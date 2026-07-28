@@ -1,2 +1,32 @@
 # WorldsApart for SillyTavern
-WorldsApart is set of tools for SillyTavern that allow a user to manage their lorebooks, their entry keywords, and the selection and insertion of lorebook entries into the prompt. 
+WorldsApart is set of tools for SillyTavern that allow a user to manage their lorebooks, their entry keywords, and the selection and insertion of lorebook entries into the prompt.
+
+## Server plugin (optional, enables mean-centered search)
+
+The extension works on its own, but its best retrieval mode — **mean-centered vector
+search** — runs in a small server plugin that ships inside this repo. SillyTavern loads
+extensions and server plugins separately, so after installing the extension you deploy the
+plugin once. All three files (`server.js`, `scoring.mjs`, `commonwords.js`) live here so the
+extension and its server half stay a single unit; `/plugins/worlds-apart/` is a generated copy.
+
+From your SillyTavern folder (one command, works on Windows / macOS / Linux — it copies the
+plugin **and** flips `enableServerPlugins: true` in `config.yaml`, which is off by default):
+
+```bash
+node public/scripts/extensions/third-party/<this-extension-folder>/deploy-plugin.mjs
+```
+
+Then restart SillyTavern.
+
+On restart the server console prints `[Worlds Apart] server plugin ready`, and WA settings show
+**✓ Server plugin active** — with a copyable redeploy command that's now a full absolute path (the
+running plugin reports the SillyTavern root, so you can run it from any terminal, not just the ST
+folder). Without the plugin, WA falls back to SillyTavern's stock vector search — everything still
+works, just without mean-centering.
+
+**After changing plugin code** (`server.js` / `scoring.mjs` / `commonwords.js`), re-run the deploy
+command and restart — no version to bump. The extension fingerprints its source copies of those three
+files and the running plugin fingerprints its deployed copies (`/ping`); if they differ, WA settings
+shows **⚠ Server plugin out of date — redeploy**. The check fires only when those files actually
+changed, so unrelated extension updates never trigger it. `deploy-plugin.mjs --link` symlinks instead
+of copying for a zero-drift dev loop (deployed always equals source).

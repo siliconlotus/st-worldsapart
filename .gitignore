@@ -142,3 +142,6 @@ vite.config.js.timestamp-*
 vite.config.ts.timestamp-*
 .vite/
 summary-cache.json
+
+# Personal relevance-eval fixtures (private /wa-debug captures + human grades)
+eval-data/

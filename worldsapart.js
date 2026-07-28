@@ -25,7 +25,7 @@ import {
     getExtensionPromptByName,
 } from '../../../../script.js';
 import { extension_settings, getContext } from '../../../extensions.js';
-import { getSortedEntries, getWorldInfoPrompt, loadWorldInfo, saveWorldInfo, reloadEditor, duplicateWorldInfoEntry, deleteWorldInfoEntry, deleteWorldInfo, updateWorldInfoList, world_names, world_info_include_names, world_info_depth, world_info_min_activations, world_info_match_whole_words, world_info_case_sensitive, selected_world_info, world_info, METADATA_KEY } from '../../../world-info.js';
+import { getSortedEntries, getWorldInfoPrompt, loadWorldInfo, saveWorldInfo, reloadEditor, duplicateWorldInfoEntry, deleteWorldInfoEntry, getFreeWorldEntryUid, deleteWIOriginalDataValue, deleteWorldInfo, updateWorldInfoList, world_names, world_info_include_names, world_info_depth, world_info_min_activations, world_info_match_whole_words, world_info_case_sensitive, selected_world_info, world_info, METADATA_KEY } from '../../../world-info.js';
 import { power_user } from '../../../power-user.js';
 import { SlashCommandParser } from '../../../slash-commands/SlashCommandParser.js';
 import { SlashCommand } from '../../../slash-commands/SlashCommand.js';
@@ -33,6 +33,8 @@ import { ARGUMENT_TYPE, SlashCommandArgument } from '../../../slash-commands/Sla
 import { ConnectionManagerRequestService } from '../../shared.js';
 import { getStringHash, splitRecursive, escapeRegex, escapeHtml, getCharaFilename } from '../../../utils.js';
 import { COMMON_WORDS } from './commonwords.js';
+import { pluginFingerprint } from './scoring.mjs';
+import * as ranking from './ranking.mjs';
 import { Popup, POPUP_TYPE, POPUP_RESULT } from '../../../popup.js';
 import { getTokenCountAsync } from '../../../tokenizers.js';
 import { textgen_types, textgenerationwebui_settings } from '../../../textgen-settings.js';
@@ -124,20 +126,10 @@ const defaultSettings = {
      * was a small non-random subsample and did not survive the larger benchmark.
      */
     retrievalMode: 'hybrid',
-    /**
-     * Text describing what every scene has in common; its per-chunk scores are
-     * subtracted from the real query's.
-     *
-     * MEASURED NOT TO WORK on a real corpus — left off by default. Subtracting
-     * similarity SCORES is not mean-centering (which subtracts the mean VECTOR before
-     * computing cosine); it ranks by similarity(q) - similarity(baseline), which is a
-     * novelty detector. Genuinely relevant chunks are dense in the shared material, so
-     * they are penalised hardest, while merely unusual chunks survive. Every weight
-     * from 0.15 to 1.0 reduced both relevance and spread versus leaving it off.
-     */
-    baselineQuery: '',
-    /** How much of the baseline to subtract. 1 = full, 0.5 = half, 0 = off. */
-    baselineWeight: 1,
+    // Removed: baselineQuery/baselineWeight (subtract a hand-crafted "shared background" query's cosine
+    // scores). Measured harmful over a 374-trial LOO grid (baseline-grid.mjs) — monotonic decline, no
+    // beneficial weight. It was a worse, redundant hand-rolled version of mean-centering (meanCentered),
+    // which subtracts the real corpus mean vector and measurably helps (+8.8% nDCG@5, centering-grid.mjs).
     /** Max retrieved entries to force-activate. A hard ceiling in both cutoff modes. */
     maxVectorEntries: 10,
     /**
@@ -185,16 +177,6 @@ const defaultSettings = {
      */
     stopwordDocFreq: 0.25,
     /**
-     * Background-frequency prior for lexical scoring. The plugin's BM25 IDF is derived
-     * from the entry chunks alone — terse, non-representative reference text — so a word
-     * rare there but common in ordinary prose (narrative filler) earns a high IDF it
-     * doesn't merit. This multiplies the IDF of any term in the general-English list
-     * (COMMON_WORDS, subtitle-derived) by this factor: 1 = off, <1 down-weights, 0 drops.
-     * The complement of stopwordDocFreq, which only catches the common-in-corpus class.
-     * Default off (1) pending an A/B; applies to both raw and summarized query paths.
-     */
-    commonWordWeight: 1,
-    /**
      * How many recent chat messages WA looks at — one depth shared by both the retrieval
      * query (the text embedded / BM25'd, or summarized in summary mode) and the keyword
      * scan window. A per-entry scanDepth still overrides the keyword window (as in core).
@@ -209,7 +191,9 @@ const defaultSettings = {
      * carries chronology — laying them out by relevance instead makes the model read
      * scene 181 before 176 whenever 181 matched the query better.
      */
-    presentationOrder: 'authored',
+    presentationOrder: 'order-asc',
+    /** Group insertion order into tiers (constant → sticky → …) before the base sort. Off = flat. */
+    presentationTiered: false,
     /** Score normal entries by keyword match quality and fuse them with the vector ranking. */
     keywordScoring: true,
     /**
@@ -445,6 +429,12 @@ async function vectorPost(route, args) {
 
 /** Whether the server plugin answered a ping. Null until checked. @type {boolean|null} */
 let pluginAvailable = null;
+/** Absolute SillyTavern root, reported by the plugin's /ping, for building copyable deploy commands. @type {string|null} */
+let pluginRoot = null;
+/** Fingerprint the running (deployed) plugin reports via /ping. @type {string|null} */
+let pluginFP = null;
+/** Fingerprint of this extension's source plugin files; a mismatch with pluginFP means the /plugins copy is stale. @type {string|null} */
+let sourceFP = null;
 
 /**
  * Checks once whether the Worlds Apart server plugin is loaded. It only exists if
@@ -459,12 +449,84 @@ async function hasPlugin() {
     try {
         const response = await fetch('/api/plugins/worlds-apart/ping', { method: 'POST', headers: getRequestHeaders() });
         pluginAvailable = response.ok;
+        if (response.ok) { try { const d = await response.json(); pluginRoot = d?.root ?? null; pluginFP = d?.fingerprint ?? null; } catch { /* older plugin: no root/fingerprint fields */ } }
     } catch {
         pluginAvailable = false;
     }
 
     console.log(`Worlds Apart: server plugin ${pluginAvailable ? 'detected — mean-centered search available' : 'not found, using stock vector search'}`);
     return pluginAvailable;
+}
+
+/**
+ * Fingerprints this extension's SOURCE plugin files (fetched from its own served directory) with the
+ * same hash the running plugin applies to its DEPLOYED files. Comparing the two spots a /plugins copy
+ * that drifted from source — no hand-maintained version number. Cached after the first call.
+ * @returns {Promise<string|null>}
+ */
+async function computeSourceFingerprint() {
+    if (sourceFP !== null) return sourceFP;
+    try {
+        const [scoring, common, server] = await Promise.all(
+            ['./scoring.mjs', './commonwords.js', './server.js'].map(f => fetch(new URL(f, import.meta.url)).then(r => r.text())),
+        );
+        sourceFP = pluginFingerprint(scoring, common, server);
+    } catch { sourceFP = null; }
+    return sourceFP;
+}
+
+/**
+ * Fills the setup box under the mean-centered checkbox with copyable install commands.
+ * The plugin ships inside this extension but ST loads server plugins separately, so a
+ * fresh install needs: enable plugins in config → deploy the copy → restart. The deploy
+ * path is derived from this module's own URL, so it's correct whatever the install folder
+ * is named (ST clones into third-party/<repo-name>, which varies).
+ */
+function renderPluginSetup() {
+    const box = $('#wa_plugin_setup');
+    if (!box.length) return;
+    const extDir = new URL('.', import.meta.url).pathname.replace(/\/+$/, '').split('/').pop();
+    // Absolute path when the plugin has reported the ST root (runs from any cwd); otherwise the
+    // ST-root-relative form with a note. Cross-platform: deploy-plugin.mjs also enables plugins in config.
+    // Absolute path once the plugin has reported the ST root (runs from any cwd) — this is the
+    // redeploy loop. Before first install the browser can't know the server's filesystem root
+    // (no plugin, and ST core exposes no path), so the fallback is the ST-root-relative command
+    // with an explicit "open a terminal there" instruction. Cross-platform; deploy also enables
+    // server plugins in config.yaml.
+    const rel = `public/scripts/extensions/third-party/${extDir}/deploy-plugin.mjs`;
+    const deployCmd = pluginRoot ? `node "${pluginRoot.replace(/\\/g, '/')}/${rel}"` : `node ${rel}`;
+    const row = (cmd) => {
+        const r = $('<div class="flex-container alignItemsCenter flexnowrap" style="gap:6px;margin:3px 0;"></div>');
+        const code = $('<code style="flex:1;overflow-x:auto;white-space:nowrap;padding:2px 6px;border-radius:4px;background:var(--black30a,rgba(0,0,0,0.2));"></code>').text(cmd);
+        const btn = $('<div class="menu_button fa-solid fa-copy" title="Copy" style="margin:0;flex:0 0 auto;"></div>');
+        btn.on('click', async () => {
+            try { await navigator.clipboard.writeText(cmd); } catch { /* clipboard blocked; user can select the text */ }
+            btn.removeClass('fa-copy').addClass('fa-check');
+            setTimeout(() => btn.removeClass('fa-check').addClass('fa-copy'), 1200);
+        });
+        return r.append(code, btn);
+    };
+    box.empty();
+    if (pluginAvailable === null) { box.text('Checking for server plugin…'); return; }
+    if (pluginAvailable) {
+        // Stale only when we have a source fingerprint to compare and it differs (a null pluginFP is an
+        // older, pre-fingerprint build, which also differs → flagged). If the source fetch failed
+        // (sourceFP null) we can't judge, so don't nag.
+        const stale = sourceFP && pluginFP !== sourceFP;
+        if (stale) {
+            box.append($('<div style="color:var(--warning,#d80);"></div>').text('⚠ Server plugin out of date — the deployed copy differs from this extension\'s source. Redeploy and restart:'));
+            box.append(row(deployCmd));
+            return;
+        }
+        box.append($('<div style="color:var(--active,#7ac);"></div>').text('✓ Server plugin active' + (sourceFP ? ` — up to date (build ${sourceFP}).` : '.')));
+        box.append($('<div style="margin-top:3px;"></div>').text('After editing plugin code, redeploy and restart SillyTavern:'));
+        box.append(row(deployCmd));
+        return;
+    }
+    box.append($('<div></div>').text('⚠ Not detected — mean-centered search is inactive (falling back to stock vector search). To install:'));
+    box.append($('<div style="margin-top:3px;"></div>').text('1. Open a terminal in your SillyTavern folder and deploy the plugin (also enables server plugins in config):'));
+    box.append(row(deployCmd));
+    box.append($('<div style="margin-top:3px;">2. Restart SillyTavern. This box will then show the exact redeploy command with your full path.</div>'));
 }
 
 /**
@@ -489,7 +551,10 @@ async function queryCollections(args) {
                     bm25B: settings().bm25B,
                     termWeights: args.termWeights ?? null,
                     stopwordDf: settings().stopwordDocFreq,
-                    commonWordWeight: settings().commonWordWeight,
+                    // Down-weights general-English words in the lexical IDF. A measured wash under hybrid
+                    // fusion (vectors mask it) but a small win for BM25-only, so it's an internal global
+                    // keyed to the mode — not a setting. 0.7 for BM25-only, off (1) for hybrid/vector.
+                    commonWordWeight: settings().retrievalMode === 'lexical' ? 0.7 : 1,
                     sourceSettings: { apiUrl: body.apiUrl, model: body.model, keep: body.keep },
                 }),
             });
@@ -608,125 +673,14 @@ async function syncWorld(world, entries) {
     return { collectionId, owners };
 }
 
-/**
- * Collects the lorebook's own vocabulary — every term appearing in an entry's keys
- * or title. Anything named there is something this corpus treats as a thing worth
- * naming, which is a better salience signal than rarity.
- * @param {object[]} entries All World Info entries
- * @returns {Set<string>} Lowercased gazetteer terms
- */
-function buildGazetteer(entries) {
-    const terms = new Set();
+// Entity filter (gazetteer + proper-noun-weighted term filter) lives in ranking.mjs — the tuning
+// layer, so it stays out of the plugin and its fingerprint. buildGazetteer is pure; buildTermWeights
+// takes the proper-noun boost from settings. Rationale/benchmarks are documented in ranking.mjs.
+const buildGazetteer = ranking.buildGazetteer;
+const buildTermWeights = (queryText, gazetteer) => ranking.buildTermWeights(queryText, gazetteer, settings().properNounBoost);
 
-    for (const entry of entries) {
-        const sources = [...(entry.key ?? []), ...(entry.keysecondary ?? []), entry.comment ?? ''];
-        for (const source of sources) {
-            for (const token of String(source).split(/[^A-Za-z0-9']+/)) {
-                if (token.length > 1) {
-                    terms.add(token.toLowerCase());
-                }
-            }
-        }
-    }
-
-    return terms;
-}
-
-/**
- * Reduces a raw query to entity-ish terms, weighted.
- *
- * Keeps a term only if it is capitalised (a cheap entity proxy) or appears in the
- * lorebook's own vocabulary, and boosts the capitalised ones. Benchmarked on real
- * chat text against a hand-judged gold set: mean target rank 11.2 versus 21.6–28.2
- * for the unfiltered query. The two halves are complementary — the gazetteer drops
- * ordinary vocabulary, the boost promotes entities.
- *
- * Note this is deliberately NOT applied to summarized queries, which are already
- * salience-selected and would only lose context.
- *
- * Do not "improve" this by admitting more terms. Both obvious loosenings were
- * measured on the same gold set and both are worse:
- *
- *   admit terms with high corpus IDF too   5/5 rank 3.0 -> 4/5 rank 5.2 (IDF>=4)
- *   keep content words (POS-style filter)  5/5 rank 3.0 -> 0/5 rank 27.4
- *
- * IDF measures rarity, and on a single-author narrative corpus rarity is dominated
- * by prose variation, not topic — the high-IDF terms this admits are "grind",
- * "flaring", "nape", "gaze". Adding them adds noise at high weight. A part-of-speech
- * filter keeps all of those and more, so it loses by the same mechanism; retaining
- * only nouns and verbs scored 0/5, and restoring the proper-noun boost on top of it
- * recovered to 4/5 rank 3.6. What discriminates here is identity, which no tagger
- * can see and capitalisation can.
- *
- * The boost is the mechanism, not the gazetteer. Measured: dropping the gazetteer
- * entirely costs half a rank (5/5 3.0 -> 4/5 3.4), while setting the boost to 1 and
- * leaving the gazetteer to do the work collapses to 1/5 rank 17.0. Keys, secondary
- * keys and titles score identically to keys alone, so there is nothing to tune in
- * how it is assembled — it is a thin safety net for entities the query happens to
- * mention in lowercase. The boost plateaus from 3 to 5 and degrades by 8.
- *
- * @param {string} queryText Raw query
- * @param {Set<string>} gazetteer Lorebook vocabulary
- * @returns {Record<string, number>} Term weights for the plugin
- */
-function buildTermWeights(queryText, gazetteer) {
-    const weights = {};
-    const boost = settings().properNounBoost;
-
-    // A capital letter at the start of a sentence says nothing about the word —
-    // "Not", "It", "Then", "The" all get capitalised there. Only count a token as
-    // an entity if it appears capitalised somewhere that ISN'T sentence-initial.
-    const properNouns = new Set();
-
-    for (const sentence of String(queryText).split(/(?<=[.!?])\s+|\n+/)) {
-        const tokens = sentence.trim().split(/[^A-Za-z0-9']+/).filter(x => x.length > 1);
-        for (let i = 1; i < tokens.length; i++) {
-            if (/^[A-Z]/.test(tokens[i])) {
-                properNouns.add(tokens[i].toLowerCase());
-            }
-        }
-    }
-
-    for (const token of String(queryText).split(/[^A-Za-z0-9']+/)) {
-        if (token.length < 2) {
-            continue;
-        }
-
-        const lower = token.toLowerCase();
-        const isProperNoun = properNouns.has(lower);
-
-        if (!isProperNoun && !gazetteer.has(lower)) {
-            continue;
-        }
-
-        weights[lower] = Math.max(weights[lower] ?? 0, isProperNoun ? boost : 1);
-    }
-
-    return weights;
-}
-
-/**
- * Builds the retrieval query from the tail of the chat.
- * @param {object[]} chat Chat messages
- * @returns {string} Query text
- */
-function buildQuery(chat) {
-    return chat
-        .map(x => ({
-            name: String(x?.name ?? '').trim(),
-            text: substituteParams(String(x?.mes || '').substring(x?.extra?.fileLength || 0).trim()),
-        }))
-        .filter(x => x.text)
-        .reverse()
-        .slice(0, Math.max(1, settings().messageDepth))
-        // Back to chronological. Taking the newest N requires reversing first, but
-        // handing a summarizer the messages backwards makes it read the scene in
-        // reverse — it can't tell what happened after what.
-        .reverse()
-        .map(x => (x.name ? `${x.name}: ${x.text}` : x.text))
-        .join('\n\n')
-        .trim();
-}
+// Query building lives in ranking.mjs; inject depth + ST's substituteParams.
+const buildQuery = (chat) => ranking.buildQuery(chat, { depth: settings().messageDepth, substituteParams });
 
 /**
  * Runs chunked retrieval and force-activates the winning entries.
@@ -788,43 +742,13 @@ async function scoreEntriesUnsafe(searchText, termWeights = null) {
     }
 
     const topK = Math.max(10, settings().maxVectorEntries * 20);
-    const baselineText = String(settings().baselineQuery ?? '').trim();
-    const useBaseline = Boolean(baselineText) && settings().baselineWeight > 0;
-
-    // With a baseline, thresholding server-side would filter on raw scores before the
-    // subtraction happens. Take everything and threshold on the adjusted score instead.
     const results = await queryCollections({
         collectionIds,
         searchText,
         topK,
-        threshold: useBaseline ? 0 : settings().scoreThreshold,
+        threshold: settings().scoreThreshold,
         termWeights,
     });
-
-    /** @type {Map<number, number> | null} chunk hash -> baseline score */
-    let baselineByHash = null;
-
-    if (useBaseline) {
-        const baselineResults = await queryCollections({
-            collectionIds,
-            searchText: baselineText,
-            topK,
-            threshold: 0,
-        });
-
-        baselineByHash = new Map();
-        for (const group of Object.values(baselineResults)) {
-            for (const item of group?.metadata ?? []) {
-                if (typeof item?.score === 'number') {
-                    baselineByHash.set(Number(item.hash), item.score);
-                }
-            }
-        }
-    }
-
-    // A chunk absent from the baseline results scored below its top-K, so its baseline
-    // is at or under the lowest one we did see. Subtracting that is the safe estimate.
-    const baselineFloor = baselineByHash?.size ? Math.min(...baselineByHash.values()) : 0;
 
     // Score each entry by its BEST chunk — this is the whole point of chunking.
     // `score` is only present if the backend returns it; without that patch we fall
@@ -837,18 +761,7 @@ async function scoreEntriesUnsafe(searchText, termWeights = null) {
                 return;
             }
 
-            const raw = typeof item?.score === 'number' ? item.score : 1 - (index / Math.max(1, metadata.length));
-            let score = raw;
-
-            if (baselineByHash) {
-                const baseline = baselineByHash.get(Number(item.hash)) ?? baselineFloor;
-                score = raw - (settings().baselineWeight * baseline);
-
-                if (score < settings().scoreThreshold) {
-                    return;
-                }
-            }
-
+            const score = typeof item?.score === 'number' ? item.score : 1 - (index / Math.max(1, metadata.length));
             const bm25 = typeof item?.bm25 === 'number' ? item.bm25 : 0;
             const previous = scores.get(owner);
 
@@ -858,17 +771,12 @@ async function scoreEntriesUnsafe(searchText, termWeights = null) {
                 scores.set(owner, {
                     score,
                     chunk: String(item?.text ?? ''),
-                    raw,
                     bm25: Math.max(bm25, previous?.bm25 ?? 0),
                 });
             } else if (bm25 > previous.bm25) {
                 previous.bm25 = bm25;
             }
         });
-    }
-
-    if (useBaseline) {
-        console.log(`Worlds Apart: baseline subtraction active (weight ${settings().baselineWeight}), ${scores.size} entries over an adjusted threshold of ${settings().scoreThreshold}`);
     }
 
     return { targets, scores };
@@ -1193,61 +1101,8 @@ function renderWorldPriority() {
 // Keyword scoring (BM25-style) and rank fusion
 // ---------------------------------------------------------------------------
 
-/**
- * Counts occurrences of a single key in text.
- * Approximates core's matcher: `/pattern/flags` keys are treated as regex, everything
- * else as a literal. ponytail: null caseSensitive/matchWholeWords are read as
- * insensitive + whole-word rather than chasing the global WI settings.
- * @param {string} key Key to count
- * @param {string} text Text to search
- * @param {boolean} caseSensitive Case sensitivity
- * @param {boolean} wholeWords Whole word matching
- * @returns {number} Occurrence count
- */
-function countKey(key, text, caseSensitive, wholeWords) {
-    const raw = String(key ?? '').trim();
-
-    if (!raw || !text) {
-        return 0;
-    }
-
-    // Regex key (/pattern/flags): count global matches, overriding the other options —
-    // same precedence core's matchKeys gives a regex needle.
-    const asRegex = raw.match(/^\/(.+)\/([gimsuy]*)$/);
-    if (asRegex) {
-        try {
-            const flags = asRegex[2].includes('g') ? asRegex[2] : `${asRegex[2]}g`;
-            return (text.match(new RegExp(asRegex[1], flags)) ?? []).length;
-        } catch {
-            return 0;
-        }
-    }
-
-    const hay = caseSensitive ? text : text.toLowerCase();
-    const needle = caseSensitive ? raw : raw.toLowerCase();
-
-    // Whole-word matching applies only to single-word keys; a multi-word key falls back
-    // to substring, exactly as core does (it splits on whitespace and uses includes()).
-    if (wholeWords && !/\s/.test(needle)) {
-        try {
-            // Core's boundary is "not flanked by a word char" — (?:^|\W)…(?:$|\W) — which,
-            // unlike \b, still matches keys that start or end with punctuation ("+5", "v2"
-            // in "v2s" would not, but "v2" alone does). Lookaround keeps it non-consuming
-            // so adjacent occurrences are all counted.
-            const regex = new RegExp(`(?<!\\w)${escapeRegex(needle)}(?!\\w)`, 'g');
-            return (hay.match(regex) ?? []).length;
-        } catch {
-            return 0;
-        }
-    }
-
-    // Substring occurrence count.
-    let count = 0;
-    for (let i = hay.indexOf(needle); i !== -1; i = hay.indexOf(needle, i + needle.length)) {
-        count++;
-    }
-    return count;
-}
+// Keyword occurrence counting lives in ranking.mjs (same signature, no injection).
+const countKey = ranking.countKey;
 
 /**
  * The non-chat texts core's scan buffer can also match against, per entry opt-in flags
@@ -1328,87 +1183,19 @@ function withMatchSources(chatWindow, entry, sources) {
     return text;
 }
 
-/**
- * BM25-style keyword score: a sum of per-key contributions with diminishing returns,
- * so breadth of evidence outweighs repetition without gating repetition out.
- * @param {object} entry World Info entry
- * @param {string} text Scan window
- * @returns {{score: number, hits: Array<{key: string, count: number}>}} Score and the
- *   keys that matched with their counts, for the debug view.
- */
-function keywordScore(entry, text, keys = entry.key) {
-    if (!Array.isArray(keys) || !keys.length) {
-        return { score: 0, hits: [] };
-    }
-
-    // Inherit the globals exactly as core does (world-info.js matchKeys), or WA matches
-    // on different rules than the scan that activated the entry. Core's whole-word
-    // default is OFF (substring), so hardcoding true here made WA miss any keyword that
-    // only appears inside a larger word.
-    const caseSensitive = entry.caseSensitive ?? world_info_case_sensitive;
-    const wholeWords = entry.matchWholeWords ?? world_info_match_whole_words;
-    const k1 = settings().bm25K1;
-
-    let score = 0;
-    const hits = [];
-
-    for (const key of keys) {
-        const count = countKey(key, text, caseSensitive, wholeWords);
-        if (count > 0) {
-            score += count / (count + k1);
-            hits.push({ key, count });
-        }
-    }
-
-    // Most-repeated key first, so the debug column leads with the strongest evidence.
-    hits.sort((a, b) => b.count - a.count);
-    return { score, hits };
-}
-
-/**
- * Fuses the vector and keyword rankings with reciprocal rank fusion.
- * Only ordering matters to RRF, so the two incomparable score scales never
- * have to be converted into each other.
- * @param {object[]} items Ranking items
- */
-function fuseRanks(items) {
-    const k = settings().rrfK;
-    const rankMap = (list) => new Map(list.map((item, index) => [item.key, index + 1]));
-
-    const mode = settings().retrievalMode;
-    const byVector = mode === 'lexical'
-        ? new Map()
-        : rankMap(items.filter(x => x.score !== undefined).sort((a, b) => b.score - a.score));
-    // BM25 over chunk TEXT, from the plugin. Its IDF is what discounts terms that
-    // appear in nearly every chunk — the recurring cast — without any tuning.
-    const byText = mode === 'vector'
-        ? new Map()
-        : rankMap(items.filter(x => x.textScore > 0).sort((a, b) => b.textScore - a.textScore));
-    // BM25 over entry KEYS. Scores non-vectorized entries; also 🔗 entries when
-    // scoreVectorKeys is on (via their stashed keys), otherwise suppressKeys leaves them at 0.
-    const byKeyword = rankMap(items.filter(x => x.keywordScore > 0).sort((a, b) => b.keywordScore - a.keywordScore));
-
-    // Optional priority signal: rank every entry by authored Order (descending — higher = higher
-    // priority, per ST where order is budgetPriority) and fuse it like any other rank. Scale-free,
-    // so no magnitude tuning; it just nudges high-order entries up the fused ranking.
-    const orderVal = it => it.entry.waOriginalOrder ?? it.entry.order ?? 0;
-    const byOrder = settings().weightByOrder
-        ? rankMap([...items].sort((a, b) => orderVal(b) - orderVal(a)))
-        : new Map();
-
-    const lexicalWeight = settings().lexicalWeight;
-
-    for (const item of items) {
-        item.vectorRank = byVector.get(item.key);
-        item.textRank = byText.get(item.key);
-        item.keywordRank = byKeyword.get(item.key);
-        item.orderRank = byOrder.get(item.key);
-        item.fused = (item.vectorRank ? 1 / (k + item.vectorRank) : 0)
-            + (item.textRank ? lexicalWeight / (k + item.textRank) : 0)
-            + (item.keywordRank ? lexicalWeight / (k + item.keywordRank) : 0)
-            + (item.orderRank ? 1 / (k + item.orderRank) : 0);
-    }
-}
+// Keyword scoring and RRF fusion live in ranking.mjs (the tuning layer). Inject the BM25 k1 + the
+// world-info match defaults for scoring, and the fusion weights for fusion — all from settings.
+const keywordScore = (entry, text, keys = entry.key) => ranking.keywordScore(entry, text, keys, {
+    k1: settings().bm25K1,
+    caseSensitiveDefault: world_info_case_sensitive,
+    wholeWordsDefault: world_info_match_whole_words,
+});
+const fuseRanks = (items) => ranking.fuseRanks(items, {
+    rrfK: settings().rrfK,
+    retrievalMode: settings().retrievalMode,
+    weightByOrder: settings().weightByOrder,
+    lexicalWeight: settings().lexicalWeight,
+});
 
 /**
  * Ranks everything core activated, applies our budget, and rewrites `order`
@@ -1622,14 +1409,24 @@ async function rankActivated(args) {
     const rankOf = world => { const i = priorityOrder.indexOf(world); return i < 0 ? priorityOrder.length : i; };
     const orderOf = it => it.entry.waOriginalOrder + (priorityMode === 'sequential' ? 0 : cfgOf(it.entry.world).offset);
     const authored = (a, b) => orderOf(a) - orderOf(b);
-    const comparators = {
-        'authored': authored,
-        'authored-inverse': (a, b) => -authored(a, b),
-        // Unscored entries within a block have no relevance opinion; fall back to authored.
-        'best-first': (a, b) => (b.fused - a.fused) || authored(a, b),
-        'best-last': (a, b) => (a.fused - b.fused) || authored(a, b),
-    };
-    const compare = comparators[settings().presentationOrder] ?? authored;
+    // Insertion order draws from the shared sort vocabulary (SORT_FNS), same as the Studio. Order asc/desc
+    // keep the offset-aware `authored` (book offsets + priority modes) rather than plain SORT_FNS['order-*'];
+    // relevance (best-first/last) is prompt-only (needs the query-time fused score); everything else adapts
+    // SORT_FNS over item.entry, falling back to authored within equal keys so ties stay deterministic.
+    const orderKey = normPresentation(settings().presentationOrder);
+    const baseCompare =
+        orderKey === 'order-asc'  ? authored :
+        orderKey === 'order-desc' ? (a, b) => -authored(a, b) :
+        orderKey === 'best-first' ? (a, b) => (b.fused - a.fused) || authored(a, b) :
+        orderKey === 'best-last'  ? (a, b) => (a.fused - b.fused) || authored(a, b) :
+        SORT_FNS[orderKey]        ? (a, b) => SORT_FNS[orderKey](a.entry, b.entry) || authored(a, b) :
+        authored;
+    // Optional tiered grouping (default off — preserves existing output). Groups by tier first (shared
+    // config), base order within. Disabled entries never activate, so that tier is inert here.
+    const layoutTierCfg = reconcileTiers(settings().tierCfg);
+    const compare = settings().presentationTiered
+        ? (a, b) => (tierRank(a.entry, layoutTierCfg) - tierRank(b.entry, layoutTierCfg)) || baseCompare(a, b)
+        : baseCompare;
 
     // Retention order for the dynamic block. Sequential: book tier is the primary key, so a
     // lower book only gets slots the higher books leave. Interleaved: a per-book weight
@@ -1877,14 +1674,19 @@ function buildKeyPruneScan(data, opts, ignoreSet) {
     const looksProper = k => k.split(/\s+/).every(t => /^[A-Z]/.test(t));   // Title Case = a name
 
     // constant / vector / keyword are exclusive; sticky rides orthogonally on any of them.
-    const entries = Object.values(data.entries).filter(e => {
+    const allEntries = Object.values(data.entries);
+    const entries = allEntries.filter(e => {
         if (!opts.includeInactive && e.disable) return false;
         if (e.constant) return opts.scanConstant;
         if (e.vectorized) return opts.scanVectorized;
         return opts.scanKeyword;
     });
-    const nE = entries.length;
-    const contents = entries.map(e => String(e.content ?? ''));
+    const nE = entries.length;                                  // scan targets (which keys get audited)
+    // Document frequency is measured over the WHOLE book, not just the scanned subset, so "how common is
+    // this term" is stable regardless of scan scope — and a key that lives only in an excluded entry
+    // (e.g. a constant) isn't falsely flagged dead.
+    const contents = allEntries.map(e => String(e.content ?? ''));
+    const nBook = allEntries.length;                            // df denominator
 
     // Occurrence scan under a key's effective flags — the semantics core activates with (countKey
     // mirrors matchKeys). Cached per (key, caseSensitive, wholeWord), so re-analysis after a flag
@@ -1942,7 +1744,7 @@ function buildKeyPruneScan(data, opts, ignoreSet) {
         // Sticky gets the shorter head-of-list cut; keyword/vector test the whole list.
         if (opts.pruneCommon && !/\s/.test(k) && (sticky ? COMMON_HEAD : COMMON_WORDS).has(k.toLowerCase())) return { flag: 'too common', dc, eng: true };
         if (dc === 0 && opts.pruneDead && !(opts.ignoreProper && looksProper(k))) return { flag: 'dead', dc };
-        if (nE >= KEY_MIN_COMMON_ENTRIES && dc / nE > opts.tooCommon * 0.75 && opts.pruneCommon) return { flag: 'too common', dc };
+        if (nBook >= KEY_MIN_COMMON_ENTRIES && dc / nBook > opts.tooCommon * 0.75 && opts.pruneCommon) return { flag: 'too common', dc };
         if (k.length < opts.minLength && !ww && opts.pruneShort) return { flag: 'short', dc, clean: strictClean(k, cs), total: scan(k, cs, false).total };
         return null;
     };
@@ -1965,8 +1767,8 @@ function buildKeyPruneScan(data, opts, ignoreSet) {
         if (p.flag === 'dead') return { text: 'dead', color: '' };
         if (p.flag === 'too common') {
             if (p.eng) return { text: 'common', color: RED };
-            const r = p.dc / nE, t = opts.tooCommon;
-            return { text: `frequent (${p.dc}/${nE})`, color: r >= t ? RED : YEL };   // ≥threshold red, danger zone (>0.75×) yellow
+            const r = p.dc / nBook, t = opts.tooCommon;
+            return { text: `frequent (${Math.round(r * 100)}%)`, color: r >= t ? RED : YEL };   // ≥threshold red, danger zone (>0.75×) yellow
         }
         const ratio = p.total ? p.clean / p.total : 0;
         return { text: `short (${p.clean}/${p.total} clean)`, color: ratio >= 1 ? GRN : ratio <= 1 / 3 ? RED : YEL };
@@ -2153,7 +1955,7 @@ async function keywordScoresReport() {
                     flagIcon('fa-power-off', !off, off ? 'Disabled — click to enable' : 'Active — click to disable', () => { e.disable = !e.disable; dirty = true; saveWorldInfo(book, data, true); render(); }),
                     flagIcon('Aa', effCase(e), `Case-sensitive: ${effCase(e) ? 'on' : 'off'} — click to toggle`, () => { e.caseSensitive = !effCase(e); dirty = true; saveWorldInfo(book, data, true); render(); }),
                     flagIcon('[ab]', effWhole(e), `Match whole words: ${effWhole(e) ? 'on' : 'off'} — click to toggle (re-runs short-key check)`, () => { e.matchWholeWords = !effWhole(e); dirty = true; saveWorldInfo(book, data, true); render(); }),
-                    flagIcon('fa-note-sticky', Number(e.sticky) > 0, `Sticky: ${Number(e.sticky) > 0 ? `on (${e.sticky})` : 'off'} — click to toggle (mark a reference sheet; spares its keys from lorebook-common)`, () => { e.sticky = Number(e.sticky) > 0 ? 0 : 1; dirty = true; saveWorldInfo(book, data, true); render(); }),
+                    flagIcon('fa-thumbtack', Number(e.sticky) > 0, `Sticky: ${Number(e.sticky) > 0 ? `on (${e.sticky})` : 'off'} — click to toggle (mark a reference sheet; spares its keys from lorebook-common)`, () => { e.sticky = Number(e.sticky) > 0 ? 0 : 1; dirty = true; saveWorldInfo(book, data, true); render(); }),
                 );
                 hc.append(wrap);
 
@@ -2330,6 +2132,17 @@ function buildKeyPrompt(entryText, avoid) {
         'ENTRY:',
         entryText,
     ].filter(Boolean).join('\n');
+}
+
+// A small local model summarises instead of extracting once an entry runs long, so cap the text per
+// call and run one pass per chunk, concatenating the raw candidate lines (callers dedupe/filter).
+// chunkSize is user-tunable (Recommender settings) since the reliable window varies per model.
+async function llmKeyCandidates(content, avoid, chunkSize = 5000) {
+    const text = String(content ?? '');
+    const chunks = text.length > chunkSize ? splitRecursive(text, chunkSize, ['\n\n', '\n', '. ', ' ', '']) : [text];
+    const out = [];
+    for (const c of chunks) out.push(...parseKeyList(await generateText(buildKeyPrompt(c, avoid), 400)));
+    return out;
 }
 
 /**
@@ -2759,17 +2572,14 @@ function paramSnapshot() {
     const nonDefaults = Object.keys(defaultSettings)
         .filter(k => typeof s[k] !== 'object' && s[k] !== defaultSettings[k]);
 
-    // The stored presentationOrder values are internal ('authored'); log the sort they
-    // actually produce (field + direction) so the snapshot is self-describing.
-    const orderLabel = { 'authored': 'wiOrderAsc', 'authored-inverse': 'wiOrderDesc', 'best-first': 'scoreOrderDesc', 'best-last': 'scoreOrderAsc' };
 
     // Keys are the real setting names so grouped values, `nonDefaults`, and the UI bindings all
     // line up — makes a logged snapshot greppable straight back to the code. Derived rollups
     // (`maxTokens`, `attached`, `presentationOrder` label) have no single backing setting.
     const snap = {
-        // commonWordWeight lives here, not under matchText: it modifies the plugin's BM25 IDF
-        // on every query (raw and summarized alike), unlike stopwordDocFreq which is query-side.
-        scoring: { retrievalMode: s.retrievalMode, rrfK: s.rrfK, lexicalWeight: s.lexicalWeight, weightByOrder: s.weightByOrder, bm25K1: s.bm25K1, bm25B: s.bm25B, commonWordWeight: s.commonWordWeight },
+        // commonWordWeight is an internal global derived from the mode (0.7 BM25-only, 1 otherwise), not a
+        // setting; logged as the value in effect. It modifies the plugin's BM25 IDF on every query.
+        scoring: { retrievalMode: s.retrievalMode, rrfK: s.rrfK, lexicalWeight: s.lexicalWeight, weightByOrder: s.weightByOrder, bm25K1: s.bm25K1, bm25B: s.bm25B, commonWordWeight: s.retrievalMode === 'lexical' ? 0.7 : 1 },
         // The entity filter only runs on raw-message queries — a summary is already
         // salience-selected — so in summary mode its params are inert and omitted.
         matchText: {
@@ -2788,7 +2598,7 @@ function paramSnapshot() {
             maxVectorEntries: s.maxVectorEntries, keywordScoring: s.keywordScoring, scoreVectorKeys: s.scoreVectorKeys,
         },
         budget: { maxTotalEntries: s.maxTotalEntries || null, maxDynamicEntries: s.maxDynamicEntries || null, maxTokens: tokenBudgetLabel(), maxTokensIncludesExempt: s.maxTokensIncludesExempt, budgetSlackMode: s.budgetSlackMode, budgetSlackPercent: s.budgetSlackPercent || 0 },
-        layout: { presentationOrder: orderLabel[s.presentationOrder] ?? s.presentationOrder },
+        layout: { insertionOrder: presentationBaseLabel(s.presentationOrder), tiered: !!s.presentationTiered },
         books: { worldPriorityMode: s.worldPriorityMode, attached },
     };
 
@@ -3303,6 +3113,13 @@ async function probeSummary() {
 // ---------------------------------------------------------------------------
 
 const SETTINGS_HTML = `
+<style>
+/* Nested WA sub-sections read as subordinate to the top "Worlds Apart" header: indented, lighter,
+   smaller, with a left rule — so they don't look like their own top-level drawers. */
+.worlds-apart-settings .wa-section { margin-left: 10px; border-left: 2px solid var(--SmartThemeBorderColor, rgba(255,255,255,0.15)); padding-left: 8px; }
+.worlds-apart-settings .wa-section > .inline-drawer-toggle { font-size: 0.95em; opacity: 0.8; }
+.worlds-apart-settings .wa-section > .inline-drawer-toggle b { font-weight: 500; }
+</style>
 <div class="worlds-apart-settings">
     <div class="inline-drawer">
         <div class="inline-drawer-toggle inline-drawer-header">
@@ -3313,13 +3130,12 @@ const SETTINGS_HTML = `
             <label class="checkbox_label" for="wa_enabled">
                 <input id="wa_enabled" type="checkbox"><span>Enabled</span>
             </label>
-            <label for="wa_presentation_order">Prompt layout</label>
-            <select id="wa_presentation_order" class="text_pole">
-                <option value="authored">WI Order Ascending</option>
-                <option value="authored-inverse">WI Order Descending</option>
-                <option value="best-first">Most relevant first</option>
-                <option value="best-last">Most relevant last</option>
-            </select>
+            <label>Prompt insertion order</label>
+            <small class="opacity50p">How WA lays out the entries it selected, in every prompt. Pick a base sort and, optionally, tiered grouping. (The Studio's sort views reuse this control but are per-session; this one is saved.)</small>
+            <div id="wa_presentation_order_mount" style="margin-top:4px;"></div>
+            <label style="margin-top:8px;">Tier precedence</label>
+            <small class="opacity50p">When tiered grouping is on (here or in the Studio), entries group into the first tier they match, top to bottom. ↑/↓ sets precedence; untick to skip a tier. Shared with the Studio.</small>
+            <div id="wa_tier_editor_mount" style="margin-top:4px;"></div>
 
             <label for="wa_retrieval_mode">Retrieval (which signals the sections below feed)</label>
             <select id="wa_retrieval_mode" class="text_pole">
@@ -3396,6 +3212,7 @@ const SETTINGS_HTML = `
                     <label class="checkbox_label" for="wa_mean_centered">
                         <input id="wa_mean_centered" type="checkbox"><span>Mean-centered search (needs server plugin)</span>
                     </label>
+                    <div id="wa_plugin_setup" style="margin:0.4em 0;font-size:0.85em;opacity:0.75;"></div>
 
                     <label for="wa_threshold">Score threshold</label>
                     <input id="wa_threshold" type="number" class="text_pole" min="0" max="1" step="0.01">
@@ -3523,10 +3340,6 @@ const SETTINGS_HTML = `
                         <input id="wa_score_vector_keys" type="checkbox"><span>Also score 🔗 entries' keys (double boost; A/B test)</span>
                     </label>
 
-                    <label for="wa_common_word_weight">Common-word IDF weight — for BM25-only retrieval (1 = off, &lt;1 down-weights, 0 drops)</label>
-                    <input id="wa_common_word_weight" type="number" class="text_pole" min="0" max="1" step="0.05">
-                    <small class="opacity50p">Down-weights general-English words in the lexical (BM25) IDF, correcting the small entry corpus's unreliable IDF on natural-prose queries. Measured wash under hybrid fusion (vectors mask it) but a small win with Retrieval = BM25 only, so it's auto-set: 0.7 for BM25 only, off (1) for Hybrid/Vector. Adjust after if you like.</small>
-
                     <label for="wa_chunk_mode">Chunking</label>
                     <select id="wa_chunk_mode" class="text_pole">
                         <option value="paragraph">Paragraph boundaries</option>
@@ -3538,12 +3351,6 @@ const SETTINGS_HTML = `
 
                     <label for="wa_min_chunk_size">Min chunk size (chars)</label>
                     <input id="wa_min_chunk_size" type="number" class="text_pole" min="0" max="2000" step="10">
-
-                    <label for="wa_baseline_query">Baseline query (subtracted; blank = off; measured not to help)</label>
-                    <textarea id="wa_baseline_query" class="text_pole textarea_compact" rows="2" placeholder="The recurring cast, in your usual prose register."></textarea>
-
-                    <label for="wa_baseline_weight">Baseline weight</label>
-                    <input id="wa_baseline_weight" type="number" class="text_pole" min="0" max="2" step="0.05">
 
                     <label class="checkbox_label" for="wa_debug_log">
                         <input id="wa_debug_log" type="checkbox"><span>Log selection table on every generation</span>
@@ -3617,6 +3424,200 @@ function bind(selector, key, kind) {
 
 const wiTitleOf = e => (e.comment && e.comment.trim()) ? e.comment.trim() : (e.key?.length ? e.key.join(', ') : `UID ${e.uid}`);
 const wiGlyph = e => e.constant ? '🔵' : (e.vectorized ? '🔗' : '🟢');
+
+// Tier definitions for the explorer's tiered grouping (/wa-studio). `test` is a pure entry predicate; the
+// order the user arranges the tiers in IS the precedence order — an entry falls into the first ENABLED
+// tier it matches (so a constant+sticky entry lands in Constant when Constant precedes Sticky). The active-
+// type tiers guard on !disable so disabled entries sink to the Disabled tier wherever it sits in the list.
+const TIER_DEFS = {
+    constant: { label: 'Constant', test: e => !e.disable && e.constant },
+    sticky:   { label: 'Sticky',   test: e => !e.disable && Number(e.sticky) > 0 },
+    keyword:  { label: 'Keyword',  test: e => !e.disable && !e.vectorized },
+    vector:   { label: 'Vector',   test: e => !e.disable && e.vectorized },
+    disabled: { label: 'Disabled', test: e => !!e.disable },
+};
+const DEFAULT_TIER_ORDER = ['constant', 'sticky', 'keyword', 'vector', 'disabled'];
+// Keep a persisted config valid across versions: drop unknown ids, append any missing known tier (enabled).
+const reconcileTiers = cfg => {
+    const out = (Array.isArray(cfg) ? cfg : []).filter(t => t && TIER_DEFS[t.id]);
+    for (const id of DEFAULT_TIER_ORDER) if (!out.some(t => t.id === id)) out.push({ id, on: true });
+    return out;
+};
+// Tier rank of an entry under a config: index of the first ENABLED tier it matches (order = precedence);
+// entries matching nothing fall to a bucket after them all. Shared by the Studio display and the prompt
+// insertion order. (Verified in scratchpad/tier_test.mjs.)
+const tierRank = (e, cfg) => {
+    let rank = 0;
+    for (const t of cfg) { if (!t.on) continue; if (TIER_DEFS[t.id].test(e)) return rank; rank++; }
+    return rank;
+};
+
+// --- Shared sort vocabulary --------------------------------------------------------------------------
+// Pure entry-field comparators, reused by the Lorebook Studio (display order) AND the prompt builder
+// (insertion order). Parity with core's #world_info_sort_order set; each tie-breaks like core (secondary
+// = order desc, tertiary = uid asc). Deviations, both improvements: Title uses wiTitleOf so comment-less
+// entries still sort by keys/uid; Trigger% treats unset probability as 100 (always-fires) not core's null→0.
+const sortPrio = e => e.disable ? 2 : e.constant ? 0 : 1;   // constant → normal → disabled
+const sortSec = (a, b) => (Number(b.order) || 0) - (Number(a.order) || 0);
+const sortTer = (a, b) => a.uid - b.uid;
+const sortWith = primary => (a, b) => primary(a, b) || sortSec(a, b) || sortTer(a, b);
+const numAsc = f => (a, b) => (Number(a[f]) || 0) - (Number(b[f]) || 0);
+const SORT_FNS = {
+    'priority':   sortWith((a, b) => sortPrio(a) - sortPrio(b)),
+    'custom':     sortWith((a, b) => (a.displayIndex ?? 0) - (b.displayIndex ?? 0)),
+    'title-asc':  sortWith((a, b) => wiTitleOf(a).localeCompare(wiTitleOf(b))),
+    'title-desc': sortWith((a, b) => wiTitleOf(b).localeCompare(wiTitleOf(a))),
+    'tokens-asc': sortWith((a, b) => String(a.content ?? '').length - String(b.content ?? '').length),
+    'tokens-desc':sortWith((a, b) => String(b.content ?? '').length - String(a.content ?? '').length),
+    'depth-asc':  sortWith(numAsc('depth')),
+    'depth-desc': sortWith((a, b) => (Number(b.depth) || 0) - (Number(a.depth) || 0)),
+    'order-asc':  sortWith(numAsc('order')),
+    'order-desc': sortWith((a, b) => (Number(b.order) || 0) - (Number(a.order) || 0)),
+    'uid-asc':    sortWith((a, b) => a.uid - b.uid),
+    'uid-desc':   sortWith((a, b) => b.uid - a.uid),
+    'prob-asc':   sortWith((a, b) => (a.probability ?? 100) - (b.probability ?? 100)),
+    'prob-desc':  sortWith((a, b) => (b.probability ?? 100) - (a.probability ?? 100)),
+};
+const SORT_LABELS = {
+    'priority': 'Priority', 'custom': 'Custom', 'title-asc': 'Title A→Z', 'title-desc': 'Title Z→A',
+    'tokens-asc': 'Tokens ↑', 'tokens-desc': 'Tokens ↓', 'depth-asc': 'Depth ↑', 'depth-desc': 'Depth ↓',
+    'order-asc': 'Order ↑', 'order-desc': 'Order ↓', 'uid-asc': 'UID ↑', 'uid-desc': 'UID ↓',
+    'prob-asc': 'Trigger% ↑', 'prob-desc': 'Trigger% ↓',
+};
+// Grouped for the sort menu: leaves (Priority/Custom) + submenus of ↑/↓ pairs. Keeps the top level short.
+const SORT_MENU = [
+    { label: 'Priority', key: 'priority' },
+    { label: 'Custom', key: 'custom' },
+    { label: 'Title', kids: [['A → Z', 'title-asc'], ['Z → A', 'title-desc']] },
+    { label: 'Tokens', kids: [['Short → long', 'tokens-asc'], ['Long → short', 'tokens-desc']] },
+    { label: 'Depth', kids: [['Low → high', 'depth-asc'], ['High → low', 'depth-desc']] },
+    { label: 'Order', kids: [['Ascending', 'order-asc'], ['Descending', 'order-desc']] },
+    { label: 'UID', kids: [['Ascending', 'uid-asc'], ['Descending', 'uid-desc']] },
+    { label: 'Trigger %', kids: [['Low → high', 'prob-asc'], ['High → low', 'prob-desc']] },
+];
+// Legacy presentationOrder values → shared sort keys. 'best-first'/'best-last' stay as-is (relevance).
+const PRESENTATION_ALIAS = { 'authored': 'order-asc', 'authored-inverse': 'order-desc' };
+const normPresentation = k => PRESENTATION_ALIAS[k] ?? k ?? 'order-asc';
+// Human label for a presentation-order key (base sort only; relevance keys keep their own names).
+const presentationBaseLabel = k => SORT_LABELS[normPresentation(k)] ?? { 'best-first': 'Most relevant first', 'best-last': 'Most relevant last' }[k] ?? k;
+// Combined label (base + tiered prefix) for the renumber dialog's "current sort order" line.
+const presentationLabel = () => (settings().presentationTiered ? 'Tiered · ' : '') + presentationBaseLabel(settings().presentationOrder);
+
+// --- Shared floating context menu (submenus) ---------------------------------------------------------
+// Each item is a leaf {label, fn, danger, active} or a parent {label, children:[…]} that flies out on
+// hover. `mount` is where panels attach (a modal's <dialog> to stack in its top layer, else document.body).
+let ctxPanels = [];   // open panels, root at 0; a submenu at depth d replaces anything deeper
+const closeCtx = () => {
+    for (const m of ctxPanels) m.remove(); ctxPanels = [];
+    document.removeEventListener('mousedown', ctxDown, true);
+    document.removeEventListener('keydown', ctxKey, true);
+    window.removeEventListener('scroll', closeCtx, true);
+};
+const ctxDown = ev => { if (!ctxPanels.some(m => m.contains(ev.target))) closeCtx(); };
+const ctxKey = ev => { if (ev.key === 'Escape') { ev.preventDefault(); closeCtx(); } };
+const buildCtxPanel = (items, x, y, depth, mount) => {
+    while (ctxPanels.length > depth) ctxPanels.pop().remove();   // drop this level + deeper before reopening
+    const menu = document.createElement('div'); menu.className = 'wa-ctx';
+    for (const it of items) {
+        const row = document.createElement('div'); row.className = 'wa-ctx-item' + (it.danger ? ' wa-ctx-danger' : '') + (it.children ? ' wa-ctx-parent' : '') + (it.active ? ' wa-ctx-active' : '');
+        const lbl = document.createElement('span'); lbl.textContent = it.label; row.append(lbl);
+        if (it.children) {
+            const car = document.createElement('span'); car.className = 'wa-ctx-caret'; car.textContent = '›'; row.append(car);
+            const open = () => { const r = row.getBoundingClientRect(); buildCtxPanel(it.children, r.right - 4, r.top - 5, depth + 1, mount); };
+            row.addEventListener('mouseenter', open);
+            row.addEventListener('click', ev => { ev.stopPropagation(); open(); });   // click also opens (touch / diagonal-miss)
+        } else {
+            row.addEventListener('mouseenter', () => { while (ctxPanels.length > depth + 1) ctxPanels.pop().remove(); });   // entering a childless row drops any open submenu
+            row.addEventListener('click', () => { closeCtx(); it.fn?.(); });
+        }
+        menu.append(row);
+    }
+    mount.append(menu);
+    ctxPanels[depth] = menu;
+    const r = menu.getBoundingClientRect();   // clamp so it never opens off-screen
+    menu.style.left = Math.max(6, Math.min(x, innerWidth - r.width - 6)) + 'px';
+    menu.style.top = Math.max(6, Math.min(y, innerHeight - r.height - 6)) + 'px';
+    return menu;
+};
+const showCtxMenu = (items, x, y, mount = document.body) => {
+    closeCtx();
+    buildCtxPanel(items, x, y, 0, mount);
+    document.addEventListener('mousedown', ctxDown, true);
+    document.addEventListener('keydown', ctxKey, true);
+    window.addEventListener('scroll', closeCtx, true);
+};
+
+// Reorder / enable tiers (shared). Draft a copy, commit on Save. onSaved fires after persistence.
+// Inline tier-precedence editor: ↑/↓ reorder + enable checkbox, committing live via setCfg/onChange.
+// Shared by WA settings (mounted inline) and the Studio's Configure-tiers popup. getCfg returns a fresh
+// array each call, so mutating a copy and handing it to setCfg is safe.
+function makeTierEditor(getCfg, setCfg, onChange) {
+    const wrap = document.createElement('div');
+    const commit = next => { setCfg(next); onChange?.(); render(); };
+    const render = () => {
+        const cfg = getCfg();
+        wrap.innerHTML = '';
+        cfg.forEach((t, i) => {
+            const row = document.createElement('div'); row.style.cssText = 'display:flex;align-items:center;gap:8px;padding:3px 0;';
+            const mv = (cls, dis, dir) => { const x = document.createElement('i'); x.className = 'fa-solid ' + cls; x.style.cssText = `cursor:${dis ? 'default' : 'pointer'};opacity:${dis ? 0.25 : 0.7};padding:2px 4px;`; if (!dis) x.addEventListener('click', () => { const n = getCfg(); [n[i + dir], n[i]] = [n[i], n[i + dir]]; commit(n); }); return x; };
+            const up = mv('fa-chevron-up', i === 0, -1);
+            const dn = mv('fa-chevron-down', i === cfg.length - 1, +1);
+            const lbl = document.createElement('label'); lbl.className = 'checkbox_label'; lbl.style.flex = '1';
+            const cb = document.createElement('input'); cb.type = 'checkbox'; cb.checked = t.on;
+            cb.addEventListener('change', () => { const n = getCfg(); n[i] = { ...n[i], on: cb.checked }; commit(n); });
+            const sp = document.createElement('span'); sp.textContent = TIER_DEFS[t.id].label;
+            lbl.append(cb, sp); row.append(up, dn, lbl); wrap.append(row);
+        });
+    };
+    render();
+    return wrap;
+}
+// Studio's Configure-tiers…: the same inline editor in a popup (live-commit; Close when done).
+async function configureTiersPopup(getCfg, setCfg, onSaved) {
+    const wrap = document.createElement('div'); wrap.style.textAlign = 'left';
+    const hint = document.createElement('div'); hint.style.cssText = 'opacity:0.7;margin-bottom:8px;font-size:0.9em;';
+    hint.textContent = 'Entries fall into the first ticked tier they match, top to bottom. ↑/↓ sets precedence; untick to skip a tier. Shared with the prompt insertion order (WA settings).';
+    wrap.append(hint, makeTierEditor(getCfg, setCfg, onSaved));
+    await new Popup(wrap, POPUP_TYPE.TEXT, '', { okButton: 'Close' }).show();
+}
+
+// Sort-control button, shared by the Studio header and the settings panel. Opens `leadItems` (special
+// leaves shown first, e.g. the Studio's "Insert Order") + the tiered toggle + Configure tiers… + base
+// sorts + any `extraItems` (e.g. relevance, prompt-only). Callbacks read/write the caller's own state so
+// the same widget drives display order and insertion order. `mount` (fn → element) targets a modal
+// dialog's top layer when needed; omit for document.body. Lead items encapsulate their own tiered state,
+// so the "Tiered · " prefix is suppressed for them.
+function makeSortControl({ getSort, setSort, getTiered, setTiered, getTierCfg, setTierCfg, leadItems = [], extraItems = [], onChange, mount, block = false }) {
+    const btn = document.createElement('button'); btn.type = 'button'; btn.className = 'menu_button wa-filter';
+    btn.title = 'Sort order';
+    // block = full-width, select-like (label left, caret right) for settings; else compact icon-wide (toolbar).
+    btn.style.cssText = block
+        ? 'display:flex;align-items:center;gap:6px;width:100%;justify-content:flex-start;white-space:nowrap;'
+        : 'display:inline-flex;align-items:center;gap:5px;width:auto;white-space:nowrap;';
+    btn.innerHTML = '<i class="fa-solid fa-arrow-down-wide-short"></i>';
+    const lblEl = document.createElement('span'); if (block) lblEl.style.cssText = 'flex:1;text-align:left;'; btn.append(lblEl);
+    if (block) { const car = document.createElement('span'); car.textContent = '▾'; car.style.opacity = '0.6'; btn.append(car); }
+    const named = [...leadItems, ...extraItems];
+    const labelFor = k => SORT_LABELS[k] ?? named.find(e => e.key === k)?.label ?? 'Order ↑';
+    const refresh = () => { const k = getSort(); const lead = leadItems.some(e => e.key === k); lblEl.textContent = (!lead && getTiered() ? 'Tiered · ' : '') + labelFor(k); };
+    refresh();
+    const changed = () => { refresh(); onChange?.(); };
+    btn.addEventListener('click', () => {
+        const cur = getSort();
+        const leaf = ex => ({ label: ex.label, active: cur === ex.key, fn: () => { setSort(ex.key); changed(); } });
+        const items = [
+            ...leadItems.map(leaf),
+            { label: `${getTiered() ? '☑' : '☐'} Tiered grouping`, active: getTiered(), fn: () => { setTiered(!getTiered()); changed(); } },
+            { label: 'Configure tiers…', fn: () => configureTiersPopup(getTierCfg, setTierCfg, changed) },
+            ...SORT_MENU.map(m => m.key
+                ? { label: m.label, active: cur === m.key, fn: () => { setSort(m.key); changed(); } }
+                : { label: m.label, active: m.kids.some(([, k]) => k === cur), children: m.kids.map(([l, k]) => ({ label: l, active: cur === k, fn: () => { setSort(k); changed(); } })) }),
+            ...extraItems.map(leaf),
+        ];
+        const r = btn.getBoundingClientRect(); showCtxMenu(items, r.left, r.bottom + 2, mount?.());
+    });
+    return btn;
+}
 
 function wiTooltip({ item, block }) {
     const e = item.entry;
@@ -3702,7 +3703,11 @@ textarea.wa-entry-full.wa-tall { max-height: 62vh; }
 .wa-entry-tools { display: flex; align-items: center; gap: 2px; margin-left: auto; }
 .wa-tool { cursor: pointer; padding: 3px 4px; border-radius: 4px; opacity: 0.55; font-style: normal; }
 .wa-tool:hover { opacity: 1; background: var(--white20a, rgba(255,255,255,0.1)); }
-.wa-tool.wa-on { opacity: 1; }
+.wa-tool.wa-on { opacity: 1; color: #6ea8fe; }
+.wa-tool.wa-badge { position: relative; }
+.wa-tool.wa-badge::after { content: attr(data-badge); position: absolute; top: -3px; right: -4px;
+    font-size: 0.6em; font-style: normal; font-weight: bold; line-height: 1.4; padding: 0 3px;
+    border-radius: 8px; background: #16305c; color: #fff; }
 .wa-title-edit { font-size: 0.82em; opacity: 0.4; }
 .wa-mode { margin: 0; padding: 1px 2px; font-size: 0.95em; background: transparent;
     border: 1px solid var(--SmartThemeBorderColor, rgba(255,255,255,0.15)); border-radius: 4px; cursor: pointer; }
@@ -3763,18 +3768,36 @@ textarea.wa-entry-full.wa-tall { max-height: 62vh; }
 .wa-kw:hover .wa-kw-text { border-bottom-color: currentColor; }
 .wa-kw-del { cursor: pointer; opacity: 0.5; font-size: 0.85em; }
 .wa-kw-del:hover { opacity: 1; }
-.wa-sugg { display: inline-flex; align-items: center; gap: 3px; margin: 0 0.7em 0.2em 0; white-space: nowrap; cursor: pointer; opacity: 0.9; }`;
+/* Right-click keyword menu. Blur-tint idiom (like ST's own menus) so it reads opaque on any theme;
+   lives in the Studio dialog's top layer, so a plain high z-index keeps it above the popup content. */
+.wa-ctx { position: fixed; z-index: 9999; min-width: 150px; padding: 4px; border-radius: 6px;
+    background: var(--SmartThemeBlurTintColor, rgba(30,30,38,0.96));
+    backdrop-filter: blur(calc(var(--SmartThemeBlurStrength, 10) * 1px));
+    border: 1px solid var(--SmartThemeBorderColor, rgba(255,255,255,0.18));
+    box-shadow: 0 6px 20px rgba(0,0,0,0.45); font-size: 0.9em; }
+.wa-ctx-item { display: flex; align-items: center; gap: 14px; padding: 5px 11px; border-radius: 4px; cursor: pointer; white-space: nowrap; }
+.wa-ctx-item:hover { background: var(--white20a, rgba(255,255,255,0.12)); }
+.wa-ctx-danger:hover { color: #e06c6c; }
+.wa-ctx-caret { margin-left: auto; opacity: 0.55; font-size: 1.15em; line-height: 1; }
+.wa-ctx-active { color: #6ea8fe; font-weight: 600; }
+.wa-sugg { display: inline-flex; align-items: center; gap: 3px; margin: 0 0.7em 0.2em 0; white-space: nowrap; cursor: pointer; opacity: 0.9; }
+.wa-adv { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px 28px; margin: 6px 0 2px 22px; padding: 8px 10px; border-radius: 5px;
+    background: var(--black30a, rgba(0,0,0,0.15)); border: 1px solid var(--SmartThemeBorderColor, rgba(255,255,255,0.15)); }
+.wa-adv-col { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+.wa-adv-sec { font-weight: bold; font-size: 0.78em; opacity: 0.7; text-transform: uppercase; letter-spacing: 0.03em; margin-bottom: 2px; }
+.wa-adv-row { display: flex; align-items: center; gap: 6px; font-size: 0.9em; margin: 0; }
+.wa-adv-row input[type=number] { width: 4.5em; margin: 0 0 0 auto; padding: 2px 5px; }
+.wa-adv-warn { display: flex; align-items: center; gap: 5px; margin-top: 5px; padding: 4px 6px; border-radius: 4px; font-size: 0.8em;
+    background: color-mix(in srgb, #e0a86c 15%, transparent); border: 1px solid color-mix(in srgb, #e0a86c 45%, transparent); }
+.wa-adv-warn i { color: #e0a86c; }`;
     document.head.append(style);
 }
 
 // Studio scans every entry (all modes, active + inactive) so every entry's keywords get a verdict;
 // suggestions use the pruner's own dfCeil so a suggested key can't be one the pruner would then flag.
 const STUDIO_PRUNE_OPTS = { scanKeyword: true, scanVectorized: true, scanConstant: true, includeInactive: true, pruneDead: true, pruneCommon: true, pruneShort: true, ignoreProper: false, stickySkipCommon: true, tooCommon: KEY_TOO_COMMON, minLength: KEY_MIN_LENGTH };
-const STUDIO_SUGGEST_OPTS = { dfCeil: 0.15, maxN: 4, excludeDates: true, excludeShort: true, onlyActive: false, cap: 8 };
+const STUDIO_SUGGEST_OPTS = { dfCeil: 0.15, maxN: 4, excludeDates: true, excludeShort: true, onlyActive: false, cap: 8, llmChunk: 5000 };
 const WA_GREEN = '#7bbf6a';   // "no prune" — a keyword the scan doesn't flag
-// Human labels for WA's own prompt-layout order (settings().presentationOrder), mirroring the
-// #wa_presentation_order <select>. WA supplants WI core's insertion order with this.
-const WA_ORDER_LABELS = { 'authored': 'WI Order Ascending', 'authored-inverse': 'WI Order Descending', 'best-first': 'Most relevant first', 'best-last': 'Most relevant last' };
 
 /**
  * Plan an advanced reorder: place the selected entries (given top-to-bottom in `orderedUids`) into a
@@ -3818,9 +3841,23 @@ async function lorebookStudio() {
     let trayOpen = false;            // Tool Settings disclosure state (session)
     let trayEl = null;               // the mounted tray element, so open/close swaps just it (not the entry list)
     let bulkEl = null;               // the mounted bulk-action bar, swapped in place as selection changes
+    let globalTrayOpen = false;      // 🌐 global WI settings drawer (session)
+    let globalTrayEl = null;         // the mounted global-tray element, swapped in place on toggle
     const selectedEntries = new Set();   // uids ticked for bulk actions
     let selAnchorUid = null;         // last-ticked entry, for shift-click range selection
     let entryFilter = 'all';         // explorer entry-type filter (all / keyword / constant / vector / enabled / disabled / flagged)
+    // Explorer sort view — the CURRENT book's base sort + tiered toggle. Persisted PER-LOREBOOK
+    // (settings().studioSortByBook), loaded on open, defaulting to 'insert' (mirror the prompt insertion
+    // order). Decoupled from the durable insertion settings. tierCfg is shared/durable with the prompt.
+    let entrySort = 'insert';
+    let tieredMode = true;
+    let tierCfg = reconcileTiers(settings().tierCfg);   // [{id, on}] tier precedence — DURABLE, shared with the prompt builder
+    const loadSortView = name => { const v = settings().studioSortByBook?.[name]; entrySort = v?.sort ?? 'insert'; tieredMode = v?.tiered ?? true; };
+    const persistSortView = () => { const s = settings(); (s.studioSortByBook ??= {})[selected] = { sort: entrySort, tiered: tieredMode }; saveSettingsDebounced(); };
+    let searchQuery = '';            // explorer free-text search
+    let visibleUids = [];            // uids of the on-screen list, in sorted+filtered order — the single
+                                     // source of truth for "visual order" (shift-range selection, renumber)
+    const searchScope = { title: true, entry: true, keywords: true };   // which fields the search looks in
     let pendingUndo = null;          // { books: [{name, data}] } of the last deletion, offered in the nav undo bar
     let undoTimer = null;            // auto-expiry for the undo bar
     const selectedBooks = new Set(); // book names ticked in the nav for book-level bulk actions
@@ -3830,6 +3867,7 @@ async function lorebookStudio() {
     const entryOpen = new Set();     // level 1: entry expanded (tools + keywords + text) vs. title line only
     const expanded = new Set();      // level 2: entry text expanded (textarea) vs. first-line preview
     const tall = new Set();          // entry uids whose editor is popped out to full Studio height
+    const advOpen = new Set();       // entry uids with the Advanced tray (recursion/budget/timing) expanded
     const sugg = new Map();          // uid -> { tfidf:string[], llm:string[] } transient suggestion chips
     const rowEls = new Map();        // uid -> entry row element, so one edit re-renders just that entry
 
@@ -3874,11 +3912,11 @@ async function lorebookStudio() {
             l.append(cb, sp); return l;
         };
         const num = (obj, key, before, unit, opt, after) => {
-            const { min = 1, max, scale = 1 } = opt || {};
+            const { min = 1, max, scale = 1, width = '3.6em' } = opt || {};
             const l = document.createElement('label'); l.className = 'checkbox_label wa-tray-opt wa-tray-num';
             const b = document.createElement('span'); b.textContent = before;
             const inp = document.createElement('input'); inp.type = 'number'; inp.className = 'text_pole';
-            inp.style.cssText = 'width:3.6em;margin:0 4px;'; inp.min = min; if (max != null) inp.max = max;
+            inp.style.cssText = `width:${width};margin:0 4px;`; inp.min = min; if (max != null) inp.max = max;
             inp.value = String(Math.round(obj[key] * scale));
             inp.addEventListener('change', () => {
                 const v = Number(inp.value) / scale;
@@ -3915,7 +3953,7 @@ async function lorebookStudio() {
         }
 
         panel.append(
-            col('Strength scan',
+            col('Keyword audit',
                 check(studioOpts, 'scanKeyword', 'Scan Keyword (🟢)'),
                 check(studioOpts, 'scanVectorized', 'Scan Vectorized (🔗)'),
                 check(studioOpts, 'scanConstant', 'Scan Constant (🔵)'),
@@ -3932,6 +3970,7 @@ async function lorebookStudio() {
                 num(suggestOpts, 'dfCeil', 'Skip terms in >', '% of entries', { min: 1, max: 100, scale: 100 }, invSuggest),
                 num(suggestOpts, 'maxN', 'Longest phrase', 'words', { min: 1, max: 8 }, invSuggest),
                 num(suggestOpts, 'cap', 'Max per entry', '', { min: 1, max: 50 }, invSuggest),
+                num(suggestOpts, 'llmChunk', '✨ chunk over', 'chars', { min: 500, width: '5.6em' }),   // longer entries split into this-sized passes
                 check(suggestOpts, 'excludeDates', 'Skip date-like terms', invSuggest),
                 check(suggestOpts, 'excludeShort', 'Skip short terms', invSuggest),
                 check(suggestOpts, 'onlyActive', 'Suggest from active entries only', invSuggest),
@@ -3944,6 +3983,58 @@ async function lorebookStudio() {
     // Open/close (and whitelist edits) rebuild only the tray in place — the entry list is untouched, so
     // toggling stays instant no matter the book size or how many keys are whitelisted.
     const refreshTray = () => { const fresh = renderTray(); if (trayEl?.isConnected) trayEl.replaceWith(fresh); trayEl = fresh; };
+
+    // 🌐 Global World Info settings — the app-wide knobs, surfaced in-context. WA's scan-depth and token
+    // budget OVERRIDE core (stored in extension_settings); the activation knobs are core globals, edited
+    // by driving core's own inputs so persistence + the min-activations/max-recursion mutual-exclusion
+    // come for free. Reading core values from those inputs keeps us in sync without importing internals.
+    const refreshGlobalTray = () => { const fresh = renderGlobalTray(); if (globalTrayEl?.isConnected) globalTrayEl.replaceWith(fresh); globalTrayEl = fresh; };
+    function renderGlobalTray() {
+        if (!globalTrayOpen) return document.createElement('div');   // nothing mounted when closed
+        const panel = document.createElement('div'); panel.className = 'wa-tray-panel';
+        const col = (title, ...kids) => { const c = document.createElement('div'); c.className = 'wa-tray-col'; const h = document.createElement('div'); h.className = 'wa-tray-sec'; h.textContent = title; c.append(h, ...kids); return c; };
+        const numRow = (label, backing, unit, title) => {
+            const l = document.createElement('label'); l.className = 'wa-tray-opt wa-tray-num'; if (title) l.title = title;
+            const b = document.createElement('span'); b.textContent = label;
+            const inp = document.createElement('input'); inp.type = 'number'; inp.min = '0'; inp.className = 'text_pole'; inp.style.cssText = 'width:4.5em;margin:0 4px;'; inp.value = String(backing.get());
+            inp.addEventListener('change', () => backing.set(Math.max(0, Math.floor(Number(inp.value) || 0))));
+            const u = document.createElement('span'); u.textContent = unit || ''; u.style.opacity = '0.6';
+            l.append(b, inp, u); return l;
+        };
+        const chkRow = (label, backing, title) => {
+            const l = document.createElement('label'); l.className = 'checkbox_label wa-tray-opt'; if (title) l.title = title;
+            const cb = document.createElement('input'); cb.type = 'checkbox'; cb.checked = backing.get();
+            cb.addEventListener('change', () => backing.set(cb.checked));
+            const s = document.createElement('span'); s.textContent = label; l.append(cb, s); return l;
+        };
+        // Backings: WA settings (extension_settings, also mirror the main panel's input); core globals (drive
+        // core's #world_info_* input so its handler updates the var, counter, mutual-exclusion, and saves).
+        // Native dispatchEvent('input') fires core's jQuery-bound handlers — no jQuery dependency here.
+        const el = id => document.querySelector(id);
+        const fire = e => { if (e) e.dispatchEvent(new Event('input', { bubbles: true })); };
+        const wa = (key, mirrorId) => ({ get: () => Number(settings()[key]) || 0, set: v => { settings()[key] = v; const m = el(mirrorId); if (m) m.value = v; saveSettingsDebounced(); } });
+        const coreNum = id => ({ get: () => Number(el(id)?.value) || 0, set: v => { const e = el(id); if (e) { e.value = v; fire(e); } refreshGlobalTray(); } });
+        const coreChk = (id, after) => ({ get: () => !!el(id)?.checked, set: v => { const e = el(id); if (e) { e.checked = v; fire(e); } after?.(); } });
+        panel.append(
+            col('Worlds Apart (overrides core)',
+                numRow('Scan depth', wa('messageDepth', '#wa_message_depth'), 'messages', 'Recent messages WA scans / queries — overrides core scan depth'),
+                numRow('Budget cap', wa('maxTokens', '#wa_max_tokens'), 'tokens', 'Absolute token budget over all activated entries (0 = leave to core)'),
+                numRow('Budget %', wa('maxTokensPercent', '#wa_max_tokens_pct'), '% of max', 'Token budget as a % of max prompt tokens (0 = off); tighter of the two wins'),
+            ),
+            col('Core activation',
+                numRow('Min Inserted Entries', coreNum('#world_info_min_activations'), '', 'Keep scanning back until at least this many entries activate (0 = off). Mutually exclusive with Max Recursions.'),
+                numRow('↳ Max Depth', coreNum('#world_info_min_activations_depth_max'), 'messages', 'When Min Inserted Entries > 0, the furthest back the search will reach (0 = no cap)'),
+                numRow('Max Recursions', coreNum('#world_info_max_recursion_steps'), '', 'Recursive scan passes (0 = off). Mutually exclusive with Min Inserted Entries.'),
+                chkRow('Recursive scanning', coreChk('#world_info_recursive'), 'Let activated entries trigger further entries'),
+            ),
+            col('Matching defaults',
+                // renderExplorer on change so inherited entry icons recolour (light green = on via this default).
+                chkRow('Case-sensitive', coreChk('#world_info_case_sensitive', renderExplorer), 'Default for entries that don’t set their own — their Aa icon shows light green when inherited'),
+                chkRow('Match whole words', coreChk('#world_info_match_whole_words', renderExplorer), 'Default for entries that don’t set their own — their [ab] icon shows light green when inherited'),
+            ),
+        );
+        return panel;
+    }
 
     // --- Bulk selection + actions ---------------------------------------------------------------
     // A contextual bar in the pinned region (below the tray) appears while any entry is ticked. Actions
@@ -3962,8 +4053,14 @@ async function lorebookStudio() {
     };
     const bulkSticky = async () => { const v = await numberPrompt('Sticky — selected entries', 'Sticky value (0 = off):', 0, 0); if (v != null) applyBulk(e => e.sticky = Math.floor(v)); };
     const bulkTrigger = async () => { const v = await numberPrompt('Trigger % — selected entries', 'Probability (0–100):', 100, 0, 100); if (v != null) applyBulk(e => { e.probability = Math.round(v); e.useProbability = true; }); };
+    const bulkDelay = async () => { const v = await numberPrompt('Delay — selected entries', 'Messages before first activation (0 = none):', 0, 0); if (v != null) applyBulk(e => e.delay = Math.floor(v) || null); };
+    const bulkCooldown = async () => { const v = await numberPrompt('Cooldown — selected entries', 'Messages before it can re-activate (0 = none):', 0, 0); if (v != null) applyBulk(e => e.cooldown = Math.floor(v) || null); };
+    const bulkScanDepth = async () => { const v = await numberPrompt('Scan depth — selected entries', 'Messages to scan (0 = global default):', 0, 0); if (v != null) applyBulk(e => e.scanDepth = Math.floor(v) > 0 ? Math.floor(v) : null); };
+    const bulkRecLevel = async () => { const v = await numberPrompt('Delay until recursion — selected entries', 'Recursion level (0 = any; turns the flag on):', 0, 0); if (v != null) applyBulk(e => e.delayUntilRecursion = Math.floor(v) > 0 ? Math.floor(v) : true); };
+    const bulkCopyTo = () => entriesToBook(selectedList(), false);
+    const bulkMoveTo = () => entriesToBook(selectedList(), true);
     const bulkOrder = async (advanced = false) => {
-        const curOrder = WA_ORDER_LABELS[settings().presentationOrder] ?? settings().presentationOrder ?? 'default';
+        const curOrder = presentationLabel();
         const w = document.createElement('div'); w.style.textAlign = 'left';
         w.innerHTML = (advanced
             ? '<div style="display:flex;align-items:center;gap:8px;margin-bottom:10px;padding:7px 10px;border-radius:5px;background:#5a1f1f;border:1px solid #e06c6c;color:#ffd9d9;">'
@@ -3982,7 +4079,7 @@ async function lorebookStudio() {
         if (await p.show() !== POPUP_RESULT.AFFIRMATIVE) return;
         const startRaw = Number(w.querySelector('.wa-bo-start').value); const start = Number.isFinite(startRaw) ? Math.round(startRaw) : 1;
         const desc = w.querySelector('.wa-bo-desc').checked;
-        const ordered = Object.values(data.entries).filter(e => selectedEntries.has(e.uid));   // == on-screen order
+        const ordered = visibleUids.filter(u => selectedEntries.has(u)).map(u => data.entries[u]).filter(Boolean);   // selected, in on-screen (sorted) order
         const n = ordered.length;
         const targetOf = i => start + (desc ? n - 1 - i : i);   // block occupies [start, start+N-1]
 
@@ -4001,7 +4098,7 @@ async function lorebookStudio() {
         for (const [oldUid, newUid] of plan.moves) { const e = byUid.get(oldUid); e.uid = newUid; e.order = newUid; next[newUid] = e; }
         data.entries = next;
         // uids changed -> every per-uid transient (open/expanded/tall/sugg/selection/scan) is stale.
-        entryOpen.clear(); expanded.clear(); tall.clear(); sugg.clear(); selectedEntries.clear(); suggest = null; if (scan) rebuildScan();
+        entryOpen.clear(); expanded.clear(); tall.clear(); advOpen.clear(); sugg.clear(); selectedEntries.clear(); suggest = null; if (scan) rebuildScan();
         save(); renderExplorer();
         toastr.success(`Renumbered ${n} ${n === 1 ? 'entry' : 'entries'} (order + UID).`, 'Worlds Apart');
     };
@@ -4021,21 +4118,51 @@ async function lorebookStudio() {
         const sep = () => { const s = document.createElement('span'); s.className = 'wa-bulk-sep'; return s; };
         const all = Object.values(data?.entries ?? {}).filter(filterMatch);   // select-all targets the visible (filtered) set
         const count = document.createElement('span'); count.className = 'wa-bulk-count'; count.textContent = `${n} selected`;
-        const modeSel = document.createElement('select'); modeSel.className = 'wa-bulk-mode menu_button';
-        const ph = new Option('Set mode…', ''); ph.disabled = true; ph.selected = true; modeSel.append(ph);
-        modeSel.append(new Option('🟢 Keyword', 'keyword'), new Option('🔵 Constant', 'constant'), new Option('🔗 Vector', 'vector'));
-        modeSel.addEventListener('change', () => { const v = modeSel.value; if (!v) return; applyBulk(e => { e.constant = v === 'constant'; e.vectorized = v === 'vector'; }); modeSel.value = ''; });
+        // "Set… ▾" opens a hierarchical menu covering every per-entry field (the gear tray + mode). Leaves
+        // with "…" open a value prompt; the rest apply straight to the selection. Built fresh on open so the
+        // Inherit labels reflect the current globals.
+        const setMode = v => applyBulk(e => { e.constant = v === 'constant'; e.vectorized = v === 'vector'; });
+        const setField = (prop, val) => applyBulk(e => e[prop] = val);
+        const setItems = () => {
+            const caseG = world_info_case_sensitive ? 'on' : 'off', wholeG = world_info_match_whole_words ? 'on' : 'off';
+            const onOff = prop => [{ label: 'On', fn: () => setField(prop, true) }, { label: 'Off', fn: () => setField(prop, false) }];
+            const tri = (prop, g) => [{ label: 'On', fn: () => setField(prop, true) }, { label: 'Off', fn: () => setField(prop, false) }, { label: `Inherit (${g})`, fn: () => setField(prop, null) }];
+            return [
+                { label: 'Mode', children: [{ label: '🟢 Keyword', fn: () => setMode('keyword') }, { label: '🔵 Constant', fn: () => setMode('constant') }, { label: '🔗 Vector', fn: () => setMode('vector') }] },
+                { label: 'Sticky…', fn: bulkSticky },
+                { label: 'Cooldown…', fn: bulkCooldown },
+                { label: 'Delay…', fn: bulkDelay },
+                { label: 'Probability', children: [{ label: 'Set %…', fn: bulkTrigger }, { label: 'On', fn: () => setField('useProbability', true) }, { label: 'Off', fn: () => setField('useProbability', false) }] },
+                { label: 'Case-sensitive', children: tri('caseSensitive', caseG) },
+                { label: 'Whole words', children: tri('matchWholeWords', wholeG) },
+                { label: 'Recursion', children: [
+                    { label: 'Non-recursable: On', fn: () => setField('excludeRecursion', true) },
+                    { label: 'Non-recursable: Off', fn: () => setField('excludeRecursion', false) },
+                    { label: 'Prevent further: On', fn: () => setField('preventRecursion', true) },
+                    { label: 'Prevent further: Off', fn: () => setField('preventRecursion', false) },
+                    { label: 'Delay until: On', fn: () => setField('delayUntilRecursion', true) },
+                    { label: 'Delay until: Off', fn: () => setField('delayUntilRecursion', false) },
+                    { label: 'Delay until: level…', fn: bulkRecLevel },
+                ] },
+                { label: 'Ignore budget', children: onOff('ignoreBudget') },
+                { label: 'Scan depth…', fn: bulkScanDepth },
+            ];
+        };
+        const setBtn = mkBtn('Set… ▾', () => { const r = setBtn.getBoundingClientRect(); showCtxMenu(setItems(), r.left, r.bottom + 2, ctxMount()); });
+        setBtn.title = 'Set a field on all selected entries';
         const reBtn = mkBtn('Renumber…', ev => bulkOrder(ev.shiftKey)); reBtn.title = 'Renumber order — shift-click to also renumber UIDs';
+        // One toggle instead of separate Enable/Disable: enable if any selected are off, else disable all.
+        const anyDisabled = Object.values(data?.entries ?? {}).some(e => selectedEntries.has(e.uid) && e.disable);
         wrap.append(
             count,
             mkBtn(n === all.length ? 'Select none' : 'Select all', () => { n === all.length ? selectedEntries.clear() : all.forEach(e => selectedEntries.add(e.uid)); syncSelCheckboxes(); }),
             sep(),
-            mkBtn('Enable', () => applyBulk(e => e.disable = false)),
-            mkBtn('Disable', () => applyBulk(e => e.disable = true)),
-            modeSel,
-            mkBtn('Sticky…', bulkSticky),
-            mkBtn('Trigger %…', bulkTrigger),
+            mkBtn(anyDisabled ? 'Enable' : 'Disable', () => { applyBulk(e => e.disable = !anyDisabled); refreshBulkBar(); }),
+            setBtn,
             reBtn,
+            sep(),
+            mkBtn('Copy to…', bulkCopyTo),
+            mkBtn('Move to…', bulkMoveTo),
             sep(),
             mkBtn('Delete', bulkDelete, 'wa-bulk-danger'),
         );
@@ -4068,6 +4195,23 @@ async function lorebookStudio() {
         if (await p.show() === POPUP_RESULT.AFFIRMATIVE) { e.sticky = Math.max(0, Math.floor(Number(inp.value) || 0)); save(); renderEntry(e); }
     };
 
+    // Trigger-probability editor: 0–100% number box + −/+ steppers + a reset to 100 (always fire).
+    // Setting it turns useProbability on; 100 leaves gating enabled but effectively always-fires.
+    const editProbability = async e => {
+        const clamp = v => Math.min(100, Math.max(0, Math.floor(Number(v) || 0)));
+        const w = document.createElement('div');
+        w.style.cssText = 'display:flex;align-items:center;justify-content:center;gap:6px;';
+        const inp = document.createElement('input');
+        inp.type = 'number'; inp.min = '0'; inp.max = '100'; inp.className = 'text_pole'; inp.style.cssText = 'width:5em;text-align:center;margin:0;';
+        inp.value = String(e.probability != null ? clamp(e.probability) : 100);
+        const step = (d, label) => { const b = document.createElement('button'); b.type = 'button'; b.className = 'menu_button'; b.style.margin = '0'; b.textContent = label; b.addEventListener('click', () => { inp.value = String(clamp((Number(inp.value) || 0) + d)); }); return b; };
+        const reset = document.createElement('button'); reset.type = 'button'; reset.className = 'menu_button'; reset.style.margin = '0'; reset.textContent = '🎯'; reset.title = 'Always fire (100%)'; reset.addEventListener('click', () => { inp.value = '100'; });
+        w.append(step(-10, '−'), inp, step(10, '+'), reset);
+        const p = new Popup(w, POPUP_TYPE.CONFIRM, 'Trigger probability %', { okButton: 'Set', cancelButton: 'Cancel' });
+        if (await p.show() === POPUP_RESULT.AFFIRMATIVE) { e.probability = clamp(inp.value); e.useProbability = true; save(); renderEntry(e); }
+    };
+
+
     // ⚡ TF-IDF suggestions for one entry (from the whole-book ranker); ✨ local-model reroll.
     // The first click builds the whole-book ranker (a ~1s pre-pass on big books), so dim the bolt and
     // yield a frame first, letting the dim paint before the synchronous pre-pass blocks the thread.
@@ -4084,17 +4228,13 @@ async function lorebookStudio() {
         for (const t of fresh) { const c = s.canon(t); if (!seen.has(c)) { g.tfidf.push(t); seen.add(c); } }
         renderEntry(e);
     };
-    const suggestLlm = async (e, btn) => {
-        if (btn.dataset.busy) return;
-        btn.dataset.busy = '1'; btn.classList.remove('wa-on'); btn.style.opacity = '0.25';
-        const s = ensureSuggest();
-        let raw = '';
-        try { raw = await generateText(buildKeyPrompt(String(e.content ?? ''), s.avoid), 400); }
-        catch (err) { toastr.warning(`Local model: ${String(err?.message ?? err)}`, 'Worlds Apart'); btn.dataset.busy = ''; btn.style.opacity = ''; return; }
+    // Merge raw model candidates into one entry's ✨ tray, applying the same filters as the single ✨
+    // (dedupe, prompt-echo, generic single word, date-like, too-common). Returns the count added.
+    const mergeLlmCands = (e, cands, s) => {
         const g = getSugg(e.uid);
         const seen = new Set([...g.tfidf, ...g.llm].map(t => s.canon(t)));
         let added = 0;
-        for (const cand of parseKeyList(raw)) {
+        for (const cand of cands) {
             const t = cand.replace(/^["'`]+|["'`]+$/g, '').trim();
             const c = s.canon(t) || t.toLowerCase();
             if (!t || t.length > 60 || seen.has(c) || hasKey(e, t)) continue;
@@ -4104,6 +4244,16 @@ async function lorebookStudio() {
             if (s.dfSubstr(t) / s.N > suggestOpts.dfCeil) continue;
             g.llm.push(t); seen.add(c); added++;
         }
+        return added;
+    };
+    const suggestLlm = async (e, btn) => {
+        if (btn.dataset.busy) return;
+        btn.dataset.busy = '1'; btn.classList.remove('wa-on'); btn.style.opacity = '0.25';
+        const s = ensureSuggest();
+        let cands;
+        try { cands = await llmKeyCandidates(e.content, s.avoid, suggestOpts.llmChunk); }
+        catch (err) { toastr.warning(`Local model: ${String(err?.message ?? err)}`, 'Worlds Apart'); btn.dataset.busy = ''; btn.style.opacity = ''; return; }
+        const added = mergeLlmCands(e, cands, s);
         btn.dataset.busy = ''; btn.style.opacity = '';
         toastr[added ? 'success' : 'info'](added ? `${wiTitleOf(e)}: +${added} from model` : 'Model returned nothing usable — click ✨ to retry.', 'Worlds Apart');
         renderEntry(e);
@@ -4135,6 +4285,46 @@ async function lorebookStudio() {
         span.replaceWith(inp); inp.focus(); inp.select();
     };
 
+    // Right-click a keyword chip → book-wide ops on that term (case-insensitive, matching core's default
+    // scan). "Delete all" / "Replace all" sweep every entry's primary keys; "Ignore" is the existing
+    // per-book whitelist toggle. ponytail: primary keys only (keysecondary isn't surfaced in the Studio).
+    const kwNorm = k => String(k).toLowerCase().trim();
+    const kwHits = key => { const n = kwNorm(key); return Object.values(data.entries).filter(e => Array.isArray(e.key) && e.key.some(k => kwNorm(k) === n)); };
+    const deleteKeyEverywhere = async key => {
+        const hits = kwHits(key);
+        if (hits.length > 1 && !await Popup.show.confirm(`Delete “${key}” from ${hits.length} entries?`, 'Removes the keyword everywhere it appears in this book.')) return;
+        const n = kwNorm(key); let touched = 0;
+        for (const e of hits) { const b = e.key.length; e.key = e.key.filter(k => kwNorm(k) !== n); if (e.key.length !== b) touched++; }
+        if (touched) { save(); renderExplorer(); toastr.success(`Deleted “${key}” from ${touched} ${touched === 1 ? 'entry' : 'entries'}.`, 'Worlds Apart'); }
+    };
+    const replaceKeyEverywhere = async key => {
+        const next = (await Popup.show.input('Replace keyword', `Replace “${key}” across all entries with:`, key))?.trim();
+        if (!next || kwNorm(next) === kwNorm(key)) return;
+        const n = kwNorm(key), nn = kwNorm(next); let touched = 0;
+        for (const e of kwHits(key)) {
+            const idx = e.key.findIndex(k => kwNorm(k) === n);
+            if (idx < 0) continue;
+            if (e.key.some(k => kwNorm(k) === nn)) e.key.splice(idx, 1); else e.key[idx] = next;   // dedupe if the target key already lives here
+            touched++;
+        }
+        if (touched) { save(); renderExplorer(); toastr.success(`Replaced “${key}” → “${next}” in ${touched} ${touched === 1 ? 'entry' : 'entries'}.`, 'Worlds Apart'); }
+    };
+    const toggleIgnore = key => { ignoreSet.has(key) ? ignoreSet.delete(key) : ignoreSet.add(key); persistIgnore(); rerenderKeys([key]); if (trayOpen) refreshTray(); };
+    // Studio context menus mount in this popup's <dialog> so they stack above the modal (module-scope
+    // showCtxMenu defaults to document.body; pass the dialog here).
+    const ctxMount = () => pop?.dlg ?? document.body;
+    const showKwMenu = (key, x, y) => showCtxMenu([
+        { label: `Delete all (${kwHits(key).length})`, fn: () => deleteKeyEverywhere(key), danger: true },
+        { label: 'Replace all…', fn: () => replaceKeyEverywhere(key) },
+        { label: ignoreSet.has(key) ? 'Un-ignore' : 'Ignore', fn: () => toggleIgnore(key) },
+    ], x, y, ctxMount());
+    const showEntryMenu = (e, x, y) => showCtxMenu([
+        { label: 'Copy', fn: () => dupEntry(e) },
+        { label: 'Copy to…', fn: () => copyEntryTo(e) },
+        { label: 'Move to…', fn: () => moveEntryTo(e) },
+        { label: 'Delete', fn: () => delEntry(e), danger: true },   // destructive → last, away from Copy
+    ], x, y, ctxMount());
+
     // Rebuild one entry's row in place. Two collapse levels: level 1 (the whole entry) shows just the
     // title line when closed; opening it reveals the tools, keywords, and text section. Level 2 is the
     // text section's own preview↔editor toggle. Tools + body are built only when open, so a big book's
@@ -4152,7 +4342,7 @@ async function lorebookStudio() {
             ev.stopPropagation();   // don't toggle collapse
             // Shift-click sets the whole range from the anchor to here to this box's new checked state.
             if (ev.shiftKey && selAnchorUid != null && selAnchorUid !== e.uid) {
-                const uids = Object.values(data?.entries ?? {}).map(x => x.uid);
+                const uids = visibleUids;   // range spans the on-screen order, which the sort controls
                 const a = uids.indexOf(selAnchorUid), b = uids.indexOf(e.uid);
                 if (a >= 0 && b >= 0) {
                     const want = selBox.checked;
@@ -4180,11 +4370,12 @@ async function lorebookStudio() {
             open ? entryOpen.delete(e.uid) : entryOpen.add(e.uid); renderEntry(e);
         });
         const mode = document.createElement('select'); mode.className = 'wa-mode';
-        mode.title = 'Match mode';
-        for (const [val, label] of [['keyword', '🟢 Keyword'], ['constant', '🔵 Constant'], ['vector', '🔗 Vector']]) {
-            const o = document.createElement('option'); o.value = val; o.textContent = label; mode.append(o);
+        const modeOpts = [['keyword', '🟢', 'Keyword'], ['constant', '🔵', 'Constant'], ['vector', '🔗', 'Vector']];
+        for (const [val, glyph, word] of modeOpts) {
+            const o = document.createElement('option'); o.value = val; o.textContent = glyph; o.title = word; mode.append(o);   // emoji only; word rides the tooltip
         }
         mode.value = e.constant ? 'constant' : (e.vectorized ? 'vector' : 'keyword');
+        mode.title = 'Match mode: ' + (modeOpts.find(m => m[0] === mode.value)?.[2] ?? '');
         mode.addEventListener('click', ev => ev.stopPropagation());
         mode.addEventListener('change', () => { e.constant = mode.value === 'constant'; e.vectorized = mode.value === 'vector'; save(); renderEntry(e); });
         const title = document.createElement('span');
@@ -4213,18 +4404,34 @@ async function lorebookStudio() {
             title.replaceWith(inp); inp.after(okBtn); inp.focus(); inp.select();
         });
         const meta = document.createElement('span'); meta.className = 'wa-entry-meta';
-        meta.textContent = `· ${keyCount ? `${keyCount} key${keyCount === 1 ? '' : 's'}` : 'no keys'} · UID ${e.uid} · order ${e.order ?? 100}`;
+        const prob = e.probability != null ? Number(e.probability) : 100;
+        const delay = Number(e.delay) || 0;
+        const cooldown = Number(e.cooldown) || 0;
+        let metaTxt = `· ${keyCount ? `${keyCount} key${keyCount === 1 ? '' : 's'}` : 'no keys'} · UID ${e.uid} · order ${e.order ?? 100}`;
+        if (e.useProbability !== false && prob < 100) metaTxt += ` · ${prob}%`;   // only when it actually gates
+        if (delay > 0) metaTxt += ` · delay ${delay}`;
+        if (cooldown > 0) metaTxt += ` · cd ${cooldown}`;
+        meta.textContent = metaTxt;
+        meta.title = `trigger probability ${e.useProbability !== false ? prob : 100}% · delay ${delay} · cooldown ${cooldown} (messages)`;
         h.append(selBox, chev, mode, title, pencil, meta);
         // Collapsed-line badge: how many keys the last scan flagged, so problems show without expanding.
+        // Tinted by the most severe flag for glance-triage; dead-only stays neutral, since "dead" is
+        // low-signal (plenty of good keys read as dead for corpus reasons).
         if (flagged && flagged.size) {
             const badge = document.createElement('span'); badge.className = 'wa-entry-badge';
             badge.textContent = `${flagged.size} flagged`;
-            badge.title = 'Keywords the last scan flagged — expand to see which';
+            const RANK = { '#e06c6c': 3, '#d9b74a': 2, '#7bbf6a': 1 };   // red > yellow > green; '' (dead) = 0
+            const SEV = { '#e06c6c': 'severe', '#d9b74a': 'moderate', '#7bbf6a': 'minor' };
+            let worst = '';
+            for (const v of flagged.values()) { const c = scan.reasonOf(v).color; if ((RANK[c] ?? 0) > (RANK[worst] ?? 0)) worst = c; }
+            if (worst) { badge.style.background = worst; badge.style.color = worst === '#e06c6c' ? '#fff' : '#111'; }
+            badge.title = `Keywords the last scan flagged — worst: ${SEV[worst] || 'dead'}. Expand to see which.`;
             h.append(badge);
         }
         // Whole header line toggles level 1; the mode dropdown and tool icons stopPropagation so they
         // act without collapsing the entry.
         h.addEventListener('click', () => { open ? entryOpen.delete(e.uid) : entryOpen.add(e.uid); renderEntry(e); });
+        h.addEventListener('contextmenu', ev => { ev.preventDefault(); showEntryMenu(e, ev.clientX, ev.clientY); });
         row.append(h);
 
         if (!open) {   // level-1 collapsed: title line only
@@ -4236,15 +4443,50 @@ async function lorebookStudio() {
         // --- Tools (right-aligned on the header line) ---
         const tools = document.createElement('div'); tools.className = 'wa-entry-tools';
         const stickyOn = Number(e.sticky) > 0;
+        // ⚡/✨ live with the keywords they populate (appended to the keyword paragraph below), not here.
         const boltBtn = tool('fa-bolt', false, 'TF-IDF keyword suggestions', () => suggestTfidf(e, boltBtn));
         const llmBtn = tool('fa-wand-magic-sparkles', false, 'Local-model keyword suggestions', () => suggestLlm(e, llmBtn));
+        // Sticky/probability: when active, a plain click DISABLES; when off, click enables/opens the
+        // editor; shift-click always opens the editor. Cooldown/delay/recursion/budget live in ⚙ Advanced.
+        const stickyTool = tool('fa-thumbtack', stickyOn, `Sticky: ${stickyOn ? `on (${e.sticky})` : 'off'} — click ${stickyOn ? 'disables' : 'enables'}, shift-click sets a value`, ev => { if (ev.shiftKey) { editSticky(e); return; } e.sticky = stickyOn ? 0 : 1; save(); renderEntry(e); });
+        if (stickyOn) { stickyTool.classList.add('wa-badge'); stickyTool.dataset.badge = String(e.sticky); }   // show the sticky count
+        const probGates = e.useProbability !== false && prob < 100;
+        // With a real gate value (<100), click toggles useProbability on/off. At 100% there's nothing to
+        // toggle, so click opens the setter instead. Shift-click always opens the setter.
+        const probVal = prob < 100;
+        const probTool = tool('fa-percent', probGates, `Trigger probability: ${probGates ? `${prob}%` : (probVal ? 'off' : 'always')} — ${probVal ? `click ${e.useProbability === false ? 'enables' : 'disables'}` : 'click to set'}, shift-click edits`, ev => { if (ev.shiftKey || !probVal) { editProbability(e); return; } e.useProbability = (e.useProbability === false); save(); renderEntry(e); });
+        if (probGates) { probTool.classList.add('wa-badge'); probTool.dataset.badge = String(prob); }   // show the % value
+        // ⚙ Advanced tray toggle — tinted when the entry carries any non-default advanced setting.
+        const advParts = [];
+        if (cooldown > 0) advParts.push(`cooldown ${cooldown}`);
+        if (delay > 0) advParts.push(`delay ${delay}`);
+        if (e.excludeRecursion) advParts.push('non-recursable');
+        if (e.preventRecursion) advParts.push('prevent recursion');
+        if (e.delayUntilRecursion) advParts.push('delay until recursion' + (typeof e.delayUntilRecursion === 'number' && e.delayUntilRecursion > 0 ? ` ${e.delayUntilRecursion}` : ''));
+        if (e.ignoreBudget) advParts.push('ignore budget');
+        if (e.scanDepth != null) advParts.push(`scan depth ${e.scanDepth}`);
+        const advActive = advParts.length > 0;
+        // When custom, the tooltip lists the non-default values (one per line); otherwise a generic hint.
+        const advTool = tool('fa-gear', advOpen.has(e.uid) || advActive, advActive ? advParts.join('\n') : 'Advanced: recursion, budget, timing', () => { advOpen.has(e.uid) ? advOpen.delete(e.uid) : advOpen.add(e.uid); renderEntry(e); });
+        // Case/whole-word show the EFFECTIVE state (entry override ?? global default). When the value is
+        // inherited from an active global (entry sets no override), the icon is light green instead of blue.
+        // Entry value overrides global (nullish-coalesce in core); global applies only when entry is unset.
+        const flagState = (v, g) => `${(v ?? g) ? 'On' : 'Off'} (${v == null ? 'inherited' : 'entry'})`;
+        const effCase = e.caseSensitive ?? world_info_case_sensitive;
+        const caseInherit = e.caseSensitive == null && !!world_info_case_sensitive;
+        const caseTool = tool('Aa', effCase, `Case-sensitive: ${flagState(e.caseSensitive, world_info_case_sensitive)} · shift-click: inherit`, ev => { e.caseSensitive = ev.shiftKey ? null : !effCase; save(); renderEntry(e); });
+        if (caseInherit) caseTool.style.color = '#8fce8f';
+        const effWhole = e.matchWholeWords ?? world_info_match_whole_words;
+        const wholeInherit = e.matchWholeWords == null && !!world_info_match_whole_words;
+        const wholeTool = tool('[ab]', effWhole, `Match whole words: ${flagState(e.matchWholeWords, world_info_match_whole_words)} · shift-click: inherit`, ev => { e.matchWholeWords = ev.shiftKey ? null : !effWhole; save(); renderEntry(e); });
+        if (wholeInherit) wholeTool.style.color = '#8fce8f';
         tools.append(
             tool('fa-power-off', !e.disable, e.disable ? 'Disabled — click to enable' : 'Active — click to disable', () => { e.disable = !e.disable; save(); renderEntry(e); }),
-            tool('Aa', (e.caseSensitive ?? world_info_case_sensitive), `Case-sensitive: ${(e.caseSensitive ?? world_info_case_sensitive) ? 'on' : 'off'}`, () => { e.caseSensitive = !(e.caseSensitive ?? world_info_case_sensitive); save(); renderEntry(e); }),
-            tool('[ab]', (e.matchWholeWords ?? world_info_match_whole_words), `Match whole words: ${(e.matchWholeWords ?? world_info_match_whole_words) ? 'on' : 'off'}`, () => { e.matchWholeWords = !(e.matchWholeWords ?? world_info_match_whole_words); save(); renderEntry(e); }),
-            tool('fa-note-sticky', stickyOn, `Sticky: ${stickyOn ? `on (${e.sticky})` : 'off'} — click toggles on/off, shift-click sets a value`, ev => { if (ev.shiftKey) { editSticky(e); return; } e.sticky = stickyOn ? 0 : 1; save(); renderEntry(e); }),
-            boltBtn,
-            llmBtn,
+            caseTool,
+            wholeTool,
+            stickyTool,
+            probTool,
+            advTool,
             tool('fa-copy', false, 'Duplicate entry', () => dupEntry(e)),
             tool('fa-trash-can', false, 'Delete entry', () => delEntry(e)),
         );
@@ -4289,6 +4531,7 @@ async function lorebookStudio() {
                 e.key.splice(e.key.indexOf(key), 1); save(); renderEntry(e);
             });
             chip.append(del);
+            chip.addEventListener('contextmenu', ev => { ev.preventDefault(); showKwMenu(key, ev.clientX, ev.clientY); });
             item.append(chip);
             if (annot) { const r = document.createElement('span'); r.className = 'wa-kw-reason'; r.textContent = `(${annot})`; item.append(r); }   // reason outside the chip
             para.append(item);
@@ -4311,7 +4554,7 @@ async function lorebookStudio() {
             inp.addEventListener('blur', () => commit(true));
             add.replaceWith(inp); inp.focus();
         });
-        para.append(add);
+        para.append(boltBtn, llmBtn, add);   // suggestion triggers sit just before the add-keyword +
 
         // --- Level 2: text section with its own chevron (preview line ↔ editor) ---
         const textSec = document.createElement('div'); textSec.className = 'wa-text-sec';
@@ -4329,7 +4572,9 @@ async function lorebookStudio() {
         // Size to the RENDERED text height (wrapped prose has few newlines, so counting \n undersizes it).
         // Height = scrollHeight; CSS max-height caps it (8 rows, or full height when popped out) and
         // scrolls beyond — no line-height parsing. scrollHeight is only valid once shown, so size on expand.
-        const autosize = () => { full.style.height = 'auto'; full.style.height = (full.scrollHeight + 2) + 'px'; };
+        // scrollHeight is only meaningful once the textarea is in the document; sizing it while detached
+        // yields 0 and collapses the editor (the keyword paragraph then paints up over it). Skip until mounted.
+        const autosize = () => { if (!full.isConnected) return; full.style.height = 'auto'; full.style.height = (full.scrollHeight + 2) + 'px'; };
         popBtn.addEventListener('click', () => {
             const isTall = full.classList.toggle('wa-tall');
             isTall ? tall.add(e.uid) : tall.delete(e.uid);
@@ -4344,11 +4589,76 @@ async function lorebookStudio() {
         thead.addEventListener('click', () => { expanded.has(e.uid) ? expanded.delete(e.uid) : expanded.add(e.uid); syncText(); });
         textSec.append(thead, fullWrap);
         body.append(textSec, para);   // entry text first, then keywords (reads more naturally)
+
+        // ⚙ Advanced tray: core WI fields we don't surface as icons — inline like the Tool Settings tray.
+        // Edits commit on change (number inputs on blur), then re-render the row; the tray stays open.
+        if (advOpen.has(e.uid)) {
+            const adv = document.createElement('div'); adv.className = 'wa-adv';
+            const col = (heading, ...rows) => { const c = document.createElement('div'); c.className = 'wa-adv-col'; const hd = document.createElement('div'); hd.className = 'wa-adv-sec'; hd.textContent = heading; c.append(hd, ...rows); return c; };
+            const chk = (label, get, set) => {
+                const l = document.createElement('label'); l.className = 'checkbox_label wa-adv-row';
+                const cb = document.createElement('input'); cb.type = 'checkbox'; cb.checked = get();
+                cb.addEventListener('change', () => { set(cb.checked); save(); renderEntry(e); });
+                const s = document.createElement('span'); s.textContent = label; l.append(cb, s); return l;
+            };
+            const numRow = (label, get, set, placeholder) => {
+                const l = document.createElement('label'); l.className = 'wa-adv-row';
+                const s = document.createElement('span'); s.textContent = label;
+                const inp = document.createElement('input'); inp.type = 'number'; inp.min = '0'; inp.className = 'text_pole'; inp.value = get(); if (placeholder) inp.placeholder = placeholder;
+                inp.addEventListener('change', () => { set(inp.value); save(); renderEntry(e); });
+                l.append(s, inp); return l;
+            };
+            const toMsg = v => Math.max(0, Math.floor(Number(v) || 0)) || null;   // 0/blank -> null (off), like core
+            const clampPct = v => Math.min(100, Math.max(0, Math.floor(Number(v) || 0)));
+            const recWarn = () => { const w = document.createElement('div'); w.className = 'wa-adv-warn'; w.innerHTML = '<i class="fa-solid fa-triangle-exclamation"></i> Recursion is off globally — these have no effect.'; return w; };
+            // Tri-state select (Inherit / On / Off) for the nullable match flags — the tray equivalent of the
+            // icon's click (On/Off) + shift-click (Inherit). Inherit resolves to the global default.
+            const triSel = (label, get, set, globalOn) => {
+                const l = document.createElement('label'); l.className = 'wa-adv-row';
+                const s = document.createElement('span'); s.textContent = label; s.style.whiteSpace = 'nowrap';
+                const sel = document.createElement('select'); sel.className = 'text_pole'; sel.style.cssText = 'width:auto;margin:0 0 0 auto;padding:2px 4px;';   // fit the option text, not text_pole's full width
+                for (const [val, txt] of [['', `Inherit (${globalOn ? 'on' : 'off'})`], ['on', 'On'], ['off', 'Off']]) sel.append(new Option(txt, val));
+                const cur = get(); sel.value = cur === true ? 'on' : cur === false ? 'off' : '';
+                sel.addEventListener('change', () => { set(sel.value === '' ? null : sel.value === 'on'); save(); renderEntry(e); });
+                l.append(s, sel); return l;
+            };
+            const durLevel = (typeof e.delayUntilRecursion === 'number' && e.delayUntilRecursion > 0) ? e.delayUntilRecursion : '';
+            adv.append(
+                // Sticky + probability also have quick icons; the fields here let you set every number at once.
+                col('Timed',
+                    numRow('Sticky', () => (Number(e.sticky) > 0 ? Number(e.sticky) : ''), v => e.sticky = toMsg(v), '0'),
+                    numRow('Cooldown', () => (cooldown || ''), v => e.cooldown = toMsg(v), '0'),
+                    numRow('Delay', () => (delay || ''), v => e.delay = toMsg(v), '0'),
+                ),
+                col('Trigger',
+                    numRow('Probability %', () => (e.probability != null ? Number(e.probability) : 100), v => e.probability = clampPct(v), '100'),
+                    chk('Use probability', () => e.useProbability !== false, v => e.useProbability = v),
+                ),
+                col('Matching',
+                    triSel('Case-sensitive', () => e.caseSensitive, v => e.caseSensitive = v, world_info_case_sensitive),
+                    triSel('Whole words', () => e.matchWholeWords, v => e.matchWholeWords = v, world_info_match_whole_words),
+                ),
+                col('Recursion',
+                    chk('Non-recursable', () => !!e.excludeRecursion, v => e.excludeRecursion = v),
+                    chk('Prevent further recursion', () => !!e.preventRecursion, v => e.preventRecursion = v),
+                    chk('Delay until recursion', () => !!e.delayUntilRecursion, v => e.delayUntilRecursion = v ? (durLevel || true) : false),
+                    numRow('↳ level', () => durLevel, v => { const n = Math.max(0, Math.floor(Number(v) || 0)); e.delayUntilRecursion = n > 0 ? n : (e.delayUntilRecursion ? true : false); }, 'any'),
+                    // These do nothing while global recursion is off — warn instead of silently misleading.
+                    ...(document.querySelector('#world_info_recursive')?.checked ? [] : [recWarn()]),
+                ),
+                col('Budget / scan',
+                    chk('Ignore budget', () => !!e.ignoreBudget, v => e.ignoreBudget = v),
+                    // 0 (or blank) = global — a literal scan depth of 0 is incoherent (disable the entry instead).
+                    numRow('Scan depth', () => (e.scanDepth ? e.scanDepth : ''), v => { const n = Math.floor(Number(v) || 0); e.scanDepth = n > 0 ? n : null; }, 'global'),
+                ),
+            );
+            body.prepend(adv);   // sit directly under the header bar, above the entry text and keywords
+        }
         row.append(body);
-        syncText();
 
         const old = rowEls.get(e.uid);
         if (old && old.isConnected) old.replaceWith(row); rowEls.set(e.uid, row);
+        syncText();   // after mount, so an expanded editor's autosize sees a real scrollHeight
         return row;
     };
 
@@ -4366,9 +4676,61 @@ async function lorebookStudio() {
         if (!await deleteWorldInfoEntry(data, e.uid)) return;   // shows its own confirm
         save(); suggest = null; if (scan) rebuildScan(); sugg.delete(e.uid); rowEls.delete(e.uid); renderExplorer();
     };
+    // Pick a target lorebook (any book but the open one) via a select in a confirm popup. null = cancelled.
+    const pickBook = async prompt => {
+        const others = [...world_names].filter(n => n !== selected).sort((a, b) => a.localeCompare(b));
+        if (!others.length) { toastr.info('No other lorebook to target.', 'Worlds Apart'); return null; }
+        const wrap = document.createElement('div');
+        const lbl = document.createElement('div'); lbl.textContent = prompt; lbl.style.marginBottom = '6px';
+        const sel = document.createElement('select'); sel.className = 'text_pole'; sel.style.width = '100%';
+        for (const n of others) { const o = document.createElement('option'); o.value = n; o.textContent = n; sel.append(o); }
+        wrap.append(lbl, sel);
+        const p = new Popup(wrap, POPUP_TYPE.CONFIRM, '', { okButton: 'OK', cancelButton: 'Cancel' });
+        return (await p.show()) === POPUP_RESULT.AFFIRMATIVE ? sel.value : null;
+    };
+    // Copy/move a list of entries to another book. One load + one save of the target (not core's
+    // per-entry moveWorldInfoEntry, which reloads/saves both books and toasts on every entry). Serves the
+    // per-entry context menu (single) and the bulk bar (selection) alike.
+    const entriesToBook = async (list, deleteOriginal) => {
+        if (!list.length) return;
+        const what = list.length === 1 ? `“${wiTitleOf(list[0])}”` : `${list.length} entries`;
+        const target = await pickBook(`${deleteOriginal ? 'Move' : 'Copy'} ${what} to:`);
+        if (!target) return;
+        const tgt = await loadWorldInfo(target);
+        if (!tgt?.entries) { toastr.warning(`Couldn't load “${target}”.`, 'Worlds Apart'); return; }
+        let maxDisplay = Object.values(tgt.entries).reduce((m, x) => Math.max(m, x.displayIndex ?? -1), -1);
+        const copied = [];
+        for (const e of list) {
+            const uid = getFreeWorldEntryUid(tgt); if (uid == null) break;   // book full (1M entries) — stop, keep what copied
+            const clone = structuredClone(e); clone.uid = uid; clone.displayIndex = ++maxDisplay;
+            tgt.entries[uid] = clone; copied.push(e);
+        }
+        await saveWorldInfo(target, tgt, true);
+        reloadEditor(target);   // refresh the core WI editor if that book happens to be open there
+        if (deleteOriginal) {
+            // Only drop what actually landed in the target. deleteWIOriginalDataValue keeps embedded-book
+            // originalData in sync (as core's move does); the entries stay in the Studio's `data` until here.
+            for (const e of copied) { deleteWIOriginalDataValue(data, String(e.uid)); delete data.entries[e.uid]; sugg.delete(e.uid); rowEls.delete(e.uid); selectedEntries.delete(e.uid); }
+            save(); suggest = null; if (scan) rebuildScan(); renderExplorer();
+        }
+        toastr.success(`${deleteOriginal ? 'Moved' : 'Copied'} ${copied.length} to “${target}”.`, 'Worlds Apart');
+    };
+    const copyEntryTo = e => entriesToBook([e], false);
+    const moveEntryTo = e => entriesToBook([e], true);
 
     // --- Book-level tools (explorer header) -----------------------------------------------------
+    // Free-text search over the scoped fields; empty query (or no scope ticked) is inert.
+    const matchSearch = e => {
+        const q = searchQuery.trim().toLowerCase();
+        if (!q) return true;
+        const fields = [];
+        if (searchScope.title) fields.push(String(wiTitleOf(e)));
+        if (searchScope.entry) fields.push(String(e.content ?? ''));
+        if (searchScope.keywords) fields.push((Array.isArray(e.key) ? e.key : []).join(' '));
+        return !fields.length || fields.some(f => f.toLowerCase().includes(q));
+    };
     const filterMatch = e => {
+        if (!matchSearch(e)) return false;
         switch (entryFilter) {
             case 'keyword': return !e.constant && !e.vectorized;
             case 'constant': return !!e.constant;
@@ -4378,6 +4740,22 @@ async function lorebookStudio() {
             case 'flagged': return !!scan && scan.classifyEntry(e).length > 0;
             default: return true;
         }
+    };
+    // Explorer display order: base sort (module SORT_FNS), then the tiered modifier buckets by tierRank
+    // (base order preserved within each bucket) and flattens. Sort vocabulary + tier logic are shared
+    // module-scope (see SORT_FNS / tierRank); this just applies them to the Studio's own state.
+    const sortEntries = list => {
+        // 'insert' mirrors the durable prompt insertion order (base sort + tiered) from settings; relevance
+        // keys have no rest-state score, so they degrade to order-asc for display.
+        const insert = entrySort === 'insert';
+        const baseKey = insert ? normPresentation(settings().presentationOrder) : entrySort;
+        const base = SORT_FNS[baseKey] ?? SORT_FNS['order-asc'];
+        const tiered = insert ? !!settings().presentationTiered : tieredMode;
+        const sorted = [...list].sort(base);
+        if (!tiered) return sorted;
+        const buckets = [];
+        for (const e of sorted) (buckets[tierRank(e, tierCfg)] ??= []).push(e);
+        return buckets.flat();   // sparse holes (empty ranks) are skipped by flat()
     };
     // Copy an arbitrary book (open or not) to a free "X copy[ n]" name. Returns the new name, or null.
     const copyBookByName = async srcName => {
@@ -4416,7 +4794,7 @@ async function lorebookStudio() {
         }
         if (wasOpen) {
             selected = [...world_names].sort((a, b) => a.localeCompare(b)).find(n => !names.includes(n)) ?? null;
-            data = null; scan = null; suggest = null; entryOpen.clear(); expanded.clear(); tall.clear(); sugg.clear(); selectedEntries.clear();
+            data = null; scan = null; suggest = null; entryOpen.clear(); expanded.clear(); tall.clear(); advOpen.clear(); sugg.clear(); selectedEntries.clear();
         }
         dirty = false;
         if (undoTimer) clearTimeout(undoTimer);
@@ -4478,6 +4856,8 @@ async function lorebookStudio() {
         } catch (err) { console.error('[WA] rename retarget', err); }
         attachedWorlds = new Set([...attachedWorlds].map(w => w === oldName ? newName : w));
         if (selectedBooks.delete(oldName)) selectedBooks.add(newName);
+        const byBook = settings().studioSortByBook;   // carry the saved per-book sort view across the rename
+        if (byBook?.[oldName]) { byBook[newName] = byBook[oldName]; delete byBook[oldName]; saveSettingsDebounced(); }
         dirty = false;
         if (oldName === selected) { renderBooks(); openBook(newName); }
         else { renderBooks(); }
@@ -4504,6 +4884,26 @@ async function lorebookStudio() {
         toastr[n ? 'success' : 'info'](n ? `Suggestions added to ${n} ${n === 1 ? 'entry' : 'entries'} — review the ⚡ chips.` : 'No TF-IDF suggestions to add.', 'Worlds Apart');
     };
 
+    // Local-model suggest-all: one ✨ pass per visible non-empty entry, sequential (a small model serves
+    // one request at a time), with per-entry progress in the button label. Long entries are chunked.
+    const suggestAllLlm = async btn => {
+        if (btn.dataset.busy) return;
+        const label = btn.innerHTML;
+        btn.dataset.busy = '1'; btn.style.opacity = '0.5';
+        let s; try { s = ensureSuggest(); } catch { btn.dataset.busy = ''; btn.style.opacity = ''; toastr.warning('Couldn\'t build suggestions.', 'Worlds Apart'); return; }
+        const targets = Object.values(data?.entries ?? {}).filter(filterMatch).filter(e => String(e.content ?? '').trim());
+        let n = 0, i = 0;
+        for (const e of targets) {
+            btn.innerHTML = `<i class="fa-solid fa-wand-magic-sparkles"></i> ${++i}/${targets.length}…`;
+            let cands; try { cands = await llmKeyCandidates(e.content, s.avoid, suggestOpts.llmChunk); }
+            catch (err) { toastr.warning(`Local model: ${String(err?.message ?? err)}`, 'Worlds Apart'); break; }
+            if (mergeLlmCands(e, cands, s)) { n++; entryOpen.add(e.uid); }
+        }
+        btn.dataset.busy = ''; btn.style.opacity = ''; btn.innerHTML = label;
+        renderExplorer();
+        toastr[n ? 'success' : 'info'](n ? `Model suggestions added to ${n} ${n === 1 ? 'entry' : 'entries'} — review the ✨ chips.` : 'Model returned nothing usable.', 'Worlds Apart');
+    };
+
     const renderExplorer = () => {
         explorer.innerHTML = ''; rowEls.clear();
         if (!selected) { explorer.innerHTML = '<div style="opacity:0.6;padding:8px;">Select a lorebook on the left.</div>'; return; }
@@ -4511,12 +4911,11 @@ async function lorebookStudio() {
         const entries = total.filter(filterMatch);
         const head = document.createElement('div');
         head.className = 'wa-studio-exphead';
-        head.style.cssText = 'display:flex;align-items:center;gap:8px;flex-wrap:wrap;';
+        head.style.cssText = 'display:flex;flex-direction:column;align-items:stretch;gap:6px;';
         const label = document.createElement('div');
-        const countTxt = entryFilter === 'all'
-            ? `${total.length} ${total.length === 1 ? 'entry' : 'entries'}`
-            : `${entries.length} of ${total.length}`;
-        label.innerHTML = `<b>${escapeHtml(selected)}</b> <span style="opacity:0.6;">(${countTxt})</span>`;
+        const nameB = document.createElement('b'); nameB.textContent = selected;
+        const countSpan = document.createElement('span'); countSpan.style.cssText = 'opacity:0.6;margin-left:5px;';
+        label.append(nameB, countSpan);
         // Book-level tools: rename / duplicate / delete the whole lorebook.
         const bookTool = (cls, title, onClick, extra = '') => { const i = document.createElement('i'); i.className = `fa-solid ${cls} wa-book-tool ${extra}`; i.title = title; i.addEventListener('click', onClick); return i; };
         const bookTools = document.createElement('span'); bookTools.className = 'wa-book-tools';
@@ -4526,22 +4925,65 @@ async function lorebookStudio() {
             bookTool('fa-trash-can', 'Delete this lorebook', () => delBook(), 'wa-book-tool-danger'),
         );
         label.append(bookTools);
-        // Entry-type filter.
-        const filter = document.createElement('select'); filter.className = 'wa-filter menu_button'; filter.title = 'Show only entries of a type';
-        for (const [val, lbl] of [['all', 'All types'], ['keyword', '🟢 Keyword'], ['constant', '🔵 Constant'], ['vector', '🔗 Vector'], ['enabled', 'Enabled'], ['disabled', 'Disabled'], ['flagged', 'Flagged (scan)']]) {
-            const o = new Option(lbl, val); if (val === entryFilter) o.selected = true; filter.append(o);
+        // Entry-type filter — a compact fa-filter dropdown (single-select). Custom, not a native <select>,
+        // so options can carry FA icons (crosshairs, power) a <select> can't render.
+        const FILTER_OPTS = [
+            ['all', 'fa-filter', 'All'],
+            ['keyword', '🟢', 'Keyword'],
+            ['constant', '🔵', 'Constant'],
+            ['vector', '🔗', 'Vector'],
+            ['enabled', 'fa-power-off', 'Enabled'],
+            ['disabled', '🚫', 'Disabled'],
+            ['flagged', 'fa-crosshairs', 'Flagged'],
+        ];
+        const iconEl = spec => { if (spec.startsWith('fa-')) { const i = document.createElement('i'); i.className = 'fa-solid ' + spec; return i; } const s = document.createElement('span'); s.textContent = spec; return s; };
+        const filterWrap = document.createElement('span'); filterWrap.style.cssText = 'position:relative;display:inline-flex;';
+        const filterBtn = document.createElement('button'); filterBtn.type = 'button'; filterBtn.className = 'menu_button wa-filter';
+        filterBtn.title = 'Show only entries of a type'; filterBtn.style.cssText = 'display:inline-flex;align-items:center;gap:5px;width:auto;white-space:nowrap;';
+        const curFilter = FILTER_OPTS.find(o => o[0] === entryFilter) ?? FILTER_OPTS[0];
+        const curLbl = document.createElement('span'); curLbl.textContent = curFilter[2];
+        filterBtn.append(iconEl('fa-filter'), curLbl);
+        const filterMenu = document.createElement('div');
+        filterMenu.style.cssText = 'position:absolute;top:100%;left:0;z-index:5;display:none;flex-direction:column;gap:1px;margin-top:2px;padding:4px;border-radius:5px;min-width:9em;'
+            + 'background:var(--SmartThemeBlurTintColor, var(--black70a, rgba(20,20,20,0.97)));border:1px solid var(--SmartThemeBorderColor, rgba(255,255,255,0.15));';
+        for (const [val, spec, lbl] of FILTER_OPTS) {
+            const item = document.createElement('button'); item.type = 'button';
+            item.style.cssText = 'display:flex;align-items:center;gap:7px;width:100%;padding:4px 8px;border:none;border-radius:4px;background:' + (val === entryFilter ? 'var(--white20a, rgba(255,255,255,0.1))' : 'transparent') + ';color:inherit;font:inherit;text-align:left;white-space:nowrap;cursor:pointer;';
+            if (val === entryFilter) item.style.fontWeight = 'bold';
+            const t = document.createElement('span'); t.textContent = lbl; item.append(iconEl(spec), t);
+            item.addEventListener('mouseenter', () => { if (val !== entryFilter) item.style.background = 'var(--white20a, rgba(255,255,255,0.1))'; });
+            item.addEventListener('mouseleave', () => { if (val !== entryFilter) item.style.background = 'transparent'; });
+            item.addEventListener('click', () => { entryFilter = val; renderExplorer(); });
+            filterMenu.append(item);
         }
-        filter.addEventListener('change', () => { entryFilter = filter.value; renderExplorer(); });
+        filterBtn.addEventListener('click', () => { filterMenu.style.display = filterMenu.style.display === 'none' ? 'flex' : 'none'; });
+        filterWrap.addEventListener('focusout', ev => { if (!filterWrap.contains(ev.relatedTarget)) filterMenu.style.display = 'none'; });
+        filterWrap.append(filterBtn, filterMenu);
+        // Sort control — shared widget (module makeSortControl). The base sort + tiered toggle are ephemeral
+        // view state (not persisted); only the tier config is durable (shared with the prompt builder).
+        // "Insert Order" (leadItems) mirrors the durable insertion settings; its tiered state reads from
+        // there, and toggling tiered while in it forks to an explicit ephemeral sort (base = the resolved
+        // insertion base, clamped to a valid key).
+        const sortBtn = makeSortControl({
+            getSort: () => entrySort, setSort: k => { entrySort = k; persistSortView(); },
+            getTiered: () => entrySort === 'insert' ? !!settings().presentationTiered : tieredMode,
+            setTiered: on => { if (entrySort === 'insert') { const k = normPresentation(settings().presentationOrder); entrySort = SORT_FNS[k] ? k : 'order-asc'; } tieredMode = on; persistSortView(); },
+            getTierCfg: () => tierCfg, setTierCfg: cfg => { tierCfg = cfg; settings().tierCfg = cfg; saveSettingsDebounced(); },
+            leadItems: [{ label: 'Insert Order', key: 'insert' }],
+            onChange: renderExplorer, mount: ctxMount,
+        });
         const scanBtn = document.createElement('button');
         scanBtn.type = 'button'; scanBtn.className = 'menu_button';
-        scanBtn.innerHTML = `<i class="fa-solid fa-stethoscope"></i> ${scan ? 'Rescan keywords' : 'Keyword Strength Scan'}`;
+        scanBtn.innerHTML = `<i class="fa-solid fa-stethoscope"></i> ${scan ? 'Re-audit' : 'Keyword audit'}`;
         scanBtn.title = 'Flag dead / frequent / short keywords and colour them by verdict — tune under Tool Settings';
         scanBtn.addEventListener('click', () => { rebuildScan(); renderExplorer(); });
         const allOpen = entries.length > 0 && entries.every(x => entryOpen.has(x.uid));
+        // Master disclosure: an icon-only chevron left of the title, echoing the per-entry chevrons.
         const expandBtn = document.createElement('button');
         expandBtn.type = 'button'; expandBtn.className = 'menu_button';
-        expandBtn.innerHTML = `<i class="fa-solid ${allOpen ? 'fa-angles-up' : 'fa-angles-down'}"></i> ${allOpen ? 'Collapse all' : 'Expand all'}`;
-        expandBtn.title = 'Expand / collapse every entry (level 1) — shift-click expands only entries with flagged keywords';
+        expandBtn.style.cssText = 'width:auto;padding:3px 7px;flex-shrink:0;';
+        expandBtn.innerHTML = `<i class="fa-solid ${allOpen ? 'fa-square-caret-up' : 'fa-square-caret-down'}"></i>`;
+        expandBtn.title = `${allOpen ? 'Collapse' : 'Expand'} all entries — shift-click expands only entries with flagged keywords`;
         expandBtn.addEventListener('click', ev => {
             if (ev.shiftKey) {   // expand only flagged entries (scan first if needed), collapse the rest
                 if (!scan) rebuildScan();
@@ -4557,24 +4999,80 @@ async function lorebookStudio() {
         suggestAllBtn.innerHTML = '<i class="fa-solid fa-bolt"></i> Suggest all';
         suggestAllBtn.title = 'Add TF-IDF keyword suggestions to every entry (review the ⚡ chips before accepting)';
         suggestAllBtn.addEventListener('click', () => suggestAll(suggestAllBtn));
-        head.append(label, filter, scanBtn, expandBtn, suggestAllBtn);
+        const suggestAllLlmBtn = document.createElement('button');
+        suggestAllLlmBtn.type = 'button'; suggestAllLlmBtn.className = 'menu_button';
+        suggestAllLlmBtn.innerHTML = '<i class="fa-solid fa-wand-magic-sparkles"></i> Suggest all (LLM)';
+        suggestAllLlmBtn.title = 'Run local-model keyword suggestions on every visible entry (long entries are chunked; review the ✨ chips before accepting)';
+        suggestAllLlmBtn.addEventListener('click', () => suggestAllLlm(suggestAllLlmBtn));
+        // Search box + scope checkboxes. Typing re-filters the list in place (applyFilter) rather than
+        // re-rendering the header, so the input keeps focus and the caret between keystrokes.
+        const searchWrap = document.createElement('span'); searchWrap.style.cssText = 'position:relative;display:inline-flex;align-items:center;';
+        const search = document.createElement('input'); search.type = 'search'; search.className = 'text_pole wa-filter';
+        search.placeholder = 'Search…'; search.value = searchQuery;
+        search.style.cssText = 'width:11em;border-top-left-radius:0;border-bottom-left-radius:0;';
+        let searchTimer = null;   // debounce so a big book doesn't re-filter on every keystroke
+        search.addEventListener('input', () => { searchQuery = search.value; clearTimeout(searchTimer); searchTimer = setTimeout(applyFilter, 180); });
+        // Scope picker: a multi-select dropdown hung off the search box — which fields the query looks in.
+        const scopeBtn = document.createElement('button'); scopeBtn.type = 'button'; scopeBtn.className = 'menu_button wa-filter';
+        scopeBtn.style.cssText = 'width:auto;display:inline-flex;align-items:center;justify-content:center;margin:0 -1px 0 0;padding:3px 8px;border-top-right-radius:0;border-bottom-right-radius:0;';
+        scopeBtn.innerHTML = '<i class="fa-solid fa-sliders"></i>';
+        const menu = document.createElement('div');
+        menu.style.cssText = 'position:absolute;top:100%;left:0;z-index:5;display:none;flex-direction:column;gap:2px;margin-top:2px;padding:6px 8px;border-radius:5px;'
+            + 'background:var(--SmartThemeBlurTintColor, var(--black70a, rgba(20,20,20,0.97)));border:1px solid var(--SmartThemeBorderColor, rgba(255,255,255,0.15));';
+        const SCOPES = [['title', 'Title'], ['entry', 'Entry'], ['keywords', 'Keywords']];
+        const syncScopeBtn = () => { const on = SCOPES.filter(([k]) => searchScope[k]).map(([, l]) => l); scopeBtn.title = `Search in: ${on.join(', ') || 'nothing selected'}`; };
+        for (const [key, lbl] of SCOPES) {
+            const l = document.createElement('label'); l.className = 'checkbox_label'; l.style.cssText = 'font-size:0.85em;white-space:nowrap;';
+            const cb = document.createElement('input'); cb.type = 'checkbox'; cb.checked = searchScope[key];
+            cb.addEventListener('change', () => { searchScope[key] = cb.checked; syncScopeBtn(); applyFilter(); });
+            const sp = document.createElement('span'); sp.textContent = lbl; l.append(cb, sp); menu.append(l);
+        }
+        syncScopeBtn();
+        scopeBtn.addEventListener('click', () => { menu.style.display = menu.style.display === 'none' ? 'flex' : 'none'; });
+        // Close when focus leaves the group — no document-level listener to leak across re-renders.
+        searchWrap.addEventListener('focusout', ev => { if (!searchWrap.contains(ev.relatedTarget)) menu.style.display = 'none'; });
+        searchWrap.append(scopeBtn, search, menu);
+        // Two rows: identity + view controls up top, the batch actions beneath.
+        const rowStyle = 'display:flex;align-items:center;gap:8px;flex-wrap:wrap;';
+        const vsep = () => { const s = document.createElement('span'); s.style.cssText = 'align-self:stretch;width:1px;background:color-mix(in srgb, currentColor 22%, transparent);margin:2px;'; return s; };
+        const row1 = document.createElement('div'); row1.style.cssText = rowStyle;
+        const row2 = document.createElement('div'); row2.style.cssText = rowStyle;
+        const spacer = () => { const s = document.createElement('span'); s.style.width = '10px'; return s; };
+        // 🌐 Global WI settings toggle — pinned to the far right of the book-header line.
+        const globeBtn = document.createElement('button'); globeBtn.type = 'button'; globeBtn.className = 'menu_button wa-filter';
+        globeBtn.title = 'Global World Info settings'; globeBtn.style.cssText = 'width:auto;margin-left:auto;padding:3px 8px;flex-shrink:0;';
+        globeBtn.innerHTML = '<i class="fa-solid fa-globe"></i>';
+        globeBtn.style.color = globalTrayOpen ? '#6ea8fe' : '';
+        globeBtn.addEventListener('click', () => { globalTrayOpen = !globalTrayOpen; globeBtn.style.color = globalTrayOpen ? '#6ea8fe' : ''; refreshGlobalTray(); });
+        row1.append(label, vsep(), filterWrap, sortBtn, spacer(), searchWrap, globeBtn);
+        row2.append(expandBtn, scanBtn, suggestAllBtn, suggestAllLlmBtn);
+        head.append(row1, row2);
         // Pinned region (header + Tool Settings drawer) stays put; only wa-studio-entries scrolls.
         const fixed = document.createElement('div'); fixed.className = 'wa-studio-fixed';
+        globalTrayEl = renderGlobalTray();
         trayEl = renderTray();
         bulkEl = renderBulkBar();
-        fixed.append(head, trayEl, bulkEl);
+        fixed.append(head, globalTrayEl, trayEl, bulkEl);
         const list = document.createElement('div'); list.className = 'wa-studio-entries';
         explorer.append(fixed, list);
-        if (!entries.length) {
-            const msg = total.length ? 'No entries match this filter.' : 'This lorebook has no entries.';
-            list.innerHTML = `<div style="opacity:0.6;padding:8px;">${msg}</div>`; return;
-        }
-        for (const e of entries) list.append(renderEntry(e));
+        // Repaint just the entry list (and the count) for the current type filter + search.
+        const applyFilter = () => {
+            rowEls.clear();
+            const shown = sortEntries(total.filter(filterMatch));
+            visibleUids = shown.map(e => e.uid);   // keep the "visual order" source of truth in sync
+            countSpan.textContent = (entryFilter !== 'all' || searchQuery.trim())
+                ? `(${shown.length} of ${total.length})`
+                : `(${total.length} ${total.length === 1 ? 'entry' : 'entries'})`;
+            list.innerHTML = '';
+            if (!shown.length) { list.innerHTML = `<div style="opacity:0.6;padding:8px;">${total.length ? 'No entries match.' : 'This lorebook has no entries.'}</div>`; return; }
+            for (const e of shown) list.append(renderEntry(e));
+        };
+        applyFilter();
     };
 
     const openBook = async name => {
         if (dirty && selected) { reloadEditor(selected); dirty = false; }   // refresh the outgoing book's editor
-        selected = name; entryOpen.clear(); expanded.clear(); tall.clear(); sugg.clear(); selectedEntries.clear(); selAnchorUid = null; suggest = null; scan = null;   // scan is on-demand
+        selected = name; loadSortView(name); entryOpen.clear(); expanded.clear(); tall.clear(); advOpen.clear(); sugg.clear(); selectedEntries.clear(); selAnchorUid = null; suggest = null; scan = null;   // scan is on-demand
         explorer.innerHTML = '<div style="opacity:0.6;padding:8px;">Loading…</div>';
         renderBooks();
         data = await loadWorldInfo(name);
@@ -4760,6 +5258,10 @@ export async function init() {
     extension_settings[MODULE_NAME] = Object.assign({}, defaultSettings, extension_settings[MODULE_NAME]);
     // 'off' folded into 'interleaved' (identical at weight 1/offset 0); drop the stale value.
     if (settings().worldPriorityMode === 'off') settings().worldPriorityMode = 'interleaved';
+    // Legacy presentationOrder ('authored'/'authored-inverse') → shared sort keys; studioTierCfg → shared tierCfg.
+    if (settings().presentationOrder in PRESENTATION_ALIAS) settings().presentationOrder = PRESENTATION_ALIAS[settings().presentationOrder];
+    if (settings().studioTierCfg && !settings().tierCfg) { settings().tierCfg = settings().studioTierCfg; delete settings().studioTierCfg; }
+    delete settings().baselineQuery; delete settings().baselineWeight;   // removed feature — drop orphaned stored values
 
     $('#extensions_settings').append(SETTINGS_HTML);
 
@@ -4778,17 +5280,33 @@ export async function init() {
 
     bind('#wa_enabled', 'enabled', 'checked');
     bind('#wa_suppress_keys', 'suppressVectorKeys', 'checked');
-    bind('#wa_presentation_order', 'presentationOrder', 'string');
-    bind('#wa_retrieval_mode', 'retrievalMode', 'string');
-    // The common-word prior is a measured wash under hybrid fusion (vectors mask the lexical
-    // gain) but a small win for BM25-only retrieval, so track it to the mode: 0.7 for lexical,
-    // off (1) for hybrid/vector. Fires alongside the bind above; user can still adjust after.
-    $('#wa_retrieval_mode').on('change', function () {
-        settings().commonWordWeight = $(this).val() === 'lexical' ? 0.7 : 1;
-        $('#wa_common_word_weight').val(settings().commonWordWeight);
-        saveSettingsDebounced();
-    });
+    // Prompt insertion order — the same sort widget the Studio uses, plus relevance options (prompt-only).
+    // The widget's button (.wa-filter) and its popup (.wa-ctx) are styled by ensureStudioStyle, which the
+    // Studio injects lazily; the settings control can be used first, so inject here too (idempotent).
+    ensureStudioStyle();
+    const getTierCfg = () => reconcileTiers(settings().tierCfg);
+    const setTierCfg = cfg => { settings().tierCfg = cfg; saveSettingsDebounced(); };
+    const presentationMount = document.querySelector('#wa_presentation_order_mount');
+    const tierMount = document.querySelector('#wa_tier_editor_mount');
+    let tierEditor = null;
+    if (presentationMount) presentationMount.append(makeSortControl({
+        getSort: () => normPresentation(settings().presentationOrder),
+        setSort: k => { settings().presentationOrder = k; saveSettingsDebounced(); },
+        getTiered: () => !!settings().presentationTiered,
+        setTiered: on => { settings().presentationTiered = on; saveSettingsDebounced(); },
+        getTierCfg, setTierCfg,
+        extraItems: [{ label: 'Most relevant first', key: 'best-first' }, { label: 'Most relevant last', key: 'best-last' }],
+        // Keep the inline tier editor in sync if tiers are reordered from the button's Configure tiers… menu.
+        onChange: () => { if (tierEditor) tierEditor.replaceWith(tierEditor = makeTierEditor(getTierCfg, setTierCfg, () => {})); },
+        block: true,
+    }));
+    if (tierMount) tierMount.append(tierEditor = makeTierEditor(getTierCfg, setTierCfg, () => {}));
+    bind('#wa_retrieval_mode', 'retrievalMode', 'string');   // commonWordWeight now derives from this at query time (internal global)
     bind('#wa_mean_centered', 'meanCentered', 'checked');
+    renderPluginSetup();                     // paints "checking…" then the detected/install state
+    // Detect the plugin and fingerprint the source in parallel; re-render once both settle so the box
+    // can show up-to-date / out-of-date. Both are cached, so this runs its fetches at most once.
+    Promise.all([hasPlugin(), computeSourceFingerprint()]).then(renderPluginSetup);
     bind('#wa_keyword_scoring', 'keywordScoring', 'checked');
     bind('#wa_score_vector_keys', 'scoreVectorKeys', 'checked');
     bind('#wa_debug_log', 'debugLog', 'checked');
@@ -4808,8 +5326,6 @@ export async function init() {
     bind('#wa_chunk_size', 'chunkSize', 'number');
     bind('#wa_min_chunk_size', 'minChunkSize', 'number');
     bind('#wa_threshold', 'scoreThreshold', 'number');
-    bind('#wa_baseline_query', 'baselineQuery', 'string');
-    bind('#wa_baseline_weight', 'baselineWeight', 'number');
     bind('#wa_max_entries', 'maxVectorEntries', 'number');
     bind('#wa_vector_cutoff', 'vectorCutoff', 'string');
     bind('#wa_min_entries', 'minVectorEntries', 'number');
@@ -4818,7 +5334,6 @@ export async function init() {
     bind('#wa_entity_filter', 'entityFilter', 'checked');
     bind('#wa_proper_noun_boost', 'properNounBoost', 'number');
     bind('#wa_stopword_df', 'stopwordDocFreq', 'number');
-    bind('#wa_common_word_weight', 'commonWordWeight', 'number');
     bind('#wa_max_tokens', 'maxTokens', 'number');
     bind('#wa_max_tokens_pct', 'maxTokensPercent', 'number');
     bind('#wa_budget_slack', 'budgetSlackPercent', 'number');
