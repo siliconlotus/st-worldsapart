@@ -1,8 +1,14 @@
-import { readFileSync } from 'node:fs';
-const src = readFileSync('/Users/user/SillyTavern-Launcher/SillyTavern/public/scripts/extensions/third-party/Worlds-Apart/worldsapart.js','utf8');
-const body = src.slice(src.indexOf('function cutRetrieved'), src.indexOf('\n}', src.indexOf('function cutRetrieved')) + 2);
+// Self-test for the shared cutoff. Imports the real selection.mjs (no more string-slicing worldsapart.js)
+// and maps each test's cfg into the injected settings.
+import { cutRetrieved as cut } from './selection.mjs';
 let cfg;
-const cutRetrieved = new Function('settings', `${body}; return cutRetrieved;`)(() => cfg);
+const cutRetrieved = (ranked) => cut(ranked, {
+    mode: cfg.vectorCutoff,
+    maxVectorEntries: cfg.maxVectorEntries,
+    minVectorEntries: cfg.minVectorEntries,
+    elbowSensitivity: cfg.elbowSensitivity,
+    dropoffThreshold: cfg.dropoffThreshold,
+});
 const mk = (...f) => f.map(fused => ({ fused }));
 const n = r => r.length;
 const eq = (got, want, label) => { console.assert(got === want, `FAIL ${label}: got ${got} want ${want}`); console.log(`${got === want ? 'ok  ' : 'FAIL'} ${label}: ${got}`); };
