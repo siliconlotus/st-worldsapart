@@ -32,7 +32,10 @@ import { fileURLToPath } from 'node:url';
 import sanitize from 'sanitize-filename';
 import { LocalIndex } from 'vectra';
 import { getOllamaVector } from '../../src/vectors/ollama-vectors.js';
-import { pluginFingerprint, DEFAULT_K1, DEFAULT_B, buildLexical, norm, scoreCollection, selectTopK, corpusMean } from './scoring.mjs';
+import { scoreCollection, selectTopK } from './scoring.mjs';
+import { DEFAULT_K1, DEFAULT_B, buildLexical } from './lexical.mjs';
+import { norm, corpusMean } from './vector.mjs';
+import { pluginFingerprint } from './fingerprint.mjs';
 
 // This file sits at <root>/plugins/worlds-apart/index.js once deployed.
 const PLUGIN_DIR = path.dirname(fileURLToPath(import.meta.url));
@@ -42,7 +45,8 @@ const ST_ROOT = path.resolve(PLUGIN_DIR, '..', '..');
 // Fingerprint of this deployed copy, computed from its own files. The extension compares it against
 // the same hash over its source files to detect a /plugins copy that wasn't redeployed after a change.
 const readDeployed = f => { try { return fs.readFileSync(path.join(PLUGIN_DIR, f), 'utf8'); } catch { return ''; } };
-const FINGERPRINT = pluginFingerprint(readDeployed('scoring.mjs'), readDeployed('commonwords.js'), readDeployed('index.js'));
+// Fixed order — must match the extension's computeSourceFingerprint (scoring, vector, lexical, commonwords, server/index).
+const FINGERPRINT = pluginFingerprint(readDeployed('scoring.mjs'), readDeployed('vector.mjs'), readDeployed('lexical.mjs'), readDeployed('commonwords.js'), readDeployed('index.js'));
 
 export const info = {
     id: 'worlds-apart',

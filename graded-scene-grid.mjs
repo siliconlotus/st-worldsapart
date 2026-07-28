@@ -14,7 +14,9 @@
 //        [--depth 5] [--index <index.json>] [--validate <capture.json>]
 import { readFileSync } from 'node:fs';
 import { basename } from 'node:path';
-import { buildLexical, scoreCollection, selectTopK, corpusMean, norm } from './scoring.mjs';
+import { scoreCollection, selectTopK } from './scoring.mjs';
+import { buildLexical } from './lexical.mjs';
+import { corpusMean, norm } from './vector.mjs';
 import * as ranking from './ranking.mjs';   // shared client tuning layer — same code the extension runs
 
 const arg = k => { const i = process.argv.indexOf(k); return i >= 0 ? process.argv[i + 1] : null; };

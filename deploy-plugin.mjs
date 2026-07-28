@@ -16,7 +16,7 @@ const DEST = path.resolve(SRC, '../../../../../plugins/worlds-apart');
 const LINK = process.argv.includes('--link');
 
 // server.js is the source; ST's plugin loader expects the package `main`, index.js.
-const FILES = [['server.js', 'index.js'], ['scoring.mjs', 'scoring.mjs'], ['commonwords.js', 'commonwords.js']];
+const FILES = [['server.js', 'index.js'], ['scoring.mjs', 'scoring.mjs'], ['vector.mjs', 'vector.mjs'], ['lexical.mjs', 'lexical.mjs'], ['fingerprint.mjs', 'fingerprint.mjs'], ['commonwords.js', 'commonwords.js']];
 
 const PACKAGE_JSON = JSON.stringify({
     name: 'worlds-apart-plugin',

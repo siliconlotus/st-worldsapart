@@ -33,7 +33,7 @@ import { ARGUMENT_TYPE, SlashCommandArgument } from '../../../slash-commands/Sla
 import { ConnectionManagerRequestService } from '../../shared.js';
 import { getStringHash, splitRecursive, escapeRegex, escapeHtml, getCharaFilename } from '../../../utils.js';
 import { COMMON_WORDS } from './commonwords.js';
-import { pluginFingerprint } from './scoring.mjs';
+import { pluginFingerprint } from './fingerprint.mjs';
 import * as ranking from './ranking.mjs';
 import { Popup, POPUP_TYPE, POPUP_RESULT } from '../../../popup.js';
 import { getTokenCountAsync } from '../../../tokenizers.js';
@@ -165,10 +165,11 @@ async function hasPlugin() {
 async function computeSourceFingerprint() {
     if (runState.sourceFP !== null) return runState.sourceFP;
     try {
-        const [scoring, common, server] = await Promise.all(
-            ['./scoring.mjs', './commonwords.js', './server.js'].map(f => fetch(new URL(f, import.meta.url)).then(r => r.text())),
+        // Fixed order — must match server.js FINGERPRINT (scoring, vector, lexical, commonwords, server/index).
+        const [scoring, vector, lexical, common, server] = await Promise.all(
+            ['./scoring.mjs', './vector.mjs', './lexical.mjs', './commonwords.js', './server.js'].map(f => fetch(new URL(f, import.meta.url)).then(r => r.text())),
         );
-        runState.sourceFP = pluginFingerprint(scoring, common, server);
+        runState.sourceFP = pluginFingerprint(scoring, vector, lexical, common, server);
     } catch { runState.sourceFP = null; }
     return runState.sourceFP;
 }
