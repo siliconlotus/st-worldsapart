@@ -8,7 +8,7 @@ import { loadWorldInfo, saveWorldInfo, reloadEditor, world_names } from '../../.
 import { escapeHtml, splitRecursive } from '../../../utils.js';
 import { Popup, POPUP_TYPE, POPUP_RESULT } from '../../../popup.js';
 import { ConnectionManagerRequestService } from '../../shared.js';
-import { settings } from './state.mjs';
+import { runState, settings } from './state.mjs';
 import { COMMON_WORDS } from './commonwords.js';
 import { countKey } from './ranking.mjs';
 import { showEntryText } from './ui-widgets.mjs';
@@ -178,7 +178,7 @@ export async function keywordScoresReport() {
     if (!s.keywordIgnore) s.keywordIgnore = {};
 
     // Carried across the Back loop so a return trip keeps the last choices.
-    let book = [...attachedWorlds].find(w => books.includes(w)) ?? books[0];
+    let book = [...runState.attachedWorlds].find(w => books.includes(w)) ?? books[0];
     let opts = { scanKeyword: true, scanVectorized: true, scanConstant: true, includeInactive: false, pruneDead: true, pruneCommon: true, pruneShort: true, ignoreProper: false, stickySkipCommon: true, tooCommon: KEY_TOO_COMMON, minLength: KEY_MIN_LENGTH };
 
     // Phase 1: book + scan options. Resolves true to proceed, false to close out.
@@ -676,7 +676,7 @@ export async function keywordSuggestReport() {
     const GRN = '#7bbf6a';
     const titleOf = e => (e.comment && e.comment.trim()) ? e.comment.trim() : `UID ${e.uid} (order ${e.order ?? 0})`;
 
-    let book = [...attachedWorlds].find(w => books.includes(w)) ?? books[0];
+    let book = [...runState.attachedWorlds].find(w => books.includes(w)) ?? books[0];
     let dfCeil = 0.15;   // drop terms in more than this fraction of the corpus
     let maxN = 4;        // longest n-gram
     let excludeDates = true;
