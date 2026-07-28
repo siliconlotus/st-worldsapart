@@ -42,7 +42,8 @@ import { textgen_types, textgenerationwebui_settings } from '../../../textgen-se
 import { oai_settings } from '../../../openai.js';
 
 import { runState, defaultSettings, settings, ensureSettings } from './state.mjs';
-import { PRESENTATION_ALIAS, SORT_FNS, ensureStudioStyle, makeSortControl, makeTierEditor, normPresentation, presentationBaseLabel, presentationLabel, reconcileTiers, showCtxMenu, showEntryText, tierRank, wiGlyph, wiTitleOf, wiTooltip } from './ui-widgets.mjs';
+import { ensureStudioStyle, makeSortControl, makeTierEditor, showCtxMenu, showEntryText, wiGlyph, wiTooltip } from './ui-widgets.mjs';
+import { PRESENTATION_ALIAS, SORT_FNS, normPresentation, presentationBaseLabel, presentationLabel, reconcileTiers, tierRank, wiTitleOf } from './sort.mjs';
 import { buildKeyPruneScan, buildKeySuggest, isDateLike, llmKeyCandidates, keywordScoresReport, keywordSuggestReport, STUDIO_PRUNE_OPTS, STUDIO_SUGGEST_OPTS } from './keyword-tools.mjs';
 
 /** Base value for the rewritten `order` sequence. WA rewrites every activated entry's order,
