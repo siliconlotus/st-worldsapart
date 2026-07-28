@@ -273,3 +273,26 @@ export function settings() {
 export function ensureSettings() {
     extension_settings[MODULE_NAME] = Object.assign({}, defaultSettings, extension_settings[MODULE_NAME]);
 }
+
+/**
+ * Cross-module runtime state (mutable). Holder object so any module can read/write a live value —
+ * ESM won't let an imported `let` be reassigned across module boundaries, but object props can.
+ * The engine writes the last* / plugin* fields; the hooks write attachedWorlds/generationIsDryRun;
+ * the debug commands toggle verboseRun/dryRunInProgress; the panel + debug read them back.
+ */
+export const runState = {
+    lastScores: new Map(),        // vector scores from the last retrieval, keyed `${world}.${uid}`
+    lastTextScores: new Map(),    // BM25-over-text scores, same keys
+    lastLayout: [],               // final layout of the last scan, for /wa-dry
+    lastDropped: [],              // entries cut by budget
+    lastSkipped: [],              // per-entry budget rejections + the cap that caused each
+    lastQueryText: '',            // last retrieval query, so /wa-debug can re-probe it
+    attachedWorlds: new Set(),    // books ST currently has active for this chat
+    verboseRun: false,            // true during a /wa-debug run (noisy per-stage logging)
+    dryRunInProgress: false,      // true during either slash-command run (quiets live logging)
+    generationIsDryRun: false,    // true while ST's own dry-run generation is in flight
+    pluginAvailable: null,        // did the server plugin answer /ping
+    pluginRoot: null,             // absolute ST root from /ping (for the deploy command)
+    pluginFP: null,               // fingerprint the deployed plugin reports
+    sourceFP: null,               // fingerprint of this extension's source plugin files
+};

@@ -40,47 +40,13 @@ import { getTokenCountAsync } from '../../../tokenizers.js';
 import { textgen_types, textgenerationwebui_settings } from '../../../textgen-settings.js';
 import { oai_settings } from '../../../openai.js';
 
-import { defaultSettings, settings, ensureSettings } from './state.mjs';
+import { runState, defaultSettings, settings, ensureSettings } from './state.mjs';
 import { PRESENTATION_ALIAS, SORT_FNS, ensureStudioStyle, makeSortControl, makeTierEditor, normPresentation, presentationBaseLabel, presentationLabel, reconcileTiers, showCtxMenu, showEntryText, tierRank, wiGlyph, wiTitleOf, wiTooltip } from './ui-widgets.mjs';
 import { buildKeyPruneScan, buildKeySuggest, isDateLike, llmKeyCandidates, keywordScoresReport, keywordSuggestReport, STUDIO_PRUNE_OPTS, STUDIO_SUGGEST_OPTS } from './keyword-tools.mjs';
-
-/** Vector scores from the most recent retrieval, keyed `${world}.${uid}`. @type {Map<string, number>} */
-const lastScores = new Map();
-
-/** BM25-over-text scores from the most recent retrieval, same keys. @type {Map<string, number>} */
-const lastTextScores = new Map();
-
-/** Final layout and casualties of the most recent scan, for /wa-dry to report. */
-let lastLayout = [];
-let lastDropped = [];
 
 /** Base value for the rewritten `order` sequence. WA rewrites every activated entry's order,
  * so only the relative index matters — the base is a fixed pad with no other writer to collide with. */
 const ORDER_BASE = 100;
-
-/** Books ST currently has active for this chat — scopes the priority feature. @type {Set<string>} */
-let attachedWorlds = new Set();
-
-/** Per-entry budget rejections with the cap that caused each, for tracing. */
-let lastSkipped = [];
-
-/** Query text of the most recent retrieval, so /wa-debug can re-probe the same thing. */
-let lastQueryText = '';
-
-/** True only for the duration of a /wa-debug run. Turns on the noisy per-stage logging. */
-let verboseRun = false;
-
-/** True during either slash-command run, so live-generation logging stays out of the way. */
-let dryRunInProgress = false;
-
-/**
- * True while ST's own dry-run generation is in flight. ST fires one on chat load (and to
- * estimate tokens) with interceptors skipped — so WA never retrieves, but WORLDINFO_SCAN_DONE
- * still fires and rankActivated runs. We keep the ranking (it firms up the token estimate)
- * but suppress the debug table, or every chat load would print it.
- */
-let generationIsDryRun = false;
-
 
 // ---------------------------------------------------------------------------
 // Vector backend — reuses Vector Storage's provider config and ST's own endpoints.
@@ -167,14 +133,6 @@ async function vectorPost(route, args) {
         : null;
 }
 
-/** Whether the server plugin answered a ping. Null until checked. @type {boolean|null} */
-let pluginAvailable = null;
-/** Absolute SillyTavern root, reported by the plugin's /ping, for building copyable deploy commands. @type {string|null} */
-let pluginRoot = null;
-/** Fingerprint the running (deployed) plugin reports via /ping. @type {string|null} */
-let pluginFP = null;
-/** Fingerprint of this extension's source plugin files; a mismatch with pluginFP means the /plugins copy is stale. @type {string|null} */
-let sourceFP = null;
 
 /**
  * Checks once whether the Worlds Apart server plugin is loaded. It only exists if
@@ -182,20 +140,20 @@ let sourceFP = null;
  * @returns {Promise<boolean>} True if the plugin responded
  */
 async function hasPlugin() {
-    if (pluginAvailable !== null) {
-        return pluginAvailable;
+    if (runState.pluginAvailable !== null) {
+        return runState.pluginAvailable;
     }
 
     try {
         const response = await fetch('/api/plugins/worlds-apart/ping', { method: 'POST', headers: getRequestHeaders() });
-        pluginAvailable = response.ok;
-        if (response.ok) { try { const d = await response.json(); pluginRoot = d?.root ?? null; pluginFP = d?.fingerprint ?? null; } catch { /* older plugin: no root/fingerprint fields */ } }
+        runState.pluginAvailable = response.ok;
+        if (response.ok) { try { const d = await response.json(); runState.pluginRoot = d?.root ?? null; runState.pluginFP = d?.fingerprint ?? null; } catch { /* older plugin: no root/fingerprint fields */ } }
     } catch {
-        pluginAvailable = false;
+        runState.pluginAvailable = false;
     }
 
-    console.log(`Worlds Apart: server plugin ${pluginAvailable ? 'detected — mean-centered search available' : 'not found, using stock vector search'}`);
-    return pluginAvailable;
+    console.log(`Worlds Apart: server plugin ${runState.pluginAvailable ? 'detected — mean-centered search available' : 'not found, using stock vector search'}`);
+    return runState.pluginAvailable;
 }
 
 /**
@@ -205,14 +163,14 @@ async function hasPlugin() {
  * @returns {Promise<string|null>}
  */
 async function computeSourceFingerprint() {
-    if (sourceFP !== null) return sourceFP;
+    if (runState.sourceFP !== null) return runState.sourceFP;
     try {
         const [scoring, common, server] = await Promise.all(
             ['./scoring.mjs', './commonwords.js', './server.js'].map(f => fetch(new URL(f, import.meta.url)).then(r => r.text())),
         );
-        sourceFP = pluginFingerprint(scoring, common, server);
-    } catch { sourceFP = null; }
-    return sourceFP;
+        runState.sourceFP = pluginFingerprint(scoring, common, server);
+    } catch { runState.sourceFP = null; }
+    return runState.sourceFP;
 }
 
 /**
@@ -234,7 +192,7 @@ function renderPluginSetup() {
     // with an explicit "open a terminal there" instruction. Cross-platform; deploy also enables
     // server plugins in config.yaml.
     const rel = `public/scripts/extensions/third-party/${extDir}/deploy-plugin.mjs`;
-    const deployCmd = pluginRoot ? `node "${pluginRoot.replace(/\\/g, '/')}/${rel}"` : `node ${rel}`;
+    const deployCmd = runState.pluginRoot ? `node "${runState.pluginRoot.replace(/\\/g, '/')}/${rel}"` : `node ${rel}`;
     const row = (cmd) => {
         const r = $('<div class="flex-container alignItemsCenter flexnowrap" style="gap:6px;margin:3px 0;"></div>');
         const code = $('<code style="flex:1;overflow-x:auto;white-space:nowrap;padding:2px 6px;border-radius:4px;background:var(--black30a,rgba(0,0,0,0.2));"></code>').text(cmd);
@@ -247,18 +205,18 @@ function renderPluginSetup() {
         return r.append(code, btn);
     };
     box.empty();
-    if (pluginAvailable === null) { box.text('Checking for server plugin…'); return; }
-    if (pluginAvailable) {
-        // Stale only when we have a source fingerprint to compare and it differs (a null pluginFP is an
+    if (runState.pluginAvailable === null) { box.text('Checking for server plugin…'); return; }
+    if (runState.pluginAvailable) {
+        // Stale only when we have a source fingerprint to compare and it differs (a null runState.pluginFP is an
         // older, pre-fingerprint build, which also differs → flagged). If the source fetch failed
-        // (sourceFP null) we can't judge, so don't nag.
-        const stale = sourceFP && pluginFP !== sourceFP;
+        // (runState.sourceFP null) we can't judge, so don't nag.
+        const stale = runState.sourceFP && runState.pluginFP !== runState.sourceFP;
         if (stale) {
             box.append($('<div style="color:var(--warning,#d80);"></div>').text('⚠ Server plugin out of date — the deployed copy differs from this extension\'s source. Redeploy and restart:'));
             box.append(row(deployCmd));
             return;
         }
-        box.append($('<div style="color:var(--active,#7ac);"></div>').text('✓ Server plugin active' + (sourceFP ? ` — up to date (build ${sourceFP}).` : '.')));
+        box.append($('<div style="color:var(--active,#7ac);"></div>').text('✓ Server plugin active' + (runState.sourceFP ? ` — up to date (build ${runState.sourceFP}).` : '.')));
         box.append($('<div style="margin-top:3px;"></div>').text('After editing plugin code, redeploy and restart SillyTavern:'));
         box.append(row(deployCmd));
         return;
@@ -568,7 +526,7 @@ async function summarizeQuery(rawText) {
 
         // The full prompt is the instruction plus the whole chat slice — thousands of
         // tokens. Only dump it on a debug run, and as an object so devtools collapses it.
-        if (verboseRun) {
+        if (runState.verboseRun) {
             console.log('%cWorlds Apart · summarizer prompt', 'font-weight: bold', { prompt });
         }
 
@@ -649,8 +607,8 @@ function fuseRetrieval(scores) {
  * @param {object[]} chat Chat messages
  */
 async function retrieve(chat) {
-    lastScores.clear();
-    lastTextScores.clear();
+    runState.lastScores.clear();
+    runState.lastTextScores.clear();
 
     const rawText = buildQuery(chat);
 
@@ -663,7 +621,7 @@ async function retrieve(chat) {
         ? await summarizeQuery(rawText)
         : rawText;
 
-    lastQueryText = searchText;
+    runState.lastQueryText = searchText;
 
     if (settings().queryMode === 'summary') {
         console.log(`Worlds Apart: summarized ${rawText.length} chars into ${searchText.length}: "${searchText}"`);
@@ -679,7 +637,7 @@ async function retrieve(chat) {
         termWeights = buildTermWeights(searchText, gazetteer);
         console.log(`Worlds Apart: entity filter kept ${Object.keys(termWeights).length} terms (gazetteer has ${gazetteer.size})`);
 
-        if (verboseRun) {
+        if (runState.verboseRun) {
             const byWeight = Object.entries(termWeights).sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]));
             console.log(`%cWorlds Apart · surviving query terms — what the entity filter kept, ×N is the proper-noun boost (${byWeight.length} terms)`, 'font-weight: bold');
             console.log(byWeight.map(([term, weight]) => (weight > 1 ? `${term}×${weight}` : term)).join(' '));
@@ -697,8 +655,8 @@ async function retrieve(chat) {
 
     for (const [key, value] of scores) {
         if (winnerKeys.has(key)) {
-            lastScores.set(key, value.score);
-            lastTextScores.set(key, value.bm25 ?? 0);
+            runState.lastScores.set(key, value.score);
+            runState.lastTextScores.set(key, value.bm25 ?? 0);
         }
     }
 
@@ -727,7 +685,7 @@ async function intercept(chat, _maxContext, type) {
         await retrieve(chat);
     } catch (error) {
         console.error('Worlds Apart: retrieval failed, falling back to core behavior', error);
-        lastScores.clear();
+        runState.lastScores.clear();
     }
 }
 
@@ -770,7 +728,7 @@ function showExemptCount(entries) {
     // feature. Refreshed on every WI load and chat/character change, authoritatively (a
     // book-less chat clears it), and before the panel-open check so the /wa-debug book line
     // stays correct with the panel closed.
-    attachedWorlds = new Set(entries.map(e => e?.world).filter(Boolean));
+    runState.attachedWorlds = new Set(entries.map(e => e?.world).filter(Boolean));
     renderWorldPriority();
 
     const field = $('#wa_exempt_count');
@@ -998,7 +956,7 @@ function scopedPriority() {
     if (list == null) return null;
     return list
         .map((cfg, i) => ({ cfg, i, world: resolvedName(cfg) }))
-        .filter(x => x.world && attachedWorlds.has(x.world));
+        .filter(x => x.world && runState.attachedWorlds.has(x.world));
 }
 
 /**
@@ -1044,7 +1002,7 @@ async function rankActivated(args) {
         return;
     }
     if (activated.size === 0) {
-        lastLayout = [];
+        runState.lastLayout = [];
         if (!args?.state?.next) renderWiPanel([]);
         return;
     }
@@ -1053,7 +1011,7 @@ async function rankActivated(args) {
         // We overwrite `order` below, and this fires once per scan loop — stash the
         // authored value on first sight so later loops don't sort by our own output.
         entry.waOriginalOrder ??= entry.order ?? 0;
-        return { key, entry, score: lastScores.get(key), textScore: lastTextScores.get(key) ?? 0 };
+        return { key, entry, score: runState.lastScores.get(key), textScore: runState.lastTextScores.get(key) ?? 0 };
     });
 
     // Books contributing entries to this scan — the priority sorts below rank only among
@@ -1108,7 +1066,7 @@ async function rankActivated(args) {
         // looking: if the key isn't in here but core matched it, core scanned something
         // WA doesn't mirror (a regex script, an attached file, an extension's inject
         // buffer) or another extension force-activated the entry.
-        if (verboseRun) {
+        if (runState.verboseRun) {
             console.log('%cWorlds Apart · keyword scan windows — the exact text WA searched, by depth', 'font-weight: bold');
             console.log(Object.fromEntries([...windows]));
         }
@@ -1215,12 +1173,12 @@ async function rankActivated(args) {
             console.log(`Worlds Apart: budget dropped ${dropped} entries — ${caps}${exempt ? `, plus ${exempt} ignoreBudget (uncapped)` : ''}, ${survivors.size} in prompt`);
         }
 
-        lastSkipped = skipped;
-        lastDropped = ranked.filter(x => !survivors.has(x));
+        runState.lastSkipped = skipped;
+        runState.lastDropped = ranked.filter(x => !survivors.has(x));
         ranked = ranked.filter(x => survivors.has(x));
     } else {
-        lastSkipped = [];
-        lastDropped = [];
+        runState.lastSkipped = [];
+        runState.lastDropped = [];
     }
 
     // Selection is done; now lay the survivors out — one flat sort over everything, so
@@ -1250,17 +1208,17 @@ async function rankActivated(args) {
         ...constant.map(x => [x, 'constant']),
         ...results.map(x => [x, 'dynamic']),
     ]);
-    lastLayout = layout.map(item => ({ item, block: blockOf.get(item) ?? 'dynamic' }));
-    lastDropped = lastDropped.map(item => ({ item, block: blockOf.get(item) ?? 'dynamic' }));
-    lastSkipped = lastSkipped.map(x => ({ ...x, block: blockOf.get(x.item) ?? 'dynamic' }));
+    runState.lastLayout = layout.map(item => ({ item, block: blockOf.get(item) ?? 'dynamic' }));
+    runState.lastDropped = runState.lastDropped.map(item => ({ item, block: blockOf.get(item) ?? 'dynamic' }));
+    runState.lastSkipped = runState.lastSkipped.map(x => ({ ...x, block: blockOf.get(x.item) ?? 'dynamic' }));
 
     // Reflect the final selection in the active-entries panel. Fires once per scan
     // loop; only the last one (no further state) is the real prompt.
-    if (!args?.state?.next) renderWiPanel(lastLayout);
+    if (!args?.state?.next) renderWiPanel(runState.lastLayout);
 
     // A plain /wa-dry has its own selected table below; this one is the selection candidates
     // — everything activated, ranked, before caps cut into it. Only /wa-debug wants this much.
-    if (verboseRun) {
+    if (runState.verboseRun) {
         console.log('%cWorlds Apart · selection candidates — every activated entry with its per-signal scores, before caps or layout', 'font-weight: bold');
         console.table(ranked.map((x, i) => ({
             // Columns lead like the selected table — title, then block, sticky, score, uid,
@@ -1295,7 +1253,7 @@ async function rankActivated(args) {
     // it answers the question you actually have when watching a real turn. Only on the
     // final loop (this fires once per scan loop, earlier ones are provisional), and never
     // on ST's dry runs — those fire on every chat load and would spam the console.
-    if (settings().debugLog && !dryRunInProgress && !generationIsDryRun && !args?.state?.next) {
+    if (settings().debugLog && !runState.dryRunInProgress && !runState.generationIsDryRun && !args?.state?.next) {
         await reportLayout(false, maxTokens > 0);
     }
 }
@@ -1326,13 +1284,13 @@ async function dryRun(verbose = false) {
 
     console.log(`%cWorlds Apart: ${verbose ? 'debug run' : 'dry run'}`, 'font-weight: bold', paramSnapshot());
 
-    verboseRun = Boolean(verbose);
-    dryRunInProgress = true;
+    runState.verboseRun = Boolean(verbose);
+    runState.dryRunInProgress = true;
 
     // Cleared so a scan that activates nothing reports nothing, rather than last run's.
-    lastLayout = [];
-    lastDropped = [];
-    lastSkipped = [];
+    runState.lastLayout = [];
+    runState.lastDropped = [];
+    runState.lastSkipped = [];
 
     await retrieve(chat);
 
@@ -1344,8 +1302,8 @@ async function dryRun(verbose = false) {
     try {
         if (verbose) {
             // Stage 1 — vector candidates: the full retrieved ranking and where the cutoff fell.
-            // Re-runs retrieval (not a hot path), so it needs lastQueryText from retrieve().
-            await probeQuery({}, lastQueryText);
+            // Re-runs retrieval (not a hot path), so it needs runState.lastQueryText from retrieve().
+            await probeQuery({}, runState.lastQueryText);
         }
 
         // Stage 2 — the scan; rankActivated prints the selection candidates (verbose) as it runs.
@@ -1354,8 +1312,8 @@ async function dryRun(verbose = false) {
         // Stage 3 — selection: what survived caps and layout.
         await reportLayout(verbose);
     } finally {
-        verboseRun = false;
-        dryRunInProgress = false;
+        runState.verboseRun = false;
+        runState.dryRunInProgress = false;
     }
 
     return '';
@@ -1531,7 +1489,7 @@ const POSITION_NAMES = ['before char', 'after char', 'AN top', 'AN bottom', '@de
  * across mixed positions does not produce one linear prompt.
  */
 async function reportLayout(verbose = false, countTokens = true) {
-    if (!lastLayout.length) {
+    if (!runState.lastLayout.length) {
         console.log('Worlds Apart: nothing activated.');
         return;
     }
@@ -1539,7 +1497,7 @@ async function reportLayout(verbose = false, countTokens = true) {
     const rows = [];
     let total = 0;
 
-    for (const { item, block } of lastLayout) {
+    for (const { item, block } of runState.lastLayout) {
         const entry = item.entry;
         // Skipped on live generations unless a token cap already made us count: this
         // runs before every turn when debugLog is on, and a remote tokenizer would turn
@@ -1589,11 +1547,11 @@ async function reportLayout(verbose = false, countTokens = true) {
     console.log(`%cWorlds Apart · selected — what reaches the prompt, in prompt order (grouped by position, then order): ${rows.length} entries${countTokens ? `, ${total} World Info tokens` : ''}`, 'font-weight: bold');
     console.table(rows);
 
-    if (lastSkipped.length) {
+    if (runState.lastSkipped.length) {
         // Near-misses first: these are the ones where an edit or a nudge to a cap would
         // actually change the outcome. The tail is reported as a block below.
-        const nearMiss = lastSkipped.filter(x => !x.tail);
-        const tail = lastSkipped.filter(x => x.tail);
+        const nearMiss = runState.lastSkipped.filter(x => !x.tail);
+        const tail = runState.lastSkipped.filter(x => x.tail);
 
         if (nearMiss.length) {
             console.log(`%cWorlds Apart · skipped (fixable) — budget was still available, so an edit or a bigger cap changes the outcome: ${nearMiss.length} entries`, 'font-weight: bold');
@@ -3285,7 +3243,7 @@ async function lorebookStudio() {
             ctx.saveSettingsDebounced?.();
             if (wasChat && ctx.chatMetadata) { ctx.chatMetadata[METADATA_KEY] = newName; ctx.saveMetadata?.(); }
         } catch (err) { console.error('[WA] rename retarget', err); }
-        attachedWorlds = new Set([...attachedWorlds].map(w => w === oldName ? newName : w));
+        runState.attachedWorlds = new Set([...attachedWorlds].map(w => w === oldName ? newName : w));
         if (selectedBooks.delete(oldName)) selectedBooks.add(newName);
         const byBook = settings().studioSortByBook;   // carry the saved per-book sort view across the rename
         if (byBook?.[oldName]) { byBook[newName] = byBook[oldName]; delete byBook[oldName]; saveSettingsDebounced(); }
@@ -3616,7 +3574,7 @@ async function lorebookStudio() {
 // ---------------------------------------------------------------------------
 // Active-entries panel — a book icon (bottom-left) that expands into the list
 // WA actually selected, each row tooltipped with its per-signal scores and
-// keyword hits, click opening the entry text. Refreshed from lastLayout at the
+// keyword hits, click opening the entry text. Refreshed from runState.lastLayout at the
 // end of every real scan (see rankActivated).
 // ---------------------------------------------------------------------------
 let wiTrigger = null, wiPanel = null;
@@ -3814,8 +3772,8 @@ export async function init() {
 
     // ST fires a dry-run generation on chat load and for token estimates; note it so the
     // scan-done handler can stay quiet, since its interceptor (and our retrieval) is skipped.
-    eventSource.on(event_types.GENERATION_STARTED, (_type, _options, dryRun) => { generationIsDryRun = Boolean(dryRun); });
-    eventSource.on(event_types.GENERATION_ENDED, () => { generationIsDryRun = false; });
+    eventSource.on(event_types.GENERATION_STARTED, (_type, _options, dryRun) => { runState.generationIsDryRun = Boolean(dryRun); });
+    eventSource.on(event_types.GENERATION_ENDED, () => { runState.generationIsDryRun = false; });
 
     eventSource.on(event_types.WORLDINFO_ENTRIES_LOADED, suppressKeys);
     // WORLDINFO_ENTRIES_LOADED only fires during a scan, so switching chat/character wouldn't
@@ -3827,7 +3785,7 @@ export async function init() {
     eventSource.on(event_types.WORLDINFO_SCAN_DONE, rankActivated);
 
     // Show the active-entries icon right away; it fills in on the next scan.
-    if (settings().enabled) renderWiPanel(lastLayout);
+    if (settings().enabled) renderWiPanel(runState.lastLayout);
 
     SlashCommandParser.addCommandObject(SlashCommand.fromProps({
         name: 'wa-dry',
