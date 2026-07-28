@@ -2219,7 +2219,7 @@ async function lorebookStudio() {
     let sortAsc = true;
     // Prefer the current chat's bound lorebook, then any world attached to the active character.
     let selected = (world_names.includes(chatBook()) ? chatBook() : null)
-        ?? [...attachedWorlds].find(w => world_names.includes(w)) ?? null;
+        ?? [...runState.attachedWorlds].find(w => world_names.includes(w)) ?? null;
     let data = null;                 // loaded world-info for `selected`
     let scan = null;                 // buildKeyPruneScan result for `data` (keyword colouring)
     let suggest = null;              // buildKeySuggest result, built lazily on first ⚡/🪄
@@ -3243,7 +3243,7 @@ async function lorebookStudio() {
             ctx.saveSettingsDebounced?.();
             if (wasChat && ctx.chatMetadata) { ctx.chatMetadata[METADATA_KEY] = newName; ctx.saveMetadata?.(); }
         } catch (err) { console.error('[WA] rename retarget', err); }
-        runState.attachedWorlds = new Set([...attachedWorlds].map(w => w === oldName ? newName : w));
+        runState.attachedWorlds = new Set([...runState.attachedWorlds].map(w => w === oldName ? newName : w));
         if (selectedBooks.delete(oldName)) selectedBooks.add(newName);
         const byBook = settings().studioSortByBook;   // carry the saved per-book sort view across the rename
         if (byBook?.[oldName]) { byBook[newName] = byBook[oldName]; delete byBook[oldName]; saveSettingsDebounced(); }
