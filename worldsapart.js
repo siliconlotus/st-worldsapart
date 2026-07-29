@@ -510,7 +510,7 @@ async function summarizeQuery(rawText) {
     // the temperature, switching profile, or toggling the preset silently reuses the old
     // summary. Anything that would produce a different answer must be in the key.
     const s = settings();
-    const key = getStringHash(`${prompt} ${s.summaryProfile} ${s.summaryTemperature} ${s.summaryBypassPreset} ${s.summaryLength}`);
+    const key = getStringHash(`${prompt}${s.summaryProfile}${s.summaryTemperature}${s.summaryBypassPreset}${s.summaryLength}`);
 
     if (summaryCache.has(key)) {
         console.log('Worlds Apart: reusing cached summary');

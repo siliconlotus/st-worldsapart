@@ -128,7 +128,7 @@ export async function keywordScoresReport() {
         const pruned = new Map();          // uid -> Set of keys pruned this session (stay visible, struck, undoable)
         let editing = null, editVal = '';  // rowId being renamed + its live text
         let dirty = false;                 // a loresheet edit was saved -> reloadEditor on close
-        const rowId = (uid, key) => `${uid} ${key}`;
+        const rowId = (uid, key) => `${uid}${key}`;
         const persistIgnore = () => { s.keywordIgnore[book] = [...ignoreSet]; saveSettingsDebounced(); };
 
         const syncHeaders = () => {
@@ -300,7 +300,7 @@ export async function keywordScoresReport() {
         // never disappears (you can verify it, or undo). Ignored keys never render, so they're safe.
         const pruneChecked = () => {
             const checked = [...bodyEl.querySelectorAll('.wa-row-cb')].filter(cb => cb.checked)
-                .map(cb => { const sep = cb.dataset.id.indexOf(' '); return { id: cb.dataset.id, uid: cb.dataset.id.slice(0, sep), key: cb.dataset.id.slice(sep + 1) }; });
+                .map(cb => { const sep = cb.dataset.id.indexOf(''); return { id: cb.dataset.id, uid: cb.dataset.id.slice(0, sep), key: cb.dataset.id.slice(sep + 1) }; });
             let removed = 0;
             const touched = new Set();
             for (const a of checked) {

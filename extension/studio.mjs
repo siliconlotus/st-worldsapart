@@ -103,14 +103,14 @@ export async function lorebookStudio(preferredBook = null) {
     // low-precision so their rows start unticked and the work is picking winners. One control that
     // silently flipped between "remove these" and "add these" is the wrong place to save a tab.
     let tab = 'explorer';
-    // Selection state per commit-direction, keyed `${uid} ${term}`. Deliberately survives tab
+    // Selection state per commit-direction, keyed `${uid}${term}`. Deliberately survives tab
     // switches AND rescans: a half-built selection is the user's work, not a cache. A rescan can retire
     // rows (they stop rendering) without discarding the decision, so loosening a threshold back restores
     // the earlier tick. The bulk bars show counts so a stale selection is visible rather than silent.
     const cleanupChecks = new Map();   // rowId -> bool (defaults from scan.defChecked — mostly ticked)
     const suggestChecks = new Map();   // rowId -> bool (defaults false — nothing is added unasked)
     let cleanupUndo = null;            // [{uid, key}] from the last prune, restorable until the next one
-    const rowId = (uid, term) => `${uid} ${term}`;
+    const rowId = (uid, term) => `${uid}${term}`;
     // The active term tab's list repaint, or null in the Explorer. Whitelist edits reach the list from
     // three places (the term right-click menu, the tray's per-key ✕, Clear whitelist), and the Explorer's
     // rerenderKeys walks rowEls, which the term tabs never populate — so without this an ignored term
