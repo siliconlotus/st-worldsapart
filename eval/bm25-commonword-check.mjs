@@ -1,14 +1,12 @@
 // Verifies the background-frequency prior on the plugin's BM25 (commonWordWeight).
-// Slices bm25Scores + tokenize out of the plugin (index.js loads as a server module with
-// ST-internal imports; slicing keeps this check dependency-free) and injects a stub COMMON_WORDS.
-import { readFileSync } from 'node:fs';
-const src = readFileSync(new URL('../../../../../../plugins/worlds-apart/index.js', import.meta.url), 'utf8');
-const slice = name => { const i = src.indexOf(`function ${name}`); return src.slice(i, src.indexOf('\n}\n', i) + 2); };
-const COMMON_WORDS = new Set(['said', 'walk']);   // "said" common, "kidnap" not
-const bm25Scores = new Function('COMMON_WORDS', 'DEFAULT_K1', 'DEFAULT_B',
-    `${slice('tokenize')}\n${slice('bm25Scores')}\n; return bm25Scores;`)(COMMON_WORDS, 1.2, 0.75);
+// bm25Scores lives in the pure, shared lexical.mjs — imported directly, so this checks the exact
+// code the server runs. Uses real COMMON_WORDS: "said" is common, "kidnap" is not.
+import { bm25Scores } from '../plugin/lexical.mjs';
+import { COMMON_WORDS } from '../plugin/commonwords.js';
 
 const eq = (got, want, label) => console.log(`${Math.abs(got - want) < 1e-9 ? 'ok  ' : 'FAIL'} ${label}: ${got}${Math.abs(got - want) < 1e-9 ? '' : ` (want ${want})`}`);
+
+console.log(`${COMMON_WORDS.has('said') && !COMMON_WORDS.has('kidnap') ? 'ok  ' : 'FAIL'} precondition: "said" common, "kidnap" not`);
 
 // One doc containing both a common word and a rare word, each once.
 const lexical = {

@@ -1,17 +1,11 @@
 // Verifies WA's keyword matcher tracks core's world-info.js matchKeys semantics.
-// Pulls countKey out of worldsapart.js by source slice — worldsapart.js only loads in a browser.
-import { readFileSync } from 'node:fs';
-const escapeRegex = s => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-const src = readFileSync(new URL('../worldsapart.js', import.meta.url), 'utf8');
-const i = src.indexOf('function countKey');
-const countKey = new Function('escapeRegex', src.slice(i, src.indexOf('\n}\n', i) + 2) + '; return countKey;')(escapeRegex);
-const eq = (got, want, label) => console.log(`${got === want ? 'ok  ' : 'FAIL'} ${label}: ${got}${got === want ? '' : ` (want ${want})`}`);
+// countKey/keywordScore live in ranking.mjs, which is isomorphic — imported directly.
+import { countKey, keywordScore as rankKeywordScore } from '../extension/ranking.mjs';
+import { eq } from './metrics.mjs';
 
-// keywordScore: sliced with countKey and its globals injected. Guards the scoreVectorKeys path —
+// keywordScore with the production defaults injected. Guards the scoreVectorKeys path —
 // that a caller can score against an explicit key list (waKeys) instead of entry.key.
-const ks = src.indexOf('function keywordScore');
-const keywordScore = new Function('countKey', 'settings', 'world_info_case_sensitive', 'world_info_match_whole_words',
-    src.slice(ks, src.indexOf('\n}\n', ks) + 2) + '; return keywordScore;')(countKey, () => ({ bm25K1: 2 }), false, false);
+const keywordScore = (e, t, k) => rankKeywordScore(e, t, k, { k1: 2, caseSensitiveDefault: false, wholeWordsDefault: false });
 const scored = (e, t, k) => keywordScore(e, t, k).score > 0;
 eq(scored({ key: ['zzz'] }, 'alpha beta', ['alpha']), true, 'keywordScore honors explicit keys over entry.key');
 eq(scored({ key: ['alpha'] }, 'alpha beta', ['zzz']), false, 'explicit keys with no hit score zero even when entry.key would match');

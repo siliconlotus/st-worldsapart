@@ -2,6 +2,7 @@
 // the sort/tier control builders, the floating context menu, entry tooltips + glyph, and the
 // injected stylesheet. DOM-coupled; imports the sort vocabulary from sort.mjs and needs Popup.
 import { settings } from './state.mjs';
+import { escapeHtml } from '../../../../utils.js';
 import { Popup, POPUP_TYPE } from '../../../../popup.js';
 import { wiTitleOf, TIER_DEFS, SORT_LABELS, SORT_MENU } from './sort.mjs';
 

@@ -28,5 +28,4 @@ works, just without mean-centering.
 The extension fingerprints its source copies of those files and the running plugin fingerprints its
 deployed copies (`/ping`); if they differ, WA settings
 shows **⚠ Server plugin out of date — redeploy**. The check fires only when those files actually
-changed, so unrelated extension updates never trigger it. `deploy-plugin.mjs --link` symlinks instead
-of copying for a zero-drift dev loop (deployed always equals source).
+changed, so unrelated extension updates never trigger it.

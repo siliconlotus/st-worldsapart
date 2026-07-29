@@ -1,37 +1,10 @@
-// Guards the Phase-0 extraction: buildKeyPruneScan / buildKeySuggest were lifted out of
-// keywordScoresReport / keywordSuggestReport so the prune popup, the suggest popup, and Lorebook
-// Studio share one classifier + one ranker. This slices those functions (and countKey) straight
-// out of worldsapart.js source and runs them on a tiny synthetic book, so a botched extraction or
-// a future edit that changes a verdict fails here instead of silently drifting the two callers.
-// Run: node keyword-extract-check.mjs
+// Guards the keyword classifier + ranker: buildKeyPruneScan / buildKeySuggest live in the pure,
+// node-importable keyword-core.mjs, so this imports the real shipped code and runs it on a tiny
+// synthetic book — a botched refactor or an edit that changes a verdict fails here instead of
+// silently drifting the prune popup, the suggest popup, and Lorebook Studio.
+// Run: node eval/keyword-extract-check.mjs
 import assert from 'node:assert';
-import { readFileSync } from 'node:fs';
-import { COMMON_WORDS } from '../plugin/commonwords.js';
-
-const escapeRegex = s => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-const src = readFileSync(new URL('../worldsapart.js', import.meta.url), 'utf8');
-// Pull a top-level `function NAME` out by source slice (worldsapart.js only loads in a browser).
-const slice = name => { const i = src.indexOf(`function ${name}`); return src.slice(i, src.indexOf('\n}\n', i) + 2); };
-
-const countKey = new Function('escapeRegex', slice('countKey') + '; return countKey;')(escapeRegex);
-const isDateLike = new Function('MONTH_RE', slice('isDateLike') + '; return isDateLike;')(
-    /\b(?:jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|jul(?:y)?|aug(?:ust)?|sep(?:t(?:ember)?)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)\b/);
-
-// Mirror the module constants (same literals as worldsapart.js).
-const KEY_TOO_COMMON = 0.5, KEY_MIN_LENGTH = 4;
-const COMMON_HEAD = new Set([...COMMON_WORDS].slice(0, 1000));
-
-const KEY_MIN_COMMON_ENTRIES = 10;
-const buildKeyPruneScan = new Function(
-    'countKey', 'escapeRegex', 'COMMON_WORDS', 'COMMON_HEAD', 'KEY_TOO_COMMON', 'KEY_MIN_COMMON_ENTRIES', 'KEY_MIN_LENGTH',
-    'world_info_case_sensitive', 'world_info_match_whole_words',
-    slice('buildKeyPruneScan') + '; return buildKeyPruneScan;',
-)(countKey, escapeRegex, COMMON_WORDS, COMMON_HEAD, KEY_TOO_COMMON, KEY_MIN_COMMON_ENTRIES, KEY_MIN_LENGTH, false, false);
-
-const buildKeySuggest = new Function(
-    'COMMON_WORDS', 'KEY_TOO_COMMON', 'isDateLike', 'KEY_GOOD_EXAMPLES', 'KEY_BAD_EXAMPLES',
-    slice('buildKeySuggest') + '; return buildKeySuggest;',
-)(COMMON_WORDS, KEY_TOO_COMMON, isDateLike, ['Thaddeus Wexler'], ['kyle confesses']);
+import { buildKeyPruneScan, buildKeySuggest, KEY_TOO_COMMON, KEY_MIN_LENGTH, KEY_MIN_COMMON_ENTRIES } from '../extension/keyword-core.mjs';
 
 // --- buildKeyPruneScan ---------------------------------------------------------------------------
 // Four entries so df ratios are meaningful (the classify priority is english-common -> dead ->

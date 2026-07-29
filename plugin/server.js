@@ -35,7 +35,7 @@ import { getOllamaVector } from '../../src/vectors/ollama-vectors.js';
 import { scoreCollection, selectTopK } from './scoring.mjs';
 import { DEFAULT_K1, DEFAULT_B, buildLexical } from './lexical.mjs';
 import { norm, corpusMean } from './vector.mjs';
-import { pluginFingerprint } from './fingerprint.mjs';
+import { pluginFingerprint, PLUGIN_FILES } from './fingerprint.mjs';
 
 // This file sits at <root>/plugins/worlds-apart/index.js once deployed.
 const PLUGIN_DIR = path.dirname(fileURLToPath(import.meta.url));
@@ -45,8 +45,7 @@ const ST_ROOT = path.resolve(PLUGIN_DIR, '..', '..');
 // Fingerprint of this deployed copy, computed from its own files. The extension compares it against
 // the same hash over its source files to detect a /plugins copy that wasn't redeployed after a change.
 const readDeployed = f => { try { return fs.readFileSync(path.join(PLUGIN_DIR, f), 'utf8'); } catch { return ''; } };
-// Fixed order — must match the extension's computeSourceFingerprint (scoring, vector, lexical, commonwords, server/index).
-const FINGERPRINT = pluginFingerprint(readDeployed('scoring.mjs'), readDeployed('vector.mjs'), readDeployed('lexical.mjs'), readDeployed('commonwords.js'), readDeployed('index.js'));
+const FINGERPRINT = pluginFingerprint(...PLUGIN_FILES.map(([, deployed]) => readDeployed(deployed)));
 
 export const info = {
     id: 'worlds-apart',
@@ -55,8 +54,9 @@ export const info = {
 };
 
 /**
- * Cached corpus statistics, keyed by index path.
- * @type {Map<string, { mean: Float64Array, lexical: object, mtimeMs: number, count: number }>}
+ * Cached corpus statistics (items included — listItems() re-parses the whole index file, so it
+ * only runs when index.json's mtime changes), keyed by index path.
+ * @type {Map<string, { items: object[], mean: Float64Array, lexical: object, mtimeMs: number, size: number }>}
  */
 const meanCache = new Map();
 
@@ -106,9 +106,21 @@ function getIndexPath(directories, collectionId, source, model) {
  * @returns {Promise<{items: object[], mean: Float64Array, lexical: object} | null>}
  */
 async function loadCentered(indexPath) {
+    // Validity key is mtime AND size: two rapid writes can land in one mtime tick (or a
+    // coarse-mtime mount can hide one entirely), and serving a stale item set from that would
+    // silently drop chunks from retrieval. Size catches the realistic case (chunk count changed).
+    const stat = fs.statSync(path.join(indexPath, 'index.json'), { throwIfNoEntry: false });
+    const mtimeMs = stat?.mtimeMs ?? 0;
+    const size = stat?.size ?? 0;
+    const cached = meanCache.get(indexPath);
+
+    if (cached && cached.mtimeMs === mtimeMs && cached.size === size) {
+        return cached;
+    }
+
     const index = new LocalIndex(indexPath);
 
-    if (!await index.isIndexCreated()) {
+    if (!mtimeMs || !await index.isIndexCreated()) {
         return null;
     }
 
@@ -118,21 +130,14 @@ async function loadCentered(indexPath) {
         return null;
     }
 
-    const file = path.join(indexPath, 'index.json');
-    const mtimeMs = fs.existsSync(file) ? fs.statSync(file).mtimeMs : 0;
-    const cached = meanCache.get(indexPath);
-
-    if (cached && cached.mtimeMs === mtimeMs && cached.count === items.length) {
-        return { items, mean: cached.mean, lexical: cached.lexical };
-    }
-
     const mean = corpusMean(items);
     const lexical = buildLexical(items);
+    const loaded = { items, mean, lexical, mtimeMs, size };
 
-    meanCache.set(indexPath, { mean, lexical, mtimeMs, count: items.length });
+    meanCache.set(indexPath, loaded);
     console.log(`[Worlds Apart] indexed ${path.basename(path.dirname(indexPath))}: ${items.length} chunks, mean norm ${norm(mean).toFixed(4)}, ${lexical.postings.size} lexical terms, avg ${lexical.avgdl.toFixed(0)} tokens/chunk`);
 
-    return { items, mean, lexical };
+    return loaded;
 }
 
 /**
@@ -160,12 +165,17 @@ export async function init(router) {
                 commonWordWeight: Number.isFinite(Number(request.body.commonWordWeight)) ? Number(request.body.commonWordWeight) : 1,
             };
 
+            // The disk loads and the embed round-trip are independent — run them concurrently.
+            const loading = Promise.all(collectionIds.map(collectionId =>
+                loadCentered(getIndexPath(request.user.directories, String(collectionId), String(source), settings.model))));
+            loading.catch(() => {});   // surfaced by the await below; without this an embed failure leaves an unhandled rejection
             const queryVector = await embed(String(source), settings, String(searchText), request.user.directories);
             const results = [];
+            const loadedAll = await loading;
 
-            for (const collectionId of collectionIds) {
-                const indexPath = getIndexPath(request.user.directories, String(collectionId), String(source), settings.model);
-                const loaded = await loadCentered(indexPath);
+            for (let i = 0; i < collectionIds.length; i++) {
+                const collectionId = collectionIds[i];
+                const loaded = loadedAll[i];
 
                 if (!loaded) {
                     continue;

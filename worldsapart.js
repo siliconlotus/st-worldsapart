@@ -31,10 +31,10 @@ import { SlashCommandParser } from '../../../slash-commands/SlashCommandParser.j
 import { SlashCommand } from '../../../slash-commands/SlashCommand.js';
 import { ARGUMENT_TYPE, SlashCommandArgument } from '../../../slash-commands/SlashCommandArgument.js';
 import { ConnectionManagerRequestService } from '../../shared.js';
-import { getStringHash, splitRecursive, escapeRegex, escapeHtml, getCharaFilename } from '../../../utils.js';
-import { COMMON_WORDS } from './plugin/commonwords.js';
-import { pluginFingerprint } from './plugin/fingerprint.mjs';
+import { getStringHash, splitRecursive, escapeHtml, getCharaFilename } from '../../../utils.js';
+import { pluginFingerprint, PLUGIN_FILES } from './plugin/fingerprint.mjs';
 import * as ranking from './extension/ranking.mjs';
+import { registerKeys, resetSmartKeys } from './extension/smartkeys.mjs';
 import * as selection from './extension/selection.mjs';
 import { Popup, POPUP_TYPE, POPUP_RESULT } from '../../../popup.js';
 import { getTokenCountAsync } from '../../../tokenizers.js';
@@ -44,7 +44,8 @@ import { oai_settings } from '../../../openai.js';
 import { runState, defaultSettings, settings, ensureSettings } from './extension/state.mjs';
 import { ensureStudioStyle, makeSortControl, makeTierEditor, showCtxMenu, showEntryText, wiGlyph, wiTooltip } from './extension/ui-widgets.mjs';
 import { PRESENTATION_ALIAS, SORT_FNS, normPresentation, presentationBaseLabel, presentationLabel, reconcileTiers, tierRank, wiTitleOf } from './extension/sort.mjs';
-import { buildKeyPruneScan, buildKeySuggest, isDateLike, llmKeyCandidates, keywordScoresReport, keywordSuggestReport, STUDIO_PRUNE_OPTS, STUDIO_SUGGEST_OPTS } from './extension/keyword-tools.mjs';
+import { buildKeyPruneScan, llmKeyCandidates, keywordScoresReport, keywordSuggestReport, STUDIO_PRUNE_OPTS, STUDIO_SUGGEST_OPTS } from './extension/keyword-tools.mjs';
+import { buildKeySuggest, classifyLlmCand } from './extension/keyword-core.mjs';
 
 /** Base value for the rewritten `order` sequence. WA rewrites every activated entry's order,
  * so only the relative index matters — the base is a fixed pad with no other writer to collide with. */
@@ -167,11 +168,10 @@ async function hasPlugin() {
 async function computeSourceFingerprint() {
     if (runState.sourceFP !== null) return runState.sourceFP;
     try {
-        // Fixed order — must match server.js FINGERPRINT (scoring, vector, lexical, commonwords, server/index).
-        const [scoring, vector, lexical, common, server] = await Promise.all(
-            ['./plugin/scoring.mjs', './plugin/vector.mjs', './plugin/lexical.mjs', './plugin/commonwords.js', './plugin/server.js'].map(f => fetch(new URL(f, import.meta.url)).then(r => r.text())),
+        const texts = await Promise.all(
+            PLUGIN_FILES.map(([src]) => fetch(new URL(`./plugin/${src}`, import.meta.url)).then(r => r.text())),
         );
-        runState.sourceFP = pluginFingerprint(scoring, vector, lexical, common, server);
+        runState.sourceFP = pluginFingerprint(...texts);
     } catch { runState.sourceFP = null; }
     return runState.sourceFP;
 }
@@ -1035,6 +1035,11 @@ async function rankActivated(args) {
         // Scanned once and shared across depths — core adds injects to the buffer for
         // every entry regardless of scan depth.
         const injectText = await scanInjects();
+
+        // Register every key this pass will score BEFORE the loop, so the smartkeys automaton is
+        // built once — a first-seen key mid-loop would rebuild it and throw away every cached scan.
+        registerKeys(items.flatMap(it => it.entry.key?.length ? it.entry.key
+            : (settings().scoreVectorKeys ? (it.entry.waKeys ?? []) : [])));
 
         for (const item of items) {
             // Score keywords over the shared message depth. Per-entry scanDepth still wins
@@ -2568,20 +2573,20 @@ async function lorebookStudio() {
         for (const t of fresh) { const c = s.canon(t); if (!seen.has(c)) { g.tfidf.push(t); seen.add(c); } }
         renderEntry(e);
     };
-    // Merge raw model candidates into one entry's ✨ tray, applying the same filters as the single ✨
-    // (dedupe, prompt-echo, generic single word, date-like, too-common). Returns the count added.
+    // Merge raw model candidates into one entry's ✨ tray via the shared classifyLlmCand — the exact
+    // filters the single ✨ applies (dedupe, prompt-echo, generic single word, date-like, too-common).
+    // Returns the count added.
     const mergeLlmCands = (e, cands, s) => {
         const g = getSugg(e.uid);
         const seen = new Set([...g.tfidf, ...g.llm].map(t => s.canon(t)));
         let added = 0;
         for (const cand of cands) {
-            const t = cand.replace(/^["'`]+|["'`]+$/g, '').trim();
-            const c = s.canon(t) || t.toLowerCase();
-            if (!t || t.length > 60 || seen.has(c) || hasKey(e, t)) continue;
-            if (s.exampleCanon.has(c)) continue;                       // pure prompt echo
-            if (!c.includes(' ') && COMMON_WORDS.has(c)) continue;     // generic single word
-            if (isDateLike(t)) continue;
-            if (s.dfSubstr(t) / s.N > suggestOpts.dfCeil) continue;
+            const { term: t, canon: c, reason } = classifyLlmCand(cand, {
+                canon: s.canon, exampleCanon: s.exampleCanon, dfSubstr: s.dfSubstr, N: s.N,
+                dfCeil: suggestOpts.dfCeil, excludeDates: suggestOpts.excludeDates,
+                isDupe: (term, cn) => seen.has(cn) || hasKey(e, term),
+            });
+            if (reason) continue;
             g.llm.push(t); seen.add(c); added++;
         }
         return added;
@@ -3732,6 +3737,9 @@ export async function init() {
     // switch; re-read the active books then. Also populates once now so it isn't blank on load.
     const refreshAttached = () => getSortedEntries().then(showExemptCount).catch(() => {});
     eventSource.on(event_types.CHAT_CHANGED, refreshAttached);
+    // New chat = possibly different books; drop the smartkeys key registry so the automaton
+    // tracks the active vocabulary instead of the union of every book ever scanned.
+    eventSource.on(event_types.CHAT_CHANGED, resetSmartKeys);
     refreshAttached();
     eventSource.on(event_types.WORLDINFO_SCAN_DONE, rankActivated);
 

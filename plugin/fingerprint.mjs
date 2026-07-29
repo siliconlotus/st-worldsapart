@@ -1,9 +1,19 @@
 // fingerprint.mjs — deploy tooling, not retrieval: a content fingerprint of the deployed server plugin
 // so a stale /plugins copy is detectable without a hand-maintained version number. The plugin hashes
 // its own deployed files and the extension hashes its source files, in the SAME fixed order; a mismatch
-// means the copy drifted from source and needs a redeploy. Pass every behavioural plugin file
-// (server, scoring, vector, lexical, commonwords); server.js and its deployed name index.js share
-// content, so the order must be identical on both sides. Pure and isomorphic.
+// means the copy drifted from source and needs a redeploy. Pure and isomorphic.
+
+/** Every deployed plugin file as [source name in plugin/, deployed name], in fingerprint order.
+ * The single manifest: deploy-plugin.mjs copies these, and both fingerprint sides hash them in THIS
+ * order — adding or reordering a plugin file is one edit here, nowhere else. */
+export const PLUGIN_FILES = [
+    ['scoring.mjs', 'scoring.mjs'],
+    ['vector.mjs', 'vector.mjs'],
+    ['lexical.mjs', 'lexical.mjs'],
+    ['commonwords.js', 'commonwords.js'],
+    ['fingerprint.mjs', 'fingerprint.mjs'],
+    ['server.js', 'index.js'],
+];
 
 /** Non-cryptographic string hash (djb2, 32-bit). Only used to fingerprint files — not a security primitive. */
 export function hashText(str) {

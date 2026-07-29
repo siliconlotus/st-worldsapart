@@ -6,17 +6,13 @@
 // then restart SillyTavern (the folder name doesn't matter — the script locates itself):
 //   node deploy-plugin.mjs
 //
-// (For a zero-drift dev loop you can symlink instead of copy — see --link below.)
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 import fs from 'node:fs';
+import { PLUGIN_FILES } from './plugin/fingerprint.mjs';
 
 const SRC = path.dirname(fileURLToPath(import.meta.url));
 const DEST = path.resolve(SRC, '../../../../../plugins/worlds-apart');
-const LINK = process.argv.includes('--link');
-
-// server.js is the source; ST's plugin loader expects the package `main`, index.js.
-const FILES = [['plugin/server.js', 'index.js'], ['plugin/scoring.mjs', 'scoring.mjs'], ['plugin/vector.mjs', 'vector.mjs'], ['plugin/lexical.mjs', 'lexical.mjs'], ['plugin/fingerprint.mjs', 'fingerprint.mjs'], ['plugin/commonwords.js', 'commonwords.js']];
 
 const PACKAGE_JSON = JSON.stringify({
     name: 'worlds-apart-plugin',
@@ -28,16 +24,12 @@ const PACKAGE_JSON = JSON.stringify({
 
 fs.mkdirSync(DEST, { recursive: true });
 
-for (const [from, to] of FILES) {
-    const src = path.join(SRC, from);
+for (const [from, to] of PLUGIN_FILES) {
+    const src = path.join(SRC, 'plugin', from);
     const dst = path.join(DEST, to);
     fs.rmSync(dst, { force: true });
-    if (LINK) {
-        fs.symlinkSync(src, dst);
-    } else {
-        fs.copyFileSync(src, dst);
-    }
-    console.log(`${LINK ? 'linked' : 'copied'}  ${from}  ->  plugins/worlds-apart/${to}`);
+    fs.copyFileSync(src, dst);
+    console.log(`copied  plugin/${from}  ->  plugins/worlds-apart/${to}`);
 }
 
 fs.writeFileSync(path.join(DEST, 'package.json'), PACKAGE_JSON);

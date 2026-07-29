@@ -8,8 +8,15 @@
 // substituteParams, BM25 k1, world-info match defaults, fusion weights) is INJECTED by the caller.
 // The extension wraps these with its settings()/ST globals; the harness passes its own values.
 
-/** Escape a string for literal use in a RegExp (same as ST's utils.escapeRegex; inlined to stay ST-free). */
-function escapeRegex(str) { return String(str).replace(/[.*+?^${}()|[\]\\]/g, '\\$&'); }
+import { cachedCount, evaluateSmartKey, primeScan } from './smartkeys.mjs';
+
+/** Escape a string for literal use in a RegExp (same as ST's utils.escapeRegex; inlined to stay ST-free, exported for keyword-core). */
+export function escapeRegex(str) { return String(str).replace(/[.*+?^${}()|[\]\\]/g, '\\$&'); }
+
+/** A /pattern/flags regex key, exactly as countKey routes them. THE regex-key test — the audit and
+ * the smartkeys registry import this so all three can never disagree on what counts as a regex key. */
+export const REGEX_KEY_RE = /^\/(.+)\/([gimsuy]*)$/;
+export const isRegexKey = k => REGEX_KEY_RE.test(String(k));
 
 /**
  * Collects the lorebook's own vocabulary — every term appearing in an entry's keys
@@ -149,9 +156,20 @@ export function countKey(key, text, caseSensitive, wholeWords) {
         return 0;
     }
 
+    // SmartKeys sentinel: `?`-prefixed keys are boolean queries (see smartkeys.mjs), overriding
+    // the other options like a regex key does. Returns the query's weight (default 1) on match,
+    // so it feeds keywordScore's saturation like a single occurrence scaled by :weight.
+    if (raw.startsWith('?')) {
+        const { matched, scoreBoost } = evaluateSmartKey(raw, text);
+        // A matched query built purely from negation (e.g. "? !apollo") carries zero accumulated
+        // weight but must still count as a hit — floor ONLY that case, so a sub-1 :weight
+        // (e.g. "? whisper:0.3") down-weights as documented.
+        return matched ? (scoreBoost > 0 ? scoreBoost : 1) : 0;
+    }
+
     // Regex key (/pattern/flags): count global matches, overriding the other options —
     // same precedence core's matchKeys gives a regex needle.
-    const asRegex = raw.match(/^\/(.+)\/([gimsuy]*)$/);
+    const asRegex = raw.match(REGEX_KEY_RE);
     if (asRegex) {
         try {
             const flags = asRegex[2].includes('g') ? asRegex[2] : `${asRegex[2]}g`;
@@ -160,6 +178,14 @@ export function countKey(key, text, caseSensitive, wholeWords) {
             return 0;
         }
     }
+
+    // Aho-Corasick fast path: when keywordScore has primed a scan of this text, the shared
+    // automaton already knows this key's folded-substring count. 0 is final under any flags;
+    // a positive count is final for plain case-insensitive substring semantics, and otherwise
+    // the key is a confirmed candidate that falls through to the exact (naive) walk below.
+    const cached = cachedCount(raw, text);
+    if (cached === 0) return 0;
+    if (cached !== undefined && !caseSensitive && (!wholeWords || /\s/.test(raw))) return cached;
 
     const hay = caseSensitive ? text : text.toLowerCase();
     const needle = caseSensitive ? raw : raw.toLowerCase();
@@ -210,6 +236,11 @@ export function keywordScore(entry, text, keys = entry.key, { k1, caseSensitiveD
     // only appears inside a larger word.
     const caseSensitive = entry.caseSensitive ?? caseSensitiveDefault;
     const wholeWords = entry.matchWholeWords ?? wholeWordsDefault;
+
+    // Register every key and scan the text ONCE (Aho-Corasick); countKey below then answers
+    // from that scan instead of walking the buffer per key. Text is shared across entries in
+    // a retrieval pass, so after the first entry this is a no-op.
+    if (text) primeScan(keys, text);
 
     let score = 0;
     const hits = [];
