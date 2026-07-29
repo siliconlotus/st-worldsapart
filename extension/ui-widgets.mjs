@@ -180,6 +180,32 @@ export function ensureStudioStyle() {
 .wa-studio-nav.wa-nav-wide { flex: 0 0 auto; width: max-content; min-width: 200px; max-width: 55%; overflow: auto; }
 .wa-nav-wide .wa-book-row { overflow: visible; }
 .wa-nav-wide .wa-book-name { overflow: visible; text-overflow: clip; }
+/* Tab strip above the explorer pane: Explorer / Cleanup / Suggest Terms. The active tab is the only
+   indicator of which direction a commit runs in, so it reads loudly (underline + colour, not just weight). */
+.wa-tabs { display: flex; gap: 2px; flex: 0 0 auto; margin-bottom: 6px;
+    border-bottom: 1px solid var(--SmartThemeBorderColor, rgba(255,255,255,0.15)); }
+.wa-tab { padding: 5px 14px; cursor: pointer; white-space: nowrap; opacity: 0.6; font-size: 0.9em;
+    border: none; background: transparent; color: inherit; font-family: inherit;
+    border-bottom: 2px solid transparent; margin-bottom: -1px; }
+.wa-tab:hover { opacity: 0.9; background: var(--white20a, rgba(255,255,255,0.06)); }
+.wa-tab.wa-tab-on { opacity: 1; font-weight: bold; color: #6ea8fe; border-bottom-color: #6ea8fe; }
+.wa-tab-count { opacity: 0.6; font-weight: normal; margin-left: 5px; font-size: 0.9em; }
+/* Key-per-row tables shared by Cleanup and Suggest. */
+/* Pinned strip of the book's ignored terms, above the term list. Wraps rather than scrolls — the set is
+   normally a handful, and a hidden overflow would defeat the point of pinning it. */
+.wa-ign-strip { display: flex; flex-wrap: wrap; align-items: center; gap: 0.4em; padding: 5px 4px;
+    border-bottom: 1px solid var(--SmartThemeBorderColor, rgba(255,255,255,0.12)); }
+.wa-term-grp { padding: 6px 2px 2px; display: flex; align-items: center; gap: 6px; font-weight: bold;
+    border-top: 1px solid var(--SmartThemeBorderColor, rgba(255,255,255,0.08)); }
+/* Left-packed with deliberate gaps rather than a stretched term column: term, a thumb's width, the
+   whitelist toggle, a wider gap, then the reason. The reason sits far enough from the icon that the
+   two read as separate columns without the icon drifting to the far edge on short terms. */
+.wa-term-row { display: flex; align-items: center; gap: 0; padding: 2px 2px 2px 22px; }
+.wa-term-row:hover { background: var(--white20a, rgba(255,255,255,0.05)); }
+.wa-term-name { flex: 0 1 auto; min-width: 0; margin-left: 8px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.wa-term-why { flex: 0 0 auto; margin-left: 2.5rem; opacity: 0.85; font-size: 0.85em; white-space: nowrap; }
+.wa-term-act { flex: 0 0 auto; cursor: pointer; opacity: 0.5; padding: 2px 5px; margin-left: 1rem; }
+.wa-term-act:hover { opacity: 1; }
 .wa-entry { padding: 5px 4px; border-bottom: 1px solid var(--SmartThemeBorderColor, rgba(255,255,255,0.1)); }
 .wa-entry-head { display: flex; align-items: center; gap: 6px; cursor: pointer; }
 .wa-entry-title { font-weight: bold; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }

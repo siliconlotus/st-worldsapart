@@ -15,7 +15,7 @@ import { power_user } from '../../../../power-user.js';
 import { escapeHtml } from '../../../../utils.js';
 import { Popup, POPUP_TYPE, POPUP_RESULT } from '../../../../popup.js';
 import { runState, settings } from './state.mjs';
-import { ensureStudioStyle, makeSortControl, showCtxMenu } from './ui-widgets.mjs';
+import { ensureStudioStyle, makeSortControl, showCtxMenu, showEntryText, wiGlyph } from './ui-widgets.mjs';
 import { SORT_FNS, normPresentation, reconcileTiers, tierRank, wiTitleOf } from './sort.mjs';
 import { buildKeyPruneScan, llmKeyCandidates, STUDIO_PRUNE_OPTS, STUDIO_SUGGEST_OPTS } from './keyword-tools.mjs';
 import { buildKeySuggest, classifyLlmCand } from './keyword-core.mjs';
@@ -95,6 +95,31 @@ export async function lorebookStudio(preferredBook = null) {
     const advOpen = new Set();       // entry uids with the Advanced tray (recursion/budget/timing) expanded
     const sugg = new Map();          // uid -> { tfidf:string[], llm:string[] } transient suggestion chips
     const rowEls = new Map();        // uid -> entry row element, so one edit re-renders just that entry
+    // --- Tabs -----------------------------------------------------------------------------------
+    // Three views over one book: Explorer (entry rows), Cleanup (flagged keys, key-per-row), Suggest
+    // Terms (candidate keys, key-per-row). Cleanup and Suggest commit in OPPOSITE directions, which is
+    // why they are separate tabs rather than one view with a mode toggle: audit flags are high-precision
+    // so their rows start ticked and the work is rescuing false positives, while suggestions are
+    // low-precision so their rows start unticked and the work is picking winners. One control that
+    // silently flipped between "remove these" and "add these" is the wrong place to save a tab.
+    let tab = 'explorer';
+    // Selection state per commit-direction, keyed `${uid} ${term}`. Deliberately survives tab
+    // switches AND rescans: a half-built selection is the user's work, not a cache. A rescan can retire
+    // rows (they stop rendering) without discarding the decision, so loosening a threshold back restores
+    // the earlier tick. The bulk bars show counts so a stale selection is visible rather than silent.
+    const cleanupChecks = new Map();   // rowId -> bool (defaults from scan.defChecked — mostly ticked)
+    const suggestChecks = new Map();   // rowId -> bool (defaults false — nothing is added unasked)
+    let cleanupUndo = null;            // [{uid, key}] from the last prune, restorable until the next one
+    const rowId = (uid, term) => `${uid} ${term}`;
+    // The active term tab's list repaint, or null in the Explorer. Whitelist edits reach the list from
+    // three places (the term right-click menu, the tray's per-key ✕, Clear whitelist), and the Explorer's
+    // rerenderKeys walks rowEls, which the term tabs never populate — so without this an ignored term
+    // just sat there, still showing its reason, until something else forced a rebuild.
+    let termRepaint = null;
+    const afterIgnoreChange = keys => {
+        if (termRepaint) termRepaint(); else rerenderKeys(keys);
+        if (trayOpen) refreshTray();   // the whitelist column lives there
+    };
 
     const root = document.createElement('div');
     root.className = 'wa-studio';
@@ -156,24 +181,26 @@ export async function lorebookStudio(preferredBook = null) {
             const h = document.createElement('div'); h.className = 'wa-tray-sec'; h.textContent = title;
             c.append(h, ...kids); return c;
         };
-        const invSuggest = () => { suggest = null; };
+        // Explorer only stashes chips, so dropping the ranker is enough there — the next ⚡ rebuilds it.
+        // The Suggest tab renders straight off it, so it has to repaint or the list shows stale candidates.
+        const invSuggest = () => { suggest = null; if (tab === 'suggest') renderExplorer(); };
 
         const wl = document.createElement('div');   // whitelist column body: chips row, then a centred Clear
         const chips = document.createElement('div'); chips.className = 'wa-tray-wl';
-        if (!ignoreSet.size) { const em = document.createElement('span'); em.style.opacity = '0.55'; em.textContent = 'None — shift-click a keyword’s ✕ to whitelist it.'; chips.append(em); }
+        if (!ignoreSet.size) { const em = document.createElement('span'); em.style.opacity = '0.55'; em.textContent = 'None — right-click a term to ignore it.'; chips.append(em); }
         for (const key of [...ignoreSet].sort()) {
             const chip = document.createElement('span'); chip.className = 'wa-kw wa-kw-ignored';
             const t = document.createElement('span'); t.className = 'wa-kw-text'; t.textContent = key; t.style.cursor = 'default';
-            const x = document.createElement('i'); x.className = 'fa-solid fa-xmark wa-kw-del'; x.title = 'Remove from whitelist';
-            x.addEventListener('click', () => { ignoreSet.delete(key); persistIgnore(); rerenderKeys([key]); refreshTray(); });
+            const x = document.createElement('i'); x.className = 'fa-solid fa-xmark wa-kw-del'; x.title = 'Stop ignoring this term';
+            x.addEventListener('click', () => { ignoreSet.delete(key); persistIgnore(); afterIgnoreChange([key]); refreshTray(); });
             chip.append(t, x); chips.append(chip);
         }
         wl.append(chips);
         if (ignoreSet.size) {
             const clrRow = document.createElement('div'); clrRow.className = 'wa-tray-wl-clear';
             const clr = document.createElement('button'); clr.type = 'button'; clr.className = 'menu_button'; clr.style.margin = '0';
-            clr.textContent = 'Clear whitelist';
-            clr.addEventListener('click', () => { const cleared = [...ignoreSet]; ignoreSet.clear(); persistIgnore(); rerenderKeys(cleared); refreshTray(); });
+            clr.textContent = 'Clear ignored';
+            clr.addEventListener('click', () => { const cleared = [...ignoreSet]; ignoreSet.clear(); persistIgnore(); afterIgnoreChange(cleared); refreshTray(); });
             clrRow.append(clr); wl.append(clrRow);
         }
 
@@ -202,7 +229,7 @@ export async function lorebookStudio(preferredBook = null) {
                 check(suggestOpts, 'excludeShort', 'Skip short terms', invSuggest),
                 check(suggestOpts, 'onlyActive', 'Suggest from active entries only', invSuggest),
             ),
-            col(`Whitelist — ${ignoreSet.size} key${ignoreSet.size === 1 ? '' : 's'}`, wl),
+            col(`Ignored terms — ${ignoreSet.size}`, wl),
         );
         wrap.append(panel);
         return wrap;
@@ -409,6 +436,71 @@ export async function lorebookStudio(preferredBook = null) {
     };
 
     // Tiny sticky editor: number box + −/+ steppers + 🚫 reset-to-0.
+    /**
+     * The per-entry tool row (power / case / whole-word / sticky / trigger % / advanced / copy / delete).
+     * Shared by the Explorer's entry header and the term tabs' group headers, so an entry exposes the
+     * same controls wherever you meet it — and toggling case or whole-word from Cleanup re-classifies
+     * that entry's keys, since the scan reads those flags live.
+     * @param {object} e Entry
+     * @param {(e: object) => void} repaint What to redraw after a change (an entry row, or a term list)
+     * @param {{compact?: boolean}} [opt] compact drops sticky + trigger-%, which govern WHEN an entry
+     *        fires once matched — a different question from whether its keywords are any good, and the
+     *        only two tools carrying badges. Both stay reachable in the gear tray (Timed / Trigger).
+     *        Case and whole-word deliberately survive: the scan reads those flags live, so toggling
+     *        either re-classifies that entry's keys on the spot.
+     */
+    const buildEntryTools = (e, repaint, { compact = false } = {}) => {
+        const tools = document.createElement('div'); tools.className = 'wa-entry-tools';
+        const prob = e.probability != null ? Number(e.probability) : 100;
+        const delay = Number(e.delay) || 0;
+        const cooldown = Number(e.cooldown) || 0;
+        const stickyOn = Number(e.sticky) > 0;
+        // Sticky/probability: when active, a plain click DISABLES; when off, click enables/opens the
+        // editor; shift-click always opens the editor. Cooldown/delay/recursion/budget live in ⚙ Advanced.
+        const stickyTool = tool('fa-thumbtack', stickyOn, `Sticky: ${stickyOn ? `on (${e.sticky})` : 'off'} — click ${stickyOn ? 'disables' : 'enables'}, shift-click sets a value`, ev => { if (ev.shiftKey) { editSticky(e); return; } e.sticky = stickyOn ? 0 : 1; save(); repaint(e); });
+        if (stickyOn) { stickyTool.classList.add('wa-badge'); stickyTool.dataset.badge = String(e.sticky); }   // show the sticky count
+        const probGates = e.useProbability !== false && prob < 100;
+        // With a real gate value (<100), click toggles useProbability on/off. At 100% there's nothing to
+        // toggle, so click opens the setter instead. Shift-click always opens the setter.
+        const probVal = prob < 100;
+        const probTool = tool('fa-percent', probGates, `Trigger probability: ${probGates ? `${prob}%` : (probVal ? 'off' : 'always')} — ${probVal ? `click ${e.useProbability === false ? 'enables' : 'disables'}` : 'click to set'}, shift-click edits`, ev => { if (ev.shiftKey || !probVal) { editProbability(e); return; } e.useProbability = (e.useProbability === false); save(); repaint(e); });
+        if (probGates) { probTool.classList.add('wa-badge'); probTool.dataset.badge = String(prob); }   // show the % value
+        // ⚙ Advanced tray toggle — tinted when the entry carries any non-default advanced setting.
+        const advParts = [];
+        if (cooldown > 0) advParts.push(`cooldown ${cooldown}`);
+        if (delay > 0) advParts.push(`delay ${delay}`);
+        if (e.excludeRecursion) advParts.push('non-recursable');
+        if (e.preventRecursion) advParts.push('prevent recursion');
+        if (e.delayUntilRecursion) advParts.push('delay until recursion' + (typeof e.delayUntilRecursion === 'number' && e.delayUntilRecursion > 0 ? ` ${e.delayUntilRecursion}` : ''));
+        if (e.ignoreBudget) advParts.push('ignore budget');
+        if (e.scanDepth != null) advParts.push(`scan depth ${e.scanDepth}`);
+        const advActive = advParts.length > 0;
+        // When custom, the tooltip lists the non-default values (one per line); otherwise a generic hint.
+        const advTool = tool('fa-gear', advOpen.has(e.uid) || advActive, advActive ? advParts.join('\n') : 'Advanced: recursion, budget, timing', () => { advOpen.has(e.uid) ? advOpen.delete(e.uid) : advOpen.add(e.uid); repaint(e); });
+        // Case/whole-word show the EFFECTIVE state (entry override ?? global default). When the value is
+        // inherited from an active global (entry sets no override), the icon is light green instead of blue.
+        // Entry value overrides global (nullish-coalesce in core); global applies only when entry is unset.
+        const flagState = (v, g) => `${(v ?? g) ? 'On' : 'Off'} (${v == null ? 'inherited' : 'entry'})`;
+        const effCase = e.caseSensitive ?? world_info_case_sensitive;
+        const caseInherit = e.caseSensitive == null && !!world_info_case_sensitive;
+        const caseTool = tool('Aa', effCase, `Case-sensitive: ${flagState(e.caseSensitive, world_info_case_sensitive)} · shift-click: inherit`, ev => { e.caseSensitive = ev.shiftKey ? null : !effCase; save(); repaint(e); });
+        if (caseInherit) caseTool.style.color = '#8fce8f';
+        const effWhole = e.matchWholeWords ?? world_info_match_whole_words;
+        const wholeInherit = e.matchWholeWords == null && !!world_info_match_whole_words;
+        const wholeTool = tool('[ab]', effWhole, `Match whole words: ${flagState(e.matchWholeWords, world_info_match_whole_words)} · shift-click: inherit`, ev => { e.matchWholeWords = ev.shiftKey ? null : !effWhole; save(); repaint(e); });
+        if (wholeInherit) wholeTool.style.color = '#8fce8f';
+        tools.append(
+            tool('fa-power-off', !e.disable, e.disable ? 'Disabled — click to enable' : 'Active — click to disable', () => { e.disable = !e.disable; save(); repaint(e); }),
+            caseTool,
+            wholeTool,
+            ...(compact ? [] : [stickyTool, probTool]),
+            advTool,
+            tool('fa-copy', false, 'Duplicate entry', () => dupEntry(e)),
+            tool('fa-trash-can', false, 'Delete entry', () => delEntry(e)),
+        );
+        return tools;
+    };
+
     const editSticky = async e => {
         const w = document.createElement('div');
         w.style.cssText = 'display:flex;align-items:center;justify-content:center;gap:6px;';
@@ -473,7 +565,9 @@ export async function lorebookStudio(preferredBook = null) {
         }
         return added;
     };
-    const suggestLlm = async (e, btn) => {
+    // `after` is how the caller repaints: the Explorer rebuilds just that entry's row, the Suggest tab
+    // repaints its term list (where the new ✨ candidates become rows).
+    const suggestLlm = async (e, btn, after = renderEntry) => {
         if (btn.dataset.busy) return;
         btn.dataset.busy = '1'; btn.classList.remove('wa-on'); btn.style.opacity = '0.25';
         const s = ensureSuggest();
@@ -483,13 +577,13 @@ export async function lorebookStudio(preferredBook = null) {
         const added = mergeLlmCands(e, cands, s);
         btn.dataset.busy = ''; btn.style.opacity = '';
         toastr[added ? 'success' : 'info'](added ? `${wiTitleOf(e)}: +${added} from model` : 'Model returned nothing usable — click ✨ to retry.', 'Worlds Apart');
-        renderEntry(e);
+        after(e);
     };
-    const acceptSugg = (e, term) => {
+    const acceptSugg = (e, term, after = renderEntry) => {
         if (!Array.isArray(e.key)) e.key = [];
         if (!hasKey(e, term)) e.key.push(term);
         const g = getSugg(e.uid); g.tfidf = g.tfidf.filter(t => t !== term); g.llm = g.llm.filter(t => t !== term);
-        save(); renderEntry(e);
+        save(); after(e);
     };
 
     // Inline "click to edit" for one keyword (commit on Enter/blur, cancel on Escape).
@@ -536,7 +630,7 @@ export async function lorebookStudio(preferredBook = null) {
         }
         if (touched) { save(); renderExplorer(); toastr.success(`Replaced “${key}” → “${next}” in ${touched} ${touched === 1 ? 'entry' : 'entries'}.`, 'Worlds Apart'); }
     };
-    const toggleIgnore = key => { ignoreSet.has(key) ? ignoreSet.delete(key) : ignoreSet.add(key); persistIgnore(); rerenderKeys([key]); if (trayOpen) refreshTray(); };
+    const toggleIgnore = key => { ignoreSet.has(key) ? ignoreSet.delete(key) : ignoreSet.add(key); persistIgnore(); afterIgnoreChange([key]); };
     // Studio context menus mount in this popup's <dialog> so they stack above the modal (module-scope
     // showCtxMenu defaults to document.body; pass the dialog here).
     const ctxMount = () => pop?.dlg ?? document.body;
@@ -667,57 +761,12 @@ export async function lorebookStudio(preferredBook = null) {
             return row;
         }
 
-        // --- Tools (right-aligned on the header line) ---
-        const tools = document.createElement('div'); tools.className = 'wa-entry-tools';
-        const stickyOn = Number(e.sticky) > 0;
-        // ⚡/✨ live with the keywords they populate (appended to the keyword paragraph below), not here.
+        h.append(buildEntryTools(e, renderEntry));
+
+        // ⚡/✨ live with the keywords they populate (appended to the keyword paragraph below), not in
+        // the tool row.
         const boltBtn = tool('fa-bolt', false, 'TF-IDF keyword suggestions', () => suggestTfidf(e, boltBtn));
         const llmBtn = tool('fa-wand-magic-sparkles', false, 'Local-model keyword suggestions', () => suggestLlm(e, llmBtn));
-        // Sticky/probability: when active, a plain click DISABLES; when off, click enables/opens the
-        // editor; shift-click always opens the editor. Cooldown/delay/recursion/budget live in ⚙ Advanced.
-        const stickyTool = tool('fa-thumbtack', stickyOn, `Sticky: ${stickyOn ? `on (${e.sticky})` : 'off'} — click ${stickyOn ? 'disables' : 'enables'}, shift-click sets a value`, ev => { if (ev.shiftKey) { editSticky(e); return; } e.sticky = stickyOn ? 0 : 1; save(); renderEntry(e); });
-        if (stickyOn) { stickyTool.classList.add('wa-badge'); stickyTool.dataset.badge = String(e.sticky); }   // show the sticky count
-        const probGates = e.useProbability !== false && prob < 100;
-        // With a real gate value (<100), click toggles useProbability on/off. At 100% there's nothing to
-        // toggle, so click opens the setter instead. Shift-click always opens the setter.
-        const probVal = prob < 100;
-        const probTool = tool('fa-percent', probGates, `Trigger probability: ${probGates ? `${prob}%` : (probVal ? 'off' : 'always')} — ${probVal ? `click ${e.useProbability === false ? 'enables' : 'disables'}` : 'click to set'}, shift-click edits`, ev => { if (ev.shiftKey || !probVal) { editProbability(e); return; } e.useProbability = (e.useProbability === false); save(); renderEntry(e); });
-        if (probGates) { probTool.classList.add('wa-badge'); probTool.dataset.badge = String(prob); }   // show the % value
-        // ⚙ Advanced tray toggle — tinted when the entry carries any non-default advanced setting.
-        const advParts = [];
-        if (cooldown > 0) advParts.push(`cooldown ${cooldown}`);
-        if (delay > 0) advParts.push(`delay ${delay}`);
-        if (e.excludeRecursion) advParts.push('non-recursable');
-        if (e.preventRecursion) advParts.push('prevent recursion');
-        if (e.delayUntilRecursion) advParts.push('delay until recursion' + (typeof e.delayUntilRecursion === 'number' && e.delayUntilRecursion > 0 ? ` ${e.delayUntilRecursion}` : ''));
-        if (e.ignoreBudget) advParts.push('ignore budget');
-        if (e.scanDepth != null) advParts.push(`scan depth ${e.scanDepth}`);
-        const advActive = advParts.length > 0;
-        // When custom, the tooltip lists the non-default values (one per line); otherwise a generic hint.
-        const advTool = tool('fa-gear', advOpen.has(e.uid) || advActive, advActive ? advParts.join('\n') : 'Advanced: recursion, budget, timing', () => { advOpen.has(e.uid) ? advOpen.delete(e.uid) : advOpen.add(e.uid); renderEntry(e); });
-        // Case/whole-word show the EFFECTIVE state (entry override ?? global default). When the value is
-        // inherited from an active global (entry sets no override), the icon is light green instead of blue.
-        // Entry value overrides global (nullish-coalesce in core); global applies only when entry is unset.
-        const flagState = (v, g) => `${(v ?? g) ? 'On' : 'Off'} (${v == null ? 'inherited' : 'entry'})`;
-        const effCase = e.caseSensitive ?? world_info_case_sensitive;
-        const caseInherit = e.caseSensitive == null && !!world_info_case_sensitive;
-        const caseTool = tool('Aa', effCase, `Case-sensitive: ${flagState(e.caseSensitive, world_info_case_sensitive)} · shift-click: inherit`, ev => { e.caseSensitive = ev.shiftKey ? null : !effCase; save(); renderEntry(e); });
-        if (caseInherit) caseTool.style.color = '#8fce8f';
-        const effWhole = e.matchWholeWords ?? world_info_match_whole_words;
-        const wholeInherit = e.matchWholeWords == null && !!world_info_match_whole_words;
-        const wholeTool = tool('[ab]', effWhole, `Match whole words: ${flagState(e.matchWholeWords, world_info_match_whole_words)} · shift-click: inherit`, ev => { e.matchWholeWords = ev.shiftKey ? null : !effWhole; save(); renderEntry(e); });
-        if (wholeInherit) wholeTool.style.color = '#8fce8f';
-        tools.append(
-            tool('fa-power-off', !e.disable, e.disable ? 'Disabled — click to enable' : 'Active — click to disable', () => { e.disable = !e.disable; save(); renderEntry(e); }),
-            caseTool,
-            wholeTool,
-            stickyTool,
-            probTool,
-            advTool,
-            tool('fa-copy', false, 'Duplicate entry', () => dupEntry(e)),
-            tool('fa-trash-can', false, 'Delete entry', () => delEntry(e)),
-        );
-        h.append(tools);
 
         const body = document.createElement('div'); body.className = 'wa-entry-body';
 
@@ -744,15 +793,13 @@ export async function lorebookStudio(preferredBook = null) {
             else if (v && !isDead) { const rc = scan.reasonOf(v); annot = rc.text; if (rc.color) { chip.style.borderColor = rc.color; chip.style.background = `color-mix(in srgb, ${rc.color} 18%, transparent)`; } }
             else if (isDead) chip.classList.add('wa-kw-dead');
             else if (flagged) chip.style.borderColor = WA_GREEN;
-            text.title = isIgnored ? `${key} — whitelisted (click to edit; shift-click ✕ to un-ignore)` : (v ? `${key} — ${isDead ? 'no entry-text match' : annot} (click to edit)` : `${key} (click to edit)`);
+            text.title = isIgnored ? `${key} — ignored (click to edit; shift-click ✕ to un-ignore)` : (v ? `${key} — ${isDead ? 'no entry-text match' : annot} (click to edit)` : `${key} (click to edit)`);
             text.addEventListener('click', () => editKeyInline(e, key, text));
             chip.append(text);   // term only inside the chip
-            const del = document.createElement('i'); del.className = 'fa-solid fa-xmark wa-kw-del'; del.title = 'Delete keyword — shift-click to toggle ignore (whitelist)';
+            const del = document.createElement('i'); del.className = 'fa-solid fa-xmark wa-kw-del'; del.title = 'Delete keyword — shift-click to ignore it instead';
             del.addEventListener('click', ev => {
                 if (ev.shiftKey) {   // whitelist toggle (mirrors the pruner's ban icon); tray lists/clears these
-                    ignoreSet.has(key) ? ignoreSet.delete(key) : ignoreSet.add(key);
-                    persistIgnore(); rerenderKeys([key]);   // recolour every entry using this key; no rescan
-                    if (trayOpen) refreshTray();            // keep the open drawer's whitelist column in sync
+                    toggleIgnore(key);   // recolours every entry using this key and syncs the tray; no rescan
                     return;
                 }
                 e.key.splice(e.key.indexOf(key), 1); save(); renderEntry(e);
@@ -817,22 +864,39 @@ export async function lorebookStudio(preferredBook = null) {
         textSec.append(thead, fullWrap);
         body.append(textSec, para);   // entry text first, then keywords (reads more naturally)
 
-        // ⚙ Advanced tray: core WI fields we don't surface as icons — inline like the Tool Settings tray.
-        // Edits commit on change (number inputs on blur), then re-render the row; the tray stays open.
-        if (advOpen.has(e.uid)) {
+        if (advOpen.has(e.uid)) body.prepend(buildAdvancedTray(e, renderEntry));   // above the text + keywords
+        row.append(body);
+
+        const old = rowEls.get(e.uid);
+        if (old && old.isConnected) old.replaceWith(row); rowEls.set(e.uid, row);
+        syncText();   // after mount, so an expanded editor's autosize sees a real scrollHeight
+        return row;
+    };
+
+    /**
+     * ⚙ Advanced tray: core WI fields we don't surface as icons — inline like the Tool Settings tray.
+     * Edits commit on change (number inputs on blur), then repaint; the tray stays open. Shared by the
+     * Explorer and the term tabs, so the gear does the same thing wherever the tool row appears.
+     * @param {object} e Entry
+     * @param {(e: object) => void} repaint What to redraw after a change
+     */
+    const buildAdvancedTray = (e, repaint) => {
+        const delay = Number(e.delay) || 0;
+        const cooldown = Number(e.cooldown) || 0;
+        {
             const adv = document.createElement('div'); adv.className = 'wa-adv';
             const col = (heading, ...rows) => { const c = document.createElement('div'); c.className = 'wa-adv-col'; const hd = document.createElement('div'); hd.className = 'wa-adv-sec'; hd.textContent = heading; c.append(hd, ...rows); return c; };
             const chk = (label, get, set) => {
                 const l = document.createElement('label'); l.className = 'checkbox_label wa-adv-row';
                 const cb = document.createElement('input'); cb.type = 'checkbox'; cb.checked = get();
-                cb.addEventListener('change', () => { set(cb.checked); save(); renderEntry(e); });
+                cb.addEventListener('change', () => { set(cb.checked); save(); repaint(e); });
                 const s = document.createElement('span'); s.textContent = label; l.append(cb, s); return l;
             };
             const numRow = (label, get, set, placeholder) => {
                 const l = document.createElement('label'); l.className = 'wa-adv-row';
                 const s = document.createElement('span'); s.textContent = label;
                 const inp = document.createElement('input'); inp.type = 'number'; inp.min = '0'; inp.className = 'text_pole'; inp.value = get(); if (placeholder) inp.placeholder = placeholder;
-                inp.addEventListener('change', () => { set(inp.value); save(); renderEntry(e); });
+                inp.addEventListener('change', () => { set(inp.value); save(); repaint(e); });
                 l.append(s, inp); return l;
             };
             const toMsg = v => Math.max(0, Math.floor(Number(v) || 0)) || null;   // 0/blank -> null (off), like core
@@ -846,7 +910,7 @@ export async function lorebookStudio(preferredBook = null) {
                 const sel = document.createElement('select'); sel.className = 'text_pole'; sel.style.cssText = 'width:auto;margin:0 0 0 auto;padding:2px 4px;';   // fit the option text, not text_pole's full width
                 for (const [val, txt] of [['', `Inherit (${globalOn ? 'on' : 'off'})`], ['on', 'On'], ['off', 'Off']]) sel.append(new Option(txt, val));
                 const cur = get(); sel.value = cur === true ? 'on' : cur === false ? 'off' : '';
-                sel.addEventListener('change', () => { set(sel.value === '' ? null : sel.value === 'on'); save(); renderEntry(e); });
+                sel.addEventListener('change', () => { set(sel.value === '' ? null : sel.value === 'on'); save(); repaint(e); });
                 l.append(s, sel); return l;
             };
             const durLevel = (typeof e.delayUntilRecursion === 'number' && e.delayUntilRecursion > 0) ? e.delayUntilRecursion : '';
@@ -879,14 +943,8 @@ export async function lorebookStudio(preferredBook = null) {
                     numRow('Scan depth', () => (e.scanDepth ? e.scanDepth : ''), v => { const n = Math.floor(Number(v) || 0); e.scanDepth = n > 0 ? n : null; }, 'global'),
                 ),
             );
-            body.prepend(adv);   // sit directly under the header bar, above the entry text and keywords
+            return adv;
         }
-        row.append(body);
-
-        const old = rowEls.get(e.uid);
-        if (old && old.isConnected) old.replaceWith(row); rowEls.set(e.uid, row);
-        syncText();   // after mount, so an expanded editor's autosize sees a real scrollHeight
-        return row;
     };
 
     const dupEntry = e => {
@@ -956,8 +1014,7 @@ export async function lorebookStudio(preferredBook = null) {
         if (searchScope.keywords) fields.push((Array.isArray(e.key) ? e.key : []).join(' '));
         return !fields.length || fields.some(f => f.toLowerCase().includes(q));
     };
-    const filterMatch = e => {
-        if (!matchSearch(e)) return false;
+    const typeMatch = e => {
         switch (entryFilter) {
             case 'keyword': return !e.constant && !e.vectorized;
             case 'constant': return !!e.constant;
@@ -968,6 +1025,7 @@ export async function lorebookStudio(preferredBook = null) {
             default: return true;
         }
     };
+    const filterMatch = e => matchSearch(e) && typeMatch(e);
     // Explorer display order: base sort (module SORT_FNS), then the tiered modifier buckets by tierRank
     // (base order preserved within each bucket) and flattens. Sort vocabulary + tier logic are shared
     // module-scope (see SORT_FNS / tierRank); this just applies them to the Studio's own state.
@@ -985,16 +1043,71 @@ export async function lorebookStudio(preferredBook = null) {
         return buckets.flat();   // sparse holes (empty ranks) are skipped by flat()
     };
     // Copy an arbitrary book (open or not) to a free "X copy[ n]" name. Returns the new name, or null.
-    const copyBookByName = async srcName => {
+    /** The default duplicate name: "X copy", then "X copy 2", … until one is free. */
+    const freeCopyName = src => { const base = `${src} copy`; let name = base, i = 2; while (world_names.includes(name)) name = `${base} ${i++}`; return name; };
+    const nameTaken = n => world_names.some(x => x.toLowerCase() === n.toLowerCase());
+
+    const copyBookByName = async (srcName, carryIgnored = false, asName = null) => {
         const src = (srcName === selected) ? data : await loadWorldInfo(srcName);
         if (!src) return null;
-        const base = `${srcName} copy`; let name = base, i = 2;
-        while (world_names.includes(name)) name = `${base} ${i++}`;
+        const name = asName || freeCopyName(srcName);
         await saveWorldInfo(name, structuredClone(src), true);
+        if (carryIgnored) {
+            const from = settings().keywordIgnore?.[srcName];
+            if (from?.length) { (settings().keywordIgnore ??= {})[name] = [...from]; saveSettingsDebounced(); }
+        }
         return name;
     };
+
+    /**
+     * Confirm a duplication, asking whether the source's ignored terms come along.
+     *
+     * A copy is usually a continuation of the same curation, so it defaults to carrying them — but a
+     * fork you intend to re-audit from scratch wants a clean slate, and that's not knowable from here.
+     * The question only appears when there is something to carry.
+     * @param {string} prompt Confirmation line
+     * @param {string[]} names Source books
+     * @param {string|null} [defaultName] Editable target name — single-book duplication only; a bulk
+     *        copy has one name per source, so there is nothing for one field to mean.
+     * @returns {Promise<{ok: boolean, carry: boolean, name: string|null}>}
+     */
+    const confirmDuplicate = async (prompt, names, defaultName = null) => {
+        const n = names.reduce((a, b) => a + (settings().keywordIgnore?.[b]?.length ?? 0), 0);
+        const wrap = document.createElement('div'); wrap.style.textAlign = 'left';
+        const msg = document.createElement('div'); msg.textContent = prompt; wrap.append(msg);
+        let inp = null;
+        if (defaultName != null) {
+            const l = document.createElement('label'); l.style.cssText = 'display:block;margin-top:0.7em;';
+            const t = document.createElement('div'); t.textContent = 'New lorebook name'; t.style.marginBottom = '0.2em';
+            inp = document.createElement('input'); inp.type = 'text'; inp.className = 'text_pole'; inp.value = defaultName;
+            inp.style.cssText = 'width:100%;margin:0;';
+            l.append(t, inp); wrap.append(l);
+        }
+        let cb = null;
+        if (n) {
+            const l = document.createElement('label'); l.className = 'checkbox_label'; l.style.marginTop = '0.7em';
+            cb = document.createElement('input'); cb.type = 'checkbox'; cb.checked = true;
+            const sp = document.createElement('span'); sp.textContent = `Also copy ${n} ignored term${n === 1 ? '' : 's'}`;
+            l.append(cb, sp); wrap.append(l);
+        }
+        const res = await new Popup(wrap, POPUP_TYPE.CONFIRM, '', {
+            okButton: 'Duplicate', cancelButton: 'Cancel',
+            // Validate in place rather than failing after the fact: returning false keeps the dialog
+            // open with what they typed, so a clash is one edit away instead of a redo.
+            onClosing: pp => {
+                if (pp.result !== POPUP_RESULT.AFFIRMATIVE || !inp) return true;
+                const v = inp.value.trim();
+                if (!v) { toastr.warning('Give the copy a name.', 'Worlds Apart'); return false; }
+                if (nameTaken(v)) { toastr.warning(`A lorebook named “${v}” already exists.`, 'Worlds Apart'); return false; }
+                return true;
+            },
+        }).show();
+        return { ok: res === POPUP_RESULT.AFFIRMATIVE, carry: !!cb?.checked, name: inp ? inp.value.trim() : null };
+    };
     const dupBook = async () => {
-        const name = await copyBookByName(selected);
+        const ask = await confirmDuplicate(`Duplicate “${selected}”?`, [selected], freeCopyName(selected));
+        if (!ask.ok) return;
+        const name = await copyBookByName(selected, ask.carry, ask.name);
         if (!name) return;
         await updateWorldInfoList();
         renderBooks();
@@ -1003,7 +1116,9 @@ export async function lorebookStudio(preferredBook = null) {
     };
     const bulkCopyBooks = async () => {
         const names = [...selectedBooks]; if (!names.length) return;
-        for (const n of names) await copyBookByName(n);
+        const { ok, carry } = await confirmDuplicate(`Duplicate ${names.length} ${names.length === 1 ? 'lorebook' : 'lorebooks'}?`, names);
+        if (!ok) return;
+        for (const n of names) await copyBookByName(n, carry);
         await updateWorldInfoList();
         selectedBooks.clear(); bookAnchor = null;
         renderBooks();
@@ -1083,8 +1198,12 @@ export async function lorebookStudio(preferredBook = null) {
         } catch (err) { console.error('[WA] rename retarget', err); }
         runState.attachedWorlds = new Set([...runState.attachedWorlds].map(w => w === oldName ? newName : w));
         if (selectedBooks.delete(oldName)) selectedBooks.add(newName);
-        const byBook = settings().studioSortByBook;   // carry the saved per-book sort view across the rename
+        // Per-book state follows the rename unconditionally — it's the same book under a new name, so
+        // nothing here is a decision worth asking about (unlike duplication, which forks it).
+        const byBook = settings().studioSortByBook;   // saved sort view
         if (byBook?.[oldName]) { byBook[newName] = byBook[oldName]; delete byBook[oldName]; saveSettingsDebounced(); }
+        const ign = settings().keywordIgnore;         // ignored terms
+        if (ign?.[oldName]) { ign[newName] = ign[oldName]; delete ign[oldName]; saveSettingsDebounced(); }
         dirty = false;
         if (oldName === selected) { renderBooks(); openBook(newName); }
         else { renderBooks(); }
@@ -1131,9 +1250,520 @@ export async function lorebookStudio(preferredBook = null) {
         toastr[n ? 'success' : 'info'](n ? `Model suggestions added to ${n} ${n === 1 ? 'entry' : 'entries'} — review the ✨ chips.` : 'Model returned nothing usable.', 'Worlds Apart');
     };
 
+    // The entry set the term tabs work over: type filter + the shared sort, WITHOUT the Explorer's
+    // search — those tabs rank by search match rather than filtering on it (see rankBySearch).
+    const visibleEntries = () => sortEntries(Object.values(data?.entries ?? {}).filter(typeMatch));
+
+    /**
+     * Search semantics for the term tabs, which differ from the Explorer's on purpose.
+     *
+     * A query keeps an entry if its TITLE matches, or if one of the terms THIS TAB lists matches
+     * (flagged keys in Cleanup, candidates in Suggest), or — if the Entry scope is ticked — its text.
+     * Title hits sort first, then term hits, then text hits; within a band the normal sort order holds.
+     *
+     * Rows are never filtered. Locating an entry shows ALL of its terms, because deciding about one
+     * term almost always means looking at its siblings — filtering to just the matched row would hide
+     * the context the decision needs.
+     *
+     * @param {Array<{entry: object, rows: Array<{term: string}>}>} groups
+     * @returns {Array} the surviving groups, ranked
+     */
+    const rankBySearch = groups => {
+        const q = searchQuery.trim().toLowerCase();
+        if (!q) return groups;
+        const rankOf = g => {
+            if (searchScope.title && String(wiTitleOf(g.entry)).toLowerCase().includes(q)) return 0;
+            if (searchScope.keywords && g.rows.some(r => r.term.toLowerCase().includes(q))) return 1;
+            if (searchScope.entry && String(g.entry.content ?? '').toLowerCase().includes(q)) return 2;
+            return -1;
+        };
+        return groups.map(g => ({ g, r: rankOf(g) })).filter(x => x.r >= 0)
+            .sort((a, b) => a.r - b.r)   // stable, so the shared sort survives within each band
+            .map(x => x.g);
+    };
+
+    // --- Shared header controls -----------------------------------------------------------------
+    // Built here rather than inline in one view because all three tabs mount the same search box and
+    // type filter; they read/write the same module state, so a query typed in Explorer still applies
+    // after switching to Cleanup.
+    const buildSearchBox = onChange => {
+        const wrap = document.createElement('span'); wrap.style.cssText = 'position:relative;display:inline-flex;align-items:center;';
+        const search = document.createElement('input'); search.type = 'search'; search.className = 'text_pole wa-filter';
+        search.placeholder = 'Search…'; search.value = searchQuery;
+        search.style.cssText = 'width:11em;border-top-left-radius:0;border-bottom-left-radius:0;';
+        let timer = null;   // debounce so a big book doesn't re-filter on every keystroke
+        search.addEventListener('input', () => { searchQuery = search.value; clearTimeout(timer); timer = setTimeout(onChange, 180); });
+        const scopeBtn = document.createElement('button'); scopeBtn.type = 'button'; scopeBtn.className = 'menu_button wa-filter';
+        scopeBtn.style.cssText = 'width:auto;display:inline-flex;align-items:center;justify-content:center;margin:0 -1px 0 0;padding:3px 8px;border-top-right-radius:0;border-bottom-right-radius:0;';
+        scopeBtn.innerHTML = '<i class="fa-solid fa-sliders"></i>';
+        const menu = document.createElement('div');
+        menu.style.cssText = 'position:absolute;top:100%;left:0;z-index:5;display:none;flex-direction:column;gap:2px;margin-top:2px;padding:6px 8px;border-radius:5px;'
+            + 'background:var(--SmartThemeBlurTintColor, var(--black70a, rgba(20,20,20,0.97)));border:1px solid var(--SmartThemeBorderColor, rgba(255,255,255,0.15));';
+        const SCOPES = [['title', 'Title'], ['entry', 'Entry'], ['keywords', 'Keywords']];
+        const syncBtn = () => { const on = SCOPES.filter(([k]) => searchScope[k]).map(([, l]) => l); scopeBtn.title = `Search in: ${on.join(', ') || 'nothing selected'}`; };
+        for (const [key, lbl] of SCOPES) {
+            const l = document.createElement('label'); l.className = 'checkbox_label'; l.style.cssText = 'font-size:0.85em;white-space:nowrap;';
+            const cb = document.createElement('input'); cb.type = 'checkbox'; cb.checked = searchScope[key];
+            cb.addEventListener('change', () => { searchScope[key] = cb.checked; syncBtn(); onChange(); });
+            const sp = document.createElement('span'); sp.textContent = lbl; l.append(cb, sp); menu.append(l);
+        }
+        syncBtn();
+        scopeBtn.addEventListener('click', () => { menu.style.display = menu.style.display === 'none' ? 'flex' : 'none'; });
+        // Close when focus leaves the group — no document-level listener to leak across re-renders.
+        wrap.addEventListener('focusout', ev => { if (!wrap.contains(ev.relatedTarget)) menu.style.display = 'none'; });
+        wrap.append(scopeBtn, search, menu);
+        return wrap;
+    };
+    /**
+     * Sort control — shared widget (module makeSortControl), and shared STATE: all three tabs read the
+     * same entrySort/tieredMode/tierCfg through sortEntries, so a sort chosen in one applies in the
+     * others. The base sort + tiered toggle are ephemeral view state (persisted per book only as a
+     * convenience); the tier config is durable and shared with the prompt builder.
+     *
+     * "Insert Order" (leadItems) mirrors the durable insertion settings; its tiered state reads from
+     * there, and toggling tiered while in it forks to an explicit ephemeral sort (base = the resolved
+     * insertion base, clamped to a valid key).
+     * @param {() => void} onChange Repaint after a sort change; the control relabels itself.
+     */
+    const buildSortControl = onChange => makeSortControl({
+        getSort: () => entrySort, setSort: k => { entrySort = k; persistSortView(); },
+        getTiered: () => entrySort === 'insert' ? !!settings().presentationTiered : tieredMode,
+        setTiered: on => { if (entrySort === 'insert') { const k = normPresentation(settings().presentationOrder); entrySort = SORT_FNS[k] ? k : 'order-asc'; } tieredMode = on; persistSortView(); },
+        getTierCfg: () => tierCfg, setTierCfg: cfg => { tierCfg = cfg; settings().tierCfg = cfg; saveSettingsDebounced(); },
+        leadItems: [{ label: 'Insert Order', key: 'insert' }],
+        onChange, mount: ctxMount,
+    });
+
+    // Entry-type filter — a compact fa-filter dropdown (single-select). Custom, not a native <select>,
+    // so options can carry FA icons (crosshairs, power) a <select> can't render.
+    const FILTER_OPTS = [
+        ['all', 'fa-filter', 'All'],
+        ['keyword', '🟢', 'Keyword'],
+        ['constant', '🔵', 'Constant'],
+        ['vector', '🔗', 'Vector'],
+        ['enabled', 'fa-power-off', 'Enabled'],
+        ['disabled', '🚫', 'Disabled'],
+        ['flagged', 'fa-crosshairs', 'Flagged'],
+    ];
+    const iconEl = spec => { if (spec.startsWith('fa-')) { const i = document.createElement('i'); i.className = 'fa-solid ' + spec; return i; } const s = document.createElement('span'); s.textContent = spec; return s; };
+    const buildFilterBtn = onChange => {
+        const wrap = document.createElement('span'); wrap.style.cssText = 'position:relative;display:inline-flex;';
+        const btn = document.createElement('button'); btn.type = 'button'; btn.className = 'menu_button wa-filter';
+        btn.title = 'Show only entries of a type'; btn.style.cssText = 'display:inline-flex;align-items:center;gap:5px;width:auto;white-space:nowrap;';
+        const cur = FILTER_OPTS.find(o => o[0] === entryFilter) ?? FILTER_OPTS[0];
+        const lbl = document.createElement('span'); lbl.textContent = cur[2];
+        btn.append(iconEl('fa-filter'), lbl);
+        const menu = document.createElement('div');
+        menu.style.cssText = 'position:absolute;top:100%;left:0;z-index:5;display:none;flex-direction:column;gap:1px;margin-top:2px;padding:4px;border-radius:5px;min-width:9em;'
+            + 'background:var(--SmartThemeBlurTintColor, var(--black70a, rgba(20,20,20,0.97)));border:1px solid var(--SmartThemeBorderColor, rgba(255,255,255,0.15));';
+        for (const [val, spec, text] of FILTER_OPTS) {
+            const item = document.createElement('button'); item.type = 'button';
+            item.style.cssText = 'display:flex;align-items:center;gap:7px;width:100%;padding:4px 8px;border:none;border-radius:4px;background:' + (val === entryFilter ? 'var(--white20a, rgba(255,255,255,0.1))' : 'transparent') + ';color:inherit;font:inherit;text-align:left;white-space:nowrap;cursor:pointer;';
+            if (val === entryFilter) item.style.fontWeight = 'bold';
+            const t = document.createElement('span'); t.textContent = text; item.append(iconEl(spec), t);
+            item.addEventListener('mouseenter', () => { if (val !== entryFilter) item.style.background = 'var(--white20a, rgba(255,255,255,0.1))'; });
+            item.addEventListener('mouseleave', () => { if (val !== entryFilter) item.style.background = 'transparent'; });
+            item.addEventListener('click', () => { entryFilter = val; onChange(); });
+            menu.append(item);
+        }
+        btn.addEventListener('click', () => { menu.style.display = menu.style.display === 'none' ? 'flex' : 'none'; });
+        wrap.addEventListener('focusout', ev => { if (!wrap.contains(ev.relatedTarget)) menu.style.display = 'none'; });
+        wrap.append(btn, menu);
+        return wrap;
+    };
+
+    // --- Cleanup / Suggest: shared key-per-row plumbing ------------------------------------------
+    // Both tabs render the same shape (entry group header, then one row per term) and differ only in
+    // where the rows come from, which way the checkbox defaults, and what the commit button does.
+    // `reg` collects the checkbox elements so a tick can update state in place. Rebuilding the list on
+    // every click would be correct but throws away scroll position, which is unusable on a big book
+    // when the whole job is working down a long list of terms.
+    // `onChange` re-syncs the checkboxes (cheap); `onEntryChange` rebuilds the whole list, which the
+    // entry tools need — toggling case/whole-word/disable changes how the scan classifies that entry.
+    const termGroupHeader = (e, rows, checks, reg, onChange, onEntryChange, extraActs = []) => {
+        const head = document.createElement('div'); head.className = 'wa-term-grp';
+        const ids = rows.map(r => rowId(e.uid, r.term));
+        if (ids.length) {
+            const cb = document.createElement('input'); cb.type = 'checkbox'; cb.style.margin = '0';
+            // Whole-entry toggle: unticking a group is how you spare an entry in one click, which is the
+            // common Cleanup move (a reference sheet whose "weak" keys are all deliberate).
+            cb.addEventListener('change', () => { for (const id of ids) checks.set(id, cb.checked); onChange(); });
+            reg.grp.push({ cb, ids });
+            head.append(cb);
+        } else {
+            const pad = document.createElement('span'); pad.style.width = '13px'; head.append(pad);   // keep titles aligned
+        }
+        // Match mode matters when judging a term: a key on a 🔗 vector entry behaves differently from one
+        // on a 🟢 keyword entry, and 🔵 constants don't need triggers at all.
+        const glyph = document.createElement('span'); glyph.textContent = wiGlyph(e);
+        glyph.title = e.constant ? 'Constant' : e.vectorized ? 'Vectorized' : 'Keyword';
+        glyph.style.cssText = 'flex:0 0 auto;font-size:0.85em;';
+        const title = document.createElement('span'); title.textContent = wiTitleOf(e); title.title = wiTitleOf(e);
+        // Shrinkable, so a long title ellipsises instead of pushing the tools off the row.
+        title.style.cssText = `flex:0 1 auto;min-width:3em;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;${e.disable ? 'opacity:0.5;' : ''}`;
+        const meta = document.createElement('span'); meta.className = 'wa-tab-count'; meta.style.flex = '0 0 auto';
+        meta.textContent = rows.length ? `${rows.length} term${rows.length === 1 ? '' : 's'}` : 'no candidates';
+        // Reading the entry is what you actually need while judging its terms, so this opens the text in
+        // a popup rather than jumping to the Explorer (which landed you at the top of an unscrolled list).
+        const view = document.createElement('i'); view.className = 'fa-solid fa-file-lines wa-term-act';
+        view.title = 'View this entry\'s text';
+        view.addEventListener('click', () => showEntryText(e));
+        // The same tool row the Explorer shows, right-aligned by .wa-entry-tools' margin-left:auto — so
+        // the identity block (title, count, view, ✨) packs left and the tools sit at the far edge, where
+        // they land in the Explorer too.
+        head.append(glyph, title, meta, view, ...extraActs.map(f => f(e)), buildEntryTools(e, onEntryChange, { compact: true }));
+        return head;
+    };
+    const termRow = (e, r, checks, reg, onChange, onContext = null) => {
+        const row = document.createElement('div'); row.className = 'wa-term-row';
+        const id = rowId(e.uid, r.term);
+        const cb = document.createElement('input'); cb.type = 'checkbox'; cb.style.margin = '0';
+        cb.addEventListener('change', () => { checks.set(id, cb.checked); onChange(); });
+        reg.row.set(id, cb);
+        const name = document.createElement('span'); name.className = 'wa-term-name';
+        name.textContent = r.term; name.title = r.term;
+        const why = document.createElement('span'); why.className = 'wa-term-why';
+        why.textContent = r.why ?? ''; if (r.color) why.style.color = r.color;
+        // Per-term actions live in the right-click menu, the same place the Explorer's keyword chips put
+        // them — so there's one way to delete/replace/whitelist a term wherever you meet it, and no row
+        // icon competing with the reason for the same strip of space.
+        if (onContext) row.addEventListener('contextmenu', ev => { ev.preventDefault(); onContext(e, r, ev.clientX, ev.clientY); });
+        row.append(cb, name, why);
+        return row;
+    };
+    // Push `checks` back into the rendered boxes (rows, then group tri-states) without rebuilding rows.
+    const syncTermChecks = (checks, reg) => {
+        for (const [id, cb] of reg.row) cb.checked = !!checks.get(id);
+        for (const g of reg.grp) {
+            const on = g.ids.filter(id => checks.get(id)).length;
+            g.cb.checked = on > 0 && on === g.ids.length;
+            g.cb.indeterminate = on > 0 && on < g.ids.length;
+        }
+    };
+    const emptyNote = text => { const d = document.createElement('div'); d.style.cssText = 'opacity:0.6;padding:10px 4px;'; d.textContent = text; return d; };
+    /**
+     * The book's ignored terms, as removable chips. Pinned in the term tabs rather than left to the
+     * Tool Settings drawer: an ignored term is invisible in these views by construction — it stops
+     * being a row — so with the drawer shut there was nothing on screen saying why a key you remember
+     * flagging isn't listed, or how to get it back.
+     * @param {HTMLElement} host Container to (re)fill
+     * @param {() => void} onChange Repaint after un-ignoring
+     */
+    const paintIgnoredStrip = (host, onChange) => {
+        host.innerHTML = '';
+        if (!ignoreSet.size) { host.style.display = 'none'; return; }
+        host.style.display = 'flex';
+        const lbl = document.createElement('span');
+        lbl.style.cssText = 'opacity:0.7;font-size:0.85em;white-space:nowrap;';
+        lbl.textContent = `Ignored (${ignoreSet.size}):`;
+        host.append(lbl);
+        for (const key of [...ignoreSet].sort()) {
+            const chip = document.createElement('span'); chip.className = 'wa-kw wa-kw-ignored';
+            const t = document.createElement('span'); t.className = 'wa-kw-text'; t.textContent = key; t.style.cursor = 'default';
+            const x = document.createElement('i'); x.className = 'fa-solid fa-xmark wa-kw-del'; x.title = 'Stop ignoring this term';
+            x.addEventListener('click', () => { ignoreSet.delete(key); persistIgnore(); onChange(); if (trayOpen) refreshTray(); });
+            chip.append(t, x); host.append(chip);
+        }
+    };
+    const barBtn = (label, onClick, extra = '') => { const b = document.createElement('button'); b.type = 'button'; b.className = 'menu_button wa-bulk-btn ' + extra; b.textContent = label; b.addEventListener('click', onClick); return b; };
+
+    // --- Cleanup tab ----------------------------------------------------------------------------
+    const cleanupGroups = () => {
+        if (!scan) return [];
+        const out = [];
+        for (const e of visibleEntries()) {
+            const rows = scan.classifyEntry(e).map(p => {
+                const rc = scan.reasonOf(p);
+                const id = rowId(e.uid, p.key);
+                if (!cleanupChecks.has(id)) cleanupChecks.set(id, scan.defChecked(p));   // pre-tick policy shared with the pruner
+                return { term: p.key, why: rc.text, color: rc.color, p };
+            });
+            if (rows.length) out.push({ entry: e, rows });
+        }
+        return rankBySearch(out);
+    };
+    const pruneChecked = () => {
+        const removed = [];
+        for (const g of cleanupGroups()) {
+            for (const r of g.rows) {
+                const id = rowId(g.entry.uid, r.term);
+                if (!cleanupChecks.get(id)) continue;
+                const i = (Array.isArray(g.entry.key) ? g.entry.key : []).indexOf(r.term);
+                if (i < 0) continue;
+                g.entry.key.splice(i, 1);
+                removed.push({ uid: g.entry.uid, key: r.term });
+                cleanupChecks.delete(id);
+            }
+        }
+        if (!removed.length) { toastr.info('Nothing selected to prune.', 'Worlds Apart'); return; }
+        cleanupUndo = removed;
+        save(); rebuildScan(); suggest = null; renderExplorer();
+        toastr.success(`Pruned ${removed.length} keyword${removed.length === 1 ? '' : 's'}. Undo is in the bar until the next prune.`, 'Worlds Apart');
+    };
+    const undoPrune = () => {
+        if (!cleanupUndo?.length) return;
+        let n = 0;
+        for (const { uid, key } of cleanupUndo) {
+            const e = data?.entries?.[uid]; if (!e) continue;
+            if (!Array.isArray(e.key)) e.key = [];
+            if (!hasKey(e, key)) { e.key.push(key); n++; }
+        }
+        cleanupUndo = null;
+        save(); rebuildScan(); suggest = null; renderExplorer();
+        toastr.success(`Restored ${n} keyword${n === 1 ? '' : 's'}.`, 'Worlds Apart');
+    };
+    // Whitelisting is the PERSISTENT form of "don't clean this" — unticking only spares a term for this
+    // run, while the whitelist survives the session and stops the scanner flagging it at all.
+    const ignoreChecked = () => {
+        let n = 0;
+        for (const g of cleanupGroups()) for (const r of g.rows) {
+            if (cleanupChecks.get(rowId(g.entry.uid, r.term)) && !ignoreSet.has(r.term)) { ignoreSet.add(r.term); n++; }
+        }
+        if (!n) { toastr.info('Nothing selected to ignore.', 'Worlds Apart'); return; }
+        persistIgnore(); rebuildScan(); renderExplorer();
+        toastr.success(`Now ignoring ${n} term${n === 1 ? '' : 's'} in "${selected}" — they won't be flagged again.`, 'Worlds Apart');
+    };
+    // Both term tabs open on a synchronous whole-book pre-pass (the audit scan / the TF-IDF ranker),
+    // which blocks the thread for up to a second on a large book. Paint the tab's shell with a working
+    // note FIRST, yield one turn so the browser actually renders it, then do the work and repaint —
+    // otherwise the click looks like it did nothing at all.
+    const yieldFrame = () => new Promise(r => setTimeout(r, 0));
+
+    const renderCleanupView = async pane => {
+        const head = document.createElement('div'); head.className = 'wa-studio-exphead';
+        head.style.cssText = 'display:flex;flex-direction:column;align-items:stretch;gap:6px;';
+        const row1 = document.createElement('div'); row1.style.cssText = 'display:flex;align-items:center;gap:8px;flex-wrap:wrap;';
+        const bookLbl = document.createElement('b'); bookLbl.textContent = selected;
+        bookLbl.style.cssText = 'overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:16em;';
+        row1.append(bookLbl);
+        const auditBtn = document.createElement('button'); auditBtn.type = 'button'; auditBtn.className = 'menu_button';
+        auditBtn.innerHTML = `<i class="fa-solid fa-stethoscope"></i> ${scan ? 'Re-audit' : 'Run audit'}`;
+        auditBtn.title = 'Re-run the keyword audit with the current Tool Settings';
+        auditBtn.addEventListener('click', () => { rebuildScan(); renderExplorer(); });
+        // Search repaints only the list: rebuilding the header would replace the input mid-keystroke
+        // and drop focus. The type filter can rebuild, since its own label has to change anyway.
+        row1.append(auditBtn, buildFilterBtn(renderExplorer), buildSortControl(() => repaint()), buildSearchBox(() => repaint()));
+        head.append(row1);
+        const fixed = document.createElement('div'); fixed.className = 'wa-studio-fixed';
+        trayEl = renderTray();
+        const bar = document.createElement('div'); bar.className = 'wa-bulk-on';
+        const ignStrip = document.createElement('div'); ignStrip.className = 'wa-ign-strip';
+        fixed.append(head, trayEl, bar, ignStrip);
+        const list = document.createElement('div'); list.className = 'wa-studio-entries';
+        pane.append(fixed, list);
+
+        let groups = [], allIds = [], reg = { row: new Map(), grp: [] };
+        const paintBar = () => {
+            const on = allIds.filter(id => cleanupChecks.get(id)).length;
+            const allOn = allIds.length > 0 && on === allIds.length;
+            bar.innerHTML = '';
+            const count = document.createElement('span'); count.className = 'wa-bulk-count';
+            count.textContent = `${on} of ${allIds.length} flagged term${allIds.length === 1 ? '' : 's'} selected`;
+            bar.append(count,
+                barBtn(allOn ? 'Select none' : 'Select all', () => {
+                    for (const id of allIds) cleanupChecks.set(id, !allOn);
+                    sync();
+                }),
+                barBtn('Prune selected', pruneChecked, 'wa-bulk-danger'),
+                barBtn('Ignore selected', ignoreChecked),
+            );
+            if (cleanupUndo?.length) bar.append(barBtn(`Undo (${cleanupUndo.length})`, undoPrune));
+        };
+        const sync = () => { syncTermChecks(cleanupChecks, reg); paintBar(); };
+        const repaint = () => {
+            paintIgnoredStrip(ignStrip, repaint);   // classifyEntry reads ignoreSet live — no rescan needed
+            groups = cleanupGroups();
+            allIds = groups.flatMap(g => g.rows.map(r => rowId(g.entry.uid, r.term)));
+            reg = { row: new Map(), grp: [] };
+            list.innerHTML = '';
+            if (!scan) list.append(emptyNote('Run the audit to flag weak keywords — tune what counts as weak under Tool Settings.'));
+            else if (!groups.length) list.append(emptyNote('No flagged keywords in the visible entries.'));
+            else for (const g of groups) {
+                list.append(termGroupHeader(g.entry, g.rows, cleanupChecks, reg, sync, repaint));
+                if (advOpen.has(g.entry.uid)) list.append(buildAdvancedTray(g.entry, repaint));
+                // Cleanup terms ARE live keys, so the Explorer's keyword menu applies unchanged.
+                for (const r of g.rows) list.append(termRow(g.entry, r, cleanupChecks, reg, sync,
+                    (e, row, x, y) => showKwMenu(row.term, x, y)));
+            }
+            sync();
+        };
+        termRepaint = repaint;
+        if (!scan) {
+            bar.textContent = 'Auditing…';
+            list.append(emptyNote('Auditing keywords…'));
+            await yieldFrame();
+            if (!pane.isConnected || tab !== 'cleanup') return;   // switched away while we were blocked
+            rebuildScan();
+            auditBtn.innerHTML = '<i class="fa-solid fa-stethoscope"></i> Re-audit';
+        }
+        repaint();
+    };
+
+    // --- Suggest Terms tab ----------------------------------------------------------------------
+    // Candidates come from two places: the TF-IDF ranker (authoritative, recomputed per book) and the
+    // transient ✨ trays filled by the local model. Deduped by the ranker's canon so a term proposed by
+    // both appears once.
+    const suggestGroups = () => {
+        let s; try { s = ensureSuggest(); } catch { return null; }
+        const byUid = new Map(s.perEntry.map(pe => [String(pe.entry.uid), pe]));
+        const out = [];
+        for (const e of visibleEntries()) {
+            const seen = new Set();
+            const rows = [];
+            const push = (term, why) => {
+                const c = s.canon(term) || term.toLowerCase();
+                // Deliberately NOT filtered on the ignore list: ignoring in Cleanup means "this key is
+                // fine, stop flagging it", which is an endorsement — suppressing suggestions on the back of
+                // it would stop a term you just affirmed from being offered on entries that lack it.
+                if (seen.has(c) || hasKey(e, term)) return;
+                seen.add(c);
+                const id = rowId(e.uid, term);
+                if (!suggestChecks.has(id)) suggestChecks.set(id, false);   // nothing is added unasked
+                rows.push({ term, why });
+            };
+            for (const r of (byUid.get(String(e.uid))?.newRows ?? [])) push(r.display, `⚡ in ${r.df} of ${s.N}`);
+            for (const t of (sugg.get(e.uid)?.llm ?? [])) push(t, '✨ model');
+            // Entries with no candidates are still listed, headers only: an entry the TF-IDF ranker has
+            // nothing to say about is exactly the one you want to aim the model at, so it needs a row
+            // to hang the per-entry ✨ on.
+            out.push({ entry: e, rows });
+        }
+        return rankBySearch(out);
+    };
+    const addChecked = () => {
+        const groups = suggestGroups();
+        if (!groups) { toastr.warning('Couldn\'t build suggestions.', 'Worlds Apart'); return; }
+        let added = 0, touched = 0;
+        for (const g of groups) {
+            let n = 0;
+            for (const r of g.rows) {
+                const id = rowId(g.entry.uid, r.term);
+                if (!suggestChecks.get(id)) continue;
+                if (!Array.isArray(g.entry.key)) g.entry.key = [];
+                if (!hasKey(g.entry, r.term)) { g.entry.key.push(r.term); n++; }
+                suggestChecks.delete(id);
+                // Drop it from the transient ✨ tray too, or Explorer would still offer it as a chip.
+                const tray = sugg.get(g.entry.uid);
+                if (tray) tray.llm = tray.llm.filter(t => t !== r.term);
+            }
+            if (n) { added += n; touched++; }
+        }
+        if (!added) { toastr.info('Nothing selected to add.', 'Worlds Apart'); return; }
+        save(); suggest = null; if (scan) rebuildScan(); renderExplorer();
+        toastr.success(`Added ${added} keyword${added === 1 ? '' : 's'} across ${touched} ${touched === 1 ? 'entry' : 'entries'}.`, 'Worlds Apart');
+    };
+    const renderSuggestView = async pane => {
+        const head = document.createElement('div'); head.className = 'wa-studio-exphead';
+        head.style.cssText = 'display:flex;flex-direction:column;align-items:stretch;gap:6px;';
+        const row1 = document.createElement('div'); row1.style.cssText = 'display:flex;align-items:center;gap:8px;flex-wrap:wrap;';
+        const bookLbl = document.createElement('b'); bookLbl.textContent = selected;
+        bookLbl.style.cssText = 'overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:16em;';
+        row1.append(bookLbl);
+        const llmBtn = document.createElement('button'); llmBtn.type = 'button'; llmBtn.className = 'menu_button';
+        llmBtn.innerHTML = '<i class="fa-solid fa-wand-magic-sparkles"></i> Suggest all (LLM)';
+        llmBtn.title = 'Run local-model keyword suggestions on every visible entry (long entries are chunked)';
+        llmBtn.addEventListener('click', () => suggestAllLlm(llmBtn));
+        // Search repaints only the list — see the Cleanup view for why the header must survive.
+        row1.append(llmBtn, buildFilterBtn(renderExplorer), buildSortControl(() => repaint()), buildSearchBox(() => repaint()));
+        head.append(row1);
+        const fixed = document.createElement('div'); fixed.className = 'wa-studio-fixed';
+        trayEl = renderTray();
+        const bar = document.createElement('div'); bar.className = 'wa-bulk-on';
+        fixed.append(head, trayEl, bar);
+        const list = document.createElement('div'); list.className = 'wa-studio-entries';
+        pane.append(fixed, list);
+
+        let groups = [], allIds = [], reg = { row: new Map(), grp: [] };
+        const paintBar = () => {
+            const on = allIds.filter(id => suggestChecks.get(id)).length;
+            const allOn = allIds.length > 0 && on === allIds.length;
+            bar.innerHTML = '';
+            const count = document.createElement('span'); count.className = 'wa-bulk-count';
+            count.textContent = `${on} of ${allIds.length} candidate${allIds.length === 1 ? '' : 's'} selected`;
+            bar.append(count,
+                barBtn(allOn ? 'Select none' : 'Select all', () => {
+                    for (const id of allIds) suggestChecks.set(id, !allOn);
+                    sync();
+                }),
+                barBtn('Add selected', addChecked),
+            );
+        };
+        const sync = () => { syncTermChecks(suggestChecks, reg); paintBar(); };
+        const repaint = () => {
+            groups = suggestGroups();
+            allIds = (groups ?? []).flatMap(g => g.rows.map(r => rowId(g.entry.uid, r.term)));
+            reg = { row: new Map(), grp: [] };
+            list.innerHTML = '';
+            if (!groups) list.append(emptyNote('Couldn\'t build suggestions for this book.'));
+            else if (!groups.length) list.append(emptyNote('No entries match the current filter.'));
+            else {
+                if (!allIds.length) list.append(emptyNote('No TF-IDF candidates — every distinctive term is already a keyword. Use ✨ on an entry (or Suggest all) to ask the local model, or loosen the Recommender settings under Tool Settings.'));
+                for (const g of groups) {
+                    // Per-entry ✨: same single-entry model pass as the Explorer's, repainting this list
+                    // instead of an entry row. Skipped for empty entries — there'd be nothing to send.
+                    const acts = String(g.entry.content ?? '').trim() ? [e => {
+                        const i = document.createElement('i');
+                        i.className = 'fa-solid fa-wand-magic-sparkles wa-term-act';
+                        i.title = 'Ask the local model for keywords for this entry';
+                        i.addEventListener('click', () => suggestLlm(e, i, () => repaint()));
+                        return i;
+                    }] : [];
+                    list.append(termGroupHeader(g.entry, g.rows, suggestChecks, reg, sync, repaint, acts));
+                    if (advOpen.has(g.entry.uid)) list.append(buildAdvancedTray(g.entry, repaint));
+                    // Candidates aren't keys yet, so the Explorer's delete/replace-everywhere options
+                    // would act on nothing, and ignoring is a Cleanup concept (see suggestGroups). Accepting
+                    // is the only decision a candidate admits beyond the checkbox.
+                    for (const r of g.rows) list.append(termRow(g.entry, r, suggestChecks, reg, sync,
+                        (e, row, x, y) => showCtxMenu([
+                            { label: 'Add to this entry', fn: () => acceptSugg(e, row.term, () => { suggestChecks.delete(rowId(e.uid, row.term)); repaint(); }) },
+                        ], x, y, ctxMount())));
+                }
+            }
+            sync();
+        };
+        termRepaint = repaint;
+        if (!suggest) {
+            bar.textContent = 'Analysing…';
+            list.append(emptyNote('Ranking this book\'s distinctive terms…'));
+            await yieldFrame();
+            if (!pane.isConnected || tab !== 'suggest') return;   // switched away while we were blocked
+        }
+        repaint();   // builds the ranker on first use, via suggestGroups -> ensureSuggest
+    };
+
+    const TABS =[['explorer', 'Explorer'], ['cleanup', 'Cleanup'], ['suggest', 'Suggest Terms']];
+    const renderTabBar = () => {
+        const bar = document.createElement('div'); bar.className = 'wa-tabs';
+        for (const [id, label] of TABS) {
+            const b = document.createElement('button'); b.type = 'button';
+            b.className = 'wa-tab' + (tab === id ? ' wa-tab-on' : '');
+            b.textContent = label;
+            // Ticked-row counts live in the tab strip so a selection left on another tab is never silent.
+            const pending = id === 'cleanup' ? [...cleanupChecks.values()].filter(Boolean).length
+                : id === 'suggest' ? [...suggestChecks.values()].filter(Boolean).length : 0;
+            if (pending) { const c = document.createElement('span'); c.className = 'wa-tab-count'; c.textContent = `${pending} selected`; b.append(c); }
+            b.addEventListener('click', () => { if (tab !== id) { tab = id; renderExplorer(); } });
+            bar.append(b);
+        }
+        return bar;
+    };
+
     const renderExplorer = () => {
         explorer.innerHTML = ''; rowEls.clear();
         if (!selected) { explorer.innerHTML = '<div style="opacity:0.6;padding:8px;">Select a lorebook on the left.</div>'; return; }
+        termRepaint = null;   // the term views below claim it; the Explorer leaves it null
+        explorer.append(renderTabBar());
+        const pane = document.createElement('div');
+        pane.style.cssText = 'flex:1 1 auto;display:flex;flex-direction:column;overflow:hidden;min-height:0;';
+        explorer.append(pane);
+        // The term tabs run their own pre-pass (Cleanup audits, Suggest ranks) and are async so they can
+        // paint a working note before blocking — nothing here awaits them; they repaint themselves.
+        if (tab === 'cleanup') { renderCleanupView(pane); return; }
+        if (tab === 'suggest') { renderSuggestView(pane); return; }
+        renderExplorerView(pane);
+    };
+
+    const renderExplorerView = pane => {
         const total = Object.values(data?.entries ?? {});
         const entries = total.filter(filterMatch);
         const head = document.createElement('div');
@@ -1152,53 +1782,8 @@ export async function lorebookStudio(preferredBook = null) {
             bookTool('fa-trash-can', 'Delete this lorebook', () => delBook(), 'wa-book-tool-danger'),
         );
         label.append(bookTools);
-        // Entry-type filter — a compact fa-filter dropdown (single-select). Custom, not a native <select>,
-        // so options can carry FA icons (crosshairs, power) a <select> can't render.
-        const FILTER_OPTS = [
-            ['all', 'fa-filter', 'All'],
-            ['keyword', '🟢', 'Keyword'],
-            ['constant', '🔵', 'Constant'],
-            ['vector', '🔗', 'Vector'],
-            ['enabled', 'fa-power-off', 'Enabled'],
-            ['disabled', '🚫', 'Disabled'],
-            ['flagged', 'fa-crosshairs', 'Flagged'],
-        ];
-        const iconEl = spec => { if (spec.startsWith('fa-')) { const i = document.createElement('i'); i.className = 'fa-solid ' + spec; return i; } const s = document.createElement('span'); s.textContent = spec; return s; };
-        const filterWrap = document.createElement('span'); filterWrap.style.cssText = 'position:relative;display:inline-flex;';
-        const filterBtn = document.createElement('button'); filterBtn.type = 'button'; filterBtn.className = 'menu_button wa-filter';
-        filterBtn.title = 'Show only entries of a type'; filterBtn.style.cssText = 'display:inline-flex;align-items:center;gap:5px;width:auto;white-space:nowrap;';
-        const curFilter = FILTER_OPTS.find(o => o[0] === entryFilter) ?? FILTER_OPTS[0];
-        const curLbl = document.createElement('span'); curLbl.textContent = curFilter[2];
-        filterBtn.append(iconEl('fa-filter'), curLbl);
-        const filterMenu = document.createElement('div');
-        filterMenu.style.cssText = 'position:absolute;top:100%;left:0;z-index:5;display:none;flex-direction:column;gap:1px;margin-top:2px;padding:4px;border-radius:5px;min-width:9em;'
-            + 'background:var(--SmartThemeBlurTintColor, var(--black70a, rgba(20,20,20,0.97)));border:1px solid var(--SmartThemeBorderColor, rgba(255,255,255,0.15));';
-        for (const [val, spec, lbl] of FILTER_OPTS) {
-            const item = document.createElement('button'); item.type = 'button';
-            item.style.cssText = 'display:flex;align-items:center;gap:7px;width:100%;padding:4px 8px;border:none;border-radius:4px;background:' + (val === entryFilter ? 'var(--white20a, rgba(255,255,255,0.1))' : 'transparent') + ';color:inherit;font:inherit;text-align:left;white-space:nowrap;cursor:pointer;';
-            if (val === entryFilter) item.style.fontWeight = 'bold';
-            const t = document.createElement('span'); t.textContent = lbl; item.append(iconEl(spec), t);
-            item.addEventListener('mouseenter', () => { if (val !== entryFilter) item.style.background = 'var(--white20a, rgba(255,255,255,0.1))'; });
-            item.addEventListener('mouseleave', () => { if (val !== entryFilter) item.style.background = 'transparent'; });
-            item.addEventListener('click', () => { entryFilter = val; renderExplorer(); });
-            filterMenu.append(item);
-        }
-        filterBtn.addEventListener('click', () => { filterMenu.style.display = filterMenu.style.display === 'none' ? 'flex' : 'none'; });
-        filterWrap.addEventListener('focusout', ev => { if (!filterWrap.contains(ev.relatedTarget)) filterMenu.style.display = 'none'; });
-        filterWrap.append(filterBtn, filterMenu);
-        // Sort control — shared widget (module makeSortControl). The base sort + tiered toggle are ephemeral
-        // view state (not persisted); only the tier config is durable (shared with the prompt builder).
-        // "Insert Order" (leadItems) mirrors the durable insertion settings; its tiered state reads from
-        // there, and toggling tiered while in it forks to an explicit ephemeral sort (base = the resolved
-        // insertion base, clamped to a valid key).
-        const sortBtn = makeSortControl({
-            getSort: () => entrySort, setSort: k => { entrySort = k; persistSortView(); },
-            getTiered: () => entrySort === 'insert' ? !!settings().presentationTiered : tieredMode,
-            setTiered: on => { if (entrySort === 'insert') { const k = normPresentation(settings().presentationOrder); entrySort = SORT_FNS[k] ? k : 'order-asc'; } tieredMode = on; persistSortView(); },
-            getTierCfg: () => tierCfg, setTierCfg: cfg => { tierCfg = cfg; settings().tierCfg = cfg; saveSettingsDebounced(); },
-            leadItems: [{ label: 'Insert Order', key: 'insert' }],
-            onChange: renderExplorer, mount: ctxMount,
-        });
+        const filterWrap = buildFilterBtn(renderExplorer);
+        const sortBtn = buildSortControl(renderExplorer);
         const scanBtn = document.createElement('button');
         scanBtn.type = 'button'; scanBtn.className = 'menu_button';
         scanBtn.innerHTML = `<i class="fa-solid fa-stethoscope"></i> ${scan ? 'Re-audit' : 'Keyword audit'}`;
@@ -1231,34 +1816,9 @@ export async function lorebookStudio(preferredBook = null) {
         suggestAllLlmBtn.innerHTML = '<i class="fa-solid fa-wand-magic-sparkles"></i> Suggest all (LLM)';
         suggestAllLlmBtn.title = 'Run local-model keyword suggestions on every visible entry (long entries are chunked; review the ✨ chips before accepting)';
         suggestAllLlmBtn.addEventListener('click', () => suggestAllLlm(suggestAllLlmBtn));
-        // Search box + scope checkboxes. Typing re-filters the list in place (applyFilter) rather than
-        // re-rendering the header, so the input keeps focus and the caret between keystrokes.
-        const searchWrap = document.createElement('span'); searchWrap.style.cssText = 'position:relative;display:inline-flex;align-items:center;';
-        const search = document.createElement('input'); search.type = 'search'; search.className = 'text_pole wa-filter';
-        search.placeholder = 'Search…'; search.value = searchQuery;
-        search.style.cssText = 'width:11em;border-top-left-radius:0;border-bottom-left-radius:0;';
-        let searchTimer = null;   // debounce so a big book doesn't re-filter on every keystroke
-        search.addEventListener('input', () => { searchQuery = search.value; clearTimeout(searchTimer); searchTimer = setTimeout(applyFilter, 180); });
-        // Scope picker: a multi-select dropdown hung off the search box — which fields the query looks in.
-        const scopeBtn = document.createElement('button'); scopeBtn.type = 'button'; scopeBtn.className = 'menu_button wa-filter';
-        scopeBtn.style.cssText = 'width:auto;display:inline-flex;align-items:center;justify-content:center;margin:0 -1px 0 0;padding:3px 8px;border-top-right-radius:0;border-bottom-right-radius:0;';
-        scopeBtn.innerHTML = '<i class="fa-solid fa-sliders"></i>';
-        const menu = document.createElement('div');
-        menu.style.cssText = 'position:absolute;top:100%;left:0;z-index:5;display:none;flex-direction:column;gap:2px;margin-top:2px;padding:6px 8px;border-radius:5px;'
-            + 'background:var(--SmartThemeBlurTintColor, var(--black70a, rgba(20,20,20,0.97)));border:1px solid var(--SmartThemeBorderColor, rgba(255,255,255,0.15));';
-        const SCOPES = [['title', 'Title'], ['entry', 'Entry'], ['keywords', 'Keywords']];
-        const syncScopeBtn = () => { const on = SCOPES.filter(([k]) => searchScope[k]).map(([, l]) => l); scopeBtn.title = `Search in: ${on.join(', ') || 'nothing selected'}`; };
-        for (const [key, lbl] of SCOPES) {
-            const l = document.createElement('label'); l.className = 'checkbox_label'; l.style.cssText = 'font-size:0.85em;white-space:nowrap;';
-            const cb = document.createElement('input'); cb.type = 'checkbox'; cb.checked = searchScope[key];
-            cb.addEventListener('change', () => { searchScope[key] = cb.checked; syncScopeBtn(); applyFilter(); });
-            const sp = document.createElement('span'); sp.textContent = lbl; l.append(cb, sp); menu.append(l);
-        }
-        syncScopeBtn();
-        scopeBtn.addEventListener('click', () => { menu.style.display = menu.style.display === 'none' ? 'flex' : 'none'; });
-        // Close when focus leaves the group — no document-level listener to leak across re-renders.
-        searchWrap.addEventListener('focusout', ev => { if (!searchWrap.contains(ev.relatedTarget)) menu.style.display = 'none'; });
-        searchWrap.append(scopeBtn, search, menu);
+        // Typing re-filters the list in place (applyFilter) rather than re-rendering the header, so the
+        // input keeps focus and the caret between keystrokes.
+        const searchWrap = buildSearchBox(() => applyFilter());
         // Two rows: identity + view controls up top, the batch actions beneath.
         const rowStyle = 'display:flex;align-items:center;gap:8px;flex-wrap:wrap;';
         const vsep = () => { const s = document.createElement('span'); s.style.cssText = 'align-self:stretch;width:1px;background:color-mix(in srgb, currentColor 22%, transparent);margin:2px;'; return s; };
@@ -1281,7 +1841,7 @@ export async function lorebookStudio(preferredBook = null) {
         bulkEl = renderBulkBar();
         fixed.append(head, globalTrayEl, trayEl, bulkEl);
         const list = document.createElement('div'); list.className = 'wa-studio-entries';
-        explorer.append(fixed, list);
+        pane.append(fixed, list);
         // Repaint just the entry list (and the count) for the current type filter + search.
         const applyFilter = () => {
             rowEls.clear();
