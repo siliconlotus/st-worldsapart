@@ -145,3 +145,6 @@ summary-cache.json
 
 # Personal relevance-eval fixtures (private /wa-debug captures + human grades)
 eval-data/
+
+# Local Claude notes (host-specific, not project facts)
+CLAUDE.local.md
