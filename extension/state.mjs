@@ -201,8 +201,14 @@ export const defaultSettings = {
      * Independent of maxTokens, and both apply — the tighter of the two wins, the same
      * pairing ST uses for world_info_budget and world_info_budget_cap. A percentage
      * scales when you switch models; an absolute value is a hard ceiling that doesn't.
+     *
+     * On by default, unlike every other cap. Without it a single over-shared key (one
+     * trigger listed on most entries) activates the whole book and WA has nothing to cut
+     * with, so World Info crowds out the actual conversation. 40% leaves the majority of
+     * the context to chat while being generous enough that a normal scan never touches it.
+     * Only bites when WA has more entries than budget; set 0 to defer to core entirely.
      */
-    maxTokensPercent: 0,
+    maxTokensPercent: 40,
     /**
      * Token budget over ALL activated entries, absolute. 0 = leave it to core.
      * Only meaningful globally — a token cap that exempted constants would report a
@@ -218,12 +224,17 @@ export const defaultSettings = {
     /**
      * Whether ignoreBudget entries spend maxTokens.
      *
-     * On (default) they are: exempt from being CUT, but their tokens still come off the
-     * top and squeeze what fits below, so maxTokens stays an honest ceiling on the World
-     * Info actually sent. Off, they are free on every axis and maxTokens stops bounding
-     * anything real — it then caps only the entries that could be cut anyway.
+     * Off (default): they are free on every axis, which is what marking an entry
+     * "ignore budget" is for — the flag reads as "this is not subject to the budget",
+     * not "this is merely uncuttable". The cost is that maxTokens then bounds only the
+     * cuttable entries, so the World Info actually sent is exempt tokens PLUS the budget.
+     * On: they still can't be cut, but their tokens come off the top and squeeze what
+     * fits below, so maxTokens is an honest ceiling on the whole of World Info.
+     *
+     * Turn this on if a book has enough exempt entries to overrun the context on its own —
+     * maxTokensPercent can't guard against exempt entries while this is off.
      */
-    maxTokensIncludesExempt: true,
+    maxTokensIncludesExempt: false,
     /**
      * Cap on every activated entry. 0 = no cap. Constants and stickies are walked first
      * and consume it, so a cap of 10 alongside 7 constants yields 10 entries, 3 dynamic.

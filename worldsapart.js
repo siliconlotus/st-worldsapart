@@ -2058,7 +2058,7 @@ const SETTINGS_HTML = `
                     </select>
 
                     <label class="checkbox_label" for="wa_tokens_include_exempt">
-                        <input id="wa_tokens_include_exempt" type="checkbox"><span>Token budget caps "ignore budget" entries</span>
+                        <input id="wa_tokens_include_exempt" type="checkbox"><span>Token budget caps "ignore budget" entries (i.e., tokens never exceeds cap)</span>
                     </label>
 
                     <small id="wa_exempt_count" class="opacity50p"></small>
