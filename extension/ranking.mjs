@@ -149,7 +149,7 @@ export function buildQuery(chat, { depth, substituteParams = s => s }) {
  * @param {boolean} wholeWords Whole word matching
  * @returns {number} Occurrence count
  */
-export function countKey(key, text, caseSensitive, wholeWords) {
+export function countKey(key, text, caseSensitive, wholeWords, scope) {
     const raw = String(key ?? '').trim();
 
     if (!raw || !text) {
@@ -160,7 +160,7 @@ export function countKey(key, text, caseSensitive, wholeWords) {
     // the other options like a regex key does. Returns the query's weight (default 1) on match,
     // so it feeds keywordScore's saturation like a single occurrence scaled by :weight.
     if (raw.startsWith('?')) {
-        const { matched, scoreBoost } = evaluateSmartKey(raw, text);
+        const { matched, scoreBoost } = evaluateSmartKey(raw, text, scope);
         // A matched query built purely from negation (e.g. "? !apollo") carries zero accumulated
         // weight but must still count as a hit — floor ONLY that case, so a sub-1 :weight
         // (e.g. "? whisper:0.3") down-weights as documented.
@@ -183,7 +183,7 @@ export function countKey(key, text, caseSensitive, wholeWords) {
     // automaton already knows this key's folded-substring count. 0 is final under any flags;
     // a positive count is final for plain case-insensitive substring semantics, and otherwise
     // the key is a confirmed candidate that falls through to the exact (naive) walk below.
-    const cached = cachedCount(raw, text);
+    const cached = cachedCount(raw, text, scope);
     if (cached === 0) return 0;
     if (cached !== undefined && !caseSensitive && (!wholeWords || /\s/.test(raw))) return cached;
 

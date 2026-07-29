@@ -178,33 +178,46 @@ export function scanAutomaton(aut, foldedText) {
     return counts;
 }
 
-// Term registry shared by every smart key: folded literal -> pattern index. The automaton is
-// rebuilt (cheap, O(total pattern chars)) whenever a new key introduces a new literal.
-const termIndex = new Map();
-const patterns = [];
-let automaton = null;
-let automatonDirty = false;
+/**
+ * One matching context: the term registry (folded literal -> pattern index), the automaton built from
+ * it, the parsed-AST cache, and the per-text scan results.
+ *
+ * Scoped rather than module-global because two callers want batching over disjoint key sets and very
+ * different lifetimes: live retrieval primes the chat's scan window with the active books' keys and
+ * keeps it for the session, while the keyword audit primes every key in one book against every entry's
+ * text and is done. Sharing one registry meant each paid for the other's vocabulary, and the audit's
+ * few-hundred keys would linger in the retrieval automaton for the rest of the session.
+ *
+ * ASTs live here too rather than in a shared cache, because registerTerms stamps a scope-local pattern
+ * index onto each TERM node.
+ */
+export function createScanScope() {
+    return { termIndex: new Map(), patterns: [], automaton: null, dirty: false, scans: new Map(), astCache: new Map() };
+}
 
-function internLiteral(folded) {
-    let idx = termIndex.get(folded);
+// The default scope, used whenever a caller doesn't supply one — i.e. live retrieval.
+const defaultScope = createScanScope();
+
+function internLiteral(scope, folded) {
+    let idx = scope.termIndex.get(folded);
     if (idx === undefined) {
-        idx = patterns.length;
-        patterns.push(folded);
-        termIndex.set(folded, idx);
-        automatonDirty = true;
+        idx = scope.patterns.length;
+        scope.patterns.push(folded);
+        scope.termIndex.set(folded, idx);
+        scope.dirty = true;
     }
     return idx;
 }
 
-function registerTerms(node) {
+function registerTerms(scope, node) {
     if (!node) return;
     if (node.type === 'TERM') {
-        node.acIndex = internLiteral(node.value.toLowerCase());
+        node.acIndex = internLiteral(scope, node.value.toLowerCase());
     } else if (node.type === 'NOT') {
-        registerTerms(node.operand);
+        registerTerms(scope, node.operand);
     } else {
-        registerTerms(node.left);
-        registerTerms(node.right);
+        registerTerms(scope, node.left);
+        registerTerms(scope, node.right);
     }
 }
 
@@ -212,20 +225,19 @@ function registerTerms(node) {
 // one retrieval pass (per-depth windows x per-entry match-source suffixes), so a small cache keeps
 // each of them scanned once per automaton generation. Cleared on rebuild — with registerKeys()
 // batching registration up front, rebuilds happen at most once per pass.
-const SCAN_CACHE_MAX = 8;
-const scanCache = new Map();   // insertion-ordered; oldest evicted first
+const SCAN_CACHE_MAX = 8;   // per scope; insertion-ordered, oldest evicted first
 
-function ensureScan(text) {
-    if (automatonDirty || automaton === null) {
-        automaton = buildAutomaton(patterns);
-        automatonDirty = false;
-        scanCache.clear();
+function ensureScan(scope, text) {
+    if (scope.dirty || scope.automaton === null) {
+        scope.automaton = buildAutomaton(scope.patterns);
+        scope.dirty = false;
+        scope.scans.clear();
     }
-    let counts = scanCache.get(text);
+    let counts = scope.scans.get(text);
     if (counts === undefined) {
-        counts = scanAutomaton(automaton, text.toLowerCase());
-        scanCache.set(text, counts);
-        if (scanCache.size > SCAN_CACHE_MAX) scanCache.delete(scanCache.keys().next().value);
+        counts = scanAutomaton(scope.automaton, text.toLowerCase());
+        scope.scans.set(text, counts);
+        if (scope.scans.size > SCAN_CACHE_MAX) scope.scans.delete(scope.scans.keys().next().value);
     }
     return counts;
 }
@@ -277,15 +289,12 @@ export function evaluate(node, text, acHits) {
     }
 }
 
-// Parsed-AST cache. Lorebook key sets are small and stable within a session, so unbounded is fine.
-const astCache = new Map();
-
-function ensureAst(raw) {
-    let ast = astCache.get(raw);
+function ensureAst(scope, raw) {
+    let ast = scope.astCache.get(raw);
     if (ast === undefined) {
         ast = parse(tokenize(raw));
-        registerTerms(ast);
-        astCache.set(raw, ast);
+        registerTerms(scope, ast);
+        scope.astCache.set(raw, ast);
     }
     return ast;
 }
@@ -295,28 +304,30 @@ function ensureAst(raw) {
  * Pass 1 candidate scan (Aho-Corasick, cached per text) -> Pass 2 parse (cached per key) -> evaluate.
  * @param {string} rawKey Key string including the leading `?`
  * @param {string} text Scan text
+ * @param {object} [scope] Matching context (default: the shared retrieval scope)
  * @returns {{matched: boolean, scoreBoost: number}}
  */
-export function evaluateSmartKey(rawKey, text) {
-    const ast = ensureAst(rawKey);
-    return evaluate(ast, text, ensureScan(text));
+export function evaluateSmartKey(rawKey, text, scope = defaultScope) {
+    const ast = ensureAst(scope, rawKey);
+    return evaluate(ast, text, ensureScan(scope, text));
 }
 
 /**
- * Registers a key list with the shared automaton without scanning anything. Plain keys register
+ * Registers a key list with the scope's automaton without scanning anything. Plain keys register
  * their folded literal; smart keys parse and register their terms; regex keys are skipped (they
  * stay regex). Call this ONCE per pass with every key the pass will score, BEFORE any scoring —
  * a new key mid-pass dirties the automaton, and the rebuild throws away every cached scan.
  * @param {string[]} rawKeys
+ * @param {object} [scope]
  */
-export function registerKeys(rawKeys) {
+export function registerKeys(rawKeys, scope = defaultScope) {
     for (const key of rawKeys) {
         const raw = String(key ?? '').trim();
         if (!raw || isRegexKey(raw)) continue;
         if (raw.startsWith('?')) {
-            ensureAst(raw);
+            ensureAst(scope, raw);
         } else {
-            internLiteral(raw.toLowerCase());
+            internLiteral(scope, raw.toLowerCase());
         }
     }
 }
@@ -326,10 +337,11 @@ export function registerKeys(rawKeys) {
  * the same text answer from the automaton instead of walking the buffer per key.
  * @param {string[]} rawKeys
  * @param {string} text
+ * @param {object} [scope]
  */
-export function primeScan(rawKeys, text) {
-    registerKeys(rawKeys);
-    ensureScan(text);
+export function primeScan(rawKeys, text, scope = defaultScope) {
+    registerKeys(rawKeys, scope);
+    ensureScan(scope, text);
 }
 
 /**
@@ -339,27 +351,29 @@ export function primeScan(rawKeys, text) {
  * case-sensitive or whole-word hit either.
  * @param {string} raw Plain key (not regex, not smart)
  * @param {string} text
+ * @param {object} [scope]
  * @returns {number|undefined}
  */
-export function cachedCount(raw, text) {
-    if (automatonDirty || automaton === null) return undefined;
-    const counts = scanCache.get(text);
+export function cachedCount(raw, text, scope = defaultScope) {
+    if (scope.dirty || scope.automaton === null) return undefined;
+    const counts = scope.scans.get(text);
     if (counts === undefined) return undefined;
-    const idx = termIndex.get(raw.toLowerCase());
+    const idx = scope.termIndex.get(raw.toLowerCase());
     if (idx === undefined) return undefined;
     return counts.get(idx) ?? 0;
 }
 
 /**
- * Drops every registered key, cached AST, and cached scan. Called on chat switch so the
- * automaton tracks the ACTIVE books' vocabulary instead of the union of every book ever seen —
- * the next pass re-registers what it actually needs (cheap: one rebuild + one scan per buffer).
+ * Drops every registered key, cached AST, and cached scan in a scope. Called on chat switch for the
+ * default scope, so the automaton tracks the ACTIVE books' vocabulary instead of the union of every
+ * book ever seen — the next pass re-registers what it needs (one rebuild + one scan per buffer).
+ * @param {object} [scope]
  */
-export function resetSmartKeys() {
-    termIndex.clear();
-    patterns.length = 0;
-    astCache.clear();
-    scanCache.clear();
-    automaton = null;
-    automatonDirty = false;
+export function resetSmartKeys(scope = defaultScope) {
+    scope.termIndex.clear();
+    scope.patterns.length = 0;
+    scope.astCache.clear();
+    scope.scans.clear();
+    scope.automaton = null;
+    scope.dirty = false;
 }

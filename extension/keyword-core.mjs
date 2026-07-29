@@ -5,6 +5,7 @@
 // (popups, saving, generation) on top and injects the world-info match flags.
 import { COMMON_WORDS } from '../plugin/commonwords.js';
 import { countKey, escapeRegex, isRegexKey } from './ranking.mjs';
+import { buildAutomaton, scanAutomaton, createScanScope, primeScan } from './smartkeys.mjs';
 
 export const KEY_TOO_COMMON = 0.5;
 
@@ -84,14 +85,39 @@ export function buildKeyPruneScan(data, opts, ignoreSet, { caseSensitiveDefault 
     // mirrors matchKeys). Cached per (key, caseSensitive, wholeWord), so re-analysis after a flag
     // toggle is cheap and the audit agrees with the runtime.
     const scanCache = new Map();
+    // Every key in the book, deduped — the batch below primes all of them against one entry's text at a
+    // time, so countKey answers from the automaton instead of re-reading the corpus per key.
+    const allKeys = [...new Set(allEntries.flatMap(e => (Array.isArray(e.key) ? e.key : []).map(k => String(k).trim())).filter(Boolean))];
+    // Its OWN matching scope: the audit primes a few thousand keys against every entry's text, and
+    // sharing the retrieval scope would leave all of that in the live automaton for the session.
+    const scanScope = createScanScope();
+    const ck = (key, cs, ww) => `${cs ? 1 : 0}${ww ? 1 : 0} ${cs ? key : String(key).toLowerCase()}`;
+    // Tallied lazily per flag combination, because the answer differs per combination and most books
+    // only ever use one. Content-outer, key-inner: one automaton walk per entry serves every key, which
+    // is the whole point — the reverse order re-walks the corpus once per key.
+    const batched = new Set();
+    const runBatch = (cs, ww) => {
+        const combo = `${cs ? 1 : 0}${ww ? 1 : 0}`;
+        if (batched.has(combo)) return;
+        batched.add(combo);
+        for (const c of contents) {
+            primeScan(allKeys, c, scanScope);
+            for (const key of allKeys) {
+                // Still countKey, deliberately: the audit has to report what the runtime matcher will
+                // actually do — flags, regex keys and `?` queries included — so the batch only changes
+                // how often the text is walked, never how a hit is decided.
+                const n = countKey(key, c, cs, ww, scanScope);
+                if (!n) continue;
+                const k = ck(key, cs, ww);
+                let r = scanCache.get(k);
+                if (!r) scanCache.set(k, r = { df: 0, total: 0 });
+                r.df++; r.total += n;
+            }
+        }
+    };
     const scan = (key, cs, ww) => {
-        const ck = `${cs ? 1 : 0}${ww ? 1 : 0} ${cs ? key : String(key).toLowerCase()}`;
-        let r = scanCache.get(ck);
-        if (r) return r;
-        let df = 0, total = 0;
-        for (const c of contents) { const n = countKey(key, c, cs, ww); if (n) { df++; total += n; } }
-        scanCache.set(ck, r = { df, total });
-        return r;
+        runBatch(cs, ww);
+        return scanCache.get(ck(key, cs, ww)) ?? { df: 0, total: 0 };
     };
     // Stricter second pass for short keys. Core's boundary is \W (so "000" counts inside
     // "$80,000" — a comma is a boundary), which flatters junk numeric keys. This counts only
@@ -327,13 +353,56 @@ export function buildKeySuggest(data, opts) {
 
     // Substring doc-frequency — how ST's countKey sees a key by default, and what the pruner's
     // too-common check counts. Defined here so suggestForEntry can gate on it; reused by the ✨ path.
+    //
+    // dfCache is the table the automaton warm-up below fills, NOT a memo of this linear scan: every
+    // call from suggestForEntry is a guaranteed hit, because the warm-up collects exactly the terms
+    // that reach this gate. The scan-on-miss path survives for terms the warm-up never saw — the ✨
+    // path hands classifyLlmCand this same function for model-proposed candidates, and answering 0 for
+    // those would quietly switch off their too-common filter. (Answering it term-by-term for the whole
+    // build was 97% of this function's runtime on a 327-entry book, hence the warm-up.)
     const contentsLc = entries.map(e => String(e.content ?? '').toLowerCase());
-    const dfSubstr = t => { const q = t.toLowerCase(); let m = 0; for (const c of contentsLc) if (c.includes(q)) m++; return m; };
+    const dfCache = new Map();
+    const dfSubstr = t => {
+        const q = String(t).toLowerCase();
+        let m = dfCache.get(q);
+        if (m === undefined) {
+            m = 0;
+            for (const c of contentsLc) if (c.includes(q)) m++;
+            dfCache.set(q, m);
+        }
+        return m;
+    };
+
+    const tfOf = seq => { const tf = new Map(); for (const t of ngramsOf(seq)) tf.set(t, (tf.get(t) ?? 0) + 1); return tf; };
+    const tfs = seqs.map(tfOf);   // computed once; the warm-up below and suggestForEntry both read it
+
+    // Warm dfCache for every term that will reach the substring gate, in ONE pass per document.
+    //
+    // dfSubstr is the gate on every candidate, and answering it term-by-term means re-reading the whole
+    // corpus per term — 97% of this function's runtime on a large book, and still the bulk of it once
+    // memoized, because most terms are distinct. Aho-Corasick inverts the loop: build one automaton over
+    // all candidates, then each document reports every term it contains in a single walk, so the cost is
+    // (corpus + patterns) instead of (terms x corpus). Same numbers, just not recomputed per term.
+    {
+        const wanted = new Set();
+        for (const tf of tfs) {
+            for (const [term, f] of tf) {
+                if (f < 2) continue;
+                if ((DF.get(term) ?? 1) / N > dfCeil) continue;   // the cheap gate that precedes it
+                wanted.add(term.toLowerCase());
+            }
+        }
+        if (wanted.size) {
+            const terms = [...wanted];
+            const aut = buildAutomaton(terms);
+            const hits = new Int32Array(terms.length);
+            for (const c of contentsLc) for (const idx of scanAutomaton(aut, c).keys()) hits[idx]++;
+            terms.forEach((t, i) => dfCache.set(t, hits[i]));
+        }
+    }
 
     // Per-entry TF-IDF: distinctive terms, ranked, subsumed, split into new vs already-keyed.
-    const suggestForEntry = (entry, seq) => {
-        const tf = new Map();
-        for (const t of ngramsOf(seq)) tf.set(t, (tf.get(t) ?? 0) + 1);
+    const suggestForEntry = (entry, tf) => {
         const existing = new Set((entry.key ?? []).map(canon));
         const rows = [];
         for (const [term, f] of tf) {
@@ -362,7 +431,7 @@ export function buildKeySuggest(data, opts) {
         return { existing, newRows: kept.filter(r => !r.present).slice(0, cap), keyedRows: kept.filter(r => r.present) };
     };
 
-    const perEntry = entries.map((entry, i) => ({ entry, ...suggestForEntry(entry, seqs[i]) })).filter(pe => pe.newRows.length);
+    const perEntry = entries.map((entry, i) => ({ entry, ...suggestForEntry(entry, tfs[i]) })).filter(pe => pe.newRows.length);
 
     // For the ✨ per-entry local-model path (lazy: only fires on click).
     const avoid = [...uDF].filter(([t, c]) => t.length > 2 && !STOP.has(t) && c / N > 0.5).sort((a, b) => b[1] - a[1]).slice(0, 20).map(x => x[0]);
