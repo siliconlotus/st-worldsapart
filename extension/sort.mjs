@@ -15,7 +15,7 @@ export const TIER_DEFS = {
     sticky:   { label: 'Sticky',   test: e => !e.disable && Number(e.sticky) > 0 },
     keyword:  { label: 'Keyword',  test: e => !e.disable && !e.vectorized },
     vector:   { label: 'Vector',   test: e => !e.disable && e.vectorized },
-    disabled: { label: 'Disabled', test: e => !!e.disable },
+    disabled: { label: 'Disabled Entries', test: e => !!e.disable },
 };
 const DEFAULT_TIER_ORDER = ['constant', 'sticky', 'keyword', 'vector', 'disabled'];
 // Keep a persisted config valid across versions: drop unknown ids, append any missing known tier (enabled).

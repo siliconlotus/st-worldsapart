@@ -34,7 +34,9 @@ const buildCtxPanel = (items, x, y, depth, mount) => {
             row.addEventListener('click', ev => { ev.stopPropagation(); open(); });   // click also opens (touch / diagonal-miss)
         } else {
             row.addEventListener('mouseenter', () => { while (ctxPanels.length > depth + 1) ctxPanels.pop().remove(); });   // entering a childless row drops any open submenu
-            row.addEventListener('click', () => { closeCtx(); it.fn?.(); });
+            // Panels mount on document.body, so a bubbling click reads as "outside the drawer" to ST's
+            // autoclose handler and collapses the Extensions panel. Stop here (parent rows already do).
+            row.addEventListener('click', ev => { ev.stopPropagation(); closeCtx(); it.fn?.(); });
         }
         menu.append(row);
     }
