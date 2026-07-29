@@ -65,4 +65,59 @@ assert.strictEqual(ss.canon("Brass Orrery's"), 'brass orrery', 'canon folds case
 assert.strictEqual(ss.dfSubstr('home'), 5, 'dfSubstr counts entries whose text contains the term');
 assert.ok(Array.isArray(ss.avoid), 'avoid list returned for the LLM prompt');
 
+// Over-shared keys: flagged on how many entries LIST the key, independent of how often it appears in
+// their TEXT. "astronaut" sits in one entry's prose but is keyed on all 12, so the content-frequency
+// flags can't see it. Needs >= KEY_MIN_COMMON_ENTRIES entries for the ratio to mean anything.
+const sharedBook = { entries: Object.fromEntries([...Array(12)].map((_, i) => [i, {
+    uid: i,
+    key: i === 0 ? ['astronaut', 'moonwalk'] : ['astronaut'],
+    content: i === 0 ? 'The astronaut walked. A moonwalk followed. Astronaut again.' : 'Unrelated prose about weather and bread.',
+}])) };
+const sharedOpts = { scanKeyword: true, scanVectorized: true, scanConstant: true, includeInactive: true, pruneDead: false, pruneCommon: true, pruneShort: false, pruneShared: true, ignoreProper: false, stickySkipCommon: true, tooCommon: KEY_TOO_COMMON, minLength: KEY_MIN_LENGTH, sharedKeys: 0.75 };
+{
+    const s = buildKeyPruneScan(sharedBook, sharedOpts, new Set());
+    const row = s.classifyEntry(sharedBook.entries[5]).find(r => r.key === 'astronaut');
+    assert.ok(row, '"astronaut" flagged though it appears in only one entry\'s text');
+    assert.strictEqual(row.flag, 'shared', 'flagged as shared, not as frequent');
+    assert.strictEqual(row.dk, 12, 'dk counts entries that LIST the key');
+    assert.strictEqual(s.reasonOf(row).text, 'shared (100%)', 'reason reports the share percentage');
+    // 100% >= threshold -> red, same banding as the frequency flag.
+    assert.strictEqual(s.reasonOf(row).color, s.reasonOf({ flag: 'too common', dc: 12 }).color, 'severity banding matches frequent');
+    // The one-entry key is untouched by the shared flag.
+    assert.ok(!s.classifyEntry(sharedBook.entries[0]).some(r => r.key === 'moonwalk' && r.flag === 'shared'), 'a key on one entry is not over-shared');
+}
+{
+    const off = buildKeyPruneScan(sharedBook, { ...sharedOpts, pruneShared: false }, new Set());
+    assert.ok(!off.classifyEntry(sharedBook.entries[5]).length, 'the flag is disableable');
+}
+{
+    // Between 0.75x and 1x the threshold is the yellow danger zone; below 0.75x nothing fires.
+    const hi = buildKeyPruneScan(sharedBook, { ...sharedOpts, sharedKeys: 1 }, new Set());
+    assert.strictEqual(hi.reasonOf(hi.classifyEntry(sharedBook.entries[5])[0]).color, '#e06c6c', '100% share at threshold 100% is red');
+    const tiny = { entries: Object.fromEntries([...Array(9)].map((_, i) => [i, { uid: i, key: ['astronaut'], content: 'x' }])) };
+    const small = buildKeyPruneScan(tiny, sharedOpts, new Set());
+    assert.ok(!small.classifyEntry(tiny.entries[0]).some(r => r.flag === 'shared'), 'skipped below KEY_MIN_COMMON_ENTRIES');
+}
+
+// classifyEntry must honour the scan's entry-class scope, not just the returned `entries` list —
+// the Studio explorer iterates its OWN list and asks per entry, so a scope-blind classifier keeps
+// flagging classes the user just told it to skip.
+const scopeBook = { entries: {
+    0: { uid: 0, key: ['zzzdead'], content: 'nothing', constant: true },
+    1: { uid: 1, key: ['zzzdead'], content: 'nothing', vectorized: true },
+    2: { uid: 2, key: ['zzzdead'], content: 'nothing' },
+    3: { uid: 3, key: ['zzzdead'], content: 'nothing', disable: true },
+} };
+const scopeOpts = { scanKeyword: true, scanVectorized: true, scanConstant: true, includeInactive: true, pruneDead: true, pruneCommon: true, pruneShort: true, ignoreProper: false, stickySkipCommon: true, tooCommon: 0.5, minLength: 4 };
+const scoped = (over) => {
+    const s = buildKeyPruneScan(scopeBook, { ...scopeOpts, ...over }, new Set());
+    return Object.values(scopeBook.entries).filter(e => s.classifyEntry(e).length).map(e => e.uid);
+};
+assert.deepStrictEqual(scoped({}), [0, 1, 2, 3], 'all classes flagged when all are in scope');
+assert.deepStrictEqual(scoped({ scanConstant: false }), [1, 2, 3], 'constants drop out when unscanned');
+assert.deepStrictEqual(scoped({ scanVectorized: false }), [0, 2, 3], 'vectorized drop out when unscanned');
+// uid 3 is disabled AND keyword-class (disable is orthogonal to class), so scanKeyword off drops it too.
+assert.deepStrictEqual(scoped({ scanKeyword: false }), [0, 1], 'keyword entries drop out when unscanned');
+assert.deepStrictEqual(scoped({ includeInactive: false }), [0, 1, 2], 'disabled drop out when inactive excluded');
+
 console.log('keyword-extract-check: ok');

@@ -9,7 +9,7 @@ import { escapeHtml, splitRecursive } from '../../../../utils.js';
 import { Popup, POPUP_TYPE, POPUP_RESULT } from '../../../../popup.js';
 import { ConnectionManagerRequestService } from '../../../shared.js';
 import { runState, settings } from './state.mjs';
-import { KEY_TOO_COMMON, KEY_MIN_LENGTH, buildKeyPruneScan as buildKeyPruneScanCore, buildKeySuggest, buildKeyPrompt, classifyLlmCand, parseKeyList } from './keyword-core.mjs';
+import { KEY_TOO_COMMON, KEY_MIN_LENGTH, KEY_SHARED, buildKeyPruneScan as buildKeyPruneScanCore, buildKeySuggest, buildKeyPrompt, classifyLlmCand, parseKeyList } from './keyword-core.mjs';
 import { showEntryText } from './ui-widgets.mjs';
 
 /** buildKeyPruneScan with core's world-info match flags injected. A wrapper (not a bound value) so
@@ -29,8 +29,8 @@ const titleOf = e => (e.comment && e.comment.trim()) ? e.comment.trim() : `UID $
  * case-sensitive / whole-word flags; toggling whole-word re-runs that entry's short-key check.
  * Every count honours the owning entry's match flags via countKey, so a whole-word entry's short
  * key can't collide and isn't flagged, and short rows show whole-word / total hits. Reasons are
- * colour-graded by severity. Flagging looks only at a key's own text frequency, not at whether the
- * key is shared across other entries.
+ * colour-graded by severity. Two independent frequency axes are flagged: how often a key appears in
+ * entry TEXT (firing rate) and how many entries LIST it (activation breadth).
  */
 export async function keywordScoresReport() {
     const books = [...(world_names ?? [])].sort((a, b) => a.localeCompare(b));
@@ -43,7 +43,7 @@ export async function keywordScoresReport() {
 
     // Carried across the Back loop so a return trip keeps the last choices.
     let book = [...runState.attachedWorlds].find(w => books.includes(w)) ?? books[0];
-    let opts = { scanKeyword: true, scanVectorized: true, scanConstant: true, includeInactive: false, pruneDead: true, pruneCommon: true, pruneShort: true, ignoreProper: false, stickySkipCommon: true, tooCommon: KEY_TOO_COMMON, minLength: KEY_MIN_LENGTH };
+    let opts = { scanKeyword: true, scanVectorized: true, scanConstant: true, includeInactive: false, pruneDead: true, pruneCommon: true, pruneShort: true, pruneShared: true, ignoreProper: false, stickySkipCommon: true, tooCommon: KEY_TOO_COMMON, minLength: KEY_MIN_LENGTH, sharedKeys: KEY_SHARED };
 
     // Phase 1: book + scan options. Resolves true to proceed, false to close out.
     const showOptions = async () => {
@@ -62,6 +62,7 @@ export async function keywordScoresReport() {
             + '<div style="margin-top:0.5em;font-weight:bold;">Recommend pruning</div>'
             + `<label class="checkbox_label"><input type="checkbox" class="wa-pruneDead"${chk(opts.pruneDead)}><span>Dead keys (in no entry\'s text)</span></label>`
             + `<label class="checkbox_label"><input type="checkbox" class="wa-pruneCommon"${chk(opts.pruneCommon)}><span>Too-common keys (in &gt;<input type="number" class="wa-tooCommon text_pole" ${numStyle} min="1" max="100" step="1" value="${Math.round(opts.tooCommon * 100)}">% of entries)</span></label>`
+            + `<label class="checkbox_label"><input type="checkbox" class="wa-pruneShared"${chk(opts.pruneShared)}><span>Over-shared keys (listed by &gt;<input type="number" class="wa-sharedKeys text_pole" ${numStyle} min="1" max="100" step="1" value="${Math.round(opts.sharedKeys * 100)}">% of entries — one hit activates them all)</span></label>`
             + `<label class="checkbox_label"><input type="checkbox" class="wa-pruneShort"${chk(opts.pruneShort)}><span>Short keys (&lt;<input type="number" class="wa-minLen text_pole" ${numStyle} min="1" step="1" value="${opts.minLength}"> chars — substring false positives)</span></label>`
             + `<label class="checkbox_label"><input type="checkbox" class="wa-ignoreProper"${chk(opts.ignoreProper)}><span>Ignore proper nouns (don\'t flag a Name as dead)</span></label>`
             + `<label class="checkbox_label"><input type="checkbox" class="wa-stickySkip"${chk(opts.stickySkipCommon)}><span>Spare sticky entries from lorebook-common (a reference sheet\'s bare-name trigger is meant to be ubiquitous)</span></label>`
@@ -71,6 +72,7 @@ export async function keywordScoresReport() {
             onClosing: pp => {
                 if (pp.result === POPUP_RESULT.AFFIRMATIVE) {
                     const pct = Number(w.querySelector('.wa-tooCommon').value);
+                    const shared = Number(w.querySelector('.wa-sharedKeys').value);
                     const minLen = Number(w.querySelector('.wa-minLen').value);
                     book = w.querySelector('.wa-book').value;
                     opts = {
@@ -81,9 +83,11 @@ export async function keywordScoresReport() {
                         pruneDead: w.querySelector('.wa-pruneDead').checked,
                         pruneCommon: w.querySelector('.wa-pruneCommon').checked,
                         pruneShort: w.querySelector('.wa-pruneShort').checked,
+                        pruneShared: w.querySelector('.wa-pruneShared').checked,
                         ignoreProper: w.querySelector('.wa-ignoreProper').checked,
                         stickySkipCommon: w.querySelector('.wa-stickySkip').checked,
                         tooCommon: pct > 0 && pct <= 100 ? pct / 100 : KEY_TOO_COMMON,
+                        sharedKeys: shared > 0 && shared <= 100 ? shared / 100 : KEY_SHARED,
                         minLength: minLen >= 1 ? Math.floor(minLen) : KEY_MIN_LENGTH,
                     };
                 }
@@ -145,7 +149,7 @@ export async function keywordScoresReport() {
 
         const renderHead = () => {
             const nVis = bodyEl.querySelectorAll('.wa-row-cb').length;
-            const recs = [opts.pruneDead && 'dead', opts.pruneCommon && `too-common >${+(opts.tooCommon * 75).toFixed(1)}% (red >${Math.round(opts.tooCommon * 100)}%)`, opts.pruneShort && `short <${opts.minLength}`].filter(Boolean).join(', ');
+            const recs = [opts.pruneDead && 'dead', opts.pruneCommon && `too-common >${+(opts.tooCommon * 75).toFixed(1)}% (red >${Math.round(opts.tooCommon * 100)}%)`, opts.pruneShared && `over-shared >${+(opts.sharedKeys * 75).toFixed(1)}% (red >${Math.round(opts.sharedKeys * 100)}%)`, opts.pruneShort && `short <${opts.minLength}`].filter(Boolean).join(', ');
             const doc = `Scan: ${opts.includeInactive ? 'all entries' : 'active entries'} · ${recs || 'nothing'}${opts.ignoreProper ? ' · sparing proper-noun dead' : ''}`;
             const list = [...ignoreSet];
             const ign = list.length ? ` · <span style="opacity:0.7;">${list.length} ignored (${escapeHtml(list.join(', '))}) <a class="wa-clear" style="cursor:pointer;text-decoration:underline;">clear</a></span>` : '';
@@ -620,5 +624,5 @@ export async function keywordSuggestReport() {
 
 // Studio scans every entry (all modes, active + inactive) so every entry's keywords get a verdict;
 // suggestions use the pruner's own dfCeil so a suggested key can't be one the pruner would then flag.
-export const STUDIO_PRUNE_OPTS = { scanKeyword: true, scanVectorized: true, scanConstant: true, includeInactive: true, pruneDead: true, pruneCommon: true, pruneShort: true, ignoreProper: false, stickySkipCommon: true, tooCommon: KEY_TOO_COMMON, minLength: KEY_MIN_LENGTH };
+export const STUDIO_PRUNE_OPTS = { scanKeyword: true, scanVectorized: true, scanConstant: true, includeInactive: true, pruneDead: true, pruneCommon: true, pruneShort: true, pruneShared: true, ignoreProper: false, stickySkipCommon: true, tooCommon: KEY_TOO_COMMON, minLength: KEY_MIN_LENGTH, sharedKeys: KEY_SHARED };
 export const STUDIO_SUGGEST_OPTS = { dfCeil: 0.15, maxN: 4, excludeDates: true, excludeShort: true, onlyActive: false, cap: 8, llmChunk: 5000 };

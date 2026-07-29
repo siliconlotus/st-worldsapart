@@ -17,6 +17,14 @@ export const KEY_MIN_COMMON_ENTRIES = 10;
  * false-positive source. Core trims keys before matching, so this measures the trimmed length. */
 export const KEY_MIN_LENGTH = 4;
 
+/** Share of the book that may LIST a key before it's flagged. This is activation breadth, a different
+ * defect from KEY_TOO_COMMON's firing rate: a key on most entries drags them all in on one hit, however
+ * rarely it fires. Deliberately far above the frequency cut, because a shared trigger is usually
+ * intentional — a character name on every entry about that character is how continuous memory is
+ * authored — so only near-total sharing (where the key can no longer discriminate at all, making it a
+ * constant that fires unpredictably) is worth flagging. */
+export const KEY_SHARED = 0.75;
+
 /** Baseline English-frequency cut for the too-common flag. A key this common in general English
  * over-fires against the CHAT, not just other entries — a signal lorebook df alone can't see.
  * Sticky reference sheets tolerate more (a bare-name trigger is meant to be ubiquitous), so they
@@ -45,19 +53,32 @@ export function buildKeyPruneScan(data, opts, ignoreSet, { caseSensitiveDefault 
     const looksProper = k => k.split(/\s+/).every(t => /^[A-Z]/.test(t));   // Title Case = a name
 
     // constant / vector / keyword are exclusive; sticky rides orthogonally on any of them.
-    const allEntries = Object.values(data.entries);
-    const entries = allEntries.filter(e => {
+    // Pure predicate, so classifyEntry can re-test it: callers that iterate their OWN entry list
+    // (the Studio explorer) would otherwise keep flagging entry classes the scan was told to skip.
+    const inScope = e => {
         if (!opts.includeInactive && e.disable) return false;
         if (e.constant) return opts.scanConstant;
         if (e.vectorized) return opts.scanVectorized;
         return opts.scanKeyword;
-    });
+    };
+    const allEntries = Object.values(data.entries);
+    const entries = allEntries.filter(inScope);
     const nE = entries.length;                                  // scan targets (which keys get audited)
     // Document frequency is measured over the WHOLE book, not just the scanned subset, so "how common is
     // this term" is stable regardless of scan scope — and a key that lives only in an excluded entry
     // (e.g. a constant) isn't falsely flagged dead.
     const contents = allEntries.map(e => String(e.content ?? ''));
     const nBook = allEntries.length;                            // df denominator
+
+    // Key-share frequency: how many entries LIST each key. Same whole-book denominator as content df,
+    // for the same reason — "how widely is this term used as a trigger" shouldn't move with scan scope.
+    // Deduped per entry so a key repeated within one entry counts once.
+    const dfKeys = new Map();
+    for (const e of allEntries) {
+        for (const k of new Set((Array.isArray(e.key) ? e.key : []).map(x => String(x).trim().toLowerCase()))) {
+            if (k) dfKeys.set(k, (dfKeys.get(k) ?? 0) + 1);
+        }
+    }
 
     // Occurrence scan under a key's effective flags — the semantics core activates with (countKey
     // mirrors matchKeys). Cached per (key, caseSensitive, wholeWord), so re-analysis after a flag
@@ -119,10 +140,16 @@ export function buildKeyPruneScan(data, opts, ignoreSet, { caseSensitiveDefault 
         if (opts.pruneCommon && !/\s/.test(k) && (sticky ? COMMON_HEAD : COMMON_WORDS).has(k.toLowerCase())) return { flag: 'too common', dc, eng: true };
         if (dc === 0 && opts.pruneDead && !(opts.ignoreProper && looksProper(k))) return { flag: 'dead', dc };
         if (nBook >= KEY_MIN_COMMON_ENTRIES && dc / nBook > opts.tooCommon * 0.75 && opts.pruneCommon) return { flag: 'too common', dc };
+        // Activation breadth, checked after firing rate: a key can be rare in the prose yet listed on
+        // most entries, which the content-df flags above can't see. Same small-corpus guard, since
+        // "75% of 4 entries" is as meaningless here as it is there.
+        const dk = dfKeys.get(k.toLowerCase()) ?? 0;
+        if (nBook >= KEY_MIN_COMMON_ENTRIES && dk / nBook > opts.sharedKeys * 0.75 && opts.pruneShared) return { flag: 'shared', dc, dk };
         if (k.length < opts.minLength && !ww && opts.pruneShort) return { flag: 'short', dc, clean: strictClean(k, cs), total: scan(k, cs, false).total };
         return null;
     };
     const classifyEntry = e => {
+        if (!inScope(e)) return [];
         const cs = effCase(e), ww = effWhole(e);
         const out = [];
         const sticky = Number(e.sticky) > 0;
@@ -143,6 +170,10 @@ export function buildKeyPruneScan(data, opts, ignoreSet, { caseSensitiveDefault 
             if (p.eng) return { text: 'common', color: RED };
             const r = p.dc / nBook, t = opts.tooCommon;
             return { text: `frequent (${Math.round(r * 100)}%)`, color: r >= t ? RED : YEL };   // ≥threshold red, danger zone (>0.75×) yellow
+        }
+        if (p.flag === 'shared') {
+            const r = p.dk / nBook, t = opts.sharedKeys;
+            return { text: `shared (${Math.round(r * 100)}%)`, color: r >= t ? RED : YEL };     // same banding as frequent
         }
         const ratio = p.total ? p.clean / p.total : 0;
         return { text: `short (${p.clean}/${p.total} clean)`, color: ratio >= 1 ? GRN : ratio <= 1 / 3 ? RED : YEL };
