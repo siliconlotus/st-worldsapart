@@ -32,19 +32,19 @@ import { SlashCommand } from '../../../slash-commands/SlashCommand.js';
 import { ARGUMENT_TYPE, SlashCommandArgument } from '../../../slash-commands/SlashCommandArgument.js';
 import { ConnectionManagerRequestService } from '../../shared.js';
 import { getStringHash, splitRecursive, escapeRegex, escapeHtml, getCharaFilename } from '../../../utils.js';
-import { COMMON_WORDS } from './commonwords.js';
-import { pluginFingerprint } from './fingerprint.mjs';
-import * as ranking from './ranking.mjs';
-import * as selection from './selection.mjs';
+import { COMMON_WORDS } from './plugin/commonwords.js';
+import { pluginFingerprint } from './plugin/fingerprint.mjs';
+import * as ranking from './extension/ranking.mjs';
+import * as selection from './extension/selection.mjs';
 import { Popup, POPUP_TYPE, POPUP_RESULT } from '../../../popup.js';
 import { getTokenCountAsync } from '../../../tokenizers.js';
 import { textgen_types, textgenerationwebui_settings } from '../../../textgen-settings.js';
 import { oai_settings } from '../../../openai.js';
 
-import { runState, defaultSettings, settings, ensureSettings } from './state.mjs';
-import { ensureStudioStyle, makeSortControl, makeTierEditor, showCtxMenu, showEntryText, wiGlyph, wiTooltip } from './ui-widgets.mjs';
-import { PRESENTATION_ALIAS, SORT_FNS, normPresentation, presentationBaseLabel, presentationLabel, reconcileTiers, tierRank, wiTitleOf } from './sort.mjs';
-import { buildKeyPruneScan, buildKeySuggest, isDateLike, llmKeyCandidates, keywordScoresReport, keywordSuggestReport, STUDIO_PRUNE_OPTS, STUDIO_SUGGEST_OPTS } from './keyword-tools.mjs';
+import { runState, defaultSettings, settings, ensureSettings } from './extension/state.mjs';
+import { ensureStudioStyle, makeSortControl, makeTierEditor, showCtxMenu, showEntryText, wiGlyph, wiTooltip } from './extension/ui-widgets.mjs';
+import { PRESENTATION_ALIAS, SORT_FNS, normPresentation, presentationBaseLabel, presentationLabel, reconcileTiers, tierRank, wiTitleOf } from './extension/sort.mjs';
+import { buildKeyPruneScan, buildKeySuggest, isDateLike, llmKeyCandidates, keywordScoresReport, keywordSuggestReport, STUDIO_PRUNE_OPTS, STUDIO_SUGGEST_OPTS } from './extension/keyword-tools.mjs';
 
 /** Base value for the rewritten `order` sequence. WA rewrites every activated entry's order,
  * so only the relative index matters — the base is a fixed pad with no other writer to collide with. */
@@ -169,7 +169,7 @@ async function computeSourceFingerprint() {
     try {
         // Fixed order — must match server.js FINGERPRINT (scoring, vector, lexical, commonwords, server/index).
         const [scoring, vector, lexical, common, server] = await Promise.all(
-            ['./scoring.mjs', './vector.mjs', './lexical.mjs', './commonwords.js', './server.js'].map(f => fetch(new URL(f, import.meta.url)).then(r => r.text())),
+            ['./plugin/scoring.mjs', './plugin/vector.mjs', './plugin/lexical.mjs', './plugin/commonwords.js', './plugin/server.js'].map(f => fetch(new URL(f, import.meta.url)).then(r => r.text())),
         );
         runState.sourceFP = pluginFingerprint(scoring, vector, lexical, common, server);
     } catch { runState.sourceFP = null; }

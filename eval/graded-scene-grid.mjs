@@ -14,10 +14,10 @@
 //        [--depth 5] [--index <index.json>] [--validate <capture.json>]
 import { readFileSync } from 'node:fs';
 import { basename } from 'node:path';
-import { scoreCollection, selectTopK } from './scoring.mjs';
-import { buildLexical } from './lexical.mjs';
-import { corpusMean, norm } from './vector.mjs';
-import * as ranking from './ranking.mjs';   // shared client tuning layer — same code the extension runs
+import { scoreCollection, selectTopK } from '../plugin/scoring.mjs';
+import { buildLexical } from '../plugin/lexical.mjs';
+import { corpusMean, norm } from '../plugin/vector.mjs';
+import * as ranking from '../extension/ranking.mjs';   // shared client tuning layer — same code the extension runs
 
 const arg = k => { const i = process.argv.indexOf(k); return i >= 0 ? process.argv[i + 1] : null; };
 const CHAT = arg('--chat'), BOOK = arg('--book'), GRADES = arg('--grades'), VALIDATE = arg('--validate');

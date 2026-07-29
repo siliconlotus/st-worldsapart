@@ -6,7 +6,7 @@
 import assert from 'node:assert';
 import { readFileSync } from 'node:fs';
 
-const src = readFileSync(new URL('./worldsapart.js', import.meta.url), 'utf8');
+const src = readFileSync(new URL('../worldsapart.js', import.meta.url), 'utf8');
 const slice = name => { const i = src.indexOf(`function ${name}`); return src.slice(i, src.indexOf('\n}\n', i) + 2); };
 const planUidReindex = new Function(slice('planUidReindex') + '; return planUidReindex;')();
 

@@ -2,7 +2,7 @@
 // Pulls countKey out of worldsapart.js by source slice — worldsapart.js only loads in a browser.
 import { readFileSync } from 'node:fs';
 const escapeRegex = s => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-const src = readFileSync(new URL('./worldsapart.js', import.meta.url), 'utf8');
+const src = readFileSync(new URL('../worldsapart.js', import.meta.url), 'utf8');
 const i = src.indexOf('function countKey');
 const countKey = new Function('escapeRegex', src.slice(i, src.indexOf('\n}\n', i) + 2) + '; return countKey;')(escapeRegex);
 const eq = (got, want, label) => console.log(`${got === want ? 'ok  ' : 'FAIL'} ${label}: ${got}${got === want ? '' : ` (want ${want})`}`);

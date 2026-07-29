@@ -2,7 +2,7 @@
 // Slices bm25Scores + tokenize out of the plugin (index.js loads as a server module with
 // ST-internal imports; slicing keeps this check dependency-free) and injects a stub COMMON_WORDS.
 import { readFileSync } from 'node:fs';
-const src = readFileSync(new URL('../../../../../plugins/worlds-apart/index.js', import.meta.url), 'utf8');
+const src = readFileSync(new URL('../../../../../../plugins/worlds-apart/index.js', import.meta.url), 'utf8');
 const slice = name => { const i = src.indexOf(`function ${name}`); return src.slice(i, src.indexOf('\n}\n', i) + 2); };
 const COMMON_WORDS = new Set(['said', 'walk']);   // "said" common, "kidnap" not
 const bm25Scores = new Function('COMMON_WORDS', 'DEFAULT_K1', 'DEFAULT_B',

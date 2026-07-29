@@ -1,7 +1,7 @@
 // state.mjs — the settings seam shared by every WA module: the settings key, the defaults, and the
 // settings() accessor. Feature modules import this instead of reaching into ST's extension_settings, so
 // there is one owner of what a setting means and one place to read it.
-import { extension_settings } from '../../../extensions.js';
+import { extension_settings } from '../../../../extensions.js';
 
 export const MODULE_NAME = 'worldsApart';
 

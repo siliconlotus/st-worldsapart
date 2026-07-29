@@ -2,7 +2,7 @@
 // The plugin, scoring math, and common-word list all live in this repo so the extension and its
 // server half travel as one unit; /plugins/worlds-apart/ is a generated COPY, never hand-edited.
 //
-// Run from this extension's folder after editing server.js / scoring.mjs / commonwords.js,
+// Run from this extension's folder after editing anything in plugin/ (server.js, the scoring math, etc.),
 // then restart SillyTavern (the folder name doesn't matter — the script locates itself):
 //   node deploy-plugin.mjs
 //
@@ -16,7 +16,7 @@ const DEST = path.resolve(SRC, '../../../../../plugins/worlds-apart');
 const LINK = process.argv.includes('--link');
 
 // server.js is the source; ST's plugin loader expects the package `main`, index.js.
-const FILES = [['server.js', 'index.js'], ['scoring.mjs', 'scoring.mjs'], ['vector.mjs', 'vector.mjs'], ['lexical.mjs', 'lexical.mjs'], ['fingerprint.mjs', 'fingerprint.mjs'], ['commonwords.js', 'commonwords.js']];
+const FILES = [['plugin/server.js', 'index.js'], ['plugin/scoring.mjs', 'scoring.mjs'], ['plugin/vector.mjs', 'vector.mjs'], ['plugin/lexical.mjs', 'lexical.mjs'], ['plugin/fingerprint.mjs', 'fingerprint.mjs'], ['plugin/commonwords.js', 'commonwords.js']];
 
 const PACKAGE_JSON = JSON.stringify({
     name: 'worlds-apart-plugin',

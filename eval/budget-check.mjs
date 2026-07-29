@@ -1,7 +1,7 @@
 // Checks the nested entry caps: vector ⊆ dynamic ⊆ all.
 // Pulls applyBudget out of worldsapart.js by source slice — worldsapart.js only loads in a browser.
 import { readFileSync } from 'node:fs';
-const src = readFileSync(new URL('./worldsapart.js', import.meta.url), 'utf8');
+const src = readFileSync(new URL('../worldsapart.js', import.meta.url), 'utf8');
 const start = src.indexOf('async function applyBudget');
 const body = src.slice(start, src.indexOf('\n}', start) + 2);
 const applyBudget = new Function(`${body}; return applyBudget;`)();

@@ -2,14 +2,14 @@
 // TF-IDF / LLM key suggester (buildKeySuggest + the generateText->llmKeyCandidates pipeline), plus the two
 // wand-menu reports that surface them. The Lorebook Studio imports the same scan/suggest logic and the
 // default opts, so this is one owner for keyword analysis instead of a copy in each place.
-import { generateRaw, saveSettingsDebounced } from '../../../../script.js';
-import { extension_settings } from '../../../extensions.js';
-import { loadWorldInfo, saveWorldInfo, reloadEditor, world_names } from '../../../world-info.js';
-import { escapeHtml, splitRecursive } from '../../../utils.js';
-import { Popup, POPUP_TYPE, POPUP_RESULT } from '../../../popup.js';
-import { ConnectionManagerRequestService } from '../../shared.js';
+import { generateRaw, saveSettingsDebounced } from '../../../../../script.js';
+import { extension_settings } from '../../../../extensions.js';
+import { loadWorldInfo, saveWorldInfo, reloadEditor, world_names } from '../../../../world-info.js';
+import { escapeHtml, splitRecursive } from '../../../../utils.js';
+import { Popup, POPUP_TYPE, POPUP_RESULT } from '../../../../popup.js';
+import { ConnectionManagerRequestService } from '../../../shared.js';
 import { runState, settings } from './state.mjs';
-import { COMMON_WORDS } from './commonwords.js';
+import { COMMON_WORDS } from '../plugin/commonwords.js';
 import { countKey } from './ranking.mjs';
 import { showEntryText } from './ui-widgets.mjs';
 

@@ -6,10 +6,10 @@
 // Run: node keyword-extract-check.mjs
 import assert from 'node:assert';
 import { readFileSync } from 'node:fs';
-import { COMMON_WORDS } from './commonwords.js';
+import { COMMON_WORDS } from '../plugin/commonwords.js';
 
 const escapeRegex = s => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-const src = readFileSync(new URL('./worldsapart.js', import.meta.url), 'utf8');
+const src = readFileSync(new URL('../worldsapart.js', import.meta.url), 'utf8');
 // Pull a top-level `function NAME` out by source slice (worldsapart.js only loads in a browser).
 const slice = name => { const i = src.indexOf(`function ${name}`); return src.slice(i, src.indexOf('\n}\n', i) + 2); };
 

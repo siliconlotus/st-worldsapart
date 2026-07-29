@@ -1,6 +1,6 @@
 // Self-test for the shared cutoff. Imports the real selection.mjs (no more string-slicing worldsapart.js)
 // and maps each test's cfg into the injected settings.
-import { cutRetrieved as cut } from './selection.mjs';
+import { cutRetrieved as cut } from '../extension/selection.mjs';
 let cfg;
 const cutRetrieved = (ranked) => cut(ranked, {
     mode: cfg.vectorCutoff,
