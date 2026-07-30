@@ -18,19 +18,6 @@ export const defaultSettings = {
     scoreVectorKeys: false,
     /** Characters per chunk. Entries are chunked for MATCHING only; the whole entry is still inserted. */
     chunkSize: 800,
-    /**
-     * Weight for BM25-over-KEYS in the layout fusion, separate from lexicalWeight (BM25-over-chunk-text).
-     *
-     * null = follow lexicalWeight, which is what every install did before this existed and is what keeps an
-     * upgrade byte-identical. Set it when a book's keywords deserve different trust than its prose: measured
-     * optima across three graded scenes were (text 0.5, keys 3) for a hand-curated book, (1.5, 0) for one
-     * whose keys are auto-generated scene detail, and (1.5, 1) for a third — the keys signal correlates
-     * 0.79 / 0.11 / 0.39 with human grades on those books, so one weight cannot serve them.
-     *
-     * Only reaches the layout ranking. fuseRetrieval (what the cutoff cuts) scores vector + text and never
-     * sees keys at all.
-     */
-    keywordWeight: null,
     /** 'paragraph' keeps semantic boundaries; 'length' fills to chunkSize (chunking.mjs splitRecursive). */
     chunkMode: 'paragraph',
     /**
@@ -246,6 +233,19 @@ export const defaultSettings = {
      */
     lexicalWeight: 1,
     /**
+     * Weight for BM25-over-KEYS in the layout fusion, separate from lexicalWeight (BM25-over-chunk-text).
+     *
+     * null = follow lexicalWeight, which is what every install did before this existed and is what keeps an
+     * upgrade byte-identical. Set it when a book's keywords deserve different trust than its prose: measured
+     * optima across three graded scenes were (text 0.5, keys 3) for a hand-curated book, (1.5, 0) for one
+     * whose keys are auto-generated scene detail, and (1.5, 1) for a third — the keys signal correlates
+     * 0.79 / 0.11 / 0.39 with human grades on those books, so one weight cannot serve them.
+     *
+     * Only reaches the layout ranking. fuseRetrieval (what the cutoff cuts) scores vector + text and never
+     * sees keys at all.
+     */
+    keywordWeight: null,
+    /**
      * Fold each entry's authored Order into the fused score as an extra RRF rank (higher order =
      * higher priority, matching ST where order is budgetPriority). Off by default; for books that
      * use Order as a priority proxy. Order remains the presentation/retention tiebreak regardless.
@@ -348,7 +348,9 @@ export function ensureSettings() {
  * the debug commands toggle verboseRun/dryRunInProgress; the panel + debug read them back.
  */
 export const runState = {
-    lastScores: new Map(),        // vector scores from the last retrieval, keyed `${world}.${uid}`
+    // Keyed `${world}.${uid}` — ST CORE'S format, which rankActivated receives and looks up here. Not a
+    // candidate for the US separator; see the note in worldsapart.js syncWorld.
+    lastScores: new Map(),        // vector scores from the last retrieval
     lastTextScores: new Map(),    // BM25-over-text scores, same keys
     lastLayout: [],               // final layout of the last scan, for /wa-dry
     lastQuery: '',                // last retrieval query text, bundled by /wa-grade

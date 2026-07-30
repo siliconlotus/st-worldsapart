@@ -419,7 +419,8 @@ export function fuseRetrieval(scores, { rrfK: k, retrievalMode: mode, lexicalWei
  * @param {number} cfg.rrfK RRF constant (settings().rrfK)
  * @param {string} cfg.retrievalMode 'hybrid' | 'vector' | 'lexical'
  * @param {boolean} cfg.weightByOrder Fuse an authored-order rank too
- * @param {number} cfg.lexicalWeight BM25 vs vector weight in fusion
+ * @param {number} cfg.lexicalWeight BM25-over-TEXT vs vector weight in fusion
+ * @param {number|null} [cfg.keywordWeight] BM25-over-KEYS weight; null/unset follows lexicalWeight
  */
 export function fuseRanks(items, { rrfK: k, retrievalMode: mode, weightByOrder, lexicalWeight, keywordWeight }) {
     // TEXT AND KEYS GET SEPARATE WEIGHTS, because they are separate signals that disagree about which books
@@ -432,7 +433,12 @@ export function fuseRanks(items, { rrfK: k, retrievalMode: mode, weightByOrder, 
     // Undefined mirrors lexicalWeight, so this is byte-identical for anyone who has not set it. That matters
     // more than a tidy default: a user running lexicalWeight 1.5 would otherwise see their keyword weight
     // silently drop to the shipped 1 on upgrade.
-    const keyW = keywordWeight ?? lexicalWeight;
+    //
+    // isFinite, not `??`: NaN is neither null nor undefined, so a `??` would pass it straight through and
+    // every fused score below becomes NaN — which does not throw, it just makes the sort comparator return
+    // NaN for every pair and silently leaves the ranking in input order. Settings arrive from persisted
+    // JSON and imported configs, not only from the numeric input that produced them.
+    const keyW = Number.isFinite(keywordWeight) ? keywordWeight : lexicalWeight;
     const rankMap = (list) => new Map(list.map((item, index) => [item.key, index + 1]));
 
     const byVector = mode === 'lexical'

@@ -1,9 +1,10 @@
 // Self-check for the paired estimator (metrics.mjs signTest) and scene.mjs's arm-reuse guard. The scoring
 // half needs a vector index so it can't run here; what CAN be pinned offline is the statistic every claim
 // about a default will rest on, and the exact p-values that set the floor on what single-digit n can say.
-import { signTest } from './metrics.mjs';
+import { eq, signTest } from './metrics.mjs';
 import { sceneParams, ndcg, dcg, nrm, wiTitle, makeGradeOf, makeKeywordScore, scoreScene } from './scene.mjs';
-import { eq } from './metrics.mjs';
+import { rowKey } from '../extension/grading.mjs';
+import { fuseRanks } from '../extension/ranking.mjs';
 
 // --- exact two-sided sign-test p-values. These are the numbers that decide whether a screening hit is
 // reportable, so they are asserted against hand-computed binomials rather than trusted.
@@ -108,7 +109,6 @@ eq(jaccard([], []), 0, 'two empty sets are 0, not NaN');
 eq(jaccard([1], []), 0, 'one empty set is 0');
 eq(jaccard(new Set([1, 2]), new Set([2])), 0.5, 'accepts Sets as well as arrays');
 // Grade-keyed identity: same uid in different books is not the same entry, so it must not read as overlap.
-const { rowKey } = await import('../extension/grading.mjs');
 eq(jaccard([rowKey({ world: 'A', uid: 1 })], [rowKey({ world: 'B', uid: 1 })]), 0,
     'same uid in different books is not shared relevance');
 
@@ -133,7 +133,6 @@ eq(Math.abs(spearman([1, 2, 3, 4], [2, 4, 6, 8]) - 1), 0, 'monotone rescaling is
 // The split exists because the two signals disagree about which books they are good on: measured optima
 // were (text 0.5, keys 3), (1.5, 0) and (1.5, 1) across three scenes, and one coupled knob can reach none
 // of them. Mirroring on null is what keeps an upgrade byte-identical for anyone running LEXW != 1.
-const { fuseRanks } = await import('../extension/ranking.mjs');
 const mkRows = () => [
     { key: 1, score: 0.9, textScore: 10, keywordScore: 1 },
     { key: 2, score: 0.1, textScore: 1, keywordScore: 50 },
@@ -147,7 +146,17 @@ eq(JSON.stringify(fusedWith({ lexicalWeight: 1.5 })) === JSON.stringify(fusedWit
 const keysOff = fusedWith({ lexicalWeight: 1.5, keywordWeight: 0 });
 const keysOn = fusedWith({ lexicalWeight: 1.5, keywordWeight: 1.5 });
 eq(keysOff[1] < keysOn[1], true, 'keywordWeight 0 suppresses the keys contribution rather than mirroring');
-// The keys-heavy row should overtake the vector-heavy one once keys are weighted hard enough.
+// PIN THE ARITHMETIC, not just the ordering. Row 2 overtakes row 1 at keywordWeight 3 by 0.4% — a real
+// margin, but too thin to be the only guard: any change to the fusion formula would flip it silently and
+// the failure would read as "keywordWeight stopped working". Asserting the exact term it contributes says
+// what is actually being tested — the weight multiplies that row's keyword-rank term and nothing else.
 const heavy = fusedWith({ lexicalWeight: 1.5, keywordWeight: 3 });
+const near = (a, b, why) => eq(Math.abs(a - b) < 1e-12, true, why);
+near(heavy[1] - keysOff[1], 3 / (20 + 1), 'keywordWeight scales exactly the keyword-rank term — row 2 is keyword rank 1');
+near(heavy[0] - keysOff[0], 3 / (20 + 2), '...at each row\'s own keyword rank — row 1 is keyword rank 2');
+// Which is what lets it reorder: the same arithmetic, read as a ranking.
 eq(heavy[1] > heavy[0], true, 'a high keywordWeight can promote a keys-dominant entry');
 eq(keysOff[1] < keysOff[0], true, '...and suppressing keys demotes it again');
+// NaN must not reach the fusion: it is neither null nor undefined, so a `??` would pass it through and
+// every fused score becomes NaN — no throw, just a ranking silently left in input order.
+eq(JSON.stringify(fusedWith({ lexicalWeight: 1.5 })), JSON.stringify(fusedWith({ lexicalWeight: 1.5, keywordWeight: NaN })), 'a NaN keywordWeight falls back to lexicalWeight rather than NaN-ing every score');

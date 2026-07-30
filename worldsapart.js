@@ -292,6 +292,9 @@ async function queryCollections(args) {
 // Retrieval
 // ---------------------------------------------------------------------------
 
+/** Unit Separator — see CLAUDE.md. The same literal grading.mjs's rowKey and studio.mjs's rowId join with. */
+const US = '';
+
 /**
  * Chunks entries and brings the collection in sync with them.
  * Chunking is for matching only — activation still emits the whole entry.
@@ -328,7 +331,14 @@ async function syncWorld(world, entries) {
             // — `wanted` below couldn't retire entry A's copy while B still produced the text, `owners`
             // silently overwrote A with B, and the plugin's per-hash dedup dropped one of the two rows.
             // ST core lists and deletes by hash only, so the pair has to live IN the hash.
-            const hash = getStringHash(`${text}${entry.uid}`);
+            const hash = getStringHash(`${text}${entry.uid}`);
+            // DOT, not the US of CLAUDE.md's composite-key rule, and it must stay a dot: this is ST core's
+            // key format, not ours (world-info.js builds `${entry.world}.${entry.uid}` for
+            // allActivatedEntries and externalActivations). rankActivated is handed that map and looks its
+            // keys up in runState.lastScores, so a "tidier" separator here would silently return undefined
+            // for every score — and fuseRanks drops rows whose score is undefined, so the vector signal
+            // would vanish from the layout ranking with nothing thrown. Use grading.mjs's US-separated
+            // rowKey for anything that is ours alone.
             // With uid in the hash, one world yields one owner per hash; still a LIST because identical
             // (text, uid) in two attached books collides, and the cross-world merge concats owners.
             owners.set(hash, [`${entry.world}.${entry.uid}`]);
@@ -449,15 +459,25 @@ async function scoreEntriesUnsafe(searchText, termWeights = null) {
     }
 
     const collectionIds = [];
-    /** @type {Map<number, string[]>} chunk hash -> every owning `${world}.${uid}` (see syncWorld) */
+    /**
+     * `${collectionId}${US}${hash}` -> every owning `${world}.${uid}` in THAT collection (see syncWorld).
+     *
+     * SCOPED BY COLLECTION, because a score only means something inside the corpus it was computed in. A
+     * collection is one book: the plugin centers each one on its own centroid and derives its own BM25 IDF
+     * (plugin/vector.mjs, plugin/lexical.mjs), so two books sharing a paragraph score it differently and
+     * neither number transfers. Keyed by hash alone, a row scored in Foxbridge also credited the Sommers
+     * entry holding the same text, and the max-pooling below handed each of them whichever book flattered
+     * the chunk more — which defeats IDF exactly where it does its job: a phrase that is boilerplate in a
+     * 400-chunk book looks rare in a 10-chunk one, and the max takes the rare reading. Both entries still
+     * get credited when both books are attached; each is now credited from its own corpus.
+     * @type {Map<string, string[]>}
+     */
     const owners = new Map();
 
     for (const world of Object.keys(byWorld)) {
         const synced = await syncWorld(world, byWorld[world]);
         collectionIds.push(synced.collectionId);
-        // CONCAT, not set: worlds are separate collections but one shared hash map, so identical text in two
-        // books has an owner in each and overwriting here would drop one of them.
-        synced.owners.forEach((v, k) => owners.set(k, owners.has(k) ? [...owners.get(k), ...v] : v));
+        synced.owners.forEach((v, k) => owners.set(`${synced.collectionId}${US}${k}`, v));
     }
 
     // ENTRIES to request, not chunks — the plugin pools each entry's best chunk before it cuts (see
@@ -506,15 +526,17 @@ async function scoreEntriesUnsafe(searchText, termWeights = null) {
     // it keeps an un-redeployed plugin (which still returns raw chunks) pooling correctly rather than letting
     // the last chunk of each entry win. `score` is only present if the backend returns it; without that patch
     // we fall back to rank position, which is still correctly ordered within a collection.
-    for (const group of Object.values(results)) {
+    // ENTRIES, not values: the collectionId is the key, and it is half the owner lookup — a chunk's score is
+    // only meaningful against the corpus it was computed in (see `owners`).
+    for (const [collectionId, group] of Object.entries(results)) {
         const metadata = group?.metadata ?? [];
         metadata.forEach((item, index) => {
-            // EVERY owner of the chunk, not one. The store keeps at most one row per hash on an incremental
-            // sync, so a chunk two entries share comes back once; crediting only one of them made the other
-            // unreachable through that text. This is not over-crediting — each of these entries genuinely
-            // contains the chunk — and the max-pooling below means an entry with a better chunk of its own
-            // still wins on that one.
-            const chunkOwners = owners.get(Number(item?.hash));
+            // EVERY owner of the chunk within this collection, not one. The store keeps at most one row per
+            // hash on an incremental sync, so two entries in the same book sharing a chunk come back once;
+            // crediting only one of them made the other unreachable through that text. This is not
+            // over-crediting — each of these entries genuinely contains the chunk — and the max-pooling
+            // below means an entry with a better chunk of its own still wins on that one.
+            const chunkOwners = owners.get(`${collectionId}${US}${Number(item?.hash)}`);
             if (!chunkOwners?.length) {
                 return;
             }
@@ -1492,7 +1514,9 @@ function paramSnapshot() {
     const snap = {
         // commonWordWeight is an internal global derived from the mode (0.7 BM25-only, 1 otherwise), not a
         // setting; logged as the value in effect. It modifies the plugin's BM25 IDF on every query.
-        scoring: { retrievalMode: s.retrievalMode, rrfK: s.rrfK, lexicalWeight: s.lexicalWeight, weightByOrder: s.weightByOrder, bm25K1: s.bm25K1, bm25B: s.bm25B, commonWordWeight: s.retrievalMode === 'lexical' ? 0.7 : 1 },
+        // keywordWeight is logged even when null, because null is a real value here ("follow lexicalWeight")
+        // and its absence would read as an older capture rather than as a deliberate setting.
+        scoring: { retrievalMode: s.retrievalMode, rrfK: s.rrfK, lexicalWeight: s.lexicalWeight, keywordWeight: s.keywordWeight ?? null, weightByOrder: s.weightByOrder, bm25K1: s.bm25K1, bm25B: s.bm25B, commonWordWeight: s.retrievalMode === 'lexical' ? 0.7 : 1 },
         // The entity filter only runs on raw-message queries — a summary is already
         // salience-selected — so in summary mode its params are inert and omitted.
         matchText: {
@@ -2817,10 +2841,21 @@ function populateProfiles(notify = false) {
 }
 
 /**
+ * A blank field for a 'number?' setting, and anything that does not parse. Both mean null — "unset, follow
+ * whatever this setting defers to" — and NaN in particular must never be stored: it is neither null nor
+ * undefined, so it survives every `??` downstream and turns a fused score into NaN silently.
+ */
+const nullableNumber = (val) => {
+    const n = Number(String(val).trim() || NaN);
+    return Number.isFinite(n) ? n : null;
+};
+
+/**
  * Wires a settings control to its backing value.
  * @param {string} selector Element selector
  * @param {string} key Settings key
- * @param {'checked'|'number'|'string'} kind Value type
+ * @param {'checked'|'number'|'number?'|'string'} kind Value type. 'number?' persists a blank or
+ *   unparseable field as null ("unset"), for settings whose null means "follow another setting".
  */
 function bind(selector, key, kind) {
     const $el = $(selector);
@@ -2828,13 +2863,16 @@ function bind(selector, key, kind) {
     if (kind === 'checked') {
         $el.prop('checked', settings()[key]);
     } else {
-        $el.val(settings()[key]);
+        // 'number?' holds null when unset, which must render as an empty field (showing the placeholder)
+        // rather than as the string "null".
+        $el.val(kind === 'number?' ? settings()[key] ?? '' : settings()[key]);
     }
 
     $el.on('input change', () => {
         settings()[key] = kind === 'checked' ? $el.prop('checked')
             : kind === 'number' ? Number($el.val())
-                : String($el.val());
+                : kind === 'number?' ? nullableNumber($el.val())
+                    : String($el.val());
         saveSettingsDebounced();
     });
 }
@@ -2979,13 +3017,9 @@ export async function init() {
     bind('#wa_bm25_k1', 'bm25K1', 'number');
     bind('#wa_bm25_b', 'bm25B', 'number');
     bind('#wa_lexical_weight', 'lexicalWeight', 'number');
-    // Blank means "follow lexicalWeight", so this cannot use the plain number binding — '' must persist as
-    // null rather than collapsing to 0, which would silently switch the keys signal off.
-    $('#wa_keyword_weight').val(settings().keywordWeight ?? '').on('input change', function () {
-        const raw = String($(this).val()).trim();
-        settings().keywordWeight = raw === '' ? null : Number(raw);
-        saveSettingsDebounced();
-    });
+    // 'number?', not 'number': blank means "follow lexicalWeight" and must persist as null, where a plain
+    // number binding would collapse it to 0 and silently switch the keys signal off.
+    bind('#wa_keyword_weight', 'keywordWeight', 'number?');
     bind('#wa_rrf_k', 'rrfK', 'number');
     bind('#wa_weight_by_order', 'weightByOrder', 'checked');
     bind('#wa_summary_profile', 'summaryProfile', 'string');
