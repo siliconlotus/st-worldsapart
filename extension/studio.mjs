@@ -1532,14 +1532,13 @@ export async function lorebookStudio(preferredBook = null) {
             wrap.append(lab);
             return cb;
         });
-        // Running total, because the chats are fetched over HTTP and not everyone is on localhost.
+        // Count only, no size warning: with the plugin deployed the scan runs where the files already are and
+        // nothing but the key list and the counts moves.
         const tot = document.createElement('div');
         tot.style.cssText = 'margin-top:0.6em;opacity:0.8;font-size:0.9em;';
         const syncTot = () => {
-            const on = rows.map((cb, i) => (cb.checked ? candidates[i] : null)).filter(Boolean);
-            const bytes = on.reduce((a, c) => a + sizeBytes(c.size), 0);
-            tot.textContent = `${on.length} chat(s) selected${bytes ? ` · ~${(bytes / 1048576).toFixed(1)}MB to read` : ''}`;
-            tot.style.color = bytes > 100 * 1048576 ? '#d9b74a' : '';
+            const on = rows.filter(cb => cb.checked).length;
+            tot.textContent = `${on} chat(s) selected`;
         };
         rows.forEach(cb => cb.addEventListener('change', syncTot));
         wrap.append(tot); syncTot();
@@ -1554,27 +1553,43 @@ export async function lorebookStudio(preferredBook = null) {
         return rows.filter(cb => cb.checked).map(cb => candidates[Number(cb.dataset.i)]);
     };
 
+    // Per-character chat metadata, cached for the Studio session. This is the expensive half of resolution
+    // — one request per character, each streaming line 0 of every chat file — and it is BOOK-INDEPENDENT:
+    // only the filter below changes when you switch books, so switching costs nothing after the first scan.
+    //
+    // ponytail: session-scoped, no invalidation. Binding a book to a chat while Studio is open will not show
+    // up until it is reopened. Refresh-on-demand if that turns out to bite; the cheap fix is closing Studio.
+    let chatIndex = null;   // [{ char, avatar, charWorld, chats: [...] }]
+    const loadChatIndex = async () => {
+        if (chatIndex) return chatIndex;
+        const list = (characters ?? []).filter(c => c?.avatar);
+        // Parallel, not sequential: these are independent reads and a served instance pays a round-trip each.
+        chatIndex = await Promise.all(list.map(async c => {
+            let chats = [];
+            try {
+                const r = await fetch('/api/characters/chats', {
+                    method: 'POST', headers: getRequestHeaders(),
+                    body: JSON.stringify({ avatar_url: c.avatar, metadata: true }),
+                });
+                if (r.ok) { const j = await r.json(); if (Array.isArray(j)) chats = j; }
+            } catch { /* a character with no chats dir just yields nothing */ }
+            return { char: c.name, avatar: c.avatar, charWorld: c?.data?.extensions?.world ?? null, chats };
+        }));
+        return chatIndex;
+    };
+
     const findBookChats = async () => {
         // Global books are listed in ST's settings, not in the lorebook file — the book itself has no idea.
         // A globally-active book genuinely applies to every chat, so those are OFFERED but never pre-ticked:
         // on a real corpus that is 190 chats and 1.2GB, and not everyone runs ST on localhost.
         const isGlobal = (selected_world_info ?? []).includes(selected);
         const out = [];
-        for (const c of (characters ?? [])) {
-            if (!c?.avatar) continue;
-            const charBound = c?.data?.extensions?.world === selected;
-            let list = [];
-            try {
-                const r = await fetch('/api/characters/chats', {
-                    method: 'POST', headers: getRequestHeaders(),
-                    body: JSON.stringify({ avatar_url: c.avatar, metadata: true }),
-                });
-                if (r.ok) { const j = await r.json(); if (Array.isArray(j)) list = j; }
-            } catch { /* a character with no chats dir just yields nothing */ }
-            for (const ch of list) {
+        for (const c of await loadChatIndex()) {
+            const charBound = c.charWorld === selected;
+            for (const ch of c.chats) {
                 const chatBound = ch?.chat_metadata?.world_info === selected;
                 if (!chatBound && !charBound && !isGlobal) continue;
-                out.push({ char: c.name, avatar: c.avatar, file: ch.file_name, size: ch.file_size ?? '?',
+                out.push({ char: c.char, avatar: c.avatar, file: ch.file_name, size: ch.file_size ?? '?',
                     why: chatBound ? 'chat-bound' : charBound ? 'character-bound' : 'global (book is always active)',
                     bound: chatBound || charBound });
             }
@@ -1583,18 +1598,12 @@ export async function lorebookStudio(preferredBook = null) {
         return out;
     };
 
-    /** "4.0MB" / "136KB" back to bytes, for a running total. Best-effort: the server hands us a formatted
-     *  string, and an approximate total is enough to warn a remote user before they pull 300MB. */
-    const sizeBytes = str => {
-        const m = String(str ?? '').match(/([\d.]+)\s*([KMG]?B)/i);
-        if (!m) return 0;
-        return Number(m[1]) * ({ B: 1, KB: 1024, MB: 1048576, GB: 1073741824 }[m[2].toUpperCase()] ?? 0);
-    };
-
+    /** Fallback path only: pull a chat's messages over HTTP. Used when the server plugin is not deployed,
+     *  where the scan cannot happen where the files live. Correct, just wasteful off localhost. */
     const fetchChatMessages = async ({ char, avatar, file }) => {
         const r = await fetch('/api/chats/get', {
             method: 'POST', headers: getRequestHeaders(), cache: 'no-cache',
-            body: JSON.stringify({ ch_name: char, file_name: file.replace(/\.jsonl$/, ''), avatar_url: avatar }),
+            body: JSON.stringify({ ch_name: char, file_name: String(file).replace(/\.jsonl$/, ''), avatar_url: avatar }),
         });
         if (!r.ok) return [];
         const j = await r.json();
@@ -1621,13 +1630,36 @@ export async function lorebookStudio(preferredBook = null) {
         const picked = await pickChats(found);
         if (!picked?.length) return;
 
+        const chatName = picked.length === 1 ? picked[0].file.replace(/\.jsonl$/, '') : `${picked.length} chats`;
+
+        // PLUGIN FIRST: it scans the files where they already live and returns only counts, so a 1.2GB
+        // history never crosses the wire. The client-side path below is the fallback for an undeployed
+        // plugin — correct, just wasteful, which only matters off localhost.
+        const onDisk = picked.filter(c => !c.open && c.avatar);
+        if (runState.pluginAvailable && onDisk.length === picked.length) {
+            const r = await fetch('/api/plugins/worlds-apart/scan-chats', {
+                method: 'POST', headers: getRequestHeaders(),
+                body: JSON.stringify({ keys, chats: onDisk.map(c => ({ dir: c.avatar.replace(/\.png$/, ''), file: c.file })) }),
+            });
+            if (r.ok) {
+                const j = await r.json();
+                cleanupChatHits = new Map(keys.map(k => [k, Number(j.counts?.[k]) || 0]));
+                cleanupChatMsgs = Number(j.messages) || 0;
+                cleanupChatName = chatName;
+                const live = [...cleanupChatHits.values()].filter(n => n > 0).length;
+                toastr.success(`${live} of ${keys.length} fire in ${chatName} (${cleanupChatMsgs} messages, scanned server-side).`, 'Worlds Apart', { timeOut: 6000 });
+                termRepaint?.();
+                return;
+            }
+            console.warn('Worlds Apart: /scan-chats unavailable, falling back to client-side scan');
+        }
+
         const msgs = [];
         for (const c of picked) {
             const got = c.open ? (ctx.chat ?? []).map(m => String(m?.mes ?? '')).filter(Boolean) : await fetchChatMessages(c);
             msgs.push(...got);
         }
         if (!msgs.length) { toastr.warning('Those chats returned no messages.', 'Worlds Apart'); return; }
-        const chatName = picked.length === 1 ? picked[0].file.replace(/\.jsonl$/, '') : `${picked.length} chats`;
         const folded = [...new Set(keys.map(fold))];
         const idxOf = new Map(folded.map((f, i) => [f, i]));
         const aut = buildAutomaton(folded);
