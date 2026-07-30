@@ -1,12 +1,14 @@
 // Guards planUidReindex — the pure planner behind Lorebook Studio's advanced reorder (shift-click
 // Renumber), which rebuilds data.entries with new UIDs. It's the one destructive path in Studio, so a
 // botched index/collision check here would clobber entries. Slices the function straight out of
-// worldsapart.js source (the file only loads in a browser) and runs it on tiny synthetic books.
+// studio.mjs source (that module imports ST + DOM, so it only loads in a browser) and runs it on tiny
+// synthetic books. ponytail: string-slice, not an import — promote planUidReindex to a pure module if
+// a second harness ever needs it.
 // Run: node bulk-reorder-check.mjs
 import assert from 'node:assert';
 import { readFileSync } from 'node:fs';
 
-const src = readFileSync(new URL('./worldsapart.js', import.meta.url), 'utf8');
+const src = readFileSync(new URL('../extension/studio.mjs', import.meta.url), 'utf8');
 const slice = name => { const i = src.indexOf(`function ${name}`); return src.slice(i, src.indexOf('\n}\n', i) + 2); };
 const planUidReindex = new Function(slice('planUidReindex') + '; return planUidReindex;')();
 

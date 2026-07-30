@@ -9,6 +9,7 @@
 //
 // Usage:  node keyword-audit.mjs [path/to/index.json] [path/to/lorebook.json]
 import { readFileSync } from 'node:fs';
+import { isRegexKey } from '../extension/ranking.mjs';
 
 const ROOT = '/Users/user/SillyTavern-Launcher/SillyTavern';
 const INDEX = process.argv[2] ?? `${ROOT}/data/default-user/vectors/ollama/wa_3810524038950542/bge-m3/index.json`;
@@ -31,7 +32,7 @@ const entryRows = Object.values(lb.entries)
     .map(e => ({ uid: Number(e.uid), title: e.comment || `uid ${e.uid}`, keys: (Array.isArray(e.key) ? e.key : []).map(String) }))
     .filter(e => contentOf.has(e.uid) && e.keys.length);
 
-const isRegex = k => /^\/.*\/[a-z]*$/i.test(k);
+const isRegex = isRegexKey;
 const dfKeys = new Map();
 for (const r of entryRows) for (const k of new Set(r.keys.map(k => k.toLowerCase()))) dfKeys.set(k, (dfKeys.get(k) ?? 0) + 1);
 

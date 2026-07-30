@@ -2,7 +2,7 @@
 // must land on the expected side of the sticky (top-1000 head) and keyword/vector (full-list) tiers.
 // Run: node keyword-common-check.mjs
 import assert from 'node:assert';
-import { COMMON_WORDS } from './commonwords.js';
+import { COMMON_WORDS } from '../plugin/commonwords.js';
 
 const STICKY_CUT = 1000;                                  // mirror ENGLISH_COMMON_STICKY_CUT
 const head = new Set([...COMMON_WORDS].slice(0, STICKY_CUT));

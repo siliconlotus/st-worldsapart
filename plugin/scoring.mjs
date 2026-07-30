@@ -1,0 +1,37 @@
+// scoring.mjs — the HYBRID combiner: score a collection with both similarity primitives (mean-centered
+// vector cosine + lexical BM25) in one pass and union the top-K by each signal. The primitives live in
+// vector.mjs / lexical.mjs; this file only combines them, so it IS the "hybrid retrieval" concern rather
+// than either similarity. Pure and isomorphic, shared by the plugin, the extension, and the harnesses.
+import { bm25Scores, DEFAULT_K1, DEFAULT_B } from './lexical.mjs';
+import { centeredCosineScores } from './vector.mjs';
+
+/** Score one collection's chunks against a query vector: mean-centered cosine + BM25. Returns the chunks
+ *  either signal likes (cosine >= threshold OR bm25 > 0). This is the plugin's /query-multi per-collection loop. */
+export function scoreCollection(collectionId, loaded, queryVector, { centered = true, threshold = 0, queryText = '', k1 = DEFAULT_K1, b = DEFAULT_B, termWeights = null, stopwordDf = 0, commonWordWeight = 1 } = {}) {
+    const { items, mean, lexical } = loaded;
+    const lexicalScores = bm25Scores(lexical, queryText, items.length, k1, b, termWeights, stopwordDf, commonWordWeight);
+    const vectorScores = centeredCosineScores(items, queryVector, mean, centered);
+    const out = [];
+    items.forEach((item, docIndex) => {
+        const score = vectorScores[docIndex];
+        const bm25 = lexicalScores[docIndex];
+        if (score >= threshold || bm25 > 0) out.push({ collectionId, score, bm25, metadata: item.metadata });
+    });
+    return out;
+}
+
+/** Union the top-K by each signal across collections, dedup, group by collectionId — exactly what the
+ *  client receives from the plugin. metadata carries the chunk's score + bm25. */
+export function selectTopK(results, topK) {
+    const byVector = [...results].sort((a, b) => b.score - a.score).slice(0, topK);
+    const byLexical = [...results].sort((a, b) => b.bm25 - a.bm25).filter(x => x.bm25 > 0).slice(0, topK);
+    const grouped = {}, emitted = new Set();
+    for (const r of [...byVector, ...byLexical]) {
+        const key = `${r.collectionId}:${r.metadata.hash}`;
+        if (emitted.has(key)) continue; emitted.add(key);
+        grouped[r.collectionId] ??= { hashes: [], metadata: [] };
+        grouped[r.collectionId].hashes.push(Number(r.metadata.hash));
+        grouped[r.collectionId].metadata.push({ ...r.metadata, score: r.score, bm25: r.bm25 });
+    }
+    return grouped;
+}
