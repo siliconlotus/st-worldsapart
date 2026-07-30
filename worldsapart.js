@@ -361,7 +361,12 @@ async function syncWorld(world, entries) {
             if (!text) {
                 continue;
             }
-            const hash = getStringHash(text);
+            // Identity is (text, uid), not text alone: two entries can produce the same chunk, and
+            // hashing text alone made one hash stand for both of them. That broke three things at once
+            // — `wanted` below couldn't retire entry A's copy while B still produced the text, `owners`
+            // silently overwrote A with B, and the plugin's per-hash dedup dropped one of the two rows.
+            // ST core lists and deletes by hash only, so the pair has to live IN the hash.
+            const hash = getStringHash(`${text}${entry.uid}`);
             owners.set(hash, `${entry.world}.${entry.uid}`);
             items.push({ hash, text, index: entry.uid });
         }
