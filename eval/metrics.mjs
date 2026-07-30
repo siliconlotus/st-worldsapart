@@ -18,3 +18,57 @@ export const ndcgAt = (map, targets, k, gradeOf = () => 1) => {
     let idcg = 0; for (let i = 0; i < Math.min(ideal.length, k); i++) idcg += ideal[i] / Math.log2(i + 2);
     return idcg ? dcg / idcg : 0;
 };
+
+/**
+ * Exact two-sided sign test over paired per-scene deltas.
+ *
+ * THE ESTIMATOR FOR SINGLE-DIGIT n. Absolute nDCG varies far more between scenes than between parameter
+ * settings — one graded scene's grid spans 0.87-0.99, another's sits elsewhere entirely — so averaging
+ * absolute scores across scenes mostly measures which scenes you happened to grade. Pairing each scene
+ * against its own baseline cancels that variance, and what survives is the DIRECTION of the change, which is
+ * the only thing a handful of scenes can support.
+ *
+ * Deliberately the sign test and not a t-test: n is single-digit, nDCG deltas are bounded and skewed, and
+ * normality is not available to assume. Exact binomial, so the p-value is not an approximation. Ties (|delta|
+ * <= eps) are dropped, which is the standard treatment and is conservative — it shrinks n.
+ *
+ * Read the floor honestly: 6/6 one-way is p=0.031, 5/5 is 0.063, 4/4 is 0.125, 3/3 is 0.25. Below about six
+ * scenes NO result reaches conventional significance, so the honest report is the direction, the count and
+ * the effect size — never a bare winner.
+ *
+ * @param {number[]} deltas Per-scene (arm - baseline) differences
+ * @param {number} [eps] Below this magnitude a delta is a tie
+ * @returns {{plus: number, minus: number, ties: number, n: number, p: number, mean: number, consistent: boolean}}
+ */
+export const signTest = (deltas, eps = 1e-9) => {
+    const d = (deltas ?? []).filter(x => Number.isFinite(x));
+    const plus = d.filter(x => x > eps).length;
+    const minus = d.filter(x => x < -eps).length;
+    const ties = d.length - plus - minus;
+    const n = plus + minus;
+    const mean = d.length ? d.reduce((a, b) => a + b, 0) / d.length : NaN;
+    if (!n) return { plus, minus, ties, n, p: 1, mean, consistent: false };
+    // P(X >= k) under Binomial(n, 1/2), doubled for two-sided and capped — exact integer binomials, since n
+    // is single digit and floating-point factorials would be silly here.
+    const choose = (a, b) => { let r = 1; for (let i = 0; i < b; i++) r = (r * (a - i)) / (i + 1); return Math.round(r); };
+    const k = Math.max(plus, minus);
+    let tail = 0;
+    for (let i = k; i <= n; i++) tail += choose(n, i);
+    return { plus, minus, ties, n, p: Math.min(1, 2 * tail / 2 ** n), mean, consistent: n > 1 && (plus === 0 || minus === 0) };
+};
+
+/**
+ * Jaccard overlap of two sets. |A∩B| / |A∪B|; two empty sets are 0, not NaN.
+ *
+ * Used on graded scenes' RELEVANT sets to detect pseudo-replication. nDCG is driven almost entirely by where
+ * the grade>=3 entries land, so two scenes that agree on which entries are relevant will move in lockstep
+ * under every parameter change — they are one observation, and a sign test that counts them as two is
+ * inventing power it does not have.
+ */
+export const jaccard = (a, b) => {
+    const A = a instanceof Set ? a : new Set(a), B = b instanceof Set ? b : new Set(b);
+    if (!A.size && !B.size) return 0;
+    let inter = 0;
+    for (const x of A) if (B.has(x)) inter++;
+    return inter / (A.size + B.size - inter);
+};

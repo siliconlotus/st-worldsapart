@@ -32,7 +32,7 @@ import { fileURLToPath } from 'node:url';
 import sanitize from 'sanitize-filename';
 import { LocalIndex } from 'vectra';
 import { getOllamaVector } from '../../src/vectors/ollama-vectors.js';
-import { scoreCollection, selectTopK } from './scoring.mjs';
+import { scoreCollection, poolEntries, selectTopK } from './scoring.mjs';
 import { DEFAULT_K1, DEFAULT_B, buildLexical } from './lexical.mjs';
 import { norm, corpusMean } from './vector.mjs';
 import { pluginFingerprint, PLUGIN_FILES } from './fingerprint.mjs';
@@ -186,9 +186,10 @@ export async function init(router) {
                 results.push(...scoreCollection(String(collectionId), loaded, queryVector, opts));
             }
 
-            // Union the top-K of each ranking, grouped by collection, so a chunk that only
-            // one signal likes still reaches the client and can win on fusion.
-            return response.send(selectTopK(results, topK));
+            // Pool each entry's best chunk FIRST, then union the top-K of each ranking, so a record that
+            // only one signal likes still reaches the client and can win on fusion. Pooling before the cut
+            // is what makes topK a count of entries and the per-entry maxima exact — see poolEntries.
+            return response.send(selectTopK(poolEntries(results), topK));
         } catch (error) {
             console.error('[Worlds Apart] query failed:', error);
             return response.status(500).send({ error: String(error?.message ?? error) });

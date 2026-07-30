@@ -22,6 +22,26 @@ export const isRegexKey = k => REGEX_KEY_RE.test(String(k));
  * Collects the lorebook's own vocabulary — every term appearing in an entry's keys
  * or title. Anything named there is something this corpus treats as a thing worth
  * naming, which is a better salience signal than rarity.
+ *
+ * DO NOT "fix" the missing keys. At retrieval time this runs AFTER suppressVectorKeys has blanked
+ * key/keysecondary on every vectorized entry, so for a mostly-vectorized book the vocabulary is
+ * mostly entry TITLES (measured: 1138 terms — 910 from titles, 228 from the 50 non-vectorized
+ * entries — where the raw book would give 3131). That looks like a bug and reads like one here.
+ * It was A/B'd on the scene1 graded fixture, and feeding the stashed `waKeys` back in is WORSE:
+ *
+ *   gazetteer            admitted query terms   P/R/F1 @ count max=10     nDCG@5
+ *   keys blanked (now)   115                    0.600 / 0.750 / 0.667     0.9510
+ *   waKeys restored      243                    0.500 / 0.625 / 0.556     0.9560
+ *
+ * It buys 0.005 nDCG@5 (a top-5 reshuffle) and costs 0.111 F1 plus one relevant entry inside the
+ * shipped cutoff. The keys it restores are triggers like "condom", "grindr", "trash", "utility" —
+ * generic words admitted at weight 1 that match broadly, where titles carry entity-ish words and
+ * stopwordDocFreq strips the junk they come with ("and", "they", "001"). n=1 scene, so this is a
+ * reason to leave it alone, not a proof; re-run the A/B if a second scene gets graded.
+ *
+ * The offline harnesses must therefore blank vectorized keys before calling this, or they admit
+ * 2.3x the terms production does and inflate BM25 by up to 74% (see eval/graded-scene-grid.mjs).
+ *
  * @param {object[]} entries All World Info entries
  * @returns {Set<string>} Lowercased gazetteer terms
  */
@@ -46,19 +66,70 @@ export function buildGazetteer(entries) {
  * Reduces a raw query to entity-ish terms, weighted.
  *
  * Keeps a term only if it is capitalised (a cheap entity proxy) or appears in the
- * lorebook's own vocabulary, and boosts the capitalised ones. Benchmarked on real
- * chat text against a hand-judged gold set: mean target rank 11.2 versus 21.6–28.2
- * for the unfiltered query. The two halves are complementary — the gazetteer drops
- * ordinary vocabulary, the boost promotes entities.
+ * lorebook's own vocabulary, and boosts the capitalised ones.
+ *
+ * MEASURE THIS WITH MEAN TARGET RANK, NOT nDCG@5. Read this before tuning anything here: four successive
+ * attempts produced four different answers, and every difference was metric or population, not signal.
+ *
+ * The original note read "mean target rank 11.2 versus 21.6-28.2 for the unfiltered query", from a 5-target
+ * gold set that no longer exists and (on later evidence) a gazetteer built from RAW book keys — 2.3x the
+ * terms production admits, see buildGazetteer. Re-measured over three graded scenes via
+ * eval/graded-scene-grid.mjs (`--unjudged zero`, mean rank of all judged-relevant entries, lower better):
+ *
+ *   arm                        mean rank    verdict
+ *   production (gaz, boost 3)     6.43      ships
+ *   boost 2                       6.40      dead tie; see below
+ *   boost 5                       6.53      plateau
+ *   boost 8                       6.83      degrades
+ *   boost 1                       7.00      degrades
+ *   no gazetteer (boost only)     7.00      gazetteer is worth ~0.6 rank
+ *   + entry bodies in gazetteer   7.20      worse than shipped on all metrics
+ *   NO entity filter              9.07      the filter is worth ~2.6 ranks
+ *
+ * That reproduces the original note's shape — boost plateaus 2..5, degrades either side, gazetteer is a
+ * thin safety net — on a population and metric that can actually see it. Two traps got in the way first:
+ *
+ * TRAP 1, THE METRIC. nDCG@5 cannot resolve these knobs. Relevance here is sparse and Poisson-shaped, not
+ * normal: 5-11 judged-relevant entries per scene, so nDCG@5 sees a handful of placements and has only a few
+ * reachable states. It returned an IDENTICAL 0.9322 for boost 1/2/3/5/8 on one scene under every population
+ * tried — which is mechanistic, not noise: the boost is a uniform multiplier over proper nouns, so wherever
+ * the top-ranked entries match the same entities it cannot reorder them at all. Mean rank pools every judged
+ * relevant entry and does not saturate. Anything that looks like a tie on nDCG@5 should be re-read there.
+ *
+ * TRAP 2, THE POPULATION. Grades exist only for entries production ACTIVATED, so restricting the ranking to
+ * that pool means a wrong promotion is INVISIBLE — the promoted entry is filtered out rather than penalised.
+ * One scene returned 0.9634 for every arm including no-filter that way. Scoring unjudged rows as 0 over the
+ * uncut ranking (`--unjudged zero`) restores the resolution for free, and the sparse shape is what licenses
+ * it: past roughly rank 25 the marginal candidate is almost surely irrelevant (measured — one sample's
+ * grades bottom out in zeros by rank 24), so "unjudged" and "irrelevant" nearly coincide. Grading deeper
+ * would buy mostly the same zeros by hand.
+ *
+ * WHAT IS STILL UNDERPOWERED: three scenes carry 22 judged-relevant entries between them. boost 2 leads on
+ * nDCG@5's mean (0.912 vs 0.888) purely because of ONE scene — it is exactly tied with boost 3 on mean rank,
+ * and identical to it on the other two scenes. Do not move the default on that. More SCENES is the lever
+ * here; deeper grading is not.
+ *
+ * The CUTOFF result (see selection.mjs) never needed any of this, because that table already sweeps the
+ * UNCUT ranking and needs grades only as deep as the pool goes.
  *
  * Note this is deliberately NOT applied to summarized queries, which are already
  * salience-selected and would only lose context.
  *
  * Do not "improve" this by admitting more terms. Both obvious loosenings were
- * measured on the same gold set and both are worse:
+ * measured on the same (now-lost) gold set and both are worse. These two were NOT re-measured above, so
+ * they carry the same caveat as the figures replaced there — but both are directionally corroborated by
+ * the re-measurement, where every arm that admitted MORE terms ranked worse:
  *
  *   admit terms with high corpus IDF too   5/5 rank 3.0 -> 4/5 rank 5.2 (IDF>=4)
  *   keep content words (POS-style filter)  5/5 rank 3.0 -> 0/5 rank 27.4
+ *
+ * A third loosening suggests itself once you notice the gazetteer only reads keys and titles: feed it the
+ * entry BODIES too, since that is also "the lorebook's vocabulary". It briefly looked competitive on one
+ * scene (mean rank 6.8 against 7.3) and that reading was an artifact of the pooled population; across all
+ * three scenes it is 7.20 against 6.43 — worse than shipped, at 5-10x the terms. It does NOT collapse to
+ * "no filter" (9.07) despite admitting most of the query's distinct terms, because the boost still weights
+ * entities and stopwordDocFreq still strips corpus-common ones — but it loses, so it loses for the same
+ * reason as the other two: more terms admitted, worse ranking.
  *
  * IDF measures rarity, and on a single-author narrative corpus rarity is dominated
  * by prose variation, not topic — the high-IDF terms this admits are "grind",
@@ -124,21 +195,52 @@ export function buildTermWeights(queryText, gazetteer, boost) {
  * @returns {string} Query text
  */
 export function buildQuery(chat, { depth, substituteParams = s => s }) {
+    return joinQueryMessages(queryMessages(chat, { depth, substituteParams }));
+}
+
+/**
+ * The join half of buildQuery, exported so a caller that already has queryMessages() output (retrieve()
+ * stashes it for /wa-grade) can build the query string without running the whole-chat substitution pass
+ * a second time.
+ * @param {Array<{name: string, mes: string}>} messages queryMessages() output
+ * @returns {string} Query text
+ */
+export function joinQueryMessages(messages) {
+    return messages
+        .map(x => (x.name ? `${x.name}: ${x.mes}` : x.mes))
+        .join('\n\n')
+        .trim();
+}
+
+/**
+ * The messages buildQuery would join: substituted, stripped of file attachments, empties dropped, newest
+ * `depth` of them, chronological. Same {name, mes} shape as ST's chat, so the output can be fed straight
+ * back in.
+ *
+ * Exported because /wa-grade freezes this into its sample. That is what makes messageDepth the one query
+ * parameter a frozen sample can still sweep: buildQuery over the last d of these is exact for any
+ * d <= the captured depth. It has to be the pre-join form — buildQuery joins on '\n\n' and RP messages
+ * contain blank lines, so the boundaries can't be recovered from the joined text.
+ *
+ * @param {object[]} chat Chat messages
+ * @param {object} cfg
+ * @param {number} cfg.depth How many recent messages to include
+ * @param {(s: string) => string} [cfg.substituteParams] Macro substitution (ST's; identity offline)
+ * @returns {Array<{name: string, mes: string}>} Newest `depth` non-empty messages, chronological
+ */
+export function queryMessages(chat, { depth, substituteParams = s => s }) {
     return chat
         .map(x => ({
             name: String(x?.name ?? '').trim(),
-            text: substituteParams(String(x?.mes || '').substring(x?.extra?.fileLength || 0).trim()),
+            mes: substituteParams(String(x?.mes || '').substring(x?.extra?.fileLength || 0).trim()),
         }))
-        .filter(x => x.text)
+        .filter(x => x.mes)
         .reverse()
         .slice(0, Math.max(1, depth))
         // Back to chronological. Taking the newest N requires reversing first, but
         // handing a summarizer the messages backwards makes it read the scene in
         // reverse — it can't tell what happened after what.
-        .reverse()
-        .map(x => (x.name ? `${x.name}: ${x.text}` : x.text))
-        .join('\n\n')
-        .trim();
+        .reverse();
 }
 
 /**
@@ -256,6 +358,53 @@ export function keywordScore(entry, text, keys = entry.key, { k1, caseSensitiveD
     // Most-repeated key first, so the debug column leads with the strongest evidence.
     hits.sort((a, b) => b.count - a.count);
     return { score, hits };
+}
+
+/**
+ * Fuses the RETRIEVAL ranking: vector score against BM25-over-chunk-text, and nothing else.
+ *
+ * Deliberately not fuseRanks. This is the list the cutoff cuts (selection.mjs cutRetrieved), and the
+ * question there is only "which retrieved entries are strong enough to force-activate" — keyword and
+ * authored-order ranks belong to the final layout ranking, over a population that includes entries
+ * retrieval never saw. Feeding them in here would let a keyword-only entry displace a retrieved one
+ * from a decision it isn't a candidate in.
+ *
+ * Lives here rather than in worldsapart.js because it is pure rank arithmetic over injected settings,
+ * so the offline cutoff harnesses can cut the real ranking instead of a copy of this formula.
+ *
+ * @param {Map<string, {score: number, bm25?: number, chunk?: string}>} scores Per-entry retrieval results
+ * @param {object} cfg
+ * @param {number} cfg.rrfK RRF constant (settings().rrfK)
+ * @param {string} cfg.retrievalMode 'hybrid' | 'vector' | 'lexical'
+ * @param {number} cfg.lexicalWeight BM25 vs vector weight in fusion
+ * @returns {Array<{key: string, value: object, fused: number, vectorRank?: number, textRank?: number}>} Fused ranking, best first
+ */
+export function fuseRetrieval(scores, { rrfK: k, retrievalMode: mode, lexicalWeight }) {
+    const entries = [...scores.entries()];
+    const useVector = mode !== 'lexical';
+    const useText = mode !== 'vector';
+
+    const rankOf = (sortKey) => new Map([...entries]
+        .sort((a, b) => (b[1][sortKey] ?? 0) - (a[1][sortKey] ?? 0))
+        .map(([key], index) => [key, index + 1]));
+
+    const vectorRanks = rankOf('score');
+    const textRanks = rankOf('bm25');
+
+    return entries
+        .map(([key, value]) => {
+            const vectorRank = useVector ? vectorRanks.get(key) : undefined;
+            const textRank = useText && value.bm25 > 0 ? textRanks.get(key) : undefined;
+            return {
+                key,
+                value,
+                vectorRank,
+                textRank,
+                fused: (vectorRank ? 1 / (k + vectorRank) : 0)
+                    + (textRank ? lexicalWeight / (k + textRank) : 0),
+            };
+        })
+        .sort((a, b) => b.fused - a.fused);
 }
 
 /**

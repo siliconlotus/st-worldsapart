@@ -5,7 +5,9 @@
 import { generateRaw, saveSettingsDebounced } from '../../../../../script.js';
 import { extension_settings } from '../../../../extensions.js';
 import { loadWorldInfo, saveWorldInfo, reloadEditor, world_names, world_info_case_sensitive, world_info_match_whole_words } from '../../../../world-info.js';
-import { escapeHtml, splitRecursive } from '../../../../utils.js';
+import { escapeHtml } from '../../../../utils.js';
+// Same splitter the indexer uses — one copy, so a scan window is cut the way a chunk is (see chunking.mjs).
+import { splitRecursive } from './chunking.mjs';
 import { Popup, POPUP_TYPE, POPUP_RESULT } from '../../../../popup.js';
 import { ConnectionManagerRequestService } from '../../../shared.js';
 import { runState, settings } from './state.mjs';

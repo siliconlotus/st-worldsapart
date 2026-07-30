@@ -18,7 +18,7 @@ export const defaultSettings = {
     scoreVectorKeys: false,
     /** Characters per chunk. Entries are chunked for MATCHING only; the whole entry is still inserted. */
     chunkSize: 800,
-    /** 'paragraph' keeps semantic boundaries; 'length' uses ST's splitRecursive (fills to chunkSize). */
+    /** 'paragraph' keeps semantic boundaries; 'length' fills to chunkSize (chunking.mjs splitRecursive). */
     chunkMode: 'paragraph',
     /**
      * 'messages' embeds raw chat text; 'summary' condenses it first.
@@ -105,8 +105,14 @@ export const defaultSettings = {
      *               across queries where a raw gap value is not, and it is window-independent
      *               where the mean is not — so it finds a real cliff wherever it sits.
      * Both cliff modes cut at the LAST qualifying gap and are floored/capped the same way.
+     *
+     * 'elbow' ships because it measures better and it is the ONE tuning result that held across every
+     * population and metric the graded harness was run under: over 3 graded scenes it reached 95% of the best
+     * possible cut (worst case 92%) against 83%/72% for the old default of count max=10. See selection.mjs
+     * cutRetrieved for the table. It is also insensitive between sensitivity 1.2 and 2.0, which is why the
+     * switch is safe to make on 3 scenes when the boost/gazetteer knobs are not.
      */
-    vectorCutoff: 'count',
+    vectorCutoff: 'elbow',
     /** Cliff modes only: never cut below this many. Guards against the rank 1-2 gap. */
     minVectorEntries: 3,
     /**
@@ -124,8 +130,11 @@ export const defaultSettings = {
     /**
      * Filter raw-text queries down to entity-ish terms before lexical scoring:
      * keep capitalised tokens and anything in the lorebook's own vocabulary, drop
-     * the rest. Benchmarked on real chat against a hand-judged gold set — mean
-     * target rank 11.2 vs 21.6-28.2 unfiltered. Ignored in summary mode.
+     * the rest. Re-measured over three graded scenes: mean nDCG@5 0.896 filtered vs
+     * 0.808 unfiltered — a real win, but far smaller than the old note claimed, and it
+     * lands on top-of-list quality rather than mean target rank. See ranking.mjs
+     * buildTermWeights for the per-scene table and which old figures did not reproduce.
+     * Ignored in summary mode.
      */
     entityFilter: true,
     /** Weight multiplier for capitalised query tokens under the entity filter. */
@@ -295,9 +304,15 @@ export const runState = {
     lastScores: new Map(),        // vector scores from the last retrieval, keyed `${world}.${uid}`
     lastTextScores: new Map(),    // BM25-over-text scores, same keys
     lastLayout: [],               // final layout of the last scan, for /wa-dry
+    lastQuery: '',                // last retrieval query text, bundled by /wa-grade
+    lastQueryChat: [],            // the messages that query was joined from, for offline depth ablation
+    lastScanText: '',             // last global-depth keyword scan window, bundled by /wa-grade
+    gradeCutoff: null,            // /wa-grade widens the cut for its run; null = use the real settings
+    lastCutKept: null,            // how many the cutoff kept on the last retrieval, recorded by /wa-grade
+    lastCandidates: [],           // selection-candidate rows from the last debug-class run, for /wa-grade
+    lastCandidateEntries: [],     // the WI entries behind those rows, aligned by index (for "view text")
     lastDropped: [],              // entries cut by budget
     lastSkipped: [],              // per-entry budget rejections + the cap that caused each
-    lastQueryText: '',            // last retrieval query, so /wa-debug can re-probe it
     attachedWorlds: new Set(),    // books ST currently has active for this chat
     verboseRun: false,            // true during a /wa-debug run (noisy per-stage logging)
     dryRunInProgress: false,      // true during either slash-command run (quiets live logging)
