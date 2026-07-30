@@ -421,7 +421,18 @@ export function fuseRetrieval(scores, { rrfK: k, retrievalMode: mode, lexicalWei
  * @param {boolean} cfg.weightByOrder Fuse an authored-order rank too
  * @param {number} cfg.lexicalWeight BM25 vs vector weight in fusion
  */
-export function fuseRanks(items, { rrfK: k, retrievalMode: mode, weightByOrder, lexicalWeight }) {
+export function fuseRanks(items, { rrfK: k, retrievalMode: mode, weightByOrder, lexicalWeight, keywordWeight }) {
+    // TEXT AND KEYS GET SEPARATE WEIGHTS, because they are separate signals that disagree about which books
+    // they are good on. Measured across three graded scenes, the best (text, keys) pair was (0.5, 3) on a
+    // book with tightly curated keywords, (1.5, 0) on one whose keys are auto-generated noise, and (1.5, 1)
+    // on a third. A single coupled knob can only slide along the diagonal and cannot express any of them —
+    // there is no value of it that means "trust the content, ignore the keys", which is what two of the
+    // three want. keys correlate 0.79 / 0.11 / 0.39 with human grades on those same books.
+    //
+    // Undefined mirrors lexicalWeight, so this is byte-identical for anyone who has not set it. That matters
+    // more than a tidy default: a user running lexicalWeight 1.5 would otherwise see their keyword weight
+    // silently drop to the shipped 1 on upgrade.
+    const keyW = keywordWeight ?? lexicalWeight;
     const rankMap = (list) => new Map(list.map((item, index) => [item.key, index + 1]));
 
     const byVector = mode === 'lexical'
@@ -451,7 +462,7 @@ export function fuseRanks(items, { rrfK: k, retrievalMode: mode, weightByOrder, 
         item.orderRank = byOrder.get(item.key);
         item.fused = (item.vectorRank ? 1 / (k + item.vectorRank) : 0)
             + (item.textRank ? lexicalWeight / (k + item.textRank) : 0)
-            + (item.keywordRank ? lexicalWeight / (k + item.keywordRank) : 0)
+            + (item.keywordRank ? keyW / (k + item.keywordRank) : 0)
             + (item.orderRank ? 1 / (k + item.orderRank) : 0);
     }
 }

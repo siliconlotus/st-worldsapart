@@ -128,3 +128,26 @@ eq(Math.abs(spearman(tx, ty) - spearman(px, py)) < 1e-12, true, 'tied blocks are
 eq(spearman([0, 0, 1, 2], [0, 1, 2, 3]) < 1, true, 'ties on one side cap the coefficient below 1');
 eq(spearman([0, 0, 1, 2], [0, 1, 2, 3]) > 0.8, true, '...but still reports a strong positive');
 eq(Math.abs(spearman([1, 2, 3, 4], [2, 4, 6, 8]) - 1), 0, 'monotone rescaling is still +1');
+
+// --- keywordWeight: separable from lexicalWeight, mirroring it when unset ---
+// The split exists because the two signals disagree about which books they are good on: measured optima
+// were (text 0.5, keys 3), (1.5, 0) and (1.5, 1) across three scenes, and one coupled knob can reach none
+// of them. Mirroring on null is what keeps an upgrade byte-identical for anyone running LEXW != 1.
+const { fuseRanks } = await import('../extension/ranking.mjs');
+const mkRows = () => [
+    { key: 1, score: 0.9, textScore: 10, keywordScore: 1 },
+    { key: 2, score: 0.1, textScore: 1, keywordScore: 50 },
+];
+const fusedWith = opts => { const r = mkRows(); fuseRanks(r, { rrfK: 20, retrievalMode: 'hybrid', weightByOrder: false, ...opts }); return r.map(x => x.fused); };
+eq(JSON.stringify(fusedWith({ lexicalWeight: 1.5 })), JSON.stringify(fusedWith({ lexicalWeight: 1.5, keywordWeight: undefined })), 'undefined keywordWeight mirrors lexicalWeight');
+eq(JSON.stringify(fusedWith({ lexicalWeight: 1.5 })), JSON.stringify(fusedWith({ lexicalWeight: 1.5, keywordWeight: null })), 'null keywordWeight mirrors lexicalWeight');
+eq(JSON.stringify(fusedWith({ lexicalWeight: 1.5 })) === JSON.stringify(fusedWith({ lexicalWeight: 1.5, keywordWeight: 3 })), false, 'an explicit keywordWeight actually changes the fusion');
+// 0 must mean "ignore keys", not "fall back to lexicalWeight" — (1.5, 0) was one of the three optima, so
+// the nullish coalesce has to distinguish 0 from unset.
+const keysOff = fusedWith({ lexicalWeight: 1.5, keywordWeight: 0 });
+const keysOn = fusedWith({ lexicalWeight: 1.5, keywordWeight: 1.5 });
+eq(keysOff[1] < keysOn[1], true, 'keywordWeight 0 suppresses the keys contribution rather than mirroring');
+// The keys-heavy row should overtake the vector-heavy one once keys are weighted hard enough.
+const heavy = fusedWith({ lexicalWeight: 1.5, keywordWeight: 3 });
+eq(heavy[1] > heavy[0], true, 'a high keywordWeight can promote a keys-dominant entry');
+eq(keysOff[1] < keysOff[0], true, '...and suppressing keys demotes it again');

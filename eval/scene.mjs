@@ -71,7 +71,9 @@ export const embed = async (text, { ollama = 'http://localhost:11434', model = '
  * asks "what would this scene look like at these parameters instead".
  */
 export const sceneParams = (S, overrides = {}) => ({
-    K: 20, K1: 2, B: 0.75, LEXW: 1.5, boost: 3, stopwordDf: 0.25, commonWordWeight: 1,
+    // KEYW null mirrors LEXW, exactly as the extension does — so a sample captured before the split scores
+    // identically, and an arm that sets KEYW is testing the split rather than a silent default change.
+    K: 20, K1: 2, B: 0.75, LEXW: 1.5, KEYW: null, boost: 3, stopwordDf: 0.25, commonWordWeight: 1,
     caseSensitive: false, wholeWords: false, includeNames: true, threshold: 0.1,
     maxVectorEntries: 20, suppressVectorKeys: true, scoreVectorKeys: false, entityFilter: true,
     queryMode: 'messages', retrievalMode: 'hybrid',
@@ -219,7 +221,7 @@ export const makeFuse = P => (rows, lexW) => {
     rows.forEach(r => { r.key = r.uid; });
     // The sample's own retrievalMode, not a hardcoded 'hybrid' — production passes settings().retrievalMode
     // here, and a scene graded under 'lexical'/'vector' fused as hybrid is a ranking the user never ran.
-    ranking.fuseRanks(rows, { rrfK: P.K, retrievalMode: P.retrievalMode, weightByOrder: false, lexicalWeight: lexW });
+    ranking.fuseRanks(rows, { rrfK: P.K, retrievalMode: P.retrievalMode, weightByOrder: false, lexicalWeight: lexW, keywordWeight: P.KEYW });
     return [...rows].sort((a, b) => b.fused - a.fused);
 };
 

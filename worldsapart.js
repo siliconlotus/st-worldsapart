@@ -297,14 +297,24 @@ async function queryCollections(args) {
  * Chunking is for matching only — activation still emits the whole entry.
  * @param {string} world World name
  * @param {object[]} entries Entries belonging to that world
- * @returns {Promise<{collectionId: string, owners: Map<number, string>}>}
+ * @returns {Promise<{collectionId: string, owners: Map<number, string[]>}>}
  */
 async function syncWorld(world, entries) {
     const collectionId = `wa_${getStringHash(world)}`;
     const saved = await vectorPost('list', { collectionId }) ?? [];
 
     const items = [];
-    /** @type {Map<number, string>} chunk hash -> `${world}.${uid}` */
+    /**
+     * Chunk hash -> EVERY `${world}.${uid}` whose text contains that chunk. A LIST, because a chunk can have
+     * more than one owner and the store cannot tell us which: identical text in two entries hashes the same,
+     * `list` returns hashes only, and `insert` is filtered by hash membership — so on an incremental sync the
+     * second entry's copy is filtered out and never gets a row of its own. Keying an owner per hash then lost
+     * that entry entirely: last writer won, and whichever entry lost was unreachable through its shared chunk.
+     * Resolving the fan-out here, off the hashes we just computed from the live entries, keeps it independent
+     * of how the collection happened to be built (fresh syncs store one row per entry, incremental ones one
+     * row total — see eval/reindex-check.mjs on path-dependence).
+     * @type {Map<number, string[]>}
+     */
     const owners = new Map();
 
     for (const entry of entries) {
@@ -319,7 +329,9 @@ async function syncWorld(world, entries) {
             // silently overwrote A with B, and the plugin's per-hash dedup dropped one of the two rows.
             // ST core lists and deletes by hash only, so the pair has to live IN the hash.
             const hash = getStringHash(`${text}${entry.uid}`);
-            owners.set(hash, `${entry.world}.${entry.uid}`);
+            // With uid in the hash, one world yields one owner per hash; still a LIST because identical
+            // (text, uid) in two attached books collides, and the cross-world merge concats owners.
+            owners.set(hash, [`${entry.world}.${entry.uid}`]);
             items.push({ hash, text, index: entry.uid });
         }
     }
@@ -437,13 +449,15 @@ async function scoreEntriesUnsafe(searchText, termWeights = null) {
     }
 
     const collectionIds = [];
-    /** @type {Map<number, string>} */
+    /** @type {Map<number, string[]>} chunk hash -> every owning `${world}.${uid}` (see syncWorld) */
     const owners = new Map();
 
     for (const world of Object.keys(byWorld)) {
         const synced = await syncWorld(world, byWorld[world]);
         collectionIds.push(synced.collectionId);
-        synced.owners.forEach((v, k) => owners.set(k, v));
+        // CONCAT, not set: worlds are separate collections but one shared hash map, so identical text in two
+        // books has an owner in each and overwriting here would drop one of them.
+        synced.owners.forEach((v, k) => owners.set(k, owners.has(k) ? [...owners.get(k), ...v] : v));
     }
 
     // ENTRIES to request, not chunks — the plugin pools each entry's best chunk before it cuts (see
@@ -495,25 +509,33 @@ async function scoreEntriesUnsafe(searchText, termWeights = null) {
     for (const group of Object.values(results)) {
         const metadata = group?.metadata ?? [];
         metadata.forEach((item, index) => {
-            const owner = owners.get(Number(item?.hash));
-            if (!owner) {
+            // EVERY owner of the chunk, not one. The store keeps at most one row per hash on an incremental
+            // sync, so a chunk two entries share comes back once; crediting only one of them made the other
+            // unreachable through that text. This is not over-crediting — each of these entries genuinely
+            // contains the chunk — and the max-pooling below means an entry with a better chunk of its own
+            // still wins on that one.
+            const chunkOwners = owners.get(Number(item?.hash));
+            if (!chunkOwners?.length) {
                 return;
             }
 
             const score = typeof item?.score === 'number' ? item.score : 1 - (index / Math.max(1, metadata.length));
             const bm25 = typeof item?.bm25 === 'number' ? item.bm25 : 0;
-            const previous = scores.get(owner);
 
-            // Vector and lexical are pooled independently: an entry's best semantic
-            // chunk and its best lexical chunk need not be the same one.
-            if (!previous || previous.score < score) {
-                scores.set(owner, {
-                    score,
-                    chunk: String(item?.text ?? ''),
-                    bm25: Math.max(bm25, previous?.bm25 ?? 0),
-                });
-            } else if (bm25 > previous.bm25) {
-                previous.bm25 = bm25;
+            for (const owner of chunkOwners) {
+                const previous = scores.get(owner);
+
+                // Vector and lexical are pooled independently: an entry's best semantic
+                // chunk and its best lexical chunk need not be the same one.
+                if (!previous || previous.score < score) {
+                    scores.set(owner, {
+                        score,
+                        chunk: String(item?.text ?? ''),
+                        bm25: Math.max(bm25, previous?.bm25 ?? 0),
+                    });
+                } else if (bm25 > previous.bm25) {
+                    previous.bm25 = bm25;
+                }
             }
         });
     }
@@ -620,6 +642,8 @@ const fuseRetrieval = (scores) => ranking.fuseRetrieval(scores, {
     rrfK: settings().rrfK,
     retrievalMode: settings().retrievalMode,
     lexicalWeight: settings().lexicalWeight,
+    // No keywordWeight here on purpose: this is the RETRIEVAL ranking the cutoff cuts, and it scores vector
+    // + chunk-text only. Keys never enter it — they exist in the layout ranking (fuseRanks) alone.
 });
 
 /**
@@ -954,6 +978,7 @@ const fuseRanks = (items) => ranking.fuseRanks(items, {
     retrievalMode: settings().retrievalMode,
     weightByOrder: settings().weightByOrder,
     lexicalWeight: settings().lexicalWeight,
+    keywordWeight: settings().keywordWeight,
 });
 
 /**
@@ -2642,6 +2667,8 @@ const SETTINGS_HTML = `
 
                     <label for="wa_lexical_weight">Lexical weight (BM25 vs vector in fusion)</label>
                     <input id="wa_lexical_weight" type="number" class="text_pole" min="0" max="5" step="0.1">
+                    <label for="wa_keyword_weight">Keyword weight (BM25 over keys) — blank follows lexical weight</label>
+                    <input id="wa_keyword_weight" type="number" class="text_pole" min="0" max="5" step="0.1" placeholder="follow lexical">
                 </div>
             </div>
 
@@ -2952,6 +2979,13 @@ export async function init() {
     bind('#wa_bm25_k1', 'bm25K1', 'number');
     bind('#wa_bm25_b', 'bm25B', 'number');
     bind('#wa_lexical_weight', 'lexicalWeight', 'number');
+    // Blank means "follow lexicalWeight", so this cannot use the plain number binding — '' must persist as
+    // null rather than collapsing to 0, which would silently switch the keys signal off.
+    $('#wa_keyword_weight').val(settings().keywordWeight ?? '').on('input change', function () {
+        const raw = String($(this).val()).trim();
+        settings().keywordWeight = raw === '' ? null : Number(raw);
+        saveSettingsDebounced();
+    });
     bind('#wa_rrf_k', 'rrfK', 'number');
     bind('#wa_weight_by_order', 'weightByOrder', 'checked');
     bind('#wa_summary_profile', 'summaryProfile', 'string');

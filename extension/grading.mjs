@@ -88,6 +88,8 @@ export function captureParams(s, { caseSensitive, wholeWords, includeNames }) {
         K1: s.bm25K1,
         B: s.bm25B,
         LEXW: s.lexicalWeight,
+        // null = follows LEXW; recorded as-is so a sample says which of the two it was captured under.
+        KEYW: s.keywordWeight ?? null,
         boost: s.properNounBoost,
         stopwordDf: s.stopwordDocFreq,
         // Derived from the mode rather than stored (see paramSnapshot): BM25-only runs down-weight

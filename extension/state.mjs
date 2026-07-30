@@ -18,6 +18,19 @@ export const defaultSettings = {
     scoreVectorKeys: false,
     /** Characters per chunk. Entries are chunked for MATCHING only; the whole entry is still inserted. */
     chunkSize: 800,
+    /**
+     * Weight for BM25-over-KEYS in the layout fusion, separate from lexicalWeight (BM25-over-chunk-text).
+     *
+     * null = follow lexicalWeight, which is what every install did before this existed and is what keeps an
+     * upgrade byte-identical. Set it when a book's keywords deserve different trust than its prose: measured
+     * optima across three graded scenes were (text 0.5, keys 3) for a hand-curated book, (1.5, 0) for one
+     * whose keys are auto-generated scene detail, and (1.5, 1) for a third — the keys signal correlates
+     * 0.79 / 0.11 / 0.39 with human grades on those books, so one weight cannot serve them.
+     *
+     * Only reaches the layout ranking. fuseRetrieval (what the cutoff cuts) scores vector + text and never
+     * sees keys at all.
+     */
+    keywordWeight: null,
     /** 'paragraph' keeps semantic boundaries; 'length' fills to chunkSize (chunking.mjs splitRecursive). */
     chunkMode: 'paragraph',
     /**

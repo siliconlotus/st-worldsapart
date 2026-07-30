@@ -38,6 +38,13 @@ eq(typeof buildItems({ '7': V('7', 'alpha') }, CFG)[0].index, 'number', 'a strin
 // is stored twice, once per uid. Collapsing them changes which entry owns a shared chunk; since entry pooling
 // takes the max over an entry's chunks, that moves the ranking and the elbow cut. A deduped rebuild
 // reproduced every nDCG figure of a live index and still cut 4 entries where production cut 8.
+//
+// One row per entry is therefore what the harness scores off `metadata.index`, and it is what production now
+// scores too — but production gets there differently, and the difference is why this file's oracle can still
+// disagree on storage. An INCREMENTAL sync keeps only the first row for a shared hash, so the store alone
+// cannot name the second owner. syncWorld resolves the fan-out from the live entries instead (hash -> uid[]),
+// which credits every owner regardless of how the collection was built. Storage stays path-dependent;
+// attribution no longer is.
 const shared = buildItems({ 1: V(1, 'same text'), 2: V(2, 'same text') }, CFG);
 eq(shared.length, 2, 'text shared by two entries is stored once PER ENTRY, as a fresh sync does');
 eq(shared[0].hash === shared[1].hash, true, 'both copies carry the same hash');

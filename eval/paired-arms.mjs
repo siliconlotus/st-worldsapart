@@ -45,6 +45,10 @@ const ARMS = {
     'K1=1.2': { K1: 1.2 }, 'K1=2': { K1: 2 }, 'K1=3': { K1: 3 },
     'B=0.6': { B: 0.6 }, 'B=0.9': { B: 0.9 },
     'LEXW=0.5': { LEXW: 0.5 }, 'LEXW=1': { LEXW: 1 }, 'LEXW=2': { LEXW: 2 }, 'LEXW=3': { LEXW: 3 },
+    // KEYS WEIGHT, now separable from text. null mirrors LEXW, which is what every capture before the split
+    // used; a number overrides it. The per-scene optima that motivated the split were (text 0.5, keys 3),
+    // (1.5, 0) and (1.5, 1), so 0 is a real candidate, not a degenerate one.
+    'KEYW=0': { KEYW: 0 }, 'KEYW=0.5': { KEYW: 0.5 }, 'KEYW=1': { KEYW: 1 }, 'KEYW=2': { KEYW: 2 }, 'KEYW=3': { KEYW: 3 },
     'K=10': { K: 10 }, 'K=60': { K: 60 },
     'boost=1': { boost: 1 }, 'boost=5': { boost: 5 }, 'boost=8': { boost: 8 },
     'stopwordDf=0.15': { stopwordDf: 0.15 }, 'stopwordDf=0.4': { stopwordDf: 0.4 },
