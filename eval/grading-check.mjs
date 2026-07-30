@@ -2,7 +2,7 @@
 // this pins the part that decides what a sample CONTAINS: book fidelity, the settings mapping, the
 // scaffolding tier, and the foreign-book exclusion. A sample that silently loses a field is a graded scene
 // that can't be re-run, which is the whole failure this feature exists to prevent.
-import { buildSample, captureParams, isScaffolding, mergeGrades, rowKey, sampleFile, searchedBook, splitGraded, trimBook, unionArms } from '../extension/grading.mjs';
+import { buildSample, bundleSamples, captureParams, isScaffolding, mergeGrades, openBundle, rowKey, sampleFile, searchedBook, splitGraded, trimBook, unionArms } from '../extension/grading.mjs';
 import { eq } from './metrics.mjs';
 import * as ranking from '../extension/ranking.mjs';
 
