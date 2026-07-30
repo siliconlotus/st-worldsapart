@@ -210,7 +210,7 @@ export async function lorebookStudio(preferredBook = null) {
                 check(studioOpts, 'scanVectorized', 'Scan Vectorized (🔗)'),
                 check(studioOpts, 'scanConstant', 'Scan Constant (🔵)'),
                 check(studioOpts, 'includeInactive', 'Include inactive entries'),
-                check(studioOpts, 'pruneDead', 'Flag dead keys (in no entry text)'),
+                check(studioOpts, 'pruneUnattested', 'Flag keys not in entry text (aliases and typos)'),
                 check(studioOpts, 'pruneCommon', 'Flag frequent keys'),
                 num(studioOpts, 'tooCommon', '↳ frequent: in >', '% of entry TEXT', { min: 1, max: 100, scale: 100 }),
                 check(studioOpts, 'pruneShared', 'Flag over-shared keys'),
@@ -736,17 +736,21 @@ export async function lorebookStudio(preferredBook = null) {
         meta.title = `trigger probability ${e.useProbability !== false ? prob : 100}% · delay ${delay} · cooldown ${cooldown} (messages)`;
         h.append(selBox, chev, mode, title, pencil, meta);
         // Collapsed-line badge: how many keys the last scan flagged, so problems show without expanding.
-        // Tinted by the most severe flag for glance-triage; dead-only stays neutral, since "dead" is
-        // low-signal (plenty of good keys read as dead for corpus reasons).
-        if (flagged && flagged.size) {
+        // COUNTS PROBLEMS, NOT WARNINGS. Yellow is the 0.75x band — "probably not harming, your call" — and
+        // green shorts cannot collide at all, so neither belongs in a number the eye reads as a defect count.
+        // They still appear on expansion with their colour; only the headline excludes them. Unattested-only
+        // stays neutral: on a hand-authored book ~90% of those are deliberate aliases.
+        const RANK = { '#e06c6c': 3, '#d9b74a': 2, '#7bbf6a': 1 };   // red > yellow > green; '' = uncoloured
+        const SEV = { '#e06c6c': 'severe', '#d9b74a': 'moderate', '#7bbf6a': 'minor' };
+        const counted = flagged ? [...flagged.values()].filter(v => { const c = scan.severityOf(v); return c !== '#d9b74a' && c !== '#7bbf6a'; }) : [];
+        if (counted.length) {
             const badge = document.createElement('span'); badge.className = 'wa-entry-badge';
-            badge.textContent = `${flagged.size} flagged`;
-            const RANK = { '#e06c6c': 3, '#d9b74a': 2, '#7bbf6a': 1 };   // red > yellow > green; '' (dead) = 0
-            const SEV = { '#e06c6c': 'severe', '#d9b74a': 'moderate', '#7bbf6a': 'minor' };
+            badge.textContent = `${counted.length} flagged`;
             let worst = '';
-            for (const v of flagged.values()) { const c = scan.reasonOf(v).color; if ((RANK[c] ?? 0) > (RANK[worst] ?? 0)) worst = c; }
+            for (const v of counted) { const c = scan.severityOf(v); if ((RANK[c] ?? 0) > (RANK[worst] ?? 0)) worst = c; }
             if (worst) { badge.style.background = worst; badge.style.color = worst === '#e06c6c' ? '#fff' : '#111'; }
-            badge.title = `Keywords the last scan flagged — worst: ${SEV[worst] || 'dead'}. Expand to see which.`;
+            const softer = (flagged?.size ?? 0) - counted.length;
+            badge.title = `Keywords the last scan flagged — worst: ${SEV[worst] || 'not in entry text'}.${softer ? ` ${softer} more are warnings, not counted here.` : ''} Expand to see which.`;
             h.append(badge);
         }
         // Whole header line toggles level 1; the mode dropdown and tool icons stopPropagation so they
@@ -784,7 +788,7 @@ export async function lorebookStudio(preferredBook = null) {
             // Verdict drives the chip's border + a faint matching fill: green = no flag, red/yellow =
             // too-common/short by severity. Dead is the overwhelming majority of flags and often hits
             // genuinely good keys (corpus limits), so it gets no label and just a slight dim, not a colour.
-            const isDead = v && v.flag === 'dead';
+            const isDead = v && v.flag === 'unattested';
             const isIgnored = ignoreSet.has(key);
             // Whitelisted keys are skipped by the scanner (never flagged), so mark them purple to show
             // they're deliberately spared; otherwise verdict drives the colour (green = no flag, red/yellow
@@ -1559,6 +1563,10 @@ export async function lorebookStudio(preferredBook = null) {
             bar.innerHTML = '';
             const count = document.createElement('span'); count.className = 'wa-bulk-count';
             count.textContent = `${on} of ${allIds.length} flagged term${allIds.length === 1 ? '' : 's'} selected`;
+            // A tick is a suggestion, not a verified problem. "Not in entry text" means exactly that — keys
+            // match against the CHAT, so a key your story uses but your prose never spells out reads as
+            // unattested and is usually a deliberate alias worth keeping.
+            count.title = 'Pre-ticked terms are suggestions, not verified problems. Review before applying.';
             bar.append(count,
                 barBtn(allOn ? 'Select none' : 'Select all', () => {
                     for (const id of allIds) cleanupChecks.set(id, !allOn);

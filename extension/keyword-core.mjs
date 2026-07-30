@@ -26,6 +26,43 @@ export const KEY_MIN_LENGTH = 4;
  * constant that fires unpredictably) is worth flagging. */
 export const KEY_SHARED = 0.75;
 
+/** English function words. Shared by the suggester (which refuses to PROPOSE candidates containing them)
+ *  and the prune classifier (which flags existing keys that do) — one list, so the two tools cannot disagree
+ *  about what junk looks like. */
+export const FUNCTION_WORDS = new Set('a an the and or but if then else for to of in on at by with from as is are was were be been being this that these those it its he she they them his her their you your i we our my me not no do does did has have had will would can could should'.split(' '));
+
+/**
+ * A key that reads as a CLAUSE FRAGMENT rather than a name for something.
+ *
+ * This is the dominant failure of machine-written keys and nothing else in the audit sees it: an entry's
+ * auto-generated keys are lifted verbatim from its own prose, so they sit in that entry's text (df 1, not
+ * "dead"), appear nowhere else (not "too common", not "shared") and are long (not "short"). Three uncurated
+ * entries were measured with 22 keys between them, all with zero hits across 5473 chat messages, and every
+ * single one UNFLAGGED.
+ *
+ * WHAT IT DELIBERATELY DOES NOT CATCH is over-specificity, because that is not decidable from the key and is
+ * not the same defect. "dick flag towels" and "epsom salts" are unlikely to recur but they NAME something
+ * concrete, so they might; "web not spoke wheel" and "try stuff and see" name nothing and cannot. Coherence
+ * is the tractable question and it is the one worth asking. It also keeps the test safe for non-English
+ * named entities — "Dia de los Muertos" survives, since `de`/`los` are not English function words.
+ *
+ * Single words are never fragments (a bare word is a name or it is caught by the English-common flag).
+ *
+ * TITLE CASE IS EXEMPT, because a capitalised phrase is a name even when it contains a function word:
+ * "No Contact Order" and "The Bali Trip" are things, "no script" and "the extra one" are not. Without this
+ * the flag fires on legitimate hand-written keys — which is exactly what the check caught.
+ *
+ * @param {string} key Raw keyword
+ * @returns {boolean} True when the key contains an English function word in a multi-word phrase
+ */
+export function looksLikeFragment(key) {
+    const raw = String(key ?? '').trim();
+    const tokens = raw.split(/\s+/).filter(Boolean);
+    if (tokens.length > 1 && tokens.every(t => /^[^\p{L}]*\p{Lu}/u.test(t))) return false;   // Title Case = a name
+    const words = raw.toLowerCase().match(/[\p{L}][\p{L}'-]*/gu) ?? [];
+    return words.length > 1 && words.some(w => FUNCTION_WORDS.has(w));
+}
+
 /** Baseline English-frequency cut for the too-common flag. A key this common in general English
  * over-fires against the CHAT, not just other entries — a signal lorebook df alone can't see.
  * Sticky reference sheets tolerate more (a bare-name trigger is meant to be ubiquitous), so they
@@ -164,13 +201,14 @@ export function buildKeyPruneScan(data, opts, ignoreSet, { caseSensitiveDefault 
         // outranks dead (a word absent from the book's own text still floods it from the chat).
         // Sticky gets the shorter head-of-list cut; keyword/vector test the whole list.
         if (opts.pruneCommon && !/\s/.test(k) && (sticky ? COMMON_HEAD : COMMON_WORDS).has(k.toLowerCase())) return { flag: 'too common', dc, eng: true };
-        if (dc === 0 && opts.pruneDead && !(opts.ignoreProper && looksProper(k))) return { flag: 'dead', dc };
+        if (dc === 0 && opts.pruneUnattested && !(opts.ignoreProper && looksProper(k))) return { flag: 'unattested', dc };
         if (nBook >= KEY_MIN_COMMON_ENTRIES && dc / nBook > opts.tooCommon * 0.75 && opts.pruneCommon) return { flag: 'too common', dc };
         // Activation breadth, checked after firing rate: a key can be rare in the prose yet listed on
         // most entries, which the content-df flags above can't see. Same small-corpus guard, since
         // "75% of 4 entries" is as meaningless here as it is there.
         const dk = dfKeys.get(k.toLowerCase()) ?? 0;
         if (nBook >= KEY_MIN_COMMON_ENTRIES && dk / nBook > opts.sharedKeys * 0.75 && opts.pruneShared) return { flag: 'shared', dc, dk };
+        if (opts.pruneFragment !== false && looksLikeFragment(k)) return { flag: 'fragment', dc };
         if (k.length < opts.minLength && !ww && opts.pruneShort) return { flag: 'short', dc, clean: strictClean(k, cs), total: scan(k, cs, false).total };
         return null;
     };
@@ -189,25 +227,66 @@ export function buildKeyPruneScan(data, opts, ignoreSet, { caseSensitiveDefault 
         }
         return out;
     };
+    // Severity banding, shared by reasonOf, defChecked and the Studio's badge so a key's colour, its
+    // pre-ticked state and whether it is counted as a problem can never disagree. Duplicating this was how
+    // the tiers drifted: the popup coloured a key yellow while still pre-ticking it for removal.
+    const severityOf = p => {
+        if (p.flag === 'unattested') return '';
+        if (p.flag === 'too common') {
+            if (p.eng) return RED;
+            return p.dc / nBook >= opts.tooCommon ? RED : YEL;
+        }
+        if (p.flag === 'shared') return p.dk / nBook >= opts.sharedKeys ? RED : YEL;
+        // RED, not yellow, and not conditioned on who wrote the key: a clause fragment is a bad trigger
+        // whoever authored it. Curated books contain them too ("never let an Alpha tie" survived a human
+        // pass and still is not a good key), so deferring to the author here would just preserve the
+        // mistakes the author already missed. The ignore list is the escape hatch for a deliberate one —
+        // classifyEntry skips anything in ignoreSet, permanently and per book.
+        if (p.flag === 'fragment') return RED;
+        const ratio = p.total ? p.clean / p.total : 0;
+        return ratio >= 1 ? GRN : ratio <= 1 / 3 ? RED : YEL;
+    };
     // Reason text + severity colour (dead is uncoloured).
     const reasonOf = p => {
-        if (p.flag === 'dead') return { text: 'dead', color: '' };
-        if (p.flag === 'too common') {
-            if (p.eng) return { text: 'common', color: RED };
-            const r = p.dc / nBook, t = opts.tooCommon;
-            return { text: `frequent (${Math.round(r * 100)}%)`, color: r >= t ? RED : YEL };   // ≥threshold red, danger zone (>0.75×) yellow
-        }
-        if (p.flag === 'shared') {
-            const r = p.dk / nBook, t = opts.sharedKeys;
-            return { text: `shared (${Math.round(r * 100)}%)`, color: r >= t ? RED : YEL };     // same banding as frequent
-        }
-        const ratio = p.total ? p.clean / p.total : 0;
-        return { text: `short (${p.clean}/${p.total} clean)`, color: ratio >= 1 ? GRN : ratio <= 1 / 3 ? RED : YEL };
+        const color = severityOf(p);
+        if (p.flag === 'unattested') return { text: 'not in entry text', color };
+        if (p.flag === 'too common') return p.eng ? { text: 'common', color } : { text: `frequent (${Math.round(100 * p.dc / nBook)}%)`, color };
+        if (p.flag === 'shared') return { text: `shared (${Math.round(100 * p.dk / nBook)}%)`, color };
+        if (p.flag === 'fragment') return { text: 'phrase fragment', color };
+        return { text: `short (${p.clean}/${p.total} clean)`, color };
     };
-    // A short key whose every hit is a clean standalone match can't collide → green, not pre-checked.
-    const defChecked = p => !(p.flag === 'short' && p.total && p.clean === p.total);
+    // WHAT GETS PRE-TICKED IS A CLAIM ABOUT CONFIDENCE, so only the red tier is. Yellow is the 0.75x band:
+    // "you might consider acting on this, but it is probably not harming" — a warning, which by definition is
+    // the author's call rather than the tool's. Pre-ticking it made "accept the defaults" silently agree to
+    // both tiers, and with no bulk control in the prune popup that pre-tick WAS the bulk action.
+    //
+    // Costs nothing measurable either way: removing the whole yellow band was worth +0.036 nDCG on one graded
+    // book and 0.000 / -0.0006 on two others. This is about the tool being honest about its own confidence,
+    // not about retrieval.
+    //
+    // Green (a short key whose every hit is a clean standalone match, so it cannot collide) stays exempt too.
+    //
+    // DEAD IS PRE-TICKED ONLY ON MACHINE-WRITTEN ENTRIES, because the label measures the wrong corpus and
+    // "Unattested" means the key appears in no ENTRY's text — NOT that it will never fire, and whether that
+    // matters depends on who wrote it, since keys fire against the CHAT. Over three full chat histories:
+    //
+    //   on STMemoryBooks entries  12% / 39% / 40% ever appear in the chat, so 60-88% are exactly
+    //                             what the flag claims — one-off scene furniture the model scraped
+    //                             ("waterproof mattress pad", "quart", "canopy bed") plus incidental
+    //                             pop-culture off a simile ("Seinfeld", "Galaxy Quest"). Bulk removal is the
+    //                             point of the tool for an unpruned memory book.
+    //   on hand-written entries   it is far more likely deliberate — an ALIAS, a name the prose does not use
+    //                             because prose uses the canonical form. A public Deltarune book showed
+    //                             ~90% aliases ("Toriel's House" for "Dreemurr Residence"); the real finds were
+    //                             two typos and two apostrophe-form breaks.
+    //
+    // So the tool decides where the author didn't, and defers where they did. Everything still SHOWS with its
+    // colour; this only controls what "accept the defaults" agrees to.
+    const generated = e => e?.stmemorybooks !== undefined || e?.STMB_start !== undefined || e?.stmbArc !== undefined;
+    const byUid = new Map(allEntries.map(e => [String(e.uid), e]));
+    const defChecked = p => severityOf(p) === RED || (p.flag === 'unattested' && generated(byUid.get(String(p.uid))));
 
-    return { entries, nE, classifyEntry, reasonOf, defChecked, effCase, effWhole };
+    return { entries, nE, classifyEntry, reasonOf, defChecked, severityOf, effCase, effWhole };
 }
 
 // Few-shot examples, shared so the LLM post-filter can drop them unconditionally: a cold small model
@@ -305,7 +384,7 @@ export function classifyLlmCand(cand, { canon, exampleCanon, dfSubstr, N, dfCeil
  */
 export function buildKeySuggest(data, opts) {
     const { dfCeil, maxN, excludeDates, excludeShort, onlyActive, cap } = opts;
-    const STOP = new Set('a an the and or but if then else for to of in on at by with from as is are was were be been being this that these those it its he she they them his her their you your i we our my me not no do does did has have had will would can could should'.split(' '));
+    const STOP = FUNCTION_WORDS;
     const fold = w => { w = w.replace(/^['-]+|['-]+$/g, ''); return w.endsWith("'s") ? w.slice(0, -2) : w; };
     // Acronym casing (see notes): a token seen only in ALL-CAPS (SDG) is an acronym, exempt from the
     // short-word cut and shown uppercase; one ever seen lowercase isn't.

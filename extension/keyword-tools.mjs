@@ -45,7 +45,7 @@ export async function keywordScoresReport() {
 
     // Carried across the Back loop so a return trip keeps the last choices.
     let book = [...runState.attachedWorlds].find(w => books.includes(w)) ?? books[0];
-    let opts = { scanKeyword: true, scanVectorized: true, scanConstant: true, includeInactive: false, pruneDead: true, pruneCommon: true, pruneShort: true, pruneShared: true, ignoreProper: false, stickySkipCommon: true, tooCommon: KEY_TOO_COMMON, minLength: KEY_MIN_LENGTH, sharedKeys: KEY_SHARED };
+    let opts = { scanKeyword: true, scanVectorized: true, scanConstant: true, includeInactive: false, pruneUnattested: true, pruneCommon: true, pruneShort: true, pruneShared: true, pruneFragment: true, ignoreProper: false, stickySkipCommon: true, tooCommon: KEY_TOO_COMMON, minLength: KEY_MIN_LENGTH, sharedKeys: KEY_SHARED };
 
     // Phase 1: book + scan options. Resolves true to proceed, false to close out.
     const showOptions = async () => {
@@ -62,10 +62,11 @@ export async function keywordScoresReport() {
             + `<label class="checkbox_label"><input type="checkbox" class="wa-scanConstant"${chk(opts.scanConstant)}><span>Constant (🔵)</span></label>`
             + `<label class="checkbox_label"><input type="checkbox" class="wa-includeInactive"${chk(opts.includeInactive)}><span>Include inactive</span></label>`
             + '<div style="margin-top:0.5em;font-weight:bold;">Recommend pruning</div>'
-            + `<label class="checkbox_label"><input type="checkbox" class="wa-pruneDead"${chk(opts.pruneDead)}><span>Dead keys (in no entry\'s text)</span></label>`
+            + `<label class="checkbox_label"><input type="checkbox" class="wa-pruneUnattested"${chk(opts.pruneUnattested)}><span>Not in entry text (aliases and typos \u2014 <i>not</i> necessarily inactive; keys match the chat, not the lorebook)</span></label>`
             + `<label class="checkbox_label"><input type="checkbox" class="wa-pruneCommon"${chk(opts.pruneCommon)}><span>Too-common keys (in &gt;<input type="number" class="wa-tooCommon text_pole" ${numStyle} min="1" max="100" step="1" value="${Math.round(opts.tooCommon * 100)}">% of entries)</span></label>`
             + `<label class="checkbox_label"><input type="checkbox" class="wa-pruneShared"${chk(opts.pruneShared)}><span>Over-shared keys (listed by &gt;<input type="number" class="wa-sharedKeys text_pole" ${numStyle} min="1" max="100" step="1" value="${Math.round(opts.sharedKeys * 100)}">% of entries — one hit activates them all)</span></label>`
             + `<label class="checkbox_label"><input type="checkbox" class="wa-pruneShort"${chk(opts.pruneShort)}><span>Short keys (&lt;<input type="number" class="wa-minLen text_pole" ${numStyle} min="1" step="1" value="${opts.minLength}"> chars — substring false positives)</span></label>`
+            + `<label class="checkbox_label"><input type="checkbox" class="wa-pruneFragment"${chk(opts.pruneFragment)}><span>Phrase fragments (multi-word keys with function words — "try stuff and see"; typical of auto-generated keys)</span></label>`
             + `<label class="checkbox_label"><input type="checkbox" class="wa-ignoreProper"${chk(opts.ignoreProper)}><span>Ignore proper nouns (don\'t flag a Name as dead)</span></label>`
             + `<label class="checkbox_label"><input type="checkbox" class="wa-stickySkip"${chk(opts.stickySkipCommon)}><span>Spare sticky entries from lorebook-common (a reference sheet\'s bare-name trigger is meant to be ubiquitous)</span></label>`
             + '<small style="display:block;margin-top:0.5em;opacity:0.6;">Flagging is per-key on its own text frequency; a deliberate recurring name may show as too-common — whitelist it with the ban icon, or mark its reference entry sticky.</small>';
@@ -82,10 +83,11 @@ export async function keywordScoresReport() {
                         scanVectorized: w.querySelector('.wa-scanVectorized').checked,
                         scanConstant: w.querySelector('.wa-scanConstant').checked,
                         includeInactive: w.querySelector('.wa-includeInactive').checked,
-                        pruneDead: w.querySelector('.wa-pruneDead').checked,
+                        pruneUnattested: w.querySelector('.wa-pruneUnattested').checked,
                         pruneCommon: w.querySelector('.wa-pruneCommon').checked,
                         pruneShort: w.querySelector('.wa-pruneShort').checked,
                         pruneShared: w.querySelector('.wa-pruneShared').checked,
+                        pruneFragment: w.querySelector('.wa-pruneFragment').checked,
                         ignoreProper: w.querySelector('.wa-ignoreProper').checked,
                         stickySkipCommon: w.querySelector('.wa-stickySkip').checked,
                         tooCommon: pct > 0 && pct <= 100 ? pct / 100 : KEY_TOO_COMMON,
@@ -109,56 +111,26 @@ export async function keywordScoresReport() {
         // Shared classifier — same one Lorebook Studio uses, so the audit never drifts from it.
         const { entries, nE, classifyEntry, reasonOf, defChecked, effCase, effWhole } = buildKeyPruneScan(data, opts, ignoreSet);
 
-        if (!entries.some(e => classifyEntry(e).length)) {
-            toastr.info(`No weak keys across ${nE} ${opts.includeInactive ? '' : 'active '}entries in "${book}".`, 'Worlds Apart');
-            continue;
-        }
-
-        // Phase 2: results. Structural edits (rename, flag toggles) save immediately; pruning is the
-        // batched OK action. render() rebuilds from live entry state, so every edit just re-renders.
-        const resWrap = document.createElement('div');
-        resWrap.style.cssText = 'text-align:left;width:71rem;max-width:100%;';
-        const head = document.createElement('div');
-        const table = document.createElement('table');
-        table.style.cssText = 'width:100%;border-collapse:collapse;table-layout:fixed;';
-        table.innerHTML = '<colgroup><col style="width:3.4em;"><col><col style="width:12.5em;"><col style="width:2.2em;"></colgroup>';
-        const bodyEl = document.createElement('tbody');
-        table.append(bodyEl);
-        resWrap.append(head, table);
-
-        const checks = new Map();          // rowId -> prune checkbox state, kept across renders
-        const pruned = new Map();          // uid -> Set of keys pruned this session (stay visible, struck, undoable)
-        let editing = null, editVal = '';  // rowId being renamed + its live text
-        let dirty = false;                 // a loresheet edit was saved -> reloadEditor on close
-        const rowId = (uid, key) => `${uid}${key}`;
-        const persistIgnore = () => { s.keywordIgnore[book] = [...ignoreSet]; saveSettingsDebounced(); };
-
-        const syncHeaders = () => {
-            bodyEl.querySelectorAll('.wa-grp-cb').forEach(g => {
-                const boxes = [...bodyEl.querySelectorAll(`.wa-row-cb[data-g="${g.dataset.g}"]`)];
-                const on = boxes.filter(b => b.checked).length;
-                g.checked = on > 0 && on === boxes.length;
-                g.indeterminate = on > 0 && on < boxes.length;
-            });
-            const all = [...bodyEl.querySelectorAll('.wa-row-cb')];
-            const gcb = head.querySelector('.wa-all-cb');
-            if (gcb) {
-                const on = all.filter(b => b.checked).length;
-                gcb.checked = on > 0 && on === all.length;
-                gcb.indeterminate = on > 0 && on < all.length;
-            }
-        };
-
         const renderHead = () => {
             const nVis = bodyEl.querySelectorAll('.wa-row-cb').length;
-            const recs = [opts.pruneDead && 'dead', opts.pruneCommon && `too-common >${+(opts.tooCommon * 75).toFixed(1)}% (red >${Math.round(opts.tooCommon * 100)}%)`, opts.pruneShared && `over-shared >${+(opts.sharedKeys * 75).toFixed(1)}% (red >${Math.round(opts.sharedKeys * 100)}%)`, opts.pruneShort && `short <${opts.minLength}`].filter(Boolean).join(', ');
-            const doc = `Scan: ${opts.includeInactive ? 'all entries' : 'active entries'} · ${recs || 'nothing'}${opts.ignoreProper ? ' · sparing proper-noun dead' : ''}`;
+            const recs = [opts.pruneUnattested && 'not in entry text', opts.pruneCommon && `too-common >${+(opts.tooCommon * 75).toFixed(1)}% (red >${Math.round(opts.tooCommon * 100)}%)`, opts.pruneShared && `over-shared >${+(opts.sharedKeys * 75).toFixed(1)}% (red >${Math.round(opts.sharedKeys * 100)}%)`, opts.pruneShort && `short <${opts.minLength}`, opts.pruneFragment && 'phrase fragments'].filter(Boolean).join(', ');
+            // TICKED IS A SUGGESTION, NOT A VERDICT. "Not in entry text" means
+            // exactly that, and NOT that the key will never fire — keys match against the CHAT. Across three
+            // full histories 13-40% of them do fire, and on a hand-authored book ~90% are deliberate aliases.
+            // It is still the strongest curation signal available (a real prune pass cut one book from 1755 to
+            // 521), so it stays pre-ticked on machine-written entries — but accepted unread it deletes aliases.
+            // Plain text (escaped below) and markup are kept apart on purpose — the summary interpolates a
+            // book-controlled name, the caveat is a fixed literal.
+            const doc = `Scan: ${opts.includeInactive ? 'all entries' : 'active entries'} · ${recs || 'nothing'}${opts.ignoreProper ? ' · sparing proper-noun names' : ''}`;
+            const caveat = '<div style="opacity:0.85;font-size:0.9em;margin:0.2em 0;">Ticked = <b>suggested</b>, not verified — review before applying. Absent from <i>entry text</i> is not absent from your chat: a key your story uses but your prose never spells out is usually a deliberate alias worth keeping.</div>';
             const list = [...ignoreSet];
             const ign = list.length ? ` · <span style="opacity:0.7;">${list.length} ignored (${escapeHtml(list.join(', '))}) <a class="wa-clear" style="cursor:pointer;text-decoration:underline;">clear</a></span>` : '';
             head.innerHTML = `<b>keyword prune · ${escapeHtml(book)} — ${nVis} weak key(s)</b>`
                 + `<div style="opacity:0.6;font-size:0.9em;margin:0.2em 0;">${escapeHtml(doc)}</div>`
+                + caveat
                 + '<div style="opacity:0.75;font-size:0.9em;">Check to prune · pencil to rename · ban icon to whitelist · x/y = entries containing the term.</div>'
-                + `<div style="margin:0.4em 0;"><label class="checkbox_label" style="display:inline-flex;"><input type="checkbox" class="wa-all-cb"><span>Select all</span></label>${ign}</div>`;
+                + `<div style="margin:0.4em 0;display:flex;align-items:center;gap:0.6em;flex-wrap:wrap;"><label class="checkbox_label" style="display:inline-flex;"><input type="checkbox" class="wa-all-cb"><span>Select all</span></label>`
+                + `${ign}</div>`;
             head.querySelector('.wa-all-cb').addEventListener('change', e => {
                 bodyEl.querySelectorAll('.wa-row-cb').forEach(cb => { cb.checked = e.target.checked; checks.set(cb.dataset.id, cb.checked); });
                 syncHeaders();
@@ -626,5 +598,5 @@ export async function keywordSuggestReport() {
 
 // Studio scans every entry (all modes, active + inactive) so every entry's keywords get a verdict;
 // suggestions use the pruner's own dfCeil so a suggested key can't be one the pruner would then flag.
-export const STUDIO_PRUNE_OPTS = { scanKeyword: true, scanVectorized: true, scanConstant: true, includeInactive: true, pruneDead: true, pruneCommon: true, pruneShort: true, pruneShared: true, ignoreProper: false, stickySkipCommon: true, tooCommon: KEY_TOO_COMMON, minLength: KEY_MIN_LENGTH, sharedKeys: KEY_SHARED };
+export const STUDIO_PRUNE_OPTS = { scanKeyword: true, scanVectorized: true, scanConstant: true, includeInactive: true, pruneUnattested: true, pruneCommon: true, pruneShort: true, pruneShared: true, pruneFragment: true, ignoreProper: false, stickySkipCommon: true, tooCommon: KEY_TOO_COMMON, minLength: KEY_MIN_LENGTH, sharedKeys: KEY_SHARED };
 export const STUDIO_SUGGEST_OPTS = { dfCeil: 0.15, maxN: 4, excludeDates: true, excludeShort: true, onlyActive: false, cap: 8, llmChunk: 5000 };

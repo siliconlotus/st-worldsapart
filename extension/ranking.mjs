@@ -8,7 +8,7 @@
 // substituteParams, BM25 k1, world-info match defaults, fusion weights) is INJECTED by the caller.
 // The extension wraps these with its settings()/ST globals; the harness passes its own values.
 
-import { cachedCount, evaluateSmartKey, primeScan } from './smartkeys.mjs';
+import { cachedCount, evaluateSmartKey, fold, normalizeApostrophes, primeScan } from './smartkeys.mjs';
 
 /** Escape a string for literal use in a RegExp (same as ST's utils.escapeRegex; inlined to stay ST-free, exported for keyword-core). */
 export function escapeRegex(str) { return String(str).replace(/[.*+?^${}()|[\]\\]/g, '\\$&'); }
@@ -289,8 +289,11 @@ export function countKey(key, text, caseSensitive, wholeWords, scope) {
     if (cached === 0) return 0;
     if (cached !== undefined && !caseSensitive && (!wholeWords || /\s/.test(raw))) return cached;
 
-    const hay = caseSensitive ? text : text.toLowerCase();
-    const needle = caseSensitive ? raw : raw.toLowerCase();
+    // Apostrophe form is normalised under BOTH case modes — it is orthogonal to case, and a
+    // case-sensitive key is no more likely to have been typed with the same quote character the prose
+    // uses. Must match smartkeys' fold exactly or the trie and this walk disagree (see fold()).
+    const hay = caseSensitive ? normalizeApostrophes(text) : fold(text);
+    const needle = caseSensitive ? normalizeApostrophes(raw) : fold(raw);
 
     // Whole-word matching applies only to single-word keys; a multi-word key falls back
     // to substring, exactly as core does (it splits on whitespace and uses includes()).

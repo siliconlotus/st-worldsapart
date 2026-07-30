@@ -29,6 +29,29 @@ const OPS = {
  * @param {string} input
  * @returns {object[]} tokens
  */
+/** Apostrophe variants that authors and models mix freely: right/left single quotes, the modifier
+ *  letter apostrophe, prime, acute and grave. All collapse to ASCII ' before matching. */
+const APOSTROPHES = /[\u2018\u2019\u02BC\u00B4\u0060\u2032]/g;
+
+/**
+ * Normalises apostrophe form without touching case.
+ *
+ * WHY THIS EXISTS. A key written "Cap'n Joe" never matched prose written "Cap\u2019n Joe", and nothing
+ * surfaced it — the key simply never fired. Models emit typographic apostrophes constantly, so a key typed
+ * with a straight one silently dies against chat as well as against entry text. Measured on real books:
+ * 2 of 3 apostrophe-bearing keys in one, 2 of 84 in another, mismatched in BOTH directions.
+ */
+export const normalizeApostrophes = s => String(s ?? '').replace(APOSTROPHES, "'");
+
+/**
+ * The one folding used for every match: apostrophe-normalised and case-folded.
+ *
+ * MUST be the only fold. countKey short-circuits on a 0 from the automaton (`if (cached === 0) return 0`),
+ * so normalising the naive walk alone would change nothing — the trie would still report a miss and return
+ * before the walk ran. Registry, scan and fallback all go through here or they silently disagree.
+ */
+export const fold = s => normalizeApostrophes(s).toLowerCase();
+
 export function tokenize(input) {
     let src = String(input).replace(/^\?/, '').trim();
     const tokens = [];
@@ -212,7 +235,7 @@ function internLiteral(scope, folded) {
 function registerTerms(scope, node) {
     if (!node) return;
     if (node.type === 'TERM') {
-        node.acIndex = internLiteral(scope, node.value.toLowerCase());
+        node.acIndex = internLiteral(scope, fold(node.value));
     } else if (node.type === 'NOT') {
         registerTerms(scope, node.operand);
     } else {
@@ -235,7 +258,7 @@ function ensureScan(scope, text) {
     }
     let counts = scope.scans.get(text);
     if (counts === undefined) {
-        counts = scanAutomaton(scope.automaton, text.toLowerCase());
+        counts = scanAutomaton(scope.automaton, fold(text));
         scope.scans.set(text, counts);
         if (scope.scans.size > SCAN_CACHE_MAX) scope.scans.delete(scope.scans.keys().next().value);
     }
@@ -327,7 +350,7 @@ export function registerKeys(rawKeys, scope = defaultScope) {
         if (raw.startsWith('?')) {
             ensureAst(scope, raw);
         } else {
-            internLiteral(scope, raw.toLowerCase());
+            internLiteral(scope, fold(raw));
         }
     }
 }
@@ -358,7 +381,7 @@ export function cachedCount(raw, text, scope = defaultScope) {
     if (scope.dirty || scope.automaton === null) return undefined;
     const counts = scope.scans.get(text);
     if (counts === undefined) return undefined;
-    const idx = scope.termIndex.get(raw.toLowerCase());
+    const idx = scope.termIndex.get(fold(raw));
     if (idx === undefined) return undefined;
     return counts.get(idx) ?? 0;
 }

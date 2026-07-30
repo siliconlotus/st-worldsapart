@@ -90,7 +90,7 @@ eq(countKey('? fire:3 XOR flood', 'a fire burns', false, false), 3, 'XOR still y
 // Prune audit exempts smart keys like it exempts regex keys.
 {
     const data = { entries: { 0: { uid: 0, key: ['? moon mission', '? -apollo'], content: 'nothing relevant' } } };
-    const opts = { scanKeyword: true, scanVectorized: true, scanConstant: true, includeInactive: true, pruneDead: true, pruneCommon: true, pruneShort: true, ignoreProper: false, stickySkipCommon: true, tooCommon: 0.5, minLength: 4 };
+    const opts = { scanKeyword: true, scanVectorized: true, scanConstant: true, includeInactive: true, pruneUnattested: true, pruneCommon: true, pruneShort: true, ignoreProper: false, stickySkipCommon: true, tooCommon: 0.5, minLength: 4 };
     const { classifyEntry } = buildKeyPruneScan(data, opts, new Set());
     eq(classifyEntry(data.entries[0]).length, 0, 'smart keys exempt from prune audit');
 }
