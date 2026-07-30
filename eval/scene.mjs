@@ -75,6 +75,25 @@ export const sceneParams = (S, overrides = {}) => ({
     caseSensitive: false, wholeWords: false, includeNames: true, threshold: 0.1,
     maxVectorEntries: 20, suppressVectorKeys: true, scoreVectorKeys: false, entityFilter: true,
     queryMode: 'messages', retrievalMode: 'hybrid',
+    // How a VECTORIZED entry's chunk earns admission to the candidate set. 'either' is what the plugin ships
+    // (scoreCollection: `score >= threshold || bm25 > 0`), so a chunk with a weak embedding can still enter on
+    // its own lexical match. 'cosine' is the strict per-entry-type gate — the cosine floor actually gates the
+    // entries it is named for. Simulated by filtering the plugin's own output rather than forking it: the OR
+    // admits a superset, so the AND result is that set narrowed to the chunks clearing the floor. Non-vectorized
+    // entries are unaffected either way; they are not in the collection at all and arrive via keyword scoring
+    // (measured: 0 non-vectorized entries in any of three real indexes, so the plugin's bm25 clause is a
+    // SECOND route for vector entries, not the non-vector branch). 'both' is the strict AND — a chunk needs a
+    // clearing cosine AND some lexical overlap — which is narrower than either single test.
+    admit: 'either',
+    // Floor for the LEXICAL admission clause. The plugin ships `bm25 > 0`, which at these query lengths admits
+    // 80-95% of every chunk in the book — so the clause is nearly free and the cosine floor can only widen the
+    // set. A percentile floor makes the lexical test selective, and makes it ADAPTIVE: BM25 is not comparable
+    // across queries or corpora, so a fixed number cannot transfer between scenes the way a quantile can.
+    bm25Floor: 0,
+    // Same floor expressed as a PERCENTILE of the nonzero BM25 scores actually in play, computed per query.
+    // This is the form a real implementation would take: measured p25-of-all ranges 2.67 to 10.93 across three
+    // books, a 4x spread, so no fixed number transfers between scenes and the gate has to be adaptive.
+    bm25FloorPct: 0,
     ...(S.captureParams ?? {}), ...overrides,
 });
 
@@ -175,7 +194,16 @@ export const makeKeywordScore = P => (e, text, k1) =>
 export function makeScorer({ loaded, byUid, entries, params: P, topK }) {
     const keywordScore = makeKeywordScore(P);
     return (k1, b, tw, qvec, qtext, scanText) => {
-        const grouped = selectTopK(poolEntries(scoreCollection(CID, loaded, qvec, { centered: true, threshold: P.threshold, queryText: qtext, k1, b, termWeights: tw, stopwordDf: P.stopwordDf, commonWordWeight: P.commonWordWeight })), topK);
+        let scored = scoreCollection(CID, loaded, qvec, { centered: true, threshold: P.threshold, queryText: qtext, k1, b, termWeights: tw, stopwordDf: P.stopwordDf, commonWordWeight: P.commonWordWeight });
+        if (P.admit === 'cosine') scored = scored.filter(m => m.score >= P.threshold);
+        else if (P.admit === 'both') scored = scored.filter(m => m.score >= P.threshold && m.bm25 > 0);
+        if (P.bm25Floor > 0) scored = scored.filter(m => m.score >= P.threshold || m.bm25 >= P.bm25Floor);
+        if (P.bm25FloorPct > 0) {
+            const nz = scored.map(m => m.bm25).filter(x => x > 0).sort((a, b) => a - b);
+            const floor = nz.length ? nz[Math.min(nz.length - 1, Math.floor(P.bm25FloorPct * nz.length))] : 0;
+            if (floor > 0) scored = scored.filter(m => m.score >= P.threshold || m.bm25 >= floor);
+        }
+        const grouped = selectTopK(poolEntries(scored), topK);
         const per = new Map();
         for (const m of grouped[CID]?.metadata ?? []) { const uid = Number(m.index); const c = per.get(uid) ?? { score: -Infinity, bm25: 0 }; c.score = Math.max(c.score, m.score); c.bm25 = Math.max(c.bm25, m.bm25); per.set(uid, c); }
         const rows = [];

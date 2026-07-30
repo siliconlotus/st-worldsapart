@@ -30,8 +30,8 @@
 // reported per cell and a run with gaps is flagged. Pool first with /wa-super-grade, then screen here.
 import { readFileSync } from 'node:fs';
 import { indexPath, loadScene, openSample, sceneParams, scoreScene, embed } from './scene.mjs';
-import { jaccard, signTest } from './metrics.mjs';
-import { rowKey } from '../extension/grading.mjs';
+import { jaccard, signTest, spearman } from './metrics.mjs';
+import { isScaffolding, rowKey } from '../extension/grading.mjs';
 import { ensureIndex } from './reindex.mjs';
 
 const argv = process.argv.slice(2);
@@ -65,6 +65,34 @@ const ARMS = {
     ...Object.fromEntries([200, 300, 400, 600, 1200, 1600, 2400].map(v => [`chunkSize=${v}`, { __chunk: { chunkSize: v } }])),
     ...Object.fromEntries([0, 60, 120, 200, 300, 500].map(v => [`minChunk=${v}`, { __chunk: { minChunkSize: v } }])),
     'chunkMode=length': { __chunk: { chunkMode: 'length' } },
+
+    // ADMISSION ARMS — how a vectorized entry's chunk earns its way into the candidate set. The plugin ships
+    // `score >= threshold || bm25 > 0` (scoring.mjs scoreCollection). Kept as standing arms so that if anyone
+    // later "fixes" that OR into something stricter, the regression shows up here instead of shipping.
+    //
+    // WHAT WAS MEASURED (3 scenes, n=3, sample threshold 0.1):
+    //   admit=cosine  the strict per-entry-type gate — cosine alone decides for vector entries, which is what
+    //                 the OR looks like it should be. Sommers dropped 3/3 -> 1/3 critical entries in the top
+    //                 10; time-whore lost a relevant entry outright (recall 0.88). Worse at EVERY threshold
+    //                 down to 0, so it is not a calibration problem: the chunks it drops have below-average
+    //                 centered cosine but real lexical hits, and mean-centering is what puts them there.
+    //   admit=both    strict AND. Byte-identical to admit=cosine on all three scenes (differs by one chunk in
+    //                 two books at threshold 0) — there is essentially no chunk with a clearing cosine and no
+    //                 lexical overlap, so the extra conjunct removes nothing.
+    //   bm25Floor=*   percentile floor on the lexical clause. Free up to p75: recall stayed 1.00, crit@10
+    //                 intact, nDCG moved <=0.007 either way, candidate set shrank 7-10%. A set-size lever, not
+    //                 a quality one. p90 cost time-whore a relevant entry while its nDCG ROSE — read recall
+    //                 alongside. Note it is not free downstream: elbowSensitivity is a multiple of the mean
+    //                 gap across the retrieved list, so shortening the list moves where the cliff fires, and
+    //                 any real adoption needs the cutoff arms re-run.
+    //
+    // These arms only ever NARROW the candidate set, so unlike the chunk arms they cannot surface an unjudged
+    // entry — judged coverage can only improve, and their deltas are not pool-biased lower bounds.
+    // Only admit=cosine is a standing arm. admit=both and bm25FloorPct are still implemented in scene.mjs and
+    // re-runnable by hand (--arms cannot reach them; call scoreScene with the override) — they are left out
+    // here because they measured nothing, and an arm that measures nothing still costs a comparison in every
+    // future run's multiplicity count.
+    'admit=cosine': { admit: 'cosine' },
 };
 
 /** Arms that answer the SAME question at different doses. Derived from the name, so adding a dose needs no
@@ -141,6 +169,20 @@ const fx = n => (n >= 0 ? '+' : '') + n.toFixed(4);
         console.log('  all pairs below 0.5 relevant-set overlap — these read as separate draws.');
     }
     if (thin.length) console.log(`  !! ${thin.length} scene(s) have fewer than 4 relevant entries; their deltas are noisy but count at full weight in the sign test.`);
+
+    // SIGNAL QUALITY per scene. Every arm below is a reweighting of these three signals, so knowing which of
+    // them actually tracks relevance on which book is the context that makes a delta interpretable — a keys
+    // arm moving nothing on a book whose keys correlate 0.27 with grade is not a null result about the arm.
+    // Measured with tie-corrected Spearman (graded pools are mostly zeros); absent signals count as 0.
+    console.log('\nsignal quality — Spearman against the human grade (absent signal counts as 0)');
+    for (const sc of scenes) {
+        const gm = new Map((sc.S.grades ?? []).filter(x => x.uid !== undefined).map(x => [rowKey(x), Number(x.grade) || 0]));
+        const rs = (sc.S.candidates ?? []).filter(c => !isScaffolding(c) && gm.has(rowKey(c)));
+        if (rs.length < 5) { console.log(`  ${sc.name.slice(0, 34).padEnd(34)} only ${rs.length} judged candidate rows — skipped`); continue; }
+        const gv = rs.map(r => gm.get(rowKey(r)));
+        const sig = f => spearman(rs.map(f), gv).toFixed(2).padStart(5);
+        console.log(`  ${sc.name.slice(0, 34).padEnd(34)} cosine ${sig(r => (r.cosine == null ? 0 : Number(r.cosine)))}   text ${sig(r => Number(r.text) || 0)}   keys ${sig(r => Number(r.keys) || 0)}`);
+    }
 
     console.log(`\n${scenes.length} scene(s), ${picked.length} arm(s), nDCG@${K}, each scene against its OWN captureParams baseline.`);
 

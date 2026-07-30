@@ -65,8 +65,42 @@ export const defaultSettings = {
     summaryBypassPreset: true,
     /** Paragraphs shorter than this are joined with the next one, so stray lines don't become chunks. */
     minChunkSize: 120,
-    /** Minimum cosine similarity for a chunk to count. */
-    scoreThreshold: 0.6,
+    /**
+     * Minimum cosine similarity for a chunk to count.
+     *
+     * 0.1, NOT 0.6, BECAUSE meanCentered IS ON BY DEFAULT. Centering subtracts the direction every chunk in a
+     * single-story corpus shares, which collapses the cosine range: measured across three real books, centered
+     * scores top out at 0.25-0.36 with a p90 of 0.086-0.110, while the same queries uncentered reach 0.62-0.72
+     * with a p90 of 0.54-0.61. The old 0.6 was calibrated against uncentered scores, where it sat near the p90
+     * and meant "roughly the top decile of chunks". Under centering it is above the entire range, so it
+     * admitted ZERO chunks on all three books and every retrieved chunk arrived via the bm25 clause instead.
+     * 0.1 is the centered p90 — the same selectivity 0.6 was chosen for.
+     *
+     * Note what this gates, which is narrower than it looks (see plugin/scoring.mjs scoreCollection): the
+     * index only ever contains chunks from VECTORIZED entries, so this is the cosine floor for those. Entries
+     * without 🔗 are not in the collection at all and reach the ranking through keyword scoring instead. The
+     * one surprise is that a vectorized chunk can also be admitted by `bm25 > 0` on its own text, which
+     * bypasses this floor — with long queries that clause admits 80-95% of chunks, so this setting currently
+     * only ever WIDENS the candidate set and cannot narrow it.
+     *
+     * THAT BYPASS IS LOAD-BEARING; DO NOT "FIX" IT INTO A STRICT GATE. It reads like sloppiness — the cosine
+     * floor ought to decide for the entries it is named after — and it was measured (eval/paired-arms.mjs
+     * `admit=cosine`, three scenes):
+     *
+     *   strict cosine gate   sommers fell 3/3 -> 1/3 on critical (grade-5) entries in the top 10, and
+     *                        time-whore lost a relevant entry from the candidate set entirely (recall 0.88).
+     *                        Worse at every threshold tested down to 0, so it is not a calibration problem.
+     *   strict AND           byte-identical to the above; there is essentially no chunk with a clearing
+     *                        cosine and zero lexical overlap, so the extra conjunct removes nothing.
+     *
+     * The reason is mean-centering. Centered cosine means "more like the query than the average chunk is", so
+     * a chunk can sit BELOW average in embedding space while containing the query's exact terms — and those
+     * chunks carry real relevance. Only the lexical clause can admit them, and no cosine floor can. Consistent
+     * with the vector signal measuring weakest of the three on these books (cosine-alone ranking missed all
+     * three of sommers' grade-5 entries). `admit=cosine` is kept as a standing arm so a future tightening
+     * trips a regression instead of shipping.
+     */
+    scoreThreshold: 0.1,
     /**
      * Use the Worlds Apart server plugin's mean-centered search when it is loaded.
      * Centering removes the direction every chunk in a single-story corpus shares,

@@ -111,3 +111,20 @@ eq(jaccard(new Set([1, 2]), new Set([2])), 0.5, 'accepts Sets as well as arrays'
 const { rowKey } = await import('../extension/grading.mjs');
 eq(jaccard([rowKey({ world: 'A', uid: 1 })], [rowKey({ world: 'B', uid: 1 })]), 0,
     'same uid in different books is not shared relevance');
+
+// --- Spearman, tie-corrected (metrics.mjs) ---
+// Graded pools are half zeros, so tie handling is not a nicety: with the shortcut formula the coefficient
+// depends on how the sort broke ties, i.e. on array order.
+const { spearman } = await import('./metrics.mjs');
+eq(spearman([1, 2, 3], [1, 2, 3]), 1, 'identical order -> +1');
+eq(spearman([1, 2, 3], [3, 2, 1]), -1, 'reversed order -> -1');
+eq(Number.isNaN(spearman([1, 1, 1], [1, 2, 3])), true, 'no variance -> NaN, not a fake 0');
+eq(Number.isNaN(spearman([1], [1])), true, 'n<2 -> NaN');
+// THE TIE PROPERTY: a tied block must not depend on input order. Same data, permuted, same answer.
+const tx = [0, 0, 0, 1, 2], ty = [0, 1, 0, 2, 3];
+const px = [0, 1, 0, 0, 2], py = [0, 2, 1, 0, 3];
+eq(Math.abs(spearman(tx, ty) - spearman(px, py)) < 1e-12, true, 'tied blocks are order-independent (midranks)');
+// A perfect monotone relation with ties on ONE side cannot reach 1, and must not exceed it.
+eq(spearman([0, 0, 1, 2], [0, 1, 2, 3]) < 1, true, 'ties on one side cap the coefficient below 1');
+eq(spearman([0, 0, 1, 2], [0, 1, 2, 3]) > 0.8, true, '...but still reports a strong positive');
+eq(Math.abs(spearman([1, 2, 3, 4], [2, 4, 6, 8]) - 1), 0, 'monotone rescaling is still +1');

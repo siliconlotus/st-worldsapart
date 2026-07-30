@@ -72,3 +72,40 @@ export const jaccard = (a, b) => {
     for (const x of A) if (B.has(x)) inter++;
     return inter / (A.size + B.size - inter);
 };
+
+/**
+ * Spearman rank correlation, tie-corrected.
+ *
+ * MIDRANKS, NOT THE SHORTCUT. The familiar `1 - 6*sum(d^2)/(n(n^2-1))` is only valid when no value repeats,
+ * and graded scenes repeat constantly — half a pool is typically grade 0. With ties the shortcut silently
+ * depends on how the sort happened to break them, which makes the coefficient partly an artifact of array
+ * order. So tied values get the average of the ranks they span, and the coefficient is Pearson over those.
+ *
+ * Absent signals are the caller's problem to encode: pass 0 (or any floor) for "this signal did not fire",
+ * because not firing on a relevant entry is the signal being wrong, not missing data to be dropped.
+ *
+ * @param {number[]} x
+ * @param {number[]} y
+ * @returns {number} -1..1, or NaN when either input has no variance
+ */
+export const spearman = (x, y) => {
+    const midranks = v => {
+        const idx = v.map((val, i) => [val, i]).sort((a, b) => a[0] - b[0]);
+        const r = new Array(v.length);
+        for (let i = 0; i < idx.length;) {
+            let j = i;
+            while (j + 1 < idx.length && idx[j + 1][0] === idx[i][0]) j++;
+            const mid = (i + j) / 2 + 1;
+            for (let k = i; k <= j; k++) r[idx[k][1]] = mid;
+            i = j + 1;
+        }
+        return r;
+    };
+    const [a, b] = [midranks(x), midranks(y)];
+    const n = a.length;
+    if (n < 2) return NaN;
+    const ma = a.reduce((s, v) => s + v, 0) / n, mb = b.reduce((s, v) => s + v, 0) / n;
+    let num = 0, da = 0, db = 0;
+    for (let i = 0; i < n; i++) { num += (a[i] - ma) * (b[i] - mb); da += (a[i] - ma) ** 2; db += (b[i] - mb) ** 2; }
+    return (da && db) ? num / Math.sqrt(da * db) : NaN;
+};
