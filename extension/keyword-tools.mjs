@@ -52,4 +52,8 @@ export async function llmKeyCandidates(content, avoid, chunkSize = 5000) {
 // Studio scans every entry (all modes, active + inactive) so every entry's keywords get a verdict;
 // suggestions use the pruner's own dfCeil so a suggested key can't be one the pruner would then flag.
 export const STUDIO_PRUNE_OPTS = { scanKeyword: true, scanVectorized: true, scanConstant: true, includeInactive: true, pruneUnattested: true, pruneCommon: true, pruneShort: true, pruneShared: true, pruneFragment: true, ignoreProper: false, stickySkipCommon: true, tooCommon: KEY_TOO_COMMON, minLength: KEY_MIN_LENGTH, sharedKeys: KEY_SHARED };
-export const STUDIO_SUGGEST_OPTS = { dfCeil: 0.15, maxN: 4, excludeDates: true, excludeShort: true, onlyActive: false, cap: 8, llmChunk: 5000 };
+// dfCeil sits just under the pruner's too-common danger line (KEY_TOO_COMMON * 0.75 = 0.375): the
+// suggester must not pre-reject a term the pruner itself considers fine. It was 0.15 when
+// cross-entry df was the only junk signal; the Zipf gate now owns English junk, and 0.15 was
+// silently cutting a book's recurring cast and setting names ("Stearns" in ~25% of entries).
+export const STUDIO_SUGGEST_OPTS = { dfCeil: 0.35, maxN: 4, excludeDates: true, excludeShort: true, onlyActive: false, cap: 8, llmChunk: 5000 };

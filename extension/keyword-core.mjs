@@ -4,6 +4,7 @@
 // runs the real shipped code instead of string-slicing it; keyword-tools.mjs layers the ST plumbing
 // (popups, saving, generation) on top and injects the world-info match flags.
 import { COMMON_WORDS } from '../plugin/commonwords.js';
+import { ZIPF_EN, POS_VA, POS_VA_STRICT, POS_ADJ } from './zipf-en.js';
 import { countKey, escapeRegex, isRegexKey } from './ranking.mjs';
 import { buildAutomaton, scanAutomaton, createScanScope, primeScan } from './smartkeys.mjs';
 
@@ -379,23 +380,47 @@ export function classifyLlmCand(cand, { canon, exampleCanon, dfSubstr, N, dfCeil
  * the ✨ local-model path and inline chip edits need.
  *
  * @param {object} data   loaded world-info object (from loadWorldInfo)
- * @param {object} opts    { dfCeil, maxN, excludeDates, excludeShort, onlyActive, cap }
+ * @param {object} opts    { dfCeil, maxN, excludeDates, excludeShort, onlyActive, cap, bgDocs }
  * @returns {{entries:object[], N:number, perEntry:object[], canon:Function, dfSubstr:Function, avoid:string[], exampleCanon:Set<string>}}
  */
 export function buildKeySuggest(data, opts) {
-    const { dfCeil, maxN, excludeDates, excludeShort, onlyActive, cap } = opts;
+    const { dfCeil, maxN, excludeDates, excludeShort, onlyActive, cap, bgDocs = [] } = opts;
     const STOP = FUNCTION_WORDS;
-    const fold = w => { w = w.replace(/^['-]+|['-]+$/g, ''); return w.endsWith("'s") ? w.slice(0, -2) : w; };
+    const fold = w => { w = w.replace(/^['’-]+|['’-]+$/g, ''); return /['’]s$/i.test(w) ? w.slice(0, -2) : w; };
     // Acronym casing (see notes): a token seen only in ALL-CAPS (SDG) is an acronym, exempt from the
-    // short-word cut and shown uppercase; one ever seen lowercase isn't.
-    const capsSeen = new Set(), mixedSeen = new Set();
+    // short-word cut and shown uppercase; one ever seen lowercase isn't. lowerSeen/capMid are the
+    // same trick for proper nouns: a name is a token capitalised somewhere MID-sentence (capMid —
+    // sentence-initial capitals prove nothing, or "Nobody" would be a name in a small book) and
+    // never seen lowercase. Proper nouns are exempt from the English-frequency gate below
+    // ("Jeffrey" is a common word by z but the right key).
+    const capsSeen = new Set(), mixedSeen = new Set(), lowerSeen = new Set(), capMid = new Set();
     const isAcr = t => t.length <= 6 && capsSeen.has(t) && !mixedSeen.has(t);
-    const wordSeq = text => (String(text ?? '').match(/[\p{L}][\p{L}'-]+/gu) ?? []).map(w => {
-        const core = fold(w);
-        (/^[A-Z]{2,}$/.test(core) ? capsSeen : mixedSeen).add(core.toLowerCase());
-        return core.toLowerCase();
-    });
-    const canon = k => (String(k).match(/[\p{L}][\p{L}'-]+/gu) ?? []).map(w => fold(w).toLowerCase()).join(' ');
+    // Sentence enders surface as a one-char '.' sentinel: ngramsOf skips any gram holding a token
+    // shorter than 2 chars, so no suggested phrase ever bridges a sentence ("…by comparison. Micah
+    // frowned…" must not yield "comparison micah"). Newlines and semicolons count as boundaries too.
+    // A possessive is the same kind of boundary on BOTH sides: fold strips its 's, so any phrase
+    // through it reads ungrammatical and can't literally match the text ("steal Teddy's bronze
+    // minotaur" must yield "teddy" + "bronze minotaur", never "steal teddy" — which sneaks past the
+    // attestation check as a prefix of "steal teddy's"). Sentinels around the possessor let its
+    // unigram survive while no gram may contain it.
+    const wordSeq = text => {
+        let atStart = true;   // sentence-initial for CAPITALISATION only; a possessive's sentinels don't reset it
+        // The word alternative is STAR, not plus: single-letter words must tokenise or the
+        // determiner "a" and pronoun "I" are invisible to the syntax tests below (fDet/bSubj) —
+        // "Kyle exchanges a look" read as "kyle exchanges look" and the object-side verb test
+        // never saw the determiner. Single-letter tokens are still gram-blocked by ngramsOf's
+        // length filter, so they act as boundaries in phrases, never as members.
+        return (String(text ?? '').match(/[\p{L}][\p{L}'’-]*|[.!?…;\n]/gu) ?? []).flatMap(w => {
+            if (!/\p{L}/u.test(w)) { atStart = true; return ['.']; }
+            const core = fold(w), lc = core.toLowerCase();
+            (/^[A-Z]{2,}$/.test(core) ? capsSeen : mixedSeen).add(lc);
+            if (/^[\p{Ll}]/u.test(core)) lowerSeen.add(lc);
+            else if (!atStart && /^[\p{Lu}]/u.test(core)) capMid.add(lc);
+            atStart = false;
+            return /['’]s$/i.test(w.replace(/^['’-]+|['’-]+$/g, '')) ? ['.', lc, '.'] : [lc];
+        });
+    };
+    const canon = k => (String(k).match(/[\p{L}][\p{L}'’-]+/gu) ?? []).map(w => fold(w).toLowerCase()).join(' ');
 
     const entries = Object.values(data.entries).filter(e => !(onlyActive && e.disable));
     const N = entries.length;
@@ -408,21 +433,56 @@ export function buildKeySuggest(data, opts) {
     const satEntity = t => (uDF.get(t) ?? 0) / N > 0.85;
     const DET = new Set('the a an this that his her its their my your our los la el whole each every some'.split(' '));
     const PRON = new Set('he she they i we you it who'.split(' '));
-    const bAll = new Map(), bDet = new Map(), bSubj = new Map();
+    const bAll = new Map(), bDet = new Map(), bSubj = new Map(), fAll = new Map(), fDet = new Map();
     for (const s of seqs) for (let i = 1; i < s.length; i++) {
         const t = s[i], p = s[i - 1];
         bAll.set(t, (bAll.get(t) ?? 0) + 1);
         if (DET.has(p)) bDet.set(t, (bDet.get(t) ?? 0) + 1);
         if (PRON.has(p) || satEntity(p)) bSubj.set(t, (bSubj.get(t) ?? 0) + 1);
+        // forward counts: what follows each token (for the object-side verb test below)
+        fAll.set(p, (fAll.get(p) ?? 0) + 1);
+        if (DET.has(t)) fDet.set(p, (fDet.get(p) ?? 0) + 1);
     }
     const isVerbHead = t => { const tot = bAll.get(t) ?? 0; return tot >= 5 && (bSubj.get(t) ?? 0) / tot > 0.4 && (bDet.get(t) ?? 0) / tot < 0.1; };
-    const headBad = term => { const h = term.slice(term.lastIndexOf(' ') + 1); return satEntity(h) || isVerbHead(h); };
+    // Verb/adverb tests, three sources, proper nouns and acronyms outranking all of them:
+    //  - SUBTLEX dominant-POS: the head takes the >=85% set ("frowned"/"accepts"/"unfolds" at
+    //    ~1.0, killing "Jeffrey accepts"-class fragments; noun-ambiguous "hunt"/"mark"/"drew"
+    //    fall under the bar). EVERY word takes the >=95% pure-verb set — a pure verb leading or
+    //    inside a phrase marks a clause fragment ("watched jeffrey", "jeffrey watched teddy") —
+    //    strict enough to spare participle-adjectives leading real noun phrases ("fallen angel",
+    //    fallen at .89). Applies to unigrams (the head is the word itself), closing the rare-verb
+    //    leak ("reeked") the frequency table can't see.
+    //  - Adverb morphology: an out-of-table word in -ily/-ingly/-edly is an adverb SUBTLEX never
+    //    saw ("sulkily", "self-deprecatingly", "comfortingly"), bad as head or alone. Suffixes
+    //    chosen for precision: plain -ly would kill -ly ADJECTIVES ("gravelly command" leads
+    //    with one, and "gravelly" alone is a plausible key); family/lily are in-table, Emily is
+    //    proper.
+    //  - The book's own syntax: a word consistently FOLLOWED by a determiner takes objects, i.e.
+    //    is a transitive verb in this corpus ("exchanges a look" — SUBTLEX tags "exchanges" Noun
+    //    1.00, dialogue never verbs it, so only local evidence can). Object-side mirror of
+    //    isVerbHead, precise enough to act from 2 observations where subject-side needs 5.
+    const inSetOrStem = (set, w) => set.has(w) || stems(w).some(s => set.has(s));
+    const notName = w => !isAcr(w) && !(capMid.has(w) && !lowerSeen.has(w));
+    const posBad = (set, w) => inSetOrStem(set, w) && notName(w);
+    const advLy = h => h.length >= 6 && /(?:ily|ingly|edly)$/.test(h) && !ZIPF_EN.has(h) && notName(h);
+    const takesObj = t => { const tot = fAll.get(t) ?? 0; return tot >= 2 && (fDet.get(t) ?? 0) / tot > 0.5 && notName(t); };
+    const headBad = term => {
+        const h = term.slice(term.lastIndexOf(' ') + 1);
+        if (satEntity(h) || isVerbHead(h) || posBad(POS_VA, h) || takesObj(h) || advLy(h)) return true;
+        return term.includes(' ') && term.split(' ').some(w => posBad(POS_VA_STRICT, w));
+    };
+    // English name linkers may sit INSIDE a gram but never at its edges: without this, "Duke of
+    // Thornhaven" and "Lord of the Rings" can never form (function words disqualify a gram
+    // outright). Only these two — other function words still break phrases everywhere. The flood
+    // of ordinary of-phrases this admits ("glass of wine") is handled downstream: common-anchored
+    // phrases gate to zero, so only rare/proper-anchored names survive.
+    const ENG_LINK = new Set(['of', 'the']);
     const ngramsOf = seq => {
         const out = [];
         for (let n = 1; n <= maxN; n++)
             for (let i = 0; i + n <= seq.length; i++) {
                 const g = seq.slice(i, i + n);
-                if (g.some(t => t.length < 2 || isFunc(t))) continue;
+                if (g.some((t, j) => (t.length < 2 || isFunc(t)) && !(ENG_LINK.has(t) && j > 0 && j < g.length - 1))) continue;
                 out.push(g.join(' '));
             }
         return out;
@@ -455,6 +515,93 @@ export function buildKeySuggest(data, opts) {
     const tfOf = seq => { const tf = new Map(); for (const t of ngramsOf(seq)) tf.set(t, (tf.get(t) ?? 0) + 1); return tf; };
     const tfs = seqs.map(tfOf);   // computed once; the warm-up below and suggestForEntry both read it
 
+    // Display casing comes from the TEXT, not from per-word evidence: corpus-global properness
+    // cased "Queen Winnifred" as "queen Winnifred" whenever "queen" also appeared lowercase
+    // somewhere else in the book. Every surviving candidate is attested as a literal substring,
+    // so its own surface span exists — take it verbatim (which also renders "McTavish", "HR" and
+    // interior linkers right, for free). Prefer an occurrence that is not sentence-initial, so a
+    // capital is the word's own rather than the sentence's; fall back to the first occurrence,
+    // then to the entry that attested it (a gram can be attested by a different entry than the
+    // one it was extracted from).
+    const SENT_END = /[.!?…;\n]/, SKIP_BACK = /[ \t"'“”‘’(\[{]/;
+    const spanIn = (idx, term) => {
+        const lc = contentsLc[idx], raw = String(entries[idx].content ?? '');
+        let first = -1;
+        for (let p = lc.indexOf(term); p >= 0; p = lc.indexOf(term, p + 1)) {
+            if (first < 0) first = p;
+            let j = p - 1;
+            while (j >= 0 && SKIP_BACK.test(raw[j])) j--;
+            if (j >= 0 && !SENT_END.test(raw[j])) return raw.slice(p, p + term.length);
+        }
+        return first < 0 ? null : raw.slice(first, first + term.length);
+    };
+    const displayOf = (term, idx) => {
+        let s = spanIn(idx, term);
+        for (let k = 0; k < entries.length && s == null; k++) if (k !== idx) s = spanIn(k, term);
+        return s ?? term;
+    };
+
+    // English-frequency gate (zipf-en.js): a word common in general English is a poor key even
+    // when locally rare — inside a small book "tub" IS unique, and no corpus-internal statistic
+    // (df over entries, the chat pool) can know it's mundane; only the language-wide frequency
+    // can. Human-curated keys fall into three classes, and each has its own test: PROPER NOUNS
+    // (Jeffrey, Rolex — often common words by z) are exempt via lowerSeen/acronym, scoring 0;
+    // UNCOMMON UNIGRAMS (minotaur, orrery) are any word NOT in the table (its floor is z 3.0, so
+    // membership itself is the unigram cut — measured: good unigrams like "jubilee" 3.4 overlap
+    // junk like "rut" 3.1, so no finer unigram ramp is honest); CONCRETE PHRASES ride on their
+    // rarest anchor word ("brass orrery" on "orrery"), gated on a looser ramp — full weight at
+    // z<=2.5, dropped at z>=3.8 — because a phrase can't fire more often than its rarest word,
+    // yet is worth more than that word alone (the length boost in the score).
+    // ponytail: constants eyeballed off one book's junk band + the class examples; retune there.
+    // Gerund budge: a lowercase non-proper -ing word is almost always a verb form ("solidifying",
+    // rare by z yet a junk key), so it inherits a junk-band pseudo-z instead of its own. Legit
+    // -ing keys are capitalised in prose ("the Reckoning") and exempted before this fires.
+    // ponytail: suffix test, no stemming; rare lowercase -ing NOUNS ("bloodletting") are casualties.
+    const isGer = w => w.length >= 6 && w.endsWith('ing');
+    // Naive de-inflection for the table lookup: "unfolds"/"frowned" are out-of-table while their
+    // stems are common — an inflection is as mundane as its stem, so an out-of-table word tries
+    // the obvious strippings (-s/-es/-ied, -ing/-ed with e-restore and un-doubling) and inherits
+    // the best stem hit. Only consulted on a table miss, so irregulars and real rare words
+    // ("olusanmokun") are untouched; rare stems ("reeked" -> reek) still slip through.
+    const stems = w => {
+        const out = [], undouble = b => (b.length > 2 && b.at(-1) === b.at(-2)) ? b.slice(0, -1) : null;
+        const vb = b => { out.push(b, b + 'e'); const u = undouble(b); if (u) out.push(u); };
+        if (w.length >= 6 && w.endsWith('ing')) vb(w.slice(0, -3));
+        else if (w.length >= 5 && w.endsWith('ed')) vb(w.slice(0, -2));
+        else if (w.length >= 5 && w.endsWith('ies')) out.push(w.slice(0, -3) + 'y');
+        else if (w.length >= 4 && w.endsWith('s') && !w.endsWith('ss')) { out.push(w.slice(0, -1)); if (w.endsWith('es')) out.push(w.slice(0, -2)); }
+        return out;
+    };
+    const tblZ = w => { let z = ZIPF_EN.get(w); if (z === undefined) { z = 0; for (const s of stems(w)) z = Math.max(z, ZIPF_EN.get(s) ?? 0); } return z; };
+    const zEff = w => (isAcr(w) || (capMid.has(w) && !lowerSeen.has(w))) ? 0 : Math.max(tblZ(w), isGer(w) ? 3.8 : 0);
+    const engMultOf = term => {
+        const words = term.split(' ');
+        let minZ = Infinity;
+        for (const w of words) minZ = Math.min(minZ, zEff(w));
+        return (words.length === 1 && minZ >= 3.0) ? 0 : Math.min(1, Math.max(0, (3.8 - minZ) / 1.3));
+    };
+    // TF is a repetition signal, and a summary-style entry mentions each entity exactly once — on
+    // those, f>=2 rejects everything good ("Olusanmokun", "Mobius Industries") before any other
+    // gate runs. It predates the English gate and was doing junk control the gate now does better,
+    // so single-mention terms are admitted — under a STRICTER test than the f>=2 gate: with no
+    // repetition to corroborate, every word must independently look name-like — capitalised
+    // mid-sentence ("Corporation" in "Stearns Corporation", even if lowercase elsewhere), an
+    // acronym, or absent from the English table. Min-anchor is not enough at f=1: it would let
+    // any tail glue onto a rare anchor ("sarah olusanmokun arrived") and then subsume the clean
+    // name, since at f=1 every adjacent pair co-occurs trivially.
+    // Name linkers: lowercase particles legitimate INSIDE a capitalised span ("Dia de los
+    // Muertos", "Cirque du Soleil") — the same class looksLikeFragment deliberately spares. They
+    // are common words by z (subtitles are full of Spanish/French), so without this the f=1 test
+    // kills the full name and strands its capitalised anchor ("Muertos" alone). Interior
+    // positions only; the edges of a name are never particles.
+    const LINKERS = new Set('de del la las los el di da du van von der den bin ibn al of the'.split(' '));
+    const TITLES = new Set('mr mrs ms mx dr st jr sr prof rev sgt capt lt col gen'.split(' '));
+    const admit = (term, f) => {
+        if (f >= 2) return true;
+        const ws = term.split(' ');
+        return ws.every((w, i) => (i > 0 && i < ws.length - 1 && LINKERS.has(w)) || isAcr(w) || capMid.has(w) || (tblZ(w) < 3.0 && !isGer(w)));
+    };
+
     // Warm dfCache for every term that will reach the substring gate, in ONE pass per document.
     //
     // dfSubstr is the gate on every candidate, and answering it term-by-term means re-reading the whole
@@ -462,11 +609,20 @@ export function buildKeySuggest(data, opts) {
     // memoized, because most terms are distinct. Aho-Corasick inverts the loop: build one automaton over
     // all candidates, then each document reports every term it contains in a single walk, so the cost is
     // (corpus + patterns) instead of (terms x corpus). Same numbers, just not recomputed per term.
+    // Background pseudo-documents (the open chat's messages, injected by the caller so this stays
+    // ST-free) pooled into the IDF denominator. On a small book nearly every candidate has df 1, the
+    // IDF is flat, and the ranking degenerates to raw term frequency — which is how "tub, rut,
+    // leaking" top a short entry. A few thousand chat messages restore resolution: a term common in
+    // ordinary chat prose is demoted (it would over-fire as a trigger anyway), a term genuinely
+    // unique to the entry keeps a large IDF. Empty bgDocs = the old book-only behaviour.
+    const bgLc = bgDocs.map(d => String(d).toLowerCase());
+    const M = bgLc.length;
+    const bgDF = new Map();
     {
         const wanted = new Set();
         for (const tf of tfs) {
             for (const [term, f] of tf) {
-                if (f < 2) continue;
+                if (!admit(term, f)) continue;
                 if ((DF.get(term) ?? 1) / N > dfCeil) continue;   // the cheap gate that precedes it
                 wanted.add(term.toLowerCase());
             }
@@ -477,40 +633,76 @@ export function buildKeySuggest(data, opts) {
             const hits = new Int32Array(terms.length);
             for (const c of contentsLc) for (const idx of scanAutomaton(aut, c).keys()) hits[idx]++;
             terms.forEach((t, i) => dfCache.set(t, hits[i]));
+            if (M) {
+                const bg = new Int32Array(terms.length);
+                for (const c of bgLc) for (const idx of scanAutomaton(aut, c).keys()) bg[idx]++;
+                terms.forEach((t, i) => bgDF.set(t, bg[i]));
+            }
         }
     }
 
     // Per-entry TF-IDF: distinctive terms, ranked, subsumed, split into new vs already-keyed.
-    const suggestForEntry = (entry, tf) => {
+    const subsume = list => list.filter(r => !list.some(o => o !== r && o.n > r.n && o.f === r.f && ` ${o.term} `.includes(` ${r.term} `)));
+    const suggestForEntry = (entry, tf, idx) => {
         const existing = new Set((entry.key ?? []).map(canon));
-        const rows = [];
+        const rows = [], weakRows = [];
         for (const [term, f] of tf) {
-            if (f < 2) continue;
+            if (!admit(term, f)) continue;
+            // Linkers are interior-only STRUCTURALLY, not just at f=1 admission: "marquis de" and
+            // "de vallon" are accidents of gram windowing, and because the address form recurs
+            // more often than the full name, they outscore and cap-crowd "marquis de vallon".
+            const ws = term.split(' ');
+            if (LINKERS.has(ws[0]) || LINKERS.has(ws.at(-1))) continue;
             const df = DF.get(term) ?? 1;
             if (df / N > dfCeil) continue;
-            // Too-common guard: never suggest a term the pruner would then flag. Checked on the
-            // substring df (the metric countKey uses), against the pruner's danger threshold. Only
-            // too-common is cross-checked — dead can't apply (the term is in this entry's text) and
-            // short is the toggle below.
-            if (dfSubstr(term) / N > KEY_TOO_COMMON * 0.75) continue;
+            // Pruner cross-checks on the substring df (the metric countKey uses): never suggest a
+            // term the pruner would then flag. ZERO hits means the joined gram never occurs
+            // literally — token folding bridged punctuation the matcher can't ("Teddy's bronze
+            // minotaur" is not the substring "teddy bronze minotaur"), so the key could never fire
+            // even on its own source text and would be flagged unattested. Dropping it here also
+            // unfolds the recommendation: with the fold-broken long gram gone before subsumption,
+            // its legitimate parts ("bronze minotaur", "teddy") surface instead of being swallowed.
+            // The high side is the pruner's too-common danger threshold, as before.
+            const ds = dfSubstr(term);
+            if (!ds || ds / N > KEY_TOO_COMMON * 0.75) continue;
             const n = term.split(' ').length;
             if (excludeShort && n === 1 && term.length <= 3 && !isAcr(term)) continue;
-            // Background-frequency cut (unigrams only): a word common in general English is a poor
-            // key even when locally rare — a small book makes "street" look distinctive. Phrases
-            // keep their specificity, so this is single-word only; acronyms are never common words.
-            if (n === 1 && !isAcr(term) && COMMON_WORDS.has(term)) continue;
             if (!isAcr(term) && headBad(term)) continue;
+            // Bare adjectives: attributive words over-fire detached from their noun — "voracious"
+            // is a poor key while "voracious reader" is fine, so the adjective test applies to
+            // unigrams only. Same dominance bar and properness override as the verb sets.
+            if (n === 1 && posBad(POS_ADJ, term)) continue;
+            // Bare honorifics: "Mr" passes every capitalisation test (always capitalised, never
+            // lowercase — a perfect fake proper noun) yet is junk alone; fine inside "Mr Lansing".
+            if (n === 1 && TITLES.has(term)) continue;
             if (excludeDates && isDateLike(term)) continue;
-            rows.push({ term, display: isAcr(term) ? term.toUpperCase() : term, present: existing.has(term), df, f, n, score: f * Math.log((N + 1) / (df + 0.5)) * (1 + 0.5 * (n - 1)) });
+            const engMult = engMultOf(term);   // the three-class English gate — see engMultOf
+            // Un-fold the display (and thus the committed key) from the term's own surface span in
+            // the text — see displayOf. Cosmetic under ST's default case-insensitive matching, and
+            // matches how humans write keys.
+            const display = displayOf(term, idx);
+            const row = { term, display, present: existing.has(term), df, f, n, weak: !engMult,
+                score: f * Math.max(engMult, 0.05) * Math.log((N + M + 1) / (df + (bgDF.get(term) ?? 0) + 0.5)) * (1 + 0.5 * (n - 1)) };
+            (engMult ? rows : weakRows).push(row);
         }
         rows.sort((a, b) => b.score - a.score);
-        const kept = rows.filter(r => !rows.some(o => o !== r && o.n > r.n && o.f === r.f && ` ${o.term} `.includes(` ${r.term} `)));
+        const kept = subsume(rows);
         // Batch triage: cap the per-entry paragraph to the strongest few so it stays scannable
         // (a focused entry can pull more via ✨). Score-sorted, so the cut only sheds the weak tail.
-        return { existing, newRows: kept.filter(r => !r.present).slice(0, cap), keyedRows: kept.filter(r => r.present) };
+        let newRows = kept.filter(r => !r.present).slice(0, cap);
+        // The English gate is a preference, not a verdict: on a short entry it can empty the
+        // paragraph entirely (measured ~2/3 of one real book's entries), and an empty paragraph
+        // helps nobody — the tab's job is candidates to judge. When nothing survives, surface the
+        // least-bad few of the gated rejects, flagged weak so the row can say so; ✨ remains the
+        // better tool for exactly these entries.
+        if (!newRows.length && weakRows.length) {
+            weakRows.sort((a, b) => b.score - a.score);
+            newRows = subsume(weakRows).filter(r => !r.present).slice(0, Math.min(cap, 3));
+        }
+        return { existing, newRows, keyedRows: kept.filter(r => r.present) };
     };
 
-    const perEntry = entries.map((entry, i) => ({ entry, ...suggestForEntry(entry, tfs[i]) })).filter(pe => pe.newRows.length);
+    const perEntry = entries.map((entry, i) => ({ entry, ...suggestForEntry(entry, tfs[i], i) })).filter(pe => pe.newRows.length);
 
     // For the ✨ per-entry local-model path (lazy: only fires on click).
     const avoid = [...uDF].filter(([t, c]) => t.length > 2 && !STOP.has(t) && c / N > 0.5).sort((a, b) => b[1] - a[1]).slice(0, 20).map(x => x[0]);

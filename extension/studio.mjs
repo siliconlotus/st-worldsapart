@@ -439,7 +439,10 @@ export async function lorebookStudio(preferredBook = null) {
         return wrap;
     };
 
-    const ensureSuggest = () => suggest ?? (suggest = buildKeySuggest(data, suggestOpts));
+    // bgDocs rides in the call, not in suggestOpts — that object is persisted to settings, and the
+    // chat would go with it. No chat open = empty = book-only ranking, same as before.
+    const ensureSuggest = () => suggest ?? (suggest = buildKeySuggest(data,
+        { ...suggestOpts, bgDocs: (getContext().chat ?? []).map(m => String(m?.mes ?? '')).filter(Boolean) }));
     const hasKey = (e, term) => Array.isArray(e.key) && e.key.some(k => String(k).toLowerCase().trim() === term.toLowerCase().trim());
 
     const tool = (cls, on, title, onClick) => {
@@ -1839,7 +1842,7 @@ export async function lorebookStudio(preferredBook = null) {
                 if (!suggestChecks.has(id)) suggestChecks.set(id, false);   // nothing is added unasked
                 rows.push({ term, why });
             };
-            for (const r of (byUid.get(String(e.uid))?.newRows ?? [])) push(r.display, `⚡ in ${r.df} of ${s.N}`);
+            for (const r of (byUid.get(String(e.uid))?.newRows ?? [])) push(r.display, `⚡ in ${r.df} of ${s.N}${r.weak ? ' · weak' : ''}`);
             for (const t of (sugg.get(e.uid)?.llm ?? [])) push(t, '✨ model');
             // Entries with no candidates are still listed, headers only: an entry the TF-IDF ranker has
             // nothing to say about is exactly the one you want to aim the model at, so it needs a row

@@ -65,6 +65,132 @@ assert.strictEqual(ss.canon("Brass Orrery's"), 'brass orrery', 'canon folds case
 assert.strictEqual(ss.dfSubstr('home'), 5, 'dfSubstr counts entries whose text contains the term');
 assert.ok(Array.isArray(ss.avoid), 'avoid list returned for the LLM prompt');
 
+// Background docs (bgDocs = chat messages) pool into the IDF denominator. On a small book both
+// phrases have df 1, equal tf and rare anchors (both invisible to the Zipf gate), so book-only
+// TF-IDF cannot separate them; a term flooding the chat must be demoted below the one the chat
+// never mentions.
+const bgBook = { entries: { ...suggestBook.entries,
+    0: { uid: 0, key: [], content: 'The brass orrery turned. The brass orrery hummed. The copper alembic dripped. The copper alembic gleamed.', comment: 'A' },
+} };
+{
+    const opts = { dfCeil: 0.5, maxN: 4, excludeDates: true, excludeShort: true, onlyActive: true, cap: 8 };
+    const score = (build, term) => build.perEntry.find(pe => pe.entry.uid === 0).newRows.find(r => r.term === term).score;
+    const noBg = buildKeySuggest(bgBook, opts);
+    assert.ok(Math.abs(score(noBg, 'brass orrery') - score(noBg, 'copper alembic')) < 1e-9, 'book-only: the two phrases tie');
+    const withBg = buildKeySuggest(bgBook, { ...opts, bgDocs: Array.from({ length: 40 }, () => 'That copper alembic is dripping again.') });
+    assert.ok(score(withBg, 'brass orrery') > score(withBg, 'copper alembic'), 'a chat-common term is demoted below a chat-absent one');
+}
+
+// Zipf gate, one assertion per key class: an English-common unigram is gated however unique it
+// looks inside a small book ("trash" 4.4, "tavern" 3.6 — in the table = gated for unigrams), but
+// on an entry where NOTHING survives the gate the least-bad rejects come back flagged weak (an
+// empty paragraph helps nobody); an uncommon unigram survives at full weight ("minotaur" 2.8,
+// below the table floor); a common word only ever seen capitalised is a proper noun and survives
+// ("Jeffrey" 3.9); and no phrase bridges a sentence boundary ("comparison. Micah" is not a bigram).
+const zipfBook = { entries: { ...suggestBook.entries,
+    // All-common prose deliberately: even the f=1 words sit in the Zipf table ("reeked" here once
+    // broke the fallback assertion by surfacing as a legitimate rare-word candidate).
+    0: { uid: 0, key: [], content: 'The trash sat by the tavern door. The trash grew. The tavern was never clean.', comment: 'A' },
+    // Mid-sentence capitals, as real prose would have: sentence-initial capitalisation is not
+    // properness evidence (or "Nobody" would count as a name).
+    5: { uid: 5, key: [], content: 'Everyone saw Jeffrey arrive early. Nobody heard Jeffrey explain his reasons.', comment: 'F' },
+    6: { uid: 6, key: [], content: 'A minotaur guarded the gate. The minotaur never slept at night.', comment: 'G' },
+    7: { uid: 7, key: [], content: 'They spoke of the comparison. Micah frowned at the ledger. Everyone asked Micah about the comparison later.', comment: 'H' },
+    // Real contiguous prose whose possessive the token fold strips: the joined gram "steal teddy
+    // bronze minotaur" is NOT a substring of this text, so it could never fire as a key.
+    8: { uid: 8, key: [], content: "Kyle plotted to steal Teddy's bronze minotaur. Nobody would help him steal Teddy's bronze minotaur.", comment: 'I' },
+    // Summary-style entry: every entity is mentioned exactly once, so TF is no signal at all —
+    // f=1 terms must still surface when the gate is fully confident (rare/proper anchor), and
+    // common f=1 words must not ride in with them.
+    9: { uid: 9, key: [], content: 'The visitor was Sarah Olusanmokun from Stearns Corporation, carrying incorporation paperwork. Nobody mentioned the earlier incident again.', comment: 'J' },
+    // A rare-by-z gerund ("solidifying" 2.58, below the table floor) must still be gated: lowercase
+    // non-proper -ing words are verb forms. The capitalised entity beside it surfaces normally.
+    10: { uid: 10, key: [], content: 'Rumors kept solidifying around the Jubilee device. Sales kept solidifying around the Jubilee device.', comment: 'K' },
+    // "unfolds" is out-of-table (SUBTLEX has "unfold" 3.1 but not the inflection) — de-inflection
+    // must gate it like its stem; with nothing else here the entry yields weak fallback at most.
+    11: { uid: 11, key: [], content: 'The ritual unfolds at midnight. The ritual unfolds in silence.', comment: 'L' },
+    // Noun+verb clause fragment: "jeffrey acquiesce" rides a proper anchor and a rare verb, so
+    // the frequency gates pass it — only the SUBTLEX POS head test (acquiesce: Verb 1.0) kills it.
+    12: { uid: 12, key: [], content: 'Everyone watched Jeffrey acquiesce. Later they watched Jeffrey acquiesce again.', comment: 'M' },
+    // Adverbs SUBTLEX never saw: out-of-table -ily/-ingly heads are adverb morphology
+    // ("kyle sulkily", "jeffrey self-deprecatingly"); the names beside them survive.
+    13: { uid: 13, key: [], content: 'Everyone saw Jeffrey self-deprecatingly wave. Then Kyle sulkily agreed, and Kyle sulkily left.', comment: 'N' },
+    // "exchanges" tags Noun 1.00 in SUBTLEX (dialogue never verbs it) — only the book's own
+    // syntax can catch it: consistently followed by a determiner = takes objects = verb.
+    14: { uid: 14, key: [], content: 'Kyle exchanges a look with Brad. Kyle exchanges a nod with Shane.', comment: 'O' },
+    // Bare adjectives over-fire detached from their noun: "voracious" (Adjective 1.00, rare by z)
+    // dies alone but is free to lead its noun phrase.
+    15: { uid: 15, key: [], content: 'A voracious reader lived upstairs. The voracious reader never returned the books.', comment: 'P' },
+    // Non-English name particles: "de"/"los" are lowercase and common by z, but legitimate as
+    // interior linkers of a capitalised span — the full name must surface (and subsume "Muertos").
+    16: { uid: 16, key: [], content: 'They gathered for Dia de los Muertos at the plaza. Nobody spoke of it afterward.', comment: 'Q' },
+    // English linkers interior to a name: "of" (a FUNCTION_WORD) must not break "Duke of
+    // Thornhaven" — while a common-anchored of-phrase ("glass of wine") still gates to weak.
+    17: { uid: 17, key: [], content: 'The Duke of Thornhaven raised a glass of wine. Everyone toasted the Duke of Thornhaven, and Kyle refilled his glass of wine.', comment: 'R' },
+    // Edge-linker grams are windowing accidents: the address form "de Vallon" recurs more often
+    // than the full name, so without the structural kill it outscores and cap-crowds the real
+    // "Marquis de Vallon".
+    18: { uid: 18, key: [], content: 'The Marquis de Vallon arrived at court. Everyone whispered as de Vallon passed. Later de Vallon and the Marquis de Harcot argued.', comment: 'T' },
+    // Display casing must come from the phrase's own span: "queen" appears lowercase elsewhere,
+    // so per-word properness would render "queen Winnifred" — the text says "Queen Winnifred".
+    19: { uid: 19, key: [], content: 'The crowd cheered for Queen Winnifred at the gate. Any queen would have smiled, but Queen Winnifred wept instead.', comment: 'U' },
+} };
+{
+    const zs = buildKeySuggest(zipfBook, { dfCeil: 0.5, maxN: 4, excludeDates: true, excludeShort: true, onlyActive: true, cap: 8 });
+    const rowsOf = uid => zs.perEntry.find(pe => pe.entry.uid === uid)?.newRows ?? [];
+    const terms = uid => rowsOf(uid).map(r => r.term);
+    assert.ok(rowsOf(0).length && rowsOf(0).every(r => r.weak), 'a gated-only entry falls back to weak-flagged rows, not emptiness');
+    assert.ok(terms(0).includes('trash'), 'the fallback offers the least-bad gated candidates');
+    assert.ok(terms(5).includes('jeffrey') && !rowsOf(5).find(r => r.term === 'jeffrey').weak, '"Jeffrey" (common word, never lowercase) is spared as a proper noun');
+    assert.ok(rowsOf(5).every(r => !r.weak), 'weak fallback does not fire when a real candidate survives');
+    assert.ok(terms(6).includes('minotaur'), '"minotaur" (below the table floor) is suggested at full weight');
+    // "micah frowned" (same f, longer) subsumes bare "micah" in the kept-filter; the point here is
+    // only that nothing bridges the sentence boundary.
+    assert.ok(terms(7).some(t => t.startsWith('micah')) && !terms(7).includes('comparison micah'), 'no phrase bridges a sentence boundary');
+    // Fold-broken grams die on attestation (dfSubstr 0), and dying BEFORE subsumption unfolds them:
+    // the parts on each side of the possessive surface instead of being swallowed by the long gram.
+    assert.ok(!terms(8).some(t => t.includes('teddy bronze')), 'a gram bridging a stripped possessive is never suggested');
+    assert.ok(terms(8).includes('bronze minotaur') && terms(8).includes('teddy'), 'the fold-broken gram unfolds into its attested parts');
+    assert.ok(terms(9).includes('sarah olusanmokun') && terms(9).includes('stearns corporation'), 'single-mention entities surface on a summary entry');
+    assert.strictEqual(rowsOf(9).find(r => r.term === 'sarah olusanmokun')?.display, 'Sarah Olusanmokun', 'display un-folds proper-noun casing from the recorded surface form');
+    assert.ok(!terms(9).includes('paperwork') && !terms(9).includes('incident'), 'common f=1 words do not ride in with them');
+    assert.ok(!terms(9).some(t => t.includes('nobody')), 'sentence-initial capitals are not properness evidence');
+    assert.ok(rowsOf(9).every(r => !r.weak), 'f=1 admissions are full-confidence, never weak fallback');
+    assert.ok(!terms(10).some(t => t.includes('solidifying')), 'a rare lowercase gerund is gated as a verb form');
+    assert.ok(terms(10).some(t => t.includes('jubilee')) && rowsOf(10).every(r => !r.weak), 'the capitalised entity beside it surfaces normally');
+    // The phrase "ritual unfolds" may survive demoted (the phrase ramp tolerates mid-band anchors);
+    // de-inflection's job is the unigram: "unfolds" must inherit unfold's z and be gated.
+    assert.ok(!terms(11).includes('unfolds'), 'a rare inflection of a common stem ("unfolds") is gated via de-inflection');
+    assert.ok(!terms(12).some(t => t.includes('acquiesce')), 'a noun+verb clause fragment dies on the POS head test');
+    assert.ok(terms(12).includes('jeffrey'), 'the proper anchor itself survives the POS kill');
+    assert.ok(!terms(13).some(t => t.includes('deprecatingly') || t.includes('sulkily')), 'out-of-table -ily/-ingly adverb heads are killed');
+    assert.ok(terms(13).includes('kyle') || terms(13).includes('jeffrey'), 'the names beside the adverbs survive');
+    assert.ok(!terms(14).some(t => t.includes('exchanges')), 'a Noun-1.00-by-SUBTLEX verb dies on the followed-by-determiner test');
+    assert.ok(terms(14).includes('kyle'), 'the subject name survives the syntax kill');
+    assert.ok(!terms(15).includes('voracious'), 'a bare adjective unigram is dropped');
+    assert.ok(terms(15).includes('voracious reader'), 'the same adjective is free to lead its noun phrase');
+    assert.ok(terms(16).includes('dia de los muertos'), 'linker particles are admitted inside a capitalised span');
+    assert.ok(!terms(16).includes('muertos'), 'the full name subsumes its stranded anchor');
+    assert.strictEqual(rowsOf(16).find(r => r.term === 'dia de los muertos')?.display, 'Dia de los Muertos', 'linker casing survives the un-fold');
+    assert.ok(terms(17).includes('duke of thornhaven'), '"of" interior to a proper span does not break the gram');
+    assert.strictEqual(rowsOf(17).find(r => r.term === 'duke of thornhaven')?.display, 'Duke of Thornhaven', 'the of-name un-folds with its casing');
+    assert.ok(!terms(17).some(t => t.includes('glass of wine')), 'a common-anchored of-phrase still gates to weak');
+    assert.ok(!terms(18).some(t => t.startsWith('de ') || t.endsWith(' de')), 'edge-linker grams ("de vallon", "marquis de") never surface');
+    assert.ok(terms(18).includes('marquis de vallon') && terms(18).includes('marquis de harcot'), 'the full names surface once the fragments stop crowding them');
+    assert.strictEqual(rowsOf(19).find(r => r.term === 'queen winnifred')?.display, 'Queen Winnifred', 'display takes the phrase\'s own span, not per-word properness ("queen" is lowercase elsewhere)');
+}
+// Bare honorifics are perfect fake proper nouns (always capitalised, never lowercase), so the
+// casing logic can't reject them — the TITLES drop must, even with the short-term cut disabled.
+{
+    const tb = { entries: { ...suggestBook.entries,
+        0: { uid: 0, key: [], content: 'Everyone greeted Mr Lansing warmly. Later Mr Lansing thanked everyone in the hall.', comment: 'S' },
+    } };
+    const ts = buildKeySuggest(tb, { dfCeil: 0.5, maxN: 4, excludeDates: true, excludeShort: false, onlyActive: true, cap: 8 });
+    const t0 = ts.perEntry.find(pe => pe.entry.uid === 0)?.newRows.map(r => r.term) ?? [];
+    assert.ok(!t0.includes('mr'), 'bare "Mr" is dropped');
+    assert.ok(t0.includes('mr lansing'), '"Mr Lansing" survives the title drop');
+}
+
 // Over-shared keys: flagged on how many entries LIST the key, independent of how often it appears in
 // their TEXT. "astronaut" sits in one entry's prose but is keyed on all 12, so the content-frequency
 // flags can't see it. Needs >= KEY_MIN_COMMON_ENTRIES entries for the ratio to mean anything.
