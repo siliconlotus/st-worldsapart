@@ -172,8 +172,12 @@ const zipfBook = { entries: { ...suggestBook.entries,
     assert.ok(terms(17).includes('duke of thornhaven'), '"of" interior to a proper span does not break the gram');
     assert.strictEqual(rowsOf(17).find(r => r.term === 'duke of thornhaven')?.display, 'Duke of Thornhaven', 'the of-name un-folds with its casing');
     assert.ok(!terms(17).some(t => t.includes('glass of wine')), 'a common-anchored of-phrase is still gated');
-    assert.ok(!terms(18).some(t => t.startsWith('de ') || t.endsWith(' de')), 'edge-linker grams ("de vallon", "marquis de") never surface');
-    assert.ok(terms(18).includes('marquis de vallon') && terms(18).includes('marquis de harcot'), 'the full names surface once the fragments stop crowding them');
+    // Edges are asymmetric because naming conventions are: a particle binds to the toponym after it
+    // ("de Vallon" is how you refer to the man), an English locative needs its title back, and
+    // nothing may trail a linker in either language.
+    assert.ok(!terms(18).some(t => t.endsWith(' de')), '"marquis de" is a fragment in any language');
+    assert.ok(!terms(17).some(t => t.startsWith('of ') || t.startsWith('the ')), 'an English locative cannot lead a key');
+    assert.ok(terms(18).includes('marquis de vallon') && terms(18).includes('marquis de harcot'), 'the full names surface');
     assert.strictEqual(rowsOf(19).find(r => r.term === 'queen winnifred')?.display, 'Queen Winnifred', 'display takes the phrase\'s own span, not per-word properness ("queen" is lowercase elsewhere)');
 }
 // Bare honorifics are perfect fake proper nouns (always capitalised, never lowercase), so the
@@ -286,3 +290,84 @@ assert.equal(looksLikeFragment('Sommers, Teddy'), false, 'comma-separated name')
 assert.equal(FUNCTION_WORDS.has('and') && FUNCTION_WORDS.has('the') && FUNCTION_WORDS.has('not'), true, 'FUNCTION_WORDS is populated');
 assert.equal(FUNCTION_WORDS.has('de') || FUNCTION_WORDS.has('los'), false, 'no non-English determiners in the list');
 console.log('ok   looksLikeFragment: fires on clause fragments, spares concrete names and non-English entities');
+
+// --- cohesion subsumption + properness --------------------------------------------------------
+// At equal frequency the longer gram used to win outright, on the assumption that longer is more
+// specific. Specificity is worthless if the string never occurs: measured against a real chat, a
+// half of an INCOHESIVE tetragram out-fires the whole 96% of the time. So the longer gram now has
+// to be a unit — count(whole)/(count(halfA)+count(halfB)) >= 0.4 — or the contained gram wins.
+{
+    const filler = n => Object.fromEntries([...Array(n)].map((_, i) => [20 + i,
+        { uid: 20 + i, key: [], content: 'Rain fell on the street tonight, a dull ordinary evening for everyone.' }]));
+    const opts = { dfCeil: 0.5, maxN: 4, excludeDates: true, excludeShort: true, onlyActive: true, cap: 8 };
+    // Both halves live independently across the book, so the tetragram is an assembly.
+    const assembly = { entries: { ...filler(6),
+        0: { uid: 0, key: [], content: 'The bronze minotaur Arthur Baxter guarded it. Again the bronze minotaur Arthur Baxter stood watch.' },
+        1: { uid: 1, key: [], content: 'A letter reached Arthur Baxter at the office today.' },
+        2: { uid: 2, key: [], content: 'Nobody argued with Arthur Baxter about the schedule.' },
+        3: { uid: 3, key: [], content: 'The bronze minotaur sat alone in the hall.' },
+        4: { uid: 4, key: [], content: 'They polished the bronze minotaur every spring without fail.' },
+    } };
+    const t0 = buildKeySuggest(assembly, opts).perEntry.find(pe => pe.entry.uid === 0)?.newRows.map(r => r.term) ?? [];
+    assert.ok(!t0.includes('bronze minotaur arthur baxter'), 'an incohesive tetragram does not swallow its halves');
+    assert.ok(t0.includes('arthur baxter') && t0.includes('bronze minotaur'), 'the halves that live independently are offered instead');
+    // A trigram decomposes into OVERLAPPING bigrams (ABC -> AB + BC), which is what the leading/
+    // trailing bigram pair gives: "Mobius Industries HQ" must lose to "Mobius Industries".
+    // filler(9): with only 6, "industries" sits in 33% of entries and the distributional
+    // function-word cut strips it from every n-gram before subsumption is ever consulted.
+    const tri = { entries: { ...filler(9),
+        0: { uid: 0, key: [], content: 'They toured Mobius Industries HQ. The badge said Mobius Industries HQ.' },
+        1: { uid: 1, key: [], content: 'A courier reached Mobius Industries before noon.' },
+        2: { uid: 2, key: [], content: 'Nobody at Mobius Industries answered the phone.' },
+    } };
+    const y0 = buildKeySuggest(tri, opts).perEntry.find(pe => pe.entry.uid === 0)?.newRows.map(r => r.term) ?? [];
+    assert.ok(!y0.includes('mobius industries hq'), 'an incohesive trigram does not swallow its leading bigram');
+    assert.ok(y0.includes('mobius industries'), 'the bigram that lives independently is offered instead');
+    // Same shape, but nothing inside it ever occurs apart — a unit, which still wins the tie.
+    const unit = { entries: { ...filler(6),
+        0: { uid: 0, key: [], content: 'They met at Pura Dalem Agung Padangtegal. Later, Pura Dalem Agung Padangtegal again.' },
+    } };
+    const u0 = buildKeySuggest(unit, opts).perEntry.find(pe => pe.entry.uid === 0)?.newRows.map(r => r.term) ?? [];
+    assert.ok(u0.includes('pura dalem agung padangtegal'), 'a cohesive tetragram survives');
+    assert.ok(!u0.includes('pura dalem'), 'and still subsumes its halves');
+    // Properness has ONE definition: capitalised mid-sentence AND never seen lowercase. Title case
+    // capitalises anything ("Data Under Duress"), so a word that also appears lowercase is not a
+    // name — otherwise it qualified every word of an f=1 phrase and "Kyle under" became a key.
+    const titled = { entries: { ...filler(6),
+        0: { uid: 0, key: [], content: 'Data Under Duress topped the report. Kyle under the awning waited for news.' },
+        1: { uid: 1, key: [], content: 'The crate sat under the table for a week.' },
+        2: { uid: 2, key: [], content: 'Kyle spoke plainly to the room about the schedule.' },
+        // A name anchor makes a phrase maximally rare, so a top-500 word can ride along on it
+        // ("Arthur because") unless the phrase also has a commonness ceiling.
+        3: { uid: 3, key: [], content: 'Arthur because of the rain stayed. Arthur because of the wind left.' },
+    } };
+    const ts = buildKeySuggest(titled, opts).perEntry;
+    const at = uid => ts.find(pe => pe.entry.uid === uid)?.newRows.map(r => r.term) ?? [];
+    assert.ok(!at(0).includes('kyle under'), 'a title-cased common word is not properness evidence');
+    assert.ok(!at(3).some(t => t.includes('because')), 'a top-500 word cannot ride a name anchor into a phrase');
+}
+console.log('ok   cohesion subsumption prefers live halves; properness needs more than a capital');
+// Non-English particles bind to what follows, so they may LEAD a key and may repeat ("de la
+// Cruz"). The filler floods the particles so the distributional function-word cut would otherwise
+// strip every gram containing them — the positional linker rule is what keeps these whole.
+{
+    const fill = n => Object.fromEntries([...Array(n)].map((_, i) => [30 + i,
+        { uid: 30 + i, key: [], content: 'De la mesa, el nombre de la casa, la vida de los otros, un dia de sol.' }]));
+    const book = { entries: { ...fill(8),
+        0: { uid: 0, key: [], content: 'The envoy Rosa de la Cruz arrived. Everyone bowed to Rosa de la Cruz.' },
+        1: { uid: 1, key: [], content: 'The scholar ibn Suleiman spoke first. They listened to ibn Suleiman.' },
+        2: { uid: 2, key: [], content: 'A letter from Baron von Furstenheim came. Baron von Furstenheim waited.' },
+        3: { uid: 3, key: [], content: 'The delegate Marine le Pen spoke last. Reporters crowded Marine le Pen.' },
+        4: { uid: 4, key: [], content: 'The striker Giovani dos Santos scored twice. Fans chanted for Giovani dos Santos.' },
+    } };
+    const s = buildKeySuggest(book, { dfCeil: 0.5, maxN: 4, excludeDates: true, excludeShort: true, onlyActive: true, cap: 8 });
+    const at = uid => s.perEntry.find(pe => pe.entry.uid === uid)?.newRows.map(r => r.display) ?? [];
+    assert.ok(at(0).includes('Rosa de la Cruz'), 'a doubled particle stays inside the name');
+    assert.ok(at(1).includes('ibn Suleiman') && at(2).includes('Baron von Furstenheim'), 'particles survive as leading and interior links');
+    // Real names, and the reason the vocabulary is broad: each of these fragments into junk under a
+    // list that happens to omit its particle.
+    assert.ok(at(3).includes('Marine le Pen'), 'French "le" mid-name');
+    assert.ok(at(4).includes('Giovani dos Santos'), 'Portuguese "dos" mid-name');
+}
+console.log('ok   non-English particles lead and repeat; English linkers stay interior');
+

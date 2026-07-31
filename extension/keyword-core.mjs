@@ -410,8 +410,17 @@ export function buildKeySuggest(data, opts) {
         // "Kyle exchanges a look" read as "kyle exchanges look" and the object-side verb test
         // never saw the determiner. Single-letter tokens are still gram-blocked by ngramsOf's
         // length filter, so they act as boundaries in phrases, never as members.
-        return (String(text ?? '').match(/[\p{L}][\p{L}'’-]*|[.!?…;\n]/gu) ?? []).flatMap(w => {
-            if (!/\p{L}/u.test(w)) { atStart = true; return ['.']; }
+        // Openers (quotes, brackets, dashes, colons, markdown emphasis) reset atStart WITHOUT emitting
+        // a sentinel: a capital after one is the start of something quoted or parenthetical, not
+        // evidence of a name, but it is not a phrase boundary either. Roleplay prose is mostly
+        // dialogue, so without this every «"What…"» and «"Because…"» taught capMid that those are
+        // proper nouns — which then admitted "Kyle what" / "Arthur because" at f=1 and exempted them
+        // from the English gate, since a proper anchor zeroes the phrase's z.
+        // ponytail: closing quotes reset it too ("Hi," Marjorie said), costing one properness
+        // observation; capMid is a book-wide OR, so a real name is attested by any other sentence.
+        return (String(text ?? '').match(/[\p{L}][\p{L}'’-]*|[.!?…;\n]|["“”‘’(\[{*_:—–«»]/gu) ?? []).flatMap(w => {
+            if (/^[.!?…;\n]$/.test(w)) { atStart = true; return ['.']; }
+            if (!/\p{L}/u.test(w)) { atStart = true; return []; }
             const core = fold(w), lc = core.toLowerCase();
             (/^[A-Z]{2,}$/.test(core) ? capsSeen : mixedSeen).add(lc);
             if (/^[\p{Ll}]/u.test(core)) lowerSeen.add(lc);
@@ -462,7 +471,14 @@ export function buildKeySuggest(data, opts) {
     //    1.00, dialogue never verbs it, so only local evidence can). Object-side mirror of
     //    isVerbHead, precise enough to act from 2 observations where subject-side needs 5.
     const inSetOrStem = (set, w) => set.has(w) || stems(w).some(s => set.has(s));
-    const notName = w => !isAcr(w) && !(capMid.has(w) && !lowerSeen.has(w));
+    // ONE properness test, used by every gate that exempts names. It was written out twice with
+    // different strictness — the English gate demanded "capitalised mid-sentence AND never seen
+    // lowercase", the f=1 admission asked only for the capital — so a word the gate refused to treat
+    // as a name still qualified every word of an f=1 phrase. Title case capitalises anything ("Data
+    // Under Duress", "Wunder Under", "Trinity Coffee", "Jubilee Small"), which is how "Kyle under",
+    // "Arthur because" and "Liam coffee" became candidates.
+    const isName = w => isAcr(w) || (capMid.has(w) && !lowerSeen.has(w));
+    const notName = w => !isName(w);
     const posBad = (set, w) => inSetOrStem(set, w) && notName(w);
     const advLy = h => h.length >= 6 && /(?:ily|ingly|edly)$/.test(h) && !ZIPF_EN.has(h) && notName(h);
     const takesObj = t => { const tot = fAll.get(t) ?? 0; return tot >= 2 && (fDet.get(t) ?? 0) / tot > 0.5 && notName(t); };
@@ -471,18 +487,32 @@ export function buildKeySuggest(data, opts) {
         if (satEntity(h) || isVerbHead(h) || posBad(POS_VA, h) || takesObj(h) || advLy(h)) return true;
         return term.includes(' ') && term.split(' ').some(w => posBad(POS_VA_STRICT, w));
     };
-    // English name linkers may sit INSIDE a gram but never at its edges: without this, "Duke of
-    // Thornhaven" and "Lord of the Rings" can never form (function words disqualify a gram
-    // outright). Only these two — other function words still break phrases everywhere. The flood
-    // of ordinary of-phrases this admits ("glass of wine") is handled downstream: common-anchored
-    // phrases gate to zero, so only rare/proper-anchored names survive.
-    const ENG_LINK = new Set(['of', 'the']);
+    // Name linkers, and the one rule for where they may sit. Both classes may sit INSIDE a gram —
+    // without that, "Duke of Thornhaven" and "Dia de los Muertos" could never form, since a
+    // function word disqualifies a gram outright. They differ at the EDGES, which is a fact about
+    // naming conventions rather than a heuristic: a nobiliary or toponymic particle binds to what
+    // follows it and the pair is a name in its own right ("de Morcaster", "de la Cruz", "ibn
+    // Suleiman", "von Furstenheim", "La Marzocco", "Los Angeles"), so a particle may also LEAD.
+    // English "of X" is a locative that cannot stand without its title — "of Edinburgh" is not a
+    // name, "Duke of Edinburgh" is — so English linkers stay interior. Nothing may TRAIL either
+    // way: "Marquis de" and "Art of" are windowing accidents in any language.
+    //
+    // Every other function word still breaks phrases everywhere. The flood of ordinary of-phrases
+    // this admits ("glass of wine") is handled downstream: common-anchored phrases gate to zero.
+    // Deliberately broader than any one book needs: measured over 38 books only de/la/los/el/van/
+    // del/du/da/der/le actually occur, but a missing particle fails SILENTLY — the name fragments
+    // into junk and the good key is never offered — so the cheap side of the trade is coverage.
+    const PARTICLES = new Set('de del da di du la las le les los el van von der den bin ibn al af av dos das'.split(' '));
+    const ENG_LINKERS = new Set(['of', 'the']);
+    const LINKERS = new Set([...PARTICLES, ...ENG_LINKERS]);
+    const linkerPosOk = (t, j, n) => PARTICLES.has(t) ? j < n - 1 : (j > 0 && j < n - 1);
+    const edgeIllegal = ws => [0, ws.length - 1].some(j => LINKERS.has(ws[j]) && !linkerPosOk(ws[j], j, ws.length));
     const ngramsOf = seq => {
         const out = [];
         for (let n = 1; n <= maxN; n++)
             for (let i = 0; i + n <= seq.length; i++) {
                 const g = seq.slice(i, i + n);
-                if (g.some((t, j) => (t.length < 2 || isFunc(t)) && !(ENG_LINK.has(t) && j > 0 && j < g.length - 1))) continue;
+                if (g.some((t, j) => (t.length < 2 || isFunc(t)) && !(LINKERS.has(t) && linkerPosOk(t, j, g.length)))) continue;
                 out.push(g.join(' '));
             }
         return out;
@@ -573,11 +603,25 @@ export function buildKeySuggest(data, opts) {
         return out;
     };
     const tblZ = w => { let z = ZIPF_EN.get(w); if (z === undefined) { z = 0; for (const s of stems(w)) z = Math.max(z, ZIPF_EN.get(s) ?? 0); } return z; };
-    const zEff = w => (isAcr(w) || (capMid.has(w) && !lowerSeen.has(w))) ? 0 : Math.max(tblZ(w), isGer(w) ? 3.8 : 0);
+    const zEff = w => isName(w) ? 0 : Math.max(tblZ(w), isGer(w) ? 3.8 : 0);
+    // Linkers are legal by POSITION (see linkerPosOk above ngramsOf), which is what lets the f=1
+    // test admit "Dia de los Muertos" and "de la Cruz" whole instead of killing them and stranding
+    // a capitalised anchor ("Muertos" alone).
+    // A phrase rides its RAREST word, and a name counts as maximally rare — which is right for
+    // "Kyle's Diner" and wrong for "Arthur because", where the name's 0 lets anything ride along.
+    // So a phrase also has a ceiling: no word of it may be top-500 English ("because" 6.0, "what"
+    // 7.0, "away" 5.9), because those pair with a name only in clause fragments. Names and linkers
+    // are exempt — a linker IS a top-500 word, and killing them would take "Duke of Thornhaven" too.
+    // ponytail: 5.5 clears the measured junk while sparing content words that key legitimately
+    // ("coffee" 5.2 in "Trinity Coffee", "small" 5.1); retune if a real key lands the wrong side.
+    const PHRASE_WORD_CEIL = 5.5;
     const engMultOf = term => {
         const words = term.split(' ');
         let minZ = Infinity;
-        for (const w of words) minZ = Math.min(minZ, zEff(w));
+        for (const w of words) {
+            minZ = Math.min(minZ, zEff(w));
+            if (words.length > 1 && !LINKERS.has(w) && !isName(w) && tblZ(w) >= PHRASE_WORD_CEIL) return 0;
+        }
         return (words.length === 1 && minZ >= 3.0) ? 0 : Math.min(1, Math.max(0, (3.8 - minZ) / 1.3));
     };
     // TF is a repetition signal, and a summary-style entry mentions each entity exactly once — on
@@ -589,17 +633,11 @@ export function buildKeySuggest(data, opts) {
     // acronym, or absent from the English table. Min-anchor is not enough at f=1: it would let
     // any tail glue onto a rare anchor ("sarah olusanmokun arrived") and then subsume the clean
     // name, since at f=1 every adjacent pair co-occurs trivially.
-    // Name linkers: lowercase particles legitimate INSIDE a capitalised span ("Dia de los
-    // Muertos", "Cirque du Soleil") — the same class looksLikeFragment deliberately spares. They
-    // are common words by z (subtitles are full of Spanish/French), so without this the f=1 test
-    // kills the full name and strands its capitalised anchor ("Muertos" alone). Interior
-    // positions only; the edges of a name are never particles.
-    const LINKERS = new Set('de del la las los el di da du van von der den bin ibn al of the'.split(' '));
     const TITLES = new Set('mr mrs ms mx dr st jr sr prof rev sgt capt lt col gen'.split(' '));
     const admit = (term, f) => {
         if (f >= 2) return true;
         const ws = term.split(' ');
-        return ws.every((w, i) => (i > 0 && i < ws.length - 1 && LINKERS.has(w)) || isAcr(w) || capMid.has(w) || (tblZ(w) < 3.0 && !isGer(w)));
+        return ws.every((w, i) => (LINKERS.has(w) && linkerPosOk(w, i, ws.length)) || isName(w) || (tblZ(w) < 3.0 && !isGer(w)));
     };
 
     // Warm dfCache for every term that will reach the substring gate, in ONE pass per document.
@@ -641,18 +679,71 @@ export function buildKeySuggest(data, opts) {
         }
     }
 
+    // Cohesion: cover the gram with its LEADING and TRAILING bigram and ask whether those live
+    // independently of it. For a trigram the two overlap on the middle word (ABC -> AB + BC), for a
+    // tetragram they tile it exactly (ABCD -> AB + CD); either way each covers one occurrence of the
+    // whole, so the ratio pins at 0.5 when the parts never appear apart and collapses toward 0 when
+    // they do. Counted over the entries AND the chat, because a name's real independence shows up in
+    // conversation, not in a 300-entry book. Splitting a trigram down the middle instead (A | BC)
+    // measured far worse — a bare leading word is common on its own for reasons that say nothing
+    // about the phrase, and the bands muddied to 0/50/55/68% where the bigram pair reads 8/65/100/100%.
+    // ponytail: validated at n=3..4; a longer gram compares only its shoulders, which errs toward
+    // keeping it. Revisit if maxN above 4 becomes a real setting rather than a knob.
+    const bgCache = new Map();
+    const bgCount = t => {
+        const q = t.toLowerCase();
+        let v = bgCache.get(q);
+        if (v === undefined) { v = 0; for (const c of bgLc) if (c.includes(q)) v++; bgCache.set(q, v); }
+        return v;
+    };
+    const cohCache = new Map();
+    const cohesion = term => {
+        let v = cohCache.get(term);
+        if (v !== undefined) return v;
+        const w = term.split(' ');
+        const docs = t => dfSubstr(t) + bgCount(t);
+        // Only parts that could THEMSELVES be offered count as alternatives. Measured on two books,
+        // 13/84 and 31/102 of the grams this rule dropped were being counted against an illegal
+        // part ("Bishop of", "de Montclair" before particles were allowed to lead) and so vanished
+        // with nothing put in their place. A gram no legal part can replace is indivisible: keep it,
+        // which is precisely the "Bishop of Queensgrace" / "Duke of Edinburgh" case.
+        const parts = [w.slice(0, 2), w.slice(-2)].filter(p => !edgeIllegal(p)).map(p => docs(p.join(' ')));
+        // Against the BEST alternative, doubled so the ceiling stays 0.5 however many parts qualify:
+        // a part that never occurs without the whole counts once per occurrence of it.
+        const best = Math.max(0, ...parts);
+        cohCache.set(term, v = best ? Math.max(1, docs(term)) / (2 * best) : 1);
+        return v;
+    };
     // Per-entry TF-IDF: distinctive terms, ranked, subsumed, split into new vs already-keyed.
-    const subsume = list => list.filter(r => !list.some(o => o !== r && o.n > r.n && o.f === r.f && ` ${o.term} `.includes(` ${r.term} `)));
+    //
+    // Subsumption used to be "at equal frequency the longer gram wins", on the assumption that longer
+    // is more specific. Specificity is worthless if the string never appears: measured over one book
+    // and its 5598-message chat, a half of an INCOHESIVE tetragram out-fires the whole 96% of the
+    // time (13% when cohesive), so that rule was trading live keys for dead ones — "arthur baxter"
+    // (241 chat hits) discarded in favour of "Kyle FaceTimed Arthur Baxter" (0). The longer gram now
+    // has to earn the swap by being a unit; otherwise the contained gram wins and IT swallows the
+    // long one, so the pair still collapses to a single row.
+    // ponytail: measured on n>=3 only, so bigram-over-unigram subsumption keeps the old rule —
+    // "Arthur Baxter" beating bare "Arthur" is a call this ratio was never tested on.
+    const SUBSUME_COHESION = 0.4;
+    const subsume = list => list.filter(r => !list.some(o => {
+        if (o === r || o.f !== r.f) return false;
+        const [lng, srt] = o.n > r.n ? [o, r] : [r, o];
+        if (lng.n === srt.n || !` ${lng.term} `.includes(` ${srt.term} `)) return false;
+        const keepLong = lng.n < 3 || cohesion(lng.term) >= SUBSUME_COHESION;
+        return keepLong ? r === srt : r === lng;   // drop r when the other row is the keeper
+    }));
     const suggestForEntry = (entry, tf, idx) => {
         const existing = new Set((entry.key ?? []).map(canon));
         const rows = [];
         for (const [term, f] of tf) {
             if (!admit(term, f)) continue;
-            // Linkers are interior-only STRUCTURALLY, not just at f=1 admission: "marquis de" and
-            // "de vallon" are accidents of gram windowing, and because the address form recurs
-            // more often than the full name, they outscore and cap-crowd "marquis de vallon".
+            // Edge legality (see PARTICLES/ENG_LINKERS): "marquis de" is a windowing accident either
+            // way, "of Edengard" needs its title back, but "de Vallon" is how you actually refer to
+            // the man. Whether the full form or the particle form is the better key is then left to
+            // the cohesion tiebreak below, on evidence, instead of to a blanket ban.
             const ws = term.split(' ');
-            if (LINKERS.has(ws[0]) || LINKERS.has(ws.at(-1))) continue;
+            if (edgeIllegal(ws)) continue;
             const df = DF.get(term) ?? 1;
             if (df / N > dfCeil) continue;
             // Pruner cross-checks on the substring df (the metric countKey uses): never suggest a
