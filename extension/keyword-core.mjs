@@ -547,28 +547,55 @@ export function buildKeySuggest(data, opts) {
 
     // Display casing comes from the TEXT, not from per-word evidence: corpus-global properness
     // cased "Queen Winnifred" as "queen Winnifred" whenever "queen" also appeared lowercase
-    // somewhere else in the book. Every surviving candidate is attested as a literal substring,
-    // so its own surface span exists — take it verbatim (which also renders "McTavish", "HR" and
-    // interior linkers right, for free). Prefer an occurrence that is not sentence-initial, so a
-    // capital is the word's own rather than the sentence's; fall back to the first occurrence,
-    // then to the entry that attested it (a gram can be attested by a different entry than the
-    // one it was extracted from).
-    const SENT_END = /[.!?…;\n]/, SKIP_BACK = /[ \t"'“”‘’(\[{]/;
-    const spanIn = (idx, term) => {
+    // somewhere else in the book. Every surviving candidate is attested as a literal substring, so
+    // its own surface span exists — take it verbatim (which also renders "McTavish", "HR" and
+    // interior linkers right, for free).
+    //
+    // Take the form the text uses MOST, not the first one found. Machine-written entries open with
+    // a shouted markdown header, so "# THE OFFERING-FISH" was beating the dozen lowercase
+    // "offering-fish" in the prose below it purely by being first. Occurrences whose capital is
+    // POSITIONAL don't get a vote — after a sentence end or a label colon the capital is
+    // punctuation rather than spelling — unless they are all there is.
+    const SENT_END = /[.!?…;:\n]/, SKIP_BACK = /[ \t"'“”‘’(\[{*_#>-]/;
+    const SHOUTED = /[A-Z]{3,}/;
+    const tallyForms = (idx, term, voting, all) => {
         const lc = contentsLc[idx], raw = String(entries[idx].content ?? '');
-        let first = -1;
+        const bump = (m, k) => m.set(k, (m.get(k) ?? 0) + 1);
         for (let p = lc.indexOf(term); p >= 0; p = lc.indexOf(term, p + 1)) {
-            if (first < 0) first = p;
+            const form = raw.slice(p, p + term.length);
+            bump(all, form);
             let j = p - 1;
             while (j >= 0 && SKIP_BACK.test(raw[j])) j--;
-            if (j >= 0 && !SENT_END.test(raw[j])) return raw.slice(p, p + term.length);
+            if (j >= 0 && !SENT_END.test(raw[j])) bump(voting, form);
         }
-        return first < 0 ? null : raw.slice(first, first + term.length);
+    };
+    // Most-used form wins; an exact tie goes to the quieter one, because a term that appears once
+    // in a header and once in prose ("LIBERTINE ECONOMY" / "Libertine economy") is a term whose
+    // header is shouting, not a term that is spelled in capitals.
+    const pickForm = (voting, all) => [...(voting.size ? voting : all)]
+        .sort((a, b) => (b[1] - a[1]) || (SHOUTED.test(a[0]) ? 1 : 0) - (SHOUTED.test(b[0]) ? 1 : 0))[0]?.[0] ?? null;
+    // The book-wide tally is the union over every entry, so it does not depend on which entry asked
+    // — worth caching, since an acronym is shouted by definition and would otherwise re-scan the
+    // corpus once per entry that suggests it.
+    const wideCache = new Map();
+    const wideForm = term => {
+        let s = wideCache.get(term);
+        if (s === undefined) {
+            const voting = new Map(), all = new Map();
+            for (let k = 0; k < entries.length; k++) tallyForms(k, term, voting, all);
+            wideCache.set(term, s = pickForm(voting, all));
+        }
+        return s;
     };
     const displayOf = (term, idx) => {
-        let s = spanIn(idx, term);
-        for (let k = 0; k < entries.length && s == null; k++) if (k !== idx) s = spanIn(k, term);
-        return s ?? term;
+        const voting = new Map(), all = new Map();
+        tallyForms(idx, term, voting, all);
+        const s = pickForm(voting, all);
+        // Widen when this entry has nothing, and when what it has is SHOUTED: a header is a single
+        // occurrence, and the prose that spells the term normally is often in OTHER entries —
+        // "elemental scales" runs 16 times lowercase across the book against one "# ELEMENTAL
+        // SCALES" in the entry that produced the candidate.
+        return ((s == null || SHOUTED.test(s)) ? wideForm(term) : s) ?? term;
     };
 
     // English-frequency gate (zipf-en.js): a word common in general English is a poor key even

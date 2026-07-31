@@ -370,4 +370,24 @@ console.log('ok   cohesion subsumption prefers live halves; properness needs mor
     assert.ok(at(4).includes('Giovani dos Santos'), 'Portuguese "dos" mid-name');
 }
 console.log('ok   non-English particles lead and repeat; English linkers stay interior');
+// Display case is the form the text uses MOST, and the evidence is book-wide. A machine-written
+// entry shouts its subject in a markdown header, so the entry that produces the candidate may hold
+// only the shouted spelling while the prose that spells it normally sits in other entries.
+{
+    const filler = n => Object.fromEntries([...Array(n)].map((_, i) => [10 + i,
+        { uid: 10 + i, key: [], content: 'Rain fell on the street tonight, a dull ordinary evening for everyone.' }]));
+    // filler(9): the term sits in 3 entries, so fewer than ~11 total puts it over the >30% share
+    // that the distributional function-word cut treats as a stopword, and no gram survives at all.
+    const book = { entries: { ...filler(9),
+        0: { uid: 0, key: [], content: '# THE OFFERING-FISH\n\nRitual notes follow in the archive below.' },
+        1: { uid: 1, key: [], content: 'The offering-fish keep their own counsel, and the offering-fish rarely speak.' },
+        2: { uid: 2, key: [], content: 'Guild rules bind every offering-fish who takes the vow.' },
+    } };
+    const s = buildKeySuggest(book, { dfCeil: 0.5, maxN: 4, excludeDates: true, excludeShort: true, onlyActive: true, cap: 8 });
+    const row = s.perEntry.find(pe => pe.entry.uid === 0)?.newRows.find(r => r.term === 'offering-fish');
+    assert.ok(row, 'a term appearing only in its entry\'s header is still a candidate');
+    assert.strictEqual(row.display, 'offering-fish', 'the shouted header loses to prose spelling found in other entries');
+}
+console.log('ok   display takes the most-used capitalisation, counted book-wide');
+
 
