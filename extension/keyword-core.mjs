@@ -865,6 +865,9 @@ export function buildKeySuggest(data, opts) {
             // elided form is a different token and no replacement would appear in its place.
             const el = n === 1 ? term.match(ELIDED) : null;
             if (el && !ZIPF_EN.has(el[1]) && tf.has(el[1])) continue;
+            // A bare roman numeral is a number, not a name — it reaches here only because an
+            // all-caps token looks like an acronym. "Louis XIII" keeps it; "XIII" alone is noise.
+            if (n === 1 && /^[ivxlcdm]{2,}$/.test(term)) continue;
             // Bare honorifics: "Mr" passes every capitalisation test (always capitalised, never
             // lowercase — a perfect fake proper noun) yet is junk alone; fine inside "Mr Lansing".
             if (n === 1 && TITLES.has(term)) continue;
@@ -886,7 +889,13 @@ export function buildKeySuggest(data, opts) {
                 score: f * engMult * Math.log((N + M + 1) / (df + (bgDF.get(term) ?? 0) + 0.5)) * (1 + 0.5 * (contentLen(term) - 1)) });
         }
         rows.sort((a, b) => b.score - a.score);
-        const kept = subsume(rows);
+        // A plural adds nothing a substring key can use — "stone-singer" already matches every
+        // "stone-singers" — so when both are candidates the singular stands alone. Same shape of
+        // argument as the particle rule: prefer the form that matches a superset of the text.
+        const have = new Set(rows.map(r => r.term));
+        const plural = t => /(?:ies|es|s)$/.test(t) &&
+            [t.replace(/ies$/, 'y'), t.replace(/es$/, ''), t.replace(/s$/, '')].find(x => x !== t && have.has(x));
+        const kept = subsume(rows.filter(r => !plural(r.term)));
         // Batch triage: cap the per-entry paragraph to the strongest few so it stays scannable
         // (a focused entry can pull more via ✨). Score-sorted, so the cut only sheds the weak tail.
         // Gated-out entries return nothing on purpose. A demoted-rejects fallback used to run here,
