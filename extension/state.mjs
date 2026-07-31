@@ -68,13 +68,16 @@ export const defaultSettings = {
     /**
      * Minimum cosine similarity for a chunk to count.
      *
-     * 0.1, NOT 0.6, BECAUSE meanCentered IS ON BY DEFAULT. Centering subtracts the direction every chunk in a
-     * single-story corpus shares, which collapses the cosine range: measured across three real books, centered
-     * scores top out at 0.25-0.36 with a p90 of 0.086-0.110, while the same queries uncentered reach 0.62-0.72
-     * with a p90 of 0.54-0.61. The old 0.6 was calibrated against uncentered scores, where it sat near the p90
-     * and meant "roughly the top decile of chunks". Under centering it is above the entire range, so it
-     * admitted ZERO chunks on all three books and every retrieved chunk arrived via the bm25 clause instead.
-     * 0.1 is the centered p90 — the same selectivity 0.6 was chosen for.
+     * 'auto' = the p90 of the query's own centered score distribution, computed per collection per query in
+     * plugin/scoring.mjs. Internal (no UI). The history that led here: the original 0.6 was calibrated
+     * against UNCENTERED scores (raw cosines reach 0.62-0.72, p90 0.54-0.61), and under centering — which
+     * collapses the range to a 0.25-0.36 top with a p90 of 0.086-0.110 — it sat above the entire range and
+     * admitted ZERO chunks. The fix, 0.1, was "the centered p90 measured on three books with bge-m3" — an
+     * embedder-specific constant. 'auto' computes that same p90 from the scores actually in play, so the
+     * selectivity transfers to any embedder with no recalibration. Verified a no-op where they overlap:
+     * paired vs 0.1 over 80 bge-m3 scenes, 78 byte-identical, mean Δ -0.0001 (eval/paired-arms.mjs
+     * `thr=auto`). The stock-ST fallback path cannot run 'auto' (the server quantiles nothing) and pins
+     * 0.1 raw — permissive by design there; client-side selection does the narrowing.
      *
      * Note what this gates, which is narrower than it looks (see plugin/scoring.mjs scoreCollection): the
      * index only ever contains chunks from VECTORIZED entries, so this is the cosine floor for those. Entries
@@ -100,7 +103,7 @@ export const defaultSettings = {
      * three of sommers' grade-5 entries). `admit=cosine` is kept as a standing arm so a future tightening
      * trips a regression instead of shipping.
      */
-    scoreThreshold: 0.1,
+    scoreThreshold: 'auto',
     /**
      * Wrong-book failsafe: a chunk must also reach this RAW (uncentered) cosine to be admitted at all.
      * 0 = off. Plugin path only — the stock-ST fallback never sees it.
@@ -380,7 +383,7 @@ export const defaultSettings = {
  * must not linger at a stale hand-tuned value the user can no longer see.
  */
 const INTERNAL_KEYS = [
-    'meanCentered', 'entityFilter', 'properNounBoost', 'stopwordDocFreq',
+    'meanCentered', 'scoreThreshold', 'entityFilter', 'properNounBoost', 'stopwordDocFreq',
     'bm25K1', 'bm25B', 'rrfK', 'scoreVectorKeys', 'keywordScoring',
     'chunkSize', 'chunkMode', 'minChunkSize',
 ];

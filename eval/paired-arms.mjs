@@ -54,6 +54,10 @@ const ARMS = {
     'stopwordDf=0.15': { stopwordDf: 0.15 }, 'stopwordDf=0.4': { stopwordDf: 0.4 },
     'filter=off': { entityFilter: false },
     'thr=0.3': { threshold: 0.3 }, 'thr=0.8': { threshold: 0.8 },
+    // Self-calibrating floor: p90 of the query's own centered scores (scoring.mjs 'auto'). Shipping this
+    // requires it to be a measured no-op vs the stored 0.1 on bge-m3 scenes — 0.1 IS the bge-m3 p90, so any
+    // gap means the quantile is tracking something the constant didn't.
+    'thr=auto': { threshold: 'auto' },
     // CHUNK ARMS. These change what text gets EMBEDDED, so unlike every arm above they cannot be re-derived
     // from the stored index — each needs its own collection, rebuilt from the sample's embedded books
     // (reindex.mjs) and cached on disk. That makes them the slow arms: first run pays one embedding pass per

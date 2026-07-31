@@ -160,7 +160,7 @@ export async function init(router) {
             const settings = sourceSettings ?? {};
             const opts = {
                 centered: request.body.centered !== false,
-                threshold: Number(request.body.threshold) || 0,
+                threshold: request.body.threshold === 'auto' ? 'auto' : (Number(request.body.threshold) || 0),
                 queryText: String(searchText),
                 k1: Number(request.body.bm25K1) > 0 ? Number(request.body.bm25K1) : DEFAULT_K1,
                 b: Number.isFinite(Number(request.body.bm25B)) ? Number(request.body.bm25B) : DEFAULT_B,

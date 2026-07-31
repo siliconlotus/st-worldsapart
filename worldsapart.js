@@ -289,6 +289,9 @@ async function queryCollections(args) {
         }
     }
 
+    // Stock ST can't quantile ('auto' resolves in the plugin) — pin the old centered default; on raw
+    // scores it's permissive and client-side selection narrows.
+    if (args.threshold === 'auto') args = { ...args, threshold: 0.1 };
     return await vectorPost('query-multi', args) ?? {};
 }
 
@@ -2775,9 +2778,6 @@ const SETTINGS_HTML = `
                     <label>Mean-centered search (automatic when the server plugin is installed)</label>
                     <div id="wa_plugin_setup" style="margin:0.4em 0;font-size:0.85em;opacity:0.75;"></div>
 
-                    <label for="wa_threshold">Score threshold</label>
-                    <input id="wa_threshold" type="number" class="text_pole" min="0" max="1" step="0.01">
-
                     <label for="wa_uncentered_gate" title="A chunk must also reach this raw (uncentered) cosine to be admitted. Catches a wrong book attached by mistake; 0.5 is calibrated for bge-m3. 0 = off.">Wrong-book gate (raw cosine)</label>
                     <input id="wa_uncentered_gate" type="number" class="text_pole" min="0" max="1" step="0.05">
                 </div>
@@ -3091,7 +3091,6 @@ export async function init() {
     bind('#wa_summary_prompt', 'summaryPrompt', 'string');
     bind('#wa_summary_length', 'summaryLength', 'number');
     bind('#wa_summary_temp', 'summaryTemperature', 'string');
-    bind('#wa_threshold', 'scoreThreshold', 'number');
     bind('#wa_uncentered_gate', 'uncenteredGate', 'number');
     bind('#wa_max_entries', 'maxVectorEntries', 'number');
     bind('#wa_vector_cutoff', 'vectorCutoff', 'string');
