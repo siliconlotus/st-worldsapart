@@ -1,5 +1,5 @@
-// Whole-book batch version of /wa-keyword-scores: audits EVERY entry's keys (the in-app command
-// scans only active ones). Same definition as worldsapart.js keywordScoresReport / KEY_TOO_COMMON.
+// Offline batch version of the Studio's keyword audit: audits EVERY entry's keys. Same classifier
+// (keyword-core buildKeyPruneScan / KEY_TOO_COMMON), so this and the in-app audit never drift.
 //
 // Per key:  dfContent — entries whose CONTENT contains the key (firing commonness)
 //           dfKeys    — entries that LIST the key (shared-memory span; NOT a defect)
