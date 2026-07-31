@@ -457,6 +457,37 @@ console.log('ok   phrase budget counts content words; truncations do not outrank
     assert.ok(at(1).includes('vicomtesse de sacres') && at(1).includes('vicomtesse'), 'the full title and its head both stand');
 }
 console.log('ok   phrases keep their bare words, except where a particle says otherwise');
+// Elision writes the particle onto the name ("d'Orléans"), so the tokeniser sees one word and the
+// particle rules never get a look. Same trade on the same terms, plus a check that the bare name
+// stands somewhere on its own — dropping the elided form is only safe if something replaces it.
+{
+    const fill = n => Object.fromEntries([...Array(n)].map((_, i) => [30 + i,
+        { uid: 30 + i, key: [], content: 'Rain fell on the street tonight, a dull ordinary evening for everyone here.' }]));
+    const book = { entries: { ...fill(9),
+        // "Ironhold", not "Orleans": unaccented "orleans" is IN the frequency table (New Orleans),
+        // so it would correctly keep its particle and the test would prove nothing.
+        0: { uid: 0, key: [], content: "The duchy of Ironhold passed to his heir. The Duc d'Ironhold held the duchy of Ironhold until his death." },
+        1: { uid: 1, key: [], content: "A hall of Objets d'Art stood there. More Objets d'Art filled the annex." },
+    } };
+    const s = buildKeySuggest(book, { dfCeil: 0.5, maxN: 4, excludeDates: true, excludeShort: true, onlyActive: true, cap: 12 });
+    const at = uid => s.perEntry.find(pe => pe.entry.uid === uid)?.newRows.map(r => r.term) ?? [];
+    assert.ok(at(0).includes('ironhold') && !at(0).includes("d'ironhold"), 'an elided particle yields to a distinctive name');
+    assert.ok(at(0).some(t => t.includes("duc d'ironhold")), 'while the full title keeps it');
+    assert.ok(at(1).includes("d'art"), '"d\'Art" keeps its particle — "art" alone is a common word');
+    // ...and an entry that never writes the bare name keeps the elided form, because the bare one
+    // is a different token and nothing would appear in its place. "d'Artagnan" is the case: the
+    // particle is the name there, not a detachable prefix.
+    const dart = { entries: { ...fill(9),
+        0: { uid: 0, key: [], content: "The musketeer d'Artagnan rode north. Nobody outmatched d'Artagnan that season." },
+        1: { uid: 1, key: [], content: 'Later Artagnan drew his sword, and Artagnan spoke of the cardinal.' },
+    } };
+    const dd = buildKeySuggest(dart, { dfCeil: 0.5, maxN: 4, excludeDates: true, excludeShort: true, onlyActive: true, cap: 12 });
+    const dt = uid => dd.perEntry.find(pe => pe.entry.uid === uid)?.newRows.map(r => r.term) ?? [];
+    assert.ok(dt(0).includes("d'artagnan"), 'the elided form stands where its entry offers no bare name');
+    assert.ok(dt(1).includes('artagnan'), 'and the entry that does write the bare name offers that');
+}
+console.log('ok   elided particles follow the same rule as written ones');
+
 
 
 

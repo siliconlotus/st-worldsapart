@@ -516,6 +516,9 @@ export function buildKeySuggest(data, opts) {
     // into junk and the good key is never offered — so the cheap side of the trade is coverage.
     const PARTICLES = new Set('de del da di du la las le les los el van von der den bin ibn al af av dos das'.split(' '));
     const ENG_LINKERS = new Set(['of', 'the']);
+    // French/Italian elision writes the particle onto the name — "d'Orléans", "dell'Arte" — so the
+    // tokeniser sees a single word and the particle rules above never get a look at it.
+    const ELIDED = /^(?:d|l|dell|dall|nell|sull|all|qu)['’](.+)$/i;
     const LINKERS = new Set([...PARTICLES, ...ENG_LINKERS]);
     const linkerPosOk = (t, j, n) => PARTICLES.has(t) ? j < n - 1 : (j > 0 && j < n - 1);
     const edgeIllegal = ws => [0, ws.length - 1].some(j => LINKERS.has(ws[j]) && !linkerPosOk(ws[j], j, ws.length));
@@ -854,6 +857,14 @@ export function buildKeySuggest(data, opts) {
             // is a poor key while "voracious reader" is fine, so the adjective test applies to
             // unigrams only. Same dominance bar and properness override as the verb sets.
             if (n === 1 && posBad(POS_ADJ, term)) continue;
+            // An elided particle gets the same trade as a written one, on the same terms: the bare
+            // name matches every elided occurrence as a substring, so prefer it — but only when it
+            // is distinctive AND stands on its own IN THIS ENTRY. "d'Orléans" yields to "Orléans"
+            // where the entry writes both; "d'Art" keeps its particle because "art" is a common
+            // word; "d'Artagnan" keeps it wherever the entry never writes the bare name, since the
+            // elided form is a different token and no replacement would appear in its place.
+            const el = n === 1 ? term.match(ELIDED) : null;
+            if (el && !ZIPF_EN.has(el[1]) && tf.has(el[1])) continue;
             // Bare honorifics: "Mr" passes every capitalisation test (always capitalised, never
             // lowercase — a perfect fake proper noun) yet is junk alone; fine inside "Mr Lansing".
             if (n === 1 && TITLES.has(term)) continue;
