@@ -645,7 +645,7 @@ export function buildKeySuggest(data, opts) {
     const subsume = list => list.filter(r => !list.some(o => o !== r && o.n > r.n && o.f === r.f && ` ${o.term} `.includes(` ${r.term} `)));
     const suggestForEntry = (entry, tf, idx) => {
         const existing = new Set((entry.key ?? []).map(canon));
-        const rows = [], weakRows = [];
+        const rows = [];
         for (const [term, f] of tf) {
             if (!admit(term, f)) continue;
             // Linkers are interior-only STRUCTURALLY, not just at f=1 admission: "marquis de" and
@@ -677,29 +677,22 @@ export function buildKeySuggest(data, opts) {
             if (n === 1 && TITLES.has(term)) continue;
             if (excludeDates && isDateLike(term)) continue;
             const engMult = engMultOf(term);   // the three-class English gate — see engMultOf
+            if (!engMult) continue;
             // Un-fold the display (and thus the committed key) from the term's own surface span in
             // the text — see displayOf. Cosmetic under ST's default case-insensitive matching, and
             // matches how humans write keys.
-            const display = displayOf(term, idx);
-            const row = { term, display, present: existing.has(term), df, f, n, weak: !engMult,
-                score: f * Math.max(engMult, 0.05) * Math.log((N + M + 1) / (df + (bgDF.get(term) ?? 0) + 0.5)) * (1 + 0.5 * (n - 1)) };
-            (engMult ? rows : weakRows).push(row);
+            rows.push({ term, display: displayOf(term, idx), present: existing.has(term), df, f, n,
+                score: f * engMult * Math.log((N + M + 1) / (df + (bgDF.get(term) ?? 0) + 0.5)) * (1 + 0.5 * (n - 1)) });
         }
         rows.sort((a, b) => b.score - a.score);
         const kept = subsume(rows);
         // Batch triage: cap the per-entry paragraph to the strongest few so it stays scannable
         // (a focused entry can pull more via ✨). Score-sorted, so the cut only sheds the weak tail.
-        let newRows = kept.filter(r => !r.present).slice(0, cap);
-        // The English gate is a preference, not a verdict: on a short entry it can empty the
-        // paragraph entirely (measured ~2/3 of one real book's entries), and an empty paragraph
-        // helps nobody — the tab's job is candidates to judge. When nothing survives, surface the
-        // least-bad few of the gated rejects, flagged weak so the row can say so; ✨ remains the
-        // better tool for exactly these entries.
-        if (!newRows.length && weakRows.length) {
-            weakRows.sort((a, b) => b.score - a.score);
-            newRows = subsume(weakRows).filter(r => !r.present).slice(0, Math.min(cap, 3));
-        }
-        return { existing, newRows, keyedRows: kept.filter(r => r.present) };
+        // Gated-out entries return nothing on purpose. A demoted-rejects fallback used to run here,
+        // on the theory that an empty paragraph helps nobody; measured over 38 books / 3466 entries
+        // it fired on 1% of them and offered "friend, things, years" — the gate was right and the
+        // real emptiness cure was admitting f=1 names, which now covers 98.8% of entries.
+        return { existing, newRows: kept.filter(r => !r.present).slice(0, cap), keyedRows: kept.filter(r => r.present) };
     };
 
     const perEntry = entries.map((entry, i) => ({ entry, ...suggestForEntry(entry, tfs[i], i) })).filter(pe => pe.newRows.length);

@@ -82,14 +82,14 @@ const bgBook = { entries: { ...suggestBook.entries,
 }
 
 // Zipf gate, one assertion per key class: an English-common unigram is gated however unique it
-// looks inside a small book ("trash" 4.4, "tavern" 3.6 — in the table = gated for unigrams), but
-// on an entry where NOTHING survives the gate the least-bad rejects come back flagged weak (an
-// empty paragraph helps nobody); an uncommon unigram survives at full weight ("minotaur" 2.8,
-// below the table floor); a common word only ever seen capitalised is a proper noun and survives
-// ("Jeffrey" 3.9); and no phrase bridges a sentence boundary ("comparison. Micah" is not a bigram).
+// looks inside a small book ("trash" 4.4, "tavern" 3.6 — in the table = gated for unigrams), and an
+// entry whose every candidate is gated yields nothing at all; an uncommon unigram survives at full
+// weight ("minotaur" 2.8, below the table floor); a common word only ever seen capitalised is a
+// proper noun and survives ("Jeffrey" 3.9); and no phrase bridges a sentence boundary
+// ("comparison. Micah" is not a bigram).
 const zipfBook = { entries: { ...suggestBook.entries,
-    // All-common prose deliberately: even the f=1 words sit in the Zipf table ("reeked" here once
-    // broke the fallback assertion by surfacing as a legitimate rare-word candidate).
+    // All-common prose deliberately: even the f=1 words must sit in the Zipf table, or one of them
+    // ("reeked") surfaces as a legitimate rare-word candidate and the entry is no longer empty.
     0: { uid: 0, key: [], content: 'The trash sat by the tavern door. The trash grew. The tavern was never clean.', comment: 'A' },
     // Mid-sentence capitals, as real prose would have: sentence-initial capitalisation is not
     // properness evidence (or "Nobody" would count as a name).
@@ -107,7 +107,7 @@ const zipfBook = { entries: { ...suggestBook.entries,
     // non-proper -ing words are verb forms. The capitalised entity beside it surfaces normally.
     10: { uid: 10, key: [], content: 'Rumors kept solidifying around the Jubilee device. Sales kept solidifying around the Jubilee device.', comment: 'K' },
     // "unfolds" is out-of-table (SUBTLEX has "unfold" 3.1 but not the inflection) — de-inflection
-    // must gate it like its stem; with nothing else here the entry yields weak fallback at most.
+    // must gate it like its stem.
     11: { uid: 11, key: [], content: 'The ritual unfolds at midnight. The ritual unfolds in silence.', comment: 'L' },
     // Noun+verb clause fragment: "jeffrey acquiesce" rides a proper anchor and a rare verb, so
     // the frequency gates pass it — only the SUBTLEX POS head test (acquiesce: Verb 1.0) kills it.
@@ -125,7 +125,7 @@ const zipfBook = { entries: { ...suggestBook.entries,
     // interior linkers of a capitalised span — the full name must surface (and subsume "Muertos").
     16: { uid: 16, key: [], content: 'They gathered for Dia de los Muertos at the plaza. Nobody spoke of it afterward.', comment: 'Q' },
     // English linkers interior to a name: "of" (a FUNCTION_WORD) must not break "Duke of
-    // Thornhaven" — while a common-anchored of-phrase ("glass of wine") still gates to weak.
+    // Thornhaven" — while a common-anchored of-phrase ("glass of wine") is still gated.
     17: { uid: 17, key: [], content: 'The Duke of Thornhaven raised a glass of wine. Everyone toasted the Duke of Thornhaven, and Kyle refilled his glass of wine.', comment: 'R' },
     // Edge-linker grams are windowing accidents: the address form "de Vallon" recurs more often
     // than the full name, so without the structural kill it outscores and cap-crowds the real
@@ -139,10 +139,8 @@ const zipfBook = { entries: { ...suggestBook.entries,
     const zs = buildKeySuggest(zipfBook, { dfCeil: 0.5, maxN: 4, excludeDates: true, excludeShort: true, onlyActive: true, cap: 8 });
     const rowsOf = uid => zs.perEntry.find(pe => pe.entry.uid === uid)?.newRows ?? [];
     const terms = uid => rowsOf(uid).map(r => r.term);
-    assert.ok(rowsOf(0).length && rowsOf(0).every(r => r.weak), 'a gated-only entry falls back to weak-flagged rows, not emptiness');
-    assert.ok(terms(0).includes('trash'), 'the fallback offers the least-bad gated candidates');
-    assert.ok(terms(5).includes('jeffrey') && !rowsOf(5).find(r => r.term === 'jeffrey').weak, '"Jeffrey" (common word, never lowercase) is spared as a proper noun');
-    assert.ok(rowsOf(5).every(r => !r.weak), 'weak fallback does not fire when a real candidate survives');
+    assert.strictEqual(rowsOf(0).length, 0, 'an entry whose every candidate is gated yields nothing');
+    assert.ok(terms(5).includes('jeffrey'), '"Jeffrey" (common word, never lowercase) is spared as a proper noun');
     assert.ok(terms(6).includes('minotaur'), '"minotaur" (below the table floor) is suggested at full weight');
     // "micah frowned" (same f, longer) subsumes bare "micah" in the kept-filter; the point here is
     // only that nothing bridges the sentence boundary.
@@ -155,9 +153,8 @@ const zipfBook = { entries: { ...suggestBook.entries,
     assert.strictEqual(rowsOf(9).find(r => r.term === 'sarah olusanmokun')?.display, 'Sarah Olusanmokun', 'display un-folds proper-noun casing from the recorded surface form');
     assert.ok(!terms(9).includes('paperwork') && !terms(9).includes('incident'), 'common f=1 words do not ride in with them');
     assert.ok(!terms(9).some(t => t.includes('nobody')), 'sentence-initial capitals are not properness evidence');
-    assert.ok(rowsOf(9).every(r => !r.weak), 'f=1 admissions are full-confidence, never weak fallback');
     assert.ok(!terms(10).some(t => t.includes('solidifying')), 'a rare lowercase gerund is gated as a verb form');
-    assert.ok(terms(10).some(t => t.includes('jubilee')) && rowsOf(10).every(r => !r.weak), 'the capitalised entity beside it surfaces normally');
+    assert.ok(terms(10).some(t => t.includes('jubilee')), 'the capitalised entity beside it surfaces normally');
     // The phrase "ritual unfolds" may survive demoted (the phrase ramp tolerates mid-band anchors);
     // de-inflection's job is the unigram: "unfolds" must inherit unfold's z and be gated.
     assert.ok(!terms(11).includes('unfolds'), 'a rare inflection of a common stem ("unfolds") is gated via de-inflection');
@@ -174,7 +171,7 @@ const zipfBook = { entries: { ...suggestBook.entries,
     assert.strictEqual(rowsOf(16).find(r => r.term === 'dia de los muertos')?.display, 'Dia de los Muertos', 'linker casing survives the un-fold');
     assert.ok(terms(17).includes('duke of thornhaven'), '"of" interior to a proper span does not break the gram');
     assert.strictEqual(rowsOf(17).find(r => r.term === 'duke of thornhaven')?.display, 'Duke of Thornhaven', 'the of-name un-folds with its casing');
-    assert.ok(!terms(17).some(t => t.includes('glass of wine')), 'a common-anchored of-phrase still gates to weak');
+    assert.ok(!terms(17).some(t => t.includes('glass of wine')), 'a common-anchored of-phrase is still gated');
     assert.ok(!terms(18).some(t => t.startsWith('de ') || t.endsWith(' de')), 'edge-linker grams ("de vallon", "marquis de") never surface');
     assert.ok(terms(18).includes('marquis de vallon') && terms(18).includes('marquis de harcot'), 'the full names surface once the fragments stop crowding them');
     assert.strictEqual(rowsOf(19).find(r => r.term === 'queen winnifred')?.display, 'Queen Winnifred', 'display takes the phrase\'s own span, not per-word properness ("queen" is lowercase elsewhere)');
