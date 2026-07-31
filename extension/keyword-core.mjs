@@ -794,8 +794,16 @@ export function buildKeySuggest(data, opts) {
         if (o === r || o.f !== r.f) return false;
         const [lng, srt] = o.n > r.n ? [o, r] : [r, o];
         if (lng.n === srt.n || !` ${lng.term} `.includes(` ${srt.term} `)) return false;
-        const keepLong = lng.n < 3 || cohesion(lng.term) >= SUBSUME_COHESION;
-        return keepLong ? r === srt : r === lng;   // drop r when the other row is the keeper
+        if (lng.n < 3 || cohesion(lng.term) >= SUBSUME_COHESION) return r === srt;   // a unit: it swallows
+        // Otherwise the long form is an assembly — but only the SHOULDER it decomposes into may
+        // take its place. Cohesion judged "chairman of the grain commission" against "grain
+        // commission"; the row that displaced it was bare "chairman", which merely happened to
+        // share its frequency, and the entry was left with a title reduced to a job word. Anything
+        // else contained in it keeps its own row and the pair is offered together, which is what
+        // you want from "Governor of the Verenthian Marches" and "Verenthian Marches".
+        const w = lng.term.split(' ');
+        const isShoulder = srt.term === w.slice(0, 2).join(' ') || srt.term === w.slice(-2).join(' ');
+        return isShoulder && r === lng;
     }));
     const suggestForEntry = (entry, tf, idx) => {
         const existing = new Set((entry.key ?? []).map(canon));

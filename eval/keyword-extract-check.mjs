@@ -407,10 +407,15 @@ console.log('ok   display takes the most-used capitalisation, counted book-wide'
     // prefix; two occurrences are what makes that sayable.
     const titles = { entries: { ...filler(9),
         0: { uid: 0, key: [], content: 'He chairs the Grain Commission board. The Grain Commission met at noon.' },
-        1: { uid: 1, key: [], content: 'Every Chairman of the Grain Commission speaks last, and each Chairman of the Grain Commission signs.' },
+        1: { uid: 1, key: [], content: 'Every Chairman of the Grain Commission speaks last, and each Chairman of the Grain Commission signs. The Grain Commission adjourned.' },
     } };
     const t1 = buildKeySuggest(titles, opts).perEntry.find(pe => pe.entry.uid === 1)?.newRows.map(r => r.term) ?? [];
     assert.ok(!t1.includes('chairman of the grain'), 'a gram with one possible successor is a truncation');
+    // Only the shoulder a phrase decomposes INTO may replace it. Here the shoulder ("grain
+    // commission", 3 mentions) does not share the title's frequency, so the only equal-frequency
+    // gram inside it is bare "chairman" — which is not what cohesion weighed, so both stand and the
+    // title is not reduced to a job word.
+    assert.ok(t1.includes('chairman of the grain commission'), 'an equal-frequency non-shoulder does not displace the whole title');
 }
 console.log('ok   phrase budget counts content words; truncations do not outrank whole names');
 
