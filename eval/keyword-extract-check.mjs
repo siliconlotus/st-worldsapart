@@ -389,5 +389,30 @@ console.log('ok   non-English particles lead and repeat; English linkers stay in
     assert.strictEqual(row.display, 'offering-fish', 'the shouted header loses to prose spelling found in other entries');
 }
 console.log('ok   display takes the most-used capitalisation, counted book-wide');
+// maxN counts CONTENT words, so a name padded with grammar still fits the budget, and a gram that
+// has exactly one possible next word is a prefix rather than a unit.
+{
+    const filler = n => Object.fromEntries([...Array(n)].map((_, i) => [20 + i,
+        { uid: 20 + i, key: [], content: 'Rain fell on the street tonight, a dull ordinary evening for everyone.' }]));
+    const opts = { dfCeil: 0.5, maxN: 4, excludeDates: true, excludeShort: true, onlyActive: true, cap: 8 };
+    // Seven tokens, three of which mean anything — under a token-counted budget of 4 this name can
+    // only ever be seen through a window across its middle.
+    const book = { entries: { ...filler(9),
+        0: { uid: 0, key: [], content: 'They sailed to the Island of the Dome of the Slate. Nobody returns from the Island of the Dome of the Slate.' },
+    } };
+    const t0 = buildKeySuggest(book, opts).perEntry.find(pe => pe.entry.uid === 0)?.newRows.map(r => r.display) ?? [];
+    assert.ok(t0.includes('Island of the Dome of the Slate'), 'linkers do not consume the phrase budget');
+    assert.ok(!t0.some(t => t !== 'Island of the Dome of the Slate' && /^Island of the Dome/.test(t)), 'and its truncations do not compete with it');
+    // "grain commission" always follows "chairman of the", so the window stopping at "grain" is a
+    // prefix; two occurrences are what makes that sayable.
+    const titles = { entries: { ...filler(9),
+        0: { uid: 0, key: [], content: 'He chairs the Grain Commission board. The Grain Commission met at noon.' },
+        1: { uid: 1, key: [], content: 'Every Chairman of the Grain Commission speaks last, and each Chairman of the Grain Commission signs.' },
+    } };
+    const t1 = buildKeySuggest(titles, opts).perEntry.find(pe => pe.entry.uid === 1)?.newRows.map(r => r.term) ?? [];
+    assert.ok(!t1.includes('chairman of the grain'), 'a gram with one possible successor is a truncation');
+}
+console.log('ok   phrase budget counts content words; truncations do not outrank whole names');
+
 
 

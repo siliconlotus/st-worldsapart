@@ -388,12 +388,12 @@ export function buildKeySuggest(data, opts) {
     const STOP = FUNCTION_WORDS;
     const fold = w => { w = w.replace(/^['’-]+|['’-]+$/g, ''); return /['’]s$/i.test(w) ? w.slice(0, -2) : w; };
     // Acronym casing (see notes): a token seen only in ALL-CAPS (SDG) is an acronym, exempt from the
-    // short-word cut and shown uppercase; one ever seen lowercase isn't. lowerSeen/capMid are the
-    // same trick for proper nouns: a name is a token capitalised somewhere MID-sentence (capMid —
-    // sentence-initial capitals prove nothing, or "Nobody" would be a name in a small book) and
-    // never seen lowercase. Proper nouns are exempt from the English-frequency gate below
+    // short-word cut and shown uppercase; one ever seen lowercase isn't. The counts below feed the
+    // same trick for proper nouns (isName, defined once the corpus pass has filled them): capitals
+    // are only counted MID-sentence, since a sentence-initial one proves nothing — "Nobody" would
+    // be a name in a small book. Proper nouns are exempt from the English-frequency gate below
     // ("Jeffrey" is a common word by z but the right key).
-    const capsSeen = new Set(), mixedSeen = new Set(), lowerSeen = new Set(), capMid = new Set();
+    const capsSeen = new Set(), mixedSeen = new Set(), lowerCount = new Map(), capMidCount = new Map();
     const isAcr = t => t.length <= 6 && capsSeen.has(t) && !mixedSeen.has(t);
     // Sentence enders surface as a one-char '.' sentinel: ngramsOf skips any gram holding a token
     // shorter than 2 chars, so no suggested phrase ever bridges a sentence ("…by comparison. Micah
@@ -413,18 +413,18 @@ export function buildKeySuggest(data, opts) {
         // Openers (quotes, brackets, dashes, colons, markdown emphasis) reset atStart WITHOUT emitting
         // a sentinel: a capital after one is the start of something quoted or parenthetical, not
         // evidence of a name, but it is not a phrase boundary either. Roleplay prose is mostly
-        // dialogue, so without this every «"What…"» and «"Because…"» taught capMid that those are
-        // proper nouns — which then admitted "Kyle what" / "Arthur because" at f=1 and exempted them
-        // from the English gate, since a proper anchor zeroes the phrase's z.
-        // ponytail: closing quotes reset it too ("Hi," Marjorie said), costing one properness
-        // observation; capMid is a book-wide OR, so a real name is attested by any other sentence.
+        // dialogue, so without this every «"What…"» and «"Because…"» counted as evidence that those
+        // are proper nouns — which then admitted "Kyle what" / "Arthur because" at f=1 and exempted
+        // them from the English gate, since a proper anchor zeroes the phrase's z.
+        // ponytail: closing quotes reset it too ("Hi," Marjorie said), costing one observation;
+        // properness is a ratio over many, so a real name is unharmed by losing a few.
         return (String(text ?? '').match(/[\p{L}][\p{L}'’-]*|[.!?…;\n]|["“”‘’(\[{*_:—–«»]/gu) ?? []).flatMap(w => {
             if (/^[.!?…;\n]$/.test(w)) { atStart = true; return ['.']; }
             if (!/\p{L}/u.test(w)) { atStart = true; return []; }
             const core = fold(w), lc = core.toLowerCase();
             (/^[A-Z]{2,}$/.test(core) ? capsSeen : mixedSeen).add(lc);
-            if (/^[\p{Ll}]/u.test(core)) lowerSeen.add(lc);
-            else if (!atStart && /^[\p{Lu}]/u.test(core)) capMid.add(lc);
+            if (/^[\p{Ll}]/u.test(core)) lowerCount.set(lc, (lowerCount.get(lc) ?? 0) + 1);
+            else if (!atStart && /^[\p{Lu}]/u.test(core)) capMidCount.set(lc, (capMidCount.get(lc) ?? 0) + 1);
             atStart = false;
             return /['’]s$/i.test(w.replace(/^['’-]+|['’-]+$/g, '')) ? ['.', lc, '.'] : [lc];
         });
@@ -438,7 +438,26 @@ export function buildKeySuggest(data, opts) {
     const seqs = entries.map(e => wordSeq(e.content));
     const uDF = new Map(), uCF = new Map();
     for (const s of seqs) { for (const t of new Set(s)) uDF.set(t, (uDF.get(t) ?? 0) + 1); for (const t of s) uCF.set(t, (uCF.get(t) ?? 0) + 1); }
-    const isFunc = t => STOP.has(t) || ((uDF.get(t) ?? 0) / N > 0.3 && (uCF.get(t) ?? 0) / (uDF.get(t) || 1) < 6);
+    // ONE properness test, used by every gate that exempts names, and a RATIO rather than "never
+    // seen lowercase". That boolean was brittle in exactly one direction: "Marches" is capitalised
+    // 397 times and lowercase twice ("he marches"), and those two occurrences were enough to strip
+    // its name status. Measured over two books the classes separate cleanly — real names sit at
+    // 99.5-100% (marches, aldric, stearns, jeffrey, kyle), junk at 1.6-16.4% (under, what, because,
+    // away, coffee) — with "lord" the nearest miss at 91%, correctly below the bar.
+    // Sentence-initial capitals are not counted at all: they are punctuation, not spelling.
+    // ponytail: 0.95 sits in a wide empty gap; retune only if a real name lands under it.
+    const NAME_CAP_RATIO = 0.95;
+    const isName = w => {
+        if (isAcr(w)) return true;
+        const up = capMidCount.get(w) ?? 0;
+        return up > 0 && up / (up + (lowerCount.get(w) ?? 0)) >= NAME_CAP_RATIO;
+    };
+    // A name is never a function word, however ubiquitous. The distributional test looks for
+    // domain stopwords — common across entries, rarely repeated within one — and a place name that
+    // half the book mentions has exactly that shape: "marches" (48.6% of entries, 3.0 repeats) was
+    // being blocked from every n-gram, so "Governor of the Verenthian Marches" could not form at
+    // all. "aldric" escaped only by repeating 6.42 times, a hair over the threshold.
+    const isFunc = t => STOP.has(t) || ((uDF.get(t) ?? 0) / N > 0.3 && (uCF.get(t) ?? 0) / (uDF.get(t) || 1) < 6 && !isName(t));
     const satEntity = t => (uDF.get(t) ?? 0) / N > 0.85;
     const DET = new Set('the a an this that his her its their my your our los la el whole each every some'.split(' '));
     const PRON = new Set('he she they i we you it who'.split(' '));
@@ -471,13 +490,6 @@ export function buildKeySuggest(data, opts) {
     //    1.00, dialogue never verbs it, so only local evidence can). Object-side mirror of
     //    isVerbHead, precise enough to act from 2 observations where subject-side needs 5.
     const inSetOrStem = (set, w) => set.has(w) || stems(w).some(s => set.has(s));
-    // ONE properness test, used by every gate that exempts names. It was written out twice with
-    // different strictness — the English gate demanded "capitalised mid-sentence AND never seen
-    // lowercase", the f=1 admission asked only for the capital — so a word the gate refused to treat
-    // as a name still qualified every word of an f=1 phrase. Title case capitalises anything ("Data
-    // Under Duress", "Wunder Under", "Trinity Coffee", "Jubilee Small"), which is how "Kyle under",
-    // "Arthur because" and "Liam coffee" became candidates.
-    const isName = w => isAcr(w) || (capMid.has(w) && !lowerSeen.has(w));
     const notName = w => !isName(w);
     const posBad = (set, w) => inSetOrStem(set, w) && notName(w);
     const advLy = h => h.length >= 6 && /(?:ily|ingly|edly)$/.test(h) && !ZIPF_EN.has(h) && notName(h);
@@ -507,18 +519,43 @@ export function buildKeySuggest(data, opts) {
     const LINKERS = new Set([...PARTICLES, ...ENG_LINKERS]);
     const linkerPosOk = (t, j, n) => PARTICLES.has(t) ? j < n - 1 : (j > 0 && j < n - 1);
     const edgeIllegal = ws => [0, ws.length - 1].some(j => LINKERS.has(ws[j]) && !linkerPosOk(ws[j], j, ws.length));
-    const ngramsOf = seq => {
+    // maxN counts CONTENT words: linkers are grammar, not meaning, so they neither consume the
+    // phrase budget nor earn the length bonus in the score. "Island of the Dome of the Slate" is
+    // seven tokens of which three mean anything, and a budget spent on "of the of the" is how a
+    // name like that ends up represented by a window across its middle.
+    const contentLen = term => { let n = 0; for (const w of term.split(' ')) if (!LINKERS.has(w)) n++; return n; };
+    // Accessor variety, recorded while the grams are enumerated: '' once two different tokens have
+    // followed this gram. A gram left holding a single successor is a prefix of something longer,
+    // not a unit — "order of the unconquered" is only ever followed by "sun". The '.' sentinel
+    // counts as a successor, since a phrase that can end a sentence is complete.
+    // Recorded on ONE pass (the df sweep below passes record=true) — the tf pass re-enumerates the
+    // same grams, and double counting would make a single occurrence look like corroboration.
+    const SUCC = new Map();
+    const ngramsOf = (seq, record = false) => {
         const out = [];
-        for (let n = 1; n <= maxN; n++)
-            for (let i = 0; i + n <= seq.length; i++) {
-                const g = seq.slice(i, i + n);
-                if (g.some((t, j) => (t.length < 2 || isFunc(t)) && !(LINKERS.has(t) && linkerPosOk(t, j, g.length)))) continue;
-                out.push(g.join(' '));
+        const blocked = t => t.length < 2 || isFunc(t);
+        for (let i = 0; i < seq.length; i++) {
+            if (blocked(seq[i]) && !PARTICLES.has(seq[i])) continue;   // only a particle may lead
+            let content = 0;
+            for (let j = i; j < seq.length; j++) {
+                const t = seq[j], link = LINKERS.has(t);
+                if (blocked(t) && !link) break;        // nothing longer can be valid either
+                if (!link) content++;
+                if (content > maxN) break;
+                if (link) continue;                    // never emit a gram ending on a linker
+                const gram = seq.slice(i, j + 1).join(' ');
+                if (record) {
+                    const nxt = seq[j + 1] ?? '.', rec = SUCC.get(gram);
+                    if (rec === undefined) SUCC.set(gram, { s: nxt, n: 1 });
+                    else { rec.n++; if (rec.s !== nxt) rec.s = ''; }
+                }
+                out.push(gram);
             }
+        }
         return out;
     };
     const DF = new Map();
-    for (const s of seqs) for (const t of new Set(ngramsOf(s))) DF.set(t, (DF.get(t) ?? 0) + 1);
+    for (const s of seqs) for (const t of new Set(ngramsOf(s, true))) DF.set(t, (DF.get(t) ?? 0) + 1);
 
     // Substring doc-frequency — how ST's countKey sees a key by default, and what the pruner's
     // too-common check counts. Defined here so suggestForEntry can gate on it; reused by the ✨ path.
@@ -602,7 +639,7 @@ export function buildKeySuggest(data, opts) {
     // when locally rare — inside a small book "tub" IS unique, and no corpus-internal statistic
     // (df over entries, the chat pool) can know it's mundane; only the language-wide frequency
     // can. Human-curated keys fall into three classes, and each has its own test: PROPER NOUNS
-    // (Jeffrey, Rolex — often common words by z) are exempt via lowerSeen/acronym, scoring 0;
+    // (Jeffrey, Rolex — often common words by z) are exempt via isName, scoring 0;
     // UNCOMMON UNIGRAMS (minotaur, orrery) are any word NOT in the table (its floor is z 3.0, so
     // membership itself is the unigram cut — measured: good unigrams like "jubilee" 3.4 overlap
     // junk like "rut" 3.1, so no finer unigram ramp is honest); CONCRETE PHRASES ride on their
@@ -796,11 +833,19 @@ export function buildKeySuggest(data, opts) {
             if (excludeDates && isDateLike(term)) continue;
             const engMult = engMultOf(term);   // the three-class English gate — see engMultOf
             if (!engMult) continue;
+            // Truncations: a gram with exactly one possible next word is the front of a longer
+            // name. Without this the window across a title's middle beats the title — and beats it
+            // twice over, because a truncation's shoulders are linker-edged, so cohesion reads it
+            // as indivisible while the complete name looks decomposable. Needs two occurrences to
+            // say anything: a phrase seen once trivially has one successor, which is how a
+            // single-mention name ("Sarah Olusanmokun from Stearns") reads as a truncation.
+            const rec = SUCC.get(term);
+            if (n > 1 && rec && rec.n >= 2 && rec.s && rec.s !== '.') continue;
             // Un-fold the display (and thus the committed key) from the term's own surface span in
             // the text — see displayOf. Cosmetic under ST's default case-insensitive matching, and
             // matches how humans write keys.
             rows.push({ term, display: displayOf(term, idx), present: existing.has(term), df, f, n,
-                score: f * engMult * Math.log((N + M + 1) / (df + (bgDF.get(term) ?? 0) + 0.5)) * (1 + 0.5 * (n - 1)) });
+                score: f * engMult * Math.log((N + M + 1) / (df + (bgDF.get(term) ?? 0) + 0.5)) * (1 + 0.5 * (contentLen(term) - 1)) });
         }
         rows.sort((a, b) => b.score - a.score);
         const kept = subsume(rows);

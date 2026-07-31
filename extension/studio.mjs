@@ -237,7 +237,7 @@ export async function lorebookStudio(preferredBook = null) {
             ),
             col('Recommender (⚡ / ✨)',
                 num(suggestOpts, 'dfCeil', 'Skip terms in >', '% of entries', { min: 1, max: 100, scale: 100 }, invSuggest),
-                num(suggestOpts, 'maxN', 'Longest phrase', 'words', { min: 1, max: 8 }, invSuggest),
+                num(suggestOpts, 'maxN', 'Longest phrase', 'content words', { min: 1, max: 8 }, invSuggest),
                 num(suggestOpts, 'cap', 'Max per entry', '', { min: 1, max: 50 }, invSuggest),
                 num(suggestOpts, 'llmChunk', '✨ chunk over', 'chars', { min: 500, width: '5.6em' }),   // longer entries split into this-sized passes
                 check(suggestOpts, 'excludeDates', 'Skip date-like terms', invSuggest),
