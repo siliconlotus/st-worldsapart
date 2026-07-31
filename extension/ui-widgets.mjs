@@ -180,7 +180,7 @@ export function ensureStudioStyle() {
 .wa-studio-nav.wa-nav-wide { flex: 0 0 auto; width: max-content; min-width: 200px; max-width: 55%; overflow: auto; }
 .wa-nav-wide .wa-book-row { overflow: visible; }
 .wa-nav-wide .wa-book-name { overflow: visible; text-overflow: clip; }
-/* Tab strip above the explorer pane: Explorer / Cleanup / Suggest Terms. The active tab is the only
+/* Tab strip above the explorer pane: Explorer / Cleanup. The active tab is the only
    indicator of which direction a commit runs in, so it reads loudly (underline + colour, not just weight). */
 .wa-tabs { display: flex; gap: 2px; flex: 0 0 auto; margin-bottom: 6px;
     border-bottom: 1px solid var(--SmartThemeBorderColor, rgba(255,255,255,0.15)); }
@@ -314,7 +314,12 @@ textarea.wa-entry-full.wa-tall { max-height: 62vh; }
 .wa-ctx-danger:hover { color: #e06c6c; }
 .wa-ctx-caret { margin-left: auto; opacity: 0.55; font-size: 1.15em; line-height: 1; }
 .wa-ctx-active { color: #6ea8fe; font-weight: 600; }
-.wa-sugg { display: inline-flex; align-items: center; gap: 3px; margin: 0 0.7em 0.2em 0; white-space: nowrap; cursor: pointer; opacity: 0.9; }
+.wa-sugg { display: inline-flex; align-items: center; gap: 3px; margin: 0 0.7em 0.2em 0; white-space: nowrap; opacity: 0.9; }
+/* ➕ takes the candidate as-is; the text rewords it first. Both commit, so both look clickable. */
+.wa-sugg-add { cursor: pointer; opacity: 0.55; font-size: 0.85em; }
+.wa-sugg-add:hover { opacity: 1; }
+.wa-sugg-text { cursor: text; }
+.wa-sugg-text:hover { text-decoration: underline dotted; }
 .wa-adv { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px 28px; margin: 6px 0 2px 22px; padding: 8px 10px; border-radius: 5px;
     background: var(--black30a, rgba(0,0,0,0.15)); border: 1px solid var(--SmartThemeBorderColor, rgba(255,255,255,0.15)); }
 .wa-adv-col { display: flex; flex-direction: column; gap: 3px; min-width: 0; }

@@ -97,19 +97,19 @@ export async function lorebookStudio(preferredBook = null) {
     const sugg = new Map();          // uid -> { tfidf:string[], llm:string[] } transient suggestion chips
     const rowEls = new Map();        // uid -> entry row element, so one edit re-renders just that entry
     // --- Tabs -----------------------------------------------------------------------------------
-    // Three views over one book: Explorer (entry rows), Cleanup (flagged keys, key-per-row), Suggest
-    // Terms (candidate keys, key-per-row). Cleanup and Suggest commit in OPPOSITE directions, which is
-    // why they are separate tabs rather than one view with a mode toggle: audit flags are high-precision
-    // so their rows start ticked and the work is rescuing false positives, while suggestions are
-    // low-precision so their rows start unticked and the work is picking winners. One control that
-    // silently flipped between "remove these" and "add these" is the wrong place to save a tab.
+    // Two views over one book: Explorer (entry rows) and Cleanup (flagged keys, key-per-row). Only
+    // Cleanup is a selection view, because only removal earns one: audit flags are high-precision, so
+    // its rows start ticked and the work is rescuing false positives from a batch you review before
+    // committing. Suggestions run the other way — each accept is independent, additive, and lands
+    // visibly as a key chip in the same paragraph — so they live inline in the Explorer and commit on
+    // click. A "Suggest Terms" tab used to mirror Cleanup's select-then-commit shape for them; at one
+    // line per term it read LESS densely than the chips it duplicated, and nobody ever wanted "add all".
     let tab = 'explorer';
-    // Selection state per commit-direction, keyed `${uid}${term}`. Deliberately survives tab
-    // switches AND rescans: a half-built selection is the user's work, not a cache. A rescan can retire
-    // rows (they stop rendering) without discarding the decision, so loosening a threshold back restores
-    // the earlier tick. The bulk bars show counts so a stale selection is visible rather than silent.
+    // Cleanup's selection. Deliberately survives tab switches AND rescans: a half-built selection is
+    // the user's work, not a cache. A rescan can retire rows (they stop rendering) without discarding
+    // the decision, so loosening a threshold back restores the earlier tick. The bulk bar shows counts
+    // so a stale selection is visible rather than silent.
     const cleanupChecks = new Map();   // rowId -> bool (defaults from scan.defChecked — mostly ticked)
-    const suggestChecks = new Map();   // rowId -> bool (defaults false — nothing is added unasked)
     let cleanupUndo = null;            // [{uid, key}] from the last prune, restorable until the next one
     // CHAT EVIDENCE for the "not in entry text" flag. That flag measures the book's own prose, but keys fire
     // against the CHAT — which is the whole ambiguity: on a hand-authored book ~90% of them are deliberate
@@ -197,9 +197,8 @@ export async function lorebookStudio(preferredBook = null) {
             const h = document.createElement('div'); h.className = 'wa-tray-sec'; h.textContent = title;
             c.append(h, ...kids); return c;
         };
-        // Explorer only stashes chips, so dropping the ranker is enough there — the next ⚡ rebuilds it.
-        // The Suggest tab renders straight off it, so it has to repaint or the list shows stale candidates.
-        const invSuggest = () => { suggest = null; if (tab === 'suggest') renderExplorer(); };
+        // Chips are stashed per entry, so dropping the ranker is enough — the next ⚡ rebuilds it.
+        const invSuggest = () => { suggest = null; };
 
         const wl = document.createElement('div');   // whitelist column body: chips row, then a centred Clear
         const chips = document.createElement('div'); chips.className = 'wa-tray-wl';
@@ -584,8 +583,8 @@ export async function lorebookStudio(preferredBook = null) {
         }
         return added;
     };
-    // `after` is how the caller repaints: the Explorer rebuilds just that entry's row, the Suggest tab
-    // repaints its term list (where the new ✨ candidates become rows).
+    // `after` is how the caller repaints: the Explorer rebuilds just that entry's row, while a
+    // book-wide run repaints the whole list once at the end.
     const suggestLlm = async (e, btn, after = renderEntry) => {
         if (btn.dataset.busy) return;
         btn.dataset.busy = '1'; btn.classList.remove('wa-on'); btn.style.opacity = '0.25';
@@ -603,6 +602,14 @@ export async function lorebookStudio(preferredBook = null) {
         if (!hasKey(e, term)) e.key.push(term);
         const g = getSugg(e.uid); g.tfidf = g.tfidf.filter(t => t !== term); g.llm = g.llm.filter(t => t !== term);
         save(); after(e);
+    };
+    // Reword a candidate before taking it — trimming "Lord Harcot" to "Harcot", which equal-frequency
+    // subsumption swallowed. Editing IS accepting: nobody rewords a term they mean to ignore. The
+    // original leaves the tray too, so the key doesn't sit beside the phrasing it replaced.
+    const acceptEdited = (e, oldTerm, newTerm) => {
+        const g = getSugg(e.uid);
+        g.tfidf = g.tfidf.filter(t => t !== oldTerm); g.llm = g.llm.filter(t => t !== oldTerm);
+        acceptSugg(e, newTerm);
     };
 
     // Inline "click to edit" for one keyword (commit on Enter/blur, cancel on Escape).
@@ -834,14 +841,36 @@ export async function lorebookStudio(preferredBook = null) {
             if (annot) { const r = document.createElement('span'); r.className = 'wa-kw-reason'; r.textContent = `(${annot})`; item.append(r); }   // reason outside the chip
             para.append(item);
         }
+        // Candidate chips: ➕ takes the term as-is, clicking the term itself rewords it first (the
+        // ranker's span is sometimes longer than the useful key). Either way it commits on the spot
+        // and reappears as a real keyword chip above, verdict colour and ✕ included — which is the
+        // undo, and the record of what you have already vetted. A checkbox used to stand in for the
+        // ➕: it read as "select for later" while actually committing immediately.
         const g = sugg.get(e.uid);
         if (g) for (const [kind, terms] of [['tfidf', g.tfidf], ['llm', g.llm]]) for (const term of terms) {
             if (hasKey(e, term)) continue;
-            const chip = document.createElement('label'); chip.className = 'wa-sugg';
-            const cb = document.createElement('input'); cb.type = 'checkbox'; cb.style.margin = '0';
-            cb.addEventListener('change', () => { if (cb.checked) acceptSugg(e, term); });
-            const t = document.createElement('span'); t.textContent = (kind === 'llm' ? '✨ ' : '⚡ ') + term;
-            chip.append(cb, t); para.append(chip);
+            const chip = document.createElement('span'); chip.className = 'wa-sugg';
+            const take = document.createElement('i'); take.className = 'fa-solid fa-plus wa-sugg-add';
+            take.title = `Add “${term}” to this entry`;
+            take.addEventListener('click', () => acceptSugg(e, term));
+            const t = document.createElement('span'); t.className = 'wa-sugg-text';
+            t.textContent = (kind === 'llm' ? '✨ ' : '⚡ ') + term;
+            t.title = `${term} — click to reword, then it's added`;
+            t.addEventListener('click', () => {
+                const inp = document.createElement('input');
+                inp.type = 'text'; inp.className = 'text_pole'; inp.value = term;
+                inp.style.cssText = 'width:10em;margin:0;font-size:0.9em;';
+                let done = false;
+                const commit = ok => {
+                    if (done) return; done = true;
+                    const nv = inp.value.trim();
+                    if (ok && nv && nv !== term) acceptEdited(e, term, nv); else renderEntry(e);
+                };
+                inp.addEventListener('keydown', ev => { if (ev.key === 'Enter') { ev.preventDefault(); commit(true); } else if (ev.key === 'Escape') { ev.preventDefault(); commit(false); } });
+                inp.addEventListener('blur', () => commit(true));
+                t.replaceWith(inp); inp.focus(); inp.select();
+            });
+            chip.append(take, t); para.append(chip);
         }
         const add = document.createElement('i'); add.className = 'fa-solid fa-plus wa-tool'; add.title = 'Add a keyword';
         add.addEventListener('click', () => {
@@ -1438,30 +1467,14 @@ export async function lorebookStudio(preferredBook = null) {
         head.append(glyph, title, meta, view, ...extraActs.map(f => f(e)), buildEntryTools(e, onEntryChange, { compact: true }));
         return head;
     };
-    const termRow = (e, r, checks, reg, onChange, onContext = null, onEdit = null) => {
+    const termRow = (e, r, checks, reg, onChange, onContext = null) => {
         const row = document.createElement('div'); row.className = 'wa-term-row';
         const id = rowId(e.uid, r.term);
         const cb = document.createElement('input'); cb.type = 'checkbox'; cb.style.margin = '0';
         cb.addEventListener('change', () => { checks.set(id, cb.checked); onChange(); });
         reg.row.set(id, cb);
         const name = document.createElement('span'); name.className = 'wa-term-name';
-        name.textContent = r.term; name.title = onEdit ? `${r.term} (click to edit)` : r.term;
-        // Same inline edit as the Explorer's keyword chips (editKeyInline): click the name, commit
-        // on Enter/blur, cancel on Escape. Offered only where the caller can act on the new text.
-        if (onEdit) name.addEventListener('click', () => {
-            const inp = document.createElement('input');
-            inp.type = 'text'; inp.className = 'text_pole'; inp.value = r.term;
-            inp.style.cssText = 'width:10em;margin:0;font-size:0.9em;';
-            let done = false;
-            const commit = ok => {
-                if (done) return; done = true;
-                const nv = inp.value.trim();
-                if (ok && nv && nv !== r.term) onEdit(nv); else inp.replaceWith(name);
-            };
-            inp.addEventListener('keydown', ev => { if (ev.key === 'Enter') { ev.preventDefault(); commit(true); } else if (ev.key === 'Escape') { ev.preventDefault(); commit(false); } });
-            inp.addEventListener('blur', () => commit(true));
-            name.replaceWith(inp); inp.focus(); inp.select();
-        });
+        name.textContent = r.term; name.title = r.term;
         const why = document.createElement('span'); why.className = 'wa-term-why';
         why.textContent = r.why ?? ''; if (r.color) why.style.color = r.color;
         // Per-term actions live in the right-click menu, the same place the Explorer's keyword chips put
@@ -1836,153 +1849,7 @@ export async function lorebookStudio(preferredBook = null) {
         repaint();
     };
 
-    // --- Suggest Terms tab ----------------------------------------------------------------------
-    // Candidates come from two places: the TF-IDF ranker (authoritative, recomputed per book) and the
-    // transient ✨ trays filled by the local model. Deduped by the ranker's canon so a term proposed by
-    // both appears once.
-    const suggestGroups = () => {
-        let s; try { s = ensureSuggest(); } catch { return null; }
-        const byUid = new Map(s.perEntry.map(pe => [String(pe.entry.uid), pe]));
-        const out = [];
-        for (const e of visibleEntries()) {
-            const seen = new Set();
-            const rows = [];
-            const push = (term, why) => {
-                const c = s.canon(term) || term.toLowerCase();
-                // Deliberately NOT filtered on the ignore list: ignoring in Cleanup means "this key is
-                // fine, stop flagging it", which is an endorsement — suppressing suggestions on the back of
-                // it would stop a term you just affirmed from being offered on entries that lack it.
-                if (seen.has(c) || hasKey(e, term)) return;
-                seen.add(c);
-                const id = rowId(e.uid, term);
-                if (!suggestChecks.has(id)) suggestChecks.set(id, false);   // nothing is added unasked
-                rows.push({ term, why });
-            };
-            for (const r of (byUid.get(String(e.uid))?.newRows ?? [])) push(r.display, `⚡ in ${r.df} of ${s.N}${r.weak ? ' · weak' : ''}`);
-            for (const t of (sugg.get(e.uid)?.llm ?? [])) push(t, '✨ model');
-            // Entries with no candidates are still listed, headers only: an entry the TF-IDF ranker has
-            // nothing to say about is exactly the one you want to aim the model at, so it needs a row
-            // to hang the per-entry ✨ on.
-            out.push({ entry: e, rows });
-        }
-        return rankBySearch(out);
-    };
-    const addChecked = () => {
-        const groups = suggestGroups();
-        if (!groups) { toastr.warning('Couldn\'t build suggestions.', 'Worlds Apart'); return; }
-        let added = 0, touched = 0;
-        for (const g of groups) {
-            let n = 0;
-            for (const r of g.rows) {
-                const id = rowId(g.entry.uid, r.term);
-                if (!suggestChecks.get(id)) continue;
-                if (!Array.isArray(g.entry.key)) g.entry.key = [];
-                if (!hasKey(g.entry, r.term)) { g.entry.key.push(r.term); n++; }
-                suggestChecks.delete(id);
-                // Drop it from the transient ✨ tray too, or Explorer would still offer it as a chip.
-                const tray = sugg.get(g.entry.uid);
-                if (tray) tray.llm = tray.llm.filter(t => t !== r.term);
-            }
-            if (n) { added += n; touched++; }
-        }
-        if (!added) { toastr.info('Nothing selected to add.', 'Worlds Apart'); return; }
-        save(); suggest = null; if (scan) rebuildScan(); renderExplorer();
-        toastr.success(`Added ${added} keyword${added === 1 ? '' : 's'} across ${touched} ${touched === 1 ? 'entry' : 'entries'}.`, 'Worlds Apart');
-    };
-    const renderSuggestView = async pane => {
-        const head = document.createElement('div'); head.className = 'wa-studio-exphead';
-        head.style.cssText = 'display:flex;flex-direction:column;align-items:stretch;gap:6px;';
-        const row1 = document.createElement('div'); row1.style.cssText = 'display:flex;align-items:center;gap:8px;flex-wrap:wrap;';
-        const bookLbl = document.createElement('b'); bookLbl.textContent = selected;
-        bookLbl.style.cssText = 'overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:16em;';
-        row1.append(bookLbl);
-        const llmBtn = document.createElement('button'); llmBtn.type = 'button'; llmBtn.className = 'menu_button';
-        llmBtn.innerHTML = '<i class="fa-solid fa-wand-magic-sparkles"></i> Suggest all (LLM)';
-        llmBtn.title = 'Run local-model keyword suggestions on every visible entry (long entries are chunked)';
-        llmBtn.addEventListener('click', () => suggestAllLlm(llmBtn));
-        // Search repaints only the list — see the Cleanup view for why the header must survive.
-        row1.append(llmBtn, buildFilterBtn(renderExplorer), buildSortControl(() => repaint()), buildSearchBox(() => repaint()));
-        head.append(row1);
-        const fixed = document.createElement('div'); fixed.className = 'wa-studio-fixed';
-        trayEl = renderTray();
-        const bar = document.createElement('div'); bar.className = 'wa-bulk-on';
-        fixed.append(head, trayEl, bar);
-        const list = document.createElement('div'); list.className = 'wa-studio-entries';
-        pane.append(fixed, list);
-
-        let groups = [], allIds = [], reg = { row: new Map(), grp: [] };
-        const paintBar = () => {
-            const on = allIds.filter(id => suggestChecks.get(id)).length;
-            const allOn = allIds.length > 0 && on === allIds.length;
-            bar.innerHTML = '';
-            const count = document.createElement('span'); count.className = 'wa-bulk-count';
-            count.textContent = `${on} of ${allIds.length} candidate${allIds.length === 1 ? '' : 's'} selected`;
-            bar.append(count,
-                barBtn(allOn ? 'Select none' : 'Select all', () => {
-                    for (const id of allIds) suggestChecks.set(id, !allOn);
-                    sync();
-                }),
-                barBtn('Add selected', addChecked),
-            );
-        };
-        const sync = () => { syncTermChecks(suggestChecks, reg); paintBar(); };
-        // Rewrite one candidate in place ("Lord Harcot" -> "Harcot") at its SOURCE — the cached
-        // suggest index for ⚡ rows, the transient ✨ tray for model rows — so the edit survives
-        // repaints and "Add selected" commits the edited text. The caller ticks the renamed row.
-        const renameSugg = (uid, oldTerm, newTerm) => {
-            const pe = suggest?.perEntry.find(p => String(p.entry.uid) === String(uid));
-            const r = pe?.newRows.find(x => x.display === oldTerm);
-            if (r) r.display = newTerm;
-            else { const tray = sugg.get(uid); if (tray) tray.llm = tray.llm.map(t => t === oldTerm ? newTerm : t); }
-            const oldId = rowId(uid, oldTerm);
-            if (suggestChecks.has(oldId)) { suggestChecks.set(rowId(uid, newTerm), suggestChecks.get(oldId)); suggestChecks.delete(oldId); }
-        };
-        const repaint = () => {
-            groups = suggestGroups();
-            allIds = (groups ?? []).flatMap(g => g.rows.map(r => rowId(g.entry.uid, r.term)));
-            reg = { row: new Map(), grp: [] };
-            list.innerHTML = '';
-            if (!groups) list.append(emptyNote('Couldn\'t build suggestions for this book.'));
-            else if (!groups.length) list.append(emptyNote('No entries match the current filter.'));
-            else {
-                if (!allIds.length) list.append(emptyNote('No TF-IDF candidates — every distinctive term is already a keyword. Use ✨ on an entry (or Suggest all) to ask the local model, or loosen the Recommender settings under Tool Settings.'));
-                for (const g of groups) {
-                    // Per-entry ✨: same single-entry model pass as the Explorer's, repainting this list
-                    // instead of an entry row. Skipped for empty entries — there'd be nothing to send.
-                    const acts = String(g.entry.content ?? '').trim() ? [e => {
-                        const i = document.createElement('i');
-                        i.className = 'fa-solid fa-wand-magic-sparkles wa-term-act';
-                        i.title = 'Ask the local model for keywords for this entry';
-                        i.addEventListener('click', () => suggestLlm(e, i, () => repaint()));
-                        return i;
-                    }] : [];
-                    list.append(termGroupHeader(g.entry, g.rows, suggestChecks, reg, sync, repaint, acts));
-                    if (advOpen.has(g.entry.uid)) list.append(buildAdvancedTray(g.entry, repaint));
-                    // Candidates aren't keys yet, so the Explorer's delete/replace-everywhere options
-                    // would act on nothing, and ignoring is a Cleanup concept (see suggestGroups). Accepting
-                    // is the only decision a candidate admits beyond the checkbox.
-                    // Click-to-edit mirrors the Explorer's chips; an edited term is auto-ticked —
-                    // nobody bothers rewording a candidate they intend to ignore.
-                    for (const r of g.rows) list.append(termRow(g.entry, r, suggestChecks, reg, sync,
-                        (e, row, x, y) => showCtxMenu([
-                            { label: 'Add to this entry', fn: () => acceptSugg(e, row.term, () => { suggestChecks.delete(rowId(e.uid, row.term)); repaint(); }) },
-                        ], x, y, ctxMount()),
-                        nv => { renameSugg(g.entry.uid, r.term, nv); suggestChecks.set(rowId(g.entry.uid, nv), true); repaint(); }));
-                }
-            }
-            sync();
-        };
-        termRepaint = repaint;
-        if (!suggest) {
-            bar.textContent = 'Analysing…';
-            list.append(emptyNote('Ranking this book\'s distinctive terms…'));
-            await yieldFrame();
-            if (!pane.isConnected || tab !== 'suggest') return;   // switched away while we were blocked
-        }
-        repaint();   // builds the ranker on first use, via suggestGroups -> ensureSuggest
-    };
-
-    const TABS =[['explorer', 'Explorer'], ['cleanup', 'Cleanup'], ['suggest', 'Suggest Terms']];
+    const TABS = [['explorer', 'Explorer'], ['cleanup', 'Cleanup']];
     const renderTabBar = () => {
         const bar = document.createElement('div'); bar.className = 'wa-tabs';
         for (const [id, label] of TABS) {
@@ -1990,8 +1857,7 @@ export async function lorebookStudio(preferredBook = null) {
             b.className = 'wa-tab' + (tab === id ? ' wa-tab-on' : '');
             b.textContent = label;
             // Ticked-row counts live in the tab strip so a selection left on another tab is never silent.
-            const pending = id === 'cleanup' ? [...cleanupChecks.values()].filter(Boolean).length
-                : id === 'suggest' ? [...suggestChecks.values()].filter(Boolean).length : 0;
+            const pending = id === 'cleanup' ? [...cleanupChecks.values()].filter(Boolean).length : 0;
             if (pending) { const c = document.createElement('span'); c.className = 'wa-tab-count'; c.textContent = `${pending} selected`; b.append(c); }
             b.addEventListener('click', () => { if (tab !== id) { tab = id; renderExplorer(); } });
             bar.append(b);
@@ -2007,10 +1873,9 @@ export async function lorebookStudio(preferredBook = null) {
         const pane = document.createElement('div');
         pane.style.cssText = 'flex:1 1 auto;display:flex;flex-direction:column;overflow:hidden;min-height:0;';
         explorer.append(pane);
-        // The term tabs run their own pre-pass (Cleanup audits, Suggest ranks) and are async so they can
-        // paint a working note before blocking — nothing here awaits them; they repaint themselves.
+        // Cleanup runs its own audit pre-pass and is async so it can paint a working note before
+        // blocking — nothing here awaits it; it repaints itself.
         if (tab === 'cleanup') { renderCleanupView(pane); return; }
-        if (tab === 'suggest') { renderSuggestView(pane); return; }
         renderExplorerView(pane);
     };
 
