@@ -1438,14 +1438,30 @@ export async function lorebookStudio(preferredBook = null) {
         head.append(glyph, title, meta, view, ...extraActs.map(f => f(e)), buildEntryTools(e, onEntryChange, { compact: true }));
         return head;
     };
-    const termRow = (e, r, checks, reg, onChange, onContext = null) => {
+    const termRow = (e, r, checks, reg, onChange, onContext = null, onEdit = null) => {
         const row = document.createElement('div'); row.className = 'wa-term-row';
         const id = rowId(e.uid, r.term);
         const cb = document.createElement('input'); cb.type = 'checkbox'; cb.style.margin = '0';
         cb.addEventListener('change', () => { checks.set(id, cb.checked); onChange(); });
         reg.row.set(id, cb);
         const name = document.createElement('span'); name.className = 'wa-term-name';
-        name.textContent = r.term; name.title = r.term;
+        name.textContent = r.term; name.title = onEdit ? `${r.term} (click to edit)` : r.term;
+        // Same inline edit as the Explorer's keyword chips (editKeyInline): click the name, commit
+        // on Enter/blur, cancel on Escape. Offered only where the caller can act on the new text.
+        if (onEdit) name.addEventListener('click', () => {
+            const inp = document.createElement('input');
+            inp.type = 'text'; inp.className = 'text_pole'; inp.value = r.term;
+            inp.style.cssText = 'width:10em;margin:0;font-size:0.9em;';
+            let done = false;
+            const commit = ok => {
+                if (done) return; done = true;
+                const nv = inp.value.trim();
+                if (ok && nv && nv !== r.term) onEdit(nv); else inp.replaceWith(name);
+            };
+            inp.addEventListener('keydown', ev => { if (ev.key === 'Enter') { ev.preventDefault(); commit(true); } else if (ev.key === 'Escape') { ev.preventDefault(); commit(false); } });
+            inp.addEventListener('blur', () => commit(true));
+            name.replaceWith(inp); inp.focus(); inp.select();
+        });
         const why = document.createElement('span'); why.className = 'wa-term-why';
         why.textContent = r.why ?? ''; if (r.color) why.style.color = r.color;
         // Per-term actions live in the right-click menu, the same place the Explorer's keyword chips put
@@ -1910,6 +1926,17 @@ export async function lorebookStudio(preferredBook = null) {
             );
         };
         const sync = () => { syncTermChecks(suggestChecks, reg); paintBar(); };
+        // Rewrite one candidate in place ("Lord Harcot" -> "Harcot") at its SOURCE — the cached
+        // suggest index for ⚡ rows, the transient ✨ tray for model rows — so the edit survives
+        // repaints and "Add selected" commits the edited text. The caller ticks the renamed row.
+        const renameSugg = (uid, oldTerm, newTerm) => {
+            const pe = suggest?.perEntry.find(p => String(p.entry.uid) === String(uid));
+            const r = pe?.newRows.find(x => x.display === oldTerm);
+            if (r) r.display = newTerm;
+            else { const tray = sugg.get(uid); if (tray) tray.llm = tray.llm.map(t => t === oldTerm ? newTerm : t); }
+            const oldId = rowId(uid, oldTerm);
+            if (suggestChecks.has(oldId)) { suggestChecks.set(rowId(uid, newTerm), suggestChecks.get(oldId)); suggestChecks.delete(oldId); }
+        };
         const repaint = () => {
             groups = suggestGroups();
             allIds = (groups ?? []).flatMap(g => g.rows.map(r => rowId(g.entry.uid, r.term)));
@@ -1934,10 +1961,13 @@ export async function lorebookStudio(preferredBook = null) {
                     // Candidates aren't keys yet, so the Explorer's delete/replace-everywhere options
                     // would act on nothing, and ignoring is a Cleanup concept (see suggestGroups). Accepting
                     // is the only decision a candidate admits beyond the checkbox.
+                    // Click-to-edit mirrors the Explorer's chips; an edited term is auto-ticked —
+                    // nobody bothers rewording a candidate they intend to ignore.
                     for (const r of g.rows) list.append(termRow(g.entry, r, suggestChecks, reg, sync,
                         (e, row, x, y) => showCtxMenu([
                             { label: 'Add to this entry', fn: () => acceptSugg(e, row.term, () => { suggestChecks.delete(rowId(e.uid, row.term)); repaint(); }) },
-                        ], x, y, ctxMount())));
+                        ], x, y, ctxMount()),
+                        nv => { renameSugg(g.entry.uid, r.term, nv); suggestChecks.set(rowId(g.entry.uid, nv), true); repaint(); }));
                 }
             }
             sync();
