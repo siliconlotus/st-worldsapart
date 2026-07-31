@@ -123,7 +123,9 @@ export const defaultSettings = {
      * Use the Worlds Apart server plugin's mean-centered search when it is loaded.
      * Centering removes the direction every chunk in a single-story corpus shares,
      * which is what compresses similarities into a narrow band. Scores come out much
-     * lower in absolute terms — recalibrate scoreThreshold when enabling.
+     * lower in absolute terms — scoreThreshold is calibrated for centered scores.
+     * Internal (always true): the plugin check in queryCollections is the real gate,
+     * so centering is simply on whenever the plugin is present.
      */
     meanCentered: true,
     /**
@@ -305,6 +307,13 @@ export const defaultSettings = {
      */
     maxTokens: 0,
     /**
+     * Token budget slack: an entry may exceed the budget by this percentage of it. Rescues the
+     * common case where the last entry misses the cut by a handful of tokens. 0 = exact budget.
+     */
+    budgetSlackPercent: 0,
+    /** 'once' — the slack rescues one entry, then the budget is exact; 'all' — every entry may use it. */
+    budgetSlackMode: 'once',
+    /**
      * Cap on dynamic entries — keyword and vector, i.e. everything that isn't constant
      * or sticky. 0 = no cap. Constants and stickies are unaffected by this one, so a
      * cap of 10 alongside 7 constants yields 17 entries.
@@ -364,6 +373,18 @@ export const defaultSettings = {
     debugLog: true,
 };
 
+/**
+ * Settings with no UI: measured-stable knobs internalized after tuning (the measurements live on
+ * their defaultSettings comments). They stay in defaultSettings so every read site and the eval
+ * harness keep working, but ensureSettings resets them each init — a knob removed from the panel
+ * must not linger at a stale hand-tuned value the user can no longer see.
+ */
+const INTERNAL_KEYS = [
+    'meanCentered', 'entityFilter', 'properNounBoost', 'stopwordDocFreq',
+    'bm25K1', 'bm25B', 'rrfK', 'scoreVectorKeys', 'keywordScoring',
+    'chunkSize', 'chunkMode', 'minChunkSize',
+];
+
 /** The live WA settings object (extension_settings[MODULE_NAME]). */
 export function settings() {
     return extension_settings[MODULE_NAME];
@@ -372,6 +393,7 @@ export function settings() {
 /** Merge defaults under any stored settings. Call once at init before reading settings(). */
 export function ensureSettings() {
     extension_settings[MODULE_NAME] = Object.assign({}, defaultSettings, extension_settings[MODULE_NAME]);
+    for (const k of INTERNAL_KEYS) extension_settings[MODULE_NAME][k] = defaultSettings[k];
 }
 
 /**
