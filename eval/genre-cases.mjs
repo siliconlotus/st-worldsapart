@@ -92,6 +92,25 @@ export const GENRE_CASES = [
         reject: ['warlock kal\'thas sunstrider'],
     },
     {
+        // Apostrophe names are ordinary tokens and need no special handling — but they are
+        // structurally identical to a French elision, so the rule that turns "d'Orléans" into
+        // "Orléans" could just as easily eat a fantasy name. What protects it is the same-entry
+        // guard: the bare form has to be available HERE for the elided one to give way.
+        genre: 'fantasy', shape: 'apostrophe name that looks like an elision',
+        text: [
+            "The warlord D'Vorah led the swarm. Nobody crossed D'Vorah twice that season.",
+            'Later Vorah spoke of the swarm, and Vorah kept the hive quiet.',
+        ],
+        expect: ["d'vorah"],
+        reject: ['vorah'],
+    },
+    {
+        genre: 'fantasy', shape: 'possessive of an apostrophe name',
+        text: "Kal'thas Sunstrider guarded the tower. Kal'thas's staff never left the tower, and Kal'thas' sigil burned above it.",
+        expect: ["kal'thas"],
+        reject: ["kal'thas's", "kal'thas'", "kal'tha"],   // the fold must not mangle the name
+    },
+    {
         genre: 'fantasy', shape: 'hyphenated species compound',
         text: 'The stone-singers of the Quartzborn clan gathered. Every stone-singer answered the Quartzborn call that season.',
         expect: ['quartzborn'],
