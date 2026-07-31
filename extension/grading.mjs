@@ -333,6 +333,7 @@ export function buildSample({ name, notes, query, queryChat, scanText, depth, ch
         books,
 
         grades,
+        gradeScale: 4,
         excludeTitles: foreign.map(g => g.title),
 
         // The ranking as it stood, so a later run can be diffed against what was actually graded.
@@ -348,7 +349,7 @@ export function buildSample({ name, notes, query, queryChat, scanText, depth, ch
  *  Everything else — query, candidates, captureParams, cutoff, primaryBook — is per-arm and must not be
  *  hoisted: the summary arm has a different query, and a lexical-only arm can retrieve from a different
  *  book. */
-const SHARED_FIELDS = ['name', 'notes', 'createdAt', 'createdBy', 'books', 'bookMode', 'bookPriority', 'grades', 'embedModel', 'pluginFP', 'sourceFP', 'chat'];
+const SHARED_FIELDS = ['name', 'notes', 'createdAt', 'createdBy', 'books', 'bookMode', 'bookPriority', 'grades', 'gradeScale', 'embedModel', 'pluginFP', 'sourceFP', 'chat'];
 
 /**
  * Packs one sample per arm into a single bundle.
@@ -385,13 +386,35 @@ export function bundleSamples(arms) {
  * @returns {object} A plain sample
  */
 export function openBundle(manifest, arm = null) {
-    if (!Array.isArray(manifest?.arms)) return manifest;
+    if (!Array.isArray(manifest?.arms)) return normalizeSample(manifest);
     const names = manifest.arms.map(a => a.arm);
     const wanted = arm ?? (names.includes('shipped') ? 'shipped' : names[0]);
     const hit = manifest.arms.find(a => a.arm === wanted);
     if (!hit) throw new Error(`bundle has no arm "${wanted}" — available: ${names.join(', ')}`);
     const { arms: _drop, bundleVersion: _v, ...shared } = manifest;
-    return { ...shared, ...hit, name: `${manifest.name}--${hit.arm}` };
+    return normalizeSample({ ...shared, ...hit, name: `${manifest.name}--${hit.arm}` });
+}
+
+/**
+ * The grading scale: 0-4, each grade an INCLUSION DECISION rather than a magnitude. Anchored wording is
+ * what inter-rater agreement hangs on — measured on one scene, restating the rubric alone nearly doubled
+ * weighted kappa between two raters — so the anchors are data here and the grading UIs show them verbatim.
+ */
+export const GRADE_ANCHORS = [
+    'Definitely not relevant',
+    'Most likely not relevant; include only as filler',
+    'Weakly relevant; 50/50 on inclusion',
+    'Fairly relevant; should likely be included',
+    'Directly relevant; should absolutely be included',
+];
+export const GRADE_SCALE = 4;
+
+// ponytail: transitional 0-5 -> 0-4 remap (grader's own re-reading: 2s->1, 3+->g-1); DELETE normalizeGrade
+// and normalizeSample (leave a passthrough) once every pre-0-4 sample has been regraded or retired.
+export const normalizeGrade = g => (g <= 1 ? g : g <= 2 ? 1 : g - 1);
+export function normalizeSample(sample) {
+    if (!sample || sample.gradeScale === GRADE_SCALE || !Array.isArray(sample.grades)) return sample;
+    return { ...sample, gradeScale: GRADE_SCALE, grades: sample.grades.map(g => ({ ...g, grade: normalizeGrade(Number(g.grade) || 0) })) };
 }
 
 /** Sample -> pretty JSON + filename, ready for ST's download(). */

@@ -102,6 +102,24 @@ export const defaultSettings = {
      */
     scoreThreshold: 0.1,
     /**
+     * Wrong-book failsafe: a chunk must also reach this RAW (uncentered) cosine to be admitted at all.
+     * 0 = off. Plugin path only — the stock-ST fallback never sees it.
+     *
+     * This is a different job from scoreThreshold, which gates the CENTERED score and so can only rank
+     * within a book — centering subtracts the book's shared direction, which is exactly the information
+     * "is this even the right book?" needs. Raw cosine keeps it: measured over 4 graded scenes and 3
+     * deliberately unrelated books (bge-m3), every relevant entry scored >= 0.538 raw while wrong-genre
+     * books topped out at 0.47-0.54. At 0.5 the gate cost NOTHING on any real scene (identical nDCG,
+     * identical entries kept) and cut wrong-book contamination from 10-19 entries to 0-2 in 7 of 9
+     * query x book pairings.
+     *
+     * Two measured limits: a same-genre wrong book (same author, same idiom) clears any raw-cosine gate —
+     * only lexical mismatch can catch those, and this knob does not try; and 0.5 is calibrated on bge-m3,
+     * whose relevant-vs-wrong margin here was ~0.04, so a different embedder may need a different value
+     * (or 0 until measured).
+     */
+    uncenteredGate: 0.5,
+    /**
      * Use the Worlds Apart server plugin's mean-centered search when it is loaded.
      * Centering removes the direction every chunk in a single-story corpus shares,
      * which is what compresses similarities into a narrow band. Scores come out much
@@ -145,6 +163,14 @@ export const defaultSettings = {
      * possible cut (worst case 92%) against 83%/72% for the old default of count max=10. See selection.mjs
      * cutRetrieved for the table. It is also insensitive between sensitivity 1.2 and 2.0, which is why the
      * switch is safe to make on 3 scenes when the boost/gazetteer knobs are not.
+     *
+     * Measured failure mode, WEAK scenes (isekai-time-whore msg3728: 4 relevant of 106 candidates, none
+     * grade-5): when relevance is sparse the score surface is noise and a large early gap reads as a cliff —
+     * every sensitivity 1.2-2.5 cut at 8 and missed 3 of the 4 relevant entries (31% of oracle F1) where
+     * count max=10 reached 80%. Elbow still wins 3 of the 4 graded scenes, and it does NOT collapse on a
+     * wrong book either (kept 10-19 junk entries across 10 null cells — see uncenteredGate for the failsafe
+     * that actually handles those), so the honest claim is narrower than it once was: the elbow adapts
+     * within a scene that HAS a relevance cliff, and does nothing useful when there isn't one.
      */
     vectorCutoff: 'elbow',
     /** Cliff modes only: never cut below this many. Guards against the rank 1-2 gap. */
@@ -186,8 +212,13 @@ export const defaultSettings = {
      * How many recent chat messages WA looks at — one depth shared by both the retrieval
      * query (the text embedded / BM25'd, or summarized in summary mode) and the keyword
      * scan window. A per-entry scanDepth still overrides the keyword window (as in core).
+     *
+     * 10 sits mid-plateau on the measured dose-response (n=80 graded scenes, paired vs each
+     * scene's own depth-10 capture): nDCG@10 climbs monotonically 1→10 (depth 3 −0.098,
+     * p=0.001; depth 5 −0.053, p=0.020), is flat 10–15, and dips slightly at 20 (−0.009,
+     * p=0.044) — over-widening dilutes the query. Cost is query length (~6k chars at 10).
      */
-    messageDepth: 3,
+    messageDepth: 10,
     /**
      * How surviving entries are laid out in the prompt:
      * 'authored' | 'authored-inverse' | 'best-first' | 'best-last'.
@@ -235,16 +266,18 @@ export const defaultSettings = {
     /**
      * Weight for BM25-over-KEYS in the layout fusion, separate from lexicalWeight (BM25-over-chunk-text).
      *
-     * null = follow lexicalWeight, which is what every install did before this existed and is what keeps an
-     * upgrade byte-identical. Set it when a book's keywords deserve different trust than its prose: measured
-     * optima across three graded scenes were (text 0.5, keys 3) for a hand-curated book, (1.5, 0) for one
-     * whose keys are auto-generated scene detail, and (1.5, 1) for a third — the keys signal correlates
-     * 0.79 / 0.11 / 0.39 with human grades on those books, so one weight cannot serve them.
+     * 1 is the measured optimum of the dose ladder (n=80 graded scenes, paired, vs a 1.5 capture
+     * baseline): 1 helps on 49/17 scenes (+0.016 nDCG@10, Holm p=0.000), 2 hurts (−0.015, Holm
+     * 0.014), 0 is flat-negative — so keys deserve less weight than prose, but not zero. Consistent
+     * in sign across book types: large gains on books with auto-generated keys, mild on hand-curated,
+     * exact no-op on keyword-only classical books. null = follow lexicalWeight (the pre-split
+     * behavior); pinning a number decouples the two so raising lexicalWeight no longer silently
+     * drags the keys weight past its optimum.
      *
      * Only reaches the layout ranking. fuseRetrieval (what the cutoff cuts) scores vector + text and never
      * sees keys at all.
      */
-    keywordWeight: null,
+    keywordWeight: 1,
     /**
      * Fold each entry's authored Order into the fused score as an extra RRF rank (higher order =
      * higher priority, matching ST where order is budgetPriority). Off by default; for books that

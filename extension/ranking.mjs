@@ -244,6 +244,23 @@ export function queryMessages(chat, { depth, substituteParams = s => s }) {
 }
 
 /**
+ * The keyword scan window over the last `depth` messages — the ONE copy of the join, shared by the live
+ * scan (worldsapart.js, which layers injects/match-sources on top), the depth ablation
+ * (graded-scene-grid.mjs) and offline capture tools. Names are included when core includes them, or a
+ * keyword that only ever appears as a "Name:" prefix would match in core and silently miss here.
+ * @param {Array<{name?: string, mes?: string}>} chat Chat messages (or queryMessages() output)
+ * @param {object} cfg
+ * @param {number} cfg.depth How many recent messages to scan
+ * @param {boolean} [cfg.includeNames] world_info_include_names
+ * @returns {string} Scan window text
+ */
+export function scanWindow(chat, { depth, includeNames = true }) {
+    return chat.slice(-Math.max(1, depth))
+        .map(x => (includeNames && x?.name ? `${x.name}: ${x.mes ?? ''}` : String(x?.mes ?? '')))
+        .join('\n');
+}
+
+/**
  * Counts occurrences of a keyword in text, matching core's matchKeys rules.
  * @param {string} key Keyword or /regex/flags
  * @param {string} text Text to search

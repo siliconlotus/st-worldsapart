@@ -167,6 +167,7 @@ export async function init(router) {
                 termWeights: request.body.termWeights && typeof request.body.termWeights === 'object' ? request.body.termWeights : null,
                 stopwordDf: Number(request.body.stopwordDf) || 0,
                 commonWordWeight: Number.isFinite(Number(request.body.commonWordWeight)) ? Number(request.body.commonWordWeight) : 1,
+                uncenteredGate: Number(request.body.uncenteredGate) || 0,
             };
 
             // The disk loads and the embed round-trip are independent — run them concurrently.

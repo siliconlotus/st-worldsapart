@@ -97,6 +97,10 @@ const ARMS = {
     // here because they measured nothing, and an arm that measures nothing still costs a comparison in every
     // future run's multiplicity count.
     'admit=cosine': { admit: 'cosine' },
+    // The shipped wrong-book failsafe (state.mjs uncenteredGate). Samples score at gate 0 for
+    // reproducibility, so this arm is the tripwire: it must stay ~0.0000 on every real scene — the gate's
+    // whole contract is "free on the right book" — and a nonzero Δ here means the calibration broke.
+    'gate=0.5': { uncenteredGate: 0.5 },
 };
 
 /** Arms that answer the SAME question at different doses. Derived from the name, so adding a dose needs no

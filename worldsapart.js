@@ -46,7 +46,10 @@ import { ensureStudioStyle, makeSortControl, makeTierEditor, showEntryText, wiGl
 import { PRESENTATION_ALIAS, SORT_FNS, normPresentation, presentationBaseLabel, presentationLabel, reconcileTiers, tierRank, wiTitleOf } from './extension/sort.mjs';
 import { keywordScoresReport, keywordSuggestReport } from './extension/keyword-tools.mjs';
 import { lorebookStudio } from './extension/studio.mjs';
-import { buildSample, bundleSamples, captureParams, isScaffolding, mergeGrades, rowKey, sampleFile, searchedBook, splitGraded, trimBook, unionArms } from './extension/grading.mjs';
+import { buildSample, bundleSamples, captureParams, GRADE_ANCHORS, isScaffolding, mergeGrades, normalizeSample, rowKey, sampleFile, searchedBook, splitGraded, trimBook, unionArms } from './extension/grading.mjs';
+
+/** The grading scale in one caption line, shared by both grading popups. */
+const gradeAnchorLine = () => `Grade 0–4: ${GRADE_ANCHORS.map((a, g) => `${g} = ${a.split(';')[0].toLowerCase()}`).join(' · ')}.`;
 // Chunking is WA's own, not ST's: it is unreachable under node and it determines every stored vector, so an
 // upstream edit would silently invalidate existing indexes. See extension/chunking.mjs.
 import { chunkEntry } from './extension/chunking.mjs';
@@ -263,6 +266,7 @@ async function queryCollections(args) {
                 body: JSON.stringify({
                     ...body,
                     centered: settings().meanCentered,
+                    uncenteredGate: Number(settings().uncenteredGate) || 0,
                     bm25K1: settings().bm25K1,
                     bm25B: settings().bm25B,
                     termWeights: args.termWeights ?? null,
@@ -308,12 +312,10 @@ async function syncWorld(world, entries) {
 
     const items = [];
     /**
-     * Chunk hash -> EVERY `${world}.${uid}` whose text contains that chunk. A LIST, because a chunk can have
-     * more than one owner and the store cannot tell us which: identical text in two entries hashes the same,
-     * `list` returns hashes only, and `insert` is filtered by hash membership — so on an incremental sync the
-     * second entry's copy is filtered out and never gets a row of its own. Keying an owner per hash then lost
-     * that entry entirely: last writer won, and whichever entry lost was unreachable through its shared chunk.
-     * Resolving the fan-out here, off the hashes we just computed from the live entries, keeps it independent
+     * Chunk hash -> owning `${world}.${uid}`(s). Hashes carry (text, uid), so within one world every hash
+     * has exactly one owner; it stays a LIST because identical (text, uid) in two attached books still
+     * collides after the cross-world merge in scoreActivated concats these maps. Resolving ownership here,
+     * off the hashes we just computed from the live entries, keeps it independent
      * of how the collection happened to be built (fresh syncs store one row per entry, incremental ones one
      * row total — see eval/reindex-check.mjs on path-dependence).
      * @type {Map<number, string[]>}
@@ -1142,6 +1144,13 @@ async function rankActivated(args) {
     if (!settings().enabled || !(activated instanceof Map)) {
         return;
     }
+    // ST's dry-run generations (PromptManager token counts after every received message,
+    // chat load) skip generate interceptors, so retrieval never ran and the scan holds
+    // keyword activations only. Ranking it would overwrite the panel and the /wa-dry//wa-grade
+    // state with that keyword-only selection — leave the last real scan's state alone.
+    if (runState.generationIsDryRun) {
+        return;
+    }
     if (activated.size === 0) {
         runState.lastLayout = [];
         if (!args?.state?.next) renderWiPanel([]);
@@ -1185,11 +1194,7 @@ async function rankActivated(args) {
             // the unified messageDepth, falling back to core's scan depth only if it's unset.
             const depth = Number(item.entry.scanDepth) || settings().messageDepth || world_info_depth;
             if (!windows.has(depth)) {
-                // Include speaker names when core does — otherwise a keyword that only
-                // appears as a "Name:" prefix is matched by core and missed here.
-                let window = chat.slice(-depth)
-                    .map(x => (world_info_include_names && x?.name ? `${x.name}: ${x.mes ?? ''}` : String(x?.mes ?? '')))
-                    .join('\n');
+                let window = ranking.scanWindow(chat, { depth, includeNames: world_info_include_names });
                 if (injectText) {
                     window += `\n${injectText}`;
                 }
@@ -1525,7 +1530,7 @@ function paramSnapshot() {
         },
         // Acquisition: what vectra gives back — the DB-side similarity gate, mean-centering, and
         // how the vectorized text is chunked. Paired with `cutoff` (WA-side selection) below.
-        vectors: { scoreThreshold: s.scoreThreshold, meanCentered: s.meanCentered, chunkMode: s.chunkMode, chunkSize: s.chunkSize, minChunkSize: s.minChunkSize, suppressVectorKeys: s.suppressVectorKeys },
+        vectors: { scoreThreshold: s.scoreThreshold, uncenteredGate: s.uncenteredGate || 0, meanCentered: s.meanCentered, chunkMode: s.chunkMode, chunkSize: s.chunkSize, minChunkSize: s.minChunkSize, suppressVectorKeys: s.suppressVectorKeys },
         // Selection: the WA-side cliff detector, floor/ceiling, and keyword scoring applied to
         // what was acquired. Mode leads, then the active mode's threshold and floor.
         cutoff: {
@@ -1864,7 +1869,7 @@ async function gradeScene(named) {
 
     const wrap = document.createElement('div');
     wrap.innerHTML = '<h3 style="margin:0 0 0.25em;">Grade this scene</h3>'
-        + `<small style="display:block;opacity:0.7;margin-bottom:0.5em;">0 = irrelevant, 5 = essential. ${gradeable.length} retrieved entries${scaffold ? `; ${scaffold} constant/sticky row(s) listed but not graded — always-on, so relevance didn't choose them` : ''}.</small>`
+        + `<small style="display:block;opacity:0.7;margin-bottom:0.5em;">${gradeAnchorLine()} ${gradeable.length} retrieved entries${scaffold ? `; ${scaffold} constant/sticky row(s) listed but not graded — always-on, so relevance didn't choose them` : ''}.</small>`
         + '<details style="margin-bottom:0.75em;"><summary style="cursor:pointer;">Query text — what retrieval actually matched on '
         + `(${runState.lastQuery.length} chars, depth ${settings().messageDepth})</summary>`
         + `<pre style="white-space:pre-wrap;max-height:14em;overflow:auto;font-size:0.85em;opacity:0.85;border:1px solid var(--SmartThemeBorderColor);padding:0.5em;margin-top:0.5em;">${esc(runState.lastQuery)}</pre></details>`
@@ -1875,7 +1880,7 @@ async function gradeScene(named) {
             const num = n => (n == null ? '·' : String(n));
             const cell = scaff
                 ? `<span style="opacity:0.5;font-size:0.85em;">${row.block === 'constant' ? 'const' : 'sticky'}</span>`
-                : `<input type="number" class="wa-grade text_pole" data-i="${i}" min="0" max="5" step="0.5" value="0" style="width:4em;padding:2px 4px;">`;
+                : `<input type="number" class="wa-grade text_pole" data-i="${i}" min="0" max="4" step="1" value="0" title="${esc(GRADE_ANCHORS.map((a, g) => `${g}: ${a}`).join('\n'))}" style="width:4em;padding:2px 4px;">`;
             return `<tr style="border-top:1px solid var(--SmartThemeBorderColor);${scaff ? 'opacity:0.6;' : ''}">`
                 + `<td>${cell}</td>`
                 + `<td>${esc(row.title)}<br><small style="opacity:0.5;">${esc(row.world)} · uid ${num(row.uid)}</small></td>`
@@ -2083,6 +2088,164 @@ async function captureArm(overrides, wanted) {
  * @param {object} named Named args: name, books, candidates, arms, notes
  * @returns {Promise<string>} Empty string — output is downloaded files
  */
+/**
+ * The super-grade grading popup, extracted so /wa-super-grade (live captures) and /wa-super-eval (a graded
+ * file, no chat required) share one shell: query blocks, prior loading, the editable union table, and the
+ * merged-grade result. Callers own what happens to the grades afterwards.
+ *
+ * @param {object} args
+ * @param {Array<{arm: string, rows: object[], entries: object[], query: string, depth?: number|string}>} args.captures Per-arm captures
+ * @param {{rows: object[], entries: object[]}} args.union unionArms() output over those captures
+ * @param {(world: string, uid: number) => object|undefined} args.entryOf Entry resolver for the text viewer
+ * @param {object[]} [args.prior] Pre-loaded prior grades (pre-filled, editable)
+ * @param {string} [args.subtitle] Extra context line under the title (escaped here)
+ * @param {string} [args.okButton] Confirm-button label
+ * @returns {Promise<{grades: object[], prior: object[]}|null>} Merged grades, or null on cancel
+ */
+async function superGradePopup({ captures, union, entryOf, prior: prior0 = [], subtitle = '', okButton = 'Save samples' }) {
+    const esc = s => escapeHtml(String(s ?? ''));
+    let prior = [...prior0];
+
+    const wrap = document.createElement('div');
+    const head = document.createElement('div');
+    const body = document.createElement('div');
+    wrap.append(head, body);
+
+    // THE QUERY TEXT THE MACHINE ACTUALLY MATCHED ON. Grading drifts without it: the human remembers the
+    // scene, but relevance was decided against this text, and the two diverge (a scene's emotional centre is
+    // often a paragraph the query window never reached). Grouped by distinct text rather than shown once,
+    // because the arms do NOT share a query — the summary arm retrieves against model-written text while the
+    // rest use raw messages, and an entry can be a fair hit for one and a miss for the other.
+    const byQuery = new Map();
+    for (const cap of captures) {
+        if (!cap.query) continue;
+        const hit = byQuery.get(cap.query) ?? [];
+        hit.push(cap.arm);
+        byQuery.set(cap.query, hit);
+    }
+    const queryBlocks = [...byQuery.entries()].map(([text, arms]) => {
+        const label = byQuery.size === 1 ? 'Query text — what retrieval actually matched on' : `Query text (${esc(arms.join(', '))})`;
+        return `<details style="margin-bottom:0.4em;"><summary style="cursor:pointer;">${label} `
+            + `(${text.length} chars, depth ${captures[0].depth})</summary>`
+            + `<pre style="white-space:pre-wrap;max-height:14em;overflow:auto;font-size:0.85em;opacity:0.85;border:1px solid var(--SmartThemeBorderColor);padding:0.5em;margin-top:0.5em;">${esc(text)}</pre></details>`;
+    }).join('');
+
+    head.innerHTML = '<h3 style="margin:0 0 0.25em;">Grade this scene — pooled across arms</h3>'
+        + `${subtitle ? `<small style="display:block;opacity:0.7;margin-bottom:0.25em;">${esc(subtitle)}</small>` : ''}`
+        + `<small style="display:block;opacity:0.7;margin-bottom:0.5em;">${gradeAnchorLine()} ${union.rows.length} distinct entries from ${captures.length} arm(s): ${esc(captures.map(c => c.arm).join(', '))}.</small>`
+        + queryBlocks
+        + `${byQuery.size > 1 ? `<small style="display:block;opacity:0.6;margin-bottom:0.5em;">${byQuery.size} arms retrieved against different text — judge relevance to the SCENE, not to any one query.</small>` : ''}`
+        // A bare <input type="file"> inherits nothing from ST's theme and reads as a paragraph of text, so it
+        // went unnoticed. Drive it from a real menu_button instead, and keep a PERSISTENT status line: a
+        // toast that has already faded is no way to confirm the priors loaded, and grading a round without
+        // them silently means re-judging everything the last round already covered.
+        + '<div style="margin:0.6em 0;display:flex;align-items:center;gap:0.6em;flex-wrap:wrap;">'
+        + '<div class="menu_button wa-sg-pick" style="width:auto;padding:0.3em 0.8em;">Load earlier samples / pool requests…</div>'
+        + `<small class="wa-sg-loaded" style="opacity:0.7;">${prior0.length ? `${prior0.length} grade(s) pre-loaded, shown in the table` : 'nothing loaded — grading everything from scratch'}</small>`
+        + '<input type="file" class="wa-sg-prior" accept=".json,application/json" multiple style="display:none;">'
+        + '</div>'
+        + '<small style="display:block;opacity:0.6;margin-bottom:0.5em;">Earlier rounds\' samples: their grades are subtracted so you only judge what is new. Pool requests from eval/pool-extend.mjs: their entries are added.</small>';
+
+    // Repaint rather than patch: loading priors changes which rows are gradeable at all. Only grades the
+    // user actually EDITED (data-dirty, set below) are carried across — every row is an input now, so
+    // carrying pristine "0"s would shadow the prior grades a freshly loaded file is supposed to pre-fill.
+    const paint = () => {
+        const typed = new Map([...body.querySelectorAll('.wa-grade')].filter(i => i.dataset.dirty).map(i => [i.dataset.key, i.value]));
+        const { fresh, known, priorOf } = splitGraded(union.rows, prior);
+
+        body.innerHTML = `<small style="display:block;opacity:0.7;margin-bottom:0.5em;">${fresh.length} to grade`
+            + `${known.length ? `; ${known.length} judged in an earlier round (pre-filled — edit any you disagree with, untouched rows carry through as shown)` : ''}.</small>`
+            + '<table style="width:100%;border-collapse:collapse;font-size:0.9em;"><thead><tr style="text-align:left;">'
+            + '<th style="width:4em;">Grade</th><th>Entry</th><th style="width:9em;">surfaced by</th><th style="width:4em;">best#</th><th style="width:4em;">cos</th><th style="width:4em;">text</th><th style="width:4em;">keys</th><th style="width:4em;"></th></tr></thead><tbody>'
+            + union.rows.map((row, i) => {
+                const key = rowKey(row);
+                const num = n => (n == null ? '·' : String(n));
+                const done = priorOf.has(key);
+                // Prior rows are inputs too, pre-filled with the (remapped) earlier grade: an edit re-emits
+                // the row as a fresh grade and mergeGrades is last-wins, so the edit overrides the prior.
+                // A carried-over edit stays dirty across repaints, or the next repaint would revert it.
+                const cell = `<input type="number" class="wa-grade text_pole" data-key="${esc(key)}" data-i="${i}" min="0" max="4" step="1" ${typed.has(key) ? 'data-dirty="1" ' : ''}value="${esc(typed.get(key) ?? (done ? priorOf.get(key) : '0'))}" title="${esc(GRADE_ANCHORS.map((a, g) => `${g}: ${a}`).join('\n'))}" style="width:4em;padding:2px 4px;">`;
+                return `<tr style="border-top:1px solid var(--SmartThemeBorderColor);${done ? 'opacity:0.55;' : ''}">`
+                    + `<td>${cell}</td>`
+                    + `<td>${esc(row.title)}<br><small style="opacity:0.5;">${esc(row.world)} · uid ${num(row.uid)}</small></td>`
+                    // Which arms surfaced a row is the pooling diagnostic: rows only one arm found are where
+                    // the overlap assumption is failing, and they are why that arm is in the list.
+                    + `<td><small style="opacity:0.7;">${esc(row.arms.join(', '))}</small></td>`
+                    + `<td>${num(row.bestRank)}</td><td>${num(row.cosine)}</td><td>${num(row.text)}</td><td>${num(row.keys)}</td>`
+                    + `<td><button class="menu_button wa-viewtext" data-i="${i}" style="padding:2px 6px;font-size:0.85em;">text</button></td></tr>`;
+            }).join('')
+            + '</tbody></table>';
+
+        body.querySelectorAll('.wa-viewtext').forEach(button => button.addEventListener('click', event => {
+            event.preventDefault();
+            const entry = union.entries[Number(button.dataset.i)];
+            if (entry) showEntryText(entry);
+        }));
+        // A user edit marks the input dirty; only dirty values survive a repaint (see `typed` above).
+        body.querySelectorAll('.wa-grade').forEach(input => input.addEventListener('input', () => { input.dataset.dirty = '1'; }));
+    };
+
+    head.querySelector('.wa-sg-pick').addEventListener('click', () => head.querySelector('.wa-sg-prior').click());
+    head.querySelector('.wa-sg-prior').addEventListener('change', async event => {
+        const loaded = [];
+        let added = 0;
+        const names = [];
+        for (const file of event.target.files ?? []) {
+            try {
+                const parsed = JSON.parse(await file.text());
+                // Two shapes through one picker: a previous round's sample/bundle (subtract its grades) or an
+                // offline pool request (ADD its entries). Told apart by which array is present.
+                if (Array.isArray(parsed?.pending)) {
+                    for (const row of parsed.pending) {
+                        const key = rowKey(row);
+                        if (union.rows.some(r => rowKey(r) === key)) continue;
+                        const entry = entryOf(row.world, row.uid);
+                        union.rows.push({
+                            title: entry?.comment || row.title, world: row.world, uid: row.uid,
+                            block: 'dynamic', sticky: 0, score: null, cosine: null, text: null, keys: null,
+                            // Labelled so the grader can see this row came from a rebuilt index rather than a
+                            // live arm — it is being judged for a configuration this machine isn't running.
+                            arms: [`offline: ${(row.doses ?? []).length || '?'} dose(s)`],
+                            bestRank: row.bestRank ?? null,
+                        });
+                        union.entries.push(entry);
+                        added++;
+                    }
+                } else if (Array.isArray(parsed?.grades)) {
+                    // Remaps legacy 0-5 grades to the 0-4 scale (no-op on current-scale files), so the
+                    // pre-filled inputs below show the value that will actually be saved.
+                    loaded.push(...normalizeSample(parsed).grades);
+                } else {
+                    toastr.warning(`${file.name} has neither "grades" nor "pending" — ignored`, 'Worlds Apart');
+                    continue;
+                }
+                names.push(file.name);
+            } catch {
+                toastr.warning(`Could not parse ${file.name} — ignored`, 'Worlds Apart');
+            }
+        }
+        prior = mergeGrades(prior, loaded);
+        head.querySelector('.wa-sg-loaded').textContent = names.length
+            ? `${names.length} file(s): ${prior.length} prior grade(s)${added ? `, ${added} entry(ies) requested offline` : ''}`
+            : 'no usable files — nothing loaded';
+        toastr.info(`${prior.length} prior grade(s)${added ? `, ${added} entr(y/ies) requested offline` : ''}`, 'Worlds Apart', { timeOut: 3000 });
+        paint();
+    });
+
+    paint();
+
+    const popup = new Popup(wrap, POPUP_TYPE.CONFIRM, '', { okButton, cancelButton: 'Cancel', large: true, wide: true, allowVerticalScrolling: true });
+    if (await popup.show() !== POPUP_RESULT.AFFIRMATIVE) {
+        return null;
+    }
+
+    const fresh = [...body.querySelectorAll('.wa-grade')].map(input => {
+        const row = union.rows[Number(input.dataset.i)];
+        return { title: row.title, grade: Number(input.value) || 0, world: row.world, uid: row.uid };
+    });
+    return { grades: mergeGrades(prior, fresh), prior };
+}
+
 async function superGradeScene(named) {
     const bookMode = String(named?.books ?? 'full').toLowerCase();
     if (!['full', 'meta', 'none'].includes(bookMode)) {
@@ -2144,139 +2307,11 @@ async function superGradeScene(named) {
     }
     const entryOf = (world, uid) => Object.values(books[world] ?? {}).find(e => Number(e.uid) === Number(uid));
 
-    const esc = s => escapeHtml(String(s ?? ''));
-    let prior = [];
-
-    const wrap = document.createElement('div');
-    const head = document.createElement('div');
-    const body = document.createElement('div');
-    wrap.append(head, body);
-
-    // THE QUERY TEXT THE MACHINE ACTUALLY MATCHED ON. Grading drifts without it: the human remembers the
-    // scene, but relevance was decided against this text, and the two diverge (a scene's emotional centre is
-    // often a paragraph the query window never reached). Grouped by distinct text rather than shown once,
-    // because the arms do NOT share a query — the summary arm retrieves against model-written text while the
-    // rest use raw messages, and an entry can be a fair hit for one and a miss for the other.
-    const byQuery = new Map();
-    for (const cap of captures) {
-        const hit = byQuery.get(cap.query) ?? [];
-        hit.push(cap.arm);
-        byQuery.set(cap.query, hit);
-    }
-    const queryBlocks = [...byQuery.entries()].map(([text, arms]) => {
-        const label = byQuery.size === 1 ? 'Query text — what retrieval actually matched on' : `Query text (${esc(arms.join(', '))})`;
-        return `<details style="margin-bottom:0.4em;"><summary style="cursor:pointer;">${label} `
-            + `(${text.length} chars, depth ${captures[0].depth})</summary>`
-            + `<pre style="white-space:pre-wrap;max-height:14em;overflow:auto;font-size:0.85em;opacity:0.85;border:1px solid var(--SmartThemeBorderColor);padding:0.5em;margin-top:0.5em;">${esc(text)}</pre></details>`;
-    }).join('');
-
-    head.innerHTML = '<h3 style="margin:0 0 0.25em;">Grade this scene — pooled across arms</h3>'
-        + `<small style="display:block;opacity:0.7;margin-bottom:0.5em;">0 = irrelevant, 5 = essential. ${union.rows.length} distinct entries from ${captures.length} arm(s): ${esc(captures.map(c => c.arm).join(', '))}.</small>`
-        + queryBlocks
-        + `${byQuery.size > 1 ? `<small style="display:block;opacity:0.6;margin-bottom:0.5em;">${byQuery.size} arms retrieved against different text — judge relevance to the SCENE, not to any one query.</small>` : ''}`
-        // A bare <input type="file"> inherits nothing from ST's theme and reads as a paragraph of text, so it
-        // went unnoticed. Drive it from a real menu_button instead, and keep a PERSISTENT status line: a
-        // toast that has already faded is no way to confirm the priors loaded, and grading a round without
-        // them silently means re-judging everything the last round already covered.
-        + '<div style="margin:0.6em 0;display:flex;align-items:center;gap:0.6em;flex-wrap:wrap;">'
-        + '<div class="menu_button wa-sg-pick" style="width:auto;padding:0.3em 0.8em;">Load earlier samples / pool requests…</div>'
-        + '<small class="wa-sg-loaded" style="opacity:0.7;">nothing loaded — grading everything from scratch</small>'
-        + '<input type="file" class="wa-sg-prior" accept=".json,application/json" multiple style="display:none;">'
-        + '</div>'
-        + '<small style="display:block;opacity:0.6;margin-bottom:0.5em;">Earlier rounds\' samples: their grades are subtracted so you only judge what is new. Pool requests from eval/pool-extend.mjs: their entries are added.</small>';
-
-    // Repaint rather than patch: loading priors changes which rows are gradeable at all. Typed grades are
-    // carried across so picking up a forgotten prior file mid-session doesn't discard work.
-    const paint = () => {
-        const typed = new Map([...body.querySelectorAll('.wa-grade')].map(i => [i.dataset.key, i.value]));
-        const { fresh, known, priorOf } = splitGraded(union.rows, prior);
-
-        body.innerHTML = `<small style="display:block;opacity:0.7;margin-bottom:0.5em;">${fresh.length} to grade`
-            + `${known.length ? `; ${known.length} already judged in an earlier round (shown greyed, carried through unchanged)` : ''}.</small>`
-            + '<table style="width:100%;border-collapse:collapse;font-size:0.9em;"><thead><tr style="text-align:left;">'
-            + '<th style="width:4em;">Grade</th><th>Entry</th><th style="width:9em;">surfaced by</th><th style="width:4em;">best#</th><th style="width:4em;">cos</th><th style="width:4em;">text</th><th style="width:4em;">keys</th><th style="width:4em;"></th></tr></thead><tbody>'
-            + union.rows.map((row, i) => {
-                const key = rowKey(row);
-                const num = n => (n == null ? '·' : String(n));
-                const done = priorOf.has(key);
-                const cell = done
-                    ? `<span style="opacity:0.6;">${priorOf.get(key)}</span>`
-                    : `<input type="number" class="wa-grade text_pole" data-key="${esc(key)}" data-i="${i}" min="0" max="5" step="0.5" value="${esc(typed.get(key) ?? '0')}" style="width:4em;padding:2px 4px;">`;
-                return `<tr style="border-top:1px solid var(--SmartThemeBorderColor);${done ? 'opacity:0.55;' : ''}">`
-                    + `<td>${cell}</td>`
-                    + `<td>${esc(row.title)}<br><small style="opacity:0.5;">${esc(row.world)} · uid ${num(row.uid)}</small></td>`
-                    // Which arms surfaced a row is the pooling diagnostic: rows only one arm found are where
-                    // the overlap assumption is failing, and they are why that arm is in the list.
-                    + `<td><small style="opacity:0.7;">${esc(row.arms.join(', '))}</small></td>`
-                    + `<td>${num(row.bestRank)}</td><td>${num(row.cosine)}</td><td>${num(row.text)}</td><td>${num(row.keys)}</td>`
-                    + `<td><button class="menu_button wa-viewtext" data-i="${i}" style="padding:2px 6px;font-size:0.85em;">text</button></td></tr>`;
-            }).join('')
-            + '</tbody></table>';
-
-        body.querySelectorAll('.wa-viewtext').forEach(button => button.addEventListener('click', event => {
-            event.preventDefault();
-            const entry = union.entries[Number(button.dataset.i)];
-            if (entry) showEntryText(entry);
-        }));
-    };
-
-    head.querySelector('.wa-sg-pick').addEventListener('click', () => head.querySelector('.wa-sg-prior').click());
-    head.querySelector('.wa-sg-prior').addEventListener('change', async event => {
-        const loaded = [];
-        let added = 0;
-        const names = [];
-        for (const file of event.target.files ?? []) {
-            try {
-                const parsed = JSON.parse(await file.text());
-                // Two shapes through one picker: a previous round's sample/bundle (subtract its grades) or an
-                // offline pool request (ADD its entries). Told apart by which array is present.
-                if (Array.isArray(parsed?.pending)) {
-                    for (const row of parsed.pending) {
-                        const key = rowKey(row);
-                        if (union.rows.some(r => rowKey(r) === key)) continue;
-                        const entry = entryOf(row.world, row.uid);
-                        union.rows.push({
-                            title: entry?.comment || row.title, world: row.world, uid: row.uid,
-                            block: 'dynamic', sticky: 0, score: null, cosine: null, text: null, keys: null,
-                            // Labelled so the grader can see this row came from a rebuilt index rather than a
-                            // live arm — it is being judged for a configuration this machine isn't running.
-                            arms: [`offline: ${(row.doses ?? []).length || '?'} dose(s)`],
-                            bestRank: row.bestRank ?? null,
-                        });
-                        union.entries.push(entry);
-                        added++;
-                    }
-                } else if (Array.isArray(parsed?.grades)) {
-                    loaded.push(...parsed.grades);
-                } else {
-                    toastr.warning(`${file.name} has neither "grades" nor "pending" — ignored`, 'Worlds Apart');
-                    continue;
-                }
-                names.push(file.name);
-            } catch {
-                toastr.warning(`Could not parse ${file.name} — ignored`, 'Worlds Apart');
-            }
-        }
-        prior = mergeGrades(prior, loaded);
-        head.querySelector('.wa-sg-loaded').textContent = names.length
-            ? `${names.length} file(s): ${prior.length} prior grade(s)${added ? `, ${added} entry(ies) requested offline` : ''}`
-            : 'no usable files — nothing loaded';
-        toastr.info(`${prior.length} prior grade(s)${added ? `, ${added} entr(y/ies) requested offline` : ''}`, 'Worlds Apart', { timeOut: 3000 });
-        paint();
-    });
-
-    paint();
-
-    const popup = new Popup(wrap, POPUP_TYPE.CONFIRM, '', { okButton: 'Save samples', cancelButton: 'Cancel', large: true, wide: true, allowVerticalScrolling: true });
-    if (await popup.show() !== POPUP_RESULT.AFFIRMATIVE) {
+    const done = await superGradePopup({ captures, union, entryOf });
+    if (!done) {
         return '';
     }
-
-    const fresh = [...body.querySelectorAll('.wa-grade')].map(input => {
-        const row = union.rows[Number(input.dataset.i)];
-        return { title: row.title, grade: Number(input.value) || 0, world: row.world, uid: row.uid };
-    });
-    const grades = mergeGrades(prior, fresh);
+    const { grades, prior } = done;
 
     const base = named?.name || defaultSampleName();
     const built = [];
@@ -2331,10 +2366,92 @@ async function superGradeScene(named) {
 
     const above = grades.filter(g => g.grade > 0).length;
     toastr.success(
-        `Saved ${filename} — ${built.length} arms in one file, ${fresh.length} newly graded, ${grades.length} pooled, ${above} above 0. `
+        `Saved ${filename} — ${built.length} arms in one file, ${union.rows.length} rows this round, ${grades.length} pooled, ${above} above 0. `
         + 'Move it to eval/eval-data/ and run graded-scene-grid.mjs --sample (add --arm to pick one); watch judged@10.',
         'Worlds Apart', { timeOut: 12000 },
     );
+    return '';
+}
+
+/** Opens the browser file picker for one JSON file. Resolves null when the user cancels. */
+const pickJsonFile = () => new Promise(resolve => {
+    const input = document.createElement('input');
+    input.type = 'file';
+    input.accept = '.json,application/json';
+    input.addEventListener('change', () => resolve(input.files?.[0] ?? null), { once: true });
+    input.addEventListener('cancel', () => resolve(null), { once: true });
+    input.click();
+});
+
+/**
+ * /wa-super-eval — chat-independent review of a graded sample/bundle: the super-grade shell, fed entirely
+ * from the file. Nothing live is read — no chat, no attached books, no settings — so a scene captured
+ * offline (or by someone else, or by an LLM judge) can be reviewed without loading the chat it came from.
+ * Entry text resolves from the bundle's embedded books, the stored grades arrive pre-filled and editable
+ * (legacy 0-5 remapped on load), and Save downloads the SAME bundle with only `grades`/`gradeScale`
+ * updated — arms, captures, params and books are preserved untouched.
+ */
+async function superEvalScene() {
+    const file = await pickJsonFile();
+    if (!file) {
+        return '';
+    }
+    let manifest;
+    try {
+        manifest = JSON.parse(await file.text());
+    } catch {
+        toastr.warning(`Could not parse ${file.name}`, 'Worlds Apart');
+        return '';
+    }
+    const armsRaw = Array.isArray(manifest?.arms) ? manifest.arms : (Array.isArray(manifest?.candidates) ? [manifest] : []);
+    if (!armsRaw.length || !Array.isArray(manifest?.grades)) {
+        toastr.warning(`${file.name} is not a graded sample/bundle (needs "grades" and captured candidates)`, 'Worlds Apart');
+        return '';
+    }
+
+    const books = manifest.books ?? {};
+    const entryOf = (world, uid) => Object.values(books[world] ?? {}).find(e => Number(e.uid) === Number(uid));
+    const captures = armsRaw.map(a => ({
+        arm: a.arm ?? manifest.name ?? 'capture',
+        rows: a.candidates ?? [],
+        entries: (a.candidates ?? []).map(r => entryOf(r.world, r.uid) ?? null),
+        query: a.query ?? '',
+        depth: a.depth ?? manifest.depth ?? '?',
+    }));
+    const union = unionArms(captures);
+    if (!union.rows.length) {
+        toastr.warning('No gradeable candidate rows in this file.', 'Worlds Apart');
+        return '';
+    }
+
+    const done = await superGradePopup({
+        captures,
+        union,
+        entryOf,
+        prior: normalizeSample(manifest).grades,
+        subtitle: `Reviewing ${file.name} (${manifest.createdBy ?? 'unknown grader'}) — loaded from file, no chat required.`,
+        okButton: 'Save updated bundle',
+    });
+    if (!done) {
+        return '';
+    }
+
+    // Same bundle out, grades swapped — never rebuilt, so captures/params/books stay byte-identical.
+    // ONE file carries both raters: `grade` is authoritative (the harness scores it; this review edits it),
+    // `llmGrade` is the LLM judge's original, preserved across reviews for IRR. The shell's fresh rows drop
+    // extra fields, so llmGrade is re-attached here from the loaded manifest.
+    const llmOf = new Map(manifest.grades.filter(g => g.llmGrade !== undefined).map(g => [rowKey(g), g.llmGrade]));
+    const grades = done.grades.map(g => (llmOf.has(rowKey(g)) ? { ...g, llmGrade: llmOf.get(rowKey(g)) } : g));
+    const updated = { ...manifest, grades, gradeScale: 4 };
+    const { filename, content } = sampleFile(updated);
+    download(content, filename, 'application/json');
+    const rel = grades.filter(g => g.grade >= 3).length;
+    // When both raters are present, the save toast doubles as the agreement report.
+    const both = grades.filter(g => g.llmGrade !== undefined);
+    const irr = both.length
+        ? ` LLM agreement: ${both.filter(g => g.grade === g.llmGrade).length}/${both.length} exact, ${both.filter(g => Math.abs(g.grade - g.llmGrade) <= 1).length}/${both.length} within 1.`
+        : '';
+    toastr.success(`Saved ${filename} — ${grades.length} grades, ${rel} relevant (>=3).${irr} Replace the old file in eval/eval-data/.`, 'Worlds Apart', { timeOut: 10000 });
     return '';
 }
 
@@ -2662,6 +2779,9 @@ const SETTINGS_HTML = `
 
                     <label for="wa_threshold">Score threshold</label>
                     <input id="wa_threshold" type="number" class="text_pole" min="0" max="1" step="0.01">
+
+                    <label for="wa_uncentered_gate" title="A chunk must also reach this raw (uncentered) cosine to be admitted. Catches a wrong book attached by mistake; 0.5 is calibrated for bge-m3. 0 = off.">Wrong-book gate (raw cosine)</label>
+                    <input id="wa_uncentered_gate" type="number" class="text_pole" min="0" max="1" step="0.05">
                 </div>
             </div>
 
@@ -3032,6 +3152,7 @@ export async function init() {
     bind('#wa_chunk_size', 'chunkSize', 'number');
     bind('#wa_min_chunk_size', 'minChunkSize', 'number');
     bind('#wa_threshold', 'scoreThreshold', 'number');
+    bind('#wa_uncentered_gate', 'uncenteredGate', 'number');
     bind('#wa_max_entries', 'maxVectorEntries', 'number');
     bind('#wa_vector_cutoff', 'vectorCutoff', 'string');
     bind('#wa_min_entries', 'minVectorEntries', 'number');
@@ -3095,6 +3216,9 @@ export async function init() {
     // New chat = possibly different books; drop the smartkeys key registry so the automaton
     // tracks the active vocabulary instead of the union of every book ever scanned.
     eventSource.on(event_types.CHAT_CHANGED, resetSmartKeys);
+    // The panel survives dry-run scans untouched (rankActivated ignores them), so without
+    // this it would carry the previous chat's selection across a switch.
+    eventSource.on(event_types.CHAT_CHANGED, () => { runState.lastLayout = []; renderWiPanel([]); });
     refreshAttached();
     eventSource.on(event_types.WORLDINFO_SCAN_DONE, rankActivated);
 
@@ -3139,6 +3263,13 @@ export async function init() {
             SlashCommandNamedArgument.fromProps({ name: 'notes', description: 'free-text note stored in every sample written', typeList: [ARGUMENT_TYPE.STRING] }),
         ],
         helpString: 'Worlds Apart: grade this scene against SEVERAL configurations at once, for a pool that isn\'t biased toward the current defaults. Runs /wa-debug once per arm (arms change which entries get surfaced — entity filter, retrieval mode, threshold, key suppression, summary queries), unions the entries they surfaced, dedupes, and opens one grading window over the union with a "surfaced by" column. Load earlier rounds\' samples into the file picker and their grades are subtracted, so each round only judges what is new. Saves one sample per arm — each with its own params and candidate rows, all sharing the pooled grades. Drop them in eval/eval-data/, run eval/graded-scene-grid.mjs --sample on each, and add arms until the judged@10 column stops showing gaps.',
+        returns: 'nothing',
+    }));
+
+    SlashCommandParser.addCommandObject(SlashCommand.fromProps({
+        name: 'wa-super-eval',
+        callback: superEvalScene,
+        helpString: 'Worlds Apart: review a graded sample/bundle from its FILE, chat-independent — nothing live is read, so scenes captured offline or graded by an LLM judge open without loading their chat. Same grading window as /wa-super-grade; stored grades arrive pre-filled and editable (legacy 0-5 remapped to 0-4), entry text comes from the embedded books, and Save downloads the same bundle with only the grades updated — diff it against the original to see exactly what the review changed.',
         returns: 'nothing',
     }));
 

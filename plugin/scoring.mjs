@@ -6,15 +6,38 @@ import { bm25Scores, DEFAULT_K1, DEFAULT_B } from './lexical.mjs';
 import { centeredCosineScores } from './vector.mjs';
 
 /** Score one collection's chunks against a query vector: mean-centered cosine + BM25. Returns the chunks
- *  either signal likes (cosine >= threshold OR bm25 > 0). This is the plugin's /query-multi per-collection loop. */
-export function scoreCollection(collectionId, loaded, queryVector, { centered = true, threshold = 0, queryText = '', k1 = DEFAULT_K1, b = DEFAULT_B, termWeights = null, stopwordDf = 0, commonWordWeight = 1 } = {}) {
+ *  either signal likes (cosine >= threshold OR bm25 > 0). This is the plugin's /query-multi per-collection loop.
+ *
+ *  uncenteredGate is a wrong-book failsafe ANDed on top of that admission, not a third ranking signal: a
+ *  chunk must also reach `uncenteredGate` RAW cosine (no mean subtraction) or it is dropped. Centered scores
+ *  cannot do this job — centering subtracts the book's shared direction, so they only say "more like the
+ *  query than this book's average chunk", and every book, including a wrong one, has above-average chunks.
+ *  Raw cosine keeps absolute similarity: measured on 4 graded scenes x 3 unrelated books (bge-m3), relevant
+ *  entries sit at >= 0.538 while wrong-genre books top out at 0.47-0.54, so a 0.5 gate zeroed 7/9 null cells
+ *  at zero cost to any real scene. Known blind spot: a same-genre wrong book clears any raw-cosine gate. */
+export function scoreCollection(collectionId, loaded, queryVector, { centered = true, threshold = 0, queryText = '', k1 = DEFAULT_K1, b = DEFAULT_B, termWeights = null, stopwordDf = 0, commonWordWeight = 1, uncenteredGate = 0 } = {}) {
     const { items, mean, lexical } = loaded;
     const lexicalScores = bm25Scores(lexical, queryText, items.length, k1, b, termWeights, stopwordDf, commonWordWeight);
     const vectorScores = centeredCosineScores(items, queryVector, mean, centered);
+    // The gate is PER ENTRY (best chunk vouches for its siblings), not per chunk. A chunk-level AND also
+    // drops an entry's best-BM25 chunk whenever that chunk's own raw cosine is low, which lowers the entry's
+    // pooled bm25 and reorders real scenes — measured -0.036 nDCG@10 on one of the four graded scenes,
+    // where the entry-level form is a byte-identical no-op on all of them.
+    let gatedOut = null;
+    if (uncenteredGate > 0) {
+        const rawScores = centered ? centeredCosineScores(items, queryVector, mean, false) : vectorScores;
+        const bestRaw = new Map();
+        items.forEach((item, docIndex) => {
+            const key = item.metadata?.index ?? `#${item.metadata?.hash}`;
+            bestRaw.set(key, Math.max(bestRaw.get(key) ?? -Infinity, rawScores[docIndex]));
+        });
+        gatedOut = key => (bestRaw.get(key) ?? -Infinity) < uncenteredGate;
+    }
     const out = [];
     items.forEach((item, docIndex) => {
         const score = vectorScores[docIndex];
         const bm25 = lexicalScores[docIndex];
+        if (gatedOut && gatedOut(item.metadata?.index ?? `#${item.metadata?.hash}`)) return;
         if (score >= threshold || bm25 > 0) out.push({ collectionId, score, bm25, metadata: item.metadata });
     });
     return out;

@@ -75,6 +75,9 @@ export const sceneParams = (S, overrides = {}) => ({
     // identically, and an arm that sets KEYW is testing the split rather than a silent default change.
     K: 20, K1: 2, B: 0.75, LEXW: 1.5, KEYW: null, boost: 3, stopwordDf: 0.25, commonWordWeight: 1,
     caseSensitive: false, wholeWords: false, includeNames: true, threshold: 0.1,
+    // Wrong-book failsafe (see state.mjs uncenteredGate). 0 here, NOT the shipped 0.5: every sample captured
+    // before the gate existed must reproduce byte-identically, and a gate arm overrides this explicitly.
+    uncenteredGate: 0,
     maxVectorEntries: 20, suppressVectorKeys: true, scoreVectorKeys: false, entityFilter: true,
     queryMode: 'messages', retrievalMode: 'hybrid',
     // How a VECTORIZED entry's chunk earns admission to the candidate set. 'either' is what the plugin ships
@@ -196,7 +199,7 @@ export const makeKeywordScore = P => (e, text, k1) =>
 export function makeScorer({ loaded, byUid, entries, params: P, topK }) {
     const keywordScore = makeKeywordScore(P);
     return (k1, b, tw, qvec, qtext, scanText) => {
-        let scored = scoreCollection(CID, loaded, qvec, { centered: true, threshold: P.threshold, queryText: qtext, k1, b, termWeights: tw, stopwordDf: P.stopwordDf, commonWordWeight: P.commonWordWeight });
+        let scored = scoreCollection(CID, loaded, qvec, { centered: true, threshold: P.threshold, queryText: qtext, k1, b, termWeights: tw, stopwordDf: P.stopwordDf, commonWordWeight: P.commonWordWeight, uncenteredGate: P.uncenteredGate });
         if (P.admit === 'cosine') scored = scored.filter(m => m.score >= P.threshold);
         else if (P.admit === 'both') scored = scored.filter(m => m.score >= P.threshold && m.bm25 > 0);
         if (P.bm25Floor > 0) scored = scored.filter(m => m.score >= P.threshold || m.bm25 >= P.bm25Floor);

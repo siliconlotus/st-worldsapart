@@ -127,7 +127,7 @@ function tailMessages(path, bytes = 8e6) {
     if (start > 0) lines.shift();   // a mid-line start yields a broken first record
     return lines.filter(Boolean).flatMap(l => { try { return [JSON.parse(l)]; } catch { return []; } });
 }
-const scanWindowOf = (msgs, depth) => msgs.slice(-depth).map(x => (P.includeNames && x?.name ? `${x.name}: ${x.mes ?? ''}` : String(x?.mes ?? ''))).join('\n');
+const scanWindowOf = (msgs, depth) => ranking.scanWindow(msgs, { depth, includeNames: P.includeNames });
 // DEPTH ABLATION FROM ONE CAPTURE. A sample's `queryChat` holds the messages its query was joined from, so
 // any depth <= the capture depth is reproducible exactly with no chat file: capture deliberately too wide
 // (say 20) and narrow from there. Preferred over the chat file, which a played-on chat invalidates — but an
@@ -426,7 +426,10 @@ const fmt = n => (n == null ? '·' : (+n).toFixed(3));
     console.log(`\ncutoff at shipped k1/b/lexW — ${relN} relevant (grade>=3) of ${ranked.length} candidates, cap=${CAP}, floor min=3`);
     if (GRADED) console.log(`  grader saw ${GRADED} rows${S.cutoff?.gradingOverride ? ` (graded at ${S.cutoff.gradingOverride.mode}/${S.cutoff.gradingOverride.maxVectorEntries}${S.cutoff.live ? `; live setting was ${S.cutoff.live.mode}/${S.cutoff.live.maxVectorEntries}` : ''})` : ''} — rows past that are ungraded, so any arm keeping more is marked (?)`);
     else console.log('  !! sample records no gradedCandidates: cannot tell where the grades stop, so deep arms may be scored against ungraded rows');
-    console.log(`  BEST POSSIBLE cut: keep ${oracle.at} -> P ${oracle.p.toFixed(3)} R ${oracle.r.toFixed(3)} F1 ${oracle.f1.toFixed(3)}  (the inflection a cliff mode should find)`);
+    // A NULL scene (0 relevant, by construction) has no oracle cut: the only right answer is "keep nothing",
+    // which no mode can reach (minVectorEntries floors them), so `kept` below reads as pure contamination.
+    if (oracle.at) console.log(`  BEST POSSIBLE cut: keep ${oracle.at} -> P ${oracle.p.toFixed(3)} R ${oracle.r.toFixed(3)} F1 ${oracle.f1.toFixed(3)}  (the inflection a cliff mode should find)`);
+    else console.log('  NULL scene (0 relevant): no oracle cut exists — every kept row is contamination, smaller kept is better');
     console.log('  mode / param     | kept   P      R      F1   %oracle  missed relevant');
     for (const [label, cfg] of arms) {
         const keep = cutRetrieved(ranked, { maxVectorEntries: CAP, minVectorEntries: 3, ...cfg });
