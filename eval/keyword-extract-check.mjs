@@ -167,7 +167,11 @@ const zipfBook = { entries: { ...suggestBook.entries,
     assert.ok(!terms(15).includes('voracious'), 'a bare adjective unigram is dropped');
     assert.ok(terms(15).includes('voracious reader'), 'the same adjective is free to lead its noun phrase');
     assert.ok(terms(16).includes('dia de los muertos'), 'linker particles are admitted inside a capitalised span');
-    assert.ok(!terms(16).includes('muertos'), 'the full name subsumes its stranded anchor');
+    // The bare anchor is offered alongside the full name (the user picks), but the PARTICLE forms
+    // are not: a leading particle means nothing and, as a substring key, "Muertos" already matches
+    // every occurrence of "de los Muertos".
+    assert.ok(terms(16).includes('muertos'), 'the bare anchor is offered beside the full name');
+    assert.ok(!terms(16).some(t => t !== 'dia de los muertos' && /(^| )(de|los) /.test(' ' + t)), 'no particle-led form is offered');
     assert.strictEqual(rowsOf(16).find(r => r.term === 'dia de los muertos')?.display, 'Dia de los Muertos', 'linker casing survives the un-fold');
     assert.ok(terms(17).includes('duke of thornhaven'), '"of" interior to a proper span does not break the gram');
     assert.strictEqual(rowsOf(17).find(r => r.term === 'duke of thornhaven')?.display, 'Duke of Thornhaven', 'the of-name un-folds with its casing');
@@ -363,7 +367,21 @@ console.log('ok   cohesion subsumption prefers live halves; properness needs mor
     const s = buildKeySuggest(book, { dfCeil: 0.5, maxN: 4, excludeDates: true, excludeShort: true, onlyActive: true, cap: 8 });
     const at = uid => s.perEntry.find(pe => pe.entry.uid === uid)?.newRows.map(r => r.display) ?? [];
     assert.ok(at(0).includes('Rosa de la Cruz'), 'a doubled particle stays inside the name');
-    assert.ok(at(1).includes('ibn Suleiman') && at(2).includes('Baron von Furstenheim'), 'particles survive as leading and interior links');
+    assert.ok(at(2).includes('Baron von Furstenheim'), 'an interior particle stays inside the name');
+    // A LEADING particle gives way to the name it carries: as a substring key "Suleiman" matches
+    // every "ibn Suleiman", and the particle contributes nothing to what the key means.
+    assert.ok(at(1).includes('Suleiman') && !at(1).includes('ibn Suleiman'), 'a leading particle gives way to the bare name');
+    // ...but only when what remains is distinctive. Stripping is a trade, and the frequency table
+    // prices it: "sacres" is absent from it, while "cruz" 3.5, "santos" 3.6 and "pen" 4.4 are
+    // listed — so "de la Cruz" keeps its particle rather than degrading to a common surname.
+    const bare = { entries: { ...fill(8),
+        0: { uid: 0, key: [], content: 'Everyone feared de Sacres. Nobody spoke to de Sacres.' },
+        1: { uid: 1, key: [], content: 'Everyone feared de la Cruz. Nobody spoke to de la Cruz.' },
+    } };
+    const b = buildKeySuggest(bare, { dfCeil: 0.5, maxN: 4, excludeDates: true, excludeShort: true, onlyActive: true, cap: 12 });
+    const bt = uid => b.perEntry.find(pe => pe.entry.uid === uid)?.newRows.map(r => r.term) ?? [];
+    assert.ok(bt(0).includes('sacres') && !bt(0).includes('de sacres'), 'a rare name sheds its particle');
+    assert.ok(bt(1).includes('de la cruz'), 'a common one keeps it — "Cruz" alone is a worse key than "de la Cruz"');
     // Real names, and the reason the vocabulary is broad: each of these fragments into junk under a
     // list that happens to omit its particle.
     assert.ok(at(3).includes('Marine le Pen'), 'French "le" mid-name');
@@ -433,10 +451,10 @@ console.log('ok   phrase budget counts content words; truncations do not outrank
     const s = buildKeySuggest(book, opts);
     const at = uid => s.perEntry.find(pe => pe.entry.uid === uid)?.newRows.map(r => r.term) ?? [];
     assert.ok(at(0).includes('evelyn ashworth') && at(0).includes('ashworth'), 'a phrase and its bare surname are both offered');
-    // "de Sacres" is itself swallowed by the full title, and the bare surname goes with it through
-    // that chain — the particle form is where the swallow is licensed.
-    assert.ok(at(1).includes('vicomtesse de sacres') && !at(1).includes('sacres'), 'a particle-led name swallows the bare form it always carries');
-    assert.ok(at(1).includes('vicomtesse'), 'while the non-particle head keeps its own row');
+    // A leading particle is nearly meaningless and the bare form matches everything the particle
+    // form would, so "Sacres" is what gets offered — never "de Sacres".
+    assert.ok(at(1).includes('sacres') && !at(1).includes('de sacres'), 'the bare surname replaces the particle form');
+    assert.ok(at(1).includes('vicomtesse de sacres') && at(1).includes('vicomtesse'), 'the full title and its head both stand');
 }
 console.log('ok   phrases keep their bare words, except where a particle says otherwise');
 

@@ -795,17 +795,23 @@ export function buildKeySuggest(data, opts) {
         const [lng, srt] = o.n > r.n ? [o, r] : [r, o];
         if (lng.n === srt.n || !` ${lng.term} `.includes(` ${srt.term} `)) return false;
         if (lng.n < 3 || cohesion(lng.term) >= SUBSUME_COHESION) {
-            // A unit swallows contained PHRASES, but a bare word is a different instrument, not a
-            // worse version of the same one: broader, and often the form the chat actually reaches
-            // for. Measured, "Ashworth" fires 149 times against 4 for "Evelyn Ashworth", "Raleigh"
-            // 134 against 0 for "Raleigh atrium" — roughly a third of swallowed unigrams sit in
-            // that band. So both are offered and the choice is the user's.
-            //
-            // A particle-led name is the one case we can rule out structurally: "Sacres" occurs
-            // only ever inside "de Sacres" (54 hits against 54), so the bare form adds nothing.
-            // "Loro Piana" and "Frescobol Carioca" behave identically but have no such tell — both
-            // halves are just name-like — and offering the redundant half is the accepted cost.
-            if (srt.n === 1 && !PARTICLES.has(lng.term.split(' ')[0])) return false;
+            // A LEADING particle carries almost no meaning, and as a substring key the bare form
+            // matches every occurrence of the particle form anyway — "Sacres" catches "de Sacres"
+            // and "Marguerite de Sacres" alike. So the particle form gives way to the bare one,
+            // but ONLY when what remains is a single distinctive word. "de la Cruz" -> "Cruz" is a
+            // bad trade and the frequency table says why: cruz 3.5, santos 3.6, pen 4.4, angeles
+            // 4.5 are all common enough to be listed, while sacres, furstenberg, morcaster, vallon
+            // and gogh are absent from it entirely. Strip a particle off a name, not off a word.
+            const lw = lng.term.split(' ');
+            let k = 0; while (k < lw.length && PARTICLES.has(lw[k])) k++;
+            if (k > 0 && lw.length - k === 1 && srt.term === lw[k] && !ZIPF_EN.has(lw[k])) return r === lng;
+            // Otherwise a unit swallows contained PHRASES, but never a bare word: that word is a
+            // different instrument rather than a worse version of the same one — broader, and often
+            // the form the chat actually reaches for. Measured, "Ashworth" fires 149 times against
+            // 4 for "Evelyn Ashworth", "Raleigh" 134 against 0 for "Raleigh atrium", and roughly a
+            // third of swallowed unigrams sat in that band. Both are offered; the choice is the
+            // user's.
+            if (srt.n === 1) return false;
             return r === srt;
         }
         // Otherwise the long form is an assembly — but only the SHOULDER it decomposes into may
