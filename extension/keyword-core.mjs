@@ -449,8 +449,15 @@ export function buildKeySuggest(data, opts) {
     const NAME_CAP_RATIO = 0.95;
     const isName = w => {
         if (isAcr(w)) return true;
-        const up = capMidCount.get(w) ?? 0;
-        return up > 0 && up / (up + (lowerCount.get(w) ?? 0)) >= NAME_CAP_RATIO;
+        const up = capMidCount.get(w) ?? 0, lo = lowerCount.get(w) ?? 0;
+        if (up > 0 && up / (up + lo) >= NAME_CAP_RATIO) return true;
+        // Weaker evidence for a narrow case: a word NEVER written lowercase, that English has no
+        // word for, is a name even without a mid-sentence capital to prove it. Bullet-led entries
+        // ("- Tenzing arrives at camp") put a name at the start of every line, and "Tenzing" is
+        // seven letters ending in -ing, so the gerund rule ate it outright. Requiring absence from
+        // the frequency table is what keeps ordinary sentence-openers ("Nothing", "Rain") out:
+        // they are common words, and they appear lowercase elsewhere anyway.
+        return lo === 0 && (capsSeen.has(w) || mixedSeen.has(w)) && !ZIPF_EN.has(w);
     };
     // A name is never a function word, however ubiquitous. The distributional test looks for
     // domain stopwords — common across entries, rarely repeated within one — and a place name that

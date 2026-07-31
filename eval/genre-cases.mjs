@@ -109,6 +109,25 @@ export const GENRE_CASES = [
         reject: ["kal'thas's", "kal'thas'", "kal'tha"],   // the fold must not mangle the name
     },
     {
+        // "Tenzing" is seven letters ending in -ing, so the gerund rule reads it as a verb form
+        // unless something proves it is a name. Bullet-led entries never provide a mid-sentence
+        // capital, which is exactly the shape a machine-written book uses — so the name has to
+        // survive on "never written lowercase, and English has no such word".
+        genre: 'any', shape: 'name that looks like a gerund, in bullet-led prose',
+        text: '- Tenzing arrives at camp.\n- Tenzing refuses the third route.\n- Tenzing waits for weather.',
+        expect: ['tenzing'],
+        reject: ['arrives', 'camp'],
+    },
+    {
+        genre: 'any', shape: 'real gerund, and a common sentence-opener',
+        text: [
+            'Rumors kept solidifying around the camp. Sales kept solidifying through winter, and doubt kept solidifying.',
+            'Nothing came of it that week. Nothing changed by spring. Nothing was said of the ridge again.',
+        ],
+        expect: [],
+        reject: ['solidifying', 'nothing'],   // neither may ride in on the name exemption
+    },
+    {
         genre: 'fantasy', shape: 'hyphenated species compound',
         text: 'The stone-singers of the Quartzborn clan gathered. Every stone-singer answered the Quartzborn call that season.',
         expect: ['quartzborn'],
