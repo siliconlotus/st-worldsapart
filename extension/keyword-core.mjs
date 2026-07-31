@@ -794,7 +794,20 @@ export function buildKeySuggest(data, opts) {
         if (o === r || o.f !== r.f) return false;
         const [lng, srt] = o.n > r.n ? [o, r] : [r, o];
         if (lng.n === srt.n || !` ${lng.term} `.includes(` ${srt.term} `)) return false;
-        if (lng.n < 3 || cohesion(lng.term) >= SUBSUME_COHESION) return r === srt;   // a unit: it swallows
+        if (lng.n < 3 || cohesion(lng.term) >= SUBSUME_COHESION) {
+            // A unit swallows contained PHRASES, but a bare word is a different instrument, not a
+            // worse version of the same one: broader, and often the form the chat actually reaches
+            // for. Measured, "Ashworth" fires 149 times against 4 for "Evelyn Ashworth", "Raleigh"
+            // 134 against 0 for "Raleigh atrium" — roughly a third of swallowed unigrams sit in
+            // that band. So both are offered and the choice is the user's.
+            //
+            // A particle-led name is the one case we can rule out structurally: "Sacres" occurs
+            // only ever inside "de Sacres" (54 hits against 54), so the bare form adds nothing.
+            // "Loro Piana" and "Frescobol Carioca" behave identically but have no such tell — both
+            // halves are just name-like — and offering the redundant half is the accepted cost.
+            if (srt.n === 1 && !PARTICLES.has(lng.term.split(' ')[0])) return false;
+            return r === srt;
+        }
         // Otherwise the long form is an assembly — but only the SHOULDER it decomposes into may
         // take its place. Cohesion judged "chairman of the grain commission" against "grain
         // commission"; the row that displaced it was bare "chairman", which merely happened to

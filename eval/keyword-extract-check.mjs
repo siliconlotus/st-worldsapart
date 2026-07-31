@@ -418,6 +418,28 @@ console.log('ok   display takes the most-used capitalisation, counted book-wide'
     assert.ok(t1.includes('chairman of the grain commission'), 'an equal-frequency non-shoulder does not displace the whole title');
 }
 console.log('ok   phrase budget counts content words; truncations do not outrank whole names');
+// A unit phrase swallows contained PHRASES but not a bare word — the word is a broader instrument
+// and often the form the chat actually uses ("Ashworth" 149 chat hits against 4 for "Evelyn
+// Ashworth"), so both are offered. A particle-led name is the exception: "Sacres" occurs only ever
+// inside "de Sacres", and the particle is the structural tell.
+{
+    const filler = n => Object.fromEntries([...Array(n)].map((_, i) => [20 + i,
+        { uid: 20 + i, key: [], content: 'Rain fell on the street tonight, a dull ordinary evening for everyone.' }]));
+    const opts = { dfCeil: 0.5, maxN: 4, excludeDates: true, excludeShort: true, onlyActive: true, cap: 12 };
+    const book = { entries: { ...filler(9),
+        0: { uid: 0, key: [], content: 'The envoy Evelyn Ashworth spoke first. Nobody interrupted Evelyn Ashworth.' },
+        1: { uid: 1, key: [], content: 'They bowed to Vicomtesse de Sacres. The room watched Vicomtesse de Sacres depart.' },
+    } };
+    const s = buildKeySuggest(book, opts);
+    const at = uid => s.perEntry.find(pe => pe.entry.uid === uid)?.newRows.map(r => r.term) ?? [];
+    assert.ok(at(0).includes('evelyn ashworth') && at(0).includes('ashworth'), 'a phrase and its bare surname are both offered');
+    // "de Sacres" is itself swallowed by the full title, and the bare surname goes with it through
+    // that chain — the particle form is where the swallow is licensed.
+    assert.ok(at(1).includes('vicomtesse de sacres') && !at(1).includes('sacres'), 'a particle-led name swallows the bare form it always carries');
+    assert.ok(at(1).includes('vicomtesse'), 'while the non-particle head keeps its own row');
+}
+console.log('ok   phrases keep their bare words, except where a particle says otherwise');
+
 
 
 
