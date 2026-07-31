@@ -28,12 +28,16 @@
 
 import path from 'node:path';
 import fs from 'node:fs';
+import readline from 'node:readline';
 import { fileURLToPath } from 'node:url';
 import sanitize from 'sanitize-filename';
 import { LocalIndex } from 'vectra';
 import { getOllamaVector } from '../../src/vectors/ollama-vectors.js';
-import { scoreCollection, selectTopK } from './scoring.mjs';
+import { scoreCollection, poolEntries, selectTopK } from './scoring.mjs';
 import { DEFAULT_K1, DEFAULT_B, buildLexical } from './lexical.mjs';
+// Same matcher and text fold the extension uses for keyword hits — shared, not copied, so a chat scan and a
+// live keyword match can never disagree about what a key matches.
+import { buildAutomaton, scanAutomaton, fold } from './automaton.mjs';
 import { norm, corpusMean } from './vector.mjs';
 import { pluginFingerprint, PLUGIN_FILES } from './fingerprint.mjs';
 
@@ -163,6 +167,7 @@ export async function init(router) {
                 termWeights: request.body.termWeights && typeof request.body.termWeights === 'object' ? request.body.termWeights : null,
                 stopwordDf: Number(request.body.stopwordDf) || 0,
                 commonWordWeight: Number.isFinite(Number(request.body.commonWordWeight)) ? Number(request.body.commonWordWeight) : 1,
+                uncenteredGate: Number(request.body.uncenteredGate) || 0,
             };
 
             // The disk loads and the embed round-trip are independent — run them concurrently.
@@ -186,11 +191,72 @@ export async function init(router) {
                 results.push(...scoreCollection(String(collectionId), loaded, queryVector, opts));
             }
 
-            // Union the top-K of each ranking, grouped by collection, so a chunk that only
-            // one signal likes still reaches the client and can win on fusion.
-            return response.send(selectTopK(results, topK));
+            // Pool each entry's best chunk FIRST, then union the top-K of each ranking, so a record that
+            // only one signal likes still reaches the client and can win on fusion. Pooling before the cut
+            // is what makes topK a count of entries and the per-entry maxima exact — see poolEntries.
+            return response.send(selectTopK(poolEntries(results), topK));
         } catch (error) {
             console.error('[Worlds Apart] query failed:', error);
+            return response.status(500).send({ error: String(error?.message ?? error) });
+        }
+    });
+
+    /**
+     * Scan chat histories for a set of literal keys, returning only counts.
+     *
+     * WHY SERVER-SIDE. The client can do this itself by fetching each chat, and for a localhost install that
+     * is fine — but the chats are the largest thing SillyTavern owns (measured: 190 chats, 1.2GB, individual
+     * files 12-17MB) and a served instance would pull all of it over the network to answer a question whose
+     * answer is a few hundred integers. The keys go up, the counts come back, the histories never move.
+     *
+     * Streams line by line: a chat is JSONL, so this never holds a whole history in memory, and one
+     * Aho-Corasick pass per message keeps the cost O(text) regardless of how many keys are checked.
+     *
+     * Body: { keys: string[], chats: [{ dir, file }] }  — dir is the character directory (avatar minus .png)
+     * Reply: { counts: { key: n }, messages, scanned, missing }
+     */
+    router.post('/scan-chats', async (request, response) => {
+        try {
+            const keys = Array.isArray(request.body?.keys) ? request.body.keys.map(String).filter(Boolean) : [];
+            const chats = Array.isArray(request.body?.chats) ? request.body.chats : [];
+            if (!keys.length || !chats.length) {
+                return response.status(400).send({ error: 'keys and chats are required' });
+            }
+
+            // Deduped by FOLDED form: two keys can fold together, and the automaton indexes the list it is given.
+            const folded = [...new Set(keys.map(fold))];
+            const idxOf = new Map(folded.map((f, i) => [f, i]));
+            const automaton = buildAutomaton(folded);
+            const totals = new Map();
+            let messages = 0, scanned = 0, missing = 0;
+
+            for (const entry of chats) {
+                const dir = sanitize(String(entry?.dir ?? ''));
+                const file = sanitize(String(entry?.file ?? ''));
+                if (!dir || !file) { missing++; continue; }
+                const full = path.join(request.user.directories.chats, dir, file.endsWith('.jsonl') ? file : `${file}.jsonl`);
+                if (!fs.existsSync(full)) { missing++; continue; }
+                scanned++;
+                await new Promise(resolve => {
+                    const rl = readline.createInterface({ input: fs.createReadStream(full), crlfDelay: Infinity });
+                    rl.on('line', line => {
+                        if (!line) return;
+                        let text = '';
+                        try { text = String(JSON.parse(line)?.mes ?? ''); } catch { return; }   // line 0 is metadata
+                        if (!text) return;
+                        messages++;
+                        for (const [i, n] of scanAutomaton(automaton, fold(text))) totals.set(i, (totals.get(i) ?? 0) + n);
+                    });
+                    rl.on('close', resolve);
+                    rl.on('error', resolve);   // an unreadable chat is skipped, not fatal
+                });
+            }
+
+            const counts = {};
+            for (const k of keys) counts[k] = totals.get(idxOf.get(fold(k))) ?? 0;
+            return response.send({ counts, messages, scanned, missing });
+        } catch (error) {
+            console.error('Worlds Apart: /scan-chats failed', error);
             return response.status(500).send({ error: String(error?.message ?? error) });
         }
     });

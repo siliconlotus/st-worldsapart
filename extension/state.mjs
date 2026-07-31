@@ -18,7 +18,7 @@ export const defaultSettings = {
     scoreVectorKeys: false,
     /** Characters per chunk. Entries are chunked for MATCHING only; the whole entry is still inserted. */
     chunkSize: 800,
-    /** 'paragraph' keeps semantic boundaries; 'length' uses ST's splitRecursive (fills to chunkSize). */
+    /** 'paragraph' keeps semantic boundaries; 'length' fills to chunkSize (chunking.mjs splitRecursive). */
     chunkMode: 'paragraph',
     /**
      * 'messages' embeds raw chat text; 'summary' condenses it first.
@@ -65,8 +65,60 @@ export const defaultSettings = {
     summaryBypassPreset: true,
     /** Paragraphs shorter than this are joined with the next one, so stray lines don't become chunks. */
     minChunkSize: 120,
-    /** Minimum cosine similarity for a chunk to count. */
-    scoreThreshold: 0.6,
+    /**
+     * Minimum cosine similarity for a chunk to count.
+     *
+     * 0.1, NOT 0.6, BECAUSE meanCentered IS ON BY DEFAULT. Centering subtracts the direction every chunk in a
+     * single-story corpus shares, which collapses the cosine range: measured across three real books, centered
+     * scores top out at 0.25-0.36 with a p90 of 0.086-0.110, while the same queries uncentered reach 0.62-0.72
+     * with a p90 of 0.54-0.61. The old 0.6 was calibrated against uncentered scores, where it sat near the p90
+     * and meant "roughly the top decile of chunks". Under centering it is above the entire range, so it
+     * admitted ZERO chunks on all three books and every retrieved chunk arrived via the bm25 clause instead.
+     * 0.1 is the centered p90 — the same selectivity 0.6 was chosen for.
+     *
+     * Note what this gates, which is narrower than it looks (see plugin/scoring.mjs scoreCollection): the
+     * index only ever contains chunks from VECTORIZED entries, so this is the cosine floor for those. Entries
+     * without 🔗 are not in the collection at all and reach the ranking through keyword scoring instead. The
+     * one surprise is that a vectorized chunk can also be admitted by `bm25 > 0` on its own text, which
+     * bypasses this floor — with long queries that clause admits 80-95% of chunks, so this setting currently
+     * only ever WIDENS the candidate set and cannot narrow it.
+     *
+     * THAT BYPASS IS LOAD-BEARING; DO NOT "FIX" IT INTO A STRICT GATE. It reads like sloppiness — the cosine
+     * floor ought to decide for the entries it is named after — and it was measured (eval/paired-arms.mjs
+     * `admit=cosine`, three scenes):
+     *
+     *   strict cosine gate   sommers fell 3/3 -> 1/3 on critical (grade-5) entries in the top 10, and
+     *                        time-whore lost a relevant entry from the candidate set entirely (recall 0.88).
+     *                        Worse at every threshold tested down to 0, so it is not a calibration problem.
+     *   strict AND           byte-identical to the above; there is essentially no chunk with a clearing
+     *                        cosine and zero lexical overlap, so the extra conjunct removes nothing.
+     *
+     * The reason is mean-centering. Centered cosine means "more like the query than the average chunk is", so
+     * a chunk can sit BELOW average in embedding space while containing the query's exact terms — and those
+     * chunks carry real relevance. Only the lexical clause can admit them, and no cosine floor can. Consistent
+     * with the vector signal measuring weakest of the three on these books (cosine-alone ranking missed all
+     * three of sommers' grade-5 entries). `admit=cosine` is kept as a standing arm so a future tightening
+     * trips a regression instead of shipping.
+     */
+    scoreThreshold: 0.1,
+    /**
+     * Wrong-book failsafe: a chunk must also reach this RAW (uncentered) cosine to be admitted at all.
+     * 0 = off. Plugin path only — the stock-ST fallback never sees it.
+     *
+     * This is a different job from scoreThreshold, which gates the CENTERED score and so can only rank
+     * within a book — centering subtracts the book's shared direction, which is exactly the information
+     * "is this even the right book?" needs. Raw cosine keeps it: measured over 4 graded scenes and 3
+     * deliberately unrelated books (bge-m3), every relevant entry scored >= 0.538 raw while wrong-genre
+     * books topped out at 0.47-0.54. At 0.5 the gate cost NOTHING on any real scene (identical nDCG,
+     * identical entries kept) and cut wrong-book contamination from 10-19 entries to 0-2 in 7 of 9
+     * query x book pairings.
+     *
+     * Two measured limits: a same-genre wrong book (same author, same idiom) clears any raw-cosine gate —
+     * only lexical mismatch can catch those, and this knob does not try; and 0.5 is calibrated on bge-m3,
+     * whose relevant-vs-wrong margin here was ~0.04, so a different embedder may need a different value
+     * (or 0 until measured).
+     */
+    uncenteredGate: 0.5,
     /**
      * Use the Worlds Apart server plugin's mean-centered search when it is loaded.
      * Centering removes the direction every chunk in a single-story corpus shares,
@@ -105,8 +157,22 @@ export const defaultSettings = {
      *               across queries where a raw gap value is not, and it is window-independent
      *               where the mean is not — so it finds a real cliff wherever it sits.
      * Both cliff modes cut at the LAST qualifying gap and are floored/capped the same way.
+     *
+     * 'elbow' ships because it measures better and it is the ONE tuning result that held across every
+     * population and metric the graded harness was run under: over 3 graded scenes it reached 95% of the best
+     * possible cut (worst case 92%) against 83%/72% for the old default of count max=10. See selection.mjs
+     * cutRetrieved for the table. It is also insensitive between sensitivity 1.2 and 2.0, which is why the
+     * switch is safe to make on 3 scenes when the boost/gazetteer knobs are not.
+     *
+     * Measured failure mode, WEAK scenes (isekai-time-whore msg3728: 4 relevant of 106 candidates, none
+     * grade-5): when relevance is sparse the score surface is noise and a large early gap reads as a cliff —
+     * every sensitivity 1.2-2.5 cut at 8 and missed 3 of the 4 relevant entries (31% of oracle F1) where
+     * count max=10 reached 80%. Elbow still wins 3 of the 4 graded scenes, and it does NOT collapse on a
+     * wrong book either (kept 10-19 junk entries across 10 null cells — see uncenteredGate for the failsafe
+     * that actually handles those), so the honest claim is narrower than it once was: the elbow adapts
+     * within a scene that HAS a relevance cliff, and does nothing useful when there isn't one.
      */
-    vectorCutoff: 'count',
+    vectorCutoff: 'elbow',
     /** Cliff modes only: never cut below this many. Guards against the rank 1-2 gap. */
     minVectorEntries: 3,
     /**
@@ -124,8 +190,11 @@ export const defaultSettings = {
     /**
      * Filter raw-text queries down to entity-ish terms before lexical scoring:
      * keep capitalised tokens and anything in the lorebook's own vocabulary, drop
-     * the rest. Benchmarked on real chat against a hand-judged gold set — mean
-     * target rank 11.2 vs 21.6-28.2 unfiltered. Ignored in summary mode.
+     * the rest. Re-measured over three graded scenes: mean nDCG@5 0.896 filtered vs
+     * 0.808 unfiltered — a real win, but far smaller than the old note claimed, and it
+     * lands on top-of-list quality rather than mean target rank. See ranking.mjs
+     * buildTermWeights for the per-scene table and which old figures did not reproduce.
+     * Ignored in summary mode.
      */
     entityFilter: true,
     /** Weight multiplier for capitalised query tokens under the entity filter. */
@@ -143,8 +212,13 @@ export const defaultSettings = {
      * How many recent chat messages WA looks at — one depth shared by both the retrieval
      * query (the text embedded / BM25'd, or summarized in summary mode) and the keyword
      * scan window. A per-entry scanDepth still overrides the keyword window (as in core).
+     *
+     * 10 sits mid-plateau on the measured dose-response (n=80 graded scenes, paired vs each
+     * scene's own depth-10 capture): nDCG@10 climbs monotonically 1→10 (depth 3 −0.098,
+     * p=0.001; depth 5 −0.053, p=0.020), is flat 10–15, and dips slightly at 20 (−0.009,
+     * p=0.044) — over-widening dilutes the query. Cost is query length (~6k chars at 10).
      */
-    messageDepth: 3,
+    messageDepth: 10,
     /**
      * How surviving entries are laid out in the prompt:
      * 'authored' | 'authored-inverse' | 'best-first' | 'best-last'.
@@ -189,6 +263,21 @@ export const defaultSettings = {
      * diverge, so BM25 deserves more weight there.
      */
     lexicalWeight: 1,
+    /**
+     * Weight for BM25-over-KEYS in the layout fusion, separate from lexicalWeight (BM25-over-chunk-text).
+     *
+     * 1 is the measured optimum of the dose ladder (n=80 graded scenes, paired, vs a 1.5 capture
+     * baseline): 1 helps on 49/17 scenes (+0.016 nDCG@10, Holm p=0.000), 2 hurts (−0.015, Holm
+     * 0.014), 0 is flat-negative — so keys deserve less weight than prose, but not zero. Consistent
+     * in sign across book types: large gains on books with auto-generated keys, mild on hand-curated,
+     * exact no-op on keyword-only classical books. null = follow lexicalWeight (the pre-split
+     * behavior); pinning a number decouples the two so raising lexicalWeight no longer silently
+     * drags the keys weight past its optimum.
+     *
+     * Only reaches the layout ranking. fuseRetrieval (what the cutoff cuts) scores vector + text and never
+     * sees keys at all.
+     */
+    keywordWeight: 1,
     /**
      * Fold each entry's authored Order into the fused score as an extra RRF rank (higher order =
      * higher priority, matching ST where order is budgetPriority). Off by default; for books that
@@ -292,12 +381,20 @@ export function ensureSettings() {
  * the debug commands toggle verboseRun/dryRunInProgress; the panel + debug read them back.
  */
 export const runState = {
-    lastScores: new Map(),        // vector scores from the last retrieval, keyed `${world}.${uid}`
+    // Keyed `${world}.${uid}` — ST CORE'S format, which rankActivated receives and looks up here. Not a
+    // candidate for the US separator; see the note in worldsapart.js syncWorld.
+    lastScores: new Map(),        // vector scores from the last retrieval
     lastTextScores: new Map(),    // BM25-over-text scores, same keys
     lastLayout: [],               // final layout of the last scan, for /wa-dry
+    lastQuery: '',                // last retrieval query text, bundled by /wa-grade
+    lastQueryChat: [],            // the messages that query was joined from, for offline depth ablation
+    lastScanText: '',             // last global-depth keyword scan window, bundled by /wa-grade
+    gradeCutoff: null,            // /wa-grade widens the cut for its run; null = use the real settings
+    lastCutKept: null,            // how many the cutoff kept on the last retrieval, recorded by /wa-grade
+    lastCandidates: [],           // selection-candidate rows from the last debug-class run, for /wa-grade
+    lastCandidateEntries: [],     // the WI entries behind those rows, aligned by index (for "view text")
     lastDropped: [],              // entries cut by budget
     lastSkipped: [],              // per-entry budget rejections + the cap that caused each
-    lastQueryText: '',            // last retrieval query, so /wa-debug can re-probe it
     attachedWorlds: new Set(),    // books ST currently has active for this chat
     verboseRun: false,            // true during a /wa-debug run (noisy per-stage logging)
     dryRunInProgress: false,      // true during either slash-command run (quiets live logging)

@@ -8,6 +8,7 @@
  * order — adding or reordering a plugin file is one edit here, nowhere else. */
 export const PLUGIN_FILES = [
     ['scoring.mjs', 'scoring.mjs'],
+    ['automaton.mjs', 'automaton.mjs'],
     ['vector.mjs', 'vector.mjs'],
     ['lexical.mjs', 'lexical.mjs'],
     ['commonwords.js', 'commonwords.js'],

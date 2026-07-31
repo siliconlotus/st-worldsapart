@@ -18,13 +18,13 @@ const pruneBook = { entries: {
     3: { uid: 3, key: [], content: 'Rain on the home, an ordinary night.', comment: 'Four' },
 } };
 const pruneOpts = { scanKeyword: true, scanVectorized: true, scanConstant: true, includeInactive: false,
-    pruneDead: true, pruneCommon: true, pruneShort: true, ignoreProper: false, stickySkipCommon: true,
+    pruneUnattested: true, pruneCommon: true, pruneShort: true, ignoreProper: false, stickySkipCommon: true,
     tooCommon: KEY_TOO_COMMON, minLength: KEY_MIN_LENGTH };
 const ps = buildKeyPruneScan(pruneBook, pruneOpts, new Set());
 assert.strictEqual(ps.entries.length, 4, 'all keyword entries scanned');
 const flagsOf = uid => Object.fromEntries(ps.classifyEntry(pruneBook.entries[uid]).map(r => [r.key, r.flag]));
 const f0 = flagsOf(0);
-assert.strictEqual(f0.zzzznope, 'dead', 'a key in no entry text is dead');
+assert.strictEqual(f0.zzzznope, 'unattested', 'a key in no entry text is unattested');
 assert.strictEqual(f0.home, 'too common', 'a common English word is flagged too-common');
 assert.strictEqual(f0.aX, 'short', 'a sub-minLength key is flagged short');
 assert.ok(!('Quillfeather' in f0), 'a real findable name is not flagged');
@@ -73,7 +73,7 @@ const sharedBook = { entries: Object.fromEntries([...Array(12)].map((_, i) => [i
     key: i === 0 ? ['astronaut', 'moonwalk'] : ['astronaut'],
     content: i === 0 ? 'The astronaut walked. A moonwalk followed. Astronaut again.' : 'Unrelated prose about weather and bread.',
 }])) };
-const sharedOpts = { scanKeyword: true, scanVectorized: true, scanConstant: true, includeInactive: true, pruneDead: false, pruneCommon: true, pruneShort: false, pruneShared: true, ignoreProper: false, stickySkipCommon: true, tooCommon: KEY_TOO_COMMON, minLength: KEY_MIN_LENGTH, sharedKeys: 0.75 };
+const sharedOpts = { scanKeyword: true, scanVectorized: true, scanConstant: true, includeInactive: true, pruneUnattested: false, pruneCommon: true, pruneShort: false, pruneShared: true, ignoreProper: false, stickySkipCommon: true, tooCommon: KEY_TOO_COMMON, minLength: KEY_MIN_LENGTH, sharedKeys: 0.75 };
 {
     const s = buildKeyPruneScan(sharedBook, sharedOpts, new Set());
     const row = s.classifyEntry(sharedBook.entries[5]).find(r => r.key === 'astronaut');
@@ -108,7 +108,7 @@ const scopeBook = { entries: {
     2: { uid: 2, key: ['zzzdead'], content: 'nothing' },
     3: { uid: 3, key: ['zzzdead'], content: 'nothing', disable: true },
 } };
-const scopeOpts = { scanKeyword: true, scanVectorized: true, scanConstant: true, includeInactive: true, pruneDead: true, pruneCommon: true, pruneShort: true, ignoreProper: false, stickySkipCommon: true, tooCommon: 0.5, minLength: 4 };
+const scopeOpts = { scanKeyword: true, scanVectorized: true, scanConstant: true, includeInactive: true, pruneUnattested: true, pruneCommon: true, pruneShort: true, ignoreProper: false, stickySkipCommon: true, tooCommon: 0.5, minLength: 4 };
 const scoped = (over) => {
     const s = buildKeyPruneScan(scopeBook, { ...scopeOpts, ...over }, new Set());
     return Object.values(scopeBook.entries).filter(e => s.classifyEntry(e).length).map(e => e.uid);
@@ -121,3 +121,45 @@ assert.deepStrictEqual(scoped({ scanKeyword: false }), [0, 1], 'keyword entries 
 assert.deepStrictEqual(scoped({ includeInactive: false }), [0, 1, 2], 'disabled drop out when inactive excluded');
 
 console.log('keyword-extract-check: ok');
+
+// --- looksLikeFragment: the clause-fragment flag -------------------------------------------------
+// Machine-written keys are lifted verbatim from an entry's own prose, so they sit in that entry's text
+// (df 1, not "dead"), appear nowhere else (not too-common, not shared) and are long (not short) — every
+// other category misses them. What is decidable from the key alone is COHERENCE, not specificity.
+import { looksLikeFragment, FUNCTION_WORDS } from '../extension/keyword-core.mjs';
+
+// Fires: real auto-generated keys that name nothing.
+for (const k of ['naked for morale', 'try stuff and see', 'web not spoke wheel', 'the soft stuff',
+    'claiming the first wave', 'the morning is mine', 'apology to his son', 'stop parenting me',
+    'listening at night', 'queer at forty-seven']) {
+    assert.equal(looksLikeFragment(k), true, `fragment: "${k}"`);
+}
+
+// SPARED, and these are the ones that matter — a key can be hyper-specific and still legitimate,
+// because it NAMES something concrete and might recur. Specificity is not the defect; incoherence is.
+for (const k of ['dick flag towels', 'epsom salts', 'empty buildings', 'naked house flag', 'Pride flag',
+    'occupying space', 'waterproof mattress pad', 'No Contact Order', 'Randy Miller']) {
+    assert.equal(looksLikeFragment(k), false, `not a fragment: "${k}"`);
+}
+
+// NON-ENGLISH NAMED ENTITIES MUST SURVIVE. The test is English function words specifically, so a Spanish
+// or French determiner inside a proper name does not trip it. This is the case that would break first if
+// anyone "improved" the predicate by adding a generic stopword list.
+for (const k of ['Dia de los Muertos', 'Cirque du Soleil', 'Coup de Grace']) {
+    assert.equal(looksLikeFragment(k), false, `named entity spared: "${k}"`);
+}
+
+// A single word is never a fragment — it is a name, or the English-common flag catches it.
+for (const k of ['the', 'and', 'Marjorie', 'Grindr']) {
+    assert.equal(looksLikeFragment(k), false, `single word: "${k}"`);
+}
+assert.equal(looksLikeFragment(''), false, 'empty key');
+assert.equal(looksLikeFragment(null), false, 'null key');
+assert.equal(looksLikeFragment('   '), false, 'whitespace key');
+// Punctuation and possessives must not fabricate a second word.
+assert.equal(looksLikeFragment("Kyle's heat"), false, 'possessive is not a function word');
+assert.equal(looksLikeFragment('Sommers, Teddy'), false, 'comma-separated name');
+// The suggester and the audit share one list, so they cannot disagree about what junk looks like.
+assert.equal(FUNCTION_WORDS.has('and') && FUNCTION_WORDS.has('the') && FUNCTION_WORDS.has('not'), true, 'FUNCTION_WORDS is populated');
+assert.equal(FUNCTION_WORDS.has('de') || FUNCTION_WORDS.has('los'), false, 'no non-English determiners in the list');
+console.log('ok   looksLikeFragment: fires on clause fragments, spares concrete names and non-English entities');

@@ -15,6 +15,11 @@
 // countKey() in ranking.mjs routes `?` keys here.
 
 import { escapeRegex, isRegexKey } from './ranking.mjs';
+// The literal matcher and its text fold live under plugin/ so the server can use them too — one copy, or
+// the browser and the server would silently disagree about what a key matches. Re-exported because
+// ranking.mjs, keyword-tools.mjs and studio.mjs all import them from here.
+import { buildAutomaton, scanAutomaton, fold, normalizeApostrophes } from '../plugin/automaton.mjs';
+export { buildAutomaton, scanAutomaton, fold, normalizeApostrophes };
 
 const OPS = {
     '&&': 'AND', '&': 'AND', '+': 'AND', 'AND': 'AND',
@@ -117,66 +122,7 @@ export function parse(tokens) {
     return parseOr();
 }
 
-/**
- * Pass 1 — Aho-Corasick automaton over the case-folded literals of every registered term.
- * One scan of the text yields the set of terms present as substrings; per-key evaluation
- * then never re-walks the text (except to verify =/^ flags on candidate terms).
- * @param {string[]} patterns Case-folded literals
- * @returns {{next: Map[], fail: number[], out: Set[]}}
- */
-export function buildAutomaton(patterns) {
-    const next = [new Map()], fail = [0], out = [new Set()];
-    for (let p = 0; p < patterns.length; p++) {
-        let node = 0;
-        for (let i = 0; i < patterns[p].length; i++) {
-            const ch = patterns[p][i];
-            if (!next[node].has(ch)) {
-                next[node].set(ch, next.length);
-                next.push(new Map()); fail.push(0); out.push(new Set());
-            }
-            node = next[node].get(ch);
-        }
-        out[node].add(p);
-    }
-    // Failure links, breadth-first: fail[v] is the longest proper suffix of v's path that is
-    // also a path in the trie; outputs propagate along it so nested patterns still report.
-    const queue = [...next[0].values()];
-    while (queue.length) {
-        const u = queue.shift();
-        for (const [ch, v] of next[u]) {
-            queue.push(v);
-            let f = fail[u];
-            while (f !== 0 && !next[f].has(ch)) f = fail[f];
-            fail[v] = next[f].get(ch) ?? 0;
-            for (const o of out[fail[v]]) out[v].add(o);
-        }
-    }
-    return { next, fail, out, len: patterns.map(p => p.length) };
-}
 
-/**
- * Scans case-folded text through the automaton, counting NON-overlapping occurrences per
- * pattern (greedy left-to-right) — exact parity with countKey's indexOf loop, where "aa"
- * in "aaa" counts once.
- * @returns {Map<number, number>} pattern index -> occurrence count (present patterns only)
- */
-export function scanAutomaton(aut, foldedText) {
-    const counts = new Map();
-    const lastEnd = new Map();
-    let node = 0;
-    for (let i = 0; i < foldedText.length; i++) {
-        const ch = foldedText[i];
-        while (node !== 0 && !aut.next[node].has(ch)) node = aut.fail[node];
-        node = aut.next[node].get(ch) ?? 0;
-        for (const p of aut.out[node]) {
-            if (i - aut.len[p] + 1 > (lastEnd.get(p) ?? -1)) {
-                counts.set(p, (counts.get(p) ?? 0) + 1);
-                lastEnd.set(p, i);
-            }
-        }
-    }
-    return counts;
-}
 
 /**
  * One matching context: the term registry (folded literal -> pattern index), the automaton built from
@@ -212,7 +158,7 @@ function internLiteral(scope, folded) {
 function registerTerms(scope, node) {
     if (!node) return;
     if (node.type === 'TERM') {
-        node.acIndex = internLiteral(scope, node.value.toLowerCase());
+        node.acIndex = internLiteral(scope, fold(node.value));
     } else if (node.type === 'NOT') {
         registerTerms(scope, node.operand);
     } else {
@@ -235,7 +181,7 @@ function ensureScan(scope, text) {
     }
     let counts = scope.scans.get(text);
     if (counts === undefined) {
-        counts = scanAutomaton(scope.automaton, text.toLowerCase());
+        counts = scanAutomaton(scope.automaton, fold(text));
         scope.scans.set(text, counts);
         if (scope.scans.size > SCAN_CACHE_MAX) scope.scans.delete(scope.scans.keys().next().value);
     }
@@ -327,7 +273,7 @@ export function registerKeys(rawKeys, scope = defaultScope) {
         if (raw.startsWith('?')) {
             ensureAst(scope, raw);
         } else {
-            internLiteral(scope, raw.toLowerCase());
+            internLiteral(scope, fold(raw));
         }
     }
 }
@@ -358,7 +304,7 @@ export function cachedCount(raw, text, scope = defaultScope) {
     if (scope.dirty || scope.automaton === null) return undefined;
     const counts = scope.scans.get(text);
     if (counts === undefined) return undefined;
-    const idx = scope.termIndex.get(raw.toLowerCase());
+    const idx = scope.termIndex.get(fold(raw));
     if (idx === undefined) return undefined;
     return counts.get(idx) ?? 0;
 }

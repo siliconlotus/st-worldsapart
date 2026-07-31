@@ -8,7 +8,7 @@
 // flag-injecting wrapper), the sort vocabulary and tier definitions in sort.mjs, and the shared widgets
 // (context menu, sort control, stylesheet) in ui-widgets.mjs — so the Studio and the wand-menu reports
 // can never drift on what counts as a weak key or how entries order.
-import { saveSettingsDebounced } from '../../../../../script.js';
+import { saveSettingsDebounced, getRequestHeaders, characters } from '../../../../../script.js';
 import { extension_settings, getContext } from '../../../../extensions.js';
 import { loadWorldInfo, saveWorldInfo, reloadEditor, duplicateWorldInfoEntry, deleteWorldInfoEntry, getFreeWorldEntryUid, deleteWIOriginalDataValue, deleteWorldInfo, updateWorldInfoList, world_names, world_info_match_whole_words, world_info_case_sensitive, selected_world_info, world_info, METADATA_KEY } from '../../../../world-info.js';
 import { power_user } from '../../../../power-user.js';
@@ -19,6 +19,7 @@ import { ensureStudioStyle, makeSortControl, showCtxMenu, showEntryText, wiGlyph
 import { SORT_FNS, normPresentation, reconcileTiers, tierRank, wiTitleOf } from './sort.mjs';
 import { buildKeyPruneScan, llmKeyCandidates, STUDIO_PRUNE_OPTS, STUDIO_SUGGEST_OPTS } from './keyword-tools.mjs';
 import { buildKeySuggest, classifyLlmCand } from './keyword-core.mjs';
+import { buildAutomaton, scanAutomaton, fold } from './smartkeys.mjs';
 
 const WA_GREEN = '#7bbf6a';   // "no prune" — a keyword the scan doesn't flag
 
@@ -110,6 +111,18 @@ export async function lorebookStudio(preferredBook = null) {
     const cleanupChecks = new Map();   // rowId -> bool (defaults from scan.defChecked — mostly ticked)
     const suggestChecks = new Map();   // rowId -> bool (defaults false — nothing is added unasked)
     let cleanupUndo = null;            // [{uid, key}] from the last prune, restorable until the next one
+    // CHAT EVIDENCE for the "not in entry text" flag. That flag measures the book's own prose, but keys fire
+    // against the CHAT — which is the whole ambiguity: on a hand-authored book ~90% of them are deliberate
+    // aliases ("Toriel's House" for "Dreemurr Residence"), on a machine-written one most are stale scene
+    // detail. One Aho-Corasick pass settles it per key, so the cost is O(chat) and independent of key count
+    // (measured 254ms for 497 keys over 5473 messages; getContext().chat is already in memory).
+    //
+    // Opt-in, because it is evidence the user asked for rather than a verdict the tool imposes — and because
+    // a key with 0 hits still is not proven useless, only unproven. Survives a rescan; cleared on book change.
+    let cleanupChatHits = null;        // Map<key, count>, null until the scan is run
+    let cleanupChatMsgs = 0;
+    let cleanupChatName = '';          // WHICH chat produced those counts — see runChatScan
+    const SEV_GREEN = '#7bbf6a';       // same green keyword-core uses for a harmless flag
     const rowId = (uid, term) => `${uid}${term}`;
     // The active term tab's list repaint, or null in the Explorer. Whitelist edits reach the list from
     // three places (the term right-click menu, the tray's per-key ✕, Clear whitelist), and the Explorer's
@@ -131,6 +144,9 @@ export async function lorebookStudio(preferredBook = null) {
     const save = () => { dirty = true; saveWorldInfo(selected, data, true); };
     const getSugg = uid => { let x = sugg.get(uid); if (!x) sugg.set(uid, x = { tfidf: [], llm: [] }); return x; };
     const rebuildScan = () => { scan = buildKeyPruneScan(data, studioOpts, ignoreSet); };
+    // Chat counts belong to a (book, chat) PAIR. Switching either one makes them describe something else,
+    // so they are dropped rather than left on screen attached to the wrong book.
+    const clearChatScan = () => { cleanupChatHits = null; cleanupChatMsgs = 0; cleanupChatName = ''; };
     // Repaint only the entries whose key list includes one of `keys`. classifyEntry reads the live
     // ignoreSet and the df table is ignore-independent, so whitelisting needs no rescan — just recolour
     // the affected rows (chip colour + collapsed badge reflect the new ignore state).
@@ -210,7 +226,7 @@ export async function lorebookStudio(preferredBook = null) {
                 check(studioOpts, 'scanVectorized', 'Scan Vectorized (🔗)'),
                 check(studioOpts, 'scanConstant', 'Scan Constant (🔵)'),
                 check(studioOpts, 'includeInactive', 'Include inactive entries'),
-                check(studioOpts, 'pruneDead', 'Flag dead keys (in no entry text)'),
+                check(studioOpts, 'pruneUnattested', 'Flag keys not in entry text (aliases and typos)'),
                 check(studioOpts, 'pruneCommon', 'Flag frequent keys'),
                 num(studioOpts, 'tooCommon', '↳ frequent: in >', '% of entry TEXT', { min: 1, max: 100, scale: 100 }),
                 check(studioOpts, 'pruneShared', 'Flag over-shared keys'),
@@ -736,17 +752,22 @@ export async function lorebookStudio(preferredBook = null) {
         meta.title = `trigger probability ${e.useProbability !== false ? prob : 100}% · delay ${delay} · cooldown ${cooldown} (messages)`;
         h.append(selBox, chev, mode, title, pencil, meta);
         // Collapsed-line badge: how many keys the last scan flagged, so problems show without expanding.
-        // Tinted by the most severe flag for glance-triage; dead-only stays neutral, since "dead" is
-        // low-signal (plenty of good keys read as dead for corpus reasons).
-        if (flagged && flagged.size) {
+        // Tinted by the most severe flag for glance-triage; unattested-only stays neutral, since it is
+        // low-signal (on a hand-authored book ~90% of those are deliberate aliases).
+        // COUNTS PROBLEMS, NOT WARNINGS. Yellow is the 0.75x band — "probably not harming, your call" — and
+        // green shorts cannot collide at all, so neither belongs in a number the eye reads as a defect count.
+        // They still appear on expansion with their colour; only the headline excludes them.
+        const RANK = { '#e06c6c': 3, '#d9b74a': 2, '#7bbf6a': 1 };   // red > yellow > green; '' (dead) = 0
+        const SEV = { '#e06c6c': 'severe', '#d9b74a': 'moderate', '#7bbf6a': 'minor' };
+        const counted = flagged ? [...flagged.values()].filter(v => { const c = scan.severityOf(v); return c !== '#d9b74a' && c !== '#7bbf6a'; }) : [];
+        if (counted.length) {
             const badge = document.createElement('span'); badge.className = 'wa-entry-badge';
-            badge.textContent = `${flagged.size} flagged`;
-            const RANK = { '#e06c6c': 3, '#d9b74a': 2, '#7bbf6a': 1 };   // red > yellow > green; '' (dead) = 0
-            const SEV = { '#e06c6c': 'severe', '#d9b74a': 'moderate', '#7bbf6a': 'minor' };
+            badge.textContent = `${counted.length} flagged`;
             let worst = '';
-            for (const v of flagged.values()) { const c = scan.reasonOf(v).color; if ((RANK[c] ?? 0) > (RANK[worst] ?? 0)) worst = c; }
+            for (const v of counted) { const c = scan.severityOf(v); if ((RANK[c] ?? 0) > (RANK[worst] ?? 0)) worst = c; }
             if (worst) { badge.style.background = worst; badge.style.color = worst === '#e06c6c' ? '#fff' : '#111'; }
-            badge.title = `Keywords the last scan flagged — worst: ${SEV[worst] || 'dead'}. Expand to see which.`;
+            const softer = (flagged?.size ?? 0) - counted.length;
+            badge.title = `Keywords the last scan flagged — worst: ${SEV[worst] || 'not in entry text'}.${softer ? ` ${softer} more are warnings, not counted here.` : ''} Expand to see which.`;
             h.append(badge);
         }
         // Whole header line toggles level 1; the mode dropdown and tool icons stopPropagation so they
@@ -784,7 +805,7 @@ export async function lorebookStudio(preferredBook = null) {
             // Verdict drives the chip's border + a faint matching fill: green = no flag, red/yellow =
             // too-common/short by severity. Dead is the overwhelming majority of flags and often hits
             // genuinely good keys (corpus limits), so it gets no label and just a slight dim, not a colour.
-            const isDead = v && v.flag === 'dead';
+            const isDead = v && v.flag === 'unattested';
             const isIgnored = ignoreSet.has(key);
             // Whitelisted keys are skipped by the scanner (never flagged), so mark them purple to show
             // they're deliberately spared; otherwise verdict drives the colour (green = no flag, red/yellow
@@ -1468,6 +1489,189 @@ export async function lorebookStudio(preferredBook = null) {
     const barBtn = (label, onClick, extra = '') => { const b = document.createElement('button'); b.type = 'button'; b.className = 'menu_button wa-bulk-btn ' + extra; b.textContent = label; b.addEventListener('click', onClick); return b; };
 
     // --- Cleanup tab ----------------------------------------------------------------------------
+    // One pass over the current chat for every "not in entry text" key at once. Deduped by FOLDED form,
+    // since two keys can fold together (apostrophe normalisation) and the automaton indexes the pattern list
+    // it was handed. Cost is O(chat), independent of key count.
+    /**
+     * Which chats does THIS BOOK reach? Studio is a lorebook manager, not a chat view — the open chat is
+     * whatever happened to be loaded and may have nothing to do with the book being edited, so scanning it
+     * answers the wrong question. A book binds three ways and they cost very differently to enumerate:
+     *
+     *   chat-bound       chat_metadata.world_info, line 0 of the .jsonl. /api/characters/chats with
+     *                    metadata:true returns it without transferring any chat body.
+     *   character-bound  characters[i].data.extensions.world — already in memory, free.
+     *   global           selected_world_info, which means EVERY chat. Never pre-ticked: on a real corpus
+     *                    that is 190 chats and 1.2GB, and the individual files run 12-17MB.
+     *
+     * Returns candidates with their size so the cost is visible before anything is fetched.
+     */
+    /**
+     * Confirm which chats to scan, with sizes, pre-ticked by binding.
+     *
+     * Shown even when there is one candidate: the whole point is that "0 hits in chat" is only meaningful if
+     * you know which chats produced it. Character-bound chats are pre-ticked with their chat-bound siblings
+     * because both are real bindings; the currently-open chat is offered unticked, since including it by
+     * assumption is exactly the bug this replaces.
+     */
+    const pickChats = async candidates => {
+        const wrap = document.createElement('div');
+        wrap.style.cssText = 'text-align:left;max-width:44rem;';
+        wrap.innerHTML = `<h3 style="margin:0 0 0.3em;">Check keys against which chats?</h3>`
+            + `<small style="display:block;opacity:0.75;margin-bottom:0.6em;">Keys flagged “not in entry text” are checked against these. A key that fires somewhere is doing its job — usually an alias your prose never spells out. Only the chats you tick are read.</small>`;
+        const rows = candidates.map((c, i) => {
+            const lab = document.createElement('label');
+            lab.className = 'checkbox_label';
+            lab.style.cssText = 'display:flex;gap:0.5em;align-items:baseline;margin:0.15em 0;';
+            const cb = document.createElement('input');
+            cb.type = 'checkbox';
+            cb.checked = !!c.bound;   // bound chats on; global candidates and the merely-open one off
+            cb.dataset.i = String(i);
+            const txt = document.createElement('span');
+            txt.innerHTML = `${escapeHtml(c.file.replace(/\.jsonl$/, ''))} <small style="opacity:0.6;">· ${escapeHtml(String(c.char || ''))} · ${escapeHtml(String(c.size))} · ${escapeHtml(c.why)}</small>`;
+            lab.append(cb, txt);
+            wrap.append(lab);
+            return cb;
+        });
+        // Count only, no size warning: with the plugin deployed the scan runs where the files already are and
+        // nothing but the key list and the counts moves.
+        const tot = document.createElement('div');
+        tot.style.cssText = 'margin-top:0.6em;opacity:0.8;font-size:0.9em;';
+        const syncTot = () => {
+            const on = rows.filter(cb => cb.checked).length;
+            tot.textContent = `${on} chat(s) selected`;
+        };
+        rows.forEach(cb => cb.addEventListener('change', syncTot));
+        wrap.append(tot); syncTot();
+        if (candidates.isGlobal) {
+            const g = document.createElement('small');
+            g.style.cssText = 'display:block;opacity:0.75;margin-top:0.4em;';
+            g.textContent = 'This book is globally active, so it reaches every chat — all of them are listed, none pre-ticked. Tick only the ones whose history is relevant.';
+            wrap.append(g);
+        }
+        const pop = new Popup(wrap, POPUP_TYPE.CONFIRM, '', { okButton: 'Scan selected', cancelButton: 'Cancel', wide: false });
+        if (await pop.show() !== POPUP_RESULT.AFFIRMATIVE) return null;
+        return rows.filter(cb => cb.checked).map(cb => candidates[Number(cb.dataset.i)]);
+    };
+
+    // Per-character chat metadata, cached for the Studio session. This is the expensive half of resolution
+    // — one request per character, each streaming line 0 of every chat file — and it is BOOK-INDEPENDENT:
+    // only the filter below changes when you switch books, so switching costs nothing after the first scan.
+    //
+    // ponytail: session-scoped, no invalidation. Binding a book to a chat while Studio is open will not show
+    // up until it is reopened. Refresh-on-demand if that turns out to bite; the cheap fix is closing Studio.
+    let chatIndex = null;   // [{ char, avatar, charWorld, chats: [...] }]
+    const loadChatIndex = async () => {
+        if (chatIndex) return chatIndex;
+        const list = (characters ?? []).filter(c => c?.avatar);
+        // Parallel, not sequential: these are independent reads and a served instance pays a round-trip each.
+        chatIndex = await Promise.all(list.map(async c => {
+            let chats = [];
+            try {
+                const r = await fetch('/api/characters/chats', {
+                    method: 'POST', headers: getRequestHeaders(),
+                    body: JSON.stringify({ avatar_url: c.avatar, metadata: true }),
+                });
+                if (r.ok) { const j = await r.json(); if (Array.isArray(j)) chats = j; }
+            } catch { /* a character with no chats dir just yields nothing */ }
+            return { char: c.name, avatar: c.avatar, charWorld: c?.data?.extensions?.world ?? null, chats };
+        }));
+        return chatIndex;
+    };
+
+    const findBookChats = async () => {
+        // Global books are listed in ST's settings, not in the lorebook file — the book itself has no idea.
+        // A globally-active book genuinely applies to every chat, so those are OFFERED but never pre-ticked:
+        // on a real corpus that is 190 chats and 1.2GB, and not everyone runs ST on localhost.
+        const isGlobal = (selected_world_info ?? []).includes(selected);
+        const out = [];
+        for (const c of await loadChatIndex()) {
+            const charBound = c.charWorld === selected;
+            for (const ch of c.chats) {
+                const chatBound = ch?.chat_metadata?.world_info === selected;
+                if (!chatBound && !charBound && !isGlobal) continue;
+                out.push({ char: c.char, avatar: c.avatar, file: ch.file_name, size: ch.file_size ?? '?',
+                    why: chatBound ? 'chat-bound' : charBound ? 'character-bound' : 'global (book is always active)',
+                    bound: chatBound || charBound });
+            }
+        }
+        out.isGlobal = isGlobal;
+        return out;
+    };
+
+    /** Fallback path only: pull a chat's messages over HTTP. Used when the server plugin is not deployed,
+     *  where the scan cannot happen where the files live. Correct, just wasteful off localhost. */
+    const fetchChatMessages = async ({ char, avatar, file }) => {
+        const r = await fetch('/api/chats/get', {
+            method: 'POST', headers: getRequestHeaders(), cache: 'no-cache',
+            body: JSON.stringify({ ch_name: char, file_name: String(file).replace(/\.jsonl$/, ''), avatar_url: avatar }),
+        });
+        if (!r.ok) return [];
+        const j = await r.json();
+        return (Array.isArray(j) ? j : []).map(m => String(m?.mes ?? '')).filter(Boolean);
+    };
+
+    const runChatScan = async () => {
+        if (!scan) { toastr.info('Run the audit first.', 'Worlds Apart'); return; }
+        const keys = [...new Set(visibleEntries().flatMap(e => scan.classifyEntry(e).filter(p => p.flag === 'unattested').map(p => p.key)))];
+        if (!keys.length) { toastr.info('No "not in entry text" keys to check.', 'Worlds Apart'); return; }
+
+        toastr.info('Finding chats that use this book…', 'Worlds Apart', { timeOut: 2000 });
+        const found = await findBookChats();
+        // The open chat is offered too, unticked, for the case the metadata does not capture — but it is
+        // never assumed, which was the bug in the first cut of this.
+        const ctx = getContext();
+        const openName = String(ctx.chatId ?? '');
+        if (openName && !found.some(f => f.file.startsWith(openName))) {
+            found.push({ char: ctx.name2 ?? '', avatar: null, file: openName, size: `${(ctx.chat ?? []).length} msgs`, why: 'currently open', open: true });
+        }
+        if (!found.length) { toastr.warning(`No chat uses "${selected}" — it is not bound to any chat or character, and not globally active. Bind it, or open a chat that uses it.`, 'Worlds Apart', { timeOut: 9000 }); return; }
+        if (!found.some(f => f.bound) && !found.isGlobal) { toastr.info(`"${selected}" is not bound to any chat; only the open one is offered.`, 'Worlds Apart', { timeOut: 6000 }); }
+
+        const picked = await pickChats(found);
+        if (!picked?.length) return;
+
+        const chatName = picked.length === 1 ? picked[0].file.replace(/\.jsonl$/, '') : `${picked.length} chats`;
+
+        // PLUGIN FIRST: it scans the files where they already live and returns only counts, so a 1.2GB
+        // history never crosses the wire. The client-side path below is the fallback for an undeployed
+        // plugin — correct, just wasteful, which only matters off localhost.
+        const onDisk = picked.filter(c => !c.open && c.avatar);
+        if (runState.pluginAvailable && onDisk.length === picked.length) {
+            const r = await fetch('/api/plugins/worlds-apart/scan-chats', {
+                method: 'POST', headers: getRequestHeaders(),
+                body: JSON.stringify({ keys, chats: onDisk.map(c => ({ dir: c.avatar.replace(/\.png$/, ''), file: c.file })) }),
+            });
+            if (r.ok) {
+                const j = await r.json();
+                cleanupChatHits = new Map(keys.map(k => [k, Number(j.counts?.[k]) || 0]));
+                cleanupChatMsgs = Number(j.messages) || 0;
+                cleanupChatName = chatName;
+                const live = [...cleanupChatHits.values()].filter(n => n > 0).length;
+                toastr.success(`${live} of ${keys.length} fire in ${chatName} (${cleanupChatMsgs} messages, scanned server-side).`, 'Worlds Apart', { timeOut: 6000 });
+                termRepaint?.();
+                return;
+            }
+            console.warn('Worlds Apart: /scan-chats unavailable, falling back to client-side scan');
+        }
+
+        const msgs = [];
+        for (const c of picked) {
+            const got = c.open ? (ctx.chat ?? []).map(m => String(m?.mes ?? '')).filter(Boolean) : await fetchChatMessages(c);
+            msgs.push(...got);
+        }
+        if (!msgs.length) { toastr.warning('Those chats returned no messages.', 'Worlds Apart'); return; }
+        const folded = [...new Set(keys.map(fold))];
+        const idxOf = new Map(folded.map((f, i) => [f, i]));
+        const aut = buildAutomaton(folded);
+        const counts = new Map();
+        for (const t of msgs) for (const [idx] of scanAutomaton(aut, fold(t))) counts.set(idx, (counts.get(idx) ?? 0) + 1);
+        cleanupChatHits = new Map(keys.map(k => [k, counts.get(idxOf.get(fold(k))) ?? 0]));
+        cleanupChatMsgs = msgs.length;
+        cleanupChatName = chatName;
+        const live = [...cleanupChatHits.values()].filter(n => n > 0).length;
+        toastr.success(`${live} of ${keys.length} fire in "${chatName}" (${msgs.length} messages) — those are doing their job.`, 'Worlds Apart', { timeOut: 6000 });
+        termRepaint?.();   // the cleanup tab claims this hook; see line ~130
+    };
     const cleanupGroups = () => {
         if (!scan) return [];
         const out = [];
@@ -1476,7 +1680,11 @@ export async function lorebookStudio(preferredBook = null) {
                 const rc = scan.reasonOf(p);
                 const id = rowId(e.uid, p.key);
                 if (!cleanupChecks.has(id)) cleanupChecks.set(id, scan.defChecked(p));   // pre-tick policy shared with the pruner
-                return { term: p.key, why: rc.text, color: rc.color, p };
+                // Denominator lives in the bulk bar, not on every row — it is the same for all of them.
+                const hits = cleanupChatHits && p.flag === 'unattested' ? cleanupChatHits.get(p.key) : undefined;
+                const why = hits === undefined ? rc.text
+                    : `${rc.text} · ${hits ? `${hits} hit${hits === 1 ? '' : 's'} in chat` : '0 hits in chat'}`;
+                return { term: p.key, why, color: hits ? SEV_GREEN : rc.color, p };
             });
             if (rows.length) out.push({ entry: e, rows });
         }
@@ -1559,6 +1767,9 @@ export async function lorebookStudio(preferredBook = null) {
             bar.innerHTML = '';
             const count = document.createElement('span'); count.className = 'wa-bulk-count';
             count.textContent = `${on} of ${allIds.length} flagged term${allIds.length === 1 ? '' : 's'} selected`;
+            // Same contract as the audit popup: a tick is a suggestion. "Dead" is measured against entry
+            // text, not the chat, so it has a real false-positive rate on keys the story actually uses.
+            count.title = 'Pre-ticked terms are suggestions, not verified problems. "Not in entry text" means exactly that — keys match against the chat, so a key your story uses but your prose never spells out reads as dead and is usually worth keeping. Review before applying.';
             bar.append(count,
                 barBtn(allOn ? 'Select none' : 'Select all', () => {
                     for (const id of allIds) cleanupChecks.set(id, !allOn);
@@ -1566,7 +1777,14 @@ export async function lorebookStudio(preferredBook = null) {
                 }),
                 barBtn('Prune selected', pruneChecked, 'wa-bulk-danger'),
                 barBtn('Ignore selected', ignoreChecked),
+                barBtn(cleanupChatHits ? 'Re-check chats' : 'Check against chats', () => runChatScan().catch(e => { console.error('Worlds Apart: chat scan failed', e); toastr.error(String(e?.message ?? e), 'Worlds Apart'); })),
             );
+            if (cleanupChatHits) {
+                const note = document.createElement('span'); note.className = 'wa-bulk-count';
+                note.textContent = `· ${[...cleanupChatHits.values()].filter(n => n > 0).length}/${cleanupChatHits.size} fire in "${cleanupChatName}" (${cleanupChatMsgs} msgs)`;
+                note.title = `Counts come from "${cleanupChatName}" only. A key with 0 hits there may still be used in another chat that shares this book — check each one.`;
+                bar.append(note);
+            }
             if (cleanupUndo?.length) bar.append(barBtn(`Undo (${cleanupUndo.length})`, undoPrune));
         };
         const sync = () => { syncTermChecks(cleanupChecks, reg); paintBar(); };
@@ -1859,7 +2077,7 @@ export async function lorebookStudio(preferredBook = null) {
 
     const openBook = async name => {
         if (dirty && selected) { reloadEditor(selected); dirty = false; }   // refresh the outgoing book's editor
-        selected = name; loadSortView(name); entryOpen.clear(); expanded.clear(); tall.clear(); advOpen.clear(); sugg.clear(); selectedEntries.clear(); selAnchorUid = null; suggest = null; scan = null;   // scan is on-demand
+        selected = name; loadSortView(name); entryOpen.clear(); expanded.clear(); tall.clear(); advOpen.clear(); sugg.clear(); selectedEntries.clear(); selAnchorUid = null; suggest = null; scan = null; clearChatScan();   // scan is on-demand; chat counts belong to a (book, chat) pair
         explorer.innerHTML = '<div style="opacity:0.6;padding:8px;">Loading…</div>';
         renderBooks();
         data = await loadWorldInfo(name);

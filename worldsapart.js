@@ -29,9 +29,9 @@ import { getSortedEntries, getWorldInfoPrompt, loadWorldInfo, saveWorldInfo, rel
 import { power_user } from '../../../power-user.js';
 import { SlashCommandParser } from '../../../slash-commands/SlashCommandParser.js';
 import { SlashCommand } from '../../../slash-commands/SlashCommand.js';
-import { ARGUMENT_TYPE, SlashCommandArgument } from '../../../slash-commands/SlashCommandArgument.js';
+import { ARGUMENT_TYPE, SlashCommandArgument, SlashCommandNamedArgument } from '../../../slash-commands/SlashCommandArgument.js';
 import { ConnectionManagerRequestService } from '../../shared.js';
-import { getStringHash, splitRecursive, escapeHtml, getCharaFilename } from '../../../utils.js';
+import { getStringHash, escapeHtml, getCharaFilename, download } from '../../../utils.js';
 import { pluginFingerprint, PLUGIN_FILES } from './plugin/fingerprint.mjs';
 import * as ranking from './extension/ranking.mjs';
 import { registerKeys, resetSmartKeys } from './extension/smartkeys.mjs';
@@ -39,12 +39,20 @@ import * as selection from './extension/selection.mjs';
 import { getTokenCountAsync } from '../../../tokenizers.js';
 import { textgen_types, textgenerationwebui_settings } from '../../../textgen-settings.js';
 import { oai_settings } from '../../../openai.js';
+import { Popup, POPUP_TYPE, POPUP_RESULT } from '../../../popup.js';
 
 import { runState, defaultSettings, settings, ensureSettings } from './extension/state.mjs';
 import { ensureStudioStyle, makeSortControl, makeTierEditor, showEntryText, wiGlyph, wiTooltip } from './extension/ui-widgets.mjs';
 import { PRESENTATION_ALIAS, SORT_FNS, normPresentation, presentationBaseLabel, presentationLabel, reconcileTiers, tierRank, wiTitleOf } from './extension/sort.mjs';
 import { keywordScoresReport, keywordSuggestReport } from './extension/keyword-tools.mjs';
 import { lorebookStudio } from './extension/studio.mjs';
+import { buildSample, bundleSamples, captureParams, GRADE_ANCHORS, isScaffolding, mergeGrades, normalizeSample, rowKey, sampleFile, searchedBook, splitGraded, trimBook, unionArms } from './extension/grading.mjs';
+
+/** The grading scale in one caption line, shared by both grading popups. */
+const gradeAnchorLine = () => `Grade 0–4: ${GRADE_ANCHORS.map((a, g) => `${g} = ${a.split(';')[0].toLowerCase()}`).join(' · ')}.`;
+// Chunking is WA's own, not ST's: it is unreachable under node and it determines every stored vector, so an
+// upstream edit would silently invalidate existing indexes. See extension/chunking.mjs.
+import { chunkEntry } from './extension/chunking.mjs';
 
 /** Base value for the rewritten `order` sequence. WA rewrites every activated entry's order, so only
  * the relative index matters and the base is free. It is parked far above any plausible authored value
@@ -258,6 +266,7 @@ async function queryCollections(args) {
                 body: JSON.stringify({
                     ...body,
                     centered: settings().meanCentered,
+                    uncenteredGate: Number(settings().uncenteredGate) || 0,
                     bm25K1: settings().bm25K1,
                     bm25B: settings().bm25B,
                     termWeights: args.termWeights ?? null,
@@ -287,76 +296,34 @@ async function queryCollections(args) {
 // Retrieval
 // ---------------------------------------------------------------------------
 
-/**
- * Splits entry text into chunks for matching.
- *
- * 'length' mode uses ST's splitRecursive, which splits on paragraph breaks and then
- * greedily merges adjacent paragraphs back together to fill chunkSize — so a chunk
- * routinely spans unrelated topics, and its centroid represents none of them.
- *
- * 'paragraph' mode keeps one paragraph per chunk. Oversized paragraphs are split
- * further; runs of very short ones are joined so stray lines aren't embedded alone.
- *
- * @param {string} content Entry content
- * @returns {string[]} Chunks
- */
-function chunkEntry(content) {
-    const maxLength = settings().chunkSize;
-
-    if (settings().chunkMode !== 'paragraph') {
-        return splitRecursive(content, maxLength);
-    }
-
-    const paragraphs = content
-        .split(/\n\s*\n/)
-        .map(x => x.trim())
-        .filter(x => x);
-
-    const chunks = [];
-    let pending = '';
-
-    for (const paragraph of paragraphs) {
-        const merged = pending ? `${pending}\n\n${paragraph}` : paragraph;
-
-        // Hold on to fragments until they carry enough signal to embed on their own.
-        if (merged.length < settings().minChunkSize) {
-            pending = merged;
-            continue;
-        }
-
-        pending = '';
-
-        if (merged.length <= maxLength) {
-            chunks.push(merged);
-        } else {
-            chunks.push(...splitRecursive(merged, maxLength, ['\n', '. ', ' ', '']));
-        }
-    }
-
-    if (pending) {
-        chunks.push(pending);
-    }
-
-    return chunks;
-}
+/** Unit Separator — see CLAUDE.md. The same literal grading.mjs's rowKey and studio.mjs's rowId join with. */
+const US = '';
 
 /**
  * Chunks entries and brings the collection in sync with them.
  * Chunking is for matching only — activation still emits the whole entry.
  * @param {string} world World name
  * @param {object[]} entries Entries belonging to that world
- * @returns {Promise<{collectionId: string, owners: Map<number, string>}>}
+ * @returns {Promise<{collectionId: string, owners: Map<number, string[]>}>}
  */
 async function syncWorld(world, entries) {
     const collectionId = `wa_${getStringHash(world)}`;
     const saved = await vectorPost('list', { collectionId }) ?? [];
 
     const items = [];
-    /** @type {Map<number, string>} chunk hash -> `${world}.${uid}` */
+    /**
+     * Chunk hash -> owning `${world}.${uid}`(s). Hashes carry (text, uid), so within one world every hash
+     * has exactly one owner; it stays a LIST because identical (text, uid) in two attached books still
+     * collides after the cross-world merge in scoreActivated concats these maps. Resolving ownership here,
+     * off the hashes we just computed from the live entries, keeps it independent
+     * of how the collection happened to be built (fresh syncs store one row per entry, incremental ones one
+     * row total — see eval/reindex-check.mjs on path-dependence).
+     * @type {Map<number, string[]>}
+     */
     const owners = new Map();
 
     for (const entry of entries) {
-        for (const chunk of chunkEntry(entry.content)) {
+        for (const chunk of chunkEntry(entry.content, settings())) {
             const text = chunk.trim();
             if (!text) {
                 continue;
@@ -366,8 +333,17 @@ async function syncWorld(world, entries) {
             // — `wanted` below couldn't retire entry A's copy while B still produced the text, `owners`
             // silently overwrote A with B, and the plugin's per-hash dedup dropped one of the two rows.
             // ST core lists and deletes by hash only, so the pair has to live IN the hash.
-            const hash = getStringHash(`${text}${entry.uid}`);
-            owners.set(hash, `${entry.world}.${entry.uid}`);
+            const hash = getStringHash(`${text}${entry.uid}`);
+            // DOT, not the US of CLAUDE.md's composite-key rule, and it must stay a dot: this is ST core's
+            // key format, not ours (world-info.js builds `${entry.world}.${entry.uid}` for
+            // allActivatedEntries and externalActivations). rankActivated is handed that map and looks its
+            // keys up in runState.lastScores, so a "tidier" separator here would silently return undefined
+            // for every score — and fuseRanks drops rows whose score is undefined, so the vector signal
+            // would vanish from the layout ranking with nothing thrown. Use grading.mjs's US-separated
+            // rowKey for anything that is ours alone.
+            // With uid in the hash, one world yields one owner per hash; still a LIST because identical
+            // (text, uid) in two attached books collides, and the cross-world merge concats owners.
+            owners.set(hash, [`${entry.world}.${entry.uid}`]);
             items.push({ hash, text, index: entry.uid });
         }
     }
@@ -394,6 +370,43 @@ async function syncWorld(world, entries) {
 // takes the proper-noun boost from settings. Rationale/benchmarks are documented in ranking.mjs.
 const buildGazetteer = ranking.buildGazetteer;
 const buildTermWeights = (queryText, gazetteer) => ranking.buildTermWeights(queryText, gazetteer, settings().properNounBoost);
+
+/**
+ * Builds the entity-filter term weights for a query — or null when the filter is off, or when the
+ * query is a summary (already salience-selected, so filtering it only loses context).
+ *
+ * ONE owner, because two callers drifted. Retrieval filtered the query; the /wa-query probe did not,
+ * and /wa-debug's stage-1 "vector candidates" table IS that probe. So the table reported BM25 from a
+ * different term set than the retrieval it was explaining — and since its `gap` and `kept` columns come
+ * from fusing those scores, the cutoff it showed could differ from the one live retrieval actually
+ * applied. Measured on a real scene, unfiltered BM25 ran ~2x the filtered value (101.06 vs 46.11), which
+ * reorders the ranking the cutoff reads. Anything that scores a query goes through here.
+ *
+ * @param {string} searchText Query text
+ * @param {object} [opts]
+ * @param {boolean} [opts.log] Log the kept-term count and (in a verbose run) the surviving terms
+ * @returns {Promise<Record<string, number>|null>} Term weights, or null to leave the query unfiltered
+ */
+async function queryTermWeights(searchText, { log = true } = {}) {
+    if (!settings().entityFilter || settings().queryMode === 'summary') {
+        return null;
+    }
+
+    const gazetteer = buildGazetteer(await getSortedEntries());
+    const termWeights = buildTermWeights(searchText, gazetteer);
+
+    if (log) {
+        console.log(`Worlds Apart: entity filter kept ${Object.keys(termWeights).length} terms (gazetteer has ${gazetteer.size})`);
+
+        if (runState.verboseRun) {
+            const byWeight = Object.entries(termWeights).sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]));
+            console.log(`%cWorlds Apart · surviving query terms — what the entity filter kept, ×N is the proper-noun boost (${byWeight.length} terms)`, 'font-weight: bold');
+            console.log(byWeight.map(([term, weight]) => (weight > 1 ? `${term}×${weight}` : term)).join(' '));
+        }
+    }
+
+    return termWeights;
+}
 
 // Query building lives in ranking.mjs; inject depth + ST's substituteParams.
 const buildQuery = (chat) => ranking.buildQuery(chat, { depth: settings().messageDepth, substituteParams });
@@ -448,16 +461,60 @@ async function scoreEntriesUnsafe(searchText, termWeights = null) {
     }
 
     const collectionIds = [];
-    /** @type {Map<number, string>} */
+    /**
+     * `${collectionId}${US}${hash}` -> every owning `${world}.${uid}` in THAT collection (see syncWorld).
+     *
+     * SCOPED BY COLLECTION, because a score only means something inside the corpus it was computed in. A
+     * collection is one book: the plugin centers each one on its own centroid and derives its own BM25 IDF
+     * (plugin/vector.mjs, plugin/lexical.mjs), so two books sharing a paragraph score it differently and
+     * neither number transfers. Keyed by hash alone, a row scored in Foxbridge also credited the Sommers
+     * entry holding the same text, and the max-pooling below handed each of them whichever book flattered
+     * the chunk more — which defeats IDF exactly where it does its job: a phrase that is boilerplate in a
+     * 400-chunk book looks rare in a 10-chunk one, and the max takes the rare reading. Both entries still
+     * get credited when both books are attached; each is now credited from its own corpus.
+     * @type {Map<string, string[]>}
+     */
     const owners = new Map();
 
     for (const world of Object.keys(byWorld)) {
         const synced = await syncWorld(world, byWorld[world]);
         collectionIds.push(synced.collectionId);
-        synced.owners.forEach((v, k) => owners.set(k, v));
+        synced.owners.forEach((v, k) => owners.set(`${synced.collectionId}${US}${k}`, v));
     }
 
-    const topK = Math.max(10, settings().maxVectorEntries * 20);
+    // ENTRIES to request, not chunks — the plugin pools each entry's best chunk before it cuts (see
+    // plugin/scoring.mjs poolEntries), so this is now a count of the thing the cutoff actually operates on.
+    //
+    // It used to be `maxVectorEntries * 20`, undocumented since the initial commit, because topK had to
+    // cover two unrelated depths at once: how many entries the user wants activated, and how deep the chunk
+    // list must run for each entry's best chunk to survive. Measured over the three graded corpora
+    // (eval/eval-data): chunks/entry mean 9.1-10.3 (max 27-56), reaching 20 distinct entries took 18/31/18
+    // chunks, but the per-entry maxima didn't stabilise until K ~= 150-300 — a corpus property, not a user
+    // preference. So x20 over-asked by ~13x for the entry count while still being the only thing keeping
+    // pooling honest, and at the shipped 400 it returned essentially the whole book (112/115, 96/96, 70/70).
+    // Pooling server-side makes the maxima exact at any K, which leaves only the entry count to size.
+    //
+    // The floor of 100 is the ELBOW's requirement, not pooling's, and it is deliberately a constant rather
+    // than a multiple of the cap — that conflation is exactly what was just removed. elbowSensitivity is a
+    // multiple of the MEAN gap across the retrieved list, so a short list has a coarse mean and the cliff
+    // fires early. Measured on the three graded scenes (eval/graded-scene-grid.mjs --topk, absolute F1 over
+    // grade>=3, mean of 3):
+    //
+    //   topK (entries)      40      60     100     400    4000
+    //   elbow sens 1.5   0.575   0.632   0.623   0.623   0.623
+    //   count max=10     0.607   0.540   0.540   0.540   0.540
+    //
+    // The elbow's window saturates by 60 and is flat to 4000; 100 sits inside that plateau without being the
+    // argmax of a 3-scene sweep. count/10 reads better at 40 for an unrelated reason worth knowing: RRF ranks
+    // within the candidate set, so a narrower topK reorders the top 10 as well as truncating the tail.
+    //
+    // ponytail: a constant, so a corpus with a much longer relevance tail than these three would want more.
+    // The knob to derive it from is the retrieved list's gap distribution, not any user setting.
+    //
+    // Read from settings(), NOT effectiveCutoff(): /wa-grade widens the CUT, and if that widening also moved
+    // retrieval depth the graded ranking would not be the live one — RRF ranks within the candidate set, so
+    // a different topK reorders the top as well as lengthening the tail (see above).
+    const topK = Math.max(100, settings().maxVectorEntries * 2);
     const results = await queryCollections({
         collectionIds,
         searchText,
@@ -466,31 +523,43 @@ async function scoreEntriesUnsafe(searchText, termWeights = null) {
         termWeights,
     });
 
-    // Score each entry by its BEST chunk — this is the whole point of chunking.
-    // `score` is only present if the backend returns it; without that patch we fall
-    // back to rank position, which is still correctly ordered within a collection.
-    for (const group of Object.values(results)) {
+    // The plugin now returns one pooled record per entry, so this loop's max-taking is a no-op against a
+    // current plugin. It stays because it is also what unpacks the response into `scores` at all, and because
+    // it keeps an un-redeployed plugin (which still returns raw chunks) pooling correctly rather than letting
+    // the last chunk of each entry win. `score` is only present if the backend returns it; without that patch
+    // we fall back to rank position, which is still correctly ordered within a collection.
+    // ENTRIES, not values: the collectionId is the key, and it is half the owner lookup — a chunk's score is
+    // only meaningful against the corpus it was computed in (see `owners`).
+    for (const [collectionId, group] of Object.entries(results)) {
         const metadata = group?.metadata ?? [];
         metadata.forEach((item, index) => {
-            const owner = owners.get(Number(item?.hash));
-            if (!owner) {
+            // EVERY owner of the chunk within this collection, not one. The store keeps at most one row per
+            // hash on an incremental sync, so two entries in the same book sharing a chunk come back once;
+            // crediting only one of them made the other unreachable through that text. This is not
+            // over-crediting — each of these entries genuinely contains the chunk — and the max-pooling
+            // below means an entry with a better chunk of its own still wins on that one.
+            const chunkOwners = owners.get(`${collectionId}${US}${Number(item?.hash)}`);
+            if (!chunkOwners?.length) {
                 return;
             }
 
             const score = typeof item?.score === 'number' ? item.score : 1 - (index / Math.max(1, metadata.length));
             const bm25 = typeof item?.bm25 === 'number' ? item.bm25 : 0;
-            const previous = scores.get(owner);
 
-            // Vector and lexical are pooled independently: an entry's best semantic
-            // chunk and its best lexical chunk need not be the same one.
-            if (!previous || previous.score < score) {
-                scores.set(owner, {
-                    score,
-                    chunk: String(item?.text ?? ''),
-                    bm25: Math.max(bm25, previous?.bm25 ?? 0),
-                });
-            } else if (bm25 > previous.bm25) {
-                previous.bm25 = bm25;
+            for (const owner of chunkOwners) {
+                const previous = scores.get(owner);
+
+                // Vector and lexical are pooled independently: an entry's best semantic
+                // chunk and its best lexical chunk need not be the same one.
+                if (!previous || previous.score < score) {
+                    scores.set(owner, {
+                        score,
+                        chunk: String(item?.text ?? ''),
+                        bm25: Math.max(bm25, previous?.bm25 ?? 0),
+                    });
+                } else if (bm25 > previous.bm25) {
+                    previous.bm25 = bm25;
+                }
             }
         });
     }
@@ -587,37 +656,55 @@ async function summarizeQuery(rawText) {
  * what actually gets activated — sorting the probe by vector score alone hid strong
  * lexical matches at the bottom of the table.
  *
+ * The arithmetic lives in ranking.mjs (like fuseRanks below) so the offline cutoff harnesses
+ * cut the real ranking rather than a copy; this wrapper only injects settings.
+ *
  * @param {Map<string, {score: number, bm25?: number, chunk: string}>} scores Per-entry results
  * @returns {Array<{key: string, value: object, fused: number, vectorRank?: number, textRank?: number}>} Fused ranking
  */
-function fuseRetrieval(scores) {
-    const entries = [...scores.entries()];
-    const k = settings().rrfK;
-    const mode = settings().retrievalMode;
-    const useVector = mode !== 'lexical';
-    const useText = mode !== 'vector';
+const fuseRetrieval = (scores) => ranking.fuseRetrieval(scores, {
+    rrfK: settings().rrfK,
+    retrievalMode: settings().retrievalMode,
+    lexicalWeight: settings().lexicalWeight,
+    // No keywordWeight here on purpose: this is the RETRIEVAL ranking the cutoff cuts, and it scores vector
+    // + chunk-text only. Keys never enter it — they exist in the layout ranking (fuseRanks) alone.
+});
 
-    const rankOf = (sortKey) => new Map([...entries]
-        .sort((a, b) => (b[1][sortKey] ?? 0) - (a[1][sortKey] ?? 0))
-        .map(([key], index) => [key, index + 1]));
+/**
+ * Prints the vector-candidates table: the retrieved ranking, the gap the cutoff reads, and where it fell.
+ *
+ * Takes a ranking rather than computing one. /wa-debug used to render this by calling the /wa-query probe,
+ * which scored the query a SECOND time — a replay that could disagree with the retrieval it was explaining
+ * (it did: the probe skipped the entity filter). Now retrieval hands over the very objects it selected on,
+ * so the table is a view of what happened, not a re-enactment. /wa-query still calls it for arbitrary text.
+ *
+ * @param {Array<{key: string, value: object, fused: number, vectorRank?: number, textRank?: number}>} ranked fuseRetrieval output
+ * @param {number} cut How many entries cutRetrieved kept
+ * @param {object[]} targets Vectorized entries, for titles
+ * @param {string} searchText The query, for the header
+ */
+function reportVectorCandidates(ranked, cut, targets, searchText) {
+    const byKey = new Map(targets.map(x => [`${x.world}.${x.uid}`, x]));
+    const spread = ranked[0].value.score - ranked[Math.min(4, ranked.length - 1)].value.score;
 
-    const vectorRanks = rankOf('score');
-    const textRanks = rankOf('bm25');
-
-    return entries
-        .map(([key, value]) => {
-            const vectorRank = useVector ? vectorRanks.get(key) : undefined;
-            const textRank = useText && value.bm25 > 0 ? textRanks.get(key) : undefined;
-            return {
-                key,
-                value,
-                vectorRank,
-                textRank,
-                fused: (vectorRank ? 1 / (k + vectorRank) : 0)
-                    + (textRank ? settings().lexicalWeight / (k + textRank) : 0),
-            };
-        })
-        .sort((a, b) => b.fused - a.fused);
+    console.log(`Worlds Apart: query "${searchText.slice(0, 80)}${searchText.length > 80 ? '…' : ''}" (${searchText.length} chars)`);
+    console.log(`Worlds Apart: ${ranked.length} entries retrieved, ${settings().retrievalMode} ranking, ${settings().vectorCutoff} cutoff kept ${cut}, top-5 vector spread ${spread.toFixed(5)}`);
+    console.log('%cWorlds Apart · vector candidates — the full ranked list of retrieved vectors, with the gap the cutoff reads (kept = above the cutoff)', 'font-weight: bold');
+    // Lead with the cutoff story — the gap the elbow reads, whether the row was kept,
+    // and which entry — so the boundary is legible without dragging columns. Per-signal
+    // scores and the matched chunk follow.
+    console.table(ranked.slice(0, Math.max(cut, settings().maxVectorEntries) * 2).map((row, index) => ({
+        // The gap this row opens below the one above — what the elbow cuts on.
+        gap: index > 0 ? Number((ranked[index - 1].fused - row.fused).toFixed(6)) : null,
+        kept: index < cut,
+        title: byKey.get(row.key)?.comment,
+        '#': index + 1,
+        vec: Number(row.value.score.toFixed(5)),
+        vRank: row.vectorRank ?? null,
+        bm25: row.value.bm25 ? Number(row.value.bm25.toFixed(2)) : null,
+        kRank: row.textRank ?? null,
+        matchedChunk: row.value.chunk.slice(0, 70).replace(/\s+/g, ' '),
+    })));
 }
 
 /**
@@ -628,7 +715,10 @@ async function retrieve(chat) {
     runState.lastScores.clear();
     runState.lastTextScores.clear();
 
-    const rawText = buildQuery(chat);
+    // One substitution pass over the chat serves both the query string and the /wa-grade stash below —
+    // queryMessages runs ST's macro engine over every message, so it must not run twice per generation.
+    const queryChat = ranking.queryMessages(chat, { depth: settings().messageDepth, substituteParams });
+    const rawText = ranking.joinQueryMessages(queryChat);
 
     if (!rawText) {
         console.log('Worlds Apart: no query text, skipping retrieval');
@@ -639,7 +729,6 @@ async function retrieve(chat) {
         ? await summarizeQuery(rawText)
         : rawText;
 
-    runState.lastQueryText = searchText;
 
     if (settings().queryMode === 'summary') {
         console.log(`Worlds Apart: summarized ${rawText.length} chars into ${searchText.length}: "${searchText}"`);
@@ -647,21 +736,7 @@ async function retrieve(chat) {
         console.log(`Worlds Apart: query is ${searchText.length} chars from ${settings().messageDepth} message(s), matched against ~${settings().chunkSize}-char entry chunks`);
     }
 
-    // Entity filtering only helps raw chat text; a summary is already salience-selected.
-    let termWeights = null;
-
-    if (settings().entityFilter && settings().queryMode !== 'summary') {
-        const gazetteer = buildGazetteer(await getSortedEntries());
-        termWeights = buildTermWeights(searchText, gazetteer);
-        console.log(`Worlds Apart: entity filter kept ${Object.keys(termWeights).length} terms (gazetteer has ${gazetteer.size})`);
-
-        if (runState.verboseRun) {
-            const byWeight = Object.entries(termWeights).sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]));
-            console.log(`%cWorlds Apart · surviving query terms — what the entity filter kept, ×N is the proper-noun boost (${byWeight.length} terms)`, 'font-weight: bold');
-            console.log(byWeight.map(([term, weight]) => (weight > 1 ? `${term}×${weight}` : term)).join(' '));
-        }
-    }
-
+    const termWeights = await queryTermWeights(searchText);
     const { targets, scores } = await scoreEntries(searchText, termWeights);
 
     if (!scores.size) {
@@ -669,7 +744,23 @@ async function retrieve(chat) {
         return;
     }
 
-    const winnerKeys = new Set(cutRetrieved(fuseRetrieval(scores)).map(x => x.key));
+    const ranked = fuseRetrieval(scores);
+    const kept = cutRetrieved(ranked);
+    const winnerKeys = new Set(kept.map(x => x.key));
+
+    // Recorded for /wa-grade, which bundles the query it graded rather than re-deriving it later.
+    runState.lastQuery = searchText;
+    runState.lastCutKept = kept.length;
+    // The MESSAGES the query was built from, macros already resolved, in ST's own {name, mes} shape so
+    // ranking.buildQuery can be re-run over them offline at any depth <= this one. This is what makes a
+    // depth ablation possible from a single capture: capture wide, then narrow. It cannot be recovered by
+    // splitting `lastQuery`, because messages contain blank lines and the join separator is '\n\n'.
+    runState.lastQueryChat = queryChat;
+
+    // /wa-debug's stage-1 table, rendered from the selection that just happened rather than a replay.
+    if (runState.verboseRun) {
+        reportVectorCandidates(ranked, kept.length, targets, searchText);
+    }
 
     for (const [key, value] of scores) {
         if (winnerKeys.has(key)) {
@@ -911,6 +1002,7 @@ const fuseRanks = (items) => ranking.fuseRanks(items, {
     retrievalMode: settings().retrievalMode,
     weightByOrder: settings().weightByOrder,
     lexicalWeight: settings().lexicalWeight,
+    keywordWeight: settings().keywordWeight,
 });
 
 /**
@@ -928,6 +1020,39 @@ function priorityKey() {
     if (ctx.groupId) return `group:${ctx.groupId}`;
     if (ctx.characterId == null) return null;
     return getCharaFilename(ctx.characterId);
+}
+
+/**
+ * Best-effort on-disk path of the current chat file, for a graded sample to record.
+ *
+ * Provenance, but load-bearing provenance: rebuilding the query at a different messageDepth is the one
+ * sweep a frozen sample can't do from its own contents, and it needs the chat. Best-effort for the same
+ * reason as vectorIndexPath — the browser can't see the data root or the user handle. Group chats live
+ * under groupchats/ with no per-character folder.
+ * @returns {string} Relative chat path
+ */
+function chatFilePath() {
+    const ctx = getContext();
+    if (!ctx.chatId) {
+        return '';
+    }
+    return ctx.groupId
+        ? `data/default-user/groupchats/${ctx.chatId}.jsonl`
+        : `data/default-user/chats/${getCharaFilename(ctx.characterId)}/${ctx.chatId}.jsonl`;
+}
+
+/**
+ * Best-effort on-disk path of a book's vector index, for a graded sample to record.
+ *
+ * Best-effort because the browser can't see the data root: the user handle is assumed to be
+ * `default-user`. The collectionId is exact (same hash syncWorld uses), so a wrong path is a one-field
+ * edit in the sample, and graded-scene-grid can also re-derive it from the book name.
+ * @param {string} world Book name
+ * @returns {string} Relative index path
+ */
+function vectorIndexPath(world) {
+    const body = vectorRequestBody();
+    return `data/default-user/vectors/${body.source}/wa_${getStringHash(world)}/${body.model || 'default'}/index.json`;
 }
 
 /** The current chat's bound lorebook, or null. The `'chat'` sentinel resolves to this. */
@@ -1019,6 +1144,13 @@ async function rankActivated(args) {
     if (!settings().enabled || !(activated instanceof Map)) {
         return;
     }
+    // ST's dry-run generations (PromptManager token counts after every received message,
+    // chat load) skip generate interceptors, so retrieval never ran and the scan holds
+    // keyword activations only. Ranking it would overwrite the panel and the /wa-dry//wa-grade
+    // state with that keyword-only selection — leave the last real scan's state alone.
+    if (runState.generationIsDryRun) {
+        return;
+    }
     if (activated.size === 0) {
         runState.lastLayout = [];
         if (!args?.state?.next) renderWiPanel([]);
@@ -1062,11 +1194,7 @@ async function rankActivated(args) {
             // the unified messageDepth, falling back to core's scan depth only if it's unset.
             const depth = Number(item.entry.scanDepth) || settings().messageDepth || world_info_depth;
             if (!windows.has(depth)) {
-                // Include speaker names when core does — otherwise a keyword that only
-                // appears as a "Name:" prefix is matched by core and missed here.
-                let window = chat.slice(-depth)
-                    .map(x => (world_info_include_names && x?.name ? `${x.name}: ${x.mes ?? ''}` : String(x?.mes ?? '')))
-                    .join('\n');
+                let window = ranking.scanWindow(chat, { depth, includeNames: world_info_include_names });
                 if (injectText) {
                     window += `\n${injectText}`;
                 }
@@ -1089,6 +1217,9 @@ async function rankActivated(args) {
         // looking: if the key isn't in here but core matched it, core scanned something
         // WA doesn't mirror (a regex script, an attached file, an extension's inject
         // buffer) or another extension force-activated the entry.
+        // The global-depth window, for /wa-grade's sample (per-entry scanDepth overrides also live here).
+        runState.lastScanText = windows.get(settings().messageDepth) ?? [...windows.values()][0] ?? '';
+
         if (runState.verboseRun) {
             console.log('%cWorlds Apart · keyword scan windows — the exact text WA searched, by depth', 'font-weight: bold');
             console.log(Object.fromEntries([...windows]));
@@ -1241,9 +1372,10 @@ async function rankActivated(args) {
 
     // A plain /wa-dry has its own selected table below; this one is the selection candidates
     // — everything activated, ranked, before caps cut into it. Only /wa-debug wants this much.
+    // Built whenever a debug-class run is in flight, and stashed: /wa-grade grades THESE rows rather than
+    // recomputing a ranking, so the grades attach to the selection that actually happened.
     if (runState.verboseRun) {
-        console.log('%cWorlds Apart · selection candidates — every activated entry with its per-signal scores, before caps or layout', 'font-weight: bold');
-        console.table(ranked.map((x, i) => ({
+        const rows = ranked.map((x, i) => ({
             // Columns lead like the selected table — title, then block, sticky, score, uid,
             // wiOrder — then the per-signal scores under the same names (cosine, text, keys), each
             // with its rank. `block` is the RUNTIME budget class (constant / sticky-active /
@@ -1269,7 +1401,14 @@ async function rankActivated(args) {
             keys: x.keywordScore ? Number(x.keywordScore.toFixed(2)) : null,
             kRank: x.keywordRank ?? null,
             '#': i,
-        })));
+        }));
+
+        // uid alone is ambiguous across books, so carry the world for the grader and the eval.
+        runState.lastCandidates = rows.map((row, i) => ({ ...row, world: ranked[i].entry.world }));
+        runState.lastCandidateEntries = ranked.map(x => x.entry);
+
+        console.log('%cWorlds Apart · selection candidates — every activated entry with its per-signal scores, before caps or layout', 'font-weight: bold');
+        console.table(rows);
     }
 
     // Live generations get the same "what was selected and why" table /wa-dry prints —
@@ -1310,24 +1449,32 @@ async function dryRun(verbose = false) {
     runState.verboseRun = Boolean(verbose);
     runState.dryRunInProgress = true;
 
-    // Cleared so a scan that activates nothing reports nothing, rather than last run's.
+    // Cleared so a scan that activates nothing reports nothing, rather than last run's. The /wa-grade
+    // capture is in here too: a stale candidate list would be graded as if it belonged to this scene,
+    // and its `if (!rows.length)` guard cannot see the difference.
     runState.lastLayout = [];
     runState.lastDropped = [];
     runState.lastSkipped = [];
-
-    await retrieve(chat);
+    runState.lastCandidates = [];
+    runState.lastCandidateEntries = [];
+    runState.lastQuery = '';
+    runState.lastScanText = '';
+    runState.lastQueryChat = [];
+    runState.lastCutKept = null;
 
     const chatForWI = chat
         .map(x => (world_info_include_names ? `${x.name}: ${x.mes}` : x.mes))
         .reverse();
 
     // Print in pipeline order: retrieval → activation ranking → final selection.
+    // Stage 1 — vector candidates — is printed by retrieve() below, from the ranking it actually selected
+    // on. This used to re-run scoring through the /wa-query probe, which scored WITHOUT the entity filter
+    // and so could report a different cutoff than the one that ran; a debug view has to reuse production's
+    // result, not re-derive one. /wa-query keeps the probe for scoring arbitrary text.
+    // retrieve() is inside the try: it hits the network (plugin, Ollama), and a throw outside the finally
+    // would leave verboseRun/dryRunInProgress stuck true for every later live generation.
     try {
-        if (verbose) {
-            // Stage 1 — vector candidates: the full retrieved ranking and where the cutoff fell.
-            // Re-runs retrieval (not a hot path), so it needs runState.lastQueryText from retrieve().
-            await probeQuery({}, runState.lastQueryText);
-        }
+        await retrieve(chat);
 
         // Stage 2 — the scan; rankActivated prints the selection candidates (verbose) as it runs.
         await getWorldInfoPrompt(chatForWI, getMaxPromptTokens(), true, { ...scanSources(), trigger: 'normal' });
@@ -1372,7 +1519,9 @@ function paramSnapshot() {
     const snap = {
         // commonWordWeight is an internal global derived from the mode (0.7 BM25-only, 1 otherwise), not a
         // setting; logged as the value in effect. It modifies the plugin's BM25 IDF on every query.
-        scoring: { retrievalMode: s.retrievalMode, rrfK: s.rrfK, lexicalWeight: s.lexicalWeight, weightByOrder: s.weightByOrder, bm25K1: s.bm25K1, bm25B: s.bm25B, commonWordWeight: s.retrievalMode === 'lexical' ? 0.7 : 1 },
+        // keywordWeight is logged even when null, because null is a real value here ("follow lexicalWeight")
+        // and its absence would read as an older capture rather than as a deliberate setting.
+        scoring: { retrievalMode: s.retrievalMode, rrfK: s.rrfK, lexicalWeight: s.lexicalWeight, keywordWeight: s.keywordWeight ?? null, weightByOrder: s.weightByOrder, bm25K1: s.bm25K1, bm25B: s.bm25B, commonWordWeight: s.retrievalMode === 'lexical' ? 0.7 : 1 },
         // The entity filter only runs on raw-message queries — a summary is already
         // salience-selected — so in summary mode its params are inert and omitted.
         matchText: {
@@ -1381,7 +1530,7 @@ function paramSnapshot() {
         },
         // Acquisition: what vectra gives back — the DB-side similarity gate, mean-centering, and
         // how the vectorized text is chunked. Paired with `cutoff` (WA-side selection) below.
-        vectors: { scoreThreshold: s.scoreThreshold, meanCentered: s.meanCentered, chunkMode: s.chunkMode, chunkSize: s.chunkSize, minChunkSize: s.minChunkSize, suppressVectorKeys: s.suppressVectorKeys },
+        vectors: { scoreThreshold: s.scoreThreshold, uncenteredGate: s.uncenteredGate || 0, meanCentered: s.meanCentered, chunkMode: s.chunkMode, chunkSize: s.chunkSize, minChunkSize: s.minChunkSize, suppressVectorKeys: s.suppressVectorKeys },
         // Selection: the WA-side cliff detector, floor/ceiling, and keyword scoring applied to
         // what was acquired. Mode leads, then the active mode's threshold and floor.
         cutoff: {
@@ -1620,7 +1769,7 @@ async function reportLayout(verbose = false, countTokens = true) {
  * @param {string} text Query text
  * @returns {Promise<string>} Empty string — output goes to the console table
  */
-async function probeQuery(_named, text) {
+async function probeQuery(_named, text, { unfiltered = false } = {}) {
     const searchText = String(text ?? '').trim();
 
     if (!searchText) {
@@ -1628,8 +1777,11 @@ async function probeQuery(_named, text) {
         return '';
     }
 
-    const { targets, scores } = await scoreEntries(searchText);
-    const byKey = new Map(targets.map(x => [`${x.world}.${x.uid}`, x]));
+    // Same entity filter retrieval applies, or the probe scores a query nothing else will. `unfiltered`
+    // is for probing a SUMMARY: the filter is deliberately never applied to summarized queries (they are
+    // already salience-selected), so filtering one here would show a combination retrieval never runs.
+    const termWeights = unfiltered ? null : await queryTermWeights(searchText);
+    const { targets, scores } = await scoreEntries(searchText, termWeights);
 
     if (!scores.size) {
         console.log(`Worlds Apart: nothing cleared the ${settings().scoreThreshold} threshold for "${searchText.slice(0, 60)}…"`);
@@ -1637,28 +1789,669 @@ async function probeQuery(_named, text) {
     }
 
     const ranked = fuseRetrieval(scores);
-    const cut = cutRetrieved(ranked).length;
-    const spread = ranked[0].value.score - ranked[Math.min(4, ranked.length - 1)].value.score;
+    reportVectorCandidates(ranked, cutRetrieved(ranked).length, targets, searchText);
 
-    console.log(`Worlds Apart: query "${searchText.slice(0, 80)}${searchText.length > 80 ? '…' : ''}" (${searchText.length} chars)`);
-    console.log(`Worlds Apart: ${ranked.length} entries retrieved, ${settings().retrievalMode} ranking, ${settings().vectorCutoff} cutoff kept ${cut}, top-5 vector spread ${spread.toFixed(5)}`);
-    console.log(`%cWorlds Apart · vector candidates — the full ranked list of retrieved vectors, with the gap the cutoff reads (kept = above the cutoff)`, 'font-weight: bold');
-    // Lead with the cutoff story — the gap the elbow reads, whether the row was kept,
-    // and which entry — so the boundary is legible without dragging columns. Per-signal
-    // scores and the matched chunk follow.
-    console.table(ranked.slice(0, Math.max(cut, settings().maxVectorEntries) * 2).map((row, index) => ({
-        // The gap this row opens below the one above — what the elbow cuts on.
-        gap: index > 0 ? Number((ranked[index - 1].fused - row.fused).toFixed(6)) : null,
-        kept: index < cut,
-        title: byKey.get(row.key)?.comment,
-        '#': index + 1,
-        vec: Number(row.value.score.toFixed(5)),
-        vRank: row.vectorRank ?? null,
-        bm25: row.value.bm25 ? Number(row.value.bm25.toFixed(2)) : null,
-        kRank: row.textRank ?? null,
-        matchedChunk: row.value.chunk.slice(0, 70).replace(/\s+/g, ' '),
-    })));
+    return '';
+}
 
+/**
+ * Default sample name: the chat plus the message the scene ends on.
+ *
+ * A date is the wrong identity — grade two scenes in one afternoon and both are `scene-<today>`, so the
+ * NAME collides even though the browser numbers the downloaded files apart, and every report keys on the
+ * name. Chat + last-message index is what actually identifies a scene: distinct across chats, distinct
+ * across scenes within a chat, stable if you re-grade the same point, and legible in a results table.
+ * @returns {string} Sample name
+ */
+function defaultSampleName() {
+    const ctx = getContext();
+    const chat = String(ctx.chatId ?? getCharaFilename(ctx.characterId) ?? 'scene');
+    // Chat ids carry timestamps and punctuation ("Isekai - 2026-03-04@14h45"); keep it filesystem- and
+    // table-friendly, and short enough to read.
+    const slug = chat.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 40).replace(/-+$/, '');
+    return `${slug || 'scene'}-msg${Math.max(0, (ctx.chat?.length ?? 1) - 1)}`;
+}
+
+/**
+ * Grades the current scene and writes a self-contained sample for eval/graded-scene-grid.mjs.
+ *
+ * Runs the real /wa-debug pipeline first, then grades the rows it produced — so the grades attach to the
+ * selection that actually happened, at settings that are recorded rather than remembered. n=1 is the
+ * standing limitation on every tuning claim in this extension; this exists to make n>1 cheap.
+ *
+ * Scaffolding rows (constants, configured stickies) are listed but not gradeable: they are always-on or
+ * persist-on-trigger, so relevance never chose them and grading them would drag nDCG down for entries the
+ * ranking isn't responsible for.
+ *
+ * @param {object} named Named args: name, books (full|meta|none), notes
+ * @returns {Promise<string>} Empty string — output is a downloaded file
+ */
+async function gradeScene(named) {
+    const bookMode = String(named?.books ?? 'full').toLowerCase();
+
+    if (!['full', 'meta', 'none'].includes(bookMode)) {
+        toastr.warning('books= must be full, meta or none', 'Worlds Apart');
+        return '';
+    }
+
+    // Widen the cut for the grading run only, so the candidate list is deep enough to assess every cutoff
+    // mode offline (see effectiveCutoff). The live setting is recorded in the sample either way.
+    const live = { mode: settings().vectorCutoff, maxVectorEntries: settings().maxVectorEntries };
+    const wanted = Math.max(1, Number(named?.candidates ?? 20));
+    runState.gradeCutoff = { mode: 'count', maxVectorEntries: wanted };
+
+    let rows = [];
+    let entries = [];
+    try {
+        // The debug run IS the measurement: same retrieval, same ranking — only the cut is widened.
+        await dryRun(true);
+        rows = runState.lastCandidates ?? [];
+        entries = runState.lastCandidateEntries ?? [];
+    } finally {
+        runState.gradeCutoff = null;
+    }
+
+    if (!rows.length) {
+        toastr.warning('Nothing was activated — nothing to grade.', 'Worlds Apart');
+        return '';
+    }
+
+    // A keyword-only scene (retrieval cleared nothing) has rows but no query; the harness scores against
+    // the frozen query, so the sample would be unrunnable garbage. Refuse rather than freeze ''.
+    if (!runState.lastQuery) {
+        toastr.warning('Retrieval activated nothing — the sample would have no query to score offline. Grade a scene where retrieval ran.', 'Worlds Apart');
+        return '';
+    }
+
+    const gradeable = rows.map((row, i) => ({ row, entry: entries[i], i })).filter(x => !isScaffolding(x.row));
+    const scaffold = rows.length - gradeable.length;
+    const esc = s => escapeHtml(String(s ?? ''));
+
+    const wrap = document.createElement('div');
+    wrap.innerHTML = '<h3 style="margin:0 0 0.25em;">Grade this scene</h3>'
+        + `<small style="display:block;opacity:0.7;margin-bottom:0.5em;">${gradeAnchorLine()} ${gradeable.length} retrieved entries${scaffold ? `; ${scaffold} constant/sticky row(s) listed but not graded — always-on, so relevance didn't choose them` : ''}.</small>`
+        + '<details style="margin-bottom:0.75em;"><summary style="cursor:pointer;">Query text — what retrieval actually matched on '
+        + `(${runState.lastQuery.length} chars, depth ${settings().messageDepth})</summary>`
+        + `<pre style="white-space:pre-wrap;max-height:14em;overflow:auto;font-size:0.85em;opacity:0.85;border:1px solid var(--SmartThemeBorderColor);padding:0.5em;margin-top:0.5em;">${esc(runState.lastQuery)}</pre></details>`
+        + '<table style="width:100%;border-collapse:collapse;font-size:0.9em;"><thead><tr style="text-align:left;">'
+        + '<th style="width:4em;">Grade</th><th>Entry</th><th style="width:4em;">fused</th><th style="width:4em;">cos</th><th style="width:4em;">text</th><th style="width:4em;">keys</th><th style="width:4em;"></th></tr></thead><tbody>'
+        + rows.map((row, i) => {
+            const scaff = isScaffolding(row);
+            const num = n => (n == null ? '·' : String(n));
+            const cell = scaff
+                ? `<span style="opacity:0.5;font-size:0.85em;">${row.block === 'constant' ? 'const' : 'sticky'}</span>`
+                : `<input type="number" class="wa-grade text_pole" data-i="${i}" min="0" max="4" step="1" value="0" title="${esc(GRADE_ANCHORS.map((a, g) => `${g}: ${a}`).join('\n'))}" style="width:4em;padding:2px 4px;">`;
+            return `<tr style="border-top:1px solid var(--SmartThemeBorderColor);${scaff ? 'opacity:0.6;' : ''}">`
+                + `<td>${cell}</td>`
+                + `<td>${esc(row.title)}<br><small style="opacity:0.5;">${esc(row.world)} · uid ${num(row.uid)}</small></td>`
+                + `<td>${num(row.score)}</td><td>${num(row.cosine)}</td><td>${num(row.text)}</td><td>${num(row.keys)}</td>`
+                + `<td><button class="menu_button wa-viewtext" data-i="${i}" style="padding:2px 6px;font-size:0.85em;">text</button></td></tr>`;
+        }).join('')
+        + '</tbody></table>';
+
+    // Reuses the Studio's entry viewer rather than a second renderer.
+    wrap.querySelectorAll('.wa-viewtext').forEach(button => button.addEventListener('click', event => {
+        event.preventDefault();
+        const entry = entries[Number(button.dataset.i)];
+        if (entry) showEntryText(entry);
+    }));
+
+    const popup = new Popup(wrap, POPUP_TYPE.CONFIRM, '', { okButton: 'Save sample', cancelButton: 'Cancel', large: true, wide: true, allowVerticalScrolling: true });
+    const result = await popup.show();
+
+    if (result !== POPUP_RESULT.AFFIRMATIVE) {
+        return '';
+    }
+
+    const grades = [...wrap.querySelectorAll('.wa-grade')].map(input => {
+        const row = rows[Number(input.dataset.i)];
+        return { title: row.title, grade: Number(input.value) || 0, world: row.world, uid: row.uid };
+    });
+
+    // Every attached book, at the requested fidelity — so a later lorebook edit can't move the numbers.
+    const books = {};
+    for (const world of runState.attachedWorlds) {
+        const data = await loadWorldInfo(world);
+        if (data?.entries) {
+            books[world] = trimBook(data.entries, bookMode);
+        }
+    }
+
+    // Which collection the harness must load. Taken from the ranking (see searchedBook), because the chat's
+    // bound book is an ST binding, not a statement about what was retrieved: a book with no entries never
+    // appears in attachedWorlds at all, so trusting it here keyed samples to a collection that doesn't
+    // exist. The chat book stays the fallback for a keyword-only scene, where nothing was retrieved.
+    const primaryBook = searchedBook(rows) ?? chatBook() ?? Object.keys(books)[0] ?? '';
+    const sample = buildSample({
+        name: named?.name || defaultSampleName(),
+        notes: named?.notes,
+        query: runState.lastQuery,
+        queryChat: runState.lastQueryChat,
+        scanText: runState.lastScanText,
+        depth: settings().messageDepth,
+        pluginFP: runState.pluginFP,
+        sourceFP: runState.sourceFP,
+        chat: chatFilePath(),
+        book: primaryBook ? `data/default-user/worlds/${primaryBook}.json` : '',
+        index: primaryBook ? vectorIndexPath(primaryBook) : '',
+        primaryBook,
+        embedModel: vectorRequestBody().model || '',
+        params: captureParams(settings(), {
+            caseSensitive: world_info_case_sensitive,
+            wholeWords: world_info_match_whole_words,
+            includeNames: world_info_include_names,
+        }),
+        snapshot: paramSnapshot(),
+        candidates: rows,
+        books,
+        bookMode,
+        priority: (scopedPriority() ?? []).map(x => x.cfg),
+        grades,
+        cutoff: {
+            // What the LIVE settings would have done — the configuration being assessed.
+            live,
+            // What this grading run actually used, and how many rows the grader was therefore shown. The
+            // harness must not evaluate a cutoff that keeps more than gradedCandidates.
+            gradingOverride: { mode: 'count', maxVectorEntries: wanted },
+            kept: runState.lastCutKept ?? null,
+            minVectorEntries: settings().minVectorEntries,
+            elbowSensitivity: settings().elbowSensitivity,
+            dropoffThreshold: settings().dropoffThreshold,
+        },
+        gradedCandidates: gradeable.length,
+        now: new Date().toISOString().slice(0, 10),
+    });
+
+    const { filename, content } = sampleFile(sample);
+    download(content, filename, 'application/json');
+    const graded = grades.filter(g => g.grade > 0).length;
+    toastr.success(`Saved ${filename} — ${graded} of ${grades.length} graded above 0. Move it to eval/eval-data/ and run graded-scene-grid.mjs --sample`, 'Worlds Apart', { timeOut: 8000 });
+    console.log(`Worlds Apart: sample "${sample.name}" — ${grades.length} graded rows, ${Object.keys(books).length} book(s) at fidelity "${bookMode}"`, sample);
+
+    return '';
+}
+
+/**
+ * The arms /wa-super-grade captures: configurations that change WHICH ENTRIES GET SURFACED.
+ *
+ * NOT a grid, and deliberately not a complete one. An arm's only job is to put entries into the judged pool
+ * that the shipped configuration never surfaces, because an unjudged entry scores 0 and any configuration
+ * that promotes it is penalised for surfacing something nobody looked at. That is pool bias, and it is what
+ * makes a defaults review scored against a single capture's pool indefensible.
+ *
+ * SO MOST PARAMETERS DO NOT BELONG HERE. k1, b, lexicalWeight, rrfK, properNounBoost, stopwordDocFreq and
+ * every cutoff mode are re-derived offline by graded-scene-grid.mjs from the frozen query and the embedded
+ * books, over whatever pool exists — running them live would cost an embed and a full WI scan each and return
+ * a near-identical population. messageDepth is likewise ablatable from `queryChat`. What earns an arm is
+ * being unable to compute the population offline:
+ *
+ *   no-filter   entityFilter off moves the surviving query terms, so it moves BM25, the retrieval ranking,
+ *               and what the cut keeps.
+ *   vector      \ retrievalMode changes which signal orders the candidates, so a different set survives
+ *   lexical     / into the top of the ranking.
+ *   loose-thr   scoreThreshold gates whether a chunk is admitted at all — the one knob that can add entries
+ *               no reordering could reach.
+ *   keys-live   suppressVectorKeys off lets ST CORE keyword-match vectorized entries. Core's activation
+ *               (secondary keys, inclusion groups, recursion, min-activations, probability rolls) is the one
+ *               thing this project cannot recompute offline at all, so it can only be sampled live.
+ *   summary     queryMode 'summary' asks a model for the query text. Not reproducible from a frozen sample
+ *               by construction, and it retrieves against genuinely different text.
+ *
+ * ARM COUNT IS NOT A DESIGN CONSTANT. Add an entry here whenever graded-scene-grid.mjs reports a
+ * configuration whose top rows are not fully judged; that number is the stopping rule, not this list's
+ * length. `arms=` runs a subset when a round only needs to close one gap.
+ */
+const POOL_ARMS = {
+    shipped: {},
+    'no-filter': { entityFilter: false },
+    vector: { retrievalMode: 'vector' },
+    lexical: { retrievalMode: 'lexical' },
+    'loose-thr': { scoreThreshold: 0 },
+    'keys-live': { suppressVectorKeys: false },
+    summary: { queryMode: 'summary' },
+};
+
+/**
+ * Runs one debug capture under temporarily-overridden settings.
+ *
+ * The override is a plain assign-and-restore over the live settings object: every module reads through
+ * `settings()` at call time, so this reaches the whole pipeline without a parallel injection path, and
+ * nothing in the retrieval or scan path calls saveSettingsDebounced, so nothing persists. captureParams and
+ * paramSnapshot are read INSIDE the window — they must describe the arm, not the restored baseline.
+ *
+ * ponytail: the override is live across awaits, so a real generation firing mid-capture would use the arm's
+ * settings. Acceptable for a dev eval command driven by hand; the fix if it ever bites is a per-run settings
+ * object threaded through retrieve(), which is a much larger change than this feature justifies.
+ *
+ * @param {object} overrides Settings to force for this run
+ * @param {number} wanted Candidate depth (the cut is widened to a plain count, as /wa-grade does)
+ * @returns {Promise<object>} The capture: rows, entries, and everything the sample needs to freeze it
+ */
+async function captureArm(overrides, wanted) {
+    const s = settings();
+    const saved = {};
+    for (const k of Object.keys(overrides)) saved[k] = s[k];
+    Object.assign(s, overrides);
+    runState.gradeCutoff = { mode: 'count', maxVectorEntries: wanted };
+
+    try {
+        await dryRun(true);
+        return {
+            rows: runState.lastCandidates ?? [],
+            entries: runState.lastCandidateEntries ?? [],
+            query: runState.lastQuery,
+            queryChat: runState.lastQueryChat,
+            scanText: runState.lastScanText,
+            depth: s.messageDepth,
+            params: captureParams(s, {
+                caseSensitive: world_info_case_sensitive,
+                wholeWords: world_info_match_whole_words,
+                includeNames: world_info_include_names,
+            }),
+            snapshot: paramSnapshot(),
+            // What this arm's own settings would have cut to, had the grading override not widened it.
+            live: { mode: s.vectorCutoff, maxVectorEntries: s.maxVectorEntries },
+            kept: runState.lastCutKept ?? null,
+            minVectorEntries: s.minVectorEntries,
+            elbowSensitivity: s.elbowSensitivity,
+            dropoffThreshold: s.dropoffThreshold,
+        };
+    } finally {
+        Object.assign(s, saved);
+        runState.gradeCutoff = null;
+    }
+}
+
+/**
+ * Captures several arms, unions what they surfaced, and grades only what no earlier round has judged.
+ *
+ * WHY NOT JUST RUN /wa-grade N TIMES. Two reasons, and the second is the load-bearing one. The arms overlap
+ * heavily, so N separate gradings re-judge the same entries N times. And more importantly a pool assembled
+ * from one configuration systematically penalises every configuration far from it (see POOL_ARMS), so the
+ * defaults review the pool is meant to support cannot be run against it.
+ *
+ * Round 2 onwards, load the previous round's samples into the file picker: those grades are subtracted, so
+ * only genuinely new entries need a human, and the written samples carry the accumulated grade set. That is
+ * what lets the arm list grow without the grading cost growing with it.
+ *
+ * Writes ONE SAMPLE PER ARM, each with its own captureParams, its own candidate rows and its own recorded
+ * cutoff — a merged row would carry one arm's signals under another's parameters. They share only the grades.
+ *
+ * Books default to 'full' despite N samples meaning N copies. 'meta' is lossless for how the harness scores
+ * TODAY and 20x smaller, which made it the obvious default — until the samples started being things other
+ * people send you. A sample is only re-scorable by someone who has the vector index, and nobody but the
+ * author does; what makes a third-party dump usable is REBUILDING the index from the sample, which needs
+ * entry content (plus the chunk params in paramSnapshot and the recorded embedModel, both already carried).
+ * 'meta' drops content and so permanently forecloses that. Size is recoverable later; a dump captured at
+ * 'meta' is not.
+ *
+ * @param {object} named Named args: name, books, candidates, arms, notes
+ * @returns {Promise<string>} Empty string — output is downloaded files
+ */
+/**
+ * The super-grade grading popup, extracted so /wa-super-grade (live captures) and /wa-super-eval (a graded
+ * file, no chat required) share one shell: query blocks, prior loading, the editable union table, and the
+ * merged-grade result. Callers own what happens to the grades afterwards.
+ *
+ * @param {object} args
+ * @param {Array<{arm: string, rows: object[], entries: object[], query: string, depth?: number|string}>} args.captures Per-arm captures
+ * @param {{rows: object[], entries: object[]}} args.union unionArms() output over those captures
+ * @param {(world: string, uid: number) => object|undefined} args.entryOf Entry resolver for the text viewer
+ * @param {object[]} [args.prior] Pre-loaded prior grades (pre-filled, editable)
+ * @param {string} [args.subtitle] Extra context line under the title (escaped here)
+ * @param {string} [args.okButton] Confirm-button label
+ * @returns {Promise<{grades: object[], prior: object[]}|null>} Merged grades, or null on cancel
+ */
+async function superGradePopup({ captures, union, entryOf, prior: prior0 = [], subtitle = '', okButton = 'Save samples' }) {
+    const esc = s => escapeHtml(String(s ?? ''));
+    let prior = [...prior0];
+
+    const wrap = document.createElement('div');
+    const head = document.createElement('div');
+    const body = document.createElement('div');
+    wrap.append(head, body);
+
+    // THE QUERY TEXT THE MACHINE ACTUALLY MATCHED ON. Grading drifts without it: the human remembers the
+    // scene, but relevance was decided against this text, and the two diverge (a scene's emotional centre is
+    // often a paragraph the query window never reached). Grouped by distinct text rather than shown once,
+    // because the arms do NOT share a query — the summary arm retrieves against model-written text while the
+    // rest use raw messages, and an entry can be a fair hit for one and a miss for the other.
+    const byQuery = new Map();
+    for (const cap of captures) {
+        if (!cap.query) continue;
+        const hit = byQuery.get(cap.query) ?? [];
+        hit.push(cap.arm);
+        byQuery.set(cap.query, hit);
+    }
+    const queryBlocks = [...byQuery.entries()].map(([text, arms]) => {
+        const label = byQuery.size === 1 ? 'Query text — what retrieval actually matched on' : `Query text (${esc(arms.join(', '))})`;
+        return `<details style="margin-bottom:0.4em;"><summary style="cursor:pointer;">${label} `
+            + `(${text.length} chars, depth ${captures[0].depth})</summary>`
+            + `<pre style="white-space:pre-wrap;max-height:14em;overflow:auto;font-size:0.85em;opacity:0.85;border:1px solid var(--SmartThemeBorderColor);padding:0.5em;margin-top:0.5em;">${esc(text)}</pre></details>`;
+    }).join('');
+
+    head.innerHTML = '<h3 style="margin:0 0 0.25em;">Grade this scene — pooled across arms</h3>'
+        + `${subtitle ? `<small style="display:block;opacity:0.7;margin-bottom:0.25em;">${esc(subtitle)}</small>` : ''}`
+        + `<small style="display:block;opacity:0.7;margin-bottom:0.5em;">${gradeAnchorLine()} ${union.rows.length} distinct entries from ${captures.length} arm(s): ${esc(captures.map(c => c.arm).join(', '))}.</small>`
+        + queryBlocks
+        + `${byQuery.size > 1 ? `<small style="display:block;opacity:0.6;margin-bottom:0.5em;">${byQuery.size} arms retrieved against different text — judge relevance to the SCENE, not to any one query.</small>` : ''}`
+        // A bare <input type="file"> inherits nothing from ST's theme and reads as a paragraph of text, so it
+        // went unnoticed. Drive it from a real menu_button instead, and keep a PERSISTENT status line: a
+        // toast that has already faded is no way to confirm the priors loaded, and grading a round without
+        // them silently means re-judging everything the last round already covered.
+        + '<div style="margin:0.6em 0;display:flex;align-items:center;gap:0.6em;flex-wrap:wrap;">'
+        + '<div class="menu_button wa-sg-pick" style="width:auto;padding:0.3em 0.8em;">Load earlier samples / pool requests…</div>'
+        + `<small class="wa-sg-loaded" style="opacity:0.7;">${prior0.length ? `${prior0.length} grade(s) pre-loaded, shown in the table` : 'nothing loaded — grading everything from scratch'}</small>`
+        + '<input type="file" class="wa-sg-prior" accept=".json,application/json" multiple style="display:none;">'
+        + '</div>'
+        + '<small style="display:block;opacity:0.6;margin-bottom:0.5em;">Earlier rounds\' samples: their grades are subtracted so you only judge what is new. Pool requests from eval/pool-extend.mjs: their entries are added.</small>';
+
+    // Repaint rather than patch: loading priors changes which rows are gradeable at all. Only grades the
+    // user actually EDITED (data-dirty, set below) are carried across — every row is an input now, so
+    // carrying pristine "0"s would shadow the prior grades a freshly loaded file is supposed to pre-fill.
+    const paint = () => {
+        const typed = new Map([...body.querySelectorAll('.wa-grade')].filter(i => i.dataset.dirty).map(i => [i.dataset.key, i.value]));
+        const { fresh, known, priorOf } = splitGraded(union.rows, prior);
+
+        body.innerHTML = `<small style="display:block;opacity:0.7;margin-bottom:0.5em;">${fresh.length} to grade`
+            + `${known.length ? `; ${known.length} judged in an earlier round (pre-filled — edit any you disagree with, untouched rows carry through as shown)` : ''}.</small>`
+            + '<table style="width:100%;border-collapse:collapse;font-size:0.9em;"><thead><tr style="text-align:left;">'
+            + '<th style="width:4em;">Grade</th><th>Entry</th><th style="width:9em;">surfaced by</th><th style="width:4em;">best#</th><th style="width:4em;">cos</th><th style="width:4em;">text</th><th style="width:4em;">keys</th><th style="width:4em;"></th></tr></thead><tbody>'
+            + union.rows.map((row, i) => {
+                const key = rowKey(row);
+                const num = n => (n == null ? '·' : String(n));
+                const done = priorOf.has(key);
+                // Prior rows are inputs too, pre-filled with the (remapped) earlier grade: an edit re-emits
+                // the row as a fresh grade and mergeGrades is last-wins, so the edit overrides the prior.
+                // A carried-over edit stays dirty across repaints, or the next repaint would revert it.
+                const cell = `<input type="number" class="wa-grade text_pole" data-key="${esc(key)}" data-i="${i}" min="0" max="4" step="1" ${typed.has(key) ? 'data-dirty="1" ' : ''}value="${esc(typed.get(key) ?? (done ? priorOf.get(key) : '0'))}" title="${esc(GRADE_ANCHORS.map((a, g) => `${g}: ${a}`).join('\n'))}" style="width:4em;padding:2px 4px;">`;
+                return `<tr style="border-top:1px solid var(--SmartThemeBorderColor);${done ? 'opacity:0.55;' : ''}">`
+                    + `<td>${cell}</td>`
+                    + `<td>${esc(row.title)}<br><small style="opacity:0.5;">${esc(row.world)} · uid ${num(row.uid)}</small></td>`
+                    // Which arms surfaced a row is the pooling diagnostic: rows only one arm found are where
+                    // the overlap assumption is failing, and they are why that arm is in the list.
+                    + `<td><small style="opacity:0.7;">${esc(row.arms.join(', '))}</small></td>`
+                    + `<td>${num(row.bestRank)}</td><td>${num(row.cosine)}</td><td>${num(row.text)}</td><td>${num(row.keys)}</td>`
+                    + `<td><button class="menu_button wa-viewtext" data-i="${i}" style="padding:2px 6px;font-size:0.85em;">text</button></td></tr>`;
+            }).join('')
+            + '</tbody></table>';
+
+        body.querySelectorAll('.wa-viewtext').forEach(button => button.addEventListener('click', event => {
+            event.preventDefault();
+            const entry = union.entries[Number(button.dataset.i)];
+            if (entry) showEntryText(entry);
+        }));
+        // A user edit marks the input dirty; only dirty values survive a repaint (see `typed` above).
+        body.querySelectorAll('.wa-grade').forEach(input => input.addEventListener('input', () => { input.dataset.dirty = '1'; }));
+    };
+
+    head.querySelector('.wa-sg-pick').addEventListener('click', () => head.querySelector('.wa-sg-prior').click());
+    head.querySelector('.wa-sg-prior').addEventListener('change', async event => {
+        const loaded = [];
+        let added = 0;
+        const names = [];
+        for (const file of event.target.files ?? []) {
+            try {
+                const parsed = JSON.parse(await file.text());
+                // Two shapes through one picker: a previous round's sample/bundle (subtract its grades) or an
+                // offline pool request (ADD its entries). Told apart by which array is present.
+                if (Array.isArray(parsed?.pending)) {
+                    for (const row of parsed.pending) {
+                        const key = rowKey(row);
+                        if (union.rows.some(r => rowKey(r) === key)) continue;
+                        const entry = entryOf(row.world, row.uid);
+                        union.rows.push({
+                            title: entry?.comment || row.title, world: row.world, uid: row.uid,
+                            block: 'dynamic', sticky: 0, score: null, cosine: null, text: null, keys: null,
+                            // Labelled so the grader can see this row came from a rebuilt index rather than a
+                            // live arm — it is being judged for a configuration this machine isn't running.
+                            arms: [`offline: ${(row.doses ?? []).length || '?'} dose(s)`],
+                            bestRank: row.bestRank ?? null,
+                        });
+                        union.entries.push(entry);
+                        added++;
+                    }
+                } else if (Array.isArray(parsed?.grades)) {
+                    // Remaps legacy 0-5 grades to the 0-4 scale (no-op on current-scale files), so the
+                    // pre-filled inputs below show the value that will actually be saved.
+                    loaded.push(...normalizeSample(parsed).grades);
+                } else {
+                    toastr.warning(`${file.name} has neither "grades" nor "pending" — ignored`, 'Worlds Apart');
+                    continue;
+                }
+                names.push(file.name);
+            } catch {
+                toastr.warning(`Could not parse ${file.name} — ignored`, 'Worlds Apart');
+            }
+        }
+        prior = mergeGrades(prior, loaded);
+        head.querySelector('.wa-sg-loaded').textContent = names.length
+            ? `${names.length} file(s): ${prior.length} prior grade(s)${added ? `, ${added} entry(ies) requested offline` : ''}`
+            : 'no usable files — nothing loaded';
+        toastr.info(`${prior.length} prior grade(s)${added ? `, ${added} entr(y/ies) requested offline` : ''}`, 'Worlds Apart', { timeOut: 3000 });
+        paint();
+    });
+
+    paint();
+
+    const popup = new Popup(wrap, POPUP_TYPE.CONFIRM, '', { okButton, cancelButton: 'Cancel', large: true, wide: true, allowVerticalScrolling: true });
+    if (await popup.show() !== POPUP_RESULT.AFFIRMATIVE) {
+        return null;
+    }
+
+    const fresh = [...body.querySelectorAll('.wa-grade')].map(input => {
+        const row = union.rows[Number(input.dataset.i)];
+        return { title: row.title, grade: Number(input.value) || 0, world: row.world, uid: row.uid };
+    });
+    return { grades: mergeGrades(prior, fresh), prior };
+}
+
+async function superGradeScene(named) {
+    const bookMode = String(named?.books ?? 'full').toLowerCase();
+    if (!['full', 'meta', 'none'].includes(bookMode)) {
+        toastr.warning('books= must be full, meta or none', 'Worlds Apart');
+        return '';
+    }
+    // Sharable dumps need content to be re-indexable by anyone but their author (see above), so a downgrade
+    // is allowed but never silent.
+    if (bookMode !== 'full') {
+        toastr.warning(`books=${bookMode} drops entry content, so nobody without your vector index can re-score these samples`, 'Worlds Apart', { timeOut: 8000 });
+    }
+
+    const wanted = Math.max(1, Number(named?.candidates ?? 30));
+    const picked = String(named?.arms ?? '').trim()
+        ? String(named.arms).split(/[,\s]+/).filter(Boolean)
+        : Object.keys(POOL_ARMS);
+    const unknown = picked.filter(a => !POOL_ARMS[a]);
+    if (unknown.length) {
+        toastr.warning(`Unknown arm(s): ${unknown.join(', ')}. Known: ${Object.keys(POOL_ARMS).join(', ')}`, 'Worlds Apart');
+        return '';
+    }
+
+    const captures = [];
+    for (const [n, arm] of picked.entries()) {
+        toastr.info(`Arm ${n + 1}/${picked.length}: ${arm}`, 'Worlds Apart', { timeOut: 2500 });
+        // Sequential, not Promise.all: the arms share one live settings object and one retrieval pipeline.
+        const cap = await captureArm(POOL_ARMS[arm], wanted);
+        if (!cap.rows.length) {
+            console.warn(`Worlds Apart: arm "${arm}" activated nothing — skipped`);
+            continue;
+        }
+        // Keyword-only under this arm: a sample without a query can't be scored offline (see gradeScene).
+        if (!cap.query) {
+            console.warn(`Worlds Apart: arm "${arm}" retrieved nothing (no query to freeze) — skipped`);
+            continue;
+        }
+        captures.push({ arm, ...cap });
+    }
+
+    if (!captures.length) {
+        toastr.warning('No arm activated anything — nothing to grade.', 'Worlds Apart');
+        return '';
+    }
+
+    const union = unionArms(captures);
+    if (!union.rows.length) {
+        toastr.warning('Every activated row was constant/sticky — relevance chose nothing to grade.', 'Worlds Apart');
+        return '';
+    }
+
+    // Loaded BEFORE the popup, not after: an offline pool request names entries no arm surfaced, so the
+    // grading table has to resolve them from the book to show their text.
+    const books = {};
+    for (const world of runState.attachedWorlds) {
+        const data = await loadWorldInfo(world);
+        if (data?.entries) {
+            books[world] = trimBook(data.entries, bookMode);
+        }
+    }
+    const entryOf = (world, uid) => Object.values(books[world] ?? {}).find(e => Number(e.uid) === Number(uid));
+
+    const done = await superGradePopup({ captures, union, entryOf });
+    if (!done) {
+        return '';
+    }
+    const { grades, prior } = done;
+
+    const base = named?.name || defaultSampleName();
+    const built = [];
+    for (const cap of captures) {
+        // Per arm, because a lexical-only arm can retrieve from a different book than the hybrid one — and the
+        // harness loads exactly one collection, so getting this wrong keys a sample to a collection that
+        // contributed nothing.
+        const primaryBook = searchedBook(cap.rows) ?? chatBook() ?? Object.keys(books)[0] ?? '';
+        const sample = buildSample({
+            name: `${base}--${cap.arm}`,
+            notes: named?.notes || `Arm "${cap.arm}" of a ${captures.length}-arm pooled grading (${captures.map(c => c.arm).join(', ')}); ${grades.length} grades pooled across arms and rounds.`,
+            query: cap.query,
+            queryChat: cap.queryChat,
+            scanText: cap.scanText,
+            depth: cap.depth,
+            pluginFP: runState.pluginFP,
+            sourceFP: runState.sourceFP,
+            chat: chatFilePath(),
+            book: primaryBook ? `data/default-user/worlds/${primaryBook}.json` : '',
+            index: primaryBook ? vectorIndexPath(primaryBook) : '',
+            primaryBook,
+            embedModel: vectorRequestBody().model || '',
+            params: cap.params,
+            snapshot: cap.snapshot,
+            candidates: cap.rows,
+            books,
+            bookMode,
+            priority: (scopedPriority() ?? []).map(x => x.cfg),
+            grades,
+            cutoff: {
+                live: cap.live,
+                gradingOverride: { mode: 'count', maxVectorEntries: wanted },
+                kept: cap.kept,
+                minVectorEntries: cap.minVectorEntries,
+                elbowSensitivity: cap.elbowSensitivity,
+                dropoffThreshold: cap.dropoffThreshold,
+            },
+            // Every non-scaffolding row of every arm is in the union, and the union is graded in full — so
+            // unlike /wa-grade this is an exact count of judged rows rather than a conservative proxy.
+            gradedCandidates: cap.rows.filter(r => !isScaffolding(r)).length,
+            now: new Date().toISOString().slice(0, 10),
+        });
+        built.push({ arm: cap.arm, sample });
+    }
+
+    // ONE download. The arms share the grades and — overwhelmingly the bulk of the bytes — the embedded book
+    // copies, so N files meant N browser download prompts and N duplicates of a 300-entry lorebook.
+    const bundle = bundleSamples(built);
+    const { filename, content } = sampleFile({ ...bundle, name: base });
+    download(content, filename, 'application/json');
+    console.log(`Worlds Apart: ${built.length}-arm bundle -> ${filename}`, bundle);
+
+    const above = grades.filter(g => g.grade > 0).length;
+    toastr.success(
+        `Saved ${filename} — ${built.length} arms in one file, ${union.rows.length} rows this round, ${grades.length} pooled, ${above} above 0. `
+        + 'Move it to eval/eval-data/ and run graded-scene-grid.mjs --sample (add --arm to pick one); watch judged@10.',
+        'Worlds Apart', { timeOut: 12000 },
+    );
+    return '';
+}
+
+/** Opens the browser file picker for one JSON file. Resolves null when the user cancels. */
+const pickJsonFile = () => new Promise(resolve => {
+    const input = document.createElement('input');
+    input.type = 'file';
+    input.accept = '.json,application/json';
+    input.addEventListener('change', () => resolve(input.files?.[0] ?? null), { once: true });
+    input.addEventListener('cancel', () => resolve(null), { once: true });
+    input.click();
+});
+
+/**
+ * /wa-super-eval — chat-independent review of a graded sample/bundle: the super-grade shell, fed entirely
+ * from the file. Nothing live is read — no chat, no attached books, no settings — so a scene captured
+ * offline (or by someone else, or by an LLM judge) can be reviewed without loading the chat it came from.
+ * Entry text resolves from the bundle's embedded books, the stored grades arrive pre-filled and editable
+ * (legacy 0-5 remapped on load), and Save downloads the SAME bundle with only `grades`/`gradeScale`
+ * updated — arms, captures, params and books are preserved untouched.
+ */
+async function superEvalScene() {
+    const file = await pickJsonFile();
+    if (!file) {
+        return '';
+    }
+    let manifest;
+    try {
+        manifest = JSON.parse(await file.text());
+    } catch {
+        toastr.warning(`Could not parse ${file.name}`, 'Worlds Apart');
+        return '';
+    }
+    const armsRaw = Array.isArray(manifest?.arms) ? manifest.arms : (Array.isArray(manifest?.candidates) ? [manifest] : []);
+    if (!armsRaw.length || !Array.isArray(manifest?.grades)) {
+        toastr.warning(`${file.name} is not a graded sample/bundle (needs "grades" and captured candidates)`, 'Worlds Apart');
+        return '';
+    }
+
+    const books = manifest.books ?? {};
+    const entryOf = (world, uid) => Object.values(books[world] ?? {}).find(e => Number(e.uid) === Number(uid));
+    const captures = armsRaw.map(a => ({
+        arm: a.arm ?? manifest.name ?? 'capture',
+        rows: a.candidates ?? [],
+        entries: (a.candidates ?? []).map(r => entryOf(r.world, r.uid) ?? null),
+        query: a.query ?? '',
+        depth: a.depth ?? manifest.depth ?? '?',
+    }));
+    const union = unionArms(captures);
+    if (!union.rows.length) {
+        toastr.warning('No gradeable candidate rows in this file.', 'Worlds Apart');
+        return '';
+    }
+
+    const done = await superGradePopup({
+        captures,
+        union,
+        entryOf,
+        prior: normalizeSample(manifest).grades,
+        subtitle: `Reviewing ${file.name} (${manifest.createdBy ?? 'unknown grader'}) — loaded from file, no chat required.`,
+        okButton: 'Save updated bundle',
+    });
+    if (!done) {
+        return '';
+    }
+
+    // Same bundle out, grades swapped — never rebuilt, so captures/params/books stay byte-identical.
+    // ONE file carries both raters: `grade` is authoritative (the harness scores it; this review edits it),
+    // `llmGrade` is the LLM judge's original, preserved across reviews for IRR. The shell's fresh rows drop
+    // extra fields, so llmGrade is re-attached here from the loaded manifest.
+    const llmOf = new Map(manifest.grades.filter(g => g.llmGrade !== undefined).map(g => [rowKey(g), g.llmGrade]));
+    const grades = done.grades.map(g => (llmOf.has(rowKey(g)) ? { ...g, llmGrade: llmOf.get(rowKey(g)) } : g));
+    const updated = { ...manifest, grades, gradeScale: 4 };
+    const { filename, content } = sampleFile(updated);
+    download(content, filename, 'application/json');
+    const rel = grades.filter(g => g.grade >= 3).length;
+    // When both raters are present, the save toast doubles as the agreement report.
+    const both = grades.filter(g => g.llmGrade !== undefined);
+    const irr = both.length
+        ? ` LLM agreement: ${both.filter(g => g.grade === g.llmGrade).length}/${both.length} exact, ${both.filter(g => Math.abs(g.grade - g.llmGrade) <= 1).length}/${both.length} within 1.`
+        : '';
+    toastr.success(`Saved ${filename} — ${grades.length} grades, ${rel} relevant (>=3).${irr} Replace the old file in eval/eval-data/.`, 'Worlds Apart', { timeOut: 10000 });
     return '';
 }
 
@@ -1814,13 +2607,33 @@ async function applyBudget({ ranked, isDynamic, maxTokens, maxTotal, maxDynamic,
 
 // Entry selection (count/elbow/dropoff cutoff) lives in selection.mjs; inject the cutoff settings.
 // Rationale/benchmarks are documented there.
-const cutRetrieved = (ranked) => selection.cutRetrieved(ranked, {
-    mode: settings().vectorCutoff,
-    maxVectorEntries: settings().maxVectorEntries,
-    minVectorEntries: settings().minVectorEntries,
-    elbowSensitivity: settings().elbowSensitivity,
-    dropoffThreshold: settings().dropoffThreshold,
-});
+/**
+ * The cutoff in force. Normally the settings; during a /wa-grade run, a deliberately wide `count` so the
+ * grader sees enough candidates to judge the OTHER cutoff modes offline.
+ *
+ * Why widening matters: the cutoff decides which retrieved entries are force-activated, so it decides which
+ * rows reach the candidates table and therefore which rows can be graded. Offline, an ungraded row scores 0,
+ * so evaluating a cutoff that would keep MORE than the capture kept silently charges it for rows the grader
+ * never saw. A sample captured at count/10 cannot fairly assess an elbow that wants 14.
+ *
+ * Read through a holder rather than by mutating settings(): settings persist, and a throw mid-run would
+ * leave the user's real cutoff changed behind their back.
+ * @returns {{mode: string, maxVectorEntries: number}} Effective cutoff
+ */
+function effectiveCutoff() {
+    return runState.gradeCutoff ?? { mode: settings().vectorCutoff, maxVectorEntries: settings().maxVectorEntries };
+}
+
+const cutRetrieved = (ranked) => {
+    const { mode, maxVectorEntries } = effectiveCutoff();
+    return selection.cutRetrieved(ranked, {
+        mode,
+        maxVectorEntries,
+        minVectorEntries: settings().minVectorEntries,
+        elbowSensitivity: settings().elbowSensitivity,
+        dropoffThreshold: settings().dropoffThreshold,
+    });
+};
 
 /**
  * Summarizes the current chat and scores the result, so the summary prompt can be
@@ -1845,7 +2658,7 @@ async function probeSummary() {
         return '';
     }
 
-    await probeQuery(null, summary);
+    await probeQuery(null, summary, { unfiltered: true });
     return '';
 }
 
@@ -1966,6 +2779,9 @@ const SETTINGS_HTML = `
 
                     <label for="wa_threshold">Score threshold</label>
                     <input id="wa_threshold" type="number" class="text_pole" min="0" max="1" step="0.01">
+
+                    <label for="wa_uncentered_gate" title="A chunk must also reach this raw (uncentered) cosine to be admitted. Catches a wrong book attached by mistake; 0.5 is calibrated for bge-m3. 0 = off.">Wrong-book gate (raw cosine)</label>
+                    <input id="wa_uncentered_gate" type="number" class="text_pole" min="0" max="1" step="0.05">
                 </div>
             </div>
 
@@ -1995,6 +2811,8 @@ const SETTINGS_HTML = `
 
                     <label for="wa_lexical_weight">Lexical weight (BM25 vs vector in fusion)</label>
                     <input id="wa_lexical_weight" type="number" class="text_pole" min="0" max="5" step="0.1">
+                    <label for="wa_keyword_weight">Keyword weight (BM25 over keys) — blank follows lexical weight</label>
+                    <input id="wa_keyword_weight" type="number" class="text_pole" min="0" max="5" step="0.1" placeholder="follow lexical">
                 </div>
             </div>
 
@@ -2143,10 +2961,21 @@ function populateProfiles(notify = false) {
 }
 
 /**
+ * A blank field for a 'number?' setting, and anything that does not parse. Both mean null — "unset, follow
+ * whatever this setting defers to" — and NaN in particular must never be stored: it is neither null nor
+ * undefined, so it survives every `??` downstream and turns a fused score into NaN silently.
+ */
+const nullableNumber = (val) => {
+    const n = Number(String(val).trim() || NaN);
+    return Number.isFinite(n) ? n : null;
+};
+
+/**
  * Wires a settings control to its backing value.
  * @param {string} selector Element selector
  * @param {string} key Settings key
- * @param {'checked'|'number'|'string'} kind Value type
+ * @param {'checked'|'number'|'number?'|'string'} kind Value type. 'number?' persists a blank or
+ *   unparseable field as null ("unset"), for settings whose null means "follow another setting".
  */
 function bind(selector, key, kind) {
     const $el = $(selector);
@@ -2154,13 +2983,16 @@ function bind(selector, key, kind) {
     if (kind === 'checked') {
         $el.prop('checked', settings()[key]);
     } else {
-        $el.val(settings()[key]);
+        // 'number?' holds null when unset, which must render as an empty field (showing the placeholder)
+        // rather than as the string "null".
+        $el.val(kind === 'number?' ? settings()[key] ?? '' : settings()[key]);
     }
 
     $el.on('input change', () => {
         settings()[key] = kind === 'checked' ? $el.prop('checked')
             : kind === 'number' ? Number($el.val())
-                : String($el.val());
+                : kind === 'number?' ? nullableNumber($el.val())
+                    : String($el.val());
         saveSettingsDebounced();
     });
 }
@@ -2305,6 +3137,9 @@ export async function init() {
     bind('#wa_bm25_k1', 'bm25K1', 'number');
     bind('#wa_bm25_b', 'bm25B', 'number');
     bind('#wa_lexical_weight', 'lexicalWeight', 'number');
+    // 'number?', not 'number': blank means "follow lexicalWeight" and must persist as null, where a plain
+    // number binding would collapse it to 0 and silently switch the keys signal off.
+    bind('#wa_keyword_weight', 'keywordWeight', 'number?');
     bind('#wa_rrf_k', 'rrfK', 'number');
     bind('#wa_weight_by_order', 'weightByOrder', 'checked');
     bind('#wa_summary_profile', 'summaryProfile', 'string');
@@ -2317,6 +3152,7 @@ export async function init() {
     bind('#wa_chunk_size', 'chunkSize', 'number');
     bind('#wa_min_chunk_size', 'minChunkSize', 'number');
     bind('#wa_threshold', 'scoreThreshold', 'number');
+    bind('#wa_uncentered_gate', 'uncenteredGate', 'number');
     bind('#wa_max_entries', 'maxVectorEntries', 'number');
     bind('#wa_vector_cutoff', 'vectorCutoff', 'string');
     bind('#wa_min_entries', 'minVectorEntries', 'number');
@@ -2380,6 +3216,9 @@ export async function init() {
     // New chat = possibly different books; drop the smartkeys key registry so the automaton
     // tracks the active vocabulary instead of the union of every book ever scanned.
     eventSource.on(event_types.CHAT_CHANGED, resetSmartKeys);
+    // The panel survives dry-run scans untouched (rankActivated ignores them), so without
+    // this it would carry the previous chat's selection across a switch.
+    eventSource.on(event_types.CHAT_CHANGED, () => { runState.lastLayout = []; renderWiPanel([]); });
     refreshAttached();
     eventSource.on(event_types.WORLDINFO_SCAN_DONE, rankActivated);
 
@@ -2397,6 +3236,40 @@ export async function init() {
         name: 'wa-debug',
         callback: () => dryRun(true),
         helpString: 'Worlds Apart: same as /wa-dry plus every intermediate — query text, surviving term weights, per-signal scores, and the full vector-candidate ranking past the cut. Console.',
+        returns: 'nothing',
+    }));
+
+    SlashCommandParser.addCommandObject(SlashCommand.fromProps({
+        name: 'wa-grade',
+        callback: gradeScene,
+        namedArgumentList: [
+            SlashCommandNamedArgument.fromProps({ name: 'name', description: 'sample name, used as the filename', typeList: [ARGUMENT_TYPE.STRING], defaultValue: 'scene-<date>' }),
+            SlashCommandNamedArgument.fromProps({ name: 'books', description: 'lorebook copy fidelity: full (verbatim), meta (entries without content), none (paths only)', typeList: [ARGUMENT_TYPE.STRING], defaultValue: 'full', enumList: ['full', 'meta', 'none'] }),
+            SlashCommandNamedArgument.fromProps({ name: 'candidates', description: 'how many retrieved entries to surface for grading (the cut is widened to a plain count for the run, so the sample can assess every cutoff mode offline)', typeList: [ARGUMENT_TYPE.NUMBER], defaultValue: '20' }),
+            SlashCommandNamedArgument.fromProps({ name: 'notes', description: 'free-text note stored in the sample', typeList: [ARGUMENT_TYPE.STRING] }),
+        ],
+        helpString: 'Worlds Apart: grade this scene for the offline evals. Runs /wa-debug, then opens a window listing every activated entry with the query text and per-signal scores, for grading 0-5 (constants and stickies are listed but not graded — relevance never chose them). Saving downloads a self-contained sample: query text, settings snapshot, candidate ranking, grades, and copies of every attached lorebook, so later chat/lorebook/settings edits cannot move the numbers. Drop it in eval/eval-data/ and run eval/graded-scene-grid.mjs --sample.',
+        returns: 'nothing',
+    }));
+
+    SlashCommandParser.addCommandObject(SlashCommand.fromProps({
+        name: 'wa-super-grade',
+        callback: superGradeScene,
+        namedArgumentList: [
+            SlashCommandNamedArgument.fromProps({ name: 'name', description: 'base sample name; each arm gets "<name>--<arm>.json"', typeList: [ARGUMENT_TYPE.STRING], defaultValue: 'chat-msgN' }),
+            SlashCommandNamedArgument.fromProps({ name: 'arms', description: 'which arms to capture, comma-separated (default: all)', typeList: [ARGUMENT_TYPE.STRING], enumList: Object.keys(POOL_ARMS) }),
+            SlashCommandNamedArgument.fromProps({ name: 'books', description: 'lorebook copy fidelity: full (default — content is what makes a sample re-indexable by anyone else), meta, none', typeList: [ARGUMENT_TYPE.STRING], defaultValue: 'full', enumList: ['full', 'meta', 'none'] }),
+            SlashCommandNamedArgument.fromProps({ name: 'candidates', description: 'candidate depth per arm (the cut is widened to a plain count for each run)', typeList: [ARGUMENT_TYPE.NUMBER], defaultValue: '30' }),
+            SlashCommandNamedArgument.fromProps({ name: 'notes', description: 'free-text note stored in every sample written', typeList: [ARGUMENT_TYPE.STRING] }),
+        ],
+        helpString: 'Worlds Apart: grade this scene against SEVERAL configurations at once, for a pool that isn\'t biased toward the current defaults. Runs /wa-debug once per arm (arms change which entries get surfaced — entity filter, retrieval mode, threshold, key suppression, summary queries), unions the entries they surfaced, dedupes, and opens one grading window over the union with a "surfaced by" column. Load earlier rounds\' samples into the file picker and their grades are subtracted, so each round only judges what is new. Saves one sample per arm — each with its own params and candidate rows, all sharing the pooled grades. Drop them in eval/eval-data/, run eval/graded-scene-grid.mjs --sample on each, and add arms until the judged@10 column stops showing gaps.',
+        returns: 'nothing',
+    }));
+
+    SlashCommandParser.addCommandObject(SlashCommand.fromProps({
+        name: 'wa-super-eval',
+        callback: superEvalScene,
+        helpString: 'Worlds Apart: review a graded sample/bundle from its FILE, chat-independent — nothing live is read, so scenes captured offline or graded by an LLM judge open without loading their chat. Same grading window as /wa-super-grade; stored grades arrive pre-filled and editable (legacy 0-5 remapped to 0-4), entry text comes from the embedded books, and Save downloads the same bundle with only the grades updated — diff it against the original to see exactly what the review changed.',
         returns: 'nothing',
     }));
 
