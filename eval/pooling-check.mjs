@@ -5,7 +5,7 @@
 //
 // Run bare: prints `ok` or throws.
 import assert from 'node:assert';
-import { poolEntries, selectTopK } from '../plugin/scoring.mjs';
+import { poolEntries, quantile, scoreCollection, selectTopK } from '../plugin/scoring.mjs';
 
 const chunk = (index, hash, score, bm25) => ({ collectionId: 'c1', score, bm25, metadata: { index, hash, text: `t${hash}` } });
 
@@ -58,5 +58,26 @@ assert.strictEqual(new Set(selectTopK(many, 2).c1.metadata.map(m => m.index)).si
 const lexOnly = selectTopK(poolEntries([chunk(7, 1, 0.9, 0), chunk(8, 2, -0.5, 5.0)]), 1);
 assert.strictEqual(new Set(lexOnly.c1.metadata.map(m => m.index)).size, 2,
     'the lexical-only entry survives a topK of 1 via the union');
+
+// quantile (backs threshold:'auto'): interpolated, order-insensitive, sane on empty/single.
+assert.strictEqual(quantile([], 0.9), 0, 'empty → 0');
+assert.strictEqual(quantile([5], 0.9), 5, 'single value');
+assert.strictEqual(quantile([3, 1, 2], 0.5), 2, 'median, unsorted input');
+assert.strictEqual(quantile([0, 10], 0.9), 9, 'linear interpolation');
+
+// threshold:'auto' must gate identically to passing the p90 of the centered scores by hand. Ten orthogonal
+// unit vectors against a query aligned with item 0: distinct cosines, no lexical overlap (bm25 0), so
+// admission is decided by the cosine clause alone.
+const dim = 10;
+const unit = i => Array.from({ length: dim }, (_, d) => (d === i ? 1 : 0));
+const autoItems = Array.from({ length: dim }, (_, i) => ({ vector: unit(i), metadata: { index: i, hash: i, text: `zz${i}` } }));
+const autoLoaded = { items: autoItems, mean: Array(dim).fill(0), lexical: { docs: autoItems.map(() => []), df: new Map(), avgLen: 0 } };
+const q = Array.from({ length: dim }, (_, d) => (dim - d));   // distinct positive cosine per item
+const auto = scoreCollection('c1', autoLoaded, q, { centered: false, threshold: 'auto', queryText: '' });
+const scores = autoItems.map((_, i) => scoreCollection('c1', autoLoaded, q, { centered: false, threshold: -Infinity, queryText: '' })[i].score);
+const byHand = scoreCollection('c1', autoLoaded, q, { centered: false, threshold: quantile(scores, 0.9), queryText: '' });
+assert.deepStrictEqual(auto.map(r => r.metadata.index), byHand.map(r => r.metadata.index),
+    "'auto' admits exactly what the hand-computed p90 admits");
+assert.ok(auto.length >= 1 && auto.length < autoItems.length, "'auto' keeps roughly the top decile, not everything");
 
 console.log('ok');

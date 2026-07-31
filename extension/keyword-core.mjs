@@ -73,13 +73,13 @@ const ENGLISH_COMMON_STICKY_CUT = 1000;
 const COMMON_HEAD = new Set([...COMMON_WORDS].slice(0, ENGLISH_COMMON_STICKY_CUT));
 
 /**
- * Flag-aware keyword prune analysis for one loaded lorebook. Extracted from keywordScoresReport so
- * the prune popup and Lorebook Studio share one classifier — the audit and the runtime never drift.
+ * Flag-aware keyword prune analysis for one loaded lorebook — one classifier shared by the Lorebook
+ * Studio audit and the offline eval/keyword-audit.mjs, so the audit and the runtime never drift.
  * Returns live closures (classifyEntry re-reads each entry's flags), so a flag toggle just re-runs
  * them; the caches key on (key, caseSensitive, wholeWord) so re-analysis after a toggle is cheap.
  *
  * @param {object} data       loaded world-info object (from loadWorldInfo)
- * @param {object} opts        scan/prune options (see keywordScoresReport's defaults)
+ * @param {object} opts        scan/prune options (see keyword-tools STUDIO_PRUNE_OPTS)
  * @param {Set<string>} ignoreSet  keys whitelisted for this book (skipped by classifyEntry)
  * @param {{caseSensitiveDefault?: boolean, wholeWordsDefault?: boolean}} [matchDefaults]  book-level
  *        match-flag defaults for entries that don't set their own (the extension injects ST's

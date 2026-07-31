@@ -44,7 +44,6 @@ import { Popup, POPUP_TYPE, POPUP_RESULT } from '../../../popup.js';
 import { runState, defaultSettings, settings, ensureSettings } from './extension/state.mjs';
 import { ensureStudioStyle, makeSortControl, makeTierEditor, showEntryText, wiGlyph, wiTooltip } from './extension/ui-widgets.mjs';
 import { PRESENTATION_ALIAS, SORT_FNS, normPresentation, presentationBaseLabel, presentationLabel, reconcileTiers, tierRank, wiTitleOf } from './extension/sort.mjs';
-import { keywordScoresReport, keywordSuggestReport } from './extension/keyword-tools.mjs';
 import { lorebookStudio } from './extension/studio.mjs';
 import { buildSample, bundleSamples, captureParams, GRADE_ANCHORS, isScaffolding, mergeGrades, normalizeSample, rowKey, sampleFile, searchedBook, splitGraded, trimBook, unionArms } from './extension/grading.mjs';
 
@@ -289,6 +288,9 @@ async function queryCollections(args) {
         }
     }
 
+    // Stock ST can't quantile ('auto' resolves in the plugin) — pin the old centered default; on raw
+    // scores it's permissive and client-side selection narrows.
+    if (args.threshold === 'auto') args = { ...args, threshold: 0.1 };
     return await vectorPost('query-multi', args) ?? {};
 }
 
@@ -2772,47 +2774,11 @@ const SETTINGS_HTML = `
                     <small class="opacity50p">Embedding similarity between the match text and your entries. Inactive when Retrieval = BM25 only.</small>
                     <div id="wa_embed_info" class="opacity50p" style="margin:0.4em 0;font-size:0.85em;" title="The embedding model and endpoint are configured in the Vector Storage extension settings — change them there."></div>
 
-                    <label class="checkbox_label" for="wa_mean_centered">
-                        <input id="wa_mean_centered" type="checkbox"><span>Mean-centered search (needs server plugin)</span>
-                    </label>
+                    <label>Mean-centered search (automatic when the server plugin is installed)</label>
                     <div id="wa_plugin_setup" style="margin:0.4em 0;font-size:0.85em;opacity:0.75;"></div>
-
-                    <label for="wa_threshold">Score threshold</label>
-                    <input id="wa_threshold" type="number" class="text_pole" min="0" max="1" step="0.01">
 
                     <label for="wa_uncentered_gate" title="A chunk must also reach this raw (uncentered) cosine to be admitted. Catches a wrong book attached by mistake; 0.5 is calibrated for bge-m3. 0 = off.">Wrong-book gate (raw cosine)</label>
                     <input id="wa_uncentered_gate" type="number" class="text_pole" min="0" max="1" step="0.05">
-                </div>
-            </div>
-
-            <div class="inline-drawer wa-section">
-                <div class="inline-drawer-toggle inline-drawer-header">
-                    <b>BM25 Match</b>
-                    <div class="inline-drawer-icon fa-solid fa-circle-chevron-down down"></div>
-                </div>
-                <div class="inline-drawer-content">
-                    <small class="opacity50p">Word-overlap (lexical) matching. Inactive when Retrieval = Vector only.</small>
-
-                    <label class="checkbox_label" for="wa_entity_filter">
-                        <input id="wa_entity_filter" type="checkbox"><span>Entity filter — raw messages only (leave on unless testing)</span>
-                    </label>
-
-                    <label for="wa_proper_noun_boost">Proper-noun boost</label>
-                    <input id="wa_proper_noun_boost" type="number" class="text_pole" min="1" max="10" step="0.5">
-
-                    <label for="wa_stopword_df">Stoplist: drop terms above this doc frequency (0 = off)</label>
-                    <input id="wa_stopword_df" type="number" class="text_pole" min="0" max="1" step="0.05">
-
-                    <label for="wa_bm25_k1">BM25 k1 (repetition vs. breadth)</label>
-                    <input id="wa_bm25_k1" type="number" class="text_pole" min="0.1" max="10" step="0.1">
-
-                    <label for="wa_bm25_b">BM25 b (length normalisation, 0-1)</label>
-                    <input id="wa_bm25_b" type="number" class="text_pole" min="0" max="1" step="0.05">
-
-                    <label for="wa_lexical_weight">Lexical weight (BM25 vs vector in fusion)</label>
-                    <input id="wa_lexical_weight" type="number" class="text_pole" min="0" max="5" step="0.1">
-                    <label for="wa_keyword_weight">Keyword weight (BM25 over keys) — blank follows lexical weight</label>
-                    <input id="wa_keyword_weight" type="number" class="text_pole" min="0" max="5" step="0.1" placeholder="follow lexical">
                 </div>
             </div>
 
@@ -2822,10 +2788,12 @@ const SETTINGS_HTML = `
                     <div class="inline-drawer-icon fa-solid fa-circle-chevron-down down"></div>
                 </div>
                 <div class="inline-drawer-content">
-                    <small class="opacity50p">How the two signals fuse.</small>
+                    <small class="opacity50p">How the lexical (BM25) and vector signals fuse.</small>
 
-                    <label for="wa_rrf_k">RRF k (fusion; lower favors the top ranks)</label>
-                    <input id="wa_rrf_k" type="number" class="text_pole" min="1" max="1000" step="1">
+                    <label for="wa_lexical_weight">Lexical weight (BM25 vs vector in fusion)</label>
+                    <input id="wa_lexical_weight" type="number" class="text_pole" min="0" max="5" step="0.1">
+                    <label for="wa_keyword_weight">Keyword weight (BM25 over keys) — blank follows lexical weight</label>
+                    <input id="wa_keyword_weight" type="number" class="text_pole" min="0" max="5" step="0.1" placeholder="follow lexical">
 
                     <label class="checkbox_label" for="wa_weight_by_order">
                         <input id="wa_weight_by_order" type="checkbox"><span>Weight by entry order (order = priority)</span>
@@ -2894,31 +2862,11 @@ const SETTINGS_HTML = `
                     <div class="inline-drawer-icon fa-solid fa-circle-chevron-down down"></div>
                 </div>
                 <div class="inline-drawer-content">
-                    <small class="opacity50p">Set once and forget. Defaults are measured; change only when testing.</small>
+                    <small class="opacity50p">Set once and forget.</small>
 
                     <label class="checkbox_label" for="wa_suppress_keys">
                         <input id="wa_suppress_keys" type="checkbox"><span>Suppress keywords on 🔗 entries</span>
                     </label>
-
-                    <label class="checkbox_label" for="wa_keyword_scoring">
-                        <input id="wa_keyword_scoring" type="checkbox"><span>Score keyword entries (BM25 over keys)</span>
-                    </label>
-
-                    <label class="checkbox_label" for="wa_score_vector_keys">
-                        <input id="wa_score_vector_keys" type="checkbox"><span>Also score 🔗 entries' keys (double boost; A/B test)</span>
-                    </label>
-
-                    <label for="wa_chunk_mode">Chunking</label>
-                    <select id="wa_chunk_mode" class="text_pole">
-                        <option value="paragraph">Paragraph boundaries</option>
-                        <option value="length">Fixed length (ST default)</option>
-                    </select>
-
-                    <label for="wa_chunk_size">Max chunk size (chars, matching only)</label>
-                    <input id="wa_chunk_size" type="number" class="text_pole" min="50" max="5000" step="50">
-
-                    <label for="wa_min_chunk_size">Min chunk size (chars)</label>
-                    <input id="wa_min_chunk_size" type="number" class="text_pole" min="0" max="2000" step="10">
 
                     <label class="checkbox_label" for="wa_debug_log">
                         <input id="wa_debug_log" type="checkbox"><span>Log selection table on every generation</span>
@@ -3091,13 +3039,6 @@ export async function init() {
     updateEmbedInfo();   // refresh on drawer open so it tracks Vector Storage changes made mid-session
     $('#wa_embed_info').closest('.inline-drawer').children('.inline-drawer-toggle').on('click', updateEmbedInfo);
 
-    // Wand-menu entry for the keyword prune tool (same as /wa-keyword-scores).
-    $('#extensionsMenu').append('<div id="wa_keyword_prune" class="list-group-item flex-container flexGap5" title="Worlds Apart — audit &amp; prune lorebook keywords"><div class="fa-solid fa-eraser extensionsMenuExtensionButton"></div><span>WA Keyword Prune</span></div>');
-    $('#wa_keyword_prune').on('click', () => { keywordScoresReport(); });
-
-    $('#extensionsMenu').append('<div id="wa_keyword_suggest" class="list-group-item flex-container flexGap5" title="Worlds Apart — TF-IDF keyword suggestions for an entry"><div class="fa-solid fa-bars-staggered extensionsMenuExtensionButton"></div><span>WA Suggest Keys</span></div>');
-    $('#wa_keyword_suggest').on('click', () => { keywordSuggestReport(); });
-
     $('#extensionsMenu').append('<div id="wa_studio" class="list-group-item flex-container flexGap5" title="Worlds Apart — Lorebook Studio: manage all lorebooks and entries"><div class="fa-solid fa-book-open extensionsMenuExtensionButton"></div><span>WA Lorebook Studio</span></div>');
     $('#wa_studio').on('click', () => { lorebookStudio(chatBook()); });
 
@@ -3125,22 +3066,16 @@ export async function init() {
     }));
     if (tierMount) tierMount.append(tierEditor = makeTierEditor(getTierCfg, setTierCfg, () => {}));
     bind('#wa_retrieval_mode', 'retrievalMode', 'string');   // commonWordWeight now derives from this at query time (internal global)
-    bind('#wa_mean_centered', 'meanCentered', 'checked');
     renderPluginSetup();                     // paints "checking…" then the detected/install state
     // Detect the plugin and fingerprint the source in parallel; re-render once both settle so the box
     // can show up-to-date / out-of-date. Both are cached, so this runs its fetches at most once.
     Promise.all([hasPlugin(), computeSourceFingerprint()]).then(renderPluginSetup);
-    bind('#wa_keyword_scoring', 'keywordScoring', 'checked');
-    bind('#wa_score_vector_keys', 'scoreVectorKeys', 'checked');
     bind('#wa_debug_log', 'debugLog', 'checked');
     bind('#wa_message_depth', 'messageDepth', 'number');
-    bind('#wa_bm25_k1', 'bm25K1', 'number');
-    bind('#wa_bm25_b', 'bm25B', 'number');
     bind('#wa_lexical_weight', 'lexicalWeight', 'number');
     // 'number?', not 'number': blank means "follow lexicalWeight" and must persist as null, where a plain
     // number binding would collapse it to 0 and silently switch the keys signal off.
     bind('#wa_keyword_weight', 'keywordWeight', 'number?');
-    bind('#wa_rrf_k', 'rrfK', 'number');
     bind('#wa_weight_by_order', 'weightByOrder', 'checked');
     bind('#wa_summary_profile', 'summaryProfile', 'string');
     bind('#wa_bypass_preset', 'summaryBypassPreset', 'checked');
@@ -3148,19 +3083,12 @@ export async function init() {
     bind('#wa_summary_prompt', 'summaryPrompt', 'string');
     bind('#wa_summary_length', 'summaryLength', 'number');
     bind('#wa_summary_temp', 'summaryTemperature', 'string');
-    bind('#wa_chunk_mode', 'chunkMode', 'string');
-    bind('#wa_chunk_size', 'chunkSize', 'number');
-    bind('#wa_min_chunk_size', 'minChunkSize', 'number');
-    bind('#wa_threshold', 'scoreThreshold', 'number');
     bind('#wa_uncentered_gate', 'uncenteredGate', 'number');
     bind('#wa_max_entries', 'maxVectorEntries', 'number');
     bind('#wa_vector_cutoff', 'vectorCutoff', 'string');
     bind('#wa_min_entries', 'minVectorEntries', 'number');
     bind('#wa_elbow_sensitivity', 'elbowSensitivity', 'number');
     bind('#wa_dropoff_threshold', 'dropoffThreshold', 'number');
-    bind('#wa_entity_filter', 'entityFilter', 'checked');
-    bind('#wa_proper_noun_boost', 'properNounBoost', 'number');
-    bind('#wa_stopword_df', 'stopwordDocFreq', 'number');
     bind('#wa_max_tokens', 'maxTokens', 'number');
     bind('#wa_max_tokens_pct', 'maxTokensPercent', 'number');
     bind('#wa_budget_slack', 'budgetSlackPercent', 'number');
@@ -3270,20 +3198,6 @@ export async function init() {
         name: 'wa-super-eval',
         callback: superEvalScene,
         helpString: 'Worlds Apart: review a graded sample/bundle from its FILE, chat-independent — nothing live is read, so scenes captured offline or graded by an LLM judge open without loading their chat. Same grading window as /wa-super-grade; stored grades arrive pre-filled and editable (legacy 0-5 remapped to 0-4), entry text comes from the embedded books, and Save downloads the same bundle with only the grades updated — diff it against the original to see exactly what the review changed.',
-        returns: 'nothing',
-    }));
-
-    SlashCommandParser.addCommandObject(SlashCommand.fromProps({
-        name: 'wa-keyword-scores',
-        callback: keywordScoresReport,
-        helpString: 'Worlds Apart: audit one lorebook\'s keys and prune/rename/ignore weak ones. Pick a book and scan options, click Assess; the results list flags dead, too-common, and short (substring-collision) keys per that book\'s own text, honouring each entry\'s match flags. Also on the extensions (wand) menu.',
-        returns: 'nothing',
-    }));
-
-    SlashCommandParser.addCommandObject(SlashCommand.fromProps({
-        name: 'wa-suggest-keys',
-        callback: keywordSuggestReport,
-        helpString: 'Worlds Apart: suggest World Info keywords across a whole book. Pick a book and click Assess; every entry with distinctive terms (1–maxN-grams ranked by TF-IDF, dates/function-words/verb-phrases filtered) shows a paragraph of checkbox suggestions with per-entry and global select-all. The ✨ on any entry adds local-model suggestions (incl. paraphrases) for that one entry. Add checked writes across every touched entry at once. Also on the extensions (wand) menu.',
         returns: 'nothing',
     }));
 

@@ -5,6 +5,16 @@
 import { bm25Scores, DEFAULT_K1, DEFAULT_B } from './lexical.mjs';
 import { centeredCosineScores } from './vector.mjs';
 
+/** Linear-interpolated quantile. Used by the 'auto' threshold; exported for the eval harness. */
+export function quantile(xs, q) {
+    if (!xs.length) return 0;
+    const s = [...xs].sort((a, b) => a - b);
+    const i = (s.length - 1) * q;
+    const lo = Math.floor(i);
+    const hi = Math.min(lo + 1, s.length - 1);
+    return s[lo] + (s[hi] - s[lo]) * (i - lo);
+}
+
 /** Score one collection's chunks against a query vector: mean-centered cosine + BM25. Returns the chunks
  *  either signal likes (cosine >= threshold OR bm25 > 0). This is the plugin's /query-multi per-collection loop.
  *
@@ -19,6 +29,11 @@ export function scoreCollection(collectionId, loaded, queryVector, { centered = 
     const { items, mean, lexical } = loaded;
     const lexicalScores = bm25Scores(lexical, queryText, items.length, k1, b, termWeights, stopwordDf, commonWordWeight);
     const vectorScores = centeredCosineScores(items, queryVector, mean, centered);
+    // 'auto' self-calibrates the cosine floor to this query's own score distribution. The stored 0.1
+    // default was chosen as "the centered p90 measured on three books with bge-m3" (state.mjs
+    // scoreThreshold) — quantiling the live scores gives the same selectivity on any embedder without
+    // a per-embedder recalibration. Per collection, per query, and free: the scores already exist.
+    if (threshold === 'auto') threshold = quantile(vectorScores, 0.9);
     // The gate is PER ENTRY (best chunk vouches for its siblings), not per chunk. A chunk-level AND also
     // drops an entry's best-BM25 chunk whenever that chunk's own raw cosine is low, which lowers the entry's
     // pooled bm25 and reorders real scenes — measured -0.036 nDCG@10 on one of the four graded scenes,

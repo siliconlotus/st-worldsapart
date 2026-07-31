@@ -157,7 +157,7 @@ export async function lorebookStudio(preferredBook = null) {
 
     // "⚙ Tool Settings" tray under the explorer header. Scan/prune options apply on the next Scan press;
     // recommender knobs invalidate the cached ranker so the next ⚡/✨ rebuilds with them; the whitelist
-    // is this book's prune ignore-set (shared with the /wa-keyword-scores popup). Replaces the old
+    // is this book's prune ignore-set (settings().keywordIgnore, per book). Replaces the old
     // shift-click options popup. All options persist globally to extension_settings.
     const renderTray = () => {
         const wrap = document.createElement('div'); wrap.className = 'wa-tray';

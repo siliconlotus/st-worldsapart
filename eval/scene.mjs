@@ -11,9 +11,9 @@
 // live lorebook either: entries come from the sample's embedded copies, which is what makes a graded scene
 // re-runnable after the books have been edited.
 import { readFileSync, existsSync } from 'node:fs';
-import { scoreCollection, poolEntries, selectTopK } from '../plugin/scoring.mjs';
+import { scoreCollection, poolEntries, selectTopK, quantile } from '../plugin/scoring.mjs';
 import { buildLexical } from '../plugin/lexical.mjs';
-import { corpusMean } from '../plugin/vector.mjs';
+import { corpusMean, centeredCosineScores } from '../plugin/vector.mjs';
 import * as ranking from '../extension/ranking.mjs';
 import { isScaffolding, openBundle } from '../extension/grading.mjs';
 
@@ -199,14 +199,17 @@ export const makeKeywordScore = P => (e, text, k1) =>
 export function makeScorer({ loaded, byUid, entries, params: P, topK }) {
     const keywordScore = makeKeywordScore(P);
     return (k1, b, tw, qvec, qtext, scanText) => {
-        let scored = scoreCollection(CID, loaded, qvec, { centered: true, threshold: P.threshold, queryText: qtext, k1, b, termWeights: tw, stopwordDf: P.stopwordDf, commonWordWeight: P.commonWordWeight, uncenteredGate: P.uncenteredGate });
-        if (P.admit === 'cosine') scored = scored.filter(m => m.score >= P.threshold);
-        else if (P.admit === 'both') scored = scored.filter(m => m.score >= P.threshold && m.bm25 > 0);
-        if (P.bm25Floor > 0) scored = scored.filter(m => m.score >= P.threshold || m.bm25 >= P.bm25Floor);
+        // Resolve 'auto' here, once, so the admit/floor filters below compare against the same number
+        // scoreCollection gated with — the same p90-of-live-scores the plugin computes.
+        const thr = P.threshold === 'auto' ? quantile(centeredCosineScores(loaded.items, qvec, loaded.mean, true), 0.9) : P.threshold;
+        let scored = scoreCollection(CID, loaded, qvec, { centered: true, threshold: thr, queryText: qtext, k1, b, termWeights: tw, stopwordDf: P.stopwordDf, commonWordWeight: P.commonWordWeight, uncenteredGate: P.uncenteredGate });
+        if (P.admit === 'cosine') scored = scored.filter(m => m.score >= thr);
+        else if (P.admit === 'both') scored = scored.filter(m => m.score >= thr && m.bm25 > 0);
+        if (P.bm25Floor > 0) scored = scored.filter(m => m.score >= thr || m.bm25 >= P.bm25Floor);
         if (P.bm25FloorPct > 0) {
             const nz = scored.map(m => m.bm25).filter(x => x > 0).sort((a, b) => a - b);
             const floor = nz.length ? nz[Math.min(nz.length - 1, Math.floor(P.bm25FloorPct * nz.length))] : 0;
-            if (floor > 0) scored = scored.filter(m => m.score >= P.threshold || m.bm25 >= floor);
+            if (floor > 0) scored = scored.filter(m => m.score >= thr || m.bm25 >= floor);
         }
         const grouped = selectTopK(poolEntries(scored), topK);
         const per = new Map();
