@@ -92,17 +92,15 @@ export const GENRE_CASES = [
         reject: ['warlock kal\'thas sunstrider'],
     },
     {
-        // Apostrophe names are ordinary tokens and need no special handling — but they are
-        // structurally identical to a French elision, so the rule that turns "d'Orléans" into
-        // "Orléans" could just as easily eat a fantasy name. What protects it is the same-entry
-        // guard: the bare form has to be available HERE for the elided one to give way.
+        // Apostrophe names are ordinary tokens and need no handling of their own — but they look
+        // exactly like a French elision, so the rule that turns "d'Orléans" into "Orléans" could
+        // eat one. Elision happens only before a VOWEL, which settles it structurally: "D'Vorah"
+        // has a consonant after the apostrophe, so no particle produced it. The fixture writes
+        // both forms in ONE entry deliberately — nothing but the vowel test can save it there.
         genre: 'fantasy', shape: 'apostrophe name that looks like an elision',
-        text: [
-            "The warlord D'Vorah led the swarm. Nobody crossed D'Vorah twice that season.",
-            'Later Vorah spoke of the swarm, and Vorah kept the hive quiet.',
-        ],
-        expect: ["d'vorah"],
-        reject: ['vorah'],
+        text: "The warlord D'Vorah led the swarm, and Vorah kept the hive quiet while D'Vorah slept and Vorah watched.",
+        expect: ["d'vorah", 'vorah'],
+        reject: ["d'vorah led"],
     },
     {
         genre: 'fantasy', shape: 'possessive of an apostrophe name',

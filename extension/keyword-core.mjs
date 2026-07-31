@@ -518,7 +518,13 @@ export function buildKeySuggest(data, opts) {
     const ENG_LINKERS = new Set(['of', 'the']);
     // French/Italian elision writes the particle onto the name — "d'Orléans", "dell'Arte" — so the
     // tokeniser sees a single word and the particle rules above never get a look at it.
-    const ELIDED = /^(?:d|l|dell|dall|nell|sull|all|qu)['’](.+)$/i;
+    //
+    // Elision happens ONLY before a vowel, which is what separates it from a name that merely
+    // contains an apostrophe: "d'Orléans", "d'Artagnan", "l'École" elide, while "D'Vorah" and
+    // "K'tharr" cannot — a consonant follows, so no French or Italian particle produced them.
+    // Mute h ("l'homme") is deliberately excluded: in a lorebook "D'Hara" is likelier than a
+    // French noun, and treating it as a name only costs a redundant row.
+    const ELIDED = /^(?:d|l|dell|dall|nell|sull|all|qu)['’]([aeiouyàáâäæèéêëìíîïòóôöœùúûü].*)$/i;
     const LINKERS = new Set([...PARTICLES, ...ENG_LINKERS]);
     const linkerPosOk = (t, j, n) => PARTICLES.has(t) ? j < n - 1 : (j > 0 && j < n - 1);
     const edgeIllegal = ws => [0, ws.length - 1].some(j => LINKERS.has(ws[j]) && !linkerPosOk(ws[j], j, ws.length));
