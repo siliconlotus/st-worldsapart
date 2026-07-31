@@ -10,6 +10,18 @@ import { buildAutomaton, scanAutomaton, createScanScope, primeScan } from './sma
 
 export const KEY_TOO_COMMON = 0.5;
 
+/**
+ * Fold a term into the form the frequency tables are keyed by. SUBTLEX writes contractions with a
+ * straight apostrophe ("isn't" z=4.8, "don't" 5.6); roleplay prose writes U+2019, and so does
+ * anything that has been through a smart-quote filter, which is most model output. Unfolded,
+ * "isn’t" missed ZIPF_EN and every POS set, scored as maximally rare — the exact inverse of the
+ * truth — and reached a real book's suggestions as a key firing in 770 of 16,360 messages.
+ *
+ * Lookup only. The term itself must keep the apostrophe it was written with: "Kal'thas" is a name
+ * rather than a contraction, and the elision rule reads both apostrophes on purpose.
+ */
+const tblKey = w => w.includes('’') ? w.replace(/’/g, "'") : w;
+
 /** The df-based lorebook-common flag needs a corpus big enough for the ratio to mean something — in a
  * handful of entries "in >37.5% of them" is a coin flip and mislabels genuinely good keys. Below this
  * many scanned entries, skip lorebook-common (English-common still fires; it doesn't lean on df). */
@@ -449,6 +461,12 @@ export function buildKeySuggest(data, opts) {
     const NAME_CAP_RATIO = 0.95;
     const isName = w => {
         if (isAcr(w)) return true;
+        // English capitalises exactly one word for grammar rather than properness, and it is the
+        // one word the ratio below cannot survive: "I" is never written lowercase, so "I've" scores
+        // a perfect 1.0 properness, counts as maximally rare, and rode every gate into a book's
+        // suggestions. Contractions of it are the whole exception — "it's" and "hasn't" appear
+        // lowercase constantly and are scored on their real frequency.
+        if (w === 'i' || /^i['’]/.test(w)) return false;
         const up = capMidCount.get(w) ?? 0, lo = lowerCount.get(w) ?? 0;
         if (up > 0 && up / (up + lo) >= NAME_CAP_RATIO) return true;
         // Weaker evidence for a narrow case: a word NEVER written lowercase, that English has no
@@ -457,7 +475,7 @@ export function buildKeySuggest(data, opts) {
         // seven letters ending in -ing, so the gerund rule ate it outright. Requiring absence from
         // the frequency table is what keeps ordinary sentence-openers ("Nothing", "Rain") out:
         // they are common words, and they appear lowercase elsewhere anyway.
-        return lo === 0 && (capsSeen.has(w) || mixedSeen.has(w)) && !ZIPF_EN.has(w);
+        return lo === 0 && (capsSeen.has(w) || mixedSeen.has(w)) && !ZIPF_EN.has(tblKey(w));
     };
     // A name is never a function word, however ubiquitous. The distributional test looks for
     // domain stopwords — common across entries, rarely repeated within one — and a place name that
@@ -496,15 +514,23 @@ export function buildKeySuggest(data, opts) {
     //    is a transitive verb in this corpus ("exchanges a look" — SUBTLEX tags "exchanges" Noun
     //    1.00, dialogue never verbs it, so only local evidence can). Object-side mirror of
     //    isVerbHead, precise enough to act from 2 observations where subject-side needs 5.
-    const inSetOrStem = (set, w) => set.has(w) || stems(w).some(s => set.has(s));
+    const inSetOrStem = (set, w) => set.has(tblKey(w)) || stems(w).some(s => set.has(tblKey(s)));
     const notName = w => !isName(w);
     const posBad = (set, w) => inSetOrStem(set, w) && notName(w);
-    const advLy = h => h.length >= 6 && /(?:ily|ingly|edly)$/.test(h) && !ZIPF_EN.has(h) && notName(h);
+    const advLy = h => h.length >= 6 && /(?:ily|ingly|edly)$/.test(h) && !ZIPF_EN.has(tblKey(h)) && notName(h);
     const takesObj = t => { const tot = fAll.get(t) ?? 0; return tot >= 2 && (fDet.get(t) ?? 0) / tot > 0.5 && notName(t); };
+    //  - Shape, for contractions, because nothing else can see them. SUBTLEX gives no dominant PoS
+    //    for a single one ("hasn't", "isn't", "don't", "can't", "won't", "didn't", "wasn't" all miss
+    //    POS_VA), and the corpus-side test is actively misled: "hasn't" scored 0.50 on the subject
+    //    side in one book — correctly a verb — and was then vetoed by three relative-clause "that"s
+    //    counting as determiners, which is how "Boulder hasn't" became a candidate. A clitic is a
+    //    closed set and needs no evidence. Never key material in ANY position, so it joins the
+    //    interior test too: a contraction anywhere means the gram is a clause, not a name.
+    const CLITIC = /(?:n['’]t|['’](?:ve|ll|re|d|m|s))$/;
     const headBad = term => {
         const h = term.slice(term.lastIndexOf(' ') + 1);
-        if (satEntity(h) || isVerbHead(h) || posBad(POS_VA, h) || takesObj(h) || advLy(h)) return true;
-        return term.includes(' ') && term.split(' ').some(w => posBad(POS_VA_STRICT, w));
+        if (satEntity(h) || isVerbHead(h) || posBad(POS_VA, h) || takesObj(h) || advLy(h) || CLITIC.test(h)) return true;
+        return term.includes(' ') && term.split(' ').some(w => posBad(POS_VA_STRICT, w) || CLITIC.test(w));
     };
     // Name linkers, and the one rule for where they may sit. Both classes may sit INSIDE a gram —
     // without that, "Duke of Thornhaven" and "Dia de los Muertos" could never form, since a
@@ -682,7 +708,7 @@ export function buildKeySuggest(data, opts) {
         else if (w.length >= 4 && w.endsWith('s') && !w.endsWith('ss')) { out.push(w.slice(0, -1)); if (w.endsWith('es')) out.push(w.slice(0, -2)); }
         return out;
     };
-    const tblZ = w => { let z = ZIPF_EN.get(w); if (z === undefined) { z = 0; for (const s of stems(w)) z = Math.max(z, ZIPF_EN.get(s) ?? 0); } return z; };
+    const tblZ = w => { let z = ZIPF_EN.get(tblKey(w)); if (z === undefined) { z = 0; for (const s of stems(w)) z = Math.max(z, ZIPF_EN.get(tblKey(s)) ?? 0); } return z; };
     const zEff = w => isName(w) ? 0 : Math.max(tblZ(w), isGer(w) ? 3.8 : 0);
     // Linkers are legal by POSITION (see linkerPosOk above ngramsOf), which is what lets the f=1
     // test admit "Dia de los Muertos" and "de la Cruz" whole instead of killing them and stranding
@@ -820,7 +846,7 @@ export function buildKeySuggest(data, opts) {
             // and gogh are absent from it entirely. Strip a particle off a name, not off a word.
             const lw = lng.term.split(' ');
             let k = 0; while (k < lw.length && PARTICLES.has(lw[k])) k++;
-            if (k > 0 && lw.length - k === 1 && srt.term === lw[k] && !ZIPF_EN.has(lw[k])) return r === lng;
+            if (k > 0 && lw.length - k === 1 && srt.term === lw[k] && !ZIPF_EN.has(tblKey(lw[k]))) return r === lng;
             // Otherwise a unit swallows contained PHRASES, but never a bare word: that word is a
             // different instrument rather than a worse version of the same one — broader, and often
             // the form the chat actually reaches for. Measured, "Ashworth" fires 149 times against
@@ -877,7 +903,7 @@ export function buildKeySuggest(data, opts) {
             // word; "d'Artagnan" keeps it wherever the entry never writes the bare name, since the
             // elided form is a different token and no replacement would appear in its place.
             const el = n === 1 ? term.match(ELIDED) : null;
-            if (el && !ZIPF_EN.has(el[1]) && tf.has(el[1])) continue;
+            if (el && !ZIPF_EN.has(tblKey(el[1])) && tf.has(el[1])) continue;
             // A bare roman numeral is a number, not a name — it reaches here only because an
             // all-caps token looks like an acronym. "Louis XIII" keeps it; "XIII" alone is noise.
             if (n === 1 && /^[ivxlcdm]{2,}$/.test(term)) continue;

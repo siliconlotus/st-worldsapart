@@ -197,6 +197,46 @@ export const GENRE_CASES = [
         reject: ['of orléans', 'the duchy'],
     },
     {
+        // Typographic apostrophes are what model output and any smart-quote filter produce, and the
+        // frequency tables are keyed by the straight one. Unfolded, every contraction in the corpus
+        // is unknown to the tables and therefore "maximally rare" — the inverse of the truth, since
+        // these are among the commonest tokens in dialogue. Both spellings appear here because the
+        // straight form was already passing and only the curly one regressed.
+        genre: 'any', shape: 'curly-apostrophe contractions',
+        text: [
+            'The steward isn’t convinced, and the ledger doesn’t balance. He isn’t sure the Verenthian tally isn\'t short.',
+            'She doesn’t argue. The clerk isn’t listening, and the Verenthian tally doesn’t change.',
+        ],
+        expect: ['verenthian'],
+        reject: ['isn’t', 'doesn’t', "isn't", 'isn’t convinced', 'steward isn’t'],
+    },
+    {
+        // First-person narration is most of roleplay prose, and "I" is never written lowercase —
+        // so the properness ratio scores "I've" a perfect 1.0, a name counts as maximally rare,
+        // and it clears every frequency gate. Grammar, not properness, is why that capital is there.
+        genre: 'any', shape: 'first-person contractions',
+        text: [
+            "I've walked the Verenthian road before. I'm sure I've seen the mile-stones, and I'd know them again.",
+            "I've counted them twice. I'm certain of it, and I'd say so to the steward.",
+        ],
+        expect: ['verenthian'],
+        reject: ["i've", "i'm", "i'd", "i've walked", "i've seen"],
+    },
+    {
+        // A name plus a contraction is a clause fragment, but every evidence source misses it:
+        // SUBTLEX has no PoS for contractions, and the corpus-side verb test gets vetoed when the
+        // contraction also follows a relative "that", which counts as a determiner. The relative
+        // clauses below are what make this case fail without the shape rule, not decoration.
+        genre: 'any', shape: 'proper noun plus contraction',
+        text: [
+            "Boulder hasn't lost a duel. Anything that hasn't been tried, Boulder hasn't feared.",
+            "He hasn't noticed. She hasn't either, and the thing that hasn't happened yet still worries the Verenthian scouts.",
+            "Boulder hasn't made camp. Verenthian scouts say he hasn't slept, and what hasn't been said hasn't been forgotten.",
+        ],
+        expect: ['boulder'],
+        reject: ["boulder hasn't", "hasn't", "hasn't lost", "he hasn't"],
+    },
+    {
         genre: 'any', shape: 'clause fragment from machine-written prose',
         text: 'Jeffrey self-deprecatingly debunks the myth. Later Jeffrey self-deprecatingly debunks it again for the room.',
         expect: ['jeffrey'],
