@@ -440,6 +440,25 @@ export async function lorebookStudio(preferredBook = null) {
 
     // bgDocs rides in the call, not in suggestOpts — that object is persisted to settings, and the
     // chat would go with it. No chat open = empty = book-only ranking, same as before.
+    //
+    // The OPEN chat only, and the alternatives were measured rather than assumed. Pooling a
+    // character's other chats looks like a free win — on one book the share of candidates that
+    // never occur anywhere falls from 51% to 25% — and Aho-Corasick absorbs the size (0.28 s/MB, so
+    // 22 MB of pooled history costs ~7s against ~2.5s, linear, not quadratic in term count).
+    //
+    // By CHARACTER is simply wrong — too coarse. Two chats on one card here are entirely different
+    // settings, so one story's vocabulary would vouch for the other's keys.
+    //
+    // By the chat's BOUND LOREBOOK is correct: chats declaring the same book are one story, and it
+    // separates those two settings cleanly. Its VALUE, though, depends on how the book was managed,
+    // and both measured cases are real: on a book versioned heavily mid-story the pool collapsed to
+    // the open chat itself (5646 messages against 5598, 0.1pp), while on a cleanly bound one it
+    // picked up a genuine sibling branch (20045 against 16359, and 32.0% -> 28.2% of candidates
+    // never occurring) for a bit over 2x the build — 5.8s against 2.6s.
+    //
+    // So this is a cost call, not a correctness one: a multi-second synchronous rebuild every time
+    // the Studio opens is a worse trade than ~4pp of dead candidates. Worth revisiting if the build
+    // ever moves off the main thread, in which case bound-lorebook is the key to group on.
     const ensureSuggest = () => suggest ?? (suggest = buildKeySuggest(data,
         { ...suggestOpts, bgDocs: (getContext().chat ?? []).map(m => String(m?.mes ?? '')).filter(Boolean) }));
     const hasKey = (e, term) => Array.isArray(e.key) && e.key.some(k => String(k).toLowerCase().trim() === term.toLowerCase().trim());
