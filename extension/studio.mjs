@@ -379,6 +379,19 @@ export async function lorebookStudio(preferredBook = null) {
         selectedEntries.clear();
         save(); suggest = null; if (scan) rebuildScan(); renderExplorer();
     };
+    // One keyword onto every selected entry — the bulk form of the ➕ in an entry's keyword paragraph,
+    // so it skips entries that already carry the term (same case-insensitive hasKey the ➕ uses) rather
+    // than duplicating it. No rescan: a new key doesn't change any entry's text, and the per-entry ➕
+    // doesn't rescan either.
+    const bulkAddTerm = async () => {
+        const raw = await Popup.show.input('Add term — selected entries', 'Keyword to add to every selected entry:');
+        const term = String(raw ?? '').trim();
+        if (!term) return;
+        let added = 0;
+        applyBulk(e => { if (!hasKey(e, term)) { if (!Array.isArray(e.key)) e.key = []; e.key.push(term); added++; } });
+        const skipped = selectedEntries.size - added;
+        toastr[added ? 'success' : 'info'](added ? `“${term}” added to ${added} ${added === 1 ? 'entry' : 'entries'}${skipped ? ` (${skipped} already had it)` : ''}.` : `Every selected entry already has “${term}”.`, 'Worlds Apart');
+    };
     const renderBulkBar = () => {
         const wrap = document.createElement('div'); wrap.className = 'wa-bulk';
         const n = selectedEntries.size;
@@ -420,6 +433,7 @@ export async function lorebookStudio(preferredBook = null) {
         };
         const setBtn = mkBtn('Set… ▾', () => { const r = setBtn.getBoundingClientRect(); showCtxMenu(setItems(), r.left, r.bottom + 2, ctxMount()); });
         setBtn.title = 'Set a field on all selected entries';
+        const addTermBtn = mkBtn('Add term…', bulkAddTerm); addTermBtn.title = 'Add one keyword to every selected entry';
         const reBtn = mkBtn('Renumber…', ev => bulkOrder(ev.shiftKey)); reBtn.title = 'Renumber order — shift-click to also renumber UIDs';
         // One toggle instead of separate Enable/Disable: enable if any selected are off, else disable all.
         const anyDisabled = Object.values(data?.entries ?? {}).some(e => selectedEntries.has(e.uid) && e.disable);
@@ -428,6 +442,7 @@ export async function lorebookStudio(preferredBook = null) {
             mkBtn(n === all.length ? 'Select none' : 'Select all', () => { n === all.length ? selectedEntries.clear() : all.forEach(e => selectedEntries.add(e.uid)); syncSelCheckboxes(); }),
             sep(),
             mkBtn(anyDisabled ? 'Enable' : 'Disable', () => { applyBulk(e => e.disable = !anyDisabled); refreshBulkBar(); }),
+            addTermBtn,
             setBtn,
             reBtn,
             sep(),
