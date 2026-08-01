@@ -3,6 +3,11 @@
 Only what isn't already in the file headers. Each module's header explains what it is and why; read it
 before changing it.
 
+`keyword-suggest-design.md` is the live, unsettled definition work for the rebuilt keyword suggester —
+what a good key is, what would count as success, and which of the books' own keys are not evidence.
+Read it before proposing anything about `buildKeySuggest` or how to measure it, and update it rather
+than re-deriving it in conversation.
+
 ## eval/ has three kinds of file
 
 - `*-check.mjs` — self-checking. Run with no arguments; they print `ok`/`FAIL` or assert. This is the
