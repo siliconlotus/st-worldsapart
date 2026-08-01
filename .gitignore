@@ -148,3 +148,5 @@ eval-data/
 
 # Local Claude notes (host-specific, not project facts)
 CLAUDE.local.md
+.claude/settings.local.json
+.claude/worktrees/
