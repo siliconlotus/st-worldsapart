@@ -494,17 +494,35 @@ Foxbridge additionally carries **six independent chat lineages** (421, 416, 173,
 ~1250 total), verified by prefix comparison — but see the caveat that continuation, separate story and
 ephemeral repeat all look alike from a zero-length shared prefix, and only the **lorebook binding**
 distinguishes same-story from separate-story. Chat binding lives in `chat_metadata.world_info` when set
-per chat (Richard) and in the character card otherwise (Foxbridge); `charLore` and `globalSelect` are
-empty.
+per chat (Richard), in the character card (Foxbridge), or in
+`settings.json` → `world_info_settings.world_info.charLore`, which on this install maps Ragnar and
+Gilbert to `ERP` and Alastor to `main_Succubus Tattoos_world_info`. Three places to look, not one.
 
 ### Numbers so far, and what they are worth
 
-**The activation ceiling, bracketed.** Whole-word rates over assistant turns, personas excluded,
-against your own verdicts: Dylan 21.8% kept ("grew, never crested"), Arthur 35.1% undecided (still
-being tagged), Liam 53.4% crossed ("good until he wasn't"), Richard 94.5% long gone. Giselle 18.3% kept
-on nine entries. The most informative point is Arthur, because the threshold sits where a human cannot
-call it either. Gold positives in Richard top out at **10.9% of all messages** with p99 at 4.6% and a
-median of 0.1%, so nothing human-approved lives high in the range.
+**The activation ceiling, bracketed.** Quoted per **scan window** at this install's
+`world_info_depth: 3`, which is the unit that governs activation — a key fires once per generation, not
+once per message. Personas excluded, since their rate measures POV.
+
+| | per-message | **per-window (3)** | verdict |
+|---|---|---|---|
+| Dylan | 12.2% | **26.0%** | kept — "grew, never crested" |
+| Giselle | 10.9% | **26.4%** | kept, nine entries |
+| Arthur | 21.6% | **38.9%** | undecided, still being tagged |
+| Liam | 29.0% | **60.2%** | crossed — "good until he wasn't" |
+| Jeffrey | 39.1% | 78.3% | principal |
+| Richard | 55.8% | 97.1% | removed |
+
+Dylan and Giselle land 0.4 points apart from two different books and unrelated reasoning, which is the
+first evidence the ceiling is a real quantity rather than a line drawn between two anecdotes. Arthur is
+the informative middle: the threshold sits where a human cannot call it either.
+
+**Do not convert between the two units by formula.** An independence model over messages predicts
+Arthur at 51.8% against a measured 38.9%, because his mentions cluster hardest; it happens to be close
+for Jeffrey and Liam and is not close in general. Measure windows directly.
+
+Gold positives in Richard top out at 10.9% of messages with p99 at 4.6% and a median of 0.1%, so
+nothing human-approved lives high in the range.
 
 **This is n=1 author.** The lorebooks span 19 lineages and genuinely wide genres, which controls
 vocabulary, entry structure and name morphology — but only six carry memory entries, two of those are
@@ -539,8 +557,6 @@ Blocking measurement:
    "unreached by a cheap prompt". Pool across several LLM configurations and treat the residue as a
    lower bound, exactly as `/wa-super-grade` pools retrieval arms.
 6. **Harness priming** — see the code facts above.
-7. **Which denominator a threshold is quoted in** — message rate or scan-window rate. Cheap to fix
-   before anything is written down, annoying afterwards.
 
 Accepted as follow-on:
 
