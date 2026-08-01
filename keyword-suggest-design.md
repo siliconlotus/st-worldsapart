@@ -226,11 +226,15 @@ contains the entry's material with a lot left over — "dog" for a hellhound ent
 thaumaturgy — and it is entry-relative, so no property of the string alone implements it; the Zipf gate
 is the cheap proxy and will misjudge entries whose subject genuinely is a common thing. *Competing
 sense* is a string carrying an unrelated established meaning. With verbs gone that reduces to
-lexicalised plurals (greens, arms, glasses, customs, quarters, goods), and **every one of those has a
-common base noun that the seeder's Zipf gate should already reject as a seed** — so the plural is never
-generated and there is probably nothing to catch. Checkable by looking up those bases against the gate.
+lexicalised plurals (greens, arms, glasses, customs, quarters, goods) — and **that class needs no
+machinery at all**, measured rather than assumed. All 14 have their base noun in `ZIPF_EN`, and table
+membership *is* the unigram cut, so none survives as a seed; every plural is independently in the table
+as well, so both routes reject. A plural can only be generated from a seed the gate already killed.
+Coinages are unaffected: thaumaturge, minotaur and orrery are absent from the table and survive.
+
 Proper-name capture (chili → Chili's, rolling stone → Rolling Stones) is the residual and has no signal
-but capitalisation.
+but capitalisation. It is not covered by the above — a possessive is not a plural, and `stems()` does
+not strip `'s`.
 
 Embedding-based drift detection was **tested and rejected**: bge-m3 over 44 pairs crossing drift with
 surface overlap gave `corr(sim, prefix-share) = 0.51` against `corr(sim, drift) = -0.21`, and *zero*
@@ -518,44 +522,63 @@ for form-level findings; none has a chat, so activation cannot be checked agains
 
 Blocking the definition:
 
-1. **Three thresholds, all on continua, all unset** — and they should be settled once, deliberately,
-   rather than a fourth time in passing. How much collision disqualifies a stem; how short a shared
-   substring is too short to use; where the breadth cut falls. The activation ceiling now has an
-   empirical bracket (above) but it is n=1 and stated in message-rate, not window-rate.
-2. **The allowlist of sense-preserving derivations** — the local track can generate thaumaturgy →
-   thaumaturge but cannot tell that witch → witchcraft drifts, so a short list of transformations that
-   reliably hold (agent-noun -y/-e, -ist, -er) goes local and the rest falls to the LLM arm. Pushing
-   derivation wholly to the LLM would mean the lexical-only build can never have it.
-3. **Whether the drift table needs to exist at all** — checkable by looking up the base nouns of the
-   lexicalised plurals against the seeder's Zipf gate. If they are already rejected as seeds, the
-   workstream deletes itself.
+1. **The renderer's two thresholds.** The backoff picks "the longest collision-free common substring
+   of the family", and neither word in that phrase has a number yet.
+   - *How clean is clean enough.* The quantity exists: `strictClean(k) / scan(k, cs, false).total`,
+     already computed at `keyword-core.mjs:225` and banded by `severityOf` at 1.0 / ⅓ for short keys.
+     The open question is whether a stem reuses those bands or earns its own, since a stem is
+     deliberately not a word and will never score 1.0 the way a short key can. Settled by running the
+     backoff over the gold families and reading the cases where it picks a stem you would reject.
+   - *How short is too short.* "scry" and "scried" share only "scr", which is unusable; `thaumaturg`
+     at nine characters is fine. The floor interacts with `KEY_MIN_LENGTH` (4) and probably should not
+     be a raw character count, since three characters of a rare coinage collide less than five of a
+     common word — so it likely wants stating as a collision bound rather than a length bound, which
+     folds it into the previous item. Same run answers both.
+2. **The derivation allowlist**, which needs naming transformation by transformation rather than in the
+   abstract. In, because the derived form co-refers at the same specificity: agent nouns (thaumaturgy →
+   thaumaturge, scry → scryer), `-ist`, `-er`. Out, because the derived form names a different thing:
+   `-craft` (witch → witchcraft), `-hood`, `-ism`, `-ery`. The admission test is co-reference at the
+   same specificity, the same test breadth uses one level up. Note this class is only ever needed where
+   the matcher cannot reach the form anyway — "thaumaturgy" and "thaumaturge" do not contain each
+   other, which is exactly why they must be enumerated while "rut"/"ruts" need not be. And it has to be
+   local: pushing derivation to the LLM arm means the lexical-only build can never produce it at all.
+
+**Closed.** *Does the drift table need to exist* — no. Measured against `ZIPF_EN`: all 14 lexicalised
+plurals have their base noun in the table (green 4.9, arm 4.8, glass 4.8, custom 3.8, quarter 4.4,
+spirit 4.7, good 6.4, letter 4.9, manner 4.1, paper 5.0, look 6.3, damage 4.5, content 4.4, brain 4.9),
+and table membership *is* the unigram cut, so none survives as a seed. Every plural is independently in
+the table as well, so both routes reject. Controls behave — thaumaturge, minotaur and orrery are absent
+from the table and survive. A plural can only be generated from a seed the gate already killed, so
+there is no case for a table to catch. Proper-name capture (chili → Chili's) is untouched by this: it
+is a possessive, `stems()` does not strip `'s`, and whether `chili` itself clears the table is a
+separate lookup that has not been run.
 
 Blocking measurement:
 
-4. **Anchor provenance** for books beyond the two gold sets — and it cannot read "already approved" as
+3. **Anchor provenance** for books beyond the two gold sets — and it cannot read "already approved" as
    a decision, since provenance decays against a moving standard.
-5. **LLM-as-proxy validation** — model-generated keys must clear Foxbridge and Richard before standing
+4. **LLM-as-proxy validation** — model-generated keys must clear Foxbridge and Richard before standing
    in for human keys anywhere else. Note the ordering problem: the lexical generator's unique value
    cannot be measured against a badly-configured LLM arm, because "lexical-only" would then mean
    "unreached by a cheap prompt". Pool across several LLM configurations and treat the residue as a
    lower bound, exactly as `/wa-super-grade` pools retrieval arms.
-6. **Harness priming** — see the code facts above.
-7. **Which denominator a threshold is quoted in** — message rate or scan-window rate. Cheap to fix
+5. **Harness priming** — see the code facts above.
+6. **Which denominator a threshold is quoted in** — message rate or scan-window rate. Cheap to fix
    before anything is written down, annoying afterwards.
 
 Accepted as follow-on:
 
-8. **SmartKeys emission.** Portability policy is a judgement call, and the quality gates exempt `?`
+7. **SmartKeys emission.** Portability policy is a judgement call, and the quality gates exempt `?`
    keys entirely (`keyword-core.mjs:211`), so they would enter precisely where nothing can see them.
-9. **`countKey` signature change.**
-10. **`generated()` fallback** — the numbering-series heuristic in Populations. Low stakes (a checkbox
+8. **`countKey` signature change.**
+9. **`generated()` fallback** — the numbering-series heuristic in Populations. Low stakes (a checkbox
     default), so "fairly safe" is the proportionate standard.
-11. **The surviving hypothesis**: reference entries may be reachable by lexical-statistical means on the
+10. **The surviving hypothesis**: reference entries may be reachable by lexical-statistical means on the
     entry plus a chat backstop, while memory entries need more. Untested — and the flat probes above say
     nothing about it either way. The Populations note cuts against it in one direction and for it in
     another: if reference bodies overlap the chat least, the backstop supplies least exactly there — but
     a reference entry's subject is usually sitting in its title, so the seed may not need the body at all.
-12. **Chat corpus assembly** — union a book's bound chats and dedupe shared branch prefixes. Correct for
+11. **Chat corpus assembly** — union a book's bound chats and dedupe shared branch prefixes. Correct for
     every branch semantics (continuation, separate story, true fork, ephemeral repeat) without needing
     to classify them, since only the case that would corrupt it is the detectable one.
 
