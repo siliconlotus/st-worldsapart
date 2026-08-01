@@ -849,7 +849,7 @@ export async function lorebookStudio(preferredBook = null) {
             inp.addEventListener('blur', () => commit(true));
             add.replaceWith(inp); inp.focus();
         });
-        para.append(boltBtn, llmBtn, add);   // suggestion triggers sit just before the add-keyword +
+        para.append(add, boltBtn, llmBtn);   // manual + first, then the suggestion triggers
 
         // --- Level 2: text section with its own chevron (preview line ↔ editor) ---
         const textSec = document.createElement('div'); textSec.className = 'wa-text-sec';
@@ -889,8 +889,13 @@ export async function lorebookStudio(preferredBook = null) {
         row.append(body);
 
         const old = rowEls.get(e.uid);
+        // A repaint builds a fresh textarea, so every keyword edit would jump a scrolled editor back
+        // to the top. Carry the scroll over from the row being replaced (after syncText, whose
+        // autosize resets it).
+        const st = old?.querySelector('.wa-entry-full')?.scrollTop ?? 0;
         if (old && old.isConnected) old.replaceWith(row); rowEls.set(e.uid, row);
         syncText();   // after mount, so an expanded editor's autosize sees a real scrollHeight
+        if (st) full.scrollTop = st;
         return row;
     };
 
