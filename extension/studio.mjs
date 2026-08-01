@@ -572,7 +572,7 @@ export async function lorebookStudio(preferredBook = null) {
         let added = 0;
         for (const cand of cands) {
             const { term: t, canon: c, reason } = classifyLlmCand(cand, {
-                canon: s.canon, exampleCanon: s.exampleCanon, dfSubstr: s.dfSubstr, N: s.N,
+                canon: s.canon, exampleCanon: s.exampleCanon, exampleWords: s.exampleWords, entryText: e.content, dfSubstr: s.dfSubstr, N: s.N,
                 dfCeil: suggestOpts.dfCeil, excludeDates: suggestOpts.excludeDates,
                 isDupe: (term, cn) => seen.has(cn) || hasKey(e, term),
             });

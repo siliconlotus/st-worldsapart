@@ -4,7 +4,7 @@
 // silently drifting the prune popup, the suggest popup, and Lorebook Studio.
 // Run: node eval/keyword-extract-check.mjs
 import assert from 'node:assert';
-import { buildKeyPruneScan, buildKeySuggest, KEY_TOO_COMMON, KEY_MIN_LENGTH, KEY_MIN_COMMON_ENTRIES } from '../extension/keyword-core.mjs';
+import { buildKeyPruneScan, buildKeySuggest, classifyLlmCand, KEY_TOO_COMMON, KEY_MIN_LENGTH, KEY_MIN_COMMON_ENTRIES } from '../extension/keyword-core.mjs';
 
 // --- buildKeyPruneScan ---------------------------------------------------------------------------
 // Four entries so df ratios are meaningful (the classify priority is english-common -> dead ->
@@ -64,6 +64,27 @@ assert.ok(!terms0.includes('home'), '"home" (common + book-wide) is not suggeste
 assert.strictEqual(ss.canon("Brass Orrery's"), 'brass orrery', 'canon folds case + possessive');
 assert.strictEqual(ss.dfSubstr('home'), 5, 'dfSubstr counts entries whose text contains the term');
 assert.ok(Array.isArray(ss.avoid), 'avoid list returned for the LLM prompt');
+
+// --- classifyLlmCand: few-shot echoes ------------------------------------------------------------
+// The model regurgitates the prompt's invented examples, and rarely verbatim — a mangled name or half
+// a phrase is the common case, and both used to sail past the exact-phrase test. Entry 1's text has
+// none of the example words; entry 0's has "brass orrery", which must therefore survive.
+{
+    const llm = (cand, uid) => classifyLlmCand(cand, {
+        canon: ss.canon, exampleCanon: ss.exampleCanon, exampleWords: ss.exampleWords,
+        entryText: suggestBook.entries[uid].content, dfSubstr: ss.dfSubstr, N: ss.N,
+        dfCeil: 0.5, isDupe: () => false,
+    }).reason;
+    assert.strictEqual(llm('Quillfeather accord', 1), 'echo', 'verbatim few-shot');
+    assert.strictEqual(llm('marlowford almshouse', 1), 'echo', 'mangled few-shot name');
+    assert.strictEqual(llm('the almshouse', 1), 'echo', 'half a few-shot');
+    assert.strictEqual(llm('thaddeus', 1), 'echo', 'one word of a few-shot name');
+    assert.strictEqual(llm('brass gears', 1), 'echo', 'example word, unattested here');
+    // The hatch: an example word the entry's own prose uses is the entry's, not the prompt's.
+    assert.strictEqual(llm('brass gears', 0), null, 'example word attested in the entry text -> kept');
+    assert.strictEqual(llm('market bread', 4), null, 'an ordinary candidate is untouched');
+    console.log('ok   classifyLlmCand: mangled and partial few-shot echoes dropped, attested terms kept');
+}
 
 // Over-shared keys: flagged on how many entries LIST the key, independent of how often it appears in
 // their TEXT. "astronaut" sits in one entry's prose but is keyed on all 12, so the content-frequency
