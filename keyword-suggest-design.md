@@ -216,12 +216,28 @@ so it shares vocabulary by construction. A reference entry is authored independe
 the chat exists, in an expository register the chat never uses. Overlap there is incidental rather than
 guaranteed.
 
-Character sheets are the far end of that gradient rather than a separate phenomenon: historical,
-psychological and dispositional content, describing how someone tends to behave rather than naming
-things anyone says out loud. Almost nothing in the body gets typed, and the name is the only reliable
-hook — which is why their keys degenerate to a name plus nicknames. They stay a distinct class for a
-different reason, semantics closer to "constant when present or referred to", and are heading toward a
-sticky flag with different rules.
+Character sheets sit at the far end of that gradient — historical, psychological and dispositional
+prose describes how someone behaves rather than naming things anyone says aloud — but that is a matter
+of degree.
+
+**They are not a distinct class for keying.** Checked against Foxbridge (human-curated, reference-only)
+and Sommers' reference minority: characters, concepts and places are all keyed the same way — the
+subject's canonical name, its morphological variants, and the common noun people say instead of it.
+
+    necromancy                  necromancy, necromancer, demiurge, medium
+    Arnold Atkins               Arnold, Atkins, sherriff, police, cop
+    Miss Roberta's Boarding House   boarding house, Miss Roberta, guest rooms
+
+Same shape three times, and the key counts of the two populations overlap completely (Foxbridge
+characters 0–6, concepts 0–8).
+
+What varies is **subject ubiquity**, which is a continuum rather than a class. Foxbridge's peripheral
+NPCs earn role nouns; Sommers' principals get a bare first name and nothing else — Jeffrey Sommers
+`[Jeffrey]`, Shane Sommers `[Shane]`, Micah Henry `[Micah]`. Degeneracy to a name tracks how central
+the subject is, not that it is a person, which is the "Kyle" observation appearing in curated data. Its
+consequence — an entry whose only good key fires in nearly every window, so the entry is *effectively*
+constant — is an activation and precedence question, and therefore the ranker's side of the boundary,
+not this system's.
 
 A consequence for seeding: for a reference entry the **title is a first-class seed source**, because a
 reference title names its subject (Foxbridge: "witch levels", "thaumaturgy", "scrying"). A memory
