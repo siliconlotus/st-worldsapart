@@ -111,6 +111,11 @@ export async function lorebookStudio(preferredBook = null) {
     // so a stale selection is visible rather than silent.
     const cleanupChecks = new Map();   // rowId -> bool (defaults from scan.defChecked — mostly ticked)
     let cleanupUndo = null;            // [{uid, key}] from the last prune, restorable until the next one
+    // Cleanup normally lists only what the audit flagged. This widens it to every key on every visible
+    // entry — the audit is a heuristic, so the term you want to prune, ignore or retitle in bulk is often
+    // one it had no opinion about. Unflagged rows never pre-tick; the flags decide what's suspect, this
+    // toggle only decides what's REACHABLE.
+    let cleanupShowAll = false;
     // CHAT EVIDENCE for the "not in entry text" flag. That flag measures the book's own prose, but keys fire
     // against the CHAT — which is the whole ambiguity: on a hand-authored book ~90% of them are deliberate
     // aliases ("Toriel's House" for "Dreemurr Residence"), on a machine-written one most are stale scene
@@ -378,6 +383,31 @@ export async function lorebookStudio(preferredBook = null) {
         selectedEntries.clear();
         save(); suggest = null; if (scan) rebuildScan(); renderExplorer();
     };
+    // One keyword onto every selected entry — the bulk form of the ➕ in an entry's keyword paragraph,
+    // so it skips entries that already carry the term (same case-insensitive hasKey the ➕ uses) rather
+    // than duplicating it. No rescan: a new key doesn't change any entry's text, and the per-entry ➕
+    // doesn't rescan either.
+    const bulkAddTerm = async () => {
+        const raw = await Popup.show.input('Add term — selected entries', 'Keyword to add to every selected entry:');
+        const term = String(raw ?? '').trim();
+        if (!term) return;
+        let added = 0;
+        applyBulk(e => { if (!hasKey(e, term)) { if (!Array.isArray(e.key)) e.key = []; e.key.push(term); added++; } });
+        const skipped = selectedEntries.size - added;
+        toastr[added ? 'success' : 'info'](added ? `“${term}” added to ${added} ${added === 1 ? 'entry' : 'entries'}${skipped ? ` (${skipped} already had it)` : ''}.` : `Every selected entry already has “${term}”.`, 'Worlds Apart');
+    };
+    // The inverse of bulkAddTerm: empty the key list of every selected entry. Unlike a single ✕ this is
+    // worth a rescan — the too-common/shared flags are df-based, so removing a book's worth of keys
+    // changes the verdict on the ones left standing.
+    const bulkClearTerms = async () => {
+        const sel = selectedList(); if (!sel.length) return;
+        const total = sel.reduce((n, e) => n + (Array.isArray(e.key) ? e.key.length : 0), 0);
+        if (!total) { toastr.info('The selected entries have no keywords.', 'Worlds Apart'); return; }
+        if (!await Popup.show.confirm(`Delete all ${total} keyword${total === 1 ? '' : 's'} from ${sel.length} selected ${sel.length === 1 ? 'entry' : 'entries'}?`, 'This is irreversible.')) return;
+        applyBulk(e => e.key = []);
+        suggest = null; if (scan) { rebuildScan(); sel.forEach(renderEntry); }
+        toastr.success(`Deleted ${total} keyword${total === 1 ? '' : 's'}.`, 'Worlds Apart');
+    };
     const renderBulkBar = () => {
         const wrap = document.createElement('div'); wrap.className = 'wa-bulk';
         const n = selectedEntries.size;
@@ -419,6 +449,7 @@ export async function lorebookStudio(preferredBook = null) {
         };
         const setBtn = mkBtn('Set… ▾', () => { const r = setBtn.getBoundingClientRect(); showCtxMenu(setItems(), r.left, r.bottom + 2, ctxMount()); });
         setBtn.title = 'Set a field on all selected entries';
+        const addTermBtn = mkBtn('Add term…', bulkAddTerm); addTermBtn.title = 'Add one keyword to every selected entry';
         const reBtn = mkBtn('Renumber…', ev => bulkOrder(ev.shiftKey)); reBtn.title = 'Renumber order — shift-click to also renumber UIDs';
         // One toggle instead of separate Enable/Disable: enable if any selected are off, else disable all.
         const anyDisabled = Object.values(data?.entries ?? {}).some(e => selectedEntries.has(e.uid) && e.disable);
@@ -427,12 +458,14 @@ export async function lorebookStudio(preferredBook = null) {
             mkBtn(n === all.length ? 'Select none' : 'Select all', () => { n === all.length ? selectedEntries.clear() : all.forEach(e => selectedEntries.add(e.uid)); syncSelCheckboxes(); }),
             sep(),
             mkBtn(anyDisabled ? 'Enable' : 'Disable', () => { applyBulk(e => e.disable = !anyDisabled); refreshBulkBar(); }),
+            addTermBtn,
             setBtn,
             reBtn,
             sep(),
             mkBtn('Copy to…', bulkCopyTo),
             mkBtn('Move to…', bulkMoveTo),
             sep(),
+            mkBtn('Delete all terms', bulkClearTerms, 'wa-bulk-danger'),
             mkBtn('Delete', bulkDelete, 'wa-bulk-danger'),
         );
         return wrap;
@@ -593,7 +626,7 @@ export async function lorebookStudio(preferredBook = null) {
         let added = 0;
         for (const cand of cands) {
             const { term: t, canon: c, reason } = classifyLlmCand(cand, {
-                canon: s.canon, exampleCanon: s.exampleCanon, dfSubstr: s.dfSubstr, N: s.N,
+                canon: s.canon, exampleCanon: s.exampleCanon, exampleWords: s.exampleWords, entryText: e.content, dfSubstr: s.dfSubstr, N: s.N,
                 dfCeil: suggestOpts.dfCeil, excludeDates: suggestOpts.excludeDates,
                 isDupe: (term, cn) => seen.has(cn) || hasKey(e, term),
             });
@@ -900,7 +933,7 @@ export async function lorebookStudio(preferredBook = null) {
             inp.addEventListener('blur', () => commit(true));
             add.replaceWith(inp); inp.focus();
         });
-        para.append(boltBtn, llmBtn, add);   // suggestion triggers sit just before the add-keyword +
+        para.append(add, boltBtn, llmBtn);   // manual + first, then the suggestion triggers
 
         // --- Level 2: text section with its own chevron (preview line ↔ editor) ---
         const textSec = document.createElement('div'); textSec.className = 'wa-text-sec';
@@ -940,8 +973,13 @@ export async function lorebookStudio(preferredBook = null) {
         row.append(body);
 
         const old = rowEls.get(e.uid);
+        // A repaint builds a fresh textarea, so every keyword edit would jump a scrolled editor back
+        // to the top. Carry the scroll over from the row being replaced (after syncText, whose
+        // autosize resets it).
+        const st = old?.querySelector('.wa-entry-full')?.scrollTop ?? 0;
         if (old && old.isConnected) old.replaceWith(row); rowEls.set(e.uid, row);
         syncText();   // after mount, so an expanded editor's autosize sees a real scrollHeight
+        if (st) full.scrollTop = st;
         return row;
     };
 
@@ -1330,7 +1368,8 @@ export async function lorebookStudio(preferredBook = null) {
      * Search semantics for the term tabs, which differ from the Explorer's on purpose.
      *
      * A query keeps an entry if its TITLE matches, or if one of the terms THIS TAB lists matches
-     * (flagged keys in Cleanup, candidates in Suggest), or — if the Entry scope is ticked — its text.
+     * (flagged keys in Cleanup — every key under "Show all terms" — candidates in Suggest), or — if
+     * the Entry scope is ticked — its text.
      * Title hits sort first, then term hits, then text hits; within a band the normal sort order holds.
      *
      * Rows are never filtered. Locating an entry shows ALL of its terms, because deciding about one
@@ -1737,6 +1776,19 @@ export async function lorebookStudio(preferredBook = null) {
                     : `${rc.text} · ${hits ? `${hits} hit${hits === 1 ? '' : 's'} in chat` : '0 hits in chat'}`;
                 return { term: p.key, why, color: hits ? SEV_GREEN : rc.color, p };
             });
+            // Show-all: append the keys classifyEntry didn't return — unflagged, whitelisted, or on an
+            // entry the audit's scope excluded. Flagged rows stay on top, so widening the list never
+            // buries the problems it found.
+            if (cleanupShowAll) {
+                const shown = new Set(rows.map(r => r.term));
+                for (const key of (Array.isArray(e.key) ? e.key : [])) {
+                    if (shown.has(key)) continue;
+                    shown.add(key);
+                    const id = rowId(e.uid, key);
+                    if (!cleanupChecks.has(id)) cleanupChecks.set(id, false);   // never pre-tick what the audit didn't flag
+                    rows.push({ term: key, why: ignoreSet.has(key) ? 'ignored' : 'not flagged', color: '' });
+                }
+            }
             if (rows.length) out.push({ entry: e, rows });
         }
         return rankBySearch(out);
@@ -1812,12 +1864,18 @@ export async function lorebookStudio(preferredBook = null) {
         pane.append(fixed, list);
 
         let groups = [], allIds = [], reg = { row: new Map(), grp: [] };
+        // Repaints the list, not just the bar: it changes which rows exist.
+        const showAllBtn = () => {
+            const b = barBtn(cleanupShowAll ? 'Flagged only' : 'Show all terms', () => { cleanupShowAll = !cleanupShowAll; repaint(); });
+            b.title = cleanupShowAll ? 'List only the keys the audit flagged' : 'List every key on every visible entry, flagged or not';
+            return b;
+        };
         const paintBar = () => {
             const on = allIds.filter(id => cleanupChecks.get(id)).length;
             const allOn = allIds.length > 0 && on === allIds.length;
             bar.innerHTML = '';
             const count = document.createElement('span'); count.className = 'wa-bulk-count';
-            count.textContent = `${on} of ${allIds.length} flagged term${allIds.length === 1 ? '' : 's'} selected`;
+            count.textContent = `${on} of ${allIds.length} ${cleanupShowAll ? '' : 'flagged '}term${allIds.length === 1 ? '' : 's'} selected`;
             // Same contract as the audit popup: a tick is a suggestion. "Dead" is measured against entry
             // text, not the chat, so it has a real false-positive rate on keys the story actually uses.
             count.title = 'Pre-ticked terms are suggestions, not verified problems. "Not in entry text" means exactly that — keys match against the chat, so a key your story uses but your prose never spells out reads as dead and is usually worth keeping. Review before applying.';
@@ -1828,6 +1886,7 @@ export async function lorebookStudio(preferredBook = null) {
                 }),
                 barBtn('Prune selected', pruneChecked, 'wa-bulk-danger'),
                 barBtn('Ignore selected', ignoreChecked),
+                showAllBtn(),
                 barBtn(cleanupChatHits ? 'Re-check chats' : 'Check against chats', () => runChatScan().catch(e => { console.error('Worlds Apart: chat scan failed', e); toastr.error(String(e?.message ?? e), 'Worlds Apart'); })),
             );
             if (cleanupChatHits) {
@@ -1846,7 +1905,7 @@ export async function lorebookStudio(preferredBook = null) {
             reg = { row: new Map(), grp: [] };
             list.innerHTML = '';
             if (!scan) list.append(emptyNote('Run the audit to flag weak keywords — tune what counts as weak under Tool Settings.'));
-            else if (!groups.length) list.append(emptyNote('No flagged keywords in the visible entries.'));
+            else if (!groups.length) list.append(emptyNote(cleanupShowAll ? 'The visible entries have no keywords at all.' : 'No flagged keywords in the visible entries — “Show all terms” lists the rest.'));
             else for (const g of groups) {
                 list.append(termGroupHeader(g.entry, g.rows, cleanupChecks, reg, sync, repaint));
                 if (advOpen.has(g.entry.uid)) list.append(buildAdvancedTray(g.entry, repaint));

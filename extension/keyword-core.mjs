@@ -369,12 +369,21 @@ export function isDateLike(term) {
  * (already-keyed isn't garbage, a prompt echo warrants a reroll hint), everything else is 'junk'.
  * `isDupe(term, canon)` is caller-supplied — each surface tracks its own already-shown set.
  */
-export function classifyLlmCand(cand, { canon, exampleCanon, dfSubstr, N, dfCeil, excludeDates = true, isDupe }) {
+export function classifyLlmCand(cand, { canon, exampleCanon, exampleWords, entryText = '', dfSubstr, N, dfCeil, excludeDates = true, isDupe }) {
     const term = cand.replace(/^["'`]+|["'`]+$/g, '').trim();
     const c = canon(term) || term.toLowerCase();
     if (!term || term.length > 60) return { term, canon: c, reason: 'junk' };
     if (isDupe(term, c)) return { term, canon: c, reason: 'dupe' };
     if (exampleCanon.has(c)) return { term, canon: c, reason: 'echo' };     // pure prompt echo
+    // A model rarely copies a few-shot cleanly: it mangles it ("Marrowford almshouse" ->
+    // "marlowford almshouse") or lifts half of one, and either walks straight past the exact-phrase
+    // test above. So reject on any WORD of an example — unless the entry's own text uses that word,
+    // which makes it the entry's rather than the prompt's ("brass orrery" is a fine key for an entry
+    // that has one). The invented sentinels never survive that hatch; real English words do.
+    if (exampleWords?.size) {
+        const body = String(entryText).toLowerCase();
+        if (c.split(' ').some(w => exampleWords.has(w) && !body.includes(w))) return { term, canon: c, reason: 'echo' };
+    }
     if (!c.includes(' ') && COMMON_WORDS.has(c)) return { term, canon: c, reason: 'junk' };   // generic single word
     if (excludeDates && isDateLike(term)) return { term, canon: c, reason: 'junk' };
     const df = dfSubstr(term);
@@ -393,7 +402,7 @@ export function classifyLlmCand(cand, { canon, exampleCanon, dfSubstr, N, dfCeil
  *
  * @param {object} data   loaded world-info object (from loadWorldInfo)
  * @param {object} opts    { dfCeil, maxN, excludeDates, excludeShort, onlyActive, cap, bgDocs }
- * @returns {{entries:object[], N:number, perEntry:object[], canon:Function, dfSubstr:Function, avoid:string[], exampleCanon:Set<string>}}
+ * @returns {{entries:object[], N:number, perEntry:object[], canon:Function, dfSubstr:Function, avoid:string[], exampleCanon:Set<string>, exampleWords:Set<string>}}
  */
 export function buildKeySuggest(data, opts) {
     const { dfCeil, maxN, excludeDates, excludeShort, onlyActive, cap, bgDocs = [] } = opts;
@@ -949,6 +958,7 @@ export function buildKeySuggest(data, opts) {
     // For the ✨ per-entry local-model path (lazy: only fires on click).
     const avoid = [...uDF].filter(([t, c]) => t.length > 2 && !STOP.has(t) && c / N > 0.5).sort((a, b) => b[1] - a[1]).slice(0, 20).map(x => x[0]);
     const exampleCanon = new Set([...KEY_GOOD_EXAMPLES, ...KEY_BAD_EXAMPLES].map(canon));   // drop few-shot echoes
+    const exampleWords = new Set([...exampleCanon].flatMap(x => x.split(' ')));   // ...and mangled/partial ones
 
-    return { entries, N, perEntry, canon, dfSubstr, avoid, exampleCanon };
+    return { entries, N, perEntry, canon, dfSubstr, avoid, exampleCanon, exampleWords };
 }
