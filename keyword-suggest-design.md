@@ -563,8 +563,6 @@ Blocking measurement:
    "unreached by a cheap prompt". Pool across several LLM configurations and treat the residue as a
    lower bound, exactly as `/wa-super-grade` pools retrieval arms.
 5. **Harness priming** — see the code facts above.
-6. **Which denominator a threshold is quoted in** — message rate or scan-window rate. Cheap to fix
-   before anything is written down, annoying afterwards.
 
 Accepted as follow-on:
 
@@ -590,6 +588,8 @@ Retired, recorded so they are not re-derived:
   All ranker-side; relevance of an entry to a window was never this system's question.
 - **Span masking**, **embedding drift detection**, and **breadth by co-occurrence** — each replaced
   above by something cheaper that works.
+- **Scan-window rates.** Rates are per message. The window transform is order-preserving and depends on
+  `world_info_depth`, so it adds nothing and does not travel.
 
 ## Related
 
