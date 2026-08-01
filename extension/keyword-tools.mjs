@@ -56,4 +56,10 @@ export const STUDIO_PRUNE_OPTS = { scanKeyword: true, scanVectorized: true, scan
 // suggester must not pre-reject a term the pruner itself considers fine. It was 0.15 when
 // cross-entry df was the only junk signal; the Zipf gate now owns English junk, and 0.15 was
 // silently cutting a book's recurring cast and setting names ("Stearns" in ~25% of entries).
-export const STUDIO_SUGGEST_OPTS = { dfCeil: 0.35, maxN: 4, excludeDates: true, excludeShort: true, onlyActive: false, cap: 8, llmChunk: 5000 };
+// cap is a display budget, not a quality line. Measured uncapped over 39 books / 3405 entries, an
+// entry yields a median of 17 candidates and a mean of 27, near-linear in content length (~7 per
+// 1000 chars) rather than tailing off — so 8 was discarding ~70% of what survives the gates, and
+// what it discarded was not junk. On a 269-candidate entry the top 8 were the entry's own subject
+// but the next hundred still held its proper nouns. 30 sits just above the p75 of 29, so most
+// entries now return everything they have and only the largest are trimmed.
+export const STUDIO_SUGGEST_OPTS = { dfCeil: 0.35, maxN: 4, excludeDates: true, excludeShort: true, onlyActive: false, cap: 30, llmChunk: 5000 };

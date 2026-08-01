@@ -40,7 +40,7 @@ if (!args.length || args.length % 2) {
 
 // Mirrors STUDIO_SUGGEST_OPTS in keyword-tools.mjs, which is ST-coupled and so cannot be imported
 // under node. Keep in step with it — measuring options the Studio does not ship is measuring nothing.
-const OPTS = { dfCeil: 0.35, maxN: 4, excludeDates: true, excludeShort: true, onlyActive: false, cap: 8 };
+const OPTS = { dfCeil: 0.35, maxN: 4, excludeDates: true, excludeShort: true, onlyActive: false, cap: 30 };
 
 const BANDS = [[0, 0, '0 (dead)'], [1, 3, '1-3'], [4, 20, '4-20'], [21, 100, '21-100'], [101, Infinity, '>100 (broad)']];
 
