@@ -210,9 +210,25 @@ that pass is where portability policy is applied rather than baked in.
 
 ## Populations
 
-Character sheets are a third class, not a kind of reference entry: near-zero lexical overlap with the
-chat, pure generation context, semantics closer to "constant when present or referred to". Their keys
-degenerate to a name plus nicknames, and they are heading toward a sticky flag with different rules.
+**Reference entries in general match the chat less than memory entries do, and the reason is
+structural.** A memory entry is derived from the chat — a summarizer read those messages and wrote it —
+so it shares vocabulary by construction. A reference entry is authored independently, usually before
+the chat exists, in an expository register the chat never uses. Overlap there is incidental rather than
+guaranteed.
+
+Character sheets are the far end of that gradient rather than a separate phenomenon: historical,
+psychological and dispositional content, describing how someone tends to behave rather than naming
+things anyone says out loud. Almost nothing in the body gets typed, and the name is the only reliable
+hook — which is why their keys degenerate to a name plus nicknames. They stay a distinct class for a
+different reason, semantics closer to "constant when present or referred to", and are heading toward a
+sticky flag with different rules.
+
+A consequence for seeding: for a reference entry the **title is a first-class seed source**, because a
+reference title names its subject (Foxbridge: "witch levels", "thaumaturgy", "scrying"). A memory
+entry's title is a generated editorial label — "003 - Post-Rut Domesticity" — which describes rather
+than names, and is correspondingly weaker.
+
+Asserted, not measured.
 
 Across 39 books on disk, every book over 100 entries is 85–96% STMemoryBooks entries, so reference
 entries are a 5–15% minority living *inside* memory books. Any memory/reference branch must therefore
@@ -253,7 +269,9 @@ Accepted as follow-on:
 8. **`countKey` signature change.**
 9. **The surviving hypothesis**: reference entries may be reachable by lexical-statistical means on the
    entry plus a chat backstop, while memory entries need more. Untested — and the flat probes above say
-   nothing about it either way.
+   nothing about it either way. The Populations note cuts against it in one direction and for it in
+   another: if reference bodies overlap the chat least, the backstop supplies least exactly there — but
+   a reference entry's subject is usually sitting in its title, so the seed may not need the body at all.
 
 ## Related
 
