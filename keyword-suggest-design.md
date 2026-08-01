@@ -257,6 +257,22 @@ The lorebooks on disk are a blend of human curation and weaker-LLM generation wh
 book, so agreement with their keys is not a score. Nothing may use them as a denominator until anchor
 provenance (below) establishes which subset is trustworthy.
 
+**An unkeyed entry is not a negative example.** Zero keys has at least three causes and they look
+identical from the outside:
+
+- **Authoring scaffolding**, meant to be switched on and off by hand and deliberately never keyed —
+  Sommers' `Design Note:` and `Story Arc:` entries. Out of scope for suggestion entirely, and they must
+  be kept out of any denominator.
+- **Probability entries** with their own activation mode — Foxbridge's `Kent plot trigger`.
+- **Oversights.** Foxbridge's `weave theory`, `mudra`, `asana`, `Kiki Chavez` — in the most trustworthy
+  reference book available, where `Kiki Chavez` is unkeyed while appearing as a key *on* two other
+  entries.
+
+Two consequences. Anchor provenance cannot read an empty key list as a decision. And the superset
+standard measures containment of what an author wrote, never what they forgot — so oversights are a
+ceiling on it, and a suggester proposing good keys for an unkeyed entry scores as noise while actually
+doing its job.
+
 **No measurements are recorded in this document.** Anything attempted before the definitions above
 existed was scored against that denominator, and the measurement is itself what is being designed
 here. Numbers start once the open items below are closed.
