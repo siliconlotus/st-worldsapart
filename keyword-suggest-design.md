@@ -534,14 +534,6 @@ Blocking the definition:
      be a raw character count, since three characters of a rare coinage collide less than five of a
      common word — so it likely wants stating as a collision bound rather than a length bound, which
      folds it into the previous item. Same run answers both.
-2. **The derivation allowlist**, which needs naming transformation by transformation rather than in the
-   abstract. In, because the derived form co-refers at the same specificity: agent nouns (thaumaturgy →
-   thaumaturge, scry → scryer), `-ist`, `-er`. Out, because the derived form names a different thing:
-   `-craft` (witch → witchcraft), `-hood`, `-ism`, `-ery`. The admission test is co-reference at the
-   same specificity, the same test breadth uses one level up. Note this class is only ever needed where
-   the matcher cannot reach the form anyway — "thaumaturgy" and "thaumaturge" do not contain each
-   other, which is exactly why they must be enumerated while "rut"/"ruts" need not be. And it has to be
-   local: pushing derivation to the LLM arm means the lexical-only build can never produce it at all.
 
 **Closed.** *Does the drift table need to exist* — no. Measured against `ZIPF_EN`: all 14 lexicalised
 plurals have their base noun in the table (green 4.9, arm 4.8, glass 4.8, custom 3.8, quarter 4.4,
@@ -555,28 +547,28 @@ separate lookup that has not been run.
 
 Blocking measurement:
 
-3. **Anchor provenance** for books beyond the two gold sets — and it cannot read "already approved" as
+2. **Anchor provenance** for books beyond the two gold sets — and it cannot read "already approved" as
    a decision, since provenance decays against a moving standard.
-4. **LLM-as-proxy validation** — model-generated keys must clear Foxbridge and Richard before standing
+3. **LLM-as-proxy validation** — model-generated keys must clear Foxbridge and Richard before standing
    in for human keys anywhere else. Note the ordering problem: the lexical generator's unique value
    cannot be measured against a badly-configured LLM arm, because "lexical-only" would then mean
    "unreached by a cheap prompt". Pool across several LLM configurations and treat the residue as a
    lower bound, exactly as `/wa-super-grade` pools retrieval arms.
-5. **Harness priming** — see the code facts above.
+4. **Harness priming** — see the code facts above.
 
 Accepted as follow-on:
 
-7. **SmartKeys emission.** Portability policy is a judgement call, and the quality gates exempt `?`
+5. **SmartKeys emission.** Portability policy is a judgement call, and the quality gates exempt `?`
    keys entirely (`keyword-core.mjs:211`), so they would enter precisely where nothing can see them.
-8. **`countKey` signature change.**
-9. **`generated()` fallback** — the numbering-series heuristic in Populations. Low stakes (a checkbox
+6. **`countKey` signature change.**
+7. **`generated()` fallback** — the numbering-series heuristic in Populations. Low stakes (a checkbox
     default), so "fairly safe" is the proportionate standard.
-10. **The surviving hypothesis**: reference entries may be reachable by lexical-statistical means on the
+8. **The surviving hypothesis**: reference entries may be reachable by lexical-statistical means on the
     entry plus a chat backstop, while memory entries need more. Untested — and the flat probes above say
     nothing about it either way. The Populations note cuts against it in one direction and for it in
     another: if reference bodies overlap the chat least, the backstop supplies least exactly there — but
     a reference entry's subject is usually sitting in its title, so the seed may not need the body at all.
-11. **Chat corpus assembly** — union a book's bound chats and dedupe shared branch prefixes. Correct for
+9. **Chat corpus assembly** — union a book's bound chats and dedupe shared branch prefixes. Correct for
     every branch semantics (continuation, separate story, true fork, ephemeral repeat) without needing
     to classify them, since only the case that would corrupt it is the detectable one.
 
