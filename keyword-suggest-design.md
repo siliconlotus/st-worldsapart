@@ -243,22 +243,25 @@ It is vacuous for the lexical arm, whose candidates are extracted from that text
 **Denotation has no test.** For a synonym it is an unchecked assertion by whatever produced the term;
 the gates above catch particular ways it can be wrong, not the claim itself.
 
-### Contraction belongs in the expander
+### Truncations are candidates too
 
-Curated keys are over-specified more often than under-specified: `Julian Vargas` where the chat says
-`Julian`, `Pera Palace Hotel` where it says `Pera Palace`. So the expander searches truncations as well
-as variants, gated identically — `Pera Palace` survives where `Pera` does not, `weaver` where `rug`
-does not. It is local, and the renderer's backoff is already this search over a morphological family.
+Curated keys are sometimes over-specified — `Julian Vargas` where the chat says `Julian`,
+`Pera Palace Hotel` where it says `Pera Palace` — so a seed's truncations are candidates alongside its
+variants, gated the same way.
 
-Name decomposition is the same operation with one extra admission test: the compound must be a **name**.
-`Human Disinterest` → "Disinterest" passes every gate while being a coined concept. Its other failure
-modes are the existing gates doing their job — stopword heads, substring collisions, ubiquity — and the
-verdict is per name rather than a rule, since bare `Joe` loses to `Joe Pagliani` while `Julian Vargas`
+**A truncation is only valid when the shorter form still names the same referent.** `Bourdain` names the
+man; `Sur` does not name Big Sur, it is a fragment that belongs to other places entirely. That is a
+semantic judgement, not a mechanical one, so this is *not* a purely local operation — the gates catch
+only the truncations that also collide orthographically (`Sur` inside *sure*), and would pass the rest
+under whole-word matching. The same limit applies to compounds that are not names at all:
+`Human Disinterest` → `Disinterest` clears every gate while being half of a coined concept.
+
+The verdict is per case rather than a rule: bare `Joe` loses to `Joe Pagliani` while `Julian Vargas`
 loses to `Julian`.
 
-Evidence: 9 of 11 zero-attestation gold keys in Richard have a live shorter form. One book, and it also
-means zero attestation is closer to a form-error signal than a frontier signal there — both worth
-re-testing against the public books, which need no chat.
+Evidence is thin — 9 of 11 zero-attestation gold keys in Richard have a live shorter form, which also
+suggests zero attestation reads as a form-error signal rather than a frontier signal there. One book.
+Both worth re-testing against the public books, which need no chat.
 
 ## Matching mechanics that constrain the design
 
