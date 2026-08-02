@@ -181,14 +181,13 @@ assuming it wins everywhere.
 
 ## Expansion correctness
 
-Two objects, and conflating them is what would waste the annotation:
+Annotate all the forms denoting the seed's material — that is a fact about language and does not move.
+The **required forms** are the subset the matcher will not reach from the seed on its own, and they are
+derived rather than annotated: under substring matching, does the seed occur in the variant; under
+whole-word, does it occur as a word. `wolf` does not occur in `wolves`, so `wolves` is required; `rut`
+occurs in `ruts`, so `ruts` is not. Deriving rather than storing is what lets the gold survive a regime
+change or a SmartKeys decision.
 
-- **The linguistic closure** — every surface form denoting the same material as the seed. A fact about
-  language and this book's world, and regime-independent.
-- **The required subset** — the forms the matcher will not already reach. Mechanically derived: under
-  substring matching, is the seed a substring of the variant; under whole-word, does it appear as one.
-
-Annotate the first, derive the second, and the gold survives a regime change or a SmartKeys decision.
 Core's boundary is `(?<!\w)…(?!\w)` (`extension/ranking.mjs:323`), so hyphens do not block: "rut"
 reaches "pre-rut" under *both* regimes and reaches "ruts" only under substring. Prefixed and hyphenated
 compounds are free almost everywhere; suffixed forms are the regime-sensitive ones.
@@ -279,7 +278,7 @@ SmartKey and still fires on the literal. The split is decided by substring-vs-ex
 means the surviving literals are exactly the non-colliding ones — so **degradation loses recall and
 preserves precision**, which is the right failure direction.
 
-The expander's output shape follows: a seed plus its closure, each variant tagged with its collision
+The expander's output shape follows: a seed plus its forms, each tagged with its collision
 measurement. Rendering as literal, whole-word, SmartKey or a mix is a downstream formatting pass, and
 that pass is where portability policy is applied rather than baked in.
 
