@@ -143,7 +143,13 @@ export async function lorebookStudio(preferredBook = null) {
     root.className = 'wa-studio';
     const nav = document.createElement('div'); nav.className = 'wa-studio-nav';
     const explorer = document.createElement('div'); explorer.className = 'wa-studio-explorer';
-    root.append(nav, explorer);
+    // Close corner instead of the popup's button row — that row costs a whole line of a 72vh window.
+    // Floats over the empty right end of the tab strip, so it collides with nothing. Wired to the
+    // Popup once it exists, below.
+    const closeBtn = document.createElement('button');
+    closeBtn.type = 'button'; closeBtn.className = 'fa-solid fa-xmark wa-studio-close';
+    closeBtn.title = 'Close'; closeBtn.setAttribute('aria-label', 'Close');
+    root.append(nav, explorer, closeBtn);
 
     const firstLine = e => { const t = String(e.content ?? '').trim(); const nl = t.indexOf('\n'); return (nl < 0 ? t : t.slice(0, nl)) || '(empty)'; };
     const save = () => { dirty = true; saveWorldInfo(selected, data, true); };
@@ -317,7 +323,7 @@ export async function lorebookStudio(preferredBook = null) {
     const refreshBulkBar = () => { const fresh = renderBulkBar(); if (bulkEl?.isConnected) bulkEl.replaceWith(fresh); bulkEl = fresh; };
     const syncSelCheckboxes = () => { for (const [uid, row] of rowEls) { const cb = row.querySelector('.wa-entry-sel'); if (cb) cb.checked = selectedEntries.has(uid); } refreshBulkBar(); };
     const selectedList = () => [...selectedEntries].map(uid => data?.entries?.[uid]).filter(Boolean);
-    const applyBulk = fn => { const sel = selectedList(); if (!sel.length) return; for (const e of sel) fn(e); save(); sel.forEach(renderEntry); };
+    const applyBulk = fn => { const sel = selectedList(); if (!sel.length) return; for (const e of sel) fn(e); save(); sel.forEach(x => renderEntry(x)); };
     const numberPrompt = async (title, label, def, min, max) => {
         const raw = await Popup.show.input(title, label, String(def));
         if (raw == null) return null;
@@ -357,7 +363,7 @@ export async function lorebookStudio(preferredBook = null) {
         const n = ordered.length;
         const targetOf = i => start + (desc ? n - 1 - i : i);   // block occupies [start, start+N-1]
 
-        if (!advanced) { ordered.forEach((e, i) => e.order = targetOf(i)); save(); ordered.forEach(renderEntry); return; }
+        if (!advanced) { ordered.forEach((e, i) => e.order = targetOf(i)); save(); ordered.forEach(x => renderEntry(x)); return; }
 
         // --- advanced: renumber UIDs too (uid = order). UID is the entries-object key + entry identity,
         // so this rebuilds data.entries. Guarded against the two ways it could lose data. ---
@@ -405,7 +411,7 @@ export async function lorebookStudio(preferredBook = null) {
         if (!total) { toastr.info('The selected entries have no keywords.', 'Worlds Apart'); return; }
         if (!await Popup.show.confirm(`Delete all ${total} keyword${total === 1 ? '' : 's'} from ${sel.length} selected ${sel.length === 1 ? 'entry' : 'entries'}?`, 'This is irreversible.')) return;
         applyBulk(e => e.key = []);
-        suggest = null; if (scan) { rebuildScan(); sel.forEach(renderEntry); }
+        suggest = null; if (scan) { rebuildScan(); sel.forEach(x => renderEntry(x)); }
         toastr.success(`Deleted ${total} keyword${total === 1 ? '' : 's'}.`, 'Worlds Apart');
     };
     const renderBulkBar = () => {
@@ -456,6 +462,9 @@ export async function lorebookStudio(preferredBook = null) {
         wrap.append(
             count,
             mkBtn(n === all.length ? 'Select none' : 'Select all', () => { n === all.length ? selectedEntries.clear() : all.forEach(e => selectedEntries.add(e.uid)); syncSelCheckboxes(); }),
+            // The toggle above only clears once everything visible is ticked; a partial selection needs its
+            // own way out, and clearing by unticking N boxes is not one.
+            ...(n === all.length ? [] : [mkBtn('Clear', () => { selectedEntries.clear(); syncSelCheckboxes(); })]),
             sep(),
             mkBtn(anyDisabled ? 'Enable' : 'Disable', () => { applyBulk(e => e.disable = !anyDisabled); refreshBulkBar(); }),
             addTermBtn,
@@ -728,7 +737,10 @@ export async function lorebookStudio(preferredBook = null) {
     // title line when closed; opening it reveals the tools, keywords, and text section. Level 2 is the
     // text section's own preview↔editor toggle. Tools + body are built only when open, so a big book's
     // collapsed list stays a light, skimmable set of title lines.
-    const renderEntry = e => {
+    // `mount` is the parent for a row that has no predecessor to replace (a fresh list build). The row
+    // must be in the document before syncText, or the editor's autosize measures a detached textarea,
+    // bails, and every open entry paints at the textarea's default two rows.
+    const renderEntry = (e, mount) => {
         const flagged = scan ? new Map(scan.classifyEntry(e).map(r => [r.key, r])) : null;   // null = not scanned yet
         const open = entryOpen.has(e.uid);
         const row = document.createElement('div'); row.className = 'wa-entry' + (open ? ' wa-entry-open' : '');
@@ -840,7 +852,8 @@ export async function lorebookStudio(preferredBook = null) {
 
         if (!open) {   // level-1 collapsed: title line only
             const old = rowEls.get(e.uid);
-            if (old && old.isConnected) old.replaceWith(row); rowEls.set(e.uid, row);
+            if (old && old.isConnected) old.replaceWith(row); else mount?.append(row);
+            rowEls.set(e.uid, row);
             return row;
         }
 
@@ -977,7 +990,8 @@ export async function lorebookStudio(preferredBook = null) {
         // to the top. Carry the scroll over from the row being replaced (after syncText, whose
         // autosize resets it).
         const st = old?.querySelector('.wa-entry-full')?.scrollTop ?? 0;
-        if (old && old.isConnected) old.replaceWith(row); rowEls.set(e.uid, row);
+        if (old && old.isConnected) old.replaceWith(row); else mount?.append(row);
+        rowEls.set(e.uid, row);
         syncText();   // after mount, so an expanded editor's autosize sees a real scrollHeight
         if (st) full.scrollTop = st;
         return row;
@@ -1940,12 +1954,19 @@ export async function lorebookStudio(preferredBook = null) {
             b.addEventListener('click', () => { if (tab !== id) { tab = id; renderExplorer(); } });
             bar.append(b);
         }
+        bar.append(closeBtn);   // tab order: straight after the last tab. It's positioned, so no layout effect
         return bar;
     };
 
+    // A full repaint throws away the scrolling list, so anything that redraws the whole Explorer (Suggest
+    // all, audit, expand all, a bulk edit) would dump the user back at the top. Carry the offset over the
+    // rebuild; a book/tab change lands on a list that doesn't exist yet and starts at 0 on its own.
     const renderExplorer = () => {
+        const listTop = explorer.querySelector('.wa-studio-entries')?.scrollTop ?? 0;
         explorer.innerHTML = ''; rowEls.clear();
-        if (!selected) { explorer.innerHTML = '<div style="opacity:0.6;padding:8px;">Select a lorebook on the left.</div>'; return; }
+        // The close button lives in the tab bar (for tab order), so the no-book branch — which paints no
+        // tab bar — has to re-adopt it or the wipe above takes the only way out with it.
+        if (!selected) { explorer.innerHTML = '<div style="opacity:0.6;padding:8px;">Select a lorebook on the left.</div>'; explorer.append(closeBtn); return; }
         termRepaint = null;   // the term views below claim it; the Explorer leaves it null
         explorer.append(renderTabBar());
         const pane = document.createElement('div');
@@ -1955,6 +1976,7 @@ export async function lorebookStudio(preferredBook = null) {
         // blocking — nothing here awaits it; it repaints itself.
         if (tab === 'cleanup') { renderCleanupView(pane); return; }
         renderExplorerView(pane);
+        if (listTop) { const l = explorer.querySelector('.wa-studio-entries'); if (l) l.scrollTop = listTop; }
     };
 
     const renderExplorerView = pane => {
@@ -2046,7 +2068,7 @@ export async function lorebookStudio(preferredBook = null) {
                 : `(${total.length} ${total.length === 1 ? 'entry' : 'entries'})`;
             list.innerHTML = '';
             if (!shown.length) { list.innerHTML = `<div style="opacity:0.6;padding:8px;">${total.length ? 'No entries match.' : 'This lorebook has no entries.'}</div>`; return; }
-            for (const e of shown) list.append(renderEntry(e));
+            for (const e of shown) renderEntry(e, list);   // mounts as it builds — see renderEntry
         };
         applyFilter();
     };
@@ -2054,7 +2076,7 @@ export async function lorebookStudio(preferredBook = null) {
     const openBook = async name => {
         if (dirty && selected) { reloadEditor(selected); dirty = false; }   // refresh the outgoing book's editor
         selected = name; loadSortView(name); entryOpen.clear(); expanded.clear(); tall.clear(); advOpen.clear(); sugg.clear(); selectedEntries.clear(); selAnchorUid = null; suggest = null; scan = null; clearChatScan();   // scan is on-demand; chat counts belong to a (book, chat) pair
-        explorer.innerHTML = '<div style="opacity:0.6;padding:8px;">Loading…</div>';
+        explorer.innerHTML = '<div style="opacity:0.6;padding:8px;">Loading…</div>'; explorer.append(closeBtn);   // same re-adopt as the no-book branch
         renderBooks();
         data = await loadWorldInfo(name);
         if (selected !== name) return;   // a faster second click won this race
@@ -2156,7 +2178,22 @@ export async function lorebookStudio(preferredBook = null) {
     if (selected) await openBook(selected);
     else renderExplorer();
 
-    const pop = new Popup(root, POPUP_TYPE.TEXT, '', { wide: true, okButton: 'Close', allowVerticalScrolling: false });
+    // Escape dismisses inside Studio; it never closes the window. A close throws away scroll position,
+    // which entries are open, and the selection — too much to lose to a stray keypress when the ✕ is
+    // right there. Bubble phase, so an inline keyword editor or an open context menu handles its own
+    // Escape first (both preventDefault); we only swallow the <dialog>'s close and, failing anything
+    // else to dismiss, drop the selection.
+    root.addEventListener('keydown', ev => {
+        if (ev.key !== 'Escape') return;
+        const claimed = ev.defaultPrevented;
+        ev.preventDefault();
+        if (claimed) return;
+        if (selectedEntries.size) { selectedEntries.clear(); syncSelCheckboxes(); }
+    });
+
+    const pop = new Popup(root, POPUP_TYPE.TEXT, '', { wide: true, okButton: false, allowVerticalScrolling: false });
+    pop.buttonControls.style.display = 'none';   // hiding the OK button alone leaves the row's padding
+    closeBtn.addEventListener('click', () => pop.complete(POPUP_RESULT.AFFIRMATIVE));
     await pop.show();
     clearUndo();   // drop the pending timer/snapshot when Studio closes
     if (dirty && selected) reloadEditor(selected);

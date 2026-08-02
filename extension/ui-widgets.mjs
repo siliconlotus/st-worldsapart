@@ -160,7 +160,19 @@ export function ensureStudioStyle() {
     studioStyled = true;
     const style = document.createElement('style');
     style.textContent = `
-.wa-studio { display: flex; gap: 0; height: 72vh; text-align: left; }
+/* Focus has to land somewhere when a nested popup (Replace all…, a confirm) closes, and with no OK
+   button left it falls to the dialog, then to whichever pane Chrome counts as focusable — it makes
+   scroll containers focusable, so the nav or the entry list gets ringed. None of these are controls;
+   the ring marks a whole pane and points at nothing actionable. Real controls inside keep theirs.
+   Cost: tabbing to a pane to arrow-scroll it shows no indicator. */
+dialog.popup:has(.wa-studio), .wa-studio-nav, .wa-studio-explorer, .wa-studio-entries { outline: none; }
+.wa-studio { position: relative; display: flex; gap: 0; height: 72vh; text-align: left; }
+/* Close corner — the popup's own button row is hidden, so this is the only way out, which is why it's
+   a real button: it has to be reachable by keyboard, and it keeps its focus ring. */
+.wa-studio-close { position: absolute; top: 0; right: 0; z-index: 2; cursor: pointer; opacity: 0.55;
+    padding: 4px 7px; border-radius: 4px; font-size: 1.15em;
+    background: none; border: none; color: inherit; line-height: 1; }
+.wa-studio-close:hover { opacity: 1; background: var(--white20a, rgba(255,255,255,0.1)); }
 .wa-studio-nav { flex: 0 0 20%; min-width: 170px; max-width: 320px; overflow-y: auto;
     border-right: 1px solid var(--SmartThemeBorderColor, rgba(255,255,255,0.15)); padding-right: 6px; }
 /* Explorer = pinned header/drawer (wa-studio-fixed) + a single scrolling entry list (wa-studio-entries),
