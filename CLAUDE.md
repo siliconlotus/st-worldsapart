@@ -8,6 +8,29 @@ what a good key is, what would count as success, and which of the books' own key
 Read it before proposing anything about `buildKeySuggest` or how to measure it, and update it rather
 than re-deriving it in conversation.
 
+## The design doc records rules, not the working that produced them
+
+It carries decisions and the facts whose absence would cause a mistake. The instance that convinced
+someone, the counts behind it, and any account of what an earlier draft got wrong all stay out. One
+pass added 312 lines and half of it was archaeology that had already answered its question.
+
+**Terms are stable, or they are announced as new.** Use the doc's vocabulary exactly — seed, expander,
+renderer, required forms, hypernymy, propriolization. A synonym reads as a different concept, and a
+reader cannot tell whether something settled is being restated or something new introduced. Prefer the
+standard technical term to a coinage: five of six invented ones did not survive review, and two were
+hiding errors — "breadth" was hypernymy, and "contraction" concealed the false claim that truncating a
+key is a purely local operation (`Big Sur` → `Sur` is not).
+
+**Say which claims are measured.** A measured claim names its measurement; anything else is labelled an
+assertion. Unchallenged is not agreed — a scan-window conversion invented in a single message was still
+load-bearing three commits later, and outlived its own revert because it had been written into two
+sections and only one was checked.
+
+**Propose a new claim before writing it down.** Cuts and restatements of settled content can just be
+made; anything asserting what the doc does not already carry, with no measurement behind it, gets
+proposed first. The test is structural, not a judgement about how controversial it looks — every
+problem here came from a new claim, none from a deletion.
+
 ## eval/ has three kinds of file
 
 - `*-check.mjs` — self-checking. Run with no arguments; they print `ok`/`FAIL` or assert. This is the
