@@ -212,18 +212,16 @@ Morphology inherits meaning and re-earns the string; synonymy inherits reference
 meaning. Neither inherits the string — "rut" and "ruts" have identical denotation and wildly different
 collision profiles.
 
-**Exclusivity is two things**, and they want different instruments. *Breadth* is one sense that properly
-contains the entry's material with a lot left over — "dog" for a hellhound entry, "magic" for
-thaumaturgy — and it is entry-relative, so no property of the string alone implements it; the Zipf gate
-is the cheap proxy and will misjudge entries whose subject genuinely is a common thing. *Competing
-sense* is a string carrying an unrelated established meaning. With verbs gone that reduces to
-lexicalised plurals (greens, arms, glasses, customs, quarters, goods) — and **that class needs no
-machinery**. Table membership *is* the unigram cut, and every one of those bases is in `ZIPF_EN`, so
-the plural can only be generated from a seed the gate already killed. Coinages are unaffected.
+**Exclusivity fails as hypernymy** — the key names a superordinate of the entry's subject. "dog" on a
+hellhound entry, "magic" for thaumaturgy. The relation is entry-relative, so no property of the string
+alone implements it; the Zipf gate is the proxy, and it works because a hypernym is usually the commoner
+word. It breaks where the entry's subject *is* the superordinate — a dog entry keyed "dog" — since
+there the two signals come apart.
 
-Proper-name capture (chili → Chili's, rolling stone → Rolling Stones) is the residual and has no signal
-but capitalisation. It is not covered by the above — a possessive is not a plural, and `stems()` does
-not strip `'s`.
+The other way a string can carry meaning outside the entry is **propriolization**: a common noun's
+plural or possessive coinciding with an established proper name, `chili` → `Chili's`,
+`rolling stone` → `Rolling Stones`. No signal but capitalisation, and `stems()` does not strip `'s`,
+so it is not reached by anything above. Rare, and unhandled.
 
 Embedding-based drift detection was tried and does not work: seed-variant cosine reads surface overlap
 about twice as strongly as it reads meaning. The distributional version is dead a priori — it needs
@@ -481,15 +479,9 @@ Blocking the definition:
      common word — so it likely wants stating as a collision bound rather than a length bound, which
      folds it into the previous item. Same run answers both.
 
-**Closed.** *Does the drift table need to exist* — no. Measured against `ZIPF_EN`: all 14 lexicalised
-plurals have their base noun in the table (green 4.9, arm 4.8, glass 4.8, custom 3.8, quarter 4.4,
-spirit 4.7, good 6.4, letter 4.9, manner 4.1, paper 5.0, look 6.3, damage 4.5, content 4.4, brain 4.9),
-and table membership *is* the unigram cut, so none survives as a seed. Every plural is independently in
-the table as well, so both routes reject. Controls behave — thaumaturge, minotaur and orrery are absent
-from the table and survive. A plural can only be generated from a seed the gate already killed, so
-there is no case for a table to catch. Proper-name capture (chili → Chili's) is untouched by this: it
-is a possessive, `stems()` does not strip `'s`, and whether `chili` itself clears the table is a
-separate lookup that has not been run.
+**Closed.** *Does a drift table need to exist* — no. Table membership is the unigram cut, and every
+lexicalised plural's base noun is in `ZIPF_EN`, so the plural can only come from a seed the gate already
+killed. Coinages are unaffected. Propriolization is untouched by this and stays unhandled.
 
 Blocking measurement:
 
