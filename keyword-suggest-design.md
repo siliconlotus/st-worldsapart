@@ -110,9 +110,8 @@ A seed is a term that:
 3. **Has affirmative reason to be typed.** The evidence is asymmetric: presence in the chat confirms,
    absence does not disqualify. That is what "prospective" means operationally.
 
-**Count is unbounded.** An earlier draft carried "one seed per distinct thing the entry is about",
-which was a quota wearing a definition's clothes; it is deleted rather than repaired. Seed count is
-whatever passes the gates — the same position on caps, one level down.
+**Seed count is unbounded** — whatever passes the gates. Not a quota, and not the same quantity as the
+number of candidates offered, which `cap` governs as a display budget.
 
 ### Two axes, and only one of them gates
 
