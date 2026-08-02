@@ -67,10 +67,7 @@ complete sets — a far thinner vetting pass than curating a book.
 3. **Renderer** — family + collision statistics + portability policy → keys.
 
 Realizability is inherited across morphology and **not** across synonymy — a form of a word people use
-is a form people use, but a synonym is a different word with its own frequency. An earlier draft said
-the expander never estimates realizability because the seed carries it; that reached the right
-conclusion by the wrong route, and would have broken as soon as the synonym half was built. The
-correct reason is in the gate table below.
+is a form people use, but a synonym is a different word with its own frequency.
 
 Synonym expansion is the only piece with no local fallback: statistical seeding exists today,
 morphological expansion is rule-work, but synonymy in the entry's sense needs world knowledge. That is
@@ -153,24 +150,19 @@ problem bites only at the newest entries and on a new book.
   hundred is wallpaper.
 
 A memory entry's own source span must not supply its own evidence, or every piece of scene furniture
-passes. **Dispersion replaces masking, and the span metadata should not be used for it.** A term whose
-occurrences all fall in one contiguous stretch is furniture and that stretch *is* the source scene —
-the data localises it without being told, which works uniformly on entries whose spans are missing,
-sentinel or wrong, and on reference entries that never had one. Same judgement, derived rather than
-trusted, and no population branch.
+passes. **Masking the span is not how that gets handled, and nothing replaces it** — the problem stops
+mattering once the test is a count rather than a presence check. A source span is a few dozen messages
+against a chat of thousands, so subtracting it changes no verdict for a term appearing several times
+across the book. Masking is only load-bearing under a binary "does it appear at all" test, and that
+test is wrong on its own terms.
 
-It also stops mattering much once the test is a count rather than a presence check: a source span is
-~50 messages against Richard's 2878, so subtracting it changes no verdict for a term appearing five
-times across the book. Masking is only load-bearing under a binary "does it appear at all" test, and
-that test is wrong for other reasons.
+Separately, and not as a gate: a term whose occurrences all sit in one contiguous stretch has located
+its own source scene, without the metadata. That is useful for knowing *where* the scene is. It does
+not distinguish scene furniture from a memorable one-off, which look identical by any count.
 
-Recorded because something else may read those fields: `STMB_start`/`STMB_end` are per-chat indices and
-mostly well-formed, but **a range shared by dozens of entries is a sentinel, not data** — Time Whore has
-43 entries all carrying `0-172`, an artifact of offline LLM editing that drops the metadata and
-backfills it. Sommers mixes 50-message auto-slices with manual scene spans and carries one `null-null`.
-Richard is clean fixed-window slicing, and its `chat_metadata.STMemoryBooks.highestMemoryProcessed`
-equals its last span end exactly, which is a cheap correspondence test for whether a book's spans index
-the chat you are measuring against.
+If anything ever does read `STMB_start`/`STMB_end`: they are per-chat indices, and **a range shared by
+dozens of entries is a sentinel, not data** — offline editing drops the metadata and something backfills
+it.
 
 **Frontier** — priors only, strongest first:
 
@@ -227,22 +219,16 @@ thaumaturgy — and it is entry-relative, so no property of the string alone imp
 is the cheap proxy and will misjudge entries whose subject genuinely is a common thing. *Competing
 sense* is a string carrying an unrelated established meaning. With verbs gone that reduces to
 lexicalised plurals (greens, arms, glasses, customs, quarters, goods) — and **that class needs no
-machinery at all**, measured rather than assumed. All 14 have their base noun in `ZIPF_EN`, and table
-membership *is* the unigram cut, so none survives as a seed; every plural is independently in the table
-as well, so both routes reject. A plural can only be generated from a seed the gate already killed.
-Coinages are unaffected: thaumaturge, minotaur and orrery are absent from the table and survive.
+machinery**. Table membership *is* the unigram cut, and every one of those bases is in `ZIPF_EN`, so
+the plural can only be generated from a seed the gate already killed. Coinages are unaffected.
 
 Proper-name capture (chili → Chili's, rolling stone → Rolling Stones) is the residual and has no signal
 but capitalisation. It is not covered by the above — a possessive is not a plural, and `stems()` does
 not strip `'s`.
 
-Embedding-based drift detection was **tested and rejected**: bge-m3 over 44 pairs crossing drift with
-surface overlap gave `corr(sim, prefix-share) = 0.51` against `corr(sim, drift) = -0.21`, and *zero*
-discrimination in the cell that motivated it (high-overlap clean 0.868, drifted 0.873 — damage/damages
-and quarter/quarters sit beside walk/walked). Best single threshold 64% against a 55% base rate, and its
-worst false positive was `scry/scried` at 0.583, an in-world coinage. The distributional version is dead
-a priori: it needs contexts for a variant that by definition is not attested yet. Drift is lexical
-knowledge, not a distributional statistic.
+Embedding-based drift detection was tried and does not work: seed-variant cosine reads surface overlap
+about twice as strongly as it reads meaning. The distributional version is dead a priori — it needs
+contexts for a variant that by definition is not attested yet.
 
 **Realizability for synonyms** is not gated, and the reason is not inheritance. A lorebook is upstream
 of its chat: an injected entry supplies vocabulary the model then writes, so a term the entry declares
@@ -261,34 +247,22 @@ It is vacuous for the lexical arm, whose candidates are extracted from that text
 **Denotation has no test.** For a synonym it is an unchecked assertion by whatever produced the term;
 the gates above catch particular ways it can be wrong, not the claim itself.
 
-### Contraction, not expansion, is where the measured defect is
+### Contraction belongs in the expander
 
-Of the 11 gold keys in Richard with zero chat attestation, **nine have a live shorter form**:
+Curated keys are over-specified more often than under-specified: `Julian Vargas` where the chat says
+`Julian`, `Pera Palace Hotel` where it says `Pera Palace`. So the expander searches truncations as well
+as variants, gated identically — `Pera Palace` survives where `Pera` does not, `weaver` where `rug`
+does not. It is local, and the renderer's backoff is already this search over a morphological family.
 
-    Pera Palace Hotel  0 -> Pera Palace (8)      Anthony Bourdain 0 -> Bourdain (7)
-    Action Hero persona 0 -> action hero (80)    Big Sur Cabin    0 -> Big Sur (18)
-    Alex's Bungalow    0 -> bungalow (20)        bus commute      0 -> commute (28)
+Name decomposition is the same operation with one extra admission test: the compound must be a **name**.
+`Human Disinterest` → "Disinterest" passes every gate while being a coined concept. Its other failure
+modes are the existing gates doing their job — stopword heads, substring collisions, ubiquity — and the
+verdict is per name rather than a rule, since bare `Joe` loses to `Joe Pagliani` while `Julian Vargas`
+loses to `Julian`.
 
-Only `Dallas Buyers' Club` and `home search` are genuinely absent, so the frontier residue in that book
-is ~1%, not the 6.5% a raw dead-count suggests. **Zero attestation is a form-error detector, not a
-frontier detector**, on any book with a long chat behind it — and it found four outright defects in a
-hand-curated gold set (`Vienna` for Venice Simplon-Orient-Express, `Human Disinteret`, `ms klein` for
-Ms. Klein, `Anthony Bourdain`).
-
-Every case examined points the same way: `Julian Vargas` (1 hit) → `Julian` (101). `ms klein` (0) →
-`Ms. Klein` (8), and bare `klein` (12) beats both. So the highest-value expander operation on real
-curated keys is **truncation**, searched as a lattice and gated the same way as anything else —
-`Pera Palace` (8) is right and `Pera` (269) is wrong, `weaver` (4) is right and `rug` (144) is wrong.
-It is entirely local, and the renderer's backoff already *is* this search, run over a morphological
-family instead of one key's truncations.
-
-Name decomposition is the same operation on people and needs one extra admission test: the compound
-must be a **name**. `Human Disinterest` → "Disinterest" scores 82 hits and passes every gate while
-being a coined concept, not a person. Across 38 two-token capitalised gold keys the failures are
-exactly the existing gates — stopword heads (`The Squad` → "The", 2470), substring collisions
-(`Big Sur` → "Sur", 759, inside *sure*), and ubiquity (`Joe`, 271) — and the wins are real (`Julian`
-101, `Maria` 193, `Stern` 153 against `Marty Stern`'s 3). The verdict is per name, not a rule: bare
-`Joe` was dropped for `Joe Pagliani` while `Julian Vargas` wants the opposite.
+Evidence: 9 of 11 zero-attestation gold keys in Richard have a live shorter form. One book, and it also
+means zero attestation is closer to a form-error signal than a frontier signal there — both worth
+re-testing against the public books, which need no chat.
 
 ## Matching mechanics that constrain the design
 
@@ -343,23 +317,17 @@ nobody runs.
   first kind of drift and is silent about the second. Fixing it needs a loop inversion (register the key
   universe once, prime per message), and it is a prerequisite for trusting any collision number the
   harness reports.
-- **`generated()` (`keyword-core.mjs:298`) is a field-*presence* test** against three keys STMB writes:
-  `stmemorybooks` (2674 entries, always literal `true`), `STMB_start` (2404; a number, `null` twice) and
-  `stmbArc` (261, always `true`). `STMB_end` and `disabledByArcId` go untested and cost nothing — zero
-  entries carry either without one of the three. It is used in exactly one place, `defChecked`
-  (`:300`), which sets the *pre-tick* state in the prune popup; it does not affect scanning at all.
-  Scope is `inScope` (`:109-113`) — `disable` / `constant` / `vectorized` / keyword — with no STMB in it.
-  Since `severityOf` returns `''` for `unattested`, that clause is the only route by which a dead key
-  arrives pre-ticked, so a miss costs manual ticking and nothing else.
-- **No entry on disk enables any of** `matchPersonaDescription`, `matchCharacterDescription`,
-  `matchCharacterPersonality`, `matchCharacterDepthPrompt`, `matchScenario`, `matchCreatorNotes`. Chat
-  is the complete activation haystack for this corpus, not an approximation of it.
-- **`is_system` means hidden from the prompt, not "not story"**. Richard's chat is 65% `is_system` and
-  those messages are ordinary narrative prose averaging 969 chars. Sommers has 7. Filtering them as
-  noise silently discards two thirds of a chat.
-- **Chat header identity fields are deprecated.** 111 of 192 chat files carry a real `user_name` *and*
-  `create_date`; the other 81 carry the literal string `"unused"` and no `create_date`, with zero
-  crossover — two format generations. The per-message `name` on `is_user` turns is authoritative in both.
+- **`generated()` (`keyword-core.mjs:298`) tests field *presence*** — `stmemorybooks`, `STMB_start`,
+  `stmbArc` — and is used only in `defChecked` (`:300`), the pre-tick state in the prune popup. It does
+  not affect scanning; scope is `inScope` (`:109-113`), which knows nothing about STMB. Since
+  `severityOf` returns `''` for `unattested`, that clause is the only route by which a dead key arrives
+  pre-ticked, so a miss costs manual ticking and nothing else.
+- **`is_system` means hidden from the prompt, not "not story"** — the messages are ordinary narrative
+  prose, and a chat can be mostly them. Filtering them as noise silently discards most of a chat.
+- **Chat header identity fields are deprecated** — newer files write a literal `"unused"`. The
+  per-message `name` on `is_user` turns is authoritative in both formats.
+- **`matchPersonaDescription` and its siblings extend the haystack** when set. Nothing on disk sets one,
+  which is why nothing handles them yet.
 
 ## Populations
 
@@ -404,32 +372,25 @@ entries are a 5–15% minority living *inside* memory books. Any memory/referenc
 be per entry, as the pruner's `generated()` split already is. Pure-reference books are small (10–75
 entries).
 
-**That figure is a `generated()` count, and `generated()` under-detects.** Offline editing — dropping a
-lorebook into a model chat to clean it up, which anyone invested enough to run STMB will eventually do
-— strips the metadata. In Richard 12 of 22 apparently-reference entries are numbered scene summaries
-carrying no STMB fields at all, so the real split is 49 memory / 8 constant scaffolding / 1 reference,
-not 37/22. Sommers and Time Whore are *not* affected: zero of their untagged entries carry a scene
-number, so their counts stand as recorded.
+**That figure is a `generated()` count, and `generated()` under-detects**, because offline editing —
+dropping a lorebook into a model chat to clean it up, which anyone invested enough to run STMB will
+eventually do — strips the metadata. Books that have been through that carry scene summaries with no
+STMB fields at all, and they read as reference.
 
 The fallback is self-calibrating and needs no format assumption: read the numbering pattern off the
-book's *own* tagged entries, then treat an untagged entry as generated if its title continues that
-series. Richard's tagged entries run 11–51 and its untagged numbered ones are 1–10 plus 32 and 33 —
-the head of the same series and two interior holes. That catches 12 of 12 in Richard and 0 in Sommers
-and Time Whore. STMB's serial-number prefix is a default that can be toggled off, so where it is off
-there is no series to continue and the heuristic degrades to silence rather than to a wrong answer.
-Requiring *continuation* rather than merely *looking numbered* also biases it toward misses, which is
-the right direction: a false positive pre-ticks the deliberate aliases on a hand-written entry, and a
-false negative costs a few clicks. Gaps in the merged series are deleted entries, free (Richard 21 and
-43, Sommers 86 and 89).
+book's *own* tagged entries, and treat an untagged entry as generated if its title continues the series.
+STMB's serial-number prefix is a default that can be toggled off, and where it is off there is no series
+to continue, so the heuristic degrades to silence rather than to a wrong answer. Requiring
+*continuation* rather than merely *looking numbered* biases it toward misses, which is the right
+direction: a false positive pre-ticks the deliberate aliases on a hand-written entry, a false negative
+costs a few clicks. Gaps in the merged series are deleted entries, free.
 
-**Do not compare key counts across populations.** Median keys per entry differ enormously — reference
-1–9 against memory 10–30 — but that is who *wrote* the keys, not what the entries are. Memory keys are
-LLM-generated and reference keys usually hand-written, and Richard shows the same split *within one
-book* (16.6 against 4.5 before curation). The same confound probably explains the in-text rate of
-existing keys, since an extractive generator produces in-text keys by construction while a human adds
-aliases. Genuine entry-type differences are the ones that survive regardless of key authorship:
-register, `entryText ⊂ chatText` for memory and possibly disjoint for reference, titles that name the
-subject versus editorial labels, source spans existing at all, and sibling density.
+**Do not compare key counts across populations.** Reference entries carry far fewer keys than memory
+entries, but that is who *wrote* the keys, not what the entries are — memory keys are LLM-generated,
+reference keys usually hand-written, and the same split appears *within* a single book. Genuine
+entry-type differences are the ones that survive regardless of key authorship: register,
+`entryText ⊂ chatText` for memory and possibly disjoint for reference, titles that name the subject
+versus editorial labels, source spans existing at all, and sibling density.
 
 **The player persona is never a key.** ST injects the Persona Description every turn, so the persona
 has no lorebook entry — but its name still turns up as a candidate on episodic entries (`Alex Nichols`,
@@ -450,21 +411,14 @@ The lorebooks on disk are a blend of human curation and weaker-LLM generation wh
 book, so agreement with their keys is not a score. Nothing may use them as a denominator until anchor
 provenance (below) establishes which subset is trustworthy.
 
-**An unkeyed entry is not a negative example** — but the causes are mechanically separable, which an
-earlier draft of this section denied:
+**An unkeyed entry is not a negative example**, and the causes are mechanically separable:
 
-- **`constant`** — always injected, so keys are inert. Authoring scaffolding and arcs: Sommers'
-  `Design Note:` and `Story Arc:`, Richard's `ACT I`–`ACT VI`, `Dramatis Personae`, `Richard's Lenses`.
-  Out of scope for suggestion, and adding keys here buys nothing measurable.
+- **`constant`** — always injected, so keys are inert. Authoring scaffolding and arcs. Out of scope for
+  suggestion, and adding keys here buys nothing measurable.
 - **`vectorized`** — activates by embedding. Keys are optional and worth having anyway, since vector
   plus keys measurably improves recall. **These are the suggestion targets.**
-- **neither** — cannot activate at all. A genuine oversight, and rare: 1 of 38 in Foxbridge, 0 of 60 in
-  Richard. That row is a **free diagnostic with no false positives** and the Studio should say so.
-
-The doc previously listed Foxbridge's `weave theory`, `mudra`, `asana` and `Kiki Chavez` as four
-oversights. Three are `vectorized` and activate fine; only `Kiki Chavez` was dead — and it has since
-been keyed. So oversights are roughly one entry per book, not a meaningful ceiling on the superset
-standard.
+- **neither** — cannot activate at all. A **free diagnostic with no false positives**, and the Studio
+  should say so. Rare in practice, so oversights are not a meaningful ceiling on the superset standard.
 
 ### The gold sets
 
@@ -479,28 +433,23 @@ realizability by construction — except where synonyms were added (`VSOE` besid
 is a realizability claim. Two acknowledged uses of outside knowledge: `Joe` → Joe Pagliani, `Mr. Stern`
 → Marty Stern.
 
-**550 labelled negatives** exist as a byproduct, recoverable because the pre-edit book survives inside
-the `richard-syn-*` grade bundles: of 737 original keys, 163 survived and 148 were newly written, so
-48% of the finished gold is human-authored and the machine-generated original retained 22%. Three
-cautions on consuming them. They are **(entry, key) pairs, not bad strings** — `Giselle` is a negative
-on entries 001 and 050 and a positive on nine others, because the judgement is about the entry, not the
-term. Some are **form corrections rather than rejections** (`TMZ leak` → `TMZ`, `Pappy 23 bourbon` →
-`Pappy Van Winkle`), separable by head-overlap with a key added to the same entry. And the 24 keys on
-the deleted entry `043 - Istanbul Arrival` are excluded and unlabelled — it was a duplicate that later
-summaries covered better.
+**550 labelled negatives** come with it, recovered from the pre-edit book preserved inside the
+`richard-syn-*` grade bundles. Three cautions on consuming them. They are **(entry, key) pairs, not bad
+strings** — the same term is a negative on one entry and a positive on nine others, because the
+judgement is about the entry. Some are **form corrections rather than rejections** (`TMZ leak` → `TMZ`),
+and separating those from true rejections has not been attempted. And the keys on the one deleted entry
+are excluded and unlabelled.
 
 Anything a suggester proposes that is in neither set is unjudged, so this measures superset recall and
 known-junk precision, not precision generally. And **provenance decays**: a key vetted before these
 definitions existed was vetted against a different standard, so "already approved" is not a shortcut
 for the anchor pass.
 
-Foxbridge additionally carries **six independent chat lineages** (421, 416, 173, 113, 77, 47 messages;
-~1250 total), verified by prefix comparison — but see the caveat that continuation, separate story and
-ephemeral repeat all look alike from a zero-length shared prefix, and only the **lorebook binding**
-distinguishes same-story from separate-story. Chat binding has three sources: `chat_metadata.world_info`
-when set per chat (Richard), the character card (Foxbridge), and — rarely, but it exists —
-`settings.json` → `world_info_settings.world_info.charLore`, which on this install attaches `ERP` to
-Ragnar and Gilbert and `main_Succubus Tattoos_world_info` to Alastor. `globalSelect` is empty.
+Foxbridge carries **six chat lineages** with no shared prefixes — but continuation, separate story and
+ephemeral repeat all look alike from a zero-length prefix, so that is not the same as independence.
+Only the **lorebook binding** distinguishes same-story from separate-story, and it has three sources:
+`chat_metadata.world_info` per chat, the character card, and — rarely —
+`settings.json` → `world_info_settings.world_info.charLore`.
 
 ### Numbers so far, and what they are worth
 
@@ -511,12 +460,10 @@ on nine entries. The most informative point is Arthur, because the threshold sit
 call it either. Gold positives in Richard top out at **10.9% of all messages** with p99 at 4.6% and a
 median of 0.1%, so nothing human-approved lives high in the range.
 
-**This is n=1 author.** The lorebooks span 19 lineages and genuinely wide genres, which controls
-vocabulary, entry structure and name morphology — but only six carry memory entries, two of those are
-one story, and the bracket above came from two. Findings sort roughly: ST mechanics travel, structural
-mechanisms probably travel with unknown magnitudes, and every rate is local until shown otherwise. The
-public books (Deltarune, Cyberpunk 2077, Adolion, Red Dead, Succubus Tattoos) are the available control
-for form-level findings; none has a chat, so activation cannot be checked against them at all.
+**This is n=1 author.** The genre spread is wide, which controls vocabulary and entry structure, but
+only a handful of books carry memory entries and the bracket came from two of them. ST mechanics
+travel; rates do not, until shown otherwise. The public books are the available control for form-level
+findings — none has a chat, so activation cannot be checked against them at all.
 
 ## Open
 
@@ -578,8 +525,9 @@ Retired, recorded so they are not re-derived:
   the produced keyset fire where it fires.
 - **`J(entry, window)` and its apparatus** — scan windows, want-sets, pooling, an identifiability flag.
   All ranker-side; relevance of an entry to a window was never this system's question.
-- **Span masking**, **embedding drift detection**, and **breadth by co-occurrence** — each replaced
-  above by something cheaper that works.
+- **Span masking** — not replaced; the problem it solved does not arise under a count test.
+- **Embedding drift detection** — reads surface overlap rather than meaning.
+- **Breadth by co-occurrence** — the Zipf gate is the proxy instead.
 
 ## Related
 
