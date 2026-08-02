@@ -282,15 +282,12 @@ The expander's output shape follows: a seed plus its forms, each tagged with its
 measurement. Rendering as literal, whole-word, SmartKey or a mix is a downstream formatting pass, and
 that pass is where portability policy is applied rather than baked in.
 
-**The measurement's haystack must be the runtime's haystack.** One rule, and it settles three separate
-questions. Entries can opt into scanning the persona description, character description, personality,
-depth prompt, scenario or creator notes — so when a flag is set, that text belongs in the haystack, and
-the resulting rate correctly reports "fires always", which is how you discover an entry wanted
-`constant`. Hidden messages (`is_system`) are *not* in the prompt, so no key can fire on them and they
-are out — though they remain evidence for realizability, which asks a different question of the same
-file. And activation is per **scan window**, not per message: at depth 2 a term in 22% of messages fires
-in roughly 39% of windows, saturating near the top of the range, so a message-rate ceiling reads
-differently once applied to windows. Fix which one is being quoted before any threshold is written down.
+**Measure against the text runtime actually searches.** Entries can opt into scanning the persona
+description, character description, personality, depth prompt, scenario or creator notes, so when a flag
+is set that text joins the search text — and a rate computed over it correctly reports "fires always",
+which is how you discover an entry that wanted `constant`. Hidden messages (`is_system`) are not in the
+prompt, so no key can fire on them; they stay evidence for realizability, which asks a different
+question of the same file.
 
 Same principle as harness priming below: a measurement that diverges from runtime is measuring a system
 nobody runs.
@@ -322,8 +319,8 @@ nobody runs.
   prose, and a chat can be mostly them. Filtering them as noise silently discards most of a chat.
 - **Chat header identity fields are deprecated** — newer files write a literal `"unused"`. The
   per-message `name` on `is_user` turns is authoritative in both formats.
-- **`matchPersonaDescription` and its siblings extend the haystack** when set. Nothing on disk sets one,
-  which is why nothing handles them yet.
+- **`matchPersonaDescription` and its siblings join that text to the search text** when set. Nothing on
+  disk sets one, which is why nothing handles them yet.
 
 ## Populations
 
