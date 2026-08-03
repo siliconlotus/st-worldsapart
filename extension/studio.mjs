@@ -10,7 +10,7 @@
 // can never drift on what counts as a weak key or how entries order.
 import { saveSettingsDebounced, getRequestHeaders, characters } from '../../../../../script.js';
 import { extension_settings, getContext } from '../../../../extensions.js';
-import { loadWorldInfo, saveWorldInfo, reloadEditor, duplicateWorldInfoEntry, deleteWorldInfoEntry, getFreeWorldEntryUid, deleteWIOriginalDataValue, deleteWorldInfo, updateWorldInfoList, world_names, world_info_match_whole_words, world_info_case_sensitive, selected_world_info, world_info, METADATA_KEY } from '../../../../world-info.js';
+import { loadWorldInfo, saveWorldInfo, reloadEditor, createWorldInfoEntry, duplicateWorldInfoEntry, deleteWorldInfoEntry, getFreeWorldEntryUid, deleteWIOriginalDataValue, deleteWorldInfo, updateWorldInfoList, world_names, world_info_match_whole_words, world_info_case_sensitive, selected_world_info, world_info, METADATA_KEY } from '../../../../world-info.js';
 import { power_user } from '../../../../power-user.js';
 import { escapeHtml } from '../../../../utils.js';
 import { Popup, POPUP_TYPE, POPUP_RESULT } from '../../../../popup.js';
@@ -1176,6 +1176,27 @@ export async function lorebookStudio(preferredBook = null) {
         }
     };
 
+    /**
+     * New blank entry, from core's template so it carries exactly the field set core would give it —
+     * a hand-rolled object would drift the moment core adds a field.
+     *
+     * Opened, expanded and title-editing on arrival: a blank entry has nothing to look at and its
+     * whole point is that you are about to type into it. Same scroll-and-flash as duplicate, for the
+     * same reason — the new uid sorts wherever it falls, which is often off-screen.
+     */
+    const newEntry = () => {
+        const ne = createWorldInfoEntry(selected, data);
+        if (!ne) { toastr.warning('Couldn\'t create an entry — this book may be full.', 'Worlds Apart'); return; }
+        save(); suggest = null; if (scan) rebuildScan();   // corpus changed -> ranker/scan stale
+        entryOpen.add(ne.uid); expanded.add(ne.uid);
+        renderExplorer();
+        const row = rowEls.get(ne.uid);
+        if (row) {
+            row.scrollIntoView({ block: 'center', behavior: 'smooth' });
+            row.classList.add('wa-flash'); setTimeout(() => row.classList.remove('wa-flash'), 1200);
+            row.querySelector('.wa-title-edit')?.click();   // straight into renaming it
+        }
+    };
     const dupEntry = e => {
         const ne = duplicateWorldInfoEntry(data, e.uid);
         if (!ne) return;
@@ -2156,7 +2177,16 @@ export async function lorebookStudio(preferredBook = null) {
         globeBtn.style.color = globalTrayOpen ? '#6ea8fe' : '';
         globeBtn.addEventListener('click', () => { globalTrayOpen = !globalTrayOpen; globeBtn.style.color = globalTrayOpen ? '#6ea8fe' : ''; refreshGlobalTray(); });
         row1.append(label, vsep(), filterWrap, sortBtn, spacer(), searchWrap, globeBtn);
-        row2.append(expandBtn, scanBtn, suggestAllBtn, suggestAllLlmBtn);
+        // Creating an entry had no home in the Studio at all — you could duplicate one but not make one,
+        // so a new book could only be filled from core's editor. Leads row 2, being the thing you reach
+        // for before any of the batch actions beside it.
+        const newBtn = document.createElement('button');
+        newBtn.type = 'button'; newBtn.className = 'menu_button';
+        newBtn.style.cssText = 'width:auto;padding:3px 9px;flex-shrink:0;';
+        newBtn.innerHTML = '<i class="fa-solid fa-plus"></i> New entry';
+        newBtn.title = 'Add a blank entry to this lorebook';
+        newBtn.addEventListener('click', () => newEntry());
+        row2.append(newBtn, expandBtn, scanBtn, suggestAllBtn, suggestAllLlmBtn);
         head.append(row1, row2);
         // Pinned region (header + Tool Settings drawer) stays put; only wa-studio-entries scrolls.
         const fixed = document.createElement('div'); fixed.className = 'wa-studio-fixed';
