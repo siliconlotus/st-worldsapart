@@ -323,27 +323,36 @@ function ensureScan(scope, text) {
 export function evaluate(node, text, acHits) {
     if (!node) return { matched: false, scoreBoost: 0 };
     switch (node.type) {
+        // A TERM's contribution is weight x OCCURRENCES, not weight alone. Scoring on presence made a
+        // query blind to recurrence: "? (glasses | spectacles)" returned the same number whether the
+        // concept appeared once or nine times, so it scored WORSE than the bare key `glasses` the moment
+        // the word repeated — being thorough about spelling was penalised. The counts were already
+        // computed and cached: the automaton's scan returns a per-term occurrence map, and this function
+        // was handed it and called .has() on it.
         case 'TERM': {
             if (acHits && node.acIndex !== undefined) {
                 // Candidate filter: no folded-substring hit means no match under any flags.
-                if (!acHits.has(node.acIndex)) return { matched: false, scoreBoost: 0 };
+                const n = acHits.get(node.acIndex);
+                if (!n) return { matched: false, scoreBoost: 0 };
                 // Unflagged term = case-insensitive substring, which is exactly what Pass 1 proved.
-                if (!node.isExact && !node.isCaseSensitive) return { matched: true, scoreBoost: node.weight };
+                if (!node.isExact && !node.isCaseSensitive) return { matched: true, scoreBoost: node.weight * n };
             }
             let pattern = escapeRegex(node.value);
             // Same lookaround boundary as countKey's whole-word path — \b would make punctuation-edged
             // terms like =c++ unmatchable. Shares WORD_CHAR with countKey rather than restating it:
             // two boundary definitions is two matchers, which is exactly what CLAUDE.md forbids.
             if (node.isExact) pattern = `(?<!${WORD_CHAR})${pattern}(?!${WORD_CHAR})`;
-            const hit = new RegExp(pattern, node.isCaseSensitive ? 'u' : 'iu').test(text);
-            return { matched: hit, scoreBoost: hit ? node.weight : 0 };
+            // Counted, not tested: same walk of the text either way, and a flagged term has as much
+            // right to recurrence as an unflagged one.
+            const n = (text.match(new RegExp(pattern, node.isCaseSensitive ? 'gu' : 'giu')) ?? []).length;
+            return { matched: n > 0, scoreBoost: node.weight * n };
         }
         case 'NOT': {
             const r = evaluate(node.operand, text, acHits);
             return { matched: !r.matched, scoreBoost: 0 };
         }
         // Invariant: an unmatched node carries scoreBoost 0. Parents read child boosts without
-        // re-checking child.matched (OR takes the max, AND sums), so a failed branch that kept a
+        // re-checking child.matched (AND and OR both sum), so a failed branch that kept a
         // boost would leak it upward — e.g. "? (fire:3 XOR flood:3) OR water:0.5" with both fire
         // and flood present must score 0.5, not 3.
         case 'AND': {
@@ -351,9 +360,14 @@ export function evaluate(node, text, acHits) {
             const matched = l.matched && r.matched;
             return { matched, scoreBoost: matched ? l.scoreBoost + r.scoreBoost : 0 };
         }
+        // OR SUMS, like AND. max() was only ever right because it coincided with the sum whenever a
+        // single branch matched — unmatched branches carry 0 — and it diverged exactly where a synonym
+        // group needs the total: "(glasses | spectacles)" is one concept, and its mentions are its
+        // mentions however they were spelled. Summing is also what keywordScore already does across
+        // keys, and saturation caps the result, so a wide alternation cannot run away.
         case 'OR': {
             const l = evaluate(node.left, text, acHits), r = evaluate(node.right, text, acHits);
-            return { matched: l.matched || r.matched, scoreBoost: Math.max(l.scoreBoost, r.scoreBoost) };
+            return { matched: l.matched || r.matched, scoreBoost: l.scoreBoost + r.scoreBoost };
         }
         case 'XOR': {
             const l = evaluate(node.left, text, acHits), r = evaluate(node.right, text, acHits);

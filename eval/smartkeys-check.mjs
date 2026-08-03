@@ -1,7 +1,7 @@
 // Verifies the SmartKeys boolean-query engine against the spec's acceptance table,
 // plus the lexer edge cases the spec calls out (internal hyphens, weights, flags).
 import { countKey, keywordScore } from '../extension/ranking.mjs';
-import { tokenize, parse, evaluate, buildAutomaton, scanAutomaton, validateSmartKey, fold } from '../extension/smartkeys.mjs';
+import { tokenize, parse, evaluate, buildAutomaton, scanAutomaton, validateSmartKey, fold, resetSmartKeys } from '../extension/smartkeys.mjs';
 import { buildKeyPruneScan } from '../extension/keyword-core.mjs';
 import { eq } from './metrics.mjs';
 
@@ -118,7 +118,7 @@ eq(evaluate(ast, 'a c').matched, true, 'evaluates the injected AND');
     // ...without making a malformed key match MORE than it should.
     eq(matches('? +fire +zebra', T), false, 'a required term that is absent still fails');
     eq(matches('? +fire -water', T), false, 'negation still applies alongside a required-marker');
-    eq(countKey('? fire | water', T, false, false), 1, 'genuine OR is untouched');
+    eq(countKey('? fire | water', T, false, false), 2, 'OR sums its matched branches (see the recurrence block)');
     eq(countKey('? fire water', T, false, false), 2, 'genuine implicit AND is untouched');
 }
 console.log('ok   malformed operator positions degrade to no-ops, not dead keys');
@@ -255,3 +255,27 @@ console.log('ok   pathological literals round-trip when quoted');
         'but quoting across a space is a different query: conjunction vs phrase');
 }
 console.log('ok   quoting a single term is free; quoting across a space is not');
+
+// A term contributes weight x OCCURRENCES. Scoring on presence alone made a query blind to recurrence:
+// a synonym group returned the same number whether its concept appeared once or nine times, so it
+// scored WORSE than the bare key the moment the word repeated. And OR sums rather than taking the max,
+// which was only ever right because it coincided with the sum whenever a single branch matched.
+{
+    const c = (q, t) => { resetSmartKeys(); return countKey(q, t, false, false); };
+    const grp = '? (glasses | spectacles)';
+    eq(c(grp, 'glasses'), 1, 'one mention of one spelling');
+    eq(c(grp, 'glasses glasses glasses'), 3, 'recurrence counts — this used to stay at 1');
+    eq(c(grp, 'glasses glasses glasses spectacles spectacles'), 5, 'and both spellings are the same concept');
+    eq(c(grp, 'glasses glasses glasses'), c('glasses', 'glasses glasses glasses'),
+        'a synonym group now matches the bare key it generalises, instead of scoring below it');
+
+    eq(c('? fire::2.5', 'fire fire'), 5, 'weight multiplies the count');
+    eq(c('? =cat', 'cat cat cats'), 2, 'the exact flag counts occurrences too, not just presence');
+    eq(c('? "hot tub"::2 party', 'hot tub hot tub party'), 5, 'quoted phrase x2 at weight 2, plus party');
+
+    // The unmatched-carries-zero invariant is what keeps summing safe.
+    eq(c('? moon -apollo', 'moon moon'), 2, 'a negation contributes nothing to the sum');
+    eq(c('? (fire::3 XOR flood::3) OR water::0.5', 'fire and flood near the water'), 0.5, 'a failed XOR leaks no boost');
+    eq(c('? (fire::3 alpha) OR water::0.5', 'fire and water'), 0.5, 'a half-matched AND leaks no boost');
+}
+console.log('ok   terms score on weight x occurrences; OR sums');
