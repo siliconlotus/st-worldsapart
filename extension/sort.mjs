@@ -4,7 +4,19 @@
 // UI module. The sort CONTROLS (the widgets that pick a sort) live in ui-widgets.mjs and import this.
 import { settings } from './state.mjs';
 
-export const wiTitleOf = e => (e.comment && e.comment.trim()) ? e.comment.trim() : (e.key?.length ? e.key.join(', ') : `UID ${e.uid}`);
+/**
+ * An entry's display name: its comment, or `UID n`.
+ *
+ * NOT its keys. Falling back to a joined key list read as a title the author had written, when in fact
+ * they had written no title — and it duplicated, in the title line, the very chips sitting underneath
+ * it. On an entry with many keys it also ran the header off the end of the pane. "UID 12" is honest
+ * about there being no name, which is the thing the reader actually needs to know.
+ *
+ * Costs the title sort a little: comment-less entries now sort as "UID 12" vs "UID 3", which
+ * localeCompare orders lexically rather than numerically. They previously sorted by key text, which
+ * was more meaningful but only because it was pretending to be a title.
+ */
+export const wiTitleOf = e => (e.comment && e.comment.trim()) ? e.comment.trim() : `UID ${e.uid}`;
 
 // Tier definitions for the explorer's tiered grouping (/wa-studio). `test` is a pure entry predicate; the
 // order the user arranges the tiers in IS the precedence order — an entry falls into the first ENABLED
@@ -37,7 +49,7 @@ export const tierRank = (e, cfg) => {
 // Pure entry-field comparators, reused by the Lorebook Studio (display order) AND the prompt builder
 // (insertion order). Parity with core's #world_info_sort_order set; each tie-breaks like core (secondary
 // = order desc, tertiary = uid asc). Deviations, both improvements: Title uses wiTitleOf so comment-less
-// entries still sort by keys/uid; Trigger% treats unset probability as 100 (always-fires) not core's null→0.
+// entries still sort by a stable label; Trigger% treats unset probability as 100 (always-fires) not core's null→0.
 const sortPrio = e => e.disable ? 2 : e.constant ? 0 : 1;   // constant → normal → disabled
 const sortSec = (a, b) => (Number(b.order) || 0) - (Number(a.order) || 0);
 const sortTer = (a, b) => a.uid - b.uid;
