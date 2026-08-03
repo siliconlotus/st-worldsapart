@@ -241,3 +241,17 @@ console.log('ok   quoting marks a punctuation term as deliberate');
     eq(tokenize(`? ${artist}`).filter(t => /PAREN/.test(t.type)).length, 1, 'unquoted, the ) is syntax');
 }
 console.log('ok   pathological literals round-trip when quoted');
+
+// "When in doubt, quote it" is only good advice if quoting a single term is free. It is — and the one
+// place it is NOT free is quoting across a space, which changes a conjunction into a phrase.
+{
+    const T = 'a fire in the hot tub at 10:30';
+    const same = (a, b, label) => eq(countKey(a, T, false, false), countKey(b, T, false, false), label);
+    same('? fire', '? "fire"', 'quoting a single term changes nothing');
+    same('? =fire', '? ="fire"', '...with the exact flag');
+    same('? ^Fire', '? ^"Fire"', '...with the case flag');
+    same('? fire::2', '? "fire"::2', '...with a weight');
+    eq(countKey('? hot tub', T, false, false) !== countKey('? "hot tub"', T, false, false), true,
+        'but quoting across a space is a different query: conjunction vs phrase');
+}
+console.log('ok   quoting a single term is free; quoting across a space is not');

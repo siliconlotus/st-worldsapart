@@ -9,6 +9,17 @@
 //                                   URLs need no quoting. Only :: introduces a weight.
 //   ? +fire +water                  Lucene's per-term required-marker; absorbed, since AND is implicit
 //
+// WHEN IN DOUBT, QUOTE IT. Quoting is the one escape in this syntax: it turns off operator, weight,
+// paren and wildcard interpretation, and marks a punctuation-only term as deliberate rather than a
+// typo. Quoting a SINGLE term never changes what it matches — "fire" and fire are identical, flags
+// and weights compose either way — so there is no cost to quoting when unsure.
+//
+// The exception is quoting ACROSS A SPACE, which is a different query rather than a safer one:
+//   ? hot tub       two terms, implicit AND — matches a hot bath beside a cold tub
+//   ? "hot tub"     one phrase — matches the words adjacent, in that order
+// Sigur Rós's "()" and its 142-character successor are both single quoted terms; unquoted they parse
+// as parens and a conjunction of punctuation.
+
 // Un-extended ST cores see the raw string "? moon ..." and silently never match it — that
 // degradation is the compatibility story, so lorebooks stay portable.
 //
