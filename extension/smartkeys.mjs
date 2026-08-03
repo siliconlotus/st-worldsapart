@@ -141,6 +141,84 @@ export function parse(tokens) {
     return parseOr();
 }
 
+/**
+ * Whether any TERM contributes POSITIVELY — reachable without passing through an odd number of NOTs.
+ * Mirrors how evaluate() accumulates: NOT yields no score and discards its subtree's, so a query with
+ * no positive term matches on absence alone.
+ */
+const hasPositiveTerm = (node, negated = false) => {
+    if (!node) return false;
+    if (node.type === 'TERM') return !negated;
+    if (node.type === 'NOT') return hasPositiveTerm(node.operand, !negated);
+    return hasPositiveTerm(node.left, negated) || hasPositiveTerm(node.right, negated);
+};
+
+/**
+ * Structural problems in a `?` query, for the Studio's save check and the audit — one definition, so
+ * the two surfaces cannot disagree about what is valid.
+ *
+ * STRUCTURE ONLY. Whether a term ever occurs is a question about a book's text, and belongs to the
+ * audit's df machinery rather than here; this needs nothing but the string.
+ *
+ * Severity is the split that matters. `error` is a query that cannot do what its author meant under
+ * any text. `warn` is legal and probably a typo. Nothing here is fatal at match time — the matcher's
+ * job is to fire, and telling an author their key is malformed is this function's job instead.
+ *
+ * @param {string} raw The key, with or without its leading `?`
+ * @returns {Array<{severity: 'error'|'warn', code: string, message: string}>} empty when clean
+ */
+export function validateSmartKey(raw) {
+    const out = [];
+    const src = String(raw ?? '');
+    if (!src.trim().startsWith('?')) return out;   // not a SmartKey; nothing to say
+    const tokens = tokenize(src);
+    const terms = tokens.filter(t => t.type === 'TERM');
+
+    if (!terms.length) {
+        out.push({ severity: 'error', code: 'no-terms', message: 'No search terms — this key can never match.' });
+        return out;   // everything below reads the terms; no point compounding the report
+    }
+
+    // A query that only says what must be ABSENT matches on nearly every scan. Core forbids the shape
+    // outright (an entry with no primary keys is skipped before its secondaries are ever read), so this
+    // is not WA being stricter than the platform.
+    if (!hasPositiveTerm(parse(tokens))) {
+        out.push({
+            severity: 'error', code: 'negation-only',
+            message: 'Every term is negated, so this matches whenever they are absent — which is almost always. Add a term that must be present.',
+        });
+    }
+
+    for (const t of terms) {
+        if (String(t.value).includes('"')) {
+            out.push({
+                severity: 'error', code: 'stray-quote',
+                message: `Unclosed quote: the term is literally ${JSON.stringify(t.value)}. Close the phrase, or drop the quote.`,
+            });
+        }
+    }
+
+    const lp = tokens.filter(t => t.type === 'LPAREN').length;
+    const rp = tokens.filter(t => t.type === 'RPAREN').length;
+    if (lp !== rp) {
+        out.push({
+            severity: 'warn', code: 'unbalanced-parens',
+            message: `${lp} “(” against ${rp} “)”. The query still parses, but probably not the way you grouped it.`,
+        });
+    }
+
+    // Legal, and meaningful once WA owns activation: "fire on this, but do not rank on it". Worth
+    // surfacing because it is indistinguishable from a mistyped weight until then.
+    if (terms.every(t => t.weight === 0)) {
+        out.push({
+            severity: 'warn', code: 'all-zero-weights',
+            message: 'Every term is weighted 0, so this key gates without contributing to the score.',
+        });
+    }
+
+    return out;
+}
+
 
 
 /**

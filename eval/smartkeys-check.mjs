@@ -1,7 +1,7 @@
 // Verifies the SmartKeys boolean-query engine against the spec's acceptance table,
 // plus the lexer edge cases the spec calls out (internal hyphens, weights, flags).
 import { countKey, keywordScore } from '../extension/ranking.mjs';
-import { tokenize, parse, evaluate, buildAutomaton, scanAutomaton } from '../extension/smartkeys.mjs';
+import { tokenize, parse, evaluate, buildAutomaton, scanAutomaton, validateSmartKey } from '../extension/smartkeys.mjs';
 import { buildKeyPruneScan } from '../extension/keyword-core.mjs';
 import { eq } from './metrics.mjs';
 
@@ -136,3 +136,30 @@ console.log('ok   malformed operator positions degrade to no-ops, not dead keys'
     eq(terms('? =^HOK::3'), 'HOK@3', 'flags and weight compose');
 }
 console.log('ok   weight delimiter is ::, single colon is ordinary text');
+
+// Structural validation, shared by the Studio's save check and the audit so the two cannot disagree
+// about what is valid. Errors are queries that cannot do what their author meant under any text;
+// warnings are legal and probably a typo. Neither is fatal at match time.
+{
+    const codes = k => validateSmartKey(k).map(p => `${p.severity}:${p.code}`).join(' ');
+    eq(codes('? fire water'), '', 'a plain conjunction is clean');
+    eq(codes('? (gucci | prada) sunglasses -(fake | knockoff)'), '', 'groups and a negated group are clean');
+    eq(codes('? meet at 10:30'), '', 'a colon in a term is clean');
+    eq(codes('? =^HOK::3'), '', 'flags and a weight are clean');
+
+    eq(codes('? -zebra'), 'error:negation-only', 'a lone negation matches on absence, i.e. almost always');
+    eq(codes('? -a -b'), 'error:negation-only', 'several negations are still no positive term');
+    eq(codes('? -(a b)'), 'error:negation-only', 'a negated group is still no positive term');
+    eq(codes('? a -b'), '', 'one positive term is enough');
+    eq(codes('? '), 'error:no-terms', 'an empty query can never match');
+    eq(codes('? ()'), 'error:no-terms', 'an empty group has no terms');
+    eq(codes('? fire "water'), 'error:stray-quote', 'an unclosed quote leaves the quote in the term');
+
+    eq(codes('? (fire | water'), 'warn:unbalanced-parens', 'unbalanced parens parse, but probably not as grouped');
+    eq(codes('? fire::0'), 'warn:all-zero-weights', 'a zero-weight key gates without scoring');
+    eq(codes('? fire::0 water'), '', 'only ALL weights being zero is worth saying');
+
+    eq(codes('plain key'), '', 'a plain key is not a SmartKey and gets no opinion');
+    eq(codes('/regex/i'), '', 'nor is a regex key');
+}
+console.log('ok   SmartKey structural validation');
