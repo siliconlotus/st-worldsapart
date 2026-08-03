@@ -2183,11 +2183,17 @@ export async function lorebookStudio(preferredBook = null) {
         // the row that writes rather than analyses.
         const newBtn = document.createElement('button');
         newBtn.type = 'button'; newBtn.className = 'menu_button';
-        newBtn.style.cssText = 'width:auto;padding:3px 9px;flex-shrink:0;margin-left:auto;';
+        newBtn.style.cssText = 'width:auto;padding:3px 9px;flex-shrink:0;';
         newBtn.innerHTML = '<i class="fa-solid fa-plus"></i> New entry';
         newBtn.title = 'Add a blank entry to this lorebook';
         newBtn.addEventListener('click', () => newEntry());
-        row2.append(expandBtn, scanBtn, suggestAllBtn, suggestAllLlmBtn, newBtn);
+        // A flex spacer rather than margin-left:auto. The row wraps, and an auto-margin still applies on
+        // whatever line the button lands on — so once the row was too narrow, New entry hung alone off
+        // the right of a second line. Line-breaking uses flex-basis, and this basis is 0, so the spacer
+        // never affects where the wrap falls: it grows to push the button right while everything fits,
+        // and once the button wraps it simply starts the next line at the left.
+        const grow = document.createElement('span'); grow.style.cssText = 'flex:1 1 0;min-width:0;';
+        row2.append(expandBtn, scanBtn, suggestAllBtn, suggestAllLlmBtn, grow, newBtn);
         head.append(row1, row2);
         // Pinned region (header + Tool Settings drawer) stays put; only wa-studio-entries scrolls.
         const fixed = document.createElement('div'); fixed.className = 'wa-studio-fixed';
