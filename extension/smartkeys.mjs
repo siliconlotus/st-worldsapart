@@ -189,6 +189,20 @@ export function validateSmartKey(raw) {
         });
     }
 
+    // A term with no letters and no digits fires on punctuation, which is in nearly every message. The
+    // usual cause is a doubled sentinel: only the FIRST `?` is stripped as the prefix, so `? or ? ()`
+    // leaves `?` behind as a literal term and the query quietly matches any text containing one.
+    for (const t of terms) {
+        if (!/[\p{L}\p{N}]/u.test(String(t.value))) {
+            out.push({
+                severity: 'warn', code: 'punctuation-term',
+                message: String(t.value) === '?'
+                    ? 'Only the first “?” marks a SmartKey, so the second one is being searched for as text — this matches nearly every message. Remove it, or quote it as "?" if you meant it.'
+                    : `The term ${JSON.stringify(String(t.value))} is punctuation only, so it matches almost anything.`,
+            });
+        }
+    }
+
     for (const t of terms) {
         if (String(t.value).includes('"')) {
             out.push({

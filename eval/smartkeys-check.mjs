@@ -194,3 +194,17 @@ console.log('ok   SmartKey structural validation');
     eq(verdict(4), 'too common|frequent (100%)', 'a query earns the df verdict, not the English-common one');
 }
 console.log('ok   SmartKeys are audited on df, exempt only from the literal-string heuristics');
+
+// Only the FIRST `?` is the sentinel, so a doubled prefix leaves one behind as a literal term — and a
+// query searching for a bare question mark fires on nearly every message. The no-terms check cannot
+// see this, because there genuinely is a term.
+{
+    const codes = k => validateSmartKey(k).map(p => `${p.severity}:${p.code}`).join(' ');
+    eq(tokenize('? or ? ()').filter(t => t.type === 'TERM').map(t => t.value).join(','), '?', 'the second ? survives as a term');
+    eq(codes('? or ? ()'), 'warn:punctuation-term', 'a doubled sentinel is caught as a punctuation term');
+    eq(codes('? ?'), 'warn:punctuation-term', 'so is a bare question mark on its own');
+    eq(codes('? fire .'), 'warn:punctuation-term', 'and a stray full stop beside a real term');
+    eq(codes('? c++'), '', 'a term with letters is fine however much punctuation it carries');
+    eq(codes('? 10:30'), '', 'digits count too');
+}
+console.log('ok   punctuation-only terms are flagged');
