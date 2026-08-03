@@ -733,7 +733,14 @@ export async function lorebookStudio(preferredBook = null) {
     const editKeyInline = (e, oldKey, span) => {
         const inp = document.createElement('input');
         inp.type = 'text'; inp.className = 'text_pole'; inp.value = oldKey;
-        inp.style.cssText = 'width:8em;margin:0;font-size:0.9em;';
+        // Sized to the text, not a fixed 8em. A SmartKey is routinely longer than that, and a fixed
+        // width made the field scroll internally — so on blur it snapped back to character 0 and the
+        // end of what you had typed went out of view. Same `size` idiom as the title editor. Capped,
+        // because the keyword paragraph wraps and one very long key should take a line, not the pane.
+        inp.style.cssText = 'margin:0;font-size:0.9em;';
+        const fit = () => { inp.size = Math.min(64, Math.max(8, inp.value.length + 2)); };
+        fit();
+        inp.addEventListener('input', fit);
         let done = false;
         const commit = (ok, viaBlur) => {
             if (done) return;
@@ -1051,7 +1058,11 @@ export async function lorebookStudio(preferredBook = null) {
         }
         const add = document.createElement('i'); add.className = 'fa-solid fa-plus wa-tool'; add.title = 'Add a keyword';
         add.addEventListener('click', () => {
-            const inp = document.createElement('input'); inp.type = 'text'; inp.className = 'text_pole'; inp.placeholder = 'keyword'; inp.style.cssText = 'width:8em;margin:0;font-size:0.9em;';
+            const inp = document.createElement('input'); inp.type = 'text'; inp.className = 'text_pole'; inp.placeholder = 'keyword';
+            inp.style.cssText = 'margin:0;font-size:0.9em;';
+            const fit = () => { inp.size = Math.min(64, Math.max(8, inp.value.length + 2)); };   // see editKeyInline
+            fit();
+            inp.addEventListener('input', fit);
             let done = false;
             const commit = (ok, viaBlur) => {
                 if (done) return;
