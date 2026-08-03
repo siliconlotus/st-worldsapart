@@ -220,24 +220,37 @@ export function buildKeyPruneScan(data, opts, ignoreSet, { caseSensitiveDefault 
     // under whole-word matching (no substring collision) and otherwise reports whole-word/total.
     const classify = (key, cs, ww, sticky) => {
         const k = String(key).trim();
-        // Smart keys ('?' prefix) are boolean queries, not literals — countKey returns weights,
-        // not occurrence counts, and negations match nearly everything, so every substring-era
-        // heuristic below (df, length, common-word) would misfire. Exempt them like regex keys.
-        if (!k || isRegexKey(k) || k.startsWith('?')) return null;
+        if (!k || isRegexKey(k)) return null;
+        // A `?` query is audited like any other key, not exempted from the audit. It used to be, and
+        // that was the wrong cut: the question the audit asks — does this key fire, and how often —
+        // is perfectly answerable for a query, because countKey already evaluates it against the same
+        // primed trie every literal goes through. df was in fact being computed for these all along
+        // and then discarded here.
+        //
+        // What genuinely does not apply is the heuristics that read the key AS A LITERAL STRING. The
+        // matching surface of `? fire water` is its terms, not the twelve characters of the query, so
+        // English-common, fragment and short-key are meaningless against the raw text and are skipped.
+        // (Per-TERM versions of them would be meaningful; that is a separate piece of work.)
+        // `total` is also meaningless for a query — countKey returns a weight, not an occurrence count
+        // — but only the short-key check reads it, and that is one of the skipped ones.
+        const smart = k.startsWith('?');
         const dc = scan(k, cs, ww).df;
         // A common-English single word over-fires against chat regardless of lorebook df, so it
         // outranks dead (a word absent from the book's own text still floods it from the chat).
         // Sticky gets the shorter head-of-list cut; keyword/vector test the whole list.
-        if (opts.pruneCommon && !/\s/.test(k) && (sticky ? COMMON_HEAD : COMMON_WORDS).has(k.toLowerCase())) return { flag: 'too common', dc, eng: true };
-        if (dc === 0 && opts.pruneUnattested && !(opts.ignoreProper && looksProper(k))) return { flag: 'unattested', dc };
+        if (!smart && opts.pruneCommon && !/\s/.test(k) && (sticky ? COMMON_HEAD : COMMON_WORDS).has(k.toLowerCase())) return { flag: 'too common', dc, eng: true };
+        // ignoreProper spares a capitalised key from the dead flag on the grounds it is a name the chat
+        // will use. A query is not a name, so it gets no such reprieve — a query that never evaluates
+        // true anywhere is exactly the broken-key case the audit exists to surface.
+        if (dc === 0 && opts.pruneUnattested && !(!smart && opts.ignoreProper && looksProper(k))) return { flag: 'unattested', dc, smart };
         if (nBook >= KEY_MIN_COMMON_ENTRIES && dc / nBook > opts.tooCommon * 0.75 && opts.pruneCommon) return { flag: 'too common', dc };
         // Activation breadth, checked after firing rate: a key can be rare in the prose yet listed on
         // most entries, which the content-df flags above can't see. Same small-corpus guard, since
         // "75% of 4 entries" is as meaningless here as it is there.
         const dk = dfKeys.get(k.toLowerCase()) ?? 0;
         if (nBook >= KEY_MIN_COMMON_ENTRIES && dk / nBook > opts.sharedKeys * 0.75 && opts.pruneShared) return { flag: 'shared', dc, dk };
-        if (opts.pruneFragment !== false && looksLikeFragment(k)) return { flag: 'fragment', dc };
-        if (k.length < opts.minLength && !ww && opts.pruneShort) return { flag: 'short', dc, clean: strictClean(k, cs), total: scan(k, cs, false).total };
+        if (!smart && opts.pruneFragment !== false && looksLikeFragment(k)) return { flag: 'fragment', dc };
+        if (!smart && k.length < opts.minLength && !ww && opts.pruneShort) return { flag: 'short', dc, clean: strictClean(k, cs), total: scan(k, cs, false).total };
         return null;
     };
     const classifyEntry = e => {
@@ -277,7 +290,9 @@ export function buildKeyPruneScan(data, opts, ignoreSet, { caseSensitiveDefault 
     // Reason text + severity colour (dead is uncoloured).
     const reasonOf = p => {
         const color = severityOf(p);
-        if (p.flag === 'unattested') return { text: 'not in entry text', color };
+        // A query is not "absent from the text" — it evaluated false everywhere, which is a different
+        // sentence and the difference matters when someone is deciding whether their query is wrong.
+        if (p.flag === 'unattested') return { text: p.smart ? 'never matches' : 'not in entry text', color };
         if (p.flag === 'too common') return p.eng ? { text: 'common', color } : { text: `frequent (${Math.round(100 * p.dc / nBook)}%)`, color };
         if (p.flag === 'shared') return { text: `shared (${Math.round(100 * p.dk / nBook)}%)`, color };
         if (p.flag === 'fragment') return { text: 'phrase fragment', color };

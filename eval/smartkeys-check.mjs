@@ -87,12 +87,13 @@ eq(countKey('? fire::3 XOR flood', 'a fire burns', false, false), 3, 'XOR still 
     eq(evaluate({ type: 'NOT', operand: T('alpha') }, 'alpha', empty).matched, true, 'acHits forwarded through NOT');
 }
 
-// Prune audit exempts smart keys like it exempts regex keys.
+// Smart keys are NOT exempt from the audit — they are audited on df, like any other key. Neither of
+// these queries can match "nothing relevant", so both are dead and both should say so.
 {
     const data = { entries: { 0: { uid: 0, key: ['? moon mission', '? -apollo'], content: 'nothing relevant' } } };
     const opts = { scanKeyword: true, scanVectorized: true, scanConstant: true, includeInactive: true, pruneUnattested: true, pruneCommon: true, pruneShort: true, ignoreProper: false, stickySkipCommon: true, tooCommon: 0.5, minLength: 4 };
     const { classifyEntry } = buildKeyPruneScan(data, opts, new Set());
-    eq(classifyEntry(data.entries[0]).length, 0, 'smart keys exempt from prune audit');
+    eq(classifyEntry(data.entries[0]).map(f => f.flag).join(','), 'unattested', 'a dead query is flagged; "? -apollo" matches on absence so it is not dead');
 }
 
 // AST shape sanity: implicit AND injection between primaries.
@@ -163,3 +164,33 @@ console.log('ok   weight delimiter is ::, single colon is ordinary text');
     eq(codes('/regex/i'), '', 'nor is a regex key');
 }
 console.log('ok   SmartKey structural validation');
+
+// SmartKeys are audited like any other key, not exempted. countKey already evaluates a query against
+// the same primed trie every literal goes through, so df was being computed for them all along and
+// then discarded. What genuinely does not apply is the heuristics that read the key as a LITERAL
+// STRING — English-common, fragment, short — because the matching surface of `? fire water` is its
+// terms, not the twelve characters of the query.
+{
+    const entries = {};
+    for (let i = 1; i <= 12; i++) entries[i] = { uid: i, key: [], content: `Marjorie walked. Entry number ${i} of the set.` };
+    entries[1].key = ['? Marjorie'];          // fires everywhere
+    entries[2].key = ['? zebra unicorn'];     // fires nowhere
+    entries[3].key = ['Marjorie'];            // plain control with the same df
+    entries[4].key = ['? the'];               // an English-common TERM, but not an English-common KEY
+    const opts = { scanKeyword: true, scanVectorized: true, scanConstant: true, pruneUnattested: true,
+        pruneCommon: true, pruneShort: true, pruneShared: true, pruneFragment: true,
+        minLength: 4, tooCommon: 0.5, sharedKeys: 0.5, ignoreProper: true };
+    const sc = buildKeyPruneScan({ entries }, opts, new Set(), { caseSensitiveDefault: false, wholeWordsDefault: false });
+    const verdict = uid => { const f = sc.classifyEntry(entries[uid])[0]; return f ? `${f.flag}|${sc.reasonOf(f).text}` : ''; };
+
+    eq(verdict(2), 'unattested|never matches', 'a query that evaluates false everywhere is flagged dead');
+    eq(verdict(1), verdict(3), 'a SmartKey and the equivalent plain key get the same df verdict');
+    eq(verdict(1), 'too common|frequent (100%)', '...and that verdict is the df one, not a string one');
+    // The literal-string heuristics stay off: `? the` is a bad key because of its TERM, which is a
+    // per-term check that does not exist yet — not because the string "? the" is a common English word.
+    // The English-common check says "common"; the df check says "frequent (N%)". "? the" fires
+    // everywhere, so it earns the df verdict — what it must NOT earn is the English-common one, which
+    // would be reading the query as though the string "? the" were an English word.
+    eq(verdict(4), 'too common|frequent (100%)', 'a query earns the df verdict, not the English-common one');
+}
+console.log('ok   SmartKeys are audited on df, exempt only from the literal-string heuristics');
