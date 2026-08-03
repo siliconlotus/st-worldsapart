@@ -219,6 +219,33 @@ export function validateSmartKey(raw) {
         }
     }
 
+    // Lucene syntax WA does not implement. Each of these currently becomes a literal term and quietly
+    // matches nothing, which the audit eventually reports as a dead key — but "never matches" is a much
+    // worse thing to be told than "fuzzy matching is not a feature here". Quoted terms are exempt: an
+    // author who quoted it said they meant the characters.
+    for (const t of terms) {
+        if (t.quoted) continue;
+        const v = String(t.value);
+        if (v.includes('~')) {
+            out.push({
+                severity: 'warn', code: 'lucene-fuzzy',
+                message: 'Fuzzy and proximity matching (~) are not supported — the term is matched literally, so this will not fire. Use a /regex/ key for pattern matching.',
+            });
+        }
+        if (v.includes('*')) {
+            out.push({
+                severity: 'warn', code: 'lucene-wildcard',
+                message: 'Wildcards (*) are not supported — the term is matched literally. Matching is substring by default, so “fir” already finds “confirm”; use a /regex/ key for anything more.',
+            });
+        }
+        if (/\^\d/.test(v)) {
+            out.push({
+                severity: 'warn', code: 'lucene-boost',
+                message: 'Weights use “::”, not “^” — try “term::2”. A leading ^ is the case-sensitivity flag.',
+            });
+        }
+    }
+
     for (const t of terms) {
         if (String(t.value).includes('"')) {
             out.push({

@@ -279,3 +279,19 @@ console.log('ok   quoting a single term is free; quoting across a space is not')
     eq(c('? (fire::3 alpha) OR water::0.5', 'fire and water'), 0.5, 'a half-matched AND leaks no boost');
 }
 console.log('ok   terms score on weight x occurrences; OR sums');
+
+// Lucene syntax WA does not implement. Each of these becomes a literal term that quietly matches
+// nothing; the audit would eventually call it dead, but "never matches" is a much worse thing to be
+// told than "fuzzy matching is not a feature here". Quoted terms are exempt — the author said they
+// meant the characters, and Gladiator really does key on "*asses*".
+{
+    const codes = k => validateSmartKey(k).map(p => p.code).join(',');
+    eq(codes('? fire~2'), 'lucene-fuzzy', 'fuzzy/proximity is named, not left to die as a literal');
+    eq(codes('? fir*'), 'lucene-wildcard', 'so are wildcards');
+    eq(codes('? fire^2'), 'lucene-boost', 'and Lucene boost, which points at :: instead');
+    eq(codes('? "*asses*"'), '', 'quoting exempts a deliberate asterisk');
+    eq(codes('? "fire~2"'), '', '...and a deliberate tilde');
+    eq(codes('? =^HOK::3'), '', 'the ^ FLAG is a prefix and is not a boost');
+    eq(codes('? c++'), '', 'ordinary punctuation in a term is not Lucene syntax');
+}
+console.log('ok   unsupported Lucene syntax is named rather than silently dead');
