@@ -557,7 +557,17 @@ export async function lorebookStudio(preferredBook = null) {
         const problems = validateSmartKey(term);
         const err = problems.find(p => p.severity === 'error');
         if (err) { toastr.warning(err.message, 'Worlds Apart', { timeOut: 8000 }); return false; }
-        for (const w of problems) toastr.info(w.message, 'Worlds Apart', { timeOut: 6000 });
+        // ONE TOAST PER KIND OF PROBLEM, not one per instance. A key can repeat the same fault dozens of
+        // times — paste an unquoted Zalgo string and it shreds into forty-odd punctuation terms, each
+        // reporting separately — and forty identical toasts is not forty times the information.
+        const byCode = new Map();
+        for (const w of problems) {
+            const seen = byCode.get(w.code);
+            if (seen) seen.n++; else byCode.set(w.code, { message: w.message, n: 1 });
+        }
+        for (const { message, n } of byCode.values()) {
+            toastr.info(n > 1 ? `${message} (${n} terms)` : message, 'Worlds Apart', { timeOut: 6000 });
+        }
         return true;
     };
 

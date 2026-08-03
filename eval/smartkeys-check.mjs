@@ -208,3 +208,19 @@ console.log('ok   SmartKeys are audited on df, exempt only from the literal-stri
     eq(codes('? 10:30'), '', 'digits count too');
 }
 console.log('ok   punctuation-only terms are flagged');
+
+// Quoting marks a punctuation term as deliberate, because sometimes it is: Sigur Rós named an album
+// "()" and a more recent one is 142 characters of combining marks. Quoted, such a title is one term
+// and validates clean; unquoted it shreds into dozens, which is worth saying once rather than once per
+// term (the Studio collapses repeats to one toast per kind).
+{
+    const codes = k => validateSmartKey(k).map(p => `${p.severity}:${p.code}`).join(' ');
+    eq(codes('? "()"'), '', 'a quoted punctuation term is deliberate');
+    eq(codes('? "()" | =^Von'), '', '...and composes with the rest of the syntax');
+    eq(codes('? ()'), 'error:no-terms', 'unquoted, those are just an empty group');
+    eq(codes('? or ? ()'), 'warn:punctuation-term', 'an unquoted stray ? is still caught');
+    eq(codes('? "?"'), '', 'quoting rescues the deliberate question mark too');
+    eq(tokenize('? "()"').filter(t => t.type === 'TERM')[0].quoted, true, 'the token remembers it was quoted');
+    eq(tokenize('? fire').filter(t => t.type === 'TERM')[0].quoted, false, '...and that a bare term was not');
+}
+console.log('ok   quoting marks a punctuation term as deliberate');

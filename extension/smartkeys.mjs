@@ -78,6 +78,9 @@ export function tokenize(input) {
             value,
             isExact: m[1].includes('='),
             isCaseSensitive: m[1].includes('^'),
+            // Quoting already means "this exact string, deliberately" for colons and wildcards. Kept on
+            // the token so validation can tell a considered literal from a typo.
+            quoted: m[2] !== undefined,
             weight,
         });
     }
@@ -193,7 +196,9 @@ export function validateSmartKey(raw) {
     // usual cause is a doubled sentinel: only the FIRST `?` is stripped as the prefix, so `? or ? ()`
     // leaves `?` behind as a literal term and the query quietly matches any text containing one.
     for (const t of terms) {
-        if (!/[\p{L}\p{N}]/u.test(String(t.value))) {
+        // A QUOTED punctuation term is deliberate — Sigur Rós really did name an album "()" — and
+        // quoting is already how this syntax says "exactly this, I meant it". Only unquoted ones warn.
+        if (!t.quoted && !/[\p{L}\p{N}]/u.test(String(t.value))) {
             out.push({
                 severity: 'warn', code: 'punctuation-term',
                 message: String(t.value) === '?'
