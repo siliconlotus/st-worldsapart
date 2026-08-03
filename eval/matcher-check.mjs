@@ -7,6 +7,27 @@ import { eq } from './metrics.mjs';
 // that a caller can score against an explicit key list (waKeys) instead of entry.key.
 const keywordScore = (e, t, k) => rankKeywordScore(e, t, k, { k1: 2, caseSensitiveDefault: false, wholeWordsDefault: false });
 const scored = (e, t, k) => keywordScore(e, t, k).score > 0;
+
+// Secondary keys gate the SCORE, not only activation: an entry is not credited for a primary its
+// author said does not count alone. Truth table mirrors core's matchSecondaryKeys (world-info.js).
+{
+    const cfg = { k1: 1.2, caseSensitiveDefault: false, wholeWordsDefault: false };
+    const e = logic => ({ key: ['cosmonaut'], keysecondary: ['apollo', 'soyuz'], selectiveLogic: logic });
+    const T = { none: 'the cosmonaut waited', one: 'the cosmonaut boarded apollo', all: 'cosmonaut apollo soyuz' };
+    const on = (logic, t) => keywordScore(e(logic), T[t], undefined, cfg).score > 0;
+    //                       none   one    all
+    const table = { 0: [false, true,  true ],   // AND_ANY
+                    1: [true,  true,  false],   // NOT_ALL
+                    2: [true,  false, false],   // NOT_ANY
+                    3: [false, false, true ] }; // AND_ALL
+    const names = { 0: 'AND_ANY', 1: 'NOT_ALL', 2: 'NOT_ANY', 3: 'AND_ALL' };
+    for (const [logic, want] of Object.entries(table)) {
+        ['none', 'one', 'all'].forEach((t, i) =>
+            eq(on(Number(logic), t), want[i], `${names[logic]}: ${t} secondary present`));
+    }
+    eq(keywordScore({ key: ['cosmonaut'] }, T.none, undefined, cfg).score > 0, true, 'no secondary keys: ungated');
+    eq(keywordScore(e(0), T.none, undefined, cfg).hits.length, 0, 'a gated entry reports no hits either');
+}
 eq(scored({ key: ['zzz'] }, 'alpha beta', ['alpha']), true, 'keywordScore honors explicit keys over entry.key');
 eq(scored({ key: ['alpha'] }, 'alpha beta', ['zzz']), false, 'explicit keys with no hit score zero even when entry.key would match');
 eq(scored({ key: ['alpha'] }, 'alpha beta'), true, 'defaults to entry.key when no list passed');

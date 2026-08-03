@@ -394,6 +394,39 @@ export function countKey(key, text, caseSensitive, wholeWords, scope) {
  * @param {boolean} cfg.wholeWordsDefault world_info_match_whole_words (entry may override)
  * @returns {{score: number, hits: Array<{key: string, count: number}>}} Score and matched keys.
  */
+/**
+ * `selectiveLogic` values, mirroring core's `world_info_logic` (world-info.js:33). Duplicated rather
+ * than imported because this module stays ST-free; the mapping is verified in matcher-check against
+ * core's own evaluation.
+ */
+export const WI_LOGIC = { AND_ANY: 0, NOT_ALL: 1, NOT_ANY: 2, AND_ALL: 3 };
+
+/**
+ * Core's secondary-key condition (world-info.js matchSecondaryKeys), over WA's matcher.
+ *
+ * True when the entry has no secondary keys, so callers can apply it unconditionally. Keys are NOT
+ * `substituteParams`-expanded here, matching how primary keys are already treated in this module —
+ * that substitution is ST-side and this file is ST-free.
+ *
+ * @returns {boolean} whether the entry's secondary condition is satisfied by `text`
+ */
+export function secondaryOk(entry, text, caseSensitive, wholeWords) {
+    const sec = Array.isArray(entry?.keysecondary) ? entry.keysecondary.filter(k => String(k ?? '').trim()) : [];
+    if (!sec.length) return true;
+    if (text) primeScan(sec, text);
+    let any = false, all = true;
+    for (const k of sec) {
+        if (countKey(k, text, caseSensitive, wholeWords) > 0) any = true;
+        else all = false;
+    }
+    switch (entry.selectiveLogic ?? WI_LOGIC.AND_ANY) {
+        case WI_LOGIC.NOT_ALL: return !all;
+        case WI_LOGIC.NOT_ANY: return !any;
+        case WI_LOGIC.AND_ALL: return all;
+        default: return any;   // AND_ANY, and core's fallback for an unknown value
+    }
+}
+
 export function keywordScore(entry, text, keys = entry.key, { k1, caseSensitiveDefault, wholeWordsDefault } = {}) {
     if (!Array.isArray(keys) || !keys.length) {
         return { score: 0, hits: [] };
@@ -410,6 +443,18 @@ export function keywordScore(entry, text, keys = entry.key, { k1, caseSensitiveD
     // from that scan instead of walking the buffer per key. Text is shared across entries in
     // a retrieval pass, so after the first entry this is a no-op.
     if (text) primeScan(keys, text);
+
+    // SECONDARY KEYS GATE THE SCORE, not just activation. An entry keyed `cosmonaut` with a
+    // secondary `apollo` under AND ANY says it is relevant when BOTH are present; scoring the
+    // primary alone credits it for evidence its author said does not count on its own.
+    //
+    // Core checks this before activating, so for a keyword entry the gate has already passed once —
+    // but against CORE's buffer, which is not WA's window (worldsapart.js builds its own), and a
+    // force-activated entry was never checked at all. Either way the score is WA's claim about this
+    // text, so it is WA's job to make it true of this text.
+    if (!secondaryOk(entry, text, caseSensitive, wholeWords)) {
+        return { score: 0, hits: [] };
+    }
 
     let score = 0;
     const hits = [];
