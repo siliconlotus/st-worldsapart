@@ -4,9 +4,10 @@
 //   ? moon mission -apollo          implicit AND, prefix - negates
 //   ? =cat                          = word boundary, ^ case-sensitive (combinable: ^=NASA)
 //   ? "moon mission" OR cosmonaut   quoted phrases, AND/OR/NOT/XOR, &&/||/!/-/+, (...) grouping
-//   ? fire:2.5                      :weight scales the key's BM25 contribution
-//   ? meeting "10:30"               a bare token's trailing :number is ALWAYS a weight;
-//                                   a literal colon must be quoted
+//   ? fire::2.5                     ::weight scales the key's BM25 contribution (Midjourney's form)
+//   ? meeting 10:30                 a SINGLE colon is ordinary text -- times, verse refs, re:code and
+//                                   URLs need no quoting. Only :: introduces a weight.
+//   ? +fire +water                  Lucene's per-term required-marker; absorbed, since AND is implicit
 //
 // Un-extended ST cores see the raw string "? moon ..." and silently never match it — that
 // degradation is the compatibility story, so lorebooks stay portable.
@@ -48,19 +49,27 @@ export function tokenize(input) {
             src = src.slice(m[0].length);
             continue;
         }
-        // Term: optional =/^ flags, quoted phrase or bare word, optional :weight postfix.
+        // Term: optional =/^ flags, quoted phrase or bare word, optional ::weight postfix.
         m = src.match(/^([=^]{0,2})(?:"([^"]*)"|([^\s()|&]+))/);
         if (!m) { src = src.slice(1); continue; } // lone stray char (e.g. unmatched ") — drop
         src = src.slice(m[0].length);
         let value = m[2] ?? m[3];
         let weight = 1.0;
+        // WEIGHT IS `::`, NOT `:`. A single colon is an ordinary character, so `10:30`, `Judges 3:16`,
+        // `re:code` and `https://…` all tokenise as written and need no quoting. With one colon they
+        // did not: `3:16` parsed as the term `3` at weight 16, which is silent and absurd, and the
+        // documented escape (quoting) was the only way out of a construction nobody expects to escape.
+        //
+        // `::` is Midjourney's multi-prompt weight, so it is a convention rather than an invention. It
+        // cannot collide with times or ratios, which never double the colon. Lucene's boost is `^N`,
+        // which is unavailable here — `^` is already the case-sensitivity flag, and that is worth more.
+        //
+        // Delimiter followed by non-digits stays part of the term (`fire::abc`), same as a lone colon.
         if (m[2] !== undefined) {
-            const w = src.match(/^:(\d+(?:\.\d+)?)/); // quoted: weight sits after the close quote
+            const w = src.match(/^::(\d+(?:\.\d+)?)/); // quoted: weight sits after the close quote
             if (w) { weight = parseFloat(w[1]); src = src.slice(w[0].length); }
         } else {
-            // Bare: split a trailing :weight off the token. This claims "10:30"-style tokens too —
-            // by design, a literal colon requires quoting (? "10:30").
-            const w = value.match(/^(.+?):(\d+(?:\.\d+)?)$/);
+            const w = value.match(/^(.+?)::(\d+(?:\.\d+)?)$/);
             if (w) { value = w[1]; weight = parseFloat(w[2]); }
         }
         if (!value) continue;

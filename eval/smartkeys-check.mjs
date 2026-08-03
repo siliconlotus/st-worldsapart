@@ -32,9 +32,9 @@ eq(matches('? "moon mission"', 'mission to the moon'), false, 'quoted phrase, no
 eq(matches('? sci-fi', 'a sci-fi novel'), true, 'internal hyphen stays in the term');
 eq(matches('? sci-fi', 'a fantasy novel'), false, 'sci-fi does not degrade to sci AND NOT fi (would match here)');
 eq(matches('? c-3po', 'c-3po beeped'), true, 'digits and hyphens in terms');
-eq(countKey('? fire:2.5', 'fire everywhere', false, false), 2.5, ':weight scales the matched score');
-eq(countKey('? fire:0.5', 'fire everywhere', false, false), 0.5, 'sub-1 :weight down-weights (not clamped to 1)');
-eq(countKey('? "hot tub":2 party', 'hot tub party', false, false), 3, 'weight after quoted phrase, summed by AND');
+eq(countKey('? fire::2.5', 'fire everywhere', false, false), 2.5, '::weight scales the matched score');
+eq(countKey('? fire::0.5', 'fire everywhere', false, false), 0.5, 'sub-1 ::weight down-weights (not clamped to 1)');
+eq(countKey('? "hot tub"::2 party', 'hot tub party', false, false), 3, 'weight after quoted phrase, summed by AND');
 eq(matches('? meeting "10:30"', 'the meeting is at 10:30'), true, 'literal colon via quoting');
 eq(matches('? "10:30"', 'at 10 30 sharp'), false, 'quoted colon term is literal, not split');
 eq(matches('? =c++', 'some c++ code'), true, '= boundary handles punctuation-edged terms (no \\b)');
@@ -74,9 +74,9 @@ eq(matches('? hers she', 'the ushers she saw'), true, 'unflagged substring terms
 
 // Unmatched nodes carry zero boost — a failed XOR/AND branch must not leak its weight into a
 // parent OR's max.
-eq(countKey('? (fire:3 XOR flood:3) OR water:0.5', 'fire and flood near the water', false, false), 0.5, 'failed XOR branch leaks no boost through OR');
-eq(countKey('? (fire:3 alpha) OR water:0.5', 'fire and water', false, false), 0.5, 'half-matched AND leaks no boost through OR');
-eq(countKey('? fire:3 XOR flood', 'a fire burns', false, false), 3, 'XOR still yields the matched side\'s weight');
+eq(countKey('? (fire::3 XOR flood::3) OR water::0.5', 'fire and flood near the water', false, false), 0.5, 'failed XOR branch leaks no boost through OR');
+eq(countKey('? (fire::3 alpha) OR water::0.5', 'fire and water', false, false), 0.5, 'half-matched AND leaks no boost through OR');
+eq(countKey('? fire::3 XOR flood', 'a fire burns', false, false), 3, 'XOR still yields the matched side\'s weight');
 
 // acHits must flow through compound nodes: a term the automaton says is absent may not match
 // via the regex fallback, even when the raw text would satisfy the regex.
@@ -121,3 +121,18 @@ eq(evaluate(ast, 'a c').matched, true, 'evaluates the injected AND');
     eq(countKey('? fire water', T, false, false), 2, 'genuine implicit AND is untouched');
 }
 console.log('ok   malformed operator positions degrade to no-ops, not dead keys');
+
+// The delimiter is `::`, so a single colon is ordinary text. With one colon, "Judges 3:16" parsed as
+// the term "3" weighted 16 -- silent, absurd, and escapable only by quoting a construction nobody
+// expects to need quoting. Times, verse refs, sequel titles and URLs now tokenise as written.
+{
+    const terms = q => tokenize(q).filter(t => t.type === 'TERM').map(t => `${t.value}@${t.weight}`).join(' ');
+    eq(terms('? fire::2'), 'fire@2', ':: introduces a weight');
+    eq(terms('? "hot tub"::2'), 'hot tub@2', ':: works after a quoted phrase too');
+    eq(terms('? meet at 10:30'), 'meet@1 at@1 10:30@1', 'a time keeps its colon and its weight of 1');
+    eq(terms('? Judges 3:16'), 'Judges@1 3:16@1', 'a verse reference is not a weighted digit');
+    eq(terms('? Kingdom Hearts re:code'), 'Kingdom@1 Hearts@1 re:code@1', 'an internal colon survives');
+    eq(terms('? fire::abc'), 'fire::abc@1', 'delimiter followed by non-digits stays part of the term');
+    eq(terms('? =^HOK::3'), 'HOK@3', 'flags and weight compose');
+}
+console.log('ok   weight delimiter is ::, single colon is ordinary text');
