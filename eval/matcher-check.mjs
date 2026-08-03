@@ -87,3 +87,13 @@ eq(countKey(`Jose\u0301`, `Jose\u0301 Sommers`, false, false), 1, 'decomposed bo
 // Counting still works across repeats and mixed forms in one text.
 eq(countKey("Cap'n", `Cap'n and Cap${CURLY}n and Capʼn`, false, false), 3, 'mixed forms all counted');
 console.log('ok   apostrophe normalisation: straight/curly interchangeable, orthographic variants folded, meaning-bearing characters untouched');
+
+// Markdown in the scan text, both directions. Emphasis around a WHOLE word is fine; emphasis INSIDE
+// one is not, and it fails in opposite directions depending on the mode. Pinned so the behaviour is a
+// recorded limit rather than something rediscovered — see countKey's docblock for why it stays.
+eq(countKey('sister', "She's my *sister*, Tim", false, false), 1, 'emphasis around a whole word: substring matches');
+eq(countKey('sister', "She's my *sister*, Tim", false, true), 1, '...and whole-word matches, since * is a boundary');
+eq(countKey('sisterhood', 'It is called *sister*hood', false, false), 0, 'in-word emphasis BREAKS a substring match');
+eq(countKey('sister', 'It is called *sister*hood', false, true), 1, 'in-word emphasis CREATES a false word boundary');
+eq(countKey('sister', 'It is called sisterhood', false, true), 0, '...which the unemphasised control correctly does not');
+console.log('ok   markdown in the scan text: whole-word emphasis fine, in-word emphasis is a known limit');
