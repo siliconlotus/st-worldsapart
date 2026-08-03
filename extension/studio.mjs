@@ -735,10 +735,20 @@ export async function lorebookStudio(preferredBook = null) {
         inp.type = 'text'; inp.className = 'text_pole'; inp.value = oldKey;
         inp.style.cssText = 'width:8em;margin:0;font-size:0.9em;';
         let done = false;
-        const commit = ok => {
-            if (done) return; done = true;
+        const commit = (ok, viaBlur) => {
+            if (done) return;
             const nv = inp.value.trim();
-            if (ok && nv && nv !== oldKey && Array.isArray(e.key) && keyWriteOk(nv)) {
+            // A REFUSED key keeps the editor open with the text still in it. The commit fires on blur,
+            // so discarding here meant clicking away silently threw the work out and the chip snapped
+            // back — the toast explained a problem with text that no longer existed. Escape still
+            // cancels outright, because ok=false never reaches the check.
+            //
+            // Focus is only reclaimed on an explicit Enter. Grabbing it back on blur traps the cursor:
+            // every attempt to click away re-fires the blur and yanks it home again. On blur the editor
+            // simply stays where it is, holding the text, and can be returned to or escaped.
+            if (ok && nv && nv !== oldKey && !keyWriteOk(nv)) { if (!viaBlur) inp.focus(); return; }
+            done = true;
+            if (ok && nv && nv !== oldKey && Array.isArray(e.key)) {
                 const idx = e.key.indexOf(oldKey);
                 // The dupe test has to skip the key being edited, or a capitalisation fix ("bob" → "Bob")
                 // collides with itself and merges the key away instead of rewriting it.
@@ -747,7 +757,7 @@ export async function lorebookStudio(preferredBook = null) {
             renderEntry(e);
         };
         inp.addEventListener('keydown', ev => { if (ev.key === 'Enter') { ev.preventDefault(); commit(true); } else if (ev.key === 'Escape') { ev.preventDefault(); commit(false); } });
-        inp.addEventListener('blur', () => commit(true));
+        inp.addEventListener('blur', () => commit(true, true));
         span.replaceWith(inp); inp.focus(); inp.select();
     };
 
@@ -1043,9 +1053,17 @@ export async function lorebookStudio(preferredBook = null) {
         add.addEventListener('click', () => {
             const inp = document.createElement('input'); inp.type = 'text'; inp.className = 'text_pole'; inp.placeholder = 'keyword'; inp.style.cssText = 'width:8em;margin:0;font-size:0.9em;';
             let done = false;
-            const commit = ok => { if (done) return; done = true; const nv = inp.value.trim(); if (ok && nv && !hasKey(e, nv) && keyWriteOk(nv)) { if (!Array.isArray(e.key)) e.key = []; e.key.push(nv); save(); } renderEntry(e); };
+            const commit = (ok, viaBlur) => {
+                if (done) return;
+                const nv = inp.value.trim();
+                // Keep the editor and the text; reclaim focus only on Enter (see editKeyInline).
+                if (ok && nv && !hasKey(e, nv) && !keyWriteOk(nv)) { if (!viaBlur) inp.focus(); return; }
+                done = true;
+                if (ok && nv && !hasKey(e, nv)) { if (!Array.isArray(e.key)) e.key = []; e.key.push(nv); save(); }
+                renderEntry(e);
+            };
             inp.addEventListener('keydown', ev => { if (ev.key === 'Enter') { ev.preventDefault(); commit(true); } else if (ev.key === 'Escape') { ev.preventDefault(); commit(false); } });
-            inp.addEventListener('blur', () => commit(true));
+            inp.addEventListener('blur', () => commit(true, true));
             add.replaceWith(inp); inp.focus();
         });
         para.append(add, boltBtn, llmBtn);   // manual + first, then the suggestion triggers

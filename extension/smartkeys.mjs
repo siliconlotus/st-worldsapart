@@ -193,7 +193,7 @@ export function validateSmartKey(raw) {
         if (String(t.value).includes('"')) {
             out.push({
                 severity: 'error', code: 'stray-quote',
-                message: `Unclosed quote: the term is literally ${JSON.stringify(t.value)}. Close the phrase, or drop the quote.`,
+                message: 'Unclosed quote — close the phrase, or remove the quote.',
             });
         }
     }
