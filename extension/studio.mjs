@@ -2178,15 +2178,16 @@ export async function lorebookStudio(preferredBook = null) {
         globeBtn.addEventListener('click', () => { globalTrayOpen = !globalTrayOpen; globeBtn.style.color = globalTrayOpen ? '#6ea8fe' : ''; refreshGlobalTray(); });
         row1.append(label, vsep(), filterWrap, sortBtn, spacer(), searchWrap, globeBtn);
         // Creating an entry had no home in the Studio at all — you could duplicate one but not make one,
-        // so a new book could only be filled from core's editor. Leads row 2, being the thing you reach
-        // for before any of the batch actions beside it.
+        // so a new book could only be filled from core's editor. Sits far right, away from the batch
+        // actions: authoring one entry at a time is the rarer errand here, and it is the only button on
+        // the row that writes rather than analyses.
         const newBtn = document.createElement('button');
         newBtn.type = 'button'; newBtn.className = 'menu_button';
-        newBtn.style.cssText = 'width:auto;padding:3px 9px;flex-shrink:0;';
+        newBtn.style.cssText = 'width:auto;padding:3px 9px;flex-shrink:0;margin-left:auto;';
         newBtn.innerHTML = '<i class="fa-solid fa-plus"></i> New entry';
         newBtn.title = 'Add a blank entry to this lorebook';
         newBtn.addEventListener('click', () => newEntry());
-        row2.append(newBtn, expandBtn, scanBtn, suggestAllBtn, suggestAllLlmBtn);
+        row2.append(expandBtn, scanBtn, suggestAllBtn, suggestAllLlmBtn, newBtn);
         head.append(row1, row2);
         // Pinned region (header + Tool Settings drawer) stays put; only wa-studio-entries scrolls.
         const fixed = document.createElement('div'); fixed.className = 'wa-studio-fixed';
