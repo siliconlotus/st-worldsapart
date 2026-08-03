@@ -261,12 +261,35 @@ export function scanWindow(chat, { depth, includeNames = true }) {
 }
 
 /**
- * Counts occurrences of a keyword in text, matching core's matchKeys rules.
- * @param {string} key Keyword or /regex/flags
+ * One-entry memo per case mode for the folded haystack. Keyed by string identity, which is the case
+ * that matters: a scan hands every key the same text object, so this turns N folds into one. A miss
+ * just recomputes, so correctness never depends on the hit.
+ */
+let foldMemoIn = null, foldMemoOut = null, orthMemoIn = null, orthMemoOut = null;
+const foldedHay = (text, caseSensitive) => {
+    if (caseSensitive) {
+        if (text !== orthMemoIn) { orthMemoIn = text; orthMemoOut = normalizeOrthography(text); }
+        return orthMemoOut;
+    }
+    if (text !== foldMemoIn) { foldMemoIn = text; foldMemoOut = fold(text); }
+    return foldMemoOut;
+};
+
+/**
+ * Counts occurrences of a keyword in text.
+ *
+ * Follows core's matchKeys for FLAGS — case sensitivity, whole-word boundaries, multi-word fallback,
+ * `/regex/` precedence — and deliberately diverges on ORTHOGRAPHY, which core does not normalise at
+ * all: apostrophes, curly quotes, en/em dashes, ellipsis, non-breaking space and NFC composition all
+ * fold here (see normalizeOrthography in plugin/automaton.mjs) and do not in core. A key carrying any
+ * of those can therefore match here and not fire in core's scan, for as long as core owns activation.
+ * `?` SmartKeys are a WA extension with no core equivalent at all.
+ *
+ * @param {string} key Keyword, /regex/flags, or a `?` SmartKey query
  * @param {string} text Text to search
  * @param {boolean} caseSensitive Case sensitivity
  * @param {boolean} wholeWords Whole word matching
- * @returns {number} Occurrence count
+ * @returns {number} Occurrence count (a SmartKey returns its weight)
  */
 export function countKey(key, text, caseSensitive, wholeWords, scope) {
     const raw = String(key ?? '').trim();
@@ -309,7 +332,12 @@ export function countKey(key, text, caseSensitive, wholeWords, scope) {
     // Orthography is normalised under BOTH case modes — it is orthogonal to case, and a case-sensitive
     // key is no more likely to have been typed with the same quote or dash characters the prose uses.
     // Must match smartkeys' fold exactly or the trie and this walk disagree (see fold()).
-    const hay = caseSensitive ? normalizeOrthography(text) : fold(text);
+    //
+    // The HAYSTACK fold is memoised, the needle's is not. Every key in a pass sees the same text, so
+    // folding it per call is the same waste core's matchKeys makes with its per-key toLowerCase — and
+    // it costs more here, because the fold does real work now (33x a bare toLowerCase on 15KB).
+    // Needles are short, so they stay uncached.
+    const hay = foldedHay(text, caseSensitive);
     const needle = caseSensitive ? normalizeOrthography(raw) : fold(raw);
 
     // Whole-word matching applies only to single-word keys; a multi-word key falls back
