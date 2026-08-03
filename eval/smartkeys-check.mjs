@@ -280,16 +280,18 @@ console.log('ok   quoting a single term is free; quoting across a space is not')
 }
 console.log('ok   terms score on weight x occurrences; OR sums');
 
-// Lucene syntax WA does not implement. Each of these becomes a literal term that quietly matches
-// nothing; the audit would eventually call it dead, but "never matches" is a much worse thing to be
-// told than "fuzzy matching is not a feature here". Quoted terms are exempt — the author said they
-// meant the characters, and Gladiator really does key on "*asses*".
+// WA has no wildcards and no fuzzy matching, so * and ~ are ordinary characters and get no warning.
+// Flagging them said "the term is matched literally" as though that were a defect, when literal is
+// exactly what M*A*S*H, *B*witched and the emphasis markup in a real book all need. A key that DID
+// expect wildcards is dead, and the audit reports it as such — from the evidence rather than a guess
+// about intent.
 {
     const codes = k => validateSmartKey(k).map(p => p.code).join(',');
-    eq(codes('? fire~2'), 'lucene-fuzzy', 'fuzzy/proximity is named, not left to die as a literal');
-    eq(codes('? fir*'), 'lucene-wildcard', 'so are wildcards');
-    eq(codes('? "*asses*"'), '', 'quoting exempts a deliberate asterisk');
-    eq(codes('? "fire~2"'), '', '...and a deliberate tilde');
+    eq(codes('? fire~2'), '', 'a tilde is a literal, because there is no fuzzy matching to mistake it for');
+    eq(codes('? M*A*S*H'), '', 'and an asterisk is a literal — there are real names shaped like this');
+    eq(codes('? *B*witched'), '', '...including ones that lead with it');
+    eq(codes('? x**3'), '', 'so Python power notation is not a wildcard either');
+    eq(codes('? *asses*'), '', 'nor is emphasis markup, which is how a real book keys the Roman currency');
     eq(codes('? =^HOK::3'), '', 'the ^ FLAG is a prefix and is not a boost');
     eq(codes('? c++'), '', 'ordinary punctuation in a term is not Lucene syntax');
 }

@@ -9,6 +9,9 @@
 //   ? meeting 10:30                 a SINGLE colon is ordinary text -- times, verse refs, re:code and
 //                                   URLs need no quoting. Only :: introduces a weight.
 //   ? +fire +water                  Lucene's per-term required-marker; absorbed, since AND is implicit
+//   ? M*A*S*H   ? ~5                 * and ~ are LITERALS, not wildcards or fuzzy matching. There is no
+//                                    pattern syntax here beyond a /regex/ key; substring is the default,
+//                                    so "fir" already finds "confirm" without help.
 //
 // WHEN IN DOUBT, QUOTE IT. Quoting is the one escape in this syntax: it turns off operator, weight,
 // paren and wildcard interpretation, and marks a punctuation-only term as deliberate rather than a
@@ -222,27 +225,6 @@ export function validateSmartKey(raw) {
                 message: String(t.value) === '?'
                     ? 'Only the first “?” marks a SmartKey, so the second one is being searched for as text — this matches nearly every message. Remove it, or quote it as "?" if you meant it.'
                     : `The term ${JSON.stringify(String(t.value))} is punctuation only, so it matches almost anything.`,
-            });
-        }
-    }
-
-    // Lucene syntax WA does not implement. Each of these currently becomes a literal term and quietly
-    // matches nothing, which the audit eventually reports as a dead key — but "never matches" is a much
-    // worse thing to be told than "fuzzy matching is not a feature here". Quoted terms are exempt: an
-    // author who quoted it said they meant the characters.
-    for (const t of terms) {
-        if (t.quoted) continue;
-        const v = String(t.value);
-        if (v.includes('~')) {
-            out.push({
-                severity: 'warn', code: 'lucene-fuzzy',
-                message: 'Fuzzy and proximity matching (~) are not supported — the term is matched literally, so this will not fire. Use a /regex/ key for pattern matching.',
-            });
-        }
-        if (v.includes('*')) {
-            out.push({
-                severity: 'warn', code: 'lucene-wildcard',
-                message: 'Wildcards (*) are not supported — the term is matched literally. Matching is substring by default, so “fir” already finds “confirm”; use a /regex/ key for anything more.',
             });
         }
     }
