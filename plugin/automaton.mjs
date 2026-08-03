@@ -9,26 +9,49 @@
 
 /** Apostrophe variants that authors and models mix freely: right/left single quotes, the modifier
  *  letter apostrophe, prime, acute and grave. All collapse to ASCII ' before matching. */
-const APOSTROPHES = /[\u2018\u2019\u02BC\u00B4\u0060\u2032]/g;
+const APOSTROPHES = /[‘’ʼ´`′]/g;
+/** Typographic double quotes. A key field takes the straight one; prose arrives typeset. */
+const DOUBLE_QUOTES = /[“”]/g;
 
 /**
- * Normalises apostrophe form without touching case.
+ * Normalises ORTHOGRAPHY without touching case: the same character in a different encoding.
  *
- * WHY THIS EXISTS. A key written "Cap'n Joe" never matched prose written "Cap\u2019n Joe", and nothing
+ * WHY THIS EXISTS. A key written "Cap'n Joe" never matched prose written "Cap’n Joe", and nothing
  * surfaced it — the key simply never fired. Models emit typographic apostrophes constantly, so a key typed
  * with a straight one silently dies against chat as well as against entry text. Measured on real books:
  * 2 of 3 apostrophe-bearing keys in one, 2 of 84 in another, mismatched in BOTH directions.
+ *
+ * The same argument covers every other form here, and the counts are larger. Over 512 MB of chat:
+ * em-dash 729,692, curly doubles 93,065, curly singles 87,665, ellipsis 7,215, en-dash 2,230,
+ * non-breaking space 57.
+ *
+ * STRICTLY ORTHOGRAPHY, and that boundary is the whole point. None of these rewrites can destroy a
+ * distinction anyone means, because nobody means anything different by a curly apostrophe. Anything
+ * that CAN carry meaning — a hyphen against a space, a case difference — does not belong here: folding
+ * it into the scan text erases it for every key at once, and no flag can ask for it back, because the
+ * damage was done to the haystack. Case gets away with it only because `^` exists to opt out.
+ *
+ * NOT included, measured absent from that corpus: combining diacritics (0, and the text is already
+ * NFC), zero-width characters (0), ligatures (0), U+2212 minus (0), angle and low quotes (0).
  */
-export const normalizeApostrophes = s => String(s ?? '').replace(APOSTROPHES, "'");
+export const normalizeOrthography = s => String(s ?? '')
+    .replace(APOSTROPHES, "'")
+    .replace(DOUBLE_QUOTES, '"')
+    // An em-dash's ASCII form is TWO hyphens; an en-dash's is one. They must not collapse together —
+    // the em-dash separates clauses and the en-dash joins, so a key meaning one must not match the other.
+    .replace(/—/g, '--')
+    .replace(/–/g, '-')
+    .replace(/…/g, '...')
+    .replace(/ /g, ' ');
 
 /**
- * The one folding used for every match: apostrophe-normalised and case-folded.
+ * The one folding used for every match: orthography-normalised and case-folded.
  *
  * MUST be the only fold. countKey short-circuits on a 0 from the automaton (`if (cached === 0) return 0`),
  * so normalising the naive walk alone would change nothing — the trie would still report a miss and return
  * before the walk ran. Registry, scan and fallback all go through here or they silently disagree.
  */
-export const fold = s => normalizeApostrophes(s).toLowerCase();
+export const fold = s => normalizeOrthography(s).toLowerCase();
 
 /**
  * Pass 1 — Aho-Corasick automaton over the case-folded literals of every registered term.

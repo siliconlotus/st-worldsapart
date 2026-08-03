@@ -18,8 +18,8 @@ import { escapeRegex, isRegexKey } from './ranking.mjs';
 // The literal matcher and its text fold live under plugin/ so the server can use them too — one copy, or
 // the browser and the server would silently disagree about what a key matches. Re-exported because
 // ranking.mjs, keyword-tools.mjs and studio.mjs all import them from here.
-import { buildAutomaton, scanAutomaton, fold, normalizeApostrophes } from '../plugin/automaton.mjs';
-export { buildAutomaton, scanAutomaton, fold, normalizeApostrophes };
+import { buildAutomaton, scanAutomaton, fold, normalizeOrthography } from '../plugin/automaton.mjs';
+export { buildAutomaton, scanAutomaton, fold, normalizeOrthography };
 
 const OPS = {
     '&&': 'AND', '&': 'AND', '+': 'AND', 'AND': 'AND',

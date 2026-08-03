@@ -43,9 +43,15 @@ eq(countKey("don't", `I don${CURLY}t think so`, false, true), 1, 'whole-word mat
 for (const [name, ch] of [['left single quote', '‘'], ['modifier letter', 'ʼ'], ['prime', '′'], ['acute', '´'], ['grave', '`']]) {
     eq(countKey("Cap'n", `Cap${ch}n`, false, false), 1, `${name} normalises`);
 }
-// Non-apostrophe punctuation is untouched — this must not become a general unicode fold.
-eq(countKey('a-b', 'a–b', false, false), 0, 'en dash is NOT normalised to hyphen');
-eq(countKey('"quoted"', '“quoted”', false, false), 0, 'double quotes are NOT normalised');
+// Orthographic variants normalise; anything that could carry meaning does not (see normalizeOrthography).
+eq(countKey('a-b', 'a–b', false, false), 1, 'en dash normalises to hyphen');
+eq(countKey('"quoted"', '“quoted”', false, false), 1, 'curly double quotes normalise');
+eq(countKey('wait--no', 'wait—no', false, false), 1, 'em dash normalises to TWO hyphens');
+eq(countKey('wait-no', 'wait—no', false, false), 0, 'em dash does NOT collapse onto a single hyphen');
+eq(countKey('a...b', 'a…b', false, false), 1, 'ellipsis normalises');
+eq(countKey('a b', 'a b', false, false), 1, 'non-breaking space normalises');
+// A hyphen is NOT folded to a space: it can carry meaning, and the haystack is the wrong place to lose it.
+eq(countKey('three-inch', 'three inch', false, false), 0, 'hyphen is not folded to a space');
 // Counting still works across repeats and mixed forms in one text.
 eq(countKey("Cap'n", `Cap'n and Cap${CURLY}n and Capʼn`, false, false), 3, 'mixed forms all counted');
-console.log('ok   apostrophe normalisation: straight/curly interchangeable, other punctuation untouched');
+console.log('ok   apostrophe normalisation: straight/curly interchangeable, orthographic variants folded, meaning-bearing characters untouched');
