@@ -8,9 +8,15 @@ what a good key is, what would count as success, and which of the books' own key
 Read it before proposing anything about `buildKeySuggest` or how to measure it, and update it rather
 than re-deriving it in conversation.
 
-## The design doc records rules, not the working that produced them
+`matcher-design.md` is its companion for the OTHER half: how a key is matched, the SmartKeys grammar,
+and the plan for WA taking over activation from core. It carries the principles that decided most of
+the individual calls (the haystack is where distinctions die; language-dependent correctness belongs in
+the reviewed layer; quoting is the single escape) plus the open work. Read it before changing
+`countKey`, `smartkeys.mjs`, the fold, or anything about activation. Same discipline as below.
 
-It carries decisions and the facts whose absence would cause a mistake. The instance that convinced
+## The design docs record rules, not the working that produced them
+
+They carry decisions and the facts whose absence would cause a mistake. The instance that convinced
 someone, the counts behind it, and any account of what an earlier draft got wrong all stay out. One
 pass added 312 lines and half of it was archaeology that had already answered its question.
 
