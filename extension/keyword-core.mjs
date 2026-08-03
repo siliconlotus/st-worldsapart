@@ -39,6 +39,21 @@ export const KEY_MIN_LENGTH = 4;
  * constant that fires unpredictably) is worth flagging. */
 export const KEY_SHARED = 0.75;
 
+/** Rare-vocabulary Jaccard at which two entries are reported as near-duplicates by the audit.
+ *
+ * It sits in an empty band rather than on a slope. Across seven books, disabled entries included, the
+ * duplicates score 0.52-1.00 and the highest pair that is NOT one scores 0.294; nothing at all falls
+ * between. So the cut is not knife-edge and nothing is hiding just beneath it here.
+ *
+ * What lives below is a continuum of adjacent scenes sharing material — the near-misses are all
+ * consecutive entries with overlapping STMB spans, e.g. "Part 16"/"Part 17" of one sequence at 0.200.
+ * The flagged consecutive splits are the same shape with far more overlap, which is why they read as
+ * one scene cut in two rather than two scenes that touch.
+ *
+ * Advisory regardless: it colours, it never pre-ticks, and a duplicate below the band would be missed
+ * with nothing to say so. */
+export const KEY_DUPE_MIN = 0.35;
+
 /** English function words. Shared by the suggester (which refuses to PROPOSE candidates containing them)
  *  and the prune classifier (which flags existing keys that do) — one list, so the two tools cannot disagree
  *  about what junk looks like. */
@@ -299,7 +314,56 @@ export function buildKeyPruneScan(data, opts, ignoreSet, { caseSensitiveDefault 
     const byUid = new Map(allEntries.map(e => [String(e.uid), e]));
     const defChecked = p => severityOf(p) === RED || (p.flag === 'unattested' && generated(byUid.get(String(p.uid))));
 
-    return { entries, nE, classifyEntry, reasonOf, defChecked, severityOf, effCase, effWhole };
+    // NEAR-DUPLICATE ENTRIES. Two summaries of one scene split its relevance: both rank mid, neither
+    // wins, and no key can separate them because they say the same thing. Found by accident in a
+    // 334-entry book — one pair, already disabled by hand, with `duplicate breakfast entry` left as a
+    // key on the survivor — so it is invisible without a tool.
+    //
+    // Similarity is Jaccard over each entry's RARE vocabulary, not its words: scene summaries share
+    // boilerplate and a recurring cast, and raw overlap reads ~0.6 on unrelated pairs of the same book.
+    //
+    // AN ARC AND ITS MEMBER SCENE ARE NOT DUPLICATES — they cover one span at different levels of
+    // detail and both are wanted, so those pairs are skipped rather than reported. Arc-vs-arc still
+    // counts: one book carries two Arc 05 entries with identical text and different title punctuation.
+    //
+    // ADVISORY ONLY. The threshold is calibrated against a single known instance (0.584, against a
+    // 0.289 ceiling across every other pair in that book), so it cannot claim the no-false-positive
+    // standard the dead-key diagnostic meets, and nothing here feeds defChecked.
+    const isArc = e => e?.stmbArc === true || /^\s*\[?\s*arc\b/i.test(String(e?.comment ?? ''));
+    const dupeVocab = e => {
+        const out = new Set();
+        for (const w of String(e.content ?? '').toLowerCase().match(/[a-z][a-z'-]{2,}/g) ?? []) {
+            if ((ZIPF_EN.get(w) ?? 0) < 3.0) out.add(w);
+        }
+        return out;
+    };
+    // ponytail: O(n^2) over in-scope entries — 55k set intersections on the largest book here and
+    // unmeasurable next to the automaton pass above. If a book ever makes this bite, invert it: index
+    // rare term -> entries and only compare pairs sharing one.
+    const dupes = new Map();
+    {
+        const cand = entries.filter(e => String(e.content ?? '').length > 200);
+        const vocab = cand.map(dupeVocab);
+        for (let i = 0; i < cand.length; i++) {
+            for (let j = i + 1; j < cand.length; j++) {
+                if (isArc(cand[i]) !== isArc(cand[j])) continue;
+                const a = vocab[i], b = vocab[j];
+                if (!a.size || !b.size) continue;
+                let shared = 0;
+                for (const w of a) if (b.has(w)) shared++;
+                const sim = shared / (a.size + b.size - shared);
+                if (sim < KEY_DUPE_MIN) continue;
+                for (const [x, y] of [[i, j], [j, i]]) {
+                    const list = dupes.get(cand[x].uid) ?? [];
+                    list.push({ uid: cand[y].uid, title: String(cand[y].comment ?? '').trim(), sim, disabled: !!cand[y].disable });
+                    dupes.set(cand[x].uid, list);
+                }
+            }
+        }
+        for (const list of dupes.values()) list.sort((p, q) => q.sim - p.sim);
+    }
+
+    return { entries, nE, classifyEntry, reasonOf, defChecked, severityOf, effCase, effWhole, dupes };
 }
 
 // Few-shot examples, shared so the LLM post-filter can drop them unconditionally: a cold small model

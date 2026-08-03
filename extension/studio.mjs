@@ -323,7 +323,14 @@ export async function lorebookStudio(preferredBook = null) {
     const refreshBulkBar = () => { const fresh = renderBulkBar(); if (bulkEl?.isConnected) bulkEl.replaceWith(fresh); bulkEl = fresh; };
     const syncSelCheckboxes = () => { for (const [uid, row] of rowEls) { const cb = row.querySelector('.wa-entry-sel'); if (cb) cb.checked = selectedEntries.has(uid); } refreshBulkBar(); };
     const selectedList = () => [...selectedEntries].map(uid => data?.entries?.[uid]).filter(Boolean);
-    const applyBulk = fn => { const sel = selectedList(); if (!sel.length) return; for (const e of sel) fn(e); save(); sel.forEach(x => renderEntry(x)); };
+    // Every bulk action spends the selection rather than leaving it ticked. A set left over from earlier
+    // work is invisible once the entries scroll away — worse, once a filter hides them — and the next
+    // bulk action then hits more than the user thinks it does. The spent set is offered back as
+    // "Reselect N" in the bar, so chaining two actions over the same entries costs one click, and the
+    // offer is deliberate rather than a timer nobody can see the state of.
+    let lastSel = null;
+    const consumeSelection = () => { if (!selectedEntries.size) return; lastSel = new Set(selectedEntries); selectedEntries.clear(); syncSelCheckboxes(); };
+    const applyBulk = fn => { const sel = selectedList(); if (!sel.length) return; for (const e of sel) fn(e); save(); sel.forEach(x => renderEntry(x)); consumeSelection(); };
     const numberPrompt = async (title, label, def, min, max) => {
         const raw = await Popup.show.input(title, label, String(def));
         if (raw == null) return null;
@@ -337,8 +344,10 @@ export async function lorebookStudio(preferredBook = null) {
     const bulkCooldown = async () => { const v = await numberPrompt('Cooldown — selected entries', 'Messages before it can re-activate (0 = none):', 0, 0); if (v != null) applyBulk(e => e.cooldown = Math.floor(v) || null); };
     const bulkScanDepth = async () => { const v = await numberPrompt('Scan depth — selected entries', 'Messages to scan (0 = global default):', 0, 0); if (v != null) applyBulk(e => e.scanDepth = Math.floor(v) > 0 ? Math.floor(v) : null); };
     const bulkRecLevel = async () => { const v = await numberPrompt('Delay until recursion — selected entries', 'Recursion level (0 = any; turns the flag on):', 0, 0); if (v != null) applyBulk(e => e.delayUntilRecursion = Math.floor(v) > 0 ? Math.floor(v) : true); };
-    const bulkCopyTo = () => entriesToBook(selectedList(), false);
-    const bulkMoveTo = () => entriesToBook(selectedList(), true);
+    // entriesToBook is shared with the single-entry Copy to… / Move to…, so the selection is spent here
+    // rather than inside it.
+    const bulkCopyTo = async () => { const l = selectedList(); consumeSelection(); await entriesToBook(l, false); };
+    const bulkMoveTo = async () => { const l = selectedList(); consumeSelection(); await entriesToBook(l, true); };
     const bulkOrder = async (advanced = false) => {
         const curOrder = presentationLabel();
         const w = document.createElement('div'); w.style.textAlign = 'left';
@@ -363,7 +372,7 @@ export async function lorebookStudio(preferredBook = null) {
         const n = ordered.length;
         const targetOf = i => start + (desc ? n - 1 - i : i);   // block occupies [start, start+N-1]
 
-        if (!advanced) { ordered.forEach((e, i) => e.order = targetOf(i)); save(); ordered.forEach(x => renderEntry(x)); return; }
+        if (!advanced) { ordered.forEach((e, i) => e.order = targetOf(i)); save(); ordered.forEach(x => renderEntry(x)); consumeSelection(); return; }
 
         // --- advanced: renumber UIDs too (uid = order). UID is the entries-object key + entry identity,
         // so this rebuilds data.entries. Guarded against the two ways it could lose data. ---
@@ -378,7 +387,7 @@ export async function lorebookStudio(preferredBook = null) {
         for (const [oldUid, newUid] of plan.moves) { const e = byUid.get(oldUid); e.uid = newUid; e.order = newUid; next[newUid] = e; }
         data.entries = next;
         // uids changed -> every per-uid transient (open/expanded/tall/sugg/selection/scan) is stale.
-        entryOpen.clear(); expanded.clear(); tall.clear(); advOpen.clear(); sugg.clear(); selectedEntries.clear(); suggest = null; if (scan) rebuildScan();
+        entryOpen.clear(); expanded.clear(); tall.clear(); advOpen.clear(); sugg.clear(); selectedEntries.clear(); lastSel = null; suggest = null; if (scan) rebuildScan();
         save(); renderExplorer();
         toastr.success(`Renumbered ${n} ${n === 1 ? 'entry' : 'entries'} (order + UID).`, 'Worlds Apart');
     };
@@ -386,7 +395,7 @@ export async function lorebookStudio(preferredBook = null) {
         const n = selectedEntries.size; if (!n) return;
         if (!await Popup.show.confirm(`Delete ${n} selected ${n === 1 ? 'entry' : 'entries'}?`, 'This is irreversible.')) return;
         for (const uid of [...selectedEntries]) { await deleteWorldInfoEntry(data, uid, { silent: true }); sugg.delete(uid); rowEls.delete(uid); }
-        selectedEntries.clear();
+        selectedEntries.clear(); lastSel = null;   // no Reselect offer: those uids don't exist any more
         save(); suggest = null; if (scan) rebuildScan(); renderExplorer();
     };
     // One keyword onto every selected entry — the bulk form of the ➕ in an entry's keyword paragraph,
@@ -398,29 +407,54 @@ export async function lorebookStudio(preferredBook = null) {
         const term = String(raw ?? '').trim();
         if (!term) return;
         let added = 0;
+        const n = selectedEntries.size;   // applyBulk spends the selection, so count before it runs
         applyBulk(e => { if (!hasKey(e, term)) { if (!Array.isArray(e.key)) e.key = []; e.key.push(term); added++; } });
-        const skipped = selectedEntries.size - added;
+        const skipped = n - added;
         toastr[added ? 'success' : 'info'](added ? `“${term}” added to ${added} ${added === 1 ? 'entry' : 'entries'}${skipped ? ` (${skipped} already had it)` : ''}.` : `Every selected entry already has “${term}”.`, 'Worlds Apart');
     };
     // The inverse of bulkAddTerm: empty the key list of every selected entry. Unlike a single ✕ this is
     // worth a rescan — the too-common/shared flags are df-based, so removing a book's worth of keys
     // changes the verdict on the ones left standing.
+    //
+    // UNDO rides on the toast rather than the nav's undo bar: that bar belongs to book deletion, lives in
+    // a different pane, and survives book switches, none of which fit an edit inside one book's Explorer.
+    // The snapshot is by uid, not by entry reference, because a rescan rebuilds rows underneath it — and
+    // it refuses outright if the book changed, since save() writes to whatever `selected` is by then.
     const bulkClearTerms = async () => {
         const sel = selectedList(); if (!sel.length) return;
         const total = sel.reduce((n, e) => n + (Array.isArray(e.key) ? e.key.length : 0), 0);
         if (!total) { toastr.info('The selected entries have no keywords.', 'Worlds Apart'); return; }
-        if (!await Popup.show.confirm(`Delete all ${total} keyword${total === 1 ? '' : 's'} from ${sel.length} selected ${sel.length === 1 ? 'entry' : 'entries'}?`, 'This is irreversible.')) return;
+        if (!await Popup.show.confirm(`Delete all ${total} keyword${total === 1 ? '' : 's'} from ${sel.length} selected ${sel.length === 1 ? 'entry' : 'entries'}?`, 'Undoable from the toast for 20 seconds.')) return;
+        const book = selected, before = sel.map(e => [e.uid, Array.isArray(e.key) ? [...e.key] : []]);
         applyBulk(e => e.key = []);
         suggest = null; if (scan) { rebuildScan(); sel.forEach(x => renderEntry(x)); }
-        toastr.success(`Deleted ${total} keyword${total === 1 ? '' : 's'}.`, 'Worlds Apart');
+        const undo = () => {
+            if (selected !== book) { toastr.warning(`That undo belongs to “${book}” — reopen it first.`, 'Worlds Apart'); return; }
+            let n = 0;
+            for (const [uid, keys] of before) { const e = data?.entries?.[uid]; if (!e) continue; e.key = keys; n += keys.length; }
+            save(); suggest = null; if (scan) rebuildScan(); renderExplorer();
+            toastr.success(`Restored ${n} keyword${n === 1 ? '' : 's'}.`, 'Worlds Apart');
+        };
+        toastr.success(`Deleted ${total} keyword${total === 1 ? '' : 's'} — click to undo.`, 'Worlds Apart', { timeOut: 20000, extendedTimeOut: 10000, onclick: undo });
     };
     const renderBulkBar = () => {
         const wrap = document.createElement('div'); wrap.className = 'wa-bulk';
         const n = selectedEntries.size;
-        if (!n) return wrap;   // nothing selected -> empty element, no visual footprint
-        wrap.classList.add('wa-bulk-on');
         const mkBtn = (label, onClick, extra = '') => { const b = document.createElement('button'); b.type = 'button'; b.className = 'menu_button wa-bulk-btn ' + extra; b.textContent = label; b.addEventListener('click', onClick); return b; };
         const sep = () => { const s = document.createElement('span'); s.className = 'wa-bulk-sep'; return s; };
+        if (!n) {   // nothing selected -> the Reselect offer if a bulk action just spent one, else no footprint
+            if (!lastSel?.size) return wrap;
+            wrap.classList.add('wa-bulk-on');
+            const note = document.createElement('span'); note.className = 'wa-bulk-count'; note.textContent = 'Selection cleared';
+            const drop = document.createElement('i'); drop.className = 'fa-solid fa-xmark wa-undo-dismiss'; drop.title = 'Dismiss';
+            drop.addEventListener('click', () => { lastSel = null; refreshBulkBar(); });
+            wrap.append(note, mkBtn(`Reselect ${lastSel.size}`, () => {
+                for (const uid of lastSel) if (data?.entries?.[uid]) selectedEntries.add(uid);   // skip anything deleted since
+                lastSel = null; syncSelCheckboxes();
+            }), drop);
+            return wrap;
+        }
+        wrap.classList.add('wa-bulk-on');
         const all = Object.values(data?.entries ?? {}).filter(filterMatch);   // select-all targets the visible (filtered) set
         const count = document.createElement('span'); count.className = 'wa-bulk-count'; count.textContent = `${n} selected`;
         // "Set… ▾" opens a hierarchical menu covering every per-entry field (the gear tray + mode). Leaves
@@ -461,10 +495,11 @@ export async function lorebookStudio(preferredBook = null) {
         const anyDisabled = Object.values(data?.entries ?? {}).some(e => selectedEntries.has(e.uid) && e.disable);
         wrap.append(
             count,
-            mkBtn(n === all.length ? 'Select none' : 'Select all', () => { n === all.length ? selectedEntries.clear() : all.forEach(e => selectedEntries.add(e.uid)); syncSelCheckboxes(); }),
+            mkBtn(n === all.length ? 'Select none' : 'Select all', () => { if (n === all.length) consumeSelection(); else { lastSel = null; all.forEach(e => selectedEntries.add(e.uid)); syncSelCheckboxes(); } }),
             // The toggle above only clears once everything visible is ticked; a partial selection needs its
-            // own way out, and clearing by unticking N boxes is not one.
-            ...(n === all.length ? [] : [mkBtn('Clear', () => { selectedEntries.clear(); syncSelCheckboxes(); })]),
+            // own way out, and clearing by unticking N boxes is not one. Both clears go through
+            // consumeSelection, so an accidental one is a Reselect away.
+            ...(n === all.length ? [] : [mkBtn('Clear', consumeSelection)]),
             sep(),
             mkBtn(anyDisabled ? 'Enable' : 'Disable', () => { applyBulk(e => e.disable = !anyDisabled); refreshBulkBar(); }),
             addTermBtn,
@@ -684,7 +719,9 @@ export async function lorebookStudio(preferredBook = null) {
             const nv = inp.value.trim();
             if (ok && nv && nv !== oldKey && Array.isArray(e.key)) {
                 const idx = e.key.indexOf(oldKey);
-                if (idx >= 0) { if (hasKey(e, nv)) e.key.splice(idx, 1); else e.key[idx] = nv; save(); }
+                // The dupe test has to skip the key being edited, or a capitalisation fix ("bob" → "Bob")
+                // collides with itself and merges the key away instead of rewriting it.
+                if (idx >= 0) { if (e.key.some((k, i) => i !== idx && kwNorm(k) === kwNorm(nv))) e.key.splice(idx, 1); else e.key[idx] = nv; save(); }
             }
             renderEntry(e);
         };
@@ -694,8 +731,9 @@ export async function lorebookStudio(preferredBook = null) {
     };
 
     // Right-click a keyword chip → book-wide ops on that term (case-insensitive, matching core's default
-    // scan). "Delete all" / "Replace all" sweep every entry's primary keys; "Ignore" is the existing
-    // per-book whitelist toggle. ponytail: primary keys only (keysecondary isn't surfaced in the Studio).
+    // scan). "Delete all" / "Replace all" / "Add variant" sweep every entry's primary keys; "Ignore" is
+    // the existing per-book whitelist toggle. ponytail: primary keys only (keysecondary isn't surfaced
+    // in the Studio).
     const kwNorm = k => String(k).toLowerCase().trim();
     const kwHits = key => { const n = kwNorm(key); return Object.values(data.entries).filter(e => Array.isArray(e.key) && e.key.some(k => kwNorm(k) === n)); };
     const deleteKeyEverywhere = async key => {
@@ -707,15 +745,33 @@ export async function lorebookStudio(preferredBook = null) {
     };
     const replaceKeyEverywhere = async key => {
         const next = (await Popup.show.input('Replace keyword', `Replace “${key}” across all entries with:`, key))?.trim();
-        if (!next || kwNorm(next) === kwNorm(key)) return;
+        if (!next || next === key) return;   // exact-match only: a case-only rewrite is a real edit, not a no-op
         const n = kwNorm(key), nn = kwNorm(next); let touched = 0;
         for (const e of kwHits(key)) {
             const idx = e.key.findIndex(k => kwNorm(k) === n);
             if (idx < 0) continue;
-            if (e.key.some(k => kwNorm(k) === nn)) e.key.splice(idx, 1); else e.key[idx] = next;   // dedupe if the target key already lives here
+            // dedupe if the target key already lives here — but not against the key being replaced, which
+            // is what a capitalisation fix would otherwise collide with
+            if (e.key.some((k, i) => i !== idx && kwNorm(k) === nn)) e.key.splice(idx, 1); else e.key[idx] = next;
             touched++;
         }
         if (touched) { save(); renderExplorer(); toastr.success(`Replaced “${key}” → “${next}” in ${touched} ${touched === 1 ? 'entry' : 'entries'}.`, 'Worlds Apart'); }
+    };
+    // Adds a SECOND term beside the clicked one, on the entries that already carry it — the alias case
+    // ("Marjorie" is tagged, "Marjorie Jones" should be too). Same hasKey the ➕ and bulkAddTerm use, so
+    // an entry that already has the variant is skipped rather than given a duplicate. No rescan, for
+    // bulkAddTerm's reason: a new key changes no entry's text.
+    const addVariantEverywhere = async key => {
+        const hits = kwHits(key);
+        const raw = await Popup.show.input('Add variant', `Keyword to add to the ${hits.length} ${hits.length === 1 ? 'entry' : 'entries'} keyed “${key}”:`);
+        const term = String(raw ?? '').trim();
+        if (!term) return;
+        let added = 0;
+        for (const e of hits) if (!hasKey(e, term)) { e.key.push(term); added++; }
+        if (added) { save(); renderExplorer(); }
+        toastr[added ? 'success' : 'info'](added
+            ? `“${term}” added to ${added} ${added === 1 ? 'entry' : 'entries'} keyed “${key}”.`
+            : `Every entry keyed “${key}” already has “${term}”.`, 'Worlds Apart');
     };
     const toggleIgnore = key => { ignoreSet.has(key) ? ignoreSet.delete(key) : ignoreSet.add(key); persistIgnore(); afterIgnoreChange([key]); };
     // Studio context menus mount in this popup's <dialog> so they stack above the modal (module-scope
@@ -724,6 +780,7 @@ export async function lorebookStudio(preferredBook = null) {
     const showKwMenu = (key, x, y) => showCtxMenu([
         { label: `Delete all (${kwHits(key).length})`, fn: () => deleteKeyEverywhere(key), danger: true },
         { label: 'Replace all…', fn: () => replaceKeyEverywhere(key) },
+        { label: 'Add variant…', fn: () => addVariantEverywhere(key) },
         { label: ignoreSet.has(key) ? 'Un-ignore' : 'Ignore', fn: () => toggleIgnore(key) },
     ], x, y, ctxMount());
     const showEntryMenu = (e, x, y) => showCtxMenu([
@@ -763,7 +820,9 @@ export async function lorebookStudio(preferredBook = null) {
             }
             selAnchorUid = e.uid;
         });
-        selBox.addEventListener('change', () => { selBox.checked ? selectedEntries.add(e.uid) : selectedEntries.delete(e.uid); refreshBulkBar(); });
+        // Building a new selection by hand retires the Reselect offer — it belongs to the set that was
+        // spent, and restoring it into a fresh one is never what was meant.
+        selBox.addEventListener('change', () => { lastSel = null; selBox.checked ? selectedEntries.add(e.uid) : selectedEntries.delete(e.uid); refreshBulkBar(); });
         const chev = document.createElement('i');
         chev.className = 'fa-solid fa-chevron-right wa-chevron' + (open ? ' wa-open' : '');
         chev.title = (open ? 'Collapse entry' : 'Expand entry') + ' — shift-click for all entries';
@@ -796,6 +855,27 @@ export async function lorebookStudio(preferredBook = null) {
         title.title = keyCount ? `Keywords (${keyCount}): ${e.key.join(', ')}` : 'No keywords';
         // The title line toggles collapse, so renaming needs its own control: pencil -> inline edit of
         // the comment (stopPropagation so it doesn't expand). Blank comment falls back to keys/uid.
+        // Near-duplicate marker, from the audit scan. Entry-level rather than key-level, so it rides the
+        // title instead of the Cleanup list — and it is advisory: it says "these two say the same thing,
+        // pick one", never which one. Absent until an audit has run, like every other scan-derived mark.
+        const twins = scan?.dupes?.get(e.uid);
+        const dupMark = twins?.length ? (() => {
+            const dup = document.createElement('i');
+            dup.className = 'fa-solid fa-clone wa-tool wa-badge';
+            if (twins.length > 1) dup.dataset.badge = String(twins.length);
+            dup.title = 'Near-duplicate of:\n' + twins.map(t =>
+                `${Math.round(t.sim * 100)}% — ${t.title || `UID ${t.uid}`}${t.disabled ? ' (disabled)' : ''}`).join('\n');
+            // Same scroll-and-flash the duplicate action uses, so "show me the twin" behaves the way
+            // "show me the copy I just made" already does.
+            dup.addEventListener('click', ev => {
+                ev.stopPropagation();
+                const row = rowEls.get(twins[0].uid);
+                if (!row) return;
+                row.scrollIntoView({ block: 'center', behavior: 'smooth' });
+                row.classList.add('wa-flash'); setTimeout(() => row.classList.remove('wa-flash'), 1200);
+            });
+            return dup;
+        })() : null;
         const pencil = document.createElement('i'); pencil.className = 'fa-solid fa-pencil wa-tool wa-title-edit'; pencil.title = 'Rename entry';
         pencil.addEventListener('click', ev => {
             ev.stopPropagation();
@@ -824,7 +904,7 @@ export async function lorebookStudio(preferredBook = null) {
         if (cooldown > 0) metaTxt += ` · cd ${cooldown}`;
         meta.textContent = metaTxt;
         meta.title = `trigger probability ${e.useProbability !== false ? prob : 100}% · delay ${delay} · cooldown ${cooldown} (messages)`;
-        h.append(selBox, chev, mode, title, pencil, meta);
+        h.append(selBox, chev, mode, title, ...(dupMark ? [dupMark] : []), pencil, meta);
         // Collapsed-line badge: how many keys the last scan flagged, so problems show without expanding.
         // Tinted by the most severe flag for glance-triage; unattested-only stays neutral, since it is
         // low-signal (on a hand-authored book ~90% of those are deliberate aliases).
@@ -975,7 +1055,10 @@ export async function lorebookStudio(preferredBook = null) {
             autosize();
         });
         full.addEventListener('input', autosize);
-        full.addEventListener('blur', () => { if (full.value !== String(e.content ?? '')) { e.content = full.value; save(); preview.textContent = firstLine(e); } });
+        // Editing the text changes the corpus the ranker was built from, so the next ⚡ has to rebuild —
+        // otherwise it scores the edited entry against the document frequencies of the text it replaced.
+        // The scan is left alone on purpose (see above): its colours are explicitly last-scan, not live.
+        full.addEventListener('blur', () => { if (full.value !== String(e.content ?? '')) { e.content = full.value; save(); suggest = null; preview.textContent = firstLine(e); } });
         fullWrap.append(popBtn, full);
         const syncText = () => { const t = expanded.has(e.uid); tchev.classList.toggle('wa-open', t); preview.style.display = t ? 'none' : ''; fullWrap.style.display = t ? '' : 'none'; if (t) autosize(); };
         thead.addEventListener('click', () => { expanded.has(e.uid) ? expanded.delete(e.uid) : expanded.add(e.uid); syncText(); });
@@ -1083,6 +1166,9 @@ export async function lorebookStudio(preferredBook = null) {
     };
     const delEntry = async e => {
         if (!await deleteWorldInfoEntry(data, e.uid)) return;   // shows its own confirm
+        // Drop the uid from the selection too: core hands freed uids back out (getFreeWorldEntryUid), so a
+        // uid left behind here would re-point at whatever entry is created next, pre-selected and unnoticed.
+        selectedEntries.delete(e.uid); lastSel?.delete(e.uid);
         save(); suggest = null; if (scan) rebuildScan(); sugg.delete(e.uid); rowEls.delete(e.uid); renderExplorer();
     };
     // Pick a target lorebook (any book but the open one) via a select in a confirm popup. null = cancelled.
@@ -1119,7 +1205,7 @@ export async function lorebookStudio(preferredBook = null) {
         if (deleteOriginal) {
             // Only drop what actually landed in the target. deleteWIOriginalDataValue keeps embedded-book
             // originalData in sync (as core's move does); the entries stay in the Studio's `data` until here.
-            for (const e of copied) { deleteWIOriginalDataValue(data, String(e.uid)); delete data.entries[e.uid]; sugg.delete(e.uid); rowEls.delete(e.uid); selectedEntries.delete(e.uid); }
+            for (const e of copied) { deleteWIOriginalDataValue(data, String(e.uid)); delete data.entries[e.uid]; sugg.delete(e.uid); rowEls.delete(e.uid); selectedEntries.delete(e.uid); lastSel?.delete(e.uid); }
             save(); suggest = null; if (scan) rebuildScan(); renderExplorer();
         }
         toastr.success(`${deleteOriginal ? 'Moved' : 'Copied'} ${copied.length} to “${target}”.`, 'Worlds Apart');
@@ -1260,7 +1346,7 @@ export async function lorebookStudio(preferredBook = null) {
         }
         if (wasOpen) {
             selected = [...world_names].sort((a, b) => a.localeCompare(b)).find(n => !names.includes(n)) ?? null;
-            data = null; scan = null; suggest = null; entryOpen.clear(); expanded.clear(); tall.clear(); advOpen.clear(); sugg.clear(); selectedEntries.clear();
+            data = null; scan = null; suggest = null; entryOpen.clear(); expanded.clear(); tall.clear(); advOpen.clear(); sugg.clear(); selectedEntries.clear(); lastSel = null;
         }
         dirty = false;
         if (undoTimer) clearTimeout(undoTimer);
@@ -2075,7 +2161,7 @@ export async function lorebookStudio(preferredBook = null) {
 
     const openBook = async name => {
         if (dirty && selected) { reloadEditor(selected); dirty = false; }   // refresh the outgoing book's editor
-        selected = name; loadSortView(name); entryOpen.clear(); expanded.clear(); tall.clear(); advOpen.clear(); sugg.clear(); selectedEntries.clear(); selAnchorUid = null; suggest = null; scan = null; clearChatScan();   // scan is on-demand; chat counts belong to a (book, chat) pair
+        selected = name; loadSortView(name); entryOpen.clear(); expanded.clear(); tall.clear(); advOpen.clear(); sugg.clear(); selectedEntries.clear(); lastSel = null; selAnchorUid = null; suggest = null; scan = null; clearChatScan();   // scan is on-demand; chat counts belong to a (book, chat) pair
         explorer.innerHTML = '<div style="opacity:0.6;padding:8px;">Loading…</div>'; explorer.append(closeBtn);   // same re-adopt as the no-book branch
         renderBooks();
         data = await loadWorldInfo(name);
@@ -2188,7 +2274,7 @@ export async function lorebookStudio(preferredBook = null) {
         const claimed = ev.defaultPrevented;
         ev.preventDefault();
         if (claimed) return;
-        if (selectedEntries.size) { selectedEntries.clear(); syncSelCheckboxes(); }
+        consumeSelection();   // recoverable from the bar, same as any other clear
     });
 
     const pop = new Popup(root, POPUP_TYPE.TEXT, '', { wide: true, okButton: false, allowVerticalScrolling: false });
