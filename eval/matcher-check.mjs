@@ -19,6 +19,13 @@ eq(countKey('Jubilee', 'Jubilee met Jubilee', false, true), 2, 'whole-word count
 eq(countKey('cat', 'cat cats scatter', false, false), 3, 'substring counts every occurrence');
 eq(countKey('cat', 'cat cats scatter', false, true), 1, 'whole-word counts only the standalone');
 eq(countKey('v2', 'the v2 model', false, true), 1, 'single token with a digit, whole-word');
+// Whole-word boundaries are Unicode, not \w. With \w every non-ASCII letter reads as a boundary, so
+// whole-word matching silently degraded to substring for every script but English.
+eq(countKey('caf', 'the caf\u00e9 was busy', false, true), 0, 'whole-word: ASCII prefix does not match into an accented word');
+eq(countKey('caf\u00e9', 'the caf\u00e9 was busy', false, true), 1, 'whole-word: the accented word itself still matches');
+eq(countKey('\u041c\u0430\u0440\u0438', '\u0432\u0441\u0442\u0440\u0435\u0442\u0438\u043b \u041c\u0430\u0440\u0438\u044e', false, true), 0, 'whole-word: Cyrillic prefix does not leak');
+eq(countKey('\u041c\u0430\u0440\u0438\u044e', '\u0432\u0441\u0442\u0440\u0435\u0442\u0438\u043b \u041c\u0430\u0440\u0438\u044e', false, true), 1, 'whole-word: the Cyrillic word itself matches');
+eq(countKey('caf', 'the caf\u00e9 was busy', false, false), 1, 'substring mode is unaffected');
 eq(countKey('hot tub', 'in the hot tub', false, true), 1, 'multi-word key falls back to substring');
 eq(countKey('Kyle', 'kyle KYLE Kyle', false, false), 3, 'case-insensitive by default');
 eq(countKey('Kyle', 'kyle KYLE', true, false), 0, 'case-sensitive when asked');

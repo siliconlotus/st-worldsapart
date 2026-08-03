@@ -14,7 +14,7 @@
 // Isomorphic like ranking.mjs: no DOM, no ST imports. Entry point is evaluateSmartKey();
 // countKey() in ranking.mjs routes `?` keys here.
 
-import { escapeRegex, isRegexKey } from './ranking.mjs';
+import { escapeRegex, isRegexKey, WORD_CHAR } from './ranking.mjs';
 // The literal matcher and its text fold live under plugin/ so the server can use them too — one copy, or
 // the browser and the server would silently disagree about what a key matches. Re-exported because
 // ranking.mjs, keyword-tools.mjs and studio.mjs all import them from here.
@@ -204,10 +204,11 @@ export function evaluate(node, text, acHits) {
                 if (!node.isExact && !node.isCaseSensitive) return { matched: true, scoreBoost: node.weight };
             }
             let pattern = escapeRegex(node.value);
-            // Same lookaround boundary as countKey's whole-word path (see ranking.mjs) — \b would
-            // make punctuation-edged terms like =c++ unmatchable.
-            if (node.isExact) pattern = `(?<!\\w)${pattern}(?!\\w)`;
-            const hit = new RegExp(pattern, node.isCaseSensitive ? '' : 'i').test(text);
+            // Same lookaround boundary as countKey's whole-word path — \b would make punctuation-edged
+            // terms like =c++ unmatchable. Shares WORD_CHAR with countKey rather than restating it:
+            // two boundary definitions is two matchers, which is exactly what CLAUDE.md forbids.
+            if (node.isExact) pattern = `(?<!${WORD_CHAR})${pattern}(?!${WORD_CHAR})`;
+            const hit = new RegExp(pattern, node.isCaseSensitive ? 'u' : 'iu').test(text);
             return { matched: hit, scoreBoost: hit ? node.weight : 0 };
         }
         case 'NOT': {

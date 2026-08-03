@@ -13,6 +13,25 @@ import { cachedCount, evaluateSmartKey, fold, normalizeOrthography, primeScan } 
 /** Escape a string for literal use in a RegExp (same as ST's utils.escapeRegex; inlined to stay ST-free, exported for keyword-core). */
 export function escapeRegex(str) { return String(str).replace(/[.*+?^${}()|[\]\\]/g, '\\$&'); }
 
+/**
+ * The character class whole-word matching treats as "inside a word". NOT `\w`, which is ASCII-only in
+ * JS and silently turns whole-word matching into substring matching for every other script: under `\w`
+ * the key `caf` whole-word-matches `café` and `Мари` matches `Марию`, because every non-ASCII letter
+ * reads as a boundary. The ASCII control behaves correctly, which is why it goes unnoticed — `Jubile`
+ * does not match `Jubilee`.
+ *
+ * Requires the `u` flag wherever it is used; escapeRegex above is already `u`-safe (it does not emit
+ * the `\-` identity escape that core's version does, which `u` rejects).
+ *
+ * KNOWN LIMIT: scripts written without spaces. In CJK every neighbour is a letter, so a whole-word key
+ * matches only in isolation — the mirror of the old bug, where every CJK substring matched. There is no
+ * word boundary to find, so whole-word matching is not meaningful there; it defaults off.
+ *
+ * DIVERGES FROM CORE, which keeps `\W` (world-info.js matchKeys). WA is the stricter side, so the audit
+ * under-reports rather than over-reports against what core fires.
+ */
+export const WORD_CHAR = '[\\p{L}\\p{N}_]';
+
 /** A /pattern/flags regex key, exactly as countKey routes them. THE regex-key test — the audit and
  * the smartkeys registry import this so all three can never disagree on what counts as a regex key. */
 export const REGEX_KEY_RE = /^\/(.+)\/([gimsuy]*)$/;
@@ -347,8 +366,8 @@ export function countKey(key, text, caseSensitive, wholeWords, scope) {
             // Core's boundary is "not flanked by a word char" — (?:^|\W)…(?:$|\W) — which,
             // unlike \b, still matches keys that start or end with punctuation ("+5", "v2"
             // in "v2s" would not, but "v2" alone does). Lookaround keeps it non-consuming
-            // so adjacent occurrences are all counted.
-            const regex = new RegExp(`(?<!\\w)${escapeRegex(needle)}(?!\\w)`, 'g');
+            // so adjacent occurrences are all counted. WORD_CHAR rather than \w: see above.
+            const regex = new RegExp(`(?<!${WORD_CHAR})${escapeRegex(needle)}(?!${WORD_CHAR})`, 'gu');
             return (hay.match(regex) ?? []).length;
         } catch {
             return 0;
