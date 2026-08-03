@@ -19,7 +19,7 @@ import { ensureStudioStyle, makeSortControl, showCtxMenu, showEntryText, wiGlyph
 import { SORT_FNS, normPresentation, reconcileTiers, tierRank, wiTitleOf } from './sort.mjs';
 import { buildKeyPruneScan, llmKeyCandidates, STUDIO_PRUNE_OPTS, STUDIO_SUGGEST_OPTS } from './keyword-tools.mjs';
 import { buildKeySuggest, classifyLlmCand } from './keyword-core.mjs';
-import { buildAutomaton, scanAutomaton, fold } from './smartkeys.mjs';
+import { buildAutomaton, scanAutomaton, fold, validateSmartKey } from './smartkeys.mjs';
 
 const WA_GREEN = '#7bbf6a';   // "no prune" — a keyword the scan doesn't flag
 
@@ -405,7 +405,7 @@ export async function lorebookStudio(preferredBook = null) {
     const bulkAddTerm = async () => {
         const raw = await Popup.show.input('Add term — selected entries', 'Keyword to add to every selected entry:');
         const term = String(raw ?? '').trim();
-        if (!term) return;
+        if (!term || !keyWriteOk(term)) return;
         let added = 0;
         const n = selectedEntries.size;   // applyBulk spends the selection, so count before it runs
         applyBulk(e => { if (!hasKey(e, term)) { if (!Array.isArray(e.key)) e.key = []; e.key.push(term); added++; } });
@@ -539,6 +539,27 @@ export async function lorebookStudio(preferredBook = null) {
     const ensureSuggest = () => suggest ?? (suggest = buildKeySuggest(data,
         { ...suggestOpts, bgDocs: (getContext().chat ?? []).map(m => String(m?.mes ?? '')).filter(Boolean) }));
     const hasKey = (e, term) => Array.isArray(e.key) && e.key.some(k => String(k).toLowerCase().trim() === term.toLowerCase().trim());
+
+    /**
+     * The gate every path that writes a key goes through. An ERROR refuses the write and says why; a
+     * WARNING lets it through and says why. Both come from validateSmartKey, so what the Studio blocks
+     * and what the audit flags cannot drift apart — one definition, two surfaces.
+     *
+     * Plain and regex keys get no opinion, so this is inert for everything but `?` queries.
+     *
+     * Refusing rather than warning on the error tier is the point: these are queries that cannot do
+     * what their author meant under any text, and the alternative — saving it and flagging it later —
+     * is how a key ends up silently never firing. The author is right here, right now, and can fix it.
+     *
+     * @returns {boolean} whether the write may proceed
+     */
+    const keyWriteOk = term => {
+        const problems = validateSmartKey(term);
+        const err = problems.find(p => p.severity === 'error');
+        if (err) { toastr.warning(err.message, 'Worlds Apart', { timeOut: 8000 }); return false; }
+        for (const w of problems) toastr.info(w.message, 'Worlds Apart', { timeOut: 6000 });
+        return true;
+    };
 
     const tool = (cls, on, title, onClick) => {
         const i = document.createElement('i');
@@ -717,7 +738,7 @@ export async function lorebookStudio(preferredBook = null) {
         const commit = ok => {
             if (done) return; done = true;
             const nv = inp.value.trim();
-            if (ok && nv && nv !== oldKey && Array.isArray(e.key)) {
+            if (ok && nv && nv !== oldKey && Array.isArray(e.key) && keyWriteOk(nv)) {
                 const idx = e.key.indexOf(oldKey);
                 // The dupe test has to skip the key being edited, or a capitalisation fix ("bob" → "Bob")
                 // collides with itself and merges the key away instead of rewriting it.
@@ -746,6 +767,7 @@ export async function lorebookStudio(preferredBook = null) {
     const replaceKeyEverywhere = async key => {
         const next = (await Popup.show.input('Replace keyword', `Replace “${key}” across all entries with:`, key))?.trim();
         if (!next || next === key) return;   // exact-match only: a case-only rewrite is a real edit, not a no-op
+        if (!keyWriteOk(next)) return;
         const n = kwNorm(key), nn = kwNorm(next); let touched = 0;
         for (const e of kwHits(key)) {
             const idx = e.key.findIndex(k => kwNorm(k) === n);
@@ -765,7 +787,7 @@ export async function lorebookStudio(preferredBook = null) {
         const hits = kwHits(key);
         const raw = await Popup.show.input('Add variant', `Keyword to add to the ${hits.length} ${hits.length === 1 ? 'entry' : 'entries'} keyed “${key}”:`);
         const term = String(raw ?? '').trim();
-        if (!term) return;
+        if (!term || !keyWriteOk(term)) return;
         let added = 0;
         for (const e of hits) if (!hasKey(e, term)) { e.key.push(term); added++; }
         if (added) { save(); renderExplorer(); }
@@ -1021,7 +1043,7 @@ export async function lorebookStudio(preferredBook = null) {
         add.addEventListener('click', () => {
             const inp = document.createElement('input'); inp.type = 'text'; inp.className = 'text_pole'; inp.placeholder = 'keyword'; inp.style.cssText = 'width:8em;margin:0;font-size:0.9em;';
             let done = false;
-            const commit = ok => { if (done) return; done = true; const nv = inp.value.trim(); if (ok && nv && !hasKey(e, nv)) { if (!Array.isArray(e.key)) e.key = []; e.key.push(nv); save(); } renderEntry(e); };
+            const commit = ok => { if (done) return; done = true; const nv = inp.value.trim(); if (ok && nv && !hasKey(e, nv) && keyWriteOk(nv)) { if (!Array.isArray(e.key)) e.key = []; e.key.push(nv); save(); } renderEntry(e); };
             inp.addEventListener('keydown', ev => { if (ev.key === 'Enter') { ev.preventDefault(); commit(true); } else if (ev.key === 'Escape') { ev.preventDefault(); commit(false); } });
             inp.addEventListener('blur', () => commit(true));
             add.replaceWith(inp); inp.focus();
