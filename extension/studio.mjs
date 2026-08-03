@@ -349,7 +349,7 @@ export async function lorebookStudio(preferredBook = null) {
     const bulkCopyTo = async () => { const l = selectedList(); consumeSelection(); await entriesToBook(l, false); };
     const bulkMoveTo = async () => { const l = selectedList(); consumeSelection(); await entriesToBook(l, true); };
     const bulkOrder = async (advanced = false) => {
-        const curOrder = presentationLabel();
+        const curOrder = presentationLabel(settings());
         const w = document.createElement('div'); w.style.textAlign = 'left';
         w.innerHTML = (advanced
             ? '<div style="display:flex;align-items:center;gap:8px;margin-bottom:10px;padding:7px 10px;border-radius:5px;background:#5a1f1f;border:1px solid #e06c6c;color:#ffd9d9;">'

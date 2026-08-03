@@ -1,8 +1,8 @@
 // sort.mjs — entry-ordering business logic: the field comparators (SORT_FNS), the tiered-grouping
 // definitions and tierRank, and the presentation-order vocabulary (labels + aliases). Pure — no DOM,
-// only settings() — so the prompt builder's insertion order can depend on it without reaching into a
-// UI module. The sort CONTROLS (the widgets that pick a sort) live in ui-widgets.mjs and import this.
-import { settings } from './state.mjs';
+// no imports at all — so the prompt builder's insertion order can depend on it without reaching into a
+// UI module, and eval/ can import it under node. The sort CONTROLS (the widgets that pick a sort) live
+// in ui-widgets.mjs and import this.
 
 /**
  * An entry's display name: its comment, or `UID n`.
@@ -48,18 +48,26 @@ export const tierRank = (e, cfg) => {
 // --- Shared sort vocabulary --------------------------------------------------------------------------
 // Pure entry-field comparators, reused by the Lorebook Studio (display order) AND the prompt builder
 // (insertion order). Parity with core's #world_info_sort_order set; each tie-breaks like core (secondary
-// = order desc, tertiary = uid asc). Deviations, both improvements: Title uses wiTitleOf so comment-less
-// entries still sort by a stable label; Trigger% treats unset probability as 100 (always-fires) not core's null→0.
+// = order desc, tertiary = uid asc). Deviations, both improvements: Title sorts comment-less entries to
+// one end rather than scattering them; Trigger% treats unset probability as 100 (always-fires) not core's null→0.
 const sortPrio = e => e.disable ? 2 : e.constant ? 0 : 1;   // constant → normal → disabled
 const sortSec = (a, b) => (Number(b.order) || 0) - (Number(a.order) || 0);
 const sortTer = (a, b) => a.uid - b.uid;
 const sortWith = primary => (a, b) => primary(a, b) || sortSec(a, b) || sortTer(a, b);
 const numAsc = f => (a, b) => (Number(a[f]) || 0) - (Number(b[f]) || 0);
+/**
+ * The SORT key for a title, which is not the DISPLAY name. An untitled entry displays as "UID 12" —
+ * honest — but sorting on that string files it among the U-words, scattered through the middle of the
+ * list. Sorting on the empty comment instead puts every untitled entry at one end: first ascending,
+ * last descending, since "" collates before everything.
+ */
+const titleKey = e => (e.comment ?? '').trim();
+
 export const SORT_FNS = {
     'priority':   sortWith((a, b) => sortPrio(a) - sortPrio(b)),
     'custom':     sortWith((a, b) => (a.displayIndex ?? 0) - (b.displayIndex ?? 0)),
-    'title-asc':  sortWith((a, b) => wiTitleOf(a).localeCompare(wiTitleOf(b))),
-    'title-desc': sortWith((a, b) => wiTitleOf(b).localeCompare(wiTitleOf(a))),
+    'title-asc':  sortWith((a, b) => titleKey(a).localeCompare(titleKey(b))),
+    'title-desc': sortWith((a, b) => titleKey(b).localeCompare(titleKey(a))),
     'tokens-asc': sortWith((a, b) => String(a.content ?? '').length - String(b.content ?? '').length),
     'tokens-desc':sortWith((a, b) => String(b.content ?? '').length - String(a.content ?? '').length),
     'depth-asc':  sortWith(numAsc('depth')),
@@ -93,5 +101,8 @@ export const PRESENTATION_ALIAS = { 'authored': 'order-asc', 'authored-inverse':
 export const normPresentation = k => PRESENTATION_ALIAS[k] ?? k ?? 'order-asc';
 // Human label for a presentation-order key (base sort only; relevance keys keep their own names).
 export const presentationBaseLabel = k => SORT_LABELS[normPresentation(k)] ?? { 'best-first': 'Most relevant first', 'best-last': 'Most relevant last' }[k] ?? k;
-// Combined label (base + tiered prefix) for the renumber dialog's "current sort order" line.
-export const presentationLabel = () => (settings().presentationTiered ? 'Tiered · ' : '') + presentationBaseLabel(settings().presentationOrder);
+// Combined label (base + tiered prefix) for the renumber dialog's "current sort order" line. Takes the
+// settings rather than importing them: this one convenience was the module's only tie to state.mjs, and
+// through it to ST — which cost the whole file its node-importability, and eval/ any coverage of the
+// comparators. Settings are injected by the caller here as everywhere else.
+export const presentationLabel = s => (s.presentationTiered ? 'Tiered · ' : '') + presentationBaseLabel(s.presentationOrder);
