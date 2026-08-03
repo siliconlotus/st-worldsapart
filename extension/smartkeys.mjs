@@ -5,6 +5,7 @@
 //   ? =cat                          = word boundary, ^ case-sensitive (combinable: ^=NASA)
 //   ? "moon mission" OR cosmonaut   quoted phrases, AND/OR/NOT/XOR, &&/||/!/-/+, (...) grouping
 //   ? fire::2.5                     ::weight scales the key's BM25 contribution (Midjourney's form)
+//   ? fire^2.5                      ^N is accepted as an alias — Lucene/Elasticsearch/Solr boost
 //   ? meeting 10:30                 a SINGLE colon is ordinary text -- times, verse refs, re:code and
 //                                   URLs need no quoting. Only :: introduces a weight.
 //   ? +fire +water                  Lucene's per-term required-marker; absorbed, since AND is implicit
@@ -76,11 +77,17 @@ export function tokenize(input) {
         // which is unavailable here — `^` is already the case-sensitivity flag, and that is worth more.
         //
         // Delimiter followed by non-digits stays part of the term (`fire::abc`), same as a lone colon.
+        //
+        // `^N` is accepted as an ALIAS. It is Lucene's boost, and Elasticsearch's query_string and Solr
+        // carry it too, so it is muscle memory worth not breaking. It cannot be confused with the `^`
+        // case-sensitivity flag, which is a PREFIX consumed before the value; this one is a postfix
+        // followed by digits. Measured collision surface across the books on disk: 0 keys contain `^`
+        // followed by a digit, and 0 in 367KB of scan text.
         if (m[2] !== undefined) {
-            const w = src.match(/^::(\d+(?:\.\d+)?)/); // quoted: weight sits after the close quote
+            const w = src.match(/^(?:::|\^)(\d+(?:\.\d+)?)/); // quoted: weight sits after the close quote
             if (w) { weight = parseFloat(w[1]); src = src.slice(w[0].length); }
         } else {
-            const w = value.match(/^(.+?)::(\d+(?:\.\d+)?)$/);
+            const w = value.match(/^(.+?)(?:::|\^)(\d+(?:\.\d+)?)$/);
             if (w) { value = w[1]; weight = parseFloat(w[2]); }
         }
         if (!value) continue;
@@ -236,12 +243,6 @@ export function validateSmartKey(raw) {
             out.push({
                 severity: 'warn', code: 'lucene-wildcard',
                 message: 'Wildcards (*) are not supported — the term is matched literally. Matching is substring by default, so “fir” already finds “confirm”; use a /regex/ key for anything more.',
-            });
-        }
-        if (/\^\d/.test(v)) {
-            out.push({
-                severity: 'warn', code: 'lucene-boost',
-                message: 'Weights use “::”, not “^” — try “term::2”. A leading ^ is the case-sensitivity flag.',
             });
         }
     }

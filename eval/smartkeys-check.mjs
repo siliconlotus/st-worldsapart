@@ -288,10 +288,25 @@ console.log('ok   terms score on weight x occurrences; OR sums');
     const codes = k => validateSmartKey(k).map(p => p.code).join(',');
     eq(codes('? fire~2'), 'lucene-fuzzy', 'fuzzy/proximity is named, not left to die as a literal');
     eq(codes('? fir*'), 'lucene-wildcard', 'so are wildcards');
-    eq(codes('? fire^2'), 'lucene-boost', 'and Lucene boost, which points at :: instead');
     eq(codes('? "*asses*"'), '', 'quoting exempts a deliberate asterisk');
     eq(codes('? "fire~2"'), '', '...and a deliberate tilde');
     eq(codes('? =^HOK::3'), '', 'the ^ FLAG is a prefix and is not a boost');
     eq(codes('? c++'), '', 'ordinary punctuation in a term is not Lucene syntax');
 }
 console.log('ok   unsupported Lucene syntax is named rather than silently dead');
+
+// ^N is accepted as an ALIAS for ::N — Lucene's boost, carried by Elasticsearch's query_string and
+// Solr, so it is muscle memory worth not breaking. It cannot collide with the ^ case-sensitivity flag,
+// which is a PREFIX consumed before the value; this is a postfix followed by digits. Measured across
+// the books on disk: 0 keys contain ^ followed by a digit.
+{
+    const T = q => tokenize(q).filter(t => t.type === 'TERM')
+        .map(t => `${t.value}@${t.weight}${t.isExact ? '=' : ''}${t.isCaseSensitive ? '^' : ''}`).join(' ');
+    eq(T('? fire^2'), T('? fire::2'), '^N and ::N are the same weight');
+    eq(T('? "hot tub"^2 party'), 'hot tub@2 party@1', '^N works after a quoted phrase');
+    eq(T('? =^HOK^3'), 'HOK@3=^', 'prefix flags and a postfix boost compose without ambiguity');
+    eq(T('? ^HOK'), 'HOK@1^', 'a bare prefix ^ is still only the case flag');
+    eq(T('? fire^abc'), 'fire^abc@1', 'delimiter followed by non-digits stays part of the term');
+    eq(countKey('? fire^2', 'fire fire', false, false), 4, '...and it reaches the score, x occurrences');
+}
+console.log('ok   ^N is accepted as a boost alias');
