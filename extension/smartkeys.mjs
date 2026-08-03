@@ -84,11 +84,16 @@ export function tokenize(input) {
 export function parse(tokens) {
     let i = 0;
     const peek = () => tokens[i];
+    // A binary operator with nothing on one side is a typo, not an instruction. Building the node
+    // anyway made the whole key dead — AND(x, null) can never match — so `? fire &` matched nothing
+    // at all rather than matching `fire`. Keep the side that exists; the Studio validator is what
+    // tells the author their key is malformed, rather than the matcher silently refusing to fire.
+    const bin = (type, left, right) => (left && right ? { type, left, right } : left ?? right);
     const parseOr = () => {
         let left = parseAnd();
         while (peek()?.type === 'OR' || peek()?.type === 'XOR') {
             const type = tokens[i++].type;
-            left = { type, left, right: parseAnd() };
+            left = bin(type, left, parseAnd());
         }
         return left;
     };
@@ -96,7 +101,7 @@ export function parse(tokens) {
         let left = parseUnary();
         while (peek() && (peek().type === 'AND' || peek().type === 'TERM' || peek().type === 'LPAREN' || peek().type === 'NOT')) {
             if (peek().type === 'AND') i++;
-            left = { type: 'AND', left, right: parseUnary() };
+            left = bin('AND', left, parseUnary());
         }
         return left;
     };
@@ -110,6 +115,11 @@ export function parse(tokens) {
         return parsePrimary();
     };
     const parsePrimary = () => {
+        // A binary operator in PREFIX position is Lucene's per-term marker, not an operator: `+fire`
+        // means "fire is required", which is already what an implicit AND says here. Skip it rather
+        // than treating it as a missing left operand — `? +fire +water` is the single most idiomatic
+        // Lucene form there is, and it matched nothing at all. Covers the same form after `(`.
+        while (peek() && (peek().type === 'AND' || peek().type === 'OR' || peek().type === 'XOR')) i++;
         const t = tokens[i++];
         if (!t) return null;
         if (t.type === 'LPAREN') {
@@ -117,7 +127,7 @@ export function parse(tokens) {
             if (peek()?.type === 'RPAREN') i++;
             return node;
         }
-        return t.type === 'TERM' ? t : null; // stray operator/RPAREN — drop
+        return t.type === 'TERM' ? t : null; // stray RPAREN — drop
     };
     return parseOr();
 }

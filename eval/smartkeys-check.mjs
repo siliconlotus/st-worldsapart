@@ -99,3 +99,25 @@ eq(countKey('? fire:3 XOR flood', 'a fire burns', false, false), 3, 'XOR still y
 const ast = parse(tokenize('? a (b OR c)'));
 eq(ast.type, 'AND', 'adjacent primaries get implicit AND');
 eq(evaluate(ast, 'a c').matched, true, 'evaluates the injected AND');
+
+// Malformed operator POSITIONS are typos, not instructions. Building the node anyway made the whole
+// key dead — AND(x, null) can never match — so the most idiomatic Lucene form of all, `+fire +water`,
+// matched nothing. A prefix binary operator is Lucene's per-term required-marker, which an implicit
+// AND already says; a dangling one keeps whichever side exists. The Studio validator is what tells
+// the author the key is malformed; the matcher's job is not to silently refuse to fire.
+{
+    const T = 'fire and water everywhere';
+    eq(matches('? +fire +water', T), true, 'leading + on every term (Lucene required-marker)');
+    eq(matches('? +fire', T), true, 'a single leading +');
+    eq(matches('? (+fire water)', T), true, 'leading + just inside a group');
+    eq(matches('? & fire', T), true, 'leading &-alias is absorbed');
+    eq(matches('? fire &', T), true, 'trailing operator keeps the left side');
+    eq(matches('? fire && && water', T), true, 'a doubled operator is not two operands');
+    eq(matches('? fire -', T), true, 'trailing negation keeps the left side');
+    // ...without making a malformed key match MORE than it should.
+    eq(matches('? +fire +zebra', T), false, 'a required term that is absent still fails');
+    eq(matches('? +fire -water', T), false, 'negation still applies alongside a required-marker');
+    eq(countKey('? fire | water', T, false, false), 1, 'genuine OR is untouched');
+    eq(countKey('? fire water', T, false, false), 2, 'genuine implicit AND is untouched');
+}
+console.log('ok   malformed operator positions degrade to no-ops, not dead keys');
