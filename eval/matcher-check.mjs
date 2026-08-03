@@ -52,6 +52,10 @@ eq(countKey('a...b', 'a…b', false, false), 1, 'ellipsis normalises');
 eq(countKey('a b', 'a b', false, false), 1, 'non-breaking space normalises');
 // A hyphen is NOT folded to a space: it can carry meaning, and the haystack is the wrong place to lose it.
 eq(countKey('three-inch', 'three inch', false, false), 0, 'hyphen is not folded to a space');
+// NFC: precomposed and decomposed spellings of one name are the same name, and look identical on screen.
+eq(countKey('Jos\u00e9', `Jose\u0301 Sommers`, false, false), 1, 'decomposed text matches a precomposed key');
+eq(countKey(`Jose\u0301`, 'Jos\u00e9 Sommers', false, false), 1, 'precomposed text matches a decomposed key');
+eq(countKey(`Jose\u0301`, `Jose\u0301 Sommers`, false, false), 1, 'decomposed both sides still matches');
 // Counting still works across repeats and mixed forms in one text.
 eq(countKey("Cap'n", `Cap'n and Cap${CURLY}n and Capʼn`, false, false), 3, 'mixed forms all counted');
 console.log('ok   apostrophe normalisation: straight/curly interchangeable, orthographic variants folded, meaning-bearing characters untouched');

@@ -12,6 +12,10 @@
 const APOSTROPHES = /[‘’ʼ´`′]/g;
 /** Typographic double quotes. A key field takes the straight one; prose arrives typeset. */
 const DOUBLE_QUOTES = /[“”]/g;
+/** Combining marks — the signal that a string may be decomposed (NFD). Guarding the NFC pass on this
+ *  makes it free where it is not needed: the test measures 0.000 ms on a 15 KB window with no marks,
+ *  against 0.019 ms to compose unconditionally. It only costs when it has something to do. */
+const COMBINING = /[̀-ͯ᪰-᫿᷀-᷿⃐-⃿︠-︯]/;
 
 /**
  * Normalises ORTHOGRAPHY without touching case: the same character in a different encoding.
@@ -31,18 +35,29 @@ const DOUBLE_QUOTES = /[“”]/g;
  * it into the scan text erases it for every key at once, and no flag can ask for it back, because the
  * damage was done to the haystack. Case gets away with it only because `^` exists to opt out.
  *
- * NOT included, measured absent from that corpus: combining diacritics (0, and the text is already
- * NFC), zero-width characters (0), ligatures (0), U+2212 minus (0), angle and low quotes (0).
+ * NFC composition is the same argument in its purest form — "José" and "José" are one name in
+ * two encodings, and the difference is invisible on screen, so a mismatch has nothing to surface it.
+ * Measured absent from this corpus (0 non-NFC keys of 46,140, 0 in the chat), but it is included anyway
+ * because the exposure is asymmetric: text pasted from another source or typed on another input method
+ * arrives decomposed, and the guard above makes the check cost nothing when it is not needed.
+ *
+ * NOT included, measured absent: zero-width characters (0), ligatures (0), U+2212 minus (0), angle and
+ * low quotes (0), fullwidth forms (14,367 in chat but all punctuation — a key is a word, and the
+ * fullwidth comma is already a non-word character, so it makes no difference to a match).
  */
-export const normalizeOrthography = s => String(s ?? '')
-    .replace(APOSTROPHES, "'")
-    .replace(DOUBLE_QUOTES, '"')
-    // An em-dash's ASCII form is TWO hyphens; an en-dash's is one. They must not collapse together —
-    // the em-dash separates clauses and the en-dash joins, so a key meaning one must not match the other.
-    .replace(/—/g, '--')
-    .replace(/–/g, '-')
-    .replace(/…/g, '...')
-    .replace(/ /g, ' ');
+export const normalizeOrthography = s => {
+    s = String(s ?? '');
+    if (COMBINING.test(s)) s = s.normalize('NFC');
+    return s
+        .replace(APOSTROPHES, "'")
+        .replace(DOUBLE_QUOTES, '"')
+        // An em-dash's ASCII form is TWO hyphens; an en-dash's is one. They must not collapse together —
+        // the em-dash separates clauses and the en-dash joins, so a key meaning one must not match the other.
+        .replace(/—/g, '--')
+        .replace(/–/g, '-')
+        .replace(/…/g, '...')
+        .replace(/ /g, ' ');
+};
 
 /**
  * The one folding used for every match: orthography-normalised and case-folded.
