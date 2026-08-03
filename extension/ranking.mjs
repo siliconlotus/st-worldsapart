@@ -313,19 +313,18 @@ const foldedHay = (text, caseSensitive) => {
  *
  * The false positive is the worse half, and `=`-flagged SmartKey terms inherit it, sharing WORD_CHAR.
  * Emphasis around a WHOLE word is fine in every mode: "*sister*," matches `sister` exactly as it should.
- * This only bites mid-word.
+ * This only bites mid-word, and mid-word emphasis turned up rarely in the sample prose available — one
+ * author's chats, so that is a weak reason to relax about it rather than evidence it is uncommon.
  *
- * Not fixed, and every option is worse. Making `*` a word character kills the working case — a
+ * Not fixed, because every option is worse. Making `*` a word character kills the working case — a
  * standalone "*sister*" would then be bounded by word characters and stop matching, so the two cases
- * want opposite answers from the same character. Stripping markup from the haystack recovers the misses
- * (measured: +0.04% of matches, 15 keys of 12,601) but destroys the asterisk as CONTENT — M*A*S*H,
- * *B*witched, and the emphasis-markup keys a real book uses to disambiguate Roman currency. Scanning
- * both a raw and a stripped copy fixes only the miss direction, not the false boundary, at two scan
- * passes and a rule for combining the counts.
+ * want opposite answers from the same character. Stripping markup from the haystack destroys the
+ * asterisk as CONTENT: M*A*S*H, *B*witched, and the emphasis-markup keys a real book uses to
+ * disambiguate Roman currency. Scanning both a raw and a stripped copy fixes only the miss direction,
+ * not the false boundary, at two scan passes and a rule for combining the counts.
  *
  * The principled fix is to scan the RENDERED text rather than the source, since that is the only thing
- * which distinguishes markup from content. Much larger than it looks — core scans raw too — and at
- * 0.04% it does not pay for itself.
+ * which distinguishes markup from content. Much larger than it looks — core scans raw too.
  *
  * @param {string} key Keyword, /regex/flags, or a `?` SmartKey query
  * @param {string} text Text to search
