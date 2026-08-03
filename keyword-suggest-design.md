@@ -115,24 +115,27 @@ number of candidates offered, which `cap` governs as a display budget.
 
 ### Two axes, and only one of them gates
 
-- **Referent persistence** — does the thing keep mattering. The Grove's sectional: yes. The specific
-  meal, the one-off restaurant's bathroom: no.
-- **Discourse recurrence** — do people type the words. The Porsche: yes. The sectional: no.
+- **Referent persistence** — does the thing keep mattering.
+- **Discourse recurrence** — do people type the words.
 
-The Porsche has both, the sectional only the first, the meal neither. **Only discourse recurrence gates
-seeds.** Referent persistence enters as evidence about *where* the seed is: a cluster of
-persistent-but-undiscussed detail is the signature of a continuity entry, and its seed is the container
-that owns the detail — the Grove, not the sectional. Foxbridge's "witch levels" has the same shape
-(thesis projects, five disciplines, none of them keys) and its human keys are all container terms:
-witch, practitioner, qualification, specialty.
+Both are continua, not tests. The Grove sits high on both; the Cloud sofa lower on the second but not
+at zero, since it is a named object people do occasionally mention; the mudroom's slate-look tile at
+zero, present only so the floor does not change every turn. **Only discourse recurrence gates seeds**,
+and what it gates on is whether the thing has a form people use to refer to it — which is why an
+entry's descriptive material is not key material even when its subject is. Referent persistence enters
+as evidence about *where* the seed is: a cluster of persistent-but-undiscussed detail is the signature
+of a continuity entry, and its seed is the container that owns the detail — the Grove, not the tile.
+Foxbridge's "witch levels" has the same shape (thesis projects, five disciplines, none of them keys)
+and all eight of its human keys are container terms: witch, wizard, mage, magician, sorceror,
+practitioner, qualification, specialty.
 
-An entry with neither axis — scene-bounded detail — yields few or no seeds. That is the honest version
+An entry low on both — scene-bounded detail — yields few or no seeds. That is the honest version
 of what the texture/skip machinery in `entry-vocabulary.md` was groping at: not "this entry should not
 exist", but "this entry's content is mostly things nobody will name".
 
-**Entry content and key material are different questions.** The sectional belongs in the entry, because
-it is what stops the sofa changing on every generation. It is simply not a key. Collapsing the two is
-how a realizability judgement gets mistaken for an argument about what an entry should contain.
+**Entry content and key material are different questions.** The tile belongs in the entry, because it
+is what stops the mudroom floor changing on every generation. It is simply not a key. Collapsing the
+two is how a realizability judgement gets mistaken for an argument about what an entry should contain.
 
 ### Realizability evidence: retrospective and frontier
 
@@ -143,10 +146,6 @@ problem bites only at the newest entries and on a new book.
 **Retrospective** — posterior chat exists:
 
 - Occurrence in chat after the entry's own scene. Not a proxy for recurrence; it is recurrence.
-- Cross-entry recurrence in the book, which **inverts the current dfCeil reading**. High df is treated
-  as junk today, but mid-band df is positive evidence that a thing keeps coming up: parabolic rather
-  than monotonic, the same shape as the firing bands. One entry is furniture, eight is a fixture, two
-  hundred is wallpaper.
 
 A memory entry's own source span must not supply its own evidence, or every piece of scene furniture
 passes. **Masking the span is not how that gets handled, and nothing replaces it** — the problem stops
@@ -223,8 +222,10 @@ plural or possessive coinciding with an established proper name, `chili` → `Ch
 so it is not reached by anything above. Rare, and unhandled.
 
 Embedding-based drift detection was tried and does not work: seed-variant cosine reads surface overlap
-about twice as strongly as it reads meaning. The distributional version is dead a priori — it needs
-contexts for a variant that by definition is not attested yet.
+about twice as strongly as it reads meaning — 1.71x by standardised coefficient over 45 term pairs on
+bge-m3, where synonyms carrying no surface overlap average 0.61 and orthographic neighbours sharing no
+meaning average 0.68, so no threshold separates a real variant from a collision. The distributional
+version is dead a priori — it needs contexts for a variant that by definition is not attested yet.
 
 **Realizability for synonyms** is not gated, and the reason is not inheritance. A lorebook is upstream
 of its chat: an injected entry supplies vocabulary the model then writes, so a term the entry declares
@@ -259,8 +260,9 @@ under whole-word matching. The same limit applies to compounds that are not name
 The verdict is per case rather than a rule: bare `Joe` loses to `Joe Pagliani` while `Julian Vargas`
 loses to `Julian`.
 
-Evidence is thin — 9 of 11 zero-attestation gold keys in Richard have a live shorter form, which also
-suggests zero attestation reads as a form-error signal rather than a frontier signal there. One book.
+Evidence is thin, and the count depends on where attestation is read: 9 of the 9 zero-attestation gold
+keys in Richard have a live shorter form against the chat, 8 of 11 against the entries' own text.
+Either way zero attestation reads as a form-error signal rather than a frontier signal there. One book.
 Both worth re-testing against the public books, which need no chat.
 
 ## Matching mechanics that constrain the design
@@ -333,9 +335,11 @@ so it shares vocabulary by construction. A reference entry is authored independe
 the chat exists, in an expository register the chat never uses. Overlap there is incidental rather than
 guaranteed.
 
-Character sheets sit at the far end of that gradient — historical, psychological and dispositional
-prose describes how someone behaves rather than naming things anyone says aloud — but that is a matter
-of degree.
+Measured on the pair that isolates it — `grounded omegaverse` against `Sommers_Pack__v22`'s memory
+entries, same story and chat: bge-m3 cosine of entry text to chat messages 0.53 against 0.62, share of
+Zipf-admitted terms recurring three or more times 9% against 18%. Foxbridge, Albion and Gladiator fall
+in the same band. Counting presence rather than recurrence, or comparing chats of different lengths,
+reverses it.
 
 **They are not a distinct class for keying.** Checked against Foxbridge (human-curated, reference-only)
 and Sommers' reference minority: characters, concepts and places are all keyed the same way — the
@@ -345,8 +349,9 @@ subject's canonical name, its morphological variants, and the common noun people
     Arnold Atkins               Arnold, Atkins, sherriff, police, cop
     Miss Roberta's Boarding House   boarding house, Miss Roberta, guest rooms
 
-Same shape three times, and the key counts of the two populations overlap completely (Foxbridge
-characters 0–6, concepts 0–8).
+Same shape three times, and the key counts of the two populations overlap completely — Foxbridge runs
+0–10 end to end, and both extremes are characters and concepts respectively (`Max's Parents` 10,
+`witch levels` 8), so neither class brackets the other.
 
 What varies is **subject ubiquity**, which is a continuum rather than a class. Foxbridge's peripheral
 NPCs earn role nouns; Sommers' principals get a bare first name and nothing else — Jeffrey Sommers
@@ -363,10 +368,13 @@ than names, and is correspondingly weaker.
 
 Asserted, not measured.
 
-Across 39 books on disk, every book over 100 entries is 85–96% STMemoryBooks entries, so reference
-entries are a 5–15% minority living *inside* memory books. Any memory/reference branch must therefore
-be per entry, as the pruner's `generated()` split already is. Pure-reference books are small (10–75
-entries).
+The 40 books on disk are 25 book lines — versions of one book match on entry titles, not on entry
+text, since re-summarizing rewrites every entry and keeps the scene list. Every book over 100 entries
+is 85–93% STMemoryBooks entries, so reference entries are a 7–15% minority living *inside* memory
+books; but those 12 books are 3 stories, 9 of them snapshots of one, so this has the same n as the
+rates below and not the corpus's. Any memory/reference branch must therefore be per entry, as the
+pruner's `generated()` split already is. Book size does not identify a population: pure-reference
+books here run 0–75 entries, and the three public ones run 106–261.
 
 **That figure is a `generated()` count, and `generated()` under-detects**, because offline editing —
 dropping a lorebook into a model chat to clean it up, which anyone invested enough to run STMB will
@@ -389,8 +397,9 @@ entry-type differences are the ones that survive regardless of key authorship: r
 versus editorial labels, source spans existing at all, and sibling density.
 
 **The player persona is never a key.** ST injects the Persona Description every turn, so the persona
-has no lorebook entry — but its name still turns up as a candidate on episodic entries (`Alex Nichols`,
-`Richard Ryder` were both removed by hand from Richard). Hard exclusion, no threshold: collect the
+has no lorebook entry — but its name still turns up as a candidate on episodic entries (`Alex Nichols`
+was removed by hand from Richard; `Richard Ryder` went too, but that is the character, and it belongs
+with the ubiquity bracket below). Hard exclusion, no threshold: collect the
 distinct `name` values on `is_user` turns and reject those strings and their tokens. Note it is
 per-chat, not global — the same user runs `Kyle Parsons` on one book and `Niall` on another — and that
 token-level rejection also kills a shared surname (`Kyle Sommers` → `Sommers`, shared with Jeffrey and
@@ -411,8 +420,10 @@ provenance (below) establishes which subset is trustworthy.
 
 - **`constant`** — always injected, so keys are inert. Authoring scaffolding and arcs. Out of scope for
   suggestion, and adding keys here buys nothing measurable.
-- **`vectorized`** — activates by embedding. Keys are optional and worth having anyway, since vector
-  plus keys measurably improves recall. **These are the suggestion targets.**
+- **`vectorized`** — activates by embedding. That keys help anyway is **asserted, not measured**, and
+  the two routes are not interchangeable: `suppressVectorKeys: false` lets core activate on the keys and
+  so can add an entry nothing else reaches, while `scoreVectorKeys` only re-ranks candidates already
+  retrieved — and is dead whenever the first is off. **These are the suggestion targets.**
 - **neither** — cannot activate at all. A **free diagnostic with no false positives**, and the Studio
   should say so. Rare in practice, so oversights are not a meaningful ceiling on the superset standard.
 
@@ -429,7 +440,7 @@ realizability by construction — except where synonyms were added (`VSOE` besid
 is a realizability claim. Two acknowledged uses of outside knowledge: `Joe` → Joe Pagliani, `Mr. Stern`
 → Marty Stern.
 
-**550 labelled negatives** come with it, recovered from the pre-edit book preserved inside the
+**549 labelled negatives** come with it, recovered from the pre-edit book preserved inside the
 `richard-syn-*` grade bundles. Three cautions on consuming them. They are **(entry, key) pairs, not bad
 strings** — the same term is a negative on one entry and a positive on nine others, because the
 judgement is about the entry. Some are **form corrections rather than rejections** (`TMZ leak` → `TMZ`),
@@ -452,11 +463,11 @@ Only the **lorebook binding** distinguishes same-story from separate-story, and 
 **The activation ceiling, bracketed.** Whole-word rates over assistant turns, personas excluded,
 against your own verdicts: Dylan 21.8% kept ("grew, never crested"), Arthur 35.1% undecided (still
 being tagged), Liam 53.4% crossed ("good until he wasn't"), Richard 94.5% long gone. Giselle 18.3% kept
-on nine entries. The most informative point is Arthur, because the threshold sits where a human cannot
+on eight entries. The most informative point is Arthur, because the threshold sits where a human cannot
 call it either. Gold positives in Richard top out at **10.9% of all messages** with p99 at 4.6% and a
 median of 0.1%, so nothing human-approved lives high in the range.
 
-**This is n=1 author.** The genre spread is wide, which controls vocabulary and entry structure, but
+**This is n=1 curator.** The genre spread is wide, which controls vocabulary and entry structure, but
 only a handful of books carry memory entries and the bracket came from two of them. ST mechanics
 travel; rates do not, until shown otherwise. The public books are the available control for form-level
 findings — none has a chat, so activation cannot be checked against them at all.
