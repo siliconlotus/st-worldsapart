@@ -1,7 +1,7 @@
 // Verifies the SmartKeys boolean-query engine against the spec's acceptance table,
 // plus the lexer edge cases the spec calls out (internal hyphens, weights, flags).
 import { countKey, keywordScore } from '../extension/ranking.mjs';
-import { tokenize, parse, evaluate, buildAutomaton, scanAutomaton, validateSmartKey } from '../extension/smartkeys.mjs';
+import { tokenize, parse, evaluate, buildAutomaton, scanAutomaton, validateSmartKey, fold } from '../extension/smartkeys.mjs';
 import { buildKeyPruneScan } from '../extension/keyword-core.mjs';
 import { eq } from './metrics.mjs';
 
@@ -224,3 +224,20 @@ console.log('ok   punctuation-only terms are flagged');
     eq(tokenize('? fire').filter(t => t.type === 'TERM')[0].quoted, false, '...and that a bare term was not');
 }
 console.log('ok   quoting marks a punctuation term as deliberate');
+
+// Real-world pathological literals round-trip when quoted. Both of these are actual release titles.
+// The point is not the characters: it is that a quoted literal is ONE term whatever it contains, and
+// that the fold leaves alone anything with no case and no orthographic variants.
+{
+    const artist = '⣎⡇ꉺლ༽இ•̛)ྀ◞ ༎ຶ ༽ৣৢ؞ৢ؞ؖ ꉺლ';   // contains a ) and several scripts
+    const q = `? "${artist}"`;
+    eq(tokenize(q).length, 1, 'a quoted literal is one token however many syntax characters it holds');
+    eq(tokenize(q)[0].value, artist, '...and survives the lexer byte for byte');
+    eq(fold(artist), artist, 'the fold is a no-op with no case and no orthographic variants to change');
+    eq(validateSmartKey(q).length, 0, 'quoted, it validates clean');
+    eq(countKey(q, `now playing ${artist} — new one`, false, false) > 0, true, 'and matches its own text');
+    eq(countKey(q, 'nothing relevant here at all', false, false) > 0, false, 'and nothing else');
+    // Unquoted the ) becomes a paren token and the symbol runs become punctuation terms.
+    eq(tokenize(`? ${artist}`).filter(t => /PAREN/.test(t.type)).length, 1, 'unquoted, the ) is syntax');
+}
+console.log('ok   pathological literals round-trip when quoted');
