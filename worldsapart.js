@@ -1206,11 +1206,10 @@ async function rankActivated(args) {
                 const window = ranking.scanSegments(chat, {
                     depth, includeNames: world_info_include_names, matchWindow: settings().matchWindow,
                 });
-                // An inject is its own text, not a continuation of the last message, so it becomes its
-                // own segment(s) rather than being concatenated onto one. At `scan` this still collapses
-                // into the single segment, so the pre-setting behaviour is unchanged.
+                // Its own text, not a continuation of the last message. Pushed raw: withMatchSources
+                // re-segments the whole array, so splitting it here would be done twice.
                 if (injectText) {
-                    window.push(...ranking.segment([injectText], settings().matchWindow));
+                    window.push(injectText);
                 }
                 windows.set(depth, window);
             }

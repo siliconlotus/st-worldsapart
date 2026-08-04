@@ -274,7 +274,7 @@ export function queryMessages(chat, { depth, substituteParams = s => s }) {
  * @returns {string} Scan window text
  */
 export function scanWindow(chat, cfg) {
-    return scanSegments(chat, { ...cfg, matchWindow: 'scan' })[0] ?? '';
+    return scanSegments(chat, { ...cfg, matchWindow: 'scan' })[0];
 }
 
 /**

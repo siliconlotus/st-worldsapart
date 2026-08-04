@@ -324,7 +324,7 @@ function ensureScan(scope, text) {
         counts = scanAutomaton(scope.automaton, fold(text));
         scope.scans.set(text, counts);
         // Raised by primeScan to fit a segmented window; SCAN_CACHE_MAX is the floor, not the cap.
-        while (scope.scans.size > (scope.scanMax ?? SCAN_CACHE_MAX)) scope.scans.delete(scope.scans.keys().next().value);
+        while (scope.scans.size > scope.scanMax) scope.scans.delete(scope.scans.keys().next().value);
     }
     return counts;
 }
@@ -457,7 +457,7 @@ export function registerKeys(rawKeys, scope = defaultScope) {
 export function primeScan(rawKeys, text, scope = defaultScope) {
     registerKeys(rawKeys, scope);
     const segments = Array.isArray(text) ? text : [text];
-    scope.scanMax = Math.max(scope.scanMax ?? SCAN_CACHE_MAX, segments.length + SCAN_CACHE_MAX);
+    scope.scanMax = Math.max(scope.scanMax, segments.length + SCAN_CACHE_MAX);
     for (const segment of segments) ensureScan(scope, segment);
 }
 
