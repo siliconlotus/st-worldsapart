@@ -1940,8 +1940,13 @@ export async function lorebookStudio(preferredBook = null) {
             });
             if (r.ok) {
                 const j = await r.json();
+                const seen = Number(j.messages) || 0;
+                // Zero messages means the route resolved no files, not that the chats are silent. Installing
+                // that would set every key's share to undefined-by-division and quietly disable the whole
+                // signal while the toast claimed a scan had happened.
+                if (!seen) { console.warn('Worlds Apart: /scan-chats read 0 messages', j); return null; }
                 chatHits = new Map(keys.map(k => [k, Number(j.counts?.[k]) || 0]));
-                chatMsgs = Number(j.messages) || 0;
+                chatMsgs = seen;
                 chatName = label;
                 return { keys, live: [...chatHits.values()].filter(n => n > 0).length, via: 'server' };
             }
@@ -2017,6 +2022,10 @@ export async function lorebookStudio(preferredBook = null) {
             }
         }
         rebuildScan();
+        console.log('Worlds Apart: audit evidence —', {
+            book: selected, boundChats: bound.length, scanned: got?.via ?? 'none',
+            messages: chatMsgs, keys: chatHits?.size ?? 0, firing: got?.live ?? 0,
+        });
         if (got) {
             toastr.success(`Audited against entry text + "${chatName}" — ${got.live} of ${got.keys.length} keys fire in its ${chatMsgs} messages.`, 'Worlds Apart', { timeOut: 6000 });
         } else if (!chatHits) {
