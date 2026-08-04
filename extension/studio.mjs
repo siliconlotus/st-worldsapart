@@ -20,6 +20,7 @@ import { SORT_FNS, normPresentation, reconcileTiers, tierRank, wiTitleOf } from 
 import { buildKeyPruneScan, llmKeyCandidates, STUDIO_PRUNE_OPTS, STUDIO_SUGGEST_OPTS } from './keyword-tools.mjs';
 import { buildKeySuggest, classifyLlmCand } from './keyword-core.mjs';
 import { buildAutomaton, addMessageHits, fold, validateSmartKey } from './smartkeys.mjs';
+import { isRegexKey } from './ranking.mjs';
 
 const WA_GREEN = '#7bbf6a';   // "no prune" — a keyword the scan doesn't flag
 
@@ -1926,7 +1927,14 @@ export async function lorebookStudio(preferredBook = null) {
      * Returns a summary for the caller to phrase; it does not toast or repaint.
      */
     const scanChats = async (picked, label) => {
-        const keys = bookKeys();
+        // LITERALS ONLY. The scan is one Aho-Corasick pass over folded literals, so a `?` query or a
+        // /regex/ key goes in as the characters it is written with and can never match — it would come
+        // back 0 and be reported as absent from a chat nobody actually asked about it. Omitted from the
+        // map instead, which chatShare reads as "not checked": no suppression, and the reason text keeps
+        // saying only that entry text was searched. Evaluating them properly needs countKey per message,
+        // which the server route cannot do — it has the messages but not the matcher — and doing it on
+        // the client path alone would put the two halves back out of step.
+        const keys = bookKeys().filter(k => !k.startsWith('?') && !isRegexKey(k));
         if (!keys.length || !picked?.length) return null;
 
         // PLUGIN FIRST: it scans the files where they already live and returns only counts, so a 1.2GB

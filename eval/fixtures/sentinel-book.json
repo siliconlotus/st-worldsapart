@@ -1,0 +1,96 @@
+{
+    "name": "WA Sentinel",
+    "entries": {
+        "0": {
+            "uid": 0,
+            "key": [
+                "quarkspindle"
+            ],
+            "keysecondary": [],
+            "comment": "attested — key appears in its own entry text",
+            "content": "The quarkspindle hums in the corner of the workshop. Nobody knows who built the quarkspindle.",
+            "constant": false,
+            "vectorized": false,
+            "disable": false,
+            "selectiveLogic": 0
+        },
+        "1": {
+            "uid": 1,
+            "key": [
+                "zzunattested"
+            ],
+            "keysecondary": [],
+            "comment": "dead everywhere — absent from entry text and from the chat",
+            "content": "A room with nothing in it worth naming.",
+            "constant": false,
+            "vectorized": false,
+            "disable": false,
+            "selectiveLogic": 0
+        },
+        "2": {
+            "uid": 2,
+            "key": [
+                "glimmerwort"
+            ],
+            "keysecondary": [],
+            "comment": "chat-only — absent from entry text, used in the chat",
+            "content": "A herb the party keeps asking about. The prose here never spells out its name.",
+            "constant": false,
+            "vectorized": false,
+            "disable": false,
+            "selectiveLogic": 0
+        },
+        "3": {
+            "uid": 3,
+            "key": [
+                "? thornwick brambleshaw"
+            ],
+            "keysecondary": [],
+            "comment": "match window — its two terms share the entry, but not a paragraph",
+            "content": "Thornwick keeps to the north road.\n\nBrambleshaw has the south field.",
+            "constant": false,
+            "vectorized": false,
+            "disable": false,
+            "selectiveLogic": 0
+        },
+        "4": {
+            "uid": 4,
+            "key": [
+                "mother"
+            ],
+            "keysecondary": [],
+            "comment": "common English word, quiet in this chat — flagged, but not severe",
+            "content": "Someone's parent, mentioned once and never again.",
+            "constant": false,
+            "vectorized": false,
+            "disable": false,
+            "selectiveLogic": 0
+        },
+        "5": {
+            "uid": 5,
+            "key": [
+                "morning"
+            ],
+            "keysecondary": [],
+            "comment": "common English word that also fires in most messages — severe",
+            "content": "The time of day this story will not shut up about.",
+            "constant": false,
+            "vectorized": false,
+            "disable": false,
+            "selectiveLogic": 0
+        },
+        "6": {
+            "uid": 6,
+            "key": [
+                "ver"
+            ],
+            "keysecondary": [],
+            "comment": "substring accident — only ever matches inside longer words",
+            "content": "A character whose name is a fragment of ordinary English.",
+            "constant": false,
+            "vectorized": false,
+            "disable": false,
+            "selectiveLogic": 0
+        }
+    }
+}

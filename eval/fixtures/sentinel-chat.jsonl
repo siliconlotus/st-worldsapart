@@ -1,0 +1,12 @@
+{"user_name": "You", "character_name": "Sentinel", "create_date": "2026-08-03@00h00m00s", "chat_metadata": {"world_info": "WA Sentinel"}}
+{"name": "You", "is_user": true, "is_system": false, "send_date": "2026-08-03", "mes": "Morning. Any sign of the glimmerwort?"}
+{"name": "Sentinel", "is_user": false, "is_system": false, "send_date": "2026-08-03", "mes": "Morning already. The glimmerwort is still in the cold frame."}
+{"name": "You", "is_user": true, "is_system": false, "send_date": "2026-08-03", "mes": "Whatever. Every morning it is the same conversation."}
+{"name": "Sentinel", "is_user": false, "is_system": false, "send_date": "2026-08-03", "mes": "Thornwick came by at first light.\n\nBrambleshaw sent word an hour later, separately."}
+{"name": "You", "is_user": true, "is_system": false, "send_date": "2026-08-03", "mes": "Morning again. Did Thornwick say anything useful?"}
+{"name": "Sentinel", "is_user": false, "is_system": false, "send_date": "2026-08-03", "mes": "However you look at it, no. Never does."}
+{"name": "You", "is_user": true, "is_system": false, "send_date": "2026-08-03", "mes": "My mother would have had something to say about that."}
+{"name": "Sentinel", "is_user": false, "is_system": false, "send_date": "2026-08-03", "mes": "Morning light suits the workshop. Whatever else is wrong."}
+{"name": "You", "is_user": true, "is_system": false, "send_date": "2026-08-03", "mes": "The glimmerwort will not water itself."}
+{"name": "Sentinel", "is_user": false, "is_system": false, "send_date": "2026-08-03", "mes": "Morning rounds, then. Clever of you to remember."}
+{"name": "Sentinel", "is_user": false, "is_system": true, "send_date": "2026-08-03", "mes": "zzunattested appears only here, and this message is hidden."}
