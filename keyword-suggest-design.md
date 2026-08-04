@@ -315,11 +315,19 @@ nobody runs.
   first kind of drift and is silent about the second. Fixing it needs a loop inversion (register the key
   universe once, prime per message), and it is a prerequisite for trusting any collision number the
   harness reports.
+- **THE EXPLORER IS THE PRIMARY CURATION SURFACE; CLEANUP IS SECONDARY.** Curation happens key by key
+  against the entry, in the Explorer's inline chips — which colour from `reasonOf`/`severityOf` via
+  `classifyEntry`, same as everything else. Cleanup is the bulk sweep, typically run once per book if
+  at all. Two consequences for anything the audit learns. It must reach the CLASSIFIER, not the cleanup
+  display layer, or it is invisible where the work happens — the chat-hit annotation
+  (`studio.mjs:1957`) is painted after classification and so appears on one tab only. And a finding
+  about `defChecked`, the pre-tick, is a finding about the rarely-visited screen: real, worth fixing,
+  never the first thing to fix.
 - **`generated()` (`keyword-core.mjs:298`) tests field *presence*** — `stmemorybooks`, `STMB_start`,
   `stmbArc` — and is used only in `defChecked` (`:300`), the pre-tick state in the prune popup. It does
   not affect scanning; scope is `inScope` (`:109-113`), which knows nothing about STMB. Since
   `severityOf` returns `''` for `unattested`, that clause is the only route by which a dead key arrives
-  pre-ticked, so a miss costs manual ticking and nothing else.
+  pre-ticked — so a miss costs manual ticking on the secondary path, and nothing else.
 - **`is_system` means hidden from the prompt, not "not story"** — the messages are ordinary narrative
   prose, and a chat can be mostly them. Filtering them as noise silently discards most of a chat.
 - **Chat header identity fields are deprecated** — newer files write a literal `"unused"`. The
@@ -387,7 +395,7 @@ STMB's serial-number prefix is a default that can be toggled off, and where it i
 to continue, so the heuristic degrades to silence rather than to a wrong answer. Requiring
 *continuation* rather than merely *looking numbered* biases it toward misses, which is the right
 direction: a false positive pre-ticks the deliberate aliases on a hand-written entry, a false negative
-costs a few clicks. Gaps in the merged series are deleted entries, free.
+costs a few clicks — and both land on Cleanup, not on the Explorer where curation actually happens. Gaps in the merged series are deleted entries, free.
 
 **Do not compare key counts across populations.** Reference entries carry far fewer keys than memory
 entries, but that is who *wrote* the keys, not what the entries are — memory keys are LLM-generated,
@@ -476,7 +484,8 @@ findings — none has a chat, so activation cannot be checked against them at al
 
 Measured against the standard chat corpus (see `eval/eval-data/README.md`). The point of the split is
 that only one class means "delete this key"; the other three mean the entry is configured wrong, which
-is a more useful thing for the Studio to say than *too common*.
+is a more useful thing to say than *too common*. It has to say it on the **Explorer's key chips** —
+that is where curation happens; Cleanup is the once-per-book sweep.
 
 | diagnostic | class | remedy |
 |---|---|---|
