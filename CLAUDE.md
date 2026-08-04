@@ -78,10 +78,12 @@ corpus is one person's chats; it also records which chats are unrepresentative a
 Count **usable** messages, not raw lines: core and WA both drop `is_system` before scanning, and one
 chat in the set is 65% hidden, so `CORPUS-MAP.md`'s line counts overstate it threefold.
 
-**A key existing in a book is not evidence that it is a good key.** Memory books carry LLM-generated
-keys, so their key lists are output, not judgement, and "the author kept it" says nothing. The
-0%-STMB books are the hand-curated ones and the only place a surviving key means a person looked at
-it. Say which population a key-quality claim rests on.
+**A key existing in a book is not evidence that it is a good key**, and which books are curated is
+NOT derivable from the data — STMB share is how keys were generated, not whether anyone reviewed
+them. The per-book curation status is recorded in `eval/eval-data/README.md`; ask rather than infer.
+Two traps: an uncurated key list is output, not judgement, so "the author kept it" says nothing; and
+the curated books were curated *using the Studio*, so a curated book lacking a flagged key is
+circular — only a curated book RETAINING one is evidence about the flag.
 
 ## countKey is the only matcher
 
