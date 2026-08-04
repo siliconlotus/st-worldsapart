@@ -78,6 +78,10 @@ corpus is one person's chats; it also records which chats are unrepresentative a
 Count **usable** messages, not raw lines: core and WA both drop `is_system` before scanning, and one
 chat in the set is 65% hidden, so `CORPUS-MAP.md`'s line counts overstate it threefold.
 
+Book-only measurements are not so limited: 40 books are available, 19 with no chat at all and 11 of
+those third-party lorebooks never played — the widest sample of other people's key authoring here.
+Say which population a two-part finding rests on; the chat half cannot be widened by adding books.
+
 **A key existing in a book is not evidence that it is a good key**, and which books are curated is
 NOT derivable from the data — STMB share is how keys were generated, not whether anyone reviewed
 them. The per-book curation status is recorded in `eval/eval-data/README.md`; ask rather than infer.
