@@ -40,12 +40,9 @@ activates, every matcher difference makes the Studio's audit report on rules tha
 
 ## Status
 
-**Bucket 1 — matcher and SmartKeys: done except the docs.** Parser bugs, the `::` weight delimiter,
-the validator, the Studio save gate, the audit change, `weight × count` scoring, the Lucene aliases.
-
-**Remaining in bucket 1:** `SMARTKEYS.md` does not exist. It needs both halves — the grammar, and the
-matching behaviour that has no user-facing home anywhere: substring by default, hyphens literal in both
-directions, what the fold normalises, Unicode word boundaries, and the Lucene delta.
+**Bucket 1 — matcher and SmartKeys: done.** Parser bugs, the `::` weight delimiter, the validator, the
+Studio save gate, the audit change, `weight × count` scoring, the Lucene aliases, and `SMARTKEYS.md`
+carrying both halves — the grammar, and the matching behaviour that had no user-facing home.
 
 **Bucket 2 — WA owns activation: not started.** All the design questions below are settled; it is
 implementation.

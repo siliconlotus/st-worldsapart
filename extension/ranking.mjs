@@ -285,7 +285,7 @@ export function scanWindow(chat, { depth, includeNames = true }) {
  * just recomputes, so correctness never depends on the hit.
  */
 let foldMemoIn = null, foldMemoOut = null, orthMemoIn = null, orthMemoOut = null;
-const foldedHay = (text, caseSensitive) => {
+export const foldedHay = (text, caseSensitive) => {
     if (caseSensitive) {
         if (text !== orthMemoIn) { orthMemoIn = text; orthMemoOut = normalizeOrthography(text); }
         return orthMemoOut;

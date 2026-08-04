@@ -312,3 +312,62 @@ console.log('ok   unsupported Lucene syntax is named rather than silently dead')
     eq(countKey('? fire^2', 'fire fire', false, false), 4, '...and it reaches the score, x occurrences');
 }
 console.log('ok   ^N is accepted as a boost alias');
+
+// A FLAGGED term verifies against the same folded text Pass 1 filtered on. It used to verify against
+// raw text, so `? =Cap'n` cleared the automaton (which scans folded) and then failed its own regex —
+// while the plain whole-word key `Cap'n` matched the same prose. One fold, or two matchers.
+{
+    const t = 'Cap’n Joe drank at the CAFÉ — the café was warm.';
+    eq(countKey("Cap'n", t, false, true), 1, 'baseline: a plain whole-word key folds the apostrophe');
+    eq(countKey("? =Cap'n", t, false, false), 1, '=flagged SmartKey term folds it too');
+    eq(countKey("? ^Cap'n", t, false, false), 1, '...and so does ^flagged');
+    eq(countKey('? ^CAFÉ', t, false, false), 1, '^ still discriminates case after folding');
+    eq(countKey('? =café', t, false, false), 2, '= counts every occurrence, either case');
+}
+console.log('ok   flagged terms verify against the folded haystack, like countKey');
+
+// The shorthand table in SMARTKEYS.md. Each group is one query written several ways; they must parse
+// AND score identically, or the doc is teaching a rewrite that changes the key.
+{
+    // Two texts, because agreeing on 0 is not agreement — a group where every spelling is broken
+    // matches nothing in perfect unison. The second text satisfies the ones the first negates away.
+    const texts = ['the moon mission left; fire and water fell as rain', 'fire, and apollo, and snow'];
+    const same = (group, why) => {
+        const got = texts.map(t => group.map(k => countKey(k, t, false, false)));
+        const ok = got.every(row => row.every(v => v === row[0])) && got.some(row => row[0] > 0);
+        eq(ok ? 1 : 0, 1, `${why}: ${group.join('  ==  ')} -> ${got.map(r => r.join('/')).join(' | ')}`);
+    };
+    same(['? moon mission', '? moon AND mission'], 'juxtaposition is AND');
+    same(['? moon mission -apollo', '? moon AND mission AND NOT apollo'], 'prefix - is AND NOT');
+    same(['? +fire +water', '? fire AND water', '? fire water'], 'Lucene + is absorbed');
+    same(['? rain | snow', '? rain OR snow', '? rain || snow'], 'the OR spellings agree');
+    same(['? fire && !water', '? fire AND NOT water', '? fire -water'], 'the AND/NOT spellings agree');
+    same(['? fire^2', '? fire::2'], 'the boost spellings agree');
+}
+console.log('ok   the documented shorthands are exact rewrites');
+
+// A plain multi-word key IS a quoted phrase — the equivalence SMARTKEYS.md leans on to explain that
+// the UNQUOTED SmartKey is the novel form, not the quoted one. Whole-word does not break it (it applies
+// to single-word keys only, so both stay on substring); case-sensitivity does, since a SmartKey ignores
+// the entry checkbox and wants ^ instead.
+{
+    const t = 'Apollo mission ended. apollo mission again. apollo  mission spaced.';
+    for (const ww of [false, true]) {
+        eq(countKey('? "apollo mission"', t, false, ww), countKey('apollo mission', t, false, ww),
+            `a plain phrase key equals a quoted term (wholeWords=${ww})`);
+    }
+    eq(countKey('? apollo mission', t, false, false), 6, 'unquoted, it is two terms and counts each');
+    eq(countKey('? ^"apollo mission"', t, true, false), countKey('apollo mission', t, true, false),
+        '^ is how a SmartKey asks for the case-sensitivity the checkbox gives a plain key');
+}
+console.log('ok   a plain multi-word key is a quoted phrase');
+
+// The worked example in SMARTKEYS.md, verbatim. It carries the whole plain-vs-SmartKey distinction,
+// so it must not be prose that drifted from the matcher.
+{
+    const msg = 'The astronauts of the Apollo mission';
+    eq(countKey('apollo astronauts', msg, false, false), 0, 'the plain key wants the words adjacent, in order');
+    eq(countKey('? "apollo astronauts"', msg, false, false), 0, '...and the quoted term is the same key');
+    eq(countKey('? apollo astronauts', msg, false, false) > 0, true, 'unquoted, order and distance stop mattering');
+}
+console.log('ok   the SMARTKEYS.md worked example holds');

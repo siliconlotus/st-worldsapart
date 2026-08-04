@@ -1,0 +1,227 @@
+# SmartKeys, and how WorldsApart matches keys
+
+A World Info key in WA can be one of three things:
+
+| Form | Example | What it is |
+|---|---|---|
+| plain | `moon mission` | substring match, the SillyTavern default |
+| regex | `/co(l|s)monaut/i` | a regular expression, as core already supports |
+| **SmartKey** | `? moon mission -apollo` | a boolean query — a leading `?` opts in |
+
+The first half of this page is the SmartKeys grammar. The second half is how matching works for *all
+three*, which is worth reading even if you never write a `?` key.
+
+## What a SmartKey does today
+
+**SmartKeys rank, they do not yet activate.** SillyTavern core owns activation, and an un-extended core
+sees the literal string `? moon mission` and never matches it. So a `?` key changes:
+
+- the **order** entries appear in, once something has activated them,
+- the **score** WA reports in `/wa-debug` and the WI panel,
+- everything in the **Keyword Studio** — colouring, the audit, the pruner.
+
+It does not, on its own, pull an entry into the prompt. WA taking over activation is planned and
+designed; until it lands, treat a SmartKey as a ranking instrument. The upside of that design is
+portability: a book full of SmartKeys still loads in a stock SillyTavern, where the keys are simply
+inert rather than broken.
+
+---
+
+# The grammar
+
+```
+? moon mission -apollo            implicit AND; a leading - negates
+? "moon mission" OR cosmonaut     quoted phrase; AND / OR / NOT / XOR
+? =cat                            = whole word
+? ^NASA                           ^ case-sensitive
+? ^=NASA                          flags combine, in either order
+? fire::2.5                       ::N weights the term
+? fire^2.5                        ^N is accepted too (Lucene's boost)
+? (rain OR snow) -indoors         parentheses group
+```
+
+**Terms.** Anything that is not an operator or a paren. A term is matched exactly as a plain key would
+be — substring by default — so `? fir` finds `confirm`.
+
+**Operators.** `AND` `OR` `NOT` `XOR` as words (any case), or `&&` `&` `+` / `||` `|` / `!` `-` as
+symbols. Adjacent terms get an implicit `AND`, so `? moon mission` requires both.
+
+`-` `!` `+` are operators only at the *start* of a token, which is why `sci-fi` and `c++` are single
+terms and need no escaping.
+
+`+` in Lucene's per-term position (`? +fire +water`) is absorbed: it means "required", which is what
+the implicit AND already says.
+
+## The same query, spelled out
+
+Every row below is one query written three ways. They parse identically and score identically — the
+short forms are shorthand, not a different feature.
+
+| shorthand | | spelled out |
+|---|---|---|
+| `? moon mission` | = | `? moon AND mission` |
+| `? moon mission -apollo` | = | `? moon AND mission AND NOT apollo` |
+| `? +fire +water` | = | `? fire AND water` &nbsp;=&nbsp; `? fire water` |
+| `? rain \| snow` | = | `? rain OR snow` &nbsp;=&nbsp; `? rain \|\| snow` |
+| `? fire && !water` | = | `? fire AND NOT water` &nbsp;=&nbsp; `? fire -water` |
+| `? fire^2` | = | `? fire::2` |
+| `apollo mission` *(a plain key)* | = | `? "apollo mission"` |
+
+If a query is hard to read, the spelled-out form is always available and always means the same thing.
+The two places where a rewrite *does* change the query are quoting across a space (`hot tub` vs
+`"hot tub"`) and regrouping with parens.
+
+**Precedence:** `(...)` before `NOT` before `AND` before `OR`/`XOR`. When in doubt, use parens.
+
+**Flags** are prefixes on a single term:
+
+- `=` whole word — `? =cat` will not match `catalogue`.
+- `^` case-sensitive — `? ^NASA` will not match `nasa`.
+
+Flags apply per term, and a SmartKey **ignores the entry's own** *Case-Sensitive* and *Match Whole
+Words* checkboxes. A `?` key says what it wants, term by term.
+
+**Weights** are a postfix: `term::2`, `term::0.5`, or the Lucene spelling `term^2`. A term contributes
+`weight × occurrences` to the key's score. Weight `0` is legal and means "must be present, but do not
+rank on it".
+
+`::` and not `:`, so a single colon stays ordinary text — `? meeting 10:30`, `? Judges 3:16`, `? re:code`
+and URLs all work as written. A delimiter followed by anything but digits is part of the term
+(`fire::abc` is one term).
+
+**Scoring.** A term scores `weight × occurrences`. `AND` and `OR` both **sum** — `? (glasses OR
+spectacles)` counts every mention of the concept however it was spelled — and a branch that did not
+match contributes nothing. `XOR` takes the winning side. A key built only from negation scores 1 when
+it matches, since there is nothing to count.
+
+## Quoting is the one escape
+
+Quoting turns off operator, weight and paren interpretation, and marks punctuation as deliberate:
+Sigur Rós's `"()"` is a real album title.
+
+**Quoting a single term never changes what it matches.** `"fire"` and `fire` are identical, and flags
+and weights still compose (`? ="fire"::2`). So there is no cost to quoting when unsure.
+
+The one exception is quoting **across a space**, which is a different query rather than a safer one:
+
+```
+? hot tub       two terms, implicit AND — matches a hot bath beside a cold tub
+? "hot tub"     one phrase — the words adjacent, in that order
+```
+
+A phrase is matched as written, including its single space: `"hot tub"` does not match `hot  tub`.
+
+**A plain multi-word key is already a quoted phrase.** The ordinary key `apollo mission` means exactly
+`? "apollo mission"` — one literal string, space included. So the quoted form is the familiar
+behaviour, and the *unquoted* SmartKey is the one doing something new.
+
+Against the message **"The astronauts of the Apollo mission"**:
+
+```
+apollo astronauts        plain key    NO MATCH — that exact string never appears
+? "apollo astronauts"    identical    NO MATCH
+? apollo astronauts      SmartKey     MATCHES  — two terms, either order, anywhere in the window
+```
+
+The plain key wants the words adjacent and in that order. The unquoted SmartKey wants both words
+present, and does not care that the message separated them or wrote them the other way round.
+
+That equivalence survives the *Match Whole Words* checkbox, which applies to single-word keys only and
+leaves both forms on substring. It does not survive *Case-Sensitive*: that checkbox reaches a plain key
+but a SmartKey ignores it, so the case-sensitive spelling is `? ^"apollo astronauts"`.
+
+## What the Studio will tell you
+
+Saving a `?` key runs a structural check. It reads the query's shape only — never a guess at what you
+meant, because every check that guessed produced false positives on real titles.
+
+| | |
+|---|---|
+| **error** | no search terms at all |
+| **error** | every term negated — that matches whenever they are absent, which is nearly always |
+| **error** | an unclosed quote |
+| **warn** | a punctuation-only term (usually a second `?`: only the first one is the sentinel) |
+| **warn** | unbalanced parens — it still parses, but probably not the way you grouped it |
+| **warn** | every term weighted 0, so the key gates without scoring |
+
+Whether a term ever actually occurs in your book is a different question, and the audit answers it.
+
+---
+
+# How matching works
+
+This half applies to plain keys and SmartKey terms alike.
+
+**Substring by default.** `fir` matches `confirm`. Whole-word matching is opt-in — the entry's *Match
+Whole Words* checkbox for a plain key, the `=` flag for a SmartKey term — and applies only to
+single-word keys, exactly as core does; a key with a space in it falls back to substring.
+
+**Case-insensitive by default**, opt out with the entry checkbox or `^`.
+
+**Orthography is normalised on both sides.** These are the same character in a different encoding, and
+nobody means anything different by them:
+
+| written | matches |
+|---|---|
+| `'` `’` `‘` | each other |
+| `"` `“` `”` | each other |
+| `—` (em dash) | `--` |
+| `–` (en dash) | `-` |
+| `…` | `...` |
+| non-breaking space | ordinary space |
+| decomposed `José` | composed `José` (NFC) |
+
+This is why a key typed `Cap'n Joe` fires against prose written `Cap’n Joe` — which it would not in
+stock SillyTavern. Em and en dashes deliberately do **not** collapse together: one separates clauses,
+the other joins.
+
+Nothing that can *carry meaning* is folded. A fold applies to the text being scanned, so it erases a
+distinction for every key at once and no flag can ask for it back. Case is the one exception, and only
+because `^` exists to opt out.
+
+**Hyphens are literal, in both directions.** `sci-fi` does not match `sci fi`, and `sci fi` does not
+match `sci-fi`. Prose picks per phrase, so if a compound is written both ways in your chats, key both
+(`? sci-fi OR "sci fi"`).
+
+**Accents are literal.** `Gerard` does not match `Gérard`. Whether stripping an accent is safe depends
+on the language — `du` and `dû` are different French words — so it is a judgement for you, not for a
+silent matcher. Key both forms when your model writes both.
+
+**No wildcards, no fuzzy matching.** `*` and `~` are ordinary characters: `M*A*S*H` matches `M*A*S*H`.
+Substring matching already covers what a leading or trailing `*` would buy you. For anything more, use
+a `/regex/` key.
+
+**Word boundaries are Unicode-aware.** A "word character" here is any letter, digit or underscore in
+any script, so whole-word `caf` does not match `café` and `Мари` does not match `Марию`. In scripts
+written without spaces (CJK) there is no boundary to find, and a whole-word key will match only in
+isolation — leave whole-word off for those.
+
+**Regex keys are matched raw.** A `/pattern/` key sees the text unfolded, so `/Cap'n/` will *not* find
+`Cap’n`. Write the alternation, or the class, yourself.
+
+**Known limit — Markdown.** Chat prose is Markdown and the markup sits in the text being scanned, so
+emphasis *inside* a word cuts both ways:
+
+```
+"*sister*hood"    sisterhood         MISSES  — the asterisks break the substring
+"*sister*hood"    sister (=/whole)   MATCHES — the * reads as a word boundary
+```
+
+Emphasis around a whole word is fine in every mode; this only bites mid-word. Every available fix is
+worse than the bug — making `*` a word character breaks the case that currently works, and stripping
+markup would destroy the asterisk as content.
+
+---
+
+# Coming from Lucene
+
+Carried over, so muscle memory works: `AND` `OR` `NOT` `+` `-` `&&` `||` `!`, parentheses, quoted
+phrases, and `^N` boost (aliased onto `::N`).
+
+Not implemented, and matched literally instead: wildcards `*` `?`, fuzzy and proximity `~`, field
+syntax `field:value`, and ranges. A key that expected one of these will simply never fire, and the
+Studio's audit reports it as a dead key — from the evidence, rather than from a guess about what you
+meant.
+
+`XOR` and `::` weights are not Lucene at all. `::` is Midjourney's multi-prompt weight, borrowed
+because it cannot collide with a time or a ratio.
