@@ -142,10 +142,14 @@ pins.
 onto the end of chat prose and let a conjunction span the seam. `segment()` is idempotent, so the
 per-entry composition re-runs it over the pre-split window and `scan` still collapses to one string.
 
-**Open:** the audit reports at `scan` regardless of the setting (`keyword-core.mjs`, marked) — it is a
-df measure over entry text, not a chat window, so making it segment-aware changes what `unattested`
-means and wants its own measurement. Core's recursion buffer arrives pre-joined, so bucket 2
-reconstructs segmentation there rather than retaining it.
+**The audit segments the same way**, so `unattested` means *not attested in any segment* — the question
+the runtime asks. df still counts ENTRIES, not segments, or "how widely is this term used" would start
+moving with paragraph length. Measured inert on every book on disk: 8 books, 8,970 distinct keys, 6,353
+of them multi-word, and 0 change df or occurrence total — a literal cannot span a paragraph break, so
+only a multi-term query can differ, and those are the keys whose unsegmented answer was wrong.
+
+**Open:** core's recursion buffer arrives pre-joined, so bucket 2 reconstructs segmentation there
+rather than retaining it.
 
 **Rejected — utterance-level.** The right unit, since a multi-sentence quote is one utterance, but it has
 no reliable marker: models drop closing quotes, use `—` for dialogue, and write narration unmarked.

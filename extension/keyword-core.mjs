@@ -5,7 +5,7 @@
 // (popups, saving, generation) on top and injects the world-info match flags.
 import { COMMON_WORDS } from '../plugin/commonwords.js';
 import { ZIPF_EN, POS_VA, POS_VA_STRICT, POS_ADJ } from './zipf-en.js';
-import { countKey, escapeRegex, isRegexKey } from './ranking.mjs';
+import { countKey, escapeRegex, isRegexKey, segment } from './ranking.mjs';
 import { buildAutomaton, scanAutomaton, createScanScope, primeScan } from './smartkeys.mjs';
 
 export const KEY_TOO_COMMON = 0.5;
@@ -114,7 +114,7 @@ const COMMON_HEAD = new Set([...COMMON_WORDS].slice(0, ENGLISH_COMMON_STICKY_CUT
  *        world-info globals here; harnesses pass nothing and get false/false)
  * @returns {{entries:object[], nE:number, classifyEntry:Function, reasonOf:Function, defChecked:Function, effCase:Function, effWhole:Function}}
  */
-export function buildKeyPruneScan(data, opts, ignoreSet, { caseSensitiveDefault = false, wholeWordsDefault = false } = {}) {
+export function buildKeyPruneScan(data, opts, ignoreSet, { caseSensitiveDefault = false, wholeWordsDefault = false, matchWindow = 'scan' } = {}) {
     const RED = '#e06c6c', YEL = '#d9b74a', GRN = '#7bbf6a';
     const looksProper = k => k.split(/\s+/).every(t => /^[A-Z]/.test(t));   // Title Case = a name
 
@@ -165,19 +165,25 @@ export function buildKeyPruneScan(data, opts, ignoreSet, { caseSensitiveDefault 
         const combo = `${cs ? 1 : 0}${ww ? 1 : 0}`;
         if (batched.has(combo)) return;
         batched.add(combo);
-        // ponytail: audits at `matchWindow: 'scan'` — each entry's content is one segment, whatever the
-        // live setting is. Deliberate for a df measure ("how widely is this term used", per the note
-        // above), but it does mean a multi-term SmartKey can be attested here and not fire at runtime,
-        // where paragraph mode would require its terms to land together. Segment `contents` the same way
-        // the scan window is segmented if the audit ever needs to predict firing rather than count usage
-        // — and re-measure `unattested` first, since that changes what the flag means for every book.
+        // Segmented like the scan window, so ATTESTED means "attested in some segment" — the same
+        // question the runtime asks. A key whose terms never land in one paragraph will never fire at
+        // that setting, and reporting it as attested would be the audit telling the author their key
+        // works. df still counts ENTRIES, not segments: "how widely is this term used" is a fact about
+        // the book, per the note above, and must not start moving with paragraph length.
+        //
+        // Measured inert on every book on disk: 8 books, 8,970 distinct keys (6,353 of them multi-word),
+        // 0 keys change df and 0 change their occurrence total. A literal key cannot span a paragraph
+        // break, so it is slice-invariant; only a multi-term query can differ, and those are the keys
+        // whose unsegmented answer was wrong.
         for (const c of contents) {
-            primeScan(allKeys, c, scanScope);
+            const segments = segment([c], matchWindow);
+            primeScan(allKeys, segments, scanScope);
             for (const key of allKeys) {
                 // Still countKey, deliberately: the audit has to report what the runtime matcher will
                 // actually do — flags, regex keys and `?` queries included — so the batch only changes
                 // how often the text is walked, never how a hit is decided.
-                const n = countKey(key, c, cs, ww, scanScope);
+                let n = 0;
+                for (const s of segments) n += countKey(key, s, cs, ww, scanScope);
                 if (!n) continue;
                 const k = ck(key, cs, ww);
                 let r = scanCache.get(k);

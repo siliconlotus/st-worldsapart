@@ -154,7 +154,8 @@ export async function lorebookStudio(preferredBook = null) {
     const firstLine = e => { const t = String(e.content ?? '').trim(); const nl = t.indexOf('\n'); return (nl < 0 ? t : t.slice(0, nl)) || '(empty)'; };
     const save = () => { dirty = true; saveWorldInfo(selected, data, true); };
     const getSugg = uid => { let x = sugg.get(uid); if (!x) sugg.set(uid, x = { tfidf: [], llm: [] }); return x; };
-    const rebuildScan = () => { scan = buildKeyPruneScan(data, studioOpts, ignoreSet); };
+    // The audit answers the same question the runtime does, so it segments the same way.
+    const rebuildScan = () => { scan = buildKeyPruneScan(data, studioOpts, ignoreSet, { matchWindow: settings().matchWindow }); };
     // Chat counts belong to a (book, chat) PAIR. Switching either one makes them describe something else,
     // so they are dropped rather than left on screen attached to the wrong book.
     const clearChatScan = () => { cleanupChatHits = null; cleanupChatMsgs = 0; cleanupChatName = ''; };

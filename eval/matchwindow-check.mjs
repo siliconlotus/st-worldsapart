@@ -68,3 +68,38 @@ const win = m => scanSegments(chat, { depth: 10, matchWindow: m });
 eq(typeof scanWindow(chat, { depth: 10 }), 'string', 'scanWindow still returns the joined string');
 
 console.log('ok   matchWindow: scan is the old behaviour, narrower settings scope both signs');
+
+// The audit asks the runtime's question. A key whose terms never land in one paragraph will never
+// fire at that setting, so reporting it as attested would be the audit telling the author it works.
+// A LITERAL key is slice-invariant either way — measured over 8 books and 8,970 distinct keys on
+// disk, 0 change df and 0 change their occurrence total, because no literal spans a paragraph break.
+{
+    const { buildKeyPruneScan } = await import('../extension/keyword-core.mjs');
+    const opts = {
+        scanKeyword: true, scanVectorized: true, scanConstant: true, includeInactive: true,
+        pruneUnattested: true, pruneCommon: true, pruneShort: true, ignoreProper: false,
+        stickySkipCommon: true, tooCommon: 0.5, minLength: 4,
+    };
+    const book = {
+        entries: {
+            0: {
+                uid: 0,
+                key: ['? apollo astronauts', 'apollo astronauts', 'astronauts'],
+                content: 'The astronauts trained here.\n\nApollo was the program that flew them.',
+            },
+        },
+    };
+    const flags = mw => {
+        const s = buildKeyPruneScan(book, opts, new Set(), { matchWindow: mw });
+        return Object.fromEntries(s.classifyEntry(book.entries[0]).map(f => [f.key, f.flag]));
+    };
+    eq(flags('scan')['? apollo astronauts'], undefined, 'scan: the query is attested across the entry');
+    eq(flags('paragraph')['? apollo astronauts'], 'unattested',
+        'paragraph: its terms never share a paragraph, so it is dead and says so');
+    // The literal that would fire nowhere is dead at BOTH settings, and the one that fires is alive at
+    // both — a plain key's answer must not move with the setting.
+    eq(flags('scan')['apollo astronauts'], 'unattested', 'a literal phrase absent from the text is dead');
+    eq(flags('paragraph')['apollo astronauts'], 'unattested', '...at every setting, being slice-invariant');
+    eq(flags('scan')['astronauts'], flags('paragraph')['astronauts'], 'an attested literal is unmoved too');
+}
+console.log('ok   the audit segments like the runtime, and literals are slice-invariant');
