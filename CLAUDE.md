@@ -72,8 +72,8 @@ keyword-only rows ST core would have rejected, and no arm can surface those.
 Anything measuring how keys behave against *prose* — firing rate, over-firing, discourse recurrence —
 runs against the standard chat set listed in `eval/eval-data/README.md`, not whatever chat is open. A
 short branch cannot show whether a key over-fires, and the set is picked to span memory against
-reference books and fantasy against contemporary. That file is gitignored, because the corpus is one
-person's chats.
+reference books and genre vocabulary against unmarked prose. That file is gitignored, because the
+corpus is one person's chats; it also records which chats are unrepresentative and how.
 
 Count **usable** messages, not raw lines: core and WA both drop `is_system` before scanning, and one
 chat in the set is 65% hidden, so `CORPUS-MAP.md`'s line counts overstate it threefold.
