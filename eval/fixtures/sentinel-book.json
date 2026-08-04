@@ -46,7 +46,7 @@
                 "? thornwick brambleshaw"
             ],
             "keysecondary": [],
-            "comment": "match window — its two terms share the entry, but not a paragraph",
+            "comment": "match window — dead at the default paragraph window, alive at scan/message",
             "content": "Thornwick keeps to the north road.\n\nBrambleshaw has the south field.",
             "constant": false,
             "vectorized": false,

@@ -81,8 +81,11 @@ eq(msgs.length, 10, 'the hidden message is dropped, as core and WA both drop it'
 
 // --- the match window reaches the audit -------------------------------------------------------
 {
-    const scan = verdicts(undefined, 'scan'), para = verdicts(undefined, 'paragraph');
+    const scan = verdicts(undefined, 'scan'), msg = verdicts(undefined, 'message'), para = verdicts(undefined, 'paragraph');
     eq(scan['? thornwick brambleshaw'], undefined, 'at scan the query is attested across the entry');
+    // An entry's content is one text, so `message` has nothing to split — for the AUDIT it is scan by
+    // another name, and only paragraph subdivides. The distinction is real on the chat side only.
+    eq(msg['? thornwick brambleshaw'], undefined, 'message cannot subdivide entry text, so it matches scan');
     eq(para['? thornwick brambleshaw']?.flag, 'unattested', 'at paragraph its terms never share a segment');
 }
 

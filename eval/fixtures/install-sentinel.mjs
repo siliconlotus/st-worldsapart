@@ -87,7 +87,10 @@ console.log('so the audit should report 10 messages and these verdicts (see sent
 console.log('   quarkspindle             unflagged, green');
 console.log('   zzunattested             dead — "not in entry text or chat"');
 console.log('   glimmerwort              unflagged (the chat uses it, so the dead flag is dropped)');
-console.log('   ? thornwick brambleshaw  unflagged at scan; dead at paragraph');
+console.log('   ? thornwick brambleshaw  "never matches" at the DEFAULT paragraph window — its two terms');
+console.log('                            sit in different paragraphs of its own entry. Unflagged at scan');
+console.log('                            or message, which is the tell that the setting is arriving:');
+console.log('                            entry text has no messages, so only paragraph subdivides it.');
 console.log('   mother                   "common", warning severity — quiet in this chat');
 console.log('   morning                  "common · 60% of chat", severe');
 console.log('   ver                      dead in entry text; fires 4/10 only inside longer words');
