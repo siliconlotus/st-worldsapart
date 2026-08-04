@@ -573,6 +573,23 @@ Accepted as follow-on:
     every branch semantics (continuation, separate story, true fork, ephemeral repeat) without needing
     to classify them, since only the case that would corrupt it is the detectable one.
 
+**Waiting on the Sommers curation to finish**, because both want a labelled set and Richard is n=1:
+
+10. **The collapse diagnostic.** Ship "this entry has a key matching inside other words" as an advisory
+    on the Explorer chips, per ENTRY. The rule and its evidence are in the four-classes section above;
+    what is missing is precision and recall against human judgement rather than against examples. A
+    finished Sommers gives a second curation event on a 2068-key book, and its removed set is a clean
+    negative label — the author's own asymmetry, that presence proves nothing in a partial pass but
+    removal is a reviewed rejection. Until then, the risk is shipping a red flag calibrated on anecdote.
+    Note item 0: some nesting is deliberate, so this advises and never repairs.
+11. **Whether `defChecked` should pre-tick at all.** It governs Cleanup, the secondary path, so this is
+    not urgent — but nothing measured supports the pre-tick, the bulk bar's own tooltip has to explain
+    that a tick is not a recommendation, and an un-vetted removal is silent where an un-vetted retention
+    just reappears next audit. The question a finished pass answers is how often a pre-tick was
+    overridden. If the answer is "often", the default is doing harm rather than saving clicks; if it is
+    "never", the pre-tick is redundant with Select all. Either reading argues for dropping it, which is
+    itself a reason to wait for a number rather than act on the argument.
+
 Retired, recorded so they are not re-derived:
 
 - **Key-set overlap as the score.** Superseded by the behavioural standard — for each curated key, does
