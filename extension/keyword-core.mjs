@@ -165,6 +165,12 @@ export function buildKeyPruneScan(data, opts, ignoreSet, { caseSensitiveDefault 
         const combo = `${cs ? 1 : 0}${ww ? 1 : 0}`;
         if (batched.has(combo)) return;
         batched.add(combo);
+        // ponytail: audits at `matchWindow: 'scan'` — each entry's content is one segment, whatever the
+        // live setting is. Deliberate for a df measure ("how widely is this term used", per the note
+        // above), but it does mean a multi-term SmartKey can be attested here and not fire at runtime,
+        // where paragraph mode would require its terms to land together. Segment `contents` the same way
+        // the scan window is segmented if the audit ever needs to predict firing rather than count usage
+        // — and re-measure `unattested` first, since that changes what the flag means for every book.
         for (const c of contents) {
             primeScan(allKeys, c, scanScope);
             for (const key of allKeys) {

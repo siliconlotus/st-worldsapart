@@ -261,6 +261,10 @@ export function validateSmartKey(raw) {
 
 
 
+// Cache floor for scanned buffers, per scope; insertion-ordered, oldest evicted first. primeScan
+// raises it to fit a segmented window (see there).
+const SCAN_CACHE_MAX = 8;
+
 /**
  * One matching context: the term registry (folded literal -> pattern index), the automaton built from
  * it, the parsed-AST cache, and the per-text scan results.
@@ -275,7 +279,7 @@ export function validateSmartKey(raw) {
  * index onto each TERM node.
  */
 export function createScanScope() {
-    return { termIndex: new Map(), patterns: [], automaton: null, dirty: false, scans: new Map(), astCache: new Map() };
+    return { termIndex: new Map(), patterns: [], automaton: null, dirty: false, scans: new Map(), scanMax: SCAN_CACHE_MAX, astCache: new Map() };
 }
 
 // The default scope, used whenever a caller doesn't supply one — i.e. live retrieval.
@@ -308,7 +312,6 @@ function registerTerms(scope, node) {
 // one retrieval pass (per-depth windows x per-entry match-source suffixes), so a small cache keeps
 // each of them scanned once per automaton generation. Cleared on rebuild — with registerKeys()
 // batching registration up front, rebuilds happen at most once per pass.
-const SCAN_CACHE_MAX = 8;   // per scope; insertion-ordered, oldest evicted first
 
 function ensureScan(scope, text) {
     if (scope.dirty || scope.automaton === null) {
@@ -320,7 +323,8 @@ function ensureScan(scope, text) {
     if (counts === undefined) {
         counts = scanAutomaton(scope.automaton, fold(text));
         scope.scans.set(text, counts);
-        if (scope.scans.size > SCAN_CACHE_MAX) scope.scans.delete(scope.scans.keys().next().value);
+        // Raised by primeScan to fit a segmented window; SCAN_CACHE_MAX is the floor, not the cap.
+        while (scope.scans.size > (scope.scanMax ?? SCAN_CACHE_MAX)) scope.scans.delete(scope.scans.keys().next().value);
     }
     return counts;
 }
@@ -439,13 +443,22 @@ export function registerKeys(rawKeys, scope = defaultScope) {
 /**
  * Batch-registers a key list and scans the text once, so subsequent countKey calls against
  * the same text answer from the automaton instead of walking the buffer per key.
+ *
+ * Accepts a segmented window (see ranking.scanSegments). Every segment is primed in one call so the
+ * automaton is built once, and the cache is raised to hold all of them — evicting a segment mid-pass
+ * would send the next entry back to the naive walk for a buffer that was just scanned. Segments key
+ * BY VALUE, so two entries segmenting the same window share every scan and an entry that appends
+ * match sources pays only for the appended text.
+ *
  * @param {string[]} rawKeys
- * @param {string} text
+ * @param {string|string[]} text One text, or the window's segments
  * @param {object} [scope]
  */
 export function primeScan(rawKeys, text, scope = defaultScope) {
     registerKeys(rawKeys, scope);
-    ensureScan(scope, text);
+    const segments = Array.isArray(text) ? text : [text];
+    scope.scanMax = Math.max(scope.scanMax ?? SCAN_CACHE_MAX, segments.length + SCAN_CACHE_MAX);
+    for (const segment of segments) ensureScan(scope, segment);
 }
 
 /**
@@ -478,6 +491,7 @@ export function resetSmartKeys(scope = defaultScope) {
     scope.patterns.length = 0;
     scope.astCache.clear();
     scope.scans.clear();
+    scope.scanMax = SCAN_CACHE_MAX;
     scope.automaton = null;
     scope.dirty = false;
 }

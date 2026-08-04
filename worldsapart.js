@@ -981,15 +981,22 @@ const MATCH_SOURCE_FIELDS = {
  * @returns {string} chatWindow plus any opted-in source texts
  */
 function withMatchSources(chatWindow, entry, sources) {
-    let text = chatWindow;
+    const texts = [...chatWindow];
 
     for (const [flag, field] of Object.entries(MATCH_SOURCE_FIELDS)) {
         if (entry[flag] && sources[field]) {
-            text += `\n${sources[field]}`;
+            texts.push(sources[field]);
         }
     }
 
-    return text;
+    // Re-segmenting is what makes `scan` still mean ONE segment: the window arrives pre-split, and
+    // this collapses it back together with the sources rather than leaving two segments where the
+    // pre-setting code had one string. It is idempotent for the other two modes — splitting an
+    // already-split paragraph yields itself — while the appended sources get split for the first time.
+    //
+    // A source is its own text, never a continuation of the last message: nothing may merge a
+    // character description onto the end of chat prose and let a conjunction span the seam.
+    return ranking.segment(texts, settings().matchWindow);
 }
 
 // Keyword scoring and RRF fusion live in ranking.mjs (the tuning layer). Inject the BM25 k1 + the
@@ -1196,9 +1203,14 @@ async function rankActivated(args) {
             // the unified messageDepth, falling back to core's scan depth only if it's unset.
             const depth = Number(item.entry.scanDepth) || settings().messageDepth || world_info_depth;
             if (!windows.has(depth)) {
-                let window = ranking.scanWindow(chat, { depth, includeNames: world_info_include_names });
+                const window = ranking.scanSegments(chat, {
+                    depth, includeNames: world_info_include_names, matchWindow: settings().matchWindow,
+                });
+                // An inject is its own text, not a continuation of the last message, so it becomes its
+                // own segment(s) rather than being concatenated onto one. At `scan` this still collapses
+                // into the single segment, so the pre-setting behaviour is unchanged.
                 if (injectText) {
-                    window += `\n${injectText}`;
+                    window.push(...ranking.segment([injectText], settings().matchWindow));
                 }
                 windows.set(depth, window);
             }
@@ -1212,7 +1224,6 @@ async function rankActivated(args) {
             const scored = keywordScore(item.entry, scanText, scoreKeys);
             item.keywordScore = scored.score;
             item.keywordHits = scored.hits;
-            item.keywordScanText = scanText;
         }
 
         // The scan text WA actually searched, so a "WA scored 0" mystery is answered by
@@ -1220,7 +1231,9 @@ async function rankActivated(args) {
         // WA doesn't mirror (a regex script, an attached file, an extension's inject
         // buffer) or another extension force-activated the entry.
         // The global-depth window, for /wa-grade's sample (per-entry scanDepth overrides also live here).
-        runState.lastScanText = windows.get(settings().messageDepth) ?? [...windows.values()][0] ?? '';
+        // Joined with a BLANK line, not a single one, so the capture round-trips: re-segmenting this
+        // string recovers the same units the scan actually used, at any setting.
+        runState.lastScanText = (windows.get(settings().messageDepth) ?? [...windows.values()][0] ?? []).join('\n\n');
 
         if (runState.verboseRun) {
             console.log('%cWorlds Apart · keyword scan windows — the exact text WA searched, by depth', 'font-weight: bold');
@@ -1527,7 +1540,7 @@ function paramSnapshot() {
         // The entity filter only runs on raw-message queries — a summary is already
         // salience-selected — so in summary mode its params are inert and omitted.
         matchText: {
-            queryMode: s.queryMode, messageDepth: s.messageDepth,
+            queryMode: s.queryMode, messageDepth: s.messageDepth, matchWindow: s.matchWindow,
             ...(s.queryMode === 'summary' ? {} : { entityFilter: s.entityFilter, properNounBoost: s.properNounBoost, stopwordDocFreq: s.stopwordDocFreq }),
         },
         // Acquisition: what vectra gives back — the DB-side similarity gate, mean-centering, and
@@ -2707,6 +2720,14 @@ const SETTINGS_HTML = `
             <label for="wa_message_depth">Message depth (recent messages for retrieval + keyword scan)</label>
             <input id="wa_message_depth" type="number" class="text_pole" min="1" max="20" step="1">
 
+            <label for="wa_match_window">Match window (the unit a key has to match within)</label>
+            <select id="wa_match_window" class="text_pole">
+                <option value="paragraph">Paragraph — terms must land in the same paragraph</option>
+                <option value="message">Message — anywhere within one message</option>
+                <option value="scan">Whole scan window — what SillyTavern core does</option>
+            </select>
+            <small class="opacity50p">Only affects keys that combine conditions: secondary keys (AND ANY / NOT ANY / …) and <code>?</code> SmartKeys. A single keyword matches the same text either way. Narrower settings stop an entry firing on terms that were pages apart — and stop a negation five messages back from silently vetoing a match. Core has no equivalent, so anything but "Whole scan window" is a deliberate divergence from what core would have activated.</small>
+
             <div class="inline-drawer wa-section">
                 <div class="inline-drawer-toggle inline-drawer-header">
                     <b>Tier precedence</b>
@@ -3072,6 +3093,7 @@ export async function init() {
     Promise.all([hasPlugin(), computeSourceFingerprint()]).then(renderPluginSetup);
     bind('#wa_debug_log', 'debugLog', 'checked');
     bind('#wa_message_depth', 'messageDepth', 'number');
+    bind('#wa_match_window', 'matchWindow', 'string');
     bind('#wa_lexical_weight', 'lexicalWeight', 'number');
     // 'number?', not 'number': blank means "follow lexicalWeight" and must persist as null, where a plain
     // number binding would collapse it to 0 and silently switch the keys signal off.

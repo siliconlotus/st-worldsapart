@@ -239,6 +239,19 @@ export const defaultSettings = {
     /** Score normal entries by keyword match quality and fuse them with the vector ranking. */
     keywordScoring: true,
     /**
+     * The unit a key has to match WITHIN — `scan` | `message` | `paragraph`.
+     *
+     * A conjunction over the whole window matches terms a dozen messages apart, and the same
+     * blindness silently vetoes on a negation five messages back. `scan` is the pre-setting
+     * behaviour (one segment) and reproduces it exactly; core has no equivalent, so anything
+     * narrower is a deliberate divergence from what core's selective logic does.
+     *
+     * Paragraph by default because message is close to a no-op on real prose: measured over one
+     * author's chats, p90 is 19 paragraphs per message and 81.6% of scanned text lives in messages
+     * of six or more. One corpus, so this is a default, not a finding about everyone.
+     */
+    matchWindow: 'paragraph',
+    /**
      * BM25 term-frequency saturation, for both the key scorer and the plugin's
      * text scorer. Roughly: how many distinct matching terms one heavily-repeated
      * term is worth. Higher = repetition counts for more.

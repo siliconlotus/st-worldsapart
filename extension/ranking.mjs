@@ -273,10 +273,67 @@ export function queryMessages(chat, { depth, substituteParams = s => s }) {
  * @param {boolean} [cfg.includeNames] world_info_include_names
  * @returns {string} Scan window text
  */
-export function scanWindow(chat, { depth, includeNames = true }) {
-    return chat.slice(-Math.max(1, depth))
-        .map(x => (includeNames && x?.name ? `${x.name}: ${x.mes ?? ''}` : String(x?.mes ?? '')))
-        .join('\n');
+export function scanWindow(chat, cfg) {
+    return scanSegments(chat, { ...cfg, matchWindow: 'scan' })[0] ?? '';
+}
+
+/**
+ * A paragraph break: a blank line, tolerating trailing whitespace on the line above.
+ *
+ * NOT a single newline. Chat prose uses both — measured over one author's chats (392 messages,
+ * 780KB), 27.6% of messages carry blank-line breaks AND single newlines within a paragraph, and only
+ * 3.8% use single newlines alone. Splitting on `\n` would chop soft-wrapped dialogue into fragments;
+ * splitting on a blank line reads the Markdown correctly, and in that 3.8% degenerates to the whole
+ * message — never narrower than the author's own structure supports.
+ */
+const PARAGRAPH_BREAK = /\n[ \t]*\n/;
+
+/**
+ * The scan window as SEGMENTS — the unit a key has to match within.
+ *
+ * WHY THIS AND NOT A JOIN. A conjunction over the whole window matches terms a dozen messages apart:
+ * `? apollo astronauts` fires on a window where someone said "Apollo" and, four replies later,
+ * someone else said "astronauts". Negation has the same blindness and fails worse — `? fire -drill`
+ * is silently vetoed by a drill five messages back, and a false negative never surfaces anywhere,
+ * where a false positive is a ranking contribution that competes and loses.
+ *
+ * The segment boundary is the one thing WA cannot recover after the fact, which is why this returns
+ * an array instead of a string with markers in it: a message's own newlines are indistinguishable
+ * from the join once flat, so a joined window cannot be split back into messages by any rule. WA
+ * builds the window, so it simply keeps what it already knows.
+ *
+ * `scan` is not a special case — it is the degenerate one-segment array, and reproduces the
+ * pre-setting behaviour exactly.
+ *
+ * @param {Array<{name?: string, mes?: string}>} chat Chat messages (or queryMessages() output)
+ * @param {object} cfg
+ * @param {number} cfg.depth How many recent messages to scan
+ * @param {boolean} [cfg.includeNames] world_info_include_names
+ * @param {'scan'|'message'|'paragraph'} [cfg.matchWindow] Segment granularity
+ * @returns {string[]} Scan segments, chronological
+ */
+export function scanSegments(chat, { depth, includeNames = true, matchWindow = 'scan' }) {
+    const messages = chat.slice(-Math.max(1, depth))
+        .map(x => (includeNames && x?.name ? `${x.name}: ${x.mes ?? ''}` : String(x?.mes ?? '')));
+    return segment(messages, matchWindow);
+}
+
+/**
+ * Applies the match window to already-separated texts. Split out from scanSegments because the
+ * non-chat match sources (character description, scenario, injects) arrive as their own units and
+ * need the same treatment — each is one text that paragraph mode may subdivide, and that no mode
+ * may merge with a chat message.
+ * @param {string[]} texts
+ * @param {'scan'|'message'|'paragraph'} matchWindow
+ * @returns {string[]}
+ */
+export function segment(texts, matchWindow) {
+    if (matchWindow === 'scan') return [texts.join('\n')];
+    const out = matchWindow === 'paragraph'
+        ? texts.flatMap(t => String(t).split(PARAGRAPH_BREAK))
+        : texts.map(String);
+    // An empty segment can only produce zero counts, and every one of them costs a scan.
+    return out.filter(t => t.trim());
 }
 
 /**
@@ -449,6 +506,14 @@ export function secondaryOk(entry, text, caseSensitive, wholeWords) {
     }
 }
 
+/**
+ * BM25-style keyword score for one entry against the scan window.
+ * @param {object} entry
+ * @param {string|string[]} text Scan text — a bare string is one segment (`matchWindow: 'scan'`),
+ *   an array is the segmented window from scanSegments()
+ * @param {string[]} [keys]
+ * @returns {{score: number, hits: Array<{key: string, count: number}>}}
+ */
 export function keywordScore(entry, text, keys = entry.key, { k1, caseSensitiveDefault, wholeWordsDefault } = {}) {
     if (!Array.isArray(keys) || !keys.length) {
         return { score: 0, hits: [] };
@@ -461,32 +526,49 @@ export function keywordScore(entry, text, keys = entry.key, { k1, caseSensitiveD
     const caseSensitive = entry.caseSensitive ?? caseSensitiveDefault;
     const wholeWords = entry.matchWholeWords ?? wholeWordsDefault;
 
-    // Register every key and scan the text ONCE (Aho-Corasick); countKey below then answers
-    // from that scan instead of walking the buffer per key. Text is shared across entries in
-    // a retrieval pass, so after the first entry this is a no-op.
-    if (text) primeScan(keys, text);
+    // A bare string is ONE segment, which is what `matchWindow: 'scan'` means — so every caller that
+    // has not been taught about segments keeps the pre-setting behaviour rather than an approximation
+    // of it. Only the live scan passes an array.
+    const segments = Array.isArray(text) ? text : [text];
 
-    // SECONDARY KEYS GATE THE SCORE, not just activation. An entry keyed `cosmonaut` with a
-    // secondary `apollo` under AND ANY says it is relevant when BOTH are present; scoring the
-    // primary alone credits it for evidence its author said does not count on its own.
-    //
-    // Core checks this before activating, so for a keyword entry the gate has already passed once —
-    // but against CORE's buffer, which is not WA's window (worldsapart.js builds its own), and a
-    // force-activated entry was never checked at all. Either way the score is WA's claim about this
-    // text, so it is WA's job to make it true of this text.
-    if (!secondaryOk(entry, text, caseSensitive, wholeWords)) {
-        return { score: 0, hits: [] };
-    }
+    // Register every key and scan each segment ONCE (Aho-Corasick); countKey below then answers
+    // from that scan instead of walking the buffer per key. Segments are shared across entries in
+    // a retrieval pass — and shared BY VALUE, since the cache keys on the string — so after the
+    // first entry this is a no-op, and an entry that appends match sources pays only for those.
+    if (segments.length) primeScan(keys, segments);
 
     let score = 0;
     const hits = [];
+    const counts = new Map();
 
-    for (const key of keys) {
-        const count = countKey(key, text, caseSensitive, wholeWords);
-        if (count > 0) {
-            score += count / (count + k1);
-            hits.push({ key, count });
+    for (const segment of segments) {
+        if (!segment) continue;
+
+        // SECONDARY KEYS GATE THE SCORE, not just activation, and they gate it PER SEGMENT. An entry
+        // keyed `cosmonaut` with a secondary `apollo` under AND ANY says it is relevant when both are
+        // present; scoring the primary alone credits it for evidence its author said does not count on
+        // its own. Whole-window, "both present" degrades to "both mentioned at some point", which is
+        // the distance-blindness the match window exists to fix — so a segment that fails its own gate
+        // contributes nothing, rather than the whole entry scoring 0 because one segment failed.
+        //
+        // Core checks this before activating, so for a keyword entry the gate has already passed once —
+        // but against CORE's buffer, which is not WA's window (worldsapart.js builds its own), and a
+        // force-activated entry was never checked at all. Either way the score is WA's claim about this
+        // text, so it is WA's job to make it true of this text.
+        if (!secondaryOk(entry, segment, caseSensitive, wholeWords)) continue;
+
+        for (const key of keys) {
+            const n = countKey(key, segment, caseSensitive, wholeWords);
+            if (n > 0) counts.set(key, (counts.get(key) ?? 0) + n);
         }
+    }
+
+    // Occurrences SUM across gate-passing segments and saturate once, rather than saturating per
+    // segment: a key is as repeated as the window says it is, and k1 is calibrated against a whole
+    // window's counts. At `scan` this is arithmetically identical to the pre-setting code.
+    for (const [key, count] of counts) {
+        score += count / (count + k1);
+        hits.push({ key, count });
     }
 
     // Most-repeated key first, so the debug column leads with the strongest evidence.

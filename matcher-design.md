@@ -47,7 +47,8 @@ carrying both halves — the grammar, and the matching behaviour that had no use
 **Bucket 2 — WA owns activation: not started.** All the design questions below are settled; it is
 implementation.
 
-**Match window — not started, and independent of bucket 2** except where noted. Settled below.
+**Match window — implemented** (`matchWindow` setting, `ranking.scanSegments`/`segment`), and independent
+of bucket 2 except where noted.
 
 ---
 
@@ -119,9 +120,11 @@ logic and SmartKey conjunctions.
 
 **Split, do not track positions.** Measured 1.01x for 8 segments against one join (200 patterns, 18KB,
 n=2000), so `scanAutomaton` keeps its counts-Map return and `plugin/automaton.mjs` never changes — no
-redeploy, and no window where the browser and server halves disagree. Cache the segmented result as ONE
-entry keyed by array reference. Not concatenating is faster than today at every setting including
-`scan`, because match-source combinations stop re-scanning the whole window.
+redeploy, and no window where the browser and server halves disagree. The scan cache keys segments BY VALUE, so two
+entries segmenting the same window share every scan; `primeScan` raises the cache floor to fit the
+window, since evicting a segment mid-pass sends the next entry back to the naive walk. Not
+concatenating is faster than before at every setting including `scan`, because match-source
+combinations stop re-scanning the whole window.
 
 **Measured, one author's chats, n=1 (392 messages, 79 windows, 780KB):** message-scoping is near a
 no-op — p90 is 19 paragraphs per message, and 81.6% of scanned text lives in messages of six paragraphs
@@ -129,9 +132,20 @@ or more. Paragraph is unambiguous in 96.2% of messages; the other 3.8% use singl
 degenerate to message-scoped, which is never worse than today. Split on `\n[ \t]*\n`. One corpus is why
 this is a default and not a decision.
 
-**Open:** how a score sums over segments; whether match sources and injects are each their own segment.
-Core's recursion buffer arrives pre-joined, so bucket 2 reconstructs segmentation there rather than
-retaining it.
+**Occurrences sum across gate-passing segments and saturate once**, rather than saturating per segment:
+a key is as repeated as the window says it is, and `k1` is calibrated against a whole window's counts.
+A segment failing its own secondary gate contributes nothing instead of zeroing the entry. At `scan`
+this is arithmetically identical to the pre-setting code, which is the invariant `matchwindow-check`
+pins.
+
+**Match sources and injects are each their own segment** — nothing may merge a character description
+onto the end of chat prose and let a conjunction span the seam. `segment()` is idempotent, so the
+per-entry composition re-runs it over the pre-split window and `scan` still collapses to one string.
+
+**Open:** the audit reports at `scan` regardless of the setting (`keyword-core.mjs`, marked) — it is a
+df measure over entry text, not a chat window, so making it segment-aware changes what `unattested`
+means and wants its own measurement. Core's recursion buffer arrives pre-joined, so bucket 2
+reconstructs segmentation there rather than retaining it.
 
 **Rejected — utterance-level.** The right unit, since a multi-sentence quote is one utterance, but it has
 no reliable marker: models drop closing quotes, use `—` for dialogue, and write narration unmarked.
