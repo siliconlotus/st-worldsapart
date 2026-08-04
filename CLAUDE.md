@@ -85,9 +85,11 @@ Say which population a two-part finding rests on; the chat half cannot be widene
 **A key existing in a book is not evidence that it is a good key**, and which books are curated is
 NOT derivable from the data — STMB share is how keys were generated, not whether anyone reviewed
 them. The per-book curation status is recorded in `eval/eval-data/README.md`; ask rather than infer.
-Two traps: an uncurated key list is output, not judgement, so "the author kept it" says nothing; and
-the curated books were curated *using the Studio*, so a curated book lacking a flagged key is
-circular — only a curated book RETAINING one is evidence about the flag.
+An uncurated key list is output, not judgement, so "the author kept it" says nothing. A curated one
+is judgement — the flags prompted a look, they were not applied in bulk, and keys were both removed
+and deliberately kept. So both directions inform: a removal is agreement with the flag, a retention
+is an override. What curation cannot tell you is anything about the keys the flag never surfaced,
+since it shaped which keys got examined. Removals speak to precision, never to recall.
 
 ## countKey is the only matcher
 
