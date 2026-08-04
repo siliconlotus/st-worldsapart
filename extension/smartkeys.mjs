@@ -266,6 +266,61 @@ export function validateSmartKey(raw) {
 const SCAN_CACHE_MAX = 8;
 
 /**
+ * Rewrites core's `(key, keysecondary, selectiveLogic)` as ONE SmartKey query, for bucket 2 — where WA
+ * answers "did a key match" and core's selective logic has to survive the move.
+ *
+ * One query PER PRIMARY KEY, not one for the whole entry. Collapsing the primaries into an alternation
+ * would work for activation and lose the per-key granularity keywordScore's saturation wants: an entry
+ * keyed on three names that all appear should not score as one term.
+ *
+ *   AND_ANY   p and at least one secondary   ? "p" ("s1" | "s2")
+ *   AND_ALL   p and all of them              ? "p" "s1" "s2"
+ *   NOT_ANY   p and none of them             ? "p" -"s1" -"s2"
+ *   NOT_ALL   p and not all of them          ? "p" -("s1" "s2")
+ *
+ * EVERY TERM IS QUOTED, which is what makes this safe rather than clever. A key is arbitrary user text:
+ * `hot tub` would parse as a conjunction, a leading `-` as a negation, `(` as a group. Quoting suppresses
+ * all of it, and quoting a single term never changes what it matches — the one property this rewrite
+ * depends on.
+ *
+ * Returns null when the entry cannot be expressed, and the caller must then fall back rather than
+ * approximate: a key containing a double quote has no escape in this grammar, and a `/regex/` or `?`
+ * key is a different matcher that cannot be a term inside a query.
+ *
+ * @param {string} primary One of the entry's primary keys
+ * @param {string[]} secondaries entry.keysecondary
+ * @param {number} logic entry.selectiveLogic (WI_LOGIC)
+ * @returns {string|null} A `?` query, or null if this entry needs the old path
+ */
+export function synthesizeSecondary(primary, secondaries, logic = 0) {
+    const usable = k => {
+        const s = String(k ?? '').trim();
+        if (!s || s.includes('"')) return null;              // no escape for a quote inside a quote
+        if (s.startsWith('?') || isRegexKey(s)) return null;  // a different matcher, not a term
+        return s;
+    };
+    const p = usable(primary);
+    if (!p) return null;
+
+    const sec = [];
+    for (const k of Array.isArray(secondaries) ? secondaries : []) {
+        const s = String(k ?? '').trim();
+        if (!s) continue;                        // blanks are dropped before the logic, as core does
+        const ok = usable(s);
+        if (!ok) return null;
+        sec.push(`"${ok}"`);
+    }
+    if (!sec.length) return `? "${p}"`;          // no secondaries: the condition is vacuously true
+
+    switch (Number(logic)) {
+        case 1: return `? "${p}" -(${sec.join(' ')})`;   // NOT_ALL
+        case 2: return `? "${p}" ${sec.map(t => `-${t}`).join(' ')}`;   // NOT_ANY
+        case 3: return `? "${p}" ${sec.join(' ')}`;      // AND_ALL
+        default: return `? "${p}" (${sec.join(' | ')})`; // AND_ANY, and core's fallback for anything else
+    }
+}
+
+/**
  * One matching context: the term registry (folded literal -> pattern index), the automaton built from
  * it, the parsed-AST cache, and the per-text scan results.
  *

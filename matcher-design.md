@@ -72,8 +72,10 @@ core trade passes forever; and do not evaluate entries core will reject this pas
 "newly matched" test never settles.
 
 **`keysecondary` needs no separate implementation.** `(key, keysecondary, selectiveLogic)` maps onto a
-SmartKey expression — verified against core's own evaluation over 16,000 random comparisons, all four
-logic modes. Distribute rather than collapse: **one SmartKey per primary key**, each `primary +
+SmartKey expression — `synthesizeSecondary` in `smartkeys.mjs`, fuzzed against `secondaryOk` over
+16,000 random comparisons in `eval/synthesis-check.mjs`. It REFUSES rather than approximates where the
+grammar cannot carry the key (a double quote has no escape; a `/regex/` or `?` key is a different
+matcher, not a term), so bucket 2 must treat null as "fall back", never as "no secondaries". Distribute rather than collapse: **one SmartKey per primary key**, each `primary +
 <secondary expression>`, so scoring keeps the per-key granularity that `keywordScore`'s saturation
 wants. `AND_ANY` → `(secondaries)`, `AND_ALL` → juxtaposition, `NOT_ANY` → `-a -b`, `NOT_ALL` → `-(a b)`.
 
