@@ -2401,26 +2401,50 @@ export async function lorebookStudio(preferredBook = null) {
                 box.append(c);
             }
 
+            const idOf = c => `${c.avatar}\u001F${c.file}`;
+            const ticked = g.chats.filter(c => orphanChecks.has(idOf(c)));
+
+            if (g.chats.length > 1) {
+                const all = document.createElement('label');
+                all.style.cssText = 'display:flex;align-items:center;gap:6px;font-size:0.9em;cursor:pointer;opacity:0.75;';
+                const cb = document.createElement('input'); cb.type = 'checkbox';
+                cb.checked = ticked.length === g.chats.length;
+                cb.indeterminate = ticked.length > 0 && ticked.length < g.chats.length;
+                cb.addEventListener('change', () => {
+                    for (const c of g.chats) cb.checked ? orphanChecks.add(idOf(c)) : orphanChecks.delete(idOf(c));
+                    renderOrphans();
+                });
+                const t = document.createElement('span'); t.textContent = `All ${g.chats.length}`;
+                all.append(cb, t);
+                box.append(all);
+            }
+
             for (const c of g.chats) {
-                const id = `${c.avatar}\u001F${c.file}`;
                 const row = document.createElement('label');
                 row.style.cssText = 'display:flex;align-items:center;gap:6px;font-size:0.9em;cursor:pointer;';
-                const cb = document.createElement('input'); cb.type = 'checkbox'; cb.checked = orphanChecks.has(id);
-                cb.addEventListener('change', () => { cb.checked ? orphanChecks.add(id) : orphanChecks.delete(id); renderOrphans(); });
+                const cb = document.createElement('input'); cb.type = 'checkbox'; cb.checked = orphanChecks.has(idOf(c));
+                cb.addEventListener('change', () => { cb.checked ? orphanChecks.add(idOf(c)) : orphanChecks.delete(idOf(c)); renderOrphans(); });
                 const t = document.createElement('span'); t.style.cssText = 'word-break:break-all;';
                 t.textContent = `${c.char} — ${c.file.replace(/\.jsonl$/, '')}`;
                 row.append(cb, t);
                 box.append(row);
             }
 
-            const ticked = g.chats.filter(c => orphanChecks.has(`${c.avatar}\u001F${c.file}`));
             if (ticked.length) {
-                const bar = document.createElement('div'); bar.style.cssText = 'margin-top:8px;';
-                bar.append(btn(`Assign ${ticked.length} to…`, async () => {
-                    const to = await Popup.show.input('Assign chats to lorebook', 'Existing lorebook name:', g.nearest ?? '');
-                    const target = (to ?? '').trim();
+                // A dropdown, not a typed name: the target is always an EXISTING book, so there is
+                // nothing to type and nothing to mistype. Defaults to the suggestion when there is one.
+                const bar = document.createElement('div');
+                bar.style.cssText = 'display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-top:8px;';
+                const sel = document.createElement('select'); sel.className = 'text_pole';
+                sel.style.cssText = 'width:auto;max-width:340px;';
+                for (const n of [...world_names].sort((a, b) => a.localeCompare(b))) {
+                    const o = document.createElement('option'); o.value = n; o.textContent = n;
+                    if (n === g.nearest) o.selected = true;
+                    sel.append(o);
+                }
+                bar.append(sel, btn(`Re-point ${ticked.length} ${ticked.length === 1 ? 'chat' : 'chats'}`, async () => {
+                    const target = sel.value;
                     if (!target) return;
-                    if (!world_names.includes(target)) { toastr.warning(`No lorebook named "${target}".`, 'Worlds Apart'); return; }
                     const open = String(getContext().chatId ?? '');
                     let ok = 0; const bad = [];
                     for (const c of ticked) {
@@ -2430,7 +2454,7 @@ export async function lorebookStudio(preferredBook = null) {
                     if (ok) toastr.success(`Re-pointed ${ok} ${ok === 1 ? 'chat' : 'chats'} to “${target}”.`, 'Worlds Apart');
                     if (bad.length) toastr.warning(`Could not re-point: ${bad.join(', ')}`, 'Worlds Apart', { timeOut: 12000 });
                     await refreshOrphans();
-                }, 'wa-bulk-danger'));
+                }));
                 box.append(bar);
             }
             wrap.append(box);
