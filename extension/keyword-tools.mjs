@@ -13,8 +13,16 @@ import { KEY_TOO_COMMON, KEY_MIN_LENGTH, KEY_SHARED, buildKeyPruneScan as buildK
 
 /** buildKeyPruneScan with core's world-info match flags injected. A wrapper (not a bound value) so
  * the flags are read at call time — they're live ST settings. */
-export const buildKeyPruneScan = (data, opts, ignoreSet) =>
-    buildKeyPruneScanCore(data, opts, ignoreSet, { caseSensitiveDefault: world_info_case_sensitive, wholeWordsDefault: world_info_match_whole_words });
+export const buildKeyPruneScan = (data, opts, ignoreSet, extra = {}) =>
+    // FORWARD the caller's options. This took a fixed 4th argument and built it here, so everything the
+    // Studio passed — matchWindow, chatRate — was dropped on the floor: the audit ran at the default
+    // match window and with no chat evidence no matter what was gathered, and the only symptom was a
+    // verdict that never changed. ST's globals stay as DEFAULTS, so a caller can still override them.
+    buildKeyPruneScanCore(data, opts, ignoreSet, {
+        caseSensitiveDefault: world_info_case_sensitive,
+        wholeWordsDefault: world_info_match_whole_words,
+        ...extra,
+    });
 
 
 /**

@@ -171,3 +171,20 @@ console.log('ok   a key the chat scan never covered is not reported as chat-chec
     eq(totals.get(0) / 3 <= 1, true, 'so hits/messages is a share and can never exceed 1');
 }
 console.log('ok   a chat hit is one message, shared by the browser and the server');
+
+// The Studio does not call buildKeyPruneScan directly — keyword-tools.mjs wraps it to inject ST's
+// match-flag globals. That wrapper took a FIXED 4th argument and built it itself, so every option the
+// Studio passed (matchWindow, chatRate) was discarded: the audit ran at the default match window with
+// no chat evidence however much was gathered, and the only symptom was a verdict that never changed.
+// String-sliced rather than imported because the wrapper pulls in ST (see bulk-reorder-check for the
+// same trick) — a shape check, but this shape is what silently disconnected two features.
+{
+    const src = await import('node:fs').then(fs => fs.readFileSync(new URL('../extension/keyword-tools.mjs', import.meta.url), 'utf8'));
+    const m = src.match(/export const buildKeyPruneScan = \(([^)]*)\)([\s\S]*?)\n\n/);
+    eq(!!m, true, 'the wrapper is still an arrow with a parameter list');
+    const [, params, body] = m;
+    const extra = (params.split(',')[3] ?? '').trim().split('=')[0].trim();
+    eq(extra.length > 0, true, 'it takes a 4th parameter for the caller options');
+    eq(body.includes(`...${extra}`), true, `it spreads ${extra || '(nothing)'} into the options it forwards`);
+}
+console.log('ok   the Studio wrapper forwards caller options instead of replacing them');
