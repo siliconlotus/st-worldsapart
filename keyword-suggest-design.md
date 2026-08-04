@@ -472,9 +472,53 @@ only a handful of books carry memory entries and the bracket came from two of th
 travel; rates do not, until shown otherwise. The public books are the available control for form-level
 findings — none has a chat, so activation cannot be checked against them at all.
 
+## Why a key over-fires — four classes, four remedies
+
+Measured against the standard chat corpus (see `eval/eval-data/README.md`). The point of the split is
+that only one class means "delete this key"; the other three mean the entry is configured wrong, which
+is a more useful thing for the Studio to say than *too common*.
+
+| diagnostic | class | remedy |
+|---|---|---|
+| high rate, **collapses** under whole-word | matches inside other words | set Match Whole Words |
+| high rate, survives, entry names a person | the subject is on stage constantly | sticky sheet — usually already right |
+| high rate, survives, entry is premise-level | the concept is always relevant | `constant` |
+| moderate rate, survives, word denotes nothing | actually a bad key | remove |
+
+**The collapse ratio is the sharp instrument**, and it is threshold-free: `Ver` 50%→0%, `ma` 51%→1%,
+`tin` 50%→2%, `cop` 15%→0%, `Ian` 14%→0.4%. Keys that are merely frequent do not move — `Jeffrey`
+39%→39%, `Kimberly` 12%→12%. It also catches the 14% cases a rate band set high enough to be safe
+would miss. The usual cause is a **short form nesting inside its own long form** (`Kim`⊂`Kimberly`,
+`Rich`⊂`Richard`), so the diagnostic is per ENTRY rather than per key: the message is "this entry has
+a key inside another of its keys", and the fix is one checkbox for the entry.
+
+**A firing-rate band is not the sharp instrument, and nearly everything it catches is legitimate.**
+Of 20 keys over 20% across seven books, 8 sit on vectorized entries where `suppressVectorKeys` blanks
+them, and most of the rest are main-cast names on sticky sheets. In Sommers the >20% band has a 0%
+removal rate against a 54% curation baseline; every key that curation removed fired under 14.5%.
+
+**Three signals, not one, and none supersedes another.** `ENGLISH_COMMON` says the word denotes
+nothing in particular and needs no chat, which matters because 19 of the 40 books on disk have none.
+Chat firing rate says how much a key matches. The collapse ratio says it matches the wrong thing.
+Measured overlap between the first two: 1 key of 38 across the books curation has not touched.
+
+**Where `ENGLISH_COMMON` is wrong is proper nouns that collide with common words** — `River`, `Blue`,
+`Angel`, `Jack`, `Paris`, `Red`, `Mark`. That is most of the high-Zipf population in real books, not
+an edge case, and chat rate is right about them where the word list is not. Measured share of keys at
+Zipf ≥ 4.5: public books 2-5%, this author's curated books 0-1%, hand-written Foxbridge 12%, untouched
+Red Dead 17%. Synthetic control — random Zipf 5.5+ words used as keys fire at median 7%, p90 34%, and
+collapse under whole-word only 11 times in 100, so the class is real and separable when it occurs.
+
 ## Open
 
 Blocking the definition:
+
+0. **Nested short forms are sometimes deliberate.** `Kim` inside `Kimberly` reads as the substring
+   defect above, but some Sommers entries carry the short form ON PURPOSE, to weight the term rather
+   than to match a nickname. So the per-entry collapse diagnostic must be an advisory, not a fix
+   applied for the author — and whether term weighting is better served this way than by an explicit
+   weight is its own experiment, not ruled on here.
+
 
 1. **The renderer's two thresholds.** The backoff picks "the longest collision-free common substring
    of the family", and neither word in that phrase has a number yet.
