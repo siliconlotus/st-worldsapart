@@ -67,6 +67,17 @@ samples and grade only the delta. `judged@10` in `graded-scene-grid.mjs` is the 
 until the cells you care about stop showing gaps. It cannot always reach 10/10: offline re-derivation ranks
 keyword-only rows ST core would have rejected, and no arm can surface those.
 
+## Chat-based measurement uses the standard corpus
+
+Anything measuring how keys behave against *prose* — firing rate, over-firing, discourse recurrence —
+runs against the standard chat set listed in `eval/eval-data/README.md`, not whatever chat is open. A
+short branch cannot show whether a key over-fires, and the set is picked to span memory against
+reference books and fantasy against contemporary. That file is gitignored, because the corpus is one
+person's chats.
+
+Count **usable** messages, not raw lines: core and WA both drop `is_system` before scanning, and one
+chat in the set is 65% hidden, so `CORPUS-MAP.md`'s line counts overstate it threefold.
+
 ## countKey is the only matcher
 
 `ranking.mjs` `countKey()` mirrors ST core's `matchKeys` — match flags, `/regex/` keys, `?` SmartKeys.
