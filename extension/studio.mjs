@@ -2371,14 +2371,20 @@ export async function lorebookStudio(preferredBook = null) {
                 const row = document.createElement('div');
                 row.style.cssText = 'display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:6px;';
                 const sug = document.createElement('span'); sug.style.cssText = 'word-break:break-all;';
-                sug.innerHTML = `<i class="fa-solid fa-arrow-right opacity50p"></i> ${escapeHtml(g.nearest)}`;
-                row.append(sug,
-                    btn('Rename to this', async () => { await renameBook(g.nearest, g.name); await refreshOrphans(); }),
-                    btn('Duplicate as this', async () => {
-                        await copyBookByName(g.nearest, false, g.name);
-                        await updateWorldInfoList();
-                        await refreshOrphans();
-                    }));
+                sug.innerHTML = `<span class="opacity50p">looks renamed from</span> ${escapeHtml(g.nearest)}`;
+                // Both buttons do the same thing — make the missing name exist again — and differ only in
+                // what happens to the existing book. Labelled by that outcome, because naming the OTHER
+                // book made them read as "point the old name at the new one", which is the opposite: it
+                // is the missing name that has to come back, since that is what the chats ask for.
+                const rename = btn('Restore this name', async () => { await renameBook(g.nearest, g.name); await refreshOrphans(); });
+                rename.title = `Rename “${g.nearest}” back to “${g.name}”. The chats resolve immediately, and anything still bound to “${g.nearest}” is re-pointed with it. One book, under the old name.`;
+                const dupe = btn('Restore as a copy', async () => {
+                    await copyBookByName(g.nearest, false, g.name);
+                    await updateWorldInfoList();
+                    await refreshOrphans();
+                });
+                dupe.title = `Copy “${g.nearest}” to a new book called “${g.name}”. Both books exist afterwards, with the same contents — for when the rename was deliberate and these chats want the old one.`;
+                row.append(sug, rename, dupe);
                 box.append(row);
             }
 
