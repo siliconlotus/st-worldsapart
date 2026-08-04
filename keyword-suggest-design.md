@@ -582,13 +582,19 @@ Accepted as follow-on:
     negative label — the author's own asymmetry, that presence proves nothing in a partial pass but
     removal is a reviewed rejection. Until then, the risk is shipping a red flag calibrated on anecdote.
     Note item 0: some nesting is deliberate, so this advises and never repairs.
-11. **Whether `defChecked` should pre-tick at all.** It governs Cleanup, the secondary path, so this is
-    not urgent — but nothing measured supports the pre-tick, the bulk bar's own tooltip has to explain
-    that a tick is not a recommendation, and an un-vetted removal is silent where an un-vetted retention
-    just reappears next audit. The question a finished pass answers is how often a pre-tick was
-    overridden. If the answer is "often", the default is doing harm rather than saving clicks; if it is
-    "never", the pre-tick is redundant with Select all. Either reading argues for dropping it, which is
-    itself a reason to wait for a number rather than act on the argument.
+11. **Whether the pre-tick is calibrated well enough to be the default.** Not whether the tool should
+    recommend — a pre-tick IS a recommendation, and the bulk bar's "suggestions, not verified problems"
+    states its confidence rather than disowning it. The question is only whether the recommendation is
+    good enough to arrive ticked, and that moves as the heuristics are refined: `eng` stopped being
+    unconditional red once chat evidence could condition it, which takes the least-calibrated input out
+    of `defChecked` on its own.
+    The measurement is the override rate over a finished pass. High means recalibrate or drop the
+    default; low means it is earning its place and should stay — it is NOT redundant with Select all,
+    which ticks the yellow band too and so cannot reproduce a red-only selection. What the asymmetry
+    argument settles is how much calibration is enough, not whether to have a default at all: an
+    un-vetted removal is silent and self-concealing where an un-vetted retention just reappears next
+    audit, so the bar sits higher than it would for a reversible action. It governs Cleanup, the
+    secondary path, so nothing is blocked by waiting.
 
 Retired, recorded so they are not re-derived:
 
