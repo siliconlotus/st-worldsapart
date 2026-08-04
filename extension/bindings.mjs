@@ -16,6 +16,21 @@
  */
 export const normalizeWorldName = s => String(s ?? '').toLowerCase().replace(/[_\-\s]+/g, ' ').trim();
 
+/** Levenshtein distance, iterative two-row. Short strings only — these are file names. */
+export function editDistance(a, b) {
+    if (a === b) return 0;
+    if (!a.length || !b.length) return a.length || b.length;
+    let prev = Array.from({ length: b.length + 1 }, (_, i) => i);
+    for (let i = 1; i <= a.length; i++) {
+        const cur = [i];
+        for (let j = 1; j <= b.length; j++) {
+            cur[j] = Math.min(prev[j] + 1, cur[j - 1] + 1, prev[j - 1] + (a[i - 1] === b[j - 1] ? 0 : 1));
+        }
+        prev = cur;
+    }
+    return prev[b.length];
+}
+
 /**
  * The existing world most likely to be what a missing name meant, or null.
  *
@@ -32,14 +47,27 @@ export function nearestWorld(missing, worldNames) {
     const m = normalizeWorldName(missing);
     if (!m) return null;
     let best = null, bestLen = 0;
+    let near = null, nearDist = Infinity;
     for (const w of worldNames) {
         const n = normalizeWorldName(w);
-        if (!n || n === m) continue;
+        // Containment misses the commonest rename there is: a version bump. `sommers pack v22` and
+        // `sommers pack v23` contain neither the other, differing by one character in the middle, and
+        // this corpus renames with `v22`, `v3`, `updated`, `old`. So an edit-distance pass runs behind
+        // containment — never ahead of it, since a contained name is the surer answer.
+        if (n && w !== missing) {
+            const d = editDistance(m, n);
+            if (d < nearDist && d <= Math.max(2, Math.floor(m.length * 0.2))) { near = w; nearDist = d; }
+        }
+        // Skip only the SAME RAW NAME. A normalized-equal world is the strongest answer there is —
+        // `LTM_-__Daddy…_ABO_-_keywords_revised` and `LTM_-__Daddy…_ABO__keywords_revised` differ by one
+        // separator and nothing else — and this line used to reject it as a book suggesting itself.
+        // It cannot be: nearestWorld is only ever asked about names that do not exist.
+        if (!n || w === missing) continue;
         if (!n.startsWith(m) && !m.startsWith(n)) continue;
         const shared = Math.min(n.length, m.length);
         if (shared > bestLen) { best = w; bestLen = shared; }
     }
-    return best;
+    return best ?? near;
 }
 
 /**

@@ -20,6 +20,7 @@ import { SORT_FNS, normPresentation, reconcileTiers, tierRank, wiTitleOf } from 
 import { buildKeyPruneScan, llmKeyCandidates, STUDIO_PRUNE_OPTS, STUDIO_SUGGEST_OPTS } from './keyword-tools.mjs';
 import { buildKeySuggest, classifyLlmCand } from './keyword-core.mjs';
 import { buildAutomaton, addMessageHits, fold, validateSmartKey } from './smartkeys.mjs';
+import { findOrphanBindings } from './bindings.mjs';
 import { isRegexKey } from './ranking.mjs';
 
 const WA_GREEN = '#7bbf6a';   // "no prune" — a keyword the scan doesn't flag
@@ -137,6 +138,22 @@ export async function lorebookStudio(preferredBook = null) {
     const afterIgnoreChange = keys => {
         if (termRepaint) termRepaint(); else rerenderKeys(keys);
         if (trayOpen) refreshTray();   // the whitelist column lives there
+    };
+
+    // Chats and character cards naming a lorebook that no longer exists. Computed once per Studio
+    // session, in the background, because it needs the whole chat index (one fetch per character) and
+    // nothing should wait on it. Null until it has run; a nav row appears only if it finds something,
+    // so a clean install never sees this feature at all.
+    let orphans = null;
+    let orphanView = false;   // showing the list instead of a book — `selected` stays a real book name
+
+    const checkOrphans = async () => {
+        try {
+            const r = findOrphanBindings(await loadChatIndex(), world_names);
+            if (!r.chatCount && !r.cardCount) return;
+            orphans = r;
+            renderBooks();
+        } catch (err) { console.warn('[WA] orphan check', err); }
     };
 
     const root = document.createElement('div');
@@ -2301,7 +2318,77 @@ export async function lorebookStudio(preferredBook = null) {
     // A full repaint throws away the scrolling list, so anything that redraws the whole Explorer (Suggest
     // all, audit, expand all, a bulk edit) would dump the user back at the top. Carry the offset over the
     // rebuild; a book/tab change lands on a list that doesn't exist yet and starts at 0 on its own.
+    /**
+     * The orphaned-bindings list. READ ONLY: it names what is broken and what it probably meant, and
+     * changes nothing. Re-pointing a chat means rewriting line 0 of its .jsonl, which is a mutation of
+     * chat history rather than lorebook data, and it should not ride in on a view whose job is to tell
+     * you something.
+     */
+    const renderOrphans = () => {
+        explorer.innerHTML = '';
+        explorer.append(closeBtn);
+        const wrap = document.createElement('div'); wrap.style.cssText = 'padding:10px 12px;max-width:780px;';
+
+        const h = document.createElement('h3'); h.style.cssText = 'margin:0 0 4px;';
+        h.innerHTML = '<i class="fa-solid fa-link-slash"></i> Orphaned bindings';
+        const sub = document.createElement('div'); sub.className = 'opacity50p'; sub.style.cssText = 'margin-bottom:12px;';
+        sub.textContent = 'These chats and characters name a lorebook that no longer exists, so it never reaches them. '
+            + 'Renaming or deleting a book does this silently — the binding is just a string, and nothing reports it.';
+        wrap.append(h, sub);
+
+        for (const g of orphans?.missing ?? []) {
+            const box = document.createElement('div');
+            box.style.cssText = 'border:1px solid var(--SmartThemeBorderColor);border-radius:6px;padding:8px 10px;margin-bottom:10px;';
+            const name = document.createElement('div');
+            name.style.cssText = 'font-weight:bold;word-break:break-all;';
+            name.textContent = g.name;
+            const counts = document.createElement('div'); counts.className = 'opacity50p'; counts.style.cssText = 'margin:2px 0 6px;';
+            const bits = [];
+            if (g.chats.length) bits.push(`${g.chats.length} chat${g.chats.length === 1 ? '' : 's'}`);
+            if (g.cards.length) bits.push(`${g.cards.length} character card${g.cards.length === 1 ? '' : 's'}`);
+            counts.textContent = `${bits.join(' and ')} point here.`;
+            box.append(name, counts);
+
+            if (g.nearest) {
+                const sug = document.createElement('div'); sug.style.cssText = 'margin-bottom:6px;';
+                sug.innerHTML = `Closest existing book: <b>${escapeHtml(g.nearest)}</b>`;
+                const why = document.createElement('div'); why.className = 'opacity50p';
+                // Say which repair each reading implies, because they are opposite and the view cannot
+                // tell them apart: only the author knows whether the rename or the chats were right.
+                why.innerHTML = 'If that was a rename, these bindings want re-pointing to it. If the rename was the mistake, '
+                    + 'the book itself wants duplicating back under the old name — the content still exists, so that is a real restore.';
+                box.append(sug, why);
+            } else {
+                const why = document.createElement('div'); why.className = 'opacity50p';
+                why.textContent = 'No existing book resembles this name, so it was probably deleted. '
+                    + 'SillyTavern keeps no backup of lorebooks, so there is nothing to restore from — these bindings need a book chosen by hand.';
+                box.append(why);
+            }
+
+            if (g.chats.length) {
+                const list = document.createElement('div'); list.style.cssText = 'margin-top:6px;font-size:0.9em;';
+                for (const c of g.chats) {
+                    const r = document.createElement('div'); r.className = 'opacity50p'; r.style.cssText = 'word-break:break-all;';
+                    r.textContent = `${c.char} — ${c.file.replace(/\.jsonl$/, '')}`;
+                    list.append(r);
+                }
+                box.append(list);
+            }
+            if (g.cards.length) {
+                const r = document.createElement('div'); r.style.cssText = 'margin-top:6px;font-size:0.9em;';
+                // Cards are the half WA cannot repair even in principle: ST's renameWorldInfo owns that
+                // field and is not exported, so saying where to go is the whole of what is available.
+                r.innerHTML = `<b>Characters:</b> ${escapeHtml(g.cards.join(', '))} — fix these in the character panel; `
+                    + 'WA cannot write a card\'s primary lorebook.';
+                box.append(r);
+            }
+            wrap.append(box);
+        }
+        explorer.append(wrap);
+    };
+
     const renderExplorer = () => {
+        if (orphanView) return renderOrphans();
         const listTop = explorer.querySelector('.wa-studio-entries')?.scrollTop ?? 0;
         explorer.innerHTML = ''; rowEls.clear();
         // The close button lives in the tab bar (for tab order), so the no-book branch — which paints no
@@ -2435,6 +2522,7 @@ export async function lorebookStudio(preferredBook = null) {
     };
 
     const openBook = async name => {
+        orphanView = false;
         if (dirty && selected) { reloadEditor(selected); dirty = false; }   // refresh the outgoing book's editor
         selected = name; loadSortView(name); entryOpen.clear(); expanded.clear(); tall.clear(); advOpen.clear(); sugg.clear(); selectedEntries.clear(); lastSel = null; selAnchorUid = null; suggest = null; scan = null; clearChatScan();   // scan is on-demand; chat counts belong to a (book, chat) pair
         explorer.innerHTML = '<div style="opacity:0.6;padding:8px;">Loading…</div>'; explorer.append(closeBtn);   // same re-adopt as the no-book branch
@@ -2533,11 +2621,27 @@ export async function lorebookStudio(preferredBook = null) {
             row.addEventListener('click', () => { if (name !== selected) openBook(name); });
             nav.append(row);
         }
+
+        // Broken bindings, at the foot and only when there are some. Not a book: it is a fact about
+        // chats, and the selector is the only place in a book-oriented tool where a chat-shaped fact
+        // can hang without interrupting whatever book you are actually working on.
+        if (orphans) {
+            const row = document.createElement('div');
+            row.className = 'wa-book-row' + (orphanView ? ' wa-sel' : '');
+            row.style.cssText = 'margin-top:6px;opacity:0.85;';
+            const nm = document.createElement('span'); nm.className = 'wa-book-name';
+            nm.innerHTML = `<i class="fa-solid fa-link-slash"></i> Orphaned bindings (${orphans.chatCount + orphans.cardCount})`;
+            nm.title = `${orphans.chatCount} chat${orphans.chatCount === 1 ? '' : 's'} and ${orphans.cardCount} character card${orphans.cardCount === 1 ? '' : 's'} name a lorebook that no longer exists`;
+            row.append(nm);
+            row.addEventListener('click', () => { orphanView = true; renderBooks(); renderExplorer(); });
+            nav.append(row);
+        }
     };
 
     renderBooks();
     if (selected) await openBook(selected);
     else renderExplorer();
+    checkOrphans();   // background; adds a nav row only if something is broken
 
     // Escape dismisses inside Studio; it never closes the window. A close throws away scroll position,
     // which entries are open, and the selection — too much to lose to a stray keypress when the ✕ is

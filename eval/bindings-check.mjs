@@ -2,7 +2,7 @@
 //
 // The detection is pure and lives in bindings.mjs precisely so it can be tested — the Studio view that
 // renders it cannot be. Today's lesson, applied before rather than after.
-import { findOrphanBindings, nearestWorld, normalizeWorldName } from '../extension/bindings.mjs';
+import { findOrphanBindings, nearestWorld, normalizeWorldName, editDistance } from '../extension/bindings.mjs';
 import { eq } from './metrics.mjs';
 
 const chat = (file, world) => ({ file_name: file, chat_metadata: world ? { world_info: world } : {} });
@@ -16,11 +16,20 @@ eq(normalizeWorldName('  A  B  '), 'a b', 'runs of whitespace collapse, ends tri
     const worlds = ['LTM_Isekai_-_Time_Whore_updated', 'Foxbridge', 'albion_lorebook_v2'];
     eq(nearestWorld('LTM Isekai - Time Whore', worlds), 'LTM_Isekai_-_Time_Whore_updated', 'a dropped qualifier is recognised');
     eq(nearestWorld('Foxbridge', worlds), null, 'a name that still exists is not its own suggestion');
+    // The separator-only rename: both normalize identically, which is the strongest match possible and
+    // was being rejected as a self-match. nearestWorld is only asked about names that do not exist.
+    eq(nearestWorld('LTM_-__Daddy_Next_Door__ABO_-_keywords_revised', ['LTM_-__Daddy_Next_Door__ABO__keywords_revised']),
+        'LTM_-__Daddy_Next_Door__ABO__keywords_revised', 'a rename that only moved a separator is recognised');
     eq(nearestWorld('Sommers_Pack', worlds), null, 'an unrelated name gets no guess, rather than a near one');
-    // The failure that matters: suggesting a book leads to rewriting chat history, so a wrong guess is
-    // worse than none. Two books alike but neither containing the other must not match.
-    eq(nearestWorld('Alastor v1', ['Alastor v2']), null, 'similar-but-divergent names are not suggested');
-    eq(nearestWorld('Alastor', ['Alastor v2']), 'Alastor v2', '...but a true prefix is');
+    eq(nearestWorld('Alastor', ['Alastor v2']), 'Alastor v2', 'a true prefix is suggested');
+    // Version bumps are the commonest rename in this corpus and containment cannot see them: neither
+    // `sommers pack v22` nor `v23` contains the other. Edit distance runs behind containment for these.
+    eq(nearestWorld('Sommers_Pack__v22', ['Sommers_Pack__v23', 'Foxbridge']), 'Sommers_Pack__v23', 'a version bump is recognised');
+    eq(nearestWorld('Alastor v1', ['Alastor v2']), 'Alastor v2', '...including one digit apart');
+    // Still refuses when nothing is close: the view is read-only, but the suggestion is what a later
+    // re-point would act on, so a confident wrong answer is the expensive failure.
+    eq(nearestWorld('Gladiator', ['Foxbridge', 'albion_lorebook_v2', 'Mystara']), null, 'nothing close gets no guess');
+    eq(nearestWorld('Foxbridge', ['Sommers_Pack__v22']), null, 'and an unrelated long name is not within tolerance');
 }
 
 {
@@ -44,5 +53,8 @@ eq(findOrphanBindings([{ char: 'A', avatar: 'A.png', charWorld: null, chats: [ch
     'an unbound chat is not a broken binding');
 eq(findOrphanBindings([], ['K']).missing.length, 0, 'no chats, nothing missing');
 eq(findOrphanBindings(undefined, []).chatCount, 0, 'an index that never loaded is empty, not a throw');
+
+eq(editDistance('kitten', 'sitting'), 3, 'edit distance is the standard one');
+eq(editDistance('', 'abc'), 3, 'and handles an empty side');
 
 console.log('ok   orphaned bindings are found, grouped, and only confidently suggested');
