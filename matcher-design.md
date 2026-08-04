@@ -47,6 +47,8 @@ carrying both halves — the grammar, and the matching behaviour that had no use
 **Bucket 2 — WA owns activation: not started.** All the design questions below are settled; it is
 implementation.
 
+**Match window — not started, and independent of bucket 2** except where noted. Settled below.
+
 ---
 
 ## Bucket 2 — the plan
@@ -90,6 +92,51 @@ book), and wildcards if they ever earn it. Quoting suppresses generation.
 **`C17` dissolves here** rather than being fixed. The matcher already diverges from core on
 orthography, NFC and Unicode word boundaries; while core activates, that means the audit reports on
 rules that are not what fires. Once WA activates, WA's rules *are* what fires.
+
+---
+
+## Match window — the haystack is segmented
+
+A setting, `matchWindow`: `scan | message | paragraph`, default `paragraph`. It selects **where WA stops
+concatenating**, not an evaluator mode — `scanWindow` returns segments, and `scan` is the degenerate
+one-segment array that reproduces today's behaviour exactly.
+
+**Uniform across every matching rule.** SmartKey conjunctions, selective logic, all of it. `keysecondary`
+is not a special case: bucket 2 synthesises it into a SmartKey expression, so it inherits the scope for
+free, where pinning it to `scan` would need a per-key override nothing else wants — and would aim the
+setting at the empty half of the population, since books have `keysecondary` and do not yet have
+SmartKeys. The 16,000-comparison equivalence test pins the *mapping* and runs at `scan`, where core's
+semantics are reproducible.
+
+**Both signs scoped.** A negation is a segment-local veto. Whole-window negation carries the same
+distance-blindness as whole-window AND and fails worse: `? fire -drill` is silently killed by a drill
+five messages back, and a false negative never surfaces, where a false positive is a ranking
+contribution that competes and loses.
+
+**Primary keys are unaffected at any setting.** A single-word key's occurrence count is slice-invariant,
+and a multi-word key cannot span the `\n` join today. Everything the setting changes lives in selective
+logic and SmartKey conjunctions.
+
+**Split, do not track positions.** Measured 1.01x for 8 segments against one join (200 patterns, 18KB,
+n=2000), so `scanAutomaton` keeps its counts-Map return and `plugin/automaton.mjs` never changes — no
+redeploy, and no window where the browser and server halves disagree. Cache the segmented result as ONE
+entry keyed by array reference. Not concatenating is faster than today at every setting including
+`scan`, because match-source combinations stop re-scanning the whole window.
+
+**Measured, one author's chats, n=1 (392 messages, 79 windows, 780KB):** message-scoping is near a
+no-op — p90 is 19 paragraphs per message, and 81.6% of scanned text lives in messages of six paragraphs
+or more. Paragraph is unambiguous in 96.2% of messages; the other 3.8% use single newlines only and
+degenerate to message-scoped, which is never worse than today. Split on `\n[ \t]*\n`. One corpus is why
+this is a default and not a decision.
+
+**Open:** how a score sums over segments; whether match sources and injects are each their own segment.
+Core's recursion buffer arrives pre-joined, so bucket 2 reconstructs segmentation there rather than
+retaining it.
+
+**Rejected — utterance-level.** The right unit, since a multi-sentence quote is one utterance, but it has
+no reliable marker: models drop closing quotes, use `—` for dialogue, and write narration unmarked.
+Sentence-splitting is not a proxy for it, and the fold supplies false boundaries by turning `…` into
+`...`. Rejected as unavailable, not as wrong.
 
 ---
 
