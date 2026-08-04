@@ -2376,15 +2376,21 @@ export async function lorebookStudio(preferredBook = null) {
                 // what happens to the existing book. Labelled by that outcome, because naming the OTHER
                 // book made them read as "point the old name at the new one", which is the opposite: it
                 // is the missing name that has to come back, since that is what the chats ask for.
-                const rename = btn('Restore this name', async () => { await renameBook(g.nearest, g.name); await refreshOrphans(); });
-                rename.title = `Rename “${g.nearest}” back to “${g.name}”. The chats resolve immediately, and anything still bound to “${g.nearest}” is re-pointed with it. One book, under the old name.`;
-                const dupe = btn('Restore as a copy', async () => {
-                    await copyBookByName(g.nearest, false, g.name);
-                    await updateWorldInfoList();
-                    await refreshOrphans();
-                });
-                dupe.title = `Copy “${g.nearest}” to a new book called “${g.name}”. Both books exist afterwards, with the same contents — for when the rename was deliberate and these chats want the old one.`;
-                row.append(sug, rename, dupe);
+                // Same icons the book toolbar uses for the same two verbs — fa-pen renames, fa-copy
+                // duplicates — so they read as the operations already known from there rather than as
+                // this view's own vocabulary. The tooltips carry which book moves and what survives.
+                const tool = (cls, title, fn) => {
+                    const i = document.createElement('i');
+                    i.className = `fa-solid ${cls} wa-book-tool`;
+                    i.title = title;
+                    i.addEventListener('click', fn);
+                    return i;
+                };
+                row.append(sug,
+                    tool('fa-pen', `Rename “${g.nearest}” back to “${g.name}”. The chats resolve immediately, and anything still bound to “${g.nearest}” is re-pointed with it — one book, under the old name.`,
+                        async () => { await renameBook(g.nearest, g.name); await refreshOrphans(); }),
+                    tool('fa-copy', `Copy “${g.nearest}” to a new book called “${g.name}”. Both books exist afterwards with the same contents — for when the rename was deliberate and these chats want the old one.`,
+                        async () => { await copyBookByName(g.nearest, false, g.name); await updateWorldInfoList(); await refreshOrphans(); }));
                 box.append(row);
             }
 
