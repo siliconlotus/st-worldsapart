@@ -166,70 +166,23 @@ export async function lorebookStudio(preferredBook = null) {
     // repainted — the cleanup list via its hook, the Explorer rows directly.
     const afterChatScan = keys => { rebuildScan(); termRepaint?.(); rerenderKeys(keys); };
     /**
-     * Does the OPEN chat use this book? Chat-bound, character-bound, or globally active — a global book
-     * is live in every chat, so its keys really do fire in this one.
+     * ONE AUDIT, TWO DISPLAYS. The Explorer and Cleanup must reach identical verdicts for identical
+     * keys — same classifier, same evidence, same key set — and differ only in how they show them:
+     * chips coloured in place against rows with reasons and a selection. Every drift between the two
+     * so far came from something being computed on one side instead of gathered once, and each read as
+     * a bug in the surface that showed the weaker answer.
      *
-     * Answered from memory, deliberately: findBookChats enumerates every chat on disk and is async, and
-     * the audit button is synchronous with sixteen other callers behind it.
+     * The one legitimate exception is the checkbox state (`cleanupChecks`, `defChecked`), which the
+     * Explorer has no equivalent of because it has no bulk removal.
+     *
+     * Every key in the BOOK, which is the key set both scan paths use.
+     *
+     * Not visibleEntries(): the audit classifies every entry, so evidence gathered from a filtered
+     * subset would make a verdict depend on what happened to be on screen when the scan ran — and the
+     * Explorer and Cleanup would disagree about the same key. One audit, two displays.
      */
-    const openChatBound = () => {
-        const ctx = getContext();
-        if (!ctx.chatId || !(ctx.chat?.length)) return false;
-        if (ctx.chatMetadata?.[METADATA_KEY] === selected) return true;
-        if ((selected_world_info ?? []).includes(selected)) return true;
-        return (characters ?? [])[ctx.characterId]?.data?.extensions?.world === selected;
-    };
-
-    /**
-     * Chat evidence for the audit, from the open chat, for free — `getContext().chat` is already in
-     * memory, so this is CPU only and no picker is involved.
-     *
-     * Runs from the audit button because that is the action meaning "re-derive what you know about these
-     * keys", and without it the Explorer shows the no-chat verdicts with no hint that better evidence is
-     * one tab away. Only when the book is actually bound: scanning an unrelated chat returns zeros for
-     * everything and upgrades `unattested` to "not in entry text or chat", which is the strong claim on
-     * evidence that does not apply.
-     *
-     * Never overwrites a scan the user ran themselves — theirs may span several chats, this one cannot.
-     * ponytail: synchronous, ~250ms on a 5000-message chat. The audit it rides along with is already
-     * synchronous and comparable, so it does not change the button's character; revisit together.
-     */
-    const scanOpenChatIfBound = () => {
-        if (chatHits) return 'kept';                 // a scan the user ran themselves; never clobbered
-        if (!openChatBound()) return 'unbound';
-        const ctx = getContext();
-        const keys = [...new Set(Object.values(data?.entries ?? {})
-            .flatMap(e => (Array.isArray(e.key) ? e.key : []).map(k => String(k).trim())).filter(Boolean))];
-        if (!keys.length) return 'unbound';
-        const msgs = (ctx.chat ?? []).filter(m => m && !m.is_system).map(m => String(m.mes ?? '')).filter(Boolean);
-        if (!msgs.length) return 'unbound';
-        const folded = [...new Set(keys.map(fold))];
-        const idxOf = new Map(folded.map((f, i) => [f, i]));
-        const aut = buildAutomaton(folded);
-        const counts = new Map();
-        for (const t of msgs) addMessageHits(aut, t, counts);
-        chatHits = new Map(keys.map(k => [k, counts.get(idxOf.get(fold(k))) ?? 0]));
-        chatMsgs = msgs.length;
-        chatName = String(ctx.chatId ?? 'the open chat');
-        return 'scanned';
-    };
-    /**
-     * The audit button's whole job: pick up free chat evidence, then re-derive.
-     *
-     * It SAYS which evidence it used, because the difference is otherwise invisible — the flags read
-     * "not in entry text" against "not in entry text or chat", which is exactly what someone checking
-     * whether the chat was searched would be squinting at. Silence here cost an hour of exactly that.
-     */
-    const runAudit = () => {
-        const got = scanOpenChatIfBound();
-        rebuildScan();
-        if (got === 'scanned') {
-            const live = [...chatHits.values()].filter(n => n > 0).length;
-            toastr.success(`Audited against entry text + "${chatName}" — ${live} of ${chatHits.size} keys fire in its ${chatMsgs} messages.`, 'Worlds Apart', { timeOut: 6000 });
-        } else if (got === 'unbound') {
-            toastr.info(`Audited against entry text only — "${selected}" is not bound to the open chat. Cleanup → "Check against chats" searches every chat that uses this book.`, 'Worlds Apart', { timeOut: 8000 });
-        }
-    };
+    const bookKeys = () => [...new Set(Object.values(data?.entries ?? {})
+        .flatMap(e => (Array.isArray(e.key) ? e.key : []).map(k => String(k).trim())).filter(Boolean))];
 
     // Chat counts belong to a (book, chat) PAIR. Switching either one makes them describe something else,
     // so they are dropped rather than left on screen attached to the wrong book.
@@ -1958,31 +1911,14 @@ export async function lorebookStudio(preferredBook = null) {
         return (Array.isArray(j) ? j : []).map(m => String(m?.mes ?? '')).filter(Boolean);
     };
 
-    const runChatScan = async () => {
-        if (!scan) { toastr.info('Run the audit first.', 'Worlds Apart'); return; }
-        // EVERY key, not just the flagged-dead ones. Scoping this to `unattested` made the scan
-        // structurally unable to see the other end — a key firing in half the chat is never asked
-        // about, because it is not dead. One automaton pass costs the same either way: the cost is
-        // O(chat), independent of key count.
-        const keys = [...new Set(visibleEntries().flatMap(e => (Array.isArray(e.key) ? e.key : []).map(k => String(k).trim())).filter(Boolean))];
-        if (!keys.length) { toastr.info('No keys to check.', 'Worlds Apart'); return; }
-
-        toastr.info('Finding chats that use this book…', 'Worlds Apart', { timeOut: 2000 });
-        const found = await findBookChats();
-        // The open chat is offered too, unticked, for the case the metadata does not capture — but it is
-        // never assumed, which was the bug in the first cut of this.
-        const ctx = getContext();
-        const openName = String(ctx.chatId ?? '');
-        if (openName && !found.some(f => f.file.startsWith(openName))) {
-            found.push({ char: ctx.name2 ?? '', avatar: null, file: openName, size: `${(ctx.chat ?? []).length} msgs`, why: 'currently open', open: true });
-        }
-        if (!found.length) { toastr.warning(`No chat uses "${selected}" — it is not bound to any chat or character, and not globally active. Bind it, or open a chat that uses it.`, 'Worlds Apart', { timeOut: 9000 }); return; }
-        if (!found.some(f => f.bound) && !found.isGlobal) { toastr.info(`"${selected}" is not bound to any chat; only the open one is offered.`, 'Worlds Apart', { timeOut: 6000 }); }
-
-        const picked = await pickChats(found);
-        if (!picked?.length) return;
-
-        const pickedName = picked.length === 1 ? picked[0].file.replace(/\.jsonl$/, '') : `${picked.length} chats`;
+    /**
+     * Scans a chosen set of chats and installs the result. THE one gatherer — the picker path and the
+     * audit's automatic path both come here, so which button was pressed cannot change the evidence.
+     * Returns a summary for the caller to phrase; it does not toast or repaint.
+     */
+    const scanChats = async (picked, label) => {
+        const keys = bookKeys();
+        if (!keys.length || !picked?.length) return null;
 
         // PLUGIN FIRST: it scans the files where they already live and returns only counts, so a 1.2GB
         // history never crosses the wire. The client-side path below is the fallback for an undeployed
@@ -1997,21 +1933,21 @@ export async function lorebookStudio(preferredBook = null) {
                 const j = await r.json();
                 chatHits = new Map(keys.map(k => [k, Number(j.counts?.[k]) || 0]));
                 chatMsgs = Number(j.messages) || 0;
-                chatName = pickedName;
-                const live = [...chatHits.values()].filter(n => n > 0).length;
-                toastr.success(`${live} of ${keys.length} fire in ${pickedName} (${chatMsgs} messages, scanned server-side).`, 'Worlds Apart', { timeOut: 6000 });
-                afterChatScan(keys);
-                return;
+                chatName = label;
+                return { keys, live: [...chatHits.values()].filter(n => n > 0).length, via: 'server' };
             }
             console.warn('Worlds Apart: /scan-chats unavailable, falling back to client-side scan');
         }
 
+        const ctx = getContext();
         const msgs = [];
         for (const c of picked) {
-            const got = c.open ? (ctx.chat ?? []).map(m => String(m?.mes ?? '')).filter(Boolean) : await fetchChatMessages(c);
+            const got = c.open
+                ? (ctx.chat ?? []).filter(m => m && !m.is_system).map(m => String(m.mes ?? '')).filter(Boolean)
+                : await fetchChatMessages(c);
             msgs.push(...got);
         }
-        if (!msgs.length) { toastr.warning('Those chats returned no messages.', 'Worlds Apart'); return; }
+        if (!msgs.length) return null;
         const folded = [...new Set(keys.map(fold))];
         const idxOf = new Map(folded.map((f, i) => [f, i]));
         const aut = buildAutomaton(folded);
@@ -2020,11 +1956,65 @@ export async function lorebookStudio(preferredBook = null) {
         for (const t of msgs) addMessageHits(aut, t, counts);
         chatHits = new Map(keys.map(k => [k, counts.get(idxOf.get(fold(k))) ?? 0]));
         chatMsgs = msgs.length;
-        chatName = pickedName;
-        const live = [...chatHits.values()].filter(n => n > 0).length;
-        toastr.success(`${live} of ${keys.length} fire in "${pickedName}" (${msgs.length} messages) — those are doing their job.`, 'Worlds Apart', { timeOut: 6000 });
-        afterChatScan(keys);
+        chatName = label;
+        return { keys, live: [...chatHits.values()].filter(n => n > 0).length, via: 'client' };
     };
+
+    /** Every chat BOUND to this book — the set worth scanning without being asked. Excludes chats that
+     *  only qualify because the book is globally active: that is 190 chats on a real corpus, which is
+     *  what the picker is for. */
+    const boundChats = async () => (await findBookChats()).filter(c => c.bound);
+
+    const runChatScan = async () => {
+        if (!scan) { toastr.info('Run the audit first.', 'Worlds Apart'); return; }
+        toastr.info('Finding chats that use this book…', 'Worlds Apart', { timeOut: 2000 });
+        const found = await findBookChats();
+        // The open chat is offered too, unticked, for the case the metadata does not capture — but it is
+        // never assumed, which was the bug in the first cut of this.
+        const ctx = getContext();
+        const openName = String(ctx.chatId ?? '');
+        if (openName && !found.some(f => f.file.startsWith(openName))) {
+            found.push({ char: ctx.name2 ?? '', avatar: null, file: openName, size: `${(ctx.chat ?? []).length} msgs`, why: 'currently open', open: true });
+        }
+        if (!found.length) { toastr.warning(`No chat uses "${selected}" — it is not bound to any chat or character, and not globally active. Bind it, or open a chat that uses it.`, 'Worlds Apart', { timeOut: 9000 }); return; }
+        if (!found.some(f => f.bound) && !found.isGlobal) { toastr.info(`"${selected}" is not bound to any chat; only the open one is offered.`, 'Worlds Apart', { timeOut: 6000 }); }
+
+        const picked = await pickChats(found);
+        if (!picked?.length) return;
+        const label = picked.length === 1 ? picked[0].file.replace(/\.jsonl$/, '') : `${picked.length} chats`;
+        const got = await scanChats(picked, label);
+        if (!got) { toastr.warning('Those chats returned no messages.', 'Worlds Apart'); return; }
+        toastr.success(`${got.live} of ${got.keys.length} fire in "${label}" (${chatMsgs} messages${got.via === 'server' ? ', scanned server-side' : ''}).`, 'Worlds Apart', { timeOut: 6000 });
+        afterChatScan(got.keys);
+    };
+
+    /**
+     * What both audit buttons do: gather the free evidence, then re-derive.
+     *
+     * Scans every chat BOUND to this book, through the same gatherer the picker uses — the audits in
+     * the Explorer and in Cleanup have to be identical, so the evidence cannot depend on which button
+     * started it. Skipped once a scan exists, since the user's own pick may be wider than this.
+     *
+     * It reports what it used. The difference between "not in entry text" and "not in entry text or
+     * chat" is otherwise invisible, and indistinguishable from a scan that ran and found nothing.
+     */
+    const runAudit = async () => {
+        let got = null, bound = [];
+        if (!chatHits) {
+            bound = await boundChats();
+            if (bound.length) {
+                const label = bound.length === 1 ? bound[0].file.replace(/\.jsonl$/, '') : `${bound.length} chats`;
+                got = await scanChats(bound, label);
+            }
+        }
+        rebuildScan();
+        if (got) {
+            toastr.success(`Audited against entry text + "${chatName}" — ${got.live} of ${got.keys.length} keys fire in its ${chatMsgs} messages.`, 'Worlds Apart', { timeOut: 6000 });
+        } else if (!chatHits) {
+            toastr.info(`Audited against entry text only — no chat is bound to "${selected}". Cleanup → "Check against chats" can search the open chat, or every chat if the book is globally active.`, 'Worlds Apart', { timeOut: 8000 });
+        }
+    };
+
     const cleanupGroups = () => {
         if (!scan) return [];
         const out = [];
@@ -2116,7 +2106,7 @@ export async function lorebookStudio(preferredBook = null) {
         auditBtn.title = chatHits
             ? `Re-run the keyword audit with the current Tool Settings.\nChat evidence: "${chatName}", ${chatMsgs} messages.`
             : 'Re-run the keyword audit with the current Tool Settings.\nNo chat searched yet.';
-        auditBtn.addEventListener('click', () => { runAudit(); renderExplorer(); });
+        auditBtn.addEventListener('click', async () => { await runAudit(); renderExplorer(); });
         // Search repaints only the list: rebuilding the header would replace the input mid-keystroke
         // and drop focus. The type filter can rebuild, since its own label has to change anyway.
         row1.append(auditBtn, buildFilterBtn(renderExplorer), buildSortControl(() => repaint()), buildSearchBox(() => repaint()));
@@ -2261,7 +2251,7 @@ export async function lorebookStudio(preferredBook = null) {
         scanBtn.title = chatHits
             ? `Flag dead / frequent / short keywords — tune under Tool Settings.\nChat evidence: "${chatName}", ${chatMsgs} messages.`
             : 'Flag dead / frequent / short keywords and colour them by verdict — tune under Tool Settings.\nNo chat searched yet: bind this book to the open chat, or use Cleanup → "Check against chats".';
-        scanBtn.addEventListener('click', () => { runAudit(); renderExplorer(); });
+        scanBtn.addEventListener('click', async () => { await runAudit(); renderExplorer(); });
         const allOpen = entries.length > 0 && entries.every(x => entryOpen.has(x.uid));
         // Master disclosure: an icon-only chevron left of the title, echoing the per-entry chevrons.
         const expandBtn = document.createElement('button');

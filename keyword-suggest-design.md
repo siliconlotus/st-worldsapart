@@ -315,6 +315,13 @@ nobody runs.
   first kind of drift and is silent about the second. Fixing it needs a loop inversion (register the key
   universe once, prime per message), and it is a prerequisite for trusting any collision number the
   harness reports.
+- **ONE AUDIT, TWO DISPLAYS.** The Explorer and Cleanup reach identical verdicts for identical keys —
+  same classifier, same chat evidence, same key set — and differ only in presentation: coloured chips
+  in place against rows with reasons and a selection. The only legitimate difference is the checkbox
+  state, which the Explorer has no equivalent of because it has no bulk removal. Treat any other
+  divergence as a bug in whichever side computed something instead of reading it: the chat evidence
+  was gathered from `visibleEntries()` on one path and the whole book on the other, which made a
+  verdict depend on what was on screen when the scan ran.
 - **THE EXPLORER IS THE PRIMARY CURATION SURFACE; CLEANUP IS SECONDARY.** Curation happens key by key
   against the entry, in the Explorer's inline chips — which colour from `reasonOf`/`severityOf` via
   `classifyEntry`, same as everything else. Cleanup is the bulk sweep, typically run once per book if
