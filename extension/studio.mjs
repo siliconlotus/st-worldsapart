@@ -1569,6 +1569,13 @@ export async function lorebookStudio(preferredBook = null) {
             if (wasSelected && !selected_world_info.includes(newName)) selected_world_info.push(newName);
             for (const cl of (world_info.charLore ?? [])) { const i = cl.extraBooks?.indexOf(oldName) ?? -1; if (i >= 0) cl.extraBooks[i] = newName; }
             if (wasPersona) power_user.persona_description_lorebook = newName;
+            // Every OTHER persona too, which core's updateWorldInfoLinks does and this did not — the
+            // active persona's binding lives in a different field from the rest, so fixing only that one
+            // looks complete and silently orphans every inactive persona pointed at the book.
+            for (const p of Object.keys(power_user.personas ?? {})) {
+                const d = power_user.persona_descriptions?.[p];
+                if (d?.lorebook === oldName) d.lorebook = newName;
+            }
             ctx.saveSettingsDebounced?.();
             if (wasChat && ctx.chatMetadata) { ctx.chatMetadata[METADATA_KEY] = newName; ctx.saveMetadata?.(); }
         } catch (err) { console.error('[WA] rename retarget', err); }
