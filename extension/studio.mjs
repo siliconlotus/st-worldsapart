@@ -8,7 +8,7 @@
 // flag-injecting wrapper), the sort vocabulary and tier definitions in sort.mjs, and the shared widgets
 // (context menu, sort control, stylesheet) in ui-widgets.mjs — so the Studio and the wand-menu reports
 // can never drift on what counts as a weak key or how entries order.
-import { saveSettingsDebounced, getRequestHeaders, characters } from '../../../../../script.js';
+import { saveSettingsDebounced, getRequestHeaders, characters, getCharacters } from '../../../../../script.js';
 import { extension_settings, getContext } from '../../../../extensions.js';
 import { loadWorldInfo, saveWorldInfo, reloadEditor, createWorldInfoEntry, duplicateWorldInfoEntry, deleteWorldInfoEntry, getFreeWorldEntryUid, deleteWIOriginalDataValue, deleteWorldInfo, updateWorldInfoList, world_names, world_info_match_whole_words, world_info_case_sensitive, selected_world_info, world_info, METADATA_KEY } from '../../../../world-info.js';
 import { power_user } from '../../../../power-user.js';
@@ -1554,6 +1554,34 @@ export async function lorebookStudio(preferredBook = null) {
         } catch (err) { console.error('[WA] repoint', name, err); return false; }
     };
 
+    /**
+     * Re-points every character card whose PRIMARY lorebook is `oldName`.
+     *
+     * WA was said not to be able to do this, here and in two other places, on the grounds that ST's
+     * renameWorldInfo owns the field and is not exported. The helper is not, but the write is:
+     * /api/characters/merge-attributes takes `{ avatar, data: { extensions: { world } } }`, deep-merges
+     * it into the card and validates before writing — it is what ST's own /char-set runs.
+     *
+     * Single mode per card rather than the bulk form: a rename touches one or two cards, the shape of
+     * the bulk `data` payload is ambiguous where the single one is exactly what /char-set sends, and a
+     * per-card result says which failed.
+     */
+    const repointCards = async (oldName, newName) => {
+        const targets = (characters ?? []).filter(c => c?.avatar && c?.data?.extensions?.world === oldName);
+        const moved = [], failed = [];
+        for (const c of targets) {
+            try {
+                const r = await fetch('/api/characters/merge-attributes', {
+                    method: 'POST', headers: getRequestHeaders(),
+                    body: JSON.stringify({ avatar: c.avatar, data: { extensions: { world: newName } } }),
+                });
+                (r.ok ? moved : failed).push(c.name ?? c.avatar);
+            } catch (err) { console.error('[WA] repoint card', c.avatar, err); failed.push(c.name ?? c.avatar); }
+        }
+        if (moved.length) await getCharacters();   // ST's in-memory copy is now stale
+        return { moved, failed };
+    };
+
     const repointChats = async (oldName, newName) => {
         const moved = [], failed = [];
         const openFile = String(getContext().chatId ?? '');
@@ -1570,9 +1598,11 @@ export async function lorebookStudio(preferredBook = null) {
         return { moved, failed };
     };
 
-    // Rename a book (open or not), then re-point the bindings we can reach. ST's own renameWorldInfo (not
-    // exported) also fixes the active character's *primary* lorebook via the character card; we can't from
-    // here, so that one case is called out in the toast. ponytail: reachable-binding retarget, card primary excluded.
+    // Rename a book (open or not), then re-point every binding to it: global-select, charLore, all
+    // personas, the open chat, every closed chat, and every character card whose primary lorebook it was.
+    // The card case was excluded for a long time on the grounds that ST's renameWorldInfo owns that field
+    // and is not exported — true of the helper, false of the write, which /char-set does through
+    // /api/characters/merge-attributes. WA's rename is now a superset of core's.
     const renameBook = async (srcName = selected, prefill = null) => {
         const oldName = srcName;
         const raw = await Popup.show.input('Rename lorebook', 'New name:', prefill ?? oldName);
@@ -1616,9 +1646,14 @@ export async function lorebookStudio(preferredBook = null) {
         // them: the binding is a string in a file, and a book that no longer exists produces no error,
         // just a chat that silently stops receiving it.
         const { moved, failed } = await repointChats(oldName, newName);
-        const also = moved.length ? ` Re-pointed ${moved.length} ${moved.length === 1 ? 'chat' : 'chats'}.` : '';
-        toastr.success(`Renamed to “${newName}”.${also} If a character used it as its primary lorebook, re-select it on that character.`, 'Worlds Apart');
-        if (failed.length) toastr.warning(`${failed.length} ${failed.length === 1 ? 'chat is' : 'chats are'} still bound to “${oldName}”: ${failed.join(', ')}. Re-point them by hand, or they will not see this book.`, 'Worlds Apart', { timeOut: 12000 });
+        const cards = await repointCards(oldName, newName);
+        const bits = [];
+        if (moved.length) bits.push(`${moved.length} ${moved.length === 1 ? 'chat' : 'chats'}`);
+        if (cards.moved.length) bits.push(`${cards.moved.length} character ${cards.moved.length === 1 ? 'card' : 'cards'}`);
+        const also = bits.length ? ` Re-pointed ${bits.join(' and ')}.` : '';
+        toastr.success(`Renamed to “${newName}”.${also}`, 'Worlds Apart');
+        const stuck = [...failed, ...cards.failed];
+        if (stuck.length) toastr.warning(`Still bound to “${oldName}”: ${stuck.join(', ')}. Re-point by hand, or they will not see this book.`, 'Worlds Apart', { timeOut: 12000 });
     };
     // Batch TF-IDF: build the ranker once, drop each entry's suggestions into its ⚡ chips, open those
     // entries so they're reviewable. Yields a frame first so the button can dim before the ~1s build.

@@ -89,8 +89,10 @@ export function findOrphanBindings(index, worldNames) {
     };
 
     for (const c of index ?? []) {
-        // A character card's primary lorebook. Diagnosable but NOT fixable from here: ST's
-        // renameWorldInfo owns that field and is not exported, so the view can only name it.
+        // A character card's primary lorebook. Kept separate from chats because it is a different
+        // write — /api/characters/merge-attributes rather than a chat save — not because it is
+        // unfixable. It was described as unfixable for a while: renameWorldInfo owns the field and is
+        // not exported, which is true of the helper and false of the endpoint underneath it.
         if (c?.charWorld && !exists.has(c.charWorld)) group(c.charWorld).cards.push(c.char);
         for (const ch of c?.chats ?? []) {
             const w = ch?.chat_metadata?.world_info;
