@@ -2371,14 +2371,16 @@ export async function lorebookStudio(preferredBook = null) {
                 const row = document.createElement('div');
                 row.style.cssText = 'display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:6px;';
                 const sug = document.createElement('span'); sug.style.cssText = 'word-break:break-all;';
-                sug.innerHTML = `<span class="opacity50p">looks renamed from</span> ${escapeHtml(g.nearest)}`;
+                sug.innerHTML = `<span class="opacity50p">might be related to</span> ${escapeHtml(g.nearest)}`;
                 // Both buttons do the same thing — make the missing name exist again — and differ only in
                 // what happens to the existing book. Labelled by that outcome, because naming the OTHER
                 // book made them read as "point the old name at the new one", which is the opposite: it
                 // is the missing name that has to come back, since that is what the chats ask for.
-                // Same icons the book toolbar uses for the same two verbs — fa-pen renames, fa-copy
-                // duplicates — so they read as the operations already known from there rather than as
-                // this view's own vocabulary. The tooltips carry which book moves and what survives.
+                // "might be related to", not "looks renamed from": the match is a name similarity and
+                // nothing more. A rename is only the likeliest explanation, and stating it as the finding
+                // would put the tool's guess ahead of the evidence in the one place a wrong reading gets
+                // acted on. Same icons the book toolbar uses for the same two verbs — fa-pen renames,
+                // fa-copy duplicates — so they read as operations already known from there.
                 const tool = (cls, title, fn) => {
                     const i = document.createElement('i');
                     i.className = `fa-solid ${cls} wa-book-tool`;
