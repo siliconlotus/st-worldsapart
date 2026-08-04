@@ -46,6 +46,11 @@ problem here came from a new claim, none from a deletion.
   and `paired-arms.mjs` go through them, so a second copy of the gazetteer or the scorers must never appear
   — that path has already produced one 74% BM25 error, and two tools disagreeing would report the drift as a
   parameter effect.
+- `fixtures/` + `sentinel-check.mjs` — a synthetic book and chat whose every audit verdict is written
+  down, and `install-sentinel.mjs`, which SYMLINKS both into `data/default-user/` so the same fixture
+  can be opened in the Studio. That is the point of it: three faults shipped behind a green suite
+  because every other check calls the classifier directly, one layer below what the UI uses. Symlinks
+  rather than copies, so editing the fixture changes what the UI shows.
 - everything else (`*-grid.mjs`, `paired-arms`, `keyword-audit`, `relevance-eval`, `summary-center`) —
   benchmark and analysis tools that need a vector index and/or lorebook path as an argument. Run bare they
   print a usage line and exit non-zero; that is not a test failure.
