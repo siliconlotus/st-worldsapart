@@ -1503,6 +1503,51 @@ export async function lorebookStudio(preferredBook = null) {
         if (skipped.length) toastr.warning(`Skipped ${skipped.length} (name already exists again): ${skipped.join(', ')}`, 'Worlds Apart');
         if (restored) toastr.success(`Restored ${restored} ${restored === 1 ? 'lorebook' : 'lorebooks'}.`, 'Worlds Apart');
     };
+    /**
+     * Re-points every CLOSED chat bound to `oldName`. The open one is handled by its own metadata save,
+     * which is cheaper and does not race ST's in-memory copy.
+     *
+     * A chat's binding lives in line 0 of its .jsonl, and the only way to change it is to round-trip the
+     * whole chat through /api/chats/get and /api/chats/save — there is no metadata-only endpoint. That is
+     * ST's own save path, so it backs the file up and integrity-checks against a concurrent edit rather
+     * than clobbering; a chat that fails is reported rather than skipped silently.
+     *
+     * ponytail: the whole chat crosses the wire per binding, which on a 5MB history is a real pause. It
+     * happens once per rename and the alternative is leaving the chats pointed at a book that no longer
+     * exists, which is silent and permanent. Revisit if ST ever exposes a metadata-only write.
+     *
+     * @returns {Promise<{moved: string[], failed: string[]}>}
+     */
+    const repointChats = async (oldName, newName) => {
+        const moved = [], failed = [];
+        const ctx = getContext();
+        const openFile = String(ctx.chatId ?? '');
+        chatIndex = null;   // a rename invalidates it, and this is the one place that must not read stale
+        for (const c of await loadChatIndex()) {
+            for (const ch of c.chats) {
+                if (ch?.chat_metadata?.world_info !== oldName) continue;
+                const file = String(ch.file_name ?? '').replace(/\.jsonl$/, '');
+                if (!file || file === openFile) continue;   // the open chat goes through saveMetadata
+                try {
+                    const got = await fetch('/api/chats/get', {
+                        method: 'POST', headers: getRequestHeaders(), cache: 'no-cache',
+                        body: JSON.stringify({ ch_name: c.char, file_name: file, avatar_url: c.avatar }),
+                    });
+                    const chat = got.ok ? await got.json() : null;
+                    if (!Array.isArray(chat) || !chat.length) { failed.push(file); continue; }
+                    chat[0].chat_metadata = { ...(chat[0].chat_metadata ?? {}), [METADATA_KEY]: newName };
+                    const put = await fetch('/api/chats/save', {
+                        method: 'POST', headers: getRequestHeaders(),
+                        body: JSON.stringify({ ch_name: c.char, file_name: file, avatar_url: c.avatar, chat }),
+                    });
+                    if (put.ok) moved.push(file); else failed.push(file);
+                } catch (err) { console.error('[WA] repoint', file, err); failed.push(file); }
+            }
+        }
+        chatIndex = null;   // the bindings just changed under it
+        return { moved, failed };
+    };
+
     // Rename a book (open or not), then re-point the bindings we can reach. ST's own renameWorldInfo (not
     // exported) also fixes the active character's *primary* lorebook via the character card; we can't from
     // here, so that one case is called out in the toast. ponytail: reachable-binding retarget, card primary excluded.
@@ -1538,7 +1583,13 @@ export async function lorebookStudio(preferredBook = null) {
         dirty = false;
         if (oldName === selected) { renderBooks(); openBook(newName); }
         else { renderBooks(); }
-        toastr.success(`Renamed to “${newName}”. If a character used it as its primary lorebook, re-select it on that character.`, 'Worlds Apart');
+        // Closed chats bound to the old name are orphaned by the rename and nothing else will ever fix
+        // them: the binding is a string in a file, and a book that no longer exists produces no error,
+        // just a chat that silently stops receiving it.
+        const { moved, failed } = await repointChats(oldName, newName);
+        const also = moved.length ? ` Re-pointed ${moved.length} ${moved.length === 1 ? 'chat' : 'chats'}.` : '';
+        toastr.success(`Renamed to “${newName}”.${also} If a character used it as its primary lorebook, re-select it on that character.`, 'Worlds Apart');
+        if (failed.length) toastr.warning(`${failed.length} ${failed.length === 1 ? 'chat is' : 'chats are'} still bound to “${oldName}”: ${failed.join(', ')}. Re-point them by hand, or they will not see this book.`, 'Worlds Apart', { timeOut: 12000 });
     };
     // Batch TF-IDF: build the ranker once, drop each entry's suggestions into its ⚡ chips, open those
     // entries so they're reviewable. Yields a frame first so the button can dim before the ~1s build.
