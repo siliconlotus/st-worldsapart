@@ -2186,7 +2186,11 @@ export async function lorebookStudio(preferredBook = null) {
             list.append(emptyNote('Auditing keywords…'));
             await yieldFrame();
             if (!pane.isConnected || tab !== 'cleanup') return;   // switched away while we were blocked
-            rebuildScan();
+            // runAudit, not rebuildScan: this is the OTHER place an audit gets built from scratch, and an
+            // audit that gathered no chat evidence is a different audit. Opening Cleanup first and then
+            // switching to the Explorer used to leave the chips reading verdicts from entry text alone,
+            // with the Explorer's own button the only way to get the rest — two surfaces, two audits.
+            await runAudit();
             auditBtn.innerHTML = '<i class="fa-solid fa-stethoscope"></i> Re-audit';
         }
         repaint();
@@ -2268,9 +2272,9 @@ export async function lorebookStudio(preferredBook = null) {
         expandBtn.style.cssText = 'width:auto;padding:3px 7px;flex-shrink:0;';
         expandBtn.innerHTML = `<i class="fa-solid ${allOpen ? 'fa-square-caret-up' : 'fa-square-caret-down'}"></i>`;
         expandBtn.title = `${allOpen ? 'Collapse' : 'Expand'} all entries — shift-click expands only entries with flagged keywords`;
-        expandBtn.addEventListener('click', ev => {
+        expandBtn.addEventListener('click', async ev => {
             if (ev.shiftKey) {   // expand only flagged entries (scan first if needed), collapse the rest
-                if (!scan) rebuildScan();
+                if (!scan) await runAudit();   // building an audit here means building the SAME audit
                 entryOpen.clear();
                 for (const x of entries) if (scan.classifyEntry(x).length) entryOpen.add(x.uid);
                 renderExplorer(); return;
