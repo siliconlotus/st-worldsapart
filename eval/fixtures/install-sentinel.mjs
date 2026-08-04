@@ -2,8 +2,19 @@
 // from node — chips, tooltips, colours, the pre-tick — can be checked against a book whose every
 // verdict is written down in sentinel-check.mjs.
 //
-// SYMLINKS, not copies: editing the fixture has to change what the UI shows, or the two drift and the
+// LINKS, not copies: editing the fixture has to change what the UI shows, or the two drift and the
 // eyeball check starts verifying a stale answer. Re-run after moving the repo; `--remove` unlinks.
+//
+// The two use different link types, and that is forced by ST rather than chosen. Worlds are listed with
+// a plain readdirSync (src/endpoints/settings.js), which returns names, so a SYMLINK is seen. Chats are
+// listed with `withFileTypes: true` and filtered on `file.isFile()` (src/endpoints/characters.js), and
+// a symlink's dirent answers isSymbolicLink() rather than isFile() — so a symlinked chat is dropped
+// before its metadata is ever read, and nothing binds. A HARD link is an ordinary directory entry for
+// the same inode: it passes the filter and still shares every edit.
+//
+// The cost of the hard link is that it does not survive the file being REPLACED rather than written in
+// place — a git checkout of the fixture makes a new inode and silently orphans the copy in ST. Re-run
+// this script after one.
 //
 //   node eval/fixtures/install-sentinel.mjs [--char <folder>] [--remove]
 //
@@ -24,7 +35,9 @@ const CHATS = path.join(USER, 'chats');
 const WORLD_NAME = 'WA Sentinel';
 const args = process.argv.slice(2);
 const remove = args.includes('--remove');
-const charArg = args[args.indexOf('--char') + 1];
+// indexOf returns -1 when absent, and args[0] is NOT the character folder — that silently made
+// `--remove` look for the chat under a directory named "--remove" and clean up nothing.
+const charArg = args.includes('--char') ? args[args.indexOf('--char') + 1] : null;
 
 if (!fs.existsSync(WORLDS)) {
     console.error(`No worlds folder at ${WORLDS} — is this extension installed under a SillyTavern tree?`);
@@ -39,21 +52,27 @@ const chatDir = (() => {
 })();
 
 const links = [
-    [path.join(HERE, 'sentinel-book.json'), path.join(WORLDS, `${WORLD_NAME}.json`)],
-    ...(chatDir ? [[path.join(HERE, 'sentinel-chat.jsonl'), path.join(chatDir, `${WORLD_NAME}.jsonl`)]] : []),
+    ['symlink', path.join(HERE, 'sentinel-book.json'), path.join(WORLDS, `${WORLD_NAME}.json`)],
+    ...(chatDir ? [['hardlink', path.join(HERE, 'sentinel-chat.jsonl'), path.join(chatDir, `${WORLD_NAME}.jsonl`)]] : []),
 ];
 
-for (const [src, dst] of links) {
-    const existing = fs.existsSync(dst) || fs.lstatSync(dst, { throwIfNoEntry: false });
-    if (existing) {
-        const isOurs = fs.lstatSync(dst).isSymbolicLink() && fs.readlinkSync(dst) === src;
-        if (!isOurs && !remove) { console.error(`refused: ${dst} exists and is not our symlink`); process.exit(1); }
+/** Ours if it is our symlink, or a hard link to the same inode. Anything else is someone's real file. */
+const isOurs = (kind, src, dst) => {
+    const st = fs.lstatSync(dst, { throwIfNoEntry: false });
+    if (!st) return false;
+    if (kind === 'symlink') return st.isSymbolicLink() && fs.readlinkSync(dst) === src;
+    return st.ino === fs.statSync(src).ino;
+};
+
+for (const [kind, src, dst] of links) {
+    if (fs.lstatSync(dst, { throwIfNoEntry: false })) {
+        if (!isOurs(kind, src, dst) && !remove) { console.error(`refused: ${dst} exists and is not ours`); process.exit(1); }
         fs.unlinkSync(dst);
         console.log(`${remove ? 'removed' : 'replaced'}  ${dst}`);
     }
     if (remove) continue;
-    fs.symlinkSync(src, dst);
-    console.log(`linked    ${dst}`);
+    if (kind === 'symlink') fs.symlinkSync(src, dst); else fs.linkSync(src, dst);
+    console.log(`${kind.padEnd(8)}  ${dst}`);
 }
 
 if (remove) process.exit(0);
