@@ -261,6 +261,48 @@ export async function init(router) {
         }
     });
 
+    /**
+     * Every chat's lorebook binding, and nothing else.
+     *
+     * ST's /api/characters/chats streams EVERY LINE of every chat to count messages and grab the last
+     * one, even when the caller asked only for metadata — 1.28GB and 3.2s on a real corpus, against
+     * 0.06s to read the one line the binding lives on. Fifty-three times the work, per Studio session,
+     * to answer "which book does this chat name".
+     *
+     * Returns [{ dir, file, world_info }] for every chat that names a book. The caller pairs it with
+     * the character list it already has in memory for card bindings.
+     */
+    router.post('/chat-bindings', async (request, response) => {
+        try {
+            const root = request.user.directories.chats;
+            if (!fs.existsSync(root)) return response.send({ bindings: [], chats: 0 });
+            const bindings = [];
+            let chats = 0;
+            for (const dir of fs.readdirSync(root, { withFileTypes: true })) {
+                if (!dir.isDirectory()) continue;
+                const dirPath = path.join(root, dir.name);
+                for (const file of fs.readdirSync(dirPath)) {
+                    if (!file.endsWith('.jsonl')) continue;
+                    chats++;
+                    const world = await new Promise(resolve => {
+                        const rl = readline.createInterface({ input: fs.createReadStream(path.join(dirPath, file)), crlfDelay: Infinity });
+                        let done = false;
+                        const finish = v => { if (!done) { done = true; rl.close(); resolve(v); } };
+                        // Line 0 is the metadata header; stop there rather than streaming the chat.
+                        rl.on('line', line => { try { finish(JSON.parse(line)?.chat_metadata?.world_info ?? null); } catch { finish(null); } });
+                        rl.on('close', () => finish(null));
+                        rl.on('error', () => finish(null));
+                    });
+                    if (world) bindings.push({ dir: dir.name, file, world_info: String(world) });
+                }
+            }
+            return response.send({ bindings, chats });
+        } catch (error) {
+            console.error('Worlds Apart: /chat-bindings failed', error);
+            return response.status(500).send({ error: String(error?.message ?? error) });
+        }
+    });
+
     router.post('/ping', (_request, response) => response.send({ ok: true, id: info.id, root: ST_ROOT, fingerprint: FINGERPRINT }));
 
     console.log('[Worlds Apart] server plugin ready at /api/plugins/worlds-apart');

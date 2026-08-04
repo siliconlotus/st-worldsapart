@@ -147,9 +147,46 @@ export async function lorebookStudio(preferredBook = null) {
     let orphans = null;
     let orphanView = false;   // showing the list instead of a book — `selected` stays a real book name
 
+    /**
+     * The chat index, as cheaply as it can be had.
+     *
+     * ST's /api/characters/chats reads every line of every chat to count messages and grab the last one
+     * — 1.28GB and 3.2s on a real corpus — even though a binding lives on line 0. The plugin route reads
+     * only that line (0.06s measured over the same 194 chats) and returns the bindings; card bindings
+     * come from the `characters` array, which is already in memory. Falls back to ST's endpoint when the
+     * plugin is not deployed, which is correct and slow rather than unavailable.
+     */
+    const bindingIndex = async () => {
+        if (runState.pluginAvailable) {
+            try {
+                const r = await fetch('/api/plugins/worlds-apart/chat-bindings', { method: 'POST', headers: getRequestHeaders() });
+                if (r.ok) {
+                    const { bindings } = await r.json();
+                    const byDir = new Map();
+                    for (const c of characters ?? []) {
+                        if (c?.avatar) byDir.set(String(c.avatar).replace(/\.png$/, ''), c);
+                    }
+                    const out = new Map();
+                    const entry = dir => {
+                        let e = out.get(dir);
+                        if (!e) {
+                            const c = byDir.get(dir);
+                            out.set(dir, e = { char: c?.name ?? dir, avatar: c?.avatar ?? `${dir}.png`, charWorld: c?.data?.extensions?.world ?? null, chats: [] });
+                        }
+                        return e;
+                    };
+                    for (const c of characters ?? []) if (c?.avatar) entry(String(c.avatar).replace(/\.png$/, ''));
+                    for (const b of bindings ?? []) entry(b.dir).chats.push({ file_name: b.file, chat_metadata: { world_info: b.world_info } });
+                    return [...out.values()];
+                }
+            } catch (err) { console.warn('[WA] chat-bindings route unavailable, falling back', err); }
+        }
+        return loadChatIndex();
+    };
+
     const checkOrphans = async () => {
         try {
-            const r = findOrphanBindings(await loadChatIndex(), world_names);
+            const r = findOrphanBindings(await bindingIndex(), world_names);
             if (!r.chatCount && !r.cardCount) return;
             orphans = r;
             renderBooks();
@@ -2364,7 +2401,7 @@ export async function lorebookStudio(preferredBook = null) {
     const refreshOrphans = async () => {
         chatIndex = null;
         orphanChecks.clear();
-        const r = findOrphanBindings(await loadChatIndex(), world_names);
+        const r = findOrphanBindings(await bindingIndex(), world_names);
         orphans = (r.chatCount || r.cardCount) ? r : null;
         if (!orphans) orphanView = false;
         renderBooks();
