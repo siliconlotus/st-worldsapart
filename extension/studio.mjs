@@ -195,13 +195,14 @@ export async function lorebookStudio(preferredBook = null) {
      * synchronous and comparable, so it does not change the button's character; revisit together.
      */
     const scanOpenChatIfBound = () => {
-        if (chatHits || !openChatBound()) return;
+        if (chatHits) return 'kept';                 // a scan the user ran themselves; never clobbered
+        if (!openChatBound()) return 'unbound';
         const ctx = getContext();
         const keys = [...new Set(Object.values(data?.entries ?? {})
             .flatMap(e => (Array.isArray(e.key) ? e.key : []).map(k => String(k).trim())).filter(Boolean))];
-        if (!keys.length) return;
+        if (!keys.length) return 'unbound';
         const msgs = (ctx.chat ?? []).filter(m => m && !m.is_system).map(m => String(m.mes ?? '')).filter(Boolean);
-        if (!msgs.length) return;
+        if (!msgs.length) return 'unbound';
         const folded = [...new Set(keys.map(fold))];
         const idxOf = new Map(folded.map((f, i) => [f, i]));
         const aut = buildAutomaton(folded);
@@ -210,9 +211,25 @@ export async function lorebookStudio(preferredBook = null) {
         chatHits = new Map(keys.map(k => [k, counts.get(idxOf.get(fold(k))) ?? 0]));
         chatMsgs = msgs.length;
         chatName = String(ctx.chatId ?? 'the open chat');
+        return 'scanned';
     };
-    /** The audit button's whole job: pick up free chat evidence, then re-derive. */
-    const runAudit = () => { scanOpenChatIfBound(); rebuildScan(); };
+    /**
+     * The audit button's whole job: pick up free chat evidence, then re-derive.
+     *
+     * It SAYS which evidence it used, because the difference is otherwise invisible — the flags read
+     * "not in entry text" against "not in entry text or chat", which is exactly what someone checking
+     * whether the chat was searched would be squinting at. Silence here cost an hour of exactly that.
+     */
+    const runAudit = () => {
+        const got = scanOpenChatIfBound();
+        rebuildScan();
+        if (got === 'scanned') {
+            const live = [...chatHits.values()].filter(n => n > 0).length;
+            toastr.success(`Audited against entry text + "${chatName}" — ${live} of ${chatHits.size} keys fire in its ${chatMsgs} messages.`, 'Worlds Apart', { timeOut: 6000 });
+        } else if (got === 'unbound') {
+            toastr.info(`Audited against entry text only — "${selected}" is not bound to the open chat. Cleanup → "Check against chats" searches every chat that uses this book.`, 'Worlds Apart', { timeOut: 8000 });
+        }
+    };
 
     // Chat counts belong to a (book, chat) PAIR. Switching either one makes them describe something else,
     // so they are dropped rather than left on screen attached to the wrong book.
@@ -2096,7 +2113,9 @@ export async function lorebookStudio(preferredBook = null) {
         row1.append(bookLbl);
         const auditBtn = document.createElement('button'); auditBtn.type = 'button'; auditBtn.className = 'menu_button';
         auditBtn.innerHTML = `<i class="fa-solid fa-stethoscope"></i> ${scan ? 'Re-audit' : 'Run audit'}`;
-        auditBtn.title = 'Re-run the keyword audit with the current Tool Settings';
+        auditBtn.title = chatHits
+            ? `Re-run the keyword audit with the current Tool Settings.\nChat evidence: "${chatName}", ${chatMsgs} messages.`
+            : 'Re-run the keyword audit with the current Tool Settings.\nNo chat searched yet.';
         auditBtn.addEventListener('click', () => { runAudit(); renderExplorer(); });
         // Search repaints only the list: rebuilding the header would replace the input mid-keystroke
         // and drop focus. The type filter can rebuild, since its own label has to change anyway.
@@ -2236,7 +2255,12 @@ export async function lorebookStudio(preferredBook = null) {
         const scanBtn = document.createElement('button');
         scanBtn.type = 'button'; scanBtn.className = 'menu_button';
         scanBtn.innerHTML = `<i class="fa-solid fa-stethoscope"></i> ${scan ? 'Re-audit' : 'Keyword audit'}`;
-        scanBtn.title = 'Flag dead / frequent / short keywords and colour them by verdict — tune under Tool Settings';
+        // The tooltip carries WHICH evidence the verdicts rest on. A chip reading "not in entry text"
+        // and one reading "not in entry text or chat" are different claims, and nothing else on this
+        // screen says whether a chat was searched.
+        scanBtn.title = chatHits
+            ? `Flag dead / frequent / short keywords — tune under Tool Settings.\nChat evidence: "${chatName}", ${chatMsgs} messages.`
+            : 'Flag dead / frequent / short keywords and colour them by verdict — tune under Tool Settings.\nNo chat searched yet: bind this book to the open chat, or use Cleanup → "Check against chats".';
         scanBtn.addEventListener('click', () => { runAudit(); renderExplorer(); });
         const allOpen = entries.length > 0 && entries.every(x => entryOpen.has(x.uid));
         // Master disclosure: an icon-only chevron left of the title, echoing the per-entry chevrons.
