@@ -127,7 +127,6 @@ export async function lorebookStudio(preferredBook = null) {
     let cleanupChatHits = null;        // Map<key, count>, null until the scan is run
     let cleanupChatMsgs = 0;
     let cleanupChatName = '';          // WHICH chat produced those counts — see runChatScan
-    const SEV_GREEN = '#7bbf6a';       // same green keyword-core uses for a harmless flag
     const rowId = (uid, term) => `${uid}${term}`;
     // The active term tab's list repaint, or null in the Explorer. Whitelist edits reach the list from
     // three places (the term right-click menu, the tray's per-key ✕, Clear whitelist), and the Explorer's
@@ -1967,11 +1966,12 @@ export async function lorebookStudio(preferredBook = null) {
                 const rc = scan.reasonOf(p);
                 const id = rowId(e.uid, p.key);
                 if (!cleanupChecks.has(id)) cleanupChecks.set(id, scan.defChecked(p));   // pre-tick policy shared with the pruner
-                // Denominator lives in the bulk bar, not on every row — it is the same for all of them.
-                const hits = cleanupChatHits && p.flag === 'unattested' ? cleanupChatHits.get(p.key) : undefined;
-                const why = hits === undefined ? rc.text
-                    : `${rc.text} · ${hits ? `${hits} hit${hits === 1 ? '' : 's'} in chat` : '0 hits in chat'}`;
-                return { term: p.key, why, color: hits ? SEV_GREEN : rc.color, p };
+                // Chat evidence used to be applied HERE — a green row and a hit count bolted onto an
+                // `unattested` verdict the classifier had already reached. It lives in the classifier
+                // now, so a chat-attested key never reaches this list to be recoloured, and the reason
+                // text carries what was checked. Nothing local left to add; the denominator is in the
+                // bulk bar, where it is the same for every row.
+                return { term: p.key, why: rc.text, color: rc.color, p };
             });
             // Show-all: append the keys classifyEntry didn't return — unflagged, whitelisted, or on an
             // entry the audit's scope excluded. Flagged rows stay on top, so widening the list never

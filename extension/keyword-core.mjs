@@ -282,10 +282,12 @@ export function buildKeyPruneScan(data, opts, ignoreSet, { caseSensitiveDefault 
         // will use. A query is not a name, so it gets no such reprieve — a query that never evaluates
         // true anywhere is exactly the broken-key case the audit exists to surface.
         //
-        // A key the CHAT uses is not dead, whatever the book's own prose does. Suppressed rather than
-        // recoloured: "not in entry text" has no bearing left on the key once it is known to fire, and a
-        // green row in a work queue is still a row to read and dismiss. Reachable via Cleanup's show-all,
-        // which lists it as unflagged like any other key.
+        // A key the CHAT uses is not dead, whatever the book's own prose does — so the flag is dropped,
+        // not annotated. Dropping it is what reaches the EXPLORER: an unflagged key renders green there,
+        // where a flagged-dead one is dimmed and unlabelled, so a chat-attested key used to sit greyed
+        // out on the surface curation actually happens on. Cleanup had a local patch for this (a green
+        // row plus a hit count) which no other surface could see. Still reachable under show-all, listed
+        // as unflagged like any other key.
         if (dc === 0 && opts.pruneUnattested && !(!smart && opts.ignoreProper && looksProper(k)) && !share) return { flag: 'unattested', dc, smart, chatChecked: share !== undefined };
         if (nBook >= KEY_MIN_COMMON_ENTRIES && dc / nBook > opts.tooCommon * 0.75 && opts.pruneCommon) return { flag: 'too common', dc };
         // Activation breadth, checked after firing rate: a key can be rare in the prose yet listed on
