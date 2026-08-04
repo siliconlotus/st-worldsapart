@@ -2022,9 +2022,12 @@ export async function lorebookStudio(preferredBook = null) {
             }
         }
         rebuildScan();
+        // matchWindow is in here because it reached the classifier for the first time in fefaa62 — the
+        // wrapper had been dropping it, so the audit ran at 'scan' while the setting said otherwise and
+        // nothing on screen disagreed. A setting that silently does nothing is the thing this line is for.
         console.log('Worlds Apart: audit evidence —', {
-            book: selected, boundChats: bound.length, scanned: got?.via ?? 'none',
-            messages: chatMsgs, keys: chatHits?.size ?? 0, firing: got?.live ?? 0,
+            book: selected, matchWindow: settings().matchWindow, boundChats: bound.length,
+            scanned: got?.via ?? 'none', messages: chatMsgs, keys: chatHits?.size ?? 0, firing: got?.live ?? 0,
         });
         if (got) {
             toastr.success(`Audited against entry text + "${chatName}" — ${got.live} of ${got.keys.length} keys fire in its ${chatMsgs} messages.`, 'Worlds Apart', { timeOut: 6000 });
