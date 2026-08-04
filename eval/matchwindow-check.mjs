@@ -103,3 +103,36 @@ console.log('ok   matchWindow: scan is the old behaviour, narrower settings scop
     eq(flags('scan')['astronauts'], flags('paragraph')['astronauts'], 'an attested literal is unmoved too');
 }
 console.log('ok   the audit segments like the runtime, and literals are slice-invariant');
+
+// Chat evidence reaching the CLASSIFIER, not the cleanup display layer — so the Explorer's chips,
+// which colour from reasonOf/severityOf, carry it too. Absent chatRate must behave exactly as before.
+{
+    const { buildKeyPruneScan, CHAT_BROAD } = await import('../extension/keyword-core.mjs');
+    const opts = {
+        scanKeyword: true, scanVectorized: true, scanConstant: true, includeInactive: true,
+        pruneUnattested: true, pruneCommon: true, pruneShort: true, ignoreProper: false,
+        stickySkipCommon: true, tooCommon: 0.5, minLength: 4,
+    };
+    // `mother` is in COMMON_WORDS; `zzznope` is in neither the book's text nor any word list.
+    const book = { entries: { 0: { uid: 0, key: ['mother', 'zzznope'], content: 'Nothing relevant here.' } } };
+    const run = chatRate => {
+        const s = buildKeyPruneScan(book, opts, new Set(), { chatRate });
+        return Object.fromEntries(s.classifyEntry(book.entries[0]).map(p => [p.key, { flag: p.flag, why: s.reasonOf(p).text, sev: s.severityOf(p) }]));
+    };
+    const none = run(undefined);
+    eq(none.zzznope.flag, 'unattested', 'no chat: a key absent from entry text is dead');
+    eq(none.zzznope.why, 'not in entry text', '...and says only what it checked');
+    eq(none.mother.flag, 'too common', 'no chat: the English list still flags a generic word');
+    eq(none.mother.sev !== '#e06c6c', true, '...but unevidenced it is no longer red');
+
+    const quiet = run({ hits: new Map([['mother', 2], ['zzznope', 0]]), messages: 100 });
+    eq(quiet.zzznope.why, 'not in entry text or chat', 'chat checked and silent: the claim gets stronger');
+    eq(quiet.mother.sev !== '#e06c6c', true, 'a quiet common word stays flagged, not red');
+
+    const live = run({ hits: new Map([['mother', 40], ['zzznope', 12]]), messages: 100 });
+    eq(live.zzznope, undefined, 'a key the CHAT uses is not dead — the flag is suppressed, not recoloured');
+    eq(live.mother.sev, '#e06c6c', 'a common word the chat confirms over-fires goes red');
+    eq(live.mother.why, `common · 40% of chat`, '...and shows the evidence, not just the assertion');
+    eq(CHAT_BROAD, 0.2, 'the broad threshold is a named bound, not a literal');
+}
+console.log('ok   chat evidence reaches the classifier and conditions severity');

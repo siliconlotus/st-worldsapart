@@ -155,7 +155,17 @@ export async function lorebookStudio(preferredBook = null) {
     const save = () => { dirty = true; saveWorldInfo(selected, data, true); };
     const getSugg = uid => { let x = sugg.get(uid); if (!x) sugg.set(uid, x = { tfidf: [], llm: [] }); return x; };
     // The audit answers the same question the runtime does, so it segments the same way.
-    const rebuildScan = () => { scan = buildKeyPruneScan(data, studioOpts, ignoreSet, { matchWindow: settings().matchWindow }); };
+    const rebuildScan = () => {
+        scan = buildKeyPruneScan(data, studioOpts, ignoreSet, {
+            matchWindow: settings().matchWindow,
+            // Into the CLASSIFIER, not the cleanup display layer — the Explorer's chips colour from
+            // reasonOf/severityOf, and curation happens there. Painted on afterwards it reaches one tab.
+            chatRate: cleanupChatHits ? { hits: cleanupChatHits, messages: cleanupChatMsgs } : undefined,
+        });
+    };
+    // A finished chat scan changes what classifyEntry returns, so the scan is rebuilt and everything
+    // repainted — the cleanup list via its hook, the Explorer rows directly.
+    const afterChatScan = keys => { rebuildScan(); termRepaint?.(); rerenderKeys(keys); };
     // Chat counts belong to a (book, chat) PAIR. Switching either one makes them describe something else,
     // so they are dropped rather than left on screen attached to the wrong book.
     const clearChatScan = () => { cleanupChatHits = null; cleanupChatMsgs = 0; cleanupChatName = ''; };
@@ -1885,8 +1895,12 @@ export async function lorebookStudio(preferredBook = null) {
 
     const runChatScan = async () => {
         if (!scan) { toastr.info('Run the audit first.', 'Worlds Apart'); return; }
-        const keys = [...new Set(visibleEntries().flatMap(e => scan.classifyEntry(e).filter(p => p.flag === 'unattested').map(p => p.key)))];
-        if (!keys.length) { toastr.info('No "not in entry text" keys to check.', 'Worlds Apart'); return; }
+        // EVERY key, not just the flagged-dead ones. Scoping this to `unattested` made the scan
+        // structurally unable to see the other end — a key firing in half the chat is never asked
+        // about, because it is not dead. One automaton pass costs the same either way: the cost is
+        // O(chat), independent of key count.
+        const keys = [...new Set(visibleEntries().flatMap(e => (Array.isArray(e.key) ? e.key : []).map(k => String(k).trim())).filter(Boolean))];
+        if (!keys.length) { toastr.info('No keys to check.', 'Worlds Apart'); return; }
 
         toastr.info('Finding chats that use this book…', 'Worlds Apart', { timeOut: 2000 });
         const found = await findBookChats();
@@ -1921,7 +1935,7 @@ export async function lorebookStudio(preferredBook = null) {
                 cleanupChatName = chatName;
                 const live = [...cleanupChatHits.values()].filter(n => n > 0).length;
                 toastr.success(`${live} of ${keys.length} fire in ${chatName} (${cleanupChatMsgs} messages, scanned server-side).`, 'Worlds Apart', { timeOut: 6000 });
-                termRepaint?.();
+                afterChatScan(keys);
                 return;
             }
             console.warn('Worlds Apart: /scan-chats unavailable, falling back to client-side scan');
@@ -1943,7 +1957,7 @@ export async function lorebookStudio(preferredBook = null) {
         cleanupChatName = chatName;
         const live = [...cleanupChatHits.values()].filter(n => n > 0).length;
         toastr.success(`${live} of ${keys.length} fire in "${chatName}" (${msgs.length} messages) — those are doing their job.`, 'Worlds Apart', { timeOut: 6000 });
-        termRepaint?.();   // the cleanup tab claims this hook; see line ~130
+        afterChatScan(keys);
     };
     const cleanupGroups = () => {
         if (!scan) return [];

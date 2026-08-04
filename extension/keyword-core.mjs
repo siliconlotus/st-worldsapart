@@ -114,7 +114,26 @@ const COMMON_HEAD = new Set([...COMMON_WORDS].slice(0, ENGLISH_COMMON_STICKY_CUT
  *        world-info globals here; harnesses pass nothing and get false/false)
  * @returns {{entries:object[], nE:number, classifyEntry:Function, reasonOf:Function, defChecked:Function, effCase:Function, effWhole:Function}}
  */
-export function buildKeyPruneScan(data, opts, ignoreSet, { caseSensitiveDefault = false, wholeWordsDefault = false, matchWindow = 'scan' } = {}) {
+/** Share of messages a key must match before chat evidence calls it broad. Not a fitted threshold —
+ * a bound. Measured on Richard's curation event, no key the author kept fired above 11%, so 20% sits
+ * above the known-good ceiling with margin. It is deliberately loose because what lives above it is
+ * mostly legitimate: of 20 keys over 20% across seven books, 8 were on vectorized entries (blanked by
+ * suppressVectorKeys) and most of the rest were main-cast names on sticky sheets, which is how
+ * continuous memory is authored. Used only to CONFIRM another flag, never to raise one on its own. */
+export const CHAT_BROAD = 0.20;
+
+/**
+ * @param {{hits: Map<string, number>, messages: number}} [chatRate] Per-key message hit counts from a
+ *   chat scan, and the denominator. Absent = no chat evidence, and every flag behaves as it did before
+ *   the signal existed — this is opt-in evidence the user asked for, not a verdict the tool imposes.
+ */
+export function buildKeyPruneScan(data, opts, ignoreSet, { caseSensitiveDefault = false, wholeWordsDefault = false, matchWindow = 'scan', chatRate } = {}) {
+    // Share of the chat a key matches, or undefined when no scan has been run.
+    const chatShare = key => {
+        if (!chatRate?.messages) return undefined;
+        const n = chatRate.hits?.get(key);
+        return n === undefined ? undefined : n / chatRate.messages;
+    };
     const RED = '#e06c6c', YEL = '#d9b74a', GRN = '#7bbf6a';
     const looksProper = k => k.split(/\s+/).every(t => /^[A-Z]/.test(t));   // Title Case = a name
 
@@ -247,14 +266,27 @@ export function buildKeyPruneScan(data, opts, ignoreSet, { caseSensitiveDefault 
         // — but only the short-key check reads it, and that is one of the skipped ones.
         const smart = k.startsWith('?');
         const dc = scan(k, cs, ww).df;
+        const share = chatShare(k);
         // A common-English single word over-fires against chat regardless of lorebook df, so it
         // outranks dead (a word absent from the book's own text still floods it from the chat).
         // Sticky gets the shorter head-of-list cut; keyword/vector test the whole list.
-        if (!smart && opts.pruneCommon && !/\s/.test(k) && (sticky ? COMMON_HEAD : COMMON_WORDS).has(k.toLowerCase())) return { flag: 'too common', dc, eng: true };
+        //
+        // `eng` is the ASSERTION that it over-fires; a chat scan is the evidence. Measured across the
+        // books curation has not touched, 1 of 38 English-flagged keys actually fires broadly — the rest
+        // are proper nouns colliding with common words (River, Blue, Angel, Paris) or generic words this
+        // story simply does not use. So the flag stands when unevidenced, and severityOf reads `share`
+        // to decide how loudly. It is NOT suppressed by a quiet chat: absence of over-firing here is not
+        // evidence the word denotes anything, which is the other half of what this flag is claiming.
+        if (!smart && opts.pruneCommon && !/\s/.test(k) && (sticky ? COMMON_HEAD : COMMON_WORDS).has(k.toLowerCase())) return { flag: 'too common', dc, eng: true, share };
         // ignoreProper spares a capitalised key from the dead flag on the grounds it is a name the chat
         // will use. A query is not a name, so it gets no such reprieve — a query that never evaluates
         // true anywhere is exactly the broken-key case the audit exists to surface.
-        if (dc === 0 && opts.pruneUnattested && !(!smart && opts.ignoreProper && looksProper(k))) return { flag: 'unattested', dc, smart };
+        //
+        // A key the CHAT uses is not dead, whatever the book's own prose does. Suppressed rather than
+        // recoloured: "not in entry text" has no bearing left on the key once it is known to fire, and a
+        // green row in a work queue is still a row to read and dismiss. Reachable via Cleanup's show-all,
+        // which lists it as unflagged like any other key.
+        if (dc === 0 && opts.pruneUnattested && !(!smart && opts.ignoreProper && looksProper(k)) && !share) return { flag: 'unattested', dc, smart, chatChecked: share !== undefined };
         if (nBook >= KEY_MIN_COMMON_ENTRIES && dc / nBook > opts.tooCommon * 0.75 && opts.pruneCommon) return { flag: 'too common', dc };
         // Activation breadth, checked after firing rate: a key can be rare in the prose yet listed on
         // most entries, which the content-df flags above can't see. Same small-corpus guard, since
@@ -286,7 +318,12 @@ export function buildKeyPruneScan(data, opts, ignoreSet, { caseSensitiveDefault 
     const severityOf = p => {
         if (p.flag === 'unattested') return '';
         if (p.flag === 'too common') {
-            if (p.eng) return RED;
+            // The English list is an assertion about the WORD; a chat scan is evidence about this book's
+            // prose. Red once the evidence agrees, yellow while it is only asserted — the same shape the
+            // df branch below already has, where severity reads a measured ratio rather than a list
+            // membership. Unevidenced it stays yellow rather than red, because the author's call is the
+            // one that matters and the flag's precision as an over-firing predictor is low.
+            if (p.eng) return p.share >= CHAT_BROAD ? RED : YEL;
             return p.dc / nBook >= opts.tooCommon ? RED : YEL;
         }
         if (p.flag === 'shared') return p.dk / nBook >= opts.sharedKeys ? RED : YEL;
@@ -304,8 +341,16 @@ export function buildKeyPruneScan(data, opts, ignoreSet, { caseSensitiveDefault 
         const color = severityOf(p);
         // A query is not "absent from the text" — it evaluated false everywhere, which is a different
         // sentence and the difference matters when someone is deciding whether their query is wrong.
-        if (p.flag === 'unattested') return { text: p.smart ? 'never matches' : 'not in entry text', color };
-        if (p.flag === 'too common') return p.eng ? { text: 'common', color } : { text: `frequent (${Math.round(100 * p.dc / nBook)}%)`, color };
+        // Say WHICH evidence was checked. "not in entry text" with no chat scan is a much weaker claim
+        // than with one, and rendering them identically makes the weak version look authoritative —
+        // especially now that a chat hit suppresses the flag, so the surviving rows read as stronger.
+        if (p.flag === 'unattested') {
+            return { text: p.smart ? 'never matches' : (p.chatChecked ? 'not in entry text or chat' : 'not in entry text'), color };
+        }
+        if (p.flag === 'too common') {
+            if (!p.eng) return { text: `frequent (${Math.round(100 * p.dc / nBook)}%)`, color };
+            return { text: p.share === undefined ? 'common' : `common · ${Math.round(100 * p.share)}% of chat`, color };
+        }
         if (p.flag === 'shared') return { text: `shared (${Math.round(100 * p.dk / nBook)}%)`, color };
         if (p.flag === 'fragment') return { text: 'phrase fragment', color };
         return { text: `short (${p.clean}/${p.total} clean)`, color };
