@@ -122,13 +122,7 @@ change, with no line-level blame or three-way merge. `grep` silently produced no
 truncated the line at the NUL. US has none of those effects and, being a control character, still can't
 collide with content the way a printable delimiter could.
 
-## Core's own defects go in `../../../../../upstream-st.md`
-
-ST's root carries `upstream-st.md` — findings in core that belong upstream rather than here, each with
-the file it lives in, how it was observed, and what WA does instead. Add to it rather than working
-around something silently, and read it before concluding that a core behaviour is intentional: the
-list already covers ASCII-only whole-word matching, the per-key re-fold of the scan buffer, and the
-three ways a lorebook BINDING rots without anything reporting it.
+Defects in ST core itself go in `upstream-st.md`, in the SillyTavern root — not in this repo.
 
 ## Plugin changes need a redeploy
 
