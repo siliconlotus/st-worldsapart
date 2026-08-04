@@ -124,9 +124,9 @@ export async function lorebookStudio(preferredBook = null) {
     //
     // Opt-in, because it is evidence the user asked for rather than a verdict the tool imposes — and because
     // a key with 0 hits still is not proven useless, only unproven. Survives a rescan; cleared on book change.
-    let cleanupChatHits = null;        // Map<key, count>, null until the scan is run
-    let cleanupChatMsgs = 0;
-    let cleanupChatName = '';          // WHICH chat produced those counts — see runChatScan
+    let chatHits = null;        // Map<key, count>, null until the scan is run
+    let chatMsgs = 0;
+    let chatName = '';          // WHICH chat produced those counts — see runChatScan
     const rowId = (uid, term) => `${uid}${term}`;
     // The active term tab's list repaint, or null in the Explorer. Whitelist edits reach the list from
     // three places (the term right-click menu, the tray's per-key ✕, Clear whitelist), and the Explorer's
@@ -159,15 +159,64 @@ export async function lorebookStudio(preferredBook = null) {
             matchWindow: settings().matchWindow,
             // Into the CLASSIFIER, not the cleanup display layer — the Explorer's chips colour from
             // reasonOf/severityOf, and curation happens there. Painted on afterwards it reaches one tab.
-            chatRate: cleanupChatHits ? { hits: cleanupChatHits, messages: cleanupChatMsgs } : undefined,
+            chatRate: chatHits ? { hits: chatHits, messages: chatMsgs } : undefined,
         });
     };
     // A finished chat scan changes what classifyEntry returns, so the scan is rebuilt and everything
     // repainted — the cleanup list via its hook, the Explorer rows directly.
     const afterChatScan = keys => { rebuildScan(); termRepaint?.(); rerenderKeys(keys); };
+    /**
+     * Does the OPEN chat use this book? Chat-bound, character-bound, or globally active — a global book
+     * is live in every chat, so its keys really do fire in this one.
+     *
+     * Answered from memory, deliberately: findBookChats enumerates every chat on disk and is async, and
+     * the audit button is synchronous with sixteen other callers behind it.
+     */
+    const openChatBound = () => {
+        const ctx = getContext();
+        if (!ctx.chatId || !(ctx.chat?.length)) return false;
+        if (ctx.chatMetadata?.[METADATA_KEY] === selected) return true;
+        if ((selected_world_info ?? []).includes(selected)) return true;
+        return (characters ?? [])[ctx.characterId]?.data?.extensions?.world === selected;
+    };
+
+    /**
+     * Chat evidence for the audit, from the open chat, for free — `getContext().chat` is already in
+     * memory, so this is CPU only and no picker is involved.
+     *
+     * Runs from the audit button because that is the action meaning "re-derive what you know about these
+     * keys", and without it the Explorer shows the no-chat verdicts with no hint that better evidence is
+     * one tab away. Only when the book is actually bound: scanning an unrelated chat returns zeros for
+     * everything and upgrades `unattested` to "not in entry text or chat", which is the strong claim on
+     * evidence that does not apply.
+     *
+     * Never overwrites a scan the user ran themselves — theirs may span several chats, this one cannot.
+     * ponytail: synchronous, ~250ms on a 5000-message chat. The audit it rides along with is already
+     * synchronous and comparable, so it does not change the button's character; revisit together.
+     */
+    const scanOpenChatIfBound = () => {
+        if (chatHits || !openChatBound()) return;
+        const ctx = getContext();
+        const keys = [...new Set(Object.values(data?.entries ?? {})
+            .flatMap(e => (Array.isArray(e.key) ? e.key : []).map(k => String(k).trim())).filter(Boolean))];
+        if (!keys.length) return;
+        const msgs = (ctx.chat ?? []).filter(m => m && !m.is_system).map(m => String(m.mes ?? '')).filter(Boolean);
+        if (!msgs.length) return;
+        const folded = [...new Set(keys.map(fold))];
+        const idxOf = new Map(folded.map((f, i) => [f, i]));
+        const aut = buildAutomaton(folded);
+        const counts = new Map();
+        for (const t of msgs) addMessageHits(aut, t, counts);
+        chatHits = new Map(keys.map(k => [k, counts.get(idxOf.get(fold(k))) ?? 0]));
+        chatMsgs = msgs.length;
+        chatName = String(ctx.chatId ?? 'the open chat');
+    };
+    /** The audit button's whole job: pick up free chat evidence, then re-derive. */
+    const runAudit = () => { scanOpenChatIfBound(); rebuildScan(); };
+
     // Chat counts belong to a (book, chat) PAIR. Switching either one makes them describe something else,
     // so they are dropped rather than left on screen attached to the wrong book.
-    const clearChatScan = () => { cleanupChatHits = null; cleanupChatMsgs = 0; cleanupChatName = ''; };
+    const clearChatScan = () => { chatHits = null; chatMsgs = 0; chatName = ''; };
     // Repaint only the entries whose key list includes one of `keys`. classifyEntry reads the live
     // ignoreSet and the df table is ignore-independent, so whitelisting needs no rescan — just recolour
     // the affected rows (chip colour + collapsed badge reflect the new ignore state).
@@ -1916,7 +1965,7 @@ export async function lorebookStudio(preferredBook = null) {
         const picked = await pickChats(found);
         if (!picked?.length) return;
 
-        const chatName = picked.length === 1 ? picked[0].file.replace(/\.jsonl$/, '') : `${picked.length} chats`;
+        const pickedName = picked.length === 1 ? picked[0].file.replace(/\.jsonl$/, '') : `${picked.length} chats`;
 
         // PLUGIN FIRST: it scans the files where they already live and returns only counts, so a 1.2GB
         // history never crosses the wire. The client-side path below is the fallback for an undeployed
@@ -1929,11 +1978,11 @@ export async function lorebookStudio(preferredBook = null) {
             });
             if (r.ok) {
                 const j = await r.json();
-                cleanupChatHits = new Map(keys.map(k => [k, Number(j.counts?.[k]) || 0]));
-                cleanupChatMsgs = Number(j.messages) || 0;
-                cleanupChatName = chatName;
-                const live = [...cleanupChatHits.values()].filter(n => n > 0).length;
-                toastr.success(`${live} of ${keys.length} fire in ${chatName} (${cleanupChatMsgs} messages, scanned server-side).`, 'Worlds Apart', { timeOut: 6000 });
+                chatHits = new Map(keys.map(k => [k, Number(j.counts?.[k]) || 0]));
+                chatMsgs = Number(j.messages) || 0;
+                chatName = pickedName;
+                const live = [...chatHits.values()].filter(n => n > 0).length;
+                toastr.success(`${live} of ${keys.length} fire in ${pickedName} (${chatMsgs} messages, scanned server-side).`, 'Worlds Apart', { timeOut: 6000 });
                 afterChatScan(keys);
                 return;
             }
@@ -1952,11 +2001,11 @@ export async function lorebookStudio(preferredBook = null) {
         const counts = new Map();
         // Same accumulator the server route uses — a hit is a MESSAGE, and the two must not drift.
         for (const t of msgs) addMessageHits(aut, t, counts);
-        cleanupChatHits = new Map(keys.map(k => [k, counts.get(idxOf.get(fold(k))) ?? 0]));
-        cleanupChatMsgs = msgs.length;
-        cleanupChatName = chatName;
-        const live = [...cleanupChatHits.values()].filter(n => n > 0).length;
-        toastr.success(`${live} of ${keys.length} fire in "${chatName}" (${msgs.length} messages) — those are doing their job.`, 'Worlds Apart', { timeOut: 6000 });
+        chatHits = new Map(keys.map(k => [k, counts.get(idxOf.get(fold(k))) ?? 0]));
+        chatMsgs = msgs.length;
+        chatName = pickedName;
+        const live = [...chatHits.values()].filter(n => n > 0).length;
+        toastr.success(`${live} of ${keys.length} fire in "${pickedName}" (${msgs.length} messages) — those are doing their job.`, 'Worlds Apart', { timeOut: 6000 });
         afterChatScan(keys);
     };
     const cleanupGroups = () => {
@@ -2048,7 +2097,7 @@ export async function lorebookStudio(preferredBook = null) {
         const auditBtn = document.createElement('button'); auditBtn.type = 'button'; auditBtn.className = 'menu_button';
         auditBtn.innerHTML = `<i class="fa-solid fa-stethoscope"></i> ${scan ? 'Re-audit' : 'Run audit'}`;
         auditBtn.title = 'Re-run the keyword audit with the current Tool Settings';
-        auditBtn.addEventListener('click', () => { rebuildScan(); renderExplorer(); });
+        auditBtn.addEventListener('click', () => { runAudit(); renderExplorer(); });
         // Search repaints only the list: rebuilding the header would replace the input mid-keystroke
         // and drop focus. The type filter can rebuild, since its own label has to change anyway.
         row1.append(auditBtn, buildFilterBtn(renderExplorer), buildSortControl(() => repaint()), buildSearchBox(() => repaint()));
@@ -2085,12 +2134,12 @@ export async function lorebookStudio(preferredBook = null) {
                 barBtn('Prune selected', pruneChecked, 'wa-bulk-danger'),
                 barBtn('Ignore selected', ignoreChecked),
                 showAllBtn(),
-                barBtn(cleanupChatHits ? 'Re-check chats' : 'Check against chats', () => runChatScan().catch(e => { console.error('Worlds Apart: chat scan failed', e); toastr.error(String(e?.message ?? e), 'Worlds Apart'); })),
+                barBtn(chatHits ? 'Re-check chats' : 'Check against chats', () => runChatScan().catch(e => { console.error('Worlds Apart: chat scan failed', e); toastr.error(String(e?.message ?? e), 'Worlds Apart'); })),
             );
-            if (cleanupChatHits) {
+            if (chatHits) {
                 const note = document.createElement('span'); note.className = 'wa-bulk-count';
-                note.textContent = `· ${[...cleanupChatHits.values()].filter(n => n > 0).length}/${cleanupChatHits.size} fire in "${cleanupChatName}" (${cleanupChatMsgs} msgs)`;
-                note.title = `Counts come from "${cleanupChatName}" only. A key with 0 hits there may still be used in another chat that shares this book — check each one.`;
+                note.textContent = `· ${[...chatHits.values()].filter(n => n > 0).length}/${chatHits.size} fire in "${chatName}" (${chatMsgs} msgs)`;
+                note.title = `Counts come from "${chatName}" only. A key with 0 hits there may still be used in another chat that shares this book — check each one.`;
                 bar.append(note);
             }
             if (cleanupUndo?.length) bar.append(barBtn(`Undo (${cleanupUndo.length})`, undoPrune));
@@ -2188,7 +2237,7 @@ export async function lorebookStudio(preferredBook = null) {
         scanBtn.type = 'button'; scanBtn.className = 'menu_button';
         scanBtn.innerHTML = `<i class="fa-solid fa-stethoscope"></i> ${scan ? 'Re-audit' : 'Keyword audit'}`;
         scanBtn.title = 'Flag dead / frequent / short keywords and colour them by verdict — tune under Tool Settings';
-        scanBtn.addEventListener('click', () => { rebuildScan(); renderExplorer(); });
+        scanBtn.addEventListener('click', () => { runAudit(); renderExplorer(); });
         const allOpen = entries.length > 0 && entries.every(x => entryOpen.has(x.uid));
         // Master disclosure: an icon-only chevron left of the title, echoing the per-entry chevrons.
         const expandBtn = document.createElement('button');
