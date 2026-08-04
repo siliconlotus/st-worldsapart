@@ -1535,30 +1535,35 @@ export async function lorebookStudio(preferredBook = null) {
      *
      * @returns {Promise<{moved: string[], failed: string[]}>}
      */
+    const repointOne = async ({ char, avatar, file }, newName) => {
+        const name = String(file ?? '').replace(/\.jsonl$/, '');
+        if (!name) return false;
+        try {
+            const got = await fetch('/api/chats/get', {
+                method: 'POST', headers: getRequestHeaders(), cache: 'no-cache',
+                body: JSON.stringify({ ch_name: char, file_name: name, avatar_url: avatar }),
+            });
+            const chat = got.ok ? await got.json() : null;
+            if (!Array.isArray(chat) || !chat.length) return false;
+            chat[0].chat_metadata = { ...(chat[0].chat_metadata ?? {}), [METADATA_KEY]: newName };
+            const put = await fetch('/api/chats/save', {
+                method: 'POST', headers: getRequestHeaders(),
+                body: JSON.stringify({ ch_name: char, file_name: name, avatar_url: avatar, chat }),
+            });
+            return put.ok;
+        } catch (err) { console.error('[WA] repoint', name, err); return false; }
+    };
+
     const repointChats = async (oldName, newName) => {
         const moved = [], failed = [];
-        const ctx = getContext();
-        const openFile = String(ctx.chatId ?? '');
+        const openFile = String(getContext().chatId ?? '');
         chatIndex = null;   // a rename invalidates it, and this is the one place that must not read stale
         for (const c of await loadChatIndex()) {
             for (const ch of c.chats) {
                 if (ch?.chat_metadata?.world_info !== oldName) continue;
                 const file = String(ch.file_name ?? '').replace(/\.jsonl$/, '');
                 if (!file || file === openFile) continue;   // the open chat goes through saveMetadata
-                try {
-                    const got = await fetch('/api/chats/get', {
-                        method: 'POST', headers: getRequestHeaders(), cache: 'no-cache',
-                        body: JSON.stringify({ ch_name: c.char, file_name: file, avatar_url: c.avatar }),
-                    });
-                    const chat = got.ok ? await got.json() : null;
-                    if (!Array.isArray(chat) || !chat.length) { failed.push(file); continue; }
-                    chat[0].chat_metadata = { ...(chat[0].chat_metadata ?? {}), [METADATA_KEY]: newName };
-                    const put = await fetch('/api/chats/save', {
-                        method: 'POST', headers: getRequestHeaders(),
-                        body: JSON.stringify({ ch_name: c.char, file_name: file, avatar_url: c.avatar, chat }),
-                    });
-                    if (put.ok) moved.push(file); else failed.push(file);
-                } catch (err) { console.error('[WA] repoint', file, err); failed.push(file); }
+                (await repointOne({ char: c.char, avatar: c.avatar, file }, newName) ? moved : failed).push(file);
             }
         }
         chatIndex = null;   // the bindings just changed under it
@@ -1568,9 +1573,9 @@ export async function lorebookStudio(preferredBook = null) {
     // Rename a book (open or not), then re-point the bindings we can reach. ST's own renameWorldInfo (not
     // exported) also fixes the active character's *primary* lorebook via the character card; we can't from
     // here, so that one case is called out in the toast. ponytail: reachable-binding retarget, card primary excluded.
-    const renameBook = async (srcName = selected) => {
+    const renameBook = async (srcName = selected, prefill = null) => {
         const oldName = srcName;
-        const raw = await Popup.show.input('Rename lorebook', 'New name:', oldName);
+        const raw = await Popup.show.input('Rename lorebook', 'New name:', prefill ?? oldName);
         const newName = (raw ?? '').trim();
         if (!newName || newName === oldName) return;
         if (world_names.some(n => n.toLowerCase() === newName.toLowerCase())) { toastr.warning('A lorebook with that name already exists.', 'Worlds Apart'); return; }
@@ -2318,69 +2323,103 @@ export async function lorebookStudio(preferredBook = null) {
     // A full repaint throws away the scrolling list, so anything that redraws the whole Explorer (Suggest
     // all, audit, expand all, a bulk edit) would dump the user back at the top. Carry the offset over the
     // rebuild; a book/tab change lands on a list that doesn't exist yet and starts at 0 on its own.
+    const orphanChecks = new Set();   // `${avatar}\u001F${file}` for chats ticked to re-point
+
+    /** Re-run the scan and repaint, after anything that changes a binding. */
+    const refreshOrphans = async () => {
+        chatIndex = null;
+        orphanChecks.clear();
+        const r = findOrphanBindings(await loadChatIndex(), world_names);
+        orphans = (r.chatCount || r.cardCount) ? r : null;
+        if (!orphans) orphanView = false;
+        renderBooks();
+        renderExplorer();
+    };
+
     /**
-     * The orphaned-bindings list. READ ONLY: it names what is broken and what it probably meant, and
-     * changes nothing. Re-pointing a chat means rewriting line 0 of its .jsonl, which is a mutation of
-     * chat history rather than lorebook data, and it should not ride in on a view whose job is to tell
-     * you something.
+     * The orphaned-bindings list: what is broken, what it probably meant, and the repairs.
+     *
+     * Two book-level repairs, because only the author knows which happened. RENAME the existing book
+     * back — the chats were right and the rename was the mistake — which now re-points everything on the
+     * way past. Or DUPLICATE it under the old name, when both books should exist. Below that, the chats,
+     * tickable, for the case where neither is true and they simply belong to a different book.
      */
     const renderOrphans = () => {
         explorer.innerHTML = '';
         explorer.append(closeBtn);
         const wrap = document.createElement('div'); wrap.style.cssText = 'padding:10px 12px;max-width:780px;';
-
-        const h = document.createElement('h3'); h.style.cssText = 'margin:0 0 4px;';
+        const h = document.createElement('h3'); h.style.cssText = 'margin:0 0 10px;';
         h.innerHTML = '<i class="fa-solid fa-link-slash"></i> Orphaned bindings';
-        const sub = document.createElement('div'); sub.className = 'opacity50p'; sub.style.cssText = 'margin-bottom:12px;';
-        sub.textContent = 'These chats and characters name a lorebook that no longer exists, so it never reaches them. '
-            + 'Renaming or deleting a book does this silently — the binding is just a string, and nothing reports it.';
-        wrap.append(h, sub);
+        wrap.append(h);
+
+        const btn = (label, fn, cls = '') => {
+            const b = document.createElement('button'); b.type = 'button'; b.className = 'menu_button ' + cls;
+            b.style.cssText = 'width:auto;padding:2px 8px;'; b.textContent = label;
+            b.addEventListener('click', fn); return b;
+        };
 
         for (const g of orphans?.missing ?? []) {
             const box = document.createElement('div');
             box.style.cssText = 'border:1px solid var(--SmartThemeBorderColor);border-radius:6px;padding:8px 10px;margin-bottom:10px;';
+
             const name = document.createElement('div');
-            name.style.cssText = 'font-weight:bold;word-break:break-all;';
+            name.style.cssText = 'font-weight:bold;word-break:break-all;margin-bottom:4px;';
             name.textContent = g.name;
-            const counts = document.createElement('div'); counts.className = 'opacity50p'; counts.style.cssText = 'margin:2px 0 6px;';
-            const bits = [];
-            if (g.chats.length) bits.push(`${g.chats.length} chat${g.chats.length === 1 ? '' : 's'}`);
-            if (g.cards.length) bits.push(`${g.cards.length} character card${g.cards.length === 1 ? '' : 's'}`);
-            counts.textContent = `${bits.join(' and ')} point here.`;
-            box.append(name, counts);
+            box.append(name);
 
             if (g.nearest) {
-                const sug = document.createElement('div'); sug.style.cssText = 'margin-bottom:6px;';
-                sug.innerHTML = `Closest existing book: <b>${escapeHtml(g.nearest)}</b>`;
-                const why = document.createElement('div'); why.className = 'opacity50p';
-                // Say which repair each reading implies, because they are opposite and the view cannot
-                // tell them apart: only the author knows whether the rename or the chats were right.
-                why.innerHTML = 'If that was a rename, these bindings want re-pointing to it. If the rename was the mistake, '
-                    + 'the book itself wants duplicating back under the old name — the content still exists, so that is a real restore.';
-                box.append(sug, why);
-            } else {
-                const why = document.createElement('div'); why.className = 'opacity50p';
-                why.textContent = 'No existing book resembles this name, so it was probably deleted. '
-                    + 'SillyTavern keeps no backup of lorebooks, so there is nothing to restore from — these bindings need a book chosen by hand.';
-                box.append(why);
+                const row = document.createElement('div');
+                row.style.cssText = 'display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:6px;';
+                const sug = document.createElement('span'); sug.style.cssText = 'word-break:break-all;';
+                sug.innerHTML = `<i class="fa-solid fa-arrow-right opacity50p"></i> ${escapeHtml(g.nearest)}`;
+                row.append(sug,
+                    btn('Rename to this', async () => { await renameBook(g.nearest, g.name); await refreshOrphans(); }),
+                    btn('Duplicate as this', async () => {
+                        await copyBookByName(g.nearest, false, g.name);
+                        await updateWorldInfoList();
+                        await refreshOrphans();
+                    }));
+                box.append(row);
             }
 
-            if (g.chats.length) {
-                const list = document.createElement('div'); list.style.cssText = 'margin-top:6px;font-size:0.9em;';
-                for (const c of g.chats) {
-                    const r = document.createElement('div'); r.className = 'opacity50p'; r.style.cssText = 'word-break:break-all;';
-                    r.textContent = `${c.char} — ${c.file.replace(/\.jsonl$/, '')}`;
-                    list.append(r);
-                }
-                box.append(list);
-            }
             if (g.cards.length) {
-                const r = document.createElement('div'); r.style.cssText = 'margin-top:6px;font-size:0.9em;';
-                // Cards are the half WA cannot repair even in principle: ST's renameWorldInfo owns that
-                // field and is not exported, so saying where to go is the whole of what is available.
-                r.innerHTML = `<b>Characters:</b> ${escapeHtml(g.cards.join(', '))} — fix these in the character panel; `
-                    + 'WA cannot write a card\'s primary lorebook.';
-                box.append(r);
+                const c = document.createElement('div'); c.style.cssText = 'margin-bottom:6px;';
+                c.innerHTML = `<b>Characters:</b> ${escapeHtml(g.cards.join(', '))} `
+                    + '<span class="opacity50p">— WA cannot edit card lorebook bindings; adjust these in the character panel.</span>';
+                box.append(c);
+            }
+
+            for (const c of g.chats) {
+                const id = `${c.avatar}\u001F${c.file}`;
+                const row = document.createElement('label');
+                row.style.cssText = 'display:flex;align-items:center;gap:6px;font-size:0.9em;cursor:pointer;';
+                const cb = document.createElement('input'); cb.type = 'checkbox'; cb.checked = orphanChecks.has(id);
+                cb.addEventListener('change', () => { cb.checked ? orphanChecks.add(id) : orphanChecks.delete(id); renderOrphans(); });
+                const t = document.createElement('span'); t.style.cssText = 'word-break:break-all;';
+                t.textContent = `${c.char} — ${c.file.replace(/\.jsonl$/, '')}`;
+                row.append(cb, t);
+                box.append(row);
+            }
+
+            const ticked = g.chats.filter(c => orphanChecks.has(`${c.avatar}\u001F${c.file}`));
+            if (ticked.length) {
+                const bar = document.createElement('div'); bar.style.cssText = 'margin-top:8px;';
+                bar.append(btn(`Assign ${ticked.length} to…`, async () => {
+                    const to = await Popup.show.input('Assign chats to lorebook', 'Existing lorebook name:', g.nearest ?? '');
+                    const target = (to ?? '').trim();
+                    if (!target) return;
+                    if (!world_names.includes(target)) { toastr.warning(`No lorebook named "${target}".`, 'Worlds Apart'); return; }
+                    const open = String(getContext().chatId ?? '');
+                    let ok = 0; const bad = [];
+                    for (const c of ticked) {
+                        if (c.file.replace(/\.jsonl$/, '') === open) { bad.push(`${c.file} (open — switch away first)`); continue; }
+                        (await repointOne(c, target)) ? ok++ : bad.push(c.file);
+                    }
+                    if (ok) toastr.success(`Re-pointed ${ok} ${ok === 1 ? 'chat' : 'chats'} to “${target}”.`, 'Worlds Apart');
+                    if (bad.length) toastr.warning(`Could not re-point: ${bad.join(', ')}`, 'Worlds Apart', { timeOut: 12000 });
+                    await refreshOrphans();
+                }, 'wa-bulk-danger'));
+                box.append(bar);
             }
             wrap.append(box);
         }
