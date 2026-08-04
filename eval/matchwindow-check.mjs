@@ -136,3 +136,25 @@ console.log('ok   the audit segments like the runtime, and literals are slice-in
     eq(CHAT_BROAD, 0.2, 'the broad threshold is a named bound, not a literal');
 }
 console.log('ok   chat evidence reaches the classifier and conditions severity');
+
+// chatShare's middle state: a scan ran, but not over this key. runChatScan collects from
+// visibleEntries(), so a filter change leaves classified keys the scan never sent — and calling those
+// "not in entry text or chat" is the strong claim on evidence nobody gathered.
+{
+    const { buildKeyPruneScan } = await import('../extension/keyword-core.mjs');
+    const opts = {
+        scanKeyword: true, scanVectorized: true, scanConstant: true, includeInactive: true,
+        pruneUnattested: true, pruneCommon: true, pruneShort: true, ignoreProper: false,
+        stickySkipCommon: true, tooCommon: 0.5, minLength: 4,
+    };
+    const book = { entries: { 0: { uid: 0, key: ['zzznope'], content: 'Nothing relevant.' } } };
+    const why = chatRate => {
+        const s = buildKeyPruneScan(book, opts, new Set(), { chatRate });
+        return s.reasonOf(s.classifyEntry(book.entries[0])[0]).text;
+    };
+    eq(why({ hits: new Map([['zzznope', 0]]), messages: 100 }), 'not in entry text or chat',
+        'in the scan and silent: both were checked');
+    eq(why({ hits: new Map([['somethingelse', 3]]), messages: 100 }), 'not in entry text',
+        'scan ran but skipped this key: claim no more than was checked');
+}
+console.log('ok   a key the chat scan never covered is not reported as chat-checked');

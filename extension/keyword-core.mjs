@@ -128,7 +128,14 @@ export const CHAT_BROAD = 0.20;
  *   the signal existed — this is opt-in evidence the user asked for, not a verdict the tool imposes.
  */
 export function buildKeyPruneScan(data, opts, ignoreSet, { caseSensitiveDefault = false, wholeWordsDefault = false, matchWindow = 'scan', chatRate } = {}) {
-    // Share of the chat a key matches, or undefined when no scan has been run.
+    // Share of the chat a key matches. THREE states, and the last two must not collapse:
+    //   undefined  no scan has been run
+    //   undefined  a scan ran, but not over THIS key — runChatScan collects from visibleEntries(),
+    //              so changing the Studio's filter afterwards leaves classified keys it never sent
+    //   0          scanned, and genuinely silent
+    // `chatChecked` reads this to pick the reason text, so conflating the middle case with the last
+    // prints "not in entry text or chat" about a key nobody checked — the strong claim on the weak
+    // evidence, which is what that label exists to prevent.
     const chatShare = key => {
         if (!chatRate?.messages) return undefined;
         const n = chatRate.hits?.get(key);
