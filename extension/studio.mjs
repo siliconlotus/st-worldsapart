@@ -1985,7 +1985,14 @@ export async function lorebookStudio(preferredBook = null) {
     /** Every chat BOUND to this book — the set worth scanning without being asked. Excludes chats that
      *  only qualify because the book is globally active: that is 190 chats on a real corpus, which is
      *  what the picker is for. */
-    const boundChats = async () => (await findBookChats()).filter(c => c.bound);
+    const boundChats = async () => {
+        let bound = (await findBookChats()).filter(c => c.bound);
+        // The index is cached for the Studio's lifetime (see loadChatIndex), so a chat bound — or a
+        // fixture linked — while it was open reads as absent. Finding nothing is cheap to disbelieve
+        // once: drop the cache and look again, rather than reporting "no bound chats" from a snapshot.
+        if (!bound.length) { chatIndex = null; bound = (await findBookChats()).filter(c => c.bound); }
+        return bound;
+    };
 
     const runChatScan = async () => {
         if (!scan) { toastr.info('Run the audit first.', 'Worlds Apart'); return; }
