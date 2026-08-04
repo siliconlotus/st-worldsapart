@@ -158,3 +158,16 @@ console.log('ok   chat evidence reaches the classifier and conditions severity')
         'scan ran but skipped this key: claim no more than was checked');
 }
 console.log('ok   a key the chat scan never covered is not reported as chat-checked');
+
+// A chat "hit" is a MESSAGE, not an occurrence — the browser and the server plugin both accumulate
+// through addMessageHits so they cannot drift. They had drifted: the client added 1 per message, the
+// server added the occurrence count, and keyword-core divides by the message total to get a share.
+{
+    const { buildAutomaton, addMessageHits } = await import('../extension/smartkeys.mjs');
+    const aut = buildAutomaton(['fire']);
+    const totals = new Map();
+    for (const m of ['fire fire fire', 'no match here', 'FIRE once']) addMessageHits(aut, m, totals);
+    eq(totals.get(0), 2, 'two of three messages contain it, however often it repeats in them');
+    eq(totals.get(0) / 3 <= 1, true, 'so hits/messages is a share and can never exceed 1');
+}
+console.log('ok   a chat hit is one message, shared by the browser and the server');

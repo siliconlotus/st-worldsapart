@@ -37,7 +37,7 @@ import { scoreCollection, poolEntries, selectTopK } from './scoring.mjs';
 import { DEFAULT_K1, DEFAULT_B, buildLexical } from './lexical.mjs';
 // Same matcher and text fold the extension uses for keyword hits — shared, not copied, so a chat scan and a
 // live keyword match can never disagree about what a key matches.
-import { buildAutomaton, scanAutomaton, fold } from './automaton.mjs';
+import { buildAutomaton, addMessageHits, fold } from './automaton.mjs';
 import { norm, corpusMean } from './vector.mjs';
 import { pluginFingerprint, PLUGIN_FILES } from './fingerprint.mjs';
 
@@ -245,7 +245,7 @@ export async function init(router) {
                         try { text = String(JSON.parse(line)?.mes ?? ''); } catch { return; }   // line 0 is metadata
                         if (!text) return;
                         messages++;
-                        for (const [i, n] of scanAutomaton(automaton, fold(text))) totals.set(i, (totals.get(i) ?? 0) + n);
+                        addMessageHits(automaton, text, totals);
                     });
                     rl.on('close', resolve);
                     rl.on('error', resolve);   // an unreadable chat is skipped, not fatal

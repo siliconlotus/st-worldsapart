@@ -19,7 +19,7 @@ import { ensureStudioStyle, makeSortControl, showCtxMenu, showEntryText, wiGlyph
 import { SORT_FNS, normPresentation, reconcileTiers, tierRank, wiTitleOf } from './sort.mjs';
 import { buildKeyPruneScan, llmKeyCandidates, STUDIO_PRUNE_OPTS, STUDIO_SUGGEST_OPTS } from './keyword-tools.mjs';
 import { buildKeySuggest, classifyLlmCand } from './keyword-core.mjs';
-import { buildAutomaton, scanAutomaton, fold, validateSmartKey } from './smartkeys.mjs';
+import { buildAutomaton, addMessageHits, fold, validateSmartKey } from './smartkeys.mjs';
 
 const WA_GREEN = '#7bbf6a';   // "no prune" — a keyword the scan doesn't flag
 
@@ -1950,7 +1950,8 @@ export async function lorebookStudio(preferredBook = null) {
         const idxOf = new Map(folded.map((f, i) => [f, i]));
         const aut = buildAutomaton(folded);
         const counts = new Map();
-        for (const t of msgs) for (const [idx] of scanAutomaton(aut, fold(t))) counts.set(idx, (counts.get(idx) ?? 0) + 1);
+        // Same accumulator the server route uses — a hit is a MESSAGE, and the two must not drift.
+        for (const t of msgs) addMessageHits(aut, t, counts);
         cleanupChatHits = new Map(keys.map(k => [k, counts.get(idxOf.get(fold(k))) ?? 0]));
         cleanupChatMsgs = msgs.length;
         cleanupChatName = chatName;

@@ -128,3 +128,25 @@ export function scanAutomaton(aut, foldedText) {
     }
     return counts;
 }
+
+/**
+ * Accumulates a chat scan: one text, counted as ONE hit per pattern present.
+ *
+ * MESSAGES CONTAINING, NOT OCCURRENCES, and that is the whole reason this exists rather than being
+ * written at each call site. The browser and the server both scan chats for the Studio's key evidence,
+ * and they wrote the loop separately: the client added 1 per message, the server added `n`. Cosmetic
+ * while the result was only ever tested for truthiness and shown as "47 hits in chat" — then
+ * keyword-core started dividing it by the message count to get a share, and the same book scored
+ * differently depending on whether the plugin was installed.
+ *
+ * A share needs the numerator and denominator to count the same thing. `messages` is the denominator,
+ * so a hit is a message. Occurrence counts are still available per text from scanAutomaton directly;
+ * nothing that compares against a message total may use them.
+ *
+ * @param {object} aut Automaton from buildAutomaton
+ * @param {string} text One message, unfolded
+ * @param {Map<number, number>} totals Accumulator, pattern index -> messages containing it
+ */
+export function addMessageHits(aut, text, totals) {
+    for (const [i] of scanAutomaton(aut, fold(text))) totals.set(i, (totals.get(i) ?? 0) + 1);
+}
