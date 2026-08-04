@@ -999,7 +999,9 @@ export async function lorebookStudio(preferredBook = null) {
             for (const v of counted) { const c = scan.severityOf(v); if ((RANK[c] ?? 0) > (RANK[worst] ?? 0)) worst = c; }
             if (worst) { badge.style.background = worst; badge.style.color = worst === '#e06c6c' ? '#fff' : '#111'; }
             const softer = (flagged?.size ?? 0) - counted.length;
-            badge.title = `Keywords the last scan flagged — worst: ${SEV[worst] || 'not in entry text'}.${softer ? ` ${softer} more are warnings, not counted here.` : ''} Expand to see which.`;
+            // No colour means every counted flag is the uncoloured one, so name it from reasonOf rather
+            // than restating it here — same reason the chip tooltips do.
+            badge.title = `Keywords the last scan flagged — worst: ${SEV[worst] || scan.reasonOf(counted[0]).text}.${softer ? ` ${softer} more are warnings, not counted here.` : ''} Expand to see which.`;
             h.append(badge);
         }
         // Whole header line toggles level 1; the mode dropdown and tool icons stopPropagation so they
@@ -1043,11 +1045,18 @@ export async function lorebookStudio(preferredBook = null) {
             // Whitelisted keys are skipped by the scanner (never flagged), so mark them purple to show
             // they're deliberately spared; otherwise verdict drives the colour (green = no flag, red/yellow
             // = too-common/short, dead = slight dim, no colour).
+            // The verdict's WORDING comes from reasonOf in every case, dead included. Dead still shows no
+            // visible label — there are too many of them and they are often good keys — but the tooltip
+            // has to carry the real sentence, because it is the only place the Explorer says which
+            // evidence was checked: "not in entry text" and "not in entry text or chat" are different
+            // claims. This line used to hardcode "no entry-text match" for dead keys, a second phrasing
+            // of a verdict the classifier already words, so a chat scan changed nothing visible here.
+            const why = v && !isIgnored ? scan.reasonOf(v).text : '';
             if (isIgnored) { annot = 'ignored'; chip.classList.add('wa-kw-ignored'); }
-            else if (v && !isDead) { const rc = scan.reasonOf(v); annot = rc.text; if (rc.color) { chip.style.borderColor = rc.color; chip.style.background = `color-mix(in srgb, ${rc.color} 18%, transparent)`; } }
+            else if (v && !isDead) { const rc = scan.reasonOf(v); annot = why; if (rc.color) { chip.style.borderColor = rc.color; chip.style.background = `color-mix(in srgb, ${rc.color} 18%, transparent)`; } }
             else if (isDead) chip.classList.add('wa-kw-dead');
             else if (flagged) chip.style.borderColor = WA_GREEN;
-            text.title = isIgnored ? `${key} — ignored (click to edit; shift-click ✕ to un-ignore)` : (v ? `${key} — ${isDead ? 'no entry-text match' : annot} (click to edit)` : `${key} (click to edit)`);
+            text.title = isIgnored ? `${key} — ignored (click to edit; shift-click ✕ to un-ignore)` : (v ? `${key} — ${why} (click to edit)` : `${key} (click to edit)`);
             text.addEventListener('click', () => editKeyInline(e, key, text));
             chip.append(text);   // term only inside the chip
             const del = document.createElement('i'); del.className = 'fa-solid fa-xmark wa-kw-del'; del.title = 'Delete keyword — shift-click to ignore it instead';
