@@ -78,6 +78,11 @@ corpus is one person's chats; it also records which chats are unrepresentative a
 Count **usable** messages, not raw lines: core and WA both drop `is_system` before scanning, and one
 chat in the set is 65% hidden, so `CORPUS-MAP.md`'s line counts overstate it threefold.
 
+**A key existing in a book is not evidence that it is a good key.** Memory books carry LLM-generated
+keys, so their key lists are output, not judgement, and "the author kept it" says nothing. The
+0%-STMB books are the hand-curated ones and the only place a surviving key means a person looked at
+it. Say which population a key-quality claim rests on.
+
 ## countKey is the only matcher
 
 `ranking.mjs` `countKey()` mirrors ST core's `matchKeys` — match flags, `/regex/` keys, `?` SmartKeys.
