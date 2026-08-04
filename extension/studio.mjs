@@ -2432,10 +2432,31 @@ export async function lorebookStudio(preferredBook = null) {
             }
 
             if (g.cards.length) {
-                const c = document.createElement('div'); c.style.cssText = 'margin-bottom:6px;';
-                c.innerHTML = `<b>Characters:</b> ${escapeHtml(g.cards.join(', '))} `
-                    + '<span class="opacity50p">— WA cannot edit card lorebook bindings; adjust these in the character panel.</span>';
-                box.append(c);
+                // Its own control, not the chat dropdown: a card binding is a different write
+                // (/api/characters/merge-attributes) and a different decision — the chats under a
+                // character may belong somewhere other than the character itself does.
+                const row = document.createElement('div');
+                row.style.cssText = 'display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:6px;';
+                const lbl = document.createElement('span');
+                lbl.innerHTML = `<b>Characters:</b> ${escapeHtml(g.cards.join(', '))}`;
+                const sel = document.createElement('select'); sel.className = 'text_pole';
+                sel.style.cssText = 'width:auto;max-width:280px;';
+                for (const n of [...world_names].sort((a, b) => a.localeCompare(b))) {
+                    const o = document.createElement('option'); o.value = n; o.textContent = n;
+                    if (n === g.nearest) o.selected = true;
+                    sel.append(o);
+                }
+                const go = btn(`Re-point ${g.cards.length === 1 ? 'card' : `${g.cards.length} cards`}`, async () => {
+                    const target = sel.value; if (!target) return;
+                    const r = await repointCards(g.name, target);
+                    if (r.moved.length) toastr.success(`Re-pointed ${r.moved.join(', ')} to “${target}”.`, 'Worlds Apart');
+                    if (r.failed.length) toastr.warning(`Could not re-point: ${r.failed.join(', ')}`, 'Worlds Apart', { timeOut: 12000 });
+                    await refreshOrphans();
+                });
+                go.title = `Set the primary lorebook on ${g.cards.length === 1 ? 'this card' : 'these cards'} to the chosen book. `
+                    + 'SillyTavern shows a broken binding as no binding at all, so this cannot be seen — let alone fixed — from the character panel.';
+                row.append(lbl, sel, go);
+                box.append(row);
             }
 
             const idOf = c => `${c.avatar}\u001F${c.file}`;
