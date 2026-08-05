@@ -1148,7 +1148,10 @@ export async function lorebookStudio(preferredBook = null) {
             t.addEventListener('click', () => {
                 const inp = document.createElement('input');
                 inp.type = 'text'; inp.className = 'text_pole'; inp.value = term;
-                inp.style.cssText = 'width:10em;margin:0;font-size:0.9em;';
+                inp.style.cssText = 'margin:0;font-size:0.9em;width:auto;';
+                const fit = () => { inp.size = Math.min(64, Math.max(8, inp.value.length + 2)); };   // see editKeyInline
+                fit();
+                inp.addEventListener('input', fit);
                 let done = false;
                 const commit = ok => {
                     if (done) return; done = true;
