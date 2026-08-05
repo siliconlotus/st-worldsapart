@@ -831,7 +831,9 @@ export async function lorebookStudio(preferredBook = null) {
         // width made the field scroll internally — so on blur it snapped back to character 0 and the
         // end of what you had typed went out of view. Same `size` idiom as the title editor. Capped,
         // because the keyword paragraph wraps and one very long key should take a line, not the pane.
-        inp.style.cssText = 'margin:0;font-size:0.9em;';
+        // width:auto is load-bearing: .text_pole is width:100%, which beats `size` and made the field
+        // take a whole line of the keyword paragraph instead of sitting inline with the chips.
+        inp.style.cssText = 'margin:0;font-size:0.9em;width:auto;';
         const fit = () => { inp.size = Math.min(64, Math.max(8, inp.value.length + 2)); };
         fit();
         inp.addEventListener('input', fit);
@@ -1162,7 +1164,7 @@ export async function lorebookStudio(preferredBook = null) {
         const add = document.createElement('i'); add.className = 'fa-solid fa-plus wa-tool'; add.title = 'Add a keyword';
         add.addEventListener('click', () => {
             const inp = document.createElement('input'); inp.type = 'text'; inp.className = 'text_pole'; inp.placeholder = 'keyword';
-            inp.style.cssText = 'margin:0;font-size:0.9em;';
+            inp.style.cssText = 'margin:0;font-size:0.9em;width:auto;';
             const fit = () => { inp.size = Math.min(64, Math.max(8, inp.value.length + 2)); };   // see editKeyInline
             fit();
             inp.addEventListener('input', fit);
