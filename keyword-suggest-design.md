@@ -444,9 +444,11 @@ provenance (below) establishes which subset is trustworthy.
 
 ### The gold sets
 
-Two books are now curated and usable. **Foxbridge** — 38 entries, 123 keys, hand-authored end to end
+Three books are now curated and usable. **Foxbridge** — 38 entries, 123 keys, hand-authored end to end
 with no LLM involvement, pure reference, several chats attached under character-card binding.
 **Richard** — 59 entries, 311 keys, curated by hand through the Explorer.
+**Sommers** — 327 entries, 2866 keys, and the first gold set carrying memory entries and a chat long
+enough to measure firing against.
 
 Richard's provenance matters and should travel with any number derived from it. Curation was
 **entry-grounded**: judged against entry text, not against the chat, which matches the scope boundary
@@ -461,6 +463,12 @@ strings** — the same term is a negative on one entry and a positive on nine ot
 judgement is about the entry. Some are **form corrections rather than rejections** (`TMZ leak` → `TMZ`),
 and separating those from true rejections has not been attempted. And the keys on the one deleted entry
 are excluded and unlabelled.
+
+Sommers was curated to the same **entry-grounded** standard — judged against the edited entry text,
+supplemented by author memory — so it is silent on realizability by construction in the same way. It
+carries **981 labelled negatives**, recovered from the `sommers-syn-*` bundles, under all three of the
+cautions above. Author memory is an input the entry text does not carry, so superset recall against
+this gold has a ceiling below 100% that is not a suggester defect.
 
 Anything a suggester proposes that is in neither set is unjudged, so this measures superset recall and
 known-junk precision, not precision generally. And **provenance decays**: a key vetted before these
@@ -481,6 +489,14 @@ being tagged), Liam 53.4% crossed ("good until he wasn't"), Richard 94.5% long g
 on eight entries. The most informative point is Arthur, because the threshold sits where a human cannot
 call it either. Gold positives in Richard top out at **10.9% of all messages** with p99 at 4.6% and a
 median of 0.1%, so nothing human-approved lives high in the range.
+
+**The suggester does not beat curated keys, and the finding that it did was an artifact of the
+book.** `suggest-firing.mjs` over Sommers × its own chat, per-row dead rate: against the pre-curation
+book, candidates 40.6% versus the book's own 39.1% — level, and ahead on unique (53.7% vs 56.2%).
+Against the same book curated, the book falls to **20.3%** (34.1% unique) while candidates stay put at
+41.7%, and the useful 4-100 band splits 50.3% to 30.5%. Both sides read only entry text, so the gap is
+like-for-like. Read it as a bound, not a score: `cap: 30` offers 6257 candidate rows against 2866 keys,
+and a dead rate at 2.2x the volume flatters the smaller set.
 
 **This is n=1 curator.** The genre spread is wide, which controls vocabulary and entry structure, but
 only a handful of books carry memory entries and the bracket came from two of them. ST mechanics
@@ -511,7 +527,9 @@ a key inside another of its keys", and the fix is one checkbox for the entry.
 **A firing-rate band is not the sharp instrument, and nearly everything it catches is legitimate.**
 Of 20 keys over 20% across seven books, 8 sit on vectorized entries where `suppressVectorKeys` blanks
 them, and most of the rest are main-cast names on sticky sheets. In Sommers the >20% band has a 0%
-removal rate against a 54% curation baseline; every key that curation removed fired under 14.5%.
+removal rate against a 41% curation baseline, and every key curation removed fired under 15.6%
+(re-measured on the finished curation, over the 1740 pre-curation keys on entries enabled and
+non-constant in both versions).
 
 **Three signals, not one, and none supersedes another.** `ENGLISH_COMMON` says the word denotes
 nothing in particular and needs no chat, which matters because 19 of the 40 books on disk have none.
