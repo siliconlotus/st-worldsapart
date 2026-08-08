@@ -1223,6 +1223,11 @@ async function rankActivated(args) {
             const scored = keywordScore(item.entry, scanText, scoreKeys);
             item.keywordScore = scored.score;
             item.keywordHits = scored.hits;
+            // Declared for fuseRanks' eligibility normalisation: having keys to score is the chance to
+            // earn the keyword rank, and an entry with none must not be divided by a weight it could
+            // never have collected. Resolved here because this is where suppressVectorKeys /
+            // scoreVectorKeys have already decided what `scoreKeys` is.
+            item.keysEligible = scoreKeys.length > 0;
         }
 
         // The scan text WA actually searched, so a "WA scored 0" mystery is answered by

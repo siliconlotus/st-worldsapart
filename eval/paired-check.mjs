@@ -146,14 +146,42 @@ eq(JSON.stringify(fusedWith({ lexicalWeight: 1.5 })) === JSON.stringify(fusedWit
 const keysOff = fusedWith({ lexicalWeight: 1.5, keywordWeight: 0 });
 const keysOn = fusedWith({ lexicalWeight: 1.5, keywordWeight: 1.5 });
 eq(keysOff[1] < keysOn[1], true, 'keywordWeight 0 suppresses the keys contribution rather than mirroring');
-// PIN THE ARITHMETIC, not just the ordering. Row 2 overtakes row 1 at keywordWeight 3 by 0.4% — a real
-// margin, but too thin to be the only guard: any change to the fusion formula would flip it silently and
-// the failure would read as "keywordWeight stopped working". Asserting the exact term it contributes says
-// what is actually being tested — the weight multiplies that row's keyword-rank term and nothing else.
+// PIN THE ARITHMETIC, not just the ordering. Row 2 overtakes row 1 at keywordWeight 3 by a thin margin,
+// and any change to the fusion formula would flip it silently with the failure reading as "keywordWeight
+// stopped working". So assert the whole expression: keyW multiplies that row's keyword-rank term in the
+// numerator AND joins its eligibility denominator, which is why it no longer scales the term linearly.
+// Both rows here declare no eligibility, so all three signals are present and all three are eligible.
 const heavy = fusedWith({ lexicalWeight: 1.5, keywordWeight: 3 });
 const near = (a, b, why) => eq(Math.abs(a - b) < 1e-12, true, why);
-near(heavy[1] - keysOff[1], 3 / (20 + 1), 'keywordWeight scales exactly the keyword-rank term — row 2 is keyword rank 1');
-near(heavy[0] - keysOff[0], 3 / (20 + 2), '...at each row\'s own keyword rank — row 1 is keyword rank 2');
+const expect = (vr, tr, kr, W) => (1 / (20 + vr) + 1.5 / (20 + tr) + W / (20 + kr)) / (1 + 1.5 + W);
+near(heavy[0], expect(1, 1, 2, 3), 'row 1: vector 1, text 1, keyword 2, normalised by 1+LEXW+keyW');
+near(heavy[1], expect(2, 2, 1, 3), 'row 2: vector 2, text 2, keyword 1, same denominator');
+near(keysOff[0], expect(1, 1, 2, 0), '...and at keywordWeight 0 the keys term leaves both sides');
+
+// ELIGIBILITY NORMALISATION — the point of the divisor. A keyword-only entry could never earn a vector or
+// text rank, so it is not measured against them: top of its own signal ties top of all three. Before this,
+// its ceiling was keyW/(k+1) against (1+LEXW+keyW)/(k+1) — 37% at shipped weights, unreachable by any key.
+const fuse1 = rows => { fuseRanks(rows, { rrfK: 20, retrievalMode: 'hybrid', weightByOrder: false, lexicalWeight: 1.5, keywordWeight: 1.5 }); return rows[0].fused; };
+const keywordOnlyTop = fuse1([{ key: 1, keywordScore: 5, textScore: 0, vectorEligible: false, keysEligible: true }]);
+const everySignalTop = fuse1([{ key: 1, score: 0.9, textScore: 9, keywordScore: 5, vectorEligible: true, keysEligible: true }]);
+near(everySignalTop, 1 / 21, 'an entry topping all three signals scores 1/(k+1)');
+near(keywordOnlyTop / 1.25, everySignalTop, '...and normalisation alone puts a keyword-only entry level with it (tilt asserted below)');
+
+// ELIGIBILITY, NOT PRESENCE. A vectorized entry that failed to rank on cosine or text is still divided by
+// those weights — it competed and lost. Normalising by signals PRESENT would instead reward it for the
+// miss, handing the weakest vector entry the same ceiling as the strongest.
+const missedItsChance = fuse1([{ key: 1, score: undefined, textScore: 0, keywordScore: 5, vectorEligible: true, keysEligible: true }]);
+near(missedItsChance, (1.5 / 21) / 4, 'a vectorized entry with only a keyword rank still divides by 1+LEXW+keyW');
+eq(missedItsChance < keywordOnlyTop, true, '...so it ranks below a keyword-only entry that earned the same rank');
+
+// THE TIE-BREAK. All else equal a keyword-only entry outranks a vectorized one; a STRONG vector entry still
+// beats a MID keyword one. Both halves are asserted because only the pair pins the tilt's size — a large
+// enough multiplier satisfies the first and breaks the second, which is the failure worth catching.
+near(keywordOnlyTop, 1.25 / 21, 'a keyword-only entry takes the tilt');
+eq(keywordOnlyTop > everySignalTop, true, 'all else equal, the keyword-only entry wins');
+const kwAtRank = r => { const rows = [{ key: 0, keywordScore: 100, vectorEligible: false, keysEligible: true }]; for (let i = 1; i < r; i++) rows.unshift({ key: -i, keywordScore: 100 + i, vectorEligible: false, keysEligible: true }); fuseRanks(rows, { rrfK: 20, retrievalMode: 'hybrid', weightByOrder: false, lexicalWeight: 1.5, keywordWeight: 1.5 }); return rows.find(x => x.key === 0).fused; };
+eq(kwAtRank(6) > everySignalTop, true, 'a keyword entry at rank 6 still clears the best vector entry');
+eq(kwAtRank(7) < everySignalTop, true, '...and at rank 7 it does not: a strong vector entry beats a mid keyword one');
 // Which is what lets it reorder: the same arithmetic, read as a ranking.
 eq(heavy[1] > heavy[0], true, 'a high keywordWeight can promote a keys-dominant entry');
 eq(keysOff[1] < keysOff[0], true, '...and suppressing keys demotes it again');

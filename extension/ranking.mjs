@@ -674,14 +674,58 @@ export function fuseRanks(items, { rrfK: k, retrievalMode: mode, weightByOrder, 
         ? rankMap([...items].sort((a, b) => orderVal(b) - orderVal(a)))
         : new Map();
 
+    // NORMALISED BY ELIGIBILITY, so an entry is scored against the signals it COULD have earned rather than
+    // against all three. A plain RRF sum treats a missing signal as a zero contribution, which is a floor for
+    // an entry that competed and lost and a ceiling for one that was never allowed to compete: a keyword-only
+    // entry topped out at keyW/(k+1) against (1 + lexicalWeight + keyW)/(k+1) for a vectorized one — 37% of
+    // the achievable score at shipped weights, permanently, no matter how well its keys matched. That is 39%
+    // of the entries across the books on disk (820 of 2112), and it is most of a reference-heavy book:
+    // Foxbridge 84%, Red Dead 85%, Time Whore 55%.
+    //
+    // ELIGIBILITY, NOT PRESENCE — the distinction is the whole design. A vectorized entry that failed to rank
+    // on cosine is still divided by the vector weight, because it had the chance and lost; normalising by
+    // signals PRESENT would instead reward it for missing one. A non-vectorized entry has no chunks to embed
+    // or BM25, so it is divided by the keyword weight alone.
+    //
+    // Callers declare eligibility on the item (`vectorEligible`, `keysEligible`) because only they know it:
+    // `vectorized` is the entry's, and whether keys are scorable depends on suppressVectorKeys/scoreVectorKeys
+    // resolution the caller has already done. Absent flags fall back to presence, which keeps a caller that
+    // sets neither self-consistent rather than silently capping everything it ranks.
+    const vectorable = it => it.vectorEligible ?? it.entry?.vectorized ?? it.score !== undefined;
+    const vecOK = it => mode !== 'lexical' && vectorable(it);
+    const txtOK = it => mode !== 'vector' && vectorable(it);
+    const keyOK = it => it.keysEligible ?? it.keywordScore > 0;
+    // A KEYWORD-ONLY ENTRY WINS THE TIE. Normalisation above makes the two classes comparable — both top out
+    // at 1/(k+1) — and this decides which way an otherwise-equal pair falls: a key is an author saying "when
+    // this term appears, this entry is relevant", which is a stronger statement of intent than a cosine.
+    //
+    // A TIE-BREAK, NOT A REORDERING, which is what fixes the size. At k=20 the whole rank curve spans 1/21 to
+    // 1/60, so a multiplier buys rank positions fast: 1.25 lets keyword ranks 1-6 clear the BEST vector entry
+    // and no further, which is "a strong vector entry still beats a mid keyword entry". 1.4 reaches rank 9,
+    // 1.5 reaches 11, and past that the tilt stops being a tie-break and starts being a class preference.
+    //
+    // Conditioned on SIGNAL TYPE, not entry class. The intuition behind it is that keyword-only entries are
+    // reference sheets and vectorized ones are scene memories, which holds one way — 97% of vectorized
+    // entries across the books on disk are memory — but only 69% the other, and it inverts on books whose
+    // memory entries were never vectorized (Time Whore: 111 of 133 keyword-only entries are memories). So
+    // this favours the signal, and a book that keys its memories gets the tilt on those too.
+    const KEYWORD_ONLY_TILT = 1.25;
+    const keywordOnly = it => keyOK(it) && !vectorable(it);
+
     for (const item of items) {
         item.vectorRank = byVector.get(item.key);
         item.textRank = byText.get(item.key);
         item.keywordRank = byKeyword.get(item.key);
         item.orderRank = byOrder.get(item.key);
-        item.fused = (item.vectorRank ? 1 / (k + item.vectorRank) : 0)
+        const raw = (item.vectorRank ? 1 / (k + item.vectorRank) : 0)
             + (item.textRank ? lexicalWeight / (k + item.textRank) : 0)
             + (item.keywordRank ? keyW / (k + item.keywordRank) : 0)
             + (item.orderRank ? 1 / (k + item.orderRank) : 0);
+        const eligible = (vecOK(item) ? 1 : 0)
+            + (txtOK(item) ? lexicalWeight : 0)
+            + (keyOK(item) ? keyW : 0)
+            + (weightByOrder ? 1 : 0);
+        item.fused = eligible > 0 ? raw / eligible : 0;
+        if (keywordOnly(item)) item.fused *= KEYWORD_ONLY_TILT;
     }
 }

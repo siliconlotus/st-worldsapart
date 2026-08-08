@@ -215,13 +215,14 @@ export function makeScorer({ loaded, byUid, entries, params: P, topK }) {
         const per = new Map();
         for (const m of grouped[CID]?.metadata ?? []) { const uid = Number(m.index); const c = per.get(uid) ?? { score: -Infinity, bm25: 0 }; c.score = Math.max(c.score, m.score); c.bm25 = Math.max(c.bm25, m.bm25); per.set(uid, c); }
         const rows = [];
-        for (const [uid, s] of per) { const e = byUid.get(uid); if (e) rows.push({ uid, title: wiTitle(e), score: s.score, textScore: s.bm25, keywordScore: keywordScore(e, scanText, k1) }); }
+        // `entry` is carried so fuseRanks can read eligibility (and authored order) the way production does.
+        for (const [uid, s] of per) { const e = byUid.get(uid); if (e) rows.push({ uid, entry: e, title: wiTitle(e), score: s.score, textScore: s.bm25, keywordScore: keywordScore(e, scanText, k1), vectorEligible: !!e.vectorized, keysEligible: scoringKeys(e, P).length > 0 }); }
         // DISABLED ENTRIES ARE NOT CANDIDATES. Production ranks what ST core activated, and core never
         // activates a disabled entry — it is also never indexed, so it can only ever arrive by this route.
         // Without the guard a book with many disabled entries manufactures keyword-only rows production
         // cannot produce: 279 of 611 on the curated sommers scenes, which is most of the population any
         // measurement of the keyword route would be reading.
-        for (const e of entries) { const uid = Number(e.uid); if (per.has(uid) || e.disable) continue; const kw = keywordScore(e, scanText, k1); if (kw > 0) rows.push({ uid, title: wiTitle(e), score: undefined, textScore: 0, keywordScore: kw }); }
+        for (const e of entries) { const uid = Number(e.uid); if (per.has(uid) || e.disable) continue; const kw = keywordScore(e, scanText, k1); if (kw > 0) rows.push({ uid, entry: e, title: wiTitle(e), score: undefined, textScore: 0, keywordScore: kw, vectorEligible: !!e.vectorized, keysEligible: true }); }
         return rows;
     };
 }
