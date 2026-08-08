@@ -15,7 +15,7 @@ import { scoreCollection, poolEntries, selectTopK, quantile } from '../plugin/sc
 import { buildLexical } from '../plugin/lexical.mjs';
 import { corpusMean, centeredCosineScores } from '../plugin/vector.mjs';
 import * as ranking from '../extension/ranking.mjs';
-import { isScaffolding, openBundle } from '../extension/grading.mjs';
+import { isReference, openBundle } from '../extension/grading.mjs';
 
 /** Reads a manifest from disk as a plain sample, whether it is one or a /wa-super-grade multi-arm bundle.
  *  Every tool goes through this so `--arm` behaves identically everywhere and a bundle is never scored as
@@ -141,9 +141,9 @@ export function loadScene(S, { indexFile, params: P }) {
     const gaz = ranking.buildGazetteer(gazEntries);
 
     // THE POOL IS WHAT A HUMAN JUDGED, not what one capture logged — see graded-scene-grid.mjs. OWN is this
-    // capture's own non-scaffolding rows, kept separately so coverage warnings stay about re-derivation
+    // capture's own non-reference rows, kept separately so coverage warnings stay about re-derivation
     // failing rather than about sibling arms legitimately disagreeing.
-    const OWN = new Set((S.candidates ?? []).filter(c => !isScaffolding(c) && (!c.world || c.world === primary)).map(c => Number(c.uid)));
+    const OWN = new Set((S.candidates ?? []).filter(c => !isReference(c) && (!c.world || c.world === primary)).map(c => Number(c.uid)));
     const POOL = new Set([...OWN, ...(S.grades ?? [])
         .filter(g => Number.isFinite(Number(g.uid)) && (!g.world || g.world === primary) && !isExcluded(g.title))
         .map(g => Number(g.uid))]);

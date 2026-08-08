@@ -45,7 +45,7 @@ import { runState, defaultSettings, settings, ensureSettings } from './extension
 import { ensureStudioStyle, makeSortControl, makeTierEditor, showEntryText, wiGlyph, wiTooltip } from './extension/ui-widgets.mjs';
 import { PRESENTATION_ALIAS, SORT_FNS, normPresentation, presentationBaseLabel, presentationLabel, reconcileTiers, tierRank, wiTitleOf } from './extension/sort.mjs';
 import { lorebookStudio } from './extension/studio.mjs';
-import { buildSample, bundleSamples, captureParams, GRADE_ANCHORS, isScaffolding, mergeGrades, normalizeSample, rowKey, sampleFile, searchedBook, splitGraded, trimBook, unionArms } from './extension/grading.mjs';
+import { buildSample, bundleSamples, captureParams, GRADE_ANCHORS, isReference, mergeGrades, normalizeSample, rowKey, sampleFile, searchedBook, splitGraded, trimBook, unionArms } from './extension/grading.mjs';
 
 /** The grading scale in one caption line, shared by both grading popups. */
 const gradeAnchorLine = () => `Grade 0–4: ${GRADE_ANCHORS.map((a, g) => `${g} = ${a.split(';')[0].toLowerCase()}`).join(' · ')}.`;
@@ -1245,7 +1245,7 @@ async function rankActivated(args) {
     // Budget walk order — NOT prompt order. Stickies and constants are always-on by
     // authorial intent, so they go first and the budget can only ever cut into the
     // retrieved block, weakest match first. Classification is by what an entry IS: a
-    // constant that also matched keywords is scaffolding, not a retrieval result.
+    // constant that also matched keywords is a reference row, not a retrieval result.
     const sticky = [];
     const constant = [];
     const results = [];
@@ -1396,7 +1396,7 @@ async function rankActivated(args) {
             // dynamic); `sticky` is the entry's CONFIGURED sticky value (0 = off). The two differ:
             // an entry with sticky configured still shows block `dynamic` on the turn it keyword-
             // activates, and dry runs (/wa-debug) never arm the effect at all — so the eval tiers
-            // scaffolding off constant-or-`sticky`, not off the runtime block, which it can't observe.
+            // reference rows off constant-or-`sticky`, not off the runtime block, which it can't observe.
             // Numeric fields stay numeric so the copied JSON is computable: `null` for "no
             // signal" (distinct from a real 0), rounded (not toFixed strings) for a readable
             // grid, and `sticky` is the count itself (0 = off). Only `block` is categorical.
@@ -1833,7 +1833,7 @@ function defaultSampleName() {
  * selection that actually happened, at settings that are recorded rather than remembered. n=1 is the
  * standing limitation on every tuning claim in this extension; this exists to make n>1 cheap.
  *
- * Scaffolding rows (constants, configured stickies) are listed but not gradeable: they are always-on or
+ * Reference rows (constants, configured stickies) are listed but not gradeable: they are always-on or
  * persist-on-trigger, so relevance never chose them and grading them would drag nDCG down for entries the
  * ranking isn't responsible for.
  *
@@ -1877,7 +1877,7 @@ async function gradeScene(named) {
         return '';
     }
 
-    const gradeable = rows.map((row, i) => ({ row, entry: entries[i], i })).filter(x => !isScaffolding(x.row));
+    const gradeable = rows.map((row, i) => ({ row, entry: entries[i], i })).filter(x => !isReference(x.row));
     const scaffold = rows.length - gradeable.length;
     const esc = s => escapeHtml(String(s ?? ''));
 
@@ -1890,7 +1890,7 @@ async function gradeScene(named) {
         + '<table style="width:100%;border-collapse:collapse;font-size:0.9em;"><thead><tr style="text-align:left;">'
         + '<th style="width:4em;">Grade</th><th>Entry</th><th style="width:4em;">fused</th><th style="width:4em;">cos</th><th style="width:4em;">text</th><th style="width:4em;">keys</th><th style="width:4em;"></th></tr></thead><tbody>'
         + rows.map((row, i) => {
-            const scaff = isScaffolding(row);
+            const scaff = isReference(row);
             const num = n => (n == null ? '·' : String(n));
             const cell = scaff
                 ? `<span style="opacity:0.5;font-size:0.85em;">${row.block === 'constant' ? 'const' : 'sticky'}</span>`
@@ -2363,9 +2363,9 @@ async function superGradeScene(named) {
                 elbowSensitivity: cap.elbowSensitivity,
                 dropoffThreshold: cap.dropoffThreshold,
             },
-            // Every non-scaffolding row of every arm is in the union, and the union is graded in full — so
+            // Every non-reference row of every arm is in the union, and the union is graded in full — so
             // unlike /wa-grade this is an exact count of judged rows rather than a conservative proxy.
-            gradedCandidates: cap.rows.filter(r => !isScaffolding(r)).length,
+            gradedCandidates: cap.rows.filter(r => !isReference(r)).length,
             now: new Date().toISOString().slice(0, 10),
         });
         built.push({ arm: cap.arm, sample });

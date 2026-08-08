@@ -114,15 +114,20 @@ export function captureParams(s, { caseSensitive, wholeWords, includeNames }) {
 }
 
 /**
- * A candidate row is scaffolding — always-on or persist-on-trigger — rather than a relevance result.
+ * A candidate row is a REFERENCE row — always-on or persist-on-trigger — rather than a relevance result.
+ *
+ * Two different authorial acts land in the same bucket: `constant` is play scaffolding, a configured
+ * `sticky` is a standing sheet about a character or place. Both are injected by intent rather than chosen
+ * by relevance, so both are excluded from grading — but only the first is scaffolding, which is why the
+ * predicate is named for what the rows ARE and not for one of the two reasons.
  *
  * Tiered off the CONFIGURED sticky value and the runtime constant class, never the runtime sticky state:
  * a sticky entry reads `block: 'dynamic'` on its keyword-activation turn, and a dry run never arms the
  * effect at all. Grading these would drag nDCG down for entries relevance never chose.
  * @param {object} row Candidate row
- * @returns {boolean} True when the row is scaffolding
+ * @returns {boolean} True when the row is a reference row
  */
-export const isScaffolding = row => row.block === 'constant' || Number(row.sticky) > 0;
+export const isReference = row => row.block === 'constant' || Number(row.sticky) > 0;
 
 // --- delta pooling (/wa-super-grade) -----------------------------------------------------------------
 //
@@ -157,7 +162,7 @@ export const rowKey = row => `${row.world ?? ''}${US}${row.uid}`;
  * the pet of one configuration. Ordered by best rank achieved across arms, so the strongest candidates are
  * graded while attention is freshest.
  *
- * Scaffolding is dropped here rather than listed-but-disabled as /wa-grade does: across N arms the same
+ * Reference rows are dropped here rather than listed-but-disabled as /wa-grade does: across N arms the same
  * constant would appear N times to no purpose, and relevance never chose it in any of them.
  *
  * @param {Array<{arm: string, rows: object[], entries: object[]}>} arms Per-arm captures, aligned rows/entries
@@ -167,7 +172,7 @@ export function unionArms(arms) {
     const seen = new Map();   // rowKey -> { row, entry }
     for (const { arm, rows, entries } of arms ?? []) {
         (rows ?? []).forEach((row, i) => {
-            if (isScaffolding(row)) return;
+            if (isReference(row)) return;
             const key = rowKey(row);
             const hit = seen.get(key);
             const rank = Number(row['#'] ?? Infinity);

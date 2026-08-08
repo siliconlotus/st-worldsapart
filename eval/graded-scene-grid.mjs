@@ -203,7 +203,7 @@ const fmt = n => (n == null ? '·' : (+n).toFixed(3));
     // judgement design — judge a candidate pool once, then evaluate any ranker over it — and it is why k1/b
     // can be swept without the population drifting out from under the grades.
     //
-    // Scaffolding (constants, configured stickies) is tiered off: always-on entries aren't relevance results.
+    // Reference rows (constants, configured stickies) are tiered off: always-on entries aren't relevance results.
     //
     // THE POOL IS WHAT A HUMAN JUDGED, not what this one capture logged. For an ordinary single-arm sample
     // those are the same set — grades are collected FROM the candidate list — so this reads exactly as it

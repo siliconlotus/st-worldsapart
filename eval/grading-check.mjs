@@ -1,8 +1,8 @@
 // Self-check for grading.mjs — the /wa-grade sample assembler. The UI half can't be exercised offline, so
 // this pins the part that decides what a sample CONTAINS: book fidelity, the settings mapping, the
-// scaffolding tier, and the foreign-book exclusion. A sample that silently loses a field is a graded scene
+// reference tier, and the foreign-book exclusion. A sample that silently loses a field is a graded scene
 // that can't be re-run, which is the whole failure this feature exists to prevent.
-import { buildSample, bundleSamples, captureParams, isScaffolding, mergeGrades, openBundle, rowKey, sampleFile, searchedBook, splitGraded, trimBook, unionArms } from '../extension/grading.mjs';
+import { buildSample, bundleSamples, captureParams, isReference, mergeGrades, openBundle, rowKey, sampleFile, searchedBook, splitGraded, trimBook, unionArms } from '../extension/grading.mjs';
 import { eq } from './metrics.mjs';
 import * as ranking from '../extension/ranking.mjs';
 
@@ -43,10 +43,10 @@ eq(captureParams({ ...s, retrievalMode: 'lexical' }, {}).commonWordWeight, 0.7, 
 // suppressVectorKeys must survive: without it the harness admits 2.3x the query terms (see buildGazetteer).
 eq(p.suppressVectorKeys, true, 'suppressVectorKeys is recorded');
 
-// --- scaffolding tier: constants and CONFIGURED stickies are not relevance results ---
-eq(isScaffolding({ block: 'constant', sticky: 0 }), true, 'constant is scaffolding');
-eq(isScaffolding({ block: 'dynamic', sticky: 3 }), true, 'configured sticky is scaffolding even while block reads dynamic');
-eq(isScaffolding({ block: 'dynamic', sticky: 0 }), false, 'a plain dynamic row is gradeable');
+// --- reference tier: constants and CONFIGURED stickies are not relevance results ---
+eq(isReference({ block: 'constant', sticky: 0 }), true, 'constant is a reference row');
+eq(isReference({ block: 'dynamic', sticky: 3 }), true, 'configured sticky is a reference row even while block reads dynamic');
+eq(isReference({ block: 'dynamic', sticky: 0 }), false, 'a plain dynamic row is gradeable');
 
 // --- searchedBook: which collection the harness must load ---
 // The case that motivated it: the chat's bound book contributed ONE retrieved row, another book contributed
@@ -165,7 +165,7 @@ const armB = {
 };
 
 const u = unionArms([armA, armB]);
-eq(u.rows.length, 3, 'union dedupes across arms and drops scaffolding');
+eq(u.rows.length, 3, 'union dedupes across arms and drops reference rows');
 eq(u.rows.some(r => r.uid === 2), false, 'the constant is not offered for grading in any arm');
 eq(u.rows.find(r => r.uid === 4) !== undefined, true, 'an entry only a sibling arm surfaced is pooled');
 eq(JSON.stringify(u.rows.find(r => r.uid === 3).arms), '["shipped","no-filter"]', 'a shared row records every arm that surfaced it');

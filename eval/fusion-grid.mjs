@@ -24,7 +24,7 @@
 // Usage (from SillyTavern root):
 //   node .../fusion-grid.mjs <sample.json> [more.json ...] [--k 10]
 import { readFileSync } from 'node:fs';
-import { openBundle, isScaffolding, rowKey } from '../extension/grading.mjs';
+import { openBundle, isReference, rowKey } from '../extension/grading.mjs';
 import { ndcg, sceneParams } from './scene.mjs';
 import { signTest, spearman } from './metrics.mjs';
 
@@ -76,8 +76,8 @@ const rankOf = vals => {
 for (const path of samples) {
     const S = openBundle(JSON.parse(readFileSync(path, 'utf8')));
     const P = sceneParams(S);
-    const rows = (S.candidates ?? []).filter(c => !isScaffolding(c));
-    // Grades are keyed by world+uid; scaffolding is excluded above because relevance never chose it.
+    const rows = (S.candidates ?? []).filter(c => !isReference(c));
+    // Grades are keyed by world+uid; reference rows are excluded above because relevance never chose them.
     const gradeOf = new Map((S.grades ?? []).filter(g => g.uid !== undefined).map(g => [rowKey(g), Number(g.grade) || 0]));
     const judged = rows.filter(r => gradeOf.has(rowKey(r)));
     if (judged.length < 5) { console.log(`${S.name}: only ${judged.length} judged candidate rows — skipping`); continue; }

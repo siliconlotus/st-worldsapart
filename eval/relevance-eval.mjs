@@ -14,7 +14,7 @@
 //                and every title survives intact. A pasted text table also works: rows are read by
 //                their leading index cell (title = first quoted cell), so the param-snapshot
 //                preamble and header/separator lines are ignored.
-//                Scaffolding rows are set aside — constants (JSON `block` column) and sticky-
+//                Reference rows are set aside — constants (JSON `block` column) and sticky-
 //                configured references (JSON `sticky` > 0, e.g. character sheets). They're always-
 //                on / persist-on-trigger, not chosen by relevance, so grading only the dynamic
 //                block keeps nDCG honest. A text paste has neither column, so it grades all rows.
@@ -174,7 +174,7 @@ if (!debugPath || !gradesPath) {
 const parsed = parseDebug(readFileSync(debugPath, 'utf8'));
 const grades = parseGrades(readFileSync(gradesPath, 'utf8'));
 if (!parsed.length) { console.error('no ranked rows parsed from debug file'); process.exit(1); }
-// Grade retrieval only. Scaffolding — constants and sticky-configured references (character
+// Grade retrieval only. Reference rows — constants and sticky-configured sheets (character
 // sheets etc.) — is always-on or persist-on-trigger, not chosen by relevance, so as ungraded 0s
 // it'd sink nDCG. Tier on constant (runtime `block`) OR a configured `sticky` value, NOT the
 // runtime sticky-active state: a sticky entry reads `block: dynamic` on its keyword-activation
