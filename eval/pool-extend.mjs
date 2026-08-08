@@ -39,14 +39,24 @@ const CHUNK_ARMS = {
     'chunkMode=length': { chunkMode: 'length' },
 };
 
+// QUERY-TIME arms, which need no index at all — they re-rank the same collection. Live pooling CAN reach
+// these, so they are not in the default set; they are here because a pool must be extended for the arms
+// somebody is actually going to score, and an offline rescore of an edited book is exactly the case where
+// the live capture no longer covers them. Names match paired-arms.mjs so a pool and a screen agree.
+const PARAM_ARMS = {
+    'scoreVectorKeys=on': { scoreVectorKeys: true }, 'scoreVectorKeys=off': { scoreVectorKeys: false },
+    'KEYW=0': { KEYW: 0 }, 'KEYW=0.5': { KEYW: 0.5 }, 'KEYW=1': { KEYW: 1 }, 'KEYW=2': { KEYW: 2 }, 'KEYW=3': { KEYW: 3 },
+    'LEXW=0.5': { LEXW: 0.5 }, 'LEXW=1': { LEXW: 1 }, 'LEXW=3': { LEXW: 3 },
+};
+
 if (!samples.length) {
     console.error('need at least one sample: node pool-extend.mjs <sample.json> [more.json ...] [--arms a,b] [--k 10] [--out-dir <dir>] [--dry]');
     console.error('writes <name>-pending.json next to each sample: the entries an offline arm would surface that nobody has graded.');
     process.exit(2);
 }
 const picked = arg('--arms') ? String(arg('--arms')).split(',').map(x => x.trim()).filter(Boolean) : Object.keys(CHUNK_ARMS);
-const unknown = picked.filter(a => !CHUNK_ARMS[a]);
-if (unknown.length) { console.error(`unknown arm(s): ${unknown.join(', ')} — known: ${Object.keys(CHUNK_ARMS).join(', ')}`); process.exit(2); }
+const unknown = picked.filter(a => !CHUNK_ARMS[a] && !PARAM_ARMS[a]);
+if (unknown.length) { console.error(`unknown arm(s): ${unknown.join(', ')} — known: ${[...Object.keys(CHUNK_ARMS), ...Object.keys(PARAM_ARMS)].join(', ')}`); process.exit(2); }
 
 const K = Number(arg('--k') ?? 10);
 const MODEL = process.env.WA_EMBED_MODEL ?? 'bge-m3';
@@ -79,8 +89,11 @@ const DRY = argv.includes('--dry');
         note(base.unjudgedRows, 'baseline');
 
         for (const arm of picked) {
-            const built = await ensureIndex(S, { overrides: CHUNK_ARMS[arm], model: MODEL, ollama: OLLAMA, log: () => {} });
-            const r = await scoreScene({ sample: S, overrides: {}, k: K, index: built.path, model: MODEL, ollama: OLLAMA, qv });
+            // A query-time arm re-ranks the collection the scene already loaded; a chunk arm needs its own.
+            const r = PARAM_ARMS[arm]
+                ? await scoreScene({ sample: S, overrides: PARAM_ARMS[arm], k: K, scene, qv })
+                : await scoreScene({ sample: S, overrides: {}, k: K, model: MODEL, ollama: OLLAMA, qv,
+                    index: (await ensureIndex(S, { overrides: CHUNK_ARMS[arm], model: MODEL, ollama: OLLAMA, log: () => {} })).path });
             note(r.unjudgedRows, arm);
             process.stdout.write(`\r  ${S.name ?? basename(path)}: scored ${arm}                    `);
         }
@@ -105,7 +118,7 @@ const DRY = argv.includes('--dry');
             k: K,
             arms: picked,
             createdAt: new Date().toISOString().slice(0, 10),
-            note: 'Entries an offline chunk arm would rank in its top-k that nobody has graded. Load into /wa-super-grade alongside the prior samples; they will appear in the grading table.',
+            note: 'Entries an offline arm would rank in its top-k that nobody has graded. Load into /wa-super-grade alongside the prior samples; they will appear in the grading table.',
         }, null, 2)}\n`);
         console.log(`  -> ${out}`);
     }
