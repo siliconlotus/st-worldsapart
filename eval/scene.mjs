@@ -217,12 +217,19 @@ export function makeScorer({ loaded, byUid, entries, params: P, topK }) {
         const rows = [];
         // `entry` is carried so fuseRanks can read eligibility (and authored order) the way production does.
         for (const [uid, s] of per) { const e = byUid.get(uid); if (e) rows.push({ uid, entry: e, title: wiTitle(e), score: s.score, textScore: s.bm25, keywordScore: keywordScore(e, scanText, k1), vectorEligible: !!e.vectorized, keysEligible: scoringKeys(e, P).length > 0 }); }
-        // DISABLED ENTRIES ARE NOT CANDIDATES. Production ranks what ST core activated, and core never
-        // activates a disabled entry — it is also never indexed, so it can only ever arrive by this route.
-        // Without the guard a book with many disabled entries manufactures keyword-only rows production
-        // cannot produce: 279 of 611 on the curated sommers scenes, which is most of the population any
-        // measurement of the keyword route would be reading.
-        for (const e of entries) { const uid = Number(e.uid); if (per.has(uid) || e.disable) continue; const kw = keywordScore(e, scanText, k1); if (kw > 0) rows.push({ uid, entry: e, title: wiTitle(e), score: undefined, textScore: 0, keywordScore: kw, vectorEligible: !!e.vectorized, keysEligible: true }); }
+        // THIS LOOP IS ACTIVATION, NOT SCORING — it stands in for ST core's keyword match, so it may only
+        // admit an entry core could actually have activated. Two exclusions, both stage-2 facts:
+        //
+        //   disable            core never activates a disabled entry, and it is never indexed either, so
+        //                      this route is the only way one could appear at all — 279 of 611 keyword-only
+        //                      rows on the curated sommers scenes before the guard.
+        //   suppressVectorKeys blanks a vectorized entry's keys so core CANNOT keyword-activate it. Its only
+        //                      door is retrieval, i.e. `per`. scoreVectorKeys does not reopen this one — that
+        //                      setting is stage 3, and re-admits the stashed keys for SCORING alone. Without
+        //                      this guard a capture with both settings on (every sommers arm) admitted 209
+        //                      more rows by key, and keys appeared to rescue vector entries production would
+        //                      never have ranked.
+        for (const e of entries) { const uid = Number(e.uid); if (per.has(uid) || e.disable || (e.vectorized && P.suppressVectorKeys)) continue; const kw = keywordScore(e, scanText, k1); if (kw > 0) rows.push({ uid, entry: e, title: wiTitle(e), score: undefined, textScore: 0, keywordScore: kw, vectorEligible: !!e.vectorized, keysEligible: true }); }
         return rows;
     };
 }

@@ -96,6 +96,42 @@ and deliberately kept. So both directions inform: a removal is agreement with th
 is an override. What curation cannot tell you is anything about the keys the flag never surfaced,
 since it shaped which keys got examined. Removals speak to precision, never to recall.
 
+## Four stages, and the two rankings
+
+Conflating these has produced several wrong conclusions here, more than once. The terms are fixed — use
+them, and say which stage a claim is about.
+
+**1. Retrieval** — `selectAndActivate` in `worldsapart.js`. The plugin scores chunks (cosine + BM25 over
+chunk text), `fuseRetrieval` fuses them into the **retrieval ranking**, and `cutRetrieved`
+(`selection.mjs`: count / elbow / dropoff, bounded by `maxVectorEntries`) keeps a prefix. **Keys are not
+in this ranking** — `fuseRetrieval` is deliberately passed no `keywordWeight`.
+
+**2. Activation** — whether an entry is ranked at all. Three independent routes: WA emits
+`WORLDINFO_FORCE_ACTIVATE` on the retrieval winners; ST core keyword-matches whatever keys are live;
+`constant`, decorators and sticky persistence. The result is core's `activated` map.
+
+**3. Scoring** — `rankActivated`, on `WORLDINFO_SCAN_DONE`. Vector and chunk-text scores are looked up
+from what retrieval stored, keyword score is computed over the scan window, and `fuseRanks` produces the
+**layout ranking** — vector + text + keys, normalised by the signals an entry was eligible for.
+
+**4. Selection** — the cuts, and there are two at different stages on different rankings. `cutRetrieved`
+cuts the retrieval ranking by relevance (inside stage 1, before anything is activated). `applyBudget`
+walks the layout ranking and deletes non-survivors from `activated` (after stage 3), sticky and constant
+first so the budget only ever cuts into the retrieved block.
+
+**Two rankings, not one.** `fuseRetrieval` decides what is activated; `fuseRanks` decides prompt order
+and what survives the budget. **A change to `fuseRanks` can never surface an entry retrieval did not
+return** — so no keyword weight, tilt or fusion change is a recall lever, only a precision one.
+
+**The two vector-key settings sit at different stages, and only one is about activation.**
+`suppressVectorKeys` blanks a vectorized entry's `key` into `waKeys` so core cannot keyword-ACTIVATE it
+— stage 2. `scoreVectorKeys` decides whether those stashed keys are SCORED — stage 3, and it does not
+reopen stage 2. Keys re-rank vector entries; they never admit one.
+
+`eval/scene.mjs` models stages 1 and 3. The keyword fallback loop in `makeScorer` is stage 2, so it may
+only admit what core could have activated: not disabled entries, and not vectorized entries under
+`suppressVectorKeys`. Both guards were added after each had already inflated a reported number.
+
 ## countKey is the only matcher
 
 `ranking.mjs` `countKey()` mirrors ST core's `matchKeys` — match flags, `/regex/` keys, `?` SmartKeys.
