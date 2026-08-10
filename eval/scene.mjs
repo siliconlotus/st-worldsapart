@@ -78,6 +78,12 @@ export const sceneParams = (S, overrides = {}) => ({
     // Wrong-book failsafe (see state.mjs uncenteredGate). 0 here, NOT the shipped 0.5: every sample captured
     // before the gate existed must reproduce byte-identically, and a gate arm overrides this explicitly.
     uncenteredGate: 0,
+    // Whether the cosine subtracts the corpus mean (state.mjs meanCentered, shipped on). An arm here contrasts
+    // the CENTERED and RAW rankings on graded scenes; centering-grid.mjs measures the same switch on the
+    // leave-one-out chunk-to-sibling task, which is a different question and can disagree without either
+    // being wrong. Samples captured before captureParams recorded it fall back to this default, which is the
+    // value they in fact ran under.
+    meanCentered: true,
     maxVectorEntries: 20, suppressVectorKeys: true, scoreVectorKeys: false, entityFilter: true,
     queryMode: 'messages', retrievalMode: 'hybrid',
     // How a VECTORIZED entry's chunk earns admission to the candidate set. 'either' is what the plugin ships
@@ -205,8 +211,8 @@ export function makeCandidateSet({ loaded, byUid, entries, params: P, topK }) {
         // Resolve 'auto' here, once, so the admit/floor filters below compare against the same number
         // scoreCollection gated with — the same p90-of-live-scores the plugin computes.
         // --- STAGE 1: RETRIEVAL. Score every chunk, apply the admission gates, pool per entry, take top-K.
-        const thr = P.threshold === 'auto' ? quantile(centeredCosineScores(loaded.items, qvec, loaded.mean, true), 0.9) : P.threshold;
-        let scored = scoreCollection(CID, loaded, qvec, { centered: true, threshold: thr, queryText: qtext, k1, b, termWeights: tw, stopwordDf: P.stopwordDf, commonWordWeight: P.commonWordWeight, uncenteredGate: P.uncenteredGate });
+        const thr = P.threshold === 'auto' ? quantile(centeredCosineScores(loaded.items, qvec, loaded.mean, P.meanCentered), 0.9) : P.threshold;
+        let scored = scoreCollection(CID, loaded, qvec, { centered: P.meanCentered, threshold: thr, queryText: qtext, k1, b, termWeights: tw, stopwordDf: P.stopwordDf, commonWordWeight: P.commonWordWeight, uncenteredGate: P.uncenteredGate });
         if (P.admit === 'cosine') scored = scored.filter(m => m.score >= thr);
         else if (P.admit === 'both') scored = scored.filter(m => m.score >= thr && m.bm25 > 0);
         if (P.bm25Floor > 0) scored = scored.filter(m => m.score >= thr || m.bm25 >= P.bm25Floor);

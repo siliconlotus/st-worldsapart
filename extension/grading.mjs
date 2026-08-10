@@ -96,6 +96,7 @@ export function captureParams(s, { caseSensitive, wholeWords, includeNames }) {
         // general-English words, hybrid does not.
         commonWordWeight: s.retrievalMode === 'lexical' ? 0.7 : 1,
         threshold: s.scoreThreshold,
+        meanCentered: s.meanCentered,
         maxVectorEntries: s.maxVectorEntries,
         minVectorEntries: s.minVectorEntries,
         suppressVectorKeys: s.suppressVectorKeys,

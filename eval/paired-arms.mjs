@@ -87,6 +87,11 @@ const ARMS = {
     ...Object.fromEntries([0, 60, 120, 200, 300, 500].map(v => [`minChunk=${v}`, { __chunk: { minChunkSize: v } }])),
     'chunkMode=length': { __chunk: { chunkMode: 'length' } },
 
+    // Mean-centering off: rank on RAW cosine. The contrast is end-to-end — it moves the retrieval ranking,
+    // the top-K, the admission gate and the fused layout order together, which is what makes it different
+    // from comparing the two score columns on a fixed candidate set.
+    'centering=off': { meanCentered: false },
+
     // ADMISSION ARMS — how a vectorized entry's chunk earns its way into the candidate set. The plugin ships
     // `score >= threshold || bm25 > 0` (scoring.mjs scoreCollection). Kept as standing arms so that if anyone
     // later "fixes" that OR into something stricter, the regression shows up here instead of shipping.
