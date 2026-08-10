@@ -6,7 +6,7 @@
  * This extension decides which entries survive, in what order, and how many tokens
  * they may spend, by hooking three sanctioned points:
  *
- *   1. WORLDINFO_ENTRIES_LOADED — suppress keyword matching on vectorized entries.
+ *   1. WORLDINFO_ENTRIES_LOADED — suppress keyword matching on vectorized entries; take the budget.
  *   2. generate_interceptor      — chunked vector retrieval, force-activate the winners.
  *   3. WORLDINFO_SCAN_DONE       — rank everything activated, apply budget, rewrite `order`.
  *
@@ -801,17 +801,41 @@ async function intercept(chat, _maxContext, type) {
 }
 
 /**
- * Blanks keys on vectorized entries so the keyword scan skips them.
+ * The `ignoreBudget` the AUTHOR set, which is not the one core is shown.
+ *
+ * WA's budget supersedes core's, and that is not a preference core can be asked to honour: core's
+ * budget loop runs before WA is ever called and DROPS the entries it cuts, so a core budget smaller
+ * than WA's silently caps WA's — the shipped 25% default against WA's 40% made any WA ceiling above
+ * 25% inoperative. onEntriesLoaded therefore tells core every entry is exempt, so its loop never
+ * cuts, and applyBudget does the cutting on the ranked layout instead.
+ *
+ * `??`, not `||`: a stashed `false` must beat the `true` core was handed. The fallback fires only for
+ * entries WA never processed — a dry run, or WA disabled — where the field is still the author's own.
+ */
+const authorIgnoreBudget = entry => Boolean(entry?.waIgnoreBudget ?? entry?.ignoreBudget);
+
+/**
+ * Blanks keys on vectorized entries so the keyword scan skips them, and takes the budget off core.
  * Entries here are freshly-spread objects, so REASSIGNING `key` is safe —
  * mutating the array in place would corrupt the cached world data.
  * @param {object} loaded Lore buckets
  */
-function suppressKeys(loaded) {
+function onEntriesLoaded(loaded) {
     const entries = Object.values(loaded ?? {}).filter(Array.isArray).flat();
 
     // Free ride: this hook already sees every entry in scope, so count the exempt ones
     // here rather than loading the lorebooks a second time.
     showExemptCount(entries);
+
+    // Gated on WA actually cutting this generation, because core's budget is the BACKSTOP: on any
+    // path where rankActivated returns early, core's cut is the only thing still bounding the
+    // prompt. Dry runs (PromptManager token counts, chat load) are exactly that path.
+    if (settings().enabled && !runState.generationIsDryRun) {
+        for (const entry of entries) {
+            entry.waIgnoreBudget = Boolean(entry.ignoreBudget);   // always set, so `??` above only
+            entry.ignoreBudget = true;                            // falls through for the ungated paths
+        }
+    }
 
     if (!settings().enabled || !settings().suppressVectorKeys) {
         return;
@@ -854,7 +878,7 @@ function showExemptCount(entries) {
         return;
     }
 
-    const exempt = entries.filter(x => x?.ignoreBudget).length;
+    const exempt = entries.filter(authorIgnoreBudget).length;
 
     // Nothing to say when there are none, which is the common case.
     field.text(exempt
@@ -1344,7 +1368,7 @@ async function rankActivated(args) {
 
         if (dropped) {
             const caps = [
-                maxDynamic > 0 ? `dynamic ${results.filter(x => survivors.has(x) && !x.entry.ignoreBudget).length}/${maxDynamic}` : null,
+                maxDynamic > 0 ? `dynamic ${results.filter(x => survivors.has(x) && !authorIgnoreBudget(x.entry)).length}/${maxDynamic}` : null,
                 maxTotal > 0 ? `total ${counted}/${maxTotal}` : null,
                 maxTokens > 0 ? `tokens ${budgeted}/${maxTokens} budgeted${inPrompt !== budgeted ? `, ${inPrompt - budgeted} exempt, ${inPrompt} in prompt` : ''}` : null,
             ].filter(Boolean).join(', ');
@@ -1730,7 +1754,7 @@ async function reportLayout(verbose = false, countTokens = true) {
             why: whySelected(item, block),
             position: POSITION_NAMES[entry.position] ?? `position ${entry.position}`,
             depth: entry.position === 4 ? (entry.depth ?? 4) : null,
-            exempt: Boolean(entry.ignoreBudget),
+            exempt: authorIgnoreBudget(entry),
             tokens: tokens ?? null,
             _pos: Number(entry.position) || 0,
         });
@@ -2543,7 +2567,7 @@ async function applyBudget({ ranked, isDynamic, maxTokens, maxTotal, maxDynamic,
     for (const item of ranked) {
         index += 1;
         const itemTokens = await tokensOf(item);
-        const exempt = Boolean(item.entry.ignoreBudget);
+        const exempt = authorIgnoreBudget(item.entry);
 
         // An entry over the budget but within the slack is admitted anyway, so the
         // entry genuinely next in line keeps the last slot instead of yielding it to
@@ -3167,7 +3191,7 @@ export async function init() {
     eventSource.on(event_types.GENERATION_STARTED, (_type, _options, dryRun) => { runState.generationIsDryRun = Boolean(dryRun); });
     eventSource.on(event_types.GENERATION_ENDED, () => { runState.generationIsDryRun = false; });
 
-    eventSource.on(event_types.WORLDINFO_ENTRIES_LOADED, suppressKeys);
+    eventSource.on(event_types.WORLDINFO_ENTRIES_LOADED, onEntriesLoaded);
     // WORLDINFO_ENTRIES_LOADED only fires during a scan, so switching chat/character wouldn't
     // refresh the attached-book set until the next generation. CHAT_CHANGED fires on every
     // switch; re-read the active books then. Also populates once now so it isn't blank on load.
