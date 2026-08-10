@@ -187,7 +187,7 @@ on the language, so it wants a human in the loop. Suggest the stripped form as a
 
 - **`plugin/` changes need `node deploy-plugin.mjs` and an ST restart.** The fold lives in
   `plugin/automaton.mjs`, so orthography and NFC are not live on the server half until then.
-- **`eq()` in `eval/metrics.mjs` prints `FAIL` but exits 0.** Checking the suite by exit code alone
-  misses assertion failures. Grep for `^FAIL`.
+- **The check suite is run by exit code.** `eq()` sets `process.exitCode`, so a failed assertion and
+  a thrown error are the same signal: `for f in eval/*-check.mjs; do node "$f" || …; done`.
 - **`sort.mjs` is now genuinely ST-free** and node-importable; it was not, and CLAUDE.md said it was.
 - **Nothing here has been verified in a browser** beyond what was tested by hand during the session.
