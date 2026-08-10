@@ -64,7 +64,7 @@ import * as ranking from '../extension/ranking.mjs';   // shared client tuning l
 import { cutRetrieved } from '../extension/selection.mjs';
 // Scene loading, the gazetteer, the scorers, the pool and the nDCG math all live in scene.mjs, shared with
 // paired-arms.mjs — there must be exactly one copy of them (see that module's header).
-import { CID, dcg, embed as embedWith, indexPath, loadScene, makeFuse, makeGradeOf, makeKeywordScore, makeScorer, ndcg, nrm, openSample, sceneParams, wiTitle } from './scene.mjs';
+import { CID, dcg, embed as embedWith, indexPath, loadScene, makeFuse, makeGradeOf, makeKeywordScore, makeCandidateSet, ndcg, nrm, openSample, sceneParams, wiTitle } from './scene.mjs';
 
 const arg = k => { const i = process.argv.indexOf(k); return i >= 0 ? process.argv[i + 1] : null; };
 if (!arg('--sample')) { console.error('need --sample <sample.json> (write one with /wa-grade)'); process.exit(2); }
@@ -189,7 +189,7 @@ const fmt = n => (n == null ? '·' : (+n).toFixed(3));
     // Per-entry signals via the SHARED scorer in scene.mjs (exact plugin vector + BM25 + selection, then
     // keyword). Wrapped only to keep this file's defaults — the report code below sweeps k1/b/tw and leaves
     // the query and scan window alone.
-    const score = makeScorer({ loaded, byUid, entries, params: P, topK: TOPK });
+    const score = makeCandidateSet({ loaded, byUid, entries, params: P, topK: TOPK });
     const scoreAll = (k1, b, tw = termWeights, qvec = qv, qtext = query, st = scanText) => score(k1, b, tw, qvec, qtext, st);
     // POPULATION COMES FROM THE LOG, NOT FROM RE-DERIVATION. /wa-grade records the entries production
     // actually activated (`candidates`), which is the one thing offline code cannot recompute: half that set

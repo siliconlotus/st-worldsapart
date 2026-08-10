@@ -187,20 +187,24 @@ export const makeKeywordScore = P => (e, text, k1) =>
     ranking.keywordScore(e, text, scoringKeys(e, P), { k1, caseSensitiveDefault: P.caseSensitive, wholeWordsDefault: P.wholeWords }).score;
 
 /**
- * Per-entry signals via the SHARED plugin scoring — the exact vector + BM25 + chunk-selection code the
- * server runs — then keyword on top.
+ * Builds the candidate set — every entry that would be in the ranking, with its per-signal scores.
  *
- * Entries are pooled independently per signal, as the client does: best vector chunk and best BM25 chunk.
- * Entries the index never returned still enter the ranking if they keyword-match, which is how non-vectorized
- * entries compete at all.
+ * SPANS THREE STAGES, and they are marked below because collapsing them is how this harness has produced
+ * wrong numbers twice. Production keeps them apart by construction: retrieval runs in selectAndActivate on
+ * one event and scoring in rankActivated on another. Offline there is no event loop, so they collapse into
+ * one pass — which is a reason to label the boundaries, not to forget they exist.
+ *
+ * Stage 2 genuinely depends on a stage-3 computation: `keywordScore > 0` is what decides keyword
+ * activation. Core has the same dependency — matching serves both — so this is faithful, not a shortcut.
  *
  * @returns {(k1: number, b: number, tw: object|null, qvec: number[], qtext: string, scanText: string) => object[]}
  */
-export function makeScorer({ loaded, byUid, entries, params: P, topK }) {
+export function makeCandidateSet({ loaded, byUid, entries, params: P, topK }) {
     const keywordScore = makeKeywordScore(P);
     return (k1, b, tw, qvec, qtext, scanText) => {
         // Resolve 'auto' here, once, so the admit/floor filters below compare against the same number
         // scoreCollection gated with — the same p90-of-live-scores the plugin computes.
+        // --- STAGE 1: RETRIEVAL. Score every chunk, apply the admission gates, pool per entry, take top-K.
         const thr = P.threshold === 'auto' ? quantile(centeredCosineScores(loaded.items, qvec, loaded.mean, true), 0.9) : P.threshold;
         let scored = scoreCollection(CID, loaded, qvec, { centered: true, threshold: thr, queryText: qtext, k1, b, termWeights: tw, stopwordDf: P.stopwordDf, commonWordWeight: P.commonWordWeight, uncenteredGate: P.uncenteredGate });
         if (P.admit === 'cosine') scored = scored.filter(m => m.score >= thr);
@@ -215,9 +219,10 @@ export function makeScorer({ loaded, byUid, entries, params: P, topK }) {
         const per = new Map();
         for (const m of grouped[CID]?.metadata ?? []) { const uid = Number(m.index); const c = per.get(uid) ?? { score: -Infinity, bm25: 0 }; c.score = Math.max(c.score, m.score); c.bm25 = Math.max(c.bm25, m.bm25); per.set(uid, c); }
         const rows = [];
+        // --- STAGE 2: ACTIVATION (retrieval route). Whatever survived the cut above is in the ranking.
         // `entry` is carried so fuseRanks can read eligibility (and authored order) the way production does.
         for (const [uid, s] of per) { const e = byUid.get(uid); if (e) rows.push({ uid, entry: e, title: wiTitle(e), score: s.score, textScore: s.bm25, keywordScore: keywordScore(e, scanText, k1), vectorEligible: !!e.vectorized, keysEligible: scoringKeys(e, P).length > 0 }); }
-        // THIS LOOP IS ACTIVATION, NOT SCORING — it stands in for ST core's keyword match, so it may only
+        // --- STAGE 2: ACTIVATION (keyword route). Stands in for ST core's keyword match, so it may only
         // admit an entry core could actually have activated. Two exclusions, both stage-2 facts:
         //
         //   disable            core never activates a disabled entry, and it is never indexed either, so
@@ -268,7 +273,7 @@ export async function scoreScene({ sample: S, overrides = {}, k = 10, vectors, m
         throw new Error('suppressVectorKeys changes the gazetteer, so it cannot be swept against a preloaded scene — load per arm');
     }
     const scene = preloaded ?? loadScene(S, { indexFile: indexPath(S, { vectors, model, index }), params: P });
-    const scoreAll = makeScorer({ ...scene, params: P, topK: topK ?? Math.max(100, P.maxVectorEntries * 2) });
+    const scoreAll = makeCandidateSet({ ...scene, params: P, topK: topK ?? Math.max(100, P.maxVectorEntries * 2) });
     const fuse = makeFuse(P);
     const gradeOf = makeGradeOf(S.grades, scene.isExcluded);
 
