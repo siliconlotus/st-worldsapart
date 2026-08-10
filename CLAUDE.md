@@ -149,6 +149,12 @@ Settings and ST globals are injected by the caller, never imported. The ST/DOM h
 One exception survives: `eval/bulk-reorder-check.mjs` string-slices `planUidReindex` out of
 `studio.mjs`, which imports ST and so can't be loaded under node.
 
+**A slice is not a test of the shipped code, and it fails silently.** `applyBudget` was sliced too,
+until a helper added just outside the sliced range made every run throw `ReferenceError` — and the
+suite reported green, because it was being checked by grepping for `^FAIL` and a stack trace has no
+such line. If something in the ST-coupled half needs a check, move it to the pure half first;
+`applyBudget` turned out to reference nothing but its own arguments, which is the usual case.
+
 ## Composite keys use US (``), never NUL
 
 Cache keys and row ids that join fields into one string (the summary cache in `summarizeQuery`, the

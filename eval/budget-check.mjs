@@ -1,22 +1,8 @@
 // Checks the nested entry caps: vector ⊆ dynamic ⊆ all.
-// Pulls applyBudget out of worldsapart.js by source slice — worldsapart.js only loads in a browser.
-import { readFileSync } from 'node:fs';
-const src = readFileSync(new URL('../worldsapart.js', import.meta.url), 'utf8');
-const line = (needle) => {
-    const at = src.indexOf(needle);
-    if (at < 0) throw new Error(`budget-check: '${needle}' is gone from worldsapart.js — fix the slice`);
-    return src.slice(at, src.indexOf('\n', at) + 1);
-};
-const start = src.indexOf('async function applyBudget');
-const body = src.slice(start, src.indexOf('\n}', start) + 2);
-// applyBudget reads the AUTHORED ignoreBudget, not the `true` WA hands core, so the predicate has to
-// come along. SLICED, not restated: a second copy here is a second definition of what "exempt" means,
-// and this check exists to pin the shipped one.
-const helper = line('const authorIgnoreBudget =');
-const applyBudget = new Function(`${helper}${body}; return applyBudget;`)();
+import { applyBudget } from '../extension/selection.mjs';
+import { eq } from './metrics.mjs';
 
 const mk = (key, tokens, opts = {}) => ({ key, tokens, entry: { ...opts } });
-const eq = (got, want, label) => console.log(`${got === want ? 'ok  ' : 'FAIL'} ${label}: ${got}${got === want ? '' : ` (want ${want})`}`);
 
 // 7 constants then 12 dynamic, which is the walk order rankActivated produces.
 const constants = Array.from({ length: 7 }, (_, i) => mk(`c${i + 1}`, 10));
