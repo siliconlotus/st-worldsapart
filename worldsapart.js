@@ -821,7 +821,13 @@ function suppressKeys(loaded) {
         if (entry?.vectorized) {
             // Stash before blanking so scoreVectorKeys can rank on the real keys after core is
             // blinded to them. keywordScore only reads primary keys, so that's all we keep.
-            entry.waKeys = entry.key;
+            //
+            // COPIED, not aliased. getGlobalLore builds each entry with a shallow spread, so
+            // `entry.key` is still the same array object as loadWorldInfo's cached book data —
+            // blanking is safe because it rebinds the field, but holding the reference would put a
+            // live handle on the cache one in-place sort or splice away from corrupting the
+            // lorebook for the session. Keys are strings, so a spread is a full copy.
+            entry.waKeys = [...(entry.key ?? [])];
             entry.key = [];
             entry.keysecondary = [];
         }
