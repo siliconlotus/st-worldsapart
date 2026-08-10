@@ -11,7 +11,7 @@ const cutRetrieved = (ranked) => cut(ranked, {
 });
 const mk = (...f) => f.map(fused => ({ fused }));
 const n = r => r.length;
-const eq = (got, want, label) => { console.assert(got === want, `FAIL ${label}: got ${got} want ${want}`); console.log(`${got === want ? 'ok  ' : 'FAIL'} ${label}: ${got}`); };
+import { eq } from './metrics.mjs';
 
 cfg = { vectorCutoff: 'count', maxVectorEntries: 10, minVectorEntries: 3, elbowSensitivity: 1.5 };
 eq(n(cutRetrieved(mk(9,8,7,6,5,4,3,2,1,0.5,0.4,0.3))), 10, 'count mode ignores gaps, caps at max');

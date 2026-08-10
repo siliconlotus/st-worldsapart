@@ -4,7 +4,7 @@
 import { bm25Scores } from '../plugin/lexical.mjs';
 import { COMMON_WORDS } from '../plugin/commonwords.js';
 
-const eq = (got, want, label) => console.log(`${Math.abs(got - want) < 1e-9 ? 'ok  ' : 'FAIL'} ${label}: ${got}${Math.abs(got - want) < 1e-9 ? '' : ` (want ${want})`}`);
+import { eqNear as eq } from './metrics.mjs';
 
 console.log(`${COMMON_WORDS.has('said') && !COMMON_WORDS.has('kidnap') ? 'ok  ' : 'FAIL'} precondition: "said" common, "kidnap" not`);
 

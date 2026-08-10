@@ -1,8 +1,29 @@
 // metrics.mjs — LOO ranking metrics shared by the eval grids (baseline-grid, centering-grid),
 // plus the one-line assertion the check scripts share.
 
-/** Exact-equality console check: "ok <label>" / "FAIL <label>: got (want …)". */
-export const eq = (got, want, label) => console.log(`${got === want ? 'ok  ' : 'FAIL'} ${label}: ${got}${got === want ? '' : ` (want ${want})`}`);
+/**
+ * Exact-equality console check: "ok <label>" / "FAIL <label>: got (want …)".
+ *
+ * A mismatch sets `process.exitCode`, so a FAILING CHECK AND A CRASH ARE THE SAME SIGNAL and the
+ * suite is `for f in eval/*-check.mjs; do node "$f" || …; done`. It used to print FAIL and exit 0,
+ * which meant the runner had to grep stdout for `^FAIL` — and that missed thrown errors, since a
+ * stack trace contains no such line. One broken check shipped green exactly that way.
+ *
+ * `exitCode`, not `exit()`: the run finishes and reports every failure, rather than stopping at the
+ * first one.
+ */
+export const eq = (got, want, label) => {
+    const ok = got === want;
+    if (!ok) process.exitCode = 1;
+    console.log(`${ok ? 'ok  ' : 'FAIL'} ${label}: ${got}${ok ? '' : ` (want ${want})`}`);
+};
+
+/** eq for floats. Same reporting and the same exit signal, `===` swapped for a tolerance. */
+export const eqNear = (got, want, label, tol = 1e-9) => {
+    const ok = Math.abs(got - want) < tol;
+    if (!ok) process.exitCode = 1;
+    console.log(`${ok ? 'ok  ' : 'FAIL'} ${label}: ${got}${ok ? '' : ` (want ${want})`}`);
+};
 
 /** scores -> 1-based rank per doc, with the query doc q forced to the bottom. */
 export const rankMap = (scores, q) => { const o = Array.from(scores, (s, d) => [s, d]); o[q][0] = -2; o.sort((a, b) => b[0] - a[0]); const m = new Int32Array(o.length); o.forEach(([, d], i) => { m[d] = i + 1; }); return m; };

@@ -1,7 +1,7 @@
 // Locks the two lorebook-priority retention comparators from rankActivated.
 // The sorts live inline in a browser-only async function, so we mirror the exact
 // comparator expressions here and assert the motivating cases.
-const eq = (got, want, label) => console.log(`${got === want ? 'ok  ' : 'FAIL'} ${label}: ${got}${got === want ? '' : ` (want ${want})`}`);
+import { eq } from './metrics.mjs';
 
 const cfg = { book1: { weight: 2, offset: 0 }, book2: { weight: 1, offset: 0 } };
 const rank = { book1: 0, book2: 1 };
