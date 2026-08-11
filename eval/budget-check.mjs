@@ -226,3 +226,21 @@ r = await applyBudget({
     isDynamic: () => true, tokensOf: i => i.tokens, maxTokens: 0, maxTotal: 1, maxDynamic: 0,
 });
 eq(r.skipped.every(x => x.tail), true, 'count cap rejections are always tail');
+
+// Sticky rows ride at the HEAD of the walk (rankActivated partitions sticky, then constant, then
+// results — always-on by authorial intent), so a token squeeze exhausts the budget on them first
+// and the cut lands entirely in the retrieved block. Sticky's timed-effect detection is ST-side;
+// what is pure — and what this pins — is that head placement IS the protection.
+{
+    const sticky = Array.from({ length: 3 }, (_, i) => mk(`s${i + 1}`, 10));
+    const walk = [...sticky, ...constants, ...dynamic];
+    const r = await applyBudget({
+        ranked: walk,
+        isDynamic: item => dynamicSet.has(item),
+        tokensOf: item => item.tokens,
+        maxTokens: 120, maxTotal: 0, maxDynamic: 0,
+    });
+    eq(sticky.every(s => r.survivors.has(s)), true, 'a token squeeze never reaches the sticky block');
+    eq(constants.every(c => r.survivors.has(c)), true, 'nor the constants behind it');
+    eq(dyn(r), 2, '120 tokens = 3 sticky + 7 constants + 2 retrieved — the cut is entirely retrieved-side');
+}

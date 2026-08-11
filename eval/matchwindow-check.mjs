@@ -1,7 +1,7 @@
 // matchWindow — the unit a key has to match within. Three properties carry the whole feature:
 // `scan` is byte-for-byte the pre-setting behaviour, narrower settings stop cross-segment
 // conjunctions (both signs), and segmentation never merges texts that were separate.
-import { scanWindow, scanSegments, segment, keywordScore } from '../extension/ranking.mjs';
+import { scanWindow, scanSegments, segment, keywordScore } from '../extension/matcher.mjs';
 import { eq } from './metrics.mjs';
 
 const cfg = { k1: 1.2, caseSensitiveDefault: false, wholeWordsDefault: false };

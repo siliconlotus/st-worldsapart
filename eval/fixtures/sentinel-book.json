@@ -91,6 +91,117 @@
             "vectorized": false,
             "disable": false,
             "selectiveLogic": 0
+        },
+        "7": {
+            "uid": 7,
+            "key": [
+                "? sodium & lamps"
+            ],
+            "keysecondary": [],
+            "comment": "SmartKeys-only — core reads `?` as a literal and can never activate this; WA's union force-activates it (both terms in one chat paragraph). The activation half of bucket 1.5.",
+            "content": "Sodium lamps hum over the terrace after dark.",
+            "constant": false,
+            "vectorized": false,
+            "disable": false,
+            "selectiveLogic": 0
+        },
+        "8": {
+            "uid": 8,
+            "key": [
+                "caf"
+            ],
+            "keysecondary": [],
+            "comment": "group FALSE WINNER — whole-word `caf` against chat \"café\": core's ASCII \\W reads é as a boundary and matches (upstream-st.md #1); WA rejects. The prune deletes it and the group goes EMPTY — the loser is NOT promoted (ruled; bucket 2 closes this structurally).",
+            "content": "A corner spot with zinc tables.",
+            "constant": false,
+            "vectorized": false,
+            "disable": false,
+            "selectiveLogic": 0,
+            "matchWholeWords": true,
+            "group": "terrace",
+            "groupOverride": true
+        },
+        "9": {
+            "uid": 9,
+            "key": [
+                "bistro"
+            ],
+            "keysecondary": [],
+            "comment": "group CLEAN LOSER — matches under both matchers, loses the group to uid 8's override. When the prune deletes the false winner this group stays EMPTY for the turn (certified in sentinel-check.mjs); under bucket 2 it wins instead.",
+            "content": "The bistro across the terrace serves till late.",
+            "constant": false,
+            "vectorized": false,
+            "disable": false,
+            "selectiveLogic": 0,
+            "group": "terrace"
+        },
+        "10": {
+            "uid": 10,
+            "key": [
+                "cold frame"
+            ],
+            "keysecondary": [],
+            "constant": false,
+            "vectorized": false,
+            "disable": false,
+            "selectiveLogic": 0,
+            "sticky": 3,
+            "comment": "STICKY 3 — fires when \"cold frame\" is in the window, then persists 3 turns. On the turns the key has LEFT the window, WA's matcher scores it 0 but the sticky exemption (args.timedEffects) keeps it out of lastPruned — a regression there silently deletes sticky entries.",
+            "content": "The cold frame by the wall holds the tender cuttings."
+        },
+        "11": {
+            "uid": 11,
+            "key": [
+                "first light"
+            ],
+            "keysecondary": [],
+            "constant": false,
+            "vectorized": false,
+            "disable": false,
+            "selectiveLogic": 0,
+            "cooldown": 2,
+            "comment": "COOLDOWN 2 — fires on \"first light\", then core suppresses re-fires for 2 messages. Core checks cooldown BEFORE external activations, so even WA's union force cannot break the cooldown; while cooling it simply never activates, and the prune has nothing to judge.",
+            "content": "At first light the yard gate is unlocked."
+        },
+        "12": {
+            "uid": 12,
+            "key": [
+                "workshop"
+            ],
+            "keysecondary": [],
+            "constant": false,
+            "vectorized": false,
+            "disable": false,
+            "selectiveLogic": 0,
+            "comment": "RECURSION SOURCE — fires on \"workshop\" from chat; its content carries \"duskmoth\", which is uid 13's only key. With recursion enabled this drags uid 13 in on the RECURSION pass.",
+            "content": "The workshop rafters shelter a duskmoth colony."
+        },
+        "13": {
+            "uid": 13,
+            "key": [
+                "duskmoth"
+            ],
+            "keysecondary": [],
+            "constant": false,
+            "vectorized": false,
+            "disable": false,
+            "selectiveLogic": 0,
+            "comment": "RECURSION TARGET — \"duskmoth\" appears in NO chat message, only in uid 12's content. It activates on the recursion pass, where the prune never judges (INITIAL only): WA's chat-window verdict would be a reject, which is exactly why the pass gate is load-bearing. Must never appear in lastPruned.",
+            "content": "The duskmoth wakes at dusk and steers by the lamps."
+        },
+        "14": {
+            "uid": 14,
+            "key": [
+                "midnight"
+            ],
+            "keysecondary": [],
+            "constant": false,
+            "vectorized": false,
+            "disable": false,
+            "selectiveLogic": 0,
+            "delayUntilRecursion": 1,
+            "comment": "DELAY UNTIL RECURSION — \"midnight\" IS in chat, but this must not fire on the initial pass: core gates delayUntilRecursion before external activations, and WA's union skips it by the same rule (provenance hygiene). It may fire only on a recursion pass.",
+            "content": "Past midnight the lanes are quiet."
         }
     }
 }

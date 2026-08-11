@@ -61,6 +61,7 @@ import { readFileSync, writeFileSync, statSync, openSync, readSync } from 'node:
 import { tokenize } from '../plugin/lexical.mjs';
 import { norm } from '../plugin/vector.mjs';
 import * as ranking from '../extension/ranking.mjs';   // shared client tuning layer — same code the extension runs
+import * as matcher from '../extension/matcher.mjs';
 import { cutRetrieved } from '../extension/selection.mjs';
 // Scene loading, the gazetteer, the scorers, the pool and the nDCG math all live in scene.mjs, shared with
 // paired-arms.mjs — there must be exactly one copy of them (see that module's header).
@@ -127,7 +128,7 @@ function tailMessages(path, bytes = 8e6) {
     if (start > 0) lines.shift();   // a mid-line start yields a broken first record
     return lines.filter(Boolean).flatMap(l => { try { return [JSON.parse(l)]; } catch { return []; } });
 }
-const scanWindowOf = (msgs, depth) => ranking.scanWindow(msgs, { depth, includeNames: P.includeNames });
+const scanWindowOf = (msgs, depth) => matcher.scanWindow(msgs, { depth, includeNames: P.includeNames });
 // DEPTH ABLATION FROM ONE CAPTURE. A sample's `queryChat` holds the messages its query was joined from, so
 // any depth <= the capture depth is reproducible exactly with no chat file: capture deliberately too wide
 // (say 20) and narrow from there. Preferred over the chat file, which a played-on chat invalidates — but an

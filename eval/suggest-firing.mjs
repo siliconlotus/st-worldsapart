@@ -30,7 +30,7 @@
 import { readFileSync } from 'node:fs';
 import { basename } from 'node:path';
 import { buildKeySuggest } from '../extension/keyword-core.mjs';
-import { countKey } from '../extension/ranking.mjs';
+import { countKey } from '../extension/matcher.mjs';
 
 const args = process.argv.slice(2);
 if (!args.length || args.length % 2) {

@@ -134,14 +134,14 @@ only admit what core could have activated: not disabled entries, and not vectori
 
 ## countKey is the only matcher
 
-`ranking.mjs` `countKey()` mirrors ST core's `matchKeys` — match flags, `/regex/` keys, `?` SmartKeys.
+`matcher.mjs` `countKey()` mirrors ST core's `matchKeys` — match flags, `/regex/` keys, `?` SmartKeys.
 Anything that reports on how a key will behave (the audit, the pruner, the Studio's keyword colouring)
 calls it rather than re-deriving the rules, so the audit can't drift from what actually fires at
 runtime. The Aho-Corasick batching in `keyword-core.mjs` changes only when and how often it is called.
 
 ## Pure vs ST-coupled
 
-`ranking.mjs`, `keyword-core.mjs`, `selection.mjs`, `smartkeys.mjs`, `sort.mjs` and `plugin/*.mjs` are
+`matcher.mjs`, `ranking.mjs`, `keyword-core.mjs`, `selection.mjs`, `smartkeys.mjs`, `sort.mjs` and `plugin/*.mjs` are
 ST-free and node-importable, so the evals exercise the real shipped code instead of string-slicing it.
 Settings and ST globals are injected by the caller, never imported. The ST/DOM half is
 `worldsapart.js`, `keyword-tools.mjs`, `studio.mjs`, `ui-widgets.mjs`.

@@ -1,6 +1,6 @@
 // Verifies WA's keyword matcher tracks core's world-info.js matchKeys semantics.
-// countKey/keywordScore live in ranking.mjs, which is isomorphic — imported directly.
-import { countKey, keywordScore as rankKeywordScore } from '../extension/ranking.mjs';
+// countKey/keywordScore live in matcher.mjs, which is isomorphic — imported directly.
+import { countKey, keyExcerpt, keywordScore as rankKeywordScore } from '../extension/matcher.mjs';
 import { eq } from './metrics.mjs';
 
 // keywordScore with the production defaults injected. Guards the scoreVectorKeys path —
@@ -97,3 +97,23 @@ eq(countKey('sisterhood', 'It is called *sister*hood', false, false), 0, 'in-wor
 eq(countKey('sister', 'It is called *sister*hood', false, true), 1, 'in-word emphasis CREATES a false word boundary');
 eq(countKey('sister', 'It is called sisterhood', false, true), 0, '...which the unemphasised control correctly does not');
 console.log('ok   markdown in the scan text: whole-word emphasis fine, in-word emphasis is a known limit');
+
+// keyExcerpt — the /wa-grade "why did this pop" display. It shares countKey's machinery but is
+// display-only: called for keys countKey already counted, so these pin (a) agreement with countKey
+// on WHERE, and (b) the substring surface form an author needs for tuning, marked «so».
+eq(keyExcerpt('thread', 'the curtains were threadbare by then', false, false),
+    'the curtains were «thread»bare by then', 'substring: excerpt shows the containing word');
+eq(keyExcerpt('thread', 'the curtains were threadbare by then', false, true),
+    null, 'whole-word: same text correctly yields no excerpt (countKey counts 0)');
+eq(keyExcerpt('sister', "She's my *sister*, Tim", false, true),
+    "she's my *«sister»*, tim", 'whole-word: excerpt is from the FOLDED haystack (lowercased)');
+eq(keyExcerpt("Cap'n", `A ${'Cap’n'} walks in`, false, false),
+    "a «cap'n» walks in", 'orthography: curly apostrophe folded, match still localised');
+eq(keyExcerpt('/th\\w+bare/', 'the curtains were threadbare by then', false, false),
+    'the curtains were «threadbare» by then', 'regex key: excerpt from the raw text via the pattern');
+eq(keyExcerpt('? thread & curtains', 'threadbare curtains', false, false),
+    null, 'smartkey: no excerpt — boolean queries are not a substring');
+eq(keyExcerpt('ghost', 'no such word here', false, false), null, 'no match, no excerpt');
+eq(keyExcerpt('bare', ['first segment', 'the threadbare one'], false, false),
+    'the thread«bare» one', 'segments: later segment searched when earlier ones miss');
+console.log('ok   keyExcerpt: localises what countKey counted, folded-haystack display, smartkeys excluded');

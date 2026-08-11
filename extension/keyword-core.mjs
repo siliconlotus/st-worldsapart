@@ -5,7 +5,7 @@
 // (popups, saving, generation) on top and injects the world-info match flags.
 import { COMMON_WORDS } from '../plugin/commonwords.js';
 import { ZIPF_EN, POS_VA, POS_VA_STRICT, POS_ADJ } from './zipf-en.js';
-import { countKey, escapeRegex, isRegexKey, segment } from './ranking.mjs';
+import { countKey, escapeRegex, isRegexKey, segment } from './matcher.mjs';
 import { buildAutomaton, scanAutomaton, createScanScope, primeScan } from './smartkeys.mjs';
 
 export const KEY_TOO_COMMON = 0.5;

@@ -9,4 +9,5 @@
 {"name": "Sentinel", "is_user": false, "is_system": false, "send_date": "2026-08-03", "mes": "Morning light suits the workshop. Whatever else is wrong."}
 {"name": "You", "is_user": true, "is_system": false, "send_date": "2026-08-03", "mes": "The glimmerwort will not water itself."}
 {"name": "Sentinel", "is_user": false, "is_system": false, "send_date": "2026-08-03", "mes": "Morning rounds, then. Clever of you to remember."}
+{"name": "You", "is_user": true, "is_system": false, "send_date": "2026-08-03", "mes": "We could take the café by the bistro — the sodium lamps stay warm past midnight."}
 {"name": "Sentinel", "is_user": false, "is_system": true, "send_date": "2026-08-03", "mes": "zzunattested appears only here, and this message is hidden."}

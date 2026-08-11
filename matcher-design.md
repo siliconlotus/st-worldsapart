@@ -36,6 +36,13 @@ from the evidence.
 **Divergence from core is free where WA owns activation, and costly where core owns it.** While core
 activates, every matcher difference makes the Studio's audit report on rules that are not what fires.
 
+**An unaltered lorebook behaves under WA as it does under core.** Least surprise: every divergence is
+a named fix for a core defect (the `\W` boundary class, `upstream-st.md` #1) or a named WA semantic
+(the fold, `messageDepth`, the match window) — never an incidental difference. Authored per-entry
+intent survives the takeover: `scanDepth` still wins over every global, `scanDepth: 0` still means
+"match nothing from chat", `@@dont_activate` is never overridden by the union, `@@activate` is never
+revoked by the prune, and a forced entry still takes core's probability roll.
+
 ---
 
 ## Status
@@ -44,14 +51,16 @@ activates, every matcher difference makes the Studio's audit report on rules tha
 Studio save gate, the audit change, `weight × count` scoring, the Lucene aliases, and `SMARTKEYS.md`
 carrying both halves — the grammar, and the matching behaviour that had no user-facing home.
 
-**Bucket 1.5 — SmartKeys activate: not started.** New term, and the next thing to build. Bucket 2's
-first increment rather than an alternative to it: every piece is reused unchanged if bucket 2 follows.
+**Bucket 1.5 — SmartKeys activate: implemented.** Union (`selectAndActivate` → `activationAdds`),
+prune (`rankActivated` → `activationPrunes`), the scan-haystack stash, and the sentinel
+certifications (uids 7–14). Bucket 2's first increment rather than an alternative to it: every
+piece carries over unchanged.
 
-**Bucket 2 — WA owns activation: conditional, not scheduled.** Was "settled, awaiting implementation";
-bucket 1.5 covers most of what it was for. Revisit if `keysecondary` scoping measures a win, if variant
-expansion earns its place, or on the group asymmetry below.
+**Bucket 2 — WA owns activation: happening, not yet implemented.** Bucket 1.5 is in.
+`keysecondary` scoping and variant expansion remain open questions inside it; the group asymmetry
+and the recursion-buffer residual below are what it closes structurally.
 
-**Match window — implemented** (`matchWindow` setting, `ranking.scanSegments`/`segment`), and independent
+**Match window — implemented** (`matchWindow` setting, `matcher.scanSegments`/`segment`), and independent
 of bucket 2 except where noted.
 
 ---
@@ -78,16 +87,54 @@ guard `makeCandidateSet` needs.
 **Deletion is the other half, and it is not symmetric with never-activating.** WA may also remove from
 `args.activated.entries`; `applyBudget` already does, and core documents the mutation as supported.
 That closes the `matchWholeWords` direction, where `WORD_CHAR` and core's `\W` diverge both ways and a
-union is powerless. But `filterByInclusionGroups` runs **before** the `WORLDINFO_SCAN_DONE` emit and
-discards the losers, so deleting a group winner leaves the group unrepresented, where a matcher that
-answered "no match" up front would have promoted a loser. **That gap is the seam's real justification**
-— everything else about ownership is reachable from outside. Measured 0 of 2,112 enabled entries in a
-group, so it is untestable here without a fixture, and that fixture is a prerequisite either way.
+union is powerless — core's side of that divergence is a defect, `upstream-st.md` #1. But
+`filterByInclusionGroups` runs **before** the `WORLDINFO_SCAN_DONE` emit and discards the losers, so
+deleting a group winner leaves the group unrepresented, where a matcher that answered "no match" up
+front would have promoted a loser.
+
+**Ruled: deletion ships with no group guard; a deleted winner leaves its group empty for that turn.**
+Transient until bucket 2, whose matcher-before-group-filter ordering removes the case. The gap is
+reachable from outside, only expensively — verified in `world-info.js`: the SCAN_DONE emit documents
+adding entries as well as removing them, force-activation does not bypass the group filter (forced
+entries join `activatedNow` and are filtered with the rest), and probability rolls run after group
+filtering — so promoting a discarded loser means WA mirrors both the group tie-break and the
+probability roll. Bucket 2 makes that machinery unnecessary; 1.5 does not build it. Measured 0 of
+2,112 enabled entries in a group, so the behaviour is untestable without a fixture; the sentinel's
+`terrace` group (uids 8–9) is that fixture, and certifies the group-empty outcome.
+
+**Measured** (`eval/prune-audit.mjs`, 8-chat standard corpus, core depth 4 / `messageDepth` 10):
+the prune fires on 319 of 115,527 core keyword activations (0.28%; 115 of 87,255 at core depth 2),
+all `segmentation` — secondary-keyed entries whose primary and secondary co-occur in the buffer but
+not in one segment — from 3 entries in 2 books. Zero boundary, zero depth, zero unexplained. Upper
+bound: sticky exemptions are not modeled offline.
+
+**Residual, by core's ordering:** a pass's activated content joins the recursion buffer before the
+`SCAN_DONE` emit, so a pruned entry's content still drives that scan's recursion pass — entries it
+recursively activated survive. Unreachable from outside the seam (the buffer is not in the event
+args). The union has the mirror limit: it feeds only the initial pass, so a SmartKeys-only entry
+cannot match recursion text in 1.5. Bucket 2 closes both the way it closes the group gap.
+
+**Activation depth is WA's setting. Ruled**: when WA runs, `messageDepth` governs key matching;
+core's `world_info_depth` is superseded, not consulted — a WA user tunes WA's setting. Stage-3
+scoring already resolves depth this way (per-entry `scanDepth`, then `messageDepth`); this extends
+the same resolution to activation. The stakes are highest on a keyword-only book, where the
+activation window is the book's entire memory horizon — retrieval cannot recover what the scan
+missed, so core's depth was a recall floor no key curation could raise. The union path implements
+the common direction: WA matches at its own depth and force-activates, and core's shallower matches
+are a subset. A `messageDepth` set *narrower* than core's depth is the deletion direction, and
+inherits the inclusion-group caveat above.
 
 ## Bucket 2 — the plan
 
 Core keeps the gates, the timers, recursion control and prompt assembly. WA replaces exactly one
 question: *did a key match*.
+
+**WA owns its failure states. Ruled**: once WA answers that question, there is no per-turn fallback
+to core for matching — a silent fallback makes match semantics flicker between two rule sets
+depending on whether an exception happened, with the audit reporting on rules that are not what
+fired. A matcher failure fails visibly. (Bucket 1.5's "falling back to core behavior" catch in
+`selectAndActivate` is legitimate only while core still owns matching — it does not survive the
+takeover.)
 
 **The seam.** `getExternallyActivated` is checked inside core's scan loop, after `@@dont_activate` and
 before constant/sticky/key-matching. Every other gate — disable, triggers, character and tag filters,

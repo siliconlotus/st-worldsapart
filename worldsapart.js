@@ -25,7 +25,7 @@ import {
     getExtensionPromptByName,
 } from '../../../../script.js';
 import { extension_settings, getContext } from '../../../extensions.js';
-import { getSortedEntries, getWorldInfoPrompt, loadWorldInfo, saveWorldInfo, reloadEditor, world_names, world_info_include_names, world_info_depth, world_info_min_activations, world_info_match_whole_words, world_info_case_sensitive, selected_world_info, world_info, METADATA_KEY } from '../../../world-info.js';
+import { getSortedEntries, getWorldInfoPrompt, loadWorldInfo, saveWorldInfo, reloadEditor, world_names, world_info_include_names, world_info_depth, world_info_min_activations, world_info_match_whole_words, world_info_case_sensitive, selected_world_info, world_info, METADATA_KEY, scan_state } from '../../../world-info.js';
 import { power_user } from '../../../power-user.js';
 import { SlashCommandParser } from '../../../slash-commands/SlashCommandParser.js';
 import { SlashCommand } from '../../../slash-commands/SlashCommand.js';
@@ -34,6 +34,7 @@ import { ConnectionManagerRequestService } from '../../shared.js';
 import { getStringHash, escapeHtml, getCharaFilename, download } from '../../../utils.js';
 import { pluginFingerprint, PLUGIN_FILES } from './plugin/fingerprint.mjs';
 import * as ranking from './extension/ranking.mjs';
+import * as matcher from './extension/matcher.mjs';
 import { registerKeys, resetSmartKeys } from './extension/smartkeys.mjs';
 import * as selection from './extension/selection.mjs';
 import { getTokenCountAsync } from '../../../tokenizers.js';
@@ -710,8 +711,10 @@ function reportVectorCandidates(ranked, cut, targets, searchText) {
 }
 
 /**
- * Runs retrieval against the chat and force-activates the winning entries.
+ * Runs retrieval against the chat and returns the winning entries. Emission is
+ * selectAndActivate's — retrieval is one of two activation routes, not the owner of the emit.
  * @param {object[]} chat Chat messages
+ * @returns {Promise<object[]>} Entries retrieval selected for activation
  */
 async function retrieve(chat) {
     runState.lastScores.clear();
@@ -724,7 +727,7 @@ async function retrieve(chat) {
 
     if (!rawText) {
         console.log('Worlds Apart: no query text, skipping retrieval');
-        return;
+        return [];
     }
 
     const searchText = settings().queryMode === 'summary'
@@ -738,26 +741,31 @@ async function retrieve(chat) {
         console.log(`Worlds Apart: query is ${searchText.length} chars from ${settings().messageDepth} message(s), matched against ~${settings().chunkSize}-char entry chunks`);
     }
 
+    // Recorded for /wa-grade BEFORE the retrieval outcome is known: a book with no vectorized
+    // entries legitimately scores nothing below, but the query exists the moment it is built, and a
+    // keyword-only scene is still gradeable against it. Recording only on the success path made
+    // /wa-grade refuse every scene on such a book ("Retrieval activated nothing") even though the
+    // keyword route had activated rows to grade.
+    runState.lastQuery = searchText;
+    // The MESSAGES the query was built from, macros already resolved, in ST's own {name, mes} shape so
+    // ranking.buildQuery can be re-run over them offline at any depth <= this one. This is what makes a
+    // depth ablation possible from a single capture: capture wide, then narrow. It cannot be recovered by
+    // splitting `lastQuery`, because messages contain blank lines and the join separator is '\n\n'.
+    runState.lastQueryChat = queryChat;
+
     const termWeights = await queryTermWeights(searchText);
     const { targets, scores } = await scoreEntries(searchText, termWeights);
 
     if (!scores.size) {
         console.log(`Worlds Apart: nothing cleared the ${settings().scoreThreshold} threshold`);
-        return;
+        return [];
     }
 
     const ranked = fuseRetrieval(scores);
     const kept = cutRetrieved(ranked);
     const winnerKeys = new Set(kept.map(x => x.key));
 
-    // Recorded for /wa-grade, which bundles the query it graded rather than re-deriving it later.
-    runState.lastQuery = searchText;
     runState.lastCutKept = kept.length;
-    // The MESSAGES the query was built from, macros already resolved, in ST's own {name, mes} shape so
-    // ranking.buildQuery can be re-run over them offline at any depth <= this one. This is what makes a
-    // depth ablation possible from a single capture: capture wide, then narrow. It cannot be recovered by
-    // splitting `lastQuery`, because messages contain blank lines and the join separator is '\n\n'.
-    runState.lastQueryChat = queryChat;
 
     // /wa-debug's stage-1 table, rendered from the selection that just happened rather than a replay.
     if (runState.verboseRun) {
@@ -771,10 +779,82 @@ async function retrieve(chat) {
         }
     }
 
-    const activated = targets.filter(x => winnerKeys.has(`${x.world}.${x.uid}`));
+    return targets.filter(x => winnerKeys.has(`${x.world}.${x.uid}`));
+}
 
-    console.log(`Worlds Apart: activating ${activated.length} entries`);
-    await eventSource.emit(event_types.WORLDINFO_FORCE_ACTIVATE, activated);
+/**
+ * The union direction (matcher-design.md, bucket 1.5): entries WA's matcher activates over its own
+ * window, which core cannot or would not — `?` SmartKeys have no core semantics, the fold and
+ * messageDepth are supersets. This function only extracts ST context; the candidacy rules and the
+ * verdict live in ranking.mjs (activationAdds), where the check suite exercises them.
+ * @param {object[]} chat The interceptor's chat — core's own scan haystack
+ * @returns {Promise<object[]>} Entries to force-activate
+ */
+async function keywordActivations(chat) {
+    const candidates = await getSortedEntries();
+    const suppress = Boolean(settings().suppressVectorKeys);
+
+    const windowFor = matcher.makeWindowFor(chat.filter(x => x && !x.is_system), {
+        injectText: await scanInjects(),
+        sources: scanSources(),
+        matchWindow: settings().matchWindow,
+        includeNames: world_info_include_names,
+    });
+
+    // Register every candidate key up front so the smartkeys automaton is built once — a
+    // first-seen key mid-loop would rebuild it and throw away every cached scan. Registering
+    // here also pre-covers stage 3's registerKeys for this generation.
+    registerKeys(candidates.flatMap(e =>
+        (e.disable || (suppress && e.vectorized)) ? [] : (e.key ?? [])));
+
+    return matcher.activationAdds(candidates, windowFor, {
+        suppressVectorKeys: suppress,
+        messageDepth: settings().messageDepth,
+        fallbackDepth: world_info_depth,
+        caseSensitiveDefault: world_info_case_sensitive,
+        wholeWordsDefault: world_info_match_whole_words,
+    });
+}
+
+/**
+ * Stage 1+2 orchestrator: retrieval winners ∪ keyword adds, one FORCE_ACTIVATE emit.
+ * The two routes fail independently — a vector-plugin outage must not cost keyword
+ * activation, and vice versa; core's own scan still applies either way.
+ * @param {object[]} chat Chat messages
+ */
+async function selectAndActivate(chat) {
+    // /wa-dry reaches here without the interceptor running — its replayed scan must judge
+    // against the chat it was handed, not a previous generation's stash. Redundant (same
+    // array) on the intercept path.
+    runState.scanChat = chat.slice();
+    runState.forcedActivations = new Set();
+
+    let winners = [];
+    try {
+        winners = await retrieve(chat);
+    } catch (error) {
+        console.error('Worlds Apart: retrieval failed, falling back to core behavior', error);
+        runState.lastScores.clear();
+    }
+
+    let adds = [];
+    try {
+        adds = await keywordActivations(chat);
+    } catch (error) {
+        console.error('Worlds Apart: keyword activation failed, core scan still applies', error);
+    }
+
+    // Union provenance: keys WA activated by keyword match alone. Always reassigned (even empty)
+    // so a stale set never outlives its generation; task-4's prune exempts winners ∪ this set.
+    const winnerKeys = new Set(winners.map(e => `${e.world}.${e.uid}`));
+    const union = adds.filter(e => !winnerKeys.has(`${e.world}.${e.uid}`));
+    runState.lastKeywordAdds = new Set(union.map(e => `${e.world}.${e.uid}`));
+
+    const activated = [...winners, ...union];
+    if (activated.length) {
+        console.log(`Worlds Apart: activating ${winners.length} retrieved + ${union.length} keyword-matched entries`);
+        await eventSource.emit(event_types.WORLDINFO_FORCE_ACTIVATE, activated);
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -788,16 +868,21 @@ async function retrieve(chat) {
  * @param {string} type Generation type
  */
 async function intercept(chat, _maxContext, type) {
+    // Stashed BEFORE the gates: the received chat IS core's scan haystack (script.js builds
+    // chatForWI from this same coreChat — regex scripts applied, file content and titles
+    // appended, reasoning merged), and quiet generations scan too — a stale stash would judge
+    // them against the previous generation's text. Sliced so ST's later in-place splices
+    // (jailbreak injects) can't shift membership under a SCAN_DONE consumer.
+    runState.scanChat = chat.slice();
+    // Fresh per generation, BEFORE any emit: the FORCE_ACTIVATE listener repopulates it as
+    // WA and other extensions emit for this scan. A stale entry only over-exempts the prune.
+    runState.forcedActivations = new Set();
+
     if (!settings().enabled || type === 'quiet') {
         return;
     }
 
-    try {
-        await retrieve(chat);
-    } catch (error) {
-        console.error('Worlds Apart: retrieval failed, falling back to core behavior', error);
-        runState.lastScores.clear();
-    }
+    await selectAndActivate(chat);
 }
 
 
@@ -928,7 +1013,7 @@ function renderWorldPriority() {
 // ---------------------------------------------------------------------------
 
 // Keyword occurrence counting lives in ranking.mjs (same signature, no injection).
-const countKey = ranking.countKey;
+const countKey = matcher.countKey;
 
 /**
  * The non-chat texts core's scan buffer can also match against, per entry opt-in flags
@@ -979,46 +1064,15 @@ async function scanInjects() {
     return parts.join('\n');
 }
 
-/** Maps each entry match-flag to the scanSources() field it pulls in, as core's buffer does. */
-const MATCH_SOURCE_FIELDS = {
-    matchPersonaDescription: 'personaDescription',
-    matchCharacterDescription: 'characterDescription',
-    matchCharacterPersonality: 'characterPersonality',
-    matchCharacterDepthPrompt: 'characterDepthPrompt',
-    matchScenario: 'scenario',
-    matchCreatorNotes: 'creatorNotes',
-};
+// withMatchSources and MATCH_SOURCE_FIELDS live in ranking.mjs now (pure window assembly, shared
+// by activation and scoring); callers pass settings().matchWindow.
+const withMatchSources = (chatWindow, entry, sources) =>
+    matcher.withMatchSources(chatWindow, entry, sources, settings().matchWindow);
 
-/**
- * Appends the extra scan sources an entry opted into, so WA scores keywords over the
- * same text core matched against — not just the chat window.
- * @param {string} chatWindow The depth-limited chat text
- * @param {object} entry World Info entry
- * @param {object} sources Output of scanSources()
- * @returns {string} chatWindow plus any opted-in source texts
- */
-function withMatchSources(chatWindow, entry, sources) {
-    const texts = [...chatWindow];
-
-    for (const [flag, field] of Object.entries(MATCH_SOURCE_FIELDS)) {
-        if (entry[flag] && sources[field]) {
-            texts.push(sources[field]);
-        }
-    }
-
-    // Re-segmenting is what makes `scan` still mean ONE segment: the window arrives pre-split, and
-    // this collapses it back together with the sources rather than leaving two segments where the
-    // pre-setting code had one string. It is idempotent for the other two modes — splitting an
-    // already-split paragraph yields itself — while the appended sources get split for the first time.
-    //
-    // A source is its own text, never a continuation of the last message: nothing may merge a
-    // character description onto the end of chat prose and let a conjunction span the seam.
-    return ranking.segment(texts, settings().matchWindow);
-}
-
-// Keyword scoring and RRF fusion live in ranking.mjs (the tuning layer). Inject the BM25 k1 + the
-// world-info match defaults for scoring, and the fusion weights for fusion — all from settings.
-const keywordScore = (entry, text, keys = entry.key) => ranking.keywordScore(entry, text, keys, {
+// Keyword scoring lives in matcher.mjs (match semantics), RRF fusion in ranking.mjs (the tuning
+// layer). Inject the BM25 k1 + the world-info match defaults for scoring, and the fusion weights
+// for fusion — all from settings.
+const keywordScore = (entry, text, keys = entry.key) => matcher.keywordScore(entry, text, keys, {
     k1: settings().bm25K1,
     caseSensitiveDefault: world_info_case_sensitive,
     wholeWordsDefault: world_info_match_whole_words,
@@ -1183,6 +1237,53 @@ async function rankActivated(args) {
         return;
     }
 
+    // The prune direction (matcher-design.md, bucket 1.5): entries core keyword-activated that
+    // WA's matcher rejects over the shared haystack are deleted, so the runtime agrees with what
+    // the audit and the Studio report. INITIAL pass only — recursion and min-activation entries
+    // matched text WA's window does not model, and are core's prerogative. Ownership exemptions
+    // are what WA can see: every force-activation this generation (runState.forcedActivations —
+    // WA's own and other extensions') and sticky timed effects; constant and @@activate are
+    // structural and live in activationPrunes. No group guard (ruled): a deleted group winner
+    // leaves its group empty this turn, until bucket 2 runs the matcher before the group filter.
+    if (args?.state?.current === scan_state.INITIAL) runState.lastPruned = [];
+    if (args?.state?.current === scan_state.INITIAL && Array.isArray(args?.new?.all) && args.new.all.length) {
+        const exempt = new Set(runState.forcedActivations);
+        for (const entry of args.new.all) {
+            if (args?.timedEffects?.isEffectActive('sticky', entry)) {
+                exempt.add(`${entry.world}.${entry.uid}`);
+            }
+        }
+
+        const windowFor = matcher.makeWindowFor(
+            (runState.scanChat ?? getContext().chat ?? []).filter(x => x && !x.is_system), {
+                injectText: await scanInjects(),
+                sources: scanSources(),
+                matchWindow: settings().matchWindow,
+                includeNames: world_info_include_names,
+            });
+
+        const judged = args.new.all.map(entry => ({ key: `${entry.world}.${entry.uid}`, entry }));
+        const pruned = matcher.activationPrunes(judged, exempt, windowFor, {
+            messageDepth: settings().messageDepth,
+            fallbackDepth: world_info_depth,
+            caseSensitiveDefault: world_info_case_sensitive,
+            wholeWordsDefault: world_info_match_whole_words,
+        });
+
+        runState.lastPruned = pruned;
+        if (pruned.length) {
+            for (const key of pruned) {
+                activated.delete(key);
+            }
+            console.log(`Worlds Apart: pruned ${pruned.length} activation(s) WA's matcher rejects (core matched on rules WA supersedes):`, pruned);
+        }
+        if (activated.size === 0) {
+            runState.lastLayout = [];
+            if (!args?.state?.next) renderWiPanel([]);
+            return;
+        }
+    }
+
     const items = [...activated.entries()].map(([key, entry]) => {
         // We overwrite `order` below, and this fires once per scan loop — stash the
         // authored value on first sight so later loops don't sort by our own output.
@@ -1198,12 +1299,14 @@ async function rankActivated(args) {
 
     if (settings().keywordScoring) {
         const windows = new Map();
-        // Core removes hidden/system messages before it scans, then counts depth over
-        // what remains. WA must filter them too — otherwise a hidden message in the
-        // recent window costs WA a slot core didn't spend, so WA scans less real history
-        // and misses a keyword core matched one message further back.
-        // (Core also regex-scripts messages and appends file content; not mirrored here.)
-        const chat = (getContext().chat ?? []).filter(x => x && !x.is_system);
+        // The stash from intercept IS core's transformed scan haystack — regex scripts
+        // applied, file content and titles appended, reasoning merged — so WA matches the
+        // text core matched. Raw context chat is the fallback only for a scan no WA entry
+        // point saw. Core removes hidden/system messages before it scans, then counts depth
+        // over what remains; WA filters them too — otherwise a hidden message in the recent
+        // window costs WA a slot core didn't spend, so WA scans less real history and misses
+        // a keyword core matched one message further back.
+        const chat = (runState.scanChat ?? getContext().chat ?? []).filter(x => x && !x.is_system);
         const sources = scanSources();
         // Scanned once and shared across depths — core adds injects to the buffer for
         // every entry regardless of scan depth.
@@ -1218,9 +1321,11 @@ async function rankActivated(args) {
             // Score keywords over the shared message depth. Per-entry scanDepth still wins
             // (as in core), so an entry that declares its own window is honoured; otherwise
             // the unified messageDepth, falling back to core's scan depth only if it's unset.
-            const depth = Number(item.entry.scanDepth) || settings().messageDepth || world_info_depth;
+            // Nullish on scanDepth: 0 is core's authored "match nothing from chat" (the entry
+            // lives on injects/sources), not an unset value to fall through.
+            const depth = Number(item.entry.scanDepth ?? (settings().messageDepth || world_info_depth));
             if (!windows.has(depth)) {
-                const window = ranking.scanSegments(chat, {
+                const window = matcher.scanSegments(chat, {
                     depth, includeNames: world_info_include_names, matchWindow: settings().matchWindow,
                 });
                 // Its own text, not a continuation of the last message. Pushed raw: withMatchSources
@@ -1240,6 +1345,15 @@ async function rankActivated(args) {
             const scored = keywordScore(item.entry, scanText, scoreKeys);
             item.keywordScore = scored.score;
             item.keywordHits = scored.hits;
+            // Debug-class runs only: WHERE each key matched, for /wa-grade's "why did this pop"
+            // column. Flags mirror the keywordScore call above exactly — same entry overrides,
+            // same defaults — so the excerpt localises the match that was actually scored.
+            item.keywordWhy = runState.verboseRun
+                ? scored.hits.slice(0, 4).map(h => ({
+                    key: h.key, count: h.count,
+                    excerpt: matcher.keyExcerpt(h.key, scanText, item.entry.caseSensitive, item.entry.matchWholeWords),
+                }))
+                : undefined;
             // Declared for fuseRanks' eligibility normalisation: having keys to score is the chance to
             // earn the keyword rank, and an entry with none must not be divided by a weight it could
             // never have collected. Resolved here because this is where suppressVectorKeys /
@@ -1249,8 +1363,9 @@ async function rankActivated(args) {
 
         // The scan text WA actually searched, so a "WA scored 0" mystery is answered by
         // looking: if the key isn't in here but core matched it, core scanned something
-        // WA doesn't mirror (a regex script, an attached file, an extension's inject
-        // buffer) or another extension force-activated the entry.
+        // WA doesn't mirror (recursed entry content, an extension's inject buffer) or
+        // another extension force-activated the entry. Regex scripts and attached files
+        // are no longer on that list — the stash carries them.
         // The global-depth window, for /wa-grade's sample (per-entry scanDepth overrides also live here).
         // Joined with a BLANK line, not a single one, so the capture round-trips: re-segmenting this
         // string recovers the same units the scan actually used, at any setting.
@@ -1440,7 +1555,8 @@ async function rankActivated(args) {
         }));
 
         // uid alone is ambiguous across books, so carry the world for the grader and the eval.
-        runState.lastCandidates = rows.map((row, i) => ({ ...row, world: ranked[i].entry.world }));
+        // `why` rides here rather than in `rows` so console.table stays scannable.
+        runState.lastCandidates = rows.map((row, i) => ({ ...row, world: ranked[i].entry.world, why: ranked[i].keywordWhy }));
         runState.lastCandidateEntries = ranked.map(x => x.entry);
 
         console.log('%cWorlds Apart · selection candidates — every activated entry with its per-signal scores, before caps or layout', 'font-weight: bold');
@@ -1510,7 +1626,7 @@ async function dryRun(verbose = false) {
     // retrieve() is inside the try: it hits the network (plugin, Ollama), and a throw outside the finally
     // would leave verboseRun/dryRunInProgress stuck true for every later live generation.
     try {
-        await retrieve(chat);
+        await selectAndActivate(chat);
 
         // Stage 2 — the scan; rankActivated prints the selection candidates (verbose) as it runs.
         await getWorldInfoPrompt(chatForWI, getMaxPromptTokens(), true, { ...scanSources(), trigger: 'normal' });
@@ -1697,6 +1813,12 @@ const POSITION_NAMES = ['before char', 'after char', 'AN top', 'AN bottom', '@de
  * across mixed positions does not produce one linear prompt.
  */
 async function reportLayout(verbose = false, countTokens = true) {
+    // Before the layout, so a scan whose only story is "WA deleted what core matched" still
+    // tells it — the runtime must visibly agree with what the audit reports.
+    if (runState.lastPruned.length) {
+        console.log('Worlds Apart · pruned by the matcher (core activated; WA\'s rules reject):', runState.lastPruned);
+    }
+
     if (!runState.lastLayout.length) {
         console.log('Worlds Apart: nothing activated.');
         return;
@@ -1892,10 +2014,11 @@ async function gradeScene(named) {
         return '';
     }
 
-    // A keyword-only scene (retrieval cleared nothing) has rows but no query; the harness scores against
-    // the frozen query, so the sample would be unrunnable garbage. Refuse rather than freeze ''.
+    // retrieve() records the query as soon as it builds one, whatever retrieval then scores — so an
+    // empty lastQuery here means no query text could be built at all (macro-empty messages), and the
+    // sample really would be unrunnable. Keyword-only scenes pass: rows from the scan, query frozen.
     if (!runState.lastQuery) {
-        toastr.warning('Retrieval activated nothing — the sample would have no query to score offline. Grade a scene where retrieval ran.', 'Worlds Apart');
+        toastr.warning('No query text could be built from this chat — the sample would have nothing to score offline.', 'Worlds Apart');
         return '';
     }
 
@@ -1919,7 +2042,7 @@ async function gradeScene(named) {
                 : `<input type="number" class="wa-grade text_pole" data-i="${i}" min="0" max="4" step="1" value="0" title="${esc(GRADE_ANCHORS.map((a, g) => `${g}: ${a}`).join('\n'))}" style="width:4em;padding:2px 4px;">`;
             return `<tr style="border-top:1px solid var(--SmartThemeBorderColor);${scaff ? 'opacity:0.6;' : ''}">`
                 + `<td>${cell}</td>`
-                + `<td>${esc(row.title)}<br><small style="opacity:0.5;">${esc(row.world)} · uid ${num(row.uid)}</small></td>`
+                + `<td>${esc(row.title)}<br><small style="opacity:0.5;">${esc(row.world)} · uid ${num(row.uid)}</small>${(row.why ?? []).map(w => `<br><small style="opacity:0.65;">🔑 ${esc(w.key)}${w.count > 1 ? ` ×${w.count}` : ''}${w.excerpt ? ` — <span style="opacity:0.8;">${esc(w.excerpt)}</span>` : ''}</small>`).join('')}</td>`
                 + `<td>${num(row.score)}</td><td>${num(row.cosine)}</td><td>${num(row.text)}</td><td>${num(row.keys)}</td>`
                 + `<td><button class="menu_button wa-viewtext" data-i="${i}" style="padding:2px 6px;font-size:0.85em;">text</button></td></tr>`;
         }).join('')
@@ -2203,7 +2326,7 @@ async function superGradePopup({ captures, union, entryOf, prior: prior0 = [], s
                 const cell = `<input type="number" class="wa-grade text_pole" data-key="${esc(key)}" data-i="${i}" min="0" max="4" step="1" ${typed.has(key) ? 'data-dirty="1" ' : ''}value="${esc(typed.get(key) ?? (done ? priorOf.get(key) : '0'))}" title="${esc(GRADE_ANCHORS.map((a, g) => `${g}: ${a}`).join('\n'))}" style="width:4em;padding:2px 4px;">`;
                 return `<tr style="border-top:1px solid var(--SmartThemeBorderColor);${done ? 'opacity:0.55;' : ''}">`
                     + `<td>${cell}</td>`
-                    + `<td>${esc(row.title)}<br><small style="opacity:0.5;">${esc(row.world)} · uid ${num(row.uid)}</small></td>`
+                    + `<td>${esc(row.title)}<br><small style="opacity:0.5;">${esc(row.world)} · uid ${num(row.uid)}</small>${(row.why ?? []).map(w => `<br><small style="opacity:0.65;">🔑 ${esc(w.key)}${w.count > 1 ? ` ×${w.count}` : ''}${w.excerpt ? ` — <span style="opacity:0.8;">${esc(w.excerpt)}</span>` : ''}</small>`).join('')}</td>`
                     // Which arms surfaced a row is the pooling diagnostic: rows only one arm found are where
                     // the overlap assumption is failing, and they are why that arm is in the list.
                     + `<td><small style="opacity:0.7;">${esc(row.arms.join(', '))}</small></td>`
@@ -3044,6 +3167,17 @@ export async function init() {
     eventSource.on(event_types.GENERATION_ENDED, () => { runState.generationIsDryRun = false; });
 
     eventSource.on(event_types.WORLDINFO_ENTRIES_LOADED, onEntriesLoaded);
+
+    // Every force-activation this generation, whoever emitted it — WA's own selectAndActivate
+    // AND other extensions'. The prune's ownership exemption: a forced entry was admitted by
+    // authority, not by a key match, so WA's matcher has no standing to revoke it.
+    eventSource.on(event_types.WORLDINFO_FORCE_ACTIVATE, (entries) => {
+        for (const entry of entries ?? []) {
+            if (entry?.world != null && entry?.uid != null) {
+                runState.forcedActivations.add(`${entry.world}.${entry.uid}`);
+            }
+        }
+    });
     // WORLDINFO_ENTRIES_LOADED only fires during a scan, so switching chat/character wouldn't
     // refresh the attached-book set until the next generation. CHAT_CHANGED fires on every
     // switch; re-read the active books then. Also populates once now so it isn't blank on load.

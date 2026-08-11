@@ -11,7 +11,7 @@
 // from node (chips, tooltips, colours) is eyeballed against a book whose every answer is written down.
 import fs from 'node:fs';
 import { buildKeyPruneScan } from '../extension/keyword-core.mjs';
-import { keywordScore, scanSegments, countKey, isRegexKey } from '../extension/ranking.mjs';
+import { keywordScore, scanSegments, countKey, isRegexKey, activationAdds, activationPrunes, makeWindowFor } from '../extension/matcher.mjs';
 import { buildAutomaton, addMessageHits, fold } from '../extension/smartkeys.mjs';
 import { eq } from './metrics.mjs';
 
@@ -49,7 +49,7 @@ const verdicts = (chat, matchWindow = 'scan') => {
     return out;
 };
 
-eq(msgs.length, 10, 'the hidden message is dropped, as core and WA both drop it');
+eq(msgs.length, 11, 'the hidden message is dropped, as core and WA both drop it');
 
 // --- no chat evidence -------------------------------------------------------------------------
 {
@@ -108,3 +108,63 @@ eq(msgs.length, 10, 'the hidden message is dropped, as core and WA both drop it'
 }
 
 console.log('ok   sentinel: every audit verdict matches its written-down answer');
+
+// --- bucket 1.5: the union activates, the prune deletes, the group goes empty ------------------
+// The written-down answers for uids 7-9. Core's runtime half (group filter picks uid 8, WA deletes
+// it at SCAN_DONE, prompt shows neither group entry) is the eyeball check in ST; what node can
+// certify is every verdict that runtime is built from.
+{
+    const chat = fs.readFileSync(new URL('sentinel-chat.jsonl', here), 'utf8').split('\n').filter(l => l.trim())
+        .map(l => JSON.parse(l)).filter(m => typeof m.mes === 'string' && !m.is_system);
+    const windowFor = makeWindowFor(chat, { matchWindow: 'paragraph', includeNames: true });
+    const opts = { messageDepth: 20, fallbackDepth: 2, caseSensitiveDefault: false, wholeWordsDefault: false };
+
+    // The divergence itself, pinned: core's \W reads é as a boundary (upstream-st.md #1), WA does not.
+    eq(countKey('caf', 'the café by the bistro', false, true), 0, 'whole-word caf does not match café under WA');
+    eq(countKey('caf', 'the café by the bistro', false, false), 1, 'substring caf would — the flag is the divergence');
+
+    const adds = activationAdds(Object.values(data.entries), windowFor, opts).map(e => e.uid);
+    eq(adds.includes(7), true, 'the SmartKeys-only entry is union-activated — only WA can do this');
+    eq(adds.includes(9), true, 'the clean loser matches and is union-activated');
+    eq(adds.includes(8), false, 'the false winner does not match under WA — never added');
+
+    // Core activated uid 8 as the terrace group's winner (groupOverride) and discarded uid 9
+    // before SCAN_DONE. WA deletes the winner; nothing promotes the loser. Group EMPTY — ruled
+    // (matcher-design.md bucket 1.5), transient until bucket 2 runs the matcher before the group
+    // filter and uid 9 wins instead.
+    const pruned = activationPrunes([{ key: 'WA Sentinel.8', entry: data.entries['8'] }], new Set(), windowFor, opts);
+    eq(pruned.join(','), 'WA Sentinel.8', 'the false winner is pruned; the group goes empty, the loser stays out');
+}
+
+// --- timed effects, recursion, delay: what the union adds, and what the prune must never touch --
+// The runtime halves (sticky persistence across turns, cooldown suppression, the recursion pass
+// dragging uid 13 in, lastPruned staying empty of uids 10/13/14) are the eyeball check in ST;
+// node certifies the verdicts those behaviours are built from, and WHY each guard is load-bearing.
+{
+    const chat = fs.readFileSync(new URL('sentinel-chat.jsonl', here), 'utf8').split('\n').filter(l => l.trim())
+        .map(l => JSON.parse(l)).filter(m => typeof m.mes === 'string' && !m.is_system);
+    const windowFor = makeWindowFor(chat, { matchWindow: 'paragraph', includeNames: true });
+    const opts = { messageDepth: 20, fallbackDepth: 2, caseSensitiveDefault: false, wholeWordsDefault: false };
+
+    const adds = activationAdds(Object.values(data.entries), windowFor, opts).map(e => e.uid);
+    eq(adds.includes(10), true, 'sticky entry: key in window, union adds it (persistence is core\'s)');
+    eq(adds.includes(11), true, 'cooldown entry: union adds; core gates cooldown BEFORE external activations, so a force cannot break it');
+    eq(adds.includes(12), true, 'recursion source fires from chat');
+    eq(adds.includes(13), false, 'recursion target has no chat evidence — only the recursion pass admits it');
+    eq(adds.includes(14), false, 'delayUntilRecursion never rides the union — the initial pass is the only pass the union feeds');
+
+    // Why the INITIAL-pass gate is load-bearing: judged against the chat window, the recursion
+    // target IS a reject — the gate is the only thing between it and deletion.
+    const rt = activationPrunes([{ key: 'WA Sentinel.13', entry: data.entries['13'] }], new Set(), windowFor, opts);
+    eq(rt.join(','), 'WA Sentinel.13', 'the recursion target would be pruned if judged — the pass gate is the protection');
+
+    // Why the sticky exemption is load-bearing: at messageDepth 2 "cold frame" (message 2 of 11)
+    // is outside the window — the exact shape of a sticky turn, where the key has scrolled away
+    // and the timed effect is the only reason the entry is still in the prompt.
+    const narrow = { ...opts, messageDepth: 2 };
+    const stuck = [{ key: 'WA Sentinel.10', entry: data.entries['10'] }];
+    eq(activationPrunes(stuck, new Set(), windowFor, narrow).join(','), 'WA Sentinel.10',
+        'sticky entry with its key out of the window is a reject on the merits');
+    eq(activationPrunes(stuck, new Set(['WA Sentinel.10']), windowFor, narrow).join(','), '',
+        'the sticky exemption is what keeps it alive — a regression there silently deletes sticky entries');
+}

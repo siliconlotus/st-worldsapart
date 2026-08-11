@@ -426,6 +426,13 @@ export const runState = {
     lastLayout: [],               // final layout of the last scan, for /wa-dry
     lastQuery: '',                // last retrieval query text, bundled by /wa-grade
     lastQueryChat: [],            // the messages that query was joined from, for offline depth ablation
+    scanChat: null,               // the interceptor's chat — core's own scan haystack (regex-scripted,
+                                  // files appended); SCAN_DONE consumers read this, not the raw chat
+    lastKeywordAdds: new Set(),   // `${world}.${uid}` of the last union's keyword-only force-activations
+    forcedActivations: new Set(), // every `${world}.${uid}` force-activated this generation — WA's own
+                                  // AND other extensions' (FORCE_ACTIVATE is a broadcast; WA listens).
+                                  // The prune's ownership exemption: forced entries are never WA's to revoke.
+    lastPruned: [],               // `${world}.${uid}` the prune deleted last scan, for /wa-debug
     lastScanText: '',             // last global-depth keyword scan window, bundled by /wa-grade
     gradeCutoff: null,            // /wa-grade widens the cut for its run; null = use the real settings
     lastCutKept: null,            // how many the cutoff kept on the last retrieval, recorded by /wa-grade

@@ -15,6 +15,7 @@ import { scoreCollection, poolEntries, selectTopK, quantile } from '../plugin/sc
 import { buildLexical } from '../plugin/lexical.mjs';
 import { corpusMean, centeredCosineScores } from '../plugin/vector.mjs';
 import * as ranking from '../extension/ranking.mjs';
+import * as matcher from '../extension/matcher.mjs';
 import { isReference, openBundle } from '../extension/grading.mjs';
 
 /** Reads a manifest from disk as a plain sample, whether it is one or a /wa-super-grade multi-arm bundle.
@@ -188,9 +189,9 @@ export function makeGradeOf(grades, isExcluded) {
  *  bug documented in loadScene. */
 export const scoringKeys = (e, P) => (e.vectorized && P.suppressVectorKeys && !P.scoreVectorKeys) ? [] : (e.key ?? []);
 
-/** Keyword score via the SHARED ranking.keywordScore (which mirrors ST core's matchKeys). */
+/** Keyword score via the SHARED matcher.keywordScore (which mirrors ST core's matchKeys). */
 export const makeKeywordScore = P => (e, text, k1) =>
-    ranking.keywordScore(e, text, scoringKeys(e, P), { k1, caseSensitiveDefault: P.caseSensitive, wholeWordsDefault: P.wholeWords }).score;
+    matcher.keywordScore(e, text, scoringKeys(e, P), { k1, caseSensitiveDefault: P.caseSensitive, wholeWordsDefault: P.wholeWords }).score;
 
 /**
  * Builds the candidate set — every entry that would be in the ranking, with its per-signal scores.

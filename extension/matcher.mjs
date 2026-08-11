@@ -1,0 +1,592 @@
+// matcher.mjs — THE matcher: does this key match this text, and where. countKey and everything a
+// match verdict rests on — the fold, word boundaries, regex keys, SmartKeys dispatch, secondary-key
+// logic, the scan window and its segmentation, and the stage-2 activation verdicts built on them.
+// Split from ranking.mjs, which keeps the ORDERING half (gazetteer, query building, RRF fusion):
+// "which entries win" is tuning, "did this key match" is semantics, and the two change for
+// different reasons.
+//
+// Anything that reports on how a key behaves (the audit, the pruner, the Studio's colouring, the
+// runtime scan) calls countKey here rather than re-deriving the rules, so a report can never drift
+// from what fires. Imported by both the extension and the offline harnesses, so it must stay
+// isomorphic — no DOM, no ST imports; every ST/settings dependency is INJECTED by the caller.
+
+import { cachedCount, evaluateSmartKey, fold, normalizeOrthography, primeScan, validateSmartKey } from './smartkeys.mjs';
+
+/** Escape a string for literal use in a RegExp (same as ST's utils.escapeRegex; inlined to stay ST-free, exported for keyword-core). */
+export function escapeRegex(str) { return String(str).replace(/[.*+?^${}()|[\]\\]/g, '\\$&'); }
+
+/**
+ * The character class whole-word matching treats as "inside a word". NOT `\w`, which is ASCII-only in
+ * JS and silently turns whole-word matching into substring matching for every other script: under `\w`
+ * the key `caf` whole-word-matches `café` and `Мари` matches `Марию`, because every non-ASCII letter
+ * reads as a boundary. The ASCII control behaves correctly, which is why it goes unnoticed — `Jubile`
+ * does not match `Jubilee`.
+ *
+ * Requires the `u` flag wherever it is used; escapeRegex above is already `u`-safe (it does not emit
+ * the `\-` identity escape that core's version does, which `u` rejects).
+ *
+ * KNOWN LIMIT: scripts written without spaces. In CJK every neighbour is a letter, so a whole-word key
+ * matches only in isolation — the mirror of the old bug, where every CJK substring matched. There is no
+ * word boundary to find, so whole-word matching is not meaningful there; it defaults off.
+ *
+ * DIVERGES FROM CORE, which keeps `\W` (world-info.js matchKeys). WA is the stricter side, so the audit
+ * under-reports rather than over-reports against what core fires.
+ */
+export const WORD_CHAR = '[\\p{L}\\p{N}_]';
+
+/** A /pattern/flags regex key, exactly as countKey routes them. THE regex-key test — the audit and
+ * the smartkeys registry import this so all three can never disagree on what counts as a regex key. */
+export const REGEX_KEY_RE = /^\/(.+)\/([gimsuy]*)$/;
+export const isRegexKey = k => REGEX_KEY_RE.test(String(k));
+
+/**
+ * The keyword scan window over the last `depth` messages — the ONE copy of the join, shared by the live
+ * scan (worldsapart.js, which layers injects/match-sources on top), the depth ablation
+ * (graded-scene-grid.mjs) and offline capture tools. Names are included when core includes them, or a
+ * keyword that only ever appears as a "Name:" prefix would match in core and silently miss here.
+ * @param {Array<{name?: string, mes?: string}>} chat Chat messages (or queryMessages() output)
+ * @param {object} cfg
+ * @param {number} cfg.depth How many recent messages to scan
+ * @param {boolean} [cfg.includeNames] world_info_include_names
+ * @returns {string} Scan window text
+ */
+export function scanWindow(chat, cfg) {
+    return scanSegments(chat, { ...cfg, matchWindow: 'scan' })[0];
+}
+
+/**
+ * A paragraph break: a blank line, tolerating trailing whitespace on the line above.
+ *
+ * NOT a single newline. Chat prose uses both — measured over one author's chats (392 messages,
+ * 780KB), 27.6% of messages carry blank-line breaks AND single newlines within a paragraph, and only
+ * 3.8% use single newlines alone. Splitting on `\n` would chop soft-wrapped dialogue into fragments;
+ * splitting on a blank line reads the Markdown correctly, and in that 3.8% degenerates to the whole
+ * message — never narrower than the author's own structure supports.
+ */
+const PARAGRAPH_BREAK = /\n[ \t]*\n/;
+
+/**
+ * The scan window as SEGMENTS — the unit a key has to match within.
+ *
+ * WHY THIS AND NOT A JOIN. A conjunction over the whole window matches terms a dozen messages apart:
+ * `? apollo astronauts` fires on a window where someone said "Apollo" and, four replies later,
+ * someone else said "astronauts". Negation has the same blindness and fails worse — `? fire -drill`
+ * is silently vetoed by a drill five messages back, and a false negative never surfaces anywhere,
+ * where a false positive is a ranking contribution that competes and loses.
+ *
+ * The segment boundary is the one thing WA cannot recover after the fact, which is why this returns
+ * an array instead of a string with markers in it: a message's own newlines are indistinguishable
+ * from the join once flat, so a joined window cannot be split back into messages by any rule. WA
+ * builds the window, so it simply keeps what it already knows.
+ *
+ * `scan` is not a special case — it is the degenerate one-segment array, and reproduces the
+ * pre-setting behaviour exactly.
+ *
+ * @param {Array<{name?: string, mes?: string}>} chat Chat messages (or queryMessages() output)
+ * @param {object} cfg
+ * @param {number} cfg.depth How many recent messages to scan
+ * @param {boolean} [cfg.includeNames] world_info_include_names
+ * @param {'scan'|'message'|'paragraph'} [cfg.matchWindow] Segment granularity
+ * @returns {string[]} Scan segments, chronological
+ */
+export function scanSegments(chat, { depth, includeNames = true, matchWindow = 'scan' }) {
+    // 0 is authored, not degenerate: core's per-entry scanDepth 0 means "match nothing from chat"
+    // (the entry lives on injects/sources/recursion), and WA mirrors it. NaN keeps its accidental
+    // whole-chat reading so no existing caller shifts.
+    const take = Number(depth);
+    const messages = (take <= 0 ? [] : chat.slice(-take))
+        .map(x => (includeNames && x?.name ? `${x.name}: ${x.mes ?? ''}` : String(x?.mes ?? '')));
+    return segment(messages, matchWindow);
+}
+
+/**
+ * Applies the match window to already-separated texts. Split out from scanSegments because the
+ * non-chat match sources (character description, scenario, injects) arrive as their own units and
+ * need the same treatment — each is one text that paragraph mode may subdivide, and that no mode
+ * may merge with a chat message.
+ * @param {string[]} texts
+ * @param {'scan'|'message'|'paragraph'} matchWindow
+ * @returns {string[]}
+ */
+export function segment(texts, matchWindow) {
+    if (matchWindow === 'scan') return [texts.join('\n')];
+    const out = matchWindow === 'paragraph'
+        ? texts.flatMap(t => String(t).split(PARAGRAPH_BREAK))
+        : texts.map(String);
+    // An empty segment can only produce zero counts, and every one of them costs a scan.
+    return out.filter(t => t.trim());
+}
+
+/** Maps each entry match-flag to the scan-sources field it pulls in, as core's buffer does. */
+export const MATCH_SOURCE_FIELDS = {
+    matchPersonaDescription: 'personaDescription',
+    matchCharacterDescription: 'characterDescription',
+    matchCharacterPersonality: 'characterPersonality',
+    matchCharacterDepthPrompt: 'characterDepthPrompt',
+    matchScenario: 'scenario',
+    matchCreatorNotes: 'creatorNotes',
+};
+
+/**
+ * Appends the extra scan sources an entry opted into, so a verdict or score is over the same text
+ * core matched against — not just the chat window.
+ *
+ * Re-segmenting is what makes `scan` still mean ONE segment: the window arrives pre-split, and this
+ * collapses it back together with the sources rather than leaving two segments where the pre-setting
+ * code had one string. It is idempotent for the other two modes — splitting an already-split
+ * paragraph yields itself — while the appended sources get split for the first time.
+ *
+ * A source is its own text, never a continuation of the last message: nothing may merge a character
+ * description onto the end of chat prose and let a conjunction span the seam.
+ *
+ * @param {string[]} chatWindow The depth-limited chat segments
+ * @param {object} entry World Info entry
+ * @param {object} sources Source texts keyed as MATCH_SOURCE_FIELDS' values
+ * @param {'scan'|'message'|'paragraph'} matchWindow
+ * @returns {string[]} chatWindow plus any opted-in source texts, segmented
+ */
+export function withMatchSources(chatWindow, entry, sources, matchWindow) {
+    const texts = [...chatWindow];
+
+    for (const [flag, field] of Object.entries(MATCH_SOURCE_FIELDS)) {
+        if (entry[flag] && sources[field]) {
+            texts.push(sources[field]);
+        }
+    }
+
+    return segment(texts, matchWindow);
+}
+
+/**
+ * The `windowFor(depth, entry)` the activation verdicts consume, from data already extracted from
+ * ST: the transformed chat, the joined scan-enabled inject text, and the scanSources() fields.
+ * Memoises the chat window per resolved depth — sources are per-entry, so they append after the
+ * memo. Pure assembly: the caller extracts, this builds, so the check can exercise the real window
+ * construction instead of a stand-in.
+ *
+ * @param {Array<{name?: string, mes?: string}>} chat Scan-eligible messages (is_system removed)
+ * @param {{injectText?: string, sources?: object, matchWindow?: string, includeNames?: boolean}} cfg
+ * @returns {(depth: number, entry: object) => string[]}
+ */
+export function makeWindowFor(chat, { injectText = '', sources = {}, matchWindow = 'scan', includeNames = true } = {}) {
+    const windows = new Map();
+    return (depth, entry) => {
+        if (!windows.has(depth)) {
+            const window = scanSegments(chat, { depth, includeNames, matchWindow });
+            // Its own text, not a continuation of the last message. Pushed raw: withMatchSources
+            // re-segments the whole array, so splitting it here would be done twice.
+            if (injectText) {
+                window.push(injectText);
+            }
+            windows.set(depth, window);
+        }
+        return withMatchSources(windows.get(depth), entry, sources, matchWindow);
+    };
+}
+
+/**
+ * One-entry memo per case mode for the folded haystack. Keyed by string identity, which is the case
+ * that matters: a scan hands every key the same text object, so this turns N folds into one. A miss
+ * just recomputes, so correctness never depends on the hit.
+ */
+let foldMemoIn = null, foldMemoOut = null, orthMemoIn = null, orthMemoOut = null;
+export const foldedHay = (text, caseSensitive) => {
+    if (caseSensitive) {
+        if (text !== orthMemoIn) { orthMemoIn = text; orthMemoOut = normalizeOrthography(text); }
+        return orthMemoOut;
+    }
+    if (text !== foldMemoIn) { foldMemoIn = text; foldMemoOut = fold(text); }
+    return foldMemoOut;
+};
+
+/**
+ * Counts occurrences of a keyword in text.
+ *
+ * Follows core's matchKeys for FLAGS — case sensitivity, whole-word boundaries, multi-word fallback,
+ * `/regex/` precedence — and deliberately diverges on ORTHOGRAPHY, which core does not normalise at
+ * all: apostrophes, curly quotes, en/em dashes, ellipsis, non-breaking space and NFC composition all
+ * fold here (see normalizeOrthography in plugin/automaton.mjs) and do not in core. A key carrying any
+ * of those can therefore match here and not fire in core's scan, for as long as core owns activation.
+ * `?` SmartKeys are a WA extension with no core equivalent at all.
+ *
+ * KNOWN LIMIT — MARKDOWN IN THE SCAN TEXT. Chat prose is Markdown, and the markup sits in the haystack,
+ * so emphasis INSIDE a word cuts both ways against the text a reader actually sees:
+ *
+ *   "*sister*hood"   `sisterhood` MISSES — the asterisks break the substring
+ *   "*sister*hood"   `sister` whole-word MATCHES — the * reads as a word boundary — where the
+ *                    unemphasised "sisterhood" correctly does not
+ *
+ * The false positive is the worse half, and `=`-flagged SmartKey terms inherit it, sharing WORD_CHAR.
+ * Emphasis around a WHOLE word is fine in every mode: "*sister*," matches `sister` exactly as it should.
+ * This only bites mid-word, and mid-word emphasis turned up rarely in the sample prose available — one
+ * author's chats, so that is a weak reason to relax about it rather than evidence it is uncommon.
+ *
+ * Not fixed, because every option is worse. Making `*` a word character kills the working case — a
+ * standalone "*sister*" would then be bounded by word characters and stop matching, so the two cases
+ * want opposite answers from the same character. Stripping markup from the haystack destroys the
+ * asterisk as CONTENT: M*A*S*H, *B*witched, and the emphasis-markup keys a real book uses to
+ * disambiguate Roman currency. Scanning both a raw and a stripped copy fixes only the miss direction,
+ * not the false boundary, at two scan passes and a rule for combining the counts.
+ *
+ * The principled fix is to scan the RENDERED text rather than the source, since that is the only thing
+ * which distinguishes markup from content. Much larger than it looks — core scans raw too.
+ *
+ * @param {string} key Keyword, /regex/flags, or a `?` SmartKey query
+ * @param {string} text Text to search
+ * @param {boolean} caseSensitive Case sensitivity
+ * @param {boolean} wholeWords Whole word matching
+ * @returns {number} Occurrence count (a SmartKey returns its weight)
+ */
+export function countKey(key, text, caseSensitive, wholeWords, scope) {
+    const raw = String(key ?? '').trim();
+
+    if (!raw || !text) {
+        return 0;
+    }
+
+    // SmartKeys sentinel: `?`-prefixed keys are boolean queries (see smartkeys.mjs), overriding
+    // the other options like a regex key does. Returns the query's weight (default 1) on match,
+    // so it feeds keywordScore's saturation like a single occurrence scaled by :weight.
+    if (raw.startsWith('?')) {
+        const { matched, scoreBoost } = evaluateSmartKey(raw, text, scope);
+        // A matched query built purely from negation (e.g. "? !apollo") carries zero accumulated
+        // weight but must still count as a hit — floor ONLY that case, so a sub-1 :weight
+        // (e.g. "? whisper:0.3") down-weights as documented.
+        return matched ? (scoreBoost > 0 ? scoreBoost : 1) : 0;
+    }
+
+    // Regex key (/pattern/flags): count global matches, overriding the other options —
+    // same precedence core's matchKeys gives a regex needle.
+    const asRegex = raw.match(REGEX_KEY_RE);
+    if (asRegex) {
+        try {
+            const flags = asRegex[2].includes('g') ? asRegex[2] : `${asRegex[2]}g`;
+            return (text.match(new RegExp(asRegex[1], flags)) ?? []).length;
+        } catch {
+            return 0;
+        }
+    }
+
+    // Aho-Corasick fast path: when keywordScore has primed a scan of this text, the shared
+    // automaton already knows this key's folded-substring count. 0 is final under any flags;
+    // a positive count is final for plain case-insensitive substring semantics, and otherwise
+    // the key is a confirmed candidate that falls through to the exact (naive) walk below.
+    const cached = cachedCount(raw, text, scope);
+    if (cached === 0) return 0;
+    if (cached !== undefined && !caseSensitive && (!wholeWords || /\s/.test(raw))) return cached;
+
+    // Orthography is normalised under BOTH case modes — it is orthogonal to case, and a case-sensitive
+    // key is no more likely to have been typed with the same quote or dash characters the prose uses.
+    // Must match smartkeys' fold exactly or the trie and this walk disagree (see fold()).
+    //
+    // The HAYSTACK fold is memoised, the needle's is not. Every key in a pass sees the same text, so
+    // folding it per call is the same waste core's matchKeys makes with its per-key toLowerCase — and
+    // it costs more here, because the fold does real work now (33x a bare toLowerCase on 15KB).
+    // Needles are short, so they stay uncached.
+    const hay = foldedHay(text, caseSensitive);
+    const needle = caseSensitive ? normalizeOrthography(raw) : fold(raw);
+
+    // Whole-word matching applies only to single-word keys; a multi-word key falls back
+    // to substring, exactly as core does (it splits on whitespace and uses includes()).
+    if (wholeWords && !/\s/.test(needle)) {
+        try {
+            // Core's boundary is "not flanked by a word char" — (?:^|\W)…(?:$|\W) — which,
+            // unlike \b, still matches keys that start or end with punctuation ("+5", "v2"
+            // in "v2s" would not, but "v2" alone does). Lookaround keeps it non-consuming
+            // so adjacent occurrences are all counted. WORD_CHAR rather than \w: see above.
+            const regex = new RegExp(`(?<!${WORD_CHAR})${escapeRegex(needle)}(?!${WORD_CHAR})`, 'gu');
+            return (hay.match(regex) ?? []).length;
+        } catch {
+            return 0;
+        }
+    }
+
+    // Substring occurrence count.
+    let count = 0;
+    for (let i = hay.indexOf(needle); i !== -1; i = hay.indexOf(needle, i + needle.length)) {
+        count++;
+    }
+    return count;
+}
+
+/**
+ * WHERE a key matched, for display — the first occurrence as a folded-text excerpt with the match
+ * marked «so». Exists for /wa-grade's "why did this pop": a substring key's surface form ("thread"
+ * inside "threadbare") is what the author needs to see to tune it, and countKey only counts.
+ *
+ * Shares countKey's exact machinery (foldedHay/fold, WORD_CHAR boundary, regex precedence) rather
+ * than re-deriving match rules — but it is DISPLAY, not a matcher: only ever called for keys
+ * countKey already counted, so a disagreement can misplace an excerpt, never invent or hide a
+ * firing. Excerpts are from the FOLDED haystack (fold is not length-preserving — em-dash → "--" —
+ * so indices do not map back to the original text). SmartKeys queries get no excerpt: which term
+ * satisfied a boolean query is the query evaluator's business, not a substring's.
+ * @param {string} key The key that matched
+ * @param {string|string[]} text Scan window — a string or segments, as keywordScore takes
+ * @param {boolean} caseSensitive Resolved entry flag
+ * @param {boolean} wholeWords Resolved entry flag
+ * @param {number} [context] Characters of context either side
+ * @returns {string|null} One marked excerpt, or null (no match found / smartkey)
+ */
+export function keyExcerpt(key, text, caseSensitive, wholeWords, context = 28) {
+    const raw = String(key ?? '').trim();
+    if (!raw || raw.startsWith('?')) return null;
+    const mark = (hay, index, length) => {
+        const from = Math.max(0, index - context);
+        const to = Math.min(hay.length, index + length + context);
+        return `${from > 0 ? '…' : ''}${hay.slice(from, index)}«${hay.slice(index, index + length)}»${hay.slice(index + length, to)}${to < hay.length ? '…' : ''}`
+            .replace(/\s+/g, ' ');
+    };
+    for (const segment of Array.isArray(text) ? text : [text]) {
+        if (!segment) continue;
+        const asRegex = raw.match(REGEX_KEY_RE);
+        if (asRegex) {
+            try {
+                const m = new RegExp(asRegex[1], asRegex[2].replace('g', '')).exec(segment);
+                if (m && m[0]) return mark(segment, m.index, m[0].length);
+            } catch { /* countKey returned 0 for it too */ }
+            continue;
+        }
+        const hay = foldedHay(segment, caseSensitive);
+        const needle = caseSensitive ? normalizeOrthography(raw) : fold(raw);
+        if (wholeWords && !/\s/.test(needle)) {
+            try {
+                const m = new RegExp(`(?<!${WORD_CHAR})${escapeRegex(needle)}(?!${WORD_CHAR})`, 'u').exec(hay);
+                if (m) return mark(hay, m.index, m[0].length);
+            } catch { /* mirror countKey's failure mode */ }
+            continue;
+        }
+        const i = hay.indexOf(needle);
+        if (i !== -1) return mark(hay, i, needle.length);
+    }
+    return null;
+}
+
+/**
+ * BM25-style keyword score: a sum of per-key contributions with diminishing returns,
+ * so breadth of evidence outweighs repetition without gating repetition out.
+ * @param {object} entry World Info entry
+ * @param {string} text Scan window
+ * @param {string[]} [keys] Keys to score (defaults to entry.key)
+ * @param {object} cfg
+ * @param {number} cfg.k1 BM25 saturation (settings().bm25K1)
+ * @param {boolean} cfg.caseSensitiveDefault world_info_case_sensitive (entry may override)
+ * @param {boolean} cfg.wholeWordsDefault world_info_match_whole_words (entry may override)
+ * @returns {{score: number, hits: Array<{key: string, count: number}>}} Score and matched keys.
+ */
+/**
+ * `selectiveLogic` values, mirroring core's `world_info_logic` (world-info.js:33). Duplicated rather
+ * than imported because this module stays ST-free; the mapping is verified in matcher-check against
+ * core's own evaluation.
+ */
+export const WI_LOGIC = { AND_ANY: 0, NOT_ALL: 1, NOT_ANY: 2, AND_ALL: 3 };
+
+/**
+ * Core's secondary-key condition (world-info.js matchSecondaryKeys), over WA's matcher.
+ *
+ * True when the entry has no secondary keys, so callers can apply it unconditionally. Keys are NOT
+ * `substituteParams`-expanded here, matching how primary keys are already treated in this module —
+ * that substitution is ST-side and this file is ST-free.
+ *
+ * @returns {boolean} whether the entry's secondary condition is satisfied by `text`
+ */
+export function secondaryOk(entry, text, caseSensitive, wholeWords) {
+    const sec = Array.isArray(entry?.keysecondary) ? entry.keysecondary.filter(k => String(k ?? '').trim()) : [];
+    if (!sec.length) return true;
+    if (text) primeScan(sec, text);
+    let any = false, all = true;
+    for (const k of sec) {
+        if (countKey(k, text, caseSensitive, wholeWords) > 0) any = true;
+        else all = false;
+    }
+    switch (entry.selectiveLogic ?? WI_LOGIC.AND_ANY) {
+        case WI_LOGIC.NOT_ALL: return !all;
+        case WI_LOGIC.NOT_ANY: return !any;
+        case WI_LOGIC.AND_ALL: return all;
+        default: return any;   // AND_ANY, and core's fallback for an unknown value
+    }
+}
+
+/**
+ * BM25-style keyword score for one entry against the scan window.
+ * @param {object} entry
+ * @param {string|string[]} text Scan text — a bare string is one segment (`matchWindow: 'scan'`),
+ *   an array is the segmented window from scanSegments()
+ * @param {string[]} [keys]
+ * @returns {{score: number, hits: Array<{key: string, count: number}>}}
+ */
+export function keywordScore(entry, text, keys = entry.key, { k1, caseSensitiveDefault, wholeWordsDefault } = {}) {
+    if (!Array.isArray(keys) || !keys.length) {
+        return { score: 0, hits: [] };
+    }
+
+    // Inherit the globals exactly as core does (world-info.js matchKeys), or WA matches
+    // on different rules than the scan that activated the entry. Core's whole-word
+    // default is OFF (substring), so hardcoding true here made WA miss any keyword that
+    // only appears inside a larger word.
+    const caseSensitive = entry.caseSensitive ?? caseSensitiveDefault;
+    const wholeWords = entry.matchWholeWords ?? wholeWordsDefault;
+
+    // A bare string is ONE segment, which is what `matchWindow: 'scan'` means — so every caller that
+    // has not been taught about segments keeps the pre-setting behaviour rather than an approximation
+    // of it. Only the live scan passes an array.
+    const segments = Array.isArray(text) ? text : [text];
+
+    // Register every key and scan each segment ONCE (Aho-Corasick); countKey below then answers
+    // from that scan instead of walking the buffer per key. Segments are shared across entries in
+    // a retrieval pass — and shared BY VALUE, since the cache keys on the string — so after the
+    // first entry this is a no-op, and an entry that appends match sources pays only for those.
+    if (segments.length) primeScan(keys, segments);
+
+    let score = 0;
+    const hits = [];
+    const counts = new Map();
+
+    for (const segment of segments) {
+        if (!segment) continue;
+
+        // SECONDARY KEYS GATE THE SCORE, not just activation, and they gate it PER SEGMENT. An entry
+        // keyed `cosmonaut` with a secondary `apollo` under AND ANY says it is relevant when both are
+        // present; scoring the primary alone credits it for evidence its author said does not count on
+        // its own. Whole-window, "both present" degrades to "both mentioned at some point", which is
+        // the distance-blindness the match window exists to fix — so a segment that fails its own gate
+        // contributes nothing, rather than the whole entry scoring 0 because one segment failed.
+        //
+        // Core checks this before activating, so for a keyword entry the gate has already passed once —
+        // but against CORE's buffer, which is not WA's window (worldsapart.js builds its own), and a
+        // force-activated entry was never checked at all. Either way the score is WA's claim about this
+        // text, so it is WA's job to make it true of this text.
+        if (!secondaryOk(entry, segment, caseSensitive, wholeWords)) continue;
+
+        for (const key of keys) {
+            const n = countKey(key, segment, caseSensitive, wholeWords);
+            if (n > 0) counts.set(key, (counts.get(key) ?? 0) + n);
+        }
+    }
+
+    // Occurrences SUM across gate-passing segments and saturate once, rather than saturating per
+    // segment: a key is as repeated as the window says it is, and k1 is calibrated against a whole
+    // window's counts. At `scan` this is arithmetically identical to the pre-setting code.
+    for (const [key, count] of counts) {
+        score += count / (count + k1);
+        hits.push({ key, count });
+    }
+
+    // Most-repeated key first, so the debug column leads with the strongest evidence.
+    hits.sort((a, b) => b.count - a.count);
+    return { score, hits };
+}
+
+// ---------------------------------------------------------------------------
+// Stage 2 — activation verdicts (matcher-design.md, bucket 1.5)
+//
+// WA's matcher decides activation in both directions: the union force-activates entries WA matches
+// and core cannot (`?` SmartKeys have no core semantics; the fold and depth are supersets), and the
+// prune deletes activated entries WA rejects over the shared haystack. Both verdicts are
+// `keywordScore` hits over the entry's resolved-depth window, so activation, scoring and the audit
+// can never disagree about whether a key matched.
+// ---------------------------------------------------------------------------
+
+/**
+ * Whether the entry's content carries a decorator, by core's rules (world-info.js parseDecorators):
+ * read only when content STARTS with `@@`, one decorator per leading line, stopping at the first
+ * non-`@@` line; a `@@@name` line is the fallback form of `@@name`, and core's own test is a
+ * bare startsWith on the name.
+ * ponytail: the `@@@` fallback-chain nuance (it only applies after an unknown decorator) is not
+ * mirrored, so this over-detects fallback lines — which errs safe in both callers: over-detecting
+ * `@@dont_activate` under-adds, over-detecting `@@activate` under-deletes.
+ */
+function hasDecorator(entry, name) {
+    const content = String(entry?.content ?? '');
+    if (!content.startsWith('@@')) return false;
+    for (const line of content.split('\n')) {
+        if (!line.startsWith('@@')) break;
+        const bare = line.startsWith('@@@') ? line.slice(1) : line;
+        if (bare.startsWith(name)) return true;
+    }
+    return false;
+}
+
+/** Keys an activation verdict may rest on: non-blank, and no validator ERROR — `negation-only`
+ *  matches on absence (nearly everywhere), `no-terms` never, `stray-quote` unpredictably. */
+const activatableKeys = keys => (Array.isArray(keys) ? keys : [])
+    .filter(k => String(k ?? '').trim() && !validateSmartKey(k).some(f => f.severity === 'error'));
+
+/**
+ * The union direction: entries WA would force-activate, judged over WA's own window.
+ *
+ * `windowFor(depth, entry)` returns the scan segments for a resolved depth — injected because the
+ * window is ST-side (chat, injects, per-entry match sources); the caller memoises per depth.
+ * Depth resolves as stage 3 already rules it: per-entry `scanDepth`, then `messageDepth`, then
+ * `fallbackDepth` (core's world_info_depth, injected) — core's depth is otherwise not consulted.
+ *
+ * Skips: disabled; `constant` (core activates them without keys — forcing again is provenance
+ * noise); vectorized under `suppressVectorKeys` (retrieval-only — at intercept onEntriesLoaded has
+ * NOT yet blanked their keys, so the flag is the guard, not empty `key`); `@@dont_activate`
+ * (core's own exclusion, which a force-activate would override).
+ *
+ * @param {object[]} entries Candidate entries (getSortedEntries shape)
+ * @param {(depth: number, entry: object) => string[]} windowFor
+ * @param {{suppressVectorKeys?: boolean, messageDepth?: number, fallbackDepth?: number,
+ *          caseSensitiveDefault?: boolean, wholeWordsDefault?: boolean}} opts
+ * @returns {object[]} entries to force-activate
+ */
+export function activationAdds(entries, windowFor, opts = {}) {
+    const out = [];
+    for (const entry of entries ?? []) {
+        if (!entry || entry.disable || entry.constant) continue;
+        if (opts.suppressVectorKeys && entry.vectorized) continue;
+        if (hasDecorator(entry, '@@dont_activate')) continue;
+        // Authored to never activate on the initial pass — the only pass the union feeds. Core's
+        // own gate order already refuses the force (delay/cooldown/delayUntilRecursion are checked
+        // before external activations, world-info.js entry walk), so this is provenance hygiene,
+        // not the protection itself.
+        if (entry.delayUntilRecursion) continue;
+        const keys = activatableKeys(entry.key);
+        if (!keys.length) continue;
+        // Nullish, not truthy: scanDepth 0 is core's authored "match nothing from chat" and must
+        // not fall through to the globals (an unaltered book behaves as it does under core).
+        const depth = Number(entry.scanDepth ?? (opts.messageDepth || opts.fallbackDepth));
+        // hits, not score: the verdict must not depend on k1, and hits are counted only in
+        // segments that pass the entry's own secondary-key gate (keywordScore).
+        if (keywordScore(entry, windowFor(depth, entry) ?? [], keys, opts).hits.length) {
+            out.push(entry);
+        }
+    }
+    return out;
+}
+
+/**
+ * The prune direction: activated entries WA's matcher rejects, as keys to delete from
+ * `args.activated.entries`. Ruled (matcher-design.md): no group guard — a deleted group winner
+ * leaves its group empty, transient until bucket 2.
+ *
+ * `exempt` is ownership the caller can see and this module cannot: WA's own forced set (retrieval
+ * + union winners), sticky timed effects, other extensions' external activations. Structural
+ * exemptions live here: `constant`, `@@activate` (core admits these without a key match), and
+ * keys-ineligible entries — a suppressed-vectorized entry reaches the scan with `key` blanked, so
+ * it is never judged by its stashed `waKeys`, and an entry whose only keys carry validator errors
+ * was never legitimately key-activated in WA's terms, so its activation is not WA's to revoke.
+ *
+ * @param {Array<{key: string, entry: object}>} items The activated map, spread
+ * @param {Set<string>} exempt `world.uid` keys never to prune
+ * @param {(depth: number, entry: object) => string[]} windowFor Same contract as activationAdds
+ * @param {{messageDepth?: number, fallbackDepth?: number,
+ *          caseSensitiveDefault?: boolean, wholeWordsDefault?: boolean}} opts
+ * @returns {string[]} keys to delete
+ */
+export function activationPrunes(items, exempt, windowFor, opts = {}) {
+    const out = [];
+    for (const { key, entry } of items ?? []) {
+        if (!entry || exempt?.has(key)) continue;
+        if (entry.constant || hasDecorator(entry, '@@activate')) continue;
+        const keys = activatableKeys(entry.key);
+        if (!keys.length) continue;
+        // Same nullish resolution as activationAdds — scanDepth 0 is authored, not unset.
+        const depth = Number(entry.scanDepth ?? (opts.messageDepth || opts.fallbackDepth));
+        if (!keywordScore(entry, windowFor(depth, entry) ?? [], keys, opts).hits.length) {
+            out.push(key);
+        }
+    }
+    return out;
+}
+

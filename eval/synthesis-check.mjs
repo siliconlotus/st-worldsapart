@@ -5,7 +5,7 @@
 //
 // The comparison is per PRIMARY key, because that is how the rewrite works — one query per primary,
 // not one per entry — so the expected answer is `this key matches AND the secondary condition holds`.
-import { countKey, secondaryOk, WI_LOGIC } from '../extension/ranking.mjs';
+import { countKey, secondaryOk, WI_LOGIC } from '../extension/matcher.mjs';
 import { synthesizeSecondary } from '../extension/smartkeys.mjs';
 import { eq } from './metrics.mjs';
 
