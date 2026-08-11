@@ -11,6 +11,7 @@
 // live lorebook either: entries come from the sample's embedded copies, which is what makes a graded scene
 // re-runnable after the books have been edited.
 import { readFileSync, existsSync } from 'node:fs';
+import { dirname, resolve as resolvePath } from 'node:path';
 import { scoreCollection, poolEntries, selectTopK, quantile } from '../plugin/scoring.mjs';
 import { buildLexical } from '../plugin/lexical.mjs';
 import { corpusMean, centeredCosineScores } from '../plugin/vector.mjs';
@@ -39,6 +40,32 @@ export const dcg = (v, k) => v.slice(0, k).reduce((s, x, i) => s + x / Math.log2
 /** Graded nDCG. The ideal is built from the RANKED vector, so a graded title that never gets ranked
  *  contributes to neither DCG nor the ideal — which is what makes excludeTitles free. */
 export const ndcg = (vec, k) => { const ideal = [...vec].sort((a, b) => b - a); return dcg(ideal, k) ? dcg(vec, k) / dcg(ideal, k) : 0; };
+
+/**
+ * Locates the live SillyTavern install for tools that must find it from any checkout. WA_ST_ROOT wins;
+ * otherwise walk ancestors to the directory holding config.yaml — ST doesn't export its root, but every
+ * install has exactly one config.yaml at it, and the walk works from git worktrees because those nest
+ * inside the ST tree. dataRoot is read from that config.yaml rather than assumed: ST's data directory is
+ * relocatable, while sample `index` paths are recorded with the default `data/` prefix.
+ *
+ * Returns null when no install is reachable (a standalone clone on another machine) — callers skip, they
+ * don't guess.
+ *
+ * @returns {{root: string, dataRoot: string, resolve: (p: string) => string} | null}
+ */
+export function stInstall() {
+    let root = process.env.WA_ST_ROOT;
+    if (!root) {
+        for (let d = dirname(new URL(import.meta.url).pathname); ; d = dirname(d)) {
+            if (existsSync(`${d}/config.yaml`)) { root = d; break; }
+            if (dirname(d) === d) return null;
+        }
+    }
+    const m = existsSync(`${root}/config.yaml`) && readFileSync(`${root}/config.yaml`, 'utf8').match(/^dataRoot:\s*['"]?(.+?)['"]?\s*$/m);
+    const dataRoot = resolvePath(root, m ? m[1] : './data');
+    const resolve = p => p.startsWith('/') ? p : p.startsWith('data/') ? dataRoot + p.slice('data'.length) : `${root}/${p}`;
+    return { root, dataRoot, resolve };
+}
 
 /**
  * Where this sample's vector collection lives. Explicit --index wins, then the sample's own record, then the

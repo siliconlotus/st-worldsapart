@@ -17,6 +17,7 @@
 import { readFileSync, readdirSync, existsSync } from 'node:fs';
 import { chunkEntry, splitRecursive } from '../extension/chunking.mjs';
 import { eq } from './metrics.mjs';
+import { stInstall } from './scene.mjs';
 
 const PARA = { chunkMode: 'paragraph', chunkSize: 800, minChunkSize: 120 };
 
@@ -55,17 +56,14 @@ eq(JSON.stringify(chunkEntry('a\n\nb', { chunkMode: 'length', chunkSize: 800, mi
     JSON.stringify(splitRecursive('a\n\nb', 800)), "'length' mode is splitRecursive verbatim, floor unused");
 
 // --- THE ORACLE: do we reproduce indexes that already exist? ---
-// A sample records `index` relative to the ST ROOT, because the grid tools are run from there. A check is run
-// from wherever the suite loop happens to sit, so resolve against the root derived from this file instead of
-// the cwd — otherwise the oracle silently skips and the port loses the only evidence that it is exact.
-// Six levels up only holds at the canonical checkout depth; from a git worktree it resolves nowhere — and
-// eval-data/ is gitignored (private captures), so a worktree has no samples either. WA_ST_ROOT names the
-// SillyTavern root and redirects both to the real install.
-const ROOT = (process.env.WA_ST_ROOT ?? new URL('../../../../../../', import.meta.url).pathname).replace(/\/?$/, '/');
-const DATA = process.env.WA_ST_ROOT
-    ? `${ROOT}public/scripts/extensions/third-party/WorldsApart/eval/eval-data/`
-    : new URL('./eval-data/', import.meta.url).pathname;
-const resolve = p => (p.startsWith('/') ? p : ROOT + p);
+// A sample records `index` relative to the ST ROOT, because the grid tools are run from there. A check is
+// run from wherever the suite loop happens to sit, so stInstall() locates the live install instead —
+// otherwise the oracle silently skips and the port loses the only evidence that it is exact. eval-data/ is
+// gitignored (private captures), so when this checkout has none the canonical checkout's samples are used.
+const ST = stInstall();
+const LOCAL = new URL('./eval-data/', import.meta.url).pathname;
+const DATA = existsSync(LOCAL) || !ST ? LOCAL : `${ST.root}/public/scripts/extensions/third-party/WorldsApart/eval/eval-data/`;
+const resolve = p => ST ? ST.resolve(p) : p;
 const samples = existsSync(DATA) ? readdirSync(DATA).filter(f => f.endsWith('.json')) : [];
 let compared = 0;
 for (const file of samples) {

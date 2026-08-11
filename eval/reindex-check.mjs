@@ -7,7 +7,7 @@
 // from a graded sample's embedded books at that sample's own settings and asserts the (hash, uid) multiset
 // matches the collection SillyTavern actually wrote.
 import { buildItems, chunkConfig, cachePath } from './reindex.mjs';
-import { getStringHash } from './scene.mjs';
+import { getStringHash, stInstall } from './scene.mjs';
 import { eq } from './metrics.mjs';
 import { readFileSync, readdirSync, existsSync } from 'node:fs';
 
@@ -66,14 +66,12 @@ eq(cp({}) === cp({ chunkMode: 'length' }), false, 'a different mode is a differe
 eq(cp({}) === cp({}, 'other-model'), false, 'a different embedding model is a different collection');
 
 // --- ORACLE: rebuild a real sample at its own settings and match what ST actually wrote ---
-// Six levels up only holds at the canonical checkout depth; from a git worktree it resolves nowhere — and
-// eval-data/ is gitignored (private captures), so a worktree has no samples either. WA_ST_ROOT names the
-// SillyTavern root and redirects both to the real install.
-const ROOT = (process.env.WA_ST_ROOT ?? new URL('../../../../../../', import.meta.url).pathname).replace(/\/?$/, '/');
-const DATA = process.env.WA_ST_ROOT
-    ? `${ROOT}public/scripts/extensions/third-party/WorldsApart/eval/eval-data/`
-    : new URL('./eval-data/', import.meta.url).pathname;
-const resolve = p => (p.startsWith('/') ? p : ROOT + p);
+// stInstall() walks to the live ST install, so this works from git worktrees too. eval-data/ is
+// gitignored (private captures), so when this checkout has none the canonical checkout's samples are used.
+const ST = stInstall();
+const LOCAL = new URL('./eval-data/', import.meta.url).pathname;
+const DATA = existsSync(LOCAL) || !ST ? LOCAL : `${ST.root}/public/scripts/extensions/third-party/WorldsApart/eval/eval-data/`;
+const resolve = p => ST ? ST.resolve(p) : p;
 let ran = 0;
 for (const file of existsSync(DATA) ? readdirSync(DATA).filter(f => f.endsWith('.json')) : []) {
     let sample;
