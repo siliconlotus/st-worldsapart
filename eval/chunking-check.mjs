@@ -55,11 +55,16 @@ eq(JSON.stringify(chunkEntry('a\n\nb', { chunkMode: 'length', chunkSize: 800, mi
     JSON.stringify(splitRecursive('a\n\nb', 800)), "'length' mode is splitRecursive verbatim, floor unused");
 
 // --- THE ORACLE: do we reproduce indexes that already exist? ---
-const DATA = new URL('./eval-data/', import.meta.url).pathname;
 // A sample records `index` relative to the ST ROOT, because the grid tools are run from there. A check is run
 // from wherever the suite loop happens to sit, so resolve against the root derived from this file instead of
 // the cwd — otherwise the oracle silently skips and the port loses the only evidence that it is exact.
-const ROOT = new URL('../../../../../../', import.meta.url).pathname;
+// Six levels up only holds at the canonical checkout depth; from a git worktree it resolves nowhere — and
+// eval-data/ is gitignored (private captures), so a worktree has no samples either. WA_ST_ROOT names the
+// SillyTavern root and redirects both to the real install.
+const ROOT = (process.env.WA_ST_ROOT ?? new URL('../../../../../../', import.meta.url).pathname).replace(/\/?$/, '/');
+const DATA = process.env.WA_ST_ROOT
+    ? `${ROOT}public/scripts/extensions/third-party/WorldsApart/eval/eval-data/`
+    : new URL('./eval-data/', import.meta.url).pathname;
 const resolve = p => (p.startsWith('/') ? p : ROOT + p);
 const samples = existsSync(DATA) ? readdirSync(DATA).filter(f => f.endsWith('.json')) : [];
 let compared = 0;

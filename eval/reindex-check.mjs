@@ -66,8 +66,13 @@ eq(cp({}) === cp({ chunkMode: 'length' }), false, 'a different mode is a differe
 eq(cp({}) === cp({}, 'other-model'), false, 'a different embedding model is a different collection');
 
 // --- ORACLE: rebuild a real sample at its own settings and match what ST actually wrote ---
-const DATA = new URL('./eval-data/', import.meta.url).pathname;
-const ROOT = new URL('../../../../../../', import.meta.url).pathname;
+// Six levels up only holds at the canonical checkout depth; from a git worktree it resolves nowhere — and
+// eval-data/ is gitignored (private captures), so a worktree has no samples either. WA_ST_ROOT names the
+// SillyTavern root and redirects both to the real install.
+const ROOT = (process.env.WA_ST_ROOT ?? new URL('../../../../../../', import.meta.url).pathname).replace(/\/?$/, '/');
+const DATA = process.env.WA_ST_ROOT
+    ? `${ROOT}public/scripts/extensions/third-party/WorldsApart/eval/eval-data/`
+    : new URL('./eval-data/', import.meta.url).pathname;
 const resolve = p => (p.startsWith('/') ? p : ROOT + p);
 let ran = 0;
 for (const file of existsSync(DATA) ? readdirSync(DATA).filter(f => f.endsWith('.json')) : []) {
