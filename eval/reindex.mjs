@@ -43,13 +43,12 @@ export const chunkConfig = (S, overrides = {}) => ({
  *   - every chunk is re-trimmed and blanks are dropped (splitRecursive on '. ' leaves edge whitespace);
  *   - one item per (entry, chunk), and NO global de-duplication.
  *
- * That last one is worth stating because de-duplicating looks obviously correct and is not. syncWorld filters
- * new items against the hashes ALREADY SAVED in the collection, which on a fresh build is nothing — so text
- * repeated across two entries really is stored twice, once under each uid. Live collections show it: 992
- * items for 983 distinct texts. Collapsing them changes which entry owns a shared chunk, and since entry
- * pooling takes the max over an entry's chunks, that moves the entry ranking, the gaps between scores, and
- * therefore where the elbow cuts. A globally-deduped rebuild reproduced every nDCG figure of the live index
- * and still cut 4 entries instead of 8.
+ * That last one is worth stating because de-duplicating looks obviously correct and is not. Since ccc5512
+ * the hash carries (text, uid), so text repeated across two entries hashes differently per owner and really
+ * is stored twice, once under each uid — even by an incremental sync. Collapsing them changes which entry
+ * owns a shared chunk, and since entry pooling takes the max over an entry's chunks, that moves the entry
+ * ranking, the gaps between scores, and therefore where the elbow cuts. A globally-deduped rebuild
+ * reproduced every nDCG figure of the live index and still cut 4 entries instead of 8.
  *
  * Any drift from this is drift from what the extension actually indexes, which would make every offline
  * number describe a collection production would never build.
@@ -65,7 +64,10 @@ export function buildItems(book, cfg) {
         for (const chunk of chunkEntry(entry.content, cfg)) {
             const text = chunk.trim();
             if (!text) continue;
-            items.push({ hash: getStringHash(text), text, index: Number(entry.uid) });
+            // Identity is (text, uid), not text alone — the uid lives IN the hash, mirroring syncWorld
+            // (worldsapart.js), because ST core lists and deletes by hash only.
+            const uid = Number(entry.uid);
+            items.push({ hash: getStringHash(`${text}${uid}`), text, index: uid });
         }
     }
     return items;

@@ -30,24 +30,19 @@ eq(trimmed.every(i => i.text === i.text.trim()), true, 'every stored chunk is tr
 const [item] = buildItems({ 7: V(7, 'alpha') }, CFG);
 eq(item.index, 7, 'index carries the owning uid');
 eq(item.text, 'alpha', 'text is the chunk itself');
-eq(item.hash, getStringHash('alpha'), 'hash is ST\'s string hash of the trimmed text');
+eq(item.hash, getStringHash('alpha7'), 'hash is ST\'s string hash of trimmed text + owning uid, as syncWorld computes it');
 eq(typeof buildItems({ '7': V('7', 'alpha') }, CFG)[0].index, 'number', 'a string uid is normalised to a number');
 
-// NO GLOBAL DE-DUPLICATION, and this is the counter-intuitive one. syncWorld filters new items against the
-// hashes ALREADY in the collection, which on a fresh build is nothing — so text shared by two entries really
-// is stored twice, once per uid. Collapsing them changes which entry owns a shared chunk; since entry pooling
-// takes the max over an entry's chunks, that moves the ranking and the elbow cut. A deduped rebuild
-// reproduced every nDCG figure of a live index and still cut 4 entries where production cut 8.
-//
-// One row per entry is therefore what the harness scores off `metadata.index`, and it is what production now
-// scores too — but production gets there differently, and the difference is why this file's oracle can still
-// disagree on storage. An INCREMENTAL sync keeps only the first row for a shared hash, so the store alone
-// cannot name the second owner. syncWorld resolves the fan-out from the live entries instead (hash -> uid[]),
-// which credits every owner regardless of how the collection was built. Storage stays path-dependent;
-// attribution no longer is.
+// NO GLOBAL DE-DUPLICATION, and this is the counter-intuitive one. Since ccc5512 the hash carries
+// (text, uid) — ST core lists and deletes by hash only, so identity has to live IN the hash or one hash
+// stands for two owners and syncs misattribute rows. Text shared by two entries therefore hashes
+// differently per owner and is stored twice, once per uid, by fresh and incremental syncs alike.
+// Collapsing them changes which entry owns a shared chunk; since entry pooling takes the max over an
+// entry's chunks, that moves the ranking and the elbow cut. A deduped rebuild reproduced every nDCG
+// figure of a live index and still cut 4 entries where production cut 8.
 const shared = buildItems({ 1: V(1, 'same text'), 2: V(2, 'same text') }, CFG);
-eq(shared.length, 2, 'text shared by two entries is stored once PER ENTRY, as a fresh sync does');
-eq(shared[0].hash === shared[1].hash, true, 'both copies carry the same hash');
+eq(shared.length, 2, 'text shared by two entries is stored once PER ENTRY');
+eq(shared[0].hash !== shared[1].hash, true, 'the uid in the hash keeps the two copies distinct');
 eq(shared.map(x => x.index).join(','), '1,2', 'each copy is attributed to its own entry');
 
 // --- the floor still reads backwards: higher minChunkSize means FEWER chunks ---
@@ -85,10 +80,11 @@ for (const file of existsSync(DATA) ? readdirSync(DATA).filter(f => f.endsWith('
     if (stored.length === mine.length && stored.every((k, i) => k === mine[i])) {
         eq(true, true, `rebuild oracle: ${sample.name ?? file} matches its live collection exactly (${stored.length} items)`);
     } else {
-        // Collections are PATH-DEPENDENT: syncWorld filters against what is already saved, so a book grown
-        // incrementally holds fewer items than the same book synced in one pass (cross-entry duplicates get
-        // filtered on the second sync but not the first). A rebuild is what a FRESH sync would produce, which
-        // is the right target — but it means exact parity with a long-lived collection is not guaranteed.
+        // Extras can be legitimate: syncWorld filters against what is already saved, so a row whose
+        // (text, uid) was retired from the entries but not yet vacuumed, or a collection touched by an
+        // older build, can hold items a fresh rebuild would not produce the same way. Missing rows cannot
+        // be: everything the collection stores came from these entries at these settings, so a rebuild
+        // that fails to reproduce a stored item means buildItems has drifted from syncWorld.
         const s = new Set(stored);
         const extra = mine.filter(k => !s.has(k)).length;
         const m = new Set(mine);
