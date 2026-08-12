@@ -2460,8 +2460,11 @@ async function gradeScene(named) {
  *   keys-live   suppressVectorKeys off lets ST CORE keyword-match vectorized entries. Core's activation
  *               (secondary keys, inclusion groups, recursion, min-activations, probability rolls) is the one
  *               thing this project cannot recompute offline at all, so it can only be sampled live.
- *   summary     queryMode 'summary' asks a model for the query text. Not reproducible from a frozen sample
- *               by construction, and it retrieves against genuinely different text.
+ *
+ * `summary` was an arm here until the query summarizer was withdrawn. It is not coming back: state.mjs
+ * RESETS queryMode rather than un-surfacing it, so an arm setting it would resurrect a withdrawn feature
+ * and pay an LLM call per scene for a mode no user can be in. Bundles captured before the removal still
+ * open by name; nothing needs to re-derive them.
  *
  * ARM COUNT IS NOT A DESIGN CONSTANT. Add an entry here whenever graded-scene-grid.mjs reports a
  * configuration whose top rows are not fully judged; that number is the stopping rule, not this list's
@@ -2474,7 +2477,6 @@ const POOL_ARMS = {
     lexical: { retrievalMode: 'lexical' },
     'loose-thr': { scoreThreshold: 0 },
     'keys-live': { suppressVectorKeys: false },
-    summary: { queryMode: 'summary' },
 };
 
 /**
