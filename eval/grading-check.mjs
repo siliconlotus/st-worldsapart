@@ -195,6 +195,17 @@ eq(villa.filled.keys, 'keys-live', 'the fill records its source arm');
 eq(villa.cosine, 0.9, 'a signal the first arm measured is NOT overwritten by a later arm');
 eq(villa.filled.cosine, undefined, 'and is not marked as filled');
 eq(villa.from, 'shipped', 'the base row still names its own arm');
+
+// `why` follows the keys value it explains, from the same arm — a filled score with no visible cause
+// is what the fill produced before this.
+const armWhy = {
+    arm: 'keys-live',
+    rows: [{ title: 'Villa', world: 'W', uid: 1, block: 'dynamic', sticky: 0, '#': 0, keys: 2.5, why: [{ key: 'villa', count: 2 }] }],
+    entries: [{ uid: 1 }],
+};
+const uw = unionArms([armA, armWhy]);
+eq(uw.rows.find(r => r.uid === 1).why?.[0]?.key, 'villa', 'why travels with the keys value it explains');
+eq(unionArms([armWhy, armA]).rows.find(r => r.uid === 1).why?.[0]?.key, 'villa', 'and a base row that has its own why keeps it');
 // Ordered by best rank across arms: Maren reached #0 under no-filter, so it outranks the constant (#1).
 eq(u.rows.map(r => r.uid).join(','), '1,3,2,4', 'union is ordered by best rank achieved across arms');
 eq(u.entries.map(e => e.uid).join(','), '1,3,2,4', 'entries stay aligned with rows after dedupe + sort');

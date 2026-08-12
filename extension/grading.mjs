@@ -211,6 +211,11 @@ export function unionArms(arms) {
                     if (hit.row[sig] == null && row[sig] != null) {
                         hit.row[sig] = row[sig];
                         (hit.row.filled ??= {})[sig] = arm;
+                        // `why` — the matched keys and their excerpts — travels with the keys value it
+                        // explains, from the SAME arm. An arm that could not score keys also had no hits
+                        // to report, so this is the same absence, and leaving it behind produced a score
+                        // with no visible cause on every filled row.
+                        if (sig === 'keys' && !(hit.row.why ?? []).length && (row.why ?? []).length) hit.row.why = row.why;
                     }
                 }
                 return;
