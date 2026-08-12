@@ -151,16 +151,25 @@ export function wiTooltip({ item, block }) {
  * case, but a key that fired exactly once is a different claim from a key that fired thirteen times, and
  * the reader cannot tell an omitted 1 from an unrecorded count.
  *
- * Colour is reinforcement, not the only cue: position already orders these (key, then count, then
- * excerpt), so the line survives being read without it.
+ * THE MATCH INSIDE THE EXCERPT IS THE POINT, and keyExcerpt hands it over wrapped in guillemets. Those
+ * become colour here: `«prototype»s` reads as punctuation the author wrote, and the whole reason to show an
+ * excerpt is to see WHERE a key landed — which for a substring or a regex is not deducible from the key.
+ * Marked in the key's own blue, because it is the key, in context; the guillemets go, since colour and the
+ * surrounding dim text already delimit it.
+ *
+ * Colour is reinforcement, not the only cue: position orders the line (key, count, excerpt), and the
+ * matched span sits at full opacity inside a dimmed excerpt, so it survives being read without colour.
  *
  * @param {Array<{key: string, count: number, excerpt?: string}>} why Key hits, as recorded on the row
  * @returns {string} HTML, one line per hit
  */
+const markExcerpt = text => escapeHtml(String(text))
+    .replace(/«([^»]*)»/g, '<span style="color:#6ea8fe;font-weight:600;opacity:1;">$1</span>');
+
 export const keyHitsHtml = why => (why ?? []).map(w =>
     `<br><small style="opacity:0.75;"><span style="color:#6ea8fe;font-weight:600;">${escapeHtml(w.key)}</span>`
     + `${Number.isFinite(w.count) ? ` <span style="color:#d9a441;font-weight:600;">${w.count}</span>` : ''}`
-    + `${w.excerpt ? ` <span style="opacity:0.6;">${escapeHtml(w.excerpt)}</span>` : ''}</small>`).join('');
+    + `${w.excerpt ? ` <span style="opacity:0.6;">${markExcerpt(w.excerpt)}</span>` : ''}</small>`).join('');
 
 /**
  * The fold shown under a grading row: what the entry is keyed on, then its text.
