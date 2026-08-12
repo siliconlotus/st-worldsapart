@@ -41,7 +41,7 @@ import * as ranking from './extension/ranking.mjs';
 import * as matcher from './extension/matcher.mjs';
 import { registerKeys, resetSmartKeys } from './extension/smartkeys.mjs';
 import * as selection from './extension/selection.mjs';
-import { getTokenCountAsync } from '../../../tokenizers.js';
+import { getTokenCountAsync, getTokenizerModel } from '../../../tokenizers.js';
 import { textgen_types, textgenerationwebui_settings } from '../../../textgen-settings.js';
 import { oai_settings } from '../../../openai.js';
 import { Popup, POPUP_TYPE, POPUP_RESULT } from '../../../popup.js';
@@ -50,7 +50,7 @@ import { runState, defaultSettings, settings, ensureSettings } from './extension
 import { ensureStudioStyle, makeSortControl, makeTierEditor, showEntryText, wiGlyph, wiTooltip } from './extension/ui-widgets.mjs';
 import { PRESENTATION_ALIAS, SORT_FNS, normPresentation, presentationBaseLabel, presentationLabel, reconcileTiers, tierRank, wiTitleOf } from './extension/sort.mjs';
 import { lorebookStudio } from './extension/studio.mjs';
-import { buildSample, bundleSamples, captureParams, GRADE_ANCHORS, isReference, mergeGrades, normalizeSample, rowKey, sampleFile, searchedBook, splitGraded, trimBook, unionArms } from './extension/grading.mjs';
+import { buildSample, bundleSamples, captureParams, GRADE_ANCHORS, mergeGrades, normalizeSample, rowKey, sampleFile, searchedBook, splitGraded, trimBook, unionArms } from './extension/grading.mjs';
 
 /** The grading scale in one caption line, shared by both grading popups. */
 const gradeAnchorLine = () => `Grade 0–4: ${GRADE_ANCHORS.map((a, g) => `${g} = ${a.split(';')[0].toLowerCase()}`).join(' · ')}.`;
@@ -1727,10 +1727,17 @@ async function rankActivated(args) {
 
         runState.lastSkipped = skipped;
         runState.lastDropped = ranked.filter(x => !survivors.has(x));
+        // THE PRE-BUDGET POPULATION, IN RANK ORDER, stashed before the filter below overwrites it. The
+        // candidate rows are built from this so a sample records what the budget CHOSE BETWEEN, not only
+        // what it kept — without it, entries the budget cut never reach the grader and the cut cannot be
+        // replayed offline at any other budget. Survivors and dropped can't be re-interleaved afterwards:
+        // concatenating them loses the rank order the cut was a prefix of.
+        runState.lastRanked = ranked;
         ranked = ranked.filter(x => survivors.has(x));
     } else {
         runState.lastSkipped = [];
         runState.lastDropped = [];
+        runState.lastRanked = ranked;
     }
 
     // Selection is done; now lay the survivors out — one flat sort over everything, so
@@ -1773,7 +1780,23 @@ async function rankActivated(args) {
     // Built whenever a debug-class run is in flight, and stashed: /wa-grade grades THESE rows rather than
     // recomputing a ranking, so the grades attach to the selection that actually happened.
     if (runState.verboseRun) {
-        const rows = ranked.map((x, i) => ({
+        // The PRE-BUDGET population (see lastRanked), so a row exists for every entry the budget chose
+        // between and `cut` records which side it fell. `ranked` is survivors only by this point.
+        const population = runState.lastRanked ?? ranked;
+        const kept = new Set(ranked);
+        // WHY a row was cut, not just that it was. applyBudget already computes this per skipped entry
+        // (`blockedBy`) and it is the difference between "ranked too low" and "would not fit" — a large
+        // entry is SKIPPED so smaller ones behind it still get in (selection.mjs), so a cut row is not
+        // evidence that everything below it was cut too.
+        const blockedOf = new Map((runState.lastSkipped ?? []).map(s => [s.item ?? s, (s.blockedBy ?? []).map(b => b.cap).join('+')]));
+        // TOKENS PER ENTRY, counted here rather than reused from applyBudget's tokensOf — that one
+        // short-circuits to 0 when maxTokens is 0, so reusing it would silently record zeros for anyone
+        // running with the budget off. Content only, matching applyBudget's own accounting; the assembled
+        // prompt is larger. With these on the row, an offline harness replays the cut at ANY budget instead
+        // of inheriting the one that happened to be set at capture. getTokenizerModel() rides in the
+        // paramSnapshot, since the counts mean nothing without knowing which tokenizer produced them.
+        const tokens = await Promise.all(population.map(x => getTokenCountAsync(x.entry.content ?? '')));
+        const rows = population.map((x, i) => ({
             // Columns lead like the selected table — title, then block, sticky, score, uid,
             // wiOrder — then the per-signal scores under the same names (cosine, text, keys), each
             // with its rank. `block` is the RUNTIME budget class (constant / sticky-active /
@@ -1782,29 +1805,38 @@ async function rankActivated(args) {
             // activates, and dry runs (/wa-debug) never arm the effect at all — so the eval tiers
             // reference rows off constant-or-`sticky`, not off the runtime block, which it can't observe.
             // Numeric fields stay numeric so the copied JSON is computable: `null` for "no
-            // signal" (distinct from a real 0), rounded (not toFixed strings) for a readable
-            // grid, and `sticky` is the count itself (0 = off). Only `block` is categorical.
+            // signal", rounded (not toFixed strings) for a readable grid, and `sticky` is the count
+            // itself (0 = off). Only `block` is categorical.
+            //
+            // `?? null` RATHER THAN A TRUTHINESS TEST, because a scored 0 is not an absent signal: the
+            // old `x.fused ? … : null` wrote both as null, so every sample on disk reports a constant
+            // that fused to 0 identically to one that was never eligible to be fused at all.
             title: x.entry.comment,
             block: blockOf.get(x) ?? 'dynamic',
             sticky: x.entry.sticky || 0,
-            score: x.fused ? Number(x.fused.toFixed(5)) : null,
+            score: Number.isFinite(x.fused) ? Number(x.fused.toFixed(5)) : null,
             uid: x.entry.uid,
             wiOrder: x.entry.waOriginalOrder,
             cosine: x.score !== undefined ? Number(x.score.toFixed(5)) : null,
             vRank: x.vectorRank ?? null,
             // BM25 over chunk text — the signal doing the work for vectorized entries.
-            text: x.textScore ? Number(x.textScore.toFixed(2)) : null,
+            text: Number.isFinite(x.textScore) ? Number(x.textScore.toFixed(2)) : null,
             tRank: x.textRank ?? null,
             // BM25 over entry keys — only ever non-zero for non-vectorized entries.
-            keys: x.keywordScore ? Number(x.keywordScore.toFixed(2)) : null,
+            keys: Number.isFinite(x.keywordScore) ? Number(x.keywordScore.toFixed(2)) : null,
             kRank: x.keywordRank ?? null,
+            tokens: tokens[i],
+            cut: !kept.has(x),
+            // Which cap rejected it — 'tokens' means it did not FIT, which is a different fact from
+            // ranking too low and is the one a grader can act on (raise the budget, or trim the entry).
+            cutBy: blockedOf.get(x) || null,
             '#': i,
         }));
 
         // uid alone is ambiguous across books, so carry the world for the grader and the eval.
         // `why` rides here rather than in `rows` so console.table stays scannable.
-        runState.lastCandidates = rows.map((row, i) => ({ ...row, world: ranked[i].entry.world, why: ranked[i].keywordWhy }));
-        runState.lastCandidateEntries = ranked.map(x => x.entry);
+        runState.lastCandidates = rows.map((row, i) => ({ ...row, world: population[i].entry.world, why: population[i].keywordWhy }));
+        runState.lastCandidateEntries = population.map(x => x.entry);
 
         console.log('%cWorlds Apart · selection candidates — every activated entry with its per-signal scores, before caps or layout', 'font-weight: bold');
         console.table(rows);
@@ -1941,7 +1973,9 @@ function paramSnapshot() {
             ...(s.vectorCutoff === 'dropoff' ? { dropoffThreshold: s.dropoffThreshold, minVectorEntries: s.minVectorEntries } : {}),
             maxVectorEntries: s.maxVectorEntries, keywordScoring: s.keywordScoring, scoreVectorKeys: s.scoreVectorKeys,
         },
-        budget: { maxTotalEntries: s.maxTotalEntries || null, maxDynamicEntries: s.maxDynamicEntries || null, maxTokens: tokenBudgetLabel(), maxTokensIncludesExempt: s.maxTokensIncludesExempt, budgetSlackMode: s.budgetSlackMode, budgetSlackPercent: s.budgetSlackPercent || 0 },
+        // `tokenizer` is what the per-row `tokens` counts were produced by. Without it those counts are
+        // unreadable — a sample re-simulated after a model switch would report a budget that never existed.
+        budget: { maxTotalEntries: s.maxTotalEntries || null, maxDynamicEntries: s.maxDynamicEntries || null, maxTokens: tokenBudgetLabel(), maxTokensIncludesExempt: s.maxTokensIncludesExempt, budgetSlackMode: s.budgetSlackMode, budgetSlackPercent: s.budgetSlackPercent || 0, tokenizer: getTokenizerModel() },
         layout: { insertionOrder: presentationBaseLabel(s.presentationOrder), tiered: !!s.presentationTiered },
         books: { worldPriorityMode: s.worldPriorityMode, attached },
     };
@@ -2221,6 +2255,25 @@ function defaultSampleName() {
 }
 
 /**
+ * Presentation order for both grading tables: gradeable first, then persisted stickies, then constants —
+ * and inside each block, best first.
+ *
+ * NOT capture order. `ranked` hoists stickies and constants to the front in AUTHORED order so the budget
+ * walk is a prefix cut (selection.mjs), which means the always-on rows take `#` 0,1,2 and would otherwise
+ * head the grading list for a structural reason rather than a relevance one — the opposite of grading the
+ * strongest candidates while attention is freshest.
+ *
+ * `rank` is supplied by the caller because the two graders have different orderings available. /wa-grade
+ * has ONE arm, so its fused `score` is meaningful and sorts descending. A super-grade union spans arms
+ * whose fused scores were computed under different parameters and are not comparable, so it sorts on
+ * `bestRank` — ordinal, and the only cross-arm quantity that means the same thing in every row.
+ */
+const BLOCK_ORDER = { dynamic: 0, sticky: 1, constant: 2 };
+const gradeOrder = (rows, rank) => rows
+    .map((row, i) => ({ row, i }))
+    .sort((a, b) => (BLOCK_ORDER[a.row.block] ?? 0) - (BLOCK_ORDER[b.row.block] ?? 0) || rank(a.row) - rank(b.row));
+
+/**
  * Grades the current scene and writes a self-contained sample for eval/graded-scene-grid.mjs.
  *
  * Runs the real /wa-debug pipeline first, then grades the rows it produced — so the grades attach to the
@@ -2272,27 +2325,43 @@ async function gradeScene(named) {
         return '';
     }
 
-    const gradeable = rows.map((row, i) => ({ row, entry: entries[i], i })).filter(x => !isReference(x.row));
+
+    // GRADEABLE MEANS THE RUNTIME CLASS IS `dynamic` — WA chose it this turn. The other two are excluded
+    // for different reasons, and neither is a relevance judgement WA can be scored on:
+    //   constant  declares relevance unconditionally; there is no per-turn call to make.
+    //   sticky    means the effect was ARMED BEFORE THIS SCAN (isEffectActive, line ~1638), so the entry
+    //             is in the prompt because a previous turn put it there. Judging it relevant or not is a
+    //             verdict on the sticky VALUE — an authoring defect — not on ranking, and pooling those
+    //             into the grade set would contaminate a ranker metric with authoring calls.
+    // An entry with `sticky` CONFIGURED that fired this scan is not in that class: the effect is not yet
+    // armed, so it classifies `dynamic` and grades like any other activation. isReference() lumps the
+    // configured value in with the runtime one; left alone here because the eval side still reads it.
+    const gradeable = rows.map((row, i) => ({ row, entry: entries[i], i })).filter(x => x.row.block === 'dynamic');
     const scaffold = rows.length - gradeable.length;
     const esc = s => escapeHtml(String(s ?? ''));
 
     const wrap = document.createElement('div');
     wrap.innerHTML = '<h3 style="margin:0 0 0.25em;">Grade this scene</h3>'
-        + `<small style="display:block;opacity:0.7;margin-bottom:0.5em;">${gradeAnchorLine()} ${gradeable.length} retrieved entries${scaffold ? `; ${scaffold} constant/sticky row(s) listed but not graded — always-on, so relevance didn't choose them` : ''}.</small>`
+        + `<small style="display:block;opacity:0.7;margin-bottom:0.5em;">${gradeAnchorLine()} ${gradeable.length} retrieved entries${scaffold ? `; ${scaffold} constant/persisting-sticky row(s) listed but not graded — WA did not choose them this turn` : ''}.</small>`
         + '<details style="margin-bottom:0.75em;"><summary style="cursor:pointer;">Query text — what retrieval actually matched on '
         + `(${runState.lastQuery.length} chars, depth ${settings().messageDepth})</summary>`
         + `<pre style="white-space:pre-wrap;max-height:14em;overflow:auto;font-size:0.85em;opacity:0.85;border:1px solid var(--SmartThemeBorderColor);padding:0.5em;margin-top:0.5em;">${esc(runState.lastQuery)}</pre></details>`
         + '<table style="width:100%;border-collapse:collapse;font-size:0.9em;"><thead><tr style="text-align:left;">'
         + '<th style="width:4em;">Grade</th><th>Entry</th><th style="width:4em;">fused</th><th style="width:4em;">cos</th><th style="width:4em;">text</th><th style="width:4em;">keys</th><th style="width:4em;"></th></tr></thead><tbody>'
-        + rows.map((row, i) => {
-            const scaff = isReference(row);
+        // Presented in block + score order, NOT capture order (see gradeOrder). `i` stays the CAPTURE
+        // index because every data-i in this table indexes back into `rows`/`entries`.
+        + gradeOrder(rows, r => -(r.score ?? -Infinity)).map(({ row, i }) => {
+            const scaff = row.block !== 'dynamic';
             const num = n => (n == null ? '·' : String(n));
             const cell = scaff
                 ? `<span style="opacity:0.5;font-size:0.85em;">${row.block === 'constant' ? 'const' : 'sticky'}</span>`
                 : `<input type="number" class="wa-grade text_pole" data-i="${i}" min="0" max="4" step="1" value="0" title="${esc(GRADE_ANCHORS.map((a, g) => `${g}: ${a}`).join('\n'))}" style="width:4em;padding:2px 4px;">`;
             return `<tr style="border-top:1px solid var(--SmartThemeBorderColor);${scaff ? 'opacity:0.6;' : ''}">`
                 + `<td>${cell}</td>`
-                + `<td>${esc(row.title)}<br><small style="opacity:0.5;">${esc(row.world)} · uid ${num(row.uid)}</small>${(row.why ?? []).map(w => `<br><small style="opacity:0.65;">🔑 ${esc(w.key)}${w.count > 1 ? ` ×${w.count}` : ''}${w.excerpt ? ` — <span style="opacity:0.8;">${esc(w.excerpt)}</span>` : ''}</small>`).join('')}</td>`
+                // 🔗 marks a VECTORIZED entry, as the super-grade table does. The two graders show the
+                // same rows and must not disagree about what they are: a divergence here is a bug in
+                // whichever side computed something instead of reading it.
+                + `<td>${row.cut ? `<i class="fa-solid fa-scissors" style="opacity:0.55;margin-right:0.35em;" title="cut by the budget${row.cutBy ? ` — ${esc(row.cutBy)} cap` : ''}${row.tokens ? `; ${row.tokens} tokens` : ''}"></i>` : ''}${entries[i]?.vectorized ? '🔗 ' : ''}${esc(row.title)}<br><small style="opacity:0.5;">${esc(row.world)} · uid ${num(row.uid)}</small>${(row.why ?? []).map(w => `<br><small style="opacity:0.65;">🔑 ${esc(w.key)}${w.count > 1 ? ` ×${w.count}` : ''}${w.excerpt ? ` — <span style="opacity:0.8;">${esc(w.excerpt)}</span>` : ''}</small>`).join('')}</td>`
                 + `<td>${num(row.score)}</td><td>${num(row.cosine)}</td><td>${num(row.text)}</td><td>${num(row.keys)}</td>`
                 + `<td><button class="menu_button wa-viewtext" data-i="${i}" style="padding:2px 6px;font-size:0.85em;">text</button></td></tr>`;
         }).join('')
@@ -2561,26 +2630,47 @@ async function superGradePopup({ captures, union, entryOf, prior: prior0 = [], s
     const paint = () => {
         const typed = new Map([...body.querySelectorAll('.wa-grade')].filter(i => i.dataset.dirty).map(i => [i.dataset.key, i.value]));
         const { fresh, known, priorOf } = splitGraded(union.rows, prior);
+        // Counted over the GRADEABLE subset — the union now carries reference rows for completeness, and
+        // "N to grade" must not count rows this table renders as uneditable.
+        const freshN = fresh.filter(r => r.block === 'dynamic').length;
+        const scaffoldN = union.rows.filter(r => r.block !== 'dynamic').length;
 
-        body.innerHTML = `<small style="display:block;opacity:0.7;margin-bottom:0.5em;">${fresh.length} to grade`
-            + `${known.length ? `; ${known.length} judged in an earlier round (pre-filled — edit any you disagree with, untouched rows carry through as shown)` : ''}.</small>`
+        body.innerHTML = `<small style="display:block;opacity:0.7;margin-bottom:0.5em;">${freshN} to grade`
+            + `${known.length ? `; ${known.length} judged in an earlier round (pre-filled — edit any you disagree with, untouched rows carry through as shown)` : ''}`
+            + `${scaffoldN ? `; ${scaffoldN} constant/persisting-sticky row(s) listed but not graded — WA did not choose them this turn` : ''}.</small>`
             + '<table style="width:100%;border-collapse:collapse;font-size:0.9em;"><thead><tr style="text-align:left;">'
             + '<th style="width:4em;">Grade</th><th>Entry</th><th style="width:9em;">surfaced by</th><th style="width:4em;">best#</th><th style="width:4em;">cos</th><th style="width:4em;">text</th><th style="width:4em;">keys</th><th style="width:4em;"></th></tr></thead><tbody>'
-            + union.rows.map((row, i) => {
+            // Block + bestRank order. Fused scores are not comparable across arms, so bestRank is the
+            // only cross-arm quantity that means the same thing in every row (see gradeOrder).
+            + gradeOrder(union.rows, r => r.bestRank ?? Infinity).map(({ row, i }) => {
                 const key = rowKey(row);
                 const num = n => (n == null ? '·' : String(n));
                 const done = priorOf.has(key);
                 // Prior rows are inputs too, pre-filled with the (remapped) earlier grade: an edit re-emits
                 // the row as a fresh grade and mergeGrades is last-wins, so the edit overrides the prior.
                 // A carried-over edit stays dirty across repaints, or the next repaint would revert it.
-                const cell = `<input type="number" class="wa-grade text_pole" data-key="${esc(key)}" data-i="${i}" min="0" max="4" step="1" ${typed.has(key) ? 'data-dirty="1" ' : ''}value="${esc(typed.get(key) ?? (done ? priorOf.get(key) : '0'))}" title="${esc(GRADE_ANCHORS.map((a, g) => `${g}: ${a}`).join('\n'))}" style="width:4em;padding:2px 4px;">`;
+                //
+                // Reference rows are LISTED, NOT GRADED, exactly as /wa-grade shows them. unionArms now
+                // keeps them so the sample is complete; declining to grade them is this layer's call, and
+                // it has to be made here or the grader is asked to judge an always-on entry.
+                const cell = row.block !== 'dynamic'
+                    ? `<span style="opacity:0.5;font-size:0.85em;">${row.block === 'constant' ? 'const' : 'sticky'}</span>`
+                    : `<input type="number" class="wa-grade text_pole" data-key="${esc(key)}" data-i="${i}" min="0" max="4" step="1" ${typed.has(key) ? 'data-dirty="1" ' : ''}value="${esc(typed.get(key) ?? (done ? priorOf.get(key) : '0'))}" title="${esc(GRADE_ANCHORS.map((a, g) => `${g}: ${a}`).join('\n'))}" style="width:4em;padding:2px 4px;">`;
                 return `<tr style="border-top:1px solid var(--SmartThemeBorderColor);${done ? 'opacity:0.55;' : ''}">`
                     + `<td>${cell}</td>`
-                    + `<td>${esc(row.title)}<br><small style="opacity:0.5;">${esc(row.world)} · uid ${num(row.uid)}</small>${(row.why ?? []).map(w => `<br><small style="opacity:0.65;">🔑 ${esc(w.key)}${w.count > 1 ? ` ×${w.count}` : ''}${w.excerpt ? ` — <span style="opacity:0.8;">${esc(w.excerpt)}</span>` : ''}</small>`).join('')}</td>`
+                    // 🔗 marks a VECTORIZED entry. Nothing else in this table says so — a non-null cosine
+                    // is the only tell, and it is the wrong one, since a vectorized entry that failed
+                    // retrieval also shows none. It matters here because whether a row can carry a keys
+                    // signal at all depends on it.
+                    + `<td>${row.cut ? `<i class="fa-solid fa-scissors" style="opacity:0.55;margin-right:0.35em;" title="cut by the budget${row.cutBy ? ` — ${esc(row.cutBy)} cap` : ''}${row.tokens ? `; ${row.tokens} tokens` : ''}"></i>` : ''}${union.entries[i]?.vectorized ? '🔗 ' : ''}${esc(row.title)}<br><small style="opacity:0.5;">${esc(row.world)} · uid ${num(row.uid)}</small>${(row.why ?? []).map(w => `<br><small style="opacity:0.65;">🔑 ${esc(w.key)}${w.count > 1 ? ` ×${w.count}` : ''}${w.excerpt ? ` — <span style="opacity:0.8;">${esc(w.excerpt)}</span>` : ''}</small>`).join('')}</td>`
                     // Which arms surfaced a row is the pooling diagnostic: rows only one arm found are where
-                    // the overlap assumption is failing, and they are why that arm is in the list.
-                    + `<td><small style="opacity:0.7;">${esc(row.arms.join(', '))}</small></td>`
-                    + `<td>${num(row.bestRank)}</td><td>${num(row.cosine)}</td><td>${num(row.text)}</td><td>${num(row.keys)}</td>`
+                    // the overlap assumption is failing, and they are why that arm is in the list. The arm
+                    // that SUPPLIED the numbers is underlined, because the signal columns are one arm's
+                    // measurements and a six-arm list beside them otherwise reads as "all of these agree".
+                    + `<td><small style="opacity:0.7;">${row.arms.map(a => (a === row.from ? `<u>${esc(a)}</u>` : esc(a))).join(', ')}</small></td>`
+                    // A borrowed signal is marked with the arm it came from: absent-filled, never blended,
+                    // so the reader can tell a measurement from a fill (see unionArms).
+                    + `<td>${num(row.bestRank)}</td>${['cosine', 'text', 'keys'].map(s => `<td>${num(row[s])}${row.filled?.[s] ? `<br><small style="opacity:0.5;font-size:0.75em;" title="filled from the ${esc(row.filled[s])} arm — this arm could not measure it">${esc(row.filled[s])}</small>` : ''}</td>`).join('')}`
                     + `<td><button class="menu_button wa-viewtext" data-i="${i}" style="padding:2px 6px;font-size:0.85em;">text</button></td></tr>`;
             }).join('')
             + '</tbody></table>';
@@ -2700,8 +2790,10 @@ async function superGradeScene(named) {
     }
 
     const union = unionArms(captures);
-    if (!union.rows.length) {
-        toastr.warning('Every activated row was constant/sticky — relevance chose nothing to grade.', 'Worlds Apart');
+    // Tested on the gradeable subset, not on the union: since unionArms keeps reference rows, a scene with
+    // nothing but constants now has a non-empty union and would have opened an ungradeable popup.
+    if (!union.rows.some(r => r.block === 'dynamic')) {
+        toastr.warning('Every activated row was constant or a persisting sticky — relevance chose nothing to grade.', 'Worlds Apart');
         return '';
     }
 
@@ -2760,7 +2852,9 @@ async function superGradeScene(named) {
             },
             // Every non-reference row of every arm is in the union, and the union is graded in full — so
             // unlike /wa-grade this is an exact count of judged rows rather than a conservative proxy.
-            gradedCandidates: cap.rows.filter(r => !isReference(r)).length,
+            // Counts what a human was actually offered — constants excepted, stickies included, matching
+            // the two grading tables. It is the boundary the harness reads to know where grades stop.
+            gradedCandidates: cap.rows.filter(r => r.block === 'dynamic').length,
             now: new Date().toISOString().slice(0, 10),
         });
         built.push({ arm: cap.arm, sample });
@@ -2828,7 +2922,7 @@ async function superEvalScene() {
         depth: a.depth ?? manifest.depth ?? '?',
     }));
     const union = unionArms(captures);
-    if (!union.rows.length) {
+    if (!union.rows.some(r => r.block === 'dynamic')) {
         toastr.warning('No gradeable candidate rows in this file.', 'Worlds Apart');
         return '';
     }

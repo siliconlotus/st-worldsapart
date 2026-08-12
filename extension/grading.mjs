@@ -167,26 +167,55 @@ export const rowKey = row => `${row.world ?? ''}${US}${row.uid}`;
  * the pet of one configuration. Ordered by best rank achieved across arms, so the strongest candidates are
  * graded while attention is freshest.
  *
- * Reference rows are dropped here rather than listed-but-disabled as /wa-grade does: across N arms the same
- * constant would appear N times to no purpose, and relevance never chose it in any of them.
+ * REFERENCE ROWS ARE KEPT, deduped like any other. They were dropped here — on the grounds that the same
+ * constant appearing N times serves no grader — which quietly made capture a function of what the UI
+ * intended to display: a super-grade sample recorded ZERO constant or sticky rows, while a plain /wa-grade
+ * of the same scene recorded them listed-but-ungraded. A sample is the complete package of what the run
+ * selected; whether a row is offered for grading is the UI's call, made downstream from this. Dedup already
+ * solves the N-times problem the old rule was aimed at.
+ * ABSENT SIGNALS ARE FILLED FROM AN ARM THAT HAS THEM; competing ones never are. The two are different
+ * operations and only the second is the blend this function refuses. `keys` under `suppressVectorKeys` is
+ * not a low score, it is a quantity that arm cannot express — so a vectorized entry showed no keys signal
+ * on every row except the one `keys-live` happened to surface first, which made the arm's entire purpose
+ * invisible in the UI that exists to motivate running it. Filling the hole is honest; picking a winner
+ * between two arms that both measured a value would not be.
+ *
+ * ONLY THE RAW PER-SIGNAL MEASUREMENTS ARE FILLABLE (cosine, text, keys). `score` is fused and the ranks
+ * are positions within one arm's ranking, so both are arm-relative — a value copied from elsewhere would
+ * mean something different in its new row. Those stay as the supplying arm left them.
+ *
+ * `from` names the arm the base row came from and `filled` maps each borrowed signal to its source, so the
+ * table can say where every number originated. A row whose columns come from two configurations without
+ * saying so is the failure this replaces, not a smaller version of it.
+ *
+ * ONE CAVEAT ON LEGACY SAMPLES: captures written before `Number.isFinite` replaced a truthiness test in
+ * worldsapart.js recorded a measured 0 as null, so a fill can overwrite a real zero there. New captures
+ * distinguish the two.
  *
  * @param {Array<{arm: string, rows: object[], entries: object[]}>} arms Per-arm captures, aligned rows/entries
- * @returns {{rows: object[], entries: object[]}} Deduped rows (each with `arms` and `bestRank`) + aligned entries
+ * @returns {{rows: object[], entries: object[]}} Deduped rows (each with `arms`, `bestRank`, `from`, `filled`) + aligned entries
  */
+const FILLABLE = ['cosine', 'text', 'keys'];
+
 export function unionArms(arms) {
     const seen = new Map();   // rowKey -> { row, entry }
     for (const { arm, rows, entries } of arms ?? []) {
         (rows ?? []).forEach((row, i) => {
-            if (isReference(row)) return;
             const key = rowKey(row);
             const hit = seen.get(key);
             const rank = Number(row['#'] ?? Infinity);
             if (hit) {
                 hit.row.arms.push(arm);
                 hit.row.bestRank = Math.min(hit.row.bestRank, rank);
+                for (const sig of FILLABLE) {
+                    if (hit.row[sig] == null && row[sig] != null) {
+                        hit.row[sig] = row[sig];
+                        (hit.row.filled ??= {})[sig] = arm;
+                    }
+                }
                 return;
             }
-            seen.set(key, { row: { ...row, arms: [arm], bestRank: rank }, entry: entries?.[i] });
+            seen.set(key, { row: { ...row, arms: [arm], bestRank: rank, from: arm }, entry: entries?.[i] });
         });
     }
     const merged = [...seen.values()].sort((a, b) => a.row.bestRank - b.row.bestRank);

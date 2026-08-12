@@ -165,19 +165,48 @@ const armB = {
 };
 
 const u = unionArms([armA, armB]);
-eq(u.rows.length, 3, 'union dedupes across arms and drops reference rows');
-eq(u.rows.some(r => r.uid === 2), false, 'the constant is not offered for grading in any arm');
+// THE UNION IS THE COMPLETE PACKAGE. Reference rows are kept and deduped like any other — a sample records
+// what the run selected, and whether a row is offered for grading is the popup's call (it renders these
+// uneditable, as /wa-grade does). Dropping them here made capture a function of display intent, and left
+// super-grade samples with zero constant/sticky rows where a plain /wa-grade of the same scene had them.
+eq(u.rows.length, 4, 'union dedupes across arms and KEEPS reference rows');
+eq(u.rows.some(r => r.uid === 2), true, 'the constant is captured, not dropped');
+eq(u.rows.filter(r => r.uid === 2).length, 1, 'the constant is deduped like any other row, so N arms do not list it N times');
 eq(u.rows.find(r => r.uid === 4) !== undefined, true, 'an entry only a sibling arm surfaced is pooled');
 eq(JSON.stringify(u.rows.find(r => r.uid === 3).arms), '["shipped","no-filter"]', 'a shared row records every arm that surfaced it');
 eq(u.rows.find(r => r.uid === 3).cosine, 0.5, 'a duplicate keeps the FIRST arm\'s signals, never a blend');
-// Ordered by best rank across arms: Maren reached #0 under no-filter, so it outranks Ironhold (#1).
-eq(u.rows.map(r => r.uid).join(','), '1,3,4', 'union is ordered by best rank achieved across arms');
-eq(u.entries.map(e => e.uid).join(','), '1,3,4', 'entries stay aligned with rows after dedupe + sort');
+eq(u.rows.find(r => r.uid === 3).from, 'shipped', 'the row records which arm supplied its numbers');
 
-// Round 2: entries 1 and 3 were graded last round, so only 4 needs a human.
+// ABSENT-FILL, and the line it must not cross. `keys` is unmeasurable under suppressVectorKeys, so a later
+// arm that CAN measure it fills the hole and says where it came from. A signal the first arm already
+// measured is never overwritten — that would be the blend this function exists to refuse.
+const armKeys = {
+    arm: 'keys-live',
+    rows: [
+        { title: 'Villa', world: 'W', uid: 1, block: 'dynamic', sticky: 0, '#': 0, cosine: 0.1, keys: 2.5 },
+        { title: 'Maren', world: 'W', uid: 3, block: 'dynamic', sticky: 0, '#': 1, cosine: 0.7, keys: 1.5 },
+    ],
+    entries: [{ uid: 1 }, { uid: 3 }],
+};
+const uf = unionArms([armA, armKeys]);
+const villa = uf.rows.find(r => r.uid === 1);
+eq(villa.keys, 2.5, 'an absent signal is filled from an arm that could measure it');
+eq(villa.filled.keys, 'keys-live', 'the fill records its source arm');
+eq(villa.cosine, 0.9, 'a signal the first arm measured is NOT overwritten by a later arm');
+eq(villa.filled.cosine, undefined, 'and is not marked as filled');
+eq(villa.from, 'shipped', 'the base row still names its own arm');
+// Ordered by best rank across arms: Maren reached #0 under no-filter, so it outranks the constant (#1).
+eq(u.rows.map(r => r.uid).join(','), '1,3,2,4', 'union is ordered by best rank achieved across arms');
+eq(u.entries.map(e => e.uid).join(','), '1,3,2,4', 'entries stay aligned with rows after dedupe + sort');
+
+// Round 2: entries 1 and 3 were graded last round. splitGraded answers ONE question — does a prior grade
+// exist — so the ungraded constant (uid 2) lands in `fresh` alongside 4. That is not a bug and must not be
+// "fixed" here: the reference filter belongs to the popup, which renders those rows uneditable and counts
+// only the gradeable ones. Teaching splitGraded about reference rows would put the same rule in two places.
 const prior = [{ title: 'Villa', world: 'W', uid: 1, grade: 5 }, { title: 'Maren', world: 'W', uid: 3, grade: 4 }];
 const split = splitGraded(u.rows, prior);
-eq(split.fresh.map(r => r.uid).join(','), '4', 'only ungraded rows are surfaced for grading');
+eq(split.fresh.map(r => r.uid).join(','), '2,4', 'splitGraded splits on prior grades alone, reference rows included');
+eq(split.fresh.filter(r => !isReference(r)).map(r => r.uid).join(','), '4', 'the gradeable fresh rows are what the popup counts');
 eq(split.known.length, 2, 'already-judged rows are reported, not silently dropped');
 eq(split.priorOf.get(rowKey({ world: 'W', uid: 3 })), 4, 'prior grades are recoverable for display');
 // A retitled entry must stay matched — title drift must not trigger a regrade from zero.
