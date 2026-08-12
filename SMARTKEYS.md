@@ -185,8 +185,8 @@ nobody means anything different by them:
 
 | written | matches |
 |---|---|
-| `'` `’` `‘` | each other |
-| `"` `“` `”` | each other |
+| `'` `’` `‘` `‚` `‛` `ʼ` `ʹ` `′` `´` `` ` `` `‹` `›` | each other |
+| `"` `“` `”` `„` `‟` `″` `ʺ` `«` `»` | each other |
 | `—` (em dash) | `--` |
 | `–` (en dash) | `-` |
 | `…` | `...` |
@@ -199,7 +199,9 @@ the other joins.
 
 Nothing that can *carry meaning* is folded. A fold applies to the text being scanned, so it erases a
 distinction for every key at once and no flag can ask for it back. Case is the one exception, and only
-because `^` exists to opt out.
+because `^` exists to opt out. That is also why the CJK brackets `《》` and `「」` are **not** in the
+table above: they are not a typeset `"`, they split the job of one — `《》` for titles, `「」` for
+speech — so folding them would throw a distinction away rather than recover one.
 
 **Hyphens are literal, in both directions.** `sci-fi` does not match `sci fi`, and `sci fi` does not
 match `sci-fi`. Prose picks per phrase, so if a compound is written both ways in your chats, key both

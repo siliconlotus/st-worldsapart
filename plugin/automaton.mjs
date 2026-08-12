@@ -7,11 +7,13 @@
 // records for countKey: two copies of a matcher drift, and the drift surfaces as a scoring difference
 // nobody can trace back.
 
-/** Apostrophe variants that authors and models mix freely: right/left single quotes, the modifier
- *  letter apostrophe, prime, acute and grave. All collapse to ASCII ' before matching. */
-const APOSTROPHES = /[‘’ʼ´`′]/g;
-/** Typographic double quotes. A key field takes the straight one; prose arrives typeset. */
-const DOUBLE_QUOTES = /[“”]/g;
+/** Single-quote variants that authors and models mix freely: right/left single quotes, the low and
+ *  high-reversed forms, the modifier letters, prime, acute, grave and the single guillemets. All
+ *  collapse to ASCII ' before matching. */
+const APOSTROPHES = /[‘’‚‛ʼʹ´`′‹›]/g;
+/** Typographic double quotes, the same family one level up: curly, low, high-reversed, double prime,
+ *  its modifier letter, and the guillemets. A key field takes the straight one; prose arrives typeset. */
+const DOUBLE_QUOTES = /[“”„‟″ʺ«»]/g;
 /** Combining marks — the signal that a string may be decomposed (NFD). Guarding the NFC pass on this
  *  makes it free where it is not needed: the test measures 0.000 ms on a 15 KB window with no marks,
  *  against 0.019 ms to compose unconditionally. It only costs when it has something to do. */
@@ -41,9 +43,16 @@ const COMBINING = /[̀-ͯ᪰-᫿᷀-᷿⃐-⃿︠-︯]/;
  * because the exposure is asymmetric: text pasted from another source or typed on another input method
  * arrives decomposed, and the guard above makes the check cost nothing when it is not needed.
  *
- * NOT included, measured absent: zero-width characters (0), ligatures (0), U+2212 minus (0), angle and
- * low quotes (0), fullwidth forms (14,367 in chat but all punctuation — a key is a word, and the
- * fullwidth comma is already a non-word character, so it makes no difference to a match).
+ * A character joins the quote classes if it is a typographic VARIANT of the ASCII form, and not if it
+ * is FINER-GRAINED than it. A variant collapses nothing — „ and “ are the double quote, differently
+ * typeset, and the guillemets are quotation in Russian and French with no narrower job. A finer-grained
+ * mark imports a distinction its writing system draws and ASCII cannot express, and that loss lands in
+ * the haystack where no key can ask for it back. So 《》 (titles) and 「」 (speech) stay out: they
+ * partition what " collapses.
+ *
+ * NOT included, measured absent: zero-width characters (0), ligatures (0), U+2212 minus (0), fullwidth
+ * forms (14,367 in chat but all punctuation — a key is a word, and the fullwidth comma is already a
+ * non-word character, so it makes no difference to a match).
  */
 export const normalizeOrthography = s => {
     s = String(s ?? '');

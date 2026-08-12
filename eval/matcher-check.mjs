@@ -68,9 +68,22 @@ eq(countKey("cap'n joe", `Cap${CURLY}n Joe`, true, false), 0, 'case-sensitive st
 // Whole-word path shares the normalised needle.
 eq(countKey("don't", `I don${CURLY}t think so`, false, true), 1, 'whole-word matching normalises too');
 // Other variants collapse to the same form.
-for (const [name, ch] of [['left single quote', '‘'], ['modifier letter', 'ʼ'], ['prime', '′'], ['acute', '´'], ['grave', '`']]) {
+for (const [name, ch] of [['left single quote', '‘'], ['modifier letter', 'ʼ'], ['prime', '′'], ['acute', '´'], ['grave', '`'],
+    ['modifier letter prime', 'ʹ'], ['low-9 quote', '‚'], ['high-reversed-9 quote', '‛'],
+    ['left single guillemet', '‹'], ['right single guillemet', '›']]) {
     eq(countKey("Cap'n", `Cap${ch}n`, false, false), 1, `${name} normalises`);
 }
+// The double family, same test. `″` was the asymmetry: `′` was in the class and `″` in none, so a key
+// `5'10"` half-matched prose written `5′10″` and `6" pipe` missed `6″ pipe` outright.
+for (const [name, ch] of [['double prime', '″'], ['modifier letter double prime', 'ʺ'], ['low-9 double', '„'],
+    ['high-reversed-9 double', '‟'], ['left guillemet', '«'], ['right guillemet', '»']]) {
+    eq(countKey('6" pipe', `a 6${ch} pipe`, false, false), 1, `${name} normalises`);
+}
+eq(countKey(`5'10"`, '5′10″ barefoot', false, false), 1, 'both primes fold, so a height key matches typeset prose');
+// FINER-GRAINED, not variants: these partition what " collapses, so folding them would erase a
+// distinction in the haystack that no key could ask back.
+eq(countKey('"title"', '《title》', false, false), 0, 'CJK angle brackets are NOT folded');
+eq(countKey('"spoken"', '「spoken」', false, false), 0, 'CJK corner brackets are NOT folded');
 // Orthographic variants normalise; anything that could carry meaning does not (see normalizeOrthography).
 eq(countKey('a-b', 'a–b', false, false), 1, 'en dash normalises to hyphen');
 eq(countKey('"quoted"', '“quoted”', false, false), 1, 'curly double quotes normalise');
