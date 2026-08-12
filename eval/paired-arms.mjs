@@ -119,6 +119,25 @@ const ARMS = {
     // here because they measured nothing, and an arm that measures nothing still costs a comparison in every
     // future run's multiplicity count.
     'admit=cosine': { admit: 'cosine' },
+    // THE HIGH-BAND HOLD-OUT. Sommers curation deliberately retained every key firing above 15.6% of
+    // messages (whole-word, frozen chat) so keep-vs-remove could be answered here instead of by intuition:
+    // Jeffrey 39%, Liam 29%, Brad 25%, Arthur 22%, Shane 21%. Teddy sits AT 15.6% and was judged per-entry
+    // (removed from 9 entries, kept on 71), so it is not in the arm. Removal semantics via scoringKeys:
+    // stops scoring and keyword-activating; gazetteer untouched (see scene.mjs). READ THE SIGN, per the
+    // curator: consistent negative = removal hurts (keep wins); consistent positive = removal helps; flat
+    // or mixed = "not better, not worse" — which licenses nothing beyond itself.
+    'dropKeys=hiband': { dropKeys: ['Jeffrey', 'Liam', 'Brad', 'Arthur', 'Shane'] },
+    // UNIFORM CAST PLACEMENT. The curation kept main-cast bare names only where the generator had already
+    // put them, so dropKeys=hiband measured removal from INCONSISTENT placement. These arms fill the gap
+    // mechanically (scene.mjs addCastKeys: name appended wherever entry content mentions it whole-word and
+    // no key form exists — 700 (entry,name) fills over the curated book, dominated by pack principals:
+    // Jeffrey 178 fills vs 2 keyed, Brad 151/1, Shane 134/3). Kyle excluded (player persona), Sara and Ian
+    // excluded (known orthographic collisions the fill would reintroduce).
+    // cast+dropHi is the interaction: uniform placement of the non-band cast with the band absent — read it
+    // against addKeys=cast, not only against baseline, to see whether the band still earns its keep once
+    // placement is uniform.
+    'addKeys=cast': { addCastKeys: ['Jeffrey', 'Shane', 'Brad', 'Micah', 'Teddy', 'Alex', 'Dylan', 'Liam', 'Marjorie', 'Valentina', 'Arthur'] },
+    'addKeys=cast+dropHi': { addCastKeys: ['Jeffrey', 'Shane', 'Brad', 'Micah', 'Teddy', 'Alex', 'Dylan', 'Liam', 'Marjorie', 'Valentina', 'Arthur'], dropKeys: ['Jeffrey', 'Liam', 'Brad', 'Arthur', 'Shane'] },
     // The shipped wrong-book failsafe (state.mjs uncenteredGate). Samples score at gate 0 for
     // reproducibility, so this arm is the tripwire: it must stay ~0.0000 on every real scene — the gate's
     // whole contract is "free on the right book" — and a nonzero Δ here means the calibration broke.

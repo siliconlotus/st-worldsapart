@@ -113,6 +113,8 @@ export const sceneParams = (S, overrides = {}) => ({
     // value they in fact ran under.
     meanCentered: true,
     maxVectorEntries: 20, suppressVectorKeys: true, scoreVectorKeys: false, entityFilter: true,
+    // Exact key strings to treat as removed from the book (see scoringKeys). Null = none.
+    dropKeys: null,
     queryMode: 'messages', retrievalMode: 'hybrid',
     // How a VECTORIZED entry's chunk earns admission to the candidate set. 'either' is what the plugin ships
     // (scoreCollection: `score >= threshold || bm25 > 0`), so a chunk with a weak embedding can still enter on
@@ -213,8 +215,37 @@ export function makeGradeOf(grades, isExcluded) {
  *  scan time (worldsapart.js suppressKeys), and scoreVectorKeys is what re-admits the stashed originals —
  *  offline the originals ARE e.key, since samples embed the book raw. Scoring raw keys unconditionally gave
  *  vectorized entries a keys signal production can never produce, the keyword-side twin of the gazetteer
- *  bug documented in loadScene. */
-export const scoringKeys = (e, P) => (e.vectorized && P.suppressVectorKeys && !P.scoreVectorKeys) ? [] : (e.key ?? []);
+ *  bug documented in loadScene.
+ *
+ *  P.dropKeys (array of exact key strings) simulates removing those keys from the book: they stop scoring
+ *  AND stop keyword-activating, since stage-2 activation tests `keywordScore > 0` through this same
+ *  function. NOT removed from the gazetteer — a real book edit would also drop them there, so a dropKeys
+ *  arm understates removal by whatever those terms contribute to term weighting. */
+/** Whole-word presence of a bare name in the entry's own content — the mechanical fill rule for
+ *  addCastKeys. Per-name regex cached at module level; case-insensitive to match the default key flags. */
+const nameRe = new Map();
+const mentions = (name, content) => {
+    let re = nameRe.get(name);
+    if (!re) nameRe.set(name, re = new RegExp(`(?<!\\w)${name.toLowerCase()}(?!\\w)`));
+    return re.test((content ?? '').toLowerCase());
+};
+
+export const scoringKeys = (e, P) => {
+    let base = e.key ?? [];
+    // P.addCastKeys (array of bare names) simulates uniform placement: each name is appended wherever the
+    // entry's CONTENT mentions it whole-word and no key already carries it (exact or "Name Surname" form).
+    // Applied before the suppress gate so a filled key behaves exactly like a book key would.
+    if (P.addCastKeys?.length) {
+        const have = base.map(k => k.toLowerCase());
+        const fills = P.addCastKeys.filter(n => {
+            const ln = n.toLowerCase();
+            return !have.some(k => k === ln || k.startsWith(ln + ' ')) && mentions(n, e.content);
+        });
+        if (fills.length) base = [...base, ...fills];
+    }
+    const ks = (e.vectorized && P.suppressVectorKeys && !P.scoreVectorKeys) ? [] : base;
+    return P.dropKeys ? ks.filter(k => !P.dropKeys.includes(k)) : ks;
+};
 
 /** Keyword score via the SHARED matcher.keywordScore (which mirrors ST core's matchKeys). */
 export const makeKeywordScore = P => (e, text, k1) =>
@@ -316,7 +347,19 @@ export async function scoreScene({ sample: S, overrides = {}, k = 10, vectors, m
     const qv = cachedQv ?? await embed(query, { ollama, model });
     const all = scoreAll(P.K1, P.B, tw, qv, query, S.scanText);
 
-    const top = fuse(all, P.LEXW).slice(0, k);
+    // REFERENCE-TIER EXCLUSION — the condensed-list convention from FULLBOOK-AUDIT-2026-08-10 (shared
+    // metrics): ranking metrics remove reference/card entries from the ranked list before computing;
+    // REMOVED, not zero-graded, or they punish the ranker for routing's job. A keyword entry is reference
+    // tier with "triggered == relevant" — its key firing IS the inclusion decision — so assessing it
+    // against a graded ranking is a category error; whether the trigger fires correctly is the
+    // matcher/audit's question. The class label is the audit's mechanical one, provenance not routing:
+    // kind = STMB-marked ? memory : reference — chosen because it derives from what the entry IS and
+    // cannot drift with the configuration being evaluated (vectorized/sticky/constant all can). The
+    // constant/sticky clause keeps isReference (extension/grading.mjs) semantics for marked entries too.
+    const isCard = e => !e || !('stmemorybooks' in e || 'STMB_start' in e) || e.constant || Number(e.sticky) > 0;
+    const rankable = all.filter(r => !isCard(r.entry));
+
+    const top = fuse(rankable, P.LEXW).slice(0, k);
     const unjudged = top.filter(r => !scene.POOL.has(Number(r.uid)));
     // Re-fuse the pooled subset AFTER reading the slice above: fuse mutates, and the subset shares references.
     const g = fuse(all.filter(r => scene.POOL.has(Number(r.uid))), P.LEXW).map(r => gradeOf(r));
