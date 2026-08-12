@@ -444,6 +444,11 @@ let retrievalQueue = Promise.resolve();
 function scoreEntries(searchText, termWeights = null) {
     const run = () => scoreEntriesUnsafe(searchText, termWeights);
     const result = retrievalQueue.then(run, run);
+    // The catch is on the QUEUE, deliberately not on `result` — it stops one rejection from poisoning
+    // every later call, while the rejection still reaches the caller. Do not "tidy" this into
+    // `return result.catch(...)`: that turns every retrieval failure into a silent empty, which is
+    // indistinguishable from the two legitimate empties in retrieve() and is exactly the conflation
+    // reportFailure exists to prevent.
     retrievalQueue = result.catch(() => {});
     return result;
 }
@@ -760,6 +765,12 @@ async function retrieve(chat) {
     const termWeights = await queryTermWeights(searchText);
     const { targets, scores } = await scoreEntries(searchText, termWeights);
 
+    // Two different empties, and conflating them sent people off to tune a threshold that was never
+    // involved: a book with nothing vectorized has no candidates at all, which no threshold affects.
+    if (!targets.length) {
+        console.log('Worlds Apart: no vectorized entries in the active books, so retrieval has nothing to score');
+        return [];
+    }
     if (!scores.size) {
         console.log(`Worlds Apart: nothing cleared the ${settings().scoreThreshold} threshold`);
         return [];
@@ -822,13 +833,61 @@ async function keywordActivations(chat) {
         fallbackDepth: world_info_depth,
         caseSensitiveDefault: world_info_case_sensitive,
         wholeWordsDefault: world_info_match_whole_words,
+        // Owning activation means emitting blindly: a delayUntilRecursion entry matched on chat
+        // must be in the external map so core admits it when its level arrives — under 1.5 core's
+        // own matcher would have found it then, but under the takeover WA is the only route in.
+        blind: Boolean(settings().ownActivation),
     });
+}
+
+/** Distinct failures already surfaced this session, keyed stage␟message (US, never NUL — see CLAUDE.md). */
+const reportedFailures = new Set();
+
+/**
+ * A generation-time failure the USER has to see, not just the console.
+ *
+ * WHY A TOAST. The realistic trigger is not a bad key — the matcher catches its own regex and null
+ * cases — but the ST surface around it: `getSortedEntries`, the inject API, the `world_info_*`
+ * globals. So this fires after someone updates SillyTavern, and it presents to them as "I updated ST
+ * and my lorebook stopped working". A console line does not reach that person.
+ *
+ * WHAT IT CARRIES. Stage, consequence in plain terms, the error's own message, and the top stack
+ * frame — the frame is what separates "ST changed an API" from "WA has a bug", and without it the
+ * only report anyone can file is "WA broke". The console keeps the full trace.
+ *
+ * ONCE PER DISTINCT MESSAGE PER SESSION. This throws every generation once it starts, and a toast
+ * per turn trains the user to dismiss it unread, which is the same as not showing it at all.
+ *
+ * @param {string} stage Which half failed, as the toast title
+ * @param {string} consequence What the user will observe this turn
+ * @param {unknown} error
+ * @param {'error'|'warning'} [severity]
+ */
+function reportFailure(stage, consequence, error, severity = 'error') {
+    console.error(`Worlds Apart: ${stage} — ${consequence}`, error);
+    const cause = String(error?.message ?? error);
+    const key = `${stage}${cause}`;
+    if (reportedFailures.has(key)) return;
+    reportedFailures.add(key);
+    const frame = String(error?.stack ?? '').split('\n')[1]?.trim().replace(/^at\s+/, '');
+    // ST sets toastr.options.escapeHtml = true globally (script.js), which collapses `\n` to a space
+    // and would run all three parts together on one line — so opt out per-toast and escape the parts
+    // by hand. `cause` and `frame` come from an exception, which can carry anything.
+    // closeButton too: the global default is false, and a 20s error the user cannot dismiss is its
+    // own annoyance.
+    toastr[severity](
+        [escapeHtml(consequence),
+            escapeHtml(cause) + (frame ? `<br>&nbsp;&nbsp;at ${escapeHtml(frame)}` : ''),
+            'See the browser console for the full trace.'].join('<br><br>'),
+        `Worlds Apart: ${stage}`,
+        { timeOut: 20000, extendedTimeOut: 15000, escapeHtml: false, closeButton: true },
+    );
 }
 
 /**
  * Stage 1+2 orchestrator: retrieval winners ∪ keyword adds, one FORCE_ACTIVATE emit.
  * The two routes fail independently — a vector-plugin outage must not cost keyword
- * activation, and vice versa; core's own scan still applies either way.
+ * activation, and vice versa.
  * @param {object[]} chat Chat messages
  */
 async function selectAndActivate(chat) {
@@ -838,11 +897,24 @@ async function selectAndActivate(chat) {
     runState.scanChat = chat.slice();
     runState.forcedActivations = new Set();
 
+    // Bucket 2 per-scan state. waOwnsScan goes FALSE first — WA's own getSortedEntries calls
+    // below fire WORLDINFO_ENTRIES_LOADED, and the takeover blanking must not eat the keys WA
+    // is about to match on (a stale true from an aborted scan would).
+    runState.waOwnsScan = false;
+    runState.waMatched = new Set();
+    runState.waRecursionTexts = [];
+    runState.waMinSkew = 0;
+    runState.waCandidates = null;
+
     let winners = [];
     try {
         winners = await retrieve(chat);
     } catch (error) {
-        console.error('Worlds Apart: retrieval failed, falling back to core behavior', error);
+        // A DEGRADATION, not a break: keyword matching still runs below and the takeover still
+        // engages, so keys are handled — only the vector half of this turn is missing.
+        reportFailure('retrieval failed',
+            'Vectorized entries will not be retrieved this turn. Keyword matching is unaffected.',
+            error, 'warning');
         runState.lastScores.clear();
     }
 
@@ -850,7 +922,14 @@ async function selectAndActivate(chat) {
     try {
         adds = await keywordActivations(chat);
     } catch (error) {
-        console.error('Worlds Apart: keyword activation failed, core scan still applies', error);
+        // TOTAL, and the message must say so. "Core scan still applies" was true under bucket 1.5,
+        // when WA only added to core's matches; under the takeover waOwnsScan is set eleven lines
+        // below regardless, blanking every key, so core does not match either. Ruled
+        // (matcher-design.md): WA owns its failure states — it does not hand matching back per turn,
+        // it fails visibly.
+        reportFailure('keyword activation failed',
+            'No entry will activate by keyword this turn. WA has taken over key matching, so SillyTavern will not match them either — the prompt has only retrieved, constant and sticky entries.',
+            error);
     }
 
     // Union provenance: keys WA activated by keyword match alone. Always reassigned (even empty)
