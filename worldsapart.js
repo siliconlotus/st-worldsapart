@@ -2314,6 +2314,34 @@ async function gradeScene(named) {
     }
 
 
+    /**
+ * "I read down to here" — fills every blank grade field ABOVE the deepest one that has a value with 0.
+ *
+ * A grader works a ranked list top-down, and past some rank everything is 0 with the occasional 1. Typing
+ * two dozen zeros to say so is the reason the field used to default to 0, which fabricated a verdict for
+ * every row nobody reached. The deepest field carrying a value IS the boundary claim, so this turns it into
+ * real grades and leaves everything below it blank — unjudged, and honestly so.
+ *
+ * Writes 0 into the DOM rather than recording a flag, so the sample gains no new semantics: those zeros are
+ * ordinary grades the author affirmed, indistinguishable from typed ones because that is what they are.
+ *
+ * @param {HTMLElement} root Container holding the .wa-grade inputs, in display order
+ * @returns {number} How many blanks were filled
+ */
+function fillReadZeros(root) {
+    const inputs = [...root.querySelectorAll('.wa-grade')];
+    const last = inputs.reduce((acc, input, idx) => (String(input.value).trim() !== '' ? idx : acc), -1);
+    let filled = 0;
+    for (let i = 0; i < last; i++) {
+        if (String(inputs[i].value).trim() === '') {
+            inputs[i].value = '0';
+            inputs[i].dataset.dirty = '1';
+            filled += 1;
+        }
+    }
+    return filled;
+}
+
     // GRADEABLE MEANS THE RUNTIME CLASS IS `dynamic` — WA chose it this turn. The other two are excluded
     // for different reasons, and neither is a relevance judgement WA can be scored on:
     //   constant  declares relevance unconditionally; there is no per-turn call to make.
@@ -2330,7 +2358,8 @@ async function gradeScene(named) {
 
     const wrap = document.createElement('div');
     wrap.innerHTML = '<h3 style="margin:0 0 0.25em;">Grade this scene</h3>'
-        + `<small style="display:block;opacity:0.7;margin-bottom:0.5em;">${gradeAnchorLine()} ${gradeable.length} retrieved entries${scaffold ? `; ${scaffold} constant/persisting-sticky row(s) listed but not graded — WA did not choose them this turn` : ''}.</small>`
+        + `<small style="display:block;opacity:0.7;margin-bottom:0.5em;">${gradeAnchorLine()} ${gradeable.length} retrieved entries${scaffold ? `; ${scaffold} constant/persisting-sticky row(s) listed but not graded — WA did not choose them this turn` : ''}. Blank means UNGRADED, not 0.</small>`
+        + '<button class="menu_button wa-fill0" style="margin-bottom:0.5em;padding:2px 8px;font-size:0.85em;" title="Everything above the deepest row you graded becomes 0. Rows below it stay blank — unjudged.">Read down to my last grade: fill blanks above with 0</button>'
         + '<details style="margin-bottom:0.75em;"><summary style="cursor:pointer;">Query text — what retrieval actually matched on '
         + `(${runState.lastQuery.length} chars, depth ${settings().messageDepth})</summary>`
         + `<pre style="white-space:pre-wrap;max-height:14em;overflow:auto;font-size:0.85em;opacity:0.85;border:1px solid var(--SmartThemeBorderColor);padding:0.5em;margin-top:0.5em;">${esc(runState.lastQuery)}</pre></details>`
@@ -2356,6 +2385,11 @@ async function gradeScene(named) {
         + '</tbody></table>';
 
     // Reuses the Studio's entry viewer rather than a second renderer.
+    wrap.querySelector('.wa-fill0')?.addEventListener('click', event => {
+        event.preventDefault();
+        const n = fillReadZeros(wrap);
+        toastr.info(n ? `Filled ${n} blank row(s) above your last grade with 0.` : 'No blanks above your last grade.', 'Worlds Apart');
+    });
     wrap.querySelectorAll('.wa-viewtext').forEach(button => button.addEventListener('click', event => {
         event.preventDefault();
         const entry = entries[Number(button.dataset.i)];
@@ -2634,7 +2668,8 @@ async function superGradePopup({ captures, union, entryOf, prior: prior0 = [], s
 
         body.innerHTML = `<small style="display:block;opacity:0.7;margin-bottom:0.5em;">${freshN} to grade`
             + `${known.length ? `; ${known.length} judged in an earlier round (pre-filled — edit any you disagree with, untouched rows carry through as shown)` : ''}`
-            + `${scaffoldN ? `; ${scaffoldN} constant/persisting-sticky row(s) listed but not graded — WA did not choose them this turn` : ''}.</small>`
+            + `${scaffoldN ? `; ${scaffoldN} constant/persisting-sticky row(s) listed but not graded — WA did not choose them this turn` : ''}. Blank means UNGRADED, not 0.</small>`
+            + '<button class="menu_button wa-fill0" style="margin-bottom:0.5em;padding:2px 8px;font-size:0.85em;" title="Everything above the deepest row you graded becomes 0. Rows below it stay blank — unjudged.">Read down to my last grade: fill blanks above with 0</button>'
             + '<table style="width:100%;border-collapse:collapse;font-size:0.9em;"><thead><tr style="text-align:left;">'
             + '<th style="width:4em;">Grade</th><th>Entry</th><th style="width:9em;">surfaced by</th><th style="width:4em;">best#</th><th style="width:4em;">cos</th><th style="width:4em;">text</th><th style="width:4em;">keys</th><th style="width:4em;"></th></tr></thead><tbody>'
             // Block + bestRank order. Fused scores are not comparable across arms, so bestRank is the
@@ -2678,6 +2713,12 @@ async function superGradePopup({ captures, union, entryOf, prior: prior0 = [], s
         }));
         // A user edit marks the input dirty; only dirty values survive a repaint (see `typed` above).
         body.querySelectorAll('.wa-grade').forEach(input => input.addEventListener('input', () => { input.dataset.dirty = '1'; }));
+        // Re-wired per repaint, and the filled zeros are marked dirty so they survive the next one.
+        body.querySelector('.wa-fill0')?.addEventListener('click', event => {
+            event.preventDefault();
+            const n = fillReadZeros(body);
+            toastr.info(n ? `Filled ${n} blank row(s) above your last grade with 0.` : 'No blanks above your last grade.', 'Worlds Apart');
+        });
     };
 
     head.querySelector('.wa-sg-pick').addEventListener('click', () => head.querySelector('.wa-sg-prior').click());
