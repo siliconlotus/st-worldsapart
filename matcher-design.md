@@ -471,6 +471,25 @@ author typed `'` — and `--` against `—` is visible in both the pattern and t
 Structure-aware even so, since a class member must splice rather than nest and escapes must be left
 alone — `regexClose`'s ECMA-262 scan already tracks both. **Unimplemented.**
 
+**Measured**, one author's 196 chats (1.28 G chars, 3.28 M possessives): 10.6% use a curly apostrophe
+overall, but the share is a property of whoever wrote the chat, not of the corpus — of 144 chats with
+at least 200 possessives, **18 are above 90% curly** (worst 97.6%), 91 sit between 5% and 95%, and 44
+are under 5%. So `/Sara('s)?/` typed with a straight quote does not degrade by a tenth; on 18 chats it
+misses nearly every possessive, and on 91 it misses an unpredictable fraction that moves when the model
+does. The mixed chats are the worse failure: a key that fires SOMETIMES reads as weak rather than
+broken, and every firing-rate measurement here would score it as weak, since those count what matched
+and cannot count what did not.
+
+**The scarcity of regex keys on disk is not evidence against this** — 3 patterns across 44 books
+measures ST core's support and discoverability, which is what this project is removing. An author who
+did not know regex keys existed has not declined to use them. The chat measurement above is admissible
+because it describes the haystack, which is independent of whether anyone has written a pattern yet;
+the key count is not.
+
+Which argues for building it BEFORE the keys exist. A pattern authored against a straight-quote chat
+works, ships, and silently stops on the next model — the failure mode that no test the author runs at
+authoring time can catch.
+
 **`C17` dissolves here** rather than being fixed. The matcher already diverges from core on
 orthography, NFC and Unicode word boundaries; while core activates, that means the audit reports on
 rules that are not what fires. Once WA activates, WA's rules *are* what fires. There is no third form:
