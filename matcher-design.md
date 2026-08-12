@@ -74,6 +74,10 @@ measures on the reference tier is the KEYS, in three divergence classes with thr
 key miss (suggester), window miss (depth/persistence, bucket 1.5), over-fire (prune) —
 `eval/divergence-audit.mjs` is that tool, and its header carries the fuller statement.
 
+**This rule is superseded by the two-score split in the queue below** and survives only until it lands.
+It removes a population that stage 4 genuinely arbitrates — on Sommers the reference class is ~60% of
+the delivered set — so it makes the ranker's largest contention invisible rather than unmeasured.
+
 ---
 
 ## Status
@@ -114,10 +118,46 @@ Order it by whether a user can see the difference — not by how tidy the fix is
 instances the books on disk hold**. A permitted input occurs whether or not this author has written
 one; corpus counts size a known effect and never dismiss a case.
 
-Currently one item, in three parts: **recursion scoring**. All of it ships on reasoning rather than
-evidence — `world_info_recursive` is off here and no book in the corpus exercises recursion — so it
-waits on a recursion-using book to test against. Written down now because the reasoning is the
-expensive part and it is already done.
+Two items: the **two-score metric redesign** below, which blocks several tuning decisions and should go
+first, and **recursion scoring** after it. Recursion ships on reasoning rather than evidence —
+`world_info_recursive` is off here and no book in the corpus exercises it — so it waits on a
+recursion-using book; the redesign has data waiting for it now.
+
+---
+
+## Two scores, because one metric cannot grade two populations
+
+**Ruled, unimplemented.** Supersedes the two-tier removal rule in Principles above, which is a
+workaround for grading a heterogeneous ranking with a metric that cannot handle one. Under the split
+the exclusion is unnecessary in one score and wrong in the other, so it goes rather than gets fixed.
+
+**The vector score** grades `fuseRetrieval`'s output, cut by `cutRetrieved`. Homogeneous by
+construction — the collection holds only vectorized entries' chunks — so no exclusion rule is needed,
+only the observation that the population is already uniform.
+
+**The layout score** grades `fuseRanks` at the depth the budget actually admits: `nDCG@budget`, over
+the DYNAMIC block. Constants and armed stickies are hoisted to the front of `ranked` so every cap is a
+prefix cut, which means they consume budget without competing for it — the graded population is
+exactly what a cut can reject. Everything else is in, cards included: this score exists to measure the
+heterogeneous contention the tier rule was removing.
+
+**Relevance is asymmetric, and the two halves take different bars.** Recall at grade >= 3 — did the
+must-deliver material arrive. Precision at grade >= 2 — a 2 is "it won't hurt and it might help", so
+delivering one is not an error and charging it as a false positive penalises the ranker for the
+contention zone behaving normally. **Measured**, one scene: P@>=3 0.542 against P@>=2 0.708, F1 0.703
+against 0.829. The arm ORDERING barely moves, so comparative findings survive; the absolute level does
+not. **Measured**, 73 scenes: under the symmetric bar F1 ranked the shallow cuts on top and the
+ordering inverted at F4, which read as beta trading recall against precision — under the asymmetric
+bar depth wins at every beta and the inversion disappears. A single bar was confounding the beta
+sweep with its own denominator.
+
+**What this unblocks**, and why it goes first: whether `elbow` survives at all, whether the stage-1 cut
+becomes a fixed bound, what `maxVectorEntries` should default to, and whether reference entries need
+contention grades. All four are currently unanswerable because nothing grades stage 4.
+
+**The offline half now exists.** `/wa-grade` records the pre-budget population with per-row `tokens`,
+`cut` and `cutBy`, plus the tokenizer in the snapshot, so `applyBudget` replays offline at any budget —
+verified exact against the runtime's own verdicts on 315 rows across 7 arms.
 
 ---
 
