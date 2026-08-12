@@ -2327,19 +2327,39 @@ async function gradeScene(named) {
  * Leaving a row blank still means UNGRADED — the difference is that saying so is now the default and
  * claiming otherwise takes an action.
  *
+ * UNDO RE-QUERIES rather than holding element references. /wa-super-grade repaints its table on any
+ * prior-round change, which detaches every input, so a captured reference would silently revert nothing.
+ * The filled rows are remembered by their identity attribute instead — `data-key` where the table has one,
+ * else `data-i` — and resolved against the DOM at the moment undo runs.
+ *
  * @param {HTMLElement} root Container holding the .wa-grade inputs
- * @returns {number} How many blanks were filled
+ * @returns {{filled: number, undo: () => number}} Count, and a revert that reads the DOM afresh
  */
 function fillReadZeros(root) {
-    let filled = 0;
+    const idOf = input => input.dataset.key ?? input.dataset.i;
+    const touched = new Set();
     for (const input of root.querySelectorAll('.wa-grade')) {
         if (String(input.value).trim() === '') {
             input.value = '0';
             input.dataset.dirty = '1';
-            filled += 1;
+            touched.add(idOf(input));
         }
     }
-    return filled;
+    const undo = () => {
+        let reverted = 0;
+        for (const input of root.querySelectorAll('.wa-grade')) {
+            // Only revert a row still holding the 0 this put there — a value edited since is the
+            // author's and outranks the undo.
+            if (touched.has(idOf(input)) && String(input.value).trim() === '0') {
+                input.value = '';
+                delete input.dataset.dirty;
+                reverted += 1;
+            }
+        }
+        touched.clear();
+        return reverted;
+    };
+    return { filled: touched.size, undo };
 }
 
     // GRADEABLE MEANS THE RUNTIME CLASS IS `dynamic` — WA chose it this turn. The other two are excluded
@@ -2395,7 +2415,14 @@ function fillReadZeros(root) {
         // Save. Sits beside the confirm buttons because it is the LAST thing done, not a table control.
         text: 'Fill blanks with 0', icon: 'fa-0',
         tooltip: 'Every untouched row becomes a graded 0. Leave a row blank to record it as UNGRADED instead.',
-        action: () => { const n = fillReadZeros(wrap); toastr.info(n ? `Filled ${n} blank row(s) with 0.` : 'No blank rows to fill.', 'Worlds Apart'); },
+        action: () => {
+            const { filled, undo } = fillReadZeros(wrap);
+            if (!filled) { toastr.info('No blank rows to fill.', 'Worlds Apart'); return; }
+            toastr.success(`Filled ${filled} blank row(s) with 0. Click to undo.`, 'Worlds Apart', {
+                timeOut: 10000, extendedTimeOut: 10000,
+                onclick: () => { const n = undo(); toastr.info(`Reverted ${n} row(s) to ungraded.`, 'Worlds Apart'); },
+            });
+        },
     }], okButton: 'Save sample', cancelButton: 'Cancel', large: true, wide: true, allowVerticalScrolling: true });
     const result = await popup.show();
 
@@ -2768,7 +2795,14 @@ async function superGradePopup({ captures, union, entryOf, prior: prior0 = [], s
         // Save. Sits beside the confirm buttons because it is the LAST thing done, not a table control.
         text: 'Fill blanks with 0', icon: 'fa-0',
         tooltip: 'Every untouched row becomes a graded 0. Leave a row blank to record it as UNGRADED instead.',
-        action: () => { const n = fillReadZeros(body); toastr.info(n ? `Filled ${n} blank row(s) with 0.` : 'No blank rows to fill.', 'Worlds Apart'); },
+        action: () => {
+            const { filled, undo } = fillReadZeros(body);
+            if (!filled) { toastr.info('No blank rows to fill.', 'Worlds Apart'); return; }
+            toastr.success(`Filled ${filled} blank row(s) with 0. Click to undo.`, 'Worlds Apart', {
+                timeOut: 10000, extendedTimeOut: 10000,
+                onclick: () => { const n = undo(); toastr.info(`Reverted ${n} row(s) to ungraded.`, 'Worlds Apart'); },
+            });
+        },
     }], okButton, cancelButton: 'Cancel', large: true, wide: true, allowVerticalScrolling: true });
     if (await popup.show() !== POPUP_RESULT.AFFIRMATIVE) {
         return null;
