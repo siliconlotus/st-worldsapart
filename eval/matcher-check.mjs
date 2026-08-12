@@ -199,10 +199,20 @@ eq(keyExcerpt('thread', 'the curtains were threadbare by then', false, false),
     'the curtains were «thread»bare by then', 'substring: excerpt shows the containing word');
 eq(keyExcerpt('thread', 'the curtains were threadbare by then', false, true),
     null, 'whole-word: same text correctly yields no excerpt (countKey counts 0)');
+// THE EXCERPT IS THE SOURCE TEXT, the match is found in the folded one. Both of these pinned the old
+// behaviour, where the author was shown a lowercased, re-punctuated sentence they never wrote and asked
+// to judge a key against it. Case and typography now survive; the mark still lands on the right span,
+// which is the part that could break, since folding shifts every offset after it.
 eq(keyExcerpt('sister', "She's my *sister*, Tim", false, true),
-    "she's my *«sister»*, tim", 'whole-word: excerpt is from the FOLDED haystack (lowercased)');
+    "She's my *«sister»*, Tim", 'whole-word: excerpt keeps the source casing');
 eq(keyExcerpt("Cap'n", `A ${'Cap’n'} walks in`, false, false),
-    "a «cap'n» walks in", 'orthography: curly apostrophe folded, match still localised');
+    `A «${'Cap’n'}» walks in`, 'orthography: a straight-quote key marks the curly-quote source it matched');
+// The offsets after a length-CHANGING fold are the case that made this hard: — folds to two characters
+// and … to three, so a naive folded index lands mid-word in the source.
+eq(keyExcerpt('rut', 'the RUT began… pre-RUT nerves', false, false),
+    'the «RUT» began… pre-RUT nerves', 'a fold that lengthens earlier text does not shift the mark');
+eq(keyExcerpt('nerves', 'a — b … c nerves here', false, false),
+    'a — b … c «nerves» here', 'em-dash and ellipsis before the match keep it correctly placed');
 eq(keyExcerpt('/th\\w+bare/', 'the curtains were threadbare by then', false, false),
     'the curtains were «threadbare» by then', 'regex key: excerpt from the raw text via the pattern');
 eq(keyExcerpt('? thread & curtains', 'threadbare curtains', false, false),
