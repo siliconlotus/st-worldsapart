@@ -103,6 +103,13 @@ export const sceneParams = (S, overrides = {}) => ({
     // identically, and an arm that sets KEYW is testing the split rather than a silent default change.
     K: 20, K1: 2, B: 0.75, LEXW: 1.5, KEYW: null, boost: 3, stopwordDf: 0.25, commonWordWeight: 1,
     caseSensitive: false, wholeWords: false, includeNames: true, threshold: 0.1,
+    // What counts as INSIDE a word when wholeWords is on (state.mjs wordBoundary, shipped 'strict').
+    // Unlike the knobs above this one is module state in the matcher, so makeKeywordScore pushes it
+    // through setBoundaryMode per call — otherwise every arm scores at whatever the last one set.
+    // A sample captured before the setting existed ran under a class that is NEITHER mode (no hyphen
+    // or apostrophe, but `_` a word character), so it cannot reproduce byte-identically; it is read
+    // at the shipped default, which is what its numbers mean today.
+    wordBoundary: 'strict',
     // Wrong-book failsafe (see state.mjs uncenteredGate). 0 here, NOT the shipped 0.5: every sample captured
     // before the gate existed must reproduce byte-identically, and a gate arm overrides this explicitly.
     uncenteredGate: 0,
@@ -265,9 +272,13 @@ export const scoringKeys = (e, P) => {
     return P.dropKeys ? ks.filter(k => !P.dropKeys.includes(k)) : ks;
 };
 
-/** Keyword score via the SHARED matcher.keywordScore (which mirrors ST core's matchKeys). */
-export const makeKeywordScore = P => (e, text, k1) =>
-    matcher.keywordScore(e, text, scoringKeys(e, P), { k1, caseSensitiveDefault: P.caseSensitive, wholeWordsDefault: P.wholeWords }).score;
+/** Keyword score via the SHARED matcher.keywordScore (which mirrors ST core's matchKeys).
+ *  Pushed per call, not once at construction: arms hold their scorers across each other's runs, so
+ *  a mode set at build time would be whichever arm was constructed last. */
+export const makeKeywordScore = P => (e, text, k1) => {
+    matcher.setBoundaryMode(P.wordBoundary);
+    return matcher.keywordScore(e, text, scoringKeys(e, P), { k1, caseSensitiveDefault: P.caseSensitive, wholeWordsDefault: P.wholeWords }).score;
+};
 
 /**
  * Builds the candidate set — every entry that would be in the ranking, with its per-signal scores.

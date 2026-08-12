@@ -110,6 +110,10 @@ export function captureParams(s, { caseSensitive, wholeWords, includeNames }) {
         dropoffThreshold: s.dropoffThreshold,
         caseSensitive,
         wholeWords,
+        // The boundary class whole-word matching used. Recorded here rather than only in
+        // paramSnapshot's matchText block, because this is the half a harness reads back: without it
+        // a permissive capture is re-scored at the default and the gap reads as a parameter effect.
+        wordBoundary: s.wordBoundary,
         includeNames,
     };
 }

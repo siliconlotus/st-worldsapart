@@ -723,9 +723,12 @@ export async function lorebookStudio(preferredBook = null) {
         const wholeAdvice = wholeWordAdvice(e.key, effWhole);
         const wholeTool = tool('[ab]', effWhole, `Match whole words: ${flagState(e.matchWholeWords, world_info_match_whole_words)} · shift-click: inherit${wholeAdvice.map(a => `\n\n${a}`).join('')}`, ev => { e.matchWholeWords = ev.shiftKey ? null : !effWhole; save(); repaint(e); });
         if (wholeInherit) wholeTool.style.color = '#8fce8f';
-        // Amber + a badge, not red: both triggers are advisories on entries that may be working
-        // exactly as intended. The tooltip carries the sentence; this is what makes anyone read it.
-        if (wholeAdvice.length) { wholeTool.style.color = '#d8a657'; wholeTool.classList.add('wa-badge'); wholeTool.dataset.badge = '!'; }
+        // A badge, not a colour, and not red: both triggers are advisories on entries that may be
+        // working exactly as intended. The tooltip carries the sentence; the badge is what makes
+        // anyone read it. COLOUR IS ALREADY SPOKEN FOR — it is the flag's own state, and tinting here
+        // overwrote the light green that says "inherited from the global", so an advisory entry read
+        // as one that had set the flag itself. Two channels, two questions.
+        if (wholeAdvice.length) { wholeTool.classList.add('wa-badge'); wholeTool.dataset.badge = '!'; }
         tools.append(
             tool('fa-power-off', !e.disable, e.disable ? 'Disabled — click to enable' : 'Active — click to disable', () => { e.disable = !e.disable; save(); repaint(e); }),
             caseTool,

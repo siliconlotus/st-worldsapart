@@ -107,7 +107,12 @@ export function tokenize(input) {
             // Flags then weight, as a quoted term takes its weight after its closing quote. No `=`/`^`
             // prefix on this branch: `=` is meaningless on a pattern and `^` is a no-op, since a regex
             // is already case-sensitive. `/i` is how insensitivity is written.
-            const f = close === -1 ? null : rest.match(/^[gimsuy]*/);
+            //
+            // THE RUN MUST END AT A TOKEN BOUNDARY or it eats the next token: unanchored, `? /home/user/file`
+            // took `us` out of "user" as flags, leaving the pattern `/home/us` and the term `er/file`.
+            // That silently rewrote both halves, and a stolen `u` turns legal escapes into a validator
+            // error on a pattern the author wrote correctly. No boundary means no flags, not some flags.
+            const f = close === -1 ? null : rest.match(/^[gimsuy]*(?=[\s()|&]|::|\^|$)/);
             const flags = f ? f[0] : '';
             rest = rest.slice(flags.length);
             const w = rest.match(/^(?:::|\^)(\d+(?:\.\d+)?)/);

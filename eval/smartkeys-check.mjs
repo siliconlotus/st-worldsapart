@@ -85,8 +85,19 @@ eq(countKey('Joe', "that is Joe's coat", false, true), 0, '...which is the same 
     eq(countKey('? /re', 'anything /re', false, false), 0, '...and counts 0, so it cannot half-fire');
     // Value-reading checks skip it: a pattern is punctuation by nature.
     eq(codes('? /[^"]+/'), '', 'punctuation-term and stray-quote do not read a pattern');
+    // THE FLAG RUN ENDS AT A TOKEN BOUNDARY. Asserted on the TOKENS, not on a count: unanchored,
+    // `[gimsuy]*` took `us` out of "user" and the key still counted 2 against the text below — one
+    // hit for the mangled pattern `/home/us` and one for the stray term `er/file` — so a count could
+    // not tell the two lexings apart, and the suite was green on the defect.
+    const tok = k => tokenize(k)
+        .map(t => t.type === 'REGEX' ? `re:${t.value}` : t.type === 'TERM' ? `term:${t.value}` : t.type).join(' ');
+    eq(tok('? /home/user/file'), 're:/home/ term:user/file', 'the flag run stops at a token boundary');
+    eq(tok('? /fire/smoke'), 're:/fire/ term:smoke', '...so a bare word after the close stays a word');
+    eq(tok('? /re/is night'), 're:/re/is term:night', '...and real flags, followed by a space, are still taken');
+    eq(tok('? /re/::2'), 're:/re/', '...as is a weight straight after the close');
+    eq(tok('? /re/gi)'), 're:/re/gi RPAREN', '...and a closing paren is a boundary too');
     // A path-shaped token changes meaning, and that is the point.
-    eq(countKey('? /home/user/file', '/home/user/file', false, false), 2, 'a path is now a pattern plus a stray term, and both score');
+    eq(countKey('? /home/user/file', '/home/user/file', false, false), 2, 'a path is a pattern plus a stray term, and both score');
     eq(matches('? /home/user/file', 'the home user file'), false, '...so the bare-word reading is gone');
 
     // A BARE regex key core reads differently. WA runs it as a pattern; core refuses any pattern whose
