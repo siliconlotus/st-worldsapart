@@ -48,7 +48,7 @@ import { Popup, POPUP_TYPE, POPUP_RESULT } from '../../../popup.js';
 
 import { runState, defaultSettings, settings, ensureSettings } from './extension/state.mjs';
 import { ensureStudioStyle, makeSortControl, makeTierEditor, showEntryText, wiGlyph, wiTooltip } from './extension/ui-widgets.mjs';
-import { PRESENTATION_ALIAS, SORT_FNS, normPresentation, presentationBaseLabel, presentationLabel, reconcileTiers, tierRank, wiTitleOf } from './extension/sort.mjs';
+import { PRESENTATION_ALIAS, SORT_FNS, gradeOrder, normPresentation, presentationBaseLabel, presentationLabel, reconcileTiers, tierRank, wiTitleOf } from './extension/sort.mjs';
 import { lorebookStudio } from './extension/studio.mjs';
 import { buildSample, bundleSamples, captureParams, GRADE_ANCHORS, mergeGrades, normalizeSample, rowKey, sampleFile, searchedBook, splitGraded, trimBook, unionArms } from './extension/grading.mjs';
 
@@ -2254,24 +2254,6 @@ function defaultSampleName() {
     return `${slug || 'scene'}-msg${Math.max(0, (ctx.chat?.length ?? 1) - 1)}`;
 }
 
-/**
- * Presentation order for both grading tables: gradeable first, then persisted stickies, then constants —
- * and inside each block, best first.
- *
- * NOT capture order. `ranked` hoists stickies and constants to the front in AUTHORED order so the budget
- * walk is a prefix cut (selection.mjs), which means the always-on rows take `#` 0,1,2 and would otherwise
- * head the grading list for a structural reason rather than a relevance one — the opposite of grading the
- * strongest candidates while attention is freshest.
- *
- * `rank` is supplied by the caller because the two graders have different orderings available. /wa-grade
- * has ONE arm, so its fused `score` is meaningful and sorts descending. A super-grade union spans arms
- * whose fused scores were computed under different parameters and are not comparable, so it sorts on
- * `bestRank` — ordinal, and the only cross-arm quantity that means the same thing in every row.
- */
-const BLOCK_ORDER = { dynamic: 0, sticky: 1, constant: 2 };
-const gradeOrder = (rows, rank) => rows
-    .map((row, i) => ({ row, i }))
-    .sort((a, b) => (BLOCK_ORDER[a.row.block] ?? 0) - (BLOCK_ORDER[b.row.block] ?? 0) || rank(a.row) - rank(b.row));
 
 /**
  * Grades the current scene and writes a self-contained sample for eval/graded-scene-grid.mjs.

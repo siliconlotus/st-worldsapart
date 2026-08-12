@@ -18,6 +18,33 @@
  */
 export const wiTitleOf = e => (e.comment && e.comment.trim()) ? e.comment.trim() : `UID ${e.uid}`;
 
+/**
+ * Presentation order for the two grading tables (/wa-grade, /wa-super-grade): gradeable rows first, then
+ * persisting stickies, then constants — and inside each block, best first.
+ *
+ * NOT CAPTURE ORDER, and that is the point. rankActivated hoists stickies and constants to the front of
+ * `ranked` in AUTHORED order so the budget walk is a prefix cut (selection.mjs), which hands the always-on
+ * rows `#` 0,1,2 and would otherwise head the grading list for a structural reason rather than a relevance
+ * one — the opposite of grading the strongest candidates while attention is freshest.
+ *
+ * `rank` is the caller's because the two graders have different orderings available. /wa-grade covers ONE
+ * arm, so its fused `score` is meaningful and sorts descending. A /wa-super-grade union spans arms whose
+ * fused scores were computed under different parameters and are therefore not comparable at all; it sorts
+ * on `bestRank`, ordinal and the only cross-arm quantity that means the same thing in every row.
+ *
+ * Returns `{row, i}` pairs carrying the ORIGINAL index, because every `data-i` in those tables indexes
+ * back into the capture-ordered rows and entries arrays. Sorting the rows alone would silently
+ * misattribute every grade.
+ *
+ * @param {object[]} rows Candidate rows, in capture order
+ * @param {(row: object) => number} rank Within-block ordering, ascending
+ * @returns {{row: object, i: number}[]} Rows paired with their capture index, in presentation order
+ */
+const GRADE_BLOCK_ORDER = { dynamic: 0, sticky: 1, constant: 2 };
+export const gradeOrder = (rows, rank) => (rows ?? [])
+    .map((row, i) => ({ row, i }))
+    .sort((a, b) => (GRADE_BLOCK_ORDER[a.row.block] ?? 0) - (GRADE_BLOCK_ORDER[b.row.block] ?? 0) || rank(a.row) - rank(b.row));
+
 // Tier definitions for the explorer's tiered grouping (/wa-studio). `test` is a pure entry predicate; the
 // order the user arranges the tiers in IS the precedence order — an entry falls into the first ENABLED
 // tier it matches (so a constant+sticky entry lands in Constant when Constant precedes Sticky). The active-
