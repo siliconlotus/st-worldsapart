@@ -37,7 +37,7 @@ import { buildKeySuggest, buildKeyPrompt, parseKeyList, STUDIO_SUGGEST_OPTS } fr
 import { countKey } from '../extension/matcher.mjs';
 
 const HERE = new URL('.', import.meta.url).pathname;
-const CACHE_PATH = `${HERE}temp-ladder-cache.json`;
+const CACHE_PATH = `${HERE}eval-data/temp-ladder-cache.json`;
 const OLLAMA = process.env.OLLAMA_URL ?? 'http://localhost:11434';
 const WORLDS = `${HERE}../../../../../../data/default-user/worlds`;
 

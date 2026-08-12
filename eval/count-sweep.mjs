@@ -27,7 +27,7 @@ import { countKey } from '../extension/matcher.mjs';
 const HERE = new URL('.', import.meta.url).pathname;
 const OLLAMA = process.env.OLLAMA_URL ?? 'http://localhost:11434';
 const WORLDS = `${HERE}../../../../../../data/default-user/worlds`;
-const CACHE_PATH = `${HERE}count-sweep-cache.json`;
+const CACHE_PATH = `${HERE}eval-data/count-sweep-cache.json`;
 
 const arg = (n, d = null) => {
     const i = process.argv.indexOf(`--${n}`);

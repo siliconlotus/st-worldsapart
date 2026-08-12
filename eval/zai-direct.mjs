@@ -34,6 +34,8 @@
 // depend on the process finishing — an interrupted run keeps everything it paid for.
 import { readFileSync, appendFileSync, existsSync } from 'node:fs';
 
+const HERE = new URL('.', import.meta.url).pathname;
+
 const arg = (n, d = null) => {
     const i = process.argv.indexOf(`--${n}`);
     return i >= 0 && process.argv[i + 1] && !process.argv[i + 1].startsWith('--') ? process.argv[i + 1] : d;
@@ -43,8 +45,8 @@ const nums = (s, d) => (s ? String(s).split(',').map(Number) : d);
 
 const BASE = arg('base', process.env.ZAI_BASE_URL ?? 'https://api.z.ai/api/coding/paas/v4');
 const MODEL = arg('model');
-const OUT = arg('out', 'zai-direct-out.jsonl');
-const PROMPTS = arg('prompts', 'eval-data/ladder-prompts.json');
+const OUT = arg('out', `${HERE}eval-data/zai-direct-out.jsonl`);
+const PROMPTS = arg('prompts', `${HERE}eval-data/ladder-prompts.json`);
 const CAPS = nums(arg('max-tokens'), [4000]);
 const TEMPS = nums(arg('temps'), [null]);
 const THINKING = arg('thinking');

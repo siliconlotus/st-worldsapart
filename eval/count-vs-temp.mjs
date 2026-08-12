@@ -37,8 +37,8 @@ import { countKey } from '../extension/matcher.mjs';
 const HERE = new URL('.', import.meta.url).pathname;
 const OLLAMA = process.env.OLLAMA_URL ?? 'http://localhost:11434';
 const WORLDS = `${HERE}../../../../../../data/default-user/worlds`;
-const LADDER_CACHE = `${HERE}temp-ladder-cache.json`;
-const CACHE_PATH = `${HERE}count-vs-temp-cache.json`;
+const LADDER_CACHE = `${HERE}eval-data/temp-ladder-cache.json`;
+const CACHE_PATH = `${HERE}eval-data/count-vs-temp-cache.json`;
 
 const arg = (n, d = null) => {
     const i = process.argv.indexOf(`--${n}`);
