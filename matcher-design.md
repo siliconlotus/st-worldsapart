@@ -488,9 +488,8 @@ but is a key nobody would author for relevance. `validateSmartKey` warns (`regex
 than either side deciding. `coreReadsAsRegex` in `matcher.mjs` is core's rule mirrored for that
 warning, and counts nothing. It reaches SmartKey TERMS as well as bare keys, since the term rule became
 the whole-key rule — before that the scan cut a slash-bearing pattern apart before anything could ask
-what core made of it. The warning names `\/` first, because escaping preserves the author's evident
-intent (a pattern) and makes both engines read it identically; `? "…"` remains the hatch for someone
-who wanted the literal after all.
+what core made of it. Both messages say what each side does and stop: WA runs the pattern, so there is
+nothing to prescribe, and `\/` is a portability choice rather than a fix.
 
 ---
 

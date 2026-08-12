@@ -373,9 +373,14 @@ export function validateSmartKey(raw) {
         // Reachable from a TERM only since the term rule became the whole-key rule; before that the
         // scan split a slash-bearing pattern before anything could ask what core made of it.
         if (!coreReadsAsRegex(val)) {
+            // Says what each side does and stops. WA runs the pattern, so nothing here needs fixing —
+            // prescribing `\/` would read as "your key is broken" about a key that works, and every
+            // other check in this file is descriptive. The hatch is the same one the bare-key branch
+            // offers, in the form a TERM takes.
+            const hatch = val.includes('"') ? '' : ` If you want the literal string, quote the term: "${val}".`;
             out.push({
                 severity: 'warn', code: 'regex-core-refuses',
-                message: `SillyTavern matching reads “${val}” as literal text, not a pattern; WA treats it as a pattern. Escaping the inner slashes as \\/ keeps your pattern and makes both read it the same way.`,
+                message: `SillyTavern matching reads “${val}” as literal text, not a pattern; WA treats it as a pattern.${hatch}`,
             });
         }
     }

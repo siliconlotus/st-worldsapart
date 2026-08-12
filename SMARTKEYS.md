@@ -113,8 +113,10 @@ The rules are the ones the rest of the grammar already follows:
 - **A `/…/` term reads exactly as the same string reads as a whole key.** `? /home/user/lux/` is the
   pattern `home/user/lux`, and `? /home/user/file` is the literal text, because that is what each of
   them is without the `?`. Two patterns in one key stay two: `? /a/ /b/` is two terms.
-- **A slash inside the pattern is fine, and `\/` is better.** Unescaped, WA reads the pattern and
-  SillyTavern's own matcher refuses it — the Studio warns. Escaped, both read it the same way.
+- **A slash inside the pattern is fine.** WA runs it either way. Stock SillyTavern refuses any pattern
+  with an unescaped `/` inside and matches the delimited string as literal text instead — so if the
+  book has to work without WA, write `\/` and both read it the same way. The Studio says which case
+  a key is in.
 - **A term that follows a pattern needs a space.** `? /[/]/ x`, not `? /[/]/x`. If you wanted the two
   adjacent, put them in the pattern: `? /\/x/`.
 - **Flags come after the close, then the weight**: `/fire/gi::2`, the same order a quoted term uses.
