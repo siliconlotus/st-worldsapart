@@ -46,6 +46,47 @@ eq(matches('? =Joe', "that is Joe's coat"), true, 'permissive: = treats an apost
 setBoundaryMode('strict');
 eq(matches('? =Joe', "that is Joe's coat"), false, 'strict: = treats it as inside the word, like a plain key');
 eq(countKey('Joe', "that is Joe's coat", false, true), 0, '...which is the same answer the plain key gives');
+// --- regex TERMS ------------------------------------------------------------------------------------
+// A `/re/` key is a pattern everywhere else it appears; inside a SmartKey it used to be five literal
+// characters, which fell out of a lexer that did not know regexes exist. `? "/re/"` keeps the literal.
+{
+    const codes = k => validateSmartKey(k).map(p => `${p.severity}:${p.code}`).join(' ');
+    eq(matches('? /co(l|s)monaut/ walked', 'the cosmonaut walked in'), true, 'a regex term matches as a pattern');
+    eq(matches('? /co(l|s)monaut/ walked', 'the astronaut walked in'), false, '...and fails when the pattern does not');
+    eq(matches('? "/re/"', 'the /re/ literal'), true, 'quoting keeps the literal reading');
+    eq(matches('? "/re/"', 'a regular expression'), false, '...and it really is a literal');
+    // The branch sits after the operator match, so a pattern can be negated.
+    eq(matches('? -/drill/ fire', 'a fire started'), true, '-/re/ negates a pattern');
+    eq(matches('? -/drill/ fire', 'a fire drill started'), false, '...and the negation bites');
+    // Only at token start — the rule " and -/!/+ already follow.
+    eq(matches('? and/or', 'an and/or clause'), true, 'a slash mid-token is ordinary text');
+    eq(matches('? 3/4', 'in 3/4 time'), true, '...including a fraction');
+    // LEFTMOST close, tracking escape and class. Greedy would collapse `? /a/ /b/` into one pattern.
+    eq(countKey('? /a/ /b/', 'a and b', false, false), 3, 'two patterns stay two, and both count');
+    eq(matches('? /[/]/x', 'the /x path'), true, 'the delimiter does not close inside a character class');
+    eq(matches('? /a\\/b/', 'an a/b split'), true, '\\/ writes a literal slash');
+    // Flags then weight, as a quoted term takes its weight after the closing quote.
+    eq(matches('? /fire/i', 'FIRE everywhere'), true, '/i is how insensitivity is written');
+    eq(matches('? /fire/', 'FIRE everywhere'), false, '...because a pattern is case-sensitive by default');
+    eq(countKey('? /fire/::3', 'fire and fire', false, false), 6, 'weight x occurrences, same as a TERM');
+    eq(countKey('? /fire/^3', 'fire and fire', false, false), 6, '...and the Lucene ^N alias works too');
+    // Fold-exempt: countKey branches before foldedHay, so a pattern runs on raw text.
+    eq(matches("? /Cap'n/", 'Cap\u2019n Joe'), false, 'a regex term is fold-exempt, like a whole-key regex');
+    eq(matches("? Cap'n", 'Cap\u2019n Joe'), true, '...where a plain term in the same key is not');
+    // A regex is a term for counting and for positivity, or these two keys would be fatally flagged.
+    eq(codes('? /re/'), '', 'a lone regex is not no-terms');
+    eq(codes('? /re/ -drill'), '', 'a regex is a positive contributor, so this is not negation-only');
+    eq(codes('? /(/'), 'error:regex-invalid', 'a pattern new RegExp refuses is an error');
+    eq(codes('? /re'), 'error:regex-unterminated', 'an unterminated pattern is an error');
+    eq(countKey('? /re', 'anything /re', false, false), 0, '...and counts 0, so it cannot half-fire');
+    // Value-reading checks skip it: a pattern is punctuation by nature.
+    eq(codes('? /[^"]+/'), '', 'punctuation-term and stray-quote do not read a pattern');
+    // A path-shaped token changes meaning, and that is the point.
+    eq(countKey('? /home/user/file', '/home/user/file', false, false), 2, 'a path is now a pattern plus a stray term, and both score');
+    eq(matches('? /home/user/file', 'the home user file'), false, '...so the bare-word reading is gone');
+}
+console.log('ok   regex terms: leftmost close, flags then weight, negatable, fold-exempt, validated');
+
 eq(matches('? and', 'sandy beach'), false, 'bare "and" is an operator, not a term');
 eq(matches('? android', 'an android walked'), true, 'AND-prefixed word is still one term');
 

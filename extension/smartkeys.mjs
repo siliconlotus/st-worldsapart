@@ -9,9 +9,10 @@
 //   ? meeting 10:30                 a SINGLE colon is ordinary text -- times, verse refs, re:code and
 //                                   URLs need no quoting. Only :: introduces a weight.
 //   ? +fire +water                  Lucene's per-term required-marker; absorbed, since AND is implicit
-//   ? M*A*S*H   ? ~5                 * and ~ are LITERALS, not wildcards or fuzzy matching. There is no
-//                                    pattern syntax here beyond a /regex/ key; substring is the default,
-//                                    so "fir" already finds "confirm" without help.
+//   ? /co(l|s)monaut/i landed       /pattern/flags is a TERM — negatable, weightable, not folded
+//   ? M*A*S*H   ? ~5                 * and ~ are LITERALS, not wildcards or fuzzy matching. Substring is
+//                                    the default, so "fir" already finds "confirm" without help; a
+//                                    /regex/ term is the only pattern syntax, and "/re/" is its literal.
 //
 // WHEN IN DOUBT, QUOTE IT. Quoting is the one escape in this syntax: it turns off operator, weight,
 // paren and wildcard interpretation, and marks a punctuation-only term as deliberate rather than a
@@ -30,7 +31,7 @@
 // Isomorphic like ranking.mjs: no DOM, no ST imports. Entry point is evaluateSmartKey();
 // countKey() in ranking.mjs routes `?` keys here.
 
-import { escapeRegex, isRegexKey, wordChar, foldedHay } from './matcher.mjs';
+import { escapeRegex, isRegexKey, wordChar, foldedHay, countRegexKey, REGEX_KEY_RE } from './matcher.mjs';
 // The literal matcher and its text fold live under plugin/ so the server can use them too — one copy, or
 // the browser and the server would silently disagree about what a key matches. Re-exported because
 // ranking.mjs, keyword-tools.mjs and studio.mjs all import them from here.
@@ -43,6 +44,30 @@ const OPS = {
     '!': 'NOT', '-': 'NOT', 'NOT': 'NOT',
     'XOR': 'XOR',
 };
+
+/**
+ * Index of the `/` that closes a regex literal opening at position 0, or -1 if there is none.
+ *
+ * LEFTMOST CLOSE, tracking escape and character class — ECMA-262's RegularExpressionLiteral, which
+ * exists for this same ambiguity. `\` escapes the next character, `[`…`]` is a class and the
+ * delimiter does not close inside one, and classes do not nest (`/[[]/` is a class holding `[`).
+ *
+ * Greedy is not available: core anchors `^…$` over a whole key, but a SmartKey term has later tokens
+ * to steal a delimiter from, so `? /a/ /b/` would collapse into one pattern. `\/` writes a literal slash.
+ * @param {string} s A string whose first character is `/`
+ * @returns {number}
+ */
+function regexClose(s) {
+    let inClass = false;
+    for (let i = 1; i < s.length; i++) {
+        const c = s[i];
+        if (c === '\\') { i++; continue; }
+        if (c === '[') inClass = true;
+        else if (c === ']') inClass = false;
+        else if (c === '/' && !inClass) return i;
+    }
+    return -1;
+}
 
 /**
  * Lexes a SmartKey (leading `?` already meaningful but tolerated) into tokens.
@@ -62,6 +87,33 @@ export function tokenize(input) {
         if (m) {
             tokens.push({ type: OPS[m[1].toUpperCase()] });
             src = src.slice(m[0].length);
+            continue;
+        }
+        // REGEX TERM. A `/re/` key is evaluated as a pattern everywhere else it appears — core's
+        // matchKeys and countKey both branch on it — and the literal reading survived in exactly one
+        // place, in here, where tokenize handed evaluate a bare word. Nobody chose that; it fell out
+        // of a lexer that did not know regexes exist. So this closes a divergence rather than adding
+        // a feature, and the literal stays reachable through the escape already there: `? "/re/"`.
+        //
+        // Only at TOKEN START, the rule `"` and `-`/`!`/`+` already follow, so `and/or` and `3/4` are
+        // untouched. After the operator match, so `? -/re/` negates a pattern.
+        if (src[0] === '/') {
+            const close = regexClose(src);
+            // Unterminated: it can only run to the end of the key, and the validator reports it. Left
+            // as a REGEX token rather than degraded to a literal so it HAS something to report on —
+            // REGEX_KEY_RE refuses the value either way, so it counts 0 at match time.
+            const body = close === -1 ? src : src.slice(0, close + 1);
+            let rest = src.slice(body.length);
+            // Flags then weight, as a quoted term takes its weight after its closing quote. No `=`/`^`
+            // prefix on this branch: `=` is meaningless on a pattern and `^` is a no-op, since a regex
+            // is already case-sensitive. `/i` is how insensitivity is written.
+            const f = close === -1 ? null : rest.match(/^[gimsuy]*/);
+            const flags = f ? f[0] : '';
+            rest = rest.slice(flags.length);
+            const w = rest.match(/^(?:::|\^)(\d+(?:\.\d+)?)/);
+            if (w) rest = rest.slice(w[0].length);
+            src = rest;
+            tokens.push({ type: 'REGEX', value: body + flags, weight: w ? parseFloat(w[1]) : 1.0 });
             continue;
         }
         // Term: optional =/^ flags, quoted phrase or bare word, optional ::weight postfix.
@@ -132,7 +184,7 @@ export function parse(tokens) {
     };
     const parseAnd = () => {
         let left = parseUnary();
-        while (peek() && (peek().type === 'AND' || peek().type === 'TERM' || peek().type === 'LPAREN' || peek().type === 'NOT')) {
+        while (peek() && (peek().type === 'AND' || peek().type === 'TERM' || peek().type === 'REGEX' || peek().type === 'LPAREN' || peek().type === 'NOT')) {
             if (peek().type === 'AND') i++;
             left = bin('AND', left, parseUnary());
         }
@@ -160,7 +212,7 @@ export function parse(tokens) {
             if (peek()?.type === 'RPAREN') i++;
             return node;
         }
-        return t.type === 'TERM' ? t : null; // stray RPAREN — drop
+        return t.type === 'TERM' || t.type === 'REGEX' ? t : null; // stray RPAREN — drop
     };
     return parseOr();
 }
@@ -172,7 +224,7 @@ export function parse(tokens) {
  */
 const hasPositiveTerm = (node, negated = false) => {
     if (!node) return false;
-    if (node.type === 'TERM') return !negated;
+    if (node.type === 'TERM' || node.type === 'REGEX') return !negated;
     if (node.type === 'NOT') return hasPositiveTerm(node.operand, !negated);
     return hasPositiveTerm(node.left, negated) || hasPositiveTerm(node.right, negated);
 };
@@ -196,7 +248,12 @@ export function validateSmartKey(raw) {
     const src = String(raw ?? '');
     if (!src.trim().startsWith('?')) return out;   // not a SmartKey; nothing to say
     const tokens = tokenize(src);
-    const terms = tokens.filter(t => t.type === 'TERM');
+    // A REGEX counts as a term for no-terms, for hasPositiveTerm and for all-zero-weights. Without
+    // that, `? /re/` reported no-terms and `? /re/ -drill` reported negation-only — both fatal, and
+    // activatableKeys would bar a key that matches perfectly well. The checks that read a term's
+    // VALUE still skip it below: a pattern is punctuation by nature, so punctuation-term and
+    // stray-quote would fire on every one.
+    const terms = tokens.filter(t => t.type === 'TERM' || t.type === 'REGEX');
 
     if (!terms.length) {
         out.push({ severity: 'error', code: 'no-terms', message: 'No search terms — this key can never match.' });
@@ -217,6 +274,7 @@ export function validateSmartKey(raw) {
     // usual cause is a doubled sentinel: only the FIRST `?` is stripped as the prefix, so `? or ? ()`
     // leaves `?` behind as a literal term and the SmartKey quietly matches any text containing one.
     for (const t of terms) {
+        if (t.type !== 'TERM') continue;
         // A QUOTED punctuation term is deliberate — Sigur Rós really did name an album "()" — and
         // quoting is already how this syntax says "exactly this, I meant it". Only unquoted ones warn.
         if (!t.quoted && !/[\p{L}\p{N}]/u.test(String(t.value))) {
@@ -236,10 +294,33 @@ export function validateSmartKey(raw) {
     // and flagging its VALUE (which is what this did) made a working key fatal, so `activatableKeys`
     // barred it from activating while countKey went on scoring it. Reads structure, not intent.
     for (const t of terms) {
-        if (!t.quoted && String(t.value).startsWith('"')) {
+        if (t.type === 'TERM' && !t.quoted && String(t.value).startsWith('"')) {
             out.push({
                 severity: 'error', code: 'stray-quote',
                 message: 'Unclosed quote — close the phrase, or remove the quote.',
+            });
+        }
+    }
+
+    // Both are facts about the STRING, so they clear the same bar the surviving checks clear rather
+    // than guessing at intent. An unterminated pattern reaches here as a REGEX token whose value has
+    // no closing delimiter, which is exactly what REGEX_KEY_RE refuses.
+    for (const t of terms) {
+        if (t.type !== 'REGEX') continue;
+        const m = String(t.value).match(REGEX_KEY_RE);
+        if (!m) {
+            out.push({
+                severity: 'error', code: 'regex-unterminated',
+                message: `The pattern ${JSON.stringify(String(t.value))} has no closing “/”, so it can never match. Close it, or quote the term to search for it as text.`,
+            });
+            continue;
+        }
+        try {
+            new RegExp(m[1], m[2]);
+        } catch (e) {
+            out.push({
+                severity: 'error', code: 'regex-invalid',
+                message: `The pattern ${JSON.stringify(String(t.value))} is not a valid regular expression (${e.message}), so it can never match.`,
             });
         }
     }
@@ -359,7 +440,9 @@ function internLiteral(scope, folded) {
 
 function registerTerms(scope, node) {
     if (!node) return;
-    if (node.type === 'TERM') {
+    if (node.type === 'REGEX') {
+        // No acIndex: a pattern is not a literal, so it cannot be a trie candidate and skips pass 1.
+    } else if (node.type === 'TERM') {
         node.acIndex = internLiteral(scope, fold(node.value));
     } else if (node.type === 'NOT') {
         registerTerms(scope, node.operand);
@@ -426,6 +509,15 @@ export function evaluate(node, text, acHits) {
             // Counted, not tested: same walk of the text either way, and a flagged term has as much
             // right to recurrence as an unflagged one.
             const n = (hay.match(new RegExp(pattern, 'gu')) ?? []).length;
+            return { matched: n > 0, scoreBoost: node.weight * n };
+        }
+        // Structurally a TERM that never uses the candidate filter. It shares countRegexKey with
+        // countKey, so "countKey is the only matcher" holds across the regex path too — and, like a
+        // whole-key regex, it is CASE-SENSITIVE and FOLD-EXEMPT: countKey branches before foldedHay,
+        // so a pattern runs on raw text. Inside a SmartKey that means mixed folding, and `/i` is how
+        // insensitivity is written.
+        case 'REGEX': {
+            const n = countRegexKey(node.value, text);
             return { matched: n > 0, scoreBoost: node.weight * n };
         }
         case 'NOT': {

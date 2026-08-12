@@ -8,6 +8,9 @@ A World Info key in WA can be one of three things:
 | regex | `/co(l|s)monaut/i` | a regular expression, as core already supports |
 | **SmartKey** | `? moon mission -apollo` | a boolean expression — a leading `?` opts in |
 
+A regex is not only a whole-key form: `/…/` is also a **term** inside a SmartKey, so
+`? /co(l|s)monaut/ landed` mixes a pattern and a word in one key.
+
 The first half of this page is the SmartKeys grammar. The second half is how matching works for *all
 three*, which is worth reading even if you never write a `?` key.
 
@@ -40,6 +43,7 @@ where the keys simply never fire rather than breaking anything.
 ? fire::2.5                       ::N weights the term
 ? fire^2.5                        ^N is accepted too (Lucene's boost)
 ? (rain OR snow) -indoors         parentheses group
+? /co(l|s)monaut/i landed         /pattern/flags is a term
 ```
 
 **Terms.** Anything that is not an operator or a paren. A term is matched exactly as a plain key would
@@ -90,6 +94,35 @@ rank on it".
 `::` and not `:`, so a single colon stays ordinary text — `? meeting 10:30`, `? Judges 3:16`, `? re:code`
 and URLs all work as written. A delimiter followed by anything but digits is part of the term
 (`fire::abc` is one term).
+
+## A regex can be one term
+
+`/pattern/flags` inside a SmartKey is a term like any other, so a pattern can sit beside a word, be
+negated, and carry a weight:
+
+```
+? /co(l|s)monaut/ landed        a pattern AND a word
+? -/drill/ fire                 a negated pattern
+? /fire/::3                     weighted, like any term
+```
+
+The rules are the ones the rest of the grammar already follows:
+
+- **A `/` opens a pattern only at the start of a token**, as `"` and `-` do. `and/or` and `3/4` are
+  ordinary terms.
+- **The pattern ends at the first unescaped `/` outside a character class.** `\/` writes a literal
+  slash, and `/[/]/` is a class holding one. Two patterns in one key stay two.
+- **Flags come after the close, then the weight**: `/fire/gi::2`, the same order a quoted term uses.
+- **`=` and `^` are not available here.** `=` means nothing to a pattern, and `^` would be a no-op —
+  a regex is already case-sensitive. Write `/i` for insensitivity.
+- **A pattern is not folded.** Curly quotes, dashes and NFC are normalised for plain terms and left
+  alone for a pattern, exactly as for a whole-key regex — so `? /Cap'n/ crunch` has one term that sees
+  `’` and one that does not.
+- **`^` and `$` anchor within the Match window**, not the whole scan. At the default (paragraph) they
+  anchor per paragraph; at *Whole scan window* a bare `^` anchors to exactly one position in the entire
+  window. `/m` behaves the same at every setting, which is usually what you want.
+
+To search for the literal characters, quote the term: `? "/re/"`.
 
 **Scoring.** A term scores `weight × occurrences`. `AND` and `OR` both **sum** — `? (glasses OR
 spectacles)` counts every mention of the concept however it was spelled — and a branch that did not
@@ -149,6 +182,8 @@ meant, because every check that guessed produced false positives on real titles.
 | **error** | no search terms at all |
 | **error** | every term negated — that matches whenever they are absent, which is nearly always |
 | **error** | an unclosed quote |
+| **error** | a `/pattern/` with no closing `/` |
+| **error** | a `/pattern/` JavaScript cannot compile |
 | **warn** | a punctuation-only term (usually a second `?`: only the first one is the sentinel) |
 | **warn** | unbalanced parens — it still parses, but probably not the way you grouped it |
 | **warn** | every term weighted 0, so the key gates without scoring |
@@ -227,8 +262,8 @@ on the language — `du` and `dû` are different French words — so it is a jud
 silent matcher. Key both forms when your model writes both.
 
 **No wildcards, no fuzzy matching.** `*` and `~` are ordinary characters: `M*A*S*H` matches `M*A*S*H`.
-Substring matching already covers what a leading or trailing `*` would buy you. For anything more, use
-a `/regex/` key.
+Substring matching already covers what a leading or trailing `*` would buy you. For anything more, write
+a `/regex/` — as the whole key, or as one term inside a SmartKey.
 
 **Word boundaries are Unicode-aware.** A "word character" here is any letter, digit or underscore in
 any script, so whole-word `caf` does not match `café` and `Мари` does not match `Марию`. In scripts

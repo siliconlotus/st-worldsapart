@@ -81,7 +81,8 @@ key miss (suggester), window miss (depth/persistence, bucket 1.5), over-fire (pr
 **Bucket 1 — matcher and SmartKeys: done.** Parser bugs, the `::` weight delimiter, the validator, the
 Studio save gate, the audit change, `weight × count` scoring, the Lucene aliases, and `SMARTKEYS.md`
 carrying both halves — the grammar, and the matching behaviour that had no user-facing home. Regex
-terms (below) reopen it: decided, unimplemented.
+terms closed the last of it: `REGEX` is a node, `regexClose` is the ECMA-262 scan, and
+`regex-unterminated`/`regex-invalid` are the two checks it added.
 
 **Bucket 1.5 — SmartKeys activate: implemented.** Union (`selectAndActivate` → `activationAdds`),
 prune (`rankActivated` → `activationPrunes`), the scan-haystack stash, and the sentinel
@@ -107,14 +108,12 @@ default `strict`), which `=` terms inherit through the same function; `_` left t
 
 ## The queue, ordered by user-visible harm
 
-Two items are outstanding across this doc, and they are ordered by whether a user can see the
+One item is outstanding in this doc. The queue is kept ordered by whether a user can see the
 difference — not by how tidy the fix is, and **not by how many instances the books on disk hold**.
 A permitted input occurs whether or not this author has written one; corpus counts size a known
 effect and never dismiss a case.
 
-1. **Regex terms in a SmartKey** (below). Decided, unimplemented. A `? /re/ x` key is writable today and
-   silently matches the five literal characters, so it is a wrong answer rather than a missing feature.
-2. **The `keysecondary` conversion** (bucket 2). Architectural. No user-visible change in either
+1. **The `keysecondary` conversion** (bucket 2). Architectural. No user-visible change in either
    direction, because the two routes score identically.
 
 ### Documentation owed when each lands
@@ -122,12 +121,7 @@ effect and never dismiss a case.
 `SMARTKEYS.md` describes what WORKS, so it must not be written ahead of the code. Collected here
 because the debt has been accumulating across items:
 
-- **1, regex terms.** Four places: the grammar block; the three-forms table at the top, since a regex
-  stops being only a whole-key form; the validator table, which gains unterminated and unparseable;
-  and "for anything more, use a `/regex/` key", which becomes advice about terms. Plus the anchor note
-  — at `scan` a bare `^` anchors to one position in the whole window, and `/m` is the form that does
-  not move with `matchWindow`.
-- **2, the conversion.** Nothing user-facing; it is behaviour-neutral by construction. Internally
+- **1, the conversion.** Nothing user-facing; it is behaviour-neutral by construction. Internally
   `secondaryOk` goes and `synthesis-check.mjs` is rewritten rather than re-run.
 
 The reason this section exists: `SMARTKEYS.md` claimed "SmartKeys rank, they do not yet activate"
