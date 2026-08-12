@@ -172,12 +172,13 @@ export function countRegexKey(raw, text) {
         // copy holds `--`. Case and orthography stay raw for that reason, and the author has `/i` and
         // `['’]` when they want the wider reading.
         //
-        // Normalisation is not that kind of choice. Decomposed text is the same characters differently
-        // encoded, so composing changes no pattern's meaning — but `/café/` silently fails against it and
-        // there is no spelling of the pattern that covers both forms. The author has no escape here, which
-        // is what separates this from the rules above.
+        // NFC is least surprise, not a divergence bought with an excuse. Two encodings of `é` are the
+        // same letter to anyone not implementing Unicode; a key that visibly matches the text, reports
+        // zero, and has no spelling that fixes it is the astonishing outcome. Core's raw-text behaviour
+        // is the surprising one, so matching it would have been the cost.
         //
-        // A NAMED DIVERGENCE from core, which runs regexes on raw text (matcher-design.md).
+        // The rule that separates this from the exemptions above: fold where the distinction is not one
+        // a writer means, and leave it where they might. Encoding form is never meant; punctuation is.
         return (String(text).normalize('NFC').match(new RegExp(m[1], m[2].includes('g') ? m[2] : `${m[2]}g`)) ?? []).length;
     } catch {
         return 0;

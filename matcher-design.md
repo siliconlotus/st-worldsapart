@@ -635,12 +635,20 @@ and `stray-quote` would fire on every one.
 against real text stops working, since `/—/` could never match a copy holding `--`. Case and
 orthography therefore stay raw, and the author widens with `/i` and `['’]` when they want to.
 
-Normalisation is not that kind of choice, so the segment is NFC-composed first. Decomposed text is the
-same characters differently encoded, so composing changes no pattern's meaning — but `/café/` silently
-fails against it and NO spelling of the pattern covers both forms. That absence of an escape is what
-separates it from the rules above. **A named divergence from core**, which runs regexes on raw text;
-measured 0 decomposed sequences across 41 books and 196 chats, so it is unexercised here and taken on
-the reasoning rather than the count. Inside a SmartKey that means mixed folding: `? /Cap'n/ crunch`
+Normalisation is not that kind of choice, so the segment is NFC-composed first — and this is LEAST
+SURPRISE applied straight, not a divergence bought with an excuse. Two encodings of `é` are the same
+letter to everyone who is not implementing Unicode; what would astonish is a key that visibly matches
+the text, reports zero, and offers no spelling that fixes it. Core's raw-text behaviour is the
+surprising one here, so matching it faithfully would have been the cost.
+
+That also says why case and orthography go the other way under the same principle. `/Cap'n/` missing
+`Cap’n` surprises too, but the surprise is visible IN THE PATTERN and the author can act on it, while
+`/—/` failing against a folded haystack would be invisible and unfixable. **Fold where the distinction
+is not one a writer means, and leave it where they might.** Encoding form is never meant; punctuation
+sometimes is.
+
+Measured 0 decomposed sequences across 41 books and 196 chats — unexercised here, which is a statement
+about this corpus and not about the case. Inside a SmartKey that means mixed folding: `? /Cap'n/ crunch`
 has one term that sees `’` and one that does not.
 
 **A path-shaped token reads as every other layer reads it**, which is what the qualifying-close rule
