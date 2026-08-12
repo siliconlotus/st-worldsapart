@@ -353,57 +353,84 @@ export function validateSmartKey(raw) {
 const SCAN_CACHE_MAX = 8;
 
 /**
- * Rewrites core's `(key, keysecondary, selectiveLogic)` as ONE SmartKey expression, for bucket 2 — where WA
- * answers "did a key match" and core's selective logic has to survive the move.
+ * Sets every weight in a subtree to 0 — the `::0` of the synthesis below, applied structurally
+ * because a spliced `?` subtree carries the author's own weights and they must not reach the score.
+ * Mutates, so callers hand it a freshly parsed tree and never a cached one.
+ */
+const zeroWeights = node => {
+    if (!node) return node;
+    if (node.type === 'TERM' || node.type === 'REGEX') node.weight = 0;
+    else if (node.type === 'NOT') zeroWeights(node.operand);
+    else { zeroWeights(node.left); zeroWeights(node.right); }
+    return node;
+};
+
+/**
+ * One key as one node, by the same three-way split countKey makes — so the synthesis inherits
+ * "entry flags reach plain keys only" rather than restating it.
  *
- * One expression PER PRIMARY KEY, not one for the whole entry. Collapsing the primaries into an alternation
- * would work for activation and lose the per-key granularity keywordScore's saturation wants: an entry
- * keyed on three names that all appear should not score as one term.
+ *   `? …`      parses and splices in as a SUBTREE, carrying its own per-term flags. Freshly parsed
+ *              rather than pulled from the AST cache, because zeroWeights mutates it.
+ *   `/re/`     a REGEX node, which carries its own case sensitivity in its flags.
+ *   anything   a TERM carrying the ENTRY's flags. No escaping and no quoting: a node holds arbitrary
+ *              text verbatim, which is why a key containing a double quote needs no escape here.
+ */
+const keyNode = (raw, { caseSensitive = false, wholeWords = false } = {}, weight = 1) => {
+    const s = String(raw ?? '').trim();
+    if (!s) return null;
+    if (s.startsWith('?')) return parse(tokenize(s));
+    if (isRegexKey(s)) return { type: 'REGEX', value: s, weight };
+    return { type: 'TERM', value: s, isExact: !!wholeWords, isCaseSensitive: !!caseSensitive, quoted: true, weight };
+};
+
+/**
+ * Rewrites core's `(key, keysecondary, selectiveLogic)` as ONE expression AST — the route by which
+ * WA's own matcher answers core's selective logic, so that stays one question with one answer.
  *
- *   AND_ANY   p and at least one secondary   ? "p" ("s1" | "s2")
- *   AND_ALL   p and all of them              ? "p" "s1" "s2"
- *   NOT_ANY   p and none of them             ? "p" -"s1" -"s2"
- *   NOT_ALL   p and not all of them          ? "p" -("s1" "s2")
+ * One expression PER PRIMARY KEY, not one for the whole entry. Collapsing the primaries into an
+ * alternation would work for activation and lose the per-key granularity keywordScore's saturation
+ * wants: an entry keyed on three names that all appear should not score as one term.
  *
- * EVERY TERM IS QUOTED, which is what makes this safe rather than clever. A key is arbitrary user text:
- * `hot tub` would parse as a conjunction, a leading `-` as a negation, `(` as a group. Quoting suppresses
- * all of it, and quoting a single term never changes what it matches — the one property this rewrite
- * depends on.
+ *   AND_ANY   p and at least one secondary   AND(p, OR(s1, s2))
+ *   AND_ALL   p and all of them              AND(p, AND(s1, s2))
+ *   NOT_ANY   p and none of them             AND(AND(p, NOT(s1)), NOT(s2))
+ *   NOT_ALL   p and not all of them          AND(p, NOT(AND(s1, s2)))
  *
- * Returns null when the entry cannot be expressed, and the caller must then fall back rather than
- * approximate: a key containing a double quote has no escape in this grammar, and a `/regex/` or `?`
- * key is a different matcher that cannot be a term inside an expression.
+ * AN AST, NOT A STRING, and that is the whole of why this has no refusals. Every one the string route
+ * had was an artifact of emitting a `?` string the lexer then had to read back: a key containing a
+ * double quote had no escape in the grammar, and a `?` or `/re/` key could not survive being quoted
+ * as a term. A node carries its value verbatim and nothing lexes it.
+ *
+ * SECONDARY NODES CARRY WEIGHT 0, which is what makes this score-neutral: evaluate's AND and OR both
+ * sum, so a gate contributing anything would inflate the primary's count. NOT already returns 0.
+ *
+ * A non-blank secondary that parses to nothing stays in the list as a null child rather than being
+ * dropped — evaluate reads null as "did not match", which is core's answer for a key that cannot
+ * fire, where dropping it would make AND_ALL pass on a gate core fails.
  *
  * @param {string} primary One of the entry's primary keys
  * @param {string[]} secondaries entry.keysecondary
  * @param {number} logic entry.selectiveLogic (WI_LOGIC)
- * @returns {string|null} A `?` expression, or null if this entry needs the old path
+ * @param {{caseSensitive?: boolean, wholeWords?: boolean}} flags The entry's resolved match flags
+ * @returns {object|null} An AST node, or null when the primary is blank
  */
-export function synthesizeSecondary(primary, secondaries, logic = 0) {
-    const usable = k => {
-        const s = String(k ?? '').trim();
-        if (!s || s.includes('"')) return null;              // no escape for a quote inside a quote
-        if (s.startsWith('?') || isRegexKey(s)) return null;  // a different matcher, not a term
-        return s;
-    };
-    const p = usable(primary);
+export function synthesizeSecondary(primary, secondaries, logic = 0, flags = {}) {
+    const p = keyNode(primary, flags, 1);
     if (!p) return null;
 
     const sec = [];
     for (const k of Array.isArray(secondaries) ? secondaries : []) {
-        const s = String(k ?? '').trim();
-        if (!s) continue;                        // blanks are dropped before the logic, as core does
-        const ok = usable(s);
-        if (!ok) return null;
-        sec.push(`"${ok}"`);
+        if (!String(k ?? '').trim()) continue;   // blanks are dropped before the logic, as core does
+        sec.push(zeroWeights(keyNode(k, flags, 0)));
     }
-    if (!sec.length) return `? "${p}"`;          // no secondaries: the condition is vacuously true
+    if (!sec.length) return p;                   // no secondaries: the condition is vacuously true
 
+    const and = (left, right) => ({ type: 'AND', left, right });
     switch (Number(logic)) {
-        case 1: return `? "${p}" -(${sec.join(' ')})`;   // NOT_ALL
-        case 2: return `? "${p}" ${sec.map(t => `-${t}`).join(' ')}`;   // NOT_ANY
-        case 3: return `? "${p}" ${sec.join(' ')}`;      // AND_ALL
-        default: return `? "${p}" (${sec.join(' | ')})`; // AND_ANY, and core's fallback for anything else
+        case 1: return and(p, { type: 'NOT', operand: sec.reduce(and) });                          // NOT_ALL
+        case 2: return sec.reduce((acc, n) => and(acc, { type: 'NOT', operand: n }), p);           // NOT_ANY
+        case 3: return and(p, sec.reduce(and));                                                    // AND_ALL
+        default: return and(p, sec.reduce((l, r) => ({ type: 'OR', left: l, right: r })));         // AND_ANY
     }
 }
 
@@ -550,27 +577,45 @@ export function evaluate(node, text, acHits) {
     }
 }
 
-function ensureAst(scope, raw) {
-    let ast = scope.astCache.get(raw);
+function ensureAst(scope, id, build) {
+    let ast = scope.astCache.get(id);
     if (ast === undefined) {
-        ast = parse(tokenize(raw));
+        ast = build();
         registerTerms(scope, ast);
-        scope.astCache.set(raw, ast);
+        scope.astCache.set(id, ast);
     }
     return ast;
 }
 
 /**
- * Full pipeline for one key against one text buffer:
- * Pass 1 candidate scan (Aho-Corasick, cached per text) -> Pass 2 parse (cached per key) -> evaluate.
+ * Full pipeline for one AST against one text buffer:
+ * Pass 1 candidate scan (Aho-Corasick, cached per text) -> Pass 2 build (cached per id) -> evaluate.
+ *
+ * The id is what interns the tree, and it must therefore capture everything the tree depends on —
+ * registerTerms stamps a scope-local pattern index onto each TERM, so a cache hit reuses those and a
+ * mis-keyed hit would evaluate the wrong expression. A raw `?` key IS its own id; a synthesised
+ * expression needs its inputs joined (see countKey's selective path).
+ *
+ * @param {string} id Cache key for the built tree
+ * @param {() => object|null} build Builds the tree; called once per id per scope
+ * @param {string} text Scan text
+ * @param {object} [scope] Matching context (default: the shared retrieval scope)
+ * @returns {{matched: boolean, scoreBoost: number}}
+ */
+export function evaluateAst(id, build, text, scope = defaultScope) {
+    const ast = ensureAst(scope, id, build);
+    return evaluate(ast, text, ensureScan(scope, text));
+}
+
+/**
+ * Full pipeline for one `?` key against one text buffer.
  * @param {string} rawKey Key string including the leading `?`
  * @param {string} text Scan text
  * @param {object} [scope] Matching context (default: the shared retrieval scope)
  * @returns {{matched: boolean, scoreBoost: number}}
  */
 export function evaluateSmartKey(rawKey, text, scope = defaultScope) {
-    const ast = ensureAst(scope, rawKey);
-    return evaluate(ast, text, ensureScan(scope, text));
+    return evaluateAst(rawKey, () => parse(tokenize(rawKey)), text, scope);
 }
 
 /**
@@ -586,7 +631,7 @@ export function registerKeys(rawKeys, scope = defaultScope) {
         const raw = String(key ?? '').trim();
         if (!raw || isRegexKey(raw)) continue;
         if (raw.startsWith('?')) {
-            ensureAst(scope, raw);
+            ensureAst(scope, raw, () => parse(tokenize(raw)));
         } else {
             internLiteral(scope, fold(raw));
         }

@@ -10,7 +10,7 @@
 // from what fires. Imported by both the extension and the offline harnesses, so it must stay
 // isomorphic — no DOM, no ST imports; every ST/settings dependency is INJECTED by the caller.
 
-import { cachedCount, evaluateSmartKey, fold, normalizeOrthography, primeScan, validateSmartKey } from './smartkeys.mjs';
+import { cachedCount, evaluateAst, evaluateSmartKey, fold, normalizeOrthography, primeScan, synthesizeSecondary, validateSmartKey } from './smartkeys.mjs';
 
 /** Escape a string for literal use in a RegExp (same as ST's utils.escapeRegex; inlined to stay ST-free, exported for keyword-core). */
 export function escapeRegex(str) { return String(str).replace(/[.*+?^${}()|[\]\\]/g, '\\$&'); }
@@ -498,30 +498,38 @@ export function keyExcerpt(key, text, caseSensitive, wholeWords, context = 28) {
  */
 export const WI_LOGIC = { AND_ANY: 0, NOT_ALL: 1, NOT_ANY: 2, AND_ALL: 3 };
 
+/** The entry's non-blank secondary keys, or an empty array. Blanks are dropped before the logic runs,
+ *  as core does, so an entry whose secondaries are all whitespace is ungated rather than impossible.
+ *  Keys are NOT `substituteParams`-expanded — that is ST-side, and primary keys are treated the same. */
+export const secondaryKeys = entry =>
+    (Array.isArray(entry?.keysecondary) ? entry.keysecondary : []).filter(k => String(k ?? '').trim());
+
 /**
- * Core's secondary-key condition (world-info.js matchSecondaryKeys), over WA's matcher.
+ * One primary key's occurrences under the entry's selective logic — countKey, with core's
+ * secondary-key condition folded into the same expression rather than evaluated beside it.
  *
- * True when the entry has no secondary keys, so callers can apply it unconditionally. Keys are NOT
- * `substituteParams`-expanded here, matching how primary keys are already treated in this module —
- * that substitution is ST-side and this file is ST-free.
+ * WHY ONE EXPRESSION AND NOT TWO EVALUATORS. `secondaryOk` was a second WA implementation of core's
+ * matchSecondaryKeys, standing next to the one in `synthesizeSecondary`, and CLAUDE.md's one-matcher
+ * rule applies to selective logic as much as to key matching: two implementations drift, and the
+ * drift surfaces as an entry that activates and does not score, or the reverse. The synthesis is the
+ * survivor because it is the one that can carry the ENTRY FLAGS — the string route returned from
+ * countKey's `?` branch before the flag arguments were ever read.
  *
- * @returns {boolean} whether the entry's secondary condition is satisfied by `text`
+ * Score-neutral by construction: the gate's nodes carry weight 0, so the value here is the primary's
+ * own contribution exactly as countKey computes it, and 0 when the gate fails. The floor mirrors
+ * countKey's `?` branch — a matched expression built purely from negation accumulates no weight and
+ * must still count as one hit.
+ *
+ * The cache id joins every input the tree depends on with US, because registerTerms stamps
+ * scope-local pattern indices onto it and a mis-keyed hit would evaluate the wrong expression.
  */
-export function secondaryOk(entry, text, caseSensitive, wholeWords) {
-    const sec = Array.isArray(entry?.keysecondary) ? entry.keysecondary.filter(k => String(k ?? '').trim()) : [];
-    if (!sec.length) return true;
-    if (text) primeScan(sec, text);
-    let any = false, all = true;
-    for (const k of sec) {
-        if (countKey(k, text, caseSensitive, wholeWords) > 0) any = true;
-        else all = false;
-    }
-    switch (entry.selectiveLogic ?? WI_LOGIC.AND_ANY) {
-        case WI_LOGIC.NOT_ALL: return !all;
-        case WI_LOGIC.NOT_ANY: return !any;
-        case WI_LOGIC.AND_ALL: return all;
-        default: return any;   // AND_ANY, and core's fallback for an unknown value
-    }
+const SELECTIVE_SEP = '\u001f';
+export function countSelective(entry, key, text, caseSensitive, wholeWords, sec = secondaryKeys(entry)) {
+    const logic = entry?.selectiveLogic ?? WI_LOGIC.AND_ANY;
+    const id = [key, logic, caseSensitive ? 1 : 0, wholeWords ? 1 : 0, ...sec].join(SELECTIVE_SEP);
+    const { matched, scoreBoost } = evaluateAst(
+        id, () => synthesizeSecondary(key, sec, logic, { caseSensitive, wholeWords }), text);
+    return matched ? (scoreBoost > 0 ? scoreBoost : 1) : 0;
 }
 
 /**
@@ -553,7 +561,11 @@ export function keywordScore(entry, text, keys = entry.key, { k1, caseSensitiveD
     // from that scan instead of walking the buffer per key. Segments are shared across entries in
     // a retrieval pass — and shared BY VALUE, since the cache keys on the string — so after the
     // first entry this is a no-op, and an entry that appends match sources pays only for those.
-    if (segments.length) primeScan(keys, segments);
+    // Secondaries are primed alongside the primaries, not on first use: the synthesised tree interns
+    // their folded literals, and doing that mid-loop would dirty the automaton and throw away every
+    // scan already cached for this window.
+    const sec = secondaryKeys(entry);
+    if (segments.length) primeScan(sec.length ? [...keys, ...sec] : keys, segments);
 
     let score = 0;
     const hits = [];
@@ -573,10 +585,13 @@ export function keywordScore(entry, text, keys = entry.key, { k1, caseSensitiveD
         // but against CORE's buffer, which is not WA's window (worldsapart.js builds its own), and a
         // force-activated entry was never checked at all. Either way the score is WA's claim about this
         // text, so it is WA's job to make it true of this text.
-        if (!secondaryOk(entry, segment, caseSensitive, wholeWords)) continue;
-
+        //
+        // The gate is INSIDE countSelective's expression rather than a separate pass over the segment,
+        // so "did this key match" stays one question with one evaluator (see there).
         for (const key of keys) {
-            const n = countKey(key, segment, caseSensitive, wholeWords);
+            const n = sec.length
+                ? countSelective(entry, key, segment, caseSensitive, wholeWords, sec)
+                : countKey(key, segment, caseSensitive, wholeWords);
             if (n > 0) counts.set(key, (counts.get(key) ?? 0) + n);
         }
     }

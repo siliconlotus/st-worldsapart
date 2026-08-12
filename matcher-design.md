@@ -89,12 +89,13 @@ prune (`rankActivated` → `activationPrunes`), the scan-haystack stash, and the
 certifications (uids 7–14). Bucket 2's first increment rather than an alternative to it: every
 piece carries over unchanged.
 
-**Bucket 2 — WA owns activation: implemented**, behind `ownActivation` (default on). On a scan WA
+**Bucket 2 — WA owns activation: implemented and complete**, behind `ownActivation` (default on). On a scan WA
 intercepts, every keyword-activating entry's keys are stashed and blanked at `WORLDINFO_ENTRIES_LOADED`,
 so core's matcher never fires and the inclusion-group filter runs over WA's verdicts. `feedScanLoop`
 answers each later pass. The group asymmetry and the recursion-buffer residual are closed by that
-ordering, and the failure path now reports visibly (`reportFailure`). Still open inside it: key-side
-variant expansion.
+ordering, and the failure path now reports visibly (`reportFailure`). The `keysecondary` conversion
+landed last and took `secondaryOk` with it. Key-side variant expansion is the one thing named here
+that was never scheduled, and it is not owed to anything.
 
 **Match window — implemented** (`matchWindow` setting, `matcher.scanSegments`/`segment`), and independent
 of bucket 2 except where noted.
@@ -106,27 +107,16 @@ default `strict`), which `=` terms inherit through the same function; `_` left t
 
 ---
 
-## The queue, ordered by user-visible harm
+## The queue is empty
 
-One item is outstanding in this doc. The queue is kept ordered by whether a user can see the
-difference — not by how tidy the fix is, and **not by how many instances the books on disk hold**.
-A permitted input occurs whether or not this author has written one; corpus counts size a known
-effect and never dismiss a case.
+Nothing in this doc is decided-and-unimplemented. When it refills, order it by whether a user can see
+the difference — not by how tidy the fix is, and **not by how many instances the books on disk hold**.
+A permitted input occurs whether or not this author has written one; corpus counts size a known effect
+and never dismiss a case.
 
-1. **The `keysecondary` conversion** (bucket 2). Architectural. No user-visible change in either
-   direction, because the two routes score identically.
-
-### Documentation owed when each lands
-
-`SMARTKEYS.md` describes what WORKS, so it must not be written ahead of the code. Collected here
-because the debt has been accumulating across items:
-
-- **1, the conversion.** Nothing user-facing; it is behaviour-neutral by construction. Internally
-  `secondaryOk` goes and `synthesis-check.mjs` is rewritten rather than re-run.
-
-The reason this section exists: `SMARTKEYS.md` claimed "SmartKeys rank, they do not yet activate"
-through the whole of buckets 1.5 and 2. A page that describes behaviour goes stale silently, because
-nothing in the suite reads it.
+`SMARTKEYS.md` describes what WORKS, so it must not be written ahead of the code — and it must not lag
+behind it either. It claimed "SmartKeys rank, they do not yet activate" through the whole of buckets
+1.5 and 2, because a page that describes behaviour goes stale silently: nothing in the suite reads it.
 
 ---
 
@@ -263,45 +253,35 @@ list after it, so using it raw restores the propagation the flag exists to stop.
 activates on content a user who disabled recursion never wanted scanned. The token budget is the
 opposite case and is not inherited — WA supplants it (see `worldsapart.js` `onEntriesLoaded`).
 
-**`keysecondary` — the ruling that the SmartKey synthesis route is dead is WITHDRAWN.** It rested on
-three reasons and none survived. Granularity is not lost: the synthesised expression is exploded from
-the primary keys, one expression per key, so the per-key verdict is preserved. Semantics do not change:
-`::0` on the synthesised secondary terms reproduces the selective-logic score exactly, measured
-identical on both routes. **Measured** population, books on disk: 79 entries of 2,112 enabled (3.7%)
-across 14 books, 77 of them `AND_ANY`.
+**`keysecondary` — converted. `secondaryOk` is gone.** Core's `(key, keysecondary, selectiveLogic)`
+is answered by ONE expression per primary key: `synthesizeSecondary` builds the AST,
+`countSelective` evaluates it, `keywordScore` is the only caller. The rival evaluator was the reason
+to do it — one-matcher covers selective logic as much as key matching — and the string route was
+never the survivor, because it could not carry the entry flags: `countKey` returns from its `?`
+branch before it reads them. **Measured** population, books on disk: 79 entries of 2,112 enabled
+(3.7%) across 14 books, 77 of them `AND_ANY`.
 
-**Synthesis builds the AST, not a string.** Every refusal was an artifact of emitting a `?` string the
-lexer then had to read back. A key containing a double quote needs no escape, because a `TERM` node
-carries it verbatim and nothing lexes it. A `?` key parses and splices in as a subtree. A `/regex/` key
-is the `REGEX` node above — and **ST core does permit regex in `keysecondary`**, so that is the class
-that decided whether `secondaryOk` survived at all. With no refusals left the conversion REPLACES
-`secondaryOk` instead of adding a path beside it, which was the third reason.
+**Synthesis builds the AST, not a string, and that is why it has no refusals.** Every one was an
+artifact of emitting a `?` string the lexer then had to read back. A key containing a double quote
+needs no escape, because a `TERM` node carries it verbatim and nothing lexes it. A `?` key parses and
+splices in as a subtree. A `/regex/` key is a `REGEX` node — and **ST core does permit regex in
+`keysecondary`**, so that is the class that decided whether `secondaryOk` could be replaced at all.
 
-Entry flags are stamped on the synthesised nodes, as `isCaseSensitive`/`isExact`. The string route
-could not carry them at all — `countKey` returns from the `?` branch before it reads the flag
-arguments — and the 16,000-comparison fuzz never caught it, because it only ever ran with both flags
-off and only ever compared the boolean.
+Entry flags are stamped on the synthesised nodes as `isCaseSensitive`/`isExact`, and a spliced `?`
+subtree and a `REGEX` node carry their own. Secondary nodes carry weight 0 (`zeroWeights` reaches
+into a spliced subtree, or the author's own `::5` would leak), so the conversion is score-neutral by
+construction: `AND` and `OR` both sum.
 
-So: viable, not scheduled, and a prerequisite for nothing. Selective logic already inherits
-`matchWindow` scoping without it, because `secondaryOk` is evaluated per segment inside `keywordScore`,
-which is what the activation verdicts call — the scoping comes from the call site, not from which
-evaluator runs. Performance argues neither way: synthesis is ~2.5x faster per evaluation, which is
-~5ms per generation over the affected entries, against a scan that also embeds and retrieves.
+Behaviour-neutrality also **depended on the whole-words change landing first**. A synthesised `TERM`
+has never had core's multi-word exemption, so while `countKey` did, a multi-word key gated by a
+secondary would have scored on different rules than the same key ungated.
 
-`synthesizeSecondary` and `eval/synthesis-check.mjs` therefore stay. The cost of keeping them is that
-`synthesis-check.mjs` guards code with no production caller until the conversion lands. `secondaryOk`
-is the live path until then and goes when it lands — obviating it IS the conversion. It is not an
-independent authority to keep fuzzing against, only a second WA implementation of core's rule, so the
-fuzz goes with it and its coverage belongs in a written-down case table, the way the sentinel fixture
-already records its verdicts.
+`eval/synthesis-check.mjs` is now the written-down case table the doc asked for. The 16,000-comparison
+fuzz went with `secondaryOk`: it was not an independent authority, only a second WA implementation of
+core's rule, and it never caught the flag defect because it only ever ran with both flags off.
 
-**`coreChat` is retained, not mirrored — done.** WA's `intercept` IS a generation interceptor and
-`runGenerationInterceptors` runs *after* `coreChat` is built (`is_system` filter, swipe-pop,
-`getRegexedString`, `appendFileContent`, titles, media, reasoning), so the `chat` parameter already is
-that array. It is stashed per generation as `runState.scanChat`; `rankActivated` reads the stash and
-falls back to `getContext().chat` only for the dry-run and chat-load cases where interceptors never
-fired. This also closed a standing stage-3 bug: keyword scores were previously computed against text
-core never matched on, for anyone running a regex script that rewrites messages.
+Selective logic already inherited `matchWindow` scoping before the conversion and still does — the
+scoping comes from the call site, `keywordScore`'s per-segment loop, not from which evaluator runs.
 
 **Then the key-side variant expansion** that bucket 1 deferred, since it is only safe once WA's rules
 are what fires: hyphen ↔ space (compounds are written both ways, and prose picks per term, not per
@@ -365,8 +345,9 @@ a plural. The user-facing wording must name the mode rather than stating either 
 
 **Measured** against `countKey`, both flags and all three key kinds: this is already what fires — the
 `?` and `/re/` branches return before the flag arguments are read — so it ratifies behaviour rather
-than changing it. The `keysecondary` conversion inherits the rule: a plain key synthesises to a `TERM`
-carrying the entry's flags, while a spliced `?` subtree and a `REGEX` node carry their own.
+than changing it. The `keysecondary` conversion inherited the rule rather than restating it: a plain
+key synthesises to a `TERM` carrying the entry's flags, while a spliced `?` subtree and a `REGEX`
+node carry their own.
 
 ---
 
@@ -472,11 +453,10 @@ concatenating**, not an evaluator mode — `scanWindow` returns segments, and `s
 one-segment array that reproduces today's behaviour exactly.
 
 **Uniform across every matching rule.** SmartKey conjunctions, selective logic, all of it. `keysecondary`
-is not a special case: `secondaryOk` runs per segment inside `keywordScore`, so it inherits the scope
+is not a special case: it is evaluated per segment inside `keywordScore`, so it inherits the scope
 from the call site, where pinning it to `scan` would need a per-key override nothing else wants — and would aim the
 setting at the empty half of the population, since books have `keysecondary` and do not yet have
-SmartKeys. The 16,000-comparison equivalence test pins the *mapping* and runs at `scan`, where core's
-semantics are reproducible.
+SmartKeys.
 
 **Both signs scoped.** A negation is a segment-local veto. Whole-window negation carries the same
 distance-blindness as whole-window AND and fails worse: `? fire -drill` is silently killed by a drill
