@@ -2343,7 +2343,7 @@ async function gradeScene(named) {
             const num = n => (n == null ? '·' : String(n));
             const cell = scaff
                 ? `<span style="opacity:0.5;font-size:0.85em;">${row.block === 'constant' ? 'const' : 'sticky'}</span>`
-                : `<input type="number" class="wa-grade text_pole" data-i="${i}" min="0" max="4" step="1" value="0" title="${esc(GRADE_ANCHORS.map((a, g) => `${g}: ${a}`).join('\n'))}" style="width:4em;padding:2px 4px;">`;
+                : `<input type="number" class="wa-grade text_pole" data-i="${i}" min="0" max="4" step="1" placeholder="—" title="${esc(GRADE_ANCHORS.map((a, g) => `${g}: ${a}`).join('\n'))}" style="width:4em;padding:2px 4px;">`;
             return `<tr style="border-top:1px solid var(--SmartThemeBorderColor);${scaff ? 'opacity:0.6;' : ''}">`
                 + `<td>${cell}</td>`
                 // wiGlyph — the Studio's own 🔵 constant / 🔗 vector / 🟢 keyword mapping, not a local
@@ -2369,10 +2369,17 @@ async function gradeScene(named) {
         return '';
     }
 
-    const grades = [...wrap.querySelectorAll('.wa-grade')].map(input => {
-        const row = rows[Number(input.dataset.i)];
-        return { title: row.title, grade: Number(input.value) || 0, world: row.world, uid: row.uid };
-    });
+    // AN UNTOUCHED FIELD IS NOT A GRADE. The input used to default to 0, so every row the grader never
+    // reached was submitted as a considered "definitely not relevant" — fabricating judgements for the
+    // whole tail of a partial pass, and making the pool look complete when it was not. Blank rows are
+    // omitted, so makeGradeOf returns null for them and every consumer decides what absent means. A
+    // TYPED 0 is a real verdict and still lands here.
+    const grades = [...wrap.querySelectorAll('.wa-grade')]
+        .filter(input => String(input.value).trim() !== '')
+        .map(input => {
+            const row = rows[Number(input.dataset.i)];
+            return { title: row.title, grade: Number(input.value), world: row.world, uid: row.uid };
+        });
 
     // Every attached book, at the requested fidelity — so a later lorebook edit can't move the numbers.
     const books = {};
@@ -2645,7 +2652,7 @@ async function superGradePopup({ captures, union, entryOf, prior: prior0 = [], s
                 // it has to be made here or the grader is asked to judge an always-on entry.
                 const cell = row.block !== 'dynamic'
                     ? `<span style="opacity:0.5;font-size:0.85em;">${row.block === 'constant' ? 'const' : 'sticky'}</span>`
-                    : `<input type="number" class="wa-grade text_pole" data-key="${esc(key)}" data-i="${i}" min="0" max="4" step="1" ${typed.has(key) ? 'data-dirty="1" ' : ''}value="${esc(typed.get(key) ?? (done ? priorOf.get(key) : '0'))}" title="${esc(GRADE_ANCHORS.map((a, g) => `${g}: ${a}`).join('\n'))}" style="width:4em;padding:2px 4px;">`;
+                    : `<input type="number" class="wa-grade text_pole" data-key="${esc(key)}" data-i="${i}" min="0" max="4" step="1" ${typed.has(key) ? 'data-dirty="1" ' : ''}value="${esc(typed.get(key) ?? (done ? priorOf.get(key) : ''))}" placeholder="—" title="${esc(GRADE_ANCHORS.map((a, g) => `${g}: ${a}`).join('\n'))}" style="width:4em;padding:2px 4px;">`;
                 return `<tr style="border-top:1px solid var(--SmartThemeBorderColor);${done ? 'opacity:0.55;' : ''}">`
                     + `<td>${cell}</td>`
                     // wiGlyph, as /wa-grade and the Explorer use it. It matters most in THIS table:
@@ -2727,10 +2734,14 @@ async function superGradePopup({ captures, union, entryOf, prior: prior0 = [], s
         return null;
     }
 
-    const fresh = [...body.querySelectorAll('.wa-grade')].map(input => {
-        const row = union.rows[Number(input.dataset.i)];
-        return { title: row.title, grade: Number(input.value) || 0, world: row.world, uid: row.uid };
-    });
+    // Blank means ungraded, not 0 — see the /wa-grade collector. Prior-round rows arrive pre-filled and
+    // so are never blank, which is what carries them through mergeGrades untouched.
+    const fresh = [...body.querySelectorAll('.wa-grade')]
+        .filter(input => String(input.value).trim() !== '')
+        .map(input => {
+            const row = union.rows[Number(input.dataset.i)];
+            return { title: row.title, grade: Number(input.value), world: row.world, uid: row.uid };
+        });
     return { grades: mergeGrades(prior, fresh), prior };
 }
 
