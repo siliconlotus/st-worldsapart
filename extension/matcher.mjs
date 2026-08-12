@@ -10,7 +10,7 @@
 // from what fires. Imported by both the extension and the offline harnesses, so it must stay
 // isomorphic — no DOM, no ST imports; every ST/settings dependency is INJECTED by the caller.
 
-import { cachedCount, evaluateAst, evaluateSmartKey, fold, normalizeOrthography, primeScan, synthesizeSecondary, validateSmartKey } from './smartkeys.mjs';
+import { cachedCount, evaluateAst, evaluateSmartKey, fold, normalizeOrthography, parse, primeScan, synthesizeSecondary, tokenize, validateSmartKey } from './smartkeys.mjs';
 
 /** Escape a string for literal use in a RegExp (same as ST's utils.escapeRegex; inlined to stay ST-free, exported for keyword-core). */
 export function escapeRegex(str) { return String(str).replace(/[.*+?^${}()|[\]\\]/g, '\\$&'); }
@@ -462,8 +462,15 @@ export function countKey(key, text, caseSensitive, wholeWords, scope) {
  * than re-deriving match rules — but it is DISPLAY, not a matcher: only ever called for keys
  * countKey already counted, so a disagreement can misplace an excerpt, never invent or hide a
  * firing. Excerpts are from the FOLDED haystack (fold is not length-preserving — em-dash → "--" —
- * so indices do not map back to the original text). A SmartKey gets no excerpt: which term
- * satisfied it is the expression evaluator's business, not a substring's.
+ * so indices do not map back to the original text).
+ *
+ * A SINGLE-TERM SmartKey gets an excerpt; a compound one does not. `? =rut` or `? /Cap'n/i` has exactly
+ * one thing that can have matched, and it is the case where the excerpt is worth most — a bare count
+ * cannot tell an author where `=rut` landed, and for a regex the surface form is not deducible from the
+ * key at all. A conjunction, alternation or negation has no single answer, so it keeps returning null
+ * rather than picking a limb and implying it was the reason. The term's OWN flags apply, never the
+ * entry's: matcher-design rules a `?` key self-describing, so `? nasa` in a caseSensitive entry is still
+ * insensitive.
  * @param {string} key The key that matched
  * @param {string|string[]} text Scan window — a string or segments, as keywordScore takes
  * @param {boolean} caseSensitive Resolved entry flag
@@ -472,8 +479,19 @@ export function countKey(key, text, caseSensitive, wholeWords, scope) {
  * @returns {string|null} One marked excerpt, or null (no match found / smartkey)
  */
 export function keyExcerpt(key, text, caseSensitive, wholeWords, context = 28) {
-    const raw = String(key ?? '').trim();
-    if (!raw || raw.startsWith('?')) return null;
+    let raw = String(key ?? '').trim();
+    if (!raw) return null;
+    if (raw.startsWith('?')) {
+        // Resolve to the single term, or give up. `parse` returns one node for a lone term and a
+        // tree for anything else, so "is this excerptable" is just the node type.
+        let node = null;
+        try { node = parse(tokenize(raw)); } catch { return null; }
+        if (!node || (node.type !== 'TERM' && node.type !== 'REGEX')) return null;
+        raw = String(node.value ?? '').trim();
+        if (!raw) return null;
+        caseSensitive = node.type === 'REGEX' ? caseSensitive : !!node.isCaseSensitive;
+        wholeWords = node.type === 'REGEX' ? wholeWords : !!node.isExact;
+    }
     const mark = (hay, index, length) => {
         const from = Math.max(0, index - context);
         const to = Math.min(hay.length, index + length + context);
