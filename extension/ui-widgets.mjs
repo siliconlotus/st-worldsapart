@@ -141,18 +141,26 @@ export function wiTooltip({ item, block }) {
 /**
  * The key-hit lines under a grading row's title: which key fired, how often, and where.
  *
- * COLOUR CARRIES THE DISTINCTION, not a repeated glyph. A 🔑 in front of every line is the same mark on
- * every row, so it separates nothing while adding a column of noise to a table read top to bottom; the key
- * itself is the thing that differs, so it is what gets marked. The count and the excerpt stay dim — they
- * are context for the key, not competing with it.
+ * COLOUR CARRIES THE DISTINCTIONS, not glyphs. A 🔑 in front of every line is the same mark on every row,
+ * so it separates nothing while adding a column of noise to a table read top to bottom; and `×` before the
+ * count is a second mark doing work that a colour change and the space already do. What differs between
+ * rows is the KEY and how often it fired, so those two are what get marked — the key in blue, the count in
+ * amber — and the excerpt stays dim as context for both.
+ *
+ * THE COUNT IS ALWAYS SHOWN, including 1. It was suppressed below 2 on the grounds that "1" is the boring
+ * case, but a key that fired exactly once is a different claim from a key that fired thirteen times, and
+ * the reader cannot tell an omitted 1 from an unrecorded count.
+ *
+ * Colour is reinforcement, not the only cue: position already orders these (key, then count, then
+ * excerpt), so the line survives being read without it.
  *
  * @param {Array<{key: string, count: number, excerpt?: string}>} why Key hits, as recorded on the row
  * @returns {string} HTML, one line per hit
  */
 export const keyHitsHtml = why => (why ?? []).map(w =>
-    `<br><small style="opacity:0.7;"><span style="color:#6ea8fe;font-weight:600;">${escapeHtml(w.key)}</span>`
-    + `${w.count > 1 ? `<span style="opacity:0.6;"> ×${w.count}</span>` : ''}`
-    + `${w.excerpt ? ` <span style="opacity:0.65;">${escapeHtml(w.excerpt)}</span>` : ''}</small>`).join('');
+    `<br><small style="opacity:0.75;"><span style="color:#6ea8fe;font-weight:600;">${escapeHtml(w.key)}</span>`
+    + `${Number.isFinite(w.count) ? ` <span style="color:#d9a441;font-weight:600;">${w.count}</span>` : ''}`
+    + `${w.excerpt ? ` <span style="opacity:0.6;">${escapeHtml(w.excerpt)}</span>` : ''}</small>`).join('');
 
 /**
  * The fold shown under a grading row: what the entry is keyed on, then its text.
