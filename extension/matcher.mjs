@@ -479,8 +479,23 @@ export function countKey(key, text, caseSensitive, wholeWords, scope) {
  * @returns {string|null} One marked excerpt, or null (no match found / smartkey)
  */
 export function keyExcerpt(key, text, caseSensitive, wholeWords, context = 28) {
-    return keyExcerpts(key, text, caseSensitive, wholeWords, context, 1)[0] ?? null;
+    const first = keyExcerpts(key, text, caseSensitive, wholeWords, context, 1)[0];
+    return first ? markExcerptText(first) : null;
 }
+
+/**
+ * An excerpt rendered as plain text with the match in guillemets.
+ *
+ * For places that cannot carry markup — a `title` tooltip, a console table, a check's expectation. The
+ * ambiguity that offsets exist to avoid is cosmetic here: a reader may not be able to tell the author's
+ * guillemets from the marker, but nothing downstream parses this back out.
+ *
+ * @param {{text: string, start: number, end: number}} ex One keyExcerpts result
+ * @returns {string} The excerpt with «the match» marked
+ */
+export const markExcerptText = ex => (ex
+    ? `${ex.text.slice(0, ex.start)}«${ex.text.slice(ex.start, ex.end)}»${ex.text.slice(ex.end)}`
+    : null);
 
 /**
  * EVERY place a key matched, for vetting rather than diagnosis — up to `limit`.
@@ -498,7 +513,7 @@ export function keyExcerpt(key, text, caseSensitive, wholeWords, context = 28) {
  * @param {boolean} wholeWords Resolved entry flag
  * @param {number} [context] Characters of context either side
  * @param {number} [limit] Most excerpts to return
- * @returns {string[]} Marked excerpts, in scan order
+ * @returns {Array<{text: string, start: number, end: number}>} Excerpts with match offsets, in scan order
  */
 export function keyExcerpts(key, text, caseSensitive, wholeWords, context = 28, limit = 20) {
     const out = [];
@@ -525,6 +540,11 @@ export function keyExcerpts(key, text, caseSensitive, wholeWords, context = 28, 
     // Derived by CALLING the real fold per character rather than restating its rules, so there is no second
     // copy to drift. Display-only and called for a handful of hits, so the walk is affordable where it
     // would not be in the scan.
+    // NFC FIRST, then walk. normalizeOrthography composes combining marks over the WHOLE string, which a
+    // per-character walk cannot reproduce: "e + ́" is two characters alone and one after composition, so
+    // every offset past the first such sequence drifts and the mark lands left of the match — `H«e kno»ts`
+    // for a hit on `knots`. Normalising the source first makes the per-character fold exactly equal to the
+    // whole-string one, since every remaining rule is one character to one or more.
     const srcIndex = (src, target) => {
         let acc = 0;
         for (let i = 0; i < src.length; i++) {
@@ -533,13 +553,20 @@ export function keyExcerpts(key, text, caseSensitive, wholeWords, context = 28, 
         }
         return src.length;
     };
-    const mark = (src, index, length) => {
+    // OFFSETS, NOT DELIMITERS. Marking the span with «…» put a signal in band with the data: an entry
+    // whose own text contains guillemets — French dialogue, a quoted aside — produced `«no «rut»»`, and a
+    // reader (or the display regex) cannot tell the author's from ours. Whitespace is collapsed BEFORE
+    // measuring, or the offsets would describe a string the caller never sees.
+    const mark = (raw0, index, length) => {
+        const src = raw0.normalize('NFC');
         const start = srcIndex(src, index);
         const end = srcIndex(src, index + length);
         const from = Math.max(0, start - context);
         const to = Math.min(src.length, end + context);
-        return `${from > 0 ? '…' : ''}${src.slice(from, start)}«${src.slice(start, end)}»${src.slice(end, to)}${to < src.length ? '…' : ''}`
-            .replace(/\s+/g, ' ');
+        const head = `${from > 0 ? '…' : ''}${src.slice(from, start)}`.replace(/\s+/g, ' ');
+        const hit = src.slice(start, end).replace(/\s+/g, ' ');
+        const tail = `${src.slice(end, to)}${to < src.length ? '…' : ''}`.replace(/\s+/g, ' ');
+        return { text: head + hit + tail, start: head.length, end: head.length + hit.length };
     };
     // A zero-length match would spin forever, so every loop advances by at least one.
     const push = (segment, index, length) => { out.push(mark(segment, index, length)); return out.length >= limit; };

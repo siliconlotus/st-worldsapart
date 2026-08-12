@@ -3,6 +3,7 @@
 // injected stylesheet. DOM-coupled; imports the sort vocabulary from sort.mjs and needs Popup.
 import { settings } from './state.mjs';
 import { escapeHtml } from '../../../../utils.js';
+import { markExcerptText } from './matcher.mjs';
 import { Popup, POPUP_TYPE } from '../../../../popup.js';
 import { wiTitleOf, TIER_DEFS, SORT_LABELS, SORT_MENU } from './sort.mjs';
 
@@ -151,8 +152,8 @@ export function wiTooltip({ item, block }) {
  * case, but a key that fired exactly once is a different claim from a key that fired thirteen times, and
  * the reader cannot tell an omitted 1 from an unrecorded count.
  *
- * THE MATCH INSIDE THE EXCERPT IS THE POINT, and keyExcerpt hands it over wrapped in guillemets. Those
- * become colour here: `«prototype»s` reads as punctuation the author wrote, and the whole reason to show an
+ * THE MATCH INSIDE THE EXCERPT IS THE POINT, and keyExcerpts hands over its offsets. They become colour
+ * here: `«prototype»s` reads as punctuation the author wrote, and the whole reason to show an
  * excerpt is to see WHERE a key landed — which for a substring or a regex is not deducible from the key.
  * Marked in the key's own colour, because it is the key, in context; the guillemets go, since colour and
  * the surrounding dim text already delimit it.
@@ -169,8 +170,14 @@ export function wiTooltip({ item, block }) {
  * @param {Array<{key: string, count: number, excerpt?: string}>} why Key hits, as recorded on the row
  * @returns {string} HTML, one line per hit
  */
-const markExcerpt = text => escapeHtml(String(text))
-    .replace(/«([^»]*)»/g, '<span style="color:var(--SmartThemeQuoteColor, #6ea8fe);font-weight:600;opacity:1;">$1</span>');
+// Marks the span keyExcerpts measured, by OFFSET. The delimiters it used to insert were in-band with the
+// data: an entry containing guillemets of its own gave `«no «rut»»`, and the regex that read them back
+// stopped at the first `»` and highlighted the wrong words. Nothing is parsed out of the text now.
+const markExcerpt = ex => (ex && typeof ex === 'object'
+    ? escapeHtml(ex.text.slice(0, ex.start))
+        + `<span style="color:var(--SmartThemeQuoteColor, #6ea8fe);font-weight:600;opacity:1;">${escapeHtml(ex.text.slice(ex.start, ex.end))}</span>`
+        + escapeHtml(ex.text.slice(ex.end))
+    : escapeHtml(String(ex ?? '')));
 
 export const keyHitsHtml = why => (why ?? []).map(w => {
     // The hover carries EVERY recorded hit, because vetting a key is a question about its spread and the
@@ -178,7 +185,7 @@ export const keyHitsHtml = why => (why ?? []).map(w => {
     // colour cannot cross into a tooltip, and without a marker the reader loses which span matched.
     const all = (w.contexts ?? []).filter(Boolean);
     const tip = all.length > 1
-        ? ` title="${escapeHtml(all.join('\n'))}"`
+        ? ` title="${escapeHtml(all.map(markExcerptText).join('\n'))}"`
         : '';
     return `<br><small style="opacity:0.75;text-align:left;"><span style="color:var(--SmartThemeQuoteColor, #6ea8fe);font-weight:600;">${escapeHtml(w.key)}</span>`
         + `${Number.isFinite(w.count) ? ` <span style="color:var(--SmartThemeEmColor, #d9a441);font-weight:600;">${w.count}</span>` : ''}`

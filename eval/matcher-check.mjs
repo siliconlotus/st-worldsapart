@@ -1,6 +1,6 @@
 // Verifies WA's keyword matcher tracks core's world-info.js matchKeys semantics.
 // countKey/keywordScore live in matcher.mjs, which is isomorphic — imported directly.
-import { countKey, keyExcerpt, keywordScore as rankKeywordScore, setBoundaryMode, wholeWordAdvice } from '../extension/matcher.mjs';
+import { countKey, keyExcerpt, keyExcerpts, keywordScore as rankKeywordScore, setBoundaryMode, wholeWordAdvice } from '../extension/matcher.mjs';
 import { eq } from './metrics.mjs';
 
 // keywordScore with the production defaults injected. Guards the scoreVectorKeys path —
@@ -213,6 +213,15 @@ eq(keyExcerpt('rut', 'the RUT began… pre-RUT nerves', false, false),
     'the «RUT» began… pre-RUT nerves', 'a fold that lengthens earlier text does not shift the mark');
 eq(keyExcerpt('nerves', 'a — b … c nerves here', false, false),
     'a — b … c «nerves» here', 'em-dash and ellipsis before the match keep it correctly placed');
+// COMBINING MARKS were the case that broke it in the browser: the fold NFC-composes over the whole
+// string, so "e + ́" is two characters before and one after. A per-character walk cannot reproduce that,
+// and every offset past the first such sequence drifted — a hit on `knots` rendered as `H«e kno»ts`.
+eq(keyExcerpt('knots', 'Cafe\u0301 and Nai\u0308ve. He knots the rope', false, false),
+    'Café and Naïve. He «knots» the rope', 'decomposed accents before the match do not shift it');
+// The delimiters are not in the data: an entry with guillemets of its own used to mark the wrong span,
+// because the reader stopped at the first closing one.
+const own = keyExcerpts('rut', 'she said «no rut» today', false, false)[0];
+eq(own.text.slice(own.start, own.end), 'rut', 'offsets select the match even when the source has guillemets');
 eq(keyExcerpt('/th\\w+bare/', 'the curtains were threadbare by then', false, false),
     'the curtains were «threadbare» by then', 'regex key: excerpt from the raw text via the pattern');
 eq(keyExcerpt('? thread & curtains', 'threadbare curtains', false, false),
