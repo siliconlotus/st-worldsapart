@@ -301,7 +301,7 @@ export function validateSmartKey(raw) {
     const tokens = tokenize(src);
     // A REGEX counts as a term for no-terms, for hasPositiveTerm and for all-zero-weights. Without
     // that, `? /re/` reported no-terms and `? /re/ -drill` reported negation-only — both fatal, and
-    // activatableKeys would bar a key that matches perfectly well. The checks that read a term's
+    // usableKeys would bar a key that matches perfectly well. The checks that read a term's
     // VALUE still skip it below: a pattern is punctuation by nature, so punctuation-term and
     // stray-quote would fire on every one.
     const terms = tokens.filter(t => t.type === 'TERM' || t.type === 'REGEX');
@@ -342,7 +342,7 @@ export function validateSmartKey(raw) {
     // alternative needs a closing `"`, so `? "moon` falls through to the bare-word branch and keeps
     // the quote as the first character of the value. Anywhere else a `"` is ordinary text —
     // `? 6" copper pipe` is three terms that score 3 against *that copper pipe is 6" in diameter*,
-    // and flagging its VALUE (which is what this did) made a working key fatal, so `activatableKeys`
+    // and flagging its VALUE (which is what this did) made a working key fatal, so `usableKeys`
     // barred it from activating while countKey went on scoring it. Reads structure, not intent.
     for (const t of terms) {
         if (t.type === 'TERM' && !t.quoted && String(t.value).startsWith('"')) {

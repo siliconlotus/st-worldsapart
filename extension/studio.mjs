@@ -820,6 +820,10 @@ export async function lorebookStudio(preferredBook = null) {
         after(e);
     };
     const acceptSugg = (e, term, after = renderEntry) => {
+        // Through the same gate as everything else. A suggester is not supposed to be able to emit a
+        // `?` or `/re/` key, but the REWORD path beside this one was already gated, so accepting a
+        // candidate verbatim skipped the check that editing it to the same string applied.
+        if (!keyWriteOk(term)) return;
         if (!Array.isArray(e.key)) e.key = [];
         if (!hasKey(e, term)) e.key.push(term);
         const g = getSugg(e.uid); g.tfidf = g.tfidf.filter(t => t !== term); g.llm = g.llm.filter(t => t !== term);

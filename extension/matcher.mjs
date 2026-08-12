@@ -578,6 +578,14 @@ export function keywordScore(entry, text, keys = entry.key, { k1, caseSensitiveD
     const caseSensitive = entry.caseSensitive ?? caseSensitiveDefault;
     const wholeWords = entry.matchWholeWords ?? wholeWordsDefault;
 
+    // A key carrying a fatal validator error scores nothing, the same rule stage 2 applies to
+    // activation. Cheap because it is per entry per pass, not per segment, and a plain key returns
+    // from validateSmartKey before it tokenises anything.
+    keys = usableKeys(keys);
+    if (!keys.length) {
+        return { score: 0, hits: [] };
+    }
+
     // A bare string is ONE segment, which is what `matchWindow: 'scan'` means — so every caller that
     // has not been taught about segments keeps the pre-setting behaviour rather than an approximation
     // of it. Only the live scan passes an array.
@@ -674,10 +682,19 @@ export function hasDecorator(entry, name) {
     return false;
 }
 
-/** Keys an activation verdict may rest on: non-blank, and no validator ERROR — `negation-only`
- *  matches on absence (nearly everywhere), `no-terms` never, `stray-quote` on a phrase whose opening
- *  delimiter was swallowed into the first word, so on nothing the author wrote. */
-const activatableKeys = keys => (Array.isArray(keys) ? keys : [])
+/**
+ * Keys WA will act on at all: non-blank, and no validator ERROR — `negation-only` matches on absence
+ * (nearly everywhere), `no-terms` never, `stray-quote` on a phrase whose opening delimiter was
+ * swallowed into the first word, so on nothing the author wrote.
+ *
+ * GATES SCORING AS WELL AS ACTIVATION, which is why it is not called `activatableKeys` any more.
+ * Filtering only the stage-2 verdicts left a key WA had declared unfit to fire on still contributing
+ * a full hit to the layout ranking — `? -zebra` scoring 1 on every scan where "zebra" is absent,
+ * which is nearly all of them. The Studio refuses to write such a key, but core's WI editor knows
+ * nothing about `?` keys and an imported book was never asked, so two of the three ways a key enters
+ * a book bypass that gate and the runtime is where it has to hold.
+ */
+export const usableKeys = keys => (Array.isArray(keys) ? keys : [])
     .filter(k => String(k ?? '').trim() && !validateSmartKey(k).some(f => f.severity === 'error'));
 
 /**
@@ -720,7 +737,7 @@ export function activationAdds(entries, windowFor, opts = {}) {
         // checked before external activations, world-info.js entry walk), so this is provenance
         // hygiene, not the protection itself — which is why `blind` may lift it.
         if (!opts.blind && entry.delayUntilRecursion) continue;
-        const keys = activatableKeys(entry.key);
+        const keys = usableKeys(entry.key);
         if (!keys.length) continue;
         // Nullish, not truthy: scanDepth 0 is core's authored "match nothing from chat" and must
         // not fall through to the globals (an unaltered book behaves as it does under core).
@@ -758,7 +775,7 @@ export function activationPrunes(items, exempt, windowFor, opts = {}) {
     for (const { key, entry } of items ?? []) {
         if (!entry || exempt?.has(key)) continue;
         if (entry.constant || hasDecorator(entry, '@@activate')) continue;
-        const keys = activatableKeys(entry.key);
+        const keys = usableKeys(entry.key);
         if (!keys.length) continue;
         // Same nullish resolution as activationAdds — scanDepth 0 is authored, not unset.
         const depth = Number(entry.scanDepth ?? (opts.messageDepth || opts.fallbackDepth));

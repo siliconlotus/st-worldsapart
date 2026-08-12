@@ -136,6 +136,15 @@ Generalises to any key WA matches and core cannot: `fold` is `normalizeOrthograp
 core's `#transformString` only lowercases, so for the default substring path WA is a strict superset.
 What that leaves for the seam is accounted under `C17` in bucket 2, not here.
 
+**A validator error bars a key from SCORING as well as from activating.** `usableKeys` (was
+`activatableKeys`) gates both, because filtering only the stage-2 verdicts left a key WA had declared
+unfit to fire on still feeding the layout ranking — `? -zebra` scoring a full hit on every scan where
+"zebra" is absent, i.e. nearly all of them, for any entry that got in by some other route. Three ways
+a key enters a book and only one is guarded: the Studio refuses the write (`keyWriteOk`, errors
+abort), core's WI editor has no concept of a `?` key, and an imported book was never asked. So the
+runtime is where it has to hold. `countKey` itself stays unfiltered — it answers what an expression
+does, and deciding whether to ask is the caller's job.
+
 **Guards.** Skip keys whose `validateSmartKey` returns an `error` — `negation-only` is advisory only
 while these cannot activate, and stops being so here. Honour `suppressVectorKeys`, the same stage-2
 guard `makeCandidateSet` needs.
@@ -473,7 +482,7 @@ caching them would recover ~5 ms of that and is not worth the code.
 **A regex is a term for counting and for positivity.** `no-terms` counts it, and `hasPositiveTerm`
 treats it as a positive contributor, as it does a spliced `?` subtree. The validator reads `TERM`
 tokens alone today, so without this `? /re/` reports `no-terms` and `? /re/ -drill` reports
-`negation-only` — both fatal, and `activatableKeys` bars a key that matches perfectly well. The checks
+`negation-only` — both fatal, and `usableKeys` bars a key that matches perfectly well. The checks
 that inspect a term's VALUE still skip it: a pattern is punctuation by nature, so `punctuation-term`
 and `stray-quote` would fire on every one.
 

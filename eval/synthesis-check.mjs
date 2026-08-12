@@ -83,8 +83,12 @@ run([
         'a `?` primary splices in as a subtree, keeping its own two-term score'],
     ['cosmonaut', ['? apollo soyuz'], AND_ALL, 'cosmonaut apollo soyuz', 1, 'a `?` secondary is a subtree too'],
     ['cosmonaut', ['? apollo soyuz'], AND_ALL, 'cosmonaut apollo', 0, '...evaluated by its own rules'],
-    ['? -zebra', ['apollo'], AND_ANY, 'apollo landed', 1,
-        'a negation-only primary accumulates no weight and must still count as one hit'],
+    // The floor, reached through a key that is LEGAL. A purely negated primary would also accumulate
+    // no weight, but `negation-only` is a validator error and keywordScore drops those before they
+    // arrive; `all-zero-weights` is a warn, and is documented as meaning "gate on this, do not rank
+    // on it" — which is exactly a matched expression that must still count as one hit.
+    ['? fire::0', ['apollo'], AND_ANY, 'fire near apollo', 1,
+        'a matched expression carrying no weight still counts as one hit'],
 ]);
 
 // --- literals that LOOK like syntax ----------------------------------------------------------------

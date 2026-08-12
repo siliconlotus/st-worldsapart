@@ -32,6 +32,15 @@ eq(scored({ key: ['zzz'] }, 'alpha beta', ['alpha']), true, 'keywordScore honors
 eq(scored({ key: ['alpha'] }, 'alpha beta', ['zzz']), false, 'explicit keys with no hit score zero even when entry.key would match');
 eq(scored({ key: ['alpha'] }, 'alpha beta'), true, 'defaults to entry.key when no list passed');
 eq(scored({ key: ['alpha'] }, 'alpha beta', []), false, 'empty key list (blanked 🔗, option off) scores zero');
+// A key WA calls fatally invalid scores nothing, the same rule stage 2 applies to activation. Only
+// the Studio refuses to write one; core's WI editor and an imported book never ask, so the runtime
+// is where it has to hold. `? -zebra` matches on absence, i.e. nearly always, so unfiltered it fed a
+// full hit into the layout ranking of any entry that got in by some other route.
+eq(keywordScore({ key: ['? -zebra', 'cosmonaut'] }, 'the cosmonaut waited').hits.map(h => h.key).join(','),
+    'cosmonaut', 'a validator-error key is dropped from scoring, the valid one is not');
+eq(scored({ key: ['? -zebra'] }, 'the cosmonaut waited'), false, 'an entry keyed only on error keys scores zero');
+eq(countKey('? -zebra', 'the cosmonaut waited', false, false), 1,
+    'countKey itself is unfiltered — it answers what the expression does, and the filter is the caller\'s');
 
 // The regression that started this: core substring-matches when whole-word is off.
 eq(countKey('Jubilee', 'the Jubilees arrived', false, false), 1, 'substring: Jubilee inside Jubilees (whole-word off)');
