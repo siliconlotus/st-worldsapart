@@ -257,8 +257,14 @@ only the truncations that also collide orthographically (`Sur` inside *sure*), a
 under whole-word matching. The same limit applies to compounds that are not names at all:
 `Human Disinterest` → `Disinterest` clears every gate while being half of a coined concept.
 
-The verdict is per case rather than a rule: bare `Joe` loses to `Joe Pagliani` while `Julian Vargas`
-loses to `Julian`.
+The verdict has a rule: **referent recurrence decides truncation**. A recurring subject earns its
+short form (`Joe Pagliani` → `Joe`, `Julian Vargas` → `Julian`), a disposable one keeps the full name
+(`Karen Halloway` — nine Sommers entries, no bare `Karen`). Two vetoes sit above it: the player
+persona is excluded outright, and orthographic collision changes the *rendering* rather than the
+verdict (`Sara` survives beside `Sarah Olusanmokun` as `? =^Sara`). Measured against the finished
+Sommers curation, which applies it throughout — arc-local cast earn bare names the same way the main
+cast do. Richard predates the rule and is over-specified against it (`Joe Pagliani` on nine entries,
+bare `Joe` on none).
 
 Evidence is thin, and the count depends on where attestation is read: 9 of the 9 zero-attestation gold
 keys in Richard have a live shorter form against the chat, 8 of 11 against the entries' own text.
@@ -503,6 +509,38 @@ only a handful of books carry memory entries and the bracket came from two of th
 travel; rates do not, until shown otherwise. The public books are the available control for form-level
 findings — none has a chat, so activation cannot be checked against them at all.
 
+### What the curation diffs measured
+
+Pre/post diff of Sommers — union of the 15 eval-bundle snapshots against the finished book: 1,760
+kept, ~1,460 removed, ~860 added, 245 in-place corrections — replicated on Richard (525 removed).
+Two count inflations: snapshot churn between captures, and one book-wide spelling fix
+(`Mark Lanning` → `Mark Lansing`) that reads as ~20 removals plus ~20 additions. Same n=1 curator
+caveat as above.
+
+- **The form divide is the proper-noun prior, twice.** Kept keys 80% capitalized and 92% at one or
+  two words; removals 59% all-lowercase and phrase-heavy. Richard: 78% against 44%.
+- **Scene furniture is the dominant removal class** — 673 of 1,460 are lowercase multiword one-off
+  props and actions ("granola bar", "water fight"; Richard: "garlic bread", "pancetta") — plus
+  quote fragments ("the morning is mine"). Discourse-recurrence gating, observed in gold.
+- **The player character is keyed nowhere.** Kyle on 0 of 327 entries; `Richard Ryder` stripped
+  from Richard's episodic entries the same way.
+- **Truncation ran one way**: ~100 corrections shortened over-specified keys ("Halloween party" →
+  "Halloween", "Mr. Sterling" → "Sterling" — the article or honorific blocks the substring).
+- **Attestation was not required**: 36% of kept keys never fire in the 5,466-message frozen chat,
+  and 39% of the curator's own additions are unattested in the entry text (author memory).
+- **Collision was always rescued, never fatal**: all 84 SmartKeys in Sommers post-date the
+  curation (`? =^Sara`, `? =DP`, `? =Huber`, alternation families like `? (your|my|Kyle's) heat`).
+  Practice diverges from the degradation principle above: most carry no plain-literal fallback, so
+  un-extended core loses the entry. Unresolved.
+- **Variants and aliases were enumerated by hand** — `three inch inseam` beside
+  `three-inch inseam`, `Quins` beside `Harlequins` — the expander's job, observed in gold.
+- **Nested bare+full name pairs are deliberate and systematic**, not occasional: full names added
+  beside existing bare names on ~160 entries (57 of 58 for `Teddy O'Neill`), part term-weighting,
+  part instrumentation. Open item 0 is understated; the collapse diagnostic must stay advisory.
+- **Title-case is not proper-nounhood.** LLM-capitalized generics were removed ("Kitchen",
+  "Certifications", "Lime Green"), and one-scene proper nouns ("West Elm", "Brenda") fail
+  recurrence despite the capital.
+
 ## Why a key over-fires — four classes, four remedies
 
 Measured against the standard chat corpus (see `eval/eval-data/README.md`). The point of the split is
@@ -530,6 +568,22 @@ them, and most of the rest are main-cast names on sticky sheets. In Sommers the 
 removal rate against a 41% curation baseline, and every key curation removed fired under 15.6%
 (re-measured on the finished curation, over the 1740 pre-curation keys on entries enabled and
 non-constant in both versions).
+
+**The Sommers 0% is by design, and the designed test has now run.** Every key above 15.6% of messages
+(whole-word, frozen chat: Jeffrey 39%, Liam 29%, Brad 25%, Arthur 22%, Shane 21%) was deliberately
+retained through curation as a hold-out, so keep-vs-remove could be measured in ranking rather than
+called by intuition. Measured (`paired-arms.mjs` `dropKeys=hiband`/`addKeys=cast`, 15 graded scenes,
+reference tier excluded per the two-tier rule in `matcher-design.md`): removing the band never helps
+and hurts on 6 of 15 scenes, mean Δ −0.039 nDCG@10, sign test p=0.031 — and since reference sheets
+sit outside the assessed ranking, the entire effect is memory-tier re-ranking. The reverse test
+fails symmetrically: uniform cast placement (each name added wherever an entry's content mentions it
+whole-word — 700 (entry,name) fills, dominated by pack principals, Jeffrey 178 against 2 keyed) is
+mixed 6/8/1 with the largest per-scene swings this harness has produced (−0.33 to +0.16), and fill
+plus band-drop lands flat (4/7/4). One-sentence finding: a main-cast name key earns its keep through
+SELECTIVE placement — the key marks "this entry is about them", and wholesale removal and wholesale
+addition destroy that signal from opposite directions. Caveat: the graded samples embed the
+pre-curation book, so the baseline's "selective" is the generator's placement, not the finished
+curation's; a re-capture against the curated book would sharpen the claim.
 
 **Three signals, not one, and none supersedes another.** `ENGLISH_COMMON` says the word denotes
 nothing in particular and needs no chat, which matters because 19 of the 40 books on disk have none.

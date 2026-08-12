@@ -18,10 +18,26 @@ character in a different encoding, which nobody means anything different by. Any
 meaning (hyphen vs space, case, accents) belongs on the key side or not at all. Case gets away with
 being in the fold only because `^` exists to opt out.
 
+**So a character joins the fold if it is a typographic VARIANT of the ASCII form, and not if it is
+FINER-GRAINED than it.** A variant collapses nothing — `“` and `„` are the double quote, differently
+typeset. A finer-grained mark imports a distinction its writing system draws and the ASCII form cannot
+express, and that loss lands in the haystack where no key can ask for it back. This is the test for
+every candidate, not just quotes.
+
 **Correctness that depends on knowing the language belongs in the reviewed layer.** The matcher is
 silent, so it must be language-neutral. The suggester is reviewed by a human before anything is
 accepted, so it is where a judgement like "is stripping this accent safe" can live. Hyphens pass that
 test (a compound is a compound in any language that hyphenates); accents do not (`du`/`dû`).
+
+**The sentinel is `?` because a key does not plausibly start with one.** Every other punctuation call
+in the grammar resolves toward the literal — `*` and `~` are text, a single colon is text, `+` is
+absorbed — and a leading `?` is the one place that trade is deliberately reversed. **Measured**, books
+on disk: 147 of 46,230 keys start with `?`, across 6 books, and all 147 validate clean, so none is an
+accidental prefix that merely happens to parse. Only the FIRST character is the sentinel, so an
+interior or trailing `?` is ordinary text and `what's up?` is a plain key. Accepted cost: a literal key
+that did start with `?` would be read as a SmartKey rather than a phrase, which both changes what it
+matches and overweights it — `? what's up?` scores its two bare terms separately rather than the
+phrase once.
 
 **Quoting is the single escape.** It suppresses operator, weight, paren and wildcard interpretation and
 marks a punctuation-only term as deliberate. One rule to learn, not four. Quoting a single term never
@@ -29,7 +45,7 @@ changes what it matches; quoting *across a space* does, turning a conjunction in
 
 **Validator checks read structure, not intent.** Every check that guessed at what an author meant
 produced false positives on legitimate literals — `"()"` is a real album, `M*A*S*H` is a real title.
-The checks that survive are facts about the query: no terms, no positive term, an unclosed quote,
+The checks that survive are facts about the SmartKey: no terms, no positive term, an unclosed quote,
 unbalanced parens. A key that expected a feature WA lacks is dead, and the audit reports it as dead
 from the evidence.
 
@@ -43,25 +59,117 @@ intent survives the takeover: `scanDepth` still wins over every global, `scanDep
 "match nothing from chat", `@@dont_activate` is never overridden by the union, `@@activate` is never
 revoked by the prune, and a forced entry still takes core's probability roll.
 
+**Two tiers of relevance, and only one is rankable.** A keyword-activated reference entry is relevant
+because its trigger fired — *triggered == relevant*: the author declared the presence conditions in
+the keys, so activation IS delivery, and the only judgement left is whether the trigger deserved to
+fire. A memory entry is relevant because ranking chose it. Consequences, decided in the fullbook audit
+(`eval/eval-data/shared-metrics/FULLBOOK-AUDIT-2026-08-10.md`, enforced in `eval/scene.mjs`
+`scoreScene`): ranking metrics REMOVE reference entries from the ranked list before computing —
+removed, not zero-graded, or the ranker is punished for routing's job — while set metrics (recall,
+F@budget) count them fully, and keyword-weight contrasts are routing decisions readable only there;
+nDCG cannot see what they are for. The tier label is provenance, never routing configuration: an entry
+is memory iff STMB-marked (`stmemorybooks`/`STMB_start`), because provenance cannot drift with the
+configuration under evaluation, where `vectorized`/`sticky`/`constant` all can. What a graded sample
+measures on the reference tier is the KEYS, in three divergence classes with three different fixes —
+key miss (suggester), window miss (depth/persistence, bucket 1.5), over-fire (prune) —
+`eval/divergence-audit.mjs` is that tool, and its header carries the fuller statement.
+
 ---
 
 ## Status
 
 **Bucket 1 — matcher and SmartKeys: done.** Parser bugs, the `::` weight delimiter, the validator, the
 Studio save gate, the audit change, `weight × count` scoring, the Lucene aliases, and `SMARTKEYS.md`
-carrying both halves — the grammar, and the matching behaviour that had no user-facing home.
+carrying both halves — the grammar, and the matching behaviour that had no user-facing home. Regex
+terms (below) reopen it: decided, unimplemented.
 
 **Bucket 1.5 — SmartKeys activate: implemented.** Union (`selectAndActivate` → `activationAdds`),
 prune (`rankActivated` → `activationPrunes`), the scan-haystack stash, and the sentinel
 certifications (uids 7–14). Bucket 2's first increment rather than an alternative to it: every
 piece carries over unchanged.
 
-**Bucket 2 — WA owns activation: happening, not yet implemented.** Bucket 1.5 is in.
-`keysecondary` scoping and variant expansion remain open questions inside it; the group asymmetry
-and the recursion-buffer residual below are what it closes structurally.
+**Bucket 2 — WA owns activation: implemented**, behind `ownActivation` (default on). On a scan WA
+intercepts, every keyword-activating entry's keys are stashed and blanked at `WORLDINFO_ENTRIES_LOADED`,
+so core's matcher never fires and the inclusion-group filter runs over WA's verdicts. `feedScanLoop`
+answers each later pass. The group asymmetry and the recursion-buffer residual are closed by that
+ordering, and the failure path now reports visibly (`reportFailure`). Still open inside it: key-side
+variant expansion.
 
 **Match window — implemented** (`matchWindow` setting, `matcher.scanSegments`/`segment`), and independent
 of bucket 2 except where noted.
+
+---
+
+## The queue, ordered by user-visible harm
+
+Five items are outstanding across this doc, and they are ordered by whether a user can see the
+difference — not by how tidy the fix is, and **not by how many instances the books on disk hold**.
+A permitted input occurs whether or not this author has written one; corpus counts size a known
+effect and never dismiss a case.
+
+1. **The fold covers the quote family asymmetrically.** `′` U+2032 is in `APOSTROPHES`; `″` U+2033 is
+   in no class, so a key `5'10"` half-matches prose written `5′10″` and `6" pipe` misses `6″ pipe`
+   outright — a silent miss with no workaround an author would think to try. Widen both classes by the
+   variant test above. **Admitted**: `″` `ʺ` `ʹ` (completing the primes and modifier letters that `′`
+   and `ʼ` already entered), `„` `‟` `‚` `‛`, and the guillemets `«` `»` `‹` `›` — Russian uses those
+   for quotation AND titles, French for quotation with titles in italics, so neither is narrower than
+   `"`. **Excluded**: `《》` and `「」`. Those are a system that partitions what `"` collapses — 《》
+   titles, 「」 speech — so both are finer-grained, and 「」 is excluded for the same reason as 《》
+   rather than as an open question about Japanese. Lives in `plugin/automaton.mjs`, so it needs a
+   redeploy.
+2. **`stray-quote` is fatal on keys that lex correctly.** The check flags any term whose VALUE contains
+   a `"`, so `? 6" copper pipe` — three terms, scoring 3 against *"that copper pipe is 6" in
+   diameter"* — is reported as an error, and `activatableKeys` bars it from activating while
+   `countKey` goes on scoring it. The predicate wants to be `!quoted && startsWith('"')`, the only
+   shape the lexer can produce from an unterminated quote. **Ruled: no escape for a quote inside a
+   quoted term.** All one buys is a phrase term containing a quote, which is what a plain key is for —
+   see `SMARTKEYS.md`, "which form to reach for". The doubled-quote design (`? "6"" pipe"`, verified
+   to leave every working construction byte-identical) is worked out if a want ever appears.
+3. **"Match Whole Words means what it says", and the Studio flag that ships with it** (ruled below).
+   The unconditional half — multi-word keys stop being exempt — narrows 430 keys across 66 entries, so
+   the fix and the warning are one item rather than two. **The flag is structural**, computable from
+   the entry with no text and no second matcher, and it has exactly two triggers: box ticked AND
+   *(a key contains a space | a key is in a script written without spaces)*.
+   Nothing else earns one. The boundary mode is a SETTING the user chose, like `messageDepth`, not core
+   behaviour they inherited — and it could not be structural anyway, since whether strict bites depends
+   on whether the text holds an affixed form. The fold only ever adds matches, so nobody relied on the
+   silent miss. `?` keys are self-evidently WA. The CJK trigger is **advisory, not diagnostic**: it
+   fires on mixed-language entries that work fine, so its copy says WHEN rather than THAT —
+   > This key is in a script without word boundaries. Whole-word matching is likely to work where it
+   > appears among Latin text or punctuation, but it can never fire inside a completely Chinese or
+   > Japanese sentence.
+   Name the script the flag actually detected rather than listing two, or a Thai author reads copy
+   about languages that are not theirs.
+4. **Regex terms in a SmartKey** (below). Decided, unimplemented. A `? /re/ x` key is writable today and
+   silently matches the five literal characters, so it is a wrong answer rather than a missing
+   feature — narrower than 1, which needs no SmartKey to reach it.
+5. **The `keysecondary` conversion** (bucket 2). Architectural. No user-visible change in either
+   direction, because the two routes score identically.
+
+### Documentation owed when each lands
+
+`SMARTKEYS.md` describes what WORKS, so it must not be written ahead of the code. Collected here
+because the debt has been accumulating across items:
+
+- **1, the fold.** The orthography table gains the new members; it lists `'` `’` `‘` and `"` `“` `”`
+  today.
+- **2, `stray-quote`.** Nothing. The validator table already says "an unclosed quote", which is what
+  the corrected predicate detects — the table describes the intent and the code is what diverges.
+- **3, whole words.** The "Substring by default" paragraph, rewritten around the `hot tub` / `hot tubs`
+  example: the checkbox reaches multi-word keys, affixes stop being boundaries under strict, and the
+  Permissive/Strict setting with its two descriptions. Plus the CJK note. Until it lands that paragraph
+  must keep describing core's exemption, because that is what ships.
+- **4, regex terms.** Four places: the grammar block; the three-forms table at the top, since a regex
+  stops being only a whole-key form; the validator table, which gains unterminated and unparseable;
+  and "for anything more, use a `/regex/` key", which becomes advice about terms. Plus the anchor note
+  — at `scan` a bare `^` anchors to one position in the whole window, and `/m` is the form that does
+  not move with `matchWindow`.
+- **5, the conversion.** Nothing user-facing; it is behaviour-neutral by construction. Internally
+  `secondaryOk` goes and `synthesis-check.mjs` is rewritten rather than re-run.
+
+The reason this section exists: `SMARTKEYS.md` claimed "SmartKeys rank, they do not yet activate"
+through the whole of buckets 1.5 and 2. A page that describes behaviour goes stale silently, because
+nothing in the suite reads it.
 
 ---
 
@@ -93,7 +201,8 @@ deleting a group winner leaves the group unrepresented, where a matcher that ans
 front would have promoted a loser.
 
 **Ruled: deletion ships with no group guard; a deleted winner leaves its group empty for that turn.**
-Transient until bucket 2, whose matcher-before-group-filter ordering removes the case. The gap is
+Transient until bucket 2, whose matcher-before-group-filter ordering removes the case — CLOSED there,
+and reachable now only with `ownActivation` off. The gap is
 reachable from outside, only expensively — verified in `world-info.js`: the SCAN_DONE emit documents
 adding entries as well as removing them, force-activation does not bypass the group filter (forced
 entries join `activatedNow` and are filtered with the rest), and probability rolls run after group
@@ -112,7 +221,9 @@ bound: sticky exemptions are not modeled offline.
 `SCAN_DONE` emit, so a pruned entry's content still drives that scan's recursion pass — entries it
 recursively activated survive. Unreachable from outside the seam (the buffer is not in the event
 args). The union has the mirror limit: it feeds only the initial pass, so a SmartKeys-only entry
-cannot match recursion text in 1.5. Bucket 2 closes both the way it closes the group gap.
+cannot match recursion text in 1.5. Bucket 2 closes both the way it closes the group gap — the prune
+does not run at all on an owned scan, since every activation there is WA's own force, constant, sticky
+or another extension's, and `feedScanLoop` matches each pass's recursion text directly.
 
 **Activation depth is WA's setting. Ruled**: when WA runs, `messageDepth` governs key matching;
 core's `world_info_depth` is superseded, not consulted — a WA user tunes WA's setting. Stage-3
@@ -124,7 +235,7 @@ the common direction: WA matches at its own depth and force-activates, and core'
 are a subset. A `messageDepth` set *narrower* than core's depth is the deletion direction, and
 inherits the inclusion-group caveat above.
 
-## Bucket 2 — the plan
+## Bucket 2 — WA owns activation
 
 Core keeps the gates, the timers, recursion control and prompt assembly. WA replaces exactly one
 question: *did a key match*.
@@ -136,25 +247,53 @@ fired. A matcher failure fails visibly. (Bucket 1.5's "falling back to core beha
 `selectAndActivate` is legitimate only while core still owns matching — it does not survive the
 takeover.)
 
+**The failure path honours it — done.** WA still takes ownership when its matcher throws, which is
+correct: the realistic trigger is the ST surface (`getSortedEntries`, the inject API, the
+`world_info_*` globals), not a key, so handing matching back would hand it to a path that may be
+equally broken and would make behaviour on an ST upgrade depend on which integration failed first.
+What was missing was visibility, and `reportFailure` supplies it — stage, consequence in plain terms,
+the error message and the top stack frame, once per distinct message per session so a per-turn toast
+cannot train the user to dismiss it. Two severities, because the halves differ: retrieval failing is a
+degradation (keys are still handled), keyword activation failing is total. The old catch asserted
+"core scan still applies", which bucket 2 had made false.
+
 **The seam.** `getExternallyActivated` is checked inside core's scan loop, after `@@dont_activate` and
 before constant/sticky/key-matching. Every other gate — disable, triggers, character and tag filters,
 delay, cooldown, `delayUntilRecursion`, `excludeRecursion`, decorators — runs *before* it, so
 force-activation inherits all of them rather than bypassing them. `WORLDINFO_FORCE_ACTIVATE` is the
 supported way in, and WA already emits it for vector winners.
 
-**Recursion is solved, not blocked.** `WORLDINFO_SCAN_DONE` fires after *each* scan loop, not once at
-the end. Its args carry `activated.text` (the accumulated recursion buffer) and a **writable**
-`state.next` that core reads back immediately. So WA evaluates against chat + recursion text, emits
-`WORLDINFO_FORCE_ACTIVATE` for anything newly matched, and sets `state.next` to run another pass.
+**Constants and `@@activate` entries keep their keys** when the takeover blanks the rest. Core
+short-circuits both before its key-matching path, so live keys there cannot leak a core keyword
+activation — and `filterGroupsByScoring` reads `entry.key` via `getScore`, so blanking them would make
+a grouped constant score 0 and lose ties it should win. The other group classes need nothing: sticky
+winners skip scoring entirely (`filterGroupsByTimedEffects`), and every keyword-activated entry reaches
+the filter as WA's own live-key copy through the external-activation map.
 
-**WA emits blindly and lets core reject; two stamped fields settle the loop.** `waMatched`, set on
-first hit and never recomputed, and `waEmittedAt`, holding `args.recursionDelay.currentLevel`, so an
-entry core refuses is retried exactly once per delay level and core's own advance is what gives it
-another chance. WA therefore models none of core's gates — the level is an opaque epoch counter, not a
-condition WA evaluates. `sortedEntries` is built once before the loop and re-cloned per generation, so
-both fields are free-scoped. **The sticky flag is correct because the haystack only grows**: `addRecurse`
+**Recursion is solved, not blocked.** `WORLDINFO_SCAN_DONE` fires after *each* scan loop, not once at
+the end, and its args carry `activated.text` — the accumulated recursion buffer. WA evaluates against
+chat + recursion text and emits `WORLDINFO_FORCE_ACTIVATE` for anything newly matched.
+
+**WA does not write `state.next`.** Core already schedules every pass WA can feed: a pass with
+recursion-eligible successes sets RECURSION, open delay levels set RECURSION, min-activations sets
+MIN_ACTIVATIONS — and WA only ever has something new to emit in exactly those cases, since its matches
+come from that pass's content or that pass's widening. The field is writable; nothing here needs it.
+
+**WA emits blindly and lets core reject; ONE stamped field settles the loop.** `waMatched`, set on
+first hit and never recomputed. A second field holding the delay level was designed and is not needed:
+`WorldInfoBuffer.externalActivations` is a static map cleared only at scan end (`resetExternalEffects`),
+so a single emit stands for the whole scan and core re-checks it every pass — which is how an entry
+refused at one delay level is admitted at a later one, with no retry logic on WA's side. WA therefore
+models none of core's gates. **The sticky flag is correct because the haystack only grows**: `addRecurse`
 appends and `#skew` only widens, so a verdict goes false→true and never back, and core does not revoke
 activation either.
+
+**Min-activations is mirrored by widening, not by re-reading.** Core advances its own scan one message
+per min-activation pass (`advanceScan`/`#skew`); WA adds the same offset to its resolved GLOBAL depth
+(`activationAdds` `depthSkew`). A per-entry `scanDepth` is authored and never skewed, as in core, where
+the buffer skew only moves the default window. Ruled, not measured — with core's keys blanked this feed
+is the only thing a min-activation pass can pull from, so the alternative is that the widening does
+nothing.
 
 **Scan each pass's new content; retain no text.** At `matchWindow: 'scan'` read core's own
 `args.activated.text` instead — one segment either way, and both join with `\n`, so it is core's exact
@@ -163,39 +302,49 @@ haystack and the cross-pass conjunction cannot diverge. Otherwise segment per en
 `args.new.successful` is the list *before* that filter, and core builds the recursion buffer from the
 list after it, so using it raw restores the propagation the flag exists to stop.
 
-**Inherit `world_info_recursive`.** WA writes `state.next`, so it must check the setting or it forces
-recursion the user disabled. The token budget is the opposite case and is not inherited — WA supplants
-it (see `worldsapart.js` `onEntriesLoaded`).
+**Inherit `world_info_recursive`.** WA must check it before matching recursion text at all, or it
+activates on content a user who disabled recursion never wanted scanned. The token budget is the
+opposite case and is not inherited — WA supplants it (see `worldsapart.js` `onEntriesLoaded`).
 
-**`keysecondary` needs no separate implementation.** `(key, keysecondary, selectiveLogic)` maps onto a
-SmartKey expression. This is what bucket 2 buys that bucket 1.5 does not: selective logic inherits
-`matchWindow` scoping instead of being whole-window and distance-blind. **Measured** population, books
-on disk: 79 entries of 2,112 enabled (3.7%) across 14 books, 77 of them `AND_ANY`. Distribute rather than collapse: **one SmartKey per primary key**, each
-`primary + <secondary expression>`, so scoring keeps the per-key granularity that `keywordScore`'s
-saturation wants. `AND_ANY` → `(secondaries)`, `AND_ALL` → juxtaposition, `NOT_ANY` → `-a -b`,
-`NOT_ALL` → `-(a b)`, every term quoted.
+**`keysecondary` — the ruling that the SmartKey synthesis route is dead is WITHDRAWN.** It rested on
+three reasons and none survived. Granularity is not lost: the synthesised expression is exploded from
+the primary keys, one expression per key, so the per-key verdict is preserved. Semantics do not change:
+`::0` on the synthesised secondary terms reproduces the selective-logic score exactly, measured
+identical on both routes. **Measured** population, books on disk: 79 entries of 2,112 enabled (3.7%)
+across 14 books, 77 of them `AND_ANY`.
 
-`synthesizeSecondary` in `smartkeys.mjs` does it, fuzzed against `secondaryOk` over 16,000 random
-comparisons in `eval/synthesis-check.mjs`. It **refuses rather than approximates** where the grammar
-cannot carry a key — a double quote has no escape, and a `/regex/` or `?` key is a different matcher
-rather than a term — so a null is "fall back to the old path", never "no secondaries". Reading it as
-the latter drops the gate silently, which is worse than not rewriting at all.
+**Synthesis builds the AST, not a string.** Every refusal was an artifact of emitting a `?` string the
+lexer then had to read back. A key containing a double quote needs no escape, because a `TERM` node
+carries it verbatim and nothing lexes it. A `?` key parses and splices in as a subtree. A `/regex/` key
+is the `REGEX` node above — and **ST core does permit regex in `keysecondary`**, so that is the class
+that decided whether `secondaryOk` survived at all. With no refusals left the conversion REPLACES
+`secondaryOk` instead of adding a path beside it, which was the third reason.
 
-**Guard the empty-primary case explicitly.** Core skips an entry with no primary keys *before* reading
-its secondaries. Synthesised from an empty `key`, the expression is just the secondary condition, and
-`NOT_ANY` over it fires on almost every scan. That guard must be written, not left to fall out.
+Entry flags are stamped on the synthesised nodes, as `isCaseSensitive`/`isExact`. The string route
+could not carry them at all — `countKey` returns from the `?` branch before it reads the flag
+arguments — and the 16,000-comparison fuzz never caught it, because it only ever ran with both flags
+off and only ever compared the boolean.
 
-**Retain `coreChat`; do not mirror it.** WA's `intercept` IS a generation interceptor, and
-`runGenerationInterceptors` is called *after* `coreChat` is built — `is_system` filter, swipe-pop,
-`getRegexedString`, `appendFileContent`, titles, media, reasoning. So the `chat` parameter already is
-that array and there is nothing to reproduce. `rankActivated` throws it away and re-derives from
-`getContext().chat`, which is raw.
+So: viable, not scheduled, and a prerequisite for nothing. Selective logic already inherits
+`matchWindow` scoping without it, because `secondaryOk` is evaluated per segment inside `keywordScore`,
+which is what the activation verdicts call — the scoping comes from the call site, not from which
+evaluator runs. Performance argues neither way: synthesis is ~2.5x faster per evaluation, which is
+~5ms per generation over the affected entries, against a scan that also embeds and retrieves.
 
-**That is a standing stage-3 bug, not a bucket 2 prerequisite.** Anyone running a regex script that
-rewrites message text has keyword scores computed against text core never matched on, today. Fix it on
-its own schedule: stash the intercepted array per generation, keep the `getContext().chat` path for the
-dry-run and chat-load cases where interceptors never fired, and remember the stash is a live reference
-that later injects mutate.
+`synthesizeSecondary` and `eval/synthesis-check.mjs` therefore stay. The cost of keeping them is that
+`synthesis-check.mjs` guards code with no production caller until the conversion lands. `secondaryOk`
+is the live path until then and goes when it lands — obviating it IS the conversion. It is not an
+independent authority to keep fuzzing against, only a second WA implementation of core's rule, so the
+fuzz goes with it and its coverage belongs in a written-down case table, the way the sentinel fixture
+already records its verdicts.
+
+**`coreChat` is retained, not mirrored — done.** WA's `intercept` IS a generation interceptor and
+`runGenerationInterceptors` runs *after* `coreChat` is built (`is_system` filter, swipe-pop,
+`getRegexedString`, `appendFileContent`, titles, media, reasoning), so the `chat` parameter already is
+that array. It is stashed per generation as `runState.scanChat`; `rankActivated` reads the stash and
+falls back to `getContext().chat` only for the dry-run and chat-load cases where interceptors never
+fired. This also closed a standing stage-3 bug: keyword scores were previously computed against text
+core never matched on, for anyone running a regex script that rewrites messages.
 
 **Then the key-side variant expansion** that bucket 1 deferred, since it is only safe once WA's rules
 are what fires: hyphen ↔ space (compounds are written both ways, and prose picks per term, not per
@@ -212,6 +361,150 @@ containing quote or hyphen characters match under WA's fold and not under core's
 over 177,499 usable messages — so a whole corpus, not a scan. It sizes one person's exposure and not
 the defect; consistency is the reason to close it, and that reason does not shrink with a bigger corpus.
 
+**Scope: WA-run generations only.** ST skips generation interceptors for its dry runs (PromptManager
+token counts, chat load), so WA is never offered those scans and they keep core's matcher — which is
+correct, since a dry run with no WA union behind it would otherwise assemble a keyless prompt. Quiet
+generations (Summarize, image prompts, the LLM expression classifier) ARE ordinary generations here and
+get the takeover like any other; they were previously skipped, and that skip was WA's own choice rather
+than an ST constraint.
+
+**Decorators are read off `entry.decorators`, not `content`.** `getSortedEntries` runs `parseDecorators`
+and strips the `@@` lines out of content before WA sees an entry, so a content-scan finds nothing at
+runtime. Both guards were inert: the union's `@@dont_activate` check (harmless — core's own gate order
+still refused the force) and the prune's `@@activate` exemption (not harmless — a keyed `@@activate`
+entry whose keys missed the window could be pruned). `hasDecorator` now prefers the array and falls
+back to the content walk for raw entries and fixtures; `eval/activation-check.mjs` pins both shapes.
+
+---
+
+## Entry flags reach plain keys only
+
+**Ruled: a `?` or `/re/` key is self-describing.** `caseSensitive` and `matchWholeWords` are entry-level
+defaults for plain keys; they do not reach inside a SmartKey or a pattern. `? nasa` in a `caseSensitive`
+entry is still insensitive, and `? ver` in a `matchWholeWords` entry still matches `never` — an author
+who wanted boundaries would have written `? =ver`.
+
+The reason is expressiveness rather than symmetry. The grammar has `^` and `=` and no inverse of
+either, so an entry flag winning over an unflagged term would leave "insensitive here" and "substring
+here" unwritable, and `^` a one-way ratchet that can add strictness and never remove it.
+
+**Ruled: whole-word applies to multi-word keys too.** Core exempts them — it splits the key on
+whitespace and uses `includes()` — so *Match Whole Words* is a silent NO-OP for any key with a space
+in it, which is the same shape as the `\W` boundary bug rather than a considered semantic. A named
+divergence, `upstream-st.md`. The `=` flag was never constrained here: it is WA syntax, so no unaltered
+book can contain one, and mirroring core's exemption into `evaluate` would import the defect into a
+feature no legacy key can reach.
+
+The cost is a NARROWING of keys already authored, which is the expensive direction. **Measured**, books
+on disk: 66 of 2,120 enabled entries tick the box AND hold a multi-word key — 430 keys, 10 books, and
+the global default is off so the 1,711 entries that inherit it do not move. Of those 430, 24 narrow
+against their own book's text, all of them the plural case (`satyr camp` no longer reaching `satyr
+camps`). Book text is a floor; chat prose pluralises more.
+
+**Plurals, not possessives.** `'` is not in `WORD_CHAR` and the fold maps `’` onto it, so `hot tub's`
+still matches, as does `hot tub-side`. Only a letter or digit suffix breaks the match, which in
+practice means a plural. The user-facing wording must not overstate this.
+
+**Measured** against `countKey`, both flags and all three key kinds: this is already what fires — the
+`?` and `/re/` branches return before the flag arguments are read — so it ratifies behaviour rather
+than changing it. The `keysecondary` conversion inherits the rule: a plain key synthesises to a `TERM`
+carrying the entry's flags, while a spliced `?` subtree and a `REGEX` node carry their own.
+
+---
+
+## Match Whole Words means what it says
+
+**Ruled: the flag applies wherever "word" is defined, with no carve-outs.** Core under-applies its own
+label twice — it skips any key containing a space, and it stops at an affix, so `Joe` matches `Joe's`.
+The first is documented, but only in a parenthetical ("entries with keys containing only one word"),
+and both surprise a reader of the label. WA applies it in both directions.
+
+**The boundary class is a setting**, because both readings are defensible and least-surprise cuts both
+ways. `permissive | strict`, default **strict**:
+
+```
+permissive  [\p{L}\p{N}\p{M}]         letters, digits, combining marks
+strict      [\p{L}\p{N}\p{M}\-'’]     ...plus hyphen and both apostrophes
+```
+
+Strict is the default because **the escapes are asymmetric**. A regex key with `\b` recovers permissive
+behaviour for any ASCII key — and `\b` is what core's own boundary approximates, so one escape hatch
+returns both. From permissive there is no short form: strict needs the explicit class written twice.
+Land in the mode that is cheap to leave. (`\b` fails for non-ASCII keys, as it does in core.)
+
+**`_` leaves the class in both modes** — not part of the toggle. Underscore is in `\w` for programming
+identifiers, and `_Joe_` failing has no defender under either reading. **Measured**, one author's chats
+(178.8M chars of message text): 822 emphasis-shaped underscores against 1,156,063 asterisks, so this
+corpus does not motivate it. Presets that instruct underscore emphasis do, and corpus absence is not
+population absence.
+
+**No CJK carve-out.** Whole-word in a script without word separators is an unanswerable request rather
+than a WA failure, and ST's own docs advise against it. Such a key still fires where it appears among
+Latin text or punctuation — the mixed-language case, a sign name or a tattoo in English prose — and
+cannot fire inside a fully Chinese or Japanese sentence. The Studio flag says so; the matcher does not
+guess. **Tibetan is out of scope and stays out of the trigger class**: the tsheg may function as the
+separator the class is defined by absence of, so including it would flag a script that possibly does
+not belong there. Han, Hiragana, Katakana, Thai, Lao, Khmer and Myanmar are the class; Hangul is not,
+since modern Korean is spaced.
+
+**Measured cost**, books on disk: 66 of 2,120 enabled entries tick the box AND hold a multi-word key —
+430 keys, 10 books. The ST global is off, so the 1,711 entries inheriting it do not move. Under strict,
+44% of whole-word keys lose occurrences, but saturation absorbs it (`Sara` 113→100 moves
+`count/(count+k1)` from 0.9895 to 0.9881); 10 keys of 955 go to zero, all singletons; and **no entry
+stops activating**.
+
+**The documented contract is preserved exactly.** ST documents one example — `king` matches "long live
+the king" and not "it's not to my liking" — and core, permissive and strict all reproduce it. Every
+divergence here lives in territory core never described, which is why an unaltered book changing
+behaviour is acceptable under the least-surprise principle rather than an exception to it.
+
+---
+
+## Regex terms in a SmartKey
+
+**Ruled: `/pattern/flags` is a TERM.** A `/re/` key is evaluated as a pattern everywhere else it
+appears — core's `matchKeys` and `countKey` both branch on it — and the literal reading survives in
+exactly one place, inside a SmartKey, where `tokenize` hands `evaluate` a bare word. Nobody chose that;
+it is what fell out of a lexer that did not know regexes exist. So this closes a divergence rather
+than adding a feature, and the literal stays reachable through the escape already there: `? "/re/"`
+is one quoted term.
+
+**A `/` opens a regex only at token start** — the rule `"` and `-`/`!`/`+` already follow. `and/or`
+and `3/4` are untouched; only a token that starts with `/` reaches the branch. The branch sits after
+the operator match, so `? -/re/` negates a pattern.
+
+**Leftmost close, tracking escape and character class.** `\` escapes the next character, `[`…`]` is a
+class and the delimiter does not close inside one, and classes do not nest (`/[[]/` is a class holding
+`[`). That is ECMA-262's RegularExpressionLiteral, which exists for this same ambiguity. Greedy is not
+available: core anchors `^…$` over a whole key, but a SmartKey term has later tokens to steal a delimiter
+from, and `? /a/ /b/` would collapse into one pattern. `\/` writes a literal slash.
+
+**Flags then weight** — `[gimsuy]*` after the close, then an optional `::N`, as a quoted term takes its
+weight after its closing quote. **No `=`/`^` prefix on this branch**: `=` is meaningless on a pattern,
+and `^` is a no-op because a regex is already case-sensitive. `/i` is how insensitivity is written.
+
+**Unterminated, or a pattern `new RegExp` refuses, is a validator error** — both are facts about the
+string, so they clear the same bar the surviving checks clear rather than guessing at intent.
+
+**A regex is a term for counting and for positivity.** `no-terms` counts it, and `hasPositiveTerm`
+treats it as a positive contributor, as it does a spliced `?` subtree. The validator reads `TERM`
+tokens alone today, so without this `? /re/` reports `no-terms` and `? /re/ -drill` reports
+`negation-only` — both fatal, and `activatableKeys` bars a key that matches perfectly well. The checks
+that inspect a term's VALUE still skip it: a pattern is punctuation by nature, so `punctuation-term`
+and `stray-quote` would fire on every one.
+
+**A regex term is case-sensitive AND fold-exempt.** `countKey` branches before `foldedHay`, so a
+pattern runs on raw text, as core's does. Inside a SmartKey that means mixed folding: `? /Cap'n/ crunch`
+has one term that sees `’` and one that does not.
+
+**A path-shaped token changes meaning, and that is the point.** `? /home/user/file` becomes a pattern
+plus a stray term where it was one bare word. Quoting restores the literal, and the new reading is the
+one every other layer already gives a slash-delimited key.
+
+**The evaluator grows one node.** `REGEX` carries the raw key and its weight, has no `acIndex`, and
+skips pass 1 — structurally a `TERM` that never uses the candidate filter. It shares `countRegexKey`
+with `countKey`, so `countKey is the only matcher` holds across the regex path too.
+
 ---
 
 ## Match window — the haystack is segmented
@@ -221,8 +514,8 @@ concatenating**, not an evaluator mode — `scanWindow` returns segments, and `s
 one-segment array that reproduces today's behaviour exactly.
 
 **Uniform across every matching rule.** SmartKey conjunctions, selective logic, all of it. `keysecondary`
-is not a special case: bucket 2 synthesises it into a SmartKey expression, so it inherits the scope for
-free, where pinning it to `scan` would need a per-key override nothing else wants — and would aim the
+is not a special case: `secondaryOk` runs per segment inside `keywordScore`, so it inherits the scope
+from the call site, where pinning it to `scan` would need a per-key override nothing else wants — and would aim the
 setting at the empty half of the population, since books have `keysecondary` and do not yet have
 SmartKeys. The 16,000-comparison equivalence test pins the *mapping* and runs at `scan`, where core's
 semantics are reproducible.
@@ -232,9 +525,15 @@ distance-blindness as whole-window AND and fails worse: `? fire -drill` is silen
 five messages back, and a false negative never surfaces, where a false positive is a ranking
 contribution that competes and loses.
 
-**Primary keys are unaffected at any setting.** A single-word key's occurrence count is slice-invariant,
-and a multi-word key cannot span the `\n` join today. Everything the setting changes lives in selective
-logic and SmartKey conjunctions.
+**Primary keys are unaffected at any setting — except an anchored regex.** A single-word key's
+occurrence count is slice-invariant and a multi-word key cannot span the `\n` join, but `keywordScore`
+hands `countKey` one segment at a time, so `^` and `$` in a `/regex/` key are SEGMENT-relative.
+**Measured**: `/^Doc/` counts 1 paragraph-scoped and 0 at `scan` over the same text, while `/^Doc/m`
+counts 1 either way — paragraph splitting happens at a blank line, which is a line boundary under both.
+Ruled by the uniformity above rather than separately: `/m` is already the setting-independent form, so
+exempting regexes from segmentation would buy nothing that is not writable. Authors want `/m` — at
+`scan` a bare `^` anchors to exactly one position in the whole window. Everything else the setting
+changes lives in selective logic and SmartKey conjunctions.
 
 **Split, do not track positions.** Measured 1.01x for 8 segments against one join (200 patterns, 18KB,
 n=2000), so `scanAutomaton` keeps its counts-Map return and `plugin/automaton.mjs` never changes — no
@@ -264,7 +563,7 @@ per-entry composition re-runs it over the pre-split window and `scan` still coll
 the runtime asks. df still counts ENTRIES, not segments, or "how widely is this term used" would start
 moving with paragraph length. Measured inert on every book on disk: 8 books, 8,970 distinct keys, 6,353
 of them multi-word, and 0 change df or occurrence total — a literal cannot span a paragraph break, so
-only a multi-term query can differ, and those are the keys whose unsegmented answer was wrong.
+only a multi-term SmartKey can differ, and those are the keys whose unsegmented answer was wrong.
 
 **The recursion buffer needs no reconstruction** — see bucket 2. WA segments each pass's own entry
 contents and reads the pre-joined buffer only at `scan`, where the join is what `scan` produces anyway.
