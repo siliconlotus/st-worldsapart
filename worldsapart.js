@@ -2346,10 +2346,10 @@ async function gradeScene(named) {
                 : `<input type="number" class="wa-grade text_pole" data-i="${i}" min="0" max="4" step="1" value="0" title="${esc(GRADE_ANCHORS.map((a, g) => `${g}: ${a}`).join('\n'))}" style="width:4em;padding:2px 4px;">`;
             return `<tr style="border-top:1px solid var(--SmartThemeBorderColor);${scaff ? 'opacity:0.6;' : ''}">`
                 + `<td>${cell}</td>`
-                // 🔗 marks a VECTORIZED entry, as the super-grade table does. The two graders show the
-                // same rows and must not disagree about what they are: a divergence here is a bug in
-                // whichever side computed something instead of reading it.
-                + `<td>${row.cut ? `<i class="fa-solid fa-scissors" style="opacity:0.55;margin-right:0.35em;" title="cut by the budget${row.cutBy ? ` — ${esc(row.cutBy)} cap` : ''}${row.tokens ? `; ${row.tokens} tokens` : ''}"></i>` : ''}${entries[i]?.vectorized ? '🔗 ' : ''}${esc(row.title)}<br><small style="opacity:0.5;">${esc(row.world)} · uid ${num(row.uid)}</small>${(row.why ?? []).map(w => `<br><small style="opacity:0.65;">🔑 ${esc(w.key)}${w.count > 1 ? ` ×${w.count}` : ''}${w.excerpt ? ` — <span style="opacity:0.8;">${esc(w.excerpt)}</span>` : ''}</small>`).join('')}</td>`
+                // wiGlyph — the Studio's own 🔵 constant / 🔗 vector / 🟢 keyword mapping, not a local
+                // one. These tables show the same entries the Explorer does and must classify them the
+                // same way; a second mapping drifts the moment either side gains a class.
+                + `<td>${row.cut ? `<i class="fa-solid fa-scissors" style="opacity:0.55;margin-right:0.35em;" title="cut by the budget${row.cutBy ? ` — ${esc(row.cutBy)} cap` : ''}${row.tokens ? `; ${row.tokens} tokens` : ''}"></i>` : ''}${entries[i] ? wiGlyph(entries[i]) + ' ' : ''}${esc(row.title)}<br><small style="opacity:0.5;">${esc(row.world)} · uid ${num(row.uid)}</small>${(row.why ?? []).map(w => `<br><small style="opacity:0.65;">🔑 ${esc(w.key)}${w.count > 1 ? ` ×${w.count}` : ''}${w.excerpt ? ` — <span style="opacity:0.8;">${esc(w.excerpt)}</span>` : ''}</small>`).join('')}</td>`
                 + `<td>${num(row.score)}</td><td>${num(row.cosine)}</td><td>${num(row.text)}</td><td>${num(row.keys)}</td>`
                 + `<td><button class="menu_button wa-viewtext" data-i="${i}" style="padding:2px 6px;font-size:0.85em;">text</button></td></tr>`;
         }).join('')
@@ -2646,11 +2646,10 @@ async function superGradePopup({ captures, union, entryOf, prior: prior0 = [], s
                     : `<input type="number" class="wa-grade text_pole" data-key="${esc(key)}" data-i="${i}" min="0" max="4" step="1" ${typed.has(key) ? 'data-dirty="1" ' : ''}value="${esc(typed.get(key) ?? (done ? priorOf.get(key) : '0'))}" title="${esc(GRADE_ANCHORS.map((a, g) => `${g}: ${a}`).join('\n'))}" style="width:4em;padding:2px 4px;">`;
                 return `<tr style="border-top:1px solid var(--SmartThemeBorderColor);${done ? 'opacity:0.55;' : ''}">`
                     + `<td>${cell}</td>`
-                    // 🔗 marks a VECTORIZED entry. Nothing else in this table says so — a non-null cosine
-                    // is the only tell, and it is the wrong one, since a vectorized entry that failed
-                    // retrieval also shows none. It matters here because whether a row can carry a keys
-                    // signal at all depends on it.
-                    + `<td>${row.cut ? `<i class="fa-solid fa-scissors" style="opacity:0.55;margin-right:0.35em;" title="cut by the budget${row.cutBy ? ` — ${esc(row.cutBy)} cap` : ''}${row.tokens ? `; ${row.tokens} tokens` : ''}"></i>` : ''}${union.entries[i]?.vectorized ? '🔗 ' : ''}${esc(row.title)}<br><small style="opacity:0.5;">${esc(row.world)} · uid ${num(row.uid)}</small>${(row.why ?? []).map(w => `<br><small style="opacity:0.65;">🔑 ${esc(w.key)}${w.count > 1 ? ` ×${w.count}` : ''}${w.excerpt ? ` — <span style="opacity:0.8;">${esc(w.excerpt)}</span>` : ''}</small>`).join('')}</td>`
+                    // wiGlyph, as /wa-grade and the Explorer use it. It matters most in THIS table:
+                    // whether a row can carry a keys signal at all depends on being a 🔗 vector entry,
+                    // and a non-null cosine is the wrong tell — one that failed retrieval shows none.
+                    + `<td>${row.cut ? `<i class="fa-solid fa-scissors" style="opacity:0.55;margin-right:0.35em;" title="cut by the budget${row.cutBy ? ` — ${esc(row.cutBy)} cap` : ''}${row.tokens ? `; ${row.tokens} tokens` : ''}"></i>` : ''}${union.entries[i] ? wiGlyph(union.entries[i]) + ' ' : ''}${esc(row.title)}<br><small style="opacity:0.5;">${esc(row.world)} · uid ${num(row.uid)}</small>${(row.why ?? []).map(w => `<br><small style="opacity:0.65;">🔑 ${esc(w.key)}${w.count > 1 ? ` ×${w.count}` : ''}${w.excerpt ? ` — <span style="opacity:0.8;">${esc(w.excerpt)}</span>` : ''}</small>`).join('')}</td>`
                     // Which arms surfaced a row is the pooling diagnostic: rows only one arm found are where
                     // the overlap assumption is failing, and they are why that arm is in the list. The arm
                     // that SUPPLIED the numbers is underlined, because the signal columns are one arm's
