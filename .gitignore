@@ -150,3 +150,6 @@ eval-data/
 CLAUDE.local.md
 .claude/settings.local.json
 .claude/worktrees/
+
+# Eval spend caches -- API responses, resumable, not history
+eval/*-cache.json

@@ -55,6 +55,42 @@ problem here came from a new claim, none from a deletion.
   benchmark and analysis tools that need a vector index and/or lorebook path as an argument. Run bare they
   print a usage line and exit non-zero; that is not a test failure.
 
+## A harness that spends anything APPENDS; it never collects and writes at the end
+
+Model calls cost money, quota or minutes, so **no result may depend on the process finishing**. Append
+each response as it arrives (JSONL is the easy shape) and key a cache so a re-run RESUMES rather than
+re-paying. This is not a nicety: a buffered run was killed a few calls in and every one of them was
+lost, and the same run's output could not be watched at all. Anything already on disk survives a kill,
+a crash, or a decision to stop early.
+
+**Order the sweep so every pass covers every arm.** Appending is worthless if the log cannot be read
+mid-run. Loop repeat-outermost and arm-innermost — the first pass then gives one full replicate of
+the design and the second gives within-arm pairs, so a decision to abandon the rest can be made at
+20% spend. Sweeping one arm to exhaustion first means no comparison exists until the run is half
+gone, which is when a buffered run would have been useless anyway.
+
+**Redirect the runner's output to a file and grep THAT; never filter the live stream.** Piping through
+`tail` re-buffers the log you just made incremental, and piping through `grep <pattern>` discards
+whatever you did not think to anticipate — which is always the line that explains the failure. One run
+produced zero rows and the reason was unrecoverable, because the filter kept two patterns and the
+error matched neither. `> run.log 2>&1` then grep the log costs nothing and keeps the evidence.
+
+Two more, same origin. `pkill -f <script>` matches the wrapper shell whose command line contains that
+string, so it kills queued jobs too — kill by PID.
+
+**Run long jobs so they stay VISIBLE AND STOPPABLE, not so they survive.** `nohup … &` detaches a run
+from the session: it vanishes from the task list and outlives a deliberate stop, which takes control
+away from whoever is watching it. Losing a run to a teardown is not the failure mode worth engineering
+against — append-and-resume already makes a killed run cost only the calls in flight, which is the
+whole point of it. Reach for tracked background execution and let the process be as mortal as the
+session.
+
+**Prompt work belongs on a local model with a fixed seed.** A seed pins output at any temperature, so
+a prompt change is the only thing that can move the result — which is what makes a prompt A/B
+readable at all. Hosted reasoning models honour neither seed nor temperature (measured: identical
+requests, same seed, spent 1815 vs 935 reasoning tokens), so they can confirm that a finding
+transfers but cannot be where it is found.
+
 ## Graded scenes: pool first, then pair
 
 Two constraints shape every tuning claim, and both have tooling rather than a workaround.
