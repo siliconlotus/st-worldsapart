@@ -199,14 +199,14 @@ export function buildKeyPruneScan(data, opts, ignoreSet, { caseSensitiveDefault 
         //
         // Measured inert on every book on disk: 8 books, 8,970 distinct keys (6,353 of them multi-word),
         // 0 keys change df and 0 change their occurrence total. A literal key cannot span a paragraph
-        // break, so it is slice-invariant; only a multi-term query can differ, and those are the keys
+        // break, so it is slice-invariant; only a multi-term SmartKey can differ, and those are the keys
         // whose unsegmented answer was wrong.
         for (const c of contents) {
             const segments = segment([c], matchWindow);
             primeScan(allKeys, segments, scanScope);
             for (const key of allKeys) {
                 // Still countKey, deliberately: the audit has to report what the runtime matcher will
-                // actually do — flags, regex keys and `?` queries included — so the batch only changes
+                // actually do — flags, regex keys and `?` SmartKeys included — so the batch only changes
                 // how often the text is walked, never how a hit is decided.
                 let n = 0;
                 for (const s of segments) n += countKey(key, s, cs, ww, scanScope);
@@ -259,17 +259,17 @@ export function buildKeyPruneScan(data, opts, ignoreSet, { caseSensitiveDefault 
     const classify = (key, cs, ww, sticky) => {
         const k = String(key).trim();
         if (!k || isRegexKey(k)) return null;
-        // A `?` query is audited like any other key, not exempted from the audit. It used to be, and
+        // A SmartKey is audited like any other key, not exempted from the audit. It used to be, and
         // that was the wrong cut: the question the audit asks — does this key fire, and how often —
-        // is perfectly answerable for a query, because countKey already evaluates it against the same
+        // is perfectly answerable for a SmartKey, because countKey already evaluates it against the same
         // primed trie every literal goes through. df was in fact being computed for these all along
         // and then discarded here.
         //
         // What genuinely does not apply is the heuristics that read the key AS A LITERAL STRING. The
-        // matching surface of `? fire water` is its terms, not the twelve characters of the query, so
+        // matching surface of `? fire water` is its terms, not the twelve characters of the SmartKey, so
         // English-common, fragment and short-key are meaningless against the raw text and are skipped.
         // (Per-TERM versions of them would be meaningful; that is a separate piece of work.)
-        // `total` is also meaningless for a query — countKey returns a weight, not an occurrence count
+        // `total` is also meaningless for a SmartKey — countKey returns a weight, not an occurrence count
         // — but only the short-key check reads it, and that is one of the skipped ones.
         const smart = k.startsWith('?');
         const dc = scan(k, cs, ww).df;
@@ -286,7 +286,7 @@ export function buildKeyPruneScan(data, opts, ignoreSet, { caseSensitiveDefault 
         // evidence the word denotes anything, which is the other half of what this flag is claiming.
         if (!smart && opts.pruneCommon && !/\s/.test(k) && (sticky ? COMMON_HEAD : COMMON_WORDS).has(k.toLowerCase())) return { flag: 'too common', dc, eng: true, share };
         // ignoreProper spares a capitalised key from the dead flag on the grounds it is a name the chat
-        // will use. A query is not a name, so it gets no such reprieve — a query that never evaluates
+        // will use. A SmartKey is not a name, so it gets no such reprieve — one that never evaluates
         // true anywhere is exactly the broken-key case the audit exists to surface.
         //
         // A key the CHAT uses is not dead, whatever the book's own prose does — so the flag is dropped,
@@ -348,8 +348,8 @@ export function buildKeyPruneScan(data, opts, ignoreSet, { caseSensitiveDefault 
     // Reason text + severity colour (dead is uncoloured).
     const reasonOf = p => {
         const color = severityOf(p);
-        // A query is not "absent from the text" — it evaluated false everywhere, which is a different
-        // sentence and the difference matters when someone is deciding whether their query is wrong.
+        // A SmartKey is not "absent from the text" — it evaluated false everywhere, which is a different
+        // sentence and the difference matters when someone is deciding whether their SmartKey is wrong.
         // Say WHICH evidence was checked. "not in entry text" with no chat scan is a much weaker claim
         // than with one, and rendering them identically makes the weak version look authoritative —
         // especially now that a chat hit suppresses the flag, so the surviving rows read as stronger.
@@ -467,7 +467,14 @@ export function buildKeyPrompt(entryText, avoid) {
         'A keyword ACTIVATES this entry when the chat text contains it, so a good keyword is what a user or character would actually type when this entry becomes relevant: a referential NOUN PHRASE — a name, place, object, event, or concept.',
         '',
         'Rules:',
-        '- Output 5 to 10 keywords, each 1 to 4 words, lowercase unless a proper noun or acronym.',
+        // SELF-SELECTING COUNT, not a range. Was "5 to 10". A fixed count is the wrong instrument
+        // because entries differ in how much key material they hold: any floor is too high for a
+        // sparse entry, where the model pads rather than stops, and too low for a rich one.
+        // Chosen on WORST-CASE F2 over five wordings x six model configurations (three local and
+        // seeded, three hosted; eval/count-sweep.mjs and eval/nano-sweep.mjs), not because it won
+        // any single cell: 5 wins of 6, best mean rank, best floor. The sixth is a tie inside a
+        // measured noise floor. The old wording ranked fourth of five and never won a cell.
+        '- Output as many keywords as you are confident about, each 1 to 4 words, lowercase unless a proper noun or acronym.',
         '- Prefer concrete nouns and named entities. Include the obvious paraphrase a reader would reach for even if those exact words are not in the text.',
         '- NEVER output a full sentence, clause, or verb phrase (bad: "kyle confesses", "makes him feel").',
         '- NEVER output generic filler or a bare ubiquitous name.',
@@ -1107,3 +1114,18 @@ export function buildKeySuggest(data, opts) {
 
     return { entries, N, perEntry, canon, dfSubstr, avoid, exampleCanon, exampleWords };
 }
+
+// Studio scans every entry (all modes, active + inactive) so every entry's keywords get a verdict;
+// suggestions use the pruner's own dfCeil so a suggested key can't be one the pruner would then flag.
+export const STUDIO_PRUNE_OPTS = { scanKeyword: true, scanVectorized: true, scanConstant: true, includeInactive: true, pruneUnattested: true, pruneCommon: true, pruneShort: true, pruneShared: true, pruneFragment: true, ignoreProper: false, stickySkipCommon: true, tooCommon: KEY_TOO_COMMON, minLength: KEY_MIN_LENGTH, sharedKeys: KEY_SHARED };
+// dfCeil sits just under the pruner's too-common danger line (KEY_TOO_COMMON * 0.75 = 0.375): the
+// suggester must not pre-reject a term the pruner itself considers fine. It was 0.15 when
+// cross-entry df was the only junk signal; the Zipf gate now owns English junk, and 0.15 was
+// silently cutting a book's recurring cast and setting names ("Stearns" in ~25% of entries).
+// cap is a display budget, not a quality line. Measured uncapped over 39 books / 3405 entries, an
+// entry yields a median of 17 candidates and a mean of 27, near-linear in content length (~7 per
+// 1000 chars) rather than tailing off — so 8 was discarding ~70% of what survives the gates, and
+// what it discarded was not junk. On a 269-candidate entry the top 8 were the entry's own subject
+// but the next hundred still held its proper nouns. 30 sits just above the p75 of 29, so most
+// entries now return everything they have and only the largest are trimmed.
+export const STUDIO_SUGGEST_OPTS = { dfCeil: 0.35, maxN: 4, excludeDates: true, excludeShort: true, onlyActive: false, cap: 30, llmChunk: 5000 };

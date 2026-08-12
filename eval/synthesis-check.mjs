@@ -1,5 +1,5 @@
 // Bucket 2 rests on ONE claim: core's `(key, keysecondary, selectiveLogic)` can be rewritten as a
-// SmartKey query that fires in exactly the same places. It was verified once, by a harness that no
+// SmartKey expression that fires in exactly the same places. It was verified once, by a harness that no
 // longer exists, and everything else load-bearing from that era turned out to be wrong at least once
 // before it was checked. So: fuzz the synthesis against secondaryOk, which is core's semantics.
 //

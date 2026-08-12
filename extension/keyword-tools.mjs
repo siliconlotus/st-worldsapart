@@ -32,13 +32,26 @@ export const buildKeyPruneScan = (data, opts, ignoreSet, extra = {}) =>
  */
 async function generateText(prompt, responseLength) {
     const s = settings();
-    const profileId = s.summaryProfile;
+    const profileId = s.llmProfile;
     const profile = profileId ? (extension_settings.connectionManager?.profiles ?? []).find(x => x.id === profileId) : null;
     if (profile) {
-        const includePreset = !s.summaryBypassPreset;
-        const temp = String(s.summaryTemperature ?? '').trim();
+        const temp = String(s.llmTemperature ?? '').trim();
         const overridePayload = temp === '' ? {} : { temperature: Number(temp) };
-        const result = await ConnectionManagerRequestService.sendRequest(profileId, prompt, responseLength, { includePreset }, overridePayload);
+        // includePreset is always false, and that is business logic rather than a setting.
+        //
+        // What the preset contributes here is SAMPLING PARAMETERS ONLY — never prompt content.
+        // sendRequest forwards `presetName` to presetToGeneratePayload, which maps the preset onto
+        // an oai_settings clone; the messages array stays the one we passed. The prompt manager,
+        // which is where a roleplay preset's system prompt and jailbreak live, is never called on
+        // this path. (The old `llmBypassPreset` setting claimed it was guarding against exactly
+        // that conditioning. It was not; there is none here to guard against.)
+        //
+        // Bypassing is still right, for the samplers: a roleplay preset is tuned for prose variety
+        // — high temperature and top_p, repetition penalties — and this is an extraction that wants
+        // the opposite. Forced rather than offered because the failure is asymmetric. Bypassed, a
+        // purpose-built utility profile loses its samplers and llmTemperature can restore the one
+        // that matters; included, a roleplay profile poisons every suggestion with no escape.
+        const result = await ConnectionManagerRequestService.sendRequest(profileId, prompt, responseLength, { includePreset: false }, overridePayload);
         const content = String(result?.content ?? '').trim();
         if (!content && result?.reasoning) throw new Error(`profile "${profile.name}" is a reasoning model (returned reasoning, no content). Pick a profile without ":thinking".`);
         return content;
@@ -46,28 +59,29 @@ async function generateText(prompt, responseLength) {
     return String(await generateRaw({ prompt, responseLength })).trim();
 }
 
-// A small local model summarises instead of extracting once an entry runs long, so cap the text per
-// call and run one pass per chunk, concatenating the raw candidate lines (callers dedupe/filter).
-// chunkSize is user-tunable (Recommender settings) since the reliable window varies per model.
+/**
+ * Response cap per call. A runaway guard, not a budget — the same reading `summaryLength` takes:
+ * you pay for tokens generated, not tokens allowed, so a tight cap buys nothing.
+ *
+ * It must clear a THINKING model's reasoning, which spends this same budget. At the previous 400 a
+ * reasoning model could consume the whole allowance and return an empty string, which the
+ * no-profile path passes through silently and the Studio reports as "Model returned nothing usable"
+ * indefinitely.
+ */
+const KEY_RESPONSE_TOKENS = 4000;
+
+// One pass per chunk, concatenating the raw candidate lines (callers dedupe/filter). chunkSize is
+// user-tunable (Recommender settings). Whether chunking beats sending the entry whole, and what
+// size is right, are open — see keyword-suggest-design.md; eval/chunk-vs-whole.mjs is the harness.
+
 export async function llmKeyCandidates(content, avoid, chunkSize = 5000) {
     const text = String(content ?? '');
     const chunks = text.length > chunkSize ? splitRecursive(text, chunkSize, ['\n\n', '\n', '. ', ' ', '']) : [text];
     const out = [];
-    for (const c of chunks) out.push(...parseKeyList(await generateText(buildKeyPrompt(c, avoid), 400)));
+    for (const c of chunks) out.push(...parseKeyList(await generateText(buildKeyPrompt(c, avoid), KEY_RESPONSE_TOKENS)));
     return out;
 }
 
-// Studio scans every entry (all modes, active + inactive) so every entry's keywords get a verdict;
-// suggestions use the pruner's own dfCeil so a suggested key can't be one the pruner would then flag.
-export const STUDIO_PRUNE_OPTS = { scanKeyword: true, scanVectorized: true, scanConstant: true, includeInactive: true, pruneUnattested: true, pruneCommon: true, pruneShort: true, pruneShared: true, pruneFragment: true, ignoreProper: false, stickySkipCommon: true, tooCommon: KEY_TOO_COMMON, minLength: KEY_MIN_LENGTH, sharedKeys: KEY_SHARED };
-// dfCeil sits just under the pruner's too-common danger line (KEY_TOO_COMMON * 0.75 = 0.375): the
-// suggester must not pre-reject a term the pruner itself considers fine. It was 0.15 when
-// cross-entry df was the only junk signal; the Zipf gate now owns English junk, and 0.15 was
-// silently cutting a book's recurring cast and setting names ("Stearns" in ~25% of entries).
-// cap is a display budget, not a quality line. Measured uncapped over 39 books / 3405 entries, an
-// entry yields a median of 17 candidates and a mean of 27, near-linear in content length (~7 per
-// 1000 chars) rather than tailing off — so 8 was discarding ~70% of what survives the gates, and
-// what it discarded was not junk. On a 269-candidate entry the top 8 were the entry's own subject
-// but the next hundred still held its proper nouns. 30 sits just above the p75 of 29, so most
-// entries now return everything they have and only the largest are trimmed.
-export const STUDIO_SUGGEST_OPTS = { dfCeil: 0.35, maxN: 4, excludeDates: true, excludeShort: true, onlyActive: false, cap: 30, llmChunk: 5000 };
+// Studio option presets moved to keyword-core.mjs (pure data, and the evals must read the shipped
+// values rather than a copy). Re-exported so studio.mjs's import site is unchanged.
+export { STUDIO_PRUNE_OPTS, STUDIO_SUGGEST_OPTS } from './keyword-core.mjs';

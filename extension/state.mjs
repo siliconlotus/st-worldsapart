@@ -7,6 +7,21 @@ export const MODULE_NAME = 'worldsApart';
 
 export const defaultSettings = {
     enabled: true,
+    /**
+     * WA owns keyword activation (matcher-design.md, bucket 2). On the scans WA intercepts, every
+     * keyword-activating entry's keys are stashed and blanked before core scans, so core's own
+     * keyword matcher never fires — WA's matcher answers "did a key match" for the initial pass,
+     * every recursion pass and min-activation widening, and force-emits the winners into core's
+     * loop. Constants and @@activate entries keep their keys: core activates them without keys
+     * (they short-circuit before its key path), and the inclusion-group filter's getScore reads
+     * them. Core keeps everything else: gates, timers, group filtering, probability rolls,
+     * recursion control, prompt assembly.
+     * Off = bucket 1.5 behaviour (core matches, WA unions what core cannot and prunes what WA
+     * rejects). Dry-run scans always keep 1.5 behaviour — ST skips interceptors for them, so WA is
+     * never offered the scan. Quiet generations (Summarize, SD prompts, the LLM expression
+     * classifier) are ordinary generations here and get the takeover like any other.
+     */
+    ownActivation: true,
     /** Suppress keyword matching on entries marked vectorized (🔗). */
     suppressVectorKeys: true,
     /**
@@ -21,9 +36,22 @@ export const defaultSettings = {
     /** 'paragraph' keeps semantic boundaries; 'length' fills to chunkSize (chunking.mjs splitRecursive). */
     chunkMode: 'paragraph',
     /**
-     * 'messages' embeds raw chat text; 'summary' condenses it first.
-     * Entries are written as summaries, so a summarized query matches their level of
-     * abstraction instead of comparing ground-level prose against it.
+     * 'messages' embeds raw chat text; 'summary' condenses it first with an LLM call.
+     *
+     * WITHDRAWN FROM PRODUCTION — internalized, so this is always 'messages' for a user. It never
+     * measured better than raw messages, and the one head-to-head on record went the other way on
+     * cost: the corpus-derived stoplist (stopwordDocFreq 0.25) put all 5 gold targets in the top 5
+     * at mean rank 3.0, "matching the LLM summary with no model call". Against that it charges an
+     * LLM call per generation and buys nothing back — the query is embedded and BM25'd, never sent
+     * in the prompt, so it cannot reduce prompt tokens; the only input it shortens is the
+     * embedder's, which is the cheapest and usually free stage. Since WA also runs on quiet
+     * generations, that charge is now per background call (Summarize, image prompts, LLM
+     * expression classification) as well.
+     *
+     * Kept reachable because `summary` is a /wa-super-grade POOL ARM and a pool arm's job is to
+     * change the population, not to be good — dropping it would permanently narrow the pool every
+     * defaults review is graded against (CLAUDE.md, "pool first, then pair"). captureArm overrides
+     * live settings at runtime, so the arm still reaches it; nothing else can.
      */
     queryMode: 'messages',
     /**
@@ -41,28 +69,45 @@ export const defaultSettings = {
      * Generous enough that a reasoning model can finish thinking and still answer.
      */
     summaryLength: 1024,
+    // The next three are WA's SHARED LLM connection, not the summarizer's — the ✨ keyword
+    // suggester (keyword-tools.mjs generateText) is their only production reader now that
+    // queryMode is internalized. Renamed off `summary*` with no migration: prerelease, single
+    // user, so a stored `summaryProfile` is worth less than a name that says what it configures.
     /**
-     * Connection Manager profile id to summarize with. Empty = the current API.
-     * Worth setting: a reasoning model spends its whole budget thinking and returns
-     * nothing, and you don't want to pay that latency before every generation.
+     * Connection Manager profile id for WA's own generation calls. Empty = the current API.
+     * Worth setting: a reasoning model spends its whole budget thinking and returns nothing,
+     * and the suggester runs per entry.
      */
-    summaryProfile: '',
+    llmProfile: '',
     /**
-     * Temperature for the summary call. Empty = leave it to the preset or backend.
+     * Temperature for those calls. Blank sends none and lets the backend decide.
      *
-     * Low values suit this job: the summary is a retrieval query, and sampling variety
-     * only makes the same scene embed differently from one turn to the next.
+     * The only sampling control WA has: the profile's preset normally holds these, and
+     * generateText always bypasses it (see keyword-tools.mjs). Needs a profile — generateRaw takes
+     * no generation parameters, so the no-profile path ignores it.
      *
-     * Requires a summary profile. generateRaw takes no generation parameters, so with
-     * no profile set this is ignored and the current API's preset governs.
+     * 1.0 because that is roughly where instruction tuning assumes sampling happens, not because
+     * it measured better: temperature showed no effect on suggestion quality on any model tried.
+     * Nonzero rather than 0 for one concrete reason — the Studio invites the user to click ✨ again,
+     * and at 0 a local model returns the identical list forever. Explicit rather than blank so the
+     * behaviour does not depend on which backend the profile points at.
+     *
+     * EXPECT IT TO BE IGNORED, increasingly. Hosted reasoning models sample their own reasoning
+     * under provider settings that no client parameter reaches, so neither temperature nor seed
+     * pins their output. Treat this as a request, not a control, and treat reproducible output as
+     * something only a local model can offer (there, a seed pins it at any temperature).
+     *
+     * What it cannot do at any value is restrict output to terms present in the entry: it rescales
+     * logits before the softmax (p_i ∝ exp(z_i/T)), reshaping a distribution over the whole
+     * vocabulary without reordering it or removing support. Only constrained decoding could, and
+     * that is unwanted — buildKeyPrompt asks for the paraphrase that is NOT in the text on purpose
+     * (keyword-suggest-design.md's realizability rule: presence confirms, absence does not
+     * disqualify).
      */
-    summaryTemperature: '',
-    /**
-     * Skip the profile's chat completion preset. Roleplay presets carry system prompts
-     * and jailbreaks that push the model back into character voice, which is the
-     * opposite of what a summary wants.
-     */
-    summaryBypassPreset: true,
+    llmTemperature: '1',
+    // Removed: llmBypassPreset. Bypassing is unconditional now (keyword-tools.mjs generateText).
+    // Its rationale had also been wrong — presets contribute samplers here, not the system prompt
+    // and jailbreak it claimed to be guarding against; the prompt manager never runs on this path.
     /** Paragraphs shorter than this are joined with the next one, so stray lines don't become chunks. */
     minChunkSize: 120,
     /**
@@ -399,6 +444,10 @@ const INTERNAL_KEYS = [
     'meanCentered', 'scoreThreshold', 'entityFilter', 'properNounBoost', 'stopwordDocFreq',
     'bm25K1', 'bm25B', 'rrfK', 'scoreVectorKeys', 'keywordScoring',
     'chunkSize', 'chunkMode', 'minChunkSize',
+    // Withdrawn with the query summarizer. queryMode in particular MUST be reset rather than
+    // merely un-surfaced: anyone who had it on 'summary' would otherwise keep paying an LLM call
+    // per generation with no control left in the panel to see it or turn it off.
+    'queryMode', 'summaryPrompt', 'summaryLength',
 ];
 
 /** The live WA settings object (extension_settings[MODULE_NAME]). */
@@ -441,6 +490,18 @@ export const runState = {
     lastDropped: [],              // entries cut by budget
     lastSkipped: [],              // per-entry budget rejections + the cap that caused each
     attachedWorlds: new Set(),    // books ST currently has active for this chat
+    waOwnsScan: false,            // bucket 2: WA intercepted the scan now in flight and owns its
+                                  // keyword matching — set at the end of selectAndActivate, cleared
+                                  // on the scan's final loop / generation end. Gates the
+                                  // ENTRIES_LOADED key blanking and the per-loop SCAN_DONE feed.
+    waMatched: new Set(),         // `${world}.${uid}` WA has emitted or seen activated this scan —
+                                  // never rescanned (the external map persists, once emitted is enough)
+    waRecursionTexts: [],         // every pass's recursion-eligible entry content so far, one text per
+                                  // entry — the rematch window is chat + all of these
+    waMinSkew: 0,                 // how many min-activation passes core has scheduled — widens WA's
+                                  // default window one message per pass, mirroring advanceScan
+    waCandidates: null,           // the candidate entries WA fetched at intercept (live keys), for the
+                                  // SCAN_DONE rematches; null = no owned scan state
     verboseRun: false,            // true during a /wa-debug run (noisy per-stage logging)
     dryRunInProgress: false,      // true during either slash-command run (quiets live logging)
     generationIsDryRun: false,    // true while ST's own dry-run generation is in flight

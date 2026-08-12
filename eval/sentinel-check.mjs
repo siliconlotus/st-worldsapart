@@ -37,7 +37,7 @@ const chatRate = () => {
     const aut = buildAutomaton(folded);
     const counts = new Map();
     for (const t of msgs) addMessageHits(aut, t, counts);
-    // Literals only, exactly as scanChats does: a `?` query cannot be found by an automaton built from
+    // Literals only, exactly as scanChats does: a `?` SmartKey cannot be found by an automaton built from
     // folded literals, so it is left OUT of the map rather than recorded as 0 — absent means unchecked.
     return { hits: new Map(literals.map(k => [k, counts.get(idxOf.get(fold(k))) ?? 0])), messages: msgs.length };
 };

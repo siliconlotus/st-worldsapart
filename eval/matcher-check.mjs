@@ -112,7 +112,7 @@ eq(keyExcerpt("Cap'n", `A ${'Cap’n'} walks in`, false, false),
 eq(keyExcerpt('/th\\w+bare/', 'the curtains were threadbare by then', false, false),
     'the curtains were «threadbare» by then', 'regex key: excerpt from the raw text via the pattern');
 eq(keyExcerpt('? thread & curtains', 'threadbare curtains', false, false),
-    null, 'smartkey: no excerpt — boolean queries are not a substring');
+    null, 'smartkey: no excerpt — a SmartKey is not a substring');
 eq(keyExcerpt('ghost', 'no such word here', false, false), null, 'no match, no excerpt');
 eq(keyExcerpt('bare', ['first segment', 'the threadbare one'], false, false),
     'the thread«bare» one', 'segments: later segment searched when earlier ones miss');

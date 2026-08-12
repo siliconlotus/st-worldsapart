@@ -40,6 +40,23 @@ export const REGEX_KEY_RE = /^\/(.+)\/([gimsuy]*)$/;
 export const isRegexKey = k => REGEX_KEY_RE.test(String(k));
 
 /**
+ * Occurrences of a `/pattern/flags` key. Its own function because a regex key can now appear in TWO
+ * places — a bare key (countKey) and a REGEX node inside a synthesised selective expression (smartkeys'
+ * evaluate) — and CLAUDE.md's one-matcher rule applies to the regex path as much as the literal one.
+ * An unparseable pattern counts 0, as core's matchKeys does.
+ * @returns {number}
+ */
+export function countRegexKey(raw, text) {
+    const m = String(raw).match(REGEX_KEY_RE);
+    if (!m) return 0;
+    try {
+        return (text.match(new RegExp(m[1], m[2].includes('g') ? m[2] : `${m[2]}g`)) ?? []).length;
+    } catch {
+        return 0;
+    }
+}
+
+/**
  * The keyword scan window over the last `depth` messages — the ONE copy of the join, shared by the live
  * scan (worldsapart.js, which layers injects/match-sources on top), the depth ablation
  * (graded-scene-grid.mjs) and offline capture tools. Names are included when core includes them, or a
@@ -185,6 +202,22 @@ export function makeWindowFor(chat, { injectText = '', sources = {}, matchWindow
 }
 
 /**
+ * A `windowFor` with extra texts appended and the whole re-segmented — bucket 2's recursion
+ * rematch window: the entry's chat window plus each pass's new entry content. Re-segmenting is
+ * what keeps the semantics per mode: at `scan` everything collapses back to one segment (core's
+ * one-buffer behaviour, so a conjunction may span chat and recursion text exactly as core's
+ * would), while `message`/`paragraph` keep the chat/recursion seam — a recursion text is its own
+ * segment, never a continuation of the last message.
+ * @param {(depth: number, entry: object) => string[]} windowFor
+ * @param {string[]} texts Extra texts (recursion contents), each its own unit
+ * @param {'scan'|'message'|'paragraph'} matchWindow
+ * @returns {(depth: number, entry: object) => string[]}
+ */
+export function withExtraTexts(windowFor, texts, matchWindow) {
+    return (depth, entry) => segment([...windowFor(depth, entry), ...texts], matchWindow);
+}
+
+/**
  * One-entry memo per case mode for the folded haystack. Keyed by string identity, which is the case
  * that matters: a scan hands every key the same text object, so this turns N folds into one. A miss
  * just recomputes, so correctness never depends on the hit.
@@ -231,7 +264,7 @@ export const foldedHay = (text, caseSensitive) => {
  * The principled fix is to scan the RENDERED text rather than the source, since that is the only thing
  * which distinguishes markup from content. Much larger than it looks — core scans raw too.
  *
- * @param {string} key Keyword, /regex/flags, or a `?` SmartKey query
+ * @param {string} key Keyword, /regex/flags, or a `?` SmartKey
  * @param {string} text Text to search
  * @param {boolean} caseSensitive Case sensitivity
  * @param {boolean} wholeWords Whole word matching
@@ -244,12 +277,12 @@ export function countKey(key, text, caseSensitive, wholeWords, scope) {
         return 0;
     }
 
-    // SmartKeys sentinel: `?`-prefixed keys are boolean queries (see smartkeys.mjs), overriding
-    // the other options like a regex key does. Returns the query's weight (default 1) on match,
+    // SmartKeys sentinel: `?`-prefixed keys are boolean expressions (see smartkeys.mjs), overriding
+    // the other options like a regex key does. Returns the SmartKey's weight (default 1) on match,
     // so it feeds keywordScore's saturation like a single occurrence scaled by :weight.
     if (raw.startsWith('?')) {
         const { matched, scoreBoost } = evaluateSmartKey(raw, text, scope);
-        // A matched query built purely from negation (e.g. "? !apollo") carries zero accumulated
+        // A matched SmartKey built purely from negation (e.g. "? !apollo") carries zero accumulated
         // weight but must still count as a hit — floor ONLY that case, so a sub-1 :weight
         // (e.g. "? whisper:0.3") down-weights as documented.
         return matched ? (scoreBoost > 0 ? scoreBoost : 1) : 0;
@@ -257,15 +290,7 @@ export function countKey(key, text, caseSensitive, wholeWords, scope) {
 
     // Regex key (/pattern/flags): count global matches, overriding the other options —
     // same precedence core's matchKeys gives a regex needle.
-    const asRegex = raw.match(REGEX_KEY_RE);
-    if (asRegex) {
-        try {
-            const flags = asRegex[2].includes('g') ? asRegex[2] : `${asRegex[2]}g`;
-            return (text.match(new RegExp(asRegex[1], flags)) ?? []).length;
-        } catch {
-            return 0;
-        }
-    }
+    if (isRegexKey(raw)) return countRegexKey(raw, text);
 
     // Aho-Corasick fast path: when keywordScore has primed a scan of this text, the shared
     // automaton already knows this key's folded-substring count. 0 is final under any flags;
@@ -318,8 +343,8 @@ export function countKey(key, text, caseSensitive, wholeWords, scope) {
  * than re-deriving match rules — but it is DISPLAY, not a matcher: only ever called for keys
  * countKey already counted, so a disagreement can misplace an excerpt, never invent or hide a
  * firing. Excerpts are from the FOLDED haystack (fold is not length-preserving — em-dash → "--" —
- * so indices do not map back to the original text). SmartKeys queries get no excerpt: which term
- * satisfied a boolean query is the query evaluator's business, not a substring's.
+ * so indices do not map back to the original text). A SmartKey gets no excerpt: which term
+ * satisfied it is the expression evaluator's business, not a substring's.
  * @param {string} key The key that matched
  * @param {string|string[]} text Scan window — a string or segments, as keywordScore takes
  * @param {boolean} caseSensitive Resolved entry flag
@@ -487,15 +512,24 @@ export function keywordScore(entry, text, keys = entry.key, { k1, caseSensitiveD
 // ---------------------------------------------------------------------------
 
 /**
- * Whether the entry's content carries a decorator, by core's rules (world-info.js parseDecorators):
+ * Whether the entry carries a decorator, by core's rules (world-info.js parseDecorators):
  * read only when content STARTS with `@@`, one decorator per leading line, stopping at the first
  * non-`@@` line; a `@@@name` line is the fallback form of `@@name`, and core's own test is a
  * bare startsWith on the name.
+ *
+ * Two entry shapes reach this: raw entries (the ENTRIES_LOADED buckets, fixtures) carry the `@@`
+ * lines in `content`; parsed entries (getSortedEntries output — what activationAdds/Prunes see at
+ * runtime) carry them in a `decorators` array with content STRIPPED, so the content walk below
+ * would always miss. The array is authoritative when present — without this check the runtime
+ * guards were inert, and the prune could delete a keyed `@@activate` entry whose keys missed.
  * ponytail: the `@@@` fallback-chain nuance (it only applies after an unknown decorator) is not
  * mirrored, so this over-detects fallback lines — which errs safe in both callers: over-detecting
  * `@@dont_activate` under-adds, over-detecting `@@activate` under-deletes.
  */
-function hasDecorator(entry, name) {
+export function hasDecorator(entry, name) {
+    if (Array.isArray(entry?.decorators)) {
+        return entry.decorators.some(d => String(d).startsWith(name));
+    }
     const content = String(entry?.content ?? '');
     if (!content.startsWith('@@')) return false;
     for (const line of content.split('\n')) {
@@ -524,10 +558,20 @@ const activatableKeys = keys => (Array.isArray(keys) ? keys : [])
  * NOT yet blanked their keys, so the flag is the guard, not empty `key`); `@@dont_activate`
  * (core's own exclusion, which a force-activate would override).
  *
+ * `blind` (bucket 2) lifts the delayUntilRecursion skip: once WA owns activation it emits blindly
+ * and lets core reject — core's gate order checks the delay level before external activations, and
+ * the external-activation map persists for the whole scan, so emitting a delayed entry early is
+ * exactly how it activates when its level arrives.
+ *
+ * `depthSkew` (bucket 2) widens the resolved GLOBAL depth, mirroring core's min-activations
+ * advanceScan one message per pass. A per-entry `scanDepth` is authored and never skewed, as in
+ * core, where the buffer skew only moves the default window.
+ *
  * @param {object[]} entries Candidate entries (getSortedEntries shape)
  * @param {(depth: number, entry: object) => string[]} windowFor
  * @param {{suppressVectorKeys?: boolean, messageDepth?: number, fallbackDepth?: number,
- *          caseSensitiveDefault?: boolean, wholeWordsDefault?: boolean}} opts
+ *          caseSensitiveDefault?: boolean, wholeWordsDefault?: boolean,
+ *          blind?: boolean, depthSkew?: number}} opts
  * @returns {object[]} entries to force-activate
  */
 export function activationAdds(entries, windowFor, opts = {}) {
@@ -536,16 +580,16 @@ export function activationAdds(entries, windowFor, opts = {}) {
         if (!entry || entry.disable || entry.constant) continue;
         if (opts.suppressVectorKeys && entry.vectorized) continue;
         if (hasDecorator(entry, '@@dont_activate')) continue;
-        // Authored to never activate on the initial pass — the only pass the union feeds. Core's
-        // own gate order already refuses the force (delay/cooldown/delayUntilRecursion are checked
-        // before external activations, world-info.js entry walk), so this is provenance hygiene,
-        // not the protection itself.
-        if (entry.delayUntilRecursion) continue;
+        // Authored to never activate on the initial pass — the only pass the 1.5 union feeds.
+        // Core's own gate order already refuses the force (delay/cooldown/delayUntilRecursion are
+        // checked before external activations, world-info.js entry walk), so this is provenance
+        // hygiene, not the protection itself — which is why `blind` may lift it.
+        if (!opts.blind && entry.delayUntilRecursion) continue;
         const keys = activatableKeys(entry.key);
         if (!keys.length) continue;
         // Nullish, not truthy: scanDepth 0 is core's authored "match nothing from chat" and must
         // not fall through to the globals (an unaltered book behaves as it does under core).
-        const depth = Number(entry.scanDepth ?? (opts.messageDepth || opts.fallbackDepth));
+        const depth = Number(entry.scanDepth ?? ((opts.messageDepth || opts.fallbackDepth) + (opts.depthSkew || 0)));
         // hits, not score: the verdict must not depend on k1, and hits are counted only in
         // segments that pass the entry's own secondary-key gate (keywordScore).
         if (keywordScore(entry, windowFor(depth, entry) ?? [], keys, opts).hits.length) {

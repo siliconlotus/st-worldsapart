@@ -6,24 +6,26 @@ A World Info key in WA can be one of three things:
 |---|---|---|
 | plain | `moon mission` | substring match, the SillyTavern default |
 | regex | `/co(l|s)monaut/i` | a regular expression, as core already supports |
-| **SmartKey** | `? moon mission -apollo` | a boolean query — a leading `?` opts in |
+| **SmartKey** | `? moon mission -apollo` | a boolean expression — a leading `?` opts in |
 
 The first half of this page is the SmartKeys grammar. The second half is how matching works for *all
 three*, which is worth reading even if you never write a `?` key.
 
 ## What a SmartKey does today
 
-**SmartKeys rank, they do not yet activate.** SillyTavern core owns activation, and an un-extended core
-sees the literal string `? moon mission` and never matches it. So a `?` key changes:
+**SmartKeys activate.** On a generation WA runs, WA answers "did a key match" for every entry, so a `?`
+key pulls its entry into the prompt exactly as a plain key does. It also sets:
 
-- the **order** entries appear in, once something has activated them,
+- the **order** entries appear in,
 - the **score** WA reports in `/wa-debug` and the WI panel,
 - everything in the **Keyword Studio** — colouring, the audit, the pruner.
 
-It does not, on its own, pull an entry into the prompt. WA taking over activation is planned and
-designed; until it lands, treat a SmartKey as a ranking instrument. The upside of that design is
-portability: a book full of SmartKeys still loads in a stock SillyTavern, where the keys are simply
-inert rather than broken.
+Two consequences worth knowing. Matching uses **WA's** scan depth, not core's *Scan Depth* — a
+per-entry Scan Depth still overrides both. And SillyTavern's own dry runs (prompt token counts, chat
+load) are not WA generations, so they keep core's matcher, where a `?` key never matches.
+
+That inertness is the portability story: a book full of SmartKeys still loads in a stock SillyTavern,
+where the keys simply never fire rather than breaking anything.
 
 ---
 
@@ -52,9 +54,9 @@ terms and need no escaping.
 `+` in Lucene's per-term position (`? +fire +water`) is absorbed: it means "required", which is what
 the implicit AND already says.
 
-## The same query, spelled out
+## The same SmartKey, spelled out
 
-Every row below is one query written three ways. They parse identically and score identically — the
+Every row below is one SmartKey written three ways. They parse identically and score identically — the
 short forms are shorthand, not a different feature.
 
 | shorthand | | spelled out |
@@ -67,8 +69,8 @@ short forms are shorthand, not a different feature.
 | `? fire^2` | = | `? fire::2` |
 | `apollo mission` *(a plain key)* | = | `? "apollo mission"` |
 
-If a query is hard to read, the spelled-out form is always available and always means the same thing.
-The two places where a rewrite *does* change the query are quoting across a space (`hot tub` vs
+If a SmartKey is hard to read, the spelled-out form is always available and always means the same thing.
+The two places where a rewrite *does* change the SmartKey are quoting across a space (`hot tub` vs
 `"hot tub"`) and regrouping with parens.
 
 **Precedence:** `(...)` before `NOT` before `AND` before `OR`/`XOR`. When in doubt, use parens.
@@ -102,7 +104,7 @@ Sigur Rós's `"()"` is a real album title.
 **Quoting a single term never changes what it matches.** `"fire"` and `fire` are identical, and flags
 and weights still compose (`? ="fire"::2`). So there is no cost to quoting when unsure.
 
-The one exception is quoting **across a space**, which is a different query rather than a safer one:
+The one exception is quoting **across a space**, which is a different SmartKey rather than a safer one:
 
 ```
 ? hot tub       two terms, implicit AND — matches a hot bath beside a cold tub
@@ -130,9 +132,15 @@ That equivalence survives the *Match Whole Words* checkbox, which applies to sin
 leaves both forms on substring. It does not survive *Case-Sensitive*: that checkbox reaches a plain key
 but a SmartKey ignores it, so the case-sensitive spelling is `? ^"apollo astronauts"`.
 
+**Which form to reach for.** If you want the literal string, use a plain key. That is what it is for, and
+it takes any character without ceremony — `6" pipe` is a plain key, quote and all. Reach for a SmartKey
+when you want the two things a literal cannot give you: **order invariance**, and **tolerance of words in
+between**. `? 6" copper pipe` fires on *"that copper pipe is 6" in diameter"*, where the plain key
+`6" copper pipe` does not.
+
 ## What the Studio will tell you
 
-Saving a `?` key runs a structural check. It reads the query's shape only — never a guess at what you
+Saving a `?` key runs a structural check. It reads the SmartKey's shape only — never a guess at what you
 meant, because every check that guessed produced false positives on real titles.
 
 | | |
@@ -153,8 +161,22 @@ Whether a term ever actually occurs in your book is a different question, and th
 This half applies to plain keys and SmartKey terms alike.
 
 **Substring by default.** `fir` matches `confirm`. Whole-word matching is opt-in — the entry's *Match
-Whole Words* checkbox for a plain key, the `=` flag for a SmartKey term — and applies only to
-single-word keys, exactly as core does; a key with a space in it falls back to substring.
+Whole Words* checkbox for a plain key, the `=` flag for a SmartKey term.
+
+**The checkbox reaches single-word keys only**, exactly as core does — a key with a space in it stays
+on substring however the box is set, so `hot tub` matches `hot tubs`. The `=` flag has no such
+exemption: `? ="hot tub"` does check boundaries, and misses `hot tubs`. That difference is a WA
+divergence rather than a design, and it is being resolved in favour of `=`.
+
+An affix does not block a match in either form. `Joe` whole-word matches `Joe's` and `Joe-adjacent`,
+because an apostrophe and a hyphen are not word characters — only a letter or digit immediately
+alongside blocks it, which is why `Joe` does not match `Joel`.
+
+**Known limit — Chinese and Japanese.** Whole-word matching needs word boundaries, and these scripts
+do not write them. A key like `猫` still fires where it appears among Latin text or punctuation — a
+sign name or a tattoo inside an English sentence, or beside `・` `、` `。` — but it misses the key
+wherever it sits between two characters of running text. Leave the box off for
+entries keyed in these scripts; SillyTavern advises the same.
 
 **Case-insensitive by default**, opt out with the entry checkbox or `^`.
 
@@ -197,7 +219,9 @@ written without spaces (CJK) there is no boundary to find, and a whole-word key 
 isolation — leave whole-word off for those.
 
 **Regex keys are matched raw.** A `/pattern/` key sees the text unfolded, so `/Cap'n/` will *not* find
-`Cap’n`. Write the alternation, or the class, yourself.
+`Cap’n`. Write the alternation, or the class, yourself. A regex also ignores the entry's checkboxes —
+it is case-sensitive unless you write `/i`, and *Match Whole Words* means nothing to it. Like a
+SmartKey, a regex key says what it wants and the entry does not override it.
 
 **Known limit — Markdown.** Chat prose is Markdown and the markup sits in the text being scanned, so
 emphasis *inside* a word cuts both ways:

@@ -6,9 +6,13 @@
  * This extension decides which entries survive, in what order, and how many tokens
  * they may spend, by hooking three sanctioned points:
  *
- *   1. WORLDINFO_ENTRIES_LOADED — suppress keyword matching on vectorized entries; take the budget.
- *   2. generate_interceptor      — chunked vector retrieval, force-activate the winners.
- *   3. WORLDINFO_SCAN_DONE       — rank everything activated, apply budget, rewrite `order`.
+ *   1. WORLDINFO_ENTRIES_LOADED — take the budget; blank keys so core's matcher stays out of what
+ *                                  WA owns (vectorized entries always; every keyword-activating
+ *                                  entry on a WA-run scan under ownActivation — matcher-design.md,
+ *                                  bucket 2 — constants and @@activate keep theirs for group scoring).
+ *   2. generate_interceptor      — chunked vector retrieval + WA's keyword matches, force-activate both.
+ *   3. WORLDINFO_SCAN_DONE       — feed the scan loop (recursion / min-activation matches, owned scans),
+ *                                  then rank everything activated, apply budget, rewrite `order`.
  *
  * Prompt order is set at assembly time by sorting on `entry.order` (world-info.js),
  * and the unshift-based build means the FINAL prompt order is ascending `order`.
@@ -25,7 +29,7 @@ import {
     getExtensionPromptByName,
 } from '../../../../script.js';
 import { extension_settings, getContext } from '../../../extensions.js';
-import { getSortedEntries, getWorldInfoPrompt, loadWorldInfo, saveWorldInfo, reloadEditor, world_names, world_info_include_names, world_info_depth, world_info_min_activations, world_info_match_whole_words, world_info_case_sensitive, selected_world_info, world_info, METADATA_KEY, scan_state } from '../../../world-info.js';
+import { getSortedEntries, getWorldInfoPrompt, loadWorldInfo, saveWorldInfo, reloadEditor, world_names, world_info_include_names, world_info_depth, world_info_min_activations, world_info_match_whole_words, world_info_case_sensitive, world_info_recursive, selected_world_info, world_info, METADATA_KEY, scan_state } from '../../../world-info.js';
 import { power_user } from '../../../power-user.js';
 import { SlashCommandParser } from '../../../slash-commands/SlashCommandParser.js';
 import { SlashCommand } from '../../../slash-commands/SlashCommand.js';
@@ -584,10 +588,10 @@ const summaryCache = new Map();
 async function summarizeQuery(rawText) {
     const prompt = `${rawText}\n\n${settings().summaryPrompt}`;
     // Key on everything that changes the output, not just the prompt — otherwise editing
-    // the temperature, switching profile, or toggling the preset silently reuses the old
-    // summary. Anything that would produce a different answer must be in the key.
+    // the temperature or switching profile silently reuses the old summary. Anything that
+    // would produce a different answer must be in the key.
     const s = settings();
-    const key = getStringHash(`${prompt}${s.summaryProfile}${s.summaryTemperature}${s.summaryBypassPreset}${s.summaryLength}`);
+    const key = getStringHash(`${prompt}${s.llmProfile}${s.llmTemperature}${s.summaryLength}`);
 
     if (summaryCache.has(key)) {
         console.log('Worlds Apart: reusing cached summary');
@@ -595,24 +599,22 @@ async function summarizeQuery(rawText) {
     }
 
     try {
-        const profileId = settings().summaryProfile;
+        const profileId = settings().llmProfile;
         const profile = profileId
             ? (extension_settings.connectionManager?.profiles ?? []).find(x => x.id === profileId)
             : null;
 
-        const includePreset = !settings().summaryBypassPreset;
-
         // Empty means "don't send it" — the preset (or the backend default when the
         // preset is bypassed) decides. Only reachable on the profile path; generateRaw
         // takes no generation parameters, so the current-API path can't honour it.
-        const temperature = String(settings().summaryTemperature ?? '').trim();
+        const temperature = String(settings().llmTemperature ?? '').trim();
         const overridePayload = temperature === '' ? {} : { temperature: Number(temperature) };
 
         if (temperature !== '' && !profile) {
             console.warn(`Worlds Apart: summary temperature ${temperature} ignored — it needs a summary profile. The current API's preset governs instead.`);
         }
 
-        console.log(`Worlds Apart: summarizing ${prompt.length} chars via ${profile ? `profile "${profile.name}"${includePreset ? ` with preset "${profile.preset ?? 'none'}"` : ' (preset bypassed)'}` : 'the current API'}${profile && temperature !== '' ? `, temperature ${temperature}` : ''}`);
+        console.log(`Worlds Apart: summarizing ${prompt.length} chars via ${profile ? `profile "${profile.name}" (preset bypassed)` : 'the current API'}${profile && temperature !== '' ? `, temperature ${temperature}` : ''}`);
 
         // The full prompt is the instruction plus the whole chat slice — thousands of
         // tokens. Only dump it on a debug run, and as an object so devtools collapses it.
@@ -623,7 +625,9 @@ async function summarizeQuery(rawText) {
         let summary;
 
         if (profile) {
-            const result = await ConnectionManagerRequestService.sendRequest(profileId, prompt, settings().summaryLength, { includePreset }, overridePayload);
+            // includePreset false, always — see keyword-tools.mjs generateText for why the preset
+            // is business logic rather than a setting (it contributes samplers, not prompt text).
+            const result = await ConnectionManagerRequestService.sendRequest(profileId, prompt, settings().summaryLength, { includePreset: false }, overridePayload);
             summary = String(result?.content ?? '').trim();
 
             // Reasoning models put everything in `reasoning` and return empty content.
@@ -794,6 +798,11 @@ async function keywordActivations(chat) {
     const candidates = await getSortedEntries();
     const suppress = Boolean(settings().suppressVectorKeys);
 
+    // Bucket 2: these copies (live keys — waOwnsScan is false during WA's own fetch, so
+    // onEntriesLoaded's takeover blanking never touches them) are what the SCAN_DONE feed
+    // rematches on every recursion and min-activation pass.
+    runState.waCandidates = candidates;
+
     const windowFor = matcher.makeWindowFor(chat.filter(x => x && !x.is_system), {
         injectText: await scanInjects(),
         sources: scanSources(),
@@ -855,6 +864,12 @@ async function selectAndActivate(chat) {
         console.log(`Worlds Apart: activating ${winners.length} retrieved + ${union.length} keyword-matched entries`);
         await eventSource.emit(event_types.WORLDINFO_FORCE_ACTIVATE, activated);
     }
+
+    // The takeover flag goes TRUE last, after WA's own fetches are done: the next
+    // WORLDINFO_ENTRIES_LOADED is core's scan, and that is the one whose keys get blanked.
+    // Cleared on the scan's final SCAN_DONE loop and at generation end.
+    for (const e of activated) runState.waMatched.add(`${e.world}.${e.uid}`);
+    runState.waOwnsScan = Boolean(settings().ownActivation);
 }
 
 // ---------------------------------------------------------------------------
@@ -863,22 +878,46 @@ async function selectAndActivate(chat) {
 
 /**
  * Generation interceptor. Runs before the World Info scan.
+ *
+ * QUIET GENERATIONS ARE ORDINARY GENERATIONS HERE. A `type === 'quiet'` run (Summarize, the SD
+ * prompt generator, the LLM expression classifier, /gen and the st-context API) scans World Info
+ * exactly like a visible one — `skipWIAN` gates only whether depth/outlet entries are injected,
+ * never the scan — and ST runs interceptors for it deliberately, gating them on `!dryRun` alone
+ * and passing `type` through so an extension can decide for itself. So WA governs it too: if the
+ * scan happens, WA's selection is what it should return.
+ *
+ * WA used to return early on quiet, which was half a skip and incoherent — retrieval and the union
+ * were skipped, but `onEntriesLoaded` still took core's budget and still blinded core to
+ * vectorized entries' keys, and `rankActivated` still ranked and budgeted the result against
+ * `lastScores` left over from the PREVIOUS real generation. A vectorized entry could therefore
+ * never activate on a quiet run (no retrieval, keys blanked), while the entries that did activate
+ * were cut by a budget walk reading another turn's scores.
+ *
+ * Neither summarization route re-enters this: `generateRaw` and ConnectionManagerRequestService
+ * both bypass `Generate` (no interceptors, no WI scan), so summary mode cannot recurse.
+ *
+ * Dry runs are upstream's call, not WA's — `runGenerationInterceptors` is skipped for them
+ * entirely, so WA is never offered the chance and core's matcher and budget are what those
+ * token estimates see.
+ *
  * @param {object[]} chat Chat messages
  * @param {number} _maxContext Max context size
- * @param {string} type Generation type
+ * @param {string} _type Generation type
  */
-async function intercept(chat, _maxContext, type) {
+async function intercept(chat, _maxContext, _type) {
     // Stashed BEFORE the gates: the received chat IS core's scan haystack (script.js builds
     // chatForWI from this same coreChat — regex scripts applied, file content and titles
-    // appended, reasoning merged), and quiet generations scan too — a stale stash would judge
-    // them against the previous generation's text. Sliced so ST's later in-place splices
-    // (jailbreak injects) can't shift membership under a SCAN_DONE consumer.
+    // appended, reasoning merged). Sliced so ST's later in-place splices (jailbreak injects)
+    // can't shift membership under a SCAN_DONE consumer.
     runState.scanChat = chat.slice();
     // Fresh per generation, BEFORE any emit: the FORCE_ACTIVATE listener repopulates it as
     // WA and other extensions emit for this scan. A stale entry only over-exempts the prune.
     runState.forcedActivations = new Set();
+    // BEFORE the gate: a disabled generation's scan is core's, and a takeover flag leaked from
+    // an aborted scan would blank its keys with no WA union behind them.
+    runState.waOwnsScan = false;
 
-    if (!settings().enabled || type === 'quiet') {
+    if (!settings().enabled) {
         return;
     }
 
@@ -909,21 +948,48 @@ function onEntriesLoaded(loaded) {
         }
     }
 
-    if (!settings().enabled || !settings().suppressVectorKeys) {
+    if (!settings().enabled) {
         return;
     }
 
-    for (const entry of entries) {
-        if (entry?.vectorized) {
-            // Stash before blanking so scoreVectorKeys can rank on the real keys after core is
-            // blinded to them. keywordScore only reads primary keys, so that's all we keep.
-            //
-            // COPIED, not aliased. getGlobalLore builds each entry with a shallow spread, so
-            // `entry.key` is still the same array object as loadWorldInfo's cached book data —
-            // blanking is safe because it rebinds the field, but holding the reference would put a
-            // live handle on the cache one in-place sort or splice away from corrupting the
-            // lorebook for the session. Keys are strings, so a spread is a full copy.
+    if (settings().suppressVectorKeys) {
+        for (const entry of entries) {
+            if (entry?.vectorized) {
+                // Stash before blanking so scoreVectorKeys can rank on the real keys after core is
+                // blinded to them. keywordScore only reads primary keys, so that's all we keep.
+                //
+                // COPIED, not aliased. getGlobalLore builds each entry with a shallow spread, so
+                // `entry.key` is still the same array object as loadWorldInfo's cached book data —
+                // blanking is safe because it rebinds the field, but holding the reference would put a
+                // live handle on the cache one in-place sort or splice away from corrupting the
+                // lorebook for the session. Keys are strings, so a spread is a full copy.
+                entry.waKeys = [...(entry.key ?? [])];
+                entry.key = [];
+                entry.keysecondary = [];
+            }
+        }
+    }
+
+    // Bucket 2 (matcher-design.md): on a scan WA intercepted, core's keyword matcher goes blind —
+    // every keyword-activating entry's keys are stashed and blanked, so the only keyword route
+    // into `activated` is WA's force-emit and the group filter runs over WA's verdicts (the
+    // matcher-before-group-filter ordering 1.5 could not have). waOwnsScan is only true between
+    // the end of selectAndActivate and the scan's last loop, so WA's own fetches and the dry-run
+    // scans WA is never offered keep live keys and core behaviour. Secondaries are stashed too:
+    // stage 3's secondary gate must judge the same condition the author wrote, not an empty one.
+    if (runState.waOwnsScan && !runState.generationIsDryRun) {
+        for (const entry of entries) {
+            if (!entry || entry.waKeys) continue;   // vectorized above already stashed and blanked
+            // Constants and @@activate entries KEEP their keys. Core's scan loop short-circuits
+            // both before its key-matching path, so live keys cannot leak a core keyword
+            // activation — and the inclusion-group filter's getScore reads entry.key, so blanking
+            // them would make a grouped constant score 0 under group scoring and lose ties it
+            // should win. The other group classes need nothing: sticky winners skip scoring
+            // entirely (filterGroupsByTimedEffects), and every keyword-activated entry reaches
+            // the filter as WA's live-key copy via the external-activation map.
+            if (entry.constant || matcher.hasDecorator(entry, '@@activate')) continue;
             entry.waKeys = [...(entry.key ?? [])];
+            entry.waSecondary = [...(entry.keysecondary ?? [])];
             entry.key = [];
             entry.keysecondary = [];
         }
@@ -1218,6 +1284,87 @@ function ensureWorldConfigs(worlds) {
     renderWorldPriority();
 }
 
+/**
+ * Bucket 2's per-loop feed (matcher-design.md): with core's keyword matcher blanked, WA answers
+ * "did a key match" for every scan loop after the initial pass — recursion text and min-activation
+ * widening. Runs on each WORLDINFO_SCAN_DONE of an owned scan, matches the not-yet-emitted
+ * candidates over chat + all recursion content so far, and force-emits the winners; core's next
+ * loop admits them through its own gates (probability, delay levels, group filter, triggers).
+ *
+ * Two things this deliberately does NOT do, both verified against core's loop:
+ *  - No `state.next` writes. Core schedules the next loop itself in every case WA feeds: a pass
+ *    with recursion-eligible successes sets RECURSION, open delay levels set RECURSION, and
+ *    min-activations sets MIN_ACTIVATIONS — and WA only ever has something new to emit in exactly
+ *    those cases (its matches come from that pass's content or that pass's widening).
+ *  - No re-emission. WorldInfoBuffer.externalActivations is a static map cleared only at scan end,
+ *    so one emit is standing for the whole scan — core re-checks it every loop, which is how an
+ *    entry refused at one delay level is admitted at a later one.
+ *
+ * @param {object} args WORLDINFO_SCAN_DONE args
+ */
+async function feedScanLoop(args) {
+    const activated = args.activated.entries;
+    // Already-activated entries (constant, sticky, other extensions' forces) never need an emit;
+    // recording them also keeps them out of every rematch.
+    for (const key of activated.keys()) runState.waMatched.add(key);
+
+    // This pass's recursion-eligible content. preventRecursion is filtered FIRST:
+    // args.new.successful is the list before core's own filter, and core builds its recursion
+    // buffer from the filtered list — using it raw would restore the propagation the flag stops.
+    // Inherit world_info_recursive: WA matching recursion text would force recursion the user
+    // disabled. Contents are macro-substituted and decorator-stripped by the time they get here.
+    const newTexts = world_info_recursive
+        ? (args?.new?.successful ?? [])
+            .filter(e => e && !e.preventRecursion)
+            .map(e => String(e.content ?? ''))
+            .filter(Boolean)
+        : [];
+    runState.waRecursionTexts.push(...newTexts);
+
+    // Core widens its min-activations window one message per pass (advanceScan); mirror the skew
+    // on WA's default depth so the widening actually reaches WA's matcher — with core's keys
+    // blanked, this feed is the only thing min activations can pull from.
+    const skewed = args?.state?.next === scan_state.MIN_ACTIVATIONS;
+    if (skewed) runState.waMinSkew++;
+
+    if (!newTexts.length && !skewed) {
+        return;
+    }
+
+    const candidates = runState.waCandidates.filter(e => !runState.waMatched.has(`${e.world}.${e.uid}`));
+    if (!candidates.length) {
+        return;
+    }
+
+    const windowFor = matcher.makeWindowFor(
+        (runState.scanChat ?? []).filter(x => x && !x.is_system), {
+            injectText: await scanInjects(),
+            sources: scanSources(),
+            matchWindow: settings().matchWindow,
+            includeNames: world_info_include_names,
+        });
+
+    const adds = matcher.activationAdds(candidates,
+        matcher.withExtraTexts(windowFor, runState.waRecursionTexts, settings().matchWindow), {
+            suppressVectorKeys: Boolean(settings().suppressVectorKeys),
+            messageDepth: settings().messageDepth,
+            fallbackDepth: world_info_depth,
+            caseSensitiveDefault: world_info_case_sensitive,
+            wholeWordsDefault: world_info_match_whole_words,
+            blind: true,
+            depthSkew: runState.waMinSkew,
+        });
+
+    if (adds.length) {
+        for (const e of adds) {
+            runState.waMatched.add(`${e.world}.${e.uid}`);
+            runState.lastKeywordAdds.add(`${e.world}.${e.uid}`);
+        }
+        console.log(`Worlds Apart: activating ${adds.length} keyword-matched entr${adds.length === 1 ? 'y' : 'ies'} on scan loop ${args?.state?.loopCount} (${newTexts.length ? 'recursion text' : 'min-activations widening'})`);
+        await eventSource.emit(event_types.WORLDINFO_FORCE_ACTIVATE, adds);
+    }
+}
+
 async function rankActivated(args) {
     const activated = args?.activated?.entries;
 
@@ -1231,6 +1378,13 @@ async function rankActivated(args) {
     if (runState.generationIsDryRun) {
         return;
     }
+
+    // Bucket 2: feed the scan loop BEFORE the size-0 return — a pass that activated nothing can
+    // still be followed by a min-activations widening WA has to answer.
+    if (runState.waOwnsScan && Array.isArray(runState.waCandidates)) {
+        await feedScanLoop(args);
+    }
+
     if (activated.size === 0) {
         runState.lastLayout = [];
         if (!args?.state?.next) renderWiPanel([]);
@@ -1245,8 +1399,10 @@ async function rankActivated(args) {
     // WA's own and other extensions') and sticky timed effects; constant and @@activate are
     // structural and live in activationPrunes. No group guard (ruled): a deleted group winner
     // leaves its group empty this turn, until bucket 2 runs the matcher before the group filter.
+    // On an OWNED scan (bucket 2) the prune is off: core's matcher is blanked, so every activation
+    // is WA's own force, constant, sticky or another extension's — all exempt, nothing to judge.
     if (args?.state?.current === scan_state.INITIAL) runState.lastPruned = [];
-    if (args?.state?.current === scan_state.INITIAL && Array.isArray(args?.new?.all) && args.new.all.length) {
+    if (!runState.waOwnsScan && args?.state?.current === scan_state.INITIAL && Array.isArray(args?.new?.all) && args.new.all.length) {
         const exempt = new Set(runState.forcedActivations);
         for (const entry of args.new.all) {
             if (args?.timedEffects?.isEffectActive('sticky', entry)) {
@@ -1312,10 +1468,26 @@ async function rankActivated(args) {
         // every entry regardless of scan depth.
         const injectText = await scanInjects();
 
+        // The keys an activated entry is scored on. Live keys as before; blanked entries score
+        // their stash — a 🔗 entry only under scoreVectorKeys (unchanged), while a bucket-2
+        // blanked entry (constant / sticky / @@activate copies from core's own sortedEntries;
+        // WA's force-emitted copies keep live keys) always scores its stash, since blanking was
+        // an activation mechanism, not a scoring opinion.
+        const scoreKeysOf = entry => entry.key?.length ? entry.key
+            : entry.vectorized
+                ? (settings().scoreVectorKeys ? (entry.waKeys ?? []) : [])
+                : (entry.waKeys ?? []);
+        // Same restoration for the secondary gate: a bucket-2 blanked entry's secondaries live in
+        // waSecondary, and the per-segment gate must judge the condition the author wrote, not an
+        // empty one. A local view, never a write-back — restoring keys on core's scan copies
+        // mid-scan would hand core's next loop the keys the takeover blanked.
+        const scoringView = entry => (!entry.keysecondary?.length && entry.waSecondary?.length)
+            ? { ...entry, keysecondary: entry.waSecondary }
+            : entry;
+
         // Register every key this pass will score BEFORE the loop, so the smartkeys automaton is
         // built once — a first-seen key mid-loop would rebuild it and throw away every cached scan.
-        registerKeys(items.flatMap(it => it.entry.key?.length ? it.entry.key
-            : (settings().scoreVectorKeys ? (it.entry.waKeys ?? []) : [])));
+        registerKeys(items.flatMap(it => scoreKeysOf(it.entry)));
 
         for (const item of items) {
             // Score keywords over the shared message depth. Per-entry scanDepth still wins
@@ -1337,12 +1509,8 @@ async function rankActivated(args) {
             }
             // Append the character/persona/scenario texts this entry opted into scanning.
             const scanText = withMatchSources(windows.get(depth), item.entry, sources);
-            // A blanked 🔗 entry has empty keys but its originals in waKeys; score those only
-            // when scoreVectorKeys is on. Any entry with live keys (non-vectorized, or 🔗 with
-            // suppress off) uses them as before.
-            const scoreKeys = item.entry.key?.length ? item.entry.key
-                : (settings().scoreVectorKeys ? (item.entry.waKeys ?? []) : []);
-            const scored = keywordScore(item.entry, scanText, scoreKeys);
+            const scoreKeys = scoreKeysOf(item.entry);
+            const scored = keywordScore(scoringView(item.entry), scanText, scoreKeys);
             item.keywordScore = scored.score;
             item.keywordHits = scored.hits;
             // Debug-class runs only: WHERE each key matched, for /wa-grade's "why did this pop"
@@ -1636,6 +1804,9 @@ async function dryRun(verbose = false) {
     } finally {
         runState.verboseRun = false;
         runState.dryRunInProgress = false;
+        // An exception between selectAndActivate and the scan's last loop would otherwise leave
+        // the takeover flag armed for the next unrelated getSortedEntries.
+        runState.waOwnsScan = false;
     }
 
     return '';
@@ -1697,8 +1868,8 @@ function paramSnapshot() {
     };
 
     if (s.queryMode === 'summary') {
-        const profile = (extension_settings.connectionManager?.profiles ?? []).find(x => x.id === s.summaryProfile);
-        snap.summary = { summaryProfile: profile ? profile.name : 'current API', endpoint: profile ? (profile['api-url'] || profile.api || '—') : '—', summaryTemperature: s.summaryTemperature || 'preset', summaryLength: s.summaryLength, summaryBypassPreset: s.summaryBypassPreset };
+        const profile = (extension_settings.connectionManager?.profiles ?? []).find(x => x.id === s.llmProfile);
+        snap.summary = { llmProfile: profile ? profile.name : 'current API', endpoint: profile ? (profile['api-url'] || profile.api || '—') : '—', llmTemperature: s.llmTemperature || 'preset', summaryLength: s.summaryLength };
     }
 
     snap.nonDefaults = nonDefaults;   // last — the flat exact-name diff list, after the grouped view
@@ -2720,12 +2891,6 @@ const SETTINGS_HTML = `
                 <option value="vector">Vector only</option>
             </select>
 
-            <label for="wa_query_mode">Query from</label>
-            <select id="wa_query_mode" class="text_pole">
-                <option value="messages">Raw messages</option>
-                <option value="summary">Summarized scene (one LLM call per new turn)</option>
-            </select>
-
             <label for="wa_message_depth">Message depth (recent messages for retrieval + keyword scan)</label>
             <input id="wa_message_depth" type="number" class="text_pole" min="1" max="20" step="1">
 
@@ -2768,30 +2933,20 @@ const SETTINGS_HTML = `
 
             <div class="inline-drawer wa-section">
                 <div class="inline-drawer-toggle inline-drawer-header">
-                    <b>Summary</b>
+                    <b>LLM</b>
                     <div class="inline-drawer-icon fa-solid fa-circle-chevron-down down"></div>
                 </div>
                 <div class="inline-drawer-content">
-                    <small class="opacity50p">Only applies when Query from = Summarized scene: how the scene summary that becomes the match text is generated.</small>
+                    <small class="opacity50p">Which model WA uses for its own generation calls — currently just the ✨ keyword suggester in Lorebook Studio. Nothing here affects your chat. Leave empty to use your current chat model. Either way it is one call per entry, more for long ones — negligible for a single ✨, worth thinking about before a book-wide suggest-all.</small>
 
-                    <label for="wa_summary_profile">Summarize with</label>
+                    <label for="wa_llm_profile">Generate with</label>
                     <div class="flex-container alignItemsCenter flexnowrap">
-                        <select id="wa_summary_profile" class="text_pole flex1"></select>
+                        <select id="wa_llm_profile" class="text_pole flex1"></select>
                         <div id="wa_refresh_profiles" class="menu_button fa-solid fa-rotate" title="Reload the Connection Manager profile list"></div>
                     </div>
 
-                    <label class="checkbox_label" for="wa_bypass_preset">
-                        <input id="wa_bypass_preset" type="checkbox"><span>Bypass the profile's preset</span>
-                    </label>
-
-                    <label for="wa_summary_prompt">Summary prompt</label>
-                    <textarea id="wa_summary_prompt" class="text_pole textarea_compact" rows="4"></textarea>
-
-                    <label for="wa_summary_temp">Summary temperature (blank = preset default; needs a profile)</label>
-                    <input id="wa_summary_temp" type="number" class="text_pole" min="0" max="2" step="0.05" placeholder="preset default">
-
-                    <label for="wa_summary_length">Summary length (tokens)</label>
-                    <input id="wa_summary_length" type="number" class="text_pole" min="50" max="2000" step="50">
+                    <label for="wa_llm_temp">Temperature (blank = backend default; needs a profile)</label>
+                    <input id="wa_llm_temp" type="number" class="text_pole" min="0" max="2" step="0.05" placeholder="backend default">
                 </div>
             </div>
 
@@ -2894,6 +3049,10 @@ const SETTINGS_HTML = `
                 <div class="inline-drawer-content">
                     <small class="opacity50p">Set once and forget.</small>
 
+                    <label class="checkbox_label" for="wa_own_activation" title="WA's matcher decides all keyword activation (SmartKeys, orthography fold, match window, message depth) — core's own keyword scan is bypassed on WA-run generations. Off: core matches and WA only adds what core cannot and removes what WA rejects.">
+                        <input id="wa_own_activation" type="checkbox"><span>WA owns keyword activation</span>
+                    </label>
+
                     <label class="checkbox_label" for="wa_suppress_keys">
                         <input id="wa_suppress_keys" type="checkbox"><span>Suppress keywords on 🔗 entries</span>
                     </label>
@@ -2915,22 +3074,26 @@ const SETTINGS_HTML = `
  */
 function populateProfiles(notify = false) {
     const profiles = extension_settings.connectionManager?.profiles ?? [];
-    const selected = settings().summaryProfile;
+    const selected = settings().llmProfile;
 
-    $('#wa_summary_profile')
+    $('#wa_llm_profile')
         .empty()
-        .append([`<option value="">Current API</option>`]
+        // Not a neutral fallback: on this path generateText uses generateRaw, which takes no
+        // generation parameters, so BOTH the temperature and bypass-preset settings below are
+        // ignored and the suggester runs on the chat model as configured. Say so in the option
+        // itself — it is the default, and nothing else in the panel would reveal it.
+        .append([`<option value="">Current chat API — ignores the settings below</option>`]
             .concat(profiles.map(x => `<option value="${escapeHtml(x.id)}">${escapeHtml(x.name)}</option>`))
             .join(''));
 
     // A deleted profile leaves a dangling id: show the fallback rather than a blank
     // select, but don't silently rewrite the setting.
     const stillExists = !selected || profiles.some(x => x.id === selected);
-    $('#wa_summary_profile').val(stillExists ? selected : '');
+    $('#wa_llm_profile').val(stillExists ? selected : '');
 
     if (!stillExists) {
-        console.warn(`Worlds Apart: saved summary profile "${selected}" no longer exists, falling back to the current API`);
-        toastr.warning('Saved summarization profile no longer exists.', 'Worlds Apart');
+        console.warn(`Worlds Apart: saved LLM profile "${selected}" no longer exists, falling back to the current API`);
+        toastr.warning('Saved LLM profile no longer exists.', 'Worlds Apart');
     }
 
     if (notify) {
@@ -3073,6 +3236,7 @@ export async function init() {
     $('#wa_studio').on('click', () => { lorebookStudio(chatBook()); });
 
     bind('#wa_enabled', 'enabled', 'checked');
+    bind('#wa_own_activation', 'ownActivation', 'checked');
     bind('#wa_suppress_keys', 'suppressVectorKeys', 'checked');
     // Prompt insertion order — the same sort widget the Studio uses, plus relevance options (prompt-only).
     // The widget's button (.wa-filter) and its popup (.wa-ctx) are styled by ensureStudioStyle, which the
@@ -3108,12 +3272,8 @@ export async function init() {
     // number binding would collapse it to 0 and silently switch the keys signal off.
     bind('#wa_keyword_weight', 'keywordWeight', 'number?');
     bind('#wa_weight_by_order', 'weightByOrder', 'checked');
-    bind('#wa_summary_profile', 'summaryProfile', 'string');
-    bind('#wa_bypass_preset', 'summaryBypassPreset', 'checked');
-    bind('#wa_query_mode', 'queryMode', 'string');
-    bind('#wa_summary_prompt', 'summaryPrompt', 'string');
-    bind('#wa_summary_length', 'summaryLength', 'number');
-    bind('#wa_summary_temp', 'summaryTemperature', 'string');
+    bind('#wa_llm_profile', 'llmProfile', 'string');
+    bind('#wa_llm_temp', 'llmTemperature', 'string');
     bind('#wa_uncentered_gate', 'uncenteredGate', 'number');
     bind('#wa_max_entries', 'maxVectorEntries', 'number');
     bind('#wa_vector_cutoff', 'vectorCutoff', 'string');
@@ -3164,7 +3324,7 @@ export async function init() {
     // ST fires a dry-run generation on chat load and for token estimates; note it so the
     // scan-done handler can stay quiet, since its interceptor (and our retrieval) is skipped.
     eventSource.on(event_types.GENERATION_STARTED, (_type, _options, dryRun) => { runState.generationIsDryRun = Boolean(dryRun); });
-    eventSource.on(event_types.GENERATION_ENDED, () => { runState.generationIsDryRun = false; });
+    eventSource.on(event_types.GENERATION_ENDED, () => { runState.generationIsDryRun = false; runState.waOwnsScan = false; });
 
     eventSource.on(event_types.WORLDINFO_ENTRIES_LOADED, onEntriesLoaded);
 
@@ -3191,6 +3351,12 @@ export async function init() {
     eventSource.on(event_types.CHAT_CHANGED, () => { runState.lastLayout = []; renderWiPanel([]); });
     refreshAttached();
     eventSource.on(event_types.WORLDINFO_SCAN_DONE, rankActivated);
+    // Registered AFTER rankActivated so the feed sees the flag while the scan is live. Clearing on
+    // the final loop (not just GENERATION_ENDED) is what keeps a between-scans getSortedEntries —
+    // ST's dry runs, other extensions, the exempt-count refresh — off the takeover blanking.
+    eventSource.on(event_types.WORLDINFO_SCAN_DONE, (args) => {
+        if (!args?.state?.next) runState.waOwnsScan = false;
+    });
 
     // Show the active-entries icon right away; it fills in on the next scan.
     if (settings().enabled) renderWiPanel(runState.lastLayout);
@@ -3255,7 +3421,7 @@ export async function init() {
     SlashCommandParser.addCommandObject(SlashCommand.fromProps({
         name: 'wa-summary',
         callback: probeSummary,
-        helpString: 'Worlds Apart: summarize the current chat with the configured prompt and score the result. Activates nothing.',
+        helpString: 'Worlds Apart: summarize the current chat with the built-in summary prompt and score the result. Activates nothing. Dev probe for the /wa-super-grade `summary` pool arm — the summarized-query mode is withdrawn from production, so this is the only way to exercise it by hand.',
         returns: 'nothing',
     }));
 

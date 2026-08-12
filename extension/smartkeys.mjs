@@ -1,6 +1,6 @@
 // smartkeys.mjs — boolean query engine for `?`-prefixed World Info keys.
 //
-// A key starting with `?` opts into query syntax instead of substring matching:
+// A key starting with `?` opts into expression syntax instead of substring matching:
 //   ? moon mission -apollo          implicit AND, prefix - negates
 //   ? =cat                          = word boundary, ^ case-sensitive (combinable: ^=NASA)
 //   ? "moon mission" OR cosmonaut   quoted phrases, AND/OR/NOT/XOR, &&/||/!/-/+, (...) grouping
@@ -18,7 +18,7 @@
 // typo. Quoting a SINGLE term never changes what it matches — "fire" and fire are identical, flags
 // and weights compose either way — so there is no cost to quoting when unsure.
 //
-// The exception is quoting ACROSS A SPACE, which is a different query rather than a safer one:
+// The exception is quoting ACROSS A SPACE, which is a different SmartKey rather than a safer one:
 //   ? hot tub       two terms, implicit AND — matches a hot bath beside a cold tub
 //   ? "hot tub"     one phrase — matches the words adjacent, in that order
 // Sigur Rós's "()" and its 142-character successor are both single quoted terms; unquoted they parse
@@ -45,7 +45,7 @@ const OPS = {
 };
 
 /**
- * Lexes a SmartKeys query (leading `?` already meaningful but tolerated) into tokens.
+ * Lexes a SmartKey (leading `?` already meaningful but tolerated) into tokens.
  * `-`/`!`/`+` are operators only at token start, so internal hyphens (sci-fi) stay in the term.
  * @param {string} input
  * @returns {object[]} tokens
@@ -167,7 +167,7 @@ export function parse(tokens) {
 
 /**
  * Whether any TERM contributes POSITIVELY — reachable without passing through an odd number of NOTs.
- * Mirrors how evaluate() accumulates: NOT yields no score and discards its subtree's, so a query with
+ * Mirrors how evaluate() accumulates: NOT yields no score and discards its subtree's, so a SmartKey with
  * no positive term matches on absence alone.
  */
 const hasPositiveTerm = (node, negated = false) => {
@@ -178,13 +178,13 @@ const hasPositiveTerm = (node, negated = false) => {
 };
 
 /**
- * Structural problems in a `?` query, for the Studio's save check and the audit — one definition, so
+ * Structural problems in a SmartKey, for the Studio's save check and the audit — one definition, so
  * the two surfaces cannot disagree about what is valid.
  *
  * STRUCTURE ONLY. Whether a term ever occurs is a question about a book's text, and belongs to the
  * audit's df machinery rather than here; this needs nothing but the string.
  *
- * Severity is the split that matters. `error` is a query that cannot do what its author meant under
+ * Severity is the split that matters. `error` is a SmartKey that cannot do what its author meant under
  * any text. `warn` is legal and probably a typo. Nothing here is fatal at match time — the matcher's
  * job is to fire, and telling an author their key is malformed is this function's job instead.
  *
@@ -203,7 +203,7 @@ export function validateSmartKey(raw) {
         return out;   // everything below reads the terms; no point compounding the report
     }
 
-    // A query that only says what must be ABSENT matches on nearly every scan. Core forbids the shape
+    // A SmartKey that only says what must be ABSENT matches on nearly every scan. Core forbids the shape
     // outright (an entry with no primary keys is skipped before its secondaries are ever read), so this
     // is not WA being stricter than the platform.
     if (!hasPositiveTerm(parse(tokens))) {
@@ -215,7 +215,7 @@ export function validateSmartKey(raw) {
 
     // A term with no letters and no digits fires on punctuation, which is in nearly every message. The
     // usual cause is a doubled sentinel: only the FIRST `?` is stripped as the prefix, so `? or ? ()`
-    // leaves `?` behind as a literal term and the query quietly matches any text containing one.
+    // leaves `?` behind as a literal term and the SmartKey quietly matches any text containing one.
     for (const t of terms) {
         // A QUOTED punctuation term is deliberate — Sigur Rós really did name an album "()" — and
         // quoting is already how this syntax says "exactly this, I meant it". Only unquoted ones warn.
@@ -243,7 +243,7 @@ export function validateSmartKey(raw) {
     if (lp !== rp) {
         out.push({
             severity: 'warn', code: 'unbalanced-parens',
-            message: `${lp} “(” against ${rp} “)”. The query still parses, but probably not the way you grouped it.`,
+            message: `${lp} “(” against ${rp} “)”. The SmartKey still parses, but probably not the way you grouped it.`,
         });
     }
 
@@ -266,10 +266,10 @@ export function validateSmartKey(raw) {
 const SCAN_CACHE_MAX = 8;
 
 /**
- * Rewrites core's `(key, keysecondary, selectiveLogic)` as ONE SmartKey query, for bucket 2 — where WA
+ * Rewrites core's `(key, keysecondary, selectiveLogic)` as ONE SmartKey expression, for bucket 2 — where WA
  * answers "did a key match" and core's selective logic has to survive the move.
  *
- * One query PER PRIMARY KEY, not one for the whole entry. Collapsing the primaries into an alternation
+ * One expression PER PRIMARY KEY, not one for the whole entry. Collapsing the primaries into an alternation
  * would work for activation and lose the per-key granularity keywordScore's saturation wants: an entry
  * keyed on three names that all appear should not score as one term.
  *
@@ -285,12 +285,12 @@ const SCAN_CACHE_MAX = 8;
  *
  * Returns null when the entry cannot be expressed, and the caller must then fall back rather than
  * approximate: a key containing a double quote has no escape in this grammar, and a `/regex/` or `?`
- * key is a different matcher that cannot be a term inside a query.
+ * key is a different matcher that cannot be a term inside an expression.
  *
  * @param {string} primary One of the entry's primary keys
  * @param {string[]} secondaries entry.keysecondary
  * @param {number} logic entry.selectiveLogic (WI_LOGIC)
- * @returns {string|null} A `?` query, or null if this entry needs the old path
+ * @returns {string|null} A `?` expression, or null if this entry needs the old path
  */
 export function synthesizeSecondary(primary, secondaries, logic = 0) {
     const usable = k => {
@@ -393,7 +393,7 @@ export function evaluate(node, text, acHits) {
     if (!node) return { matched: false, scoreBoost: 0 };
     switch (node.type) {
         // A TERM's contribution is weight x OCCURRENCES, not weight alone. Scoring on presence made a
-        // query blind to recurrence: "? (glasses | spectacles)" returned the same number whether the
+        // SmartKey blind to recurrence: "? (glasses | spectacles)" returned the same number whether the
         // concept appeared once or nine times, so it scored WORSE than the bare key `glasses` the moment
         // the word repeated — being thorough about spelling was penalised. The counts were already
         // computed and cached: the automaton's scan returns a per-term occurrence map, and this function

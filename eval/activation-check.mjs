@@ -1,8 +1,9 @@
 // Verifies the stage-2 activation verdicts (matcher.mjs activationAdds / activationPrunes) — the
-// union and prune halves of matcher-design.md bucket 1.5. Guards the candidacy rules the runtime
-// and the tools must share: which keys may carry an activation, which entries are never judged,
-// and that the verdict is keywordScore's over the entry's resolved-depth window.
-import { activationAdds, activationPrunes, makeWindowFor, scanSegments } from '../extension/matcher.mjs';
+// union and prune halves of matcher-design.md bucket 1.5, and the bucket-2 extensions (blind
+// emission, min-activation depth skew, the recursion rematch window). Guards the candidacy rules
+// the runtime and the tools must share: which keys may carry an activation, which entries are
+// never judged, and that the verdict is keywordScore's over the entry's resolved-depth window.
+import { activationAdds, activationPrunes, makeWindowFor, scanSegments, withExtraTexts } from '../extension/matcher.mjs';
 import { eq } from './metrics.mjs';
 
 const OPTS = { messageDepth: 4, fallbackDepth: 2, caseSensitiveDefault: false, wholeWordsDefault: false };
@@ -42,6 +43,12 @@ const addedUids = (entries, text, o = {}) =>
         '@@dont_activate is core\'s exclusion; the union must not override it');
     eq(addedUids([{ uid: 11, key: ['cosmonaut'], delayUntilRecursion: 1, content: 'x' }], 'cosmonaut'), '',
         'delayUntilRecursion entries never activate on the initial pass — the only pass the union feeds');
+    eq(addedUids([{ uid: 12, key: ['cosmonaut'], delayUntilRecursion: 1, content: 'x' }], 'cosmonaut', { blind: true }), '12',
+        'blind (bucket 2): delayed entries ARE emitted — core\'s gate order and the persistent external map admit them at their level');
+    eq(addedUids([{ uid: 13, key: ['cosmonaut'], content: '@@dont_activate\nx' }], 'cosmonaut', { blind: true }), '',
+        'blind lifts only the delay skip — @@dont_activate is still never overridden');
+    eq(addedUids([{ uid: 14, key: ['cosmonaut'], decorators: ['@@dont_activate'], content: 'x' }], 'cosmonaut'), '',
+        'parsed entries (getSortedEntries) carry decorators in the array with content stripped — the array is authoritative');
     console.log('ok   activationAdds: candidacy — SmartKeys admitted, error keys and excluded entries not');
 }
 
@@ -61,6 +68,12 @@ const addedUids = (entries, text, o = {}) =>
     seen.length = 0;
     activationAdds([{ uid: 4, key: ['cosmonaut'], scanDepth: 0, content: 'x' }], recorder, { ...OPTS });
     eq(seen.join(','), '0', 'scanDepth 0 is authored (core: match nothing from chat), not unset');
+    seen.length = 0;
+    activationAdds([
+        { uid: 5, key: ['cosmonaut'], content: 'x' },
+        { uid: 6, key: ['cosmonaut'], scanDepth: 7, content: 'x' },
+    ], recorder, { ...OPTS, depthSkew: 2 });
+    eq(seen.join(','), '6,7', 'depthSkew (min-activations) widens the default window only — authored scanDepth never skews');
     console.log('ok   activationAdds: depth resolves as stage 3 rules it, 0 included');
 }
 
@@ -102,6 +115,26 @@ const addedUids = (entries, text, o = {}) =>
     console.log('ok   activationAdds: verdict is keywordScore\'s — segmentation and secondary gating included');
 }
 
+// Bucket 2's recursion rematch window (withExtraTexts): chat segments plus each pass's new entry
+// content, re-segmented — so recursion text carries activations, and whether a conjunction may
+// span the chat/recursion seam follows the match window exactly as it follows the message seam.
+{
+    const chat = [{ name: 'A', mes: 'the cosmonaut waited' }];
+    const compose = (texts, matchWindow) =>
+        withExtraTexts(makeWindowFor(chat, { matchWindow }), texts, matchWindow);
+
+    eq(activationAdds([{ uid: 1, key: ['moonbase'], content: 'x' }],
+        compose(['the moonbase hummed'], 'message'), OPTS).map(e => e.uid).join(','), '1',
+    'recursion text carries an activation');
+
+    const conj = { uid: 2, key: ['? cosmonaut moonbase'], content: 'x' };
+    eq(activationAdds([conj], compose(['the moonbase hummed'], 'message'), OPTS).length, 0,
+        'a conjunction may not span the chat/recursion seam under a segmented window');
+    eq(activationAdds([conj], compose(['the moonbase hummed'], 'scan'), OPTS).map(e => e.uid).join(','), '2',
+        'at scan the buffer is one segment — core\'s own cross-pass semantics');
+    console.log('ok   withExtraTexts: recursion content matchable, seam scoped by the match window');
+}
+
 // Prune: reject-verdicts over the shared window, minus ownership and structural exemptions.
 {
     const item = (uid, entry) => ({ key: `book.${uid}`, entry: { uid, content: 'x', ...entry } });
@@ -118,6 +151,8 @@ const addedUids = (entries, text, o = {}) =>
         'constant entries are structurally exempt');
     eq(prunes([item(1, { key: ['cosmonaut'], content: '@@activate\nx' })], [], 'nothing relevant'), '',
         '@@activate entries were admitted without a key match — not WA\'s to revoke');
+    eq(prunes([item(1, { key: ['cosmonaut'], decorators: ['@@activate'], content: 'x' })], [], 'nothing relevant'), '',
+        '...and the runtime shape (decorators array, stripped content) is exempt too — this was a live prune bug');
     eq(prunes([item(1, { key: [], waKeys: ['cosmonaut'] })], [], 'nothing relevant'), '',
         'blanked suppressed-vectorized entries are keys-ineligible — never judged by waKeys');
     eq(prunes([item(1, { key: ['? !apollo'] })], [], 'quiet evening'), '',

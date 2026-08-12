@@ -629,9 +629,9 @@ export async function lorebookStudio(preferredBook = null) {
      * WARNING lets it through and says why. Both come from validateSmartKey, so what the Studio blocks
      * and what the audit flags cannot drift apart — one definition, two surfaces.
      *
-     * Plain and regex keys get no opinion, so this is inert for everything but `?` queries.
+     * Plain and regex keys get no opinion, so this is inert for everything but `?` SmartKeys.
      *
-     * Refusing rather than warning on the error tier is the point: these are queries that cannot do
+     * Refusing rather than warning on the error tier is the point: these are SmartKeys that cannot do
      * what their author meant under any text, and the alternative — saving it and flagging it later —
      * is how a key ends up silently never firing. The author is right here, right now, and can fix it.
      *
@@ -2084,7 +2084,7 @@ export async function lorebookStudio(preferredBook = null) {
      * Returns a summary for the caller to phrase; it does not toast or repaint.
      */
     const scanChats = async (picked, label) => {
-        // LITERALS ONLY. The scan is one Aho-Corasick pass over folded literals, so a `?` query or a
+        // LITERALS ONLY. The scan is one Aho-Corasick pass over folded literals, so a `?` SmartKey or a
         // /regex/ key goes in as the characters it is written with and can never match — it would come
         // back 0 and be reported as absent from a chat nobody actually asked about it. Omitted from the
         // map instead, which chatShare reads as "not checked": no suppression, and the reason text keeps
