@@ -292,7 +292,7 @@ export function validateSmartKey(raw) {
             const hatch = bare.includes('"') ? '' : ` If you meant the literal string, use ? "${bare}".`;
             out.push({
                 severity: 'warn', code: 'regex-core-refuses',
-                message: `WA runs “${bare}” as a pattern. SillyTavern's own matcher refuses any pattern with an unescaped “/” inside it and looks for the whole delimited string as literal text instead, so without WA this key does nothing.${hatch}`,
+                message: `WA runs “${bare}” as a pattern. SillyTavern's own matcher refuses any pattern with an unescaped “/” inside it, so without WA the key matches only where that exact delimited string appears in the text.${hatch}`,
             });
         }
         return out;   // not a SmartKey; nothing further to say
@@ -381,7 +381,7 @@ export function validateSmartKey(raw) {
             const hatch = val.includes('"') ? '' : ` If you meant the literal string, quote the term: "${val}".`;
             out.push({
                 severity: 'warn', code: 'regex-core-refuses',
-                message: `WA runs “${val}” as a pattern. SillyTavern's own matcher refuses any pattern with an unescaped “/” inside it and looks for the whole delimited string as literal text instead, so without WA this key does nothing.${hatch}`,
+                message: `WA runs “${val}” as a pattern. SillyTavern's own matcher refuses any pattern with an unescaped “/” inside it, so without WA the key matches only where that exact delimited string appears in the text.${hatch}`,
             });
         }
     }

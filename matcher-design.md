@@ -480,11 +480,12 @@ delimited string as literal text. `REGEX_KEY_RE` does not refuse it, so `/and/or
 implementation detail rather than a meaning, which is the ground every divergence in this document
 stands on.
 
-**Core's reading is dead in practice, and that decides the message.** It fires only where the whole
-DELIMITED string occurs — `/(home/user|~/user)/file/`, slashes and all — which prose does not contain;
-**measured**, WA counts 2 against text carrying both path forms where core's literal counts 0. An
-earlier draft called the two readings symmetric and sized the gap by how common the pattern was. They
-are not symmetric: WA's fires and core's does not.
+**The two readings are not symmetric, and that decides the message.** Core's fires only where the
+whole DELIMITED string occurs — `/(home/user|~/user)/file/`, slashes and all — where WA's fires
+wherever the pattern does. **Measured**, one text carrying both path forms: WA 2, core 0. Say it as
+the mechanism, not as a verdict — core's reading CAN hit, and "does nothing" is a claim about all
+prose that no measurement here supports. An earlier draft went the other way and called the two
+readings equally live, sizing the gap by how common the pattern was; that is the same error inverted.
 
 So there are four things an author can have meant, and only one wants anything done. Written for stock
 ST as a pattern: core was silently dead and WA repairs it. Meant to evaluate under WA: it already
