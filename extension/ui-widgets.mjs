@@ -138,6 +138,42 @@ export function wiTooltip({ item, block }) {
     return lines.join('\n');
 }
 
+/**
+ * The fold shown under a grading row: what the entry is keyed on, then its text.
+ *
+ * KEYS FIRST, because the judgement being made is whether this entry belonged in this scene, and its keys
+ * are half the reason it is there — a grader reading only the prose has to infer the trigger. Reads
+ * `waKeys` when `key` is empty: bucket 2 blanks a vectorized entry's keys into the stash, so the live
+ * object a grader looks at has none, and reporting "no keys" for an entry that has several is worse than
+ * reporting nothing.
+ *
+ * Returns HTML rather than nodes because both grading tables are built as strings; the caller owns the row
+ * and the toggle.
+ *
+ * The popout re-opens the same showEntryText modal the Studio and the suggester use — entries run to
+ * thousands of characters and the inline pane caps at 22em, so long content needs somewhere to go. Wired
+ * by the caller off `data-i`, like every other per-row control in these tables.
+ *
+ * @param {object} entry World Info entry
+ * @param {number} idx Capture index, for the caller's popout handler
+ * @returns {string} Inner HTML for the fold cell
+ */
+export function entryFoldHtml(entry, idx) {
+    const live = list => (list ?? []).filter(k => String(k).trim());
+    const keys = live(entry?.key?.length ? entry.key : entry?.waKeys);
+    const sec = live(entry?.keysecondary?.length ? entry.keysecondary : entry?.waSecondary);
+    const chip = k => `<code style="background:var(--black30a,rgba(0,0,0,0.25));padding:1px 5px;border-radius:3px;margin:0 3px 3px 0;display:inline-block;font-size:0.85em;">${escapeHtml(k)}</code>`;
+    const line = (label, list) => (list.length
+        ? `<div style="margin-bottom:0.35em;"><small style="opacity:0.55;">${label}</small><br>${list.map(chip).join('')}</div>`
+        : '');
+    const pop = `<i class="wa-fold-pop fa-solid fa-expand" data-i="${idx}" title="Open in a larger window" style="cursor:pointer;opacity:0.6;float:right;padding:2px 4px;"></i>`;
+    return pop
+        + line('keys', keys)
+        + line('secondary', sec)
+        + (keys.length || sec.length ? '' : '<div style="opacity:0.5;margin-bottom:0.35em;"><small>no keys</small></div>')
+        + `<div style="white-space:pre-wrap;max-height:22em;overflow:auto;opacity:0.9;border-left:2px solid var(--SmartThemeBorderColor);padding-left:0.6em;">${escapeHtml(String(entry?.content ?? '') || '(empty)')}</div>`;
+}
+
 // Same "view entry text" popup the keyword suggester opens.
 export function showEntryText(entry) {
     const body = document.createElement('div');

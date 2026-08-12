@@ -47,7 +47,7 @@ import { oai_settings } from '../../../openai.js';
 import { Popup, POPUP_TYPE, POPUP_RESULT } from '../../../popup.js';
 
 import { runState, defaultSettings, settings, ensureSettings } from './extension/state.mjs';
-import { ensureStudioStyle, makeSortControl, makeTierEditor, showEntryText, wiGlyph, wiTooltip } from './extension/ui-widgets.mjs';
+import { ensureStudioStyle, entryFoldHtml, makeSortControl, makeTierEditor, showEntryText, wiGlyph, wiTooltip } from './extension/ui-widgets.mjs';
 import { PRESENTATION_ALIAS, SORT_FNS, gradeOrder, normPresentation, presentationBaseLabel, presentationLabel, reconcileTiers, tierRank, wiTitleOf } from './extension/sort.mjs';
 import { lorebookStudio } from './extension/studio.mjs';
 import { buildSample, bundleSamples, captureParams, GRADE_ANCHORS, mergeGrades, normalizeSample, rowKey, sampleFile, searchedBook, splitGraded, trimBook, unionArms } from './extension/grading.mjs';
@@ -2262,6 +2262,33 @@ function defaultSampleName() {
 
 
 /**
+ * Wires a grading table's fold chevrons and their popouts.
+ *
+ * Shared because the two graders must behave identically here — they show the same rows, and a fold that
+ * opened in one and not the other would be a difference in what a grader can see rather than in what the
+ * table is for. Called on every /wa-super-grade repaint, which is why it attaches to freshly-queried nodes
+ * rather than holding references.
+ *
+ * @param {HTMLElement} root Container holding the rows
+ * @param {(i: number) => object} entryAt Resolves a row's capture index to its entry
+ */
+function wireFolds(root, entryAt) {
+    root.querySelectorAll('.wa-fold').forEach(chevron => chevron.addEventListener('click', event => {
+        event.preventDefault();
+        const fold = root.querySelector(`.wa-foldrow[data-i="${chevron.dataset.i}"]`);
+        if (!fold) return;
+        const open = fold.style.display === 'none';
+        fold.style.display = open ? '' : 'none';
+        chevron.classList.toggle('wa-open', open);
+    }));
+    root.querySelectorAll('.wa-fold-pop').forEach(pop => pop.addEventListener('click', event => {
+        event.preventDefault();
+        const entry = entryAt(Number(pop.dataset.i));
+        if (entry) showEntryText(entry);
+    }));
+}
+
+/**
  * "The rest are zeros" — fills every blank grade field with 0.
  *
  * A grader works a ranked list top-down and past some rank everything is 0 with the occasional 1. Typing
@@ -2399,16 +2426,16 @@ async function gradeScene(named) {
                 // same way; a second mapping drifts the moment either side gains a class.
                 + `<td>${row.cut ? `<i class="fa-solid fa-scissors" style="opacity:0.55;margin-right:0.35em;" title="cut by the budget${row.cutBy ? ` — ${esc(row.cutBy)} cap` : ''}${row.tokens ? `; ${row.tokens} tokens` : ''}"></i>` : ''}${entries[i] ? wiGlyph(entries[i]) + ' ' : ''}${esc(row.title)}<br><small style="opacity:0.5;">${esc(row.world)} · uid ${num(row.uid)}</small>${(row.why ?? []).map(w => `<br><small style="opacity:0.65;">🔑 ${esc(w.key)}${w.count > 1 ? ` ×${w.count}` : ''}${w.excerpt ? ` — <span style="opacity:0.8;">${esc(w.excerpt)}</span>` : ''}</small>`).join('')}</td>`
                 + `<td>${num(row.score)}</td><td>${num(row.cosine)}</td><td>${num(row.text)}</td><td>${num(row.keys)}</td>`
-                + `<td><button class="menu_button wa-viewtext" data-i="${i}" style="padding:2px 6px;font-size:0.85em;">text</button></td></tr>`;
+                // Chevron instead of a modal button: a grader compares a row against its neighbours, and a
+                // popup that hides the table breaks the comparison. The fold carries the keys too, since
+                // whether the entry belonged is half a question about its trigger.
+                + `<td><i class="fa-solid fa-chevron-right wa-chevron wa-fold" data-i="${i}" title="Show keys and entry text"></i></td></tr>`
+                + `<tr class="wa-foldrow" data-i="${i}" style="display:none;"><td colspan="7" style="padding:0.5em 0.75em 0.9em;">${entryFoldHtml(entries[i], i)}</td></tr>`;
         }).join('')
         + '</tbody></table>';
 
     // Reuses the Studio's entry viewer rather than a second renderer.
-    wrap.querySelectorAll('.wa-viewtext').forEach(button => button.addEventListener('click', event => {
-        event.preventDefault();
-        const entry = entries[Number(button.dataset.i)];
-        if (entry) showEntryText(entry);
-    }));
+    wireFolds(wrap, i => entries[i]);
 
     const popup = new Popup(wrap, POPUP_TYPE.CONFIRM, '', { customButtons: [{
         // No `result`, so it acts on the form and leaves the popup open — a pass ends with this and then
@@ -2728,15 +2755,15 @@ async function superGradePopup({ captures, union, entryOf, prior: prior0 = [], s
                     // A borrowed signal is marked with the arm it came from: absent-filled, never blended,
                     // so the reader can tell a measurement from a fill (see unionArms).
                     + `<td>${num(row.bestRank)}</td>${['cosine', 'text', 'keys'].map(s => `<td>${num(row[s])}${row.filled?.[s] ? `<br><small style="opacity:0.5;font-size:0.75em;" title="filled from the ${esc(row.filled[s])} arm — this arm could not measure it">${esc(row.filled[s])}</small>` : ''}</td>`).join('')}`
-                    + `<td><button class="menu_button wa-viewtext" data-i="${i}" style="padding:2px 6px;font-size:0.85em;">text</button></td></tr>`;
+                    // Chevron instead of a modal button: a grader compares a row against its neighbours, and a
+                    // popup that hides the table breaks the comparison. The fold carries the keys too, since
+                    // whether the entry belonged is half a question about its trigger.
+                    + `<td><i class="fa-solid fa-chevron-right wa-chevron wa-fold" data-i="${i}" title="Show keys and entry text"></i></td></tr>`
+                    + `<tr class="wa-foldrow" data-i="${i}" style="display:none;"><td colspan="8" style="padding:0.5em 0.75em 0.9em;">${entryFoldHtml(union.entries[i], i)}</td></tr>`;
             }).join('')
             + '</tbody></table>';
 
-        body.querySelectorAll('.wa-viewtext').forEach(button => button.addEventListener('click', event => {
-            event.preventDefault();
-            const entry = union.entries[Number(button.dataset.i)];
-            if (entry) showEntryText(entry);
-        }));
+        wireFolds(body, i => union.entries[i]);
         // A user edit marks the input dirty; only dirty values survive a repaint (see `typed` above).
         body.querySelectorAll('.wa-grade').forEach(input => input.addEventListener('input', () => { input.dataset.dirty = '1'; }));
     };
