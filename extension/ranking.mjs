@@ -369,6 +369,13 @@ export function fuseRanks(items, { rrfK: k, retrievalMode: mode, weightByOrder, 
     // entries across the books on disk are memory — but only 69% the other, and it inverts on books whose
     // memory entries were never vectorized (Time Whore: 111 of 133 keyword-only entries are memories). So
     // this favours the signal, and a book that keys its memories gets the tilt on those too.
+    //
+    // THAT INVERTING POPULATION IS AN ARTIFACT, not a case to design for: an STMB entry that is not
+    // vectorized is a book in a configuration its author has since abandoned — keys were the workaround
+    // for weak vector recall, and the defect is the missing link, not the keys. 289 of 1,393 STMB entries
+    // on disk are in that state and 113 of them are one book. Re-vectorizing it removes the tilt from
+    // those entries, which is correct. The tilt's own reasoning does not depend on them; only this
+    // paragraph's example did.
     const KEYWORD_ONLY_TILT = 1.25;
     const keywordOnly = it => keyOK(it) && !vectorable(it);
 

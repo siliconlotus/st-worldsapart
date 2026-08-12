@@ -14,25 +14,35 @@
  *   'dropoff' — a FIXED fraction of the top score (dropoffThreshold × head[0]). Comparable
  *               across queries because RRF bounds the score band, and window-independent.
  *
- * MEASURED, 3 graded scenes (eval/graded-scene-grid.mjs, F1 over grade>=3 as a % of the best possible
- * prefix cut of the same ranking — "%oracle"). The cliff modes were given each sample's own
- * maxVectorEntries as the cap; capping a cliff search below the candidate list makes it structurally
- * unable to find an inflection further down, and an earlier run that hardcoded 10 wrongly concluded the
- * elbow was inert:
+ * MEASURED, 73 graded scenes (%oracle: each mode's F as a share of the best prefix cut of the same
+ * ranking, oracle re-chosen per beta). The 3-scene table this replaces did NOT reproduce — it recorded
+ * elbow at 95% mean / 92% worst against count max=10's 83%/72%, and nothing near that survives here.
  *
- *   mode                sommers   time-whore   isekai   mean   worst
- *   count max=10           72%        96%        80%     83%    72%   (was the default)
- *   count max=20           87%        84%        60%     77%    60%
- *   elbow 1.2 / 1.5        96%        96%        92%     95%    92%   <- ships
- *   elbow 2.0              96%        96%        67%     86%    67%
- *   elbow 2.5              62%        96%        67%     75%    62%
- *   dropoff 0.06           62%        96%        67%     75%    62%
+ *   mode              kept |  F1  F1.5   F2   F4  |  F1  F1.5   F2   F4
+ *                          |  -- one >=3 bar --   |  - recall>=3, prec>=2 -
+ *   count max=3        3.0 | 60%  57%  54%  46%   | 59%  54%  50%  45%
+ *   count max=5        5.0 | 60%  62%  61%  57%   | 63%  61%  58%  55%
+ *   count max=10      10.0 | 60%  67%  71%  76%   | 70%  74%  75%  77%
+ *   count max=20      20.0 | 49%  59%  68%  84%   | 66%  75%  81%  92%
+ *   elbow 1.2         14.4 | 54%  63%  70%  81%   | 69%  75%  78%  85%
+ *   elbow 1.5 (ships) 12.8 | 55%  64%  69%  77%   | 68%  73%  76%  80%
+ *   elbow 2.5          8.9 | 60%  64%  67%  70%   | 67%  69%  69%  71%
+ *   dropoff 0.06      12.6 | 58%  65%  69%  76%   | 68%  72%  75%  79%
  *
- * elbow at 1.2-1.5 is the only setting that never drops below 92%, and it adapts as intended — it kept
- * 14 / 10 / 8 where the ideal cuts were 16 / 6 / 7. It ships on the strength of that, having survived every
- * population, metric and pooling change the harness was rebuilt through — the one tuning result here that
- * did. Sensitivity sits on a plateau that ENDS at 2.0 (isekai falls to 67% there), so 1.5 is well placed but
- * has less headroom above it than below.
+ * READ THE RIGHT-HAND BLOCK. Under a single >=3 bar the shallow cuts win F1 and the ordering inverts by
+ * F4, which reads as beta trading recall against precision. Under the asymmetric bar (matcher-design.md,
+ * queued) depth wins at every beta and the inversion is gone — a single bar was confounding the sweep
+ * with its own denominator, since it charges every delivered grade-2 row as a false positive.
+ *
+ * DEPTH is what the metric rewards; mode is close to a wash at equal depth. Elbow 1.2 sits at or near
+ * the top of every asymmetric column, but count max=20 beats it at F2 and F4, and 213 arm-cells kept
+ * unjudged rows — which penalises exactly the deep arms, so those are lower bounds. No cutoff default is
+ * defensible from this until the pool gap closes. What IS settled: the elbow's advantage in the old
+ * table was largely the precision bar, and the shipped maxVectorEntries of 10 is below anything measured
+ * here — every graded capture ran at 20.
+ *
+ * Where this is going: matcher-design.md rules that stage 1 should ADMIT on a bound and stage 4 should
+ * arbitrate. Under that, most of this comparison is a question about the wrong stage.
  *
  * ELBOW HAS A MINIMUM RETRIEVAL DEPTH, and it is not obvious from this file. elbowSensitivity is a multiple
  * of the MEAN gap over the retrieved list, so a short list yields a coarse mean and the cliff fires early.

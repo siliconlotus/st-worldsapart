@@ -471,10 +471,18 @@ export function buildKeyPrompt(entryText, avoid) {
         // SELF-SELECTING COUNT, not a range. Was "5 to 10". A fixed count is the wrong instrument
         // because entries differ in how much key material they hold: any floor is too high for a
         // sparse entry, where the model pads rather than stops, and too low for a rich one.
-        // Chosen on WORST-CASE F2 over five wordings x six model configurations (three local and
+        // Chosen on WORST-CASE F over five wordings x six model configurations (three local and
         // seeded, three hosted; eval/count-sweep.mjs and eval/nano-sweep.mjs), not because it won
         // any single cell: 5 wins of 6, best mean rank, best floor. The sixth is a tie inside a
         // measured noise floor. The old wording ranked fourth of five and never won a cell.
+        //
+        // RE-SCORED ACROSS THE BETA SPREAD from the same cached responses (596, hosted arms): it wins
+        // the mean at F1, F1.5, F2 and F4, and the worst cell at every beta except F1, where the
+        // lowest-yield wording edges it by 0.006 inside that same noise floor. So the choice does not
+        // depend on where recall is weighted against precision — which the old "F2" wording implied it
+        // might. Caveat that does not move the verdict but should travel with the number: this scores
+        // against the books' own keys, which eval-data/README.md is explicit is not a denominator that
+        // establishes quality.
         '- Output as many keywords as you are confident about, each 1 to 4 words, lowercase unless a proper noun or acronym.',
         '- Prefer concrete nouns and named entities. Include the obvious paraphrase a reader would reach for even if those exact words are not in the text.',
         '- NEVER output a full sentence, clause, or verb phrase (bad: "kyle confesses", "makes him feel").',

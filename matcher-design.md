@@ -91,6 +91,13 @@ measures on the reference tier is the KEYS, in three divergence classes with thr
 key miss (suggester), window miss (depth/persistence, bucket 1.5), over-fire (prune) —
 `eval/divergence-audit.mjs` is that tool, and its header carries the fuller statement.
 
+**Set metrics on a reference-heavy book are JOINT, and cannot tune routing alone.** A reference entry
+reaches the prompt because its key fired, so a key miss and a routing miss both land in the same recall
+number with nothing distinguishing them. Split the misses by divergence class (`eval/divergence-audit.mjs`)
+before reading an F or recall figure on such a book as a statement about the ranker. The extreme case is
+a pure-reference vectorized book, where the tier rule removes 100% of the rows and the score is entirely
+about keys.
+
 **This rule is superseded by the two-score split in the queue below** and survives only until it lands.
 It removes a population that stage 4 genuinely arbitrates — on Sommers the reference class is ~60% of
 the delivered set — so it makes the ranker's largest contention invisible rather than unmeasured.
@@ -157,6 +164,14 @@ the DYNAMIC block. Constants and armed stickies are hoisted to the front of `ran
 prefix cut, which means they consume budget without competing for it — the graded population is
 exactly what a cut can reject. Everything else is in, cards included: this score exists to measure the
 heterogeneous contention the tier rule was removing.
+
+**Reference entries are GRADED, on the same 0-4 scale as anything else — not reduced to a boolean.**
+A two-valued "does it belong" was considered and is wrong: it throws away the only evidence there is
+about contention, which is precisely what the layout score reads. The same entry graded 2 in one scene
+and 3 in another is not noise to be flattened; at stage 4 that difference is which of two entries keeps
+a slot. Where the grades are USED is what differs by score: the vector score never sees them, because a
+reference entry has no chunk in the collection and is absent from that ranking by construction rather
+than by a removal rule; the layout score consumes them fully.
 
 **Relevance is asymmetric, and the two halves take different bars.** Recall at grade >= 3 — did the
 must-deliver material arrive. Precision at grade >= 2 — a 2 is "it won't hurt and it might help", so

@@ -572,18 +572,17 @@ non-constant in both versions).
 **The Sommers 0% is by design, and the designed test has now run.** Every key above 15.6% of messages
 (whole-word, frozen chat: Jeffrey 39%, Liam 29%, Brad 25%, Arthur 22%, Shane 21%) was deliberately
 retained through curation as a hold-out, so keep-vs-remove could be measured in ranking rather than
-called by intuition. Measured (`paired-arms.mjs` `dropKeys=hiband`/`addKeys=cast`, 15 graded scenes,
-reference tier excluded per the two-tier rule in `matcher-design.md`): removing the band never helps
-and hurts on 6 of 15 scenes, mean Δ −0.039 nDCG@10, sign test p=0.031 — and since reference sheets
-sit outside the assessed ranking, the entire effect is memory-tier re-ranking. The reverse test
-fails symmetrically: uniform cast placement (each name added wherever an entry's content mentions it
-whole-word — 700 (entry,name) fills, dominated by pack principals, Jeffrey 178 against 2 keyed) is
-mixed 6/8/1 with the largest per-scene swings this harness has produced (−0.33 to +0.16), and fill
-plus band-drop lands flat (4/7/4). One-sentence finding: a main-cast name key earns its keep through
-SELECTIVE placement — the key marks "this entry is about them", and wholesale removal and wholesale
-addition destroy that signal from opposite directions. Caveat: the graded samples embed the
-pre-curation book, so the baseline's "selective" is the generator's placement, not the finished
-curation's; a re-capture against the curated book would sharpen the claim.
+called by intuition. **Measured flat** (`paired-arms.mjs`, 15 graded scenes, paired, reference tier
+excluded): removing the band 2/5/8, mean Δ −0.0004 nDCG@10; uniform cast placement 8/7/0, +0.019;
+both together 7/6/2, −0.004. Nothing is distinguishable from its own baseline, which per the arm's
+own reading rule is "not better, not worse" and licenses nothing beyond itself. The band stays
+retained because nothing argues for moving it, not because keeping it was shown to win.
+
+Two things this result cannot do. The graded samples embed the pre-curation book, so what the baseline
+calls "selective" placement is the generator's, not the finished curation's. And nDCG here excludes
+the reference tier while the band's keys sit on entries that mostly ARE reference, so the contrast
+runs on memory-tier re-ranking alone — the two-score work in `matcher-design.md` is what would let it
+be asked of the ranking that actually arbitrates.
 
 **Three signals, not one, and none supersedes another.** `ENGLISH_COMMON` says the word denotes
 nothing in particular and needs no chat, which matters because 19 of the 40 books on disk have none.
