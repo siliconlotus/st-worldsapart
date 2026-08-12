@@ -441,6 +441,23 @@ scoping comes from the call site, `keywordScore`'s per-segment loop, not from wh
 are what fires: hyphen ↔ space (compounds are written both ways, and prose picks per term, not per
 book), and wildcards if they ever earn it. Quoting suppresses generation.
 
+**Orthographic variants for REGEX keys belong to that same pass, and not to the fold.** A regex is the
+one key kind that cannot be folded — a pattern is code, so rewriting `…` to `...` turns a literal into
+three wildcards and `[a–z]` into a range. Folding only the haystack instead would kill the distinction
+for every key at once, which the first principle forbids. So the regex case is not an exception to the
+fold; it is the case that shows why the fold works everywhere else: literals fold BOTH sides and meet
+in the same space, and a regex has no such second side.
+
+Expansion has no equivalent problem, and the difference is arity. A character class matches exactly one
+character, so no rewriting can make `[—]` match `--`; an alternation has no such limit, and
+`(?:—|--)` is ordinary. The generated forms therefore cover what folding cannot: `'` widens to the
+apostrophe family, `-` to include the en-dash, `--` and `—` to each other, `...` and `…` likewise.
+Offsets stay in source space because the haystack is never touched, which is the property the excerpt
+path kept losing while this was being worked out.
+
+Structure-aware, since expansion inside a character class must lift it to an alternation, and escapes
+must be left alone — `regexClose`'s ECMA-262 scan already tracks both. **Unimplemented.**
+
 **`C17` dissolves here** rather than being fixed. The matcher already diverges from core on
 orthography, NFC and Unicode word boundaries; while core activates, that means the audit reports on
 rules that are not what fires. Once WA activates, WA's rules *are* what fires. There is no third form:
