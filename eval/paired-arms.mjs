@@ -180,6 +180,10 @@ const fx = n => (n >= 0 ? '+' : '') + n.toFixed(4);
         const base = await scoreScene({ sample: S, k: K, scene, qv });
         scenes.push({ path, name: S.name ?? path, S, scene, qv, P, base });
         console.log(`scene "${S.name ?? path}": baseline nDCG@${K} ${base.n.toFixed(4)}, judged ${base.judged}/${base.of}${base.judged < base.of ? ' !!' : ''}`);
+        // `of` is the rankable top-k, so 0 means the reference-tier removal took EVERYTHING — a
+        // reference-only book. Every arm then scores 0 and every delta is a tie, so the scene inflates the
+        // scene count without contributing evidence. The judged<of check cannot see it: 0 < 0 is false.
+        if (!base.of) console.log('  !! nothing rankable: every candidate is reference tier, so this scene can only produce ties. It counts in n and contributes nothing.');
     }
     if (scenes.length < 2) console.log('\n!! ONE SCENE: deltas are shown but no sign test is possible. Pairing needs scenes to pair.');
 

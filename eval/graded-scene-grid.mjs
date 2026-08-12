@@ -311,7 +311,7 @@ const fmt = n => (n == null ? '·' : (+n).toFixed(3));
             const v = await embed(q);
             const rows = scoreAll(DEF.k1, DEF.b, tw, v, q).map(r => ({ ...r, keywordScore: keywordScore(byUid.get(Number(r.uid)) ?? { key: [] }, st, DEF.k1) }));
             const fused = fuse(rows, DEF.lexW);
-            const g = fused.map(r => gradeOf(r));
+            const g = fused.map(r => gradeOf(r) ?? 0);   // unjudged occupies its rank and contributes nothing (makeGradeOf returns null)
             const hits = fused.map((r, i) => [gradeOf(r), i + 1]).filter(([gr]) => gr >= 3).map(([, i]) => i);
             const mean = hits.length ? hits.reduce((a, b) => a + b, 0) / hits.length : NaN;
             // Cutoff, on the retrieval ranking as production cuts it.
@@ -369,7 +369,7 @@ const fmt = n => (n == null ? '·' : (+n).toFixed(3));
             const top = fuse(all, lexW).slice(0, 10);
             const unjudged = top.filter(r => !POOL.has(Number(r.uid)));
             const j10 = top.length - unjudged.length;
-            const g = fuse(rows, lexW).map(r => gradeOf(r));
+            const g = fuse(rows, lexW).map(r => gradeOf(r) ?? 0);   // unjudged occupies its rank and contributes nothing (makeGradeOf returns null)
             const n5 = ndcg(g, 5), n10 = ndcg(g, 10);
             if (!best || n10 > best.n10) best = { k1, b, lexW, n5, n10, j10, of: top.length, unjudged: unjudged.map(r => `${r.title} (#${top.indexOf(r) + 1})`) };
             if (!worst || j10 - top.length < worst.j10 - worst.of) worst = { k1, b, lexW, j10, of: top.length };
@@ -463,7 +463,7 @@ const fmt = n => (n == null ? '·' : (+n).toFixed(3));
         const j10 = top.filter(r => POOL.has(Number(r.uid))).length;
         const rows = fuse(activated(all), DEF.lexW);
         const hits = rows.map((r, i) => [gradeOf(r), i + 1]).filter(([g]) => g >= 3).map(([, i]) => i);
-        const g = rows.map(r => gradeOf(r));
+        const g = rows.map(r => gradeOf(r) ?? 0);   // unjudged occupies its rank and contributes nothing (makeGradeOf returns null)
         return { found: hits.length, mean: hits.length ? hits.reduce((a, b) => a + b, 0) / hits.length : NaN, top10: hits.filter(i => i <= 10).length, n10: ndcg(g, 10), j10, of: top.length };
     };
     const filterArms = [

@@ -151,8 +151,16 @@ export function loadScene(S, { indexFile, params: P }) {
     const primary = S.primaryBook;
     const entries = Object.values(S.books[primary]);
     const byUid = new Map(entries.map(e => [Number(e.uid), e]));
-    const items = JSON.parse(readFileSync(indexFile, 'utf8')).items;
-    const loaded = { items, mean: corpusMean(items), lexical: buildLexical(items) };
+    // A KEYWORD-ONLY BOOK HAS NO COLLECTION, and that is a configuration rather than a failure: indexing
+    // gates on `vectorized` (reindex.mjs buildItems), so a book with no vectorized entry yields no items
+    // and ensureIndex refuses to build one. Foxbridge is exactly that — 38 hand-keyed reference entries,
+    // 0 vectorized — and until this branch existed its two clean captures could not be scored at all,
+    // while the 8 that could embedded a reverted, partly-vectorized copy of the same book. Retrieval then
+    // contributes nothing, every entry arrives by the keyword route, and the scene is deterministic: no
+    // index, no embedding call, no ollama. corpusMean is the only thing that cannot take an empty list,
+    // and it is guarded here rather than in plugin/ so this needs no redeploy.
+    const items = existsSync(indexFile) ? JSON.parse(readFileSync(indexFile, 'utf8')).items : [];
+    const loaded = { items, mean: items.length ? corpusMean(items) : [], lexical: buildLexical(items) };
 
     // Out-of-scope graded titles: entries from a second attached book, which this harness cannot rank
     // because only one collection is loaded. Token-subset match, same rule as grade matching.
@@ -191,7 +199,17 @@ export function loadScene(S, { indexFile, params: P }) {
  * Grade lookup. By uid when every grade carries one (every /wa-grade sample does) — token-subset title
  * matching alone misattributes when one graded title's tokens are a subset of a sibling's ("Villa" also
  * matches "Villa Party", first-found wins). Titles remain the fallback for hand-written samples, and a bare
- * string argument always resolves by title. Out-of-scope titles drop; ungraded = 0.
+ * string argument always resolves by title.
+ *
+ * RETURNS null FOR "NOBODY JUDGED THIS", NOT 0. A judged 0 is a verdict — someone looked and said not
+ * relevant — while an absent grade is the pool not reaching that row, and the two want opposite
+ * treatment: the first is evidence, the second is a hole. Collapsing them to 0 hid both. It made the
+ * reference tier's grade distribution unreadable (its g0 bucket was mostly unjudged rows), and under
+ * "activation supplies delivery" it would silently score a correctly-fired, never-judged reference
+ * entry as a miss. Out-of-scope titles also return null: the harness has no usable verdict for them.
+ *
+ * Callers that need a number say so. For nDCG that is `?? 0`, which is the standard partial-label
+ * rule and is now written where it applies rather than assumed everywhere.
  */
 export function makeGradeOf(grades, isExcluded) {
     const list = (grades ?? [])
@@ -203,10 +221,10 @@ export function makeGradeOf(grades, isExcluded) {
     const byUid = list.length && list.every(g => Number.isFinite(Number(g.uid)))
         ? new Map(kept.map(g => [Number(g.uid), g.g]))
         : null;
-    const byTitle = title => { const mt = new Set(nrm(title)); const h = kept.find(x => x.tk.length && x.tk.every(t => mt.has(t))); return h ? h.g : 0; };
+    const byTitle = title => { const mt = new Set(nrm(title)); const h = kept.find(x => x.tk.length && x.tk.every(t => mt.has(t))); return h ? h.g : null; };
     return r => {
         const uid = Number(r?.uid ?? r?.key);
-        if (byUid && Number.isFinite(uid)) return byUid.get(uid) ?? 0;
+        if (byUid && Number.isFinite(uid)) return byUid.get(uid) ?? null;
         return byTitle(typeof r === 'string' ? r : String(r?.title ?? ''));
     };
 }
@@ -318,10 +336,11 @@ export const makeFuse = P => (rows, lexW) => {
  * Scores one scene end to end at one parameter set: nDCG on the pooled rows, plus judged coverage of the
  * unfiltered top-k.
  *
- * THE TWO RANKINGS ARE DELIBERATELY DIFFERENT. nDCG is measured on the pool (grades only exist there), while
- * coverage is measured on the UNFILTERED ranking — because the question coverage answers is "has a human
- * looked at the top-k this configuration would actually deploy", and restricting to the pool first would
- * answer it 100% by construction. A scene whose coverage is short is reporting a LOWER BOUND on nDCG.
+ * THE TWO RANKINGS ARE DELIBERATELY DIFFERENT. Both drop the reference tier first; after that, nDCG is
+ * measured on the pool (grades only exist there), while coverage is measured on the unpooled ranking —
+ * because the question coverage answers is "has a human looked at the top-k this configuration would
+ * actually deploy", and restricting to the pool first would answer it 100% by construction. A scene
+ * whose coverage is short is reporting a LOWER BOUND on nDCG.
  *
  * @param {object} args
  * @param {object} args.sample Parsed sample
@@ -344,7 +363,8 @@ export async function scoreScene({ sample: S, overrides = {}, k = 10, vectors, m
 
     const query = S.query;
     const tw = (P.entityFilter && P.queryMode !== 'summary') ? ranking.buildTermWeights(query, scene.gaz, P.boost) : null;
-    const qv = cachedQv ?? await embed(query, { ollama, model });
+    // No collection means no cosine to compute, so the embed call is skipped rather than made and ignored.
+    const qv = cachedQv ?? (scene.items.length ? await embed(query, { ollama, model }) : []);
     const all = scoreAll(P.K1, P.B, tw, qv, query, S.scanText);
 
     // REFERENCE-TIER EXCLUSION — the condensed-list convention from FULLBOOK-AUDIT-2026-08-10 (shared
@@ -362,7 +382,12 @@ export async function scoreScene({ sample: S, overrides = {}, k = 10, vectors, m
     const top = fuse(rankable, P.LEXW).slice(0, k);
     const unjudged = top.filter(r => !scene.POOL.has(Number(r.uid)));
     // Re-fuse the pooled subset AFTER reading the slice above: fuse mutates, and the subset shares references.
-    const g = fuse(all.filter(r => scene.POOL.has(Number(r.uid))), P.LEXW).map(r => gradeOf(r));
+    // FROM `rankable`, NOT `all` — the exclusion above is the whole point, and reading `all` here applied it
+    // to coverage alone. That is what it did until 2026-08-12: every nDCG this harness had ever printed still
+    // ranked the reference tier, and a reference-only book reported `judged 0/0` beside a healthy nDCG.
+    // `?? 0` is the standard partial-label rule: an unjudged row occupies its rank and contributes
+    // nothing. Explicit here because gradeOf now returns null for it — see makeGradeOf.
+    const g = fuse(rankable.filter(r => scene.POOL.has(Number(r.uid))), P.LEXW).map(r => gradeOf(r) ?? 0);
 
     return {
         n: ndcg(g, k),

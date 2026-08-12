@@ -67,14 +67,17 @@ eq(wiTitle({ comment: ' Villa ', uid: 1 }), 'Villa', 'title prefers the trimmed 
 eq(wiTitle({ comment: '', key: ['a', 'b'], uid: 1 }), 'a, b', 'title falls back to keys');
 eq(wiTitle({ comment: '', key: [], uid: 7 }), 'UID 7', 'title falls back to uid');
 
-// Grade matching is token-subset, and out-of-scope titles resolve to 0 rather than their grade.
+// Grade matching is token-subset, and out-of-scope titles resolve to null rather than their grade.
+// null, not 0, is the whole point: a judged 0 is a verdict and an absent grade is a hole in the pool,
+// and callers treat them differently (nDCG coerces with `?? 0`; a delivery rule must not).
 const gradeOf = makeGradeOf(
     [{ title: 'Villa Victory Party', grade: 5 }, { title: 'Intimacy & Mechanics', grade: 4 }],
     title => nrm(title).includes('mechanics'),
 );
 eq(gradeOf('176 - Villa Victory Party'), 5, 'a graded title matches by token subset');
-eq(gradeOf('Intimacy & Mechanics'), 0, 'an excluded title scores 0, not its grade');
-eq(gradeOf('Something Else'), 0, 'an ungraded title scores 0');
+eq(gradeOf('Intimacy & Mechanics'), null, 'an excluded title has no usable verdict, not its grade');
+eq(gradeOf('Something Else'), null, 'an ungraded title is null, distinct from a judged 0');
+eq(makeGradeOf([{ title: 'Villa', grade: 0 }], () => false)('Villa'), 0, 'a judged 0 stays 0 and is not confused with unjudged');
 
 // uid is authoritative when every grade carries one (every /wa-grade sample does) — the misattribution the
 // title heuristic allows is "Villa" also matching "Villa Party", first-found wins.
@@ -83,7 +86,7 @@ const byUid = makeGradeOf(
     () => false,
 );
 eq(byUid({ uid: 2, title: 'Villa Party' }), 2, 'uid match beats the token-subset title match');
-eq(byUid({ uid: 9, title: 'Villa Party Annex' }), 0, 'uid-complete grades: an unknown uid is ungraded, never title-guessed');
+eq(byUid({ uid: 9, title: 'Villa Party Annex' }), null, 'uid-complete grades: an unknown uid is ungraded, never title-guessed');
 eq(byUid({ key: 1, title: 'anything' }), 5, 'retrieval rows keyed by `key` resolve by uid too');
 // A mixed set (some grades lack uids) falls back to titles wholesale rather than half-and-half.
 eq(makeGradeOf([{ title: 'Villa', grade: 5, uid: 1 }, { title: 'Other', grade: 3 }], () => false)({ uid: 9, title: 'Other Thing' }), 3,
