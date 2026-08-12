@@ -1819,11 +1819,17 @@ async function rankActivated(args) {
             wiOrder: x.entry.waOriginalOrder,
             cosine: x.score !== undefined ? Number(x.score.toFixed(5)) : null,
             vRank: x.vectorRank ?? null,
-            // BM25 over chunk text — the signal doing the work for vectorized entries.
-            text: Number.isFinite(x.textScore) ? Number(x.textScore.toFixed(2)) : null,
+            // BM25 over chunk text. Gated on the same condition as cosine, because both come from the
+            // retrieval path: an entry with no chunks in the collection has no text score to report, and
+            // the scorer returning 0 for it is a default, not a measurement.
+            text: x.score !== undefined && Number.isFinite(x.textScore) ? Number(x.textScore.toFixed(2)) : null,
             tRank: x.textRank ?? null,
-            // BM25 over entry keys — only ever non-zero for non-vectorized entries.
-            keys: Number.isFinite(x.keywordScore) ? Number(x.keywordScore.toFixed(2)) : null,
+            // BM25 over entry keys, gated on ELIGIBILITY (set at the scan, ~line 1608) rather than on the
+            // value. keywordScore is 0 both when an eligible key missed and when suppressVectorKeys blanked
+            // the keys so nothing could be scored at all — and only the first is a measurement. Reading the
+            // value alone reported 32 confident zeros on a capture where those entries had no keys to
+            // score, which also silently defeats unionArms' absent-signal fill.
+            keys: x.keysEligible === false ? null : (Number.isFinite(x.keywordScore) ? Number(x.keywordScore.toFixed(2)) : null),
             kRank: x.keywordRank ?? null,
             tokens: tokens[i],
             cut: !kept.has(x),
