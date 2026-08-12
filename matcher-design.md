@@ -108,12 +108,84 @@ default `strict`), which `=` terms inherit through the same function; `_` left t
 
 ---
 
-## The queue is empty
+## The queue
 
-Nothing in this doc is decided-and-unimplemented. When it refills, order it by whether a user can see
-the difference — not by how tidy the fix is, and **not by how many instances the books on disk hold**.
-A permitted input occurs whether or not this author has written one; corpus counts size a known effect
-and never dismiss a case.
+Order it by whether a user can see the difference — not by how tidy the fix is, and **not by how many
+instances the books on disk hold**. A permitted input occurs whether or not this author has written
+one; corpus counts size a known effect and never dismiss a case.
+
+Currently one item, in three parts: **recursion scoring**. All of it ships on reasoning rather than
+evidence — `world_info_recursive` is off here and no book in the corpus exercises recursion — so it
+waits on a recursion-using book to test against. Written down now because the reasoning is the
+expensive part and it is already done.
+
+---
+
+## Recursion: WA activates on it and then refuses to score it
+
+**A recursed entry cannot currently compete.** Stage 3 builds its scan window from the chat plus
+injects plus opted-in match sources, and never the recursion buffer — so an entry whose key matched
+another entry's CONTENT is scored against text where that key does not appear. It scores `keys: 0`,
+and `vector`/`text` are absent unless retrieval returned it anyway, so it sorts to the bottom of the
+layout ranking and the budget drops it first. The budget binds on every graded scene measured, so this
+is not a hypothetical: recursion currently activates entries that WA then discards.
+
+The one case where a recursed entry does score is the case where its key is also in the chat — where
+it would have activated directly and recursion added nothing.
+
+**This is migration residue, not a decision.** Before bucket 2, core owned recursion activation and WA
+never saw the buffer; scoring on chat alone was the only thing available. Bucket 2 removed that
+constraint and the scoring window was never revisited. Bucket 2's claim that recursion is "solved"
+is true of ACTIVATION only.
+
+**Ruled: trigger provenance is not WA's business.** Where an entry was triggered from does not change
+whether it may compete. `delayUntilRecursion` is the author's own and only declaration that an entry
+is child-only, so unset — or level 1, which is the first hop — stands on its own. **Measured**, 44
+books / 2,699 enabled entries (this author's 41 plus the three public ones): 26 are `true`, one
+carries an explicit level 1, and nothing anywhere is authored deeper — so this rule admits everything
+on disk and ships unexercised.
+
+**Third-party books suppress recursion far harder than this author's do**, which sizes the whole item.
+`excludeRecursion` — the flag that stops an entry being activated BY recursion — is set on 526 of the
+579 public-book entries (91%) against 140 of 2,120 here (6.6%), and the public books set
+`preventRecursion` and `delayUntilRecursion` on nothing at all. So the population recursion scoring
+would touch is small in other people's books by their own choice, and the flags are evidently
+understood: this is authors suppressing a mechanism, not authors ignoring it. Read that as a bound on
+how much this can matter, not as permission to skip it — a book that leaves recursion on is exactly
+the book where an activated-then-discarded entry is invisible and wrong.
+
+**Ruled: stage 3 scores the recursion buffer.** Via the existing `matcher.withExtraTexts`, which the
+activation path already uses on the same `runState.waRecursionTexts` — so this closes the divergence
+with one call rather than a second code path, and the one-matcher discipline holds. Recursion contents
+are per-entry strings and become their own segments, which is the rule match sources and injects
+already follow: nothing may merge them onto the end of chat prose and let a conjunction span the seam.
+
+The circularity objection does not survive: chat text is also downstream of what WA injected, one turn
+later, and stage 2 already accepts the relation. What is genuinely different is that recursion text is
+not opt-in the way `matchPersonaDescription` and its siblings are — it applies to every entry at once,
+gated only by the global.
+
+**Open: trigger-depth weighting.** An entry reached at the third recursion pass is three removes from
+the conversation, and should not score as though the conversation had named it. The weight is a
+per-entry scalar stamped at first match, NOT a per-segment weight — `matchWindow`'s rule that
+occurrences sum across gate-passing segments and saturate once stays intact.
+
+Two things this needs, and one trap:
+
+- A pass counter. `feedScanLoop` runs once per `WORLDINFO_SCAN_DONE` of an owned scan, and the point
+  where a newly-matched entry joins `waMatched` is where its depth is stamped.
+- **The counter advances on RECURSION passes only.** `feedScanLoop` also runs for min-activation
+  passes, which widen the chat window rather than feed on entry content — `args.state.next ===
+  scan_state.MIN_ACTIVATIONS` already distinguishes them for the depth skew. An entry first matched on
+  a min-activation pass was found in the CHAT, just further back; weighting it as depth-2 would punish
+  it for being deep in the conversation rather than deep in a chain.
+- Depth is a property of the MOMENT, not of the entry: the same entry can be reached at depth 1 in one
+  scene and depth 3 in another, since depth depends on what else fired. That is the intended reading —
+  distance from this conversation — but it means the weight is a per-scene signal and not a stable
+  per-entry prior, and anything averaging it across scenes is averaging two different things.
+
+**The two halves are one change.** Without buffer scoring, the weight has nothing to discount. Without
+the weight, buffer scoring admits a depth-3 entry at full strength on text WA itself chose to inject.
 
 `SMARTKEYS.md` describes what WORKS, so it must not be written ahead of the code — and it must not lag
 behind it either. It claimed "SmartKeys rank, they do not yet activate" through the whole of buckets
