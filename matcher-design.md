@@ -81,8 +81,9 @@ key miss (suggester), window miss (depth/persistence, bucket 1.5), over-fire (pr
 **Bucket 1 — matcher and SmartKeys: done.** Parser bugs, the `::` weight delimiter, the validator, the
 Studio save gate, the audit change, `weight × count` scoring, the Lucene aliases, and `SMARTKEYS.md`
 carrying both halves — the grammar, and the matching behaviour that had no user-facing home. Regex
-terms closed the last of it: `REGEX` is a node, `regexClose` is the ECMA-262 scan, and
-`regex-unterminated`/`regex-invalid` are the two checks it added.
+terms closed the last of it: `REGEX` is a node, `regexLiteral` is the ECMA-262 scan under a
+qualifying-close rule that makes a term read as the whole key reads, and `regex-invalid` is the check
+it added.
 
 **Bucket 1.5 — SmartKeys activate: implemented.** Union (`selectAndActivate` → `activationAdds`),
 prune (`rankActivated` → `activationPrunes`), the scan-haystack stash, and the sentinel
@@ -412,20 +413,44 @@ is one quoted term.
 and `3/4` are untouched; only a token that starts with `/` reaches the branch. The branch sits after
 the operator match, so `? -/re/` negates a pattern.
 
-**Leftmost close, tracking escape and character class.** `\` escapes the next character, `[`…`]` is a
-class and the delimiter does not close inside one, and classes do not nest (`/[[]/` is a class holding
-`[`). That is ECMA-262's RegularExpressionLiteral, which exists for this same ambiguity. Greedy is not
-available: core anchors `^…$` over a whole key, but a SmartKey term has later tokens to steal a delimiter
-from, and `? /a/ /b/` would collapse into one pattern. `\/` writes a literal slash.
+**Leftmost QUALIFYING close, tracking escape and character class.** `\` escapes the next character,
+`[`…`]` is a class the delimiter cannot close inside, and classes do not nest (`/[[]/` is a class
+holding `[`) — ECMA-262's RegularExpressionLiteral, which exists for this same ambiguity. A candidate
+delimiter is accepted only when the body it delimits COMPILES and its flag run ends at a token
+boundary; otherwise the scan continues. `\/` writes a literal slash.
+
+Delimiter hunting alone is not enough, because `/` is both the delimiter and an ordinary character in
+a pattern. Neither is drawing a token boundary first: `(`, `)` and `|` are simultaneously SmartKey
+syntax and regex syntax, so splitting on them breaks `? /(rain|snow)/` and splitting on whitespace
+breaks `? (/a/|/b/) x`. Scanning under regex-literal rules and letting the surviving candidate decide
+needs neither classification up front.
+
+**A TERM READS AS THE WHOLE KEY READS, and that is the point of the rule.** The plain-key test is
+"the entire string is `/…/flags`"; when a term IS the entire key, the accept test above is that same
+test. So `/home/user/lux/` is one pattern in both, `/home/user/file` is a literal in both, and
+`? /(home/user|~/user)/file/` — a defensible key, matching either home form — is the pattern its
+author wrote rather than an invalid fragment plus three stray terms. Verified across every form in
+this section: the SmartKey reading equals the plain-key reading, string for string.
+
+**The cost, accepted: an abutting term after a pattern needs a space.** `? /[/]/x` is now the literal
+six characters rather than the pattern `[/]` and the term `x`. It is recovered by a space (`? /[/]/ x`)
+or, better where adjacency was meant, by extending the pattern (`? /\/x/`) — the abutting form never
+delivered adjacency anyway, only a conjunction that fired on any slash and any `x`. Keeping it would
+cost `/home/user/file`, where core and WA's plain key already agree on "literal" and only the SmartKey
+invented a pattern.
+
+**No shape, no fault.** `regex-unterminated` and `regex-empty` are gone: `? /re` and `? //` are literal
+terms, exactly as the bare keys `/re` and `//` are literal, so a fault there would have been the
+divergence. `regex-invalid` survives, on the one case where the shape IS well-formed and the pattern
+will not compile — which is also how `? /(/` stays the dead pattern the bare key is. Diagnostics are
+richer inside a SmartKey than outside it (`punctuation-term` reaches `? //`), but no reading differs.
 
 **Flags then weight** — `[gimsuy]*` after the close, then an optional `::N`, as a quoted term takes its
 weight after its closing quote. **No `=`/`^` prefix on this branch**: `=` is meaningless on a pattern,
 and `^` is a no-op because a regex is already case-sensitive. `/i` is how insensitivity is written.
 
-**Unterminated, empty, or a pattern `new RegExp` refuses, is a validator error** — all three are facts
-about the string, so they clear the same bar the surviving checks clear rather than guessing at intent.
-Empty is its own code: `//` is terminated, and calling it unterminated sends the author looking for a
-delimiter that is already there. `regexClose` is what separates them, being what cut the token.
+**A pattern `new RegExp` refuses is a validator error** — a fact about the string, so it clears the
+same bar the surviving checks clear rather than guessing at intent.
 
 **A regex is a term for counting and for positivity.** `no-terms` counts it, and `hasPositiveTerm`
 treats it as a positive contributor, as it does a spliced `?` subtree. The validator reads `TERM`
@@ -438,9 +463,10 @@ and `stray-quote` would fire on every one.
 pattern runs on raw text, as core's does. Inside a SmartKey that means mixed folding: `? /Cap'n/ crunch`
 has one term that sees `’` and one that does not.
 
-**A path-shaped token changes meaning, and that is the point.** `? /home/user/file` becomes a pattern
-plus a stray term where it was one bare word. Quoting restores the literal, and the new reading is the
-one every other layer already gives a slash-delimited key.
+**A path-shaped token reads as every other layer reads it**, which is what the qualifying-close rule
+delivers: `? /home/user/file` is the literal string, because that is what the bare key
+`/home/user/file` is and what core makes of it too. An earlier draft split it into a pattern plus a
+stray term and called the change deliberate; it was neither core's reading nor WA's own.
 
 **The evaluator grows one node.** `REGEX` carries the raw key and its weight, has no `acIndex`, and
 skips pass 1 — structurally a `TERM` that never uses the candidate filter. It shares `countRegexKey`
@@ -459,9 +485,12 @@ only on text carrying one form and not the other, and core owns activation until
 that gap tracks the key: a long specific pattern (`/home/user/some_folder/`) occurs in neither form, so
 nothing observable turns on it, and a short common one (`/and/or/`) occurs in the stripped form often
 but is a key nobody would author for relevance. `validateSmartKey` warns (`regex-core-refuses`) rather
-than either side deciding — the only thing it has to say about a key with no `?`. `coreReadsAsRegex` in
-`matcher.mjs` is core's rule mirrored for that warning, and counts nothing. The literal hatch it points
-at is `? "…"`: quoting is a term rule, so a bare `"…"` keeps the quotes as characters.
+than either side deciding. `coreReadsAsRegex` in `matcher.mjs` is core's rule mirrored for that
+warning, and counts nothing. It reaches SmartKey TERMS as well as bare keys, since the term rule became
+the whole-key rule — before that the scan cut a slash-bearing pattern apart before anything could ask
+what core made of it. The warning names `\/` first, because escaping preserves the author's evident
+intent (a pattern) and makes both engines read it identically; `? "…"` remains the hatch for someone
+who wanted the literal after all.
 
 ---
 

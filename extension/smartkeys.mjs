@@ -46,27 +46,54 @@ const OPS = {
 };
 
 /**
- * Index of the `/` that closes a regex literal opening at position 0, or -1 if there is none.
+ * The regex literal opening at position 0, or null when the token is not one.
  *
- * LEFTMOST CLOSE, tracking escape and character class — ECMA-262's RegularExpressionLiteral, which
- * exists for this same ambiguity. `\` escapes the next character, `[`…`]` is a class and the
- * delimiter does not close inside one, and classes do not nest (`/[[]/` is a class holding `[`).
+ * LEFTMOST QUALIFYING CLOSE, not merely the leftmost close. A candidate delimiter is accepted only
+ * when the body it delimits COMPILES and its flag run ENDS AT A TOKEN BOUNDARY; otherwise the scan
+ * keeps going. Delimiter hunting alone is not enough, because `/` is both this grammar's delimiter
+ * and an ordinary character inside a pattern.
  *
- * Greedy is not available: core anchors `^…$` over a whole key, but a SmartKey term has later tokens
- * to steal a delimiter from, so `? /a/ /b/` would collapse into one pattern. `\/` writes a literal slash.
+ * WHY THIS AND NOT A TOKEN BOUNDARY FIRST. `(`, `)` and `|` are simultaneously SmartKey syntax and
+ * regex syntax, so no boundary set can be drawn before the scan: splitting on them breaks
+ * `? /(rain|snow)/`, and splitting on whitespace alone breaks `? (/a/|/b/) x`. Scanning with regex
+ * literal rules and letting the surviving candidate decide needs neither classification up front.
+ *
+ * WHAT IT BUYS: a term reads exactly as the same string reads as a WHOLE KEY. The plain-key rule is
+ * "the entire string is `/…/flags`" (REGEX_KEY_RE), and when a term is the entire key this rule's
+ * accept test is that same test — so `/home/user/lux/` is one pattern in both, `/home/user/file` is
+ * a literal in both, and `countKey is the only matcher` finally holds for the `?` path too.
+ *
+ * `\` escapes the next character and `[`…`]` is a class the delimiter cannot close inside, both as
+ * ECMA-262's RegularExpressionLiteral has them. `\/` writes a literal slash and is what core
+ * requires for portability, so escaping also collapses the WA/core divergence (regex-core-refuses).
+ *
+ * The compile is the one semantic step in the lexer. Bounded: only tokens opening with `/` reach it,
+ * ASTs are cached per key, and measured across 41 books, 0 of 148 `?` keys contain a `/` at all.
+ *
  * @param {string} s A string whose first character is `/`
- * @returns {number}
+ * @returns {{value: string, rest: string}|null} The `/pattern/flags` token and what follows
  */
-function regexClose(s) {
+function regexLiteral(s) {
     let inClass = false;
     for (let i = 1; i < s.length; i++) {
         const c = s[i];
         if (c === '\\') { i++; continue; }
         if (c === '[') inClass = true;
         else if (c === ']') inClass = false;
-        else if (c === '/' && !inClass) return i;
+        else if (c === '/' && !inClass) {
+            const body = s.slice(1, i);
+            // An empty body is not a pattern, exactly as REGEX_KEY_RE's `.+` says of a whole key.
+            if (!body) continue;
+            // Flags run to a token boundary or there are none — an unbounded run eats the next token
+            // (`? /home/user/file` once took `us` out of "user"), and a run that cannot end cleanly
+            // means this delimiter was not the close.
+            const f = s.slice(i + 1).match(/^[gimsuy]*(?=[\s()|&]|::|\^|$)/);
+            if (!f) continue;
+            try { new RegExp(body, f[0]); } catch { continue; }
+            return { value: `/${body}/${f[0]}`, rest: s.slice(i + 1 + f[0].length) };
+        }
     }
-    return -1;
+    return null;
 }
 
 /**
@@ -98,28 +125,21 @@ export function tokenize(input) {
         // Only at TOKEN START, the rule `"` and `-`/`!`/`+` already follow, so `and/or` and `3/4` are
         // untouched. After the operator match, so `? -/re/` negates a pattern.
         if (src[0] === '/') {
-            const close = regexClose(src);
-            // Unterminated: it can only run to the end of the key, and the validator reports it. Left
-            // as a REGEX token rather than degraded to a literal so it HAS something to report on —
-            // REGEX_KEY_RE refuses the value either way, so it counts 0 at match time.
-            const body = close === -1 ? src : src.slice(0, close + 1);
-            let rest = src.slice(body.length);
-            // Flags then weight, as a quoted term takes its weight after its closing quote. No `=`/`^`
-            // prefix on this branch: `=` is meaningless on a pattern and `^` is a no-op, since a regex
-            // is already case-sensitive. `/i` is how insensitivity is written.
-            //
-            // THE RUN MUST END AT A TOKEN BOUNDARY or it eats the next token: unanchored, `? /home/user/file`
-            // took `us` out of "user" as flags, leaving the pattern `/home/us` and the term `er/file`.
-            // That silently rewrote both halves, and a stolen `u` turns legal escapes into a validator
-            // error on a pattern the author wrote correctly. No boundary means no flags, not some flags.
-            const f = close === -1 ? null : rest.match(/^[gimsuy]*(?=[\s()|&]|::|\^|$)/);
-            const flags = f ? f[0] : '';
-            rest = rest.slice(flags.length);
-            const w = rest.match(/^(?:::|\^)(\d+(?:\.\d+)?)/);
-            if (w) rest = rest.slice(w[0].length);
-            src = rest;
-            tokens.push({ type: 'REGEX', value: body + flags, weight: w ? parseFloat(w[1]) : 1.0 });
-            continue;
+            // Not a pattern falls through to the term lexer, which is core's own answer for a regex
+            // it refuses and the plain key's answer for `/home/user/file`. Nothing here reports a
+            // fault, because there is no longer a fault to report: the string simply is a literal.
+            // A token that fails to compile is still a REGEX when the WHOLE remaining source is a
+            // well-formed `/…/flags`, because that is precisely the plain-key test and the two must
+            // agree: `? /(/` has to be the dead pattern `/(/` is as a bare key, not the literal three
+            // characters. Only the SHAPE being absent — `/re`, `//`, `/home/user/file` — makes it a
+            // literal, and those are literals as bare keys too.
+            const re = regexLiteral(src) ?? (REGEX_KEY_RE.test(src) ? { value: src, rest: '' } : null);
+            if (re) {
+                const w = re.rest.match(/^(?:::|\^)(\d+(?:\.\d+)?)/);
+                src = w ? re.rest.slice(w[0].length) : re.rest;
+                tokens.push({ type: 'REGEX', value: re.value, weight: w ? parseFloat(w[1]) : 1.0 });
+                continue;
+            }
         }
         // Term: optional =/^ flags, quoted phrase or bare word, optional ::weight postfix.
         m = src.match(/^([=^]{0,2})(?:"([^"]*)"|([^\s()|&]+))/);
@@ -332,36 +352,30 @@ export function validateSmartKey(raw) {
         }
     }
 
-    // Both are facts about the STRING, so they clear the same bar the surviving checks clear rather
-    // than guessing at intent. An unterminated pattern reaches here as a REGEX token whose value has
-    // no closing delimiter, which is exactly what REGEX_KEY_RE refuses.
+    // A REGEX token now only exists where the SHAPE exists, so the two shape faults are gone:
+    // `? /re` and `? //` are literal terms, exactly as the bare keys `/re` and `//` are literal.
+    // What survives is the pattern that is well-formed and will not compile — a fact about the
+    // string, the same bar the other checks clear — plus core's refusal, which is about the reading
+    // rather than the string and so warns instead.
     for (const t of terms) {
         if (t.type !== 'REGEX') continue;
         const val = String(t.value);
         const m = val.match(REGEX_KEY_RE);
-        if (!m) {
-            // TWO ways to fail REGEX_KEY_RE, and they need different sentences. `regexClose` is what
-            // the lexer used to cut this token, so it is also what says which: no closing delimiter at
-            // all, or one found with nothing before it. `//` reported "no closing /" while holding one,
-            // sending the author to look for a delimiter that was already there.
-            const terminated = regexClose(val) !== -1;
-            out.push(terminated
-                ? {
-                    severity: 'error', code: 'regex-empty',
-                    message: `The pattern ${JSON.stringify(val)} is empty, so it can never match. Put a pattern between the slashes, or quote the term to search for it as text.`,
-                }
-                : {
-                    severity: 'error', code: 'regex-unterminated',
-                    message: `The pattern ${JSON.stringify(val)} has no closing “/”, so it can never match. Close it, or quote the term to search for it as text.`,
-                });
-            continue;
-        }
         try {
             new RegExp(m[1], m[2]);
         } catch (e) {
             out.push({
                 severity: 'error', code: 'regex-invalid',
-                message: `The pattern ${JSON.stringify(String(t.value))} is not a valid regular expression (${e.message}), so it can never match.`,
+                message: `The pattern ${JSON.stringify(val)} is not a valid regular expression (${e.message}), so it can never match.`,
+            });
+            continue;
+        }
+        // Reachable from a TERM only since the term rule became the whole-key rule; before that the
+        // scan split a slash-bearing pattern before anything could ask what core made of it.
+        if (!coreReadsAsRegex(val)) {
+            out.push({
+                severity: 'warn', code: 'regex-core-refuses',
+                message: `SillyTavern matching reads “${val}” as literal text, not a pattern; WA treats it as a pattern. Escaping the inner slashes as \\/ keeps your pattern and makes both read it the same way.`,
             });
         }
     }

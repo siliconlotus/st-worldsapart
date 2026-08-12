@@ -1,6 +1,6 @@
 // Verifies the SmartKeys boolean-query engine against the spec's acceptance table,
 // plus the lexer edge cases the spec calls out (internal hyphens, weights, flags).
-import { countKey, keywordScore, setBoundaryMode } from '../extension/matcher.mjs';
+import { countKey, keywordScore, setBoundaryMode, isRegexKey } from '../extension/matcher.mjs';
 import { tokenize, parse, evaluate, buildAutomaton, scanAutomaton, validateSmartKey, fold, resetSmartKeys } from '../extension/smartkeys.mjs';
 import { buildKeyPruneScan } from '../extension/keyword-core.mjs';
 import { eq } from './metrics.mjs';
@@ -61,9 +61,11 @@ eq(countKey('Joe', "that is Joe's coat", false, true), 0, '...which is the same 
     // Only at token start — the rule " and -/!/+ already follow.
     eq(matches('? and/or', 'an and/or clause'), true, 'a slash mid-token is ordinary text');
     eq(matches('? 3/4', 'in 3/4 time'), true, '...including a fraction');
-    // LEFTMOST close, tracking escape and class. Greedy would collapse `? /a/ /b/` into one pattern.
+    // LEFTMOST QUALIFYING close, tracking escape and class. Greedy over the whole source would
+    // collapse `? /a/ /b/` into one pattern; stopping at the first delimiter regardless would cut
+    // a pattern that legitimately contains one.
     eq(countKey('? /a/ /b/', 'a and b', false, false), 3, 'two patterns stay two, and both count');
-    eq(matches('? /[/]/x', 'the /x path'), true, 'the delimiter does not close inside a character class');
+    eq(matches('? /[/]/ x', 'the /x path'), true, 'the delimiter does not close inside a character class');
     eq(matches('? /a\\/b/', 'an a/b split'), true, '\\/ writes a literal slash');
     // Flags then weight, as a quoted term takes its weight after the closing quote.
     eq(matches('? /fire/i', 'FIRE everywhere'), true, '/i is how insensitivity is written');
@@ -76,28 +78,40 @@ eq(countKey('Joe', "that is Joe's coat", false, true), 0, '...which is the same 
     // A regex is a term for counting and for positivity, or these two keys would be fatally flagged.
     eq(codes('? /re/'), '', 'a lone regex is not no-terms');
     eq(codes('? /re/ -drill'), '', 'a regex is a positive contributor, so this is not negation-only');
-    eq(codes('? /(/'), 'error:regex-invalid', 'a pattern new RegExp refuses is an error');
-    eq(codes('? /re'), 'error:regex-unterminated', 'an unterminated pattern is an error');
-    // An empty pattern IS terminated, so it gets its own code rather than being called unterminated —
-    // the delimiter the old message sent the author looking for was already there.
-    eq(codes('? //'), 'error:regex-empty', 'an empty pattern is empty, not unterminated');
-    eq(codes('? //g'), 'error:regex-empty', '...and flags do not make a body');
-    eq(countKey('? /re', 'anything /re', false, false), 0, '...and counts 0, so it cannot half-fire');
+    eq(codes('? /(/'), 'error:regex-invalid', 'a well-formed pattern new RegExp refuses is an error');
+    // NO SHAPE, NO FAULT. `/re` and `//` are not broken patterns, they are literal terms — which is
+    // exactly what the BARE keys `/re` and `//` are, so reporting a fault here would have been the
+    // divergence. regex-unterminated and regex-empty went with the shape they described.
+    eq(codes('? /re'), '', 'an unterminated pattern is simply not a pattern');
+    eq(codes('? //g'), '', '...and neither is an empty one');
+    eq(countKey('? /re', 'anything /re', false, false), 1, '...it matches the characters, as the bare key does');
+    eq(countKey('/re', 'anything /re', false, false), 1, '...which is the bare key it now agrees with');
     // Value-reading checks skip it: a pattern is punctuation by nature.
     eq(codes('? /[^"]+/'), '', 'punctuation-term and stray-quote do not read a pattern');
-    // THE FLAG RUN ENDS AT A TOKEN BOUNDARY. Asserted on the TOKENS, not on a count: unanchored,
-    // `[gimsuy]*` took `us` out of "user" and the key still counted 2 against the text below — one
-    // hit for the mangled pattern `/home/us` and one for the stray term `er/file` — so a count could
-    // not tell the two lexings apart, and the suite was green on the defect.
+    // A TERM READS AS THE WHOLE KEY READS. The plain-key rule is "the entire string is /…/flags";
+    // when a term IS the entire key this scanner's accept test is that same test, so the two can no
+    // longer disagree. Asserted on the TOKENS, because a count cannot tell two lexings apart: the old
+    // reading of `? /home/user/file` was the pattern `/home/` plus the term `user/file`, and it
+    // counted 2 against the text below for reasons that had nothing to do with the key.
     const tok = k => tokenize(k)
         .map(t => t.type === 'REGEX' ? `re:${t.value}` : t.type === 'TERM' ? `term:${t.value}` : t.type).join(' ');
-    eq(tok('? /home/user/file'), 're:/home/ term:user/file', 'the flag run stops at a token boundary');
-    eq(tok('? /fire/smoke'), 're:/fire/ term:smoke', '...so a bare word after the close stays a word');
-    eq(tok('? /re/is night'), 're:/re/is term:night', '...and real flags, followed by a space, are still taken');
+    const plainReads = k => (isRegexKey(k) ? `re:${k}` : `term:${k}`);
+    for (const k of ['/home/user/file', '/home/user/lux/', '/(home/user|~/user)/file/', '/re/',
+        '/(rain|snow)/', '/a\\/b/', '/[/]/x', '/re', '//']) {
+        eq(tok('? ' + k), plainReads(k), `a term reads as the whole key does: ${k}`);
+    }
+    eq(tok('? /re/is night'), 're:/re/is term:night', 'flags followed by a space are still taken');
     eq(tok('? /re/::2'), 're:/re/', '...as is a weight straight after the close');
     eq(tok('? /re/gi)'), 're:/re/gi RPAREN', '...and a closing paren is a boundary too');
-    // A path-shaped token changes meaning, and that is the point.
-    eq(countKey('? /home/user/file', '/home/user/file', false, false), 2, 'a path is a pattern plus a stray term, and both score');
+    eq(tok('? (/a/|/b/) x'), 'LPAREN re:/a/ OR re:/b/ RPAREN term:x', 'grouping around patterns still lexes');
+    // The cost, accepted: an abutting term after a pattern needs a space. Extending the regex is the
+    // other answer, and the clearer one when adjacency is what was meant.
+    eq(tok('? /[/]/ x'), 're:/[/]/ term:x', 'a space recovers the abutting form');
+    eq(matches('? /\\/x/', 'the /x path'), true, '...and adjacency belongs inside the pattern');
+    // The core divergence is now visible from a term, not just from a bare key.
+    eq(codes('? /(home/user|~/user)/file/'), 'warn:regex-core-refuses', 'a term reaches the core-refusal warning');
+    eq(codes('? /(home\\/user|~\\/user)\\/file/'), '', '...and escaping the delimiters clears it');
+    eq(countKey('? /home/user/file', '/home/user/file', false, false), 1, 'a path is one literal term');
     eq(matches('? /home/user/file', 'the home user file'), false, '...so the bare-word reading is gone');
 
     // A BARE regex key core reads differently. WA runs it as a pattern; core refuses any pattern whose
@@ -109,7 +123,10 @@ eq(countKey('Joe', "that is Joe's coat", false, true), 0, '...which is the same 
     eq(codes('/and\\/or/'), '', '...and escaping the inner slash clears it, because core then reads it');
     eq(codes('/fire/'), '', 'a pattern with no inner slash was never in question');
     eq(codes('fire'), '', 'a plain key still gets no opinion at all');
-    eq(codes('? /and/or/'), '', 'and a SmartKey does not reach the bare-key check');
+    // ...and a SmartKey term reaches the SAME check now, because the term rule became the whole-key
+    // rule. Before, the scan cut `/and/` off the front and there was no pattern left to ask about.
+    eq(codes('? /and/or/'), 'warn:regex-core-refuses', 'a term reaches it too, on the same string');
+    eq(codes('? /and\\/or/'), '', '...and clears the same way');
     // The hatch the warning points at has to be the one that works: quoting is a TERM rule, so the
     // bare form keeps its quotes as characters and matches neither reading.
     eq(countKey('? "/and/or/"', 'the config at /and/or/ is set', false, false), 1, '? "…" is the literal hatch');

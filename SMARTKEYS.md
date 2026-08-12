@@ -110,8 +110,13 @@ The rules are the ones the rest of the grammar already follows:
 
 - **A `/` opens a pattern only at the start of a token**, as `"` and `-` do. `and/or` and `3/4` are
   ordinary terms.
-- **The pattern ends at the first unescaped `/` outside a character class.** `\/` writes a literal
-  slash, and `/[/]/` is a class holding one. Two patterns in one key stay two.
+- **A `/…/` term reads exactly as the same string reads as a whole key.** `? /home/user/lux/` is the
+  pattern `home/user/lux`, and `? /home/user/file` is the literal text, because that is what each of
+  them is without the `?`. Two patterns in one key stay two: `? /a/ /b/` is two terms.
+- **A slash inside the pattern is fine, and `\/` is better.** Unescaped, WA reads the pattern and
+  SillyTavern's own matcher refuses it — the Studio warns. Escaped, both read it the same way.
+- **A term that follows a pattern needs a space.** `? /[/]/ x`, not `? /[/]/x`. If you wanted the two
+  adjacent, put them in the pattern: `? /\/x/`.
 - **Flags come after the close, then the weight**: `/fire/gi::2`, the same order a quoted term uses.
 - **`=` and `^` are not available here.** `=` means nothing to a pattern, and `^` would be a no-op —
   a regex is already case-sensitive. Write `/i` for insensitivity.
@@ -182,7 +187,6 @@ meant, because every check that guessed produced false positives on real titles.
 | **error** | no search terms at all |
 | **error** | every term negated — that matches whenever they are absent, which is nearly always |
 | **error** | an unclosed quote |
-| **error** | a `/pattern/` with no closing `/` |
 | **error** | a `/pattern/` JavaScript cannot compile |
 | **warn** | a punctuation-only term (usually a second `?`: only the first one is the sentinel) |
 | **warn** | unbalanced parens — it still parses, but probably not the way you grouped it |
