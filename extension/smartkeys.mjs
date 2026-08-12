@@ -289,10 +289,10 @@ export function validateSmartKey(raw) {
         // quote would close the term early, so that sentence is dropped rather than made wrong.
         const bare = src.trim();
         if (isRegexKey(bare) && !coreReadsAsRegex(bare)) {
-            const hatch = bare.includes('"') ? '' : ` If you want the literal string, use ? "${bare}".`;
+            const hatch = bare.includes('"') ? '' : ` If you meant the literal string, use ? "${bare}".`;
             out.push({
                 severity: 'warn', code: 'regex-core-refuses',
-                message: `SillyTavern matching reads “${bare}” as literal text, not a pattern; WA treats it as a pattern.${hatch}`,
+                message: `WA runs “${bare}” as a pattern. SillyTavern's own matcher refuses any pattern with an unescaped “/” inside it and looks for the whole delimited string as literal text instead, so without WA this key does nothing.${hatch}`,
             });
         }
         return out;   // not a SmartKey; nothing further to say
@@ -373,14 +373,15 @@ export function validateSmartKey(raw) {
         // Reachable from a TERM only since the term rule became the whole-key rule; before that the
         // scan split a slash-bearing pattern before anything could ask what core made of it.
         if (!coreReadsAsRegex(val)) {
-            // Says what each side does and stops. WA runs the pattern, so nothing here needs fixing —
-            // prescribing `\/` would read as "your key is broken" about a key that works, and every
-            // other check in this file is descriptive. The hatch is the same one the bare-key branch
-            // offers, in the form a TERM takes.
-            const hatch = val.includes('"') ? '' : ` If you want the literal string, quote the term: "${val}".`;
+            // WA FIRST, because WA is the side that runs it. Four things an author can have meant, and
+            // only one of them wants anything done: written for core as a pattern, core was silently
+            // dead and WA repairs it; meant to evaluate under WA, it already does; meant as the
+            // literal delimited string, the hatch is here. Leading with core's reading framed WA as
+            // the deviant in three cases out of four.
+            const hatch = val.includes('"') ? '' : ` If you meant the literal string, quote the term: "${val}".`;
             out.push({
                 severity: 'warn', code: 'regex-core-refuses',
-                message: `SillyTavern matching reads “${val}” as literal text, not a pattern; WA treats it as a pattern.${hatch}`,
+                message: `WA runs “${val}” as a pattern. SillyTavern's own matcher refuses any pattern with an unescaped “/” inside it and looks for the whole delimited string as literal text instead, so without WA this key does nothing.${hatch}`,
             });
         }
     }

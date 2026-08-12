@@ -480,11 +480,22 @@ delimited string as literal text. `REGEX_KEY_RE` does not refuse it, so `/and/or
 implementation detail rather than a meaning, which is the ground every divergence in this document
 stands on.
 
-Neither reading is dead — core's fires wherever the delimited form itself appears — so the two differ
-only on text carrying one form and not the other, and core owns activation until Bucket 2. The size of
-that gap tracks the key: a long specific pattern (`/home/user/some_folder/`) occurs in neither form, so
-nothing observable turns on it, and a short common one (`/and/or/`) occurs in the stripped form often
-but is a key nobody would author for relevance. `validateSmartKey` warns (`regex-core-refuses`) rather
+**Core's reading is dead in practice, and that decides the message.** It fires only where the whole
+DELIMITED string occurs — `/(home/user|~/user)/file/`, slashes and all — which prose does not contain;
+**measured**, WA counts 2 against text carrying both path forms where core's literal counts 0. An
+earlier draft called the two readings symmetric and sized the gap by how common the pattern was. They
+are not symmetric: WA's fires and core's does not.
+
+So there are four things an author can have meant, and only one wants anything done. Written for stock
+ST as a pattern: core was silently dead and WA repairs it. Meant to evaluate under WA: it already
+does. Meant as the literal delimited string: the hatch is the warning's second sentence. Meant as a
+literal but authored before WA: same hatch. The message therefore leads with what WA does — leading
+with core's reading framed WA as the deviant in three cases out of four — and `\/` is named nowhere
+in it, because escaping serves core and nothing else.
+
+Bucket 2 also removes the premise the warning was first justified on. Core no longer owns activation
+(`ownActivation`, default on), and this document's own principle is that divergence is free once WA
+owns it. What survives is portability alone: a book opened without WA, where the key does nothing. `validateSmartKey` warns (`regex-core-refuses`) rather
 than either side deciding. `coreReadsAsRegex` in `matcher.mjs` is core's rule mirrored for that
 warning, and counts nothing. It reaches SmartKey TERMS as well as bare keys, since the term rule became
 the whole-key rule — before that the scan cut a slash-bearing pattern apart before anything could ask
