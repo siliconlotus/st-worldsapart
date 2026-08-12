@@ -2315,27 +2315,27 @@ async function gradeScene(named) {
 
 
     /**
- * "I read down to here" — fills every blank grade field ABOVE the deepest one that has a value with 0.
+ * "The rest are zeros" — fills every blank grade field with 0.
  *
- * A grader works a ranked list top-down, and past some rank everything is 0 with the occasional 1. Typing
+ * A grader works a ranked list top-down and past some rank everything is 0 with the occasional 1. Typing
  * two dozen zeros to say so is the reason the field used to default to 0, which fabricated a verdict for
- * every row nobody reached. The deepest field carrying a value IS the boundary claim, so this turns it into
- * real grades and leaves everything below it blank — unjudged, and honestly so.
+ * every row nobody reached. This is the deliberate version of the same thing: one click at the END of a
+ * pass, asserting that the untouched rows were read and judged irrelevant.
  *
  * Writes 0 into the DOM rather than recording a flag, so the sample gains no new semantics: those zeros are
  * ordinary grades the author affirmed, indistinguishable from typed ones because that is what they are.
+ * Leaving a row blank still means UNGRADED — the difference is that saying so is now the default and
+ * claiming otherwise takes an action.
  *
- * @param {HTMLElement} root Container holding the .wa-grade inputs, in display order
+ * @param {HTMLElement} root Container holding the .wa-grade inputs
  * @returns {number} How many blanks were filled
  */
 function fillReadZeros(root) {
-    const inputs = [...root.querySelectorAll('.wa-grade')];
-    const last = inputs.reduce((acc, input, idx) => (String(input.value).trim() !== '' ? idx : acc), -1);
     let filled = 0;
-    for (let i = 0; i < last; i++) {
-        if (String(inputs[i].value).trim() === '') {
-            inputs[i].value = '0';
-            inputs[i].dataset.dirty = '1';
+    for (const input of root.querySelectorAll('.wa-grade')) {
+        if (String(input.value).trim() === '') {
+            input.value = '0';
+            input.dataset.dirty = '1';
             filled += 1;
         }
     }
@@ -2359,7 +2359,6 @@ function fillReadZeros(root) {
     const wrap = document.createElement('div');
     wrap.innerHTML = '<h3 style="margin:0 0 0.25em;">Grade this scene</h3>'
         + `<small style="display:block;opacity:0.7;margin-bottom:0.5em;">${gradeAnchorLine()} ${gradeable.length} retrieved entries${scaffold ? `; ${scaffold} constant/persisting-sticky row(s) listed but not graded — WA did not choose them this turn` : ''}. Blank means UNGRADED, not 0.</small>`
-        + '<button class="menu_button wa-fill0" style="margin-bottom:0.5em;padding:2px 8px;font-size:0.85em;" title="Everything above the deepest row you graded becomes 0. Rows below it stay blank — unjudged.">Read down to my last grade: fill blanks above with 0</button>'
         + '<details style="margin-bottom:0.75em;"><summary style="cursor:pointer;">Query text — what retrieval actually matched on '
         + `(${runState.lastQuery.length} chars, depth ${settings().messageDepth})</summary>`
         + `<pre style="white-space:pre-wrap;max-height:14em;overflow:auto;font-size:0.85em;opacity:0.85;border:1px solid var(--SmartThemeBorderColor);padding:0.5em;margin-top:0.5em;">${esc(runState.lastQuery)}</pre></details>`
@@ -2385,18 +2384,19 @@ function fillReadZeros(root) {
         + '</tbody></table>';
 
     // Reuses the Studio's entry viewer rather than a second renderer.
-    wrap.querySelector('.wa-fill0')?.addEventListener('click', event => {
-        event.preventDefault();
-        const n = fillReadZeros(wrap);
-        toastr.info(n ? `Filled ${n} blank row(s) above your last grade with 0.` : 'No blanks above your last grade.', 'Worlds Apart');
-    });
     wrap.querySelectorAll('.wa-viewtext').forEach(button => button.addEventListener('click', event => {
         event.preventDefault();
         const entry = entries[Number(button.dataset.i)];
         if (entry) showEntryText(entry);
     }));
 
-    const popup = new Popup(wrap, POPUP_TYPE.CONFIRM, '', { okButton: 'Save sample', cancelButton: 'Cancel', large: true, wide: true, allowVerticalScrolling: true });
+    const popup = new Popup(wrap, POPUP_TYPE.CONFIRM, '', { customButtons: [{
+        // No `result`, so it acts on the form and leaves the popup open — a pass ends with this and then
+        // Save. Sits beside the confirm buttons because it is the LAST thing done, not a table control.
+        text: 'Fill blanks with 0', icon: 'fa-0',
+        tooltip: 'Every untouched row becomes a graded 0. Leave a row blank to record it as UNGRADED instead.',
+        action: () => { const n = fillReadZeros(wrap); toastr.info(n ? `Filled ${n} blank row(s) with 0.` : 'No blank rows to fill.', 'Worlds Apart'); },
+    }], okButton: 'Save sample', cancelButton: 'Cancel', large: true, wide: true, allowVerticalScrolling: true });
     const result = await popup.show();
 
     if (result !== POPUP_RESULT.AFFIRMATIVE) {
@@ -2669,7 +2669,6 @@ async function superGradePopup({ captures, union, entryOf, prior: prior0 = [], s
         body.innerHTML = `<small style="display:block;opacity:0.7;margin-bottom:0.5em;">${freshN} to grade`
             + `${known.length ? `; ${known.length} judged in an earlier round (pre-filled — edit any you disagree with, untouched rows carry through as shown)` : ''}`
             + `${scaffoldN ? `; ${scaffoldN} constant/persisting-sticky row(s) listed but not graded — WA did not choose them this turn` : ''}. Blank means UNGRADED, not 0.</small>`
-            + '<button class="menu_button wa-fill0" style="margin-bottom:0.5em;padding:2px 8px;font-size:0.85em;" title="Everything above the deepest row you graded becomes 0. Rows below it stay blank — unjudged.">Read down to my last grade: fill blanks above with 0</button>'
             + '<table style="width:100%;border-collapse:collapse;font-size:0.9em;"><thead><tr style="text-align:left;">'
             + '<th style="width:4em;">Grade</th><th>Entry</th><th style="width:9em;">surfaced by</th><th style="width:4em;">best#</th><th style="width:4em;">cos</th><th style="width:4em;">text</th><th style="width:4em;">keys</th><th style="width:4em;"></th></tr></thead><tbody>'
             // Block + bestRank order. Fused scores are not comparable across arms, so bestRank is the
@@ -2713,12 +2712,6 @@ async function superGradePopup({ captures, union, entryOf, prior: prior0 = [], s
         }));
         // A user edit marks the input dirty; only dirty values survive a repaint (see `typed` above).
         body.querySelectorAll('.wa-grade').forEach(input => input.addEventListener('input', () => { input.dataset.dirty = '1'; }));
-        // Re-wired per repaint, and the filled zeros are marked dirty so they survive the next one.
-        body.querySelector('.wa-fill0')?.addEventListener('click', event => {
-            event.preventDefault();
-            const n = fillReadZeros(body);
-            toastr.info(n ? `Filled ${n} blank row(s) above your last grade with 0.` : 'No blanks above your last grade.', 'Worlds Apart');
-        });
     };
 
     head.querySelector('.wa-sg-pick').addEventListener('click', () => head.querySelector('.wa-sg-prior').click());
@@ -2770,7 +2763,13 @@ async function superGradePopup({ captures, union, entryOf, prior: prior0 = [], s
 
     paint();
 
-    const popup = new Popup(wrap, POPUP_TYPE.CONFIRM, '', { okButton, cancelButton: 'Cancel', large: true, wide: true, allowVerticalScrolling: true });
+    const popup = new Popup(wrap, POPUP_TYPE.CONFIRM, '', { customButtons: [{
+        // No `result`, so it acts on the form and leaves the popup open — a pass ends with this and then
+        // Save. Sits beside the confirm buttons because it is the LAST thing done, not a table control.
+        text: 'Fill blanks with 0', icon: 'fa-0',
+        tooltip: 'Every untouched row becomes a graded 0. Leave a row blank to record it as UNGRADED instead.',
+        action: () => { const n = fillReadZeros(body); toastr.info(n ? `Filled ${n} blank row(s) with 0.` : 'No blank rows to fill.', 'Worlds Apart'); },
+    }], okButton, cancelButton: 'Cancel', large: true, wide: true, allowVerticalScrolling: true });
     if (await popup.show() !== POPUP_RESULT.AFFIRMATIVE) {
         return null;
     }
