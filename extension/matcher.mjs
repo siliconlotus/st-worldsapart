@@ -557,10 +557,12 @@ export function keyExcerpts(key, text, caseSensitive, wholeWords, context = 28, 
     // whose own text contains guillemets — French dialogue, a quoted aside — produced `«no «rut»»`, and a
     // reader (or the display regex) cannot tell the author's from ours. Whitespace is collapsed BEFORE
     // measuring, or the offsets would describe a string the caller never sees.
-    const mark = (raw0, index, length) => {
-        const src = raw0.normalize('NFC');
-        const start = srcIndex(src, index);
-        const end = srcIndex(src, index + length);
+    // TWO OFFSET SPACES, and conflating them is what this function got wrong. The literal paths search the
+    // FOLDED haystack, so their offsets need walking back through the fold. The regex path runs on the raw
+    // segment — as countRegexKey does — so its offsets are already source offsets and mapping them again
+    // drags the mark left by one per em-dash and two per ellipsis before the match. `/knot(s|ting)?/` over
+    // RP prose rendered as `«  He k»nots`.
+    const markAt = (src, start, end) => {
         const from = Math.max(0, start - context);
         const to = Math.min(src.length, end + context);
         const head = `${from > 0 ? '…' : ''}${src.slice(from, start)}`.replace(/\s+/g, ' ');
@@ -568,8 +570,14 @@ export function keyExcerpts(key, text, caseSensitive, wholeWords, context = 28, 
         const tail = `${src.slice(end, to)}${to < src.length ? '…' : ''}`.replace(/\s+/g, ' ');
         return { text: head + hit + tail, start: head.length, end: head.length + hit.length };
     };
+    /** Offsets in FOLDED space — walk them back to the source first. */
+    const mark = (raw0, index, length) => {
+        const src = raw0.normalize('NFC');
+        return markAt(src, srcIndex(src, index), srcIndex(src, index + length));
+    };
     // A zero-length match would spin forever, so every loop advances by at least one.
     const push = (segment, index, length) => { out.push(mark(segment, index, length)); return out.length >= limit; };
+    const pushAt = (segment, start, end) => { out.push(markAt(segment, start, end)); return out.length >= limit; };
     for (const segment of Array.isArray(text) ? text : [text]) {
         if (!segment) continue;
         const asRegex = raw.match(REGEX_KEY_RE);
@@ -578,7 +586,7 @@ export function keyExcerpts(key, text, caseSensitive, wholeWords, context = 28, 
                 const re = new RegExp(asRegex[1], asRegex[2].includes('g') ? asRegex[2] : `${asRegex[2]}g`);
                 for (let m = re.exec(segment); m; m = re.exec(segment)) {
                     if (!m[0]) { re.lastIndex += 1; continue; }
-                    if (push(segment, m.index, m[0].length)) return out;
+                    if (pushAt(segment, m.index, m.index + m[0].length)) return out;
                 }
             } catch { /* countKey returned 0 for it too */ }
             continue;

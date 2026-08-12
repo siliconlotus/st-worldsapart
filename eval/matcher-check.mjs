@@ -222,6 +222,11 @@ eq(keyExcerpt('knots', 'Cafe\u0301 and Nai\u0308ve. He knots the rope', false, f
 // because the reader stopped at the first closing one.
 const own = keyExcerpts('rut', 'she said «no rut» today', false, false)[0];
 eq(own.text.slice(own.start, own.end), 'rut', 'offsets select the match even when the source has guillemets');
+// A REGEX runs on the raw segment, so its offsets are already source offsets. Mapping them back through
+// the fold a second time — as the literal paths must — dragged the mark left by one per em-dash and two
+// per ellipsis before the match, which is how `/knot(s|ting)?/` over RP prose rendered as `« He k»nots`.
+eq(keyExcerpt('/knot(s|ting)?/', 'She paused — then again — and sighed… He knots the rope', false, false),
+    '…then again — and sighed… He «knots» the rope', 'a regex hit is not walked back through the fold');
 eq(keyExcerpt('/th\\w+bare/', 'the curtains were threadbare by then', false, false),
     'the curtains were «threadbare» by then', 'regex key: excerpt from the raw text via the pattern');
 eq(keyExcerpt('? thread & curtains', 'threadbare curtains', false, false),
