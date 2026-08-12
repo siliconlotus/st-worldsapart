@@ -455,8 +455,21 @@ apostrophe family, `-` to include the en-dash, `--` and `—` to each other, `..
 Offsets stay in source space because the haystack is never touched, which is the property the excerpt
 path kept losing while this was being worked out.
 
-Structure-aware, since expansion inside a character class must lift it to an alternation, and escapes
-must be left alone — `regexClose`'s ECMA-262 scan already tracks both. **Unimplemented.**
+**Only 1→1 substitutions are generated, and the reason is that a pattern is parsed, not scanned.** A
+one-character swap is LOCAL — `o'?k` becomes `o['’ʼ′]?k` and the quantifier still binds to the quote —
+and splices into a character class as an ordinary member. A multi-character one is not: in `a--?b` the
+two hyphens are a hyphen plus a QUANTIFIED hyphen, so rewriting them to `(?:--|—)?` silently stops
+matching `a-b`. Telling those apart needs a real parse, which a substitution pass does not have. `...`
+is worse — it is already three wildcards, so expanding it would rewrite a wildcard into a literal.
+
+So the generated set is the apostrophe family, the double-quote family, en-dash ↔ hyphen, and
+nbsp ↔ space. Em-dash and ellipsis are left to the author, which is the right cut on intent as well as
+on safety: expansion exists to cover variation nobody can anticipate — a model emitting `’` where the
+author typed `'` — and `--` against `—` is visible in both the pattern and the prose, and writable as
+`(?:--|—)` by anyone who means both.
+
+Structure-aware even so, since a class member must splice rather than nest and escapes must be left
+alone — `regexClose`'s ECMA-262 scan already tracks both. **Unimplemented.**
 
 **`C17` dissolves here** rather than being fixed. The matcher already diverges from core on
 orthography, NFC and Unicode word boundaries; while core activates, that means the audit reports on
