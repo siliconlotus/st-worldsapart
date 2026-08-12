@@ -461,8 +461,8 @@ export function countKey(key, text, caseSensitive, wholeWords, scope) {
  * Shares countKey's exact machinery (foldedHay/fold, wordChar() boundary, regex precedence) rather
  * than re-deriving match rules — but it is DISPLAY, not a matcher: only ever called for keys
  * countKey already counted, so a disagreement can misplace an excerpt, never invent or hide a
- * firing. Excerpts are from the FOLDED haystack (fold is not length-preserving — em-dash → "--" —
- * so indices do not map back to the original text).
+ * firing. Excerpts read from the ORIGINAL text: matches are found in the folded haystack, then the
+ * offsets are walked back through a per-character fold, so the author sees the sentence they wrote.
  *
  * A SINGLE-TERM SmartKey gets an excerpt; a compound one does not. `? =rut` or `? /Cap'n/i` has exactly
  * one thing that can have matched, and it is the case where the excerpt is worth most — a bare count
@@ -492,10 +492,30 @@ export function keyExcerpt(key, text, caseSensitive, wholeWords, context = 28) {
         caseSensitive = node.type === 'REGEX' ? caseSensitive : !!node.isCaseSensitive;
         wholeWords = node.type === 'REGEX' ? wholeWords : !!node.isExact;
     }
-    const mark = (hay, index, length) => {
-        const from = Math.max(0, index - context);
-        const to = Math.min(hay.length, index + length + context);
-        return `${from > 0 ? '…' : ''}${hay.slice(from, index)}«${hay.slice(index, index + length)}»${hay.slice(index + length, to)}${to < hay.length ? '…' : ''}`
+    // EXCERPTS COME FROM THE ORIGINAL TEXT, matches are FOUND in the folded one. The fold lowercases and
+    // rewrites typography (— → --, … → ..., curly quotes → straight), so an excerpt sliced from it showed
+    // the author a sentence they never wrote — wrong case, wrong punctuation — while asking them to judge
+    // a key against it.
+    //
+    // Mapping back is possible because the fold is per character: every rule is one char to one or more,
+    // so walking the source and folding a character at a time yields folded-offset → source-offset exactly.
+    // Derived by CALLING the real fold per character rather than restating its rules, so there is no second
+    // copy to drift. Display-only and called for a handful of hits, so the walk is affordable where it
+    // would not be in the scan.
+    const srcIndex = (src, target) => {
+        let acc = 0;
+        for (let i = 0; i < src.length; i++) {
+            if (acc >= target) return i;
+            acc += (caseSensitive ? normalizeOrthography(src[i]) : fold(src[i])).length;
+        }
+        return src.length;
+    };
+    const mark = (src, index, length) => {
+        const start = srcIndex(src, index);
+        const end = srcIndex(src, index + length);
+        const from = Math.max(0, start - context);
+        const to = Math.min(src.length, end + context);
+        return `${from > 0 ? '…' : ''}${src.slice(from, start)}«${src.slice(start, end)}»${src.slice(end, to)}${to < src.length ? '…' : ''}`
             .replace(/\s+/g, ' ');
     };
     for (const segment of Array.isArray(text) ? text : [text]) {
@@ -504,7 +524,7 @@ export function keyExcerpt(key, text, caseSensitive, wholeWords, context = 28) {
         if (asRegex) {
             try {
                 const m = new RegExp(asRegex[1], asRegex[2].replace('g', '')).exec(segment);
-                if (m && m[0]) return mark(segment, m.index, m[0].length);
+                if (m && m[0]) return mark(segment, m.index, m[0].length);   // regex runs on raw text already
             } catch { /* countKey returned 0 for it too */ }
             continue;
         }
@@ -513,12 +533,12 @@ export function keyExcerpt(key, text, caseSensitive, wholeWords, context = 28) {
         if (wholeWords) {
             try {
                 const m = new RegExp(`(?<!${wordChar()})${escapeRegex(needle)}(?!${wordChar()})`, 'u').exec(hay);
-                if (m) return mark(hay, m.index, m[0].length);
+                if (m) return mark(segment, m.index, m[0].length);
             } catch { /* mirror countKey's failure mode */ }
             continue;
         }
         const i = hay.indexOf(needle);
-        if (i !== -1) return mark(hay, i, needle.length);
+        if (i !== -1) return mark(segment, i, needle.length);
     }
     return null;
 }
