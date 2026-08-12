@@ -2262,6 +2262,54 @@ function defaultSampleName() {
 
 
 /**
+ * "The rest are zeros" — fills every blank grade field with 0.
+ *
+ * A grader works a ranked list top-down and past some rank everything is 0 with the occasional 1. Typing
+ * two dozen zeros to say so is the reason the field used to default to 0, which fabricated a verdict for
+ * every row nobody reached. This is the deliberate version of the same thing: one click at the END of a
+ * pass, asserting that the untouched rows were read and judged irrelevant.
+ *
+ * Writes 0 into the DOM rather than recording a flag, so the sample gains no new semantics: those zeros are
+ * ordinary grades the author affirmed, indistinguishable from typed ones because that is what they are.
+ * Leaving a row blank still means UNGRADED — the difference is that saying so is now the default and
+ * claiming otherwise takes an action.
+ *
+ * UNDO RE-QUERIES rather than holding element references. /wa-super-grade repaints its table on any
+ * prior-round change, which detaches every input, so a captured reference would silently revert nothing.
+ * The filled rows are remembered by their identity attribute instead — `data-key` where the table has one,
+ * else `data-i` — and resolved against the DOM at the moment undo runs.
+ *
+ * @param {HTMLElement} root Container holding the .wa-grade inputs
+ * @returns {{filled: number, undo: () => number}} Count, and a revert that reads the DOM afresh
+ */
+function fillReadZeros(root) {
+    const idOf = input => input.dataset.key ?? input.dataset.i;
+    const touched = new Set();
+    for (const input of root.querySelectorAll('.wa-grade')) {
+        if (String(input.value).trim() === '') {
+            input.value = '0';
+            input.dataset.dirty = '1';
+            touched.add(idOf(input));
+        }
+    }
+    const undo = () => {
+        let reverted = 0;
+        for (const input of root.querySelectorAll('.wa-grade')) {
+            // Only revert a row still holding the 0 this put there — a value edited since is the
+            // author's and outranks the undo.
+            if (touched.has(idOf(input)) && String(input.value).trim() === '0') {
+                input.value = '';
+                delete input.dataset.dirty;
+                reverted += 1;
+            }
+        }
+        touched.clear();
+        return reverted;
+    };
+    return { filled: touched.size, undo };
+}
+
+/**
  * Grades the current scene and writes a self-contained sample for eval/graded-scene-grid.mjs.
  *
  * Runs the real /wa-debug pipeline first, then grades the rows it produced — so the grades attach to the
@@ -2313,54 +2361,6 @@ async function gradeScene(named) {
         return '';
     }
 
-
-    /**
- * "The rest are zeros" — fills every blank grade field with 0.
- *
- * A grader works a ranked list top-down and past some rank everything is 0 with the occasional 1. Typing
- * two dozen zeros to say so is the reason the field used to default to 0, which fabricated a verdict for
- * every row nobody reached. This is the deliberate version of the same thing: one click at the END of a
- * pass, asserting that the untouched rows were read and judged irrelevant.
- *
- * Writes 0 into the DOM rather than recording a flag, so the sample gains no new semantics: those zeros are
- * ordinary grades the author affirmed, indistinguishable from typed ones because that is what they are.
- * Leaving a row blank still means UNGRADED — the difference is that saying so is now the default and
- * claiming otherwise takes an action.
- *
- * UNDO RE-QUERIES rather than holding element references. /wa-super-grade repaints its table on any
- * prior-round change, which detaches every input, so a captured reference would silently revert nothing.
- * The filled rows are remembered by their identity attribute instead — `data-key` where the table has one,
- * else `data-i` — and resolved against the DOM at the moment undo runs.
- *
- * @param {HTMLElement} root Container holding the .wa-grade inputs
- * @returns {{filled: number, undo: () => number}} Count, and a revert that reads the DOM afresh
- */
-function fillReadZeros(root) {
-    const idOf = input => input.dataset.key ?? input.dataset.i;
-    const touched = new Set();
-    for (const input of root.querySelectorAll('.wa-grade')) {
-        if (String(input.value).trim() === '') {
-            input.value = '0';
-            input.dataset.dirty = '1';
-            touched.add(idOf(input));
-        }
-    }
-    const undo = () => {
-        let reverted = 0;
-        for (const input of root.querySelectorAll('.wa-grade')) {
-            // Only revert a row still holding the 0 this put there — a value edited since is the
-            // author's and outranks the undo.
-            if (touched.has(idOf(input)) && String(input.value).trim() === '0') {
-                input.value = '';
-                delete input.dataset.dirty;
-                reverted += 1;
-            }
-        }
-        touched.clear();
-        return reverted;
-    };
-    return { filled: touched.size, undo };
-}
 
     // GRADEABLE MEANS THE RUNTIME CLASS IS `dynamic` — WA chose it this turn. The other two are excluded
     // for different reasons, and neither is a relevance judgement WA can be scored on:
