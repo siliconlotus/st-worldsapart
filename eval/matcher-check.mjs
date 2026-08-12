@@ -92,6 +92,10 @@ eq(countKey('nope', 'nothing here', false, false), 0, 'no match is zero');
 
     setBoundaryMode('nonsense');
     eq(countKey('Joe', "that is Joe's coat", false, true), 0, 'an unknown mode falls back to the default');
+    // An inherited name is an unknown mode too. `in` accepted these, and the fallback that makes the
+    // line above pass never ran — the class became a Function and every whole-word key answered 0.
+    setBoundaryMode('constructor');
+    eq(countKey('Joe', 'Joe arrived', false, true), 1, 'a prototype property name is not a mode');
     setBoundaryMode('strict');
 
     // Substring mode never reads the class at all.

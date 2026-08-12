@@ -78,12 +78,41 @@ eq(countKey('Joe', "that is Joe's coat", false, true), 0, '...which is the same 
     eq(codes('? /re/ -drill'), '', 'a regex is a positive contributor, so this is not negation-only');
     eq(codes('? /(/'), 'error:regex-invalid', 'a pattern new RegExp refuses is an error');
     eq(codes('? /re'), 'error:regex-unterminated', 'an unterminated pattern is an error');
+    // An empty pattern IS terminated, so it gets its own code rather than being called unterminated —
+    // the delimiter the old message sent the author looking for was already there.
+    eq(codes('? //'), 'error:regex-empty', 'an empty pattern is empty, not unterminated');
+    eq(codes('? //g'), 'error:regex-empty', '...and flags do not make a body');
     eq(countKey('? /re', 'anything /re', false, false), 0, '...and counts 0, so it cannot half-fire');
     // Value-reading checks skip it: a pattern is punctuation by nature.
     eq(codes('? /[^"]+/'), '', 'punctuation-term and stray-quote do not read a pattern');
     // A path-shaped token changes meaning, and that is the point.
     eq(countKey('? /home/user/file', '/home/user/file', false, false), 2, 'a path is now a pattern plus a stray term, and both score');
     eq(matches('? /home/user/file', 'the home user file'), false, '...so the bare-word reading is gone');
+
+    // A BARE regex key core reads differently. WA runs it as a pattern; core refuses any pattern whose
+    // delimiter is unescaped inside it and matches the whole string as literal text instead, which no
+    // prose contains — so the key never activates and nothing says so. The matcher is unchanged; this
+    // is the only thing validateSmartKey has to say about a key with no `?`.
+    eq(codes('/and/or/'), 'warn:regex-core-refuses', 'a bare regex core will refuse is flagged');
+    eq(codes('/24/7/'), 'warn:regex-core-refuses', '...whatever the pattern is; the slash is the fault');
+    eq(codes('/and\\/or/'), '', '...and escaping the inner slash clears it, because core then reads it');
+    eq(codes('/fire/'), '', 'a pattern with no inner slash was never in question');
+    eq(codes('fire'), '', 'a plain key still gets no opinion at all');
+    eq(codes('? /and/or/'), '', 'and a SmartKey does not reach the bare-key check');
+    // The hatch the warning points at has to be the one that works: quoting is a TERM rule, so the
+    // bare form keeps its quotes as characters and matches neither reading.
+    eq(countKey('? "/and/or/"', 'the config at /and/or/ is set', false, false), 1, '? "…" is the literal hatch');
+    eq(countKey('"/and/or/"', 'the config at /and/or/ is set', false, false), 0, '...and a bare "…" is not one');
+    // The warning names the term as TYPED, and the hatch it names has to be typeable. JSON.stringify
+    // rendered `/a\/b/c/` as `/a\\/b/c/`, so the sentence told the author to type a different key.
+    const msg = k => validateSmartKey(k)[0].message;
+    eq(msg('/a\\/b/c/').includes('use ? "/a\\/b/c/".'), true, 'the hatch quotes the term as typed, not JSON-escaped');
+    eq(countKey('? "/a\\/b/c/"', 'path /a\\/b/c/ here', false, false), 1, '...and that hatch matches the literal');
+    // A term already holding a `"` has no hatch — the quote would close the term early — so the
+    // sentence is dropped rather than printed wrong.
+    eq(msg('/say "hi"/there/').includes('use ?'), false, 'no hatch is offered when quoting cannot work');
+    // The flag is advisory only — WA still counts it, which is what makes it a warn rather than an error.
+    eq(countKey('/and/or/', 'take and/or leave', false, false), 1, 'the matcher still runs it as a pattern');
 }
 console.log('ok   regex terms: leftmost close, flags then weight, negatable, fold-exempt, validated');
 

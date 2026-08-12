@@ -629,7 +629,8 @@ export async function lorebookStudio(preferredBook = null) {
      * WARNING lets it through and says why. Both come from validateSmartKey, so what the Studio blocks
      * and what the audit flags cannot drift apart — one definition, two surfaces.
      *
-     * Plain and regex keys get no opinion, so this is inert for everything but `?` SmartKeys.
+     * Plain keys get no opinion. A regex key gets exactly one: a warning when core would refuse the
+     * pattern and so never activate it. Everything else here is a `?` SmartKey.
      *
      * Refusing rather than warning on the error tier is the point: these are SmartKeys that cannot do
      * what their author meant under any text, and the alternative — saving it and flagging it later —

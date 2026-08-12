@@ -65,7 +65,10 @@ let boundaryMode = 'strict';
  * shipped default, which is what makes their numbers claims about what ships.
  * @param {'permissive'|'strict'} mode Unknown values fall back to the default.
  */
-export const setBoundaryMode = mode => { boundaryMode = mode in BOUNDARY_CLASSES ? mode : 'strict'; };
+// Own-property, not `in`: `in` walks the prototype chain, so 'constructor' and 'toString' passed as
+// modes and wordChar() then returned a Function, which template-literals into a regex that throws
+// inside countKey's own catch — whole-word matching silently answering 0 for every key.
+export const setBoundaryMode = mode => { boundaryMode = Object.hasOwn(BOUNDARY_CLASSES, mode) ? mode : 'strict'; };
 
 /** The live boundary class, as a regex-source string. A function, not a const, so a mode change
  *  cannot leave a stale class baked into a caller's template literal. */
@@ -129,6 +132,22 @@ export function wholeWordAdvice(keys, wholeWords) {
  * the smartkeys registry import this so all three can never disagree on what counts as a regex key. */
 export const REGEX_KEY_RE = /^\/(.+)\/([gimsuy]*)$/;
 export const isRegexKey = k => REGEX_KEY_RE.test(String(k));
+
+/**
+ * Core's OWN reading of the same string — `parseRegexFromString` in `world-info.js`, mirrored. It
+ * differs from `isRegexKey` in two ways, and both are core's rule rather than ours: a pattern
+ * carrying an unescaped `/` is refused outright (core's comment gives portability to other regex
+ * engines as the reason, not meaning), and `[\w\W]` spans a newline where our `.` does not.
+ *
+ * Not a second matcher — nothing counts with this. It exists so `validateSmartKey` can say that core
+ * will not activate a key WA is willing to run, which is a fact about the two implementations and
+ * needs no theory of what the author meant. `isRegexKey` stays the matcher's test.
+ */
+const CORE_REGEX_KEY_RE = /^\/([\w\W]+?)\/([gimsuy]*)$/;
+export function coreReadsAsRegex(k) {
+    const m = String(k).match(CORE_REGEX_KEY_RE);
+    return !!m && !/(^|[^\\])\//.test(m[1]);
+}
 
 /**
  * Occurrences of a `/pattern/flags` key. Its own function because a regex key can now appear in TWO

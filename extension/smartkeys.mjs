@@ -31,7 +31,7 @@
 // Isomorphic like ranking.mjs: no DOM, no ST imports. Entry point is evaluateSmartKey();
 // countKey() in ranking.mjs routes `?` keys here.
 
-import { escapeRegex, isRegexKey, wordChar, foldedHay, countRegexKey, REGEX_KEY_RE } from './matcher.mjs';
+import { escapeRegex, isRegexKey, wordChar, foldedHay, countRegexKey, REGEX_KEY_RE, coreReadsAsRegex } from './matcher.mjs';
 // The literal matcher and its text fold live under plugin/ so the server can use them too — one copy, or
 // the browser and the server would silently disagree about what a key matches. Re-exported because
 // ranking.mjs, keyword-tools.mjs and studio.mjs all import them from here.
@@ -230,8 +230,10 @@ const hasPositiveTerm = (node, negated = false) => {
 };
 
 /**
- * Structural problems in a SmartKey, for the Studio's save check and the audit — one definition, so
- * the two surfaces cannot disagree about what is valid.
+ * Structural problems in a key, for the Studio's save check and the audit — one definition, so the
+ * two surfaces cannot disagree about what is valid. Almost everything here is about a `?` SmartKey;
+ * the one exception is a bare `/re/` key core and WA read differently, which is checked and returned
+ * before the SmartKey body because it is the same question — will this key do what it looks like.
  *
  * STRUCTURE ONLY. Whether a term ever occurs is a question about a book's text, and belongs to the
  * audit's df machinery rather than here; this needs nothing but the string.
@@ -246,7 +248,30 @@ const hasPositiveTerm = (node, negated = false) => {
 export function validateSmartKey(raw) {
     const out = [];
     const src = String(raw ?? '');
-    if (!src.trim().startsWith('?')) return out;   // not a SmartKey; nothing to say
+    if (!src.trim().startsWith('?')) {
+        // A BARE regex key the two implementations read differently: core refuses a pattern whose
+        // delimiter appears unescaped inside it and matches the whole delimited string as literal
+        // text, where WA runs it as a pattern. Neither reading is dead — core's fires wherever the
+        // delimited form itself appears — so this says what each side does and leaves what was meant
+        // to the author. WARN, not error: the matcher's reading is unchanged.
+        //
+        // The literal hatch is `? "…"`, NOT `"…"`. Quoting is a SmartKey term rule; a bare key keeps
+        // the quotes as characters and then matches neither reading.
+        //
+        // The term goes in RAW, in typographic quotes. JSON.stringify renders a JSON view of it —
+        // `/a\/b/c/` came back as `/a\\/b/c/` — so the hatch instructed the author to type a string
+        // that was not their key. A key already containing a `"` has no hatch at all, because the
+        // quote would close the term early, so that sentence is dropped rather than made wrong.
+        const bare = src.trim();
+        if (isRegexKey(bare) && !coreReadsAsRegex(bare)) {
+            const hatch = bare.includes('"') ? '' : ` If you want the literal string, use ? "${bare}".`;
+            out.push({
+                severity: 'warn', code: 'regex-core-refuses',
+                message: `SillyTavern matching reads “${bare}” as literal text, not a pattern; WA treats it as a pattern.${hatch}`,
+            });
+        }
+        return out;   // not a SmartKey; nothing further to say
+    }
     const tokens = tokenize(src);
     // A REGEX counts as a term for no-terms, for hasPositiveTerm and for all-zero-weights. Without
     // that, `? /re/` reported no-terms and `? /re/ -drill` reported negation-only — both fatal, and
@@ -307,12 +332,23 @@ export function validateSmartKey(raw) {
     // no closing delimiter, which is exactly what REGEX_KEY_RE refuses.
     for (const t of terms) {
         if (t.type !== 'REGEX') continue;
-        const m = String(t.value).match(REGEX_KEY_RE);
+        const val = String(t.value);
+        const m = val.match(REGEX_KEY_RE);
         if (!m) {
-            out.push({
-                severity: 'error', code: 'regex-unterminated',
-                message: `The pattern ${JSON.stringify(String(t.value))} has no closing “/”, so it can never match. Close it, or quote the term to search for it as text.`,
-            });
+            // TWO ways to fail REGEX_KEY_RE, and they need different sentences. `regexClose` is what
+            // the lexer used to cut this token, so it is also what says which: no closing delimiter at
+            // all, or one found with nothing before it. `//` reported "no closing /" while holding one,
+            // sending the author to look for a delimiter that was already there.
+            const terminated = regexClose(val) !== -1;
+            out.push(terminated
+                ? {
+                    severity: 'error', code: 'regex-empty',
+                    message: `The pattern ${JSON.stringify(val)} is empty, so it can never match. Put a pattern between the slashes, or quote the term to search for it as text.`,
+                }
+                : {
+                    severity: 'error', code: 'regex-unterminated',
+                    message: `The pattern ${JSON.stringify(val)} has no closing “/”, so it can never match. Close it, or quote the term to search for it as text.`,
+                });
             continue;
         }
         try {

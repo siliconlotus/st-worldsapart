@@ -422,8 +422,10 @@ from, and `? /a/ /b/` would collapse into one pattern. `\/` writes a literal sla
 weight after its closing quote. **No `=`/`^` prefix on this branch**: `=` is meaningless on a pattern,
 and `^` is a no-op because a regex is already case-sensitive. `/i` is how insensitivity is written.
 
-**Unterminated, or a pattern `new RegExp` refuses, is a validator error** — both are facts about the
-string, so they clear the same bar the surviving checks clear rather than guessing at intent.
+**Unterminated, empty, or a pattern `new RegExp` refuses, is a validator error** — all three are facts
+about the string, so they clear the same bar the surviving checks clear rather than guessing at intent.
+Empty is its own code: `//` is terminated, and calling it unterminated sends the author looking for a
+delimiter that is already there. `regexClose` is what separates them, being what cut the token.
 
 **A regex is a term for counting and for positivity.** `no-terms` counts it, and `hasPositiveTerm`
 treats it as a positive contributor, as it does a spliced `?` subtree. The validator reads `TERM`
@@ -443,6 +445,23 @@ one every other layer already gives a slash-delimited key.
 **The evaluator grows one node.** `REGEX` carries the raw key and its weight, has no `acIndex`, and
 skips pass 1 — structurally a `TERM` that never uses the candidate filter. It shares `countRegexKey`
 with `countKey`, so `countKey is the only matcher` holds across the regex path too.
+
+**A bare `/re/` key is WA's reading, not core's, and the gap is flagged rather than closed.** Core's
+`parseRegexFromString` refuses a pattern whose delimiter appears unescaped inside it — its own comment
+gives portability to other regex engines as the reason — and falls back to matching the whole
+delimited string as literal text. `REGEX_KEY_RE` does not refuse it, so `/and/or/` is the pattern
+`and/or` here and the literal `/and/or/` there. WA keeps its reading: core's refusal is an
+implementation detail rather than a meaning, which is the ground every divergence in this document
+stands on.
+
+Neither reading is dead — core's fires wherever the delimited form itself appears — so the two differ
+only on text carrying one form and not the other, and core owns activation until Bucket 2. The size of
+that gap tracks the key: a long specific pattern (`/home/user/some_folder/`) occurs in neither form, so
+nothing observable turns on it, and a short common one (`/and/or/`) occurs in the stripped form often
+but is a key nobody would author for relevance. `validateSmartKey` warns (`regex-core-refuses`) rather
+than either side deciding — the only thing it has to say about a key with no `?`. `coreReadsAsRegex` in
+`matcher.mjs` is core's rule mirrored for that warning, and counts nothing. The literal hatch it points
+at is `? "…"`: quoting is a term rule, so a bare `"…"` keeps the quotes as characters.
 
 ---
 
