@@ -59,6 +59,23 @@ intent survives the takeover: `scanDepth` still wins over every global, `scanDep
 "match nothing from chat", `@@dont_activate` is never overridden by the union, `@@activate` is never
 revoked by the prune, and a forced entry still takes core's probability roll.
 
+**The system makes exactly ONE relevance decision, and it makes it at stage 4.** Everything earlier is
+either an author's declaration or a mechanical bound, and neither is a judgement WA is entitled to
+make on its own. Stage 1 and 2 ADMIT — generously, cheaply, on rules that need no taste; stage 4
+arbitrates, once, over the whole heterogeneous set, on the layout ranking that is the only place all
+three signals and the real constraint meet.
+
+This is the principle behind most of the queue below, and the queue reads as unrelated items without
+it. The stage-1 elbow is a relevance judgement made early, on a ranking that cannot see keys, against
+a budget it does not know about. The tier rule removes a population from the only ranking that
+arbitrates. Trigger provenance excluding a recursed entry is a judgement dressed as bookkeeping.
+`maxVectorEntries` is budget allocation enforced two stages before the budget exists.
+
+What it does NOT absorb, because these are not WA's calls: an author's declarations (`constant`,
+`delayUntilRecursion`, `preventRecursion`, `excludeRecursion`, `disable`), core's own gates, and the
+admission bound itself — a ceiling that stops a pathological scene feeding a recursion pass is a
+safety limit, not a verdict on relevance.
+
 **Two tiers of relevance, and only one is rankable.** A keyword-activated reference entry is relevant
 because its trigger fired — *triggered == relevant*: the author declared the presence conditions in
 the keys, so activation IS delivery, and the only judgement left is whether the trigger deserved to
