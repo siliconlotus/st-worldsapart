@@ -402,6 +402,13 @@ behaviour is acceptable under the least-surprise principle rather than an except
 
 ## Regex terms in a SmartKey
 
+**Decided on principle, and the corpus cannot adjudicate it.** Regex keys on disk: **2** of 46,226
+keys, in 2 of 41 books (`/salar(y|ies)/`, `/^sons?$/`), neither carrying an internal slash; `?` keys
+containing a `/` at all: 0 of 148. So every rule below rests on ONE SYNTAX HAVING ONE READING, not on
+observation, and a count here can only size exposure — it can never be the reason for a call or the
+reason against one. Worked examples in this section are demonstrations of a mechanism, not samples;
+where a claim is genuinely measured it says so and names the measurement.
+
 **Ruled: `/pattern/flags` is a TERM.** A `/re/` key is evaluated as a pattern everywhere else it
 appears — core's `matchKeys` and `countKey` both branch on it — and the literal reading survives in
 exactly one place, inside a SmartKey, where `tokenize` hands `evaluate` a bare word. Nobody chose that;
@@ -482,10 +489,9 @@ stands on.
 
 **The two readings are not symmetric, and that decides the message.** Core's fires only where the
 whole DELIMITED string occurs — `/(home/user|~/user)/file/`, slashes and all — where WA's fires
-wherever the pattern does. **Measured**, one text carrying both path forms: WA 2, core 0. Say it as
-the mechanism, not as a verdict — core's reading CAN hit, and "does nothing" is a claim about all
-prose that no measurement here supports. An earlier draft went the other way and called the two
-readings equally live, sizing the gap by how common the pattern was; that is the same error inverted.
+wherever the pattern does. That is read off the two expressions, not sampled. Say it as the mechanism
+and stop: core's reading CAN hit, so "does nothing" is a verdict about all prose, and an earlier draft
+calling the two readings equally live was the same error inverted.
 
 So there are four things an author can have meant, and only one wants anything done. Written for stock
 ST as a pattern: core was silently dead and WA repairs it. Meant to evaluate under WA: it already
@@ -528,8 +534,9 @@ contribution that competes and loses.
 **Primary keys are unaffected at any setting — except an anchored regex.** A single-word key's
 occurrence count is slice-invariant and a multi-word key cannot span the `\n` join, but `keywordScore`
 hands `countKey` one segment at a time, so `^` and `$` in a `/regex/` key are SEGMENT-relative.
-**Measured**: `/^Doc/` counts 1 paragraph-scoped and 0 at `scan` over the same text, while `/^Doc/m`
-counts 1 either way — paragraph splitting happens at a blank line, which is a line boundary under both.
+Worked, not sampled: `/^Doc/` counts 1 paragraph-scoped and 0 at `scan` over one constructed text,
+while `/^Doc/m` counts 1 either way — paragraph splitting happens at a blank line, which is a line
+boundary under both, so the behaviour follows from the anchors rather than from the example.
 Ruled by the uniformity above rather than separately: `/m` is already the setting-independent form, so
 exempting regexes from segmentation would buy nothing that is not writable. Authors want `/m` — at
 `scan` a bare `^` anchors to exactly one position in the whole window. Everything else the setting

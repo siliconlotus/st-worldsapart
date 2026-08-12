@@ -67,8 +67,9 @@ const OPS = {
  * ECMA-262's RegularExpressionLiteral has them. `\/` writes a literal slash and is what core
  * requires for portability, so escaping also collapses the WA/core divergence (regex-core-refuses).
  *
- * The compile is the one semantic step in the lexer. Bounded: only tokens opening with `/` reach it,
- * ASTs are cached per key, and measured across 41 books, 0 of 148 `?` keys contain a `/` at all.
+ * The compile is the one semantic step in the lexer. Bounded: only tokens opening with `/` reach it
+ * and ASTs are cached per key. Exposure, not justification — the rule stands on one syntax having one
+ * reading, and the books on disk hold 2 regex keys in 46,226, so they cannot speak to it either way.
  *
  * @param {string} s A string whose first character is `/`
  * @returns {{value: string, rest: string}|null} The `/pattern/flags` token and what follows
