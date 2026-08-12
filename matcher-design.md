@@ -534,9 +534,8 @@ contribution that competes and loses.
 **Primary keys are unaffected at any setting — except an anchored regex.** A single-word key's
 occurrence count is slice-invariant and a multi-word key cannot span the `\n` join, but `keywordScore`
 hands `countKey` one segment at a time, so `^` and `$` in a `/regex/` key are SEGMENT-relative.
-Worked, not sampled: `/^Doc/` counts 1 paragraph-scoped and 0 at `scan` over one constructed text,
-while `/^Doc/m` counts 1 either way — paragraph splitting happens at a blank line, which is a line
-boundary under both, so the behaviour follows from the anchors rather than from the example.
+`/^Doc/` counts 1 paragraph-scoped and 0 at `scan`, while `/^Doc/m` counts 1 either way. That follows
+from the anchors: paragraph splitting happens at a blank line, which is a line boundary under both.
 Ruled by the uniformity above rather than separately: `/m` is already the setting-independent form, so
 exempting regexes from segmentation would buy nothing that is not writable. Authors want `/m` — at
 `scan` a bare `^` anchors to exactly one position in the whole window. Everything else the setting
