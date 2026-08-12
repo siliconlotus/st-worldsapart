@@ -102,20 +102,12 @@ of bucket 2 except where noted.
 
 ## The queue, ordered by user-visible harm
 
-Four items are outstanding across this doc, and they are ordered by whether a user can see the
+Three items are outstanding across this doc, and they are ordered by whether a user can see the
 difference — not by how tidy the fix is, and **not by how many instances the books on disk hold**.
 A permitted input occurs whether or not this author has written one; corpus counts size a known
 effect and never dismiss a case.
 
-1. **`stray-quote` is fatal on keys that lex correctly.** The check flags any term whose VALUE contains
-   a `"`, so `? 6" copper pipe` — three terms, scoring 3 against *"that copper pipe is 6" in
-   diameter"* — is reported as an error, and `activatableKeys` bars it from activating while
-   `countKey` goes on scoring it. The predicate wants to be `!quoted && startsWith('"')`, the only
-   shape the lexer can produce from an unterminated quote. **Ruled: no escape for a quote inside a
-   quoted term.** All one buys is a phrase term containing a quote, which is what a plain key is for —
-   see `SMARTKEYS.md`, "which form to reach for". The doubled-quote design (`? "6"" pipe"`, verified
-   to leave every working construction byte-identical) is worked out if a want ever appears.
-2. **"Match Whole Words means what it says", and the Studio flag that ships with it** (ruled below).
+1. **"Match Whole Words means what it says", and the Studio flag that ships with it** (ruled below).
    The unconditional half — multi-word keys stop being exempt — narrows 430 keys across 66 entries, so
    the fix and the warning are one item rather than two. **The flag is structural**, computable from
    the entry with no text and no second matcher, and it has exactly two triggers: box ticked AND
@@ -130,9 +122,9 @@ effect and never dismiss a case.
    > Japanese sentence.
    Name the script the flag actually detected rather than listing two, or a Thai author reads copy
    about languages that are not theirs.
-3. **Regex terms in a SmartKey** (below). Decided, unimplemented. A `? /re/ x` key is writable today and
+2. **Regex terms in a SmartKey** (below). Decided, unimplemented. A `? /re/ x` key is writable today and
    silently matches the five literal characters, so it is a wrong answer rather than a missing feature.
-4. **The `keysecondary` conversion** (bucket 2). Architectural. No user-visible change in either
+3. **The `keysecondary` conversion** (bucket 2). Architectural. No user-visible change in either
    direction, because the two routes score identically.
 
 ### Documentation owed when each lands
@@ -140,18 +132,16 @@ effect and never dismiss a case.
 `SMARTKEYS.md` describes what WORKS, so it must not be written ahead of the code. Collected here
 because the debt has been accumulating across items:
 
-- **1, `stray-quote`.** Nothing. The validator table already says "an unclosed quote", which is what
-  the corrected predicate detects — the table describes the intent and the code is what diverges.
-- **2, whole words.** The "Substring by default" paragraph, rewritten around the `hot tub` / `hot tubs`
+- **1, whole words.** The "Substring by default" paragraph, rewritten around the `hot tub` / `hot tubs`
   example: the checkbox reaches multi-word keys, affixes stop being boundaries under strict, and the
   Permissive/Strict setting with its two descriptions. Plus the CJK note. Until it lands that paragraph
   must keep describing core's exemption, because that is what ships.
-- **3, regex terms.** Four places: the grammar block; the three-forms table at the top, since a regex
+- **2, regex terms.** Four places: the grammar block; the three-forms table at the top, since a regex
   stops being only a whole-key form; the validator table, which gains unterminated and unparseable;
   and "for anything more, use a `/regex/` key", which becomes advice about terms. Plus the anchor note
   — at `scan` a bare `^` anchors to one position in the whole window, and `/m` is the form that does
   not move with `matchWindow`.
-- **4, the conversion.** Nothing user-facing; it is behaviour-neutral by construction. Internally
+- **3, the conversion.** Nothing user-facing; it is behaviour-neutral by construction. Internally
   `secondaryOk` goes and `synthesis-check.mjs` is rewritten rather than re-run.
 
 The reason this section exists: `SMARTKEYS.md` claimed "SmartKeys rank, they do not yet activate"

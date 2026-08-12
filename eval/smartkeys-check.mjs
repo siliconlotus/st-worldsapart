@@ -155,6 +155,13 @@ console.log('ok   weight delimiter is ::, single colon is ordinary text');
     eq(codes('? '), 'error:no-terms', 'an empty query can never match');
     eq(codes('? ()'), 'error:no-terms', 'an empty group has no terms');
     eq(codes('? fire "water'), 'error:stray-quote', 'an unclosed quote leaves the quote in the term');
+    // ...and ONLY an unclosed one. An inch mark, a seconds mark or a closing quote mid-term is
+    // ordinary text — the lexer only ever puts a `"` FIRST when the quoted branch failed to close.
+    eq(codes('? 6" copper pipe'), '', 'an inch mark is text, not a broken quote');
+    eq(codes('? 5\'10" barefoot'), '', 'feet and inches together are text');
+    eq(codes('? say"what'), '', 'a quote inside a bare word is text');
+    eq(codes('? ="moon mission"'), '', 'a properly closed quoted phrase with a flag is clean');
+    eq(codes('? fire ="water'), 'error:stray-quote', 'a flagged unclosed quote is still unclosed');
 
     eq(codes('? (fire | water'), 'warn:unbalanced-parens', 'unbalanced parens parse, but probably not as grouped');
     eq(codes('? fire::0'), 'warn:all-zero-weights', 'a zero-weight key gates without scoring');

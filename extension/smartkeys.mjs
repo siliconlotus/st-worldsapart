@@ -229,8 +229,14 @@ export function validateSmartKey(raw) {
         }
     }
 
+    // An UNCLOSED quote, which is the only shape the lexer can produce from one: the quoted
+    // alternative needs a closing `"`, so `? "moon` falls through to the bare-word branch and keeps
+    // the quote as the first character of the value. Anywhere else a `"` is ordinary text —
+    // `? 6" copper pipe` is three terms that score 3 against *that copper pipe is 6" in diameter*,
+    // and flagging its VALUE (which is what this did) made a working key fatal, so `activatableKeys`
+    // barred it from activating while countKey went on scoring it. Reads structure, not intent.
     for (const t of terms) {
-        if (String(t.value).includes('"')) {
+        if (!t.quoted && String(t.value).startsWith('"')) {
             out.push({
                 severity: 'error', code: 'stray-quote',
                 message: 'Unclosed quote — close the phrase, or remove the quote.',

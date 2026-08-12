@@ -541,7 +541,8 @@ export function hasDecorator(entry, name) {
 }
 
 /** Keys an activation verdict may rest on: non-blank, and no validator ERROR — `negation-only`
- *  matches on absence (nearly everywhere), `no-terms` never, `stray-quote` unpredictably. */
+ *  matches on absence (nearly everywhere), `no-terms` never, `stray-quote` on a phrase whose opening
+ *  delimiter was swallowed into the first word, so on nothing the author wrote. */
 const activatableKeys = keys => (Array.isArray(keys) ? keys : [])
     .filter(k => String(k ?? '').trim() && !validateSmartKey(k).some(f => f.severity === 'error'));
 
