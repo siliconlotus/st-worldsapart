@@ -464,8 +464,11 @@ a SmartKey — `classify` discarded both for years while `runBatch` computed the
 heuristics that read a key AS A LITERAL STRING stay exempt (English-common, fragment, short), because
 the matching surface of `/sal(a|e)/` is its pattern and not the characters it is written with. Without
 this a pattern had no oversight anywhere: the validator skips value checks on patterns by design, so
-`/\n/` firing on every multi-line message drew not one word from any tool. Cost: `registerKeys` skips
-regex keys, so they miss the Aho-Corasick batching and cost one regex execution per entry.
+`/\n/` firing on every multi-line message drew not one word from any tool. `registerKeys` skips regex
+keys, so they miss the Aho-Corasick batching and pay a compile and a scan per entry; **measured**, 100
+regex keys x 300 entries x ~1KB is 9.8 ms when nothing matches and 18.4 ms at 630,000 hits, against a
+Studio open already costing hundreds. A compile is ~0.1 microseconds and V8 caches by source, so
+caching them would recover ~5 ms of that and is not worth the code.
 
 **A regex is a term for counting and for positivity.** `no-terms` counts it, and `hasPositiveTerm`
 treats it as a positive contributor, as it does a spliced `?` subtree. The validator reads `TERM`
