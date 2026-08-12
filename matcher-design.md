@@ -496,7 +496,10 @@ in it, because escaping serves core and nothing else.
 
 Bucket 2 also removes the premise the warning was first justified on. Core no longer owns activation
 (`ownActivation`, default on), and this document's own principle is that divergence is free once WA
-owns it. What survives is portability alone: a book opened without WA, where the key does nothing. `validateSmartKey` warns (`regex-core-refuses`) rather
+owns it. What survives is PORTABILITY, and `SMARTKEYS.md` carries it as a conditional rather than as
+advice on the warning: write a pattern with unescaped slashes and plan to port it to a non-WA system,
+and you must escape them for vanilla ST to evaluate it. Escaping is free under WA (`\/` and `/` are
+one character to a regex), so that is a choice about where the book will run, not a fix to a key. `validateSmartKey` warns (`regex-core-refuses`) rather
 than either side deciding. `coreReadsAsRegex` in `matcher.mjs` is core's rule mirrored for that
 warning, and counts nothing. It reaches SmartKey TERMS as well as bare keys, since the term rule became
 the whole-key rule — before that the scan cut a slash-bearing pattern apart before anything could ask

@@ -113,10 +113,8 @@ The rules are the ones the rest of the grammar already follows:
 - **A `/…/` term reads exactly as the same string reads as a whole key.** `? /home/user/lux/` is the
   pattern `home/user/lux`, and `? /home/user/file` is the literal text, because that is what each of
   them is without the `?`. Two patterns in one key stay two: `? /a/ /b/` is two terms.
-- **A slash inside the pattern is fine.** WA runs it either way. Stock SillyTavern refuses any pattern
-  with an unescaped `/` inside and matches the delimited string as literal text instead — so if the
-  book has to work without WA, write `\/` and both read it the same way. The Studio says which case
-  a key is in.
+- **A slash inside the pattern is fine.** WA runs `/(home/user|~/user)/file/` as the pattern it looks
+  like, whole key or term. See the portability note below if the book will travel.
 - **A term that follows a pattern needs a space.** `? /[/]/ x`, not `? /[/]/x`. If you wanted the two
   adjacent, put them in the pattern: `? /\/x/`.
 - **Flags come after the close, then the weight**: `/fire/gi::2`, the same order a quoted term uses.
@@ -130,6 +128,22 @@ The rules are the ones the rest of the grammar already follows:
   window. `/m` behaves the same at every setting, which is usually what you want.
 
 To search for the literal characters, quote the term: `? "/re/"`.
+
+### Porting a pattern to a non-WA SillyTavern
+
+If you write a regex containing unescaped slashes and plan to port it to a non-WA system, you must
+escape the slashes for vanilla SillyTavern to evaluate it. Its matcher refuses any pattern with an
+unescaped `/` inside — the reason given in its source is portability to other regex engines — and
+looks for the whole delimited string as literal text instead, so the pattern never runs there.
+
+```
+/(home/user|~/user)/file/         WA: pattern.   vanilla ST: the literal 25 characters.
+/(home\/user|~\/user)\/file/      both: pattern. Identical matches; `\/` is just `/` to a regex.
+```
+
+Escaping costs nothing under WA — `\/` and `/` are the same character to a pattern — so a book that
+may be shared is worth writing the escaped way. The Studio warns on any key in the first row's shape,
+and says nothing about the second. This applies to a bare `/regex/` key and to a `/…/` term alike.
 
 **Scoring.** A term scores `weight × occurrences`. `AND` and `OR` both **sum** — `? (glasses OR
 spectacles)` counts every mention of the concept however it was spelled — and a branch that did not
@@ -182,7 +196,8 @@ between**. `? 6" copper pipe` fires on *"that copper pipe is 6" in diameter"*, w
 ## What the Studio will tell you
 
 Saving a `?` key runs a structural check. It reads the SmartKey's shape only — never a guess at what you
-meant, because every check that guessed produced false positives on real titles.
+meant, because every check that guessed produced false positives on real titles. The last row applies to
+a bare `/regex/` key as well, which is the one thing the Studio has to say about a key with no `?`.
 
 | | |
 |---|---|
@@ -193,6 +208,7 @@ meant, because every check that guessed produced false positives on real titles.
 | **warn** | a punctuation-only term (usually a second `?`: only the first one is the sentinel) |
 | **warn** | unbalanced parens — it still parses, but probably not the way you grouped it |
 | **warn** | every term weighted 0, so the key gates without scoring |
+| **warn** | a `/pattern/` with an unescaped `/` inside — vanilla SillyTavern will not run it (above) |
 
 Whether a term ever actually occurs in your book is a different question, and the audit answers it.
 
