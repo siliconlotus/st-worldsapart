@@ -154,8 +154,14 @@ export function wiTooltip({ item, block }) {
  * THE MATCH INSIDE THE EXCERPT IS THE POINT, and keyExcerpt hands it over wrapped in guillemets. Those
  * become colour here: `«prototype»s` reads as punctuation the author wrote, and the whole reason to show an
  * excerpt is to see WHERE a key landed — which for a substring or a regex is not deducible from the key.
- * Marked in the key's own blue, because it is the key, in context; the guillemets go, since colour and the
- * surrounding dim text already delimit it.
+ * Marked in the key's own colour, because it is the key, in context; the guillemets go, since colour and
+ * the surrounding dim text already delimit it.
+ *
+ * COLOURS COME FROM THE THEME, not from constants. A hard-coded blue is a bet that every user's background
+ * is the one it was picked against, and it lost on a black theme. `--SmartThemeQuoteColor` is what ST
+ * already uses to make quoted text stand out from body text, which is this exact job, and
+ * `--SmartThemeEmColor` is its emphasis pair — both move with the user's theme. Literal fallbacks stay for
+ * a theme that defines neither.
  *
  * Colour is reinforcement, not the only cue: position orders the line (key, count, excerpt), and the
  * matched span sits at full opacity inside a dimmed excerpt, so it survives being read without colour.
@@ -164,11 +170,11 @@ export function wiTooltip({ item, block }) {
  * @returns {string} HTML, one line per hit
  */
 const markExcerpt = text => escapeHtml(String(text))
-    .replace(/«([^»]*)»/g, '<span style="color:#6ea8fe;font-weight:600;opacity:1;">$1</span>');
+    .replace(/«([^»]*)»/g, '<span style="color:var(--SmartThemeQuoteColor, #6ea8fe);font-weight:600;opacity:1;">$1</span>');
 
 export const keyHitsHtml = why => (why ?? []).map(w =>
-    `<br><small style="opacity:0.75;"><span style="color:#6ea8fe;font-weight:600;">${escapeHtml(w.key)}</span>`
-    + `${Number.isFinite(w.count) ? ` <span style="color:#d9a441;font-weight:600;">${w.count}</span>` : ''}`
+    `<br><small style="opacity:0.75;"><span style="color:var(--SmartThemeQuoteColor, #6ea8fe);font-weight:600;">${escapeHtml(w.key)}</span>`
+    + `${Number.isFinite(w.count) ? ` <span style="color:var(--SmartThemeEmColor, #d9a441);font-weight:600;">${w.count}</span>` : ''}`
     + `${w.excerpt ? ` <span style="opacity:0.6;">${markExcerpt(w.excerpt)}</span>` : ''}</small>`).join('');
 
 /**
