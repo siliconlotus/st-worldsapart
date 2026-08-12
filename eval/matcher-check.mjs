@@ -1,6 +1,6 @@
 // Verifies WA's keyword matcher tracks core's world-info.js matchKeys semantics.
 // countKey/keywordScore live in matcher.mjs, which is isomorphic — imported directly.
-import { countKey, keyExcerpt, keywordScore as rankKeywordScore } from '../extension/matcher.mjs';
+import { countKey, keyExcerpt, keywordScore as rankKeywordScore, setBoundaryMode, wholeWordAdvice } from '../extension/matcher.mjs';
 import { eq } from './metrics.mjs';
 
 // keywordScore with the production defaults injected. Guards the scoreVectorKeys path —
@@ -47,11 +47,79 @@ eq(countKey('caf\u00e9', 'the caf\u00e9 was busy', false, true), 1, 'whole-word:
 eq(countKey('\u041c\u0430\u0440\u0438', '\u0432\u0441\u0442\u0440\u0435\u0442\u0438\u043b \u041c\u0430\u0440\u0438\u044e', false, true), 0, 'whole-word: Cyrillic prefix does not leak');
 eq(countKey('\u041c\u0430\u0440\u0438\u044e', '\u0432\u0441\u0442\u0440\u0435\u0442\u0438\u043b \u041c\u0430\u0440\u0438\u044e', false, true), 1, 'whole-word: the Cyrillic word itself matches');
 eq(countKey('caf', 'the caf\u00e9 was busy', false, false), 1, 'substring mode is unaffected');
-eq(countKey('hot tub', 'in the hot tub', false, true), 1, 'multi-word key falls back to substring');
+eq(countKey('hot tub', 'in the hot tub', false, true), 1, 'multi-word key, whole-word, standing alone');
 eq(countKey('Kyle', 'kyle KYLE Kyle', false, false), 3, 'case-insensitive by default');
 eq(countKey('Kyle', 'kyle KYLE', true, false), 0, 'case-sensitive when asked');
 eq(countKey('/jubi\\w+/i', 'the Jubilees came', false, true), 1, 'regex key with flags overrides options');
 eq(countKey('nope', 'nothing here', false, false), 0, 'no match is zero');
+
+// --- Match Whole Words means what it says -----------------------------------------------------------
+// Core under-applies its own label twice: it skips any key containing a space, and it stops at an
+// affix. WA applies it in both directions, and which characters count as "inside a word" is the
+// wordBoundary setting rather than a rule, because both readings are defensible.
+{
+    // THE MULTI-WORD HALF, unconditional — a space in the key is not an exemption.
+    eq(countKey('satyr camp', 'the satyr camps burned', false, true), 0, 'a multi-word key is NOT exempt from whole-word');
+    eq(countKey('satyr camp', 'the satyr camp burned', false, true), 1, '...and still matches standing alone');
+    eq(countKey('satyr camp', 'the satyr camps burned', false, false), 1, 'substring mode is where the plural still counts');
+    eq(countKey('hot tub', 'unhot tub', false, true), 0, 'the LEFT edge of a multi-word key is bounded too');
+
+    // `_` is in neither class. It is in \w for programming identifiers, and underscore emphasis puts
+    // it around whole words exactly as asterisks do, so `_Joe_` failing has no defender.
+    eq(countKey('Joe', '_Joe_ arrived', false, true), 1, 'underscore is a boundary, so emphasis does not hide a word');
+    eq(countKey('Joe', 'Joe_Bloggs', false, true), 1, '...in both directions, including an identifier');
+
+    // Combining marks ARE in both classes: a mark is part of the letter it sits on, so a decomposed
+    // spelling must not match where its precomposed twin does not.
+    // x + COMBINING ACUTE (U+0301) has no precomposed form, so it survives the fold's NFC pass
+    // as a real mark — which \p{L} alone would read as a boundary.
+    eq(countKey('x', 'the x\u0301 mark', false, true), 0, 'a combining mark is inside the word, not a boundary');
+
+    // THE SETTING. Strict is the default; permissive is core's own reading of an affix.
+    setBoundaryMode('permissive');
+    eq(countKey('Joe', "that is Joe's coat", false, true), 1, 'permissive: an apostrophe is a boundary, so a possessive matches');
+    eq(countKey('hot tub', 'the hot tub-side chair', false, true), 1, 'permissive: a hyphen is a boundary too');
+    eq(countKey('Joe', 'Joel arrived', false, true), 0, 'permissive still stops at a letter');
+
+    setBoundaryMode('strict');
+    eq(countKey('Joe', "that is Joe's coat", false, true), 0, 'strict: an apostrophe is inside the word');
+    eq(countKey('Joe', 'that is Joe\u2019s coat', false, true), 0, '...and the fold means the curly form behaves identically');
+    eq(countKey('hot tub', 'the hot tub-side chair', false, true), 0, 'strict: a hyphen is inside the word');
+    eq(countKey('Joe', 'Joe arrived', false, true), 1, 'strict still matches a word standing alone');
+    eq(countKey("Joe's", "that is Joe's coat", false, true), 1, '...and the affixed form is reachable by keying it');
+    // A `\b` regex key is the escape hatch that makes strict the cheap default to leave.
+    eq(countKey('/\\bJoe\\b/', "that is Joe's coat", false, true), 1, 'a \\b regex key recovers permissive behaviour');
+
+    setBoundaryMode('nonsense');
+    eq(countKey('Joe', "that is Joe's coat", false, true), 0, 'an unknown mode falls back to the default');
+    setBoundaryMode('strict');
+
+    // Substring mode never reads the class at all.
+    eq(countKey('Joe', "that is Joe's coat", false, false), 1, 'the setting does not reach substring matching');
+}
+console.log('ok   whole words: multi-word keys included, _ excluded, permissive/strict boundary class');
+
+// The Studio's structural flag for the same change: computable from the entry, no text and no second
+// matcher. Two triggers, both only when the box is on, and nothing else earns one.
+{
+    const n = (keys, ww = true) => wholeWordAdvice(keys, ww).length;
+    eq(n(['satyr camp'], false), 0, 'box off: nothing to say');
+    eq(n(['satyr']), 0, 'a single-word Latin key is unremarkable');
+    eq(n(['satyr camp']), 1, 'a multi-word key narrows, and core would not have narrowed it');
+    eq(n(['? hot tub']), 0, 'a SmartKey does not take entry flags, so neither trigger is true of it');
+    eq(n(['/hot tub/']), 0, '...nor does a regex key');
+    eq(n(['\u9f8d\u306e\u5bfa']), 1, 'a spaceless script is advised about');
+    eq(n(['satyr camp', '\u0e01\u0e23\u0e38\u0e07\u0e40\u0e17\u0e1e']), 2, 'both triggers can fire on one entry');
+    // Name the script actually detected — a Thai author must not read copy about Japanese.
+    const named = k => /written in (\w+)/.exec(wholeWordAdvice([k], true)[0])?.[1];
+    eq(named('\u3072\u3089\u304c\u306a'), 'Japanese', 'kana is named Japanese');
+    eq(named('\u9f8d\u5bfa'), 'Chinese', 'Han alone is named Chinese');
+    eq(named('\u0e01\u0e23\u0e38\u0e07'), 'Thai', 'Thai is named Thai');
+    eq(named('\u9f8d\u306e\u5bfa'), 'Japanese', 'kana wins over the Han it sits beside');
+    eq(n(['\uc11c\uc6b8']), 0, 'Hangul is not in the class — modern Korean is spaced');
+    eq(n(['\u0f56\u0f7c\u0f51']), 0, 'Tibetan is deliberately out of scope');
+}
+console.log('ok   whole-word advisory: structural, two triggers, names the script it found');
 
 // --- apostrophe normalisation ---------------------------------------------------------------------
 // A key typed with ASCII ' never matched prose written with U+2019, and nothing surfaced it: the key just

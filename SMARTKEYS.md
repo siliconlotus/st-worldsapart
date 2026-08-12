@@ -128,9 +128,10 @@ apollo astronauts        plain key    NO MATCH — that exact string never appea
 The plain key wants the words adjacent and in that order. The unquoted SmartKey wants both words
 present, and does not care that the message separated them or wrote them the other way round.
 
-That equivalence survives the *Match Whole Words* checkbox, which applies to single-word keys only and
-leaves both forms on substring. It does not survive *Case-Sensitive*: that checkbox reaches a plain key
-but a SmartKey ignores it, so the case-sensitive spelling is `? ^"apollo astronauts"`.
+That equivalence is between the two *keys*, not between the two entries: neither checkbox reaches
+inside a SmartKey. With *Match Whole Words* ticked the plain key `apollo astronauts` checks boundaries
+and `? "apollo astronauts"` still does not, so the matching spelling is `? ="apollo astronauts"`.
+*Case-Sensitive* works the same way, and its spelling is `? ^"apollo astronauts"`.
 
 **Which form to reach for.** If you want the literal string, use a plain key. That is what it is for, and
 it takes any character without ceremony — `6" pipe` is a plain key, quote and all. Reach for a SmartKey
@@ -163,20 +164,34 @@ This half applies to plain keys and SmartKey terms alike.
 **Substring by default.** `fir` matches `confirm`. Whole-word matching is opt-in — the entry's *Match
 Whole Words* checkbox for a plain key, the `=` flag for a SmartKey term.
 
-**The checkbox reaches single-word keys only**, exactly as core does — a key with a space in it stays
-on substring however the box is set, so `hot tub` matches `hot tubs`. The `=` flag has no such
-exemption: `? ="hot tub"` does check boundaries, and misses `hot tubs`. That difference is a WA
-divergence rather than a design, and it is being resolved in favour of `=`.
+**The checkbox reaches every key, including multi-word ones.** SillyTavern core skips any key with a
+space in it, so its own checkbox is silently a no-op there and `hot tub` goes on matching `hot tubs`.
+WA applies the label as written: with the box ticked, `hot tub` matches *hot tub* and not *hot tubs*.
+The `=` flag behaves identically, so `? ="hot tub"` and the plain key now agree. If you want the
+plural too, key it — or leave the box off, which is the default.
 
-An affix does not block a match in either form. `Joe` whole-word matches `Joe's` and `Joe-adjacent`,
-because an apostrophe and a hyphen are not word characters — only a letter or digit immediately
-alongside blocks it, which is why `Joe` does not match `Joel`.
+**What counts as *inside* a word is the Word boundary setting**, in the WA panel, because both
+readings of "word" are defensible:
 
-**Known limit — Chinese and Japanese.** Whole-word matching needs word boundaries, and these scripts
-do not write them. A key like `猫` still fires where it appears among Latin text or punctuation — a
-sign name or a tattoo inside an English sentence, or beside `・` `、` `。` — but it misses the key
-wherever it sits between two characters of running text. Leave the box off for
-entries keyed in these scripts; SillyTavern advises the same.
+| | inside a word | so `Joe` matches |
+|---|---|---|
+| **Strict** (default) | letters, digits, marks, `-` `'` | *Joe*, not *Joe's* or *Joe-adjacent* |
+| **Permissive** | letters, digits, marks | *Joe*, *Joe's* and *Joe-adjacent* |
+
+Neither matches *Joel* — a letter alongside always blocks. `_` is a boundary in both, so `_Joe_`
+matches: underscore is a word character for programming identifiers, not for prose, and presets that
+ask for underscore emphasis wrap whole words with it exactly as asterisks do.
+
+Strict is the default because it is the cheap one to leave: a `/regex/` key written with `\b` gets
+permissive behaviour back for that one key, and there is no equally short way to go the other
+direction. (`\b` is ASCII-only, in WA as in SillyTavern.)
+
+**Known limit — scripts without word boundaries.** Whole-word matching needs boundaries, and Chinese,
+Japanese, Thai, Lao, Khmer and Burmese do not write them. A key like `猫` still fires where it appears
+among Latin text or punctuation — a sign name or a tattoo inside an English sentence, or beside `・`
+`、` `。` — but it misses the key wherever it sits between two characters of running text. Leave the
+box off for entries keyed in these scripts; SillyTavern advises the same, and the Studio marks the
+whole-words control on any entry where this applies.
 
 **Case-insensitive by default**, opt out with the entry checkbox or `^`.
 

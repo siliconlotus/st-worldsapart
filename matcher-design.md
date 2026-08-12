@@ -98,33 +98,23 @@ variant expansion.
 **Match window — implemented** (`matchWindow` setting, `matcher.scanSegments`/`segment`), and independent
 of bucket 2 except where noted.
 
+**Match Whole Words — implemented.** The multi-word exemption is gone from `countKey` and its cached
+fast path; the boundary class is the `wordBoundary` setting (`matcher.setBoundaryMode`/`wordChar`,
+default `strict`), which `=` terms inherit through the same function; `_` left the class; and
+`matcher.wholeWordAdvice` is the Studio's structural flag, shown on the whole-words tool.
+
 ---
 
 ## The queue, ordered by user-visible harm
 
-Three items are outstanding across this doc, and they are ordered by whether a user can see the
+Two items are outstanding across this doc, and they are ordered by whether a user can see the
 difference — not by how tidy the fix is, and **not by how many instances the books on disk hold**.
 A permitted input occurs whether or not this author has written one; corpus counts size a known
 effect and never dismiss a case.
 
-1. **"Match Whole Words means what it says", and the Studio flag that ships with it** (ruled below).
-   The unconditional half — multi-word keys stop being exempt — narrows 430 keys across 66 entries, so
-   the fix and the warning are one item rather than two. **The flag is structural**, computable from
-   the entry with no text and no second matcher, and it has exactly two triggers: box ticked AND
-   *(a key contains a space | a key is in a script written without spaces)*.
-   Nothing else earns one. The boundary mode is a SETTING the user chose, like `messageDepth`, not core
-   behaviour they inherited — and it could not be structural anyway, since whether strict bites depends
-   on whether the text holds an affixed form. The fold only ever adds matches, so nobody relied on the
-   silent miss. `?` keys are self-evidently WA. The CJK trigger is **advisory, not diagnostic**: it
-   fires on mixed-language entries that work fine, so its copy says WHEN rather than THAT —
-   > This key is in a script without word boundaries. Whole-word matching is likely to work where it
-   > appears among Latin text or punctuation, but it can never fire inside a completely Chinese or
-   > Japanese sentence.
-   Name the script the flag actually detected rather than listing two, or a Thai author reads copy
-   about languages that are not theirs.
-2. **Regex terms in a SmartKey** (below). Decided, unimplemented. A `? /re/ x` key is writable today and
+1. **Regex terms in a SmartKey** (below). Decided, unimplemented. A `? /re/ x` key is writable today and
    silently matches the five literal characters, so it is a wrong answer rather than a missing feature.
-3. **The `keysecondary` conversion** (bucket 2). Architectural. No user-visible change in either
+2. **The `keysecondary` conversion** (bucket 2). Architectural. No user-visible change in either
    direction, because the two routes score identically.
 
 ### Documentation owed when each lands
@@ -132,16 +122,12 @@ effect and never dismiss a case.
 `SMARTKEYS.md` describes what WORKS, so it must not be written ahead of the code. Collected here
 because the debt has been accumulating across items:
 
-- **1, whole words.** The "Substring by default" paragraph, rewritten around the `hot tub` / `hot tubs`
-  example: the checkbox reaches multi-word keys, affixes stop being boundaries under strict, and the
-  Permissive/Strict setting with its two descriptions. Plus the CJK note. Until it lands that paragraph
-  must keep describing core's exemption, because that is what ships.
-- **2, regex terms.** Four places: the grammar block; the three-forms table at the top, since a regex
+- **1, regex terms.** Four places: the grammar block; the three-forms table at the top, since a regex
   stops being only a whole-key form; the validator table, which gains unterminated and unparseable;
   and "for anything more, use a `/regex/` key", which becomes advice about terms. Plus the anchor note
   — at `scan` a bare `^` anchors to one position in the whole window, and `/m` is the form that does
   not move with `matchWindow`.
-- **3, the conversion.** Nothing user-facing; it is behaviour-neutral by construction. Internally
+- **2, the conversion.** Nothing user-facing; it is behaviour-neutral by construction. Internally
   `secondaryOk` goes and `synthesis-check.mjs` is rewritten rather than re-run.
 
 The reason this section exists: `SMARTKEYS.md` claimed "SmartKeys rank, they do not yet activate"
@@ -378,9 +364,10 @@ the global default is off so the 1,711 entries that inherit it do not move. Of t
 against their own book's text, all of them the plural case (`satyr camp` no longer reaching `satyr
 camps`). Book text is a floor; chat prose pluralises more.
 
-**Plurals, not possessives.** `'` is not in `WORD_CHAR` and the fold maps `’` onto it, so `hot tub's`
-still matches, as does `hot tub-side`. Only a letter or digit suffix breaks the match, which in
-practice means a plural. The user-facing wording must not overstate this.
+**Plurals under permissive, plurals AND affixes under strict.** The two halves ship together, so the
+narrowing an author sees is the strict one: `hot tub's` and `hot tub-side` stop matching along with
+`hot tubs`. Under permissive only a letter or digit suffix breaks the match, which in practice means
+a plural. The user-facing wording must name the mode rather than stating either as the rule.
 
 **Measured** against `countKey`, both flags and all three key kinds: this is already what fires — the
 `?` and `/re/` branches return before the flag arguments are read — so it ratifies behaviour rather

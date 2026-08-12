@@ -1,6 +1,6 @@
 // Verifies the SmartKeys boolean-query engine against the spec's acceptance table,
 // plus the lexer edge cases the spec calls out (internal hyphens, weights, flags).
-import { countKey, keywordScore } from '../extension/matcher.mjs';
+import { countKey, keywordScore, setBoundaryMode } from '../extension/matcher.mjs';
 import { tokenize, parse, evaluate, buildAutomaton, scanAutomaton, validateSmartKey, fold, resetSmartKeys } from '../extension/smartkeys.mjs';
 import { buildKeyPruneScan } from '../extension/keyword-core.mjs';
 import { eq } from './metrics.mjs';
@@ -39,6 +39,13 @@ eq(matches('? meeting "10:30"', 'the meeting is at 10:30'), true, 'literal colon
 eq(matches('? "10:30"', 'at 10 30 sharp'), false, 'quoted colon term is literal, not split');
 eq(matches('? =c++', 'some c++ code'), true, '= boundary handles punctuation-edged terms (no \\b)');
 eq(matches('? =cat', 'the category'), false, '= boundary still rejects substrings');
+// The `=` flag shares wordChar() with countKey rather than restating it, so it inherits the
+// wordBoundary setting: two boundary definitions would be two matchers.
+setBoundaryMode('permissive');
+eq(matches('? =Joe', "that is Joe's coat"), true, 'permissive: = treats an apostrophe as a boundary');
+setBoundaryMode('strict');
+eq(matches('? =Joe', "that is Joe's coat"), false, 'strict: = treats it as inside the word, like a plain key');
+eq(countKey('Joe', "that is Joe's coat", false, true), 0, '...which is the same answer the plain key gives');
 eq(matches('? and', 'sandy beach'), false, 'bare "and" is an operator, not a term');
 eq(matches('? android', 'an android walked'), true, 'AND-prefixed word is still one term');
 

@@ -21,7 +21,7 @@ import { buildKeyPruneScan, llmKeyCandidates, STUDIO_PRUNE_OPTS, STUDIO_SUGGEST_
 import { buildKeySuggest, classifyLlmCand } from './keyword-core.mjs';
 import { buildAutomaton, addMessageHits, fold, validateSmartKey } from './smartkeys.mjs';
 import { findOrphanBindings } from './bindings.mjs';
-import { isRegexKey } from './matcher.mjs';
+import { isRegexKey, wholeWordAdvice } from './matcher.mjs';
 
 const WA_GREEN = '#7bbf6a';   // "no prune" — a keyword the scan doesn't flag
 
@@ -716,8 +716,15 @@ export async function lorebookStudio(preferredBook = null) {
         if (caseInherit) caseTool.style.color = '#8fce8f';
         const effWhole = e.matchWholeWords ?? world_info_match_whole_words;
         const wholeInherit = e.matchWholeWords == null && !!world_info_match_whole_words;
-        const wholeTool = tool('[ab]', effWhole, `Match whole words: ${flagState(e.matchWholeWords, world_info_match_whole_words)} · shift-click: inherit`, ev => { e.matchWholeWords = ev.shiftKey ? null : !effWhole; save(); repaint(e); });
+        // Structural advice about THIS entry's keys under the flag — a narrowing core would not have
+        // applied, or a script with no word boundaries to find. Computed from the entry alone, so it
+        // costs nothing and cannot disagree with the matcher: same module, same rules.
+        const wholeAdvice = wholeWordAdvice(e.key, effWhole);
+        const wholeTool = tool('[ab]', effWhole, `Match whole words: ${flagState(e.matchWholeWords, world_info_match_whole_words)} · shift-click: inherit${wholeAdvice.map(a => `\n\n${a}`).join('')}`, ev => { e.matchWholeWords = ev.shiftKey ? null : !effWhole; save(); repaint(e); });
         if (wholeInherit) wholeTool.style.color = '#8fce8f';
+        // Amber + a badge, not red: both triggers are advisories on entries that may be working
+        // exactly as intended. The tooltip carries the sentence; this is what makes anyone read it.
+        if (wholeAdvice.length) { wholeTool.style.color = '#d8a657'; wholeTool.classList.add('wa-badge'); wholeTool.dataset.badge = '!'; }
         tools.append(
             tool('fa-power-off', !e.disable, e.disable ? 'Disabled — click to enable' : 'Active — click to disable', () => { e.disable = !e.disable; save(); repaint(e); }),
             caseTool,

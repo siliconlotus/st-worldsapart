@@ -297,6 +297,21 @@ export const defaultSettings = {
      */
     matchWindow: 'paragraph',
     /**
+     * What counts as "inside a word" when Match Whole Words is on — `permissive` | `strict`.
+     *
+     *   permissive  letters, digits, combining marks           `Joe` matches `Joe's`
+     *   strict      ...plus hyphen and apostrophes             it does not
+     *
+     * Strict by default because the escapes are asymmetric: a `/regex/` key with `\b` recovers
+     * permissive behaviour for any ASCII key, and `\b` is what core's own boundary approximates,
+     * so one escape hatch returns both. From permissive there is no short form. Land in the mode
+     * that is cheap to leave.
+     *
+     * Read by matcher.mjs through setBoundaryMode() rather than as an argument — it is global by
+     * construction, and threading it would touch every countKey caller for a value none of them vary.
+     */
+    wordBoundary: 'strict',
+    /**
      * BM25 term-frequency saturation, for both the key scorer and the plugin's
      * text scorer. Roughly: how many distinct matching terms one heavily-repeated
      * term is worth. Higher = repetition counts for more.

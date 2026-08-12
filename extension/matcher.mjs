@@ -22,17 +22,108 @@ export function escapeRegex(str) { return String(str).replace(/[.*+?^${}()|[\]\\
  * reads as a boundary. The ASCII control behaves correctly, which is why it goes unnoticed — `Jubile`
  * does not match `Jubilee`.
  *
+ * BOTH READINGS OF "WORD" ARE DEFENSIBLE, so which one applies is a SETTING rather than a rule:
+ *
+ *   permissive  [\p{L}\p{N}\p{M}]        letters, digits, combining marks — `Joe` matches `Joe's`
+ *   strict      [\p{L}\p{N}\p{M}\-'’]    ...plus hyphen and apostrophes — it does not
+ *
+ * Strict is the default because THE ESCAPES ARE ASYMMETRIC. A `/regex/` key with `\b` recovers
+ * permissive behaviour for any ASCII key, and `\b` is what core's own boundary approximates, so one
+ * escape hatch returns both. From permissive there is no short form — strict needs the explicit class
+ * written twice. Land in the mode that is cheap to leave. (`\b` fails for non-ASCII keys, as in core.)
+ *
+ * `_` is in NEITHER, and is not part of the toggle. It is in `\w` for programming identifiers, and
+ * `_Joe_` failing to match `Joe` has no defender under either reading — presets that instruct
+ * underscore emphasis put it around whole words exactly as asterisks do.
+ *
+ * Combining marks are in both: a mark is part of the letter it sits on, and treating one as a boundary
+ * would make a decomposed spelling match where its precomposed twin does not.
+ *
  * Requires the `u` flag wherever it is used; escapeRegex above is already `u`-safe (it does not emit
- * the `\-` identity escape that core's version does, which `u` rejects).
+ * the `\-` identity escape that core's version does, which `u` rejects OUTSIDE a class — inside one,
+ * which is the only place this class puts it, `\-` is valid).
  *
  * KNOWN LIMIT: scripts written without spaces. In CJK every neighbour is a letter, so a whole-word key
  * matches only in isolation — the mirror of the old bug, where every CJK substring matched. There is no
- * word boundary to find, so whole-word matching is not meaningful there; it defaults off.
+ * word boundary to find, so whole-word matching is not meaningful there; the Studio flags an entry that
+ * asks for it, and the matcher does not guess.
  *
  * DIVERGES FROM CORE, which keeps `\W` (world-info.js matchKeys). WA is the stricter side, so the audit
  * under-reports rather than over-reports against what core fires.
  */
-export const WORD_CHAR = '[\\p{L}\\p{N}_]';
+const BOUNDARY_CLASSES = {
+    permissive: '[\\p{L}\\p{N}\\p{M}]',
+    strict: '[\\p{L}\\p{N}\\p{M}\\-\'’]',
+};
+let boundaryMode = 'strict';
+
+/**
+ * Injects the resolved `wordBoundary` setting. Module-level rather than an argument because every
+ * caller of countKey would otherwise have to thread it — the audit, the pruner, the Studio's
+ * colouring and the runtime scan — for a value that is global by construction (one user setting,
+ * never per-entry). Called by the ST side at init and on change; the offline harnesses get the
+ * shipped default, which is what makes their numbers claims about what ships.
+ * @param {'permissive'|'strict'} mode Unknown values fall back to the default.
+ */
+export const setBoundaryMode = mode => { boundaryMode = mode in BOUNDARY_CLASSES ? mode : 'strict'; };
+
+/** The live boundary class, as a regex-source string. A function, not a const, so a mode change
+ *  cannot leave a stale class baked into a caller's template literal. */
+export const wordChar = () => BOUNDARY_CLASSES[boundaryMode];
+
+/**
+ * Scripts written without word separators, in the order a key is tested against them. Kana first, so
+ * a Japanese key is named Japanese rather than by the Han it also contains; a kanji-only key is the
+ * one ambiguous case and reads as Chinese, where the advice is identical either way.
+ *
+ * Hangul is NOT here — modern Korean is spaced. Tibetan is deliberately out of scope: the tsheg may
+ * function as the separator this class is defined by the absence of, so including it would flag a
+ * script that possibly does not belong.
+ */
+const SPACELESS_SCRIPTS = [
+    ['Japanese', /[\p{Script=Hiragana}\p{Script=Katakana}]/u],
+    ['Chinese', /\p{Script=Han}/u],
+    ['Thai', /\p{Script=Thai}/u],
+    ['Lao', /\p{Script=Lao}/u],
+    ['Khmer', /\p{Script=Khmer}/u],
+    ['Burmese', /\p{Script=Myanmar}/u],
+];
+
+/**
+ * What an author needs told about Match Whole Words on THIS entry — structural, so it needs the keys
+ * and the resolved flag and no text, no scan and no second matcher.
+ *
+ * Exactly two triggers, both only when the box is on:
+ *
+ *   a key contains a space   WA applies the flag to it and core does not, so this is a NARROWING of
+ *                            a key already authored — the expensive direction, and silent otherwise.
+ *   a key is in a spaceless  ADVISORY, not diagnostic: it fires on mixed-language entries that work
+ *   script                   fine, so the copy says WHEN it works rather than THAT it is broken.
+ *
+ * `?` and `/re/` keys are excluded from both: entry flags do not reach inside them (countKey returns
+ * from those branches before it reads the flag arguments), so neither trigger is true of them.
+ *
+ * @param {string[]} keys entry.key
+ * @param {boolean} wholeWords The RESOLVED flag (entry ?? global)
+ * @returns {string[]} Messages, empty when there is nothing to say
+ */
+export function wholeWordAdvice(keys, wholeWords) {
+    const out = [];
+    if (!wholeWords) return out;
+    const plain = (Array.isArray(keys) ? keys : [])
+        .map(k => String(k ?? '').trim())
+        .filter(k => k && !k.startsWith('?') && !isRegexKey(k));
+
+    const spaced = plain.find(k => /\s/.test(k));
+    if (spaced) {
+        out.push(`Whole-word matching applies to multi-word keys here, unlike SillyTavern core — “${spaced}” will not match a suffixed form such as its plural.`);
+    }
+    const script = SPACELESS_SCRIPTS.find(([, re]) => plain.some(k => re.test(k)));
+    if (script) {
+        out.push(`A key here is written in ${script[0]}, a script without word boundaries. Whole-word matching is likely to work where it appears among Latin text or punctuation, but it can never fire inside a wholly ${script[0]} sentence.`);
+    }
+    return out;
+}
 
 /** A /pattern/flags regex key, exactly as countKey routes them. THE regex-key test — the audit and
  * the smartkeys registry import this so all three can never disagree on what counts as a regex key. */
@@ -249,7 +340,7 @@ export const foldedHay = (text, caseSensitive) => {
  *   "*sister*hood"   `sister` whole-word MATCHES — the * reads as a word boundary — where the
  *                    unemphasised "sisterhood" correctly does not
  *
- * The false positive is the worse half, and `=`-flagged SmartKey terms inherit it, sharing WORD_CHAR.
+ * The false positive is the worse half, and `=`-flagged SmartKey terms inherit it, sharing wordChar().
  * Emphasis around a WHOLE word is fine in every mode: "*sister*," matches `sister` exactly as it should.
  * This only bites mid-word, and mid-word emphasis turned up rarely in the sample prose available — one
  * author's chats, so that is a weak reason to relax about it rather than evidence it is uncommon.
@@ -298,7 +389,7 @@ export function countKey(key, text, caseSensitive, wholeWords, scope) {
     // the key is a confirmed candidate that falls through to the exact (naive) walk below.
     const cached = cachedCount(raw, text, scope);
     if (cached === 0) return 0;
-    if (cached !== undefined && !caseSensitive && (!wholeWords || /\s/.test(raw))) return cached;
+    if (cached !== undefined && !caseSensitive && !wholeWords) return cached;
 
     // Orthography is normalised under BOTH case modes — it is orthogonal to case, and a case-sensitive
     // key is no more likely to have been typed with the same quote or dash characters the prose uses.
@@ -311,15 +402,17 @@ export function countKey(key, text, caseSensitive, wholeWords, scope) {
     const hay = foldedHay(text, caseSensitive);
     const needle = caseSensitive ? normalizeOrthography(raw) : fold(raw);
 
-    // Whole-word matching applies only to single-word keys; a multi-word key falls back
-    // to substring, exactly as core does (it splits on whitespace and uses includes()).
-    if (wholeWords && !/\s/.test(needle)) {
+    // Whole-word matching applies to EVERY key, including multi-word ones. Core exempts them — it
+    // splits the key on whitespace and uses includes() — so its own checkbox is a silent no-op for
+    // any key with a space in it, which is the same shape as the \W boundary bug rather than a
+    // considered semantic. A named divergence, upstream-st.md.
+    if (wholeWords) {
         try {
             // Core's boundary is "not flanked by a word char" — (?:^|\W)…(?:$|\W) — which,
             // unlike \b, still matches keys that start or end with punctuation ("+5", "v2"
             // in "v2s" would not, but "v2" alone does). Lookaround keeps it non-consuming
-            // so adjacent occurrences are all counted. WORD_CHAR rather than \w: see above.
-            const regex = new RegExp(`(?<!${WORD_CHAR})${escapeRegex(needle)}(?!${WORD_CHAR})`, 'gu');
+            // so adjacent occurrences are all counted. wordChar() rather than \w: see above.
+            const regex = new RegExp(`(?<!${wordChar()})${escapeRegex(needle)}(?!${wordChar()})`, 'gu');
             return (hay.match(regex) ?? []).length;
         } catch {
             return 0;
@@ -339,7 +432,7 @@ export function countKey(key, text, caseSensitive, wholeWords, scope) {
  * marked «so». Exists for /wa-grade's "why did this pop": a substring key's surface form ("thread"
  * inside "threadbare") is what the author needs to see to tune it, and countKey only counts.
  *
- * Shares countKey's exact machinery (foldedHay/fold, WORD_CHAR boundary, regex precedence) rather
+ * Shares countKey's exact machinery (foldedHay/fold, wordChar() boundary, regex precedence) rather
  * than re-deriving match rules — but it is DISPLAY, not a matcher: only ever called for keys
  * countKey already counted, so a disagreement can misplace an excerpt, never invent or hide a
  * firing. Excerpts are from the FOLDED haystack (fold is not length-preserving — em-dash → "--" —
@@ -373,9 +466,9 @@ export function keyExcerpt(key, text, caseSensitive, wholeWords, context = 28) {
         }
         const hay = foldedHay(segment, caseSensitive);
         const needle = caseSensitive ? normalizeOrthography(raw) : fold(raw);
-        if (wholeWords && !/\s/.test(needle)) {
+        if (wholeWords) {
             try {
-                const m = new RegExp(`(?<!${WORD_CHAR})${escapeRegex(needle)}(?!${WORD_CHAR})`, 'u').exec(hay);
+                const m = new RegExp(`(?<!${wordChar()})${escapeRegex(needle)}(?!${wordChar()})`, 'u').exec(hay);
                 if (m) return mark(hay, m.index, m[0].length);
             } catch { /* mirror countKey's failure mode */ }
             continue;

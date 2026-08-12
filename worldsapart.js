@@ -1927,7 +1927,7 @@ function paramSnapshot() {
         // The entity filter only runs on raw-message queries — a summary is already
         // salience-selected — so in summary mode its params are inert and omitted.
         matchText: {
-            queryMode: s.queryMode, messageDepth: s.messageDepth, matchWindow: s.matchWindow,
+            queryMode: s.queryMode, messageDepth: s.messageDepth, matchWindow: s.matchWindow, wordBoundary: s.wordBoundary,
             ...(s.queryMode === 'summary' ? {} : { entityFilter: s.entityFilter, properNounBoost: s.properNounBoost, stopwordDocFreq: s.stopwordDocFreq }),
         },
         // Acquisition: what vectra gives back — the DB-side similarity gate, mean-centering, and
@@ -2981,6 +2981,13 @@ const SETTINGS_HTML = `
             </select>
             <small class="opacity50p">Only affects keys that combine conditions: secondary keys (AND ANY / NOT ANY / …) and <code>?</code> SmartKeys. A single keyword matches the same text either way. Narrower settings stop an entry firing on terms that were pages apart — and stop a negation five messages back from silently vetoing a match. Core has no equivalent, so anything but "Whole scan window" is a deliberate divergence from what core would have activated.</small>
 
+            <label for="wa_word_boundary">Word boundary (what counts as inside a word)</label>
+            <select id="wa_word_boundary" class="text_pole">
+                <option value="strict">Strict — hyphens and apostrophes are part of the word</option>
+                <option value="permissive">Permissive — only letters and digits are</option>
+            </select>
+            <small class="opacity50p">Only applies to entries with <b>Match Whole Words</b> ticked. Under Strict, the key <code>Joe</code> does not match <i>Joe's</i> and <code>hot tub</code> does not match <i>hot tub-side</i>; under Permissive both match. Plurals break under either — <code>hot tub</code> never matches <i>hot tubs</i> with the box ticked. A <code>/regex/</code> key using <code>\b</code> gets Permissive behaviour back for one key without changing the setting. Unlike SillyTavern core, the box also applies to keys with a space in them.</small>
+
             <div class="inline-drawer wa-section">
                 <div class="inline-drawer-toggle inline-drawer-header">
                     <b>Tier precedence</b>
@@ -3305,6 +3312,9 @@ export async function init() {
     if (settings().presentationOrder in PRESENTATION_ALIAS) settings().presentationOrder = PRESENTATION_ALIAS[settings().presentationOrder];
     if (settings().studioTierCfg && !settings().tierCfg) { settings().tierCfg = settings().studioTierCfg; delete settings().studioTierCfg; }
     delete settings().baselineQuery; delete settings().baselineWeight;   // removed feature — drop orphaned stored values
+    // The one place the word-boundary setting crosses into the matcher, which holds it module-level
+    // (see setBoundaryMode). Re-pushed by the select's own handler below.
+    matcher.setBoundaryMode(settings().wordBoundary);
 
     $('#extensions_settings').append(SETTINGS_HTML);
 
@@ -3346,6 +3356,8 @@ export async function init() {
     bind('#wa_debug_log', 'debugLog', 'checked');
     bind('#wa_message_depth', 'messageDepth', 'number');
     bind('#wa_match_window', 'matchWindow', 'string');
+    bind('#wa_word_boundary', 'wordBoundary', 'string');
+    $('#wa_word_boundary').on('change', () => matcher.setBoundaryMode(settings().wordBoundary));
     bind('#wa_lexical_weight', 'lexicalWeight', 'number');
     // 'number?', not 'number': blank means "follow lexicalWeight" and must persist as null, where a plain
     // number binding would collapse it to 0 and silently switch the keys signal off.

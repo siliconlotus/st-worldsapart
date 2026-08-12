@@ -30,7 +30,7 @@
 // Isomorphic like ranking.mjs: no DOM, no ST imports. Entry point is evaluateSmartKey();
 // countKey() in ranking.mjs routes `?` keys here.
 
-import { escapeRegex, isRegexKey, WORD_CHAR, foldedHay } from './matcher.mjs';
+import { escapeRegex, isRegexKey, wordChar, foldedHay } from './matcher.mjs';
 // The literal matcher and its text fold live under plugin/ so the server can use them too — one copy, or
 // the browser and the server would silently disagree about what a key matches. Re-exported because
 // ranking.mjs, keyword-tools.mjs and studio.mjs all import them from here.
@@ -420,9 +420,9 @@ export function evaluate(node, text, acHits) {
             const hay = foldedHay(text, node.isCaseSensitive);
             let pattern = escapeRegex(node.isCaseSensitive ? normalizeOrthography(node.value) : fold(node.value));
             // Same lookaround boundary as countKey's whole-word path — \b would make punctuation-edged
-            // terms like =c++ unmatchable. Shares WORD_CHAR with countKey rather than restating it:
+            // terms like =c++ unmatchable. Shares wordChar() with countKey rather than restating it:
             // two boundary definitions is two matchers, which is exactly what CLAUDE.md forbids.
-            if (node.isExact) pattern = `(?<!${WORD_CHAR})${pattern}(?!${WORD_CHAR})`;
+            if (node.isExact) pattern = `(?<!${wordChar()})${pattern}(?!${wordChar()})`;
             // Counted, not tested: same walk of the text either way, and a flagged term has as much
             // right to recurrence as an unflagged one.
             const n = (hay.match(new RegExp(pattern, 'gu')) ?? []).length;
