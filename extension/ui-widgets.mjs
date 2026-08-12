@@ -139,6 +139,22 @@ export function wiTooltip({ item, block }) {
 }
 
 /**
+ * The key-hit lines under a grading row's title: which key fired, how often, and where.
+ *
+ * COLOUR CARRIES THE DISTINCTION, not a repeated glyph. A 🔑 in front of every line is the same mark on
+ * every row, so it separates nothing while adding a column of noise to a table read top to bottom; the key
+ * itself is the thing that differs, so it is what gets marked. The count and the excerpt stay dim — they
+ * are context for the key, not competing with it.
+ *
+ * @param {Array<{key: string, count: number, excerpt?: string}>} why Key hits, as recorded on the row
+ * @returns {string} HTML, one line per hit
+ */
+export const keyHitsHtml = why => (why ?? []).map(w =>
+    `<br><small style="opacity:0.7;"><span style="color:#6ea8fe;font-weight:600;">${escapeHtml(w.key)}</span>`
+    + `${w.count > 1 ? `<span style="opacity:0.6;"> ×${w.count}</span>` : ''}`
+    + `${w.excerpt ? ` <span style="opacity:0.65;">${escapeHtml(w.excerpt)}</span>` : ''}</small>`).join('');
+
+/**
  * The fold shown under a grading row: what the entry is keyed on, then its text.
  *
  * KEYS FIRST, because the judgement being made is whether this entry belonged in this scene, and its keys

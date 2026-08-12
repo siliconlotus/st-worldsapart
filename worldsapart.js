@@ -47,7 +47,7 @@ import { oai_settings } from '../../../openai.js';
 import { Popup, POPUP_TYPE, POPUP_RESULT } from '../../../popup.js';
 
 import { runState, defaultSettings, settings, ensureSettings } from './extension/state.mjs';
-import { ensureStudioStyle, entryFoldHtml, makeSortControl, makeTierEditor, showEntryText, wiGlyph, wiTooltip } from './extension/ui-widgets.mjs';
+import { ensureStudioStyle, entryFoldHtml, keyHitsHtml, makeSortControl, makeTierEditor, showEntryText, wiGlyph, wiTooltip } from './extension/ui-widgets.mjs';
 import { PRESENTATION_ALIAS, SORT_FNS, gradeOrder, normPresentation, presentationBaseLabel, presentationLabel, reconcileTiers, tierRank, wiTitleOf } from './extension/sort.mjs';
 import { lorebookStudio } from './extension/studio.mjs';
 import { buildSample, bundleSamples, captureParams, GRADE_ANCHORS, mergeGrades, normalizeSample, rowKey, sampleFile, searchedBook, splitGraded, trimBook, unionArms } from './extension/grading.mjs';
@@ -2410,7 +2410,7 @@ async function gradeScene(named) {
         + `(${runState.lastQuery.length} chars, depth ${settings().messageDepth})</summary>`
         + `<pre style="white-space:pre-wrap;max-height:14em;overflow:auto;font-size:0.85em;opacity:0.85;border:1px solid var(--SmartThemeBorderColor);padding:0.5em;margin-top:0.5em;">${esc(runState.lastQuery)}</pre></details>`
         + '<table style="width:100%;border-collapse:collapse;font-size:0.9em;"><thead><tr style="text-align:left;">'
-        + '<th style="width:4em;">Grade</th><th>Entry</th><th style="width:4em;">fused</th><th style="width:4em;">cos</th><th style="width:4em;">text</th><th style="width:4em;">keys</th><th style="width:4em;"></th></tr></thead><tbody>'
+        + '<th style="width:4em;">Grade</th><th>Entry</th><th style="width:4em;">fused</th><th style="width:4em;">cos</th><th style="width:4em;">text</th><th style="width:4em;">keys</th></tr></thead><tbody>'
         // Presented in block + score order, NOT capture order (see gradeOrder). `i` stays the CAPTURE
         // index because every data-i in this table indexes back into `rows`/`entries`.
         + gradeOrder(rows, r => -(r.score ?? -Infinity)).map(({ row, i }) => {
@@ -2424,13 +2424,10 @@ async function gradeScene(named) {
                 // wiGlyph — the Studio's own 🔵 constant / 🔗 vector / 🟢 keyword mapping, not a local
                 // one. These tables show the same entries the Explorer does and must classify them the
                 // same way; a second mapping drifts the moment either side gains a class.
-                + `<td>${row.cut ? `<i class="fa-solid fa-scissors" style="opacity:0.55;margin-right:0.35em;" title="cut by the budget${row.cutBy ? ` — ${esc(row.cutBy)} cap` : ''}${row.tokens ? `; ${row.tokens} tokens` : ''}"></i>` : ''}${entries[i] ? wiGlyph(entries[i]) + ' ' : ''}${esc(row.title)}<br><small style="opacity:0.5;">${esc(row.world)} · uid ${num(row.uid)}</small>${(row.why ?? []).map(w => `<br><small style="opacity:0.65;">🔑 ${esc(w.key)}${w.count > 1 ? ` ×${w.count}` : ''}${w.excerpt ? ` — <span style="opacity:0.8;">${esc(w.excerpt)}</span>` : ''}</small>`).join('')}</td>`
+                + `<td>${row.cut ? `<i class="fa-solid fa-scissors" style="opacity:0.55;margin-right:0.35em;" title="cut by the budget${row.cutBy ? ` — ${esc(row.cutBy)} cap` : ''}${row.tokens ? `; ${row.tokens} tokens` : ''}"></i>` : ''}${entries[i] ? wiGlyph(entries[i]) + ' ' : ''}${esc(row.title)}<br><small style="opacity:0.5;">${esc(row.world)} · uid ${num(row.uid)}</small>${keyHitsHtml(row.why)}<br><i class="fa-solid fa-chevron-right wa-chevron wa-fold" data-i="${i}" title="Show keys and entry text" style="margin-top:0.35em;"></i></td>`
                 + `<td>${num(row.score)}</td><td>${num(row.cosine)}</td><td>${num(row.text)}</td><td>${num(row.keys)}</td>`
-                // Chevron instead of a modal button: a grader compares a row against its neighbours, and a
-                // popup that hides the table breaks the comparison. The fold carries the keys too, since
-                // whether the entry belonged is half a question about its trigger.
-                + `<td><i class="fa-solid fa-chevron-right wa-chevron wa-fold" data-i="${i}" title="Show keys and entry text"></i></td></tr>`
-                + `<tr class="wa-foldrow" data-i="${i}" style="display:none;"><td colspan="7" style="padding:0.5em 0.75em 0.9em;">${entryFoldHtml(entries[i], i)}</td></tr>`;
+                + `</tr>`
+                + `<tr class="wa-foldrow" data-i="${i}" style="display:none;"><td colspan="6" style="padding:0.5em 0.75em 0.9em;">${entryFoldHtml(entries[i], i)}</td></tr>`;
         }).join('')
         + '</tbody></table>';
 
@@ -2724,7 +2721,7 @@ async function superGradePopup({ captures, union, entryOf, prior: prior0 = [], s
             + `${known.length ? `; ${known.length} judged in an earlier round (pre-filled — edit any you disagree with, untouched rows carry through as shown)` : ''}`
             + `${scaffoldN ? `; ${scaffoldN} constant/persisting-sticky row(s) listed but not graded — WA did not choose them this turn` : ''}. Blank means UNGRADED, not 0.</small>`
             + '<table style="width:100%;border-collapse:collapse;font-size:0.9em;"><thead><tr style="text-align:left;">'
-            + '<th style="width:4em;">Grade</th><th>Entry</th><th style="width:9em;">surfaced by</th><th style="width:4em;">best#</th><th style="width:4em;">cos</th><th style="width:4em;">text</th><th style="width:4em;">keys</th><th style="width:4em;"></th></tr></thead><tbody>'
+            + '<th style="width:4em;">Grade</th><th>Entry</th><th style="width:9em;">surfaced by</th><th style="width:4em;">best#</th><th style="width:4em;">cos</th><th style="width:4em;">text</th><th style="width:4em;">keys</th></tr></thead><tbody>'
             // Block + bestRank order. Fused scores are not comparable across arms, so bestRank is the
             // only cross-arm quantity that means the same thing in every row (see gradeOrder).
             + gradeOrder(union.rows, r => r.bestRank ?? Infinity).map(({ row, i }) => {
@@ -2746,7 +2743,7 @@ async function superGradePopup({ captures, union, entryOf, prior: prior0 = [], s
                     // wiGlyph, as /wa-grade and the Explorer use it. It matters most in THIS table:
                     // whether a row can carry a keys signal at all depends on being a 🔗 vector entry,
                     // and a non-null cosine is the wrong tell — one that failed retrieval shows none.
-                    + `<td>${row.cut ? `<i class="fa-solid fa-scissors" style="opacity:0.55;margin-right:0.35em;" title="cut by the budget${row.cutBy ? ` — ${esc(row.cutBy)} cap` : ''}${row.tokens ? `; ${row.tokens} tokens` : ''}"></i>` : ''}${union.entries[i] ? wiGlyph(union.entries[i]) + ' ' : ''}${esc(row.title)}<br><small style="opacity:0.5;">${esc(row.world)} · uid ${num(row.uid)}</small>${(row.why ?? []).map(w => `<br><small style="opacity:0.65;">🔑 ${esc(w.key)}${w.count > 1 ? ` ×${w.count}` : ''}${w.excerpt ? ` — <span style="opacity:0.8;">${esc(w.excerpt)}</span>` : ''}</small>`).join('')}</td>`
+                    + `<td>${row.cut ? `<i class="fa-solid fa-scissors" style="opacity:0.55;margin-right:0.35em;" title="cut by the budget${row.cutBy ? ` — ${esc(row.cutBy)} cap` : ''}${row.tokens ? `; ${row.tokens} tokens` : ''}"></i>` : ''}${union.entries[i] ? wiGlyph(union.entries[i]) + ' ' : ''}${esc(row.title)}<br><small style="opacity:0.5;">${esc(row.world)} · uid ${num(row.uid)}</small>${keyHitsHtml(row.why)}<br><i class="fa-solid fa-chevron-right wa-chevron wa-fold" data-i="${i}" title="Show keys and entry text" style="margin-top:0.35em;"></i></td>`
                     // Which arms surfaced a row is the pooling diagnostic: rows only one arm found are where
                     // the overlap assumption is failing, and they are why that arm is in the list. The arm
                     // that SUPPLIED the numbers is underlined, because the signal columns are one arm's
@@ -2755,11 +2752,8 @@ async function superGradePopup({ captures, union, entryOf, prior: prior0 = [], s
                     // A borrowed signal is marked with the arm it came from: absent-filled, never blended,
                     // so the reader can tell a measurement from a fill (see unionArms).
                     + `<td>${num(row.bestRank)}</td>${['cosine', 'text', 'keys'].map(s => `<td>${num(row[s])}${row.filled?.[s] ? `<br><small style="opacity:0.5;font-size:0.75em;" title="filled from the ${esc(row.filled[s])} arm — this arm could not measure it">${esc(row.filled[s])}</small>` : ''}</td>`).join('')}`
-                    // Chevron instead of a modal button: a grader compares a row against its neighbours, and a
-                    // popup that hides the table breaks the comparison. The fold carries the keys too, since
-                    // whether the entry belonged is half a question about its trigger.
-                    + `<td><i class="fa-solid fa-chevron-right wa-chevron wa-fold" data-i="${i}" title="Show keys and entry text"></i></td></tr>`
-                    + `<tr class="wa-foldrow" data-i="${i}" style="display:none;"><td colspan="8" style="padding:0.5em 0.75em 0.9em;">${entryFoldHtml(union.entries[i], i)}</td></tr>`;
+                    + `</tr>`
+                    + `<tr class="wa-foldrow" data-i="${i}" style="display:none;"><td colspan="7" style="padding:0.5em 0.75em 0.9em;">${entryFoldHtml(union.entries[i], i)}</td></tr>`;
             }).join('')
             + '</tbody></table>';
 
