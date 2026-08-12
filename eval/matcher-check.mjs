@@ -225,6 +225,15 @@ eq(own.text.slice(own.start, own.end), 'rut', 'offsets select the match even whe
 // A REGEX runs on the raw segment, so its offsets are already source offsets. Mapping them back through
 // the fold a second time — as the literal paths must — dragged the mark left by one per em-dash and two
 // per ellipsis before the match, which is how `/knot(s|ting)?/` over RP prose rendered as `« He k»nots`.
+// NFC IS THE ONE FOLD A REGEX GETS. Decomposed text is the same characters differently encoded, and no
+// spelling of a pattern covers both forms — unlike case (/i) and orthography (['’]), where the author has
+// an escape. Everything else stays raw, or a pattern written against real text stops working.
+eq(countKey('/café/', 'the cafe\u0301 rope', false, false), 1, 'a regex matches decomposed text after NFC');
+eq(countKey('/—/', 'a — b', false, false), 1, 'orthography is still NOT folded: a pattern can match a real em-dash');
+eq(countKey("/Cap'n/", 'Cap\u2019n', false, false), 0, "and a straight-quote pattern still misses a curly one");
+eq(countKey("/Cap['\u2019]n/", 'Cap\u2019n', false, false), 1, 'which the author widens with a class, as before');
+eq(keyExcerpt('/café/', 'He knots the cafe\u0301 rope', false, false),
+    'He knots the «café» rope', 'the excerpt marks the composed form it searched');
 eq(keyExcerpt('/knot(s|ting)?/', 'She paused — then again — and sighed… He knots the rope', false, false),
     '…then again — and sighed… He «knots» the rope', 'a regex hit is not walked back through the fold');
 eq(keyExcerpt('/th\\w+bare/', 'the curtains were threadbare by then', false, false),

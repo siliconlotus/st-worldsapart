@@ -167,7 +167,18 @@ export function countRegexKey(raw, text) {
     const m = String(raw).match(REGEX_KEY_RE);
     if (!m) return 0;
     try {
-        return (text.match(new RegExp(m[1], m[2].includes('g') ? m[2] : `${m[2]}g`)) ?? []).length;
+        // NFC, AND NOTHING ELSE. A regex is otherwise fold-exempt on purpose: fold the haystack and a
+        // pattern written against real text stops working — `/—/` could never match, because the folded
+        // copy holds `--`. Case and orthography stay raw for that reason, and the author has `/i` and
+        // `['’]` when they want the wider reading.
+        //
+        // Normalisation is not that kind of choice. Decomposed text is the same characters differently
+        // encoded, so composing changes no pattern's meaning — but `/café/` silently fails against it and
+        // there is no spelling of the pattern that covers both forms. The author has no escape here, which
+        // is what separates this from the rules above.
+        //
+        // A NAMED DIVERGENCE from core, which runs regexes on raw text (matcher-design.md).
+        return (String(text).normalize('NFC').match(new RegExp(m[1], m[2].includes('g') ? m[2] : `${m[2]}g`)) ?? []).length;
     } catch {
         return 0;
     }
@@ -583,10 +594,13 @@ export function keyExcerpts(key, text, caseSensitive, wholeWords, context = 28, 
         const asRegex = raw.match(REGEX_KEY_RE);
         if (asRegex) {
             try {
+                // Same NFC as countRegexKey, and marked against the SAME string it was searched in —
+                // normalising one and slicing the other is how the offsets drifted before.
+                const src = String(segment).normalize('NFC');
                 const re = new RegExp(asRegex[1], asRegex[2].includes('g') ? asRegex[2] : `${asRegex[2]}g`);
-                for (let m = re.exec(segment); m; m = re.exec(segment)) {
+                for (let m = re.exec(src); m; m = re.exec(src)) {
                     if (!m[0]) { re.lastIndex += 1; continue; }
-                    if (pushAt(segment, m.index, m.index + m[0].length)) return out;
+                    if (pushAt(src, m.index, m.index + m[0].length)) return out;
                 }
             } catch { /* countKey returned 0 for it too */ }
             continue;

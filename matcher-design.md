@@ -630,8 +630,17 @@ tokens alone today, so without this `? /re/` reports `no-terms` and `? /re/ -dri
 that inspect a term's VALUE still skip it: a pattern is punctuation by nature, so `punctuation-term`
 and `stray-quote` would fire on every one.
 
-**A regex term is case-sensitive AND fold-exempt.** `countKey` branches before `foldedHay`, so a
-pattern runs on raw text, as core's does. Inside a SmartKey that means mixed folding: `? /Cap'n/ crunch`
+**A regex term is case-sensitive AND fold-exempt, except for NFC.** `countKey` branches before
+`foldedHay`, so a pattern runs on raw text, as core's does — fold the haystack and a pattern written
+against real text stops working, since `/—/` could never match a copy holding `--`. Case and
+orthography therefore stay raw, and the author widens with `/i` and `['’]` when they want to.
+
+Normalisation is not that kind of choice, so the segment is NFC-composed first. Decomposed text is the
+same characters differently encoded, so composing changes no pattern's meaning — but `/café/` silently
+fails against it and NO spelling of the pattern covers both forms. That absence of an escape is what
+separates it from the rules above. **A named divergence from core**, which runs regexes on raw text;
+measured 0 decomposed sequences across 41 books and 196 chats, so it is unexercised here and taken on
+the reasoning rather than the count. Inside a SmartKey that means mixed folding: `? /Cap'n/ crunch`
 has one term that sees `’` and one that does not.
 
 **A path-shaped token reads as every other layer reads it**, which is what the qualifying-close rule
