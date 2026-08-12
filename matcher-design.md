@@ -515,8 +515,9 @@ system, and you must escape them for vanilla ST to evaluate it. Escaping is free
 
 **The check is one-directional, and stays so.** It catches WA-yes/core-no. The mirror is real and
 silent: a body containing a literal newline is a pattern to core (`[\w\W]`) and a plain literal key
-to WA (`.`). Recorded rather than closed — a key field does not carry newlines — but the check does
-not name every divergence, only the reachable one. `validateSmartKey` warns (`regex-core-refuses`) rather
+to WA (`.`). Recorded rather than closed: authoring does not produce one, though a JSON
+import can carry anything, so the check names the divergence a user can reach rather than every
+divergence that exists. `validateSmartKey` warns (`regex-core-refuses`) rather
 than either side deciding. `coreReadsAsRegex` in `matcher.mjs` is core's rule mirrored for that
 warning, and counts nothing. It reaches SmartKey TERMS as well as bare keys, since the term rule became
 the whole-key rule — before that the scan cut a slash-bearing pattern apart before anything could ask
