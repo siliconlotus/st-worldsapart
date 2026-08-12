@@ -129,15 +129,22 @@ export function wholeWordAdvice(keys, wholeWords) {
 }
 
 /** A /pattern/flags regex key, exactly as countKey routes them. THE regex-key test — the audit and
- * the smartkeys registry import this so all three can never disagree on what counts as a regex key. */
-export const REGEX_KEY_RE = /^\/(.+)\/([gimsuy]*)$/;
+ * the smartkeys registry import this so all three can never disagree on what counts as a regex key.
+ *
+ * `[\s\S]`, not `.`, so a body may hold a literal newline. `.` excluded one and there was never a
+ * reason: `new RegExp("a\nb")` is a valid pattern, core's own `[\w\W]` admits it, and the exclusion
+ * was an artifact of the character class rather than a rule anyone chose. It was also the one
+ * divergence from core running the wrong way — core read such a key as a pattern and WA as a plain
+ * literal — and the only one nothing warned about. */
+export const REGEX_KEY_RE = /^\/([\s\S]+)\/([gimsuy]*)$/;
 export const isRegexKey = k => REGEX_KEY_RE.test(String(k));
 
 /**
- * Core's OWN reading of the same string — `parseRegexFromString` in `world-info.js`, mirrored. It
- * differs from `isRegexKey` in two ways, and both are core's rule rather than ours: a pattern
- * carrying an unescaped `/` is refused outright (core's comment gives portability to other regex
- * engines as the reason, not meaning), and `[\w\W]` spans a newline where our `.` does not.
+ * Core's OWN reading of the same string — `parseRegexFromString` in `world-info.js`, mirrored. One
+ * difference remains, and it is core's rule rather than ours: a pattern carrying an unescaped `/` is
+ * refused outright, core's comment giving portability to other regex engines as the reason rather
+ * than meaning. (There were two. The other was our `.` against core's `[\w\W]` over a newline, which
+ * was an artifact and is gone — `REGEX_KEY_RE` spans one now.)
  *
  * Not a second matcher — nothing counts with this. It exists so `validateSmartKey` can say that core
  * will not activate a key WA is willing to run, which is a fact about the two implementations and

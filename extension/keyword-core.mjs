@@ -258,20 +258,21 @@ export function buildKeyPruneScan(data, opts, ignoreSet, { caseSensitiveDefault 
     // under whole-word matching (no substring collision) and otherwise reports whole-word/total.
     const classify = (key, cs, ww, sticky) => {
         const k = String(key).trim();
-        if (!k || isRegexKey(k)) return null;
-        // A SmartKey is audited like any other key, not exempted from the audit. It used to be, and
-        // that was the wrong cut: the question the audit asks — does this key fire, and how often —
-        // is perfectly answerable for a SmartKey, because countKey already evaluates it against the same
-        // primed trie every literal goes through. df was in fact being computed for these all along
-        // and then discarded here.
+        if (!k) return null;
+        // NEITHER A SMARTKEY NOR A REGEX IS EXEMPT FROM THE AUDIT. Both used to be, and both were the
+        // wrong cut for the same reason: the question the audit asks — does this key fire, and how
+        // often — is perfectly answerable for either, because countKey already evaluates them against
+        // the same text every literal goes through. `runBatch` was in fact computing df for both all
+        // along, and this line discarded it. A `/\n/` that fires on every multi-line message drew not
+        // one word from any tool WA had.
         //
         // What genuinely does not apply is the heuristics that read the key AS A LITERAL STRING. The
-        // matching surface of `? fire water` is its terms, not the twelve characters of the SmartKey, so
-        // English-common, fragment and short-key are meaningless against the raw text and are skipped.
-        // (Per-TERM versions of them would be meaningful; that is a separate piece of work.)
-        // `total` is also meaningless for a SmartKey — countKey returns a weight, not an occurrence count
-        // — but only the short-key check reads it, and that is one of the skipped ones.
-        const smart = k.startsWith('?');
+        // matching surface of `? fire water` is its terms and of `/sal(a|e)/` is its pattern, not the
+        // characters either is written with, so English-common, fragment and short-key are meaningless
+        // against the raw text and are skipped. (Per-TERM versions would be meaningful; separate work.)
+        // `total` is meaningless for a SmartKey too — countKey returns a weight, not an occurrence
+        // count — but only the short-key check reads it, and that is one of the skipped ones.
+        const literal = !k.startsWith('?') && !isRegexKey(k);
         const dc = scan(k, cs, ww).df;
         const share = chatShare(k);
         // A common-English single word over-fires against chat regardless of lorebook df, so it
@@ -284,7 +285,7 @@ export function buildKeyPruneScan(data, opts, ignoreSet, { caseSensitiveDefault 
         // story simply does not use. So the flag stands when unevidenced, and severityOf reads `share`
         // to decide how loudly. It is NOT suppressed by a quiet chat: absence of over-firing here is not
         // evidence the word denotes anything, which is the other half of what this flag is claiming.
-        if (!smart && opts.pruneCommon && !/\s/.test(k) && (sticky ? COMMON_HEAD : COMMON_WORDS).has(k.toLowerCase())) return { flag: 'too common', dc, eng: true, share };
+        if (literal && opts.pruneCommon && !/\s/.test(k) && (sticky ? COMMON_HEAD : COMMON_WORDS).has(k.toLowerCase())) return { flag: 'too common', dc, eng: true, share };
         // ignoreProper spares a capitalised key from the dead flag on the grounds it is a name the chat
         // will use. A SmartKey is not a name, so it gets no such reprieve — one that never evaluates
         // true anywhere is exactly the broken-key case the audit exists to surface.
@@ -295,15 +296,15 @@ export function buildKeyPruneScan(data, opts, ignoreSet, { caseSensitiveDefault 
         // out on the surface curation actually happens on. Cleanup had a local patch for this (a green
         // row plus a hit count) which no other surface could see. Still reachable under show-all, listed
         // as unflagged like any other key.
-        if (dc === 0 && opts.pruneUnattested && !(!smart && opts.ignoreProper && looksProper(k)) && !share) return { flag: 'unattested', dc, smart, chatChecked: share !== undefined };
+        if (dc === 0 && opts.pruneUnattested && !(literal && opts.ignoreProper && looksProper(k)) && !share) return { flag: 'unattested', dc, literal, chatChecked: share !== undefined };
         if (nBook >= KEY_MIN_COMMON_ENTRIES && dc / nBook > opts.tooCommon * 0.75 && opts.pruneCommon) return { flag: 'too common', dc };
         // Activation breadth, checked after firing rate: a key can be rare in the prose yet listed on
         // most entries, which the content-df flags above can't see. Same small-corpus guard, since
         // "75% of 4 entries" is as meaningless here as it is there.
         const dk = dfKeys.get(k.toLowerCase()) ?? 0;
         if (nBook >= KEY_MIN_COMMON_ENTRIES && dk / nBook > opts.sharedKeys * 0.75 && opts.pruneShared) return { flag: 'shared', dc, dk };
-        if (!smart && opts.pruneFragment !== false && looksLikeFragment(k)) return { flag: 'fragment', dc };
-        if (!smart && k.length < opts.minLength && !ww && opts.pruneShort) return { flag: 'short', dc, clean: strictClean(k, cs), total: scan(k, cs, false).total };
+        if (literal && opts.pruneFragment !== false && looksLikeFragment(k)) return { flag: 'fragment', dc };
+        if (literal && k.length < opts.minLength && !ww && opts.pruneShort) return { flag: 'short', dc, clean: strictClean(k, cs), total: scan(k, cs, false).total };
         return null;
     };
     const classifyEntry = e => {
@@ -348,13 +349,13 @@ export function buildKeyPruneScan(data, opts, ignoreSet, { caseSensitiveDefault 
     // Reason text + severity colour (dead is uncoloured).
     const reasonOf = p => {
         const color = severityOf(p);
-        // A SmartKey is not "absent from the text" — it evaluated false everywhere, which is a different
+        // A SmartKey or a pattern is not "absent from the text" — it evaluated false everywhere, a different
         // sentence and the difference matters when someone is deciding whether their SmartKey is wrong.
         // Say WHICH evidence was checked. "not in entry text" with no chat scan is a much weaker claim
         // than with one, and rendering them identically makes the weak version look authoritative —
         // especially now that a chat hit suppresses the flag, so the surviving rows read as stronger.
         if (p.flag === 'unattested') {
-            return { text: p.smart ? 'never matches' : (p.chatChecked ? 'not in entry text or chat' : 'not in entry text'), color };
+            return { text: !p.literal ? 'never matches' : (p.chatChecked ? 'not in entry text or chat' : 'not in entry text'), color };
         }
         if (p.flag === 'too common') {
             if (!p.eng) return { text: `frequent (${Math.round(100 * p.dc / nBook)}%)`, color };

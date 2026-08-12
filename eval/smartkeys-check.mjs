@@ -201,6 +201,29 @@ eq(countKey('? fire::3 XOR flood', 'a fire burns', false, false), 3, 'XOR still 
     eq(classifyEntry(data.entries[0]).map(f => f.flag).join(','), 'unattested', 'a dead query is flagged; "? -apollo" matches on absence so it is not dead');
 }
 
+// NEITHER IS A REGEX KEY, for the same reason and by the same machinery. `classify` used to discard
+// both, so a pattern firing on every entry — `/\n/` against multi-line prose — drew not one word from
+// any tool WA had, while runBatch had been computing its df all along.
+{
+    const entries = {};
+    for (let i = 1; i <= 12; i++) entries[i] = { uid: i, key: [], content: `Marjorie walked on.\nShe paused, number ${i}.` };
+    entries[1].content += ' By the door.';
+    entries[1].key = ['/\\n/', '/zzznope/', '/by the door/i', 'x'];
+    const opts = { scanKeyword: true, scanVectorized: true, scanConstant: true, includeInactive: true,
+        pruneUnattested: true, pruneCommon: true, pruneShort: true, pruneShared: true, ignoreProper: false,
+        stickySkipCommon: true, tooCommon: 0.5, sharedKeys: 0.5, minLength: 4 };
+    const { classifyEntry, reasonOf } = buildKeyPruneScan({ entries }, opts, new Set());
+    const flags = new Map(classifyEntry(entries[1]).map(f => [String(f.key), f]));
+    eq(flags.get('/\\n/')?.flag, 'too common', 'a pattern that fires on every entry is flagged, like any ubiquitous key');
+    eq(flags.get('/zzznope/')?.flag, 'unattested', '...and one that fires nowhere is flagged dead');
+    eq(reasonOf(flags.get('/zzznope/')).text, 'never matches', '...worded as evaluating false, not as absent text');
+    eq(flags.has('/by the door/i'), false, 'a pattern that fires in exactly one entry draws nothing');
+    // The heuristics that read a key AS A LITERAL STRING still skip it: the matching surface of
+    // `/zzznope/` is its pattern, not the ten characters it is written with.
+    eq(flags.get('/zzznope/')?.flag !== 'short', true, 'short-key never reads a pattern');
+    eq(flags.get('x')?.flag, 'unattested', '...while a genuine literal is judged on its characters as before');
+}
+
 // AST shape sanity: implicit AND injection between primaries.
 const ast = parse(tokenize('? a (b OR c)'));
 eq(ast.type, 'AND', 'adjacent primaries get implicit AND');

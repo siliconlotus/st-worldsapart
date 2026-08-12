@@ -459,6 +459,14 @@ and `^` is a no-op because a regex is already case-sensitive. `/i` is how insens
 **A pattern `new RegExp` refuses is a validator error** — a fact about the string, so it clears the
 same bar the surviving checks clear rather than guessing at intent.
 
+**A regex key is audited like any other key**, on df, by the same machinery that judges a literal and
+a SmartKey — `classify` discarded both for years while `runBatch` computed their df anyway. Only the
+heuristics that read a key AS A LITERAL STRING stay exempt (English-common, fragment, short), because
+the matching surface of `/sal(a|e)/` is its pattern and not the characters it is written with. Without
+this a pattern had no oversight anywhere: the validator skips value checks on patterns by design, so
+`/\n/` firing on every multi-line message drew not one word from any tool. Cost: `registerKeys` skips
+regex keys, so they miss the Aho-Corasick batching and cost one regex execution per entry.
+
 **A regex is a term for counting and for positivity.** `no-terms` counts it, and `hasPositiveTerm`
 treats it as a positive contributor, as it does a spliced `?` subtree. The validator reads `TERM`
 tokens alone today, so without this `? /re/` reports `no-terms` and `? /re/ -drill` reports
@@ -513,11 +521,12 @@ than as advice on the warning: write a pattern with unescaped slashes and plan t
 system, and you must escape them for vanilla ST to evaluate it. Escaping is free under WA (`\/` and
 `/` are one character to a regex), so that is a choice about where the book will run, not a fix.
 
-**The check is one-directional, and stays so.** It catches WA-yes/core-no. The mirror is real and
-silent: a body containing a literal newline is a pattern to core (`[\w\W]`) and a plain literal key
-to WA (`.`). Recorded rather than closed: authoring does not produce one, though a JSON
-import can carry anything, so the check names the divergence a user can reach rather than every
-divergence that exists. `validateSmartKey` warns (`regex-core-refuses`) rather
+**The check is one-directional, and the mirror is now closed rather than recorded.** It catches
+WA-yes/core-no, which after this is the only direction there is: `REGEX_KEY_RE` used `.`, so a body
+holding a literal newline was a pattern to core (`[\w\W]`) and a plain literal key to WA. That was an
+artifact of a character class, not a rule — `new RegExp("a\nb")` is a valid pattern and core admits
+it — so the class widened to `[\s\S]` and the two agree. A weird key is still a valid one, and WA had
+no reason to refuse where core did not. `validateSmartKey` warns (`regex-core-refuses`) rather
 than either side deciding. `coreReadsAsRegex` in `matcher.mjs` is core's rule mirrored for that
 warning, and counts nothing. It reaches SmartKey TERMS as well as bare keys, since the term rule became
 the whole-key rule — before that the scan cut a slash-bearing pattern apart before anything could ask
