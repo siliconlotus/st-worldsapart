@@ -500,12 +500,23 @@ literal but authored before WA: same hatch. The message therefore leads with wha
 with core's reading framed WA as the deviant in three cases out of four — and `\/` is named nowhere
 in it, because escaping serves core and nothing else.
 
-Bucket 2 also removes the premise the warning was first justified on. Core no longer owns activation
-(`ownActivation`, default on), and this document's own principle is that divergence is free once WA
-owns it. What survives is PORTABILITY, and `SMARTKEYS.md` carries it as a conditional rather than as
-advice on the warning: write a pattern with unescaped slashes and plan to port it to a non-WA system,
-and you must escape them for vanilla ST to evaluate it. Escaping is free under WA (`\/` and `/` are
-one character to a regex), so that is a choice about where the book will run, not a fix to a key. `validateSmartKey` warns (`regex-core-refuses`) rather
+**The warning is kept, and on a different footing than it was introduced with.** Bucket 2 removed the
+first one: core no longer owns activation (`ownActivation`, default on), and this document's own
+principle is that divergence is free once WA owns it. What it rests on now is LEAST SURPRISE — the
+principle above requires every divergence to be a NAMED one, and this is where this divergence gets
+named to the user whose expectations came from core. That reason does not expire, and does not depend
+on the book travelling. It is an extreme edge case (0 keys on disk trigger it) and edge cases are
+exactly what a user cannot be expected to predict.
+
+Portability is the separate, practical half, and `SMARTKEYS.md` carries it as a conditional rather
+than as advice on the warning: write a pattern with unescaped slashes and plan to port it to a non-WA
+system, and you must escape them for vanilla ST to evaluate it. Escaping is free under WA (`\/` and
+`/` are one character to a regex), so that is a choice about where the book will run, not a fix.
+
+**The check is one-directional, and stays so.** It catches WA-yes/core-no. The mirror is real and
+silent: a body containing a literal newline is a pattern to core (`[\w\W]`) and a plain literal key
+to WA (`.`). Recorded rather than closed — a key field does not carry newlines — but the check does
+not name every divergence, only the reachable one. `validateSmartKey` warns (`regex-core-refuses`) rather
 than either side deciding. `coreReadsAsRegex` in `matcher.mjs` is core's rule mirrored for that
 warning, and counts nothing. It reaches SmartKey TERMS as well as bare keys, since the term rule became
 the whole-key rule — before that the scan cut a slash-bearing pattern apart before anything could ask
