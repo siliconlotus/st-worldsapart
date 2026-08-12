@@ -479,16 +479,39 @@ export function countKey(key, text, caseSensitive, wholeWords, scope) {
  * @returns {string|null} One marked excerpt, or null (no match found / smartkey)
  */
 export function keyExcerpt(key, text, caseSensitive, wholeWords, context = 28) {
+    return keyExcerpts(key, text, caseSensitive, wholeWords, context, 1)[0] ?? null;
+}
+
+/**
+ * EVERY place a key matched, for vetting rather than diagnosis — up to `limit`.
+ *
+ * keyExcerpt answers "did this land where I think"; this answers "is this key any good", which needs the
+ * spread: one excerpt cannot distinguish a term that fires thirteen times on the same phrase from one
+ * firing across thirteen different scenes, and that difference is the whole judgement about a key.
+ *
+ * Capped because it is display: twenty is more than a reader will scan and bounds what a sample carries.
+ * Same machinery and same rules as the single-excerpt path, which is the point of it being one function.
+ *
+ * @param {string} key The key that matched
+ * @param {string|string[]} text Scan window — a string or segments
+ * @param {boolean} caseSensitive Resolved entry flag
+ * @param {boolean} wholeWords Resolved entry flag
+ * @param {number} [context] Characters of context either side
+ * @param {number} [limit] Most excerpts to return
+ * @returns {string[]} Marked excerpts, in scan order
+ */
+export function keyExcerpts(key, text, caseSensitive, wholeWords, context = 28, limit = 20) {
+    const out = [];
     let raw = String(key ?? '').trim();
-    if (!raw) return null;
+    if (!raw || limit < 1) return out;
     if (raw.startsWith('?')) {
         // Resolve to the single term, or give up. `parse` returns one node for a lone term and a
         // tree for anything else, so "is this excerptable" is just the node type.
         let node = null;
-        try { node = parse(tokenize(raw)); } catch { return null; }
-        if (!node || (node.type !== 'TERM' && node.type !== 'REGEX')) return null;
+        try { node = parse(tokenize(raw)); } catch { return out; }
+        if (!node || (node.type !== 'TERM' && node.type !== 'REGEX')) return out;
         raw = String(node.value ?? '').trim();
-        if (!raw) return null;
+        if (!raw) return out;
         caseSensitive = node.type === 'REGEX' ? caseSensitive : !!node.isCaseSensitive;
         wholeWords = node.type === 'REGEX' ? wholeWords : !!node.isExact;
     }
@@ -518,29 +541,39 @@ export function keyExcerpt(key, text, caseSensitive, wholeWords, context = 28) {
         return `${from > 0 ? '…' : ''}${src.slice(from, start)}«${src.slice(start, end)}»${src.slice(end, to)}${to < src.length ? '…' : ''}`
             .replace(/\s+/g, ' ');
     };
+    // A zero-length match would spin forever, so every loop advances by at least one.
+    const push = (segment, index, length) => { out.push(mark(segment, index, length)); return out.length >= limit; };
     for (const segment of Array.isArray(text) ? text : [text]) {
         if (!segment) continue;
         const asRegex = raw.match(REGEX_KEY_RE);
         if (asRegex) {
             try {
-                const m = new RegExp(asRegex[1], asRegex[2].replace('g', '')).exec(segment);
-                if (m && m[0]) return mark(segment, m.index, m[0].length);   // regex runs on raw text already
+                const re = new RegExp(asRegex[1], asRegex[2].includes('g') ? asRegex[2] : `${asRegex[2]}g`);
+                for (let m = re.exec(segment); m; m = re.exec(segment)) {
+                    if (!m[0]) { re.lastIndex += 1; continue; }
+                    if (push(segment, m.index, m[0].length)) return out;
+                }
             } catch { /* countKey returned 0 for it too */ }
             continue;
         }
         const hay = foldedHay(segment, caseSensitive);
         const needle = caseSensitive ? normalizeOrthography(raw) : fold(raw);
+        if (!needle) continue;
         if (wholeWords) {
             try {
-                const m = new RegExp(`(?<!${wordChar()})${escapeRegex(needle)}(?!${wordChar()})`, 'u').exec(hay);
-                if (m) return mark(segment, m.index, m[0].length);
+                const re = new RegExp(`(?<!${wordChar()})${escapeRegex(needle)}(?!${wordChar()})`, 'gu');
+                for (let m = re.exec(hay); m; m = re.exec(hay)) {
+                    if (!m[0]) { re.lastIndex += 1; continue; }
+                    if (push(segment, m.index, m[0].length)) return out;
+                }
             } catch { /* mirror countKey's failure mode */ }
             continue;
         }
-        const i = hay.indexOf(needle);
-        if (i !== -1) return mark(segment, i, needle.length);
+        for (let i = hay.indexOf(needle); i !== -1; i = hay.indexOf(needle, i + needle.length)) {
+            if (push(segment, i, needle.length)) return out;
+        }
     }
-    return null;
+    return out;
 }
 
 /**

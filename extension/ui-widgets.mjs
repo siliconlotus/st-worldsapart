@@ -172,10 +172,18 @@ export function wiTooltip({ item, block }) {
 const markExcerpt = text => escapeHtml(String(text))
     .replace(/«([^»]*)»/g, '<span style="color:var(--SmartThemeQuoteColor, #6ea8fe);font-weight:600;opacity:1;">$1</span>');
 
-export const keyHitsHtml = why => (why ?? []).map(w =>
-    `<br><small style="opacity:0.75;"><span style="color:var(--SmartThemeQuoteColor, #6ea8fe);font-weight:600;">${escapeHtml(w.key)}</span>`
-    + `${Number.isFinite(w.count) ? ` <span style="color:var(--SmartThemeEmColor, #d9a441);font-weight:600;">${w.count}</span>` : ''}`
-    + `${w.excerpt ? ` <span style="opacity:0.6;">${markExcerpt(w.excerpt)}</span>` : ''}</small>`).join('');
+export const keyHitsHtml = why => (why ?? []).map(w => {
+    // The hover carries EVERY recorded hit, because vetting a key is a question about its spread and the
+    // line has room for one. A title attribute is plain text, so the guillemets earn their keep here —
+    // colour cannot cross into a tooltip, and without a marker the reader loses which span matched.
+    const all = (w.contexts ?? []).filter(Boolean);
+    const tip = all.length > 1
+        ? ` title="${escapeHtml(all.join('\n'))}"`
+        : '';
+    return `<br><small style="opacity:0.75;text-align:left;"><span style="color:var(--SmartThemeQuoteColor, #6ea8fe);font-weight:600;">${escapeHtml(w.key)}</span>`
+        + `${Number.isFinite(w.count) ? ` <span style="color:var(--SmartThemeEmColor, #d9a441);font-weight:600;">${w.count}</span>` : ''}`
+        + `${w.excerpt ? ` <span style="opacity:0.6;cursor:${all.length > 1 ? 'help' : 'default'};"${tip}>${markExcerpt(w.excerpt)}</span>` : ''}</small>`;
+}).join('');
 
 /**
  * The fold shown under a grading row: what the entry is keyed on, then its text.
@@ -206,11 +214,11 @@ export function entryFoldHtml(entry, idx) {
         ? `<div style="margin-bottom:0.35em;"><small style="opacity:0.55;">${label}</small><br>${list.map(chip).join('')}</div>`
         : '');
     const pop = `<i class="wa-fold-pop fa-solid fa-expand" data-i="${idx}" title="Open in a larger window" style="cursor:pointer;opacity:0.6;float:right;padding:2px 4px;"></i>`;
-    return pop
+    return `<div style="text-align:left;">${pop}`
         + line('keys', keys)
         + line('secondary', sec)
         + (keys.length || sec.length ? '' : '<div style="opacity:0.5;margin-bottom:0.35em;"><small>no keys</small></div>')
-        + `<div style="white-space:pre-wrap;max-height:22em;overflow:auto;opacity:0.9;border-left:2px solid var(--SmartThemeBorderColor);padding-left:0.6em;">${escapeHtml(String(entry?.content ?? '') || '(empty)')}</div>`;
+        + `<div style="white-space:pre-wrap;max-height:22em;overflow:auto;opacity:0.9;border-left:2px solid var(--SmartThemeBorderColor);padding-left:0.6em;">${escapeHtml(String(entry?.content ?? '') || '(empty)')}</div></div>`;
 }
 
 // Same "view entry text" popup the keyword suggester opens.

@@ -1596,10 +1596,14 @@ async function rankActivated(args) {
             // column. Flags mirror the keywordScore call above exactly — same entry overrides,
             // same defaults — so the excerpt localises the match that was actually scored.
             item.keywordWhy = runState.verboseRun
-                ? scored.hits.slice(0, 4).map(h => ({
-                    key: h.key, count: h.count,
-                    excerpt: matcher.keyExcerpt(h.key, scanText, item.entry.caseSensitive, item.entry.matchWholeWords),
-                }))
+                ? scored.hits.slice(0, 4).map(h => {
+                    // Every place it landed, not just the first. One excerpt cannot tell a key firing
+                    // thirteen times on one phrase from one firing across thirteen scenes, and that is
+                    // the judgement being made. `excerpt` is contexts[0] rather than a second call, so
+                    // the displayed line and the hover can never disagree.
+                    const contexts = matcher.keyExcerpts(h.key, scanText, item.entry.caseSensitive, item.entry.matchWholeWords);
+                    return { key: h.key, count: h.count, excerpt: contexts[0] ?? null, contexts };
+                })
                 : undefined;
             // Declared for fuseRanks' eligibility normalisation: having keys to score is the chance to
             // earn the keyword rank, and an entry with none must not be divided by a weight it could
@@ -2409,7 +2413,7 @@ async function gradeScene(named) {
         + '<details style="margin-bottom:0.75em;"><summary style="cursor:pointer;">Query text — what retrieval actually matched on '
         + `(${runState.lastQuery.length} chars, depth ${settings().messageDepth})</summary>`
         + `<pre style="white-space:pre-wrap;max-height:14em;overflow:auto;font-size:0.85em;opacity:0.85;border:1px solid var(--SmartThemeBorderColor);padding:0.5em;margin-top:0.5em;">${esc(runState.lastQuery)}</pre></details>`
-        + '<table style="width:100%;border-collapse:collapse;font-size:0.9em;"><thead><tr style="text-align:left;">'
+        + '<table style="width:100%;border-collapse:collapse;font-size:0.9em;text-align:left;"><thead><tr style="text-align:left;">'
         + '<th style="width:4em;">Grade</th><th>Entry</th><th style="width:4em;">fused</th><th style="width:4em;">cos</th><th style="width:4em;">text</th><th style="width:4em;">keys</th></tr></thead><tbody>'
         // Presented in block + score order, NOT capture order (see gradeOrder). `i` stays the CAPTURE
         // index because every data-i in this table indexes back into `rows`/`entries`.
@@ -2720,7 +2724,7 @@ async function superGradePopup({ captures, union, entryOf, prior: prior0 = [], s
         body.innerHTML = `<small style="display:block;opacity:0.7;margin-bottom:0.5em;">${freshN} to grade`
             + `${known.length ? `; ${known.length} judged in an earlier round (pre-filled — edit any you disagree with, untouched rows carry through as shown)` : ''}`
             + `${scaffoldN ? `; ${scaffoldN} constant/persisting-sticky row(s) listed but not graded — WA did not choose them this turn` : ''}. Blank means UNGRADED, not 0.</small>`
-            + '<table style="width:100%;border-collapse:collapse;font-size:0.9em;"><thead><tr style="text-align:left;">'
+            + '<table style="width:100%;border-collapse:collapse;font-size:0.9em;text-align:left;"><thead><tr style="text-align:left;">'
             + '<th style="width:4em;">Grade</th><th>Entry</th><th style="width:9em;">surfaced by</th><th style="width:4em;">best#</th><th style="width:4em;">cos</th><th style="width:4em;">text</th><th style="width:4em;">keys</th></tr></thead><tbody>'
             // Block + bestRank order. Fused scores are not comparable across arms, so bestRank is the
             // only cross-arm quantity that means the same thing in every row (see gradeOrder).
