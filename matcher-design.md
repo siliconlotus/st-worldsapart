@@ -108,8 +108,8 @@ literal stays reachable through the escape already there: `? "/re/"`.
   `regex-invalid` survives for the one case where the shape is well-formed and the pattern will not
   compile.
 - A regex is a term for counting and for positivity — `no-terms` counts it and `hasPositiveTerm` treats
-  it as a contributor. Checks that inspect a term's VALUE skip it, since a pattern is punctuation by
-  nature.
+  it as a contributor. Checks that inspect a term's VALUE skip it — `punctuation-term` and
+  `stray-quote` would fire on every pattern, one being punctuation by nature.
 
 **Measured**, and it cannot adjudicate any of the above: regex keys on disk are 2 of 46,226, in 2 of 41
 books; `?` keys containing a `/` at all are 0 of 148. Every rule here rests on one syntax having one
@@ -557,7 +557,9 @@ cannot be widened by adding books.
 **A key existing in a book is not evidence that it is a good key**, and which books are curated is not
 derivable from the data — see `eval/eval-data/README.md`. Removals speak to precision, never to recall.
 
-**Tiers are provenance, never routing configuration.** An entry is memory iff STMB-marked
+**Tiers are provenance, never routing configuration** (decided in
+`eval/eval-data/shared-metrics/FULLBOOK-AUDIT-2026-08-10.md`, enforced in `eval/scene.mjs`
+`scoreScene`). An entry is memory iff STMB-marked
 (`stmemorybooks`/`STMB_start`), because provenance cannot drift with the configuration under
 evaluation, where `vectorized`/`sticky`/`constant` all can. A keyword-activated reference entry is
 relevant because its trigger fired — *triggered == relevant* — so the only judgement left is whether
@@ -654,12 +656,16 @@ instances the books on disk hold.
    possessives, 18 are above 90% curly (worst 97.6%), 91 sit between 5% and 95%, and 44 are under 5%.
    The mixed chats are the worse failure, since a key that fires SOMETIMES reads as weak rather than
    broken. Which argues for building it BEFORE the keys exist.
-8. **Remove `ownActivation`** — deprecated, and still a bound setting (`#wa_own_activation`), so its
+8. **A grading row's key count is a SCORE wearing a count's name.** `keywordScore` pushes
+   `hits.count = scoreBoost`, so `? fire::3` displays `3` for a single occurrence and the row reads as
+   "fired three times". Independent of the witness-span work and fixable on its own.
+9. **Remove `ownActivation`** — deprecated, and still a bound setting (`#wa_own_activation`), so its
    off position is reachable today. Removing it also retires the only code and the only rules that
    exist for that configuration: the deletion path (`matcher.activationPrunes`, called at
    `worldsapart.js` `rankActivated`) and the ruling that **deletion ships with no group guard, so a
-   deleted group winner leaves its group empty for that turn** — which `worldsapart.js` currently
-   cites by name. On an owned scan the prune does not run at all, since every activation there is WA's
+   deleted group winner leaves its group empty for that turn**, which holds because
+   `filterByInclusionGroups` runs before the `SCAN_DONE` emit and has already discarded the losers by
+   the time WA sees the map. On an owned scan the prune does not run at all, since every activation there is WA's
    own force, constant, sticky or another extension's.
 
    Two measurements support deleting it rather than fixing it. **Measured** (`eval/prune-audit.mjs`,
@@ -669,9 +675,9 @@ instances the books on disk hold.
    in 2 books. Zero boundary, zero depth, zero unexplained; sticky exemptions are not modelled offline,
    so it is an upper bound. **Measured** 0 of 2,112 enabled entries in a group, so the group behaviour
    is untestable without a fixture; the sentinel's `terrace` group (uids 8–9) is that fixture.
-9. **`reportFailure`: retrieval failure is a failure, not a degradation.** The two-severity split rests
+10. **`reportFailure`: retrieval failure is a failure, not a degradation.** The two-severity split rests
    on "keys are still handled", which is false for any vectorized entry under `suppressVectorKeys`.
-10. **Suggester i18n, none of it started.** `ZIPF_EN` scores non-English function words as maximally
+11. **Suggester i18n, none of it started.** `ZIPF_EN` scores non-English function words as maximally
     rare, so the gate designed to reject common words would propose them; a few are present with
     meaningless values, which is worse than absent. The suggester should detect that its priors do not
     apply and stand down rather than invert. Accent variants belong here too — `Gérard`/`Gerard` is a
