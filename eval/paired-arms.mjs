@@ -161,6 +161,13 @@ const unknown = picked.filter(a => !ARMS[a]);
 if (unknown.length) { console.error(`unknown arm(s): ${unknown.join(', ')} — see --list`); process.exit(2); }
 
 const K = Number(arg('--k') ?? 10);
+// WHICH METRIC THE SIGN TEST READS. nDCG is a ranking metric and cannot see an entry that lands outside k,
+// so an arm whose action is ADMISSION is measured by the half it does not move. `--metric f2` switches the
+// delta to F-beta(2) on the asymmetric bars (scene.mjs), which weights recall twice. Baseline and arm are
+// always scored on the same one, so a run mixing them is impossible.
+const METRIC = arg('--metric') ?? 'n';
+if (!['n', 'nAt5', 'f2', 'recall', 'precision'].includes(METRIC)) { console.error(`unknown --metric ${METRIC}`); process.exit(2); }
+const mOf = r => r[METRIC];
 const MODEL = process.env.WA_EMBED_MODEL ?? 'bge-m3';
 const OLLAMA = process.env.OLLAMA_URL ?? 'http://localhost:11434';
 const fx = n => (n >= 0 ? '+' : '') + n.toFixed(4);
@@ -179,7 +186,7 @@ const fx = n => (n >= 0 ? '+' : '') + n.toFixed(4);
         const qv = await embed(S.query, { ollama: OLLAMA, model: MODEL });
         const base = await scoreScene({ sample: S, k: K, scene, qv });
         scenes.push({ path, name: S.name ?? path, S, scene, qv, P, base });
-        console.log(`scene "${S.name ?? path}": baseline nDCG@${K} ${base.n.toFixed(4)}, judged ${base.judged}/${base.of}${base.judged < base.of ? ' !!' : ''}`);
+        console.log(`scene "${S.name ?? path}": baseline ${METRIC}@${K} ${mOf(base).toFixed(4)} (nDCG ${base.n.toFixed(4)}, P ${base.precision.toFixed(3)}, R ${base.recall.toFixed(3)}, rel ${base.relevant}), judged ${base.judged}/${base.of}${base.judged < base.of ? ' !!' : ''}`);
         // `of` is the rankable top-k, so 0 means the reference-tier removal took EVERYTHING — a
         // reference-only book. Every arm then scores 0 and every delta is a tie, so the scene inflates the
         // scene count without contributing evidence. The judged<of check cannot see it: 0 < 0 is false.
@@ -237,7 +244,7 @@ const fx = n => (n >= 0 ? '+' : '') + n.toFixed(4);
         console.log(`  ${sc.name.slice(0, 34).padEnd(34)} cosine ${sig(r => (r.cosine == null ? 0 : Number(r.cosine)))}   text ${sig(r => Number(r.text) || 0)}   keys ${sig(r => Number(r.keys) || 0)}`);
     }
 
-    console.log(`\n${scenes.length} scene(s), ${picked.length} arm(s), nDCG@${K}, each scene against its OWN captureParams baseline.`);
+    console.log(`\n${scenes.length} scene(s), ${picked.length} arm(s), ${METRIC}@${K}, each scene against its OWN captureParams baseline.`);
 
     // Baseline disagreement check. If the scenes don't share a starting value for a parameter, an absolute arm
     // is a different contrast on each of them and the sign test is answering a muddled question.
@@ -262,7 +269,7 @@ const fx = n => (n >= 0 ? '+' : '') + n.toFixed(4);
             } else {
                 r = await scoreScene({ sample: sc.S, overrides: scoring, k: K, scene: sc.scene, qv: sc.qv });
             }
-            cells.push({ scene: sc.name, delta: r.n - sc.base.n, judged: r.judged, of: r.of, unjudged: r.unjudged });
+            cells.push({ scene: sc.name, delta: mOf(r) - mOf(sc.base), judged: r.judged, of: r.of, unjudged: r.unjudged });
         }
         results.push({ arm: armName, cells, stat: signTest(cells.map(c => c.delta)) });
     }
