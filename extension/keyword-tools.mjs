@@ -72,7 +72,7 @@ const KEY_RESPONSE_TOKENS = 4000;
 
 // One pass per chunk, concatenating the raw candidate lines (callers dedupe/filter). chunkSize is
 // user-tunable (Recommender settings). Whether chunking beats sending the entry whole, and what
-// size is right, are open — see keyword-suggest-design.md; eval/chunk-vs-whole.mjs is the harness.
+// size is right, are open; eval/chunk-vs-whole.mjs is the harness.
 
 export async function llmKeyCandidates(content, avoid, chunkSize = 5000) {
     const text = String(content ?? '');

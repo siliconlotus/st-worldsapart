@@ -126,7 +126,7 @@ const COMMON_HEAD = new Set([...COMMON_WORDS].slice(0, ENGLISH_COMMON_STICKY_CUT
  * entry is meant to be ubiquitous) and NOT vectorized, since suppressVectorKeys is a WA setting and
  * stock ST matches those keys normally — so the 20% was sized against a population that flag still
  * reports on, and the threshold wants re-reading against what it surfaces rather than inheriting a
- * bound set for a different job. Ruled in keyword-suggest-design.md. */
+ * bound set for a different job. */
 export const KEY_CHAT_COMMON = 0.20;
 
 /**

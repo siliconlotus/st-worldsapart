@@ -109,7 +109,7 @@ eq(msgs.length, 11, 'the hidden message is dropped, as core and WA both drop it'
 
 console.log('ok   sentinel: every audit verdict matches its written-down answer');
 
-// --- bucket 1.5: the union activates, the prune deletes, the group goes empty ------------------
+// --- ownActivation off: the union activates, the prune deletes, the group goes empty -----------
 // The written-down answers for uids 7-9. Core's runtime half (group filter picks uid 8, WA deletes
 // it at SCAN_DONE, prompt shows neither group entry) is the eyeball check in ST; what node can
 // certify is every verdict that runtime is built from.
@@ -129,9 +129,9 @@ console.log('ok   sentinel: every audit verdict matches its written-down answer'
     eq(adds.includes(8), false, 'the false winner does not match under WA — never added');
 
     // Core activated uid 8 as the terrace group's winner (groupOverride) and discarded uid 9
-    // before SCAN_DONE. WA deletes the winner; nothing promotes the loser. Group EMPTY — ruled
-    // (matcher-design.md bucket 1.5), transient until bucket 2 runs the matcher before the group
-    // filter and uid 9 wins instead.
+    // before SCAN_DONE. WA deletes the winner; nothing promotes the loser. Group EMPTY. Reachable
+    // only with ownActivation off — an owned scan runs the matcher before the group filter, and
+    // uid 9 wins instead.
     const pruned = activationPrunes([{ key: 'WA Sentinel.8', entry: data.entries['8'] }], new Set(), windowFor, opts);
     eq(pruned.join(','), 'WA Sentinel.8', 'the false winner is pruned; the group goes empty, the loser stays out');
 }

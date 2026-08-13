@@ -8,7 +8,7 @@ export const MODULE_NAME = 'worldsApart';
 export const defaultSettings = {
     enabled: true,
     /**
-     * WA owns keyword activation (matcher-design.md, bucket 2). On the scans WA intercepts, every
+     * WA owns keyword activation. On the scans WA intercepts, every
      * keyword-activating entry's keys are stashed and blanked before core scans, so core's own
      * keyword matcher never fires — WA's matcher answers "did a key match" for the initial pass,
      * every recursion pass and min-activation widening, and force-emits the winners into core's
@@ -16,8 +16,8 @@ export const defaultSettings = {
      * (they short-circuit before its key path), and the inclusion-group filter's getScore reads
      * them. Core keeps everything else: gates, timers, group filtering, probability rolls,
      * recursion control, prompt assembly.
-     * Off = bucket 1.5 behaviour (core matches, WA unions what core cannot and prunes what WA
-     * rejects). Dry-run scans always keep 1.5 behaviour — ST skips interceptors for them, so WA is
+     * Off = core matches, WA unions what core cannot and prunes what WA rejects. Dry-run scans
+     * always keep that behaviour — ST skips interceptors for them, so WA is
      * never offered the scan. Quiet generations (Summarize, SD prompts, the LLM expression
      * classifier) are ordinary generations here and get the takeover like any other.
      */
@@ -101,7 +101,7 @@ export const defaultSettings = {
      * logits before the softmax (p_i ∝ exp(z_i/T)), reshaping a distribution over the whole
      * vocabulary without reordering it or removing support. Only constrained decoding could, and
      * that is unwanted — buildKeyPrompt asks for the paraphrase that is NOT in the text on purpose
-     * (keyword-suggest-design.md's realizability rule: presence confirms, absence does not
+     * (the realizability rule: presence confirms, absence does not
      * disqualify).
      */
     llmTemperature: '1',
@@ -512,7 +512,7 @@ export const runState = {
     lastDropped: [],              // entries cut by budget
     lastSkipped: [],              // per-entry budget rejections + the cap that caused each
     attachedWorlds: new Set(),    // books ST currently has active for this chat
-    waOwnsScan: false,            // bucket 2: WA intercepted the scan now in flight and owns its
+    waOwnsScan: false,            // WA intercepted the scan now in flight and owns its
                                   // keyword matching — set at the end of selectAndActivate, cleared
                                   // on the scan's final loop / generation end. Gates the
                                   // ENTRIES_LOADED key blanking and the per-loop SCAN_DONE feed.

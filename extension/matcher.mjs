@@ -331,7 +331,7 @@ export function makeWindowFor(chat, { injectText = '', sources = {}, matchWindow
 }
 
 /**
- * A `windowFor` with extra texts appended and the whole re-segmented — bucket 2's recursion
+ * A `windowFor` with extra texts appended and the whole re-segmented — the recursion
  * rematch window: the entry's chat window plus each pass's new entry content. Re-segmenting is
  * what keeps the semantics per mode: at `scan` everything collapses back to one segment (core's
  * one-buffer behaviour, so a conjunction may span chat and recursion text exactly as core's
@@ -481,7 +481,7 @@ export function countKey(key, text, caseSensitive, wholeWords, scope) {
  * cannot tell an author where `=rut` landed, and for a regex the surface form is not deducible from the
  * key at all. A conjunction, alternation or negation has no single answer, so it keeps returning null
  * rather than picking a limb and implying it was the reason. The term's OWN flags apply, never the
- * entry's: matcher-design rules a `?` key self-describing, so `? nasa` in a caseSensitive entry is still
+ * entry's: a `?` key is self-describing, so `? nasa` in a caseSensitive entry is still
  * insensitive.
  * @param {string} key The key that matched
  * @param {string|string[]} text Scan window — a string or segments, as keywordScore takes
@@ -765,7 +765,7 @@ export function keywordScore(entry, text, keys = entry.key, { k1, caseSensitiveD
 }
 
 // ---------------------------------------------------------------------------
-// Stage 2 — activation verdicts (matcher-design.md, bucket 1.5)
+// Stage 2 — activation verdicts.
 //
 // WA's matcher decides activation in both directions: the union force-activates entries WA matches
 // and core cannot (`?` SmartKeys have no core semantics; the fold and depth are supersets), and the
@@ -831,12 +831,12 @@ export const usableKeys = keys => (Array.isArray(keys) ? keys : [])
  * NOT yet blanked their keys, so the flag is the guard, not empty `key`); `@@dont_activate`
  * (core's own exclusion, which a force-activate would override).
  *
- * `blind` (bucket 2) lifts the delayUntilRecursion skip: once WA owns activation it emits blindly
+ * `blind` lifts the delayUntilRecursion skip: once WA owns activation it emits blindly
  * and lets core reject — core's gate order checks the delay level before external activations, and
  * the external-activation map persists for the whole scan, so emitting a delayed entry early is
  * exactly how it activates when its level arrives.
  *
- * `depthSkew` (bucket 2) widens the resolved GLOBAL depth, mirroring core's min-activations
+ * `depthSkew` widens the resolved GLOBAL depth, mirroring core's min-activations
  * advanceScan one message per pass. A per-entry `scanDepth` is authored and never skewed, as in
  * core, where the buffer skew only moves the default window.
  *
@@ -874,8 +874,9 @@ export function activationAdds(entries, windowFor, opts = {}) {
 
 /**
  * The prune direction: activated entries WA's matcher rejects, as keys to delete from
- * `args.activated.entries`. Ruled (matcher-design.md): no group guard — a deleted group winner
- * leaves its group empty, transient until bucket 2.
+ * `args.activated.entries`. No group guard: `filterByInclusionGroups` has already run and discarded
+ * the losers by the time WA sees the map, so deleting a group winner leaves the group empty for that
+ * turn with nothing to promote. Reachable only with `ownActivation` off, and retired with it.
  *
  * `exempt` is ownership the caller can see and this module cannot: WA's own forced set (retrieval
  * + union winners), sticky timed effects, other extensions' external activations. Structural

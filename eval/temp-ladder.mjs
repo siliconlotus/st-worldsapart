@@ -138,7 +138,7 @@ const fmt = x => (Number.isFinite(x) ? x.toFixed(3) : '—');
  * `agree*` compare against the book's own keys and are relative-only (see the header). `stability`
  * is the mean pairwise Jaccard between repeats of the same entry at the same rung, which is the one
  * metric here with no reference-bias caveat at all — it asks only whether the generator repeats
- * itself. `grounded` is keyword-suggest-design.md's set-level predicate: does ANY candidate occur in
+ * itself. `grounded` is the set-level predicate: does ANY candidate occur in
  * the entry text, i.e. is the set anchored to the entry rather than invented wholesale.
  */
 function scoreArm(book, runs) {

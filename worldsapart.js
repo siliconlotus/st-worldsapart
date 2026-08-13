@@ -8,8 +8,8 @@
  *
  *   1. WORLDINFO_ENTRIES_LOADED — take the budget; blank keys so core's matcher stays out of what
  *                                  WA owns (vectorized entries always; every keyword-activating
- *                                  entry on a WA-run scan under ownActivation — matcher-design.md,
- *                                  bucket 2 — constants and @@activate keep theirs for group scoring).
+ *                                  entry on a WA-run scan under ownActivation; constants and
+ *                                  @@activate keep theirs for group scoring).
  *   2. generate_interceptor      — chunked vector retrieval + WA's keyword matches, force-activate both.
  *   3. WORLDINFO_SCAN_DONE       — feed the scan loop (recursion / min-activation matches, owned scans),
  *                                  then rank everything activated, apply budget, rewrite `order`.
@@ -798,7 +798,7 @@ async function retrieve(chat) {
 }
 
 /**
- * The union direction (matcher-design.md, bucket 1.5): entries WA's matcher activates over its own
+ * The union direction: entries WA's matcher activates over its own
  * window, which core cannot or would not — `?` SmartKeys have no core semantics, the fold and
  * messageDepth are supersets. This function only extracts ST context; the candidacy rules and the
  * verdict live in ranking.mjs (activationAdds), where the check suite exercises them.
@@ -809,7 +809,7 @@ async function keywordActivations(chat) {
     const candidates = await getSortedEntries();
     const suppress = Boolean(settings().suppressVectorKeys);
 
-    // Bucket 2: these copies (live keys — waOwnsScan is false during WA's own fetch, so
+    // Under the takeover: these copies (live keys — waOwnsScan is false during WA's own fetch, so
     // onEntriesLoaded's takeover blanking never touches them) are what the SCAN_DONE feed
     // rematches on every recursion and min-activation pass.
     runState.waCandidates = candidates;
@@ -897,7 +897,7 @@ async function selectAndActivate(chat) {
     runState.scanChat = chat.slice();
     runState.forcedActivations = new Set();
 
-    // Bucket 2 per-scan state. waOwnsScan goes FALSE first — WA's own getSortedEntries calls
+    // Per-scan takeover state. waOwnsScan goes FALSE first — WA's own getSortedEntries calls
     // below fire WORLDINFO_ENTRIES_LOADED, and the takeover blanking must not eat the keys WA
     // is about to match on (a stale true from an aborted scan would).
     runState.waOwnsScan = false;
@@ -922,10 +922,10 @@ async function selectAndActivate(chat) {
     try {
         adds = await keywordActivations(chat);
     } catch (error) {
-        // TOTAL, and the message must say so. "Core scan still applies" was true under bucket 1.5,
+        // TOTAL, and the message must say so. "Core scan still applies" holds only with ownActivation off,
         // when WA only added to core's matches; under the takeover waOwnsScan is set eleven lines
         // below regardless, blanking every key, so core does not match either. Ruled
-        // (matcher-design.md): WA owns its failure states — it does not hand matching back per turn,
+        // WA owns its failure states — it does not hand matching back per turn,
         // it fails visibly.
         reportFailure('keyword activation failed',
             'No entry will activate by keyword this turn. WA has taken over key matching, so SillyTavern will not match them either — the prompt has only retrieved, constant and sticky entries.',
@@ -1049,7 +1049,7 @@ function onEntriesLoaded(loaded) {
         }
     }
 
-    // Bucket 2 (matcher-design.md): on a scan WA intercepted, core's keyword matcher goes blind —
+    // On a scan WA intercepted, core's keyword matcher goes blind:
     // every keyword-activating entry's keys are stashed and blanked, so the only keyword route
     // into `activated` is WA's force-emit and the group filter runs over WA's verdicts (the
     // matcher-before-group-filter ordering 1.5 could not have). waOwnsScan is only true between
@@ -1364,7 +1364,7 @@ function ensureWorldConfigs(worlds) {
 }
 
 /**
- * Bucket 2's per-loop feed (matcher-design.md): with core's keyword matcher blanked, WA answers
+ * The per-loop feed: with core's keyword matcher blanked, WA answers
  * "did a key match" for every scan loop after the initial pass — recursion text and min-activation
  * widening. Runs on each WORLDINFO_SCAN_DONE of an owned scan, matches the not-yet-emitted
  * candidates over chat + all recursion content so far, and force-emits the winners; core's next
@@ -1458,7 +1458,7 @@ async function rankActivated(args) {
         return;
     }
 
-    // Bucket 2: feed the scan loop BEFORE the size-0 return — a pass that activated nothing can
+    // Feed the scan loop BEFORE the size-0 return — a pass that activated nothing can
     // still be followed by a min-activations widening WA has to answer.
     if (runState.waOwnsScan && Array.isArray(runState.waCandidates)) {
         await feedScanLoop(args);
@@ -1470,15 +1470,15 @@ async function rankActivated(args) {
         return;
     }
 
-    // The prune direction (matcher-design.md, bucket 1.5): entries core keyword-activated that
+    // The prune direction, live only with ownActivation off: entries core keyword-activated that
     // WA's matcher rejects over the shared haystack are deleted, so the runtime agrees with what
     // the audit and the Studio report. INITIAL pass only — recursion and min-activation entries
     // matched text WA's window does not model, and are core's prerogative. Ownership exemptions
     // are what WA can see: every force-activation this generation (runState.forcedActivations —
     // WA's own and other extensions') and sticky timed effects; constant and @@activate are
     // structural and live in activationPrunes. No group guard (ruled): a deleted group winner
-    // leaves its group empty this turn, until bucket 2 runs the matcher before the group filter.
-    // On an OWNED scan (bucket 2) the prune is off: core's matcher is blanked, so every activation
+    // leaves its group empty this turn. Retired with ownActivation.
+    // On an OWNED scan the prune is off: core's matcher is blanked, so every activation
     // is WA's own force, constant, sticky or another extension's — all exempt, nothing to judge.
     if (args?.state?.current === scan_state.INITIAL) runState.lastPruned = [];
     if (!runState.waOwnsScan && args?.state?.current === scan_state.INITIAL && Array.isArray(args?.new?.all) && args.new.all.length) {
@@ -1548,7 +1548,7 @@ async function rankActivated(args) {
         const injectText = await scanInjects();
 
         // The keys an activated entry is scored on. Live keys as before; blanked entries score
-        // their stash — a 🔗 entry only under scoreVectorKeys (unchanged), while a bucket-2
+        // their stash — a 🔗 entry only under scoreVectorKeys (unchanged), while a takeover-
         // blanked entry (constant / sticky / @@activate copies from core's own sortedEntries;
         // WA's force-emitted copies keep live keys) always scores its stash, since blanking was
         // an activation mechanism, not a scoring opinion.
@@ -1556,7 +1556,7 @@ async function rankActivated(args) {
             : entry.vectorized
                 ? (settings().scoreVectorKeys ? (entry.waKeys ?? []) : [])
                 : (entry.waKeys ?? []);
-        // Same restoration for the secondary gate: a bucket-2 blanked entry's secondaries live in
+        // Same restoration for the secondary gate: a blanked entry's secondaries live in
         // waSecondary, and the per-segment gate must judge the condition the author wrote, not an
         // empty one. A local view, never a write-back — restoring keys on core's scan copies
         // mid-scan would hand core's next loop the keys the takeover blanked.

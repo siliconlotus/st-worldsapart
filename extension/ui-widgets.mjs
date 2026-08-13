@@ -197,7 +197,7 @@ export const keyHitsHtml = why => (why ?? []).map(w => {
  *
  * KEYS FIRST, because the judgement being made is whether this entry belonged in this scene, and its keys
  * are half the reason it is there — a grader reading only the prose has to infer the trigger. Reads
- * `waKeys` when `key` is empty: bucket 2 blanks a vectorized entry's keys into the stash, so the live
+ * `waKeys` when `key` is empty: the takeover blanks a vectorized entry's keys into the stash, so the live
  * object a grader looks at has none, and reporting "no keys" for an entry that has several is worse than
  * reporting nothing.
  *

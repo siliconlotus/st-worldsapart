@@ -1,5 +1,5 @@
 // Verifies the stage-2 activation verdicts (matcher.mjs activationAdds / activationPrunes) — the
-// union and prune halves of matcher-design.md bucket 1.5, and the bucket-2 extensions (blind
+// union and prune halves of stage-2 activation, and the takeover extensions (blind
 // emission, min-activation depth skew, the recursion rematch window). Guards the candidacy rules
 // the runtime and the tools must share: which keys may carry an activation, which entries are
 // never judged, and that the verdict is keywordScore's over the entry's resolved-depth window.
@@ -19,7 +19,7 @@ const addedUids = (entries, text, o = {}) =>
 
     const smart = { uid: 2, key: ['? apollo & cosmonaut'], content: 'x' };
     eq(addedUids([smart], 'the cosmonaut boarded apollo'), '2',
-        'SmartKeys-only entry activates — the defect bucket 1.5 exists to fix');
+        'SmartKeys-only entry activates — core reads `? …` as a literal needle and never fires it');
     eq(addedUids([smart], 'the cosmonaut waited'), '', 'conjunction unmet, no add');
 
     eq(addedUids([{ uid: 3, key: ['? !apollo'], content: 'x' }], 'quiet evening'), '',
@@ -44,7 +44,7 @@ const addedUids = (entries, text, o = {}) =>
     eq(addedUids([{ uid: 11, key: ['cosmonaut'], delayUntilRecursion: 1, content: 'x' }], 'cosmonaut'), '',
         'delayUntilRecursion entries never activate on the initial pass — the only pass the union feeds');
     eq(addedUids([{ uid: 12, key: ['cosmonaut'], delayUntilRecursion: 1, content: 'x' }], 'cosmonaut', { blind: true }), '12',
-        'blind (bucket 2): delayed entries ARE emitted — core\'s gate order and the persistent external map admit them at their level');
+        'blind: delayed entries ARE emitted — core\'s gate order and the persistent external map admit them at their level');
     eq(addedUids([{ uid: 13, key: ['cosmonaut'], content: '@@dont_activate\nx' }], 'cosmonaut', { blind: true }), '',
         'blind lifts only the delay skip — @@dont_activate is still never overridden');
     eq(addedUids([{ uid: 14, key: ['cosmonaut'], decorators: ['@@dont_activate'], content: 'x' }], 'cosmonaut'), '',
@@ -115,7 +115,7 @@ const addedUids = (entries, text, o = {}) =>
     console.log('ok   activationAdds: verdict is keywordScore\'s — segmentation and secondary gating included');
 }
 
-// Bucket 2's recursion rematch window (withExtraTexts): chat segments plus each pass's new entry
+// The recursion rematch window (withExtraTexts): chat segments plus each pass's new entry
 // content, re-segmented — so recursion text carries activations, and whether a conjunction may
 // span the chat/recursion seam follows the match window exactly as it follows the message seam.
 {

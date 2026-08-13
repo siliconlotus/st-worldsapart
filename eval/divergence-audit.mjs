@@ -15,7 +15,7 @@
 //   key miss        — no key of a relevant entry occurs anywhere; fix the keys (suggester).
 //   window miss     — a key occurs in the sample's scanText (WA's window) but the entry did not
 //                     fire, i.e. core's shallower scan expired it; fix is depth/persistence
-//                     (matcher-design.md, bucket 1.5: WA's messageDepth supersedes core's depth).
+//                     (WA's messageDepth supersedes core's depth).
 //   over-fire       — a fired row graded 0-1; fix the keys (prune / tighten).
 // This tool finds window misses mechanically and lists candidates for the other two; "relevant but
 // unfired" beyond the window class needs a judge, since ungraded unfired entries have no grades.

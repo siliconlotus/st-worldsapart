@@ -1,4 +1,4 @@
-// prune-audit.mjs — the bucket 1.5 task-5 measurement: over a real chat, how often would the prune
+// prune-audit.mjs — over a real chat, how often would the prune
 // delete an entry core keyword-activated, and why. Runs the REAL prune verdict (matcher.mjs
 // activationPrunes over makeWindowFor) against an emulation of core's matchKeys at every message of
 // the chat, and classifies each would-prune event:

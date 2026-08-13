@@ -30,8 +30,8 @@
  *   dropoff 0.06      12.6 | 58%  65%  69%  76%   | 68%  72%  75%  79%
  *
  * READ THE RIGHT-HAND BLOCK. Under a single >=3 bar the shallow cuts win F1 and the ordering inverts by
- * F4, which reads as beta trading recall against precision. Under the asymmetric bar (matcher-design.md,
- * queued) depth wins at every beta and the inversion is gone — a single bar was confounding the sweep
+ * F4, which reads as beta trading recall against precision. Under the asymmetric bar (recall at
+ * grade >= 3, precision at >= 2) depth wins at every beta and the inversion is gone — a single bar was confounding the sweep
  * with its own denominator, since it charges every delivered grade-2 row as a false positive.
  *
  * DEPTH is what the metric rewards; mode is close to a wash at equal depth. Elbow 1.2 sits at or near
@@ -41,7 +41,7 @@
  * table was largely the precision bar, and the shipped maxVectorEntries of 10 is below anything measured
  * here — every graded capture ran at 20.
  *
- * Where this is going: matcher-design.md rules that stage 1 should ADMIT on a bound and stage 4 should
+ * Where this is going: stage 1 should ADMIT on a bound and stage 4 should
  * arbitrate. Under that, most of this comparison is a question about the wrong stage.
  *
  * ELBOW HAS A MINIMUM RETRIEVAL DEPTH, and it is not obvious from this file. elbowSensitivity is a multiple
