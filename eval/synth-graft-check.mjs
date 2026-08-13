@@ -8,7 +8,7 @@
 // The scene guard is the one that matters. A grade is a verdict about a (scene, entry) pair, and the entry
 // half fails loudly on its own — a wrong uid matches nothing. The scene half is the half that can be wrong
 // while looking right, because two bundles can name the same message id and hold different turns.
-import { execFileSync } from 'node:child_process';
+import { spawnSync } from 'node:child_process';
 import { mkdtempSync, writeFileSync, readFileSync, existsSync, mkdirSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, dirname } from 'node:path';
@@ -19,14 +19,14 @@ const TMP = mkdtempSync(join(tmpdir(), 'wa-synth-check-'));
 let bad = 0;
 const ok = (cond, msg) => { console.log(`${cond ? 'ok  ' : 'FAIL'} ${msg}`); if (!cond) bad++; };
 
-/** Runs a tool the way a person would. Returns exit code and combined output rather than throwing. */
+/**
+ * Runs a tool the way a person would. Returns exit code and BOTH streams — these tools report refusals and
+ * warnings on stderr and results on stdout, so reading one of them makes half their output invisible to a
+ * check while it still looks like it passed.
+ */
 function run(script, args, env = {}) {
-    try {
-        const out = execFileSync('node', [join(HERE, script), ...args], { encoding: 'utf8', stdio: 'pipe', env: { ...process.env, ...env } });
-        return { code: 0, out };
-    } catch (e) {
-        return { code: e.status ?? 1, out: `${e.stdout ?? ''}${e.stderr ?? ''}` };
-    }
+    const r = spawnSync('node', [join(HERE, script), ...args], { encoding: 'utf8', env: { ...process.env, ...env } });
+    return { code: r.status ?? 1, out: `${r.stdout ?? ''}${r.stderr ?? ''}` };
 }
 
 const WORLD = 'Check Book';
@@ -71,6 +71,20 @@ for (const [field, over] of [['query', { query: 'different' }], ['scanText', { s
     ok(res.code !== 0 && res.out.includes('REFUSED') && res.out.includes(field),
         `a scene differing only in ${field} is refused, and ${field} is named`);
 }
+
+// --- graft: the whitespace escape, which must not widen into anything else -------------------------------
+const ws = put('ws.json', bundle('scene', { scanText: 'S \nT' }));
+const wsSrc = put('ws-graded.json', bundle('scene', { scanText: 'S\nT', grades: [[1, 4]] }));
+ok(run('graft-grades.mjs', [ws, '--from', wsSrc]).code !== 0, 'trailing whitespace still refuses by default');
+r = run('graft-grades.mjs', [ws, '--from', wsSrc, '--allow-whitespace-drift']);
+ok(r.code === 0 && /whitespace only/.test(r.out), '--allow-whitespace-drift accepts it, and says it did');
+// A space in the MIDDLE is a different scene, not drift, and the flag must not reach it.
+const mid = put('mid.json', bundle('scene', { scanText: 'S T' }));
+ok(run('graft-grades.mjs', [mid, '--from', wsSrc, '--allow-whitespace-drift']).code !== 0,
+    'the flag does not excuse a difference anywhere but at a line end');
+r = run('graft-grades.mjs', [ws, '--from', wsSrc, '--allow-whitespace-drift', '--write']);
+ok(JSON.parse(readFileSync(ws, 'utf8')).grading?.sceneMatchedIgnoringTrailingWhitespace === true,
+    'and the bundle records that its scene matched only under normalisation');
 
 // --- graft: the entry half ------------------------------------------------------------------------------
 r = run('graft-grades.mjs', [same, '--from', graded, '--write']);

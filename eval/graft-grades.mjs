@@ -29,10 +29,12 @@ const files = argv.filter((a, i) => a.endsWith('.json') && !a.startsWith('--') &
 const WRITE = argv.includes('--write');
 const FROM = arg('--from');
 const FROM_DIR = arg('--from-dir');
+const WS_DRIFT = argv.includes('--allow-whitespace-drift');
 
 if (!files.length || (!FROM && !FROM_DIR)) {
     console.error('usage: node eval/graft-grades.mjs <fresh.json ...> (--from <graded.json> | --from-dir <dir>) [--rename-world "old=new"] [--write]');
     console.error('  refuses unless the frozen scene matches; reports orphans by reason');
+    console.error('  --allow-whitespace-drift accepts a scene differing only in trailing whitespace, and records that it did');
     process.exit(2);
 }
 
@@ -60,7 +62,21 @@ for (const path of files) {
 
     // --- the scene guard, before anything is read out of the source -----------------------------------
     const a = armOf(fresh), b = armOf(src);
-    const diff = ['query', 'scanText'].filter(f => a[f] !== b[f]).concat(Number(a.depth) !== Number(b.depth) ? ['depth'] : []);
+    let diff = ['query', 'scanText'].filter(f => a[f] !== b[f]).concat(Number(a.depth) !== Number(b.depth) ? ['depth'] : []);
+    // TRAILING WHITESPACE ONLY, and only when asked for. Measured on 4 of 56 scenes across 3 chats: the
+    // capture's scanText is one character shorter than the window rebuilt from the same turn, because a
+    // message in the chat file ends with a space that the capture did not record. Production reads `mes`
+    // raw into scanSegments, so the rebuilt window is the faithful one and the recorded text was subtly
+    // wrong — and under strict word boundaries a space before a newline is a boundary either way, so no
+    // count can move. The escape is a flag rather than the default because a guard that quietly normalises
+    // its input stops being able to tell you the scene changed.
+    let drifted = false;
+    if (diff.length && WS_DRIFT) {
+        const flat = s => String(s).split('\n').map(l => l.replace(/[ \t]+$/, '')).join('\n');
+        const still = diff.filter(f => (f === 'depth' ? Number(a[f]) !== Number(b[f]) : flat(a[f]) !== flat(b[f])));
+        if (!still.length) { drifted = true; console.error(`   ${basename(path)}: ${diff.join(', ')} differ by trailing whitespace only — accepted under --allow-whitespace-drift`); }
+        diff = still;
+    }
     if (diff.length) {
         console.error(`!! ${basename(path)}: REFUSED — ${diff.join(', ')} differ from ${basename(srcPath)}, so these grades were not made about this scene`);
         for (const f of diff) {
@@ -119,6 +135,7 @@ for (const path of files) {
                 notes: src.grading?.notes ?? src.notes ?? null,
                 graftedAt: new Date().toISOString().slice(0, 10),
                 ...(RENAME ? { renamedWorld: `${RENAME.from} -> ${RENAME.to}` } : {}),
+                ...(drifted ? { sceneMatchedIgnoringTrailingWhitespace: true } : {}),
                 orphans: [...byReason].map(([reason, gs]) => ({ reason, uids: gs.map(g => Number(g.uid)) })),
             },
         };
