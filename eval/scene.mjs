@@ -18,6 +18,7 @@ import { corpusMean, centeredCosineScores } from '../plugin/vector.mjs';
 import * as ranking from '../extension/ranking.mjs';
 import * as matcher from '../extension/matcher.mjs';
 import { isReference, openBundle } from '../extension/grading.mjs';
+import { gradeCredit, fbeta, RECALL_WEIGHT } from './metrics.mjs';
 
 /** Reads a manifest from disk as a plain sample, whether it is one or a /wa-super-grade multi-arm bundle.
  *  Every tool goes through this so `--arm` behaves identically everywhere and a bundle is never scored as
@@ -315,13 +316,26 @@ export function makeCandidateSet({ loaded, byUid, entries, params: P, topK }) {
         const rows = [];
         // --- STAGE 2: ACTIVATION (retrieval route). Whatever survived the cut above is in the ranking.
         // `entry` is carried so fuseRanks can read eligibility (and authored order) the way production does.
-        for (const [uid, s] of per) { const e = byUid.get(uid); if (e) rows.push({ uid, entry: e, title: wiTitle(e), score: s.score, textScore: s.bm25, keywordScore: keywordScore(e, scanText, k1), vectorEligible: !!e.vectorized, keysEligible: scoringKeys(e, P).length > 0 }); }
+        //
+        // DISABLED ENTRIES ARE EXCLUDED HERE TOO, and this route is why the exclusion matters. Disabling an
+        // entry does NOT purge its chunks from the collection, so the index keeps answering for it long after
+        // core stopped activating it — measured: every one of the 41 ungraded rows in the top-40 of three
+        // sommers scenes was a disabled entry, all of them still in the index, 34% of the delivered slots.
+        // They read as "unjudged" for the honest reason that no live capture could ever have listed them, so
+        // the pool is complete and the RANKING was wrong. The keyword route below has always guarded this;
+        // its comment used to justify being the only guard by claiming a disabled entry "is never indexed
+        // either", which the index disproves.
+        //
+        // Dropped at admission rather than filtered from `entries`: the gazetteer and the BM25 corpus must
+        // still see every entry, or the term weights move and the comparison measures the wrong thing.
+        for (const [uid, s] of per) { const e = byUid.get(uid); if (e && !e.disable) rows.push({ uid, entry: e, title: wiTitle(e), score: s.score, textScore: s.bm25, keywordScore: keywordScore(e, scanText, k1), vectorEligible: !!e.vectorized, keysEligible: scoringKeys(e, P).length > 0 }); }
         // --- STAGE 2: ACTIVATION (keyword route). Stands in for ST core's keyword match, so it may only
         // admit an entry core could actually have activated. Two exclusions, both stage-2 facts:
         //
-        //   disable            core never activates a disabled entry, and it is never indexed either, so
-        //                      this route is the only way one could appear at all — 279 of 611 keyword-only
-        //                      rows on the curated sommers scenes before the guard.
+        //   disable            core never activates a disabled entry — 279 of 611 keyword-only rows on the
+        //                      curated sommers scenes arrived this way before the guard. The retrieval route
+        //                      needs the same exclusion for a different reason (see above): a disabled entry
+        //                      stays in the collection, so that door does not close on its own.
         //   suppressVectorKeys blanks a vectorized entry's keys so core CANNOT keyword-activate it. Its only
         //                      door is retrieval, i.e. `per`. scoreVectorKeys does not reopen this one — that
         //                      setting is stage 3, and re-admits the stashed keys for SCORING alone. Without
@@ -392,6 +406,8 @@ export async function scoreScene({ sample: S, overrides = {}, k = 10, vectors, m
 
     const top = fuse(rankable, P.LEXW).slice(0, k);
     const unjudged = top.filter(r => !scene.POOL.has(Number(r.uid)));
+    // Read the DEPLOYED slice's grades before the pooled re-fuse below mutates shared rows.
+    const topGrades = top.map(r => gradeOf(r) ?? 0);
     // Re-fuse the pooled subset AFTER reading the slice above: fuse mutates, and the subset shares references.
     // FROM `rankable`, NOT `all` — the exclusion above is the whole point, and reading `all` here applied it
     // to coverage alone. That is what it did until 2026-08-12: every nDCG this harness had ever printed still
@@ -400,9 +416,33 @@ export async function scoreScene({ sample: S, overrides = {}, k = 10, vectors, m
     // nothing. Explicit here because gradeOf now returns null for it — see makeGradeOf.
     const g = fuse(rankable.filter(r => scene.POOL.has(Number(r.uid))), P.LEXW).map(r => gradeOf(r) ?? 0);
 
+    // SET METRICS, on the ASYMMETRIC bars: recall counts only grade >= 3 (did the must-deliver material
+    // arrive), while precision credits a 3 or 4 in full and a 2 at half (metrics.mjs gradeCredit). Both read
+    // the UNPOOLED top-k — what this configuration would actually put in front of a user — so an ungraded row
+    // still occupies a slot and still costs precision, the same `?? 0` convention nDCG uses. Scoring them off
+    // the pooled subset instead would flatter every arm by deleting its own misses.
+    //
+    // WHY THESE EXIST BESIDE nDCG. A ranking metric can only credit an entry that lands inside k, so it is
+    // structurally blind to an arm whose action is ADMITTING entries; F-beta at RECALL_WEIGHT weights the
+    // recall half, which is the half such an arm moves. Recall is also the pool-robust half — an ungraded row
+    // is not in the relevant set, so it cannot depress recall the way it depresses precision and nDCG.
+    //
+    // NOT the layout score the doc rules for: that one is at the token BUDGET over the dynamic block, and
+    // this is a fixed k. A fixed k also cannot express "as many as are relevant and no more" — two
+    // configurations delivering 6 and 20 entries to catch the same 6 score identically here. Read it as
+    // directional until the window is what the configuration actually delivered.
+    const relevant = g.filter(x => x >= 3).length;
+    const precision = top.length ? topGrades.reduce((sum, x) => sum + gradeCredit(x), 0) / top.length : 0;
+    const recall = relevant ? topGrades.filter(x => x >= 3).length / relevant : 0;
+    const f2 = fbeta(precision, recall, RECALL_WEIGHT);
+
     return {
         n: ndcg(g, k),
         nAt5: ndcg(g, 5),
+        precision,
+        recall,
+        f2,
+        relevant,
         judged: top.length - unjudged.length,
         of: top.length,
         unjudged: unjudged.map(r => r.title),
