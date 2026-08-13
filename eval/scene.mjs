@@ -18,6 +18,10 @@ import { corpusMean, centeredCosineScores } from '../plugin/vector.mjs';
 import * as ranking from '../extension/ranking.mjs';
 import * as matcher from '../extension/matcher.mjs';
 import { isReference, openBundle } from '../extension/grading.mjs';
+// Cycle: reindex.mjs imports getStringHash from here. Safe because neither side calls across at module
+// scope — both references live inside function bodies, so whichever module loads first finishes evaluating
+// before the other needs a binding.
+import { cachePath, chunkConfig } from './reindex.mjs';
 import { gradeCredit, fbeta, RECALL_WEIGHT } from './metrics.mjs';
 
 /** Reads a manifest from disk as a plain sample, whether it is one or a /wa-super-grade multi-arm bundle.
@@ -70,18 +74,33 @@ export function stInstall() {
 
 /**
  * Where this sample's vector collection lives. Explicit --index wins, then the sample's own record, then the
- * derived path.
+ * path derived from the local ST vectors dir, then the rebuild cache.
  *
  * THE SAMPLE'S OWN `index` IS SKIPPED WHEN IT DOESN'T EXIST HERE, which is the normal case for a graded scene
- * somebody else captured: it records an absolute-ish path on THEIR machine. Falling through to the derived
- * path lets a rebuilt collection (eval/reindex.mjs, whose cache key is book + model + chunk settings) be
- * found without editing the manifest. Callers that need a specific rebuild still pass `index` explicitly.
+ * somebody else captured: it records an absolute-ish path on THEIR machine. So does the derived path — it
+ * hashes the book name into THIS machine's vectors dir, which a stranger's book will not occupy. Both are
+ * author-machine concepts, and a bundle that carries `bookMode: 'full'`, `paramSnapshot.vectors` and
+ * `embedModel` needs neither: cachePath keys on (book, model, chunk settings), so it names the same file on
+ * every machine and ensureIndex can fill it. That cache is the last resort rather than the first so no run
+ * that resolves today resolves anywhere else — it is reached only when the two local paths are both absent.
+ *
+ * The returned path may not exist. Naming the rebuildable one in that case is what lets loadScene say which
+ * file to build instead of scoring on an empty collection.
  */
 export const indexPath = (S, { vectors = 'data/default-user/vectors/ollama', model = 'bge-m3', index = null } = {}) => {
     if (index) return index;
-    const derived = `${vectors}/wa_${getStringHash(S.primaryBook)}/${model}/index.json`;
-    if (S.index && (existsSync(S.index) || !existsSync(derived))) return S.index;
-    return derived;
+    // THROUGH stInstall, NOT THE CWD. Both local candidates are recorded with ST's `data/` prefix, so testing
+    // them raw asks whether the collection exists *relative to wherever the tool was launched from* — and the
+    // answer changes with the directory while the scene does not. That is not hypothetical: the same sample
+    // scored 10/10 judged from the ST root and 0/0 one directory down, and the second run reported it as a
+    // result. stInstall returns null only on a machine with no ST install, where neither candidate can exist
+    // anyway and the rebuild cache is the answer.
+    const st = stInstall();
+    const local = p => (st ? st.resolve(p) : p);
+    if (S.index && existsSync(local(S.index))) return local(S.index);
+    const derived = local(`${vectors}/wa_${getStringHash(S.primaryBook)}/${model}/index.json`);
+    if (existsSync(derived)) return derived;
+    return cachePath(S, chunkConfig(S), model);
 };
 
 /** One local embed call. Deliberately not cached to disk: a stored vector would keep answering after the
@@ -157,6 +176,9 @@ export const sceneParams = (S, overrides = {}) => ({
  */
 export function loadScene(S, { indexFile, params: P }) {
     const primary = S.primaryBook;
+    // `primaryBook` names a key of `books`, and a bundle whose book was renamed after capture no longer
+    // satisfies that. Says so, rather than dying inside Object.values with nothing naming the book.
+    if (!S.books?.[primary]) throw new Error(`sample's primaryBook "${primary}" is not among its embedded books (${Object.keys(S.books ?? {}).join(', ') || 'none'})`);
     const entries = Object.values(S.books[primary]);
     const byUid = new Map(entries.map(e => [Number(e.uid), e]));
     // A KEYWORD-ONLY BOOK HAS NO COLLECTION, and that is a configuration rather than a failure: indexing
@@ -168,6 +190,15 @@ export function loadScene(S, { indexFile, params: P }) {
     // index, no embedding call, no ollama. corpusMean is the only thing that cannot take an empty list,
     // and it is guarded here rather than in plugin/ so this needs no redeploy.
     const items = existsSync(indexFile) ? JSON.parse(readFileSync(indexFile, 'utf8')).items : [];
+    // AN EMPTY COLLECTION IS ONLY LEGITIMATE WHEN THE BOOK HAS NOTHING TO INDEX. Same gate reindex.mjs
+    // buildItems applies, so the two agree on what "nothing to index" means. Without this the two cases are
+    // indistinguishable at runtime: a missing collection scores keyword-and-BM25-only and returns a
+    // plausible number rather than an error, which is what a bundle opened on a machine that never held the
+    // author's vectors does. Measured on this corpus: the same scene read 10/10 judged with the index and
+    // 0/0 without, and only the second one looked like a result.
+    if (!items.length && entries.some(e => e.vectorized && !e.disable && e.content)) {
+        throw new Error(`no vector collection for "${primary}" at ${indexFile} — the book has vectorized entries, so scoring without one would silently drop cosine. Build it with: node eval/reindex.mjs <sample.json>`);
+    }
     const loaded = { items, mean: items.length ? corpusMean(items) : [], lexical: buildLexical(items) };
 
     // Out-of-scope graded titles: entries from a second attached book, which this harness cannot rank
