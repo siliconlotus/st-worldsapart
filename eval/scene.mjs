@@ -192,13 +192,19 @@ export function loadScene(S, { indexFile, params: P }) {
         : gazSource;
     const gaz = ranking.buildGazetteer(gazEntries);
 
-    // THE POOL IS WHAT A HUMAN JUDGED, not what one capture logged — see graded-scene-grid.mjs. OWN is this
-    // capture's own non-reference rows, kept separately so coverage warnings stay about re-derivation
-    // failing rather than about sibling arms legitimately disagreeing.
+    // THE POOL IS WHAT WAS JUDGED, and ONLY that — see graded-scene-grid.mjs. OWN is this capture's own
+    // non-reference rows, kept separately so coverage warnings stay about re-derivation failing rather than
+    // about sibling arms legitimately disagreeing.
+    //
+    // OWN USED TO BE UNIONED INTO THE POOL, which was a shorthand for "a capture logs exactly the rows the
+    // grader was shown" — true while every logged row got a verdict, and false the moment a sample records a
+    // population wider than the graded set. A re-derived bundle logging 144 rows against 47 grades then
+    // reported judged@10 of 100% on a scene that was 18% judged, so the stopping rule said "pool is
+    // adequate" precisely where it was not. An ungraded row is unjudged no matter who logged it.
     const OWN = new Set((S.candidates ?? []).filter(c => !isReference(c) && (!c.world || c.world === primary)).map(c => Number(c.uid)));
-    const POOL = new Set([...OWN, ...(S.grades ?? [])
+    const POOL = new Set((S.grades ?? [])
         .filter(g => Number.isFinite(Number(g.uid)) && (!g.world || g.world === primary) && !isExcluded(g.title))
-        .map(g => Number(g.uid))]);
+        .map(g => Number(g.uid)));
 
     return { primary, entries, byUid, items, loaded, gaz, gazSource, isExcluded, POOL, OWN };
 }

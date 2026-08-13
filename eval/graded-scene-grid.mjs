@@ -206,17 +206,22 @@ const fmt = n => (n == null ? '·' : (+n).toFixed(3));
     //
     // Reference rows (constants, configured stickies) are tiered off: always-on entries aren't relevance results.
     //
-    // THE POOL IS WHAT A HUMAN JUDGED, not what this one capture logged. For an ordinary single-arm sample
-    // those are the same set — grades are collected FROM the candidate list — so this reads exactly as it
-    // always did. They diverge by design for a /wa-super-grade sample, which captures N population-changing
-    // arms, unions their candidate lists, and grades the union once: an entry only a SIBLING arm surfaced is
-    // judged too, and admitting it here is what makes a wrong promotion visible instead of silently filtered
-    // out of the ranking.
+    // THE POOL IS WHAT WAS JUDGED, and nothing else. For an ordinary single-arm sample it reads as it always
+    // did, because grades are collected FROM the candidate list. For a /wa-super-grade sample the grades span
+    // the union of N population-changing arms, so an entry only a SIBLING arm surfaced is judged too, and
+    // counting it is what makes a wrong promotion visible instead of silently filtered out of the ranking.
+    //
+    // What is NOT in the pool is a logged row nobody graded. A sample may record a population wider than the
+    // graded set — an offline re-derivation does — and treating those rows as judged reported full coverage
+    // on a scene that was 18% judged.
     //
     // ponytail: the union is over the arms actually run, not over the whole parameter space, so a param swept
     // far outside those arms is still ranking against a pool that never saw its population. Widen the arm set
     // (or grade a fresh super-sample) rather than trusting a lone distant arm.
-    console.log(`pool: ${POOL.size} judged entries (${OWN.size} from this capture's ${S.candidates.length} logged rows${POOL.size > OWN.size ? `, +${POOL.size - OWN.size} judged under a sibling arm` : ''})`);
+    const ownJudged = [...OWN].filter(u => POOL.has(u)).length;
+    console.log(`pool: ${POOL.size} judged entries; this capture logged ${S.candidates.length} rows, ${ownJudged} of them judged`
+        + `${POOL.size > ownJudged ? ` (+${POOL.size - ownJudged} judged under a sibling arm)` : ''}`
+        + `${OWN.size > ownJudged ? ` — ${OWN.size - ownJudged} logged rows are UNJUDGED and score as 0` : ''}`);
 
     let poolWarned = false;
     const activated = rows => {
