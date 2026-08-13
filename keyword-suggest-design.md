@@ -596,6 +596,34 @@ Zipf ≥ 4.5: public books 2-5%, this author's curated books 0-1%, hand-written 
 Red Dead 17%. Synthetic control — random Zipf 5.5+ words used as keys fire at median 7%, p90 34%, and
 collapse under whole-word only 11 times in 100, so the class is real and separable when it occurs.
 
+**Ruled: `chat common` raises its own flag.** Chat rate was confirm-only — it could redden
+`english common` and never speak alone — so a key that floods the chat without being a common English
+word or frequent in the book's own prose went unflagged entirely. `magic` on a Foxbridge entry is the
+shape: not on the word list, and 38 entries of encyclopedia prose will never clear the `book common`
+ratio.
+
+**It claims something about the KEY against this chat, not about the entry's wiring.** That is what
+decides the exemptions, and it is a narrower claim than "this entry is effectively a constant" — which
+was the phrasing considered first and would have made every exemption a question about whether the
+entry can currently fire.
+
+**Exempt: `constant` and `sticky`.** Both are author declarations that the entry is meant to be
+ubiquitous, which is the ground `stickySkipCommon` already stands on for `book common`.
+
+**Not exempt: vectorized, and therefore not the memory tier.** `suppressVectorKeys` blanks those keys
+so they cannot activate — but it is a WA setting, and stock SillyTavern matches them normally, so a key
+inert on this machine is a latent flood in the same book opened anywhere else. Suppressing on wiring
+would hide precisely the case the author cannot see for themselves. Revisit if the volume proves to
+drown the flags worth acting on; the noise argument is real and the correctness one is not.
+
+**Advisory: it colours, it never pre-ticks**, as `KEY_DUPE_MIN` already does. Its remedies are
+`constant` or a narrower key, so it does not belong in a tick-to-remove list — a warning means nothing
+until someone chooses to act on it, which is also why showing it costs little.
+
+**Open: the threshold.** `KEY_CHAT_COMMON` is 20% and was set deliberately loose for the confirm role,
+sized against a population dominated by the entries this flag does not exempt. It wants re-reading
+against what the flag actually surfaces rather than inheriting a bound calibrated for a different job.
+
 ## Open
 
 Blocking the definition:

@@ -122,10 +122,11 @@ const COMMON_HEAD = new Set([...COMMON_WORDS].slice(0, ENGLISH_COMMON_STICKY_CUT
  * how continuous memory is authored.
  *
  * Used only to CONFIRM another flag, never to raise one on its own — and the value is calibrated for
- * that job. A `chat common` flag that RAISES would first exclude the entries that make the band
- * legitimate (constant, sticky, vectorized), which removes most of the population the 20% was set
- * loose to accommodate, so the threshold wants re-reading against what survives rather than
- * inheriting this one. */
+ * that job. A `chat common` flag that RAISES exempts constant and sticky (author declarations that the
+ * entry is meant to be ubiquitous) and NOT vectorized, since suppressVectorKeys is a WA setting and
+ * stock ST matches those keys normally — so the 20% was sized against a population that flag still
+ * reports on, and the threshold wants re-reading against what it surfaces rather than inheriting a
+ * bound set for a different job. Ruled in keyword-suggest-design.md. */
 export const KEY_CHAT_COMMON = 0.20;
 
 /**
