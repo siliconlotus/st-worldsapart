@@ -8,7 +8,7 @@ import { ZIPF_EN, POS_VA, POS_VA_STRICT, POS_ADJ } from './zipf-en.js';
 import { countKey, escapeRegex, isRegexKey, segment } from './matcher.mjs';
 import { buildAutomaton, scanAutomaton, createScanScope, primeScan } from './smartkeys.mjs';
 
-export const KEY_TOO_COMMON = 0.5;
+export const KEY_BOOK_COMMON = 0.5;
 
 /**
  * Fold a term into the form the frequency tables are keyed by. SUBTLEX writes contractions with a
@@ -25,19 +25,19 @@ const tblKey = w => w.includes('’') ? w.replace(/’/g, "'") : w;
 /** The df-based lorebook-common flag needs a corpus big enough for the ratio to mean something — in a
  * handful of entries "in >37.5% of them" is a coin flip and mislabels genuinely good keys. Below this
  * many scanned entries, skip lorebook-common (English-common still fires; it doesn't lean on df). */
-export const KEY_MIN_COMMON_ENTRIES = 10;
+export const KEY_MIN_BOOK_COMMON_ENTRIES = 10;
 
 /** Keys shorter than this fire on substrings of longer words (e.g. "un" inside "under"), a common
  * false-positive source. Core trims keys before matching, so this measures the trimmed length. */
 export const KEY_MIN_LENGTH = 4;
 
 /** Share of the book that may LIST a key before it's flagged. This is activation breadth, a different
- * defect from KEY_TOO_COMMON's firing rate: a key on most entries drags them all in on one hit, however
+ * defect from KEY_BOOK_COMMON's firing rate: a key on most entries drags them all in on one hit, however
  * rarely it fires. Deliberately far above the frequency cut, because a shared trigger is usually
  * intentional — a character name on every entry about that character is how continuous memory is
  * authored — so only near-total sharing (where the key can no longer discriminate at all, making it a
  * constant that fires unpredictably) is worth flagging. */
-export const KEY_SHARED = 0.75;
+export const KEY_BOOK_SHARED = 0.75;
 
 /** Rare-vocabulary Jaccard at which two entries are reported as near-duplicates by the audit.
  *
@@ -64,7 +64,7 @@ export const FUNCTION_WORDS = new Set('a an the and or but if then else for to o
  *
  * This is the dominant failure of machine-written keys and nothing else in the audit sees it: an entry's
  * auto-generated keys are lifted verbatim from its own prose, so they sit in that entry's text (df 1, not
- * "dead"), appear nowhere else (not "too common", not "shared") and are long (not "short"). Three uncurated
+ * "dead"), appear nowhere else (not "book common", not "book shared") and are long (not "short"). Three uncurated
  * entries were measured with 22 keys between them, all with zero hits across 5473 chat messages, and every
  * single one UNFLAGGED.
  *
@@ -114,20 +114,32 @@ const COMMON_HEAD = new Set([...COMMON_WORDS].slice(0, ENGLISH_COMMON_STICKY_CUT
  *        world-info globals here; harnesses pass nothing and get false/false)
  * @returns {{entries:object[], nE:number, classifyEntry:Function, reasonOf:Function, defChecked:Function, effCase:Function, effWhole:Function}}
  */
-/** Share of messages a key must match before chat evidence calls it broad. Not a fitted threshold —
- * a bound. Measured on Richard's curation event, no key the author kept fired above 11%, so 20% sits
- * above the known-good ceiling with margin. It is deliberately loose because what lives above it is
- * mostly legitimate: of 20 keys over 20% across seven books, 8 were on vectorized entries (blanked by
- * suppressVectorKeys) and most of the rest were main-cast names on sticky sheets, which is how
- * continuous memory is authored. Used only to CONFIRM another flag, never to raise one on its own. */
-export const CHAT_BROAD = 0.20;
+/** Share of messages a key must match before chat evidence calls it chat-common. Not a fitted
+ * threshold — a bound. Measured on Richard's curation event, no key the author kept fired above 11%,
+ * so 20% sits above the known-good ceiling with margin. It is deliberately loose because what lives
+ * above it is mostly legitimate: of 20 keys over 20% across seven books, 8 were on vectorized entries
+ * (blanked by suppressVectorKeys) and most of the rest were main-cast names on sticky sheets, which is
+ * how continuous memory is authored.
+ *
+ * Used only to CONFIRM another flag, never to raise one on its own — and the value is calibrated for
+ * that job. A `chat common` flag that RAISES would first exclude the entries that make the band
+ * legitimate (constant, sticky, vectorized), which removes most of the population the 20% was set
+ * loose to accommodate, so the threshold wants re-reading against what survives rather than
+ * inheriting this one. */
+export const KEY_CHAT_COMMON = 0.20;
 
 /**
- * @param {{hits: Map<string, number>, messages: number}} [chatRate] Per-key message hit counts from a
- *   chat scan, and the denominator. Absent = no chat evidence, and every flag behaves as it did before
- *   the signal existed — this is opt-in evidence the user asked for, not a verdict the tool imposes.
+ * NAMES SAY WHICH CORPUS, because there are two and the old ones did not. `bookContent` and
+ * `bookListed` are COUNTS of entries, over `nBook`; `chatRate` is a RATE, already divided by the
+ * message total. Nothing here holds a book-side rate — those divisions are inline and read as
+ * divisions — so a bare identifier is always a count and anything ending `Rate` is always a share.
+ *
+ * @param {{messagesWith: Map<string, number>, messages: number}} [chatScan] Per-key counts of MESSAGES
+ *   CONTAINING the key, and the denominator — never occurrences, which is the drift `addMessageHits`
+ *   exists to prevent. Absent = no chat evidence, and every flag behaves as it did before the signal
+ *   existed: this is opt-in evidence the user asked for, not a verdict the tool imposes.
  */
-export function buildKeyPruneScan(data, opts, ignoreSet, { caseSensitiveDefault = false, wholeWordsDefault = false, matchWindow = 'scan', chatRate } = {}) {
+export function buildKeyPruneScan(data, opts, ignoreSet, { caseSensitiveDefault = false, wholeWordsDefault = false, matchWindow = 'scan', chatScan } = {}) {
     // Share of the chat a key matches. THREE states, and the last two must not collapse:
     //   undefined  no scan has been run
     //   undefined  a scan ran, but not over THIS key — runChatScan collects from visibleEntries(),
@@ -136,10 +148,10 @@ export function buildKeyPruneScan(data, opts, ignoreSet, { caseSensitiveDefault 
     // `chatChecked` reads this to pick the reason text, so conflating the middle case with the last
     // prints "not in entry text or chat" about a key nobody checked — the strong claim on the weak
     // evidence, which is what that label exists to prevent.
-    const chatShare = key => {
-        if (!chatRate?.messages) return undefined;
-        const n = chatRate.hits?.get(key);
-        return n === undefined ? undefined : n / chatRate.messages;
+    const chatRateOf = key => {
+        if (!chatScan?.messages) return undefined;
+        const n = chatScan.messagesWith?.get(key);
+        return n === undefined ? undefined : n / chatScan.messages;
     };
     const RED = '#e06c6c', YEL = '#d9b74a', GRN = '#7bbf6a';
     const looksProper = k => k.split(/\s+/).every(t => /^[A-Z]/.test(t));   // Title Case = a name
@@ -162,13 +174,13 @@ export function buildKeyPruneScan(data, opts, ignoreSet, { caseSensitiveDefault 
     const contents = allEntries.map(e => String(e.content ?? ''));
     const nBook = allEntries.length;                            // df denominator
 
-    // Key-share frequency: how many entries LIST each key. Same whole-book denominator as content df,
-    // for the same reason — "how widely is this term used as a trigger" shouldn't move with scan scope.
+    // How many entries LIST each key. Same whole-book denominator as content df, for the same reason —
+    // "how widely is this term used as a trigger" shouldn't move with scan scope.
     // Deduped per entry so a key repeated within one entry counts once.
-    const dfKeys = new Map();
+    const bookListedBy = new Map();
     for (const e of allEntries) {
         for (const k of new Set((Array.isArray(e.key) ? e.key : []).map(x => String(x).trim().toLowerCase()))) {
-            if (k) dfKeys.set(k, (dfKeys.get(k) ?? 0) + 1);
+            if (k) bookListedBy.set(k, (bookListedBy.get(k) ?? 0) + 1);
         }
     }
 
@@ -273,8 +285,8 @@ export function buildKeyPruneScan(data, opts, ignoreSet, { caseSensitiveDefault 
         // `total` is meaningless for a SmartKey too — countKey returns a weight, not an occurrence
         // count — but only the short-key check reads it, and that is one of the skipped ones.
         const literal = !k.startsWith('?') && !isRegexKey(k);
-        const dc = scan(k, cs, ww).df;
-        const share = chatShare(k);
+        const bookContent = scan(k, cs, ww).df;
+        const chatRate = chatRateOf(k);
         // A common-English single word over-fires against chat regardless of lorebook df, so it
         // outranks dead (a word absent from the book's own text still floods it from the chat).
         // Sticky gets the shorter head-of-list cut; keyword/vector test the whole list.
@@ -282,10 +294,10 @@ export function buildKeyPruneScan(data, opts, ignoreSet, { caseSensitiveDefault 
         // `eng` is the ASSERTION that it over-fires; a chat scan is the evidence. Measured across the
         // books curation has not touched, 1 of 38 English-flagged keys actually fires broadly — the rest
         // are proper nouns colliding with common words (River, Blue, Angel, Paris) or generic words this
-        // story simply does not use. So the flag stands when unevidenced, and severityOf reads `share`
+        // story simply does not use. So the flag stands when unevidenced, and severityOf reads `chatRate`
         // to decide how loudly. It is NOT suppressed by a quiet chat: absence of over-firing here is not
         // evidence the word denotes anything, which is the other half of what this flag is claiming.
-        if (literal && opts.pruneCommon && !/\s/.test(k) && (sticky ? COMMON_HEAD : COMMON_WORDS).has(k.toLowerCase())) return { flag: 'too common', dc, eng: true, share };
+        if (literal && opts.pruneCommon && !/\s/.test(k) && (sticky ? COMMON_HEAD : COMMON_WORDS).has(k.toLowerCase())) return { flag: 'english common', bookContent, chatRate };
         // ignoreProper spares a capitalised key from the dead flag on the grounds it is a name the chat
         // will use. A SmartKey is not a name, so it gets no such reprieve — one that never evaluates
         // true anywhere is exactly the broken-key case the audit exists to surface.
@@ -296,15 +308,15 @@ export function buildKeyPruneScan(data, opts, ignoreSet, { caseSensitiveDefault 
         // out on the surface curation actually happens on. Cleanup had a local patch for this (a green
         // row plus a hit count) which no other surface could see. Still reachable under show-all, listed
         // as unflagged like any other key.
-        if (dc === 0 && opts.pruneUnattested && !(literal && opts.ignoreProper && looksProper(k)) && !share) return { flag: 'unattested', dc, literal, chatChecked: share !== undefined };
-        if (nBook >= KEY_MIN_COMMON_ENTRIES && dc / nBook > opts.tooCommon * 0.75 && opts.pruneCommon) return { flag: 'too common', dc };
+        if (bookContent === 0 && opts.pruneUnattested && !(literal && opts.ignoreProper && looksProper(k)) && !chatRate) return { flag: 'unattested', bookContent, literal, chatChecked: chatRate !== undefined };
+        if (nBook >= KEY_MIN_BOOK_COMMON_ENTRIES && bookContent / nBook > opts.bookCommon * 0.75 && opts.pruneCommon) return { flag: 'book common', bookContent };
         // Activation breadth, checked after firing rate: a key can be rare in the prose yet listed on
         // most entries, which the content-df flags above can't see. Same small-corpus guard, since
         // "75% of 4 entries" is as meaningless here as it is there.
-        const dk = dfKeys.get(k.toLowerCase()) ?? 0;
-        if (nBook >= KEY_MIN_COMMON_ENTRIES && dk / nBook > opts.sharedKeys * 0.75 && opts.pruneShared) return { flag: 'shared', dc, dk };
-        if (literal && opts.pruneFragment !== false && looksLikeFragment(k)) return { flag: 'fragment', dc };
-        if (literal && k.length < opts.minLength && !ww && opts.pruneShort) return { flag: 'short', dc, clean: strictClean(k, cs), total: scan(k, cs, false).total };
+        const bookListed = bookListedBy.get(k.toLowerCase()) ?? 0;
+        if (nBook >= KEY_MIN_BOOK_COMMON_ENTRIES && bookListed / nBook > opts.bookShared * 0.75 && opts.pruneShared) return { flag: 'book shared', bookContent, bookListed };
+        if (literal && opts.pruneFragment !== false && looksLikeFragment(k)) return { flag: 'fragment', bookContent };
+        if (literal && k.length < opts.minLength && !ww && opts.pruneShort) return { flag: 'short', bookContent, clean: strictClean(k, cs), total: scan(k, cs, false).total };
         return null;
     };
     const classifyEntry = e => {
@@ -318,7 +330,7 @@ export function buildKeyPruneScan(data, opts, ignoreSet, { caseSensitiveDefault 
             // Sticky = a reference sheet whose bare-name trigger is meant to be ubiquitous, so spare
             // the df-based too-common (cross-entry ubiquity is expected). The English-common flag
             // still bites — a genuinely generic word (top-1000) is a bad trigger even here.
-            if (c && !(c.flag === 'too common' && !c.eng && sticky && opts.stickySkipCommon)) out.push({ uid: e.uid, key, ...c });
+            if (c && !(c.flag === 'book common' && sticky && opts.stickySkipCommon)) out.push({ uid: e.uid, key, ...c });
         }
         return out;
     };
@@ -327,16 +339,14 @@ export function buildKeyPruneScan(data, opts, ignoreSet, { caseSensitiveDefault 
     // the tiers drifted: the popup coloured a key yellow while still pre-ticking it for removal.
     const severityOf = p => {
         if (p.flag === 'unattested') return '';
-        if (p.flag === 'too common') {
-            // The English list is an assertion about the WORD; a chat scan is evidence about this book's
-            // prose. Red once the evidence agrees, yellow while it is only asserted — the same shape the
-            // df branch below already has, where severity reads a measured ratio rather than a list
-            // membership. Unevidenced it stays yellow rather than red, because the author's call is the
-            // one that matters and the flag's precision as an over-firing predictor is low.
-            if (p.eng) return p.share >= CHAT_BROAD ? RED : YEL;
-            return p.dc / nBook >= opts.tooCommon ? RED : YEL;
-        }
-        if (p.flag === 'shared') return p.dk / nBook >= opts.sharedKeys ? RED : YEL;
+        // The English list is an assertion about the WORD; a chat scan is evidence about this book's
+        // prose. Red once the evidence agrees, yellow while it is only asserted — the same shape the
+        // book-side flags have, where severity reads a measured ratio rather than a list membership.
+        // Unevidenced it stays yellow rather than red, because the author's call is the one that matters
+        // and the flag's precision as an over-firing predictor is low.
+        if (p.flag === 'english common') return p.chatRate >= (opts.chatCommon ?? KEY_CHAT_COMMON) ? RED : YEL;
+        if (p.flag === 'book common') return p.bookContent / nBook >= opts.bookCommon ? RED : YEL;
+        if (p.flag === 'book shared') return p.bookListed / nBook >= opts.bookShared ? RED : YEL;
         // RED, not yellow, and not conditioned on who wrote the key: a clause fragment is a bad trigger
         // whoever authored it. Curated books contain them too ("never let an Alpha tie" survived a human
         // pass and still is not a good key), so deferring to the author here would just preserve the
@@ -357,11 +367,11 @@ export function buildKeyPruneScan(data, opts, ignoreSet, { caseSensitiveDefault 
         if (p.flag === 'unattested') {
             return { text: !p.literal ? 'never matches' : (p.chatChecked ? 'not in entry text or chat' : 'not in entry text'), color };
         }
-        if (p.flag === 'too common') {
-            if (!p.eng) return { text: `frequent (${Math.round(100 * p.dc / nBook)}%)`, color };
-            return { text: p.share === undefined ? 'common' : `common · ${Math.round(100 * p.share)}% of chat`, color };
+        if (p.flag === 'book common') return { text: `book common (${Math.round(100 * p.bookContent / nBook)}%)`, color };
+        if (p.flag === 'english common') {
+            return { text: p.chatRate === undefined ? 'english common' : `english common · ${Math.round(100 * p.chatRate)}% of chat`, color };
         }
-        if (p.flag === 'shared') return { text: `shared (${Math.round(100 * p.dk / nBook)}%)`, color };
+        if (p.flag === 'book shared') return { text: `book shared (${Math.round(100 * p.bookListed / nBook)}%)`, color };
         if (p.flag === 'fragment') return { text: 'phrase fragment', color };
         return { text: `short (${p.clean}/${p.total} clean)`, color };
     };
@@ -1058,7 +1068,7 @@ export function buildKeySuggest(data, opts) {
             // its legitimate parts ("bronze minotaur", "teddy") surface instead of being swallowed.
             // The high side is the pruner's too-common danger threshold, as before.
             const ds = dfSubstr(term);
-            if (!ds || ds / N > KEY_TOO_COMMON * 0.75) continue;
+            if (!ds || ds / N > KEY_BOOK_COMMON * 0.75) continue;
             const n = term.split(' ').length;
             if (excludeShort && n === 1 && term.length <= 3 && !isAcr(term)) continue;
             if (!isAcr(term) && headBad(term)) continue;
@@ -1126,8 +1136,8 @@ export function buildKeySuggest(data, opts) {
 
 // Studio scans every entry (all modes, active + inactive) so every entry's keywords get a verdict;
 // suggestions use the pruner's own dfCeil so a suggested key can't be one the pruner would then flag.
-export const STUDIO_PRUNE_OPTS = { scanKeyword: true, scanVectorized: true, scanConstant: true, includeInactive: true, pruneUnattested: true, pruneCommon: true, pruneShort: true, pruneShared: true, pruneFragment: true, ignoreProper: false, stickySkipCommon: true, tooCommon: KEY_TOO_COMMON, minLength: KEY_MIN_LENGTH, sharedKeys: KEY_SHARED };
-// dfCeil sits just under the pruner's too-common danger line (KEY_TOO_COMMON * 0.75 = 0.375): the
+export const STUDIO_PRUNE_OPTS = { scanKeyword: true, scanVectorized: true, scanConstant: true, includeInactive: true, pruneUnattested: true, pruneCommon: true, pruneShort: true, pruneShared: true, pruneFragment: true, ignoreProper: false, stickySkipCommon: true, bookCommon: KEY_BOOK_COMMON, minLength: KEY_MIN_LENGTH, bookShared: KEY_BOOK_SHARED, chatCommon: KEY_CHAT_COMMON };
+// dfCeil sits just under the pruner's too-common danger line (KEY_BOOK_COMMON * 0.75 = 0.375): the
 // suggester must not pre-reject a term the pruner itself considers fine. It was 0.15 when
 // cross-entry df was the only junk signal; the Zipf gate now owns English junk, and 0.15 was
 // silently cutting a book's recurring cast and setting names ("Stearns" in ~25% of entries).

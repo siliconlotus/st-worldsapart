@@ -23,7 +23,7 @@ const msgs = fs.readFileSync(new URL('sentinel-chat.jsonl', here), 'utf8').split
 const OPTS = {
     scanKeyword: true, scanVectorized: true, scanConstant: true, includeInactive: true,
     pruneUnattested: true, pruneCommon: true, pruneShort: true, pruneShared: true, pruneFragment: true,
-    ignoreProper: false, stickySkipCommon: true, tooCommon: 0.5, minLength: 4, sharedKeys: 0.75,
+    ignoreProper: false, stickySkipCommon: true, bookCommon: 0.5, minLength: 4, bookShared: 0.75,
 };
 const RED = '#e06c6c';
 const entries = Object.values(data.entries);
@@ -39,11 +39,11 @@ const chatRate = () => {
     for (const t of msgs) addMessageHits(aut, t, counts);
     // Literals only, exactly as scanChats does: a `?` SmartKey cannot be found by an automaton built from
     // folded literals, so it is left OUT of the map rather than recorded as 0 — absent means unchecked.
-    return { hits: new Map(literals.map(k => [k, counts.get(idxOf.get(fold(k))) ?? 0])), messages: msgs.length };
+    return { messagesWith: new Map(literals.map(k => [k, counts.get(idxOf.get(fold(k))) ?? 0])), messages: msgs.length };
 };
 
 const verdicts = (chat, matchWindow = 'scan') => {
-    const s = buildKeyPruneScan(data, OPTS, new Set(), { chatRate: chat, matchWindow });
+    const s = buildKeyPruneScan(data, OPTS, new Set(), { chatScan: chat, matchWindow });
     const out = {};
     for (const e of entries) for (const p of s.classifyEntry(e)) out[p.key] = { flag: p.flag, why: s.reasonOf(p).text, sev: s.severityOf(p) };
     return out;
@@ -57,7 +57,7 @@ eq(msgs.length, 11, 'the hidden message is dropped, as core and WA both drop it'
     eq(v.quarkspindle, undefined, 'a key in its own entry text is not flagged');
     eq(v.zzunattested?.why, 'not in entry text', 'dead, and says only that entry text was checked');
     eq(v.glimmerwort?.why, 'not in entry text', 'chat-only key reads dead when no chat was searched');
-    eq(v.mother?.flag, 'too common', 'the English list flags a generic word with no chat needed');
+    eq(v.mother?.flag, 'english common', 'the English list flags a generic word with no chat needed');
     eq(v.mother?.sev !== RED, true, '...but unevidenced it is not severe');
 }
 

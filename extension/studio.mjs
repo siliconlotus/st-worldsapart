@@ -214,7 +214,7 @@ export async function lorebookStudio(preferredBook = null) {
             matchWindow: settings().matchWindow,
             // Into the CLASSIFIER, not the cleanup display layer — the Explorer's chips colour from
             // reasonOf/severityOf, and curation happens there. Painted on afterwards it reaches one tab.
-            chatRate: chatHits ? { hits: chatHits, messages: chatMsgs } : undefined,
+            chatScan: chatHits ? { messagesWith: chatHits, messages: chatMsgs } : undefined,
         });
     };
     // A finished chat scan changes what classifyEntry returns, so the scan is rebuilt and everything
@@ -321,14 +321,15 @@ export async function lorebookStudio(preferredBook = null) {
                 check(studioOpts, 'scanConstant', 'Scan Constant (🔵)'),
                 check(studioOpts, 'includeInactive', 'Include inactive entries'),
                 check(studioOpts, 'pruneUnattested', 'Flag keys not in entry text (aliases and typos)'),
-                check(studioOpts, 'pruneCommon', 'Flag frequent keys'),
-                num(studioOpts, 'tooCommon', '↳ frequent: in >', '% of entry TEXT', { min: 1, max: 100, scale: 100 }),
-                check(studioOpts, 'pruneShared', 'Flag over-shared keys'),
-                num(studioOpts, 'sharedKeys', '↳ shared: LISTED by >', '% of entries', { min: 1, max: 100, scale: 100 }),
+                check(studioOpts, 'pruneCommon', 'Flag english-common and book-common keys'),
+                num(studioOpts, 'bookCommon', '↳ book common: in >', '% of entry TEXT', { min: 1, max: 100, scale: 100 }),
+                num(studioOpts, 'chatCommon', '↳ chat common: in >', '% of MESSAGES', { min: 1, max: 100, scale: 100 }),
+                check(studioOpts, 'pruneShared', 'Flag book-shared keys'),
+                num(studioOpts, 'bookShared', '↳ book shared: LISTED by >', '% of entries', { min: 1, max: 100, scale: 100 }),
                 check(studioOpts, 'pruneShort', 'Flag short keys'),
                 num(studioOpts, 'minLength', '↳ short: under', 'chars', { min: 1 }),
                 check(studioOpts, 'ignoreProper', 'Spare proper nouns from the dead flag'),
-                check(studioOpts, 'stickySkipCommon', 'Spare sticky entries from the frequent flag'),
+                check(studioOpts, 'stickySkipCommon', 'Spare sticky entries from the book-common flag'),
             ),
             col('Recommender (⚡ / ✨)',
                 num(suggestOpts, 'dfCeil', 'Skip terms in >', '% of entries', { min: 1, max: 100, scale: 100 }, invSuggest),
@@ -497,7 +498,7 @@ export async function lorebookStudio(preferredBook = null) {
         toastr[added ? 'success' : 'info'](added ? `“${term}” added to ${added} ${added === 1 ? 'entry' : 'entries'}${skipped ? ` (${skipped} already had it)` : ''}.` : `Every selected entry already has “${term}”.`, 'Worlds Apart');
     };
     // The inverse of bulkAddTerm: empty the key list of every selected entry. Unlike a single ✕ this is
-    // worth a rescan — the too-common/shared flags are df-based, so removing a book's worth of keys
+    // worth a rescan — the book-common/book-shared flags are df-based, so removing a book's worth of keys
     // changes the verdict on the ones left standing.
     //
     // UNDO rides on the toast rather than the nav's undo bar: that bar belongs to book deletion, lives in
@@ -2102,7 +2103,7 @@ export async function lorebookStudio(preferredBook = null) {
         // LITERALS ONLY. The scan is one Aho-Corasick pass over folded literals, so a `?` SmartKey or a
         // /regex/ key goes in as the characters it is written with and can never match — it would come
         // back 0 and be reported as absent from a chat nobody actually asked about it. Omitted from the
-        // map instead, which chatShare reads as "not checked": no suppression, and the reason text keeps
+        // map instead, which chatRateOf reads as "not checked": no suppression, and the reason text keeps
         // saying only that entry text was searched. Evaluating them properly needs countKey per message,
         // which the server route cannot do — it has the messages but not the matcher — and doing it on
         // the client path alone would put the two halves back out of step.
@@ -2624,8 +2625,8 @@ export async function lorebookStudio(preferredBook = null) {
         // and one reading "not in entry text or chat" are different claims, and nothing else on this
         // screen says whether a chat was searched.
         scanBtn.title = chatHits
-            ? `Flag dead / frequent / short keywords — tune under Tool Settings.\nChat evidence: "${chatName}", ${chatMsgs} messages.`
-            : 'Flag dead / frequent / short keywords and colour them by verdict — tune under Tool Settings.\nNo chat searched yet: bind this book to the open chat, or use Cleanup → "Check against chats".';
+            ? `Flag dead / common / short keywords — tune under Tool Settings.\nChat evidence: "${chatName}", ${chatMsgs} messages.`
+            : 'Flag dead / common / short keywords and colour them by verdict — tune under Tool Settings.\nNo chat searched yet: bind this book to the open chat, or use Cleanup → "Check against chats".';
         scanBtn.addEventListener('click', async () => { await runAudit(); renderExplorer(); });
         const allOpen = entries.length > 0 && entries.every(x => entryOpen.has(x.uid));
         // Master disclosure: an icon-only chevron left of the title, echoing the per-entry chevrons.

@@ -4,7 +4,7 @@
 // silently drifting the prune popup, the suggest popup, and Lorebook Studio.
 // Run: node eval/keyword-extract-check.mjs
 import assert from 'node:assert';
-import { buildKeyPruneScan, buildKeySuggest, classifyLlmCand, KEY_TOO_COMMON, KEY_MIN_LENGTH, KEY_MIN_COMMON_ENTRIES } from '../extension/keyword-core.mjs';
+import { buildKeyPruneScan, buildKeySuggest, classifyLlmCand, KEY_BOOK_COMMON, KEY_MIN_LENGTH, KEY_MIN_BOOK_COMMON_ENTRIES } from '../extension/keyword-core.mjs';
 
 // --- buildKeyPruneScan ---------------------------------------------------------------------------
 // Four entries so df ratios are meaningful (the classify priority is english-common -> dead ->
@@ -19,13 +19,13 @@ const pruneBook = { entries: {
 } };
 const pruneOpts = { scanKeyword: true, scanVectorized: true, scanConstant: true, includeInactive: false,
     pruneUnattested: true, pruneCommon: true, pruneShort: true, ignoreProper: false, stickySkipCommon: true,
-    tooCommon: KEY_TOO_COMMON, minLength: KEY_MIN_LENGTH };
+    bookCommon: KEY_BOOK_COMMON, minLength: KEY_MIN_LENGTH };
 const ps = buildKeyPruneScan(pruneBook, pruneOpts, new Set());
 assert.strictEqual(ps.entries.length, 4, 'all keyword entries scanned');
 const flagsOf = uid => Object.fromEntries(ps.classifyEntry(pruneBook.entries[uid]).map(r => [r.key, r.flag]));
 const f0 = flagsOf(0);
 assert.strictEqual(f0.zzzznope, 'unattested', 'a key in no entry text is unattested');
-assert.strictEqual(f0.home, 'too common', 'a common English word is flagged too-common');
+assert.strictEqual(f0.home, 'english common', 'a common English word is flagged as english-common');
 assert.strictEqual(f0.aX, 'short', 'a sub-minLength key is flagged short');
 assert.ok(!('Quillfeather' in f0), 'a real findable name is not flagged');
 // The ignore whitelist skips a key entirely.
@@ -36,12 +36,12 @@ function flagsOfIgnored() {
 }
 
 // Min-entries gate: the df-based lorebook-common flag only fires once the corpus is big enough
-// (>= KEY_MIN_COMMON_ENTRIES). "widgetron" is non-English-common and appears in >37.5% of entries.
+// (>= KEY_MIN_BOOK_COMMON_ENTRIES). "widgetron" is non-English-common and appears in >37.5% of entries.
 const mkBook = (n, hits, key) => ({ entries: Object.fromEntries(Array.from({ length: n }, (_, i) =>
     [i, { uid: i, key: i === 0 ? [key] : [], content: i < hits ? `A ${key} appears here.` : 'Nothing notable here.' }])) });
 const gateFlag = (n, hits) => { const p = buildKeyPruneScan(mkBook(n, hits, 'widgetron'), pruneOpts, new Set()); return Object.fromEntries(p.classifyEntry(p.entries[0]).map(r => [r.key, r.flag])).widgetron; };
-assert.strictEqual(gateFlag(4, 3), undefined, `lorebook-common suppressed below ${KEY_MIN_COMMON_ENTRIES} entries`);
-assert.strictEqual(gateFlag(10, 6), 'too common', `lorebook-common fires at/above ${KEY_MIN_COMMON_ENTRIES} entries`);
+assert.strictEqual(gateFlag(4, 3), undefined, `lorebook-common suppressed below ${KEY_MIN_BOOK_COMMON_ENTRIES} entries`);
+assert.strictEqual(gateFlag(10, 6), 'book common', `book-common fires at/above ${KEY_MIN_BOOK_COMMON_ENTRIES} entries`);
 
 // --- buildKeySuggest -----------------------------------------------------------------------------
 // A distinctive multi-word phrase repeated within one entry (tf>=2) but rare across the book should
@@ -219,24 +219,24 @@ const zipfBook = { entries: { ...suggestBook.entries,
 
 // Over-shared keys: flagged on how many entries LIST the key, independent of how often it appears in
 // their TEXT. "astronaut" sits in one entry's prose but is keyed on all 12, so the content-frequency
-// flags can't see it. Needs >= KEY_MIN_COMMON_ENTRIES entries for the ratio to mean anything.
+// flags can't see it. Needs >= KEY_MIN_BOOK_COMMON_ENTRIES entries for the ratio to mean anything.
 const sharedBook = { entries: Object.fromEntries([...Array(12)].map((_, i) => [i, {
     uid: i,
     key: i === 0 ? ['astronaut', 'moonwalk'] : ['astronaut'],
     content: i === 0 ? 'The astronaut walked. A moonwalk followed. Astronaut again.' : 'Unrelated prose about weather and bread.',
 }])) };
-const sharedOpts = { scanKeyword: true, scanVectorized: true, scanConstant: true, includeInactive: true, pruneUnattested: false, pruneCommon: true, pruneShort: false, pruneShared: true, ignoreProper: false, stickySkipCommon: true, tooCommon: KEY_TOO_COMMON, minLength: KEY_MIN_LENGTH, sharedKeys: 0.75 };
+const sharedOpts = { scanKeyword: true, scanVectorized: true, scanConstant: true, includeInactive: true, pruneUnattested: false, pruneCommon: true, pruneShort: false, pruneShared: true, ignoreProper: false, stickySkipCommon: true, bookCommon: KEY_BOOK_COMMON, minLength: KEY_MIN_LENGTH, bookShared: 0.75 };
 {
     const s = buildKeyPruneScan(sharedBook, sharedOpts, new Set());
     const row = s.classifyEntry(sharedBook.entries[5]).find(r => r.key === 'astronaut');
     assert.ok(row, '"astronaut" flagged though it appears in only one entry\'s text');
-    assert.strictEqual(row.flag, 'shared', 'flagged as shared, not as frequent');
-    assert.strictEqual(row.dk, 12, 'dk counts entries that LIST the key');
-    assert.strictEqual(s.reasonOf(row).text, 'shared (100%)', 'reason reports the share percentage');
+    assert.strictEqual(row.flag, 'book shared', 'flagged as book-shared, not as book-common');
+    assert.strictEqual(row.bookListed, 12, 'bookListed counts entries that LIST the key');
+    assert.strictEqual(s.reasonOf(row).text, 'book shared (100%)', 'reason names the corpus and reports the share');
     // 100% >= threshold -> red, same banding as the frequency flag.
-    assert.strictEqual(s.reasonOf(row).color, s.reasonOf({ flag: 'too common', dc: 12 }).color, 'severity banding matches frequent');
+    assert.strictEqual(s.reasonOf(row).color, s.reasonOf({ flag: 'book common', bookContent: 12 }).color, 'severity banding matches book common');
     // The one-entry key is untouched by the shared flag.
-    assert.ok(!s.classifyEntry(sharedBook.entries[0]).some(r => r.key === 'moonwalk' && r.flag === 'shared'), 'a key on one entry is not over-shared');
+    assert.ok(!s.classifyEntry(sharedBook.entries[0]).some(r => r.key === 'moonwalk' && r.flag === 'book shared'), 'a key on one entry is not over-shared');
 }
 {
     const off = buildKeyPruneScan(sharedBook, { ...sharedOpts, pruneShared: false }, new Set());
@@ -244,11 +244,11 @@ const sharedOpts = { scanKeyword: true, scanVectorized: true, scanConstant: true
 }
 {
     // Between 0.75x and 1x the threshold is the yellow danger zone; below 0.75x nothing fires.
-    const hi = buildKeyPruneScan(sharedBook, { ...sharedOpts, sharedKeys: 1 }, new Set());
+    const hi = buildKeyPruneScan(sharedBook, { ...sharedOpts, bookShared: 1 }, new Set());
     assert.strictEqual(hi.reasonOf(hi.classifyEntry(sharedBook.entries[5])[0]).color, '#e06c6c', '100% share at threshold 100% is red');
     const tiny = { entries: Object.fromEntries([...Array(9)].map((_, i) => [i, { uid: i, key: ['astronaut'], content: 'x' }])) };
     const small = buildKeyPruneScan(tiny, sharedOpts, new Set());
-    assert.ok(!small.classifyEntry(tiny.entries[0]).some(r => r.flag === 'shared'), 'skipped below KEY_MIN_COMMON_ENTRIES');
+    assert.ok(!small.classifyEntry(tiny.entries[0]).some(r => r.flag === 'book shared'), 'skipped below KEY_MIN_BOOK_COMMON_ENTRIES');
 }
 
 // classifyEntry must honour the scan's entry-class scope, not just the returned `entries` list —
@@ -260,7 +260,7 @@ const scopeBook = { entries: {
     2: { uid: 2, key: ['zzzdead'], content: 'nothing' },
     3: { uid: 3, key: ['zzzdead'], content: 'nothing', disable: true },
 } };
-const scopeOpts = { scanKeyword: true, scanVectorized: true, scanConstant: true, includeInactive: true, pruneUnattested: true, pruneCommon: true, pruneShort: true, ignoreProper: false, stickySkipCommon: true, tooCommon: 0.5, minLength: 4 };
+const scopeOpts = { scanKeyword: true, scanVectorized: true, scanConstant: true, includeInactive: true, pruneUnattested: true, pruneCommon: true, pruneShort: true, ignoreProper: false, stickySkipCommon: true, bookCommon: 0.5, minLength: 4 };
 const scoped = (over) => {
     const s = buildKeyPruneScan(scopeBook, { ...scopeOpts, ...over }, new Set());
     return Object.values(scopeBook.entries).filter(e => s.classifyEntry(e).length).map(e => e.uid);

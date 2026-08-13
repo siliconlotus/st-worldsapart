@@ -7,7 +7,7 @@ import { eq } from './metrics.mjs';
 
 const OPTS = { scanKeyword: true, scanVectorized: true, scanConstant: true, includeInactive: true,
     pruneUnattested: false, pruneCommon: false, pruneShort: false, pruneShared: false, pruneFragment: false,
-    ignoreProper: false, tooCommon: 0.5, minLength: 4, sharedKeys: 0.75 };
+    ignoreProper: false, bookCommon: 0.5, minLength: 4, bookShared: 0.75 };
 
 // Rare tokens only — the flag ignores anything the English table calls common, so filler must be rare
 // too or it counts as neither shared nor distinguishing.

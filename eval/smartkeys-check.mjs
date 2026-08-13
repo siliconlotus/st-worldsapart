@@ -196,7 +196,7 @@ eq(countKey('? fire::3 XOR flood', 'a fire burns', false, false), 3, 'XOR still 
 // these queries can match "nothing relevant", so both are dead and both should say so.
 {
     const data = { entries: { 0: { uid: 0, key: ['? moon mission', '? -apollo'], content: 'nothing relevant' } } };
-    const opts = { scanKeyword: true, scanVectorized: true, scanConstant: true, includeInactive: true, pruneUnattested: true, pruneCommon: true, pruneShort: true, ignoreProper: false, stickySkipCommon: true, tooCommon: 0.5, minLength: 4 };
+    const opts = { scanKeyword: true, scanVectorized: true, scanConstant: true, includeInactive: true, pruneUnattested: true, pruneCommon: true, pruneShort: true, ignoreProper: false, stickySkipCommon: true, bookCommon: 0.5, minLength: 4 };
     const { classifyEntry } = buildKeyPruneScan(data, opts, new Set());
     eq(classifyEntry(data.entries[0]).map(f => f.flag).join(','), 'unattested', 'a dead query is flagged; "? -apollo" matches on absence so it is not dead');
 }
@@ -211,10 +211,10 @@ eq(countKey('? fire::3 XOR flood', 'a fire burns', false, false), 3, 'XOR still 
     entries[1].key = ['/\\n/', '/zzznope/', '/by the door/i', 'x'];
     const opts = { scanKeyword: true, scanVectorized: true, scanConstant: true, includeInactive: true,
         pruneUnattested: true, pruneCommon: true, pruneShort: true, pruneShared: true, ignoreProper: false,
-        stickySkipCommon: true, tooCommon: 0.5, sharedKeys: 0.5, minLength: 4 };
+        stickySkipCommon: true, bookCommon: 0.5, bookShared: 0.5, minLength: 4 };
     const { classifyEntry, reasonOf } = buildKeyPruneScan({ entries }, opts, new Set());
     const flags = new Map(classifyEntry(entries[1]).map(f => [String(f.key), f]));
-    eq(flags.get('/\\n/')?.flag, 'too common', 'a pattern that fires on every entry is flagged, like any ubiquitous key');
+    eq(flags.get('/\\n/')?.flag, 'book common', 'a pattern that fires on every entry is flagged, like any ubiquitous key');
     eq(flags.get('/zzznope/')?.flag, 'unattested', '...and one that fires nowhere is flagged dead');
     eq(reasonOf(flags.get('/zzznope/')).text, 'never matches', '...worded as evaluating false, not as absent text');
     eq(flags.has('/by the door/i'), false, 'a pattern that fires in exactly one entry draws nothing');
@@ -314,19 +314,19 @@ console.log('ok   SmartKey structural validation');
     entries[4].key = ['? the'];               // an English-common TERM, but not an English-common KEY
     const opts = { scanKeyword: true, scanVectorized: true, scanConstant: true, pruneUnattested: true,
         pruneCommon: true, pruneShort: true, pruneShared: true, pruneFragment: true,
-        minLength: 4, tooCommon: 0.5, sharedKeys: 0.5, ignoreProper: true };
+        minLength: 4, bookCommon: 0.5, bookShared: 0.5, ignoreProper: true };
     const sc = buildKeyPruneScan({ entries }, opts, new Set(), { caseSensitiveDefault: false, wholeWordsDefault: false });
     const verdict = uid => { const f = sc.classifyEntry(entries[uid])[0]; return f ? `${f.flag}|${sc.reasonOf(f).text}` : ''; };
 
     eq(verdict(2), 'unattested|never matches', 'a query that evaluates false everywhere is flagged dead');
     eq(verdict(1), verdict(3), 'a SmartKey and the equivalent plain key get the same df verdict');
-    eq(verdict(1), 'too common|frequent (100%)', '...and that verdict is the df one, not a string one');
+    eq(verdict(1), 'book common|book common (100%)', '...and that verdict is the df one, not a string one');
     // The literal-string heuristics stay off: `? the` is a bad key because of its TERM, which is a
     // per-term check that does not exist yet — not because the string "? the" is a common English word.
     // The English-common check says "common"; the df check says "frequent (N%)". "? the" fires
     // everywhere, so it earns the df verdict — what it must NOT earn is the English-common one, which
     // would be reading the query as though the string "? the" were an English word.
-    eq(verdict(4), 'too common|frequent (100%)', 'a query earns the df verdict, not the English-common one');
+    eq(verdict(4), 'book common|book common (100%)', 'a query earns the df verdict, not the English-common one');
 }
 console.log('ok   SmartKeys are audited on df, exempt only from the literal-string heuristics');
 

@@ -9,7 +9,7 @@ import { world_info_case_sensitive, world_info_match_whole_words } from '../../.
 import { splitRecursive } from './chunking.mjs';
 import { ConnectionManagerRequestService } from '../../../shared.js';
 import { settings } from './state.mjs';
-import { KEY_TOO_COMMON, KEY_MIN_LENGTH, KEY_SHARED, buildKeyPruneScan as buildKeyPruneScanCore, buildKeyPrompt, parseKeyList } from './keyword-core.mjs';
+import { KEY_BOOK_COMMON, KEY_MIN_LENGTH, KEY_BOOK_SHARED, buildKeyPruneScan as buildKeyPruneScanCore, buildKeyPrompt, parseKeyList } from './keyword-core.mjs';
 
 /** buildKeyPruneScan with core's world-info match flags injected. A wrapper (not a bound value) so
  * the flags are read at call time — they're live ST settings. */
