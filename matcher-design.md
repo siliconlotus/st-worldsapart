@@ -142,10 +142,14 @@ Order it by whether a user can see the difference — not by how tidy the fix is
 instances the books on disk hold**. A permitted input occurs whether or not this author has written
 one; corpus counts size a known effect and never dismiss a case.
 
-Two items: the **two-score metric redesign** below, which blocks several tuning decisions and should go
-first, and **recursion scoring** after it. Recursion ships on reasoning rather than evidence —
-`world_info_recursive` is off here and no book in the corpus exercises it — so it waits on a
-recursion-using book; the redesign has data waiting for it now.
+Two items block other work: the **two-score metric redesign** below, which blocks several tuning
+decisions and should go first, and **recursion scoring** after it. Recursion ships on reasoning rather
+than evidence — `world_info_recursive` is off here and no book in the corpus exercises it — so it waits
+on a recursion-using book; the redesign has data waiting for it now.
+
+**Witness spans** and **proximity** are ruled and unimplemented below, and share one collector. The
+display half lands first: it is what tells a proximity key's classes apart, and it is worth having
+whether or not `~N` ever ships.
 
 ---
 
@@ -757,6 +761,46 @@ nothing to prescribe, and `\/` is a portability choice rather than a fix.
 
 ---
 
+## Witness spans — what an excerpt may claim
+
+**Ruled, unimplemented.** `keyExcerpts` answers only for a lone `TERM` or `REGEX` and returns null for
+every compound key.
+
+**A key's spans are the leaves that CONTRIBUTED, not a whitelist of node types.** The rule is the one
+`evaluate` already applies to `scoreBoost`: a leaf's spans survive exactly where its weight does. `OR`
+concatenates, a matched `AND` keeps both operands, `XOR` keeps the winner, and a failed `AND` branch
+inside a matched `OR` retracts. So `? (a | b | c) -d` is fully excerptable — a negation has an empty
+extension, which is not the same as barring the spans beside it.
+
+**Collection rides on `evaluate` rather than mirroring it.** An optional accumulator, absent on the hot
+path; `AND` and `XOR` record its length before descending and truncate on failure. A second traversal
+would be a second copy of the survival rules, which is what `countKey is the only matcher` forbids.
+
+**Below a negation the algebra is existence, not extension.** The collector never descends into a
+`NOT` — it takes `matched` from `evaluate` and stops. Counting a negated term reports how often it
+almost matched, a quantity the semantics do not have, and extracting its spans pays the per-character
+fold walk to build excerpts that are then discarded.
+
+**Counts belong to the result, never to the node.** `astCache` interns a tree by its raw key on a
+module-level scope, so one object serves every segment of the window and every entry sharing that key;
+a count written onto it is last-segment-wins and leaks between entries. Weight is the node's, being a
+property of the key as written.
+
+**The display takes occurrences and ignores weight.** A witness line answers *how is this key reaching
+the text*, which is not what it contributed to the ranking. Per-leaf counts come from the leaf's own
+count and not `spans.length`, which is capped for display.
+
+**Overlapping context windows are one window**, rendered as one excerpt with both spans marked. The
+cluster count then reads as the diagnostic — one line means the terms were adjacent, two means they
+were not — and the only claim being made is a rendering one, never that a particular pair witnessed
+the match.
+
+**An `AND`'s leaf spans are already restricted to segments that fired**, since `keywordScore` evaluates
+per segment and a failed conjunction retracts its leaves there. A conjunction reports where its terms
+co-occurred, not everywhere either term appeared.
+
+---
+
 ## Match window — the haystack is segmented
 
 A setting, `matchWindow`: `scan | message | paragraph`, default `paragraph`. It selects **where WA stops
@@ -824,6 +868,76 @@ Sentence-splitting is not a proxy for it, and the fold supplies false boundaries
 
 ---
 
+## Proximity — `(…)~N`
+
+**Ruled, unimplemented.** `? (copper pipe)~5` constrains a group to a window. Parens already group
+without order, so the slop attaches to something order-free by construction. `"…"~N` is rejected:
+quoting is this grammar's one construct that DOES carry order, and it stays unspent for the ordered
+loosened phrase it looks like.
+
+**The unit of completeness is the CONJUNCT, not the leaf.** In `? ((Arthur | Kyle) Porsche)~3` the
+window needs one span from `Porsche` and one from either branch. **Measured**, Sommers chat: 60
+witnesses against 47 + 16 for the two keys run separately — the sweep takes whichever alternative is
+nearer, so a paragraph yields one tighter witness rather than two.
+
+**N is per junction.** Consecutive spans, sorted by position, each within N words. Decided on intent —
+an author writing a fuzzy phrase claims the steps are short, not that the whole span is compact — and
+the corpus cannot adjudicate it, because re-reading plain multi-word keys as groups puts function
+words in the operands, and dropping those takes the key to two terms, where the two readings are
+identical. Accepted cost: a k-term group can span (k−1)·N.
+
+**Slop counts words, off `wordChar()`.** **Measured**, standard corpus: a `\b` counter charges a slop
+point to `teddy o'neill` and `pack-bond pheromone`, since the apostrophe and hyphen split one word in
+two — 2.9pp of two-term co-occurrences at `~0`. One boundary class, or two matchers.
+
+**Occurrences are CLUSTERS.** Three `copper` and two `pipe` are one fact, not six: leftmost minimal
+windows, each consumed before the next is sought.
+
+**A negation is a veto over the padded window, and the window must be fixed before it is tested.**
+Positives are existential and negatives universal, so one window serves neither — the sweep may always
+shrink to a single positive, which contains no negated term by construction. The rule is the positive
+witness window, padded N words each side, holding no negated operand. Centring on the padded cluster
+and centring on each positive independently are the same region, since the slop bounds every internal
+gap by N and radii of N therefore always overlap. `? (-x)~N` has no positive to anchor and is the
+existing `negation-only` error.
+
+**The digits are required.** A bare `~` makes a key's behaviour depend on a default it does not show.
+**Measured**, Sommers chat: `? ((Arthur|Kyle) Porsche)` yields 16 witnesses at `~3` and 35 at `~10`.
+
+**A group without `~` keeps segment scope**, so no existing key changes meaning. **Measured**, the 26
+conjunction SmartKeys in `Sommers_Pack__v22` against their own chat: 720 firings, of which `~5` keeps
+39% and `~10` 57%. A slop cannot be retrofitted onto conjunctions written precisely because the terms
+are apart.
+
+**The trie answers presence; positions are walked.** `scanAutomaton` computes each match start and
+discards it into a counter, so positions are one push away — but recording them changes `plugin/` and
+pays an array per pattern per segment for every plain key that never wants one. The walk it saves is
+an `indexOf` over one paragraph, after the candidate filter has rejected every segment missing an
+operand.
+
+**NEAR is for content terms.** A key reproducing a title stays a plain phrase, and a function word as
+an operand is the failure mode — but *is this a stopword* is language-dependent, so it belongs to the
+suggester and never to the validator.
+
+**Where it earns its keep is narrow, and two of three bands are not it.** Proper nouns co-occur
+genuinely, so a slop filters signal rather than noise. A polyseme's noise sits at slack 0 where no slop
+reaches it — **measured**, Sommers: `? Jeffrey =watch` fires 48 times against 395 for `? Jeffrey
+watch`, so `=` is worth 7× the slop, and the verb sits closer to the name than the noun does. The band
+is terms individually common and jointly specific, where **measured**, standard corpus, `~5` rejects
+21.5% of what a segment-scope conjunction admits.
+
+**Negative slack is overlap, and it is the class proximity cannot fix.** A window covering fewer word
+starts than it has operands means they landed inside one word. **Measured**, standard corpus: 3.8% of
+two-term co-occurrences, led by `moving in` firing 876 times inside the word "moving", plus the
+compound written closed (`scrap yard` against `scrap-yard`). All are maximally near, so no slop
+excludes them and only per-operand whole-word does.
+
+**Rejected — a finer match window in its place.** **Measured**, Sommers conjunction keys: 3% of firings
+have a minimal window spanning a line break, and 138 of the slack-21+ firings sit on a single line. A
+`line` mode would buy 3% and leave every distant-pair case untouched.
+
+---
+
 ## Elsewhere
 
 **Suggester i18n, none of it started.** `ZIPF_EN` scores non-English function words as maximally rare
@@ -836,6 +950,10 @@ absent from the table and scores maximally rare.
 **The suggester should know when its priors do not apply.** If a large share of an entry's tokens are
 absent from `ZIPF_EN`, the book is probably not English and the frequency gate should stand down and
 say so rather than invert.
+
+**A grading row's key count is a SCORE wearing a count's name.** `keywordScore` pushes
+`hits.count = scoreBoost`, so `? fire::3` displays `3` for a single occurrence and the row reads as
+"fired three times". Independent of the witness-span work and fixable on its own.
 
 **Accent variants belong here, not in the matcher** — `Gérard`/`Gerard` is a real miss (the model
 writes both, and in one corpus the unaccented form more often), but whether stripping is safe depends
