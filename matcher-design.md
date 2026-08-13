@@ -94,26 +94,41 @@ literal stays reachable through the escape already there: `? "/re/"`.
 
 - A `/` opens a regex **only at token start**, the rule `"` and `-`/`!`/`+` already follow, so `and/or`
   and `3/4` are untouched and `? -/re/` negates a pattern.
-- **Leftmost QUALIFYING close** — ECMA-262's RegularExpressionLiteral scan (`regexLiteral`), tracking
-  escapes and character classes. A candidate delimiter is accepted only when the body compiles and its
-  flag run ends at a token boundary.
+- **Leftmost QUALIFYING close** — ECMA-262's RegularExpressionLiteral scan (`regexLiteral`): `\`
+  escapes the next character, `[`…`]` is a class the delimiter cannot close inside, and classes do not
+  nest (`/[[]/` is a class holding `[`). A candidate delimiter is accepted only when the body compiles
+  and its flag run ends at a token boundary; otherwise the scan continues. **`\/` writes a literal
+  slash.**
 - **A term reads as the whole key reads.** `/home/user/lux/` is one pattern in both; `/home/user/file`
   is a literal in both. Verified across every form in this section, string for string.
 - Accepted cost: an abutting term after a pattern needs a space. `? /[/]/x` is the literal six
-  characters; recover with `? /[/] x` or by extending the pattern.
+  characters; recover with `? /[/]/ x`, or better where adjacency was meant, by extending the pattern
+  (`? /\/x/`) — the abutting form only ever gave a conjunction that fired on any slash and any `x`.
 - Flags then weight — `[gimsuy]*` after the close, then an optional `::N`. **No `=`/`^` prefix**: `=`
   is meaningless on a pattern and `^` is a no-op, since a regex is already case-sensitive. `/i` is how
   insensitivity is written.
 - **No shape, no fault.** `? /re` and `? //` are literal terms, exactly as the bare keys are.
   `regex-invalid` survives for the one case where the shape is well-formed and the pattern will not
-  compile.
+  compile. Diagnostics may be richer inside a SmartKey than outside it (`punctuation-term` reaches
+  `? //`); no READING may differ.
 - A regex is a term for counting and for positivity — `no-terms` counts it and `hasPositiveTerm` treats
   it as a contributor. Checks that inspect a term's VALUE skip it — `punctuation-term` and
   `stray-quote` would fire on every pattern, one being punctuation by nature.
 
 **Measured**, and it cannot adjudicate any of the above: regex keys on disk are 2 of 46,226, in 2 of 41
 books; `?` keys containing a `/` at all are 0 of 148. Every rule here rests on one syntax having one
-reading. A count sizes exposure and is never the reason for a call or against one.
+reading. A count sizes exposure and is never the reason for a call or against one. Worked examples
+here are demonstrations of a mechanism, not samples.
+
+**A regex key is audited like any other key**, on df, by the same machinery that judges a literal and
+a SmartKey. Only the heuristics that read a key AS A LITERAL STRING stay exempt — English-common,
+fragment, short — because the matching surface of `/sal(a|e)/` is its pattern and not the characters it
+is written with. Without this a pattern has no oversight anywhere: the validator skips value checks on
+patterns by design, so `/\n/` firing on every multi-line message drew not one word from any tool.
+`registerKeys` skips regex keys, so they miss the Aho-Corasick batching and pay a compile and a scan
+per entry — **measured**, 100 regex keys × 300 entries × ~1KB is 9.8 ms when nothing matches and
+18.4 ms at 630,000 hits, against a Studio open already costing hundreds. V8 caches a compile by source,
+so caching them would recover ~5 ms and is not worth the code.
 
 **Entry flags reach plain keys only. Ruled: a `?` or `/re/` key is self-describing.** `caseSensitive`
 and `matchWholeWords` are entry-level defaults for plain keys and do not reach inside a SmartKey or a
@@ -339,9 +354,13 @@ force-activation inherits all of them rather than bypassing them.
 
 **Prohibited: no per-turn fallback to core for matching.** A silent fallback makes match semantics
 flicker between two rule sets depending on whether an exception happened, with the audit reporting on
-rules that are not what fired. A matcher failure fails visibly (`reportFailure`) and WA keeps
-ownership — the realistic trigger is the ST surface, not a key, so handing matching back would hand it
+rules that are not what fired. A matcher failure fails visibly (`reportFailure` — stage, consequence in plain terms, the error and
+the top stack frame, **once per distinct message per session** so a per-turn toast cannot train the
+user to dismiss it) and WA keeps ownership — the realistic trigger is the ST surface, not a key, so handing matching back would hand it
 to a path that may be equally broken.
+
+`negation-only` stopped being advisory when SmartKeys began to activate: a key that can fire must not
+fire on absence alone.
 
 **Prohibited: `countKey` stays unfiltered.** It answers what an expression does; deciding whether to
 ask is the caller's job. A validator error bars a key from SCORING as well as from activating, and
