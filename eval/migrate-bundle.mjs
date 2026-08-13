@@ -64,7 +64,7 @@ const sha = s => createHash('sha1').update(String(s ?? '')).digest('hex').slice(
  * same rule the spend harnesses follow. Counting is local CPU rather than money, but a full pass over 70
  * bundles is minutes, and resuming for free costs one writeFileSync.
  */
-function makeTokenCounter(st, tokenizer) {
+export function makeTokenCounter(st, tokenizer) {
     const cachePath = `${st.root}/public/scripts/extensions/third-party/WorldsApart/eval/eval-data/token-cache.json`;
     const cache = existsSync(cachePath) ? JSON.parse(readFileSync(cachePath, 'utf8')) : {};
     const cfg = readFileSync(`${st.root}/config.yaml`, 'utf8');
@@ -129,7 +129,7 @@ const entryFinder = m => {
 
 /** Key hits for one entry against the arm's frozen scan text — the same call rankActivated makes, so the
  *  excerpt localises the match that was actually scored rather than a re-derivation of the match rules. */
-function whyFor(entry, scanText, P) {
+export function whyFor(entry, scanText, P) {
     matcher.setBoundaryMode(P.wordBoundary);
     const keys = scoringKeys(entry, P);
     if (!keys.length || !scanText) return [];
@@ -152,7 +152,26 @@ function whyFor(entry, scanText, P) {
 export async function migrateManifest(m, { tokensOf = null, tokenizer = null } = {}) {
     const tally = { textNulled: 0, keysZeroed: 0, keysNulled: 0, tokens: 0, why: 0, rows: 0, armsDropped: [], noEntry: 0 };
 
+    // eval-data holds spend caches and prompt sets beside the samples, and `eval-data/*.json` is how anyone
+    // will invoke this. Without the guard those get a bundleVersion, a population and a migratedWhy stamped
+    // onto them — a cache file wearing a graded sample's metadata.
+    if (!Array.isArray(m.grades) || !armsOf(m).some(a => Array.isArray(a.candidates))) {
+        return { m, skip: 'not a graded sample', tally };
+    }
+
     if (m.bundleVersion === BUNDLE_VERSION) return { m, skip: 'already v2', tally };
+
+    // SHAPE DECIDES, NOT THE STAMP. bundleVersion is written by the extension running in the browser, so a
+    // capture taken before that page reloaded says 1 while every row already carries the v2 fields — eight
+    // of the nine bundles in eval-data were exactly this. Migrating one would be a near no-op on the values
+    // and would still stamp it `population: 'survivors'`, which is false for a full capture and precisely
+    // the sort of confident wrong label this tool exists to delete. So the version is corrected and nothing
+    // else is touched.
+    const allRows = armsOf(m).flatMap(a => a.candidates ?? []);
+    if (allRows.length && allRows.every(r => 'cut' in r && 'tokens' in r)) {
+        m.bundleVersion = BUNDLE_VERSION;
+        return { m, restamped: true, tally };
+    }
 
     // The summary arm resurrects a withdrawn query mode; state.mjs resets queryMode rather than un-surfacing
     // it, so the arm cannot be re-run and its rows describe a configuration no user can be in.
@@ -265,6 +284,11 @@ if (import.meta.main) {
         }
         const t = out.tally;
         if (out.skip) { console.log(`${basename(path).slice(0, 47).padEnd(48)} skipped — ${out.skip}`); continue; }
+        if (out.restamped) {
+            console.log(`${basename(path).slice(0, 47).padEnd(48)} restamped — rows already at v2 conventions, only bundleVersion was stale`);
+            if (WRITE) writeFileSync(OUT_DIR ? `${resolvePath(OUT_DIR)}/${basename(path)}` : path, JSON.stringify(out.m));
+            continue;
+        }
         console.log(`${basename(path).slice(0, 47).padEnd(48)} rows ${String(t.rows).padStart(5)}`
             + `  text->null ${String(t.textNulled).padStart(4)}`
             + `  keys->0 ${String(t.keysZeroed).padStart(4)}`

@@ -105,5 +105,41 @@ check('tokenizer recorded beside the counts', withTokens.m.arms[0].paramSnapshot
 check('cut not fabricated', rows.map(r => r.cut), [undefined, undefined, undefined]);
 check('cutBy not fabricated', rows.map(r => r.cutBy), [undefined, undefined, undefined]);
 
+// A capture whose ROWS are already at v2 conventions but whose stamp is stale (the extension in the browser
+// predates the BUNDLE_VERSION bump) must be restamped, never migrated. Migrating one is nearly a no-op on
+// the values and still marks a full capture `population: 'survivors'`.
+const v2shaped = () => ({
+    bundleVersion: 1, name: 'fresh', primaryBook: 'B', gradeScale: 4, grades: [], books: bundle().books,
+    arms: [{
+        arm: 'shipped', scanText: 'she drew the dagger and ran',
+        captureParams: { suppressVectorKeys: true, scoreVectorKeys: false },
+        candidates: [{ uid: 1, world: 'B', title: 'keyed, not vectorized', cosine: 0.4, text: 1.2, keys: 0, tokens: 27, cut: false, cutBy: null, why: [] }],
+    }],
+});
+const fresh = await migrateManifest(v2shaped(), { tokensOf: null, tokenizer: null });
+check('a v2-shaped bundle with a stale stamp is restamped', fresh.restamped, true);
+check('...its version is corrected', fresh.m.bundleVersion, BUNDLE_VERSION);
+check('...and it is NOT labelled survivors', fresh.m.population, undefined);
+check('...and no repair is claimed', [fresh.tally.textNulled, fresh.tally.keysZeroed, fresh.tally.why], [0, 0, 0]);
+// The distinction is the ROWS, not the stamp: strip the v2 row fields and the same stamp migrates normally.
+const stale = v2shaped();
+for (const r of stale.arms[0].candidates) { delete r.tokens; delete r.cut; delete r.cutBy; delete r.why; }
+const migrated = await migrateManifest(stale, { tokensOf: null, tokenizer: null });
+check('a genuinely v1-shaped bundle still migrates', migrated.restamped, undefined);
+check('...and is marked survivors', migrated.m.population, 'survivors');
+
+
+// eval-data holds caches and prompt sets beside the samples, and `eval-data/*.json` is the obvious way to
+// invoke this. Anything without grades AND candidates is not a graded sample and must come back untouched.
+for (const [label, obj] of [
+    ['a token cache', { 'gpt-3.5-turbo\u001fabc': 27 }],
+    ['a prompt set', { prompts: [{ id: 1, text: 'hi' }] }],
+    ['a bundle with grades but no candidates', { bundleVersion: 1, grades: [{ uid: 1, grade: 3 }] }],
+]) {
+    const r = await migrateManifest(structuredClone(obj), { tokensOf: null, tokenizer: null });
+    check(`${label} is left alone`, r.skip, 'not a graded sample');
+    check(`...${label} gains no bundle metadata`, [r.m.population, r.m.migratedWhy], [undefined, undefined]);
+}
+
 console.log(failures ? `\n${failures} FAILED` : 'ok');
 process.exit(failures ? 1 : 0);
