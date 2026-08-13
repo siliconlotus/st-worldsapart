@@ -1,7 +1,7 @@
 // Self-check for the paired estimator (metrics.mjs signTest) and scene.mjs's arm-reuse guard. The scoring
 // half needs a vector index so it can't run here; what CAN be pinned offline is the statistic every claim
 // about a default will rest on, and the exact p-values that set the floor on what single-digit n can say.
-import { eq, signTest } from './metrics.mjs';
+import { eq, eqNear, signTest, gradeCredit, fbeta, RECALL_WEIGHT } from './metrics.mjs';
 import { sceneParams, ndcg, dcg, nrm, wiTitle, makeGradeOf, makeKeywordScore, scoreScene } from './scene.mjs';
 import { rowKey } from '../extension/grading.mjs';
 import { fuseRanks } from '../extension/ranking.mjs';
@@ -191,3 +191,32 @@ eq(keysOff[1] < keysOff[0], true, '...and suppressing keys demotes it again');
 // NaN must not reach the fusion: it is neither null nor undefined, so a `??` would pass it through and
 // every fused score becomes NaN — no throw, just a ranking silently left in input order.
 eq(JSON.stringify(fusedWith({ lexicalWeight: 1.5 })), JSON.stringify(fusedWith({ lexicalWeight: 1.5, keywordWeight: NaN })), 'a NaN keywordWeight falls back to lexicalWeight rather than NaN-ing every score');
+
+// --- SET METRICS. The half-credit rule and the exchange rate are two separate judgements (metrics.mjs), and
+// the failure worth catching is the one that inverts an incentive rather than one that throws.
+eq(gradeCredit(4), 1, 'a 4 is delivered correctly');
+eq(gradeCredit(3), 1, 'a 3 is too — the bar for "should be included"');
+eq(gradeCredit(2), 0.5, 'a 2 is 50/50 on inclusion, so it credits half');
+eq(gradeCredit(2.5), 0.5, 'a half-grade credits by its BAND, not by interpolation');
+eq(gradeCredit(1.5), 0, '...and below 2 nothing is earned');
+eq(gradeCredit(1), 0, 'a 1 is filler');
+eq(gradeCredit(0), 0, 'a 0 is an error');
+
+// THE INCENTIVE, which is the whole point of the half: adding a 2 to a delivered set must not raise
+// precision. Under the old `>= 2` full-credit count it did, so padding with ambiguity scored better.
+const prec = grades => grades.reduce((s, x) => s + gradeCredit(x), 0) / grades.length;
+eq(prec([4, 3]) === 1, true, 'two confident hits are precision 1');
+eq(prec([4, 3, 2]) < prec([4, 3]), true, 'adding a 2 LOWERS precision from 1 — ambiguity is not a win');
+eq(prec([2, 2, 2]), 0.5, 'a set of nothing but 2s sits at 0.5, neither rewarded nor condemned');
+eq(prec([4, 3, 0]) < prec([4, 3, 2]), true, '...and a 0 still costs more than a 2');
+eq(prec([1, 2]) > prec([1, 1]), true, 'a 2 beats a 1, so the bands stay ordered');
+
+// F-beta at the stated exchange rate. beta=2 makes recall count 4x precision in the harmonic weighting,
+// so an arm trading precision for recall reads positive — asserted against hand-computed values.
+eq(RECALL_WEIGHT, 2, 'a lost relevant entry is held to cost at least twice a gained irrelevant one');
+eqNear(fbeta(1, 1, 2), 1, 'perfect on both is 1');
+eqNear(fbeta(0.5, 1, 2), (5 * 0.5) / (4 * 0.5 + 1), 'F2 formula matches the closed form it replaced');
+eq(fbeta(0.5, 1, 2) > fbeta(1, 0.5, 2), true, 'at beta=2, high recall beats the mirrored high precision');
+eq(fbeta(0.5, 1, 1) === fbeta(1, 0.5, 1), true, '...and at beta=1 the two are symmetric, which is what beta buys');
+eq(fbeta(0, 0, 2), 0, 'no signal either way is 0, not NaN');
+eq(fbeta(0, 1, 2), 0, 'zero precision cannot be rescued by recall');

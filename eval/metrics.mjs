@@ -25,6 +25,44 @@ export const eqNear = (got, want, label, tol = 1e-9) => {
     console.log(`${ok ? 'ok  ' : 'FAIL'} ${label}: ${got}${ok ? '' : ` (want ${want})`}`);
 };
 
+/**
+ * PRECISION CREDIT for one delivered entry, on the 0-4 anchors (extension/grading.mjs GRADE_ANCHORS).
+ *
+ * A 3 or 4 is "should likely / should absolutely be included", so delivering one is fully correct. A 2 is
+ * "Weakly relevant; 50/50 on inclusion" — the grader declined to call it, so the metric must not call it
+ * either: HALF credit leaves precision drifting toward 0.5 as 2s are added rather than toward 1. Counting a
+ * 2 as a full hit made padding with ambiguous entries raise the score, which contradicts delivering as many
+ * as are relevant AND NO MORE. Dropping 2s from the denominator instead was rejected for the mirror reason:
+ * it lets a configuration shrink what it is judged on by delivering ambiguity.
+ *
+ * BANDED, NOT INTERPOLATED. A grader may type 2.5, and it credits 0.5 like any other 2 — the credit follows
+ * the anchors, which are the wording inter-rater agreement was measured on, not a continuum between them.
+ * Whether half-grades should carry their own weight is a separate decision, unmade.
+ */
+export const gradeCredit = g => (g >= 3 ? 1 : g >= 2 ? 0.5 : 0);
+
+/**
+ * F-beta. beta > 1 weights recall; the harness passes RECALL_WEIGHT.
+ *
+ * Spelled out rather than hardcoded as F2's (5pr)/(4p+r), because the exponent is a JUDGEMENT about relative
+ * cost and a pair of magic constants hides which decision was made.
+ */
+export const fbeta = (precision, recall, beta = 2) => {
+    const b2 = beta * beta;
+    return (precision || recall) ? ((1 + b2) * precision * recall) / (b2 * precision + recall) : 0;
+};
+
+/**
+ * How much worse a lost relevant entry is than a gained irrelevant one. ASSERTED, not measured: the author's
+ * stated preference is that missing something relevant costs at least twice what delivering something
+ * irrelevant does. Everything downstream of it inherits that, so it is named here rather than left as a
+ * literal at the call site.
+ *
+ * Note it is NOT the same lever as gradeCredit. That one decides what counts as an error at all; this one
+ * sets the exchange rate between the two kinds.
+ */
+export const RECALL_WEIGHT = 2;
+
 /** scores -> 1-based rank per doc, with the query doc q forced to the bottom. */
 export const rankMap = (scores, q) => { const o = Array.from(scores, (s, d) => [s, d]); o[q][0] = -2; o.sort((a, b) => b[0] - a[0]); const m = new Int32Array(o.length); o.forEach(([, d], i) => { m[d] = i + 1; }); return m; };
 
