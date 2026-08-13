@@ -19,9 +19,9 @@
 // judgement), and rows that surface with no grade become PENDING, written alongside for grading.
 //
 // Usage (from SillyTavern root):
-//   node eval/rederive-syn.mjs <syn-bundle.json ...> [--depth 40] [--tokenizer <name>] [--write] [--out-dir <dir>]
+//   node eval/rederive-syn.mjs <syn-bundle.json ...> --books-from <dump.json> [--tokenizer <name>] [--write] [--out-dir <dir>]
 //
-// Dry by default. --depth is the pooled candidate count per arm (the capture's own widened count was 30).
+// Dry by default.
 import { readFileSync, writeFileSync, mkdirSync } from 'node:fs';
 import { basename, dirname, resolve as resolvePath } from 'node:path';
 import { loadScene, makeCandidateSet, makeFuse, sceneParams, indexPath, embed, stInstall, wiTitle } from './scene.mjs';
@@ -54,9 +54,8 @@ const argv = process.argv.slice(2);
 const arg = k => { const i = argv.indexOf(k); return i >= 0 ? argv[i + 1] : null; };
 // A flag's VALUE is not an input file. --books-from takes a .json, so the naive "ends in .json and does not
 // start with --" filter fed the dump back in as a bundle to re-derive.
-const VALUE_FLAGS = new Set(['--depth', '--arms', '--tokenizer', '--out-dir', '--books-from']);
+const VALUE_FLAGS = new Set(['--arms', '--tokenizer', '--out-dir', '--books-from']);
 const files = argv.filter((a, i) => a.endsWith('.json') && !a.startsWith('--') && !VALUE_FLAGS.has(argv[i - 1]));
-const DEPTH = Number(arg('--depth') ?? 40);
 // Subset of the arms, same spelling as --list would print. Mostly for attributing a pool change to the arm
 // that caused it: keys-live was recorded wrong in every v1 synthetic bundle, so re-deriving with it fixed
 // and re-deriving without it are different questions.
@@ -78,7 +77,7 @@ const BOOKS_FROM = arg('--books-from');
 const FORCE = argv.includes('--force');
 
 if (!files.length) {
-    console.error('usage: node eval/rederive-syn.mjs <syn-bundle.json ...> [--depth 40] [--tokenizer <name>] [--write] [--out-dir <dir>]');
+    console.error('usage: node eval/rederive-syn.mjs <syn-bundle.json ...> --books-from <dump.json> [--tokenizer <name>] [--write] [--out-dir <dir>]');
     console.error('  dry by default. Writes <name>.json (rebuilt) and <name>-pending.json (rows needing a grade).');
     process.exit(2);
 }
@@ -141,7 +140,14 @@ for (const path of files) {
             const rows = makeCandidateSet({ ...scene, params: P, topK: Math.max(100, P.maxVectorEntries * 2) })(
                 P.K1, P.B, tw, qv, S.query, S.scanText,
             );
-            const ranked = makeFuse(P)(rows, P.LEXW).slice(0, DEPTH);
+            // EVERY ACTIVATED ROW, ordered but not truncated. A capture does not choose how many entries to
+            // record — /wa-super-grade widens the cutoff to a plain count and then writes down whatever
+            // activated — so a re-derivation has no prefix to take either. Truncating here also cut the
+            // WRONG ranking: production's cut is on the retrieval ranking (fuseRetrieval -> cutRetrieved),
+            // and slicing the layout ranking lets a keyword-only entry displace a retrieved one from a
+            // decision it is not a candidate in (ranking.mjs fuseRetrieval). Recording all of it makes the
+            // pool the whole population, so no later re-ranking can orphan a grade.
+            const ranked = makeFuse(P)(rows, P.LEXW);
 
             const out = [];
             for (const [i, r] of ranked.entries()) {
@@ -176,7 +182,8 @@ for (const path of files) {
                 captureParams: capture,
                 paramSnapshot: shipped.paramSnapshot ? { ...shipped.paramSnapshot } : undefined,
                 excludeTitles: S.excludeTitles,
-                cutoff: { mode: 'count', maxVectorEntries: DEPTH },
+                // Nothing was cut, so there is no cutoff to report — recorded explicitly rather than omitted.
+                cutoff: { mode: 'none', maxVectorEntries: null, note: 'offline re-derivation records the full activated population' },
                 candidates: out,
             });
         }
@@ -206,7 +213,8 @@ for (const path of files) {
                 // --books-from existed.
                 booksFrom: BOOKS_FROM ? basename(BOOKS_FROM) : null,
                 paramsFrom: BOOKS_FROM ? basename(BOOKS_FROM) : null,
-                rederivedWhy: `candidate lists rebuilt offline at depth ${DEPTH} under the retrieval-route disable guard. `
+                rederivedWhy: 'candidate lists rebuilt offline under the retrieval-route disable guard, recording the FULL '
+                    + 'activated population rather than any prefix of it. '
                     + 'The SCENE (query, scan window, depth, chat) is the bundle\'s own and is NOT re-randomised, so every '
                     + 'carried grade still describes the pair it was made about. '
                     + (BOOKS_FROM
