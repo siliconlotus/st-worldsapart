@@ -406,9 +406,16 @@ const SHARED_FIELDS = ['name', 'notes', 'createdAt', 'createdBy', 'books', 'book
  * @param {Array<{arm: string, sample: object}>} arms Per-arm samples from buildSample
  * @returns {object} Bundle: shared fields once, `arms` carrying the rest
  */
+/** Bundle shape. 1: rows carry cosine/text/keys under the truthiness gate, no per-row tokens or key hits.
+ *  2: `text` and `keys` gate on the CONDITION (rankActivated's row builder) so an absent signal is null and
+ *  a measured zero is 0; rows carry `tokens`, `cut`, `cutBy` and `why`. Only 2 can be read field-by-field
+ *  without knowing when it was written — under 1, `keys: null` means either "scored 0" or "had no keys",
+ *  and nothing on the row tells them apart. eval/migrate-bundle.mjs lifts a 1 to a 2. */
+export const BUNDLE_VERSION = 2;
+
 export function bundleSamples(arms) {
     const first = arms[0]?.sample ?? {};
-    const bundle = { bundleVersion: 1 };
+    const bundle = { bundleVersion: BUNDLE_VERSION };
     for (const f of SHARED_FIELDS) if (first[f] !== undefined) bundle[f] = first[f];
     bundle.arms = arms.map(({ arm, sample }) => {
         const per = { arm };
