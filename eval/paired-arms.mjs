@@ -62,6 +62,15 @@ const ARMS = {
     // generator, not the hypothesis.
     'scoreVectorKeys=on': { scoreVectorKeys: true },
     'scoreVectorKeys=off': { scoreVectorKeys: false },
+    // SELECTION, the other half of the pair above — and it is NOT one variable. suppressVectorKeys blanks
+    // vectorized keys so core cannot activate on them (stage 2) AND, because the gazetteer is built
+    // downstream of that blanking, changes the BM25 term set (stage 1). So `vectorKeys=live` moves both, and
+    // the captured keys-live arm is not a superset of shipped: measured across 65 scenes it adds 767
+    // keyword-only rows but loses 174 vector rows to the reranking. The other two hold one half fixed via
+    // suppressGazetteerKeys, so the effect splits. __reload because the gazetteer is baked at load time.
+    'vectorKeys=live': { suppressVectorKeys: false, __reload: true },
+    'vectorKeys=live-gazfixed': { suppressVectorKeys: false, suppressGazetteerKeys: true, __reload: true },
+    'vectorKeys=gazraw': { suppressVectorKeys: true, suppressGazetteerKeys: false, __reload: true },
     'K=10': { K: 10 }, 'K=60': { K: 60 },
     'boost=1': { boost: 1 }, 'boost=5': { boost: 5 }, 'boost=8': { boost: 8 },
     'stopwordDf=0.15': { stopwordDf: 0.15 }, 'stopwordDf=0.4': { stopwordDf: 0.4 },
@@ -257,7 +266,7 @@ const fx = n => (n >= 0 ? '+' : '') + n.toFixed(4);
 
     const results = [];
     for (const armName of picked) {
-        const { __chunk: chunkCfg, ...scoring } = ARMS[armName];
+        const { __chunk: chunkCfg, __reload: needsReload, ...scoring } = ARMS[armName];
         const cells = [];
         for (const sc of scenes) {
             let r;
@@ -266,6 +275,11 @@ const fx = n => (n >= 0 ? '+' : '') + n.toFixed(4);
                 // exactly what changed. The query embedding still can: the query text is untouched.
                 const built = await ensureIndex(sc.S, { overrides: chunkCfg, model: MODEL, ollama: OLLAMA, log: () => {} });
                 r = await scoreScene({ sample: sc.S, overrides: scoring, k: K, index: built.path, model: MODEL, ollama: OLLAMA, qv: sc.qv });
+            } else if (needsReload) {
+                // Same collection, but the gazetteer is baked at load time, so the preloaded scene is stale
+                // for this arm (scoreScene throws rather than let it pass). Reload; the query embedding still
+                // holds, since the query text is what did not change.
+                r = await scoreScene({ sample: sc.S, overrides: scoring, k: K, index: indexPath(sc.S, { model: MODEL }), model: MODEL, ollama: OLLAMA, qv: sc.qv });
             } else {
                 r = await scoreScene({ sample: sc.S, overrides: scoring, k: K, scene: sc.scene, qv: sc.qv });
             }

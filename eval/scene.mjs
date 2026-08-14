@@ -140,6 +140,14 @@ export const sceneParams = (S, overrides = {}) => ({
     // value they in fact ran under.
     meanCentered: true,
     maxVectorEntries: 20, suppressVectorKeys: true, scoreVectorKeys: false, entityFilter: true,
+    // suppressVectorKeys moves TWO stages at once. It blanks vectorized keys so core cannot keyword-ACTIVATE
+    // them (stage 2), and because the gazetteer is built downstream of that blanking it also changes the BM25
+    // term set (stage 1 — 2.3x terms, up to 74% score movement, see loadScene). So an arm that flips it is not
+    // a clean activation contrast, and the keys-live capture is NOT a superset of shipped: measured, it adds
+    // 767 keyword-only rows but LOSES 174 vector rows across 65 scenes to the reranking, all of them below
+    // shipped rank 16. Null follows suppressVectorKeys, which is what production does. Set it explicitly to
+    // hold the gazetteer fixed while activation moves, or the reverse, and the two effects separate.
+    suppressGazetteerKeys: null,
     // Exact key strings to treat as removed from the book (see scoringKeys). Null = none.
     dropKeys: null,
     queryMode: 'messages', retrievalMode: 'hybrid',
@@ -218,7 +226,9 @@ export function loadScene(S, { indexFile, params: P }) {
     // their own entries are out of scope here. Gazetteer-only — no index, no candidates.
     const embeddedOthers = Object.keys(S.books).filter(w => w !== primary).flatMap(w => Object.values(S.books[w]));
     const gazSource = [...entries, ...embeddedOthers];
-    const gazEntries = P.suppressVectorKeys
+    // suppressGazetteerKeys splits this from the activation half of suppressVectorKeys (see sceneParams);
+    // null is production, where one flag drives both.
+    const gazEntries = (P.suppressGazetteerKeys ?? P.suppressVectorKeys)
         ? gazSource.map(e => (e.vectorized ? { ...e, key: [], keysecondary: [] } : e))
         : gazSource;
     const gaz = ranking.buildGazetteer(gazEntries);
@@ -415,8 +425,8 @@ export async function scoreScene({ sample: S, overrides = {}, k = 10, vectors, m
     // A preloaded scene is reused across arms so N arms cost ONE embed and ONE index parse per scene. Valid
     // only while no arm moves suppressVectorKeys, which is baked into the gazetteer at load time — asserted
     // rather than trusted, because the failure would be a silently wrong gazetteer and those cost 74% BM25.
-    if (preloaded && overrides.suppressVectorKeys !== undefined) {
-        throw new Error('suppressVectorKeys changes the gazetteer, so it cannot be swept against a preloaded scene — load per arm');
+    if (preloaded && (overrides.suppressVectorKeys !== undefined || overrides.suppressGazetteerKeys !== undefined)) {
+        throw new Error('suppressVectorKeys/suppressGazetteerKeys change the gazetteer, so they cannot be swept against a preloaded scene — load per arm');
     }
     const scene = preloaded ?? loadScene(S, { indexFile: indexPath(S, { vectors, model, index }), params: P });
     const scoreAll = makeCandidateSet({ ...scene, params: P, topK: topK ?? Math.max(100, P.maxVectorEntries * 2) });

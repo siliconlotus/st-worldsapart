@@ -146,6 +146,10 @@ summary-cache.json
 # Personal relevance-eval fixtures (private /wa-debug captures + human grades)
 eval-data/
 
+# Judge jobs and their answers — derived from eval-data by grade-pending.mjs, rebuildable, and large
+eval/grade-jobs/
+eval/recal-jobs/
+
 # Local Claude notes (host-specific, not project facts)
 CLAUDE.local.md
 .claude/settings.local.json
