@@ -18,6 +18,7 @@ import { corpusMean, centeredCosineScores } from '../plugin/vector.mjs';
 import * as ranking from '../extension/ranking.mjs';
 import * as matcher from '../extension/matcher.mjs';
 import { isDurable, openBundle } from '../extension/grading.mjs';
+import { cutDynamic } from '../extension/selection.mjs';
 // Cycle: reindex.mjs imports getStringHash from here. Safe because neither side calls across at module
 // scope — both references live inside function bodies, so whichever module loads first finishes evaluating
 // before the other needs a binding.
@@ -424,6 +425,48 @@ export const makeFuse = P => (rows, lexW) => {
     ranking.fuseRanks(rows, { rrfK: P.K, retrievalMode: P.retrievalMode, weightByOrder: false, lexicalWeight: lexW, keywordWeight: P.KEYW });
     return [...rows].sort((a, b) => b.fused - a.fused);
 };
+
+/**
+ * The stage-4 cliff as the runtime applies it: over the fused LAYOUT ranking's dynamic block, not over
+ * the retrieval ranking. One helper so graded-scene-grid and paired-arms cannot drift — the same rule
+ * that keeps the gazetteer and the scorers in one place.
+ *
+ * Reference-tier rows are the harness's sticky/constant analogue: they reach the prompt because a key
+ * fired, not because ranking chose them, so they are outside the cliff's population exactly as constants
+ * are at runtime.
+ *
+ * DURABLE IS OUT OF THE POPULATION, matching the runtime — the budget may cut a constant for capacity,
+ * the cliff may not cut it for relevance. REFERENCE IS IN IT, also matching the runtime, because a
+ * keyword-activated entry is neither sticky nor constant and so lands in `results` there.
+ *
+ * `scoreScene` still strips reference rows before its RANKING metrics (triggered == relevant); whether
+ * the cliff is entitled to cut them is a different question and the answer is yes.
+ *
+ * `refKept`/`refAll` report composition over the CUT population, so a cliff eating the reference tier is
+ * visible. Read it as a calibration symptom, not as a case for a quota: the fused score is meant to make
+ * a grade-3 memory entry beat a grade-2 reference entry, and if reference rows vanish at equal grade
+ * that is fuseRanks failing to compare across provenance, which no cliff placement can rescue.
+ *
+ * @param {Array<object>} layout Fused layout ranking, best first, durable rows already excluded by the caller
+ * @param {object} P Scene params (vectorCutoff, minVectorEntries, elbowSensitivity, …)
+ * @returns {{kept: Array<object>, dropped: Array<object>, refKept: number, refAll: number}}
+ */
+export function cliffCut(layout, P) {
+    // `layout` is ALREADY durable-filtered by the caller — graded-scene-grid's `layoutOf` does exactly
+    // that split, and re-deriving it here is the second copy the gazetteer rule exists to prevent.
+    const { ranked, dropped } = cutDynamic({ sticky: [], constant: [], results: layout }, {
+        mode: P.vectorCutoff ?? 'off',
+        minVectorEntries: P.minVectorEntries ?? 3,
+        elbowSensitivity: P.elbowSensitivity ?? 1.5,
+        dropoffThreshold: P.dropoffThreshold ?? 0.06,
+    });
+    return {
+        kept: ranked,
+        dropped,
+        refKept: ranked.filter(r => isReference(r.entry)).length,
+        refAll: layout.filter(r => isReference(r.entry)).length,
+    };
+}
 
 /**
  * Scores one scene end to end at one parameter set: nDCG on the pooled rows, plus judged coverage of the

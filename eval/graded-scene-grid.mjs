@@ -66,7 +66,7 @@ import { cutRetrieved } from '../extension/selection.mjs';
 import { gradeValue } from './metrics.mjs';
 // Scene loading, the gazetteer, the scorers, the pool and the nDCG math all live in scene.mjs, shared with
 // paired-arms.mjs — there must be exactly one copy of them (see that module's header).
-import { CID, dcg, embed as embedWith, indexPath, isDurableEntry, loadScene, makeFuse, makeGradeOf, makeKeywordScore, makeCandidateSet, ndcg, nrm, openSample, sceneParams, vectorable, wiTitle } from './scene.mjs';
+import { CID, cliffCut, dcg, embed as embedWith, indexPath, isDurableEntry, loadScene, makeFuse, makeGradeOf, makeKeywordScore, makeCandidateSet, ndcg, nrm, openSample, sceneParams, vectorable, wiTitle } from './scene.mjs';
 
 const arg = k => { const i = process.argv.indexOf(k); return i >= 0 ? process.argv[i + 1] : null; };
 if (!arg('--sample')) { console.error('need --sample <sample.json> (write one with /wa-grade)'); process.exit(2); }
@@ -338,7 +338,7 @@ const fmt = n => (n == null ? '·' : (+n).toFixed(3));
         // pure subset operation — a shorter, more focused query can promote an entry the wide capture ranked
         // out of the graded pool entirely — so a depth row with a high blind count is understating itself.
         // If it stays at 0, one wide capture ablates down cleanly and no extra grading is needed.
-        console.log(' depth | qChars  msgs  terms | layout@10 layout@R vector@R  meanRank  cut P     R     F1     blind');
+        console.log(' depth | qChars  msgs  terms | layout@10 layout@R vector@R  meanRank  cut P     R     F1     blind   ref');
         for (const d of DEPTHS) {
             const q = ranking.buildQuery(chat, { depth: d });
             const st = scanWindowOf(chat, d);
@@ -350,19 +350,17 @@ const fmt = n => (n == null ? '·' : (+n).toFixed(3));
             const g = fused.map(r => gradeOf(r) ?? 0);   // unjudged occupies its rank and contributes nothing (makeGradeOf returns null)
             const hits = fused.map((r, i) => [gradeOf(r), i + 1]).filter(([gr]) => gr >= 3).map(([, i]) => i);
             const mean = hits.length ? hits.reduce((a, b) => a + b, 0) / hits.length : NaN;
-            // Cutoff, on the retrieval ranking as production cuts it.
-            const retr = rows.filter(r => r.score !== undefined);
-            const rk = ranking.fuseRetrieval(new Map(retr.map(r => [r.uid, { score: r.score, bm25: r.textScore }])), { rrfK: P.K, retrievalMode: P.retrievalMode, lexicalWeight: DEF.lexW })
-                .map(r => ({ ...r, title: byUid.get(Number(r.key)) ? wiTitle(byUid.get(Number(r.key))) : String(r.key) }));
-            // The sample's own cutoff config, not a hardcoded count/10 — a depth sweep that cuts differently
-            // from the configuration under test measures the wrong thing.
-            const keep = cutRetrieved(rk, { mode: P.vectorCutoff ?? 'count', maxVectorEntries: P.maxVectorEntries ?? 10, minVectorEntries: P.minVectorEntries ?? 3, elbowSensitivity: P.elbowSensitivity ?? 1.5, dropoffThreshold: P.dropoffThreshold ?? 0.06 });
-            const relInRank = rk.filter(r => gradeOf(r) >= 3).length;
+            // Cutoff, at stage 4, on the layout ranking — reference rows included, because the runtime's
+            // cliff can drop them too. Durable rows are already out via layoutOf/fused above. `fused` is
+            // this ranking's own cutoff config (P.vectorCutoff etc.), not a hardcoded count/10 — a depth
+            // sweep that cuts differently from the configuration under test measures the wrong thing.
+            const { kept: keep, refKept, refAll } = cliffCut(fused, P);
+            const relInRank = fused.filter(r => gradeOf(r) >= 3).length;
             const tp = keep.filter(r => gradeOf(r) >= 3).length;
             const pr = keep.length ? tp / keep.length : 0, rc = relInRank ? tp / relInRank : 0;
-            const blind = keep.filter(r => !POOL.has(Number(r.key))).length;
+            const blind = keep.filter(r => !POOL.has(Number(r.uid))).length;
             const tag = d === DEPTH ? '  <- as graded' : '';
-            console.log(`${String(d).padStart(6)} | ${String(q.length).padStart(6)}  ${String(Math.min(d, chat.length)).padStart(4)}  ${String(tw ? Object.keys(tw).length : 'all').padStart(5)} | ${ndcg(g, 10).toFixed(4)}   ${fmtR(ndcgAtR(g))}   ${fmtR(ndcgAtR(gVec))}  ${mean.toFixed(1).padStart(8)}  ${pr.toFixed(3)} ${rc.toFixed(3)} ${((pr + rc) ? 2 * pr * rc / (pr + rc) : 0).toFixed(3)}  ${String(blind).padStart(4)}/${keep.length}${tag}`);
+            console.log(`${String(d).padStart(6)} | ${String(q.length).padStart(6)}  ${String(Math.min(d, chat.length)).padStart(4)}  ${String(tw ? Object.keys(tw).length : 'all').padStart(5)} | ${ndcg(g, 10).toFixed(4)}   ${fmtR(ndcgAtR(g))}   ${fmtR(ndcgAtR(gVec))}  ${mean.toFixed(1).padStart(8)}  ${pr.toFixed(3)} ${rc.toFixed(3)} ${((pr + rc) ? 2 * pr * rc / (pr + rc) : 0).toFixed(3)}  ${String(blind).padStart(4)}/${keep.length}  ${refKept}/${refAll}${tag}`);
         }
         return;
     }
@@ -426,6 +424,12 @@ const fmt = n => (n == null ? '·' : (+n).toFixed(3));
     if (worst.j10 < worst.of) console.log(`!! worst coverage in the grid: ${worst.j10}/${worst.of} at k1=${worst.k1} b=${worst.b} lexW=${worst.lexW} — that cell is penalised for surfacing entries nobody judged.`);
     else console.log('pool is reusable across this grid: every cell\'s top-10 is fully judged.');
 
+    // SUPERSEDED BY THE STAGE-4 MOVE, kept until the tuning pass rewrites it: production cuts the layout
+    // ranking now, so these arms describe a cut WA no longer makes. The rewrite is the tuning work's,
+    // and needs three calls this change does not make — which credit rule the precision uses, which
+    // population it scores, and whether depth returns as an axis once maxVectorEntries is a budget cap
+    // this harness would have to replay applyBudget to apply.
+    //
     // --- selection criteria: where the cut falls, scored as a SET. nDCG above grades the ORDER and is
     // blind to how many survive it, so the cutoff settings need their own metric. Relevant = grade >= 3,
     // the same bar relevance-eval.mjs reports recall against. Human grades on a real scene's entry-level

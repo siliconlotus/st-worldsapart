@@ -17,9 +17,9 @@
 //
 //   sd       — spread of kept-count across queries. Low = predictable, high = adapts (or is erratic).
 //   fired%   — how often the cliff search found a cliff instead of falling through to the cap. A mode that
-//              rarely fires is decorative: it's `count` wearing a hat.
-//   drift    — mean kept at window 20 minus mean kept at window 10. ~0 is window-independence. `count` is
-//              the reference row: it drifts by the full 10, because in count mode the window IS the setting.
+//              rarely fires is decorative: it's `off` wearing a hat.
+//   drift    — mean kept at window 20 minus mean kept at window 10. ~0 is window-independence. `off` is
+//              the reference row: it drifts by the full 10, because with no cliff the window IS the setting.
 //
 // Rankings come from the same LOO queries as the other grids (each chunk of the corpus, in turn, as a real
 // query), fused with the shared plugin BM25 + mean-centered cosine and cut by the real cutRetrieved from
@@ -27,6 +27,10 @@
 //
 // Usage (from SillyTavern root):
 //   node public/scripts/extensions/third-party/WorldsApart/eval/cutoff-grid.mjs <index.json>
+//
+// STAGE 4. The shipped cliff cuts the LAYOUT ranking (extension/selection.mjs cutDynamic); this grid
+// reads retrieval rankings, because those are what it has cheaply and mode behaviour transfers. Read the
+// kept-counts as "how decisive is each mode on a real score curve", not as a measurement of what ships.
 import { readFileSync } from 'node:fs';
 import { buildLexical, bm25Scores } from '../plugin/lexical.mjs';
 import { corpusMean, centeredCosineScores } from '../plugin/vector.mjs';
@@ -69,7 +73,10 @@ const rankedAt = k => queries.map((q, qi) => {
 });
 
 const stats = (ranked, cfg, W) => {
-    const kept = ranked.map(rows => cutRetrieved(rows, { maxVectorEntries: W, minVectorEntries: MIN, ...cfg }).length);
+    // No maxVectorEntries here — cutRetrieved takes no count, only the floor and the cliff params below.
+    // W still bounds `fired` (how often the cut lands short of it), which is a property of the mode's
+    // score-curve read, not of a cap this call passes in.
+    const kept = ranked.map(rows => cutRetrieved(rows, { minVectorEntries: MIN, ...cfg }).length);
     const m = kept.reduce((a, b) => a + b, 0) / n;
     return {
         mean: m,
@@ -79,7 +86,7 @@ const stats = (ranked, cfg, W) => {
 };
 
 const arms = [
-    ['count           ', { mode: 'count' }],
+    ['off             ', { mode: 'off' }],
     ...[1.2, 1.5, 2, 2.5].map(v => [`elbow   sens=${v}`.padEnd(16), { mode: 'elbow', elbowSensitivity: v }]),
     ...[0.04, 0.06, 0.08, 0.12].map(v => [`dropoff thr=${v}`.padEnd(16), { mode: 'dropoff', dropoffThreshold: v }]),
 ];
