@@ -2575,9 +2575,10 @@ async function gradeScene(named) {
  *               admits at all.
  *   loose-thr   scoreThreshold gates whether a chunk is admitted at all — with no stage-1 cut it is one
  *               of the two knobs that can still change the population rather than reorder it.
- *   keys-live   suppressVectorKeys off lets ST CORE keyword-match vectorized entries. Core's activation
- *               (secondary keys, inclusion groups, recursion, min-activations, probability rolls) is the one
- *               thing this project cannot recompute offline at all, so it can only be sampled live.
+ *   keys-live   suppressVectorKeys off lets WA keyword-match vectorized entries; core's own matcher only
+ *               runs redundantly, and only with ownActivation off. Activation (secondary keys, inclusion
+ *               groups, recursion, min-activations, probability rolls) is the one thing this project
+ *               cannot recompute offline at all, so it can only be sampled live.
  *
  * vector and lexical retired once retrieval stopped cutting: retrievalMode decided which signal ordered the
  * candidates, so a different set survived into the top of the retrieval ranking, and that mattered only
