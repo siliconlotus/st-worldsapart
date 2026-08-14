@@ -93,7 +93,7 @@ transfers but cannot be where it is found.
 
 ## Graded scenes: pool first, then pair
 
-Two constraints shape every tuning claim, and both have tooling rather than a workaround.
+Three constraints shape every tuning claim, and each has tooling rather than a workaround.
 
 `n` is single-digit and always will be — a chat has to be long enough to have retrievable history and rich
 enough for some of it to be irrelevant. So **argmax over a grid is not available**: use `paired-arms.mjs`,
@@ -106,7 +106,41 @@ against a single `/wa-grade` capture is not defensible. `/wa-super-grade` captur
 population-changing arms, unions what they surfaced and grades the union once; later rounds load earlier
 samples and grade only the delta. `judged@10` in `graded-scene-grid.mjs` is the stopping rule — add arms
 until the cells you care about stop showing gaps. It cannot always reach 10/10: offline re-derivation ranks
-keyword-only rows ST core would have rejected, and no arm can surface those.
+keyword-only rows core's GATES would have rejected — probability rolls, inclusion-group contention, delay
+and cooldown, character and tag filters, `@@dont_activate`, `delayUntilRecursion`, triggers. Not matching,
+which WA owns and `scene.mjs` models through the same `keywordScore` that fires at runtime. No arm surfaces
+those either, since a probability roll is not made reproducible by adding one.
+
+**A grade mean is only comparable at matched retrieval rank.** Grades fall steeply with pool depth, so a
+pass that graded deeper reads as a harsher rater when nothing about the rater changed. Measured, n=258 rows
+graded by both the human rater and `scene-relevance.md`, joined on shipped-arm rank: the contract sits at
+0.68x the human's mean at rank 0-19 and 1.03x at 20-44. **Those human grades predate the current rubric**, so
+head disagreement is a changed construct as much as rater drift, and no agreement statistic can tell you
+whether a rule the human never applied is right. What it can show is the shape of the change: the rule that
+reserves 4 for the scene's current subject reads as a tightening rather than a redefinition — every 4 the
+contract emitted fell on a row the human also graded 4, n=5 — while 19 of its 62 3s sit on rows the human
+called 0-2. Quadratic weighted kappa is 0.690 over those 258 rows and Kendall tau-b averages 0.54 per scene,
+but both are agreement statistics against a superseded construct, and neither is what the validity score
+reads, which is which band a row lands in. Raw means across two passes said 0.26 vs 0.83 and almost all of
+that was which rows each pass drew, not disagreement. Match the band or make no comparison; `grades` rows
+carry no rank, so join through the arm's `candidates`.
+
+That cuts two ways once a bundle holds more than one pass. Which rater graded a row correlates with rank
+band, so an arm whose wins come from deep rows is scored on a different scale than one winning at the head,
+and `graded-scene-grid.mjs` will report that as a parameter effect.
+
+**The contract does not reproduce evenly, and the relevant band is the unstable one.** Re-graded at the
+original job size — 179 rows, 12 jobs, 4 books — it agrees with itself 87.7% exactly and 98.3% within one
+grade, so most rows are solid. But agreement is 79% at the head of the pool against 90-93% deeper, and 4 of
+the 13 rows originally graded >= 3 came back below it. The 0s are what is stable. Since every selection
+criterion is defined on the >= 3 line, a single pass's relevant set carries real noise there, and a
+one-scene difference between arms is inside it.
+
+**Job size does not move grades, and was checked rather than assumed.** 16-row jobs run ~140KB with single
+entry lines to 28KB, which no one Read returns; the obvious worry is that a judge grades a prefix. Measured
+flat: the same 64 rows at 4 rows/job scored +0.11 against 16 rows/job, 10 up and 5 down, sign test p~0.3.
+Prefer small batches anyway — two of those 64 were real 0-to-3 catches — but a large-batch pass does not
+need re-grading on size grounds.
 
 ## Chat-based measurement uses the standard corpus
 
@@ -133,6 +167,12 @@ is an override. What curation cannot tell you is anything about the keys the fla
 since it shaped which keys got examined. Removals speak to precision, never to recall.
 
 ## Four stages, and the two rankings
+
+**WA is a selection system that uses rank, not a ranking system.** What ships is the set that survives
+stage 4; rank is how that set gets chosen, not the product. So the validity score is set-based and
+asymmetric — recall at grade >= 3, precision at grade >= 2, recall-weighted (`matcher-design.md`,
+*Evidence → Two scores*). nDCG over either ranking is a diagnostic for whether the ordering earns its
+keep, and is not evidence that the system works.
 
 Conflating these has produced several wrong conclusions here, more than once. The terms are fixed — use
 them, and say which stage a claim is about.
