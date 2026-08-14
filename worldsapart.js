@@ -1667,21 +1667,52 @@ async function rankActivated(args) {
         // Interleaved: per-book weight scales fused (weight 1 = plain relevance ranking).
         results.sort((a, b) => (b.fused * cfgOf(b.entry.world).weight - a.fused * cfgOf(a.entry.world).weight) || authored(a, b));
     }
-    let ranked = [...sticky.sort(authored), ...constant.sort(authored), ...results];
+    sticky.sort(authored);
+    constant.sort(authored);
+
+    // Stashed BEFORE the cliff, so a debug or grading capture holds a row for every entry this pass
+    // judged rather than only the survivors — `cut`/`cutBy` below record which side each fell on, and
+    // an offline harness can replay any cliff or budget setting against the whole population.
+    // Survivors and losers can't be re-interleaved afterwards: concatenating them loses the rank order
+    // the cuts were prefixes of.
+    runState.lastRanked = [...sticky, ...constant, ...results];
+
+    // FIRST CUT: relevance, over the dynamic block only, and it runs whether or not the budget below
+    // does. That guard is a capacity condition — it is false with the token budget and every entry cap
+    // at 0 — and an irrelevant entry should not reach the prompt merely because there was room for it.
+    // It takes no count: a flat ranking has no cliff, survives whole, and the caps bound it.
+    const cliff = selection.cutDynamic({ sticky, constant, results }, effectiveCliff());
+    let ranked = cliff.ranked;
+
+    // Cliff losers need their own delete. The budget's loop below walks `ranked`, and a cliff loser is
+    // not in it by construction.
+    for (const item of cliff.dropped) {
+        activated.delete(item.key);
+    }
+
+    if (cliff.dropped.length) {
+        console.log(`Worlds Apart: cliff dropped ${cliff.dropped.length} entries below the relevance cut, ${ranked.length} remain`);
+    }
 
     const maxTokens = effectiveTokenBudget();
     const maxTotal = settings().maxTotalEntries;
     const maxDynamic = settings().maxDynamicEntries;
+    const maxVectorEntries = settings().maxVectorEntries;
     const bookCaps = new Map(priorityList.filter(w => w.cap > 0).map(w => [resolvedName(w), w.cap]).filter(([n]) => n));
 
-    if (maxTokens > 0 || maxTotal > 0 || maxDynamic > 0 || bookCaps.size) {
+    if (maxTokens > 0 || maxTotal > 0 || maxDynamic > 0 || maxVectorEntries > 0 || bookCaps.size) {
         const dynamicSet = new Set(results);
         const { survivors, counted, skipped, dropped, budgeted, inPrompt } = await selection.applyBudget({
             ranked,
             isDynamic: item => dynamicSet.has(item),
+            // PROVENANCE — retrieval returned a score for it — not entry.vectorized. An entry that
+            // activated on a key it kept came in through the keyword route and is not what this cap
+            // bounds; the two coincide while suppressVectorKeys is on.
+            isVector: item => runState.lastScores.has(item.key),
             maxTokens,
             maxTotal,
             maxDynamic,
+            maxVectorEntries,
             capOf: item => bookCaps.get(item.entry.world) ?? 0,
             tokensOf: item => (maxTokens > 0 ? getTokenCountAsync(item.entry.content ?? '') : 0),
             exemptIsBudgeted: settings().maxTokensIncludesExempt,
@@ -1697,6 +1728,10 @@ async function rankActivated(args) {
 
         if (dropped) {
             const caps = [
+                // Nested innermost first — vector ⊆ dynamic ⊆ total — so the line reads in the order the
+                // caps bind. Recounted from the survivors on the same terms applyBudget counted them:
+                // by provenance, and exempt entries are outside the population the caps bound.
+                maxVectorEntries > 0 ? `vector ${results.filter(x => survivors.has(x) && runState.lastScores.has(x.key) && !selection.authorIgnoreBudget(x.entry)).length}/${maxVectorEntries}` : null,
                 maxDynamic > 0 ? `dynamic ${results.filter(x => survivors.has(x) && !selection.authorIgnoreBudget(x.entry)).length}/${maxDynamic}` : null,
                 maxTotal > 0 ? `total ${counted}/${maxTotal}` : null,
                 maxTokens > 0 ? `tokens ${budgeted}/${maxTokens} budgeted${inPrompt !== budgeted ? `, ${inPrompt - budgeted} exempt, ${inPrompt} in prompt` : ''}` : null,
@@ -1707,17 +1742,10 @@ async function rankActivated(args) {
 
         runState.lastSkipped = skipped;
         runState.lastDropped = ranked.filter(x => !survivors.has(x));
-        // THE PRE-BUDGET POPULATION, IN RANK ORDER, stashed before the filter below overwrites it. The
-        // candidate rows are built from this so a sample records what the budget CHOSE BETWEEN, not only
-        // what it kept — without it, entries the budget cut never reach the grader and the cut cannot be
-        // replayed offline at any other budget. Survivors and dropped can't be re-interleaved afterwards:
-        // concatenating them loses the rank order the cut was a prefix of.
-        runState.lastRanked = ranked;
         ranked = ranked.filter(x => survivors.has(x));
     } else {
         runState.lastSkipped = [];
         runState.lastDropped = [];
-        runState.lastRanked = ranked;
     }
 
     // Selection is done; now lay the survivors out — one flat sort over everything, so
@@ -1760,15 +1788,29 @@ async function rankActivated(args) {
     // Built whenever a debug-class run is in flight, and stashed: /wa-grade grades THESE rows rather than
     // recomputing a ranking, so the grades attach to the selection that actually happened.
     if (runState.verboseRun) {
-        // The PRE-BUDGET population (see lastRanked), so a row exists for every entry the budget chose
-        // between and `cut` records which side it fell. `ranked` is survivors only by this point.
-        const population = runState.lastRanked ?? ranked;
+        // The PRE-CLIFF, PRE-BUDGET population (see lastRanked), so a row exists for every entry this
+        // pass chose between and `cut`/`cutBy` record which side it fell on. `ranked` is survivors only
+        // by this point.
+        //
+        // /wa-grade's candidates=N caps the DYNAMIC rows and nothing else. It is a grading-budget
+        // decision rather than a selection one: the grading popup LISTS sticky and constant rows but
+        // does not grade them, so capping the whole walk order would spend slots on rows nobody judges
+        // and N would mean a different depth on every book. A grading run has no cliff (effectiveCliff),
+        // so N cuts into the full population instead of into whatever the cliff left.
+        let dynamicSeen = 0;
+        const gradeDepth = runState.gradeCutoff?.maxVectorEntries ?? 0;
+        const population = (runState.lastRanked ?? ranked)
+            .filter(x => !gradeDepth || (blockOf.get(x) ?? 'dynamic') !== 'dynamic' || ++dynamicSeen <= gradeDepth);
         const kept = new Set(ranked);
         // WHY a row was cut, not just that it was. applyBudget already computes this per skipped entry
         // (`blockedBy`) and it is the difference between "ranked too low" and "would not fit" — a large
         // entry is SKIPPED so smaller ones behind it still get in (selection.mjs), so a cut row is not
-        // evidence that everything below it was cut too.
-        const blockedOf = new Map((runState.lastSkipped ?? []).map(s => [s.item ?? s, (s.blockedBy ?? []).map(b => b.cap).join('+')]));
+        // evidence that everything below it was cut too. The cliff's own losers join them, so a row says
+        // which of the two decisions rejected it: irrelevant, or would not fit.
+        const blockedOf = new Map([
+            ...(runState.lastSkipped ?? []).map(s => [s.item ?? s, (s.blockedBy ?? []).map(b => b.cap).join('+')]),
+            ...cliff.dropped.map(item => [item, 'cliff']),
+        ]);
         // TOKENS PER ENTRY, counted here rather than reused from applyBudget's tokensOf — that one
         // short-circuits to 0 when maxTokens is 0, so reusing it would silently record zeros for anyone
         // running with the budget off. Content only, matching applyBudget's own accounting; the assembled
@@ -2338,11 +2380,12 @@ async function gradeScene(named) {
         return '';
     }
 
-    // Widen the cut for the grading run only, so the candidate list is deep enough to assess every cutoff
-    // mode offline (see effectiveCutoff). The live setting is recorded in the sample either way.
+    // Drop the cliff for the grading run only, so the candidate list is deep enough to assess every cliff
+    // setting offline (see effectiveCliff), and cap the dynamic rows at the depth asked for. The live
+    // setting is recorded in the sample either way.
     const live = { mode: settings().vectorCutoff, maxVectorEntries: settings().maxVectorEntries };
     const wanted = Math.max(1, Number(named?.candidates ?? 20));
-    runState.gradeCutoff = { mode: 'count', maxVectorEntries: wanted };
+    runState.gradeCutoff = { mode: 'off', maxVectorEntries: wanted };
 
     let rows = [];
     let entries = [];
@@ -2490,7 +2533,7 @@ async function gradeScene(named) {
             live,
             // What this grading run actually used, and how many rows the grader was therefore shown. The
             // harness must not evaluate a cutoff that keeps more than gradedCandidates.
-            gradingOverride: { mode: 'count', maxVectorEntries: wanted },
+            gradingOverride: { mode: 'off', maxVectorEntries: wanted },
             kept: runState.lastCutKept ?? null,
             minVectorEntries: settings().minVectorEntries,
             elbowSensitivity: settings().elbowSensitivity,
@@ -2564,7 +2607,7 @@ const POOL_ARMS = {
  * object threaded through retrieve(), which is a much larger change than this feature justifies.
  *
  * @param {object} overrides Settings to force for this run
- * @param {number} wanted Candidate depth (the cut is widened to a plain count, as /wa-grade does)
+ * @param {number} wanted Candidate depth (the cliff is dropped and the dynamic rows capped, as /wa-grade does)
  * @returns {Promise<object>} The capture: rows, entries, and everything the sample needs to freeze it
  */
 async function captureArm(overrides, wanted) {
@@ -2572,7 +2615,7 @@ async function captureArm(overrides, wanted) {
     const saved = {};
     for (const k of Object.keys(overrides)) saved[k] = s[k];
     Object.assign(s, overrides);
-    runState.gradeCutoff = { mode: 'count', maxVectorEntries: wanted };
+    runState.gradeCutoff = { mode: 'off', maxVectorEntries: wanted };
 
     try {
         await dryRun(true);
@@ -2925,7 +2968,7 @@ async function superGradeScene(named) {
             grades,
             cutoff: {
                 live: cap.live,
-                gradingOverride: { mode: 'count', maxVectorEntries: wanted },
+                gradingOverride: { mode: 'off', maxVectorEntries: wanted },
                 kept: cap.kept,
                 minVectorEntries: cap.minVectorEntries,
                 elbowSensitivity: cap.elbowSensitivity,
@@ -3057,35 +3100,30 @@ function effectiveTokenBudget() {
 }
 
 
-// Entry selection (count/elbow/dropoff cutoff) lives in selection.mjs; inject the cutoff settings.
-// Rationale/benchmarks are documented there.
+// The cliff itself (elbow / dropoff) lives in selection.mjs; inject the settings it reads.
 /**
- * The cutoff in force. Normally the settings; during a /wa-grade run, a deliberately wide `count` so the
- * grader sees enough candidates to judge the OTHER cutoff modes offline.
+ * The cliff in force. Normally the settings; during a /wa-grade or /wa-super-grade run it is DISABLED, so
+ * the capture records the population the cuts chose between rather than the survivors — an offline harness
+ * can then replay any cliff setting against it, and a row the cliff would have rejected has a grade.
  *
- * Why widening matters: the cutoff decides which retrieved entries are force-activated, so it decides which
- * rows reach the candidates table and therefore which rows can be graded. Offline, an ungraded row scores 0,
- * so evaluating a cutoff that would keep MORE than the capture kept silently charges it for rows the grader
- * never saw. A sample captured at count/10 cannot fairly assess an elbow that wants 14.
+ * The candidate depth rides on the same holder, but is applied where the capture is built (rankActivated)
+ * rather than here: with no cliff and nothing cut at retrieval, a capture would otherwise pool the entire
+ * admitted set, and grading cost scales with the union across arms. It caps a grading budget, not a
+ * selection.
  *
  * Read through a holder rather than by mutating settings(): settings persist, and a throw mid-run would
- * leave the user's real cutoff changed behind their back.
- * @returns {{mode: string, maxVectorEntries: number}} Effective cutoff
+ * leave the user's real cliff changed behind their back.
+ * @returns {object} cutDynamic settings
  */
-function effectiveCutoff() {
-    return runState.gradeCutoff ?? { mode: settings().vectorCutoff, maxVectorEntries: settings().maxVectorEntries };
+function effectiveCliff() {
+    const s = settings();
+    return {
+        mode: runState.gradeCutoff ? 'off' : s.vectorCutoff,
+        minVectorEntries: s.minVectorEntries,
+        elbowSensitivity: s.elbowSensitivity,
+        dropoffThreshold: s.dropoffThreshold,
+    };
 }
-
-const cutRetrieved = (ranked) => {
-    const { mode, maxVectorEntries } = effectiveCutoff();
-    return selection.cutRetrieved(ranked, {
-        mode,
-        maxVectorEntries,
-        minVectorEntries: settings().minVectorEntries,
-        elbowSensitivity: settings().elbowSensitivity,
-        dropoffThreshold: settings().dropoffThreshold,
-    });
-};
 
 /**
  * Summarizes the current chat and scores the result, so the summary prompt can be

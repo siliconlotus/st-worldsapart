@@ -515,7 +515,7 @@ export const runState = {
                                   // The prune's ownership exemption: forced entries are never WA's to revoke.
     lastPruned: [],               // `${world}.${uid}` the prune deleted last scan, for /wa-debug
     lastScanText: '',             // last global-depth keyword scan window, bundled by /wa-grade
-    gradeCutoff: null,            // /wa-grade widens the cut for its run; null = use the real settings
+    gradeCutoff: null,            // /wa-grade drops the cliff and caps its candidate depth; null = real settings
     lastCutKept: null,            // how many the cutoff kept on the last retrieval, recorded by /wa-grade
     lastCandidates: [],           // selection-candidate rows from the last debug-class run, for /wa-grade
     lastCandidateEntries: [],     // the WI entries behind those rows, aligned by index (for "view text")
