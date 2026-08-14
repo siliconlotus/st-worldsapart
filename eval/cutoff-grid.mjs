@@ -12,14 +12,16 @@
 //
 // What IS testable without a gold set is the claim selection.mjs makes for the two cliff modes: that elbow's
 // threshold (a multiple of the MEAN gap) "shifts with the window" while dropoff's (a fraction of the TOP
-// score) is "window-independent" and "comparable across queries". Those are statements about spread and
-// stability, which hundreds of real rankings answer directly:
+// score) is "window-independent" and "comparable across queries". "Window" is this harness's own slice of
+// the candidate list, taken before cutRetrieved ever sees it — cutRetrieved takes no count of its own, so
+// simulating a shorter or longer dynamic block means truncating the input rather than passing a size in.
+// Those are statements about spread and stability, which hundreds of real rankings answer directly:
 //
 //   sd       — spread of kept-count across queries. Low = predictable, high = adapts (or is erratic).
-//   fired%   — how often the cliff search found a cliff instead of falling through to the cap. A mode that
-//              rarely fires is decorative: it's `off` wearing a hat.
+//   fired%   — how often the cliff search found a cliff instead of falling through to the window. A mode
+//              that rarely fires is decorative: it's `off` wearing a hat.
 //   drift    — mean kept at window 20 minus mean kept at window 10. ~0 is window-independence. `off` is
-//              the reference row: it drifts by the full 10, because with no cliff the window IS the setting.
+//              the reference row: it drifts by the full 10, because with no cliff the window IS the kept count.
 //
 // Rankings come from the same LOO queries as the other grids (each chunk of the corpus, in turn, as a real
 // query), fused with the shared plugin BM25 + mean-centered cosine and cut by the real cutRetrieved from
@@ -43,7 +45,7 @@ if (!INDEX) { console.error('pass the collection index.json path'); process.exit
 // swept, so the thing it cuts has to be the thing that ships.
 const K1 = 1.2, B = 0.75, LEXW = 1, MIN = 3;
 const RRFKS = [10, 20, 60];
-const WINDOWS = [10, 20];   // maxVectorEntries; 10 is the shipped default
+const WINDOWS = [10, 20];   // harness-side slice length fed to cutRetrieved; 10 is the shipped maxVectorEntries default
 
 const items = JSON.parse(readFileSync(INDEX, 'utf8')).items.filter(i => (i.metadata.text ?? '').length > 120);
 const N = items.length;
@@ -73,10 +75,9 @@ const rankedAt = k => queries.map((q, qi) => {
 });
 
 const stats = (ranked, cfg, W) => {
-    // No maxVectorEntries here — cutRetrieved takes no count, only the floor and the cliff params below.
-    // W still bounds `fired` (how often the cut lands short of it), which is a property of the mode's
-    // score-curve read, not of a cap this call passes in.
-    const kept = ranked.map(rows => cutRetrieved(rows, { minVectorEntries: MIN, ...cfg }).length);
+    // cutRetrieved takes no count of its own — W has to bound the INPUT, by slicing before the cut, or
+    // every window hands cutRetrieved the same list and produces identical stats regardless of W.
+    const kept = ranked.map(rows => cutRetrieved(rows.slice(0, W), { minVectorEntries: MIN, ...cfg }).length);
     const m = kept.reduce((a, b) => a + b, 0) / n;
     return {
         mean: m,
