@@ -354,10 +354,11 @@ const fmt = n => (n == null ? '·' : (+n).toFixed(3));
             // JUDGED@10 — pool reusability, and the stopping rule for /wa-super-grade's rounds.
             //
             // Computed on the UNFILTERED re-derivation, before activated(), which is the whole point:
-            // restricting to the pool first would report 10/10 by construction. The question this answers is
-            // "if this configuration shipped, has a human looked at the top 10 it would produce" — and where
-            // the answer is no, this row's nDCG is a LOWER BOUND, because an unjudged entry scores 0 whether
-            // or not it is relevant. A config with gaps therefore cannot be compared against one without
+            // restricting to the pool first would report 10/10 by construction. The question is whether the
+            // top 10 THIS RANKING produces carries grades at all, from any rater — and where it does not,
+            // this row's nDCG is a LOWER BOUND, because an unjudged entry scores 0 whether
+            // or not it is relevant. NOT a statement about what ships: this is a prefix of a ranking, and
+            // what ships is what survives selection. Nor about human raters — most of the pool is judged. A config with gaps therefore cannot be compared against one without
             // until the gap is graded, which is exactly what makes a pool built from one configuration
             // useless for a zero-based defaults review. Fix by adding arms, not by reading past it.
             //

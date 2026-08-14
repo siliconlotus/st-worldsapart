@@ -430,8 +430,9 @@ export const makeFuse = P => (rows, lexW) => {
  *
  * THE TWO RANKINGS ARE DELIBERATELY DIFFERENT. Both drop the reference tier first; after that, nDCG is
  * measured on the pool (grades only exist there), while coverage is measured on the unpooled ranking —
- * because the question coverage answers is "has a human looked at the top-k this configuration would
- * actually deploy", and restricting to the pool first would answer it 100% by construction. A scene
+ * because the question coverage answers is whether the top-k this configuration produces carries grades
+ * at all, from any rater, and restricting to the pool first would answer it 100% by construction. It is
+ * not about what ships — that is what survives selection — nor about human raters specifically. A scene
  * whose coverage is short is reporting a LOWER BOUND on nDCG.
  *
  * @param {object} args
