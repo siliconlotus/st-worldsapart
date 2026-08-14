@@ -23,6 +23,7 @@ import { isDurable, openBundle } from '../extension/grading.mjs';
 // before the other needs a binding.
 import { cachePath, chunkConfig } from './reindex.mjs';
 import { gradeCredit, fbeta, RECALL_WEIGHT, gradeValue } from './metrics.mjs';
+export { vectorable } from '../extension/ranking.mjs';
 
 /** Reads a manifest from disk as a plain sample, whether it is one or a /wa-super-grade multi-arm bundle.
  *  Every tool goes through this so `--arm` behaves identically everywhere and a bundle is never scored as

@@ -284,6 +284,14 @@ export function fuseRetrieval(scores, { rrfK: k, retrievalMode: mode, lexicalWei
 }
 
 /**
+ * Whether an item was ELIGIBLE for the vector signals — not whether it earned them. A vectorized entry
+ * that failed to rank on cosine is still eligible, because it competed and lost. Callers may declare it
+ * explicitly, since only they know how suppressVectorKeys/scoreVectorKeys resolved; absent flags fall
+ * back to presence.
+ */
+export const vectorable = it => it.vectorEligible ?? it.entry?.vectorized ?? it.score !== undefined;
+
+/**
  * Fuses the vector and keyword rankings with reciprocal rank fusion.
  * Only ordering matters to RRF, so the two incomparable score scales never
  * have to be converted into each other.
@@ -351,7 +359,6 @@ export function fuseRanks(items, { rrfK: k, retrievalMode: mode, weightByOrder, 
     // `vectorized` is the entry's, and whether keys are scorable depends on suppressVectorKeys/scoreVectorKeys
     // resolution the caller has already done. Absent flags fall back to presence, which keeps a caller that
     // sets neither self-consistent rather than silently capping everything it ranks.
-    const vectorable = it => it.vectorEligible ?? it.entry?.vectorized ?? it.score !== undefined;
     const vecOK = it => mode !== 'lexical' && vectorable(it);
     const txtOK = it => mode !== 'vector' && vectorable(it);
     const keyOK = it => it.keysEligible ?? it.keywordScore > 0;
