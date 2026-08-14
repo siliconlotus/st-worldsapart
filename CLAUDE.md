@@ -199,10 +199,18 @@ keep, and is not evidence that the system works.
 Conflating these has produced several wrong conclusions here, more than once. The terms are fixed — use
 them, and say which stage a claim is about.
 
+**Three populations, and they cross-cut.** `memory` is STMB-marked and `reference` is everything that is
+not — provenance, and the tier an entry belongs to. `durable` is constant plus active-sticky
+(`grading.mjs` `isDurable` of a capture row, `eval/scene.mjs` `isDurableEntry` of a raw entry), which is
+how a row reached the prompt rather than what kind of thing it is. A keyword-activated reference entry is
+not durable, and a durable entry may be either tier.
+
 **1. Retrieval** — `selectAndActivate` in `worldsapart.js`. The plugin scores chunks (cosine + BM25 over
-chunk text), `fuseRetrieval` fuses them into the **retrieval ranking**, and `cutRetrieved`
-(`selection.mjs`: count / elbow / dropoff, bounded by `maxVectorEntries`) keeps a prefix. **Keys are not
-in this ranking** — `fuseRetrieval` is deliberately passed no `keywordWeight`.
+chunk text), `fuseRetrieval` fuses them into the **retrieval ranking**, and `retrieve` returns everything
+that ranking scored: **stage 1 admits and does not cut**. Admission is the plugin's gates
+(`scoreThreshold`, `bm25 > 0`, `uncenteredGate`) plus `admitCeiling` (`plugin/scoring.mjs`), a safety
+limit counting entries (100) on the pooled plugin path and chunks (300) on the stock-ST fallback.
+**Keys are not in this ranking** — `fuseRetrieval` is deliberately passed no `keywordWeight`.
 
 **2. Activation** — whether an entry is ranked at all. Three independent routes: WA emits
 `WORLDINFO_FORCE_ACTIVATE` on the retrieval winners; ST core keyword-matches whatever keys are live;
@@ -212,10 +220,14 @@ in this ranking** — `fuseRetrieval` is deliberately passed no `keywordWeight`.
 from what retrieval stored, keyword score is computed over the scan window, and `fuseRanks` produces the
 **layout ranking** — vector + text + keys, normalised by the signals an entry was eligible for.
 
-**4. Selection** — the cuts, and there are two at different stages on different rankings. `cutRetrieved`
-cuts the retrieval ranking by relevance (inside stage 1, before anything is activated). `applyBudget`
-walks the layout ranking and deletes non-survivors from `activated` (after stage 3), sticky and constant
-first so the budget only ever cuts into the retrieved block.
+**4. Selection** — three cuts, all here, each answering one question over the layout ranking. The CLIFF
+(`selection.mjs` `cutDynamic`) decides relevance over the dynamic block and takes no count; it runs
+unconditionally, outside the budget's capacity guard, and durable entries are outside its population.
+The ENTRY MAXES decide how many, on nested populations — vector ⊆ dynamic ⊆ all, plus the per-book cap —
+with `maxVectorEntries` counted by PROVENANCE (retrieval scored the entry), not by the `vectorized`
+flag. The TOKEN BUDGET decides how much. The maxes and the budget live in `applyBudget`, which walks the
+layout ranking sticky and constant first, so every cap is a prefix cut, and deletes non-survivors from
+`activated`.
 
 **Two rankings, not one.** `fuseRetrieval` decides what is activated; `fuseRanks` decides prompt order
 and what survives the budget. **A change to `fuseRanks` can never surface an entry retrieval did not

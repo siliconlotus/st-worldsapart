@@ -320,19 +320,32 @@ every compound key.
 ## Stage 1: Retrieval
 
 `selectAndActivate` (`worldsapart.js`). The plugin scores chunks (cosine + BM25 over chunk text),
-`fuseRetrieval` fuses them into the **retrieval ranking**, and `cutRetrieved` (`selection.mjs`: count /
-elbow / dropoff, bounded by `maxVectorEntries`) keeps a prefix.
+`fuseRetrieval` fuses them into the **retrieval ranking**, and `retrieve` returns every entry that
+ranking scored.
 
 **Keys are not in this ranking** — `fuseRetrieval` is deliberately passed no `keywordWeight`.
+
+**Stage 1 admits and does not cut.** Admission is the plugin's own gates — `scoreThreshold` on the
+centered cosine, `bm25 > 0` on the chunk's own text, `uncenteredGate` as the wrong-book failsafe — plus a
+ceiling on how many records are asked for. That ceiling is `admitCeiling` (`plugin/scoring.mjs`, beside
+`poolEntries`), and it bounds how much a pathological scene may feed core's scan loop rather than
+judging any entry. It is path-dependent because topK counts a different thing on each path: the plugin
+pools to one record per entry before `selectTopK`, so K counts ENTRIES (100); the stock-ST fallback does
+not pool, so K counts CHUNKS (300, chunks/entry measuring 9.1-10.3 with per-entry maxima stabilising at
+K ~= 150-300). `queryCollections` chooses per path, since the fallback can fire mid-request.
+
+**`scoreThreshold` cannot narrow the candidate set.** A vectorized chunk is also admitted by `bm25 > 0`
+on its own text, so admission is "top decile by centered cosine OR any lexical overlap" — `'auto'`
+resolves to `quantile(vectorScores, 0.9)`, a selector rather than a floor. That bypass is load-bearing.
+**Measured** (`eval/paired-arms.mjs` `admit=cosine`, three scenes): a strict cosine gate dropped sommers
+from 3/3 to 1/3 on grade-5 entries in the top 10, and lost a relevant time-whore entry from the
+candidate set entirely. Narrowing admission is therefore a COST question, not a precision one, since
+stage 4 arbitrates.
 
 **The gazetteer is built downstream of `suppressVectorKeys`**, which blanks `key`/`keysecondary` on
 every vectorized entry, so "the lorebook's own vocabulary" is entry TITLES plus the keys of
 non-vectorized entries. Reading the raw book instead admitted 2.3x the terms (238 vs 105) and inflated
 every BM25 score by up to 74%. `eval/scene.mjs` reproduces the production order for this reason.
-
-**Open**: the stage-1 elbow is a relevance judgement made early, on a ranking that cannot see keys,
-against a budget it does not know about; `maxVectorEntries` is budget allocation enforced two stages
-before the budget exists. Both are blocked on the two-score split (see *Evidence*).
 
 ---
 
@@ -498,12 +511,32 @@ the weight, buffer scoring admits a depth-3 entry at full strength on text WA it
 
 ## Stage 4: Selection
 
-Two cuts, at different stages, on different rankings. `cutRetrieved` cuts the retrieval ranking by
-relevance inside stage 1, before anything is activated. `applyBudget` walks the layout ranking and
-deletes non-survivors from `activated` after stage 3, sticky and constant first so the budget only ever
-cuts into the retrieved block.
+Three cuts, all here, each answering one question over the same layout ranking.
+
+**The cliff** (`selection.mjs` `cutDynamic`) decides relevance, over the dynamic block, in the order the
+budget walks. It runs unconditionally: an irrelevant entry should not reach the prompt whether or not
+there was room for it. DURABLE entries are outside its population — the budget may cut a constant for
+capacity, the cliff may not cut it for relevance, because marking an entry constant is that judgement
+already made, and a durable entry scores low by ELIGIBILITY rather than by irrelevance. Reference
+entries that are not durable are in it, and are cut like anything else — the fused score is what has to
+make a grade-3 memory entry beat a grade-2 reference entry, and giving either tier a structural
+exemption would be compensating for a score that is not doing its job.
+
+**The entry maxes** then decide how many, on nested populations: vector ⊆ dynamic ⊆ all, plus the
+per-book quota. `maxVectorEntries` bounds what retrieval contributed and is counted by PROVENANCE —
+retrieval scored the entry — not by the `vectorized` flag.
+
+**The token budget** decides how much, and is the only one of the three measured in tokens rather than
+entries. The maxes and the budget both live in `applyBudget`, which walks the ranked layout once,
+sticky and constant first so every cap is a prefix cut, deletes non-survivors from `activated`, and
+reports every cap that rejected a row.
 
 This is where the one relevance decision is made (see *Principles*).
+
+**The cliff can drop a keyword-activated entry with the budget wide open.** That stands against
+*triggered == relevant* (*Evidence*) and is recorded rather than resolved: arbitrating once over the
+whole heterogeneous set is what *Principles* requires, and carving an exemption for keyword rows would
+make stage 4 read provenance.
 
 ---
 
@@ -584,6 +617,11 @@ evaluation, where `vectorized`/`sticky`/`constant` all can. A keyword-activated 
 relevant because its trigger fired — *triggered == relevant* — so the only judgement left is whether
 the trigger deserved to fire; a memory entry is relevant because ranking chose it.
 
+**`durable` — constant plus active-sticky — is a third population that CROSS-CUTS the tiers** (`CLAUDE.md`,
+*Four stages*). It says how a row reached the prompt, where the tiers say what kind of thing it is, and
+stage 4's cliff is defined on it: a keyword-activated reference entry is not durable and is cut like
+anything else.
+
 **Set metrics on a reference-heavy book are JOINT** and cannot tune routing alone: a reference entry
 reaches the prompt because its key fired, so a key miss and a routing miss land in the same recall
 number. Split the misses by divergence class (`eval/divergence-audit.mjs`) — key miss (suggester),
@@ -602,8 +640,11 @@ a lower bound.
 **Ruled, unimplemented.** It separates the gates at stage 1 and stage 4, which one metric currently
 conflates.
 
-**The vector score** grades `fuseRetrieval`'s output, cut by `cutRetrieved`. Homogeneous by
-construction — the collection holds only vectorized entries' chunks — so no exclusion rule is needed.
+**The vector score** grades ADMISSION: was the relevant entry returned at all. With no relevance
+decision at stage 1 it is a recall diagnostic and a cost measure, not a quality metric — the question it
+answers is whether anything downstream could have surfaced the entry, and how much was carried to find
+out. Homogeneous by construction — the collection holds only vectorized entries' chunks — so no
+exclusion rule is needed.
 
 **The layout score** grades what survives the budget, over the DYNAMIC block. It is set-based and takes
 the asymmetric bars below, because what ships is the surviving SET and rank is only how that set was
@@ -637,9 +678,9 @@ moves, so comparative findings survive but the absolute level does not. **Measur
 ordering inverted at F4 — under the asymmetric bar depth wins at every beta and the inversion
 disappears.
 
-**What this unblocks**: whether `elbow` survives at all, whether the stage-1 cut becomes a fixed bound,
-what `maxVectorEntries` should default to, and whether reference entries need contention grades. All
-four are currently unanswerable because nothing grades stage 4.
+**What this unblocks**: whether `elbow` survives at all, what the cliff's own parameters and
+`maxVectorEntries` should default to, and whether reference entries need contention grades. All three
+are currently unanswerable because nothing grades stage 4.
 
 **The offline half exists.** `/wa-grade` records the pre-budget population with per-row `tokens`, `cut`
 and `cutBy`, plus the tokenizer, so `applyBudget` replays offline at any budget — verified exact
@@ -652,7 +693,10 @@ against the runtime's own verdicts on 315 rows across 7 arms.
 Ordered by whether a user can see the difference — not by how tidy the fix is, and not by how many
 instances the books on disk hold.
 
-1. **The two-score split.** Blocks four tuning decisions; has data waiting for it now.
+1. **The layout score** — `F2@budget` over the dynamic block, set-based, recall at grade >= 3 and
+   precision crediting a 2 at half (`metrics.mjs` `gradeCredit`). Nothing grades stage 4 until it
+   exists, so every cliff default is carried over rather than chosen. Blocks three tuning decisions; has
+   data waiting for it now.
 2. **Recursion scoring** — buffer scoring plus trigger-depth weighting, one change. Ships on reasoning
    rather than evidence (`world_info_recursive` is off here and no book in the corpus exercises it), so
    it waits on a recursion-using book.

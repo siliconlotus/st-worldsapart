@@ -198,7 +198,7 @@ export const defaultSettings = {
     /**
      * Cap on VECTOR entries in the final selection — stage 4, inside applyBudget, nested as
      * vector ⊆ dynamic ⊆ all. It bounds what retrieval contributes to the prompt; it does not decide
-     * what activates. Stage 1 admits every vectorized entry up to a fixed ceiling (selection.mjs
+     * what activates. Stage 1 admits every vectorized entry up to a fixed ceiling (plugin/scoring.mjs
      * admitCeiling) and makes no relevance decision at all.
      *
      * IT IS A USER SETTING BECAUSE IT IS AN INPUT-TOKEN COST, not because it protects the ranker. The

@@ -261,7 +261,7 @@ function renderPluginSetup() {
  * @returns {Promise<object>} Grouped results
  */
 async function queryCollections(args) {
-    // ENTRIES or CHUNKS depending on which path answers — selection.mjs admitCeiling carries both
+    // ENTRIES or CHUNKS depending on which path answers — plugin/scoring.mjs admitCeiling carries both
     // numbers and why they differ. Chosen HERE rather than by the caller because the fallback below can
     // fire mid-request, and a ceiling picked before the attempt would ask for entries and be handed
     // chunks. A safety limit on what a pathological scene may feed core's scan loop, not a verdict on
