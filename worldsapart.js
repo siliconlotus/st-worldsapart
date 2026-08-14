@@ -2571,15 +2571,20 @@ async function gradeScene(named) {
  * a near-identical population. messageDepth is likewise ablatable from `queryChat`. What earns an arm is
  * being unable to compute the population offline:
  *
- *   no-filter   entityFilter off moves the surviving query terms, so it moves BM25, the retrieval ranking,
- *               and what the cut keeps.
- *   vector      \ retrievalMode changes which signal orders the candidates, so a different set survives
- *   lexical     / into the top of the ranking.
- *   loose-thr   scoreThreshold gates whether a chunk is admitted at all — the one knob that can add entries
- *               no reordering could reach.
+ *   no-filter   entityFilter off moves the surviving query terms, so it moves BM25 and what stage 1
+ *               admits at all.
+ *   loose-thr   scoreThreshold gates whether a chunk is admitted at all — with no stage-1 cut it is one
+ *               of the two knobs that can still change the population rather than reorder it.
  *   keys-live   suppressVectorKeys off lets ST CORE keyword-match vectorized entries. Core's activation
  *               (secondary keys, inclusion groups, recursion, min-activations, probability rolls) is the one
  *               thing this project cannot recompute offline at all, so it can only be sampled live.
+ *
+ * vector and lexical retired once retrieval stopped cutting: retrievalMode decided which signal ordered the
+ * candidates, so a different set survived into the top of the retrieval ranking, and that mattered only
+ * because cutRetrieved then kept a prefix of it. With nothing cut at stage 1 there is no top to survive
+ * into, so both are pure reordering now, which graded-scene-grid.mjs re-derives offline from the frozen
+ * query. They would still matter on a book past admitCeiling, where ordering decides what makes the
+ * ceiling; the books measured here hold 70-115 vectorized entries.
  *
  * `summary` was an arm here until the query summarizer was withdrawn. It is not coming back: state.mjs
  * RESETS queryMode rather than un-surfacing it, so an arm setting it would resurrect a withdrawn feature
@@ -2593,8 +2598,6 @@ async function gradeScene(named) {
 const POOL_ARMS = {
     shipped: {},
     'no-filter': { entityFilter: false },
-    vector: { retrievalMode: 'vector' },
-    lexical: { retrievalMode: 'lexical' },
     'loose-thr': { scoreThreshold: 0 },
     'keys-live': { suppressVectorKeys: false },
 };

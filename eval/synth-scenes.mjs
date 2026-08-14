@@ -33,17 +33,12 @@ import { BUNDLE_VERSION } from '../extension/grading.mjs';
 
 /**
  * The pooling arms, in HARNESS vocabulary. Mirrors worldsapart.js POOL_ARMS, which is written in settings
- * vocabulary and cannot be imported (that module pulls in ST). Two things this must not get wrong:
- *
- *   - `lexical` also moves commonWordWeight. captureParams derives it (`retrievalMode === 'lexical' ? 0.7 : 1`)
- *     rather than reading a setting, so declaring the arm by retrievalMode alone silently scores it at 1.
- *   - `loose-thr` is scoreThreshold in settings and `threshold` here.
+ * vocabulary and cannot be imported (that module pulls in ST). One thing this must not get wrong:
+ * `loose-thr` is scoreThreshold in settings and `threshold` here.
  */
 const POOL_ARMS = {
     shipped: {},
     'no-filter': { entityFilter: false },
-    vector: { retrievalMode: 'vector', commonWordWeight: 1 },
-    lexical: { retrievalMode: 'lexical', commonWordWeight: 0.7 },
     'loose-thr': { threshold: 0 },
     'keys-live': { suppressVectorKeys: false },
 };

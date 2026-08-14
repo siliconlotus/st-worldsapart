@@ -158,10 +158,6 @@ ok(!/\b(0|1|[1-4][0-9])\b/.test(String(picks(a1.out)).split(', ')[0]) || Number(
     const live = names(WA), mine = names(SRC);
     ok(live.length > 0, 'POOL_ARMS was found in worldsapart.js');
     ok(mine.join(',') === live.join(','), 'the generator mirrors worldsapart.js POOL_ARMS exactly');
-    // captureParams DERIVES commonWordWeight from retrievalMode, so an arm that names the mode alone is
-    // silently scored at the wrong weight.
-    ok(/'?lexical'?:\s*\{[^}]*commonWordWeight:\s*0\.7/.test(SRC), 'the lexical arm carries commonWordWeight 0.7, as captureParams derives it');
-    ok(/'?vector'?:\s*\{[^}]*commonWordWeight:\s*1\b/.test(SRC), '...and the vector arm carries 1');
     ok(/'loose-thr':\s*\{\s*threshold:\s*0\s*\}/.test(SRC), "loose-thr sets `threshold`, the harness spelling of scoreThreshold");
 }
 
