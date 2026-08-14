@@ -211,6 +211,16 @@ eq(prec([2, 2, 2]), 0.5, 'a set of nothing but 2s sits at 0.5, neither rewarded 
 eq(prec([4, 3, 0]) < prec([4, 3, 2]), true, '...and a 0 still costs more than a 2');
 eq(prec([1, 2]) > prec([1, 1]), true, 'a 2 beats a 1, so the bands stay ordered');
 
+// THE FIXED POINT IS THE SEMANTIC CLAIM. Adding a 2 pulls precision toward 0.5 from either side, so a set
+// already better than 50/50 is hurt by one and a set worse than 50/50 is helped. That neutral point is
+// what the anchor's "50/50 on inclusion" means, expressed as arithmetic — and it is the whole difference
+// between this rule and its two neighbours: full credit has its fixed point at 1.0 and so rewards padding
+// with ambiguous entries at every realistic level, and a hard >=3 bar has none below 1 and so punishes a
+// 2 as if it were an error. Pin it, because either neighbour is a one-character edit away.
+eq(prec([4, 4, 3, 3]) > prec([4, 4, 3, 3, 2, 2]), true, 'a 2 LOWERS precision on a set above 50/50');
+eq(prec([3, 1, 0, 0]) < prec([3, 1, 0, 0, 2, 2]), true, '...and RAISES it on a set below');
+eqNear(prec([4, 3, 1, 0]), prec([4, 3, 1, 0, 2, 2]), 'and does nothing at exactly 50/50 — the fixed point');
+
 // F-beta at the stated exchange rate. beta=2 makes recall count 4x precision in the harmonic weighting,
 // so an arm trading precision for recall reads positive — asserted against hand-computed values.
 eq(RECALL_WEIGHT, 2, 'a lost relevant entry is held to cost at least twice a gained irrelevant one');
