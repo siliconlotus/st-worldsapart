@@ -272,8 +272,22 @@ eq(v.skipped.some(s => s.blockedBy.some(b => b.cap === 'vector')), true, 'a vect
 eq(v.skipped.filter(s => s.blockedBy.some(b => b.cap === 'vector')).length, 4, 'the 4 vector rows past the cap are each reported');
 
 // A vectorized CONSTANT is not dynamic, so no entry cap may reject it — the vector cap included.
-// isVector is provenance and answers true for one, which is exactly why the clause guards on isDynamic
-// rather than trusting the predicate.
-const vAll = await run({ isVector: () => true, maxVectorEntries: 2 });
-eq(constants.every(c => vAll.survivors.has(c)), true, 'a vector cap never rejects a constant, whatever isVector says');
-eq([...vAll.survivors].filter(x => dynamicSet.has(x)).length, 2, 'and still caps the dynamic vector rows at 2');
+// isVector is provenance and answers true for one, which is exactly why the block clause guards on
+// isDynamic rather than trusting the predicate.
+//
+// The shared `ranked` (constants then dynamic) cannot exercise this: applyBudget always walks
+// constants before dynamic, so `vector` is still 0 throughout the constant block on any ordering a
+// caller actually produces, and the guard is never reached either way. This local order — two
+// vector rows exhausting the cap, THEN a constant, which no caller produces — exists only to pin
+// that the function holds vector ⊆ dynamic itself rather than inheriting it from walk order. Do not
+// "fix" this to match production order; that would delete the only case that tells the guard apart
+// from the counter.
+const constantAfterVectorCap = [dynamic[0], dynamic[1], constants[0]];
+const vAfterCap = await applyBudget({
+    ranked: constantAfterVectorCap,
+    isDynamic: item => dynamicSet.has(item),
+    isVector: () => true,
+    tokensOf: item => item.tokens,
+    maxTokens: 0, maxTotal: 0, maxDynamic: 0, maxVectorEntries: 2,
+});
+eq(vAfterCap.survivors.has(constants[0]), true, 'a constant walked after the vector cap is spent still survives — the block clause checks isDynamic, not just the counter');
