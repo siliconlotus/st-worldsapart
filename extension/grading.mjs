@@ -119,7 +119,7 @@ export function captureParams(s, { caseSensitive, wholeWords, includeNames }) {
 }
 
 /**
- * A candidate row is a REFERENCE row — always-on or persist-on-trigger — rather than a relevance result.
+ * A candidate row is DURABLE — always-on or persist-on-trigger — rather than a relevance result.
  *
  * Two different authorial acts land in the same bucket: `constant` is play scaffolding, a configured
  * `sticky` is a standing sheet about a character or place. Both are injected by intent rather than chosen

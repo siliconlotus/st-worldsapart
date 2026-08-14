@@ -1609,7 +1609,7 @@ async function rankActivated(args) {
     // Budget walk order — NOT prompt order. Stickies and constants are always-on by
     // authorial intent, so they go first and the budget can only ever cut into the
     // retrieved block, weakest match first. Classification is by what an entry IS: a
-    // constant that also matched keywords is a reference row, not a retrieval result.
+    // constant that also matched keywords is a durable row, not a retrieval result.
     const sticky = [];
     const constant = [];
     const results = [];
@@ -1829,8 +1829,8 @@ async function rankActivated(args) {
             // with its rank. `block` is the RUNTIME budget class (constant / sticky-active /
             // dynamic); `sticky` is the entry's CONFIGURED sticky value (0 = off). The two differ:
             // an entry with sticky configured still shows block `dynamic` on the turn it keyword-
-            // activates, and dry runs (/wa-debug) never arm the effect at all — so the eval tiers
-            // reference rows off constant-or-`sticky`, not off the runtime block, which it can't observe.
+            // activates, and dry runs (/wa-debug) never arm the effect at all — so the eval side reads
+            // DURABLE off constant-or-`sticky`, not off the runtime block, which it can't observe.
             // Numeric fields stay numeric so the copied JSON is computable: `null` for "no
             // signal", rounded (not toFixed strings) for a readable grid, and `sticky` is the count
             // itself (0 = off). Only `block` is categorical.
@@ -2744,7 +2744,7 @@ async function superGradePopup({ captures, union, entryOf, prior: prior0 = [], s
     const paint = () => {
         const typed = new Map([...body.querySelectorAll('.wa-grade')].filter(i => i.dataset.dirty).map(i => [i.dataset.key, i.value]));
         const { fresh, known, priorOf } = splitGraded(union.rows, prior);
-        // Counted over the GRADEABLE subset — the union now carries reference rows for completeness, and
+        // Counted over the GRADEABLE subset — the union now carries durable rows for completeness, and
         // "N to grade" must not count rows this table renders as uneditable.
         const freshN = fresh.filter(r => r.block === 'dynamic').length;
         const scaffoldN = union.rows.filter(r => r.block !== 'dynamic').length;
@@ -2923,7 +2923,7 @@ async function superGradeScene(named) {
     }
 
     const union = unionArms(captures);
-    // Tested on the gradeable subset, not on the union: since unionArms keeps reference rows, a scene with
+    // Tested on the gradeable subset, not on the union: since unionArms keeps durable rows, a scene with
     // nothing but constants now has a non-empty union and would have opened an ungradeable popup.
     if (!union.rows.some(r => r.block === 'dynamic')) {
         toastr.warning('Every activated row was constant or a persisting sticky — relevance chose nothing to grade.', 'Worlds Apart');
@@ -2983,7 +2983,7 @@ async function superGradeScene(named) {
                 elbowSensitivity: cap.elbowSensitivity,
                 dropoffThreshold: cap.dropoffThreshold,
             },
-            // Every non-reference row of every arm is in the union, and the union is graded in full — so
+            // Every non-durable row of every arm is in the union, and the union is graded in full — so
             // unlike /wa-grade this is an exact count of judged rows rather than a conservative proxy.
             // Counts what a human was actually offered — constants excepted, stickies included, matching
             // the two grading tables. It is the boundary the harness reads to know where grades stop.

@@ -334,13 +334,19 @@ pools to one record per entry before `selectTopK`, so K counts ENTRIES (100); th
 not pool, so K counts CHUNKS (300, chunks/entry measuring 9.1-10.3 with per-entry maxima stabilising at
 K ~= 150-300). `queryCollections` chooses per path, since the fallback can fire mid-request.
 
-**`scoreThreshold` cannot narrow the candidate set.** A vectorized chunk is also admitted by `bm25 > 0`
-on its own text, so admission is "top decile by centered cosine OR any lexical overlap" — `'auto'`
-resolves to `quantile(vectorScores, 0.9)`, a selector rather than a floor. That bypass is load-bearing.
-**Measured** (`eval/paired-arms.mjs` `admit=cosine`, three scenes): a strict cosine gate dropped sommers
-from 3/3 to 1/3 on grade-5 entries in the top 10, and lost a relevant time-whore entry from the
-candidate set entirely. Narrowing admission is therefore a COST question, not a precision one, since
-stage 4 arbitrates.
+**On the plugin path `scoreThreshold` cannot narrow the candidate set.** A vectorized chunk is also
+admitted by `bm25 > 0` on its own text, so admission there is "top decile by centered cosine OR any
+lexical overlap" — `'auto'` resolves to `quantile(vectorScores, 0.9)`, a selector rather than a floor.
+That bypass is load-bearing. **Measured** (`eval/paired-arms.mjs` `admit=cosine`, three scenes, on the
+0-5 human scale those captures carry — `eval/relevance-eval.mjs`, not the 0-4 rubric below): a strict
+cosine gate dropped sommers from 3/3 to 1/3 on its grade-5 entries in the top 10, and lost a relevant
+time-whore entry from the candidate set entirely. Narrowing
+admission is therefore a COST question, not a precision one, since stage 4 arbitrates.
+
+**On the stock-ST fallback it is a hard floor and the only admission signal.** `'auto'` cannot resolve
+there (the server quantiles nothing) so `queryCollections` pins 0.1 against RAW scores; ST returns no
+`bm25` field, so the lexical clause reads 0 and cannot admit anything; `uncenteredGate` is plugin-only
+and never runs.
 
 **The gazetteer is built downstream of `suppressVectorKeys`**, which blanks `key`/`keysecondary` on
 every vectorized entry, so "the lorebook's own vocabulary" is entry TITLES plus the keys of
@@ -515,21 +521,22 @@ Three cuts, all here, each answering one question over the same layout ranking.
 
 **The cliff** (`selection.mjs` `cutDynamic`) decides relevance, over the dynamic block, in the order the
 budget walks. It runs unconditionally: an irrelevant entry should not reach the prompt whether or not
-there was room for it. DURABLE entries are outside its population — the budget may cut a constant for
-capacity, the cliff may not cut it for relevance, because marking an entry constant is that judgement
-already made, and a durable entry scores low by ELIGIBILITY rather than by irrelevance. Reference
-entries that are not durable are in it, and are cut like anything else — the fused score is what has to
-make a grade-3 memory entry beat a grade-2 reference entry, and giving either tier a structural
-exemption would be compensating for a score that is not doing its job.
+there was room for it. Constants and ARMED stickies — durable as the runtime reads it — are outside its
+population: the budget may cut a constant for capacity, the cliff may not cut it for relevance, because
+marking an entry constant is that judgement already made, and such an entry scores low by ELIGIBILITY
+rather than by irrelevance. Everything else in the dynamic block is in it and is cut like anything
+else — the fused score is what has to make a grade-3 memory entry beat a grade-2 reference entry, and
+giving either tier a structural exemption would be compensating for a score that is not doing its job.
 
 **The entry maxes** then decide how many, on nested populations: vector ⊆ dynamic ⊆ all, plus the
 per-book quota. `maxVectorEntries` bounds what retrieval contributed and is counted by PROVENANCE —
 retrieval scored the entry — not by the `vectorized` flag.
 
 **The token budget** decides how much, and is the only one of the three measured in tokens rather than
-entries. The maxes and the budget both live in `applyBudget`, which walks the ranked layout once,
-sticky and constant first so every cap is a prefix cut, deletes non-survivors from `activated`, and
-reports every cap that rejected a row.
+entries. The maxes and the budget both live in `applyBudget`, which walks the ranked layout once, sticky
+and constant first so every cap is a prefix cut, returns the survivors, and reports every cap that
+rejected a row. `rankActivated` deletes the rest from `activated` — `selection.mjs` is ST-free and the
+map is core's.
 
 This is where the one relevance decision is made (see *Principles*).
 
@@ -617,10 +624,13 @@ evaluation, where `vectorized`/`sticky`/`constant` all can. A keyword-activated 
 relevant because its trigger fired — *triggered == relevant* — so the only judgement left is whether
 the trigger deserved to fire; a memory entry is relevant because ranking chose it.
 
-**`durable` — constant plus active-sticky — is a third population that CROSS-CUTS the tiers** (`CLAUDE.md`,
-*Four stages*). It says how a row reached the prompt, where the tiers say what kind of thing it is, and
-stage 4's cliff is defined on it: a keyword-activated reference entry is not durable and is cut like
-anything else.
+**`durable` — constant plus sticky — is a third population that CROSS-CUTS the tiers** (`CLAUDE.md`,
+*Four stages*). It says how a row reached the prompt, where the tiers say what kind of thing it is: a
+keyword-activated reference entry is not durable and is graded like anything else. Grading reads it off
+the CONFIGURED sticky value (`grading.mjs` `isDurable`, `eval/scene.mjs` `isDurableEntry`), because the
+question is whether ranking would have chosen the entry and the runtime state cannot answer it — a dry
+run arms nothing. Stage 4's cliff reads the ARMED effect instead, so a configured sticky entry on the
+turn it keyword-activates is inside the cliff's population and outside the graded one.
 
 **Set metrics on a reference-heavy book are JOINT** and cannot tune routing alone: a reference entry
 reaches the prompt because its key fired, so a key miss and a routing miss land in the same recall

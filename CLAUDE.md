@@ -200,17 +200,26 @@ Conflating these has produced several wrong conclusions here, more than once. Th
 them, and say which stage a claim is about.
 
 **Three populations, and they cross-cut.** `memory` is STMB-marked and `reference` is everything that is
-not — provenance, and the tier an entry belongs to. `durable` is constant plus active-sticky
-(`grading.mjs` `isDurable` of a capture row, `eval/scene.mjs` `isDurableEntry` of a raw entry), which is
-how a row reached the prompt rather than what kind of thing it is. A keyword-activated reference entry is
-not durable, and a durable entry may be either tier.
+not — provenance, and the tier an entry belongs to. `durable` is `constant` plus sticky: in the prompt by
+intent rather than because relevance chose it. It is how a row got there, not what kind of thing it is, so
+a keyword-activated reference entry is not durable and a durable entry may be either tier.
+
+**Sticky is read at two moments and they do not coincide, so say which durable you mean.** The runtime
+reads the ARMED effect (`isEffectActive`, `worldsapart.js` `rankActivated`) — stage 4's cliff exempts an
+entry that is in the prompt because an earlier turn put it there. The eval side reads the CONFIGURED
+sticky value (`grading.mjs` `isDurable` of a capture row, `eval/scene.mjs` `isDurableEntry` of a raw
+entry), because grading asks whether ranking would have chosen the entry and the runtime state cannot
+answer that: a dry run arms nothing. So a configured sticky entry on the turn it keyword-activates is
+inside the cliff's population and outside the graded one.
 
 **1. Retrieval** — `selectAndActivate` in `worldsapart.js`. The plugin scores chunks (cosine + BM25 over
 chunk text), `fuseRetrieval` fuses them into the **retrieval ranking**, and `retrieve` returns everything
-that ranking scored: **stage 1 admits and does not cut**. Admission is the plugin's gates
-(`scoreThreshold`, `bm25 > 0`, `uncenteredGate`) plus `admitCeiling` (`plugin/scoring.mjs`), a safety
-limit counting entries (100) on the pooled plugin path and chunks (300) on the stock-ST fallback.
-**Keys are not in this ranking** — `fuseRetrieval` is deliberately passed no `keywordWeight`.
+that ranking scored: **stage 1 admits and does not cut**. On the plugin path admission is
+`scoreThreshold` OR `bm25 > 0`, ANDed with `uncenteredGate`; on the stock-ST fallback `scoreThreshold` is
+pinned to 0.1 against raw scores and is the only signal there is. Both are bounded by `admitCeiling`
+(`plugin/scoring.mjs`), a safety limit counting entries (100) on the pooled plugin path and chunks (300)
+on the fallback. **Keys are not in this ranking** — `fuseRetrieval` is deliberately passed no
+`keywordWeight`.
 
 **2. Activation** — whether an entry is ranked at all. Three independent routes: WA emits
 `WORLDINFO_FORCE_ACTIVATE` on the retrieval winners; ST core keyword-matches whatever keys are live;
@@ -222,12 +231,13 @@ from what retrieval stored, keyword score is computed over the scan window, and 
 
 **4. Selection** — three cuts, all here, each answering one question over the layout ranking. The CLIFF
 (`selection.mjs` `cutDynamic`) decides relevance over the dynamic block and takes no count; it runs
-unconditionally, outside the budget's capacity guard, and durable entries are outside its population.
-The ENTRY MAXES decide how many, on nested populations — vector ⊆ dynamic ⊆ all, plus the per-book cap —
-with `maxVectorEntries` counted by PROVENANCE (retrieval scored the entry), not by the `vectorized`
-flag. The TOKEN BUDGET decides how much. The maxes and the budget live in `applyBudget`, which walks the
-layout ranking sticky and constant first, so every cap is a prefix cut, and deletes non-survivors from
-`activated`.
+unconditionally, outside the budget's capacity guard, and constants and armed stickies are outside its
+population. The ENTRY MAXES decide how many, on nested populations — vector ⊆ dynamic ⊆ all, plus the
+per-book cap — with `maxVectorEntries` counted by PROVENANCE (retrieval scored the entry), not by the
+`vectorized` flag. The TOKEN BUDGET decides how much. The maxes and the budget live in `applyBudget`,
+which walks the layout ranking sticky and constant first, so every cap is a prefix cut, and returns the
+survivors; `rankActivated` is what deletes the rest from `activated`, since `selection.mjs` is ST-free
+and the map is core's.
 
 **Two rankings, not one.** `fuseRetrieval` decides what is activated; `fuseRanks` decides prompt order
 and what survives the budget. **A change to `fuseRanks` can never surface an entry retrieval did not
