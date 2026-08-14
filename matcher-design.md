@@ -627,10 +627,13 @@ what the layout score reads. The vector score never sees the grades, because a r
 chunk in the collection; the layout score consumes them fully.
 
 **Relevance is asymmetric, and the two halves take different bars.** Recall at grade >= 3 — did the
-must-deliver material arrive. Precision at grade >= 2 — a 2 is "it won't hurt and it might help", so
-delivering one is not an error. **Measured**, one scene: P@>=3 0.542 against P@>=2 0.708, F1 0.703
-against 0.829; the arm ORDERING barely moves, so comparative findings survive but the absolute level
-does not. **Measured**, 73 scenes: under the symmetric bar F1 ranked the shallow cuts on top and the
+must-deliver material arrive. Precision credits a 3 or 4 in full and a 2 at HALF, keeping the 2 in the
+denominator (`metrics.mjs` `gradeCredit`): a 2 is "weakly relevant, 50/50 on inclusion", so the grader
+declined to call it and the metric must not call it either. Full credit made padding with ambiguous
+entries raise the score; dropping 2s from the denominator instead let a configuration shrink what it is
+judged on by delivering ambiguity. **Measured**, one scene, contrasting two HARD bars rather than the
+shipped half-credit: P@>=3 0.542 against P@>=2 0.708, F1 0.703 against 0.829; the arm ORDERING barely
+moves, so comparative findings survive but the absolute level does not. **Measured**, 73 scenes: under the symmetric bar F1 ranked the shallow cuts on top and the
 ordering inverted at F4 — under the asymmetric bar depth wins at every beta and the inversion
 disappears.
 

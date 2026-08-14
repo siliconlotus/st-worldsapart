@@ -191,7 +191,8 @@ since it shaped which keys got examined. Removals speak to precision, never to r
 
 **WA is a selection system that uses rank, not a ranking system.** What ships is the set that survives
 stage 4; rank is how that set gets chosen, not the product. So the validity score is set-based and
-asymmetric — recall at grade >= 3, precision at grade >= 2, recall-weighted (`matcher-design.md`,
+asymmetric — recall at grade >= 3, precision crediting a 2 at half (`metrics.mjs` `gradeCredit`),
+recall-weighted (`matcher-design.md`,
 *Evidence → Two scores*). nDCG over either ranking is a diagnostic for whether the ordering earns its
 keep, and is not evidence that the system works.
 
