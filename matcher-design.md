@@ -605,10 +605,21 @@ conflates.
 **The vector score** grades `fuseRetrieval`'s output, cut by `cutRetrieved`. Homogeneous by
 construction — the collection holds only vectorized entries' chunks — so no exclusion rule is needed.
 
-**The layout score** grades `fuseRanks` at the depth the budget actually admits: `nDCG@budget`, over
-the DYNAMIC block. Constants and armed stickies are hoisted to the front of `ranked` so every cap is a
-prefix cut, which means they consume budget without competing for it — the graded population is exactly
-what a cut can reject. Everything else is in, cards included.
+**The layout score** grades what survives the budget, over the DYNAMIC block. It is set-based and takes
+the asymmetric bars below, because what ships is the surviving SET and rank is only how that set was
+chosen. Beta is not settled; `F2@budget` is the current expectation. Constants and armed stickies are
+hoisted to the front of `ranked` so every cap is a prefix cut, which means they consume budget without
+competing for it — the graded population is exactly what a cut can reject. Everything else is in, cards
+included.
+
+**nDCG is a DIAGNOSTIC, not an evaluation score.** It asks whether the ordering puts the good material
+at the top. The evaluation score asks whether the system delivers the right set. A reordering inside the
+cut moves nDCG and cannot move the set, so the two correlate without being the same measurement, and an
+nDCG figure is never evidence that the system works.
+
+It is kept because the cliff cuts a PREFIX of the layout ranking, so the ordering bounds what any cut
+placed on it can achieve — a well-placed cut cannot rescue a badly ordered list. The diagnostic is what
+tells a cliff that cut in the wrong place from a ranking where no cut position was good.
 
 **Reference entries are GRADED, on the same 0-4 scale as anything else — not reduced to a boolean.** A
 two-valued "does it belong" throws away the only evidence there is about contention, which is precisely
@@ -630,16 +641,6 @@ four are currently unanswerable because nothing grades stage 4.
 **The offline half exists.** `/wa-grade` records the pre-budget population with per-row `tokens`, `cut`
 and `cutBy`, plus the tokenizer, so `applyBudget` replays offline at any budget — verified exact
 against the runtime's own verdicts on 315 rows across 7 arms.
-
-### Recorded arm results
-
-**`suppressVectorKeys=off`** — **measured**, 74 graded scenes, paired: 39 + / 21 − / 14 tie, mean Δ
-+0.0100 nDCG@10, p=0.027. Turning suppression off is mildly *better*, not worse, and the pool bias runs
-against that arm (33 scenes ranked unjudged rows, scored 0), so the figure is a lower bound. It does
-not argue for flipping the default; it removes the case for deleting the off position, which is a
-documented recall lever — `suppressVectorKeys: false` can admit an entry nothing else reaches, where
-`scoreVectorKeys` only re-ranks. Caveats: the 74 scenes come from ~6 chats, three pairs share most of
-their relevant set (one at Jaccard 1.00), and many scenes are thin.
 
 ---
 
