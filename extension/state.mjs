@@ -213,6 +213,10 @@ export const defaultSettings = {
      *
      * Counted by PROVENANCE — an entry retrieval returned — not by the `vectorized` flag, so an entry
      * admitted on a key it kept counts as keyword. The two coincide unless suppressVectorKeys is off.
+     *
+     * THE VALUE MOVED, AND ON JUDGEMENT RATHER THAN MEASUREMENT: 20 is where a cap generous enough to
+     * leave relevance to the cliff was put, given that a cap deciding relevance is the failure described
+     * above. Nothing grades stage 4 yet, so no measurement chose it and none endorses the old value either.
      */
     maxVectorEntries: 20,
     /**
@@ -516,7 +520,8 @@ export const runState = {
     lastPruned: [],               // `${world}.${uid}` the prune deleted last scan, for /wa-debug
     lastScanText: '',             // last global-depth keyword scan window, bundled by /wa-grade
     gradeCutoff: null,            // /wa-grade drops the cliff and caps its candidate depth; null = real settings
-    lastCutKept: null,            // how many the cutoff kept on the last retrieval, recorded by /wa-grade
+    lastCutKept: null,            // a /wa-grade capture's `cutoff.kept`. Always null: stage 1 admits and
+                                  // cuts nothing, so retrieval has no count to record.
     lastCandidates: [],           // selection-candidate rows from the last debug-class run, for /wa-grade
     lastCandidateEntries: [],     // the WI entries behind those rows, aligned by index (for "view text")
     lastDropped: [],              // entries cut by budget

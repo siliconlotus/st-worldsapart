@@ -172,7 +172,7 @@ for (const idx of picks) {
         // entity filter off — the gazetteer path that admitted 2.3x the query terms and moved BM25 by up
         // to 74%, which is a difference no arm label would have shown.
         const tw = P.entityFilter ? ranking.buildTermWeights(query, scene.gaz, P.boost) : null;
-        const rows = makeCandidateSet({ ...scene, params: P, topK: Math.max(100, P.maxVectorEntries * 2) })(
+        const rows = makeCandidateSet({ ...scene, params: P })(
             P.K1, P.B, tw, qv, query, scanText,
         );
         // EVERY ACTIVATED ROW, ordered but not truncated — a pool that is the whole population is one no

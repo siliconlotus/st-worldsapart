@@ -109,7 +109,7 @@ if (!CHAT && !S.chat && (S.query === undefined || (DEPTHS && !S.queryChat?.lengt
 if (S.name) console.log(`sample: ${S.name}${S.notes ? ` — ${S.notes}` : ''}`);
 const VECTORS = arg('--vectors') ?? 'data/default-user/vectors/ollama';
 const INDEX = indexPath(S, { vectors: VECTORS, model: MODEL, index: arg('--index') });
-const TOPK = Number(arg('--topk')) || Math.max(100, P.maxVectorEntries * 2);   // ENTRIES, as production now asks — the plugin pools before it cuts. --topk probes the elbow's window sensitivity.
+const TOPK = Number(arg('--topk')) || undefined;   // unset = stage 1's own bound (scene.mjs makeCandidateSet); --topk probes the elbow's window sensitivity.
 
 // --- inputs ---
 // A /wa-grade sample carries copies of every attached book, so it re-runs identically after the live
@@ -367,11 +367,9 @@ const fmt = n => (n == null ? '·' : (+n).toFixed(3));
 
     // --- ranking: k1 × b × lexW, graded nDCG. Per-entry scoring depends only on (k1,b), so score once
     // per pair and sweep lexW on top of it (fusion is a re-rank of the same rows).
-    // @10 IS THE TARGET, @5 is carried as a secondary column. The shipped cut is `elbow` capped at
-    // maxVectorEntries 10 with a floor of 3 (state.mjs), so 10 is the widest rank that can reach the prompt
-    // at all — tuning on @5 optimised a window narrower than the decision being made, and relevance on these
-    // scenes runs deep enough (pools bottom out around rank 24-28) that ranks 6-10 carry real signal rather
-    // than padding. Argmax on @10 for the same reason.
+    // @10 IS THE TARGET, @5 is carried as a secondary column. Relevance on these scenes runs deep enough
+    // (pools bottom out around rank 24-28) that ranks 6-10 carry real signal rather than padding, so tuning
+    // on @5 optimises a window narrower than the decision being made. Argmax on @10 for the same reason.
     console.log('grid (k1 × b × lexW) — graded nDCG on the scene\n  k1     b   lexW | layout@10 layout@R vector@10 vector@R  judged@10');
     let best = null;
     let worst = null;
@@ -445,14 +443,18 @@ const fmt = n => (n == null ? '·' : (+n).toFixed(3));
         { rrfK: P.K, retrievalMode: P.retrievalMode, lexicalWeight: DEF.lexW },
     ).map(r => ({ ...r, uid: r.key, title: byUid.get(Number(r.key)) ? wiTitle(byUid.get(Number(r.key))) : String(r.key) }));
     const relN = ranked.filter(r => gradeOf(r) >= 3).length;
-    const arms = [
-        ...[...new Set([3, 5, 10, 20, P.maxVectorEntries ?? 10])].sort((a, b) => a - b).map(v => [`count   max=${v}`, { mode: 'count', maxVectorEntries: v }]),
-        ...[1.2, 1.5, 2, 2.5].map(v => [`elbow   sens=${v}`, { mode: 'elbow', elbowSensitivity: v }]),
-        ...[0.04, 0.06, 0.08, 0.12].map(v => [`dropoff thr=${v}`, { mode: 'dropoff', dropoffThreshold: v }]),
-    ];
     // Cliff modes get the SAMPLE's cap, not a hardcoded 10: capping a cliff search below the candidate
     // list makes it structurally unable to find an inflection further down, which is the whole question.
     const CAP = P.maxVectorEntries ?? 10;
+    // cutRetrieved takes no count of its own, so an arm's depth is a bound on its INPUT — third tuple
+    // element, sliced before the cut. The prefix arms are the cliff off over a window of N; the cliff arms
+    // search CAP rows, which is the depth %oracle below is measured to, so a prefix arm deeper than CAP is
+    // scored against an oracle that never looked that far.
+    const arms = [
+        ...[...new Set([3, 5, 10, 20, CAP])].sort((a, b) => a - b).map(v => [`prefix  max=${v}`, { mode: 'off' }, v]),
+        ...[1.2, 1.5, 2, 2.5].map(v => [`elbow   sens=${v}`, { mode: 'elbow', elbowSensitivity: v }, CAP]),
+        ...[0.04, 0.06, 0.08, 0.12].map(v => [`dropoff thr=${v}`, { mode: 'dropoff', dropoffThreshold: v }, CAP]),
+    ];
     // Best F1 any prefix cut of this ranking could achieve — the ceiling the modes are trying to hit. Honest
     // here (unlike the LOO arm) because the gold set is human, entry-level, and the right size.
     let oracle = { f1: 0, at: 0 };
@@ -463,8 +465,8 @@ const fmt = n => (n == null ? '·' : (+n).toFixed(3));
         if (f > oracle.f1) oracle = { f1: f, at: i, p, r };
     }
     // How many rows the grader was actually shown. Beyond this, entries are ungraded and score 0, so a mode
-    // that keeps more is charged for rows nobody judged — it looks worse than it is. /wa-grade widens its own
-    // cut to a plain count precisely to push this boundary out past any mode being assessed.
+    // that keeps more is charged for rows nobody judged — it looks worse than it is. /wa-grade switches its
+    // own cliff off precisely to push this boundary out past any mode being assessed.
     const GRADED = Number(S.gradedCandidates) || 0;
     console.log(`\ncutoff at shipped k1/b/lexW — ${relN} relevant (grade>=3) of ${ranked.length} candidates, cap=${CAP}, floor min=3`);
     if (GRADED) console.log(`  grader saw ${GRADED} rows${S.cutoff?.gradingOverride ? ` (graded at ${S.cutoff.gradingOverride.mode}/${S.cutoff.gradingOverride.maxVectorEntries}${S.cutoff.live ? `; live setting was ${S.cutoff.live.mode}/${S.cutoff.live.maxVectorEntries}` : ''})` : ''} — rows past that are ungraded, so any arm keeping more is marked (?)`);
@@ -474,8 +476,8 @@ const fmt = n => (n == null ? '·' : (+n).toFixed(3));
     if (oracle.at) console.log(`  BEST POSSIBLE cut: keep ${oracle.at} -> P ${oracle.p.toFixed(3)} R ${oracle.r.toFixed(3)} F1 ${oracle.f1.toFixed(3)}  (the inflection a cliff mode should find)`);
     else console.log('  NULL scene (0 relevant): no oracle cut exists — every kept row is contamination, smaller kept is better');
     console.log('  mode / param     | kept   P      R      F1   %oracle  missed relevant');
-    for (const [label, cfg] of arms) {
-        const keep = cutRetrieved(ranked, { maxVectorEntries: CAP, minVectorEntries: 3, ...cfg });
+    for (const [label, cfg, win] of arms) {
+        const keep = cutRetrieved(ranked.slice(0, win), { minVectorEntries: 3, ...cfg });
         const kept = new Set(keep.map(r => r.uid));
         const tp = keep.filter(r => gradeOf(r) >= 3).length;
         const p = keep.length ? tp / keep.length : 0, r = relN ? tp / relN : 0;

@@ -86,7 +86,11 @@ export function cutRetrieved(ranked, { mode = 'off', minVectorEntries = 1, elbow
  * also score low by ELIGIBILITY rather than by irrelevance — a constant has no vector signal and often
  * no keys — so including them would both cut them immediately and distort the mean gap the elbow reads.
  *
- * `results` must already be in retention order, so the cliff reads the order the budget walks.
+ * `results` must already be in retention order, so the cliff reads the order the budget walks — and that
+ * order must be MONOTONE DESCENDING IN `fused`. The gap arithmetic reads raw differences between adjacent
+ * rows and their mean, which measure nothing on a list that rises anywhere: a negative gap pulls the mean
+ * down and pushes the last significant gap later. Any retention sort whose key is not `fused` alone — a
+ * book tier ahead of it, or a per-book weight scaling it — breaks the precondition.
  *
  * @param {object} blocks The three activation classes
  * @param {Array<{fused: number}>} blocks.sticky Armed stickies, authored order

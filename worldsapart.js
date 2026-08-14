@@ -1681,6 +1681,10 @@ async function rankActivated(args) {
     // does. That guard is a capacity condition — it is false with the token budget and every entry cap
     // at 0 — and an irrelevant entry should not reach the prompt merely because there was room for it.
     // It takes no count: a flat ranking has no cliff, survives whole, and the caps bound it.
+    //
+    // cutDynamic needs `results` monotone descending in `fused`, which the retention sort above satisfies
+    // only at the defaults (interleaved, every weight 1). A book tier ahead of `fused` (sequential) or a
+    // weight scaling it makes the gap at a book boundary negative, and the cliff reads raw `fused`.
     const cliff = selection.cutDynamic({ sticky, constant, results }, effectiveCliff());
     let ranked = cliff.ranked;
 
@@ -3304,12 +3308,12 @@ const SETTINGS_HTML = `
                     <div class="inline-drawer-icon fa-solid fa-circle-chevron-down down"></div>
                 </div>
                 <div class="inline-drawer-content">
-                    <label for="wa_max_entries">Max retrieved entries</label>
+                    <label for="wa_max_entries">Vector entry cap — retrieved entries in the prompt</label>
                     <input id="wa_max_entries" type="number" class="text_pole" min="1" max="100" step="1">
 
-                    <label for="wa_vector_cutoff">Cutoff</label>
+                    <label for="wa_vector_cutoff">Cutoff (the relevance cut, ahead of the caps below)</label>
                     <select id="wa_vector_cutoff" class="text_pole">
-                        <option value="count">Fixed count (always the max)</option>
+                        <option value="off">Off (no relevance cut — the caps alone decide)</option>
                         <option value="elbow">Elbow (cut at a gap vs the mean gap)</option>
                         <option value="dropoff">Dropoff (cut at a fixed score drop)</option>
                     </select>
@@ -3697,7 +3701,7 @@ export async function init() {
         namedArgumentList: [
             SlashCommandNamedArgument.fromProps({ name: 'name', description: 'sample name, used as the filename', typeList: [ARGUMENT_TYPE.STRING], defaultValue: 'scene-<date>' }),
             SlashCommandNamedArgument.fromProps({ name: 'books', description: 'lorebook copy fidelity: full (verbatim), meta (entries without content), none (paths only)', typeList: [ARGUMENT_TYPE.STRING], defaultValue: 'full', enumList: ['full', 'meta', 'none'] }),
-            SlashCommandNamedArgument.fromProps({ name: 'candidates', description: 'how many retrieved entries to surface for grading (the cut is widened to a plain count for the run, so the sample can assess every cutoff mode offline)', typeList: [ARGUMENT_TYPE.NUMBER], defaultValue: '20' }),
+            SlashCommandNamedArgument.fromProps({ name: 'candidates', description: 'how many retrieved entries to surface for grading (the cliff is switched off for the run, so the sample can assess every cutoff mode offline)', typeList: [ARGUMENT_TYPE.NUMBER], defaultValue: '20' }),
             SlashCommandNamedArgument.fromProps({ name: 'notes', description: 'free-text note stored in the sample', typeList: [ARGUMENT_TYPE.STRING] }),
         ],
         helpString: 'Worlds Apart: grade this scene for the offline evals. Runs /wa-debug, then opens a window listing every activated entry with the query text and per-signal scores, for grading 0-5 (constants and stickies are listed but not graded — relevance never chose them). Saving downloads a self-contained sample: query text, settings snapshot, candidate ranking, grades, and copies of every attached lorebook, so later chat/lorebook/settings edits cannot move the numbers. Drop it in eval/eval-data/ and run eval/graded-scene-grid.mjs --sample.',
@@ -3711,7 +3715,7 @@ export async function init() {
             SlashCommandNamedArgument.fromProps({ name: 'name', description: 'base sample name; each arm gets "<name>--<arm>.json"', typeList: [ARGUMENT_TYPE.STRING], defaultValue: 'chat-msgN' }),
             SlashCommandNamedArgument.fromProps({ name: 'arms', description: 'which arms to capture, comma-separated (default: all)', typeList: [ARGUMENT_TYPE.STRING], enumList: Object.keys(POOL_ARMS) }),
             SlashCommandNamedArgument.fromProps({ name: 'books', description: 'lorebook copy fidelity: full (default — content is what makes a sample re-indexable by anyone else), meta, none', typeList: [ARGUMENT_TYPE.STRING], defaultValue: 'full', enumList: ['full', 'meta', 'none'] }),
-            SlashCommandNamedArgument.fromProps({ name: 'candidates', description: 'candidate depth per arm (the cut is widened to a plain count for each run)', typeList: [ARGUMENT_TYPE.NUMBER], defaultValue: '30' }),
+            SlashCommandNamedArgument.fromProps({ name: 'candidates', description: 'candidate depth per arm (the cliff is switched off for each run)', typeList: [ARGUMENT_TYPE.NUMBER], defaultValue: '30' }),
             SlashCommandNamedArgument.fromProps({ name: 'notes', description: 'free-text note stored in every sample written', typeList: [ARGUMENT_TYPE.STRING] }),
         ],
         helpString: 'Worlds Apart: grade this scene against SEVERAL configurations at once, for a pool that isn\'t biased toward the current defaults. Runs /wa-debug once per arm (arms change which entries get surfaced — entity filter, retrieval mode, threshold, key suppression, summary queries), unions the entries they surfaced, dedupes, and opens one grading window over the union with a "surfaced by" column. Load earlier rounds\' samples into the file picker and their grades are subtracted, so each round only judges what is new. Saves one sample per arm — each with its own params and candidate rows, all sharing the pooled grades. Drop them in eval/eval-data/, run eval/graded-scene-grid.mjs --sample on each, and add arms until the judged@10 column stops showing gaps.',

@@ -239,8 +239,7 @@ export function queryMessages(chat, { depth, substituteParams = s => s }) {
 /**
  * Fuses the RETRIEVAL ranking: vector score against BM25-over-chunk-text, and nothing else.
  *
- * Deliberately not fuseRanks. This is the list the cutoff cuts (selection.mjs cutRetrieved), and the
- * question there is only "which retrieved entries are strong enough to force-activate" — keyword and
+ * Deliberately not fuseRanks. The question here is only "which retrieved entries force-activate" — keyword and
  * authored-order ranks belong to the final layout ranking, over a population that includes entries
  * retrieval never saw. Feeding them in here would let a keyword-only entry displace a retrieved one
  * from a decision it isn't a candidate in.

@@ -45,7 +45,7 @@ if (!INDEX) { console.error('pass the collection index.json path'); process.exit
 // swept, so the thing it cuts has to be the thing that ships.
 const K1 = 1.2, B = 0.75, LEXW = 1, MIN = 3;
 const RRFKS = [10, 20, 60];
-const WINDOWS = [10, 20];   // harness-side slice length fed to cutRetrieved; 10 is the shipped maxVectorEntries default
+const WINDOWS = [10, 20];   // harness-side slice length fed to cutRetrieved — how deep a list the cliff searches
 
 const items = JSON.parse(readFileSync(INDEX, 'utf8')).items.filter(i => (i.metadata.text ?? '').length > 120);
 const N = items.length;

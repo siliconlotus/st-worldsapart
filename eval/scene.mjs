@@ -12,7 +12,7 @@
 // re-runnable after the books have been edited.
 import { readFileSync, existsSync } from 'node:fs';
 import { dirname, resolve as resolvePath } from 'node:path';
-import { scoreCollection, poolEntries, selectTopK, quantile } from '../plugin/scoring.mjs';
+import { scoreCollection, poolEntries, selectTopK, quantile, admitCeiling } from '../plugin/scoring.mjs';
 import { buildLexical } from '../plugin/lexical.mjs';
 import { corpusMean, centeredCosineScores } from '../plugin/vector.mjs';
 import * as ranking from '../extension/ranking.mjs';
@@ -361,9 +361,13 @@ export const makeKeywordScore = P => (e, text, k1) => {
  * Stage 2 genuinely depends on a stage-3 computation: `keywordScore > 0` is what decides keyword
  * activation. Core has the same dependency — matching serves both — so this is faithful, not a shortcut.
  *
+ * `topK` defaults to stage 1's own bound, and pooling happens before the cut here as it does in the
+ * plugin, so K counts ENTRIES. It is not a function of any stage-4 cap: admission depth and how many
+ * entries may reach the prompt are separate questions. Pass it only to probe window sensitivity.
+ *
  * @returns {(k1: number, b: number, tw: object|null, qvec: number[], qtext: string, scanText: string) => object[]}
  */
-export function makeCandidateSet({ loaded, byUid, entries, params: P, topK }) {
+export function makeCandidateSet({ loaded, byUid, entries, params: P, topK = admitCeiling(true) }) {
     const keywordScore = makeKeywordScore(P);
     return (k1, b, tw, qvec, qtext, scanText) => {
         // Resolve 'auto' here, once, so the admit/floor filters below compare against the same number
@@ -482,7 +486,7 @@ export function cliffCut(layout, P) {
  * @param {object} args
  * @param {object} args.sample Parsed sample
  * @param {object} [args.overrides] Parameter overrides for this arm
- * @param {number} [args.k] Coverage/nDCG cutoff (10 — the widest rank the shipped cut can reach)
+ * @param {number} [args.k] Coverage/nDCG cutoff (10)
  * @returns {Promise<{n: number, nAt5: number, judged: number, of: number, unjudged: string[], terms: number|null}>}
  */
 export async function scoreScene({ sample: S, overrides = {}, k = 10, vectors, model, ollama, index, topK, scene: preloaded, qv: cachedQv } = {}) {
@@ -494,7 +498,7 @@ export async function scoreScene({ sample: S, overrides = {}, k = 10, vectors, m
         throw new Error('suppressVectorKeys/suppressGazetteerKeys change the gazetteer, so they cannot be swept against a preloaded scene — load per arm');
     }
     const scene = preloaded ?? loadScene(S, { indexFile: indexPath(S, { vectors, model, index }), params: P });
-    const scoreAll = makeCandidateSet({ ...scene, params: P, topK: topK ?? Math.max(100, P.maxVectorEntries * 2) });
+    const scoreAll = makeCandidateSet({ ...scene, params: P, topK });
     const fuse = makeFuse(P);
     const gradeOf = makeGradeOf(S.grades, scene.isExcluded);
 
