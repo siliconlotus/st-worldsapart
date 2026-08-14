@@ -165,11 +165,11 @@ const armB = {
 };
 
 const u = unionArms([armA, armB]);
-// THE UNION IS THE COMPLETE PACKAGE. Reference rows are kept and deduped like any other — a sample records
+// THE UNION IS THE COMPLETE PACKAGE. Durable rows are kept and deduped like any other — a sample records
 // what the run selected, and whether a row is offered for grading is the popup's call (it renders these
 // uneditable, as /wa-grade does). Dropping them here made capture a function of display intent, and left
 // super-grade samples with zero constant/sticky rows where a plain /wa-grade of the same scene had them.
-eq(u.rows.length, 4, 'union dedupes across arms and KEEPS reference rows');
+eq(u.rows.length, 4, 'union dedupes across arms and KEEPS durable rows');
 eq(u.rows.some(r => r.uid === 2), true, 'the constant is captured, not dropped');
 eq(u.rows.filter(r => r.uid === 2).length, 1, 'the constant is deduped like any other row, so N arms do not list it N times');
 eq(u.rows.find(r => r.uid === 4) !== undefined, true, 'an entry only a sibling arm surfaced is pooled');
@@ -212,11 +212,11 @@ eq(u.entries.map(e => e.uid).join(','), '1,3,2,4', 'entries stay aligned with ro
 
 // Round 2: entries 1 and 3 were graded last round. splitGraded answers ONE question — does a prior grade
 // exist — so the ungraded constant (uid 2) lands in `fresh` alongside 4. That is not a bug and must not be
-// "fixed" here: the reference filter belongs to the popup, which renders those rows uneditable and counts
-// only the gradeable ones. Teaching splitGraded about reference rows would put the same rule in two places.
+// "fixed" here: the durable filter belongs to the popup, which renders those rows uneditable and counts
+// only the gradeable ones. Teaching splitGraded about durable rows would put the same rule in two places.
 const prior = [{ title: 'Villa', world: 'W', uid: 1, grade: 5 }, { title: 'Maren', world: 'W', uid: 3, grade: 4 }];
 const split = splitGraded(u.rows, prior);
-eq(split.fresh.map(r => r.uid).join(','), '2,4', 'splitGraded splits on prior grades alone, reference rows included');
+eq(split.fresh.map(r => r.uid).join(','), '2,4', 'splitGraded splits on prior grades alone, durable rows included');
 eq(split.fresh.filter(r => !isDurable(r)).map(r => r.uid).join(','), '4', 'the gradeable fresh rows are what the popup counts');
 eq(split.known.length, 2, 'already-judged rows are reported, not silently dropped');
 eq(split.priorOf.get(rowKey({ world: 'W', uid: 3 })), 4, 'prior grades are recoverable for display');

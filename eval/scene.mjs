@@ -236,7 +236,7 @@ export function loadScene(S, { indexFile, params: P }) {
     const gaz = ranking.buildGazetteer(gazEntries);
 
     // THE POOL IS WHAT WAS JUDGED, and ONLY that — see graded-scene-grid.mjs. OWN is this capture's own
-    // non-reference rows, kept separately so coverage warnings stay about re-derivation failing rather than
+    // non-durable rows, kept separately so coverage warnings stay about re-derivation failing rather than
     // about sibling arms legitimately disagreeing.
     //
     // OWN USED TO BE UNIONED INTO THE POOL, which was a shorthand for "a capture logs exactly the rows the

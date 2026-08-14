@@ -215,8 +215,9 @@ inside the cliff's population and outside the graded one.
 **1. Retrieval** — `selectAndActivate` in `worldsapart.js`. The plugin scores chunks (cosine + BM25 over
 chunk text), `fuseRetrieval` fuses them into the **retrieval ranking**, and `retrieve` returns everything
 that ranking scored: **stage 1 admits and does not cut**. On the plugin path admission is
-`scoreThreshold` OR `bm25 > 0`, ANDed with `uncenteredGate`; on the stock-ST fallback `scoreThreshold` is
-pinned to 0.1 against raw scores and is the only signal there is. Both are bounded by `admitCeiling`
+`scoreThreshold` OR `bm25 > 0`, ANDed with `uncenteredGate`; on the stock-ST fallback neither of those
+two runs, so `scoreThreshold` is a hard floor on raw scores and the only admission signal there is, with
+`'auto'` resolving to 0.1 because the server quantiles nothing. Both are bounded by `admitCeiling`
 (`plugin/scoring.mjs`), a safety limit counting entries (100) on the pooled plugin path and chunks (300)
 on the fallback. **Keys are not in this ranking** — `fuseRetrieval` is deliberately passed no
 `keywordWeight`.

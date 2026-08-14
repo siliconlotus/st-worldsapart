@@ -340,13 +340,14 @@ lexical overlap" — `'auto'` resolves to `quantile(vectorScores, 0.9)`, a selec
 That bypass is load-bearing. **Measured** (`eval/paired-arms.mjs` `admit=cosine`, three scenes, on the
 0-5 human scale those captures carry — `eval/relevance-eval.mjs`, not the 0-4 rubric below): a strict
 cosine gate dropped sommers from 3/3 to 1/3 on its grade-5 entries in the top 10, and lost a relevant
-time-whore entry from the candidate set entirely. Narrowing
-admission is therefore a COST question, not a precision one, since stage 4 arbitrates.
+time-whore entry from the candidate set entirely. Narrowing admission is therefore a COST question, not
+a precision one, since stage 4 arbitrates.
 
-**On the stock-ST fallback it is a hard floor and the only admission signal.** `'auto'` cannot resolve
-there (the server quantiles nothing) so `queryCollections` pins 0.1 against RAW scores; ST returns no
-`bm25` field, so the lexical clause reads 0 and cannot admit anything; `uncenteredGate` is plugin-only
-and never runs.
+**On the stock-ST fallback it is a hard floor and the only admission signal**, applied to RAW scores. The
+plugin's `bm25 > 0` clause and `uncenteredGate` are `scoreCollection`'s, and that never runs on this path
+— ST returns no `bm25` field either, so there is nothing for a lexical clause to read. `'auto'` is the
+one value `queryCollections` rewrites, to 0.1, since the server quantiles nothing; a numeric
+`scoreThreshold` is passed through as the author set it.
 
 **The gazetteer is built downstream of `suppressVectorKeys`**, which blanks `key`/`keysecondary` on
 every vectorized entry, so "the lorebook's own vocabulary" is entry TITLES plus the keys of

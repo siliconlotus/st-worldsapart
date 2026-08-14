@@ -77,7 +77,7 @@ for (const path of samples) {
     const S = openBundle(JSON.parse(readFileSync(path, 'utf8')));
     const P = sceneParams(S);
     const rows = (S.candidates ?? []).filter(c => !isDurable(c));
-    // Grades are keyed by world+uid; reference rows are excluded above because relevance never chose them.
+    // Grades are keyed by world+uid; durable rows are excluded above because relevance never chose them.
     const gradeOf = new Map((S.grades ?? []).filter(g => g.uid !== undefined).map(g => [rowKey(g), gradeValue(g) || 0]));
     const judged = rows.filter(r => gradeOf.has(rowKey(r)));
     if (judged.length < 5) { console.log(`${S.name}: only ${judged.length} judged candidate rows — skipping`); continue; }
