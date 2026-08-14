@@ -24,6 +24,7 @@
 // Needs bookMode 'full' samples (the default) — 'meta'/'none' have no entry text to match against.
 import { readFileSync } from 'node:fs';
 import { countKey } from '../extension/matcher.mjs';
+import { gradeValue } from './metrics.mjs';
 
 const files = process.argv.slice(2);
 if (!files.length) {
@@ -43,7 +44,7 @@ for (const file of files) {
     const entries = Object.values(j.books?.[j.primaryBook] ?? Object.values(j.books ?? {})[0] ?? {});
     const byUid = new Map(entries.map(e => [Number(e.uid), e]));
     const fired = new Set(j.candidates.map(r => Number(r.uid)));
-    const gradeOf = new Map(j.grades.map(g => [Number(g.uid), Number(g.grade)]));
+    const gradeOf = new Map(j.grades.map(g => [Number(g.uid), gradeValue(g)]));
 
     console.log(`\n== ${name} — book "${j.primaryBook}", ${entries.length} entries ==`);
     const firedTok = [...fired].reduce((a, u) => a + (byUid.has(u) ? tokOf(byUid.get(u)) : 0), 0);

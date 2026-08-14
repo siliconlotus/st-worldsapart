@@ -21,6 +21,7 @@
 import { readFileSync, writeFileSync, existsSync } from 'node:fs';
 import { basename, resolve as resolvePath } from 'node:path';
 import { rowKey } from '../extension/grading.mjs';
+import { gradeValue } from './metrics.mjs';
 
 const argv = process.argv.slice(2);
 const arg = k => { const i = argv.indexOf(k); return i >= 0 ? argv[i + 1] : null; };
@@ -112,13 +113,13 @@ for (const path of files) {
     }
 
     const pending = [...pool.values()].filter(r => !grades.some(g => key(g) === rowKey(r)));
-    const rel = g => Number(g.grade) >= 3;
+    const rel = g => gradeValue(g) >= 3;
     console.log(`${basename(path).slice(0, 36).padEnd(36)} ${String(landed.length).padStart(8)} ${String(orphan.length).padStart(7)} ${String(pending.length).padStart(8)}   ${orphan.filter(rel).length}/${grades.filter(rel).length}`);
     for (const [r, gs] of [...byReason].sort((x, y) => y[1].length - x[1].length)) {
         // The one reason that means retrieval moved is spelled out row by row; the rest are counted.
         const alarming = r.startsWith('rankable');
         console.log(`   ${String(gs.length).padStart(3)} ${r}${alarming ? '  <<' : ''}`);
-        if (alarming) for (const g of gs) console.log(`       grade ${g.grade}  ${String(g.title).slice(0, 60)}`);
+        if (alarming) for (const g of gs) console.log(`       grade ${gradeValue(g)}  ${String(g.title).slice(0, 60)}`);
     }
 
     if (WRITE) {

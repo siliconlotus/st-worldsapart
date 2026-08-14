@@ -2833,10 +2833,16 @@ async function superGradePopup({ captures, union, entryOf, prior: prior0 = [], s
         return null;
     }
 
-    // Blank means ungraded, not 0 — see the /wa-grade collector. Prior-round rows arrive pre-filled and
-    // so are never blank, which is what carries them through mergeGrades untouched.
+    // Blank means ungraded, not 0 — see the /wa-grade collector.
+    //
+    // DIRTY ONLY, because `grade` means a human set it. A prior row arrives pre-filled and is never
+    // blank, so emitting every non-blank input made opening a review and saving it stamp `grade` on
+    // every row in the table, including ones nobody read — and a judge's row carries `llmGrade` alone
+    // precisely so that "no human has looked at this" stays readable. mergeGrades replaces the whole
+    // object on conflict, so an untouched row skipping `fresh` also keeps the `why` it came with.
+    // dataset.dirty survives a repaint (see `typed` in paint).
     const fresh = [...body.querySelectorAll('.wa-grade')]
-        .filter(input => String(input.value).trim() !== '')
+        .filter(input => String(input.value).trim() !== '' && input.dataset.dirty)
         .map(input => {
             const row = union.rows[Number(input.dataset.i)];
             return { title: row.title, grade: Number(input.value), world: row.world, uid: row.uid };
@@ -3039,17 +3045,20 @@ async function superEvalScene() {
     }
 
     // Same bundle out, grades swapped — never rebuilt, so captures/params/books stay byte-identical.
-    // ONE file carries both raters: `grade` is authoritative (the harness scores it; this review edits it),
-    // `llmGrade` is the LLM judge's original, preserved across reviews for IRR. The shell's fresh rows drop
-    // extra fields, so llmGrade is re-attached here from the loaded manifest.
+    // ONE file carries both raters, and WHICH ONE GRADED A ROW IS READ OFF WHICH FIELDS IT HAS: `grade`
+    // is written by a human alone, `llmGrade` by the judge alone. A row with both was reviewed by a
+    // human; llmGrade by itself means no human has looked. The shell's rows drop extra fields, so
+    // llmGrade is re-attached here from the loaded manifest for the rows a human did edit.
     const llmOf = new Map(manifest.grades.filter(g => g.llmGrade !== undefined).map(g => [rowKey(g), g.llmGrade]));
     const grades = done.grades.map(g => (llmOf.has(rowKey(g)) ? { ...g, llmGrade: llmOf.get(rowKey(g)) } : g));
     const updated = { ...manifest, grades, gradeScale: 4 };
     const { filename, content } = sampleFile(updated);
     download(content, filename, 'application/json');
-    const rel = grades.filter(g => g.grade >= 3).length;
-    // When both raters are present, the save toast doubles as the agreement report.
-    const both = grades.filter(g => g.llmGrade !== undefined);
+    const rel = grades.filter(g => (g.grade ?? g.llmGrade) >= 3).length;
+    // Agreement is over the rows a human actually reviewed — those carrying BOTH. Filtering on llmGrade
+    // alone would drag in every untouched judge row and report them as disagreements, since their
+    // `grade` is absent rather than equal.
+    const both = grades.filter(g => g.llmGrade !== undefined && g.grade !== undefined);
     const irr = both.length
         ? ` LLM agreement: ${both.filter(g => g.grade === g.llmGrade).length}/${both.length} exact, ${both.filter(g => Math.abs(g.grade - g.llmGrade) <= 1).length}/${both.length} within 1.`
         : '';

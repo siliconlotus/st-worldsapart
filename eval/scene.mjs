@@ -22,7 +22,7 @@ import { isReference, openBundle } from '../extension/grading.mjs';
 // scope — both references live inside function bodies, so whichever module loads first finishes evaluating
 // before the other needs a binding.
 import { cachePath, chunkConfig } from './reindex.mjs';
-import { gradeCredit, fbeta, RECALL_WEIGHT } from './metrics.mjs';
+import { gradeCredit, fbeta, RECALL_WEIGHT, gradeValue } from './metrics.mjs';
 
 /** Reads a manifest from disk as a plain sample, whether it is one or a /wa-super-grade multi-arm bundle.
  *  Every tool goes through this so `--arm` behaves identically everywhere and a bundle is never scored as
@@ -268,8 +268,8 @@ export function loadScene(S, { indexFile, params: P }) {
  */
 export function makeGradeOf(grades, isExcluded) {
     const list = (grades ?? [])
-        .filter(x => x && x.title && Number.isFinite(Number(x.grade)))
-        .map(x => ({ tk: nrm(x.title), g: Number(x.grade), title: x.title, uid: x.uid }));
+        .filter(x => x && x.title && Number.isFinite(gradeValue(x)))
+        .map(x => ({ tk: nrm(x.title), g: gradeValue(x), title: x.title, uid: x.uid }));
     const kept = list.filter(g => !isExcluded(g.title));
     // uid is authoritative only when the grade set is uid-complete; a mixed set falls back to titles
     // wholesale rather than resolving half the rows by a different rule.

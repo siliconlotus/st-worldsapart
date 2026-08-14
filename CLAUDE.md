@@ -118,6 +118,20 @@ and cooldown, character and tag filters, `@@dont_activate`, `delayUntilRecursion
 which WA owns and `scene.mjs` models through the same `keywordScore` that fires at runtime. No arm surfaces
 those either, since a probability roll is not made reproducible by adding one.
 
+**`grade` is a human's verdict; `llmGrade` is a judge's. Only a human writes `grade`.** Read the value in
+force through `metrics.mjs` `gradeValue` (human first, judge as fallback, NaN when ungraded) and the rater
+off the shape: `grade` present means a human set it, `llmGrade` alone means none has looked. Nothing else
+can recover this — a judge's bundle and a human's are structurally identical, and a filename convention is
+enforced by nothing. The two were once written together at the same value, which made an unreviewed row
+indistinguishable from a reviewed-and-agreed one; `eval/synthetic-data/split-rater.mjs` migrated the 8394
+duplicated rows and refuses any row where the two differ. **Measured** after it: 611 human-only rows,
+8394 judge-only, 0 reviewed.
+
+**Grading is the expensive step, so extend a pool by delta and never re-pool.** Loaded grades are
+subtracted (`/wa-super-grade`), carried onto a fresh capture (`graft-grades.mjs`), or built into jobs only
+for what is still pending (`grade-pending.mjs`). Where a shape change would do, migrate instead of
+re-grading.
+
 **A grade mean is only comparable at matched retrieval rank.** Grades fall steeply with pool depth, so a
 pass that graded deeper reads as a harsher rater when nothing about the rater changed. Measured, n=258 rows
 graded by both the human rater and `scene-relevance.md`, joined on shipped-arm rank: the contract sits at

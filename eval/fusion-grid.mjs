@@ -26,7 +26,7 @@
 import { readFileSync } from 'node:fs';
 import { openBundle, isReference, rowKey } from '../extension/grading.mjs';
 import { ndcg, sceneParams } from './scene.mjs';
-import { signTest, spearman } from './metrics.mjs';
+import { signTest, spearman, gradeValue } from './metrics.mjs';
 
 const argv = process.argv.slice(2);
 const arg = k => { const i = argv.indexOf(k); return i >= 0 ? argv[i + 1] : null; };
@@ -78,7 +78,7 @@ for (const path of samples) {
     const P = sceneParams(S);
     const rows = (S.candidates ?? []).filter(c => !isReference(c));
     // Grades are keyed by world+uid; reference rows are excluded above because relevance never chose them.
-    const gradeOf = new Map((S.grades ?? []).filter(g => g.uid !== undefined).map(g => [rowKey(g), Number(g.grade) || 0]));
+    const gradeOf = new Map((S.grades ?? []).filter(g => g.uid !== undefined).map(g => [rowKey(g), gradeValue(g) || 0]));
     const judged = rows.filter(r => gradeOf.has(rowKey(r)));
     if (judged.length < 5) { console.log(`${S.name}: only ${judged.length} judged candidate rows — skipping`); continue; }
 

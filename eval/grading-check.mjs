@@ -3,7 +3,7 @@
 // reference tier, and the foreign-book exclusion. A sample that silently loses a field is a graded scene
 // that can't be re-run, which is the whole failure this feature exists to prevent.
 import { buildSample, bundleSamples, captureParams, isReference, mergeGrades, openBundle, rowKey, sampleFile, searchedBook, splitGraded, trimBook, unionArms } from '../extension/grading.mjs';
-import { eq } from './metrics.mjs';
+import { eq, gradeValue } from './metrics.mjs';
 import * as ranking from '../extension/ranking.mjs';
 
 const book = {
@@ -230,6 +230,26 @@ eq(merged.find(g => g.uid === 1).grade, 2, 'a regrade overwrites the earlier rou
 eq(merged.find(g => g.uid === 3).grade, 4, 'a prior grade this round did not revisit survives');
 // The accumulation property that makes iterative pooling terminate: N rounds of deltas equal one big grading.
 eq(mergeGrades(mergeGrades([], prior), [{ world: 'W', uid: 4, grade: 3 }]).length, 3, 'delta rounds compose');
+
+// --- rater provenance: `grade` is a human's, `llmGrade` is a judge's -----------------------------------
+// The distinction nothing else can recover. A judge's row and a human's are structurally identical apart
+// from which field carries the number, so once they are written together at the same value there is no
+// guard, filename or stamp that can tell an unreviewed row from one a human reviewed and agreed with.
+eq(gradeValue({ llmGrade: 3 }), 3, 'a judge-only row grades at its llmGrade');
+eq(gradeValue({ grade: 2, llmGrade: 3 }), 2, 'a reviewed row grades at the HUMAN value, not the judge s');
+eq(gradeValue({ grade: 0, llmGrade: 3 }), 0, 'a human 0 is a verdict, not an absent value');
+eq(Number.isNaN(gradeValue({})), true, 'an ungraded row is NaN, so a caller s || 0 or isFinite still works');
+eq(gradeValue({ grade: undefined, llmGrade: 0 }), 0, 'a judge 0 survives an undefined human grade');
+
+// mergeGrades replaces the whole object on conflict, so a row the review did NOT touch must not appear in
+// `fresh` — that is what keeps its llmGrade (and its `why`) rather than restamping it as human-graded.
+const judged = [{ world: 'W', uid: 7, title: 'J', llmGrade: 3, why: 'because' }];
+const untouched = mergeGrades(judged, []);
+eq(untouched[0].grade, undefined, 'a judge row no human edited keeps no grade field');
+eq(untouched[0].why, 'because', 'and keeps the judge s reasoning');
+const reviewed = mergeGrades(judged, [{ world: 'W', uid: 7, title: 'J', grade: 1 }]);
+eq(reviewed[0].grade, 1, 'a human edit lands in grade');
+eq(reviewed[0].llmGrade, undefined, 'and drops llmGrade, which the caller re-attaches from the manifest for IRR');
 
 // --- multi-arm bundles (one download instead of N) ---
 // The failure to guard: hoisting a per-arm field into the shared block. The summary arm has a DIFFERENT

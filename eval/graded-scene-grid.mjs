@@ -63,6 +63,7 @@ import { norm } from '../plugin/vector.mjs';
 import * as ranking from '../extension/ranking.mjs';   // shared client tuning layer — same code the extension runs
 import * as matcher from '../extension/matcher.mjs';
 import { cutRetrieved } from '../extension/selection.mjs';
+import { gradeValue } from './metrics.mjs';
 // Scene loading, the gazetteer, the scorers, the pool and the nDCG math all live in scene.mjs, shared with
 // paired-arms.mjs — there must be exactly one copy of them (see that module's header).
 import { CID, dcg, embed as embedWith, indexPath, loadScene, makeFuse, makeGradeOf, makeKeywordScore, makeCandidateSet, ndcg, nrm, openSample, sceneParams, wiTitle } from './scene.mjs';
@@ -282,7 +283,7 @@ const fmt = n => (n == null ? '·' : (+n).toFixed(3));
     }
 
     // Grades come inline from the sample: an array of {title, grade}, matched to a ranked row by token subset.
-    const gradesAll = GRADES.filter(x => x && x.title && Number.isFinite(Number(x.grade))).map(x => ({ tk: nrm(x.title), g: Number(x.grade), title: x.title }));
+    const gradesAll = GRADES.filter(x => x && x.title && Number.isFinite(gradeValue(x))).map(x => ({ tk: nrm(x.title), g: gradeValue(x), title: x.title }));
     const grades = gradesAll.filter(g => !isExcluded(g.title));
     if (grades.length < gradesAll.length) console.log(`excluded ${gradesAll.length - grades.length} out-of-scope grade(s) — not rankable from this book: ${gradesAll.filter(g => isExcluded(g.title)).map(g => `"${g.title}"`).join(', ')}\n`);
     const gradeOf = makeGradeOf(S.grades, isExcluded);

@@ -125,9 +125,14 @@ for (const jf of jobFiles) {
         continue;
     }
     if (!bySceneRows.has(job.scene)) bySceneRows.set(job.scene, []);
+    // `llmGrade` ONLY — never `grade`, which a human writes and nothing else does. Both used to be
+    // written at the same value, which made a row no human had seen identical to one a human reviewed
+    // and agreed with. Readers take metrics.mjs `gradeValue`, so the grade in force is unchanged; what
+    // changes is that provenance survives, and it is the one thing no shape guard could recover
+    // afterwards. `g.grade` on the right is the JUDGE's own output field, a different namespace.
     bySceneRows.get(job.scene).push(...job.candidates.map(c => {
         const g = got.get(rowKey(c.world, c.uid));
-        return { title: c.title, grade: Number(g.grade), llmGrade: Number(g.grade), world: c.world, uid: c.uid, why: g.why };
+        return { title: c.title, llmGrade: Number(g.grade), world: c.world, uid: c.uid, why: g.why };
     }));
 }
 

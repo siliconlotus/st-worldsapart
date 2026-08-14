@@ -30,7 +30,7 @@
 // reported per cell and a run with gaps is flagged. Pool first with /wa-super-grade, then screen here.
 import { readFileSync } from 'node:fs';
 import { indexPath, loadScene, openSample, sceneParams, scoreScene, embed } from './scene.mjs';
-import { jaccard, signTest, spearman } from './metrics.mjs';
+import { jaccard, signTest, spearman, gradeValue } from './metrics.mjs';
 import { isReference, rowKey } from '../extension/grading.mjs';
 import { ensureIndex } from './reindex.mjs';
 
@@ -216,7 +216,7 @@ const fx = n => (n >= 0 ? '+' : '') + n.toFixed(4);
     // Also reported: how many relevant entries each scene has. nDCG on a scene with two or three is fragile —
     // one rank change swings it hard — so a thin scene contributes noise to the sign test at full weight.
     // That is the other half of "signals fairly clear", and it is worth knowing BEFORE spending grading time.
-    const relOf = S => new Set((S.grades ?? []).filter(g => Number(g.grade) >= 3 && g.uid !== undefined).map(rowKey));
+    const relOf = S => new Set((S.grades ?? []).filter(g => gradeValue(g) >= 3 && g.uid !== undefined).map(rowKey));
     const judgedOf = S => new Set((S.grades ?? []).filter(g => g.uid !== undefined).map(rowKey));
     console.log('\nscene independence — relevant-set overlap (grade>=3); the sign test assumes these are separate draws');
     const thin = scenes.filter(s => relOf(s.S).size < 4);
@@ -245,7 +245,7 @@ const fx = n => (n >= 0 ? '+' : '') + n.toFixed(4);
     // Measured with tie-corrected Spearman (graded pools are mostly zeros); absent signals count as 0.
     console.log('\nsignal quality — Spearman against the human grade (absent signal counts as 0)');
     for (const sc of scenes) {
-        const gm = new Map((sc.S.grades ?? []).filter(x => x.uid !== undefined).map(x => [rowKey(x), Number(x.grade) || 0]));
+        const gm = new Map((sc.S.grades ?? []).filter(x => x.uid !== undefined).map(x => [rowKey(x), gradeValue(x) || 0]));
         const rs = (sc.S.candidates ?? []).filter(c => !isReference(c) && gm.has(rowKey(c)));
         if (rs.length < 5) { console.log(`  ${sc.name.slice(0, 34).padEnd(34)} only ${rs.length} judged candidate rows — skipped`); continue; }
         const gv = rs.map(r => gm.get(rowKey(r)));
