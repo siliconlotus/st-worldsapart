@@ -3,82 +3,42 @@
 // are injected, so the extension and the elbow harness run the identical code (no more string-slicing).
 
 /**
- * Decides how many retrieved entries survive.
+ * The cliff: how much of a ranking's head survives.
  *
- * 'count' takes a fixed number. The two cliff modes cut at a drop in fused score, so a
- * scene with three strong matches admits three and one with twelve admits twelve — still
- * bounded by maxVectorEntries, because a flat distribution has no meaningful cliff and
- * would otherwise admit the lot. They differ only in how big a gap counts as a cliff:
- *   'elbow'   — relative to the MEAN gap (elbowSensitivity × mean). Adapts per query but
- *               shifts with the window, since the mean depends on what's in it.
- *   'dropoff' — a FIXED fraction of the top score (dropoffThreshold × head[0]). Comparable
- *               across queries because RRF bounds the score band, and window-independent.
+ * STAGE 4, over the dynamic block of the LAYOUT ranking (see cutDynamic). It ran at stage 1 over the
+ * retrieval ranking until 2026-08, which is why every measurement that once lived here is gone rather
+ * than moved — they graded a different population.
  *
- * MEASURED, 73 graded scenes (%oracle: each mode's F as a share of the best prefix cut of the same
- * ranking, oracle re-chosen per beta). The 3-scene table this replaces did NOT reproduce — it recorded
- * elbow at 95% mean / 92% worst against count max=10's 83%/72%, and nothing near that survives here.
+ * 'off' keeps the head whole and lets the caps decide. The two cliff modes cut at a drop in fused
+ * score, so a scene with three strong matches admits three and one with twelve admits twelve. It takes
+ * no count: a flat distribution has no cliff and survives whole, and how many of those rows ship is the
+ * entry maxes' question, one cut later. They differ only in how big
+ * a gap counts as a cliff:
+ *   'elbow'   — relative to the MEAN gap (elbowSensitivity × mean). Adapts per query but shifts with
+ *               the window, since the mean depends on what is in it.
+ *   'dropoff' — a FIXED fraction of the top score (dropoffThreshold × head[0]). Comparable across
+ *               queries because RRF bounds the score band, and window-independent where the mean is not.
  *
- *   mode              kept |  F1  F1.5   F2   F4  |  F1  F1.5   F2   F4
- *                          |  -- one >=3 bar --   |  - recall>=3, prec>=2 -
- *   count max=3        3.0 | 60%  57%  54%  46%   | 59%  54%  50%  45%
- *   count max=5        5.0 | 60%  62%  61%  57%   | 63%  61%  58%  55%
- *   count max=10      10.0 | 60%  67%  71%  76%   | 70%  74%  75%  77%
- *   count max=20      20.0 | 49%  59%  68%  84%   | 66%  75%  81%  92%
- *   elbow 1.2         14.4 | 54%  63%  70%  81%   | 69%  75%  78%  85%
- *   elbow 1.5 (ships) 12.8 | 55%  64%  69%  77%   | 68%  73%  76%  80%
- *   elbow 2.5          8.9 | 60%  64%  67%  70%   | 67%  69%  69%  71%
- *   dropoff 0.06      12.6 | 58%  65%  69%  76%   | 68%  72%  75%  79%
+ * Both cut at the LAST significant gap, not the largest. A decaying score curve often has several
+ * cliffs; the largest is usually the earliest, and cutting there discards whole clusters of near-tied
+ * entries that sit below it. The largest gap only wins when it is also the last.
  *
- * READ THE RIGHT-HAND BLOCK. Under a single >=3 bar the shallow cuts win F1 and the ordering inverts by
- * F4, which reads as beta trading recall against precision. Under the asymmetric bar (recall at
- * grade >= 3, precision at >= 2) depth wins at every beta and the inversion is gone — a single bar was confounding the sweep
- * with its own denominator, since it charges every delivered grade-2 row as a false positive.
+ * The search starts at minVectorEntries: the biggest gap in a good ranking is very often the one
+ * between rank 1 and rank 2, and cutting there would return a single entry every time.
  *
- * DEPTH is what the metric rewards; mode is close to a wash at equal depth. Elbow 1.2 sits at or near
- * the top of every asymmetric column, but count max=20 beats it at F2 and F4, and 213 arm-cells kept
- * unjudged rows — which penalises exactly the deep arms, so those are lower bounds. No cutoff default is
- * defensible from this until the pool gap closes. What IS settled: the elbow's advantage in the old
- * table was largely the precision bar, and the shipped maxVectorEntries of 10 is below anything measured
- * here — every graded capture ran at 20.
- *
- * Where this is going: stage 1 should ADMIT on a bound and stage 4 should
- * arbitrate. Under that, most of this comparison is a question about the wrong stage.
- *
- * ELBOW HAS A MINIMUM RETRIEVAL DEPTH, and it is not obvious from this file. elbowSensitivity is a multiple
- * of the MEAN gap over the retrieved list, so a short list yields a coarse mean and the cliff fires early.
- * Server-side entry pooling initially shipped with topK = 2x the cap (20 entries), which starved it: the
- * elbow collapsed to keeping 4 on isekai and the table above reversed, making 'count' look better. It needs
- * >=60 entries and is flat from there to 4000; worldsapart.js floors topK at 100 for this reason, with the
- * measurement. Anything that narrows retrieval must re-check this table, not just the recall.
- *
- * The comparison also has a trap worth knowing: %oracle is NOT comparable across retrieval depths, because
- * the oracle improves as the candidate list deepens. Compare absolute F1 when topK changes.
- *
- * dropoff is the one to distrust: it is bimodal, jumping from 4 to 20 kept with nothing in between
- * (sommers), because a fixed fraction of the top fused score doesn't track where the gap actually is.
- * The mean gap does, which is why elbow finds inflections dropoff walks past.
- *
- * Both cut at the LAST significant gap, not the largest. A decaying score curve often has
- * several cliffs; the largest is usually the earliest, and cutting there discards whole
- * clusters of near-tied entries that sit below it. Keeping through to the final cliff
- * before the tail is what a cliff cut should mean — the largest gap only wins when it is
- * also the last, which is the single-cliff case.
- *
- * The search starts at minVectorEntries: the biggest gap in a good ranking is very
- * often the one between rank 1 and rank 2, and cutting there would return a single
- * entry every time.
+ * Any mode that is not a cliff mode passes through, so a stored setting that outlives a rename degrades
+ * to 'off' rather than throwing.
  *
  * @param {Array<{fused: number}>} ranked Fused ranking, best first
  * @param {object} cfg Cutoff settings (from settings())
- * @param {string} cfg.mode vectorCutoff — 'count' | 'elbow' | 'dropoff'
- * @param {number} cfg.maxVectorEntries Hard cap on survivors
+ * @param {string} cfg.mode vectorCutoff — 'off' | 'elbow' | 'dropoff'
  * @param {number} cfg.minVectorEntries Floor the cliff search starts at
  * @param {number} cfg.elbowSensitivity Cliff = elbowSensitivity × mean gap (elbow mode)
  * @param {number} cfg.dropoffThreshold Cliff = dropoffThreshold × top score (dropoff mode)
  * @returns {Array<{fused: number}>} The surviving prefix
  */
-export function cutRetrieved(ranked, { mode = 'count', maxVectorEntries = 20, minVectorEntries = 1, elbowSensitivity = 1.5, dropoffThreshold = 0.06 } = {}) {
-    const head = ranked.slice(0, Math.max(1, maxVectorEntries));
+export function cutRetrieved(ranked, { mode = 'off', minVectorEntries = 1, elbowSensitivity = 1.5, dropoffThreshold = 0.06 } = {}) {
+    const head = ranked.slice();
 
     if ((mode !== 'elbow' && mode !== 'dropoff') || head.length <= 1) {
         return head;

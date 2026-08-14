@@ -195,46 +195,56 @@ export const defaultSettings = {
     // scores). Measured harmful over a 374-trial LOO grid (baseline-grid.mjs) — monotonic decline, no
     // beneficial weight. It was a worse, redundant hand-rolled version of mean-centering (meanCentered),
     // which subtracts the real corpus mean vector and measurably helps (+8.8% nDCG@5, centering-grid.mjs).
-    /** Max retrieved entries to force-activate. A hard ceiling in both cutoff modes. */
-    maxVectorEntries: 10,
     /**
-     * How many of those actually survive:
-     *   'count'   — keeps maxVectorEntries every time; predictable.
-     *   'elbow'   — cuts at a gap that stands out from the MEAN gap, so the number adapts
-     *               to the scene. Sensitive to the window, because the mean shifts with it.
-     *   'dropoff' — cuts at a gap larger than a FIXED fraction of the top score. Because the
-     *               ranking is RRF (a bounded 1/(k+rank) band), that fraction is comparable
-     *               across queries where a raw gap value is not, and it is window-independent
-     *               where the mean is not — so it finds a real cliff wherever it sits.
+     * Cap on VECTOR entries in the final selection — stage 4, inside applyBudget, nested as
+     * vector ⊆ dynamic ⊆ all. It bounds what retrieval contributes to the prompt; it does not decide
+     * what activates. Stage 1 admits every vectorized entry up to a fixed ceiling (selection.mjs
+     * admitCeiling) and makes no relevance decision at all.
+     *
+     * IT IS A USER SETTING BECAUSE IT IS AN INPUT-TOKEN COST, not because it protects the ranker. The
+     * cliff is what should be keeping irrelevant entries out; this is the user deciding how much of
+     * their context window World Info may occupy on the retrieval side. So it is deliberately GENEROUS
+     * — the tighter it is set, the more it is doing a relevance job it has no signal for, since it cuts
+     * by rank position and knows nothing about the gap it cuts across.
+     *
+     * The failure it does not guard against: a prompt can be well within every cap and still dilute the
+     * model's attention across too much material. No metric here sees that — F2@budget scores the SET
+     * that shipped, not what the model did with it.
+     *
+     * Counted by PROVENANCE — an entry retrieval returned — not by the `vectorized` flag, so an entry
+     * admitted on a key it kept counts as keyword. The two coincide unless suppressVectorKeys is off.
+     */
+    maxVectorEntries: 20,
+    /**
+     * The stage-4 relevance cut, over the dynamic block, ahead of the budget:
+     *   'off'     — no cliff; the caps alone decide.
+     *   'elbow'   — cuts at a gap that stands out from the MEAN gap, so the number adapts to the scene.
+     *   'dropoff' — cuts at a gap larger than a FIXED fraction of the top score, which is comparable
+     *               across scenes where a raw gap value is not.
      * Both cliff modes cut at the LAST qualifying gap and are floored/capped the same way.
      *
-     * 'elbow' ships because it measures better and it is the ONE tuning result that held across every
-     * population and metric the graded harness was run under: over 3 graded scenes it reached 95% of the best
-     * possible cut (worst case 92%) against 83%/72% for the old default of count max=10. See selection.mjs
-     * cutRetrieved for the table. It is also insensitive between sensitivity 1.2 and 2.0, which is why the
-     * switch is safe to make on 3 scenes when the boost/gazetteer knobs are not.
+     * 'count' retired: maxVectorEntries is the count now, enforced by applyBudget. A stored 'count'
+     * reads as 'off', since cutRetrieved passes through any mode that is not a cliff mode.
      *
-     * Measured failure mode, WEAK scenes (isekai-time-whore msg3728: 4 relevant of 106 candidates, none
-     * grade-5): when relevance is sparse the score surface is noise and a large early gap reads as a cliff —
-     * every sensitivity 1.2-2.5 cut at 8 and missed 3 of the 4 relevant entries (31% of oracle F1) where
-     * count max=10 reached 80%. Elbow still wins 3 of the 4 graded scenes, and it does NOT collapse on a
-     * wrong book either (kept 10-19 junk entries across 10 null cells — see uncenteredGate for the failsafe
-     * that actually handles those), so the honest claim is narrower than it once was: the elbow adapts
-     * within a scene that HAS a relevance cliff, and does nothing useful when there isn't one.
+     * CARRIED-OVER DEFAULT, NOT A MEASUREMENT. Every figure that chose 'elbow' graded a cut over the
+     * RETRIEVAL ranking. On the layout ranking the cliff spans an eligibility-normalised, heterogeneous
+     * list — vector+text+keys entries beside keyword-only ones — so the mean gap is not the same
+     * quantity and none of those results transfers. Nothing grades stage 4 yet; see matcher-design.md
+     * Evidence, "Two scores".
      */
     vectorCutoff: 'elbow',
-    /** Cliff modes only: never cut below this many. Guards against the rank 1-2 gap. */
+    /** Cliff modes only: never cut the dynamic block below this many. Carried-over default, unmeasured
+     *  at this stage. */
     minVectorEntries: 3,
     /**
-     * Elbow mode only: how large a score gap must be, as a multiple of the mean gap, to
-     * count as a cliff worth cutting at. Higher keeps fewer (only dramatic drops cut),
-     * lower keeps more. Below 1 would treat an average gap as a cliff and is meaningless.
+     * Elbow mode only: how large a gap must be, as a multiple of the mean gap, to count as a cliff.
+     * Higher keeps fewer. Below 1 would treat an average gap as a cliff and is meaningless.
+     * Carried-over default, unmeasured at this stage.
      */
     elbowSensitivity: 1.5,
     /**
-     * Dropoff mode only: a gap is a cliff when it erases more than this fraction of the top
-     * fused score. ~0.08 was the cliff size measured on two real queries (Orient-Express and
-     * Vegas); 0.06 keeps a little margin below that. Higher keeps fewer, lower keeps more.
+     * Dropoff mode only: a gap is a cliff when it erases more than this fraction of the top fused
+     * score. Higher keeps fewer. Carried-over default, unmeasured at this stage.
      */
     dropoffThreshold: 0.06,
     /**
