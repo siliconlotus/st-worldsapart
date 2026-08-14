@@ -17,7 +17,7 @@ import { buildLexical } from '../plugin/lexical.mjs';
 import { corpusMean, centeredCosineScores } from '../plugin/vector.mjs';
 import * as ranking from '../extension/ranking.mjs';
 import * as matcher from '../extension/matcher.mjs';
-import { isReference, openBundle } from '../extension/grading.mjs';
+import { isDurable, openBundle } from '../extension/grading.mjs';
 // Cycle: reindex.mjs imports getStringHash from here. Safe because neither side calls across at module
 // scope — both references live inside function bodies, so whichever module loads first finishes evaluating
 // before the other needs a binding.
@@ -242,7 +242,7 @@ export function loadScene(S, { indexFile, params: P }) {
     // population wider than the graded set. A re-derived bundle logging 144 rows against 47 grades then
     // reported judged@10 of 100% on a scene that was 18% judged, so the stopping rule said "pool is
     // adequate" precisely where it was not. An ungraded row is unjudged no matter who logged it.
-    const OWN = new Set((S.candidates ?? []).filter(c => !isReference(c) && (!c.world || c.world === primary)).map(c => Number(c.uid)));
+    const OWN = new Set((S.candidates ?? []).filter(c => !isDurable(c) && (!c.world || c.world === primary)).map(c => Number(c.uid)));
     const POOL = new Set((S.grades ?? [])
         .filter(g => Number.isFinite(Number(g.uid)) && (!g.world || g.world === primary) && !isExcluded(g.title))
         .map(g => Number(g.uid)));
@@ -283,6 +283,26 @@ export function makeGradeOf(grades, isExcluded) {
         return byTitle(typeof r === 'string' ? r : String(r?.title ?? ''));
     };
 }
+
+/**
+ * The three populations, as predicates over a raw ENTRY. They cross-cut, which is why there are three
+ * names and not two: a keyword-activated reference entry is not durable, and a durable entry may be
+ * either tier.
+ *
+ *   memory     STMB-marked — a scene summary ranking chose
+ *   reference  everything else — world rules, settings, standing sheets
+ *   durable    constant or configured-sticky — in the prompt by intent, not by relevance
+ *
+ * Provenance, never routing: the marker cannot drift with the configuration under evaluation, where
+ * `vectorized`/`sticky`/`constant` all can. Presence of the marker is the whole signal — never its range
+ * (see eval/repair-markers.mjs).
+ *
+ * `isDurableEntry` asks of an entry what `isDurable` (extension/grading.mjs) asks of a capture row; the
+ * two shapes carry the constant flag differently and cannot share an implementation.
+ */
+export const isMemory = e => Boolean(e) && ('stmemorybooks' in e || 'STMB_start' in e);
+export const isReference = e => !isMemory(e);
+export const isDurableEntry = e => Boolean(e?.constant) || Number(e?.sticky) > 0;
 
 /** Keys the production scan would actually score. suppressVectorKeys blanks a vectorized entry's keys at
  *  scan time (worldsapart.js suppressKeys), and scoreVectorKeys is what re-admits the stashed originals —
@@ -447,9 +467,12 @@ export async function scoreScene({ sample: S, overrides = {}, k = 10, vectors, m
     // matcher/audit's question. The class label is the audit's mechanical one, provenance not routing:
     // kind = STMB-marked ? memory : reference — chosen because it derives from what the entry IS and
     // cannot drift with the configuration being evaluated (vectorized/sticky/constant all can). The
-    // constant/sticky clause keeps isReference (extension/grading.mjs) semantics for marked entries too.
-    const isCard = e => !e || !('stmemorybooks' in e || 'STMB_start' in e) || e.constant || Number(e.sticky) > 0;
-    const rankable = all.filter(r => !isCard(r.entry));
+    // durable clause keeps isDurable (extension/grading.mjs) semantics for marked entries too.
+    //
+    // TWO REASONS, SPELLED SEPARATELY. A reference entry is excluded because triggered == relevant makes
+    // ranking it a category error; a durable entry is excluded because relevance never chose it. One
+    // predicate covering both would name neither.
+    const rankable = all.filter(r => !isReference(r.entry) && !isDurableEntry(r.entry));
 
     const top = fuse(rankable, P.LEXW).slice(0, k);
     const unjudged = top.filter(r => !scene.POOL.has(Number(r.uid)));

@@ -2401,7 +2401,7 @@ async function gradeScene(named) {
     //             verdict on the sticky VALUE — an authoring defect — not on ranking, and pooling those
     //             into the grade set would contaminate a ranker metric with authoring calls.
     // An entry with `sticky` CONFIGURED that fired this scan is not in that class: the effect is not yet
-    // armed, so it classifies `dynamic` and grades like any other activation. isReference() lumps the
+    // armed, so it classifies `dynamic` and grades like any other activation. isDurable() lumps the
     // configured value in with the runtime one; left alone here because the eval side still reads it.
     const gradeable = rows.map((row, i) => ({ row, entry: entries[i], i })).filter(x => x.row.block === 'dynamic');
     const scaffold = rows.length - gradeable.length;

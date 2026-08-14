@@ -31,7 +31,7 @@
 import { readFileSync } from 'node:fs';
 import { indexPath, loadScene, openSample, sceneParams, scoreScene, embed } from './scene.mjs';
 import { jaccard, signTest, spearman, gradeValue } from './metrics.mjs';
-import { isReference, rowKey } from '../extension/grading.mjs';
+import { isDurable, rowKey } from '../extension/grading.mjs';
 import { ensureIndex } from './reindex.mjs';
 
 const argv = process.argv.slice(2);
@@ -246,7 +246,7 @@ const fx = n => (n >= 0 ? '+' : '') + n.toFixed(4);
     console.log('\nsignal quality — Spearman against the human grade (absent signal counts as 0)');
     for (const sc of scenes) {
         const gm = new Map((sc.S.grades ?? []).filter(x => x.uid !== undefined).map(x => [rowKey(x), gradeValue(x) || 0]));
-        const rs = (sc.S.candidates ?? []).filter(c => !isReference(c) && gm.has(rowKey(c)));
+        const rs = (sc.S.candidates ?? []).filter(c => !isDurable(c) && gm.has(rowKey(c)));
         if (rs.length < 5) { console.log(`  ${sc.name.slice(0, 34).padEnd(34)} only ${rs.length} judged candidate rows — skipped`); continue; }
         const gv = rs.map(r => gm.get(rowKey(r)));
         const sig = f => spearman(rs.map(f), gv).toFixed(2).padStart(5);

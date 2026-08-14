@@ -2,7 +2,7 @@
 // this pins the part that decides what a sample CONTAINS: book fidelity, the settings mapping, the
 // reference tier, and the foreign-book exclusion. A sample that silently loses a field is a graded scene
 // that can't be re-run, which is the whole failure this feature exists to prevent.
-import { buildSample, bundleSamples, captureParams, isReference, mergeGrades, openBundle, rowKey, sampleFile, searchedBook, splitGraded, trimBook, unionArms } from '../extension/grading.mjs';
+import { buildSample, bundleSamples, captureParams, isDurable, mergeGrades, openBundle, rowKey, sampleFile, searchedBook, splitGraded, trimBook, unionArms } from '../extension/grading.mjs';
 import { eq, gradeValue } from './metrics.mjs';
 import * as ranking from '../extension/ranking.mjs';
 
@@ -44,9 +44,9 @@ eq(captureParams({ ...s, retrievalMode: 'lexical' }, {}).commonWordWeight, 0.7, 
 eq(p.suppressVectorKeys, true, 'suppressVectorKeys is recorded');
 
 // --- reference tier: constants and CONFIGURED stickies are not relevance results ---
-eq(isReference({ block: 'constant', sticky: 0 }), true, 'constant is a reference row');
-eq(isReference({ block: 'dynamic', sticky: 3 }), true, 'configured sticky is a reference row even while block reads dynamic');
-eq(isReference({ block: 'dynamic', sticky: 0 }), false, 'a plain dynamic row is gradeable');
+eq(isDurable({ block: 'constant', sticky: 0 }), true, 'constant is durable');
+eq(isDurable({ block: 'dynamic', sticky: 3 }), true, 'configured sticky is durable even while block reads dynamic');
+eq(isDurable({ block: 'dynamic', sticky: 0 }), false, 'a plain dynamic row is gradeable');
 
 // --- searchedBook: which collection the harness must load ---
 // The case that motivated it: the chat's bound book contributed ONE retrieved row, another book contributed
@@ -217,7 +217,7 @@ eq(u.entries.map(e => e.uid).join(','), '1,3,2,4', 'entries stay aligned with ro
 const prior = [{ title: 'Villa', world: 'W', uid: 1, grade: 5 }, { title: 'Maren', world: 'W', uid: 3, grade: 4 }];
 const split = splitGraded(u.rows, prior);
 eq(split.fresh.map(r => r.uid).join(','), '2,4', 'splitGraded splits on prior grades alone, reference rows included');
-eq(split.fresh.filter(r => !isReference(r)).map(r => r.uid).join(','), '4', 'the gradeable fresh rows are what the popup counts');
+eq(split.fresh.filter(r => !isDurable(r)).map(r => r.uid).join(','), '4', 'the gradeable fresh rows are what the popup counts');
 eq(split.known.length, 2, 'already-judged rows are reported, not silently dropped');
 eq(split.priorOf.get(rowKey({ world: 'W', uid: 3 })), 4, 'prior grades are recoverable for display');
 // A retitled entry must stay matched — title drift must not trigger a regrade from zero.

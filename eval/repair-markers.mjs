@@ -1,7 +1,7 @@
 // repair-markers.mjs — reconciles a bundle's embedded books with what its entries actually are.
 //
 // Two fields decide how scene.mjs treats an entry and both drifted through ordinary editing as these books
-// grew. The STMB marker says memory-or-reference (loadScene's isCard reads its PRESENCE, never the range),
+// grew. The STMB marker says memory-or-reference (scene.mjs's isMemory reads its PRESENCE, never the range),
 // and `vectorized` says which route can reach the entry at all. Neither is repairable from the other, but on
 // THIS corpus the title convention settles it: an STMB entry is titled with a number, or ARC + number. That
 // convention is the author's, not a property of World Info, so it lives here as a repair rule over data and
@@ -83,7 +83,7 @@ for (const path of files) {
             if (acts.includes('vectorize') && world === view.primaryBook) vectorized.add(path);
             if (WRITE) {
                 if (acts.includes('strip-marker')) { delete e.stmemorybooks; delete e.STMB_start; delete e.STMB_end; }
-                // Presence is the whole signal — loadScene's isCard and keyword-core's `generated` both test
+                // Presence is the whole signal — scene.mjs's isMemory and keyword-core's `generated` both test
                 // for it and never read the range, which a repair has no way to recover anyway.
                 if (acts.includes('add-marker')) e.stmemorybooks = true;
                 if (acts.includes('vectorize')) e.vectorized = true;

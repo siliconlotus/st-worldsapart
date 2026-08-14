@@ -129,10 +129,17 @@ export function captureParams(s, { caseSensitive, wholeWords, includeNames }) {
  * Tiered off the CONFIGURED sticky value and the runtime constant class, never the runtime sticky state:
  * a sticky entry reads `block: 'dynamic'` on its keyword-activation turn, and a dry run never arms the
  * effect at all. Grading these would drag nDCG down for entries relevance never chose.
+ * DURABLE, not "reference": reference is the TIER (not STMB-marked — world rules, settings), and the two
+ * cross-cut. A keyword-activated reference entry is not durable, and a durable entry may be either tier.
+ * This predicate is about how the row got into the prompt, not what kind of thing it is.
+ *
+ * Takes a capture ROW (`block`/`sticky`). eval/scene.mjs `isDurableEntry` is the same question asked of a
+ * raw entry (`constant`/`sticky`), which is a different shape and cannot share this one.
+ *
  * @param {object} row Candidate row
- * @returns {boolean} True when the row is a reference row
+ * @returns {boolean} True when the row is durable — constant or configured-sticky
  */
-export const isReference = row => row.block === 'constant' || Number(row.sticky) > 0;
+export const isDurable = row => row.block === 'constant' || Number(row.sticky) > 0;
 
 // --- delta pooling (/wa-super-grade) -----------------------------------------------------------------
 //
