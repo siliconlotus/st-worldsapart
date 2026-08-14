@@ -1,6 +1,7 @@
 // Self-test for the shared cutoff. Imports the real selection.mjs (no more string-slicing worldsapart.js)
 // and maps each test's cfg into the injected settings.
 import { cutRetrieved as cut } from '../extension/selection.mjs';
+import { admitCeiling } from '../plugin/scoring.mjs';   // stage-1 bound; lives beside poolEntries, which is what makes K mean entries or chunks
 let cfg;
 const cutRetrieved = (ranked) => cut(ranked, {
     mode: cfg.vectorCutoff,
@@ -57,3 +58,9 @@ const vg = [[4,3],[2,13],[5,8],[16,1],[1,18],[8,7],[3,15],[17,4],[9,12],[32,2],[
 cfg = { vectorCutoff: 'dropoff', maxVectorEntries: 20, minVectorEntries: 3, dropoffThreshold: 0.06 };
 eq(n(cutRetrieved(mk(...fused(oe)))), 13, 'dropoff: Orient-Express cuts at the rank 13->14 cliff');
 eq(n(cutRetrieved(mk(...fused(vg)))), 11, 'dropoff: Vegas cuts at the real rank 11->12 cliff the elbow missed');
+
+// --- admitCeiling: stage 1's bound, which counts a different thing on each retrieval path ------------
+eq(admitCeiling(true), 100, 'plugin path: K counts ENTRIES, because poolEntries ran server-side');
+eq(admitCeiling(false), 300, 'fallback path: K counts CHUNKS, so it must cover each entry s best one');
+eq(admitCeiling(undefined), 300, 'unknown pooling is treated as unpooled — the safe direction is more chunks');
+eq(admitCeiling(true) < admitCeiling(false), true, 'the chunk ceiling is the larger of the two');

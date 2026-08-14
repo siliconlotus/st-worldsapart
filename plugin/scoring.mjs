@@ -98,6 +98,28 @@ export function poolEntries(results) {
     return [...best.values()];
 }
 
+/**
+ * How many records stage 1 asks the store for. A SAFETY LIMIT on what a pathological scene may feed
+ * core's scan loop, not a verdict on relevance — stage 4 makes the only relevance decision.
+ *
+ * PATH-DEPENDENT, because K counts a different thing on each retrieval path:
+ *
+ *   pooled server-side   poolEntries runs before selectTopK, so K counts ENTRIES. 100.
+ *   not pooled           K counts CHUNKS and the client pools over only what K let through. 300,
+ *                        because chunks/entry measures 9.1-10.3 and the per-entry maxima do not
+ *                        stabilise until K ~= 150-300 (see poolEntries above).
+ *
+ * One number for both would mean "100 entries, correctly pooled" on one path and "100 chunks, with
+ * understated per-entry maxima" on the other — and those understated scores feed the stage-4 cliff.
+ *
+ * Unknown resolves to the chunk ceiling: over-asking costs a larger response, under-asking silently
+ * mis-scores entries.
+ *
+ * @param {boolean} pooledServerSide Whether the store pooled to one record per entry before cutting
+ * @returns {number} topK to request
+ */
+export const admitCeiling = pooledServerSide => (pooledServerSide === true ? 100 : 300);
+
 /** Union the top-K by each signal across collections, dedup, group by collectionId — exactly what the
  *  client receives from the plugin. Fed poolEntries() output, so K counts ENTRIES. */
 export function selectTopK(results, topK) {
