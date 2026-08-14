@@ -134,6 +134,7 @@ export const authorIgnoreBudget = entry => Boolean(entry?.waIgnoreBudget ?? entr
  * on one walk rather than three competing policies, and none of them changes what
  * another means. Any cap at 0 is off.
  *
+ *   maxVectorEntries  caps the retrieved entries within that, so retrieval cannot flood the block
  *   maxDynamic  caps keyword and vector entries; constants and stickies are unaffected
  *   maxTotal    caps everything, so constants consume it before the dynamic entries
  *   maxTokens   caps context usage, which is only meaningful over everything
@@ -149,10 +150,11 @@ export const authorIgnoreBudget = entry => Boolean(entry?.waIgnoreBudget ?? entr
  * @param {object} args Budget arguments
  * @returns {Promise<{survivors: Set, counted: number, dropped: number, budgeted: number, inPrompt: number}>}
  */
-export async function applyBudget({ ranked, isDynamic, maxTokens, maxTotal, maxDynamic, tokensOf, capOf = () => 0, exemptIsBudgeted = true, slack = 0, slackOnce = true }) {
+export async function applyBudget({ ranked, isDynamic, maxTokens, maxTotal, maxDynamic, maxVectorEntries = 0, isVector = () => false, tokensOf, capOf = () => 0, exemptIsBudgeted = true, slack = 0, slackOnce = true }) {
     const survivors = new Set();
     let counted = 0;
     let dynamic = 0;
+    let vector = 0;
     // Per-book quota: a ceiling on how many dynamic entries each book may contribute, so a
     // relevance flood in one book can't crowd the others out. Counts dynamic only — a book's
     // constants are always-on and not subject to it, same as maxDynamic.
@@ -208,6 +210,11 @@ export async function applyBudget({ ranked, isDynamic, maxTokens, maxTotal, maxD
         if (maxDynamic > 0 && isDynamic(item) && dynamic >= maxDynamic) {
             blockedBy.push({ cap: 'dynamic', shortfall: 1 });
         }
+        // Retrieval's own ceiling, inside the dynamic block. Nested rather than parallel: a vector entry
+        // is a dynamic entry, so maxDynamic still binds first when it is the tighter of the two.
+        if (maxVectorEntries > 0 && isVector(item) && vector >= maxVectorEntries) {
+            blockedBy.push({ cap: 'vector', shortfall: 1 });
+        }
         const bookCap = capOf(item);
         if (bookCap > 0 && isDynamic(item) && (perWorld.get(item.entry?.world) ?? 0) >= bookCap) {
             blockedBy.push({ cap: 'book', shortfall: 1, world: item.entry?.world, limit: bookCap });
@@ -244,6 +251,9 @@ export async function applyBudget({ ranked, isDynamic, maxTokens, maxTotal, maxD
             counted += 1;
             if (isDynamic(item)) {
                 dynamic += 1;
+                if (isVector(item)) {
+                    vector += 1;
+                }
                 perWorld.set(item.entry?.world, (perWorld.get(item.entry?.world) ?? 0) + 1);
             }
         }

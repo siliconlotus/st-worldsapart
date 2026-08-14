@@ -244,3 +244,29 @@ eq(r.skipped.every(x => x.tail), true, 'count cap rejections are always tail');
     eq(constants.every(c => r.survivors.has(c)), true, 'nor the constants behind it');
     eq(dyn(r), 2, '120 tokens = 3 sticky + 7 constants + 2 retrieved — the cut is entirely retrieved-side');
 }
+
+// --- vector cap: the third nesting level, vector ⊆ dynamic ⊆ all -------------------------------------
+// Provenance, not the `vectorized` flag: the cap bounds what RETRIEVAL contributed, so an entry admitted
+// on a key it kept is keyword no matter what its flag says (see worldsapart.js rankActivated).
+const vectorSet = new Set(dynamic.slice(0, 6));   // 6 of the 12 dynamic rows came from retrieval
+const runV = (opts) => run({ isVector: item => vectorSet.has(item), ...opts });
+
+let v = await runV({ maxVectorEntries: 4 });
+eq(v.survivors.size, 17, 'vector cap 4: 7 constants + 4 vector + 6 keyword-only dynamic, 2 vector rows blocked');
+eq([...v.survivors].filter(x => vectorSet.has(x)).length, 4, 'vector cap 4 keeps 4 vector entries');
+eq(dyn(v), 10, 'the 6 non-vector dynamic rows are untouched by the vector cap');
+eq(constants.every(c => v.survivors.has(c)), true, 'vector cap never touches constants');
+
+// Nesting: a dynamic cap below the vector cap binds first, because vector rows are dynamic rows.
+v = await runV({ maxVectorEntries: 6, maxDynamic: 3 });
+eq(dyn(v), 3, 'dynamic cap binds before the vector cap, since vector is a subset of dynamic');
+eq([...v.survivors].filter(x => vectorSet.has(x)).length, 3, 'and the survivors are vector rows, being first in walk order');
+
+// 0 is off, matching every other cap here.
+v = await runV({ maxVectorEntries: 0 });
+eq(dyn(v), 12, 'vector cap 0 is off');
+
+// A blocked row reports the cap by name, so the panel can tell the user which knob to raise.
+v = await runV({ maxVectorEntries: 2 });
+eq(v.skipped.some(s => s.blockedBy.some(b => b.cap === 'vector')), true, 'a vector-blocked row names the vector cap');
+eq(v.skipped.filter(s => s.blockedBy.some(b => b.cap === 'vector')).length, 4, 'the 4 vector rows past the cap are each reported');
