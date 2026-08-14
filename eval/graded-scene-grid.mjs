@@ -240,6 +240,17 @@ const fmt = n => (n == null ? '·' : (+n).toFixed(3));
     // BOTH ARE PRINTED because a parameter's membership changes. k1, b and lexicalWeight move only
     // vectorized rows while they are the only rows carrying textScore, and move every row once a keyword
     // entry's CONTENT is lexically scored.
+    // nDCG@R, R = the relevant count in the population being scored, at the recall bar (>= 3). A fixed k
+    // asks a different question of every scene: at k=10 a scene with 2 relevant saturates on two positions
+    // and one with 26 cannot express sixteen of them. R holds the depth at the scene's own difficulty, so
+    // the number reads as "given a cut in the right place, how good is the ordering" — which is the half
+    // nDCG is for, the other half being where the cut actually fell.
+    //
+    // R IS POOL-DEPENDENT: an incomplete pool understates it and evaluates too shallow. judged@10 is the
+    // guard, and a null scene (R=0) prints '—' rather than 0/0.
+    const ndcgAtR = g => { const R = g.filter(x => x >= 3).length; return R ? ndcg(g, R) : NaN; };
+    const fmtR = v => (Number.isNaN(v) ? '  —   ' : v.toFixed(4));
+
     const layoutOf = list => list.filter(r => !isDurableEntry(r.entry));
     const vectorOf = list => list.filter(r => !isDurableEntry(r.entry) && vectorable(r));
 
@@ -327,7 +338,7 @@ const fmt = n => (n == null ? '·' : (+n).toFixed(3));
         // pure subset operation — a shorter, more focused query can promote an entry the wide capture ranked
         // out of the graded pool entirely — so a depth row with a high blind count is understating itself.
         // If it stays at 0, one wide capture ablates down cleanly and no extra grading is needed.
-        console.log(' depth | qChars  msgs  terms | layout@5 layout@10 vector@10  meanRank  cut P     R     F1     blind');
+        console.log(' depth | qChars  msgs  terms | layout@10 layout@R vector@R  meanRank  cut P     R     F1     blind');
         for (const d of DEPTHS) {
             const q = ranking.buildQuery(chat, { depth: d });
             const st = scanWindowOf(chat, d);
@@ -351,7 +362,7 @@ const fmt = n => (n == null ? '·' : (+n).toFixed(3));
             const pr = keep.length ? tp / keep.length : 0, rc = relInRank ? tp / relInRank : 0;
             const blind = keep.filter(r => !POOL.has(Number(r.key))).length;
             const tag = d === DEPTH ? '  <- as graded' : '';
-            console.log(`${String(d).padStart(6)} | ${String(q.length).padStart(6)}  ${String(Math.min(d, chat.length)).padStart(4)}  ${String(tw ? Object.keys(tw).length : 'all').padStart(5)} | ${ndcg(g, 5).toFixed(4)}  ${ndcg(g, 10).toFixed(4)}  ${ndcg(gVec, 10).toFixed(4)}  ${mean.toFixed(1).padStart(8)}  ${pr.toFixed(3)} ${rc.toFixed(3)} ${((pr + rc) ? 2 * pr * rc / (pr + rc) : 0).toFixed(3)}  ${String(blind).padStart(4)}/${keep.length}${tag}`);
+            console.log(`${String(d).padStart(6)} | ${String(q.length).padStart(6)}  ${String(Math.min(d, chat.length)).padStart(4)}  ${String(tw ? Object.keys(tw).length : 'all').padStart(5)} | ${ndcg(g, 10).toFixed(4)}   ${fmtR(ndcgAtR(g))}   ${fmtR(ndcgAtR(gVec))}  ${mean.toFixed(1).padStart(8)}  ${pr.toFixed(3)} ${rc.toFixed(3)} ${((pr + rc) ? 2 * pr * rc / (pr + rc) : 0).toFixed(3)}  ${String(blind).padStart(4)}/${keep.length}${tag}`);
         }
         return;
     }
@@ -363,7 +374,7 @@ const fmt = n => (n == null ? '·' : (+n).toFixed(3));
     // at all — tuning on @5 optimised a window narrower than the decision being made, and relevance on these
     // scenes runs deep enough (pools bottom out around rank 24-28) that ranks 6-10 carry real signal rather
     // than padding. Argmax on @10 for the same reason.
-    console.log('grid (k1 × b × lexW) — graded nDCG on the scene\n  k1     b   lexW | layout@10 layout@5 vector@10  judged@10');
+    console.log('grid (k1 × b × lexW) — graded nDCG on the scene\n  k1     b   lexW | layout@10 layout@R vector@10 vector@R  judged@10');
     let best = null;
     let worst = null;
     for (const k1 of [1.2, 2, 3]) for (const b of [0.6, 0.75, 0.9]) {
@@ -397,14 +408,14 @@ const fmt = n => (n == null ? '·' : (+n).toFixed(3));
             const j10 = top.length - unjudged.length;
             const g = fuse(layoutOf(rows), lexW).map(r => gradeOf(r) ?? 0);   // unjudged occupies its rank and contributes nothing (makeGradeOf returns null)
             const gVec = fuse(vectorOf(rows), lexW).map(r => gradeOf(r) ?? 0);
-            const n5 = ndcg(g, 5), n10 = ndcg(g, 10), v10 = ndcg(gVec, 10);
-            if (!best || n10 > best.n10) best = { k1, b, lexW, n5, n10, j10, of: top.length, unjudged: unjudged.map(r => `${r.title} (#${top.indexOf(r) + 1})`) };
+            const n10 = ndcg(g, 10), v10 = ndcg(gVec, 10), nR = ndcgAtR(g), vR = ndcgAtR(gVec);
+            if (!best || nR > best.nR || (Number.isNaN(best.nR) && n10 > best.n10)) best = { k1, b, lexW, nR, n10, j10, of: top.length, unjudged: unjudged.map(r => `${r.title} (#${top.indexOf(r) + 1})`) };
             if (!worst || j10 - top.length < worst.j10 - worst.of) worst = { k1, b, lexW, j10, of: top.length };
             const tag = k1 === DEF.k1 && b === DEF.b && lexW === DEF.lexW ? '  <- shipped default' : '';
-            console.log(`${String(k1).padStart(4)}  ${String(b).padStart(4)}  ${String(lexW).padStart(4)} | ${n10.toFixed(4)}    ${n5.toFixed(4)}   ${v10.toFixed(4)}    ${String(j10).padStart(2)}/${top.length}${j10 < top.length ? ' !!' : '   '}${tag}`);
+            console.log(`${String(k1).padStart(4)}  ${String(b).padStart(4)}  ${String(lexW).padStart(4)} | ${n10.toFixed(4)}   ${fmtR(nR)}   ${v10.toFixed(4)}   ${fmtR(vR)}    ${String(j10).padStart(2)}/${top.length}${j10 < top.length ? ' !!' : '   '}${tag}`);
         }
     }
-    console.log(`\nbest nDCG@10: k1=${best.k1} b=${best.b} lexW=${best.lexW} -> ${best.n10.toFixed(4)} (@5 ${best.n5.toFixed(4)}), judged ${best.j10}/${best.of}`);
+    console.log(`\nbest layout@R: k1=${best.k1} b=${best.b} lexW=${best.lexW} -> ${fmtR(best.nR)} (@10 ${best.n10.toFixed(4)}), judged ${best.j10}/${best.of}`);
     // The argmax is the cell whose coverage matters most: if ITS top-10 isn't fully judged, the grid picked a
     // winner partly because nobody graded what it surfaced.
     if (best.j10 < best.of) {
@@ -492,7 +503,7 @@ const fmt = n => (n == null ? '·' : (+n).toFixed(3));
         const gVec = fuse(vectorOf(activated(all)), DEF.lexW).map(r => gradeOf(r) ?? 0);
         const hits = rows.map((r, i) => [gradeOf(r), i + 1]).filter(([g]) => g >= 3).map(([, i]) => i);
         const g = rows.map(r => gradeOf(r) ?? 0);   // unjudged occupies its rank and contributes nothing (makeGradeOf returns null)
-        return { found: hits.length, mean: hits.length ? hits.reduce((a, b) => a + b, 0) / hits.length : NaN, top10: hits.filter(i => i <= 10).length, n10: ndcg(g, 10), v10: ndcg(gVec, 10), j10, of: top.length };
+        return { found: hits.length, mean: hits.length ? hits.reduce((a, b) => a + b, 0) / hits.length : NaN, top10: hits.filter(i => i <= 10).length, n10: ndcg(g, 10), nR: ndcgAtR(g), v10: ndcg(gVec, 10), vR: ndcgAtR(gVec), j10, of: top.length };
     };
     const filterArms = [
         ['production (gaz + boost 3)', termWeights],
@@ -505,10 +516,10 @@ const fmt = n => (n == null ? '·' : (+n).toFixed(3));
         ['+ entry content in gaz', ranking.buildTermWeights(query, new Set([...gaz, ...gazSource.flatMap(e => tokenize(e.content ?? ''))]), P.boost)],
     ];
     console.log(`\nentity filter — mean rank of the ${relN} graded targets (grade>=3), lower is better`);
-    console.log('  arm                          | terms  found  mean rank  in top10  layout@10 vector@10  judged@10');
+    console.log('  arm                          | terms  found  mean rank  in top10  layout@10 layout@R vector@10 vector@R  judged@10');
     for (const [label, tw] of filterArms) {
         const m = rankMetrics(tw);
         const tag = tw === termWeights ? '  <- shipped' : '';
-        console.log(`  ${label.padEnd(28)} | ${String(tw ? Object.keys(tw).length : 'all').padStart(5)}  ${String(m.found).padStart(5)}  ${m.mean.toFixed(1).padStart(9)}  ${String(m.top10).padStart(8)}  ${m.n10.toFixed(4)}  ${m.v10.toFixed(4)}   ${String(m.j10).padStart(2)}/${m.of}${m.j10 < m.of ? ' !!' : ''}${tag}`);
+        console.log(`  ${label.padEnd(28)} | ${String(tw ? Object.keys(tw).length : 'all').padStart(5)}  ${String(m.found).padStart(5)}  ${m.mean.toFixed(1).padStart(9)}  ${String(m.top10).padStart(8)}  ${m.n10.toFixed(4)}  ${fmtR(m.nR)}  ${m.v10.toFixed(4)}  ${fmtR(m.vR)}   ${String(m.j10).padStart(2)}/${m.of}${m.j10 < m.of ? ' !!' : ''}${tag}`);
     }
 })();
