@@ -270,3 +270,10 @@ eq(dyn(v), 12, 'vector cap 0 is off');
 v = await runV({ maxVectorEntries: 2 });
 eq(v.skipped.some(s => s.blockedBy.some(b => b.cap === 'vector')), true, 'a vector-blocked row names the vector cap');
 eq(v.skipped.filter(s => s.blockedBy.some(b => b.cap === 'vector')).length, 4, 'the 4 vector rows past the cap are each reported');
+
+// A vectorized CONSTANT is not dynamic, so no entry cap may reject it — the vector cap included.
+// isVector is provenance and answers true for one, which is exactly why the clause guards on isDynamic
+// rather than trusting the predicate.
+const vAll = await run({ isVector: () => true, maxVectorEntries: 2 });
+eq(constants.every(c => vAll.survivors.has(c)), true, 'a vector cap never rejects a constant, whatever isVector says');
+eq([...vAll.survivors].filter(x => dynamicSet.has(x)).length, 2, 'and still caps the dynamic vector rows at 2');

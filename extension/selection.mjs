@@ -211,8 +211,11 @@ export async function applyBudget({ ranked, isDynamic, maxTokens, maxTotal, maxD
             blockedBy.push({ cap: 'dynamic', shortfall: 1 });
         }
         // Retrieval's own ceiling, inside the dynamic block. Nested rather than parallel: a vector entry
-        // is a dynamic entry, so maxDynamic still binds first when it is the tighter of the two.
-        if (maxVectorEntries > 0 && isVector(item) && vector >= maxVectorEntries) {
+        // is a dynamic entry, so maxDynamic still binds first when it is the tighter of the two. Guarded
+        // on isDynamic here too, not just at the increment below — isVector is provenance (retrieval
+        // returned this entry), and a constant can be vectorized and still show up in that provenance,
+        // so vector ⊆ dynamic has to be enforced at the block rather than assumed of the caller's predicate.
+        if (maxVectorEntries > 0 && isDynamic(item) && isVector(item) && vector >= maxVectorEntries) {
             blockedBy.push({ cap: 'vector', shortfall: 1 });
         }
         const bookCap = capOf(item);
