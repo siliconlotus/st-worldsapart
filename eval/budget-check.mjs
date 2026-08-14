@@ -291,3 +291,35 @@ const vAfterCap = await applyBudget({
     maxTokens: 0, maxTotal: 0, maxDynamic: 0, maxVectorEntries: 2,
 });
 eq(vAfterCap.survivors.has(constants[0]), true, 'a constant walked after the vector cap is spent still survives — the block clause checks isDynamic, not just the counter');
+
+// --- cutDynamic: the cliff's population and the list it hands the budget -----------------------------
+import { cutDynamic } from '../extension/selection.mjs';
+
+const row = (key, fused) => ({ key, fused, entry: {} });
+// A clear cliff after the third row.
+const res = [row('r1', 9), row('r2', 8.9), row('r3', 8.8), row('r4', 1), row('r5', 0.9), row('r6', 0.8)];
+const stick = [row('s1', 0.1)];
+const cons = [row('k1', 0)];
+const cliffCfg = { mode: 'elbow', minVectorEntries: 1, elbowSensitivity: 1.5 };
+
+let c = cutDynamic({ sticky: stick, constant: cons, results: res }, cliffCfg);
+eq(c.ranked.map(x => x.key).join(','), 's1,k1,r1,r2,r3', 'sticky and constant lead, then the surviving prefix');
+eq(c.dropped.map(x => x.key).join(','), 'r4,r5,r6', 'cliff losers are named, not silently absent');
+eq(c.ranked.includes(stick[0]) && c.ranked.includes(cons[0]), true, 'sticky and constant always survive the cliff');
+
+// The population excludes sticky and constant, so their low fused scores cannot move the cliff. A
+// constant scores low by ELIGIBILITY (no vector signal, often no keys), not by irrelevance.
+const withNoise = cutDynamic({ sticky: [row('s1', 0.05)], constant: [row('k1', 0.04)], results: res }, cliffCfg);
+eq(withNoise.dropped.map(x => x.key).join(','), 'r4,r5,r6', 'a constant s low score does not shift where the cliff falls');
+
+// 'off' disables the cliff without disabling the budget that follows.
+c = cutDynamic({ sticky: stick, constant: cons, results: res }, { ...cliffCfg, mode: 'off' });
+eq(c.dropped.length, 0, 'mode off drops nothing');
+eq(c.ranked.length, 8, 'mode off still assembles the full walk order');
+
+// Empty blocks are the ordinary keyword-only and retrieval-only cases, not edge cases.
+c = cutDynamic({ sticky: [], constant: [], results: [] }, cliffCfg);
+eq(c.ranked.length, 0, 'nothing activated');
+eq(c.dropped.length, 0, 'and nothing dropped');
+c = cutDynamic({ sticky: stick, constant: cons, results: [] }, cliffCfg);
+eq(c.ranked.map(x => x.key).join(','), 's1,k1', 'a scene with no dynamic rows still ranks its always-on ones');

@@ -114,6 +114,37 @@ export function cutRetrieved(ranked, { mode = 'count', maxVectorEntries = 20, mi
 }
 
 /**
+ * Stage 4's first cut: the cliff, over the dynamic block, ahead of the budget.
+ *
+ * THREE CUTS AT STAGE 4, EACH ANSWERING ONE QUESTION. The cliff decides relevance; the entry maxes
+ * decide how many; the token budget decides how much. The cliff therefore takes no count and runs
+ * unconditionally — an irrelevant entry should not reach the prompt whether or not there was room for it,
+ * and a flat ranking with no cliff survives whole for the entry maxes to bound.
+ *
+ * STICKY AND CONSTANT ARE NOT IN THE POPULATION. The budget may cut a constant for capacity; the cliff
+ * may not cut it for relevance, because marking an entry constant is that judgement already made. They
+ * also score low by ELIGIBILITY rather than by irrelevance — a constant has no vector signal and often
+ * no keys — so including them would both cut them immediately and distort the mean gap the elbow reads.
+ *
+ * `results` must already be in retention order, so the cliff reads the order the budget walks.
+ *
+ * @param {object} blocks The three activation classes
+ * @param {Array<{fused: number}>} blocks.sticky Armed stickies, authored order
+ * @param {Array<{fused: number}>} blocks.constant Constants, authored order
+ * @param {Array<{fused: number}>} blocks.results The dynamic block, retention order
+ * @param {object} cfg Cutoff settings, as cutRetrieved takes them
+ * @returns {{ranked: Array<object>, dropped: Array<object>}} Budget walk order, and the cliff's losers
+ */
+export function cutDynamic({ sticky = [], constant = [], results = [] }, cfg = {}) {
+    const kept = cutRetrieved(results, cfg);
+    const keptSet = new Set(kept);
+    return {
+        ranked: [...sticky, ...constant, ...kept],
+        dropped: results.filter(item => !keptSet.has(item)),
+    };
+}
+
+/**
  * The `ignoreBudget` the AUTHOR set, which is not the one core is shown.
  *
  * WA's budget supersedes core's, and that is not a preference core can be asked to honour: core's
