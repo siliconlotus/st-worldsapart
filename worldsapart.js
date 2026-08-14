@@ -37,6 +37,7 @@ import { ARGUMENT_TYPE, SlashCommandArgument, SlashCommandNamedArgument } from '
 import { ConnectionManagerRequestService } from '../../shared.js';
 import { getStringHash, escapeHtml, getCharaFilename, download } from '../../../utils.js';
 import { pluginFingerprint, PLUGIN_FILES } from './plugin/fingerprint.mjs';
+import { admitCeiling } from './plugin/scoring.mjs';
 import * as ranking from './extension/ranking.mjs';
 import * as matcher from './extension/matcher.mjs';
 import { registerKeys, resetSmartKeys } from './extension/smartkeys.mjs';
@@ -260,9 +261,14 @@ function renderPluginSetup() {
  * @returns {Promise<object>} Grouped results
  */
 async function queryCollections(args) {
+    // ENTRIES or CHUNKS depending on which path answers — selection.mjs admitCeiling carries both
+    // numbers and why they differ. Chosen HERE rather than by the caller because the fallback below can
+    // fire mid-request, and a ceiling picked before the attempt would ask for entries and be handed
+    // chunks. A safety limit on what a pathological scene may feed core's scan loop, not a verdict on
+    // any entry — stage 4 makes the only relevance decision.
     if (settings().meanCentered && await hasPlugin()) {
         try {
-            const body = vectorRequestBody(args);
+            const body = vectorRequestBody({ ...args, topK: admitCeiling(true) });
             // The plugin needs the provider settings under one key, as the server does.
             const response = await fetch('/api/plugins/worlds-apart/query-multi', {
                 method: 'POST',
@@ -296,7 +302,9 @@ async function queryCollections(args) {
     // Stock ST can't quantile ('auto' resolves in the plugin) — pin the old centered default; on raw
     // scores it's permissive and client-side selection narrows.
     if (args.threshold === 'auto') args = { ...args, threshold: 0.1 };
-    return await vectorPost('query-multi', args) ?? {};
+    // No server-side pooling here, so K counts chunks and must run deep enough for each entry's best
+    // one to survive. Re-asked rather than inherited from a failed plugin attempt.
+    return await vectorPost('query-multi', { ...args, topK: admitCeiling(false) }) ?? {};
 }
 
 // ---------------------------------------------------------------------------
@@ -494,43 +502,9 @@ async function scoreEntriesUnsafe(searchText, termWeights = null) {
         synced.owners.forEach((v, k) => owners.set(`${synced.collectionId}${US}${k}`, v));
     }
 
-    // ENTRIES to request, not chunks — the plugin pools each entry's best chunk before it cuts (see
-    // plugin/scoring.mjs poolEntries), so this is now a count of the thing the cutoff actually operates on.
-    //
-    // It used to be `maxVectorEntries * 20`, undocumented since the initial commit, because topK had to
-    // cover two unrelated depths at once: how many entries the user wants activated, and how deep the chunk
-    // list must run for each entry's best chunk to survive. Measured over the three graded corpora
-    // (eval/eval-data): chunks/entry mean 9.1-10.3 (max 27-56), reaching 20 distinct entries took 18/31/18
-    // chunks, but the per-entry maxima didn't stabilise until K ~= 150-300 — a corpus property, not a user
-    // preference. So x20 over-asked by ~13x for the entry count while still being the only thing keeping
-    // pooling honest, and at the shipped 400 it returned essentially the whole book (112/115, 96/96, 70/70).
-    // Pooling server-side makes the maxima exact at any K, which leaves only the entry count to size.
-    //
-    // The floor of 100 is the ELBOW's requirement, not pooling's, and it is deliberately a constant rather
-    // than a multiple of the cap — that conflation is exactly what was just removed. elbowSensitivity is a
-    // multiple of the MEAN gap across the retrieved list, so a short list has a coarse mean and the cliff
-    // fires early. Measured on the three graded scenes (eval/graded-scene-grid.mjs --topk, absolute F1 over
-    // grade>=3, mean of 3):
-    //
-    //   topK (entries)      40      60     100     400    4000
-    //   elbow sens 1.5   0.575   0.632   0.623   0.623   0.623
-    //   count max=10     0.607   0.540   0.540   0.540   0.540
-    //
-    // The elbow's window saturates by 60 and is flat to 4000; 100 sits inside that plateau without being the
-    // argmax of a 3-scene sweep. count/10 reads better at 40 for an unrelated reason worth knowing: RRF ranks
-    // within the candidate set, so a narrower topK reorders the top 10 as well as truncating the tail.
-    //
-    // ponytail: a constant, so a corpus with a much longer relevance tail than these three would want more.
-    // The knob to derive it from is the retrieved list's gap distribution, not any user setting.
-    //
-    // Read from settings(), NOT effectiveCutoff(): /wa-grade widens the CUT, and if that widening also moved
-    // retrieval depth the graded ranking would not be the live one — RRF ranks within the candidate set, so
-    // a different topK reorders the top as well as lengthening the tail (see above).
-    const topK = Math.max(100, settings().maxVectorEntries * 2);
     const results = await queryCollections({
         collectionIds,
         searchText,
-        topK,
         threshold: settings().scoreThreshold,
         termWeights,
     });
@@ -683,7 +657,7 @@ const fuseRetrieval = (scores) => ranking.fuseRetrieval(scores, {
 });
 
 /**
- * Prints the vector-candidates table: the retrieved ranking, the gap the cutoff reads, and where it fell.
+ * Prints the vector-candidates table: the admitted ranking and the gap between neighbours.
  *
  * Takes a ranking rather than computing one. /wa-debug used to render this by calling the /wa-query probe,
  * which scored the query a SECOND time — a replay that could disagree with the retrieval it was explaining
@@ -691,24 +665,22 @@ const fuseRetrieval = (scores) => ranking.fuseRetrieval(scores, {
  * so the table is a view of what happened, not a re-enactment. /wa-query still calls it for arbitrary text.
  *
  * @param {Array<{key: string, value: object, fused: number, vectorRank?: number, textRank?: number}>} ranked fuseRetrieval output
- * @param {number} cut How many entries cutRetrieved kept
- * @param {object[]} targets Vectorized entries, for titles
- * @param {string} searchText The query, for the header
+ * @param {object[]} targets Vectorized entries in the active books
+ * @param {string} searchText The query
  */
-function reportVectorCandidates(ranked, cut, targets, searchText) {
+function reportVectorCandidates(ranked, targets, searchText) {
     const byKey = new Map(targets.map(x => [`${x.world}.${x.uid}`, x]));
     const spread = ranked[0].value.score - ranked[Math.min(4, ranked.length - 1)].value.score;
 
     console.log(`Worlds Apart: query "${searchText.slice(0, 80)}${searchText.length > 80 ? '…' : ''}" (${searchText.length} chars)`);
-    console.log(`Worlds Apart: ${ranked.length} entries retrieved, ${settings().retrievalMode} ranking, ${settings().vectorCutoff} cutoff kept ${cut}, top-5 vector spread ${spread.toFixed(5)}`);
-    console.log('%cWorlds Apart · vector candidates — the full ranked list of retrieved vectors, with the gap the cutoff reads (kept = above the cutoff)', 'font-weight: bold');
-    // Lead with the cutoff story — the gap the elbow reads, whether the row was kept,
-    // and which entry — so the boundary is legible without dragging columns. Per-signal
-    // scores and the matched chunk follow.
-    console.table(ranked.slice(0, Math.max(cut, settings().maxVectorEntries) * 2).map((row, index) => ({
-        // The gap this row opens below the one above — what the elbow cuts on.
+    console.log(`Worlds Apart: ${ranked.length} entries admitted, ${settings().retrievalMode} ranking, top-5 vector spread ${spread.toFixed(5)}`);
+    console.log('%cWorlds Apart · vector candidates — the full admitted ranking, best first', 'font-weight: bold');
+    // The gap between neighbours and which entry — so stage 4's cut (fuseRanks + applyBudget) is legible
+    // against this ranking without dragging columns. Per-signal scores and the matched chunk follow. No
+    // slice: the whole admitted ranking is the point of this table now that stage 1 doesn't cut it.
+    console.table(ranked.map((row, index) => ({
+        // The gap this row opens below the one above — what a rank-ordered cliff would read.
         gap: index > 0 ? Number((ranked[index - 1].fused - row.fused).toFixed(6)) : null,
-        kept: index < cut,
         title: byKey.get(row.key)?.comment,
         '#': index + 1,
         vec: Number(row.value.score.toFixed(5)),
@@ -777,23 +749,27 @@ async function retrieve(chat) {
     }
 
     const ranked = fuseRetrieval(scores);
-    const kept = cutRetrieved(ranked);
-    const winnerKeys = new Set(kept.map(x => x.key));
+    const winnerKeys = new Set(ranked.map(x => x.key));
 
-    runState.lastCutKept = kept.length;
+    runState.lastCutKept = null;
 
-    // /wa-debug's stage-1 table, rendered from the selection that just happened rather than a replay.
+    // /wa-debug's stage-1 table, rendered from the admission that just happened rather than a replay.
     if (runState.verboseRun) {
-        reportVectorCandidates(ranked, kept.length, targets, searchText);
+        reportVectorCandidates(ranked, targets, searchText);
     }
 
+    // EVERY admitted entry, not a surviving prefix. Stage 3 looks its vector and text scores up from
+    // here, so stashing only survivors would leave every entry stage 4 has yet to judge without the two
+    // signals it was admitted on — and a missing signal reads as a low score rather than as an error.
     for (const [key, value] of scores) {
-        if (winnerKeys.has(key)) {
-            runState.lastScores.set(key, value.score);
-            runState.lastTextScores.set(key, value.bm25 ?? 0);
-        }
+        runState.lastScores.set(key, value.score);
+        runState.lastTextScores.set(key, value.bm25 ?? 0);
     }
 
+    // winnerKeys is exactly scores' keys — everything that cleared the threshold and got ranked, no
+    // narrower cut. targets includes vectorized entries the query never scored at all (below threshold,
+    // or absent from the store's response); admitting those too would return an entry with no vector
+    // score for stage 3 to look up.
     return targets.filter(x => winnerKeys.has(`${x.world}.${x.uid}`));
 }
 
@@ -2241,7 +2217,7 @@ async function probeQuery(_named, text, { unfiltered = false } = {}) {
     }
 
     const ranked = fuseRetrieval(scores);
-    reportVectorCandidates(ranked, cutRetrieved(ranked).length, targets, searchText);
+    reportVectorCandidates(ranked, targets, searchText);
 
     return '';
 }
