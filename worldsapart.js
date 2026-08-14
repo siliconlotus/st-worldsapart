@@ -1788,20 +1788,25 @@ async function rankActivated(args) {
     // Built whenever a debug-class run is in flight, and stashed: /wa-grade grades THESE rows rather than
     // recomputing a ranking, so the grades attach to the selection that actually happened.
     if (runState.verboseRun) {
-        // The PRE-CLIFF, PRE-BUDGET population (see lastRanked), so a row exists for every entry this
-        // pass chose between and `cut`/`cutBy` record which side it fell on. `ranked` is survivors only
-        // by this point.
+        // The PRE-CLIFF, PRE-BUDGET population (see lastRanked): every entry that shipped, plus — down to
+        // the grading depth below — the ones this pass rejected, with `cut`/`cutBy` recording which side
+        // each fell on. `ranked` is survivors only by this point.
         //
         // /wa-grade's candidates=N caps the DYNAMIC rows and nothing else. It is a grading-budget
         // decision rather than a selection one: the grading popup LISTS sticky and constant rows but
         // does not grade them, so capping the whole walk order would spend slots on rows nobody judges
         // and N would mean a different depth on every book. A grading run has no cliff (effectiveCliff),
         // so N cuts into the full population instead of into whatever the cliff left.
+        //
+        // WHAT IT BOUNDS IS THE EXTRA, and it never drops a row that shipped. applyBudget SKIPS rather
+        // than stops (selection.mjs), so a short entry below rank N still reaches the prompt when the
+        // larger ones ahead of it did not fit — and a shipped row with no capture row is invisible to
+        // grading and to every offline replay of the scene, with nothing downstream able to notice.
+        const kept = new Set(ranked);
         let dynamicSeen = 0;
         const gradeDepth = runState.gradeCutoff?.maxVectorEntries ?? 0;
         const population = (runState.lastRanked ?? ranked)
-            .filter(x => !gradeDepth || (blockOf.get(x) ?? 'dynamic') !== 'dynamic' || ++dynamicSeen <= gradeDepth);
-        const kept = new Set(ranked);
+            .filter(x => !gradeDepth || (blockOf.get(x) ?? 'dynamic') !== 'dynamic' || ++dynamicSeen <= gradeDepth || kept.has(x));
         // WHY a row was cut, not just that it was. applyBudget already computes this per skipped entry
         // (`blockedBy`) and it is the difference between "ranked too low" and "would not fit" — a large
         // entry is SKIPPED so smaller ones behind it still get in (selection.mjs), so a cut row is not
