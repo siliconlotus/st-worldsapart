@@ -487,7 +487,9 @@ export function cliffCut(layout, P) {
  * @param {object} args.sample Parsed sample
  * @param {object} [args.overrides] Parameter overrides for this arm
  * @param {number} [args.k] Coverage/nDCG cutoff (10)
- * @returns {Promise<{n: number, nAt5: number, judged: number, of: number, unjudged: string[], terms: number|null}>}
+ * @returns {Promise<{n: number, nAt5: number, judged: number, of: number, unjudged: string[], terms: number|null,
+ *   atR: {precision: number, recall: number, f: number, n: number},
+ *   delivered: {precision: number, recall: number, f: number, n: number}, divergence: number}>}
  */
 export async function scoreScene({ sample: S, overrides = {}, k = 10, vectors, model, ollama, index, topK, scene: preloaded, qv: cachedQv } = {}) {
     const P = sceneParams(S, overrides);
@@ -555,12 +557,41 @@ export async function scoreScene({ sample: S, overrides = {}, k = 10, vectors, m
     const recall = relevant ? topGrades.filter(x => x >= 3).length / relevant : 0;
     const f2 = fbeta(precision, recall, RECALL_WEIGHT);
 
+    // TWO MORE WINDOWS ON THE SAME BARS, because a fixed k cannot answer either question this system is
+    // selecting for. The bars, the gradeCredit rule and RECALL_WEIGHT are shared with the block above; only
+    // the window changes, so the three are comparable to each other and nothing else needs restating.
+    //
+    //   @R          the top `relevant` rows. Budget-invariant by construction — a user's token ceiling is
+    //               set by cost and is not a property of the ranking, so it cannot be in the window.
+    //   @delivered  the rows stage 4 hands over with capacity NOT BINDING, which is the cliff's own output.
+    //               `delivered` is the accurate name: the intent is that it lands under the budget rather
+    //               than at it, so the count is the configuration's, not the ceiling's.
+    //
+    // Both drop the reference tier, exactly as the block above does — grading a keyword-activated entry is
+    // the same category error at any window, and a delivered set scored with reference rows in the
+    // denominator against an R that excludes them would not be one metric.
+    const scoreWindow = (rows) => {
+        const gr = rows.map(r => gradeOf(r) ?? 0);
+        const p = rows.length ? gr.reduce((s, x) => s + gradeCredit(x), 0) / rows.length : 0;
+        const rc = relevant ? gr.filter(x => x >= 3).length / relevant : 0;
+        return { precision: p, recall: rc, f: fbeta(p, rc, RECALL_WEIGHT), n: rows.length };
+    };
+    const ranked = fuse(rankable, P.LEXW);
+    const atR = scoreWindow(ranked.slice(0, relevant));
+    // cliffCut takes the durable-filtered layout INCLUDING reference rows, because the runtime's cliff can
+    // drop those too; the reference exclusion is applied to what it returns, not to what it is handed.
+    const delivered = scoreWindow(cliffCut(fuse(all.filter(r => !isDurableEntry(r.entry)), P.LEXW), P).kept.filter(r => !isReference(r.entry)));
+
     return {
         n: ndcg(g, k),
         nAt5: ndcg(g, 5),
         precision,
         recall,
         f2,
+        atR,
+        delivered,
+        // Reported rather than derived at every call site, so two tools cannot disagree about its sign.
+        divergence: delivered.f - atR.f,
         relevant,
         judged: top.length - unjudged.length,
         of: top.length,

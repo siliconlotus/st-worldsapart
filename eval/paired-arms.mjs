@@ -174,9 +174,13 @@ const K = Number(arg('--k') ?? 10);
 // so an arm whose action is ADMISSION is measured by the half it does not move. `--metric f2` switches the
 // delta to F-beta(2) on the asymmetric bars (scene.mjs), which weights recall twice. Baseline and arm are
 // always scored on the same one, so a run mixing them is impossible.
+// `fAtR` and `fDelivered` are the two windows scoreScene reports (see its SET METRICS block); `divergence`
+// is their difference. All three ignore --k, being sized by the scene's relevant count and by what the
+// configuration delivers rather than by a fixed depth.
 const METRIC = arg('--metric') ?? 'n';
-if (!['n', 'nAt5', 'f2', 'recall', 'precision'].includes(METRIC)) { console.error(`unknown --metric ${METRIC}`); process.exit(2); }
-const mOf = r => r[METRIC];
+const WINDOWED = { fAtR: r => r.atR.f, fDelivered: r => r.delivered.f, divergence: r => r.divergence };
+if (!['n', 'nAt5', 'f2', 'recall', 'precision', ...Object.keys(WINDOWED)].includes(METRIC)) { console.error(`unknown --metric ${METRIC}`); process.exit(2); }
+const mOf = r => (WINDOWED[METRIC] ? WINDOWED[METRIC](r) : r[METRIC]);
 const MODEL = process.env.WA_EMBED_MODEL ?? 'bge-m3';
 const OLLAMA = process.env.OLLAMA_URL ?? 'http://localhost:11434';
 const fx = n => (n >= 0 ? '+' : '') + n.toFixed(4);
@@ -196,6 +200,9 @@ const fx = n => (n >= 0 ? '+' : '') + n.toFixed(4);
         const base = await scoreScene({ sample: S, k: K, scene, qv });
         scenes.push({ path, name: S.name ?? path, S, scene, qv, P, base });
         console.log(`scene "${S.name ?? path}": baseline ${METRIC}@${K} ${mOf(base).toFixed(4)} (nDCG ${base.n.toFixed(4)}, P ${base.precision.toFixed(3)}, R ${base.recall.toFixed(3)}, rel ${base.relevant}), judged ${base.judged}/${base.of}${base.judged < base.of ? ' !!' : ''}`);
+        console.log(`    F@R ${base.atR.f.toFixed(4)} (P ${base.atR.precision.toFixed(3)} R ${base.atR.recall.toFixed(3)}, n ${base.atR.n})`
+            + `   F@delivered ${base.delivered.f.toFixed(4)} (P ${base.delivered.precision.toFixed(3)} R ${base.delivered.recall.toFixed(3)}, n ${base.delivered.n})`
+            + `   divergence ${(base.divergence >= 0 ? '+' : '') + base.divergence.toFixed(4)}`);
         // `of` is the rankable top-k, so 0 means the reference-tier removal took EVERYTHING — a
         // reference-only book. Every arm then scores 0 and every delta is a tie, so the scene inflates the
         // scene count without contributing evidence. The judged<of check cannot see it: 0 < 0 is false.
