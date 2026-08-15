@@ -708,19 +708,53 @@ instances the books on disk hold.
    precision crediting a 2 at half (`metrics.mjs` `gradeCredit`). Nothing grades stage 4 until it
    exists, so every cliff default is carried over rather than chosen. Blocks three tuning decisions; has
    data waiting for it now.
-2. **Recursion scoring** — buffer scoring plus trigger-depth weighting, one change. Ships on reasoning
+2. **`promote` — an author declaration that activation is sufficient.** A promoted entry enters the
+   layout whenever its keys fire, exempt from the cliff. It is the per-entry form of *triggered ==
+   relevant*, which stage 4 broke by having the cliff arbitrate keyword-activated entries alongside
+   retrieved ones. The fused score still orders it within its block; it no longer gates inclusion.
+
+   The walk becomes `[constant, fired-sticky, promoted, dynamic]`. `cutDynamic` gains one array and
+   exempts those rows as it exempts constants — the harness must too, or it cuts what the runtime
+   keeps. The RANKING metrics still rank them: how a haystack should be sorted is a question about the
+   entries, and only `constant` is outside that population.
+
+   **Exempt from relevance, not capacity.** The per-book cap applies, which is what stops one book
+   flooding a turn. `maxDynamic` does not — that cap bounds relevance-selected material, and charging
+   author-declared entries against it would make promoting things silently eat retrieval, the failure
+   `applyBudget` already refuses for `ignoreBudget` rows. `maxVectorEntries` cannot apply: it reads the
+   `vectorized` flag and a promoted keyword entry does not carry it. Only `ignoreBudget` exempts from
+   the budget itself.
+
+   **It replaces sticky-as-priority.** ST fills sticky entries first, making sticky the only reliable
+   way to guarantee a keyword entry is inserted, so it carries persistence, cliff exemption and queue
+   position at once — and the ST maintainers recommend it for exactly that. **Measured**: 34 of
+   `Sommers_Pack__v22`'s 45 live reference entries are `sticky: 1, constant: false`. Promoting them
+   keeps the exemption the author wanted and drops the rest.
+
+   Stored as `entry.promote`, top-level beside `sticky` and `vectorized` rather than under
+   `extensions` — `convertCharacterBook` reads 25 fields OUT of `extensions` and never copies the map,
+   so an ST entry has no such key. It is author data rather than WA scratch, so it takes no `wa`
+   prefix. It survives loose-JSON import, load and save (`addMissingWorldInfoFields` backfills and
+   deletes nothing; `/api/worldinfo/edit` writes verbatim; the Studio mutates the loaded object), and
+   is lost only through `convertCharacterBook`, as CCv2 `priority` is (`upstream-st.md` #13).
+
+   No per-book count is worth surfacing: promoted entries are situational, so forty of them is not
+   forty constants — activation gates them and most turns fire a handful. The number that means
+   something is how many fired on THIS turn, which is a runtime observation.
+
+3. **Recursion scoring** — buffer scoring plus trigger-depth weighting, one change. Ships on reasoning
    rather than evidence (`world_info_recursive` is off here and no book in the corpus exercises it), so
    it waits on a recursion-using book.
-3. **Witness spans**, then **proximity** — they share one collector, and the display half lands first
+4. **Witness spans**, then **proximity** — they share one collector, and the display half lands first
    because it is what tells a proximity key's classes apart.
-4. **`probeKeys`** (pure: keys × segments → verdict, count, witnesses), then the **Keyword Lab** tab
+5. **`probeKeys`** (pure: keys × segments → verdict, count, witnesses), then the **Keyword Lab** tab
    (paste text or pick an entry/chat, see what hits), then wiring the same function into `scanChats` so
    `?` and `/re/` keys finally get chat evidence.
-5. **`chat common` as a raising flag** — currently `KEY_CHAT_COMMON` can only confirm another flag. It
+6. **`chat common` as a raising flag** — currently `KEY_CHAT_COMMON` can only confirm another flag. It
    needs the structural exclusion (constant/sticky) decided and the 20% re-read against what survives.
-6. **Key-side variant expansion**: hyphen ↔ space, since compounds are written both ways and prose
+7. **Key-side variant expansion**: hyphen ↔ space, since compounds are written both ways and prose
    picks per term. Quoting suppresses generation.
-7. **Orthographic expansion for REGEX keys**, which belongs to that pass and not to the fold — a
+8. **Orthographic expansion for REGEX keys**, which belongs to that pass and not to the fold — a
    pattern is code, so rewriting `…` to `...` turns a literal into three wildcards. Expansion has no
    equivalent problem because a character class matches exactly one character while an alternation has
    no such limit. **Only 1→1 substitutions are generated**: a one-character swap is local and splices
@@ -734,10 +768,10 @@ instances the books on disk hold.
    possessives, 18 are above 90% curly (worst 97.6%), 91 sit between 5% and 95%, and 44 are under 5%.
    The mixed chats are the worse failure, since a key that fires SOMETIMES reads as weak rather than
    broken. Which argues for building it BEFORE the keys exist.
-8. **A grading row's key count is a SCORE wearing a count's name.** `keywordScore` pushes
+9. **A grading row's key count is a SCORE wearing a count's name.** `keywordScore` pushes
    `hits.count = scoreBoost`, so `? fire::3` displays `3` for a single occurrence and the row reads as
    "fired three times". Independent of the witness-span work and fixable on its own.
-9. **Remove `ownActivation`** — deprecated, and still a bound setting (`#wa_own_activation`), so its
+10. **Remove `ownActivation`** — deprecated, and still a bound setting (`#wa_own_activation`), so its
    off position is reachable today. Removing it also retires the only code and the only rules that
    exist for that configuration: the deletion path (`matcher.activationPrunes`, called at
    `worldsapart.js` `rankActivated`) and the ruling that **deletion ships with no group guard, so a
@@ -753,9 +787,9 @@ instances the books on disk hold.
    in 2 books. Zero boundary, zero depth, zero unexplained; sticky exemptions are not modelled offline,
    so it is an upper bound. **Measured** 0 of 2,112 enabled entries in a group, so the group behaviour
    is untestable without a fixture; the sentinel's `terrace` group (uids 8–9) is that fixture.
-10. **`reportFailure`: retrieval failure is a failure, not a degradation.** The two-severity split rests
+11. **`reportFailure`: retrieval failure is a failure, not a degradation.** The two-severity split rests
    on "keys are still handled", which is false for any vectorized entry under `suppressVectorKeys`.
-11. **Suggester i18n, none of it started.** `ZIPF_EN` scores non-English function words as maximally
+12. **Suggester i18n, none of it started.** `ZIPF_EN` scores non-English function words as maximally
     rare, so the gate designed to reject common words would propose them; a few are present with
     meaningless values, which is worse than absent. The suggester should detect that its priors do not
     apply and stand down rather than invert. Accent variants belong here too — `Gérard`/`Gerard` is a
