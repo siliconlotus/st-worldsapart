@@ -1984,10 +1984,20 @@ async function rankActivated(args) {
  */
 async function dryRun(verbose = false) {
     const context = getContext();
-    const chat = context.chat ?? [];
+    // is_system FIRST, because production never sees those messages and a dry run that does is not a dry
+    // run of production. ST filters them out of `coreChat` before any interceptor is called
+    // (script.js: `chat.filter(x => !x.is_system || ...)`), so `intercept` is handed a chat that already
+    // lacks them; reading context.chat raw here put hidden turns into the query and the scan window.
+    //
+    // It matters most exactly where it is least visible. STMemoryBooks can hide a turn once it has been
+    // swept into a memory entry, so a well-developed chat is the one most likely to be mostly hidden —
+    // 68% on the chat that surfaced this — and every /wa-grade capture from it described a scene no
+    // generation could produce.
+    const rawChat = context.chat ?? [];
+    const chat = rawChat.filter(x => x && !x.is_system);
 
     if (!chat.length) {
-        toastr.warning('No chat to scan.', 'Worlds Apart');
+        toastr.warning(rawChat.length ? 'Every message in this chat is hidden.' : 'No chat to scan.', 'Worlds Apart');
         return '';
     }
 

@@ -21,6 +21,7 @@
 //   node eval/synth-scenes.mjs --chat <chat.jsonl> --book <world name> --msgs 123,456 [--write]
 //   node eval/synth-scenes.mjs --chat <chat.jsonl> --book <world name> --n 14 --seed 7 [--write]
 //   node eval/synth-scenes.mjs --from <bundle.json> --msgs same [--write]
+//   ... [--include-hidden]   derive turns marked is_system, for scenes graded before they were hidden
 // Dry by default: prints what it would generate. Each bundle is written as it is produced, never at the end.
 import { readFileSync, writeFileSync, mkdirSync, existsSync } from 'node:fs';
 import { basename, dirname, resolve as resolvePath } from 'node:path';
@@ -49,6 +50,7 @@ const arg = k => { const i = argv.indexOf(k); return i >= 0 ? argv[i + 1] : null
 const WRITE = argv.includes('--write');
 const FROM = arg('--from');
 const MIN_HISTORY = Number(arg('--min-history') ?? 50);
+const INCLUDE_HIDDEN = argv.includes('--include-hidden');
 const OUT_DIR = arg('--out-dir') ?? (FROM ? dirname(resolvePath(FROM)) : '.');
 const MODEL = arg('--model') ?? process.env.WA_EMBED_MODEL ?? 'bge-m3';
 const OLLAMA = process.env.OLLAMA_URL ?? 'http://localhost:11434';
@@ -122,8 +124,22 @@ if (arg('--msgs') === 'same') {
     picks.sort((a, b) => a - b);
 } else { console.error('pass --msgs a,b,c or --n N'); process.exit(2); }
 
-const bad = picks.filter(i => !records[i] || !isMessage(records[i]) || records[i].is_system);
-if (bad.length) { console.error(`message id(s) ${bad.join(', ')} are missing or hidden in ${basename(chatPath)} — a raw index must name a visible message`); process.exit(2); }
+// HIDDEN TURNS ARE STILL SCENES. is_system is a rule about what the runtime SCANS, not a statement about
+// whether the turn happened or whether an entry is relevant to it — a grade is a judgement about the
+// scene's content, and hiding a turn afterwards does not retract it. So --include-hidden derives them,
+// treating hidden messages as present when building the query and scan window, which is the only way to
+// reproduce a scene that was graded while they were visible.
+//
+// Off by default and STAMPED on the bundle when used, because such a scene is not one the runtime could
+// produce today: anything reading it as a live-configuration replay would be wrong, and nothing else on
+// the row says so.
+const bad = picks.filter(i => !records[i] || !isMessage(records[i]) || (records[i].is_system && !INCLUDE_HIDDEN));
+if (bad.length) {
+    const hidden = bad.filter(i => records[i] && isMessage(records[i]) && records[i].is_system);
+    console.error(`message id(s) ${bad.join(', ')} are missing or hidden in ${basename(chatPath)} — a raw index must name a visible message`);
+    if (hidden.length) console.error(`  ${hidden.length} of them are hidden rather than absent (${hidden.join(', ')}); --include-hidden derives them anyway`);
+    process.exit(2);
+}
 
 console.log(`chat ${basename(chatPath)}: ${records.length} records, ${eligible.length} eligible turns`);
 console.log(`world "${BOOK}": ${Object.keys(entries).length} entries, ${Object.values(entries).filter(e => e.vectorized && !e.disable && e.content).length} vectorized`);
@@ -168,7 +184,7 @@ console.log(`collection: ${built.items} chunks${built.built ? ' (built)' : ' (ca
 
 console.log(`scene                          arms  pooled  vectorized  keyword-only`);
 for (const idx of picks) {
-    const visible = records.slice(0, idx + 1).filter(r => isMessage(r) && !r.is_system);
+    const visible = records.slice(0, idx + 1).filter(r => isMessage(r) && (INCLUDE_HIDDEN || !r.is_system));
     const query = ranking.buildQuery(visible, { depth: DEPTH });
     const queryChat = ranking.queryMessages(visible, { depth: DEPTH });
     const base = { ...(srcArm?.captureParams ?? {}) };
@@ -224,6 +240,7 @@ for (const idx of picks) {
             paramSnapshot: snapshotFor(srcArm?.paramSnapshot), excludeTitles: [],
             // Nothing was cut, so there is no cutoff to report — recorded explicitly rather than omitted.
             cutoff: { mode: 'none', maxVectorEntries: null, note: 'offline derivation records the full activated population' },
+            ...(INCLUDE_HIDDEN ? { includedHidden: true } : {}),
             candidates: out,
         });
     }
