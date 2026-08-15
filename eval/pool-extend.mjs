@@ -5,7 +5,7 @@
 // chunk settings: changing chunkSize or minChunkSize changes what gets EMBEDDED, so covering them live would
 // mean re-vectorizing the lorebook mid-capture, twice per arm, against the user's real collection.
 //
-// So every chunk arm in paired-arms.mjs is scored against a pool collected under ONE chunking, and any entry
+// So every chunk arm in param-screen.mjs is scored against a pool collected under ONE chunking, and any entry
 // a different chunking surfaces counts as irrelevant because nobody looked at it. That biases chunk arms
 // downward, systematically, and the bias grows with distance from the live settings — which is precisely the
 // region the sweep exists to explore. Measured on three scenes, every chunk cell was a lower bound.
@@ -31,7 +31,7 @@ const argv = process.argv.slice(2);
 const arg = k => { const i = argv.indexOf(k); return i >= 0 ? argv[i + 1] : null; };
 const samples = argv.filter(a => a.endsWith('.json') && !a.startsWith('--'));
 
-// The doses live pooling can't reach. Same values as paired-arms.mjs's ladder — they have to match, or the
+// The doses live pooling can't reach. Same values as param-screen.mjs's ladder — they have to match, or the
 // pool would be extended for configurations nobody is going to score.
 const CHUNK_ARMS = {
     ...Object.fromEntries([200, 300, 400, 600, 1200, 1600, 2400].map(v => [`chunkSize=${v}`, { chunkSize: v }])),
@@ -42,7 +42,7 @@ const CHUNK_ARMS = {
 // QUERY-TIME arms, which need no index at all — they re-rank the same collection. Live pooling CAN reach
 // these, so they are not in the default set; they are here because a pool must be extended for the arms
 // somebody is actually going to score, and an offline rescore of an edited book is exactly the case where
-// the live capture no longer covers them. Names match paired-arms.mjs so a pool and a screen agree.
+// the live capture no longer covers them. Names match param-screen.mjs so a pool and a screen agree.
 const PARAM_ARMS = {
     'scoreVectorKeys=on': { scoreVectorKeys: true }, 'scoreVectorKeys=off': { scoreVectorKeys: false },
     'KEYW=0': { KEYW: 0 }, 'KEYW=0.5': { KEYW: 0.5 }, 'KEYW=1': { KEYW: 1 }, 'KEYW=2': { KEYW: 2 }, 'KEYW=3': { KEYW: 3 },
@@ -125,7 +125,7 @@ const DRY = argv.includes('--dry');
 
     if (grandTotal) {
         console.log(`\n${grandTotal} ungraded entr${grandTotal === 1 ? 'y' : 'ies'} across ${samples.length} scene(s). Load the -pending.json files into /wa-super-grade`);
-        console.log('(same picker as the prior samples), grade them, then re-run paired-arms.mjs — the chunk cells should lose their "?".');
+        console.log('(same picker as the prior samples), grade them, then re-run param-screen.mjs — the chunk cells should lose their "?".');
     } else {
         console.log('\nnothing to grade: every dose\'s top-k is already judged on every scene.');
     }

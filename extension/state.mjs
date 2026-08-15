@@ -120,7 +120,7 @@ export const defaultSettings = {
      * admitted ZERO chunks. The fix, 0.1, was "the centered p90 measured on three books with bge-m3" — an
      * embedder-specific constant. 'auto' computes that same p90 from the scores actually in play, so the
      * selectivity transfers to any embedder with no recalibration. Verified a no-op where they overlap:
-     * paired vs 0.1 over 80 bge-m3 scenes, 78 byte-identical, mean Δ -0.0001 (eval/paired-arms.mjs
+     * paired vs 0.1 over 80 bge-m3 scenes, 78 byte-identical, mean Δ -0.0001 (eval/param-screen.mjs
      * `thr=auto`). The stock-ST fallback path cannot run 'auto' (the server quantiles nothing) and pins
      * 0.1 raw — permissive by design there; client-side selection does the narrowing.
      *
@@ -132,7 +132,7 @@ export const defaultSettings = {
      * only ever WIDENS the candidate set and cannot narrow it.
      *
      * THAT BYPASS IS LOAD-BEARING; DO NOT "FIX" IT INTO A STRICT GATE. It reads like sloppiness — the cosine
-     * floor ought to decide for the entries it is named after — and it was measured (eval/paired-arms.mjs
+     * floor ought to decide for the entries it is named after — and it was measured (eval/param-screen.mjs
      * `admit=cosine`, three scenes):
      *
      *   strict cosine gate   sommers fell 3/3 -> 1/3 on critical (grade-5) entries in the top 10, and

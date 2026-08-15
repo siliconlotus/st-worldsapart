@@ -103,7 +103,7 @@ export function splitRecursive(input, length, delimiters = ['\n\n', '\n', ' ', '
  *          short ones get. On one real book, 20 vs 120 was 4572 vs 4027 chunks and 738 vs 156 chunks under
  *          120 chars, with the longest entry going from 64 chunks to 102.
  *
- * That trade is exactly what eval/paired-arms.mjs is for, once a reindexer can rebuild a collection per arm.
+ * That trade is exactly what eval/param-screen.mjs is for, once a reindexer can rebuild a collection per arm.
  *
  * @param {string} content Entry content
  * @param {object} opts Chunking settings (pass `settings()` — the field names match)

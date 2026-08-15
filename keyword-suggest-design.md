@@ -572,7 +572,7 @@ non-constant in both versions).
 **The Sommers 0% is by design, and the designed test has now run.** Every key above 15.6% of messages
 (whole-word, frozen chat: Jeffrey 39%, Liam 29%, Brad 25%, Arthur 22%, Shane 21%) was deliberately
 retained through curation as a hold-out, so keep-vs-remove could be measured in ranking rather than
-called by intuition. **Measured flat** (`paired-arms.mjs`, 15 graded scenes, paired, reference tier
+called by intuition. **Measured flat** (`param-screen.mjs`, 15 graded scenes, paired, reference tier
 excluded): removing the band 2/5/8, mean Δ −0.0004 nDCG@10; uniform cast placement 8/7/0, +0.019;
 both together 7/6/2, −0.004. Nothing is distinguishable from its own baseline, which per the arm's
 own reading rule is "not better, not worse" and licenses nothing beyond itself. The band stays

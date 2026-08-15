@@ -11,7 +11,7 @@
 // never about recall: the audit flags decided which keys got examined, so a curated book says
 // nothing about keys the flags never surfaced. A candidate absent from the book may be a bad key or
 // a good one nobody considered, and this cannot tell them apart. What it CAN do is hold the
-// reference fixed while temperature moves, which is the paired-arms logic the repo already uses —
+// reference fixed while temperature moves, which is the param-screen logic the repo already uses —
 // the bias is constant across the ladder, so the DIRECTION of a change is interpretable even though
 // the absolute level is not a quality score.
 //
@@ -303,7 +303,7 @@ for (const r of rows) {
 // The pooled means above cannot support a claim on their own: the differences between rungs are
 // small, and an unpaired mean hides that entries vary far more than rungs do. So contrast each rung
 // against the SAME entry's T=0 result and sign-test the per-entry deltas, which is the discipline
-// paired-arms.mjs applies to scenes. n is entries, not responses — repeats are averaged first,
+// param-screen.mjs applies to scenes. n is entries, not responses — repeats are averaged first,
 // because three samples of one entry are not three independent observations.
 if (has('paired')) {
     // Every arm's per-entry candidate sets in one shape, so the ollama rungs and the outside arms

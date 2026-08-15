@@ -337,7 +337,7 @@ K ~= 150-300). `queryCollections` chooses per path, since the fallback can fire 
 **On the plugin path `scoreThreshold` cannot narrow the candidate set.** A vectorized chunk is also
 admitted by `bm25 > 0` on its own text, so admission there is "top decile by centered cosine OR any
 lexical overlap" — `'auto'` resolves to `quantile(vectorScores, 0.9)`, a selector rather than a floor.
-That bypass is load-bearing. **Measured** (`eval/paired-arms.mjs` `admit=cosine`, three scenes, on the
+That bypass is load-bearing. **Measured** (`eval/param-screen.mjs` `admit=cosine`, three scenes, on the
 0-5 human scale those captures carry — `eval/relevance-eval.mjs`, not the 0-4 rubric below): a strict
 cosine gate dropped sommers from 3/3 to 1/3 on its grade-5 entries in the top 10, and lost a relevant
 time-whore entry from the candidate set entirely. Narrowing admission is therefore a COST question, not
@@ -640,7 +640,7 @@ window miss (depth/persistence), over-fire (prune) — before reading an F or re
 book as a statement about the ranker.
 
 **Graded scenes: pool first, then pair.** `n` is single-digit to double-digit and always will be, so
-argmax over a grid is not available: `paired-arms.mjs` contrasts one parameter at a time against each
+argmax over a grid is not available: `param-screen.mjs` contrasts one parameter at a time against each
 scene's own baseline and reports the sign test. A pool built from one configuration penalises every
 configuration far from it, so `/wa-super-grade` unions several population-changing arms and grades the
 union once. An arm that surfaces unjudged entries scores them 0 and looks worse than it is, so its Δ is

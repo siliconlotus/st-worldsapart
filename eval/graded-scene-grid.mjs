@@ -65,7 +65,7 @@ import * as matcher from '../extension/matcher.mjs';
 import { cutRetrieved } from '../extension/selection.mjs';
 import { gradeValue } from './metrics.mjs';
 // Scene loading, the gazetteer, the scorers, the pool and the nDCG math all live in scene.mjs, shared with
-// paired-arms.mjs — there must be exactly one copy of them (see that module's header).
+// param-screen.mjs — there must be exactly one copy of them (see that module's header).
 import { CID, cliffCut, dcg, embed as embedWith, indexPath, isDurableEntry, loadScene, makeFuse, makeGradeOf, makeKeywordScore, makeCandidateSet, ndcg, nrm, openSample, sceneParams, vectorable, wiTitle } from './scene.mjs';
 
 const arg = k => { const i = process.argv.indexOf(k); return i >= 0 ? process.argv[i + 1] : null; };

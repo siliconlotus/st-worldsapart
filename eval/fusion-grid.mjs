@@ -13,7 +13,7 @@
 //   lot. A book with four keyword-matching entries hands its top one the same contribution a 300-entry
 //   vector list hands its best.
 //
-// paired-arms.mjs already found supporting evidence: rrfK=60 hurt all three scenes and rrfK=10 helped two.
+// param-screen.mjs already found supporting evidence: rrfK=60 hurt all three scenes and rrfK=10 helped two.
 // Less flattening measured better, and score fusion is the limit of that direction.
 //
 // READS THE LOGGED SIGNALS, DOES NOT RE-DERIVE THEM. Every sample records per-entry cosine/text/keys from
@@ -156,7 +156,7 @@ for (const path of samples) {
     globalThis.__acc.push(out);
 }
 
-// Paired across scenes, same estimator as paired-arms: direction per scene against the shipped fusion.
+// Paired across scenes, same estimator as param-screen: direction per scene against the shipped fusion.
 const acc = globalThis.__acc ?? [];
 if (acc.length > 1) {
     const base = Object.keys(acc[0]).find(k => k.endsWith('(shipped)'));

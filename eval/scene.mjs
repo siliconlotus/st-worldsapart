@@ -1,5 +1,5 @@
 // scene.mjs — loading and scoring ONE graded scene from a /wa-grade sample. The machinery
-// graded-scene-grid.mjs and paired-arms.mjs both need, extracted so there is exactly one copy of it.
+// graded-scene-grid.mjs and param-screen.mjs both need, extracted so there is exactly one copy of it.
 //
 // WHY IT IS A MODULE AND NOT COPY-PASTE. Every line below is a place a second copy would silently drift.
 // The gazetteer alone has already cost this project one wrong answer: reading raw book keys instead of the
@@ -432,7 +432,7 @@ export const makeFuse = P => (rows, lexW) => {
 
 /**
  * The stage-4 cliff as the runtime applies it: over the fused LAYOUT ranking's dynamic block, not over
- * the retrieval ranking. One helper so graded-scene-grid and paired-arms cannot drift — the same rule
+ * the retrieval ranking. One helper so graded-scene-grid and param-screen cannot drift — the same rule
  * that keeps the gazetteer and the scorers in one place.
  *
  * Reference-tier rows are the harness's sticky/constant analogue: they reach the prompt because a key

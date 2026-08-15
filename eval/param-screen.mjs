@@ -23,7 +23,7 @@
 // for exactly this reason; treat an uncorrected p as a screening signal, never as a result.
 //
 // Usage (from SillyTavern root):
-//   node .../paired-arms.mjs <sample.json> [sample2.json ...] [--arms K1=3,filter=off] [--k 10] [--list]
+//   node .../param-screen.mjs <sample.json> [sample2.json ...] [--arms K1=3,filter=off] [--k 10] [--list]
 //
 // Samples are /wa-grade or /wa-super-grade manifests. Their POOLS MUST BE HONEST for this to mean anything:
 // an arm that surfaces unjudged entries scores them 0 and looks worse than it is, so judged coverage is
@@ -160,7 +160,7 @@ const familyOf = arm => arm.split('=')[0];
 
 if (argv.includes('--list')) { console.log(Object.keys(ARMS).join('\n')); process.exit(0); }
 if (!samples.length) {
-    console.error('need at least one sample: node paired-arms.mjs <sample.json> [more.json ...] [--arms a,b] [--k 10] [--list]');
+    console.error('need at least one sample: node param-screen.mjs <sample.json> [more.json ...] [--arms a,b] [--k 10] [--list]');
     console.error('one sample runs, but reports no sign test — pairing needs scenes to pair.');
     process.exit(2);
 }
