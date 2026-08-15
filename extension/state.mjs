@@ -199,22 +199,29 @@ export const defaultSettings = {
     // which subtracts the real corpus mean vector and measurably helps (+8.8% nDCG@5, centering-grid.mjs).
     /**
      * Cap on VECTOR entries in the final selection — stage 4, inside applyBudget, nested as
-     * vector ⊆ dynamic ⊆ all. It bounds what retrieval contributes to the prompt; it does not decide
-     * what activates. Stage 1 admits every vectorized entry up to a fixed ceiling (plugin/scoring.mjs
-     * admitCeiling) and makes no relevance decision at all.
+     * vector ⊆ dynamic ⊆ all. At most this many vector entries are added to the layout during the walk;
+     * it does not decide what activates. Stage 1 admits every vectorized entry up to a fixed ceiling
+     * (plugin/scoring.mjs admitCeiling) and makes no relevance decision at all.
      *
-     * IT IS A USER SETTING BECAUSE IT IS AN INPUT-TOKEN COST, not because it protects the ranker. The
-     * cliff is what should be keeping irrelevant entries out; this is the user deciding how much of
-     * their context window World Info may occupy on the retrieval side. So it is deliberately GENEROUS
-     * — the tighter it is set, the more it is doing a relevance job it has no signal for, since it cuts
-     * by rank position and knows nothing about the gap it cuts across.
+     * IT IS THE KEYWORD-TO-VECTOR RATIO KNOB, and the guard against runaway retrieval suppressing the
+     * keyword population entirely. Vector results are numerous and arrive already ranked, so a walk that
+     * simply fills until the budget is gone hands the whole prompt to them and a keyword entry never
+     * gets in — which is what ST core does, having no such cap. Capping the vector side is what leaves
+     * room for the entries an author keyed by hand.
+     *
+     * IT IS ALSO AN INPUT-TOKEN COST the user is choosing, not a ranker protection. The cliff is what
+     * should be keeping irrelevant entries out; this is how much of their context window World Info may
+     * occupy on the retrieval side. So it is deliberately GENEROUS — the tighter it is set, the more it
+     * is doing a relevance job it has no signal for, since it cuts by rank position and knows nothing
+     * about the gap it cuts across.
      *
      * The failure it does not guard against: a prompt can be well within every cap and still dilute the
      * model's attention across too much material. No metric here sees that — F2@budget scores the SET
      * that shipped, not what the model did with it.
      *
-     * Counted by PROVENANCE — an entry retrieval returned — not by the `vectorized` flag, so an entry
-     * admitted on a key it kept counts as keyword. The two coincide unless suppressVectorKeys is off.
+     * Counted off the `vectorized` flag, because the cap is about what an entry IS. It read retrieval
+     * provenance before — a stage-1 framing from when this WAS the count retrieval cut to, carried onto
+     * a stage-4 cap. The two coincide unless suppressVectorKeys is off.
      *
      * THE VALUE MOVED, AND ON JUDGEMENT RATHER THAN MEASUREMENT: 20 is where a cap generous enough to
      * leave relevance to the cliff was put, given that a cap deciding relevance is the failure described
