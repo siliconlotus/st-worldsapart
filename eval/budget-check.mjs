@@ -302,8 +302,14 @@ const stick = [row('s1', 0.1)];
 const cons = [row('k1', 0)];
 const cliffCfg = { mode: 'elbow', minVectorEntries: 1, elbowSensitivity: 1.5 };
 
+// CONSTANT BEFORE STICKY: constant means always, so a world rule only loses its place when constants
+// alone overflow the budget. The walk order is a prefix cut, so whichever class leads is served first.
+{
+    const order = cutDynamic({ sticky: [row('s1', 0.9)], constant: [row('k1', 0.1)], results: [] }, cliffCfg).ranked;
+    eq(order[0].key, 'k1', 'a constant is walked before an armed sticky, whatever their fused scores');
+}
 let c = cutDynamic({ sticky: stick, constant: cons, results: res }, cliffCfg);
-eq(c.ranked.map(x => x.key).join(','), 's1,k1,r1,r2,r3', 'sticky and constant lead, then the surviving prefix');
+eq(c.ranked.map(x => x.key).join(','), 'k1,s1,r1,r2,r3', 'constant and sticky lead, then the surviving prefix');
 eq(c.dropped.map(x => x.key).join(','), 'r4,r5,r6', 'cliff losers are named, not silently absent');
 eq(c.ranked.includes(stick[0]) && c.ranked.includes(cons[0]), true, 'sticky and constant always survive the cliff');
 
@@ -322,4 +328,4 @@ c = cutDynamic({ sticky: [], constant: [], results: [] }, cliffCfg);
 eq(c.ranked.length, 0, 'nothing activated');
 eq(c.dropped.length, 0, 'and nothing dropped');
 c = cutDynamic({ sticky: stick, constant: cons, results: [] }, cliffCfg);
-eq(c.ranked.map(x => x.key).join(','), 's1,k1', 'a scene with no dynamic rows still ranks its always-on ones');
+eq(c.ranked.map(x => x.key).join(','), 'k1,s1', 'a scene with no dynamic rows still ranks its always-on ones');

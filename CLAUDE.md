@@ -242,7 +242,8 @@ unconditionally, outside the budget's capacity guard, and constants and armed st
 population. The ENTRY MAXES decide how many, on nested populations — vector ⊆ dynamic ⊆ all, plus the
 per-book cap — with `maxVectorEntries` counted by PROVENANCE (retrieval scored the entry), not by the
 `vectorized` flag. The TOKEN BUDGET decides how much. The maxes and the budget live in `applyBudget`,
-which walks the layout ranking sticky and constant first, so every cap is a prefix cut, and returns the
+which walks the layout ranking constant and sticky first — constant leads, because constant means always
+and should only be cut when constants alone overflow — so every cap is a prefix cut, and returns the
 survivors; `rankActivated` is what deletes the rest from `activated`, since `selection.mjs` is ST-free
 and the map is core's.
 

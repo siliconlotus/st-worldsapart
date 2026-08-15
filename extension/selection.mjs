@@ -92,6 +92,11 @@ export function cutRetrieved(ranked, { mode = 'off', minVectorEntries = 1, elbow
  * down and pushes the last significant gap later. Any retention sort whose key is not `fused` alone — a
  * book tier ahead of it, or a per-book weight scaling it — breaks the precondition.
  *
+ * CONSTANT LEADS, because constant means always. A constant should only be cut when constants ALONE
+ * exceed the budget — anything else is a world rule losing its place to an entry that persists from an
+ * earlier turn, which is a surprise no author asked for. The previous order put sticky first and nothing
+ * argued for it; it was incidental.
+ *
  * @param {object} blocks The three activation classes
  * @param {Array<{fused: number}>} blocks.sticky Armed stickies, authored order
  * @param {Array<{fused: number}>} blocks.constant Constants, authored order
@@ -103,7 +108,7 @@ export function cutDynamic({ sticky = [], constant = [], results = [] }, cfg = {
     const kept = cutRetrieved(results, cfg);
     const keptSet = new Set(kept);
     return {
-        ranked: [...sticky, ...constant, ...kept],
+        ranked: [...constant, ...sticky, ...kept],
         dropped: results.filter(item => !keptSet.has(item)),
     };
 }
