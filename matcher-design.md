@@ -639,8 +639,8 @@ number. Split the misses by divergence class (`eval/divergence-audit.mjs`) — k
 window miss (depth/persistence), over-fire (prune) — before reading an F or recall figure on such a
 book as a statement about the ranker.
 
-**Graded scenes: pool first, then pair.** `n` is single-digit to double-digit and always will be, so
-argmax over a grid is not available: `param-screen.mjs` contrasts one parameter at a time against each
+**Graded scenes: pool first, then pair.** `n` is small — human grading is the scarce input — so prefer a
+screen to an argmax over a grid: `param-screen.mjs` contrasts one parameter at a time against each
 scene's own baseline and reports the sign test. A pool built from one configuration penalises every
 configuration far from it, so `/wa-super-grade` unions several population-changing arms and grades the
 union once. An arm that surfaces unjudged entries scores them 0 and looks worse than it is, so its Δ is

@@ -102,11 +102,13 @@ transfers but cannot be where it is found.
 
 Three constraints shape every tuning claim, and each has tooling rather than a workaround.
 
-`n` is single-digit and always will be — a chat has to be long enough to have retrievable history and rich
-enough for some of it to be irrelevant. So **argmax over a grid is not available**: use `param-screen.mjs`,
-which contrasts one parameter at a time against each scene's own baseline and reports the sign test. At n<6
-nothing can reach p<0.05, so the finding is the direction plus the mean delta, and "measured flat, n=X scenes
-across Y chats, paired" is a legitimate and common outcome to write next to a default.
+`n` is small — a chat has to be long enough to have retrievable history and rich enough for some of it to be
+irrelevant, and HUMAN grading is the scarce input. Deriving scenes offline (`synth-scenes.mjs`) raised it to
+56 across 4 chats, which is enough for a paired screen to clear Holm correction but not enough to make the
+scenes independent draws. So prefer `param-screen.mjs`, which contrasts one parameter at a time against each
+scene's own baseline and reports the sign test. At n<6 nothing can reach p<0.05, so the finding is the
+direction plus the mean delta, and "measured flat, n=X scenes across Y chats, paired" is a legitimate and
+common outcome to write next to a default.
 
 A pool built from one configuration penalises every configuration far from it, so a defaults review scored
 against a single `/wa-grade` capture is not defensible. `/wa-super-grade` captures several

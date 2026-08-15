@@ -1,13 +1,12 @@
-// Paired arm screening across several graded scenes — the estimator for single-digit n.
+// Paired arm screening across graded scenes — the estimator for small n.
 //
 // WHY NOT graded-scene-grid.mjs PER SAMPLE. That tool answers "which cell wins on THIS scene", and with a
 // handful of scenes that question has no defensible answer: between-scene variance swamps between-parameter
 // variance (one sample's grid spans nDCG@10 0.87-0.99, another's sits elsewhere), and picking the argmax of
 // hundreds of cells from three scenes is noise-mining. Gradeable chats are structurally rare — a chat has to
-// be long enough to have history worth retrieving and rich enough for some of it to be irrelevant — so n is
-// never going to rescue that approach.
+// be long enough to have history worth retrieving and rich enough for some of it to be irrelevant.
 //
-// What single-digit n DOES support is a paired contrast. Score each scene at its own baseline, score it again
+// What small n DOES support is a paired contrast. Score each scene at its own baseline, score it again
 // with ONE parameter changed, and look at the sign of the difference. Each scene is its own control, so the
 // between-scene variance cancels, and the claim becomes "this change helps consistently" rather than "this
 // cell scored highest once". The price is that the claim is directional: see signTest in metrics.mjs for the
