@@ -80,9 +80,23 @@ check('why excerpt marks the match', typeof rows[0].why[0].excerpt?.text, 'strin
 
 // Idempotence: a v2 is left alone. Without this the second run of a --write pass would restamp and, worse,
 // re-null every measured zero the first run just recovered.
+//
+// The skip REASON is not asserted, only that it skipped and changed nothing: a v2 whose rows lack `tokens`
+// says so in the message, and pinning the string would make that a failure rather than the note it is.
 const again = await migrateManifest(m, { tokensOf: null, tokenizer: null });
-check('v2 is skipped', again.skip, 'already v2');
+check('v2 is skipped', String(again.skip).startsWith('already v2'), true);
 check('v2 rows unchanged', again.m.arms[0].candidates.map(r => r.keys), [0, null, null]);
+
+// The token backfill is the one thing a v2 may still be missing, and it CONVERGES: a pass with a counter
+// fills them, and the next pass finds nothing to do. Anything else on the row stays untouched, which is
+// what keeps this from becoming a second migration path wearing a smaller name.
+const counted = await migrateManifest(m, { tokensOf: async c => String(c ?? '').length, tokenizer: 'test-tok' });
+check('v2 missing tokens is backfilled', counted.tokensOnly, true);
+check('every row gained a count', counted.m.arms[0].candidates.every(r => typeof r.tokens === 'number'), true);
+check('backfill records its tokenizer', counted.m.arms[0].paramSnapshot.budget.tokenizer, 'test-tok');
+check('backfill touches nothing else', counted.m.arms[0].candidates.map(r => r.keys), [0, null, null]);
+const third = await migrateManifest(counted.m, { tokensOf: async () => 999, tokenizer: 'test-tok' });
+check('a second backfill is a no-op', third.skip, 'already v2');
 
 // A flat single-arm sample (no `arms`, no version) is the third shape on disk and takes the same path.
 const flat = {

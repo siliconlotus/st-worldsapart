@@ -23,19 +23,21 @@
 // the migrated file records `population: 'survivors'` — a v1 arm's row count is not comparable to a v2's.
 //
 // Usage (from anywhere):
-//   node eval/migrate-bundle.mjs <sample.json ...> [--tokenizer <name>] [--write] [--out-dir <dir>]
+//   node eval/migrate-bundle.mjs <sample.json ...> [--tokenizer <name>] [--offline] [--write] [--out-dir <dir>]
 //
-// DRY BY DEFAULT: prints what each file would gain and writes nothing until --write. Token counts need a
-// running SillyTavern (they come from its own tokenizer endpoint, so they match what a live capture records
-// byte for byte) and are skipped entirely without --tokenizer, rather than filled from a default nobody
-// measured. Counts are cached by (tokenizer, content hash) in eval-data/token-cache.json, so a re-run after
-// a kill re-counts nothing.
+// DRY BY DEFAULT: prints what each file would gain and writes nothing until --write. Token counts are
+// skipped entirely without --tokenizer, rather than filled from a default nobody measured. With it they
+// come from SillyTavern's own tokenizer endpoint, so they match what a live capture records byte for byte;
+// --offline produces the same numbers with no server, through tokens.mjs. Endpoint counts are cached by
+// (tokenizer, content hash) in eval-data/token-cache.json, so a re-run after a kill re-counts nothing;
+// the offline path needs no cache, being local CPU.
 import { readFileSync, writeFileSync, existsSync, mkdirSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 import { basename, dirname, resolve as resolvePath } from 'node:path';
 import { stInstall, sceneParams, scoringKeys } from './scene.mjs';
 import * as matcher from '../extension/matcher.mjs';
 import { BUNDLE_VERSION } from '../extension/grading.mjs';
+import { offlineTokenCounter } from './tokens.mjs';
 
 // ---------------------------------------------------------------------------
 // Token counts, from SillyTavern's own tokenizer
@@ -110,6 +112,21 @@ export function makeTokenCounter(st, tokenizer) {
     return { count, flush };
 }
 
+/** The offline counter in makeTokenCounter's shape, so the migration below cannot tell them apart. One
+ *  encoder is held per tokenizer name for the whole run; there is no cache to flush because encoding is
+ *  local CPU and a re-run costs seconds rather than an HTTP round trip per row. */
+function offlineCounterAdapter(tokenizer) {
+    const held = new Map();
+    const of = name => {
+        if (!held.has(name)) held.set(name, offlineTokenCounter(name));
+        return held.get(name);
+    };
+    return {
+        count: async (content, model = tokenizer) => of(model).count(content),
+        flush: () => { for (const c of held.values()) c.free(); held.clear(); },
+    };
+}
+
 // ---------------------------------------------------------------------------
 // The migration
 // ---------------------------------------------------------------------------
@@ -159,7 +176,31 @@ export async function migrateManifest(m, { tokensOf = null, tokenizer = null } =
         return { m, skip: 'not a graded sample', tally };
     }
 
-    if (m.bundleVersion === BUNDLE_VERSION) return { m, skip: 'already v2', tally };
+    // A v2 file whose rows carry no `tokens` still does not read under v2 conventions, and that is this
+    // tool's job. It is the mirror of the restamp below — there the stamp was stale and the rows were
+    // right; here the stamp is right and one field is absent, because the derivation that wrote them had
+    // no tokenizer. Backfilled ALONE: nothing else about a v2 row is touched, so this can never become a
+    // second, quieter migration path.
+    if (m.bundleVersion === BUNDLE_VERSION) {
+        const missing = armsOf(m).flatMap(a => a.candidates ?? []).filter(r => r.tokens === undefined);
+        if (!missing.length) return { m, skip: 'already v2', tally };
+        if (!tokensOf) return { m, skip: `already v2, but ${missing.length} rows have no tokens — pass --tokenizer to backfill`, tally };
+        const findEntry = entryFinder(m);
+        for (const arm of armsOf(m)) {
+            for (const row of arm.candidates ?? []) {
+                if (row.tokens !== undefined) continue;
+                const entry = findEntry(row.world, row.uid);
+                if (!entry) { tally.noEntry++; continue; }
+                row.tokens = await tokensOf(entry.content ?? '');
+                tally.tokens++;
+            }
+            // Which tokenizer produced them, on the arm that carries the counts. Offline it is a harness
+            // choice rather than an observation, and a count whose encoder is unrecorded cannot be checked.
+            if (tokenizer) arm.paramSnapshot = { ...(arm.paramSnapshot ?? {}), budget: { ...(arm.paramSnapshot?.budget ?? {}), tokenizer } };
+        }
+        tally.rows = missing.length;
+        return { m, tokensOnly: true, tally };
+    }
 
     // SHAPE DECIDES, NOT THE STAMP. bundleVersion is written by the extension running in the browser, so a
     // capture taken before that page reloaded says 1 while every row already carries the v2 fields — eight
@@ -250,12 +291,19 @@ if (import.meta.main) {
         console.error('  dry by default — prints per-file repairs and writes nothing until --write.');
         console.error('  --tokenizer names a SillyTavern tokenizer endpoint (gpt2, llama3, claude, …); without it');
         console.error('  the per-row `tokens` backfill is skipped rather than guessed.');
+        console.error('  --offline counts locally (tokens.mjs) instead of against a running SillyTavern.');
         process.exit(2);
     }
 
     const st = stInstall();
     if (TOKENIZER && !st) { console.error('--tokenizer needs a reachable SillyTavern install (none found from here)'); process.exit(2); }
-    const counter = TOKENIZER ? makeTokenCounter(st, TOKENIZER) : null;
+    // --offline counts locally instead of over HTTP. It is not an approximation of the endpoint: the
+    // encoding is the same one ST dispatches to, plus the fixed per-message overhead its counter adds,
+    // measured and asserted by tokens-check.mjs. It exists because the HTTP path needs a RUNNING
+    // SillyTavern, which is a strange prerequisite for backfilling files that are already on disk.
+    const counter = TOKENIZER
+        ? (argv.includes('--offline') ? offlineCounterAdapter(TOKENIZER) : makeTokenCounter(st, TOKENIZER))
+        : null;
 
     /** Which tokenizer a manifest's counts should be produced by. The capture's OWN record wins: a v2 arm
      *  carries paramSnapshot.budget.tokenizer, which is what ST's "best match" resolved to on the run being
@@ -284,6 +332,12 @@ if (import.meta.main) {
         }
         const t = out.tally;
         if (out.skip) { console.log(`${basename(path).slice(0, 47).padEnd(48)} skipped — ${out.skip}`); continue; }
+        if (out.tokensOnly) {
+            console.log(`${basename(path).slice(0, 47).padEnd(48)} tokens backfilled ${String(out.tally.tokens).padStart(5)}`
+                + (out.tally.noEntry ? `  NO ENTRY ${out.tally.noEntry}` : ''));
+            if (WRITE) writeFileSync(OUT_DIR ? `${resolvePath(OUT_DIR)}/${basename(path)}` : path, JSON.stringify(out.m));
+            continue;
+        }
         if (out.restamped) {
             console.log(`${basename(path).slice(0, 47).padEnd(48)} restamped — rows already at v2 conventions, only bundleVersion was stale`);
             if (WRITE) writeFileSync(OUT_DIR ? `${resolvePath(OUT_DIR)}/${basename(path)}` : path, JSON.stringify(out.m));

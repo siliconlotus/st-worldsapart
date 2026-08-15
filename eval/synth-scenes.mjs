@@ -27,6 +27,7 @@ import { basename, dirname, resolve as resolvePath } from 'node:path';
 import { loadScene, makeCandidateSet, makeFuse, sceneParams, indexPath, embed, stInstall, wiTitle } from './scene.mjs';
 import { ensureIndex } from './reindex.mjs';
 import { whyFor } from './migrate-bundle.mjs';
+import { offlineTokenCounter } from './tokens.mjs';
 import * as ranking from '../extension/ranking.mjs';
 import * as matcher from '../extension/matcher.mjs';
 import { BUNDLE_VERSION } from '../extension/grading.mjs';
@@ -140,6 +141,25 @@ if (!WRITE) {
 const r5 = x => (Number.isFinite(x) ? Number(x.toFixed(5)) : null);
 const r2 = x => (Number.isFinite(x) ? Number(x.toFixed(2)) : null);
 
+// TOKENS ARE RECORDED SO A BUDGET OF ANY SIZE CAN BE REPLAYED, which is the point of writing them at all:
+// a bundle that carries only the budget its capture ran under can answer exactly one question, and it is
+// the question nobody needs. Counted offline at the same value the runtime would have recorded
+// (tokens.mjs), so a derived row and a captured one are comparable rather than two estimates.
+//
+// The tokenizer is the source capture's when there is one and the default otherwise, and either way it is
+// WRITTEN DOWN below — offline it is a harness choice, not an observation, and the `block` field's
+// derived-not-observed note is the precedent.
+const TOKENIZER = srcArm?.paramSnapshot?.budget?.tokenizer ?? 'gpt-3.5-turbo';
+const tokens = offlineTokenCounter(TOKENIZER);
+
+// The budget block a derived bundle should carry: the settings it was derived under, minus the one field
+// that is a resolved RUNTIME number. `maxTokens` reads "40%* = 29036" on the source — 40% of whatever
+// context window was open on that machine — and no budget was applied here at all, so passing it through
+// describes a run that never happened. Same class of staleness as the inherited candidate lists this tool
+// was rewritten to stop producing.
+const budgetFor = snap => ({ ...(snap?.budget ?? {}), maxTokens: null, tokenizer: TOKENIZER });
+const snapshotFor = snap => (snap ? { ...snap, budget: budgetFor(snap) } : { budget: budgetFor(null) });
+
 // The collection, built once from the live world and shared by every scene — same book, same chunking.
 const chunkOverrides = srcArm?.paramSnapshot?.vectors ?? {};
 const shell = { primaryBook: BOOK, books: { [BOOK]: byUidWorld }, paramSnapshot: srcArm?.paramSnapshot };
@@ -186,6 +206,7 @@ for (const idx of picks) {
                 // entry's own always-on fields.
                 block: e.constant ? 'constant' : (Number(e.sticky) > 0 ? 'sticky' : 'dynamic'),
                 sticky: e.sticky || 0,
+                tokens: tokens.count(e.content ?? ''),
                 score: r5(r.fused), uid: Number(e.uid),
                 wiOrder: e.waOriginalOrder ?? e.order ?? null,
                 cosine: r.score !== undefined ? r5(r.score) : null, vRank: r.vectorRank ?? null,
@@ -200,7 +221,7 @@ for (const idx of picks) {
         armsOut.push({
             arm: armName, query, queryChat, scanText, depth: DEPTH,
             primaryBook: BOOK, index: built.path, captureParams: capture,
-            paramSnapshot: srcArm?.paramSnapshot, excludeTitles: [],
+            paramSnapshot: snapshotFor(srcArm?.paramSnapshot), excludeTitles: [],
             // Nothing was cut, so there is no cutoff to report — recorded explicitly rather than omitted.
             cutoff: { mode: 'none', maxVectorEntries: null, note: 'offline derivation records the full activated population' },
             candidates: out,
