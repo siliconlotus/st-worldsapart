@@ -352,7 +352,11 @@ export function fuseRanks(items, { rrfK: k, retrievalMode: mode, weightByOrder, 
         : new Map();
 
     // Optional priority signal: rank every entry by authored Order (descending — higher = higher
-    // priority, per ST where order is budgetPriority) and fuse it like any other rank. Scale-free,
+    // priority: ST sorts entries `b.order - a.order` and fills until the budget runs out, so a higher
+    // order is served first) and fuse it like any other rank. ST has no priority CONCEPT — `budgetPriority`
+    // appears once in its tree, inside an importer mapping a foreign format onto `order` — so this is an
+    // emergent property of the sort, the same way sticky becomes priority by being filled first.
+    // Scale-free,
     // so no magnitude tuning; it just nudges high-order entries up the fused ranking.
     const orderVal = it => it.entry.waOriginalOrder ?? it.entry.order ?? 0;
     const byOrder = weightByOrder

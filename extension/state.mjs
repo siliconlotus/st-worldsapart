@@ -381,7 +381,9 @@ export const defaultSettings = {
     keywordWeight: 1,
     /**
      * Fold each entry's authored Order into the fused score as an extra RRF rank (higher order =
-     * higher priority, matching ST where order is budgetPriority). Off by default; for books that
+     * higher priority: ST sorts `b.order - a.order` and fills until the budget is gone, so a higher order
+     * is served first. That is emergent, not declared — ST has no priority concept, and `budgetPriority`
+     * exists in its tree only as an importer's name for a foreign format's field. Off by default; for books that
      * use Order as a priority proxy. Order remains the presentation/retention tiebreak regardless.
      */
     weightByOrder: false,
