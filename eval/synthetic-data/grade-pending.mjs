@@ -61,6 +61,12 @@ if (cmd === 'build') {
         const bundle = JSON.parse(readFileSync(`${DATA}/${pend.of}`, 'utf8'));
         const arm = shipped(bundle);
         const name = bundle.name ?? pend.of.replace(/\.json$/, '');
+        // IDENTITY IS THE FILENAME, never `name` — two bundles can carry the same name and one pair does
+        // (isekai-time-whore-frozen-2-msg3728 and its -null-book variant, the same scene under a different
+        // book). Keyed on name, their jobs overwrite each other here and merge writes the survivor's rows
+        // into whichever file the name resolves to: measured, one row landed in a bundle whose books do not
+        // contain that world. `scene` stays the display label; `bundle` is what merge resolves.
+        const base = pend.of.replace(/\.json$/, '');
         const books = new Map(Object.entries(bundle.books ?? {}).map(([w, bk]) => [w, byUid(bk)]));
 
         // A row whose entry is gone or empty cannot be graded from the entry text, and a judge handed an
@@ -73,9 +79,10 @@ if (cmd === 'build') {
 
         for (let i = 0; i < usable.length; i += BATCH) {
             const chunk = usable.slice(i, i + BATCH);
-            const id = `${name}-b${String(i / BATCH).padStart(2, '0')}`;
+            const id = `${base}-b${String(i / BATCH).padStart(2, '0')}`;
             const job = {
                 scene: name,
+                bundle: pend.of,
                 out: `${JOBS}/${id}-graded.json`,
                 note: 'Grade every candidate against the scene. Write the JSON your instructions describe to `out`.',
                 sceneText: arm.query,
@@ -124,13 +131,16 @@ for (const jf of jobFiles) {
         mismatched.push([`${JOBS}/${jf}`, `${lost.length} missing, ${extra.length} extra, ${bad.length} out-of-range`]);
         continue;
     }
-    if (!bySceneRows.has(job.scene)) bySceneRows.set(job.scene, []);
+    // Grouped by the bundle FILE, not the scene name — see the note in build. A job written before
+    // `bundle` existed falls back to the old name-derived path, which is what it was in fact merged as.
+    const target = job.bundle ?? `${job.scene}.json`;
+    if (!bySceneRows.has(target)) bySceneRows.set(target, []);
     // `llmGrade` ONLY — never `grade`, which a human writes and nothing else does. Both used to be
     // written at the same value, which made a row no human had seen identical to one a human reviewed
     // and agreed with. Readers take metrics.mjs `gradeValue`, so the grade in force is unchanged; what
     // changes is that provenance survives, and it is the one thing no shape guard could recover
     // afterwards. `g.grade` on the right is the JUDGE's own output field, a different namespace.
-    bySceneRows.get(job.scene).push(...job.candidates.map(c => {
+    bySceneRows.get(target).push(...job.candidates.map(c => {
         const g = got.get(rowKey(c.world, c.uid));
         return { title: c.title, llmGrade: Number(g.grade), world: c.world, uid: c.uid, why: g.why };
     }));
@@ -141,8 +151,9 @@ for (const [p, why] of mismatched) console.log(`  REJECT ${p}  ${why}`);
 if (missing.length) console.log(`  ${missing.length} jobs have no result yet (first: ${missing[0]})`);
 
 let merged = 0, collided = 0, touched = 0;
-for (const [scene, rows] of bySceneRows) {
-    const file = `${DATA}/${scene}.json`;
+for (const [target, rows] of bySceneRows) {
+    const file = `${DATA}/${target}`;
+    const scene = target.replace(/\.json$/, '');
     if (!existsSync(file)) { console.log(`  SKIP ${scene}: no bundle at ${file}`); continue; }
     const bundle = JSON.parse(readFileSync(file, 'utf8'));
     const have = new Set((bundle.grades ?? []).map(g => rowKey(g.world, g.uid)));
