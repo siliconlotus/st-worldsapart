@@ -306,8 +306,9 @@ export const inVectorIndex = it => it.vectorEligible ?? it.entry?.vectorized ?? 
  * @param {boolean} cfg.weightByOrder Fuse an authored-order rank too
  * @param {number} cfg.lexicalWeight BM25-over-TEXT vs vector weight in fusion
  * @param {number|null} [cfg.keywordWeight] BM25-over-KEYS weight; null/unset follows lexicalWeight
+ * @param {number} [cfg.sparseWeight] Learned sparse-lexical weight; 0 (default) makes the column inert
  */
-export function fuseRanks(items, { rrfK: k, retrievalMode: mode, weightByOrder, lexicalWeight, keywordWeight }) {
+export function fuseRanks(items, { rrfK: k, retrievalMode: mode, weightByOrder, lexicalWeight, keywordWeight, sparseWeight = 0 }) {
     // TEXT AND KEYS GET SEPARATE WEIGHTS, because they are separate signals that disagree about which books
     // they are good on. Measured across three graded scenes, the best (text, keys) pair was (0.5, 3) on a
     // book with tightly curated keywords, (1.5, 0) on one whose keys are auto-generated noise, and (1.5, 1)
@@ -337,6 +338,18 @@ export function fuseRanks(items, { rrfK: k, retrievalMode: mode, weightByOrder, 
     // BM25 over entry KEYS. Scores non-vectorized entries; also 🔗 entries when
     // scoreVectorKeys is on (via their stashed keys), otherwise suppressKeys leaves them at 0.
     const byKeyword = rankMap(items.filter(x => x.keywordScore > 0).sort((a, b) => b.keywordScore - a.keywordScore));
+    // LEARNED SPARSE LEXICAL — a per-token weight from the embedder rather than a corpus statistic, scored
+    // as the sum over shared tokens of the two sides' weights. It answers the question IDF answers badly on
+    // a single-story corpus (a cast name in most chunks earns almost no IDF, and is exactly what the scene
+    // is about) using a prior learned from the model's training data instead of from this book.
+    //
+    // INERT AT WEIGHT 0, which is the default: with no sparseWeight the column contributes nothing and is
+    // in nobody's denominator, so this is byte-identical for a caller that supplies no sparse scores. That
+    // matters because the scores need a serving path the extension does not have yet — Ollama returns the
+    // dense vector only — so the column exists to be measured offline before anything is built for it.
+    const bySparse = sparseWeight > 0
+        ? rankMap(items.filter(x => x.sparseScore > 0).sort((a, b) => b.sparseScore - a.sparseScore))
+        : new Map();
 
     // Optional priority signal: rank every entry by authored Order (descending — higher = higher
     // priority, per ST where order is budgetPriority) and fuse it like any other rank. Scale-free,
@@ -375,6 +388,9 @@ export function fuseRanks(items, { rrfK: k, retrievalMode: mode, weightByOrder, 
     const vectorEligible = it => mode !== 'lexical' && inVectorIndex(it);
     const textEligible = it => mode !== 'vector' && (it.textEligible ?? it.textScore !== undefined);
     const keyEligible = it => it.keysEligible ?? it.keywordScore > 0;
+    // Same rule as text: eligible means the caller could have produced a score for it, declared explicitly
+    // because only the caller knows whether the sparse index covered this entry.
+    const sparseEligible = it => sparseWeight > 0 && (it.sparseEligible ?? it.sparseScore !== undefined);
     // A KEYWORD-ONLY ENTRY WINS THE TIE. Normalisation above makes the two classes comparable — both top out
     // at 1/(k+1) — and this decides which way an otherwise-equal pair falls: a key is an author saying "when
     // this term appears, this entry is relevant", which is a stronger statement of intent than a cosine.
@@ -403,14 +419,17 @@ export function fuseRanks(items, { rrfK: k, retrievalMode: mode, weightByOrder, 
         item.vectorRank = byVector.get(item.key);
         item.textRank = byText.get(item.key);
         item.keywordRank = byKeyword.get(item.key);
+        item.sparseRank = bySparse.get(item.key);
         item.orderRank = byOrder.get(item.key);
         const raw = (item.vectorRank ? 1 / (k + item.vectorRank) : 0)
             + (item.textRank ? lexicalWeight / (k + item.textRank) : 0)
             + (item.keywordRank ? keyW / (k + item.keywordRank) : 0)
+            + (item.sparseRank ? sparseWeight / (k + item.sparseRank) : 0)
             + (item.orderRank ? 1 / (k + item.orderRank) : 0);
         const eligible = (vectorEligible(item) ? 1 : 0)
             + (textEligible(item) ? lexicalWeight : 0)
             + (keyEligible(item) ? keyW : 0)
+            + (sparseEligible(item) ? sparseWeight : 0)
             + (weightByOrder ? 1 : 0);
         item.fused = eligible > 0 ? raw / eligible : 0;
         if (keywordOnly(item)) item.fused *= KEYWORD_ONLY_TILT;
