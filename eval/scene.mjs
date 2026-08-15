@@ -305,7 +305,7 @@ export function makeGradeOf(grades, isExcluded) {
  */
 export const isMemory = e => Boolean(e) && ('stmemorybooks' in e || 'STMB_start' in e);
 export const isReference = e => !isMemory(e);
-export const isDurableEntry = e => Boolean(e?.constant) || Number(e?.sticky) > 0;
+export const isDurableEntry = e => Boolean(e?.constant);
 
 /** Keys the production scan would actually score. suppressVectorKeys blanks a vectorized entry's keys at
  *  scan time (worldsapart.js suppressKeys), and scoreVectorKeys is what re-admits the stashed originals —
@@ -520,20 +520,26 @@ export async function scoreScene({ sample: S, overrides = {}, k = 10, vectors, m
     const qv = cachedQv ?? (scene.items.length ? await embed(query, { ollama, model }) : []);
     const all = scoreAll(P.K1, P.B, tw, qv, query, S.scanText);
 
-    // REFERENCE-TIER EXCLUSION — the condensed-list convention from FULLBOOK-AUDIT-2026-08-10 (shared
-    // metrics): ranking metrics remove reference/card entries from the ranked list before computing;
-    // REMOVED, not zero-graded, or they punish the ranker for routing's job. A keyword entry is reference
-    // tier with "triggered == relevant" — its key firing IS the inclusion decision — so assessing it
-    // against a graded ranking is a category error; whether the trigger fires correctly is the
-    // matcher/audit's question. The class label is the audit's mechanical one, provenance not routing:
-    // kind = STMB-marked ? memory : reference — chosen because it derives from what the entry IS and
-    // cannot drift with the configuration being evaluated (vectorized/sticky/constant all can). The
-    // durable clause keeps isDurable (extension/grading.mjs) semantics for marked entries too.
+    // WHAT IS RANKED: the haystack, minus CONSTANTS. These metrics tune RANKING FEATURES — how should this
+    // set be sorted for this query — so what the pipeline later filters out does not bear on them.
     //
-    // TWO REASONS, SPELLED SEPARATELY. A reference entry is excluded because triggered == relevant makes
-    // ranking it a category error; a durable entry is excluded because relevance never chose it. One
-    // predicate covering both would name neither.
-    const rankable = all.filter(r => !isReference(r.entry) && !isDurableEntry(r.entry));
+    // CONSTANTS ARE OUT because relevance is not a concept that applies to them. They carry world rules and
+    // sometimes generation instructions; they are not about the scene and were never competing to be.
+    // Scoring them would ask a grader to rate a category they do not belong to.
+    //
+    // STICKY IS IN, and used not to be — isDurableEntry is `constant || sticky > 0`, which threw both out
+    // together. A sticky entry is ordinary content that persists once activated, and how it should be
+    // ordered is exactly the question here. The pair mattered: 34 of sommers' 45 reference entries are
+    // sticky: 1 with constant false, so lumping them with constants deleted that book's whole reference
+    // tier from every ranking measurement taken here.
+    //
+    // REFERENCE IS IN, also newly. Stage 1 once arbitrated a retrieval ranking only vectorized entries
+    // could enter, so a keyword entry arrived by a route ranking never judged; stage 4 ended that, and
+    // cliffCut in this file already says "REFERENCE IS IN IT, also matching the runtime".
+    //
+    // The `delivered` window below still models the runtime, durable handling and all, because that one IS
+    // a question about what the pipeline hands over.
+    const rankable = all.filter(r => !r.entry?.constant);
 
     const top = fuse(rankable, P.LEXW).slice(0, k);
     const unjudged = top.filter(r => !scene.POOL.has(Number(r.uid)));

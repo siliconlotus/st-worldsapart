@@ -137,9 +137,16 @@ export function captureParams(s, { caseSensitive, wholeWords, includeNames }) {
  * raw entry (`constant`/`sticky`), which is a different shape and cannot share this one.
  *
  * @param {object} row Candidate row
- * @returns {boolean} True when the row is durable — constant or configured-sticky
+ * ARMED, not configured. A sticky entry is only in the prompt by intent once an earlier turn armed the
+ * effect; before that it is ordinary content competing for selection like anything else, and excluding it
+ * deletes real entries from the population — 34 of sommers' 45 reference entries are sticky: 1 with
+ * constant false, so the configured reading removed that book's whole reference tier. `block` is what the
+ * runtime classified the row as, which is where the armed effect shows; `sticky` is the setting and says
+ * nothing about this turn. A dry run arms nothing, so on a /wa-grade capture this reduces to constant.
+ *
+ * @returns {boolean} True when the row is durable — constant, or sticky with the effect armed
  */
-export const isDurable = row => row.block === 'constant' || Number(row.sticky) > 0;
+export const isDurable = row => row.block === 'constant' || row.block === 'sticky';
 
 // --- delta pooling (/wa-super-grade) -----------------------------------------------------------------
 //

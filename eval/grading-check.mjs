@@ -45,7 +45,12 @@ eq(p.suppressVectorKeys, true, 'suppressVectorKeys is recorded');
 
 // --- reference tier: constants and CONFIGURED stickies are not relevance results ---
 eq(isDurable({ block: 'constant', sticky: 0 }), true, 'constant is durable');
-eq(isDurable({ block: 'dynamic', sticky: 3 }), true, 'configured sticky is durable even while block reads dynamic');
+// ARMED, not configured: a sticky entry whose effect no turn has armed is ordinary content competing for
+// selection, and `block` is where the runtime records that it armed one. The configured value says nothing
+// about this turn — reading it deleted whole reference tiers from the ranked population.
+eq(isDurable({ block: 'dynamic', sticky: 3 }), false, 'configured sticky with no armed effect is gradeable');
+eq(isDurable({ block: 'sticky', sticky: 3 }), true, 'an ARMED sticky row is durable');
+eq(isDurable({ block: 'sticky', sticky: 0 }), true, '...read off block, not the setting');
 eq(isDurable({ block: 'dynamic', sticky: 0 }), false, 'a plain dynamic row is gradeable');
 
 // --- searchedBook: which collection the harness must load ---

@@ -218,9 +218,11 @@ for (const idx of picks) {
             const e = r.entry;
             const row = {
                 title: wiTitle(e),
-                // DERIVED, not observed: offline there is no runtime budget class, so this reads the
-                // entry's own always-on fields.
-                block: e.constant ? 'constant' : (Number(e.sticky) > 0 ? 'sticky' : 'dynamic'),
+                // DERIVED, not observed: offline there is no runtime budget class. `constant` is a
+                // property of the entry and survives that; `sticky` is not — the block reads 'sticky' only
+                // once an earlier turn ARMED the effect, and nothing offline ever does. Writing it from the
+                // configured value invented an armed state that no run produced, and isDurable believed it.
+                block: e.constant ? 'constant' : 'dynamic',
                 sticky: e.sticky || 0,
                 tokens: tokens.count(e.content ?? ''),
                 score: r5(r.fused), uid: Number(e.uid),
