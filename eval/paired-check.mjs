@@ -161,11 +161,15 @@ near(heavy[0], expect(1, 1, 2, 3), 'row 1: vector 1, text 1, keyword 2, normalis
 near(heavy[1], expect(2, 2, 1, 3), 'row 2: vector 2, text 2, keyword 1, same denominator');
 near(keysOff[0], expect(1, 1, 2, 0), '...and at keywordWeight 0 the keys term leaves both sides');
 
-// ELIGIBILITY NORMALISATION — the point of the divisor. A keyword-only entry could never earn a vector or
-// text rank, so it is not measured against them: top of its own signal ties top of all three. Before this,
-// its ceiling was keyW/(k+1) against (1+LEXW+keyW)/(k+1) — 37% at shipped weights, unreachable by any key.
+// ELIGIBILITY NORMALISATION — the point of the divisor. An entry is not measured against a signal it could
+// never earn: top of what it was eligible for ties top of all three. Before this, a keys-only ceiling was
+// keyW/(k+1) against (1+LEXW+keyW)/(k+1) — 37% at shipped weights, unreachable by any key.
+//
+// TEXT ELIGIBILITY IS NO LONGER "IS IT VECTORIZED". content-lexical.mjs indexes every entry's content, so a
+// keyword entry with a body can earn a text rank and is divided by lexicalWeight like anything else. The
+// signal-starved case that remains is an entry with NO content — keys and nothing to index.
 const fuse1 = rows => { fuseRanks(rows, { rrfK: 20, retrievalMode: 'hybrid', weightByOrder: false, lexicalWeight: 1.5, keywordWeight: 1.5 }); return rows[0].fused; };
-const keywordOnlyTop = fuse1([{ key: 1, keywordScore: 5, textScore: 0, vectorEligible: false, keysEligible: true }]);
+const keywordOnlyTop = fuse1([{ key: 1, keywordScore: 5, textScore: 0, vectorEligible: false, textEligible: false, keysEligible: true }]);
 const everySignalTop = fuse1([{ key: 1, score: 0.9, textScore: 9, keywordScore: 5, vectorEligible: true, keysEligible: true }]);
 near(everySignalTop, 1 / 21, 'an entry topping all three signals scores 1/(k+1)');
 near(keywordOnlyTop / 1.25, everySignalTop, '...and normalisation alone puts a keyword-only entry level with it (tilt asserted below)');
@@ -181,6 +185,14 @@ eq(missedItsChance < keywordOnlyTop, true, '...so it ranks below a keyword-only 
 // beats a MID keyword one. Both halves are asserted because only the pair pins the tilt's size — a large
 // enough multiplier satisfies the first and breaks the second, which is the failure worth catching.
 near(keywordOnlyTop, 1.25 / 21, 'a keyword-only entry takes the tilt');
+
+// THE SECOND SIGNAL, which is what content-lexical buys a keyword entry. Eligible for text as well as keys,
+// it reaches the ceiling only by topping BOTH — winning on keys alone no longer ties an entry that won on
+// everything. That is the point: one noisy signal used to decide where a keyword entry landed.
+const bodiedBoth = fuse1([{ key: 1, keywordScore: 5, textScore: 9, vectorEligible: false, textEligible: true, keysEligible: true }]);
+const bodiedKeysOnly = fuse1([{ key: 1, keywordScore: 5, textScore: 0, vectorEligible: false, textEligible: true, keysEligible: true }]);
+near(bodiedBoth, 1.25 / 21, 'a keyword entry topping keys AND text reaches the same ceiling');
+eq(bodiedKeysOnly < bodiedBoth, true, '...and one topping keys alone does not, being divided by lexicalWeight too');
 eq(keywordOnlyTop > everySignalTop, true, 'all else equal, the keyword-only entry wins');
 const kwAtRank = r => { const rows = [{ key: 0, keywordScore: 100, vectorEligible: false, keysEligible: true }]; for (let i = 1; i < r; i++) rows.unshift({ key: -i, keywordScore: 100 + i, vectorEligible: false, keysEligible: true }); fuseRanks(rows, { rrfK: 20, retrievalMode: 'hybrid', weightByOrder: false, lexicalWeight: 1.5, keywordWeight: 1.5 }); return rows.find(x => x.key === 0).fused; };
 eq(kwAtRank(6) > everySignalTop, true, 'a keyword entry at rank 6 still clears the best vector entry');

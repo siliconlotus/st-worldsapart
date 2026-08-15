@@ -58,6 +58,7 @@ const gradeAnchorLine = () => `Grade 0–4: ${GRADE_ANCHORS.map((a, g) => `${g} 
 // Chunking is WA's own, not ST's: it is unreachable under node and it determines every stored vector, so an
 // upstream edit would silently invalidate existing indexes. See extension/chunking.mjs.
 import { chunkEntry } from './extension/chunking.mjs';
+import { buildContentIndex, scoreContent, indexFingerprint } from './extension/content-lexical.mjs';
 
 /** Base value for the rewritten `order` sequence. WA rewrites every activated entry's order, so only
  * the relative index matters and the base is free. It is parked far above any plausible authored value
@@ -402,6 +403,65 @@ const buildTermWeights = (queryText, gazetteer) => ranking.buildTermWeights(quer
  * @param {boolean} [opts.log] Log the kept-term count and (in a verbose run) the surviving terms
  * @returns {Promise<Record<string, number>|null>} Term weights, or null to leave the query unfiltered
  */
+/**
+ * Content-lexical indexes, one per book, rebuilt when that book's fingerprint moves.
+ *
+ * PER BOOK, not one index across the attached set, because IDF is a corpus statistic and the vector path
+ * is already per collection — a term common in one book and rare in another must not average. The scores
+ * are merged after pooling, exactly as scoreActivated merges the vector path's.
+ *
+ * Built from EVERY entry in the book, not the activated ones: an index over the turn's activations would
+ * recompute IDF against a population that changes every turn, so the same entry's score would move
+ * because its neighbours did.
+ * @type {Map<string, {fingerprint: string, index: object}>}
+ */
+const contentIndexes = new Map();
+
+function contentIndexFor(world, entries) {
+    const fingerprint = indexFingerprint(entries, settings());
+    const hit = contentIndexes.get(world);
+    if (hit?.fingerprint === fingerprint) return hit.index;
+    const index = buildContentIndex(entries, settings());
+    contentIndexes.set(world, { fingerprint, index });
+    console.log(`Worlds Apart: content-lexical index for "${world}" — ${index.entryCount} entries, ${index.docCount} chunks`);
+    return index;
+}
+
+/**
+ * BM25 of the scan's query against every entry's CONTENT — the stage-3 text signal, for keyword and
+ * vectorized entries alike.
+ *
+ * SCORING, NEVER ADMISSION: this runs on entries core has already activated. Stage 1 does not consult it,
+ * so no amount of lexical overlap can surface an entry whose keys never fired.
+ *
+ * The same term weights stage 1 used, because the entity filter decides which query terms count at all —
+ * scoring the two stages on different term sets would make the text signal disagree with the admission it
+ * was supposed to refine.
+ *
+ * @returns {Promise<Map<string, number>>} `${world}.${uid}` -> best chunk score; empty when unavailable.
+ */
+async function contentTextScores(query) {
+    if (!query) return new Map();
+    const byWorld = new Map();
+    for (const entry of await getSortedEntries()) {
+        if (!byWorld.has(entry.world)) byWorld.set(entry.world, []);
+        byWorld.get(entry.world).push(entry);
+    }
+    if (!byWorld.size) return new Map();
+
+    const s = settings();
+    const termWeights = await queryTermWeights(query, { log: false });
+    const opts = { k1: s.bm25K1, b: s.bm25B, termWeights, stopwordDf: s.stopwordDocFreq, commonWordWeight: s.commonWordWeight };
+    const out = new Map();
+    for (const [world, entries] of byWorld) {
+        for (const [key, score] of scoreContent(contentIndexFor(world, entries), query, opts)) {
+            const prev = out.get(key);
+            if (prev === undefined || score > prev) out.set(key, score);
+        }
+    }
+    return out;
+}
+
 async function queryTermWeights(searchText, { log = true } = {}) {
     if (!settings().entityFilter || settings().queryMode === 'summary') {
         return null;
@@ -1495,11 +1555,30 @@ async function rankActivated(args) {
         }
     }
 
+    // The text signal now comes from content-lexical, which covers every entry rather than only the ones
+    // in the vector collection. ALL OR NOTHING, never merged with lastTextScores: those are the plugin's
+    // BM25 over a vectorized-only corpus, so their IDF is computed against a different population and a
+    // rank list mixing the two would report the seam as a parameter effect. When no index is available
+    // (empty query, no entries) the old source is used whole, which is the previous behaviour intact.
+    const contentText = await contentTextScores(runState.lastQuery);
+    const contentIndexed = contentText.size > 0;
+
     const items = [...activated.entries()].map(([key, entry]) => {
         // We overwrite `order` below, and this fires once per scan loop — stash the
         // authored value on first sight so later loops don't sort by our own output.
         entry.waOriginalOrder ??= entry.order ?? 0;
-        return { key, entry, score: runState.lastScores.get(key), textScore: runState.lastTextScores.get(key) ?? 0 };
+        return {
+            key,
+            entry,
+            score: runState.lastScores.get(key),
+            textScore: (contentIndexed ? contentText.get(key) : runState.lastTextScores.get(key)) ?? 0,
+            // Eligible means COULD have scored, not did. With content indexed, that is every entry
+            // carrying content; without an index it falls back to the vector collection, which is where
+            // the plugin's scores came from.
+            textEligible: contentIndexed
+                ? Boolean(String(entry.content ?? '').trim())
+                : runState.lastTextScores.has(key),
+        };
     });
 
     // Books contributing entries to this scan — the priority sorts below rank only among

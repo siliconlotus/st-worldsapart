@@ -283,12 +283,17 @@ export function fuseRetrieval(scores, { rrfK: k, retrievalMode: mode, lexicalWei
 }
 
 /**
- * Whether an item was ELIGIBLE for the vector signals — not whether it earned them. A vectorized entry
- * that failed to rank on cosine is still eligible, because it competed and lost. Callers may declare it
- * explicitly, since only they know how suppressVectorKeys/scoreVectorKeys resolved; absent flags fall
- * back to presence.
+ * Whether an item is IN THE VECTOR COLLECTION — not whether it could be embedded, which is true of all
+ * text, and not whether it earned a cosine. A vectorized entry that failed to rank is still in, because
+ * it competed and lost. Callers may declare it explicitly, since only they know how
+ * suppressVectorKeys/scoreVectorKeys resolved; absent flags fall back to presence.
+ *
+ * Named for membership because that is the only question it answers. It used to gate the TEXT signal
+ * too, which read as "is a non-vector entry in the vector collection" — a question worth asking of
+ * nothing. That was parasitic: text scores could only come from the vector index, so membership stood in
+ * for text eligibility. content-lexical.mjs indexes every entry's content, so text no longer asks.
  */
-export const vectorable = it => it.vectorEligible ?? it.entry?.vectorized ?? it.score !== undefined;
+export const inVectorIndex = it => it.vectorEligible ?? it.entry?.vectorized ?? it.score !== undefined;
 
 /**
  * Fuses the vector and keyword rankings with reciprocal rank fusion.
@@ -358,9 +363,18 @@ export function fuseRanks(items, { rrfK: k, retrievalMode: mode, weightByOrder, 
     // `vectorized` is the entry's, and whether keys are scorable depends on suppressVectorKeys/scoreVectorKeys
     // resolution the caller has already done. Absent flags fall back to presence, which keeps a caller that
     // sets neither self-consistent rather than silently capping everything it ranks.
-    const vecOK = it => mode !== 'lexical' && vectorable(it);
-    const txtOK = it => mode !== 'vector' && vectorable(it);
-    const keyOK = it => it.keysEligible ?? it.keywordScore > 0;
+    // ELIGIBILITY, one predicate per signal, each naming the question it answers. The denominator below
+    // divides by the signals an entry could have earned, so an entry with one shot at scoring is not
+    // ranked against one with three as though it had lost the other two.
+    //
+    // textEligible no longer consults the vector collection. Every entry with content is in the
+    // content-lexical index (content-lexical.mjs), so the honest test is whether the caller found a text
+    // score for it — declared through `textEligible` on the item, since only the caller knows whether an
+    // index was available at all. A plugin-less run with no index falls back to presence, which keeps the
+    // old behaviour rather than declaring everything eligible for a signal nothing computed.
+    const vectorEligible = it => mode !== 'lexical' && inVectorIndex(it);
+    const textEligible = it => mode !== 'vector' && (it.textEligible ?? it.textScore !== undefined);
+    const keyEligible = it => it.keysEligible ?? it.keywordScore > 0;
     // A KEYWORD-ONLY ENTRY WINS THE TIE. Normalisation above makes the two classes comparable — both top out
     // at 1/(k+1) — and this decides which way an otherwise-equal pair falls: a key is an author saying "when
     // this term appears, this entry is relevant", which is a stronger statement of intent than a cosine.
@@ -383,7 +397,7 @@ export function fuseRanks(items, { rrfK: k, retrievalMode: mode, weightByOrder, 
     // those entries, which is correct. The tilt's own reasoning does not depend on them; only this
     // paragraph's example did.
     const KEYWORD_ONLY_TILT = 1.25;
-    const keywordOnly = it => keyOK(it) && !vectorable(it);
+    const keywordOnly = it => keyEligible(it) && !inVectorIndex(it);
 
     for (const item of items) {
         item.vectorRank = byVector.get(item.key);
@@ -394,9 +408,9 @@ export function fuseRanks(items, { rrfK: k, retrievalMode: mode, weightByOrder, 
             + (item.textRank ? lexicalWeight / (k + item.textRank) : 0)
             + (item.keywordRank ? keyW / (k + item.keywordRank) : 0)
             + (item.orderRank ? 1 / (k + item.orderRank) : 0);
-        const eligible = (vecOK(item) ? 1 : 0)
-            + (txtOK(item) ? lexicalWeight : 0)
-            + (keyOK(item) ? keyW : 0)
+        const eligible = (vectorEligible(item) ? 1 : 0)
+            + (textEligible(item) ? lexicalWeight : 0)
+            + (keyEligible(item) ? keyW : 0)
             + (weightByOrder ? 1 : 0);
         item.fused = eligible > 0 ? raw / eligible : 0;
         if (keywordOnly(item)) item.fused *= KEYWORD_ONLY_TILT;

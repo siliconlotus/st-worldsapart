@@ -19,12 +19,13 @@ import * as ranking from '../extension/ranking.mjs';
 import * as matcher from '../extension/matcher.mjs';
 import { isDurable, openBundle } from '../extension/grading.mjs';
 import { cutDynamic } from '../extension/selection.mjs';
+import { buildContentIndex, scoreContent, entryKey } from '../extension/content-lexical.mjs';
 // Cycle: reindex.mjs imports getStringHash from here. Safe because neither side calls across at module
 // scope — both references live inside function bodies, so whichever module loads first finishes evaluating
 // before the other needs a binding.
 import { cachePath, chunkConfig } from './reindex.mjs';
 import { gradeCredit, fbeta, RECALL_WEIGHT, gradeValue } from './metrics.mjs';
-export { vectorable } from '../extension/ranking.mjs';
+export { inVectorIndex } from '../extension/ranking.mjs';
 
 /** Reads a manifest from disk as a plain sample, whether it is one or a /wa-super-grade multi-arm bundle.
  *  Every tool goes through this so `--arm` behaves identically everywhere and a bundle is never scored as
@@ -249,7 +250,7 @@ export function loadScene(S, { indexFile, params: P }) {
         .filter(g => Number.isFinite(Number(g.uid)) && (!g.world || g.world === primary) && !isExcluded(g.title))
         .map(g => Number(g.uid)));
 
-    return { primary, entries, byUid, items, loaded, gaz, gazSource, isExcluded, POOL, OWN };
+    return { primary, entries, byUid, items, loaded, gaz, gazSource, isExcluded, POOL, OWN, chunkCfg: chunkConfig(S) };
 }
 
 /**
@@ -367,12 +368,21 @@ export const makeKeywordScore = P => (e, text, k1) => {
  *
  * @returns {(k1: number, b: number, tw: object|null, qvec: number[], qtext: string, scanText: string) => object[]}
  */
-export function makeCandidateSet({ loaded, byUid, entries, params: P, topK = admitCeiling(true) }) {
+export function makeCandidateSet({ loaded, byUid, entries, params: P, chunkCfg, topK = admitCeiling(true) }) {
     const keywordScore = makeKeywordScore(P);
+    // CONTENT-LEXICAL, the stage-3 text signal for every entry — built once here because it depends only
+    // on the book and the chunk settings, not on the query. The runtime builds it per book at the same
+    // point in the pipeline (worldsapart.js contentTextScores); a second copy of the pooling or the
+    // chunking rule would be the drift the single-scorer rule exists to prevent, so both go through
+    // content-lexical.mjs.
+    const contentIndex = buildContentIndex(entries, chunkCfg ?? { chunkMode: 'paragraph', chunkSize: 800, minChunkSize: 120 });
+    const hasContent = e => Boolean(String(e?.content ?? '').trim());
     return (k1, b, tw, qvec, qtext, scanText) => {
         // Resolve 'auto' here, once, so the admit/floor filters below compare against the same number
         // scoreCollection gated with — the same p90-of-live-scores the plugin computes.
         // --- STAGE 1: RETRIEVAL. Score every chunk, apply the admission gates, pool per entry, take top-K.
+        // Same term weights the admission gates use, so the two stages agree on which query terms count.
+        const contentText = scoreContent(contentIndex, qtext, { k1, b, termWeights: tw, stopwordDf: P.stopwordDf, commonWordWeight: P.commonWordWeight });
         const thr = P.threshold === 'auto' ? quantile(centeredCosineScores(loaded.items, qvec, loaded.mean, P.meanCentered), 0.9) : P.threshold;
         let scored = scoreCollection(CID, loaded, qvec, { centered: P.meanCentered, threshold: thr, queryText: qtext, k1, b, termWeights: tw, stopwordDf: P.stopwordDf, commonWordWeight: P.commonWordWeight, uncenteredGate: P.uncenteredGate });
         if (P.admit === 'cosine') scored = scored.filter(m => m.score >= thr);
@@ -401,7 +411,7 @@ export function makeCandidateSet({ loaded, byUid, entries, params: P, topK = adm
         //
         // Dropped at admission rather than filtered from `entries`: the gazetteer and the BM25 corpus must
         // still see every entry, or the term weights move and the comparison measures the wrong thing.
-        for (const [uid, s] of per) { const e = byUid.get(uid); if (e && !e.disable) rows.push({ uid, entry: e, title: wiTitle(e), score: s.score, textScore: s.bm25, keywordScore: keywordScore(e, scanText, k1), vectorEligible: !!e.vectorized, keysEligible: scoringKeys(e, P).length > 0 }); }
+        for (const [uid, s] of per) { const e = byUid.get(uid); if (e && !e.disable) rows.push({ uid, entry: e, title: wiTitle(e), score: s.score, textScore: contentText.get(entryKey(e)) ?? 0, keywordScore: keywordScore(e, scanText, k1), vectorEligible: !!e.vectorized, textEligible: hasContent(e), keysEligible: scoringKeys(e, P).length > 0 }); }
         // --- STAGE 2: ACTIVATION (keyword route). Stands in for ST core's keyword match, so it may only
         // admit an entry core could actually have activated. Two exclusions, both stage-2 facts:
         //
@@ -415,7 +425,7 @@ export function makeCandidateSet({ loaded, byUid, entries, params: P, topK = adm
         //                      this guard a capture with both settings on (every sommers arm) admitted 209
         //                      more rows by key, and keys appeared to rescue vector entries production would
         //                      never have ranked.
-        for (const e of entries) { const uid = Number(e.uid); if (per.has(uid) || e.disable || (e.vectorized && P.suppressVectorKeys)) continue; const kw = keywordScore(e, scanText, k1); if (kw > 0) rows.push({ uid, entry: e, title: wiTitle(e), score: undefined, textScore: 0, keywordScore: kw, vectorEligible: !!e.vectorized, keysEligible: true }); }
+        for (const e of entries) { const uid = Number(e.uid); if (per.has(uid) || e.disable || (e.vectorized && P.suppressVectorKeys)) continue; const kw = keywordScore(e, scanText, k1); if (kw > 0) rows.push({ uid, entry: e, title: wiTitle(e), score: undefined, textScore: contentText.get(entryKey(e)) ?? 0, keywordScore: kw, vectorEligible: !!e.vectorized, textEligible: hasContent(e), keysEligible: true }); }
         return rows;
     };
 }

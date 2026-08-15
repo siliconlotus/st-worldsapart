@@ -66,7 +66,7 @@ import { cutRetrieved } from '../extension/selection.mjs';
 import { gradeValue } from './metrics.mjs';
 // Scene loading, the gazetteer, the scorers, the pool and the nDCG math all live in scene.mjs, shared with
 // param-screen.mjs — there must be exactly one copy of them (see that module's header).
-import { CID, cliffCut, dcg, embed as embedWith, indexPath, isDurableEntry, loadScene, makeFuse, makeGradeOf, makeKeywordScore, makeCandidateSet, ndcg, nrm, openSample, sceneParams, vectorable, wiTitle } from './scene.mjs';
+import { CID, cliffCut, dcg, embed as embedWith, indexPath, isDurableEntry, loadScene, makeFuse, makeGradeOf, makeKeywordScore, makeCandidateSet, ndcg, nrm, openSample, sceneParams, inVectorIndex, wiTitle } from './scene.mjs';
 
 const arg = k => { const i = process.argv.indexOf(k); return i >= 0 ? process.argv[i + 1] : null; };
 if (!arg('--sample')) { console.error('need --sample <sample.json> (write one with /wa-grade)'); process.exit(2); }
@@ -252,7 +252,7 @@ const fmt = n => (n == null ? '·' : (+n).toFixed(3));
     const fmtR = v => (Number.isNaN(v) ? '  —   ' : v.toFixed(4));
 
     const layoutOf = list => list.filter(r => !isDurableEntry(r.entry));
-    const vectorOf = list => list.filter(r => !isDurableEntry(r.entry) && vectorable(r));
+    const vectorOf = list => list.filter(r => !isDurableEntry(r.entry) && inVectorIndex(r));
 
     const activated = rows => {
         // --unjudged zero: don't restrict to the pool at all; ungraded rows keep their signals and score 0
