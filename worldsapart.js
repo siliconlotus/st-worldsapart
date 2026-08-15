@@ -1788,10 +1788,15 @@ async function rankActivated(args) {
         const { survivors, counted, skipped, dropped, budgeted, inPrompt } = await selection.applyBudget({
             ranked,
             isDynamic: item => dynamicSet.has(item),
-            // PROVENANCE — retrieval returned a score for it — not entry.vectorized. An entry that
-            // activated on a key it kept came in through the keyword route and is not what this cap
-            // bounds; the two coincide while suppressVectorKeys is on.
-            isVector: item => runState.lastScores.has(item.key),
+            // THE TAG, not retrieval provenance. maxVectorEntries exists so that at most N vector
+            // entries are added to the layout during the walk, which is a question about what an entry
+            // IS — and that is what the flag records. It read runState.lastScores before: a stage-1
+            // framing ("how much did retrieval contribute") carried onto a stage-4 cap, from when
+            // maxVectorEntries WAS the count retrieval cut to. Since stage 1 stopped cutting, the two
+            // differ only for a vectorized entry that keyword-activated without being admitted, which
+            // needs suppressVectorKeys off — a distinction that exists in an arm, bought with an answer
+            // living in per-generation mutable state instead of on the entry.
+            isVector: item => Boolean(item.entry?.vectorized),
             maxTokens,
             maxTotal,
             maxDynamic,

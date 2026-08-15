@@ -240,8 +240,8 @@ from what retrieval stored, keyword score is computed over the scan window, and 
 (`selection.mjs` `cutDynamic`) decides relevance over the dynamic block and takes no count; it runs
 unconditionally, outside the budget's capacity guard, and constants and armed stickies are outside its
 population. The ENTRY MAXES decide how many, on nested populations — vector ⊆ dynamic ⊆ all, plus the
-per-book cap — with `maxVectorEntries` counted by PROVENANCE (retrieval scored the entry), not by the
-`vectorized` flag. The TOKEN BUDGET decides how much. The maxes and the budget live in `applyBudget`,
+per-book cap — with `maxVectorEntries` counted off the `vectorized` flag — the cap exists so that at most N vector
+entries are added to the layout, which is a question about what an entry is. The TOKEN BUDGET decides how much. The maxes and the budget live in `applyBudget`,
 which walks the layout ranking constant and sticky first — constant leads, because constant means always
 and should only be cut when constants alone overflow — so every cap is a prefix cut, and returns the
 survivors; `rankActivated` is what deletes the rest from `activated`, since `selection.mjs` is ST-free

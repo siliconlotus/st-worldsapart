@@ -283,8 +283,8 @@ eq(v.skipped.some(s => s.blockedBy.some(b => b.cap === 'vector')), true, 'a vect
 eq(v.skipped.filter(s => s.blockedBy.some(b => b.cap === 'vector')).length, 4, 'the 4 vector rows past the cap are each reported');
 
 // A vectorized CONSTANT is not dynamic, so no entry cap may reject it — the vector cap included.
-// isVector is provenance and answers true for one, which is exactly why the block clause guards on
-// isDynamic rather than trusting the predicate.
+// isVector reads the entry's own flag and answers true for one, which is exactly why the block clause
+// guards on isDynamic rather than trusting the predicate.
 //
 // The shared `ranked` (constants then dynamic) cannot exercise this: applyBudget always walks
 // constants before dynamic, so `vector` is still 0 throughout the constant block on any ordering a
