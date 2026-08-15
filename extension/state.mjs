@@ -157,14 +157,16 @@ export const defaultSettings = {
      * within a book — centering subtracts the book's shared direction, which is exactly the information
      * "is this even the right book?" needs. Raw cosine keeps it: measured over 4 graded scenes and 3
      * deliberately unrelated books (bge-m3), every relevant entry scored >= 0.538 raw while wrong-genre
-     * books topped out at 0.47-0.54. At 0.5 the gate cost NOTHING on any real scene (identical nDCG,
-     * identical entries kept) and cut wrong-book contamination from 10-19 entries to 0-2 in 7 of 9
-     * query x book pairings.
+     * books topped out at 0.47-0.54. At 0.5 it cuts wrong-book contamination from 10-19 entries to 0-2 in
+     * 7 of 9 query x book pairings, and costs little on the right book: measured, 66 graded scenes over 6
+     * books, paired against the same scene at gate 0 — 5 relevant entries dropped at admission and 9 lost
+     * from the cliff-surviving set, none of them on the 10 human-graded captures.
      *
      * Two measured limits: a same-genre wrong book (same author, same idiom) clears any raw-cosine gate —
      * only lexical mismatch can catch those, and this knob does not try; and 0.5 is calibrated on bge-m3,
      * whose relevant-vs-wrong margin here was ~0.04, so a different embedder may need a different value
-     * (or 0 until measured).
+     * (or 0 until measured). 0.6 is not a cautious step up from 0.5: it costs 178 relevant entries over
+     * those same scenes.
      */
     uncenteredGate: 0.5,
     /**
