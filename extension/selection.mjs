@@ -150,7 +150,7 @@ export const authorIgnoreBudget = entry => Boolean(entry?.waIgnoreBudget ?? entr
  * @param {object} args Budget arguments
  * @returns {Promise<{survivors: Set, counted: number, dropped: number, budgeted: number, inPrompt: number}>}
  */
-export async function applyBudget({ ranked, isDynamic, maxTokens, maxTotal, maxDynamic, maxVectorEntries = 0, isVector = () => false, tokensOf, capOf = () => 0, exemptIsBudgeted = true, slack = 0, slackOnce = true }) {
+export async function applyBudget({ ranked, isDynamic, maxTokens, maxTotal, maxDynamic, maxVectorEntries = 0, isVector = () => false, tokensOf, capOf = () => 0, exemptIsBudgeted = false, slack = 0, slackOnce = true }) {
     const survivors = new Set();
     let counted = 0;
     let dynamic = 0;
@@ -237,9 +237,13 @@ export async function applyBudget({ ranked, isDynamic, maxTokens, maxTotal, maxD
         // failure whose cause is a flag on ten unrelated entries. Not counting it means
         // you asked for 10 and got 20, which is visible and proportional.
         //
-        // Tokens are the exception by default: they are a real resource with a real
-        // consequence, so a mandatory entry's tokens still come off the top and squeeze
-        // what fits below. Turning that off makes exemption total.
+        // TOKENS FOLLOW THE SAME RULE, and the default is off for the same reason. maxTokens is a COST
+        // GUARD, not a limit anything downstream enforces — nothing rejects a prompt for exceeding it. So
+        // charging a mandatory entry against it means marking ten entries exempt silently collapses
+        // retrieval while the cost stays flat, which is the failure the paragraph above refuses on the
+        // count caps. Free means the cost rises by exactly what was marked mandatory: visible and
+        // proportional. maxTokensIncludesExempt turns it back on for a book whose exempt entries could
+        // overrun the context by themselves, which is the one case where a ceiling beats an honest bill.
         if (rescuable) {
             slackSpent = true;
         }

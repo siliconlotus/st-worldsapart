@@ -94,14 +94,25 @@ r = await applyBudget({
 });
 eq(r.survivors.size, 9, 'exempt dynamic entries do not consume the dynamic cap');
 
-// Tokens are the exception by default: exempt entries are still budgeted.
+// EXEMPT MEANS EXEMPT, on tokens as on the count caps. maxTokens is a cost guard rather than a limit
+// anything downstream enforces, so charging a mandatory entry against it would collapse retrieval to pay
+// for entries the author marked must-have, at flat cost — the same failure the count caps refuse.
 const withVip = [mk('vip2', 40, { ignoreBudget: true }), ...dynamic];
 r = await applyBudget({
     ranked: withVip, isDynamic: () => true, tokensOf: i => i.tokens,
     maxTokens: 60, maxTotal: 0, maxDynamic: 0,
 });
-eq(r.budgeted, 60, 'exempt entry takes its tokens off the top');
-eq(r.inPrompt, 60, 'budgeted equals in-prompt when exempt entries are budgeted');
+eq(r.budgeted, 60, 'the exempt entry does not spend the budget');
+eq(r.inPrompt, 100, '...so the prompt is the budget PLUS what was marked mandatory');
+
+// maxTokensIncludesExempt turns it back on, for a book whose exempt entries could overrun the context by
+// themselves — there a ceiling is worth more than an honest bill.
+r = await applyBudget({
+    ranked: withVip, isDynamic: () => true, tokensOf: i => i.tokens,
+    maxTokens: 60, maxTotal: 0, maxDynamic: 0, exemptIsBudgeted: true,
+});
+eq(r.budgeted, 60, 'with it on, the exempt entry takes its tokens off the top');
+eq(r.inPrompt, 60, '...and maxTokens is an honest ceiling on the whole of World Info');
 eq(r.survivors.size, 3, 'and squeezes what fits below it');
 
 // ...unless the user turns that off, at which point exemption is total.
