@@ -104,8 +104,10 @@ Three constraints shape every tuning claim, and each has tooling rather than a w
 
 `n` is small — a chat has to be long enough to have retrievable history and rich enough for some of it to be
 irrelevant, and HUMAN grading is the scarce input. Deriving scenes offline (`synth-scenes.mjs`) raised it to
-56 across 4 chats, which is enough for a paired screen to clear Holm correction but not enough to make the
-scenes independent draws. So prefer `param-screen.mjs`, which contrasts one parameter at a time against each
+56, which is enough for a paired screen to clear Holm correction but not enough to make the scenes
+independent draws. Count the LINES, not the files: the 56 sit on 4 chat files but only 3 books and 3
+stories — `adventure-syn` and `timewhore-syn` are the same story on the same lorebook, so 28 of the 56
+share a corpus. Anything resting on corpus statistics has an effective n nearer 3 than 56. So prefer `param-screen.mjs`, which contrasts one parameter at a time against each
 scene's own baseline and reports the sign test. At n<6 nothing can reach p<0.05, so the finding is the
 direction plus the mean delta, and "measured flat, n=X scenes across Y chats, paired" is a legitimate and
 common outcome to write next to a default.
