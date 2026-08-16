@@ -125,6 +125,10 @@ export const sceneParams = (S, overrides = {}) => ({
     // KEYW null mirrors LEXW, exactly as the extension does — so a sample captured before the split scores
     // identically, and an arm that sets KEYW is testing the split rather than a silent default change.
     K: 20, K1: 2, B: 0.75, LEXW: 1.5, KEYW: null, boost: 3, stopwordDf: 0.25, commonWordWeight: 1,
+    // The keyword-only tie-break (ranking.mjs KEYWORD_ONLY_TILT). Sweepable because denseAllEntries removes
+    // it as a side effect — an entry with a cosine is not keyword-only — so its own cost has to be
+    // measurable separately or that arm reports one number for two changes.
+    keywordTilt: ranking.KEYWORD_ONLY_TILT,
     caseSensitive: false, wholeWords: false, includeNames: true, threshold: 0.1,
     // What counts as INSIDE a word when wholeWords is on (state.mjs wordBoundary, shipped 'strict').
     // Unlike the knobs above this one is module state in the matcher, so makeKeywordScore pushes it
@@ -142,6 +146,39 @@ export const sceneParams = (S, overrides = {}) => ({
     // being wrong. Samples captured before captureParams recorded it fall back to this default, which is the
     // value they in fact ran under.
     meanCentered: true,
+    // DENSE FOR EVERY ENTRY — a cosine for the entries the vector collection has no row for, which is the
+    // signal keyword-only entries lack. Needs an index built with reindex.mjs --all (every entry with
+    // content, the same population content-lexical.mjs indexes) and reads its two halves at different
+    // stages: the vectorized chunks stay stage 1's collection and the corpus mean, so retrieval, admission
+    // and every baseline cosine are unchanged, and the rest are scored at stage 3 against that same mean so
+    // the two classes share a scale. Nothing here activates — an entry no key fired for gets no row.
+    //
+    // IT MOVES TWO THINGS. An entry that earns a cosine is no longer keyword-only, so ranking.mjs's
+    // KEYWORD_ONLY_TILT stops applying to it. Ranking that entry as though it still had one signal would be
+    // the opposite error, so this is the honest form of the arm rather than a confound to remove — but a
+    // flat result cannot tell the two apart. denseColumn below is the form that does not move it.
+    denseAllEntries: false,
+    // WHERE THAT COSINE IS FUSED, and it decides which question is being asked.
+    //
+    // null puts it in the entry's own `score`: the entry becomes vector-eligible, is normalised by the
+    // vector weight, and loses the keyword-only tilt. That is what "vectorize this entry" would do in
+    // production, and it is a change to three things at once.
+    //
+    // A population name instead puts it in fuseRanks's FOURTH COLUMN at denseWeight — the column the
+    // learned-sparse scores were measured through. Same weight, same eligibility rule, `score` and the tilt
+    // untouched, so dense and sparse measured this way differ in the NUMBER THE COLUMN HOLDS and nothing
+    // else. That is the only form in which the two are comparable; the null form and the sparse arms differ
+    // in enough places that their gap is unattributable.
+    //
+    //   'nocos'  entries with no cosine of their own — the arm the sparse head won on
+    //   'all'    every ranked entry, a vectorized one's own cosine duplicated into the column
+    //   'cos'    only entries that already have one, which for dense IS that duplication
+    //
+    // 'all' and 'cos' are degenerate for dense in a way they were not for sparse: sparse was a second
+    // opinion from a different head, while duplicating the vector column is the same number twice and can
+    // only reweight the vector signal. They are run as controls, not as candidates.
+    denseColumn: null,
+    denseWeight: 0.5,
     maxVectorEntries: 20, suppressVectorKeys: true, scoreVectorKeys: false, entityFilter: true,
     // suppressVectorKeys moves TWO stages at once. It blanks vectorized keys so core cannot keyword-ACTIVATE
     // them (stage 2), and because the gazetteer is built downstream of that blanking it also changes the BM25
@@ -200,7 +237,21 @@ export function loadScene(S, { indexFile, params: P }) {
     // contributes nothing, every entry arrives by the keyword route, and the scene is deterministic: no
     // index, no embedding call, no ollama. corpusMean is the only thing that cannot take an empty list,
     // and it is guarded here rather than in plugin/ so this needs no redeploy.
-    const items = existsSync(indexFile) ? JSON.parse(readFileSync(indexFile, 'utf8')).items : [];
+    const raw = existsSync(indexFile) ? JSON.parse(readFileSync(indexFile, 'utf8')).items : [];
+    // DENSE-ALL SPLITS THE COLLECTION BY STAGE. An --all index (reindex.mjs) holds every entry's chunks; the
+    // vectorized ones are item-for-item what the ordinary build produces, so keeping them as `items` leaves
+    // stage 1 — admission, the top-K, the corpus mean, every baseline cosine — byte-identical to a run
+    // against the ordinary index. The rest go to `extra`, scored at stage 3 only.
+    const vectorUids = new Set(entries.filter(e => e.vectorized).map(e => Number(e.uid)));
+    const ofVectorized = it => vectorUids.has(Number(it.metadata?.index));
+    const items = P.denseAllEntries ? raw.filter(ofVectorized) : raw;
+    const extra = P.denseAllEntries ? raw.filter(it => !ofVectorized(it)) : [];
+    // An ordinary index under this param would score every entry at its production value and report the arm
+    // as flat, which is the one failure that looks like a result.
+    if (P.denseAllEntries && !extra.length) throw new Error(`denseAllEntries is on but ${indexFile} holds no non-vectorized chunks — build that collection with: node eval/reindex.mjs <sample.json> --all`);
+    // A column population that includes the extras has nothing to put in the column without them, and would
+    // report as a weight change on the vectorized half alone.
+    if (!P.denseAllEntries && (P.denseColumn === 'nocos' || P.denseColumn === 'all')) throw new Error(`denseColumn '${P.denseColumn}' scores entries the ordinary collection has no vectors for — set denseAllEntries too`);
     // AN EMPTY COLLECTION IS ONLY LEGITIMATE WHEN THE BOOK HAS NOTHING TO INDEX. Same gate reindex.mjs
     // buildItems applies, so the two agree on what "nothing to index" means. Without this the two cases are
     // indistinguishable at runtime: a missing collection scores keyword-and-BM25-only and returns a
@@ -210,7 +261,11 @@ export function loadScene(S, { indexFile, params: P }) {
     if (!items.length && entries.some(e => e.vectorized && !e.disable && e.content)) {
         throw new Error(`no vector collection for "${primary}" at ${indexFile} — the book has vectorized entries, so scoring without one would silently drop cosine. Build it with: node eval/reindex.mjs <sample.json>`);
     }
-    const loaded = { items, mean: items.length ? corpusMean(items) : [], lexical: buildLexical(items) };
+    // The mean is PRODUCTION'S — the vectorized corpus's centroid — so a dense-all entry is centered by the
+    // same vector its competitors are. A book with nothing vectorized has no such centroid, and there the
+    // arm's own corpus is the only one there is; that book has no baseline cosine to preserve anyway.
+    const meanSource = items.length ? items : extra;
+    const loaded = { items, extra, mean: meanSource.length ? corpusMean(meanSource) : [], lexical: buildLexical(items) };
 
     // Out-of-scope graded titles: entries from a second attached book, which this harness cannot rank
     // because only one collection is loaded. Token-subset match, same rule as grade matching.
@@ -405,7 +460,25 @@ export function makeCandidateSet({ loaded, byUid, entries, params: P, chunkCfg, 
     // content-lexical.mjs.
     const contentIndex = buildContentIndex(entries, chunkCfg ?? { chunkMode: 'paragraph', chunkSize: 800, minChunkSize: 120 });
     const hasContent = e => Boolean(String(e?.content ?? '').trim());
+    // DENSE-ALL, the stage-3 cosine for entries the collection has no row for (loadScene splits them out).
+    // Pooled by MAX per entry, the same rule poolEntries applies to the vectorized half, and against
+    // loaded.mean so both classes are centered by the same vector. Filled onto the keyword route below, so
+    // it re-ranks entries a key already activated and admits nothing — the dense twin of content-lexical.
+    const denseExtra = (qvec) => {
+        const out = new Map();
+        if (!loaded.extra?.length || !qvec?.length) return out;
+        const scores = centeredCosineScores(loaded.extra, qvec, loaded.mean, P.meanCentered);
+        loaded.extra.forEach((it, i) => {
+            const uid = Number(it.metadata?.index);
+            out.set(uid, Math.max(out.get(uid) ?? -Infinity, scores[i]));
+        });
+        return out;
+    };
+    // Which rows carry the dense cosine in the fourth column rather than in `score` (see denseColumn).
+    const colExtras = P.denseColumn === 'nocos' || P.denseColumn === 'all';
+    const colVectorized = P.denseColumn === 'cos' || P.denseColumn === 'all';
     return (k1, b, tw, qvec, qtext, scanText) => {
+        const dense = denseExtra(qvec);
         // Resolve 'auto' here, once, so the admit/floor filters below compare against the same number
         // scoreCollection gated with — the same p90-of-live-scores the plugin computes.
         // --- STAGE 1: RETRIEVAL. Score every chunk, apply the admission gates, pool per entry, take top-K.
@@ -439,7 +512,7 @@ export function makeCandidateSet({ loaded, byUid, entries, params: P, chunkCfg, 
         //
         // Dropped at admission rather than filtered from `entries`: the gazetteer and the BM25 corpus must
         // still see every entry, or the term weights move and the comparison measures the wrong thing.
-        for (const [uid, s] of per) { const e = byUid.get(uid); if (e && !e.disable) rows.push({ uid, entry: e, title: wiTitle(e), score: s.score, textScore: contentText.get(entryKey(e)) ?? 0, keywordScore: keywordScore(e, scanText, k1), vectorEligible: !!e.vectorized, textEligible: hasContent(e), keysEligible: scoringKeys(e, P).length > 0 }); }
+        for (const [uid, s] of per) { const e = byUid.get(uid); if (e && !e.disable) rows.push({ uid, entry: e, title: wiTitle(e), score: s.score, sparseScore: colVectorized ? s.score : undefined, textScore: contentText.get(entryKey(e)) ?? 0, keywordScore: keywordScore(e, scanText, k1), vectorEligible: !!e.vectorized, textEligible: hasContent(e), keysEligible: scoringKeys(e, P).length > 0 }); }
         // --- STAGE 2: ACTIVATION (keyword route). Stands in for ST core's keyword match, so it may only
         // admit an entry core could actually have activated. Two exclusions, both stage-2 facts:
         //
@@ -453,7 +526,7 @@ export function makeCandidateSet({ loaded, byUid, entries, params: P, chunkCfg, 
         //                      this guard a capture with both settings on (every sommers arm) admitted 209
         //                      more rows by key, and keys appeared to rescue vector entries production would
         //                      never have ranked.
-        for (const e of entries) { const uid = Number(e.uid); if (per.has(uid) || e.disable || (e.vectorized && P.suppressVectorKeys)) continue; const kw = keywordScore(e, scanText, k1); if (kw > 0) rows.push({ uid, entry: e, title: wiTitle(e), score: undefined, textScore: contentText.get(entryKey(e)) ?? 0, keywordScore: kw, vectorEligible: !!e.vectorized, textEligible: hasContent(e), keysEligible: true }); }
+        for (const e of entries) { const uid = Number(e.uid); if (per.has(uid) || e.disable || (e.vectorized && P.suppressVectorKeys)) continue; const kw = keywordScore(e, scanText, k1); if (kw > 0) rows.push({ uid, entry: e, title: wiTitle(e), score: P.denseColumn ? undefined : dense.get(uid), sparseScore: colExtras ? dense.get(uid) : undefined, textScore: contentText.get(entryKey(e)) ?? 0, keywordScore: kw, vectorEligible: (!P.denseColumn && dense.has(uid)) || !!e.vectorized, textEligible: hasContent(e), keysEligible: true }); }
         return rows;
     };
 }
@@ -464,7 +537,7 @@ export const makeFuse = P => (rows, lexW) => {
     rows.forEach(r => { r.key = r.uid; });
     // The sample's own retrievalMode, not a hardcoded 'hybrid' — production passes settings().retrievalMode
     // here, and a scene graded under 'lexical'/'vector' fused as hybrid is a ranking the user never ran.
-    ranking.fuseRanks(rows, { rrfK: P.K, retrievalMode: P.retrievalMode, weightByOrder: false, lexicalWeight: lexW, keywordWeight: P.KEYW });
+    ranking.fuseRanks(rows, { rrfK: P.K, retrievalMode: P.retrievalMode, weightByOrder: false, lexicalWeight: lexW, keywordWeight: P.KEYW, keywordOnlyTilt: P.keywordTilt, sparseWeight: P.denseColumn ? P.denseWeight : 0 });
     return [...rows].sort((a, b) => b.fused - a.fused);
 };
 
@@ -534,8 +607,10 @@ export async function scoreScene({ sample: S, overrides = {}, k = 10, vectors, m
     // A preloaded scene is reused across arms so N arms cost ONE embed and ONE index parse per scene. Valid
     // only while no arm moves suppressVectorKeys, which is baked into the gazetteer at load time — asserted
     // rather than trusted, because the failure would be a silently wrong gazetteer and those cost 74% BM25.
-    if (preloaded && (overrides.suppressVectorKeys !== undefined || overrides.suppressGazetteerKeys !== undefined)) {
-        throw new Error('suppressVectorKeys/suppressGazetteerKeys change the gazetteer, so they cannot be swept against a preloaded scene — load per arm');
+    // denseAllEntries is baked in the same way for a different reason: it is read when the index is split,
+    // so against a preloaded scene it would silently score the ordinary collection and report flat.
+    if (preloaded && (overrides.suppressVectorKeys !== undefined || overrides.suppressGazetteerKeys !== undefined || overrides.denseAllEntries !== undefined)) {
+        throw new Error('suppressVectorKeys/suppressGazetteerKeys/denseAllEntries are read at load time, so they cannot be swept against a preloaded scene — load per arm');
     }
     const scene = preloaded ?? loadScene(S, { indexFile: indexPath(S, { vectors, model, index }), params: P });
     const scoreAll = makeCandidateSet({ ...scene, params: P, topK });
@@ -545,7 +620,9 @@ export async function scoreScene({ sample: S, overrides = {}, k = 10, vectors, m
     const query = S.query;
     const tw = (P.entityFilter && P.queryMode !== 'summary') ? ranking.buildTermWeights(query, scene.gaz, P.boost) : null;
     // No collection means no cosine to compute, so the embed call is skipped rather than made and ignored.
-    const qv = cachedQv ?? (scene.items.length ? await embed(query, { ollama, model }) : []);
+    // Under denseAllEntries a keyword-only book has an empty stage-1 collection and still has vectors to
+    // score against, which is the whole point of the arm there.
+    const qv = cachedQv ?? ((scene.items.length || scene.loaded?.extra?.length) ? await embed(query, { ollama, model }) : []);
     const all = scoreAll(P.K1, P.B, tw, qv, query, S.scanText);
 
     // WHAT IS RANKED: the haystack, minus CONSTANTS. These metrics tune RANKING FEATURES — how should this
@@ -638,11 +715,11 @@ export async function scoreScene({ sample: S, overrides = {}, k = 10, vectors, m
         f2,
         atR,
         delivered,
-        // Reported rather than derived at every call site, so two tools cannot disagree about its sign.
         // Delivered recall, split by tier. Not a second score — a guard on the one above: a selection that
         // trades a hard class for an easy one improves every pooled metric here while delivering less of
         // what the system is for, and nothing else reported by this function can see that.
         byTier,
+        // Reported rather than derived at every call site, so two tools cannot disagree about its sign.
         divergence: delivered.f - atR.f,
         relevant,
         judged: top.length - unjudged.length,

@@ -21,6 +21,19 @@ eq(buildItems({ 1: V(1, 'alpha', { disable: true }) }, CFG).length, 0, 'a disabl
 eq(buildItems({ 1: V(1, '') }, CFG).length, 0, 'an empty entry is not indexed');
 eq(buildItems({ 1: { uid: 1, vectorized: true } }, CFG).length, 0, 'a contentless entry is not indexed');
 
+// --- `all`: the one build that deliberately does NOT mirror syncWorld (the denseAllEntries arm) ---
+// The vectorized half must come out item-for-item identical, because that half stays stage 1's collection
+// and its corpus mean — an --all index that reordered or re-hashed anything would move every baseline
+// cosine and report it as the arm's effect.
+const mixed = { 1: V(1, 'alpha'), 2: { uid: 2, content: 'beta', vectorized: false }, 3: V(3, 'gamma', { disable: true }), 4: { uid: 4, vectorized: false } };
+const vecOnly = buildItems(mixed, CFG);
+const withAll = buildItems(mixed, CFG, true);
+eq(vecOnly.length, 1, 'without --all only the vectorized entry is indexed');
+eq(withAll.length, 2, 'with --all the non-vectorized entry with content joins it');
+eq(withAll.some(i => i.index === 3), false, 'a disabled entry stays out under --all too');
+eq(withAll.some(i => i.index === 4), false, 'a contentless entry stays out under --all too');
+eq(JSON.stringify(withAll.filter(i => i.index === 1)), JSON.stringify(vecOnly), 'the vectorized half of an --all build is item-for-item the ordinary build');
+
 // --- post-chunking: trim, drop blanks ---
 const trimmed = buildItems({ 1: V(1, 'alpha\n\n   \n\nbeta') }, CFG);
 eq(trimmed.length, 2, 'blank paragraphs are dropped, not embedded');
@@ -64,6 +77,10 @@ eq(cp({}) === cp({ chunkSize: 400 }), false, 'a different chunkSize is a differe
 eq(cp({}) === cp({ minChunkSize: 0 }), false, 'a different floor is a different collection');
 eq(cp({}) === cp({ chunkMode: 'length' }), false, 'a different mode is a different collection');
 eq(cp({}) === cp({}, 'other-model'), false, 'a different embedding model is a different collection');
+// An --all collection holds a different entry population at the same settings, so it cannot share a path
+// with the ordinary one — and the ordinary one must keep the path it already has on disk.
+eq(cachePath({ primaryBook: 'Book' }, chunkConfig(S), 'bge-m3', 'Book', true) === cp({}), false, 'an --all collection is a different collection');
+eq(cachePath({ primaryBook: 'Book' }, chunkConfig(S), 'bge-m3', 'Book', false), cp({}), 'not asking for --all leaves the existing path untouched');
 
 // --- ORACLE: rebuild a real sample at its own settings and match what ST actually wrote ---
 // stInstall() walks to the live ST install, so this works from git worktrees too. eval-data/ is

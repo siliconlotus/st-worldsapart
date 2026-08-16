@@ -53,14 +53,22 @@ export const chunkConfig = (S, overrides = {}) => ({
  * Any drift from this is drift from what the extension actually indexes, which would make every offline
  * number describe a collection production would never build.
  *
+ * `all` DELIBERATELY BREAKS THAT MIRROR, and is the only thing here that may: it drops the `vectorized`
+ * gate so every entry with content is embedded, which is a collection no ST install holds. It exists for
+ * the dense-all arm (scene.mjs denseAllEntries), which reads the two halves at different stages — the
+ * vectorized half is stage 1's collection and is item-for-item what the ordinary build produces, so a
+ * baseline scored against this index is unchanged. Cached under a different path (cachePath) so the two
+ * can never be mistaken for each other.
+ *
  * @param {Record<string, object>} book uid-keyed entries
  * @param {object} cfg chunkConfig() output
+ * @param {boolean} [all] Index every entry with content, not only the vectorized ones
  * @returns {Array<{hash: number, text: string, index: number}>} Items, ready to embed
  */
-export function buildItems(book, cfg) {
+export function buildItems(book, cfg, all = false) {
     const items = [];
     for (const entry of Object.values(book)) {
-        if (!entry.vectorized || entry.disable || typeof entry.content !== 'string' || !entry.content) continue;
+        if ((!all && !entry.vectorized) || entry.disable || typeof entry.content !== 'string' || !entry.content) continue;
         for (const chunk of chunkEntry(entry.content, cfg)) {
             const text = chunk.trim();
             if (!text) continue;
@@ -74,11 +82,15 @@ export function buildItems(book, cfg) {
 }
 
 /** Deterministic cache location: same book + model + chunk settings always resolves to the same file, so a
- *  sweep re-running an arm costs nothing and two arms can never collide. */
-export function cachePath(S, cfg, model, book = S.primaryBook) {
+ *  sweep re-running an arm costs nothing and two arms can never collide.
+ *
+ *  `all` is in the key AND in the directory name, because the two builds differ only in which entries are
+ *  present, and one silently standing in for the other would read as a parameter effect. It contributes
+ *  nothing to either when false, so every existing cache path stays where it is. */
+export function cachePath(S, cfg, model, book = S.primaryBook, all = false) {
     const slug = String(book).replace(/[^\w.-]+/g, '-').slice(0, 40);
-    const key = getStringHash(`${book}${model}${cfg.chunkMode}${cfg.chunkSize}${cfg.minChunkSize}`);
-    return new URL(`./eval-data/indexes/${slug}__${model}__${key}/index.json`, import.meta.url).pathname;
+    const key = getStringHash(`${book}${model}${cfg.chunkMode}${cfg.chunkSize}${cfg.minChunkSize}${all ? `all` : ``}`);
+    return new URL(`./eval-data/indexes/${slug}__${model}${all ? `__all` : ``}__${key}/index.json`, import.meta.url).pathname;
 }
 
 const embedBatch = async (texts, { ollama, model }) => {
@@ -95,19 +107,19 @@ const l2 = v => { let s = 0; for (const x of v) s += x * x; return Math.sqrt(s);
  *
  * @returns {Promise<{path: string, built: boolean, items: number}>}
  */
-export async function ensureIndex(S, { overrides = {}, model = 'bge-m3', ollama = 'http://localhost:11434', book = S.primaryBook, out = null, batch = 64, force = false, log = () => {} } = {}) {
+export async function ensureIndex(S, { overrides = {}, model = 'bge-m3', ollama = 'http://localhost:11434', book = S.primaryBook, out = null, batch = 64, force = false, all = false, log = () => {} } = {}) {
     const cfg = chunkConfig(S, overrides);
-    const path = out ?? cachePath(S, cfg, model, book);
+    const path = out ?? cachePath(S, cfg, model, book, all);
     if (!force && existsSync(path)) return { path, built: false, items: JSON.parse(readFileSync(path, 'utf8')).items.length };
 
     const entries = S.books?.[book];
     if (!entries || !Object.keys(entries).length) throw new Error(`sample embeds no entries for book "${book}" (bookMode "${S.bookMode ?? '?'}") — needs a 'full' capture`);
-    const items = buildItems(entries, cfg);
-    if (!items.length) throw new Error(`no vectorized entries with content in "${book}" — nothing to index`);
+    const items = buildItems(entries, cfg, all);
+    if (!items.length) throw new Error(`no ${all ? '' : 'vectorized '}entries with content in "${book}" — nothing to index`);
     // 'meta' fidelity drops content, so the chunks would silently be empty rather than wrong. Say so.
     if (S.bookMode && S.bookMode !== 'full') log(`!! sample bookMode is "${S.bookMode}"; only 'full' carries the entry content this rebuilds from`);
 
-    log(`building ${items.length} chunks for "${book}" at ${cfg.chunkMode}/${cfg.chunkSize}/${cfg.minChunkSize} -> ${path}`);
+    log(`building ${items.length} chunks for "${book}"${all ? ' (EVERY entry, not just vectorized)' : ''} at ${cfg.chunkMode}/${cfg.chunkSize}/${cfg.minChunkSize} -> ${path}`);
     const out_ = [];
     for (let i = 0; i < items.length; i += batch) {
         const slice = items.slice(i, i + batch);
@@ -132,7 +144,8 @@ if (process.argv[1] && import.meta.url.endsWith(process.argv[1].split('/').pop()
     const arg = k => { const i = argv.indexOf(k); return i >= 0 ? argv[i + 1] : null; };
     const sample = argv.find(a => a.endsWith('.json') && !a.startsWith('--'));
     if (!sample) {
-        console.error('usage: node reindex.mjs <sample.json> [--chunkSize N] [--chunkMode paragraph|length] [--minChunkSize N] [--book <name>] [--out <index.json>] [--batch 64] [--force]');
+        console.error('usage: node reindex.mjs <sample.json> [--chunkSize N] [--chunkMode paragraph|length] [--minChunkSize N] [--book <name>] [--out <index.json>] [--batch 64] [--force] [--all]');
+        console.error('--all embeds EVERY entry with content, not just the vectorized ones — the collection the denseAllEntries arm reads (scene.mjs)');
         console.error('rebuilds a vector collection from the sample\'s embedded books into eval-data/indexes/ (never into SillyTavern\'s live vectors unless --out says so)');
         process.exit(2);
     }
@@ -146,9 +159,11 @@ if (process.argv[1] && import.meta.url.endsWith(process.argv[1].split('/').pop()
     ensureIndex(S, {
         overrides, model, book: arg('--book') ?? S.primaryBook, out: arg('--out'),
         ollama: process.env.OLLAMA_URL ?? 'http://localhost:11434',
-        batch: Number(arg('--batch')) || 64, force: argv.includes('--force'), log: m => console.log(m),
+        batch: Number(arg('--batch')) || 64, force: argv.includes('--force'), all: argv.includes('--all'), log: m => console.log(m),
     }).then(r => {
         console.log(r.built ? `wrote ${r.items} items -> ${r.path}` : `already built (${r.items} items) -> ${r.path}  [--force to rebuild]`);
-        console.log(`score it with:  node graded-scene-grid.mjs --sample ${sample} --index ${r.path}`);
+        console.log(argv.includes('--all')
+            ? `score it with:  node param-screen.mjs ${sample} --arms denseAll=on   (an --all index is only meaningful under denseAllEntries)`
+            : `score it with:  node graded-scene-grid.mjs --sample ${sample} --index ${r.path}`);
     }).catch(e => { console.error(String(e.message ?? e)); process.exit(1); });
 }

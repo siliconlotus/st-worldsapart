@@ -95,6 +95,38 @@ const ARMS = {
     ...Object.fromEntries([0, 60, 120, 200, 300, 500].map(v => [`minChunk=${v}`, { __chunk: { minChunkSize: v } }])),
     'chunkMode=length': { __chunk: { chunkMode: 'length' } },
 
+    // A COSINE FOR EVERY ENTRY — the dense twin of giving keyword entries a text score (content-lexical.mjs).
+    // A keyword-only entry has no vector row, so its semantic standing is estimated from keys and content
+    // BM25 alone; this embeds every entry with content and hands stage 3 the cosine as a fourth column's
+    // worth of evidence on the rows it already ranks. Needs its own collection (reindex.mjs --all), so it is
+    // a slow arm on first run like the chunk arms, and free after.
+    //
+    // STAGE 3 ONLY, which is what makes its Δ readable: activation is untouched, so unlike a chunk arm it
+    // cannot surface an unjudged row and its delta is not a pool-biased lower bound. It does move two things
+    // at once — see denseAllEntries in scene.mjs for the tilt that stops applying.
+    'denseAll=on': { __dense: true, denseAllEntries: true },
+    // THE SAME COSINE THROUGH THE COLUMN THE LEARNED-SPARSE SCORES WERE MEASURED IN (ranking.mjs
+    // sparseWeight, scene.mjs denseColumn). Weight 0.5, same eligibility rule, `score` and the keyword-only
+    // tilt untouched — so denseCol=nocos against the sparse run's own nocos arm differs in the number the
+    // column holds and nothing else, which denseAll=on does not.
+    //
+    // Only 'nocos' is a standing arm. denseColumn 'all' and 'cos' put a vectorized entry's own cosine in
+    // the column beside itself, so they can only reweight the vector signal — a question the vector weight
+    // asks directly. Measured on 70 scenes they moved +0.0056 and +0.0005 nDCG@10, and an arm that measures
+    // nothing still costs a comparison in every later run's multiplicity count. scene.mjs still implements
+    // both; call scoreScene with the override to run them.
+    'denseCol=nocos': { __dense: true, denseAllEntries: true, denseColumn: 'nocos' },
+    // THE OTHER HALF OF THAT ARM, on its own: denseAll=on both adds the cosine and removes the keyword-only
+    // tie-break from the entries that get one, so tilt=1 is what splits the pair (the cosine's own
+    // contribution reads as denseAllΔ - tiltΔ).
+    //
+    // THE DOSE QUESTION IS CLOSED — the ladder finding lives at ranking.mjs KEYWORD_ONLY_TILT (13 doses
+    // 0.75-3, 70 scenes, unimodal on both metrics, joint plateau [1.25, 1.3]). These two are TRIPWIRES,
+    // one per cliff edge: tilt=1 must read ~-0.02 F@R and tilt=1.5 ~-0.02 nDCG, and a flat cell means the
+    // fusion or the population changed shape and the ladder wants re-running, not that the tilt is free.
+    'tilt=1': { keywordTilt: 1 },
+    'tilt=1.5': { keywordTilt: 1.5 },
+
     // Mean-centering off: rank on RAW cosine. The contrast is end-to-end — it moves the retrieval ranking,
     // the top-K, the admission gate and the fused layout order together, which is what makes it different
     // from comparing the two score columns on a fixed candidate set.
@@ -274,14 +306,15 @@ const fx = n => (n >= 0 ? '+' : '') + n.toFixed(4);
 
     const results = [];
     for (const armName of picked) {
-        const { __chunk: chunkCfg, __reload: needsReload, ...scoring } = ARMS[armName];
+        const { __chunk: chunkCfg, __reload: needsReload, __dense: denseAll, ...scoring } = ARMS[armName];
         const cells = [];
         for (const sc of scenes) {
             let r;
-            if (chunkCfg) {
+            if (chunkCfg || denseAll) {
                 // A chunk arm needs its OWN collection, so the preloaded scene can't be reused — the index is
                 // exactly what changed. The query embedding still can: the query text is untouched.
-                const built = await ensureIndex(sc.S, { overrides: chunkCfg, model: MODEL, ollama: OLLAMA, log: () => {} });
+                // A dense-all arm is the same shape: same chunk settings, a collection covering every entry.
+                const built = await ensureIndex(sc.S, { overrides: chunkCfg ?? {}, all: !!denseAll, model: MODEL, ollama: OLLAMA, log: () => {} });
                 r = await scoreScene({ sample: sc.S, overrides: scoring, k: K, index: built.path, model: MODEL, ollama: OLLAMA, qv: sc.qv });
             } else if (needsReload) {
                 // Same collection, but the gazetteer is baked at load time, so the preloaded scene is stale
