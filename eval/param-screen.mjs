@@ -61,12 +61,22 @@ const ARMS = {
     // generator, not the hypothesis.
     'scoreVectorKeys=on': { scoreVectorKeys: true },
     'scoreVectorKeys=off': { scoreVectorKeys: false },
-    // SELECTION, the other half of the pair above — and it is NOT one variable. suppressVectorKeys blanks
-    // vectorized keys so core cannot activate on them (stage 2) AND, because the gazetteer is built
-    // downstream of that blanking, changes the BM25 term set (stage 1). So `vectorKeys=live` moves both, and
-    // the captured keys-live arm is not a superset of shipped: measured across 65 scenes it adds 767
-    // keyword-only rows but loses 174 vector rows to the reranking. The other two hold one half fixed via
-    // suppressGazetteerKeys, so the effect splits. __reload because the gazetteer is baked at load time.
+    // THESE NO LONGER MOVE THE POPULATION. Measured at the current architecture, 70 scenes: every arm below
+    // returns a BYTE-IDENTICAL candidate set — 10103 vector rows, 353 keyword rows, 670 of 672 retrievable
+    // relevant — and only the query-term count differs (6130 shipped, 9839 keys-live). The old figure here
+    // ("adds 767 keyword-only rows, loses 174 vector rows across 65 scenes") was an artifact of
+    // admitCeiling 100: those rows were vectorized entries the ceiling kept out of the pooled set, which
+    // live keys then re-admitted by the keyword route. At 1000 the ceiling excludes nothing and stage 1
+    // reads no term weights, so suppression cannot reach admission from either direction.
+    //
+    // What is left is stage 3 alone: the term set feeds content-lexical, and scoringKeys decides whether a
+    // vectorized entry's keys are counted. One upside — an arm that cannot change the population cannot
+    // surface an unjudged row, so unlike a chunk arm its delta is not a pool-biased lower bound.
+    //
+    // suppressVectorKeys is RULED to be going (matcher-design.md, Stage 2: the takeover already blanks
+    // every keyword-activating entry and stashes both key and keysecondary). These arms outlive it only as
+    // the gazetteer contrast; scoreVectorKeys is where the surviving question lives.
+    // __reload because the gazetteer is baked at load time.
     'vectorKeys=live': { suppressVectorKeys: false, __reload: true },
     'vectorKeys=live-gazfixed': { suppressVectorKeys: false, suppressGazetteerKeys: true, __reload: true },
     'vectorKeys=gazraw': { suppressVectorKeys: true, suppressGazetteerKeys: false, __reload: true },
@@ -80,6 +90,14 @@ const ARMS = {
     // what to argue about: at this sample size the whole gazetteer is inside noise, and the proper-noun
     // boost is carrying the entity filter on its own. Kept as standing arms because that null is the answer
     // to a question that keeps getting re-asked, and re-asking it should cost one command.
+    //
+    // THOSE DELTAS WERE MEASURED WHEN THESE ARMS ALSO MOVED ADMISSION, by up to 137 rows. They no longer
+    // do: re-measured at the current architecture over 70 scenes, all four return a byte-identical
+    // candidate set to baseline and to each other (10103 vector rows, 353 keyword rows, 670 relevant),
+    // differing only in query terms — 2911 for none, 4042 keys, 6130 shipped, 36789 bodies. Stage 1 reads
+    // no term weights, so the gazetteer reaches content-lexical at stage 3 and nothing else. The flat
+    // finding survives the narrowing; what changed is that these now measure a pure reweighting, which is
+    // a cleaner contrast than the one that produced the numbers above.
     'gaz=keys': { gazetteerSource: 'keys', __reload: true },
     'gaz=titles': { gazetteerSource: 'titles', __reload: true },
     'gaz=bodies': { gazetteerSource: 'bodies', __reload: true },

@@ -212,13 +212,18 @@ export const sceneParams = (S, overrides = {}) => ({
     denseColumn: null,
     denseWeight: 0.5,
     maxVectorEntries: 20, suppressVectorKeys: true, scoreVectorKeys: false, entityFilter: true,
-    // suppressVectorKeys moves TWO stages at once. It blanks vectorized keys so core cannot keyword-ACTIVATE
-    // them (stage 2), and because the gazetteer is built downstream of that blanking it also changes the BM25
-    // term set (stage 1 — 2.3x terms, up to 74% score movement, see loadScene). So an arm that flips it is not
-    // a clean activation contrast, and the keys-live capture is NOT a superset of shipped: measured, it adds
-    // 767 keyword-only rows but LOSES 174 vector rows across 65 scenes to the reranking, all of them below
-    // shipped rank 16. Null follows suppressVectorKeys, which is what production does. Set it explicitly to
-    // hold the gazetteer fixed while activation moves, or the reverse, and the two effects separate.
+    // suppressVectorKeys USED TO move two stages at once — blanking vectorized keys so core could not
+    // keyword-ACTIVATE them (stage 2), and widening the gazetteer, which fed stage-1 BM25. Neither reaches
+    // admission now: stage 1 is cosine-only and reads no term weights, and the ceiling admits every indexed
+    // entry, so the keyword route never sees a vectorized entry to add. Measured at the current
+    // architecture over 70 scenes, flipping it returns a BYTE-IDENTICAL candidate set — 10103 vector rows,
+    // 353 keyword rows, 670 relevant — and moves only the term count (6130 -> 9839). The old figure
+    // ("adds 767 keyword-only rows, loses 174 vector rows across 65 scenes") was admitCeiling 100 talking.
+    //
+    // What survives is stage 3: the term set feeds content-lexical, and scoringKeys decides whether a
+    // vectorized entry's keys are counted. suppressGazetteerKeys exists to split those, and stops being
+    // needed once production filters the gazetteer deliberately rather than riding the blanking side
+    // effect (matcher-design.md, Stage 2 — where suppressVectorKeys itself is ruled to be going).
     suppressGazetteerKeys: null,
     // WHICH FIELDS THE GAZETTEER READS. Production is 'keys+titles' (buildGazetteer's own sources), chosen on
     // a 5-target gold set that no longer exists; 'bodies' was re-measured at n=3 scenes and lost. This param
