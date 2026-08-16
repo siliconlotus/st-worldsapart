@@ -319,40 +319,46 @@ every compound key.
 
 ## Stage 1: Retrieval
 
-`selectAndActivate` (`worldsapart.js`). The plugin scores chunks (cosine + BM25 over chunk text),
-`fuseRetrieval` fuses them into the **retrieval ranking**, and `retrieve` returns every entry that
-ranking scored.
+`selectAndActivate` (`worldsapart.js`). The plugin scores every chunk by mean-centered cosine,
+`fuseRetrieval` orders them into the **retrieval ranking**, and `retrieve` returns all of it.
 
-**Keys are not in this ranking** — `fuseRetrieval` is deliberately passed no `keywordWeight`.
+**Stage 1 is cosine only, and admits everything it scores.** No lexical signal, no entity filter, no
+relevance test. The one thing that drops a chunk is `uncenteredGate`, the wrong-book failsafe on RAW
+cosine; the one thing that bounds the result is `admitCeiling`. Keys are not in this ranking either.
 
-**Stage 1 admits and does not cut.** Admission is the plugin's own gates — `scoreThreshold` on the
-centered cosine, `bm25 > 0` on the chunk's own text, `uncenteredGate` as the wrong-book failsafe — plus a
-ceiling on how many records are asked for. That ceiling is `admitCeiling` (`plugin/scoring.mjs`, beside
-`poolEntries`), and it bounds how much a pathological scene may feed core's scan loop rather than
-judging any entry. It is path-dependent because topK counts a different thing on each path: the plugin
-pools to one record per entry before `selectTopK`, so K counts ENTRIES (100); the stock-ST fallback does
-not pool, so K counts CHUNKS (300, chunks/entry measuring 9.1-10.3 with per-entry maxima stabilising at
-K ~= 150-300). `queryCollections` chooses per path, since the fallback can fire mid-request.
+Everything else that used to gate here was removed against measurement, and `plugin/scoring.mjs`'s header
+is the record — read it before proposing any of it back. In short: `scoreThreshold` resolved to a p90
+quantile, a top-decile SELECTOR rather than a floor, and sat beside `bm25 > 0`, which admitted 99.9% of
+every book's indexed entries and so undid each of its exclusions; removing the threshold outright moved
+admission by 6 entries in 10,103 across 70 graded scenes and recovered no relevant entry. BM25 then had
+no admission left to serve, `retrievalMode` had no second signal to choose, and the entity filter — which
+produces BM25 query terms — had nothing here to spend them on.
 
-**On the plugin path `scoreThreshold` cannot narrow the candidate set.** A vectorized chunk is also
-admitted by `bm25 > 0` on its own text, so admission there is "top decile by centered cosine OR any
-lexical overlap" — `'auto'` resolves to `quantile(vectorScores, 0.9)`, a selector rather than a floor.
-That bypass is load-bearing. **Measured** (`eval/param-screen.mjs` `admit=cosine`, three scenes, on the
-0-5 human scale those captures carry — `eval/relevance-eval.mjs`, not the 0-4 rubric below): a strict
-cosine gate dropped sommers from 3/3 to 1/3 on its grade-5 entries in the top 10, and lost a relevant
-time-whore entry from the candidate set entirely. Narrowing admission is therefore a COST question, not
-a precision one, since stage 4 arbitrates.
+**What that concedes.** A strict cosine gate loses 110 of 672 graded-relevant entries (measured, 70
+scenes): chunks below the corpus mean in embedding space that carry the query's exact terms, which
+mean-centering is what puts there. Stage 1 no longer applies such a gate, so the loss is not live — but
+`admitCeiling` overflow is now chosen on cosine alone, which is the same population. The ceiling is 1000
+entries and the largest book measured holds 208 vectorized ones. **If a book approaches the ceiling, this
+is the decision to revisit first.**
 
-**On the stock-ST fallback it is a hard floor and the only admission signal**, applied to RAW scores. The
-plugin's `bm25 > 0` clause and `uncenteredGate` are `scoreCollection`'s, and that never runs on this path
-— ST returns no `bm25` field either, so there is nothing for a lexical clause to read. `'auto'` is the
-one value `queryCollections` rewrites, to 0.1, since the server quantiles nothing; a numeric
-`scoreThreshold` is passed through as the author set it.
+`admitCeiling` (`plugin/scoring.mjs`, beside `poolEntries`) bounds how much a pathological scene may feed
+stage 3 rather than judging any entry, and is path-dependent because topK counts a different thing on
+each path: the plugin pools to one record per entry before `selectTopK`, so K counts ENTRIES (1000); the
+NO-PLUGIN PATH does not pool, so K counts CHUNKS (10000, holding the 9.1-10.3 chunks/entry ratio).
+`queryCollections` chooses per path, since the no-plugin path can fire mid-request. It was 100/300 and
+that bound *did* bind — below two of seven books here, costing 23 of 672 graded-relevant entries on 20
+scenes. **A ceiling that binds on an ordinary scene is a cut, not a limit.**
+
+**The NO-PLUGIN PATH** (ST's own `/api/vector`, taken when the WA plugin is absent or errors) does not
+mean-centre and does not pool server-side. It has never had BM25, and since stage 1 no longer does
+either, that has stopped being a difference between the paths. Neither path passes a threshold now.
 
 **The gazetteer is built downstream of `suppressVectorKeys`**, which blanks `key`/`keysecondary` on
 every vectorized entry, so "the lorebook's own vocabulary" is entry TITLES plus the keys of
-non-vectorized entries. Reading the raw book instead admitted 2.3x the terms (238 vs 105) and inflated
-every BM25 score by up to 74%. `eval/scene.mjs` reproduces the production order for this reason.
+non-vectorized entries. Reading the raw book instead admits 2.3x the terms (238 vs 105). The 74% BM25
+inflation that figure used to carry was measured on stage-1 BM25 and is retired with it; the term-set
+mismatch still moves content-lexical's scores at STAGE 3, where the filter now lives, so
+`eval/scene.mjs` reproduces the production order for that reason instead.
 
 ---
 

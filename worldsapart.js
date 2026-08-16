@@ -292,9 +292,8 @@ async function queryCollections(args) {
         }
     }
 
-    // Stock ST can't quantile ('auto' resolves in the plugin) — pin the old centered default; on raw
-    // scores it's permissive and client-side selection narrows.
-    if (args.threshold === 'auto') args = { ...args, threshold: 0.1 };
+    // No threshold to pass: WA has no admission gate at either path, and ST's endpoint defaults its own
+    // to 0, which admits everything — the same contract the plugin path now has.
     // No server-side pooling here, so K counts chunks and must run deep enough for each entry's best
     // one to survive. Re-asked rather than inherited from a failed plugin attempt.
     return await vectorPost('query-multi', { ...args, topK: admitCeiling(false) }) ?? {};
@@ -778,7 +777,7 @@ async function retrieve(chat) {
     const { targets, scores } = await scoreEntries(searchText);
 
     // Two different empties, and conflating them sent people off to tune a threshold that was never
-    // involved: a book with nothing vectorized has no candidates at all, which no threshold affects.
+    // involved (and no longer exists): a book with nothing vectorized has no candidates at all.
     if (!targets.length) {
         console.log('Worlds Apart: no vectorized entries in the active books, so retrieval has nothing to score');
         return [];
@@ -805,8 +804,8 @@ async function retrieve(chat) {
         runState.lastScores.set(key, value.score);
     }
 
-    // winnerKeys is exactly scores' keys — everything that cleared the threshold and got ranked, no
-    // narrower cut. targets includes vectorized entries the query never scored at all (below threshold,
+    // winnerKeys is exactly scores' keys — everything the store returned and ranked, no narrower cut.
+    // targets includes vectorized entries the query never scored at all (absent from the response,
     // or absent from the store's response); admitting those too would return an entry with no vector
     // score for stage 3 to look up.
     return targets.filter(x => winnerKeys.has(`${x.world}.${x.uid}`));

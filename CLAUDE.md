@@ -218,23 +218,40 @@ entry), because grading asks whether ranking would have chosen the entry and the
 answer that: a dry run arms nothing. So a configured sticky entry on the turn it keyword-activates is
 inside the cliff's population and outside the graded one.
 
-**1. Retrieval** — `selectAndActivate` in `worldsapart.js`. The plugin scores chunks (cosine + BM25 over
-chunk text), `fuseRetrieval` fuses them into the **retrieval ranking**, and `retrieve` returns everything
-that ranking scored: **stage 1 admits and does not cut**. On the plugin path admission is
-`scoreThreshold` OR `bm25 > 0`, ANDed with `uncenteredGate`; on the stock-ST fallback neither of those
-two runs, so `scoreThreshold` is a hard floor on raw scores and the only admission signal there is, with
-`'auto'` resolving to 0.1 because the server quantiles nothing. Both are bounded by `admitCeiling`
-(`plugin/scoring.mjs`), a safety limit counting entries (100) on the pooled plugin path and chunks (300)
-on the fallback. **Keys are not in this ranking** — `fuseRetrieval` is deliberately passed no
-`keywordWeight`.
+**1. Retrieval** — `selectAndActivate` in `worldsapart.js`. **Stage 1 is COSINE ONLY, and it has no
+admission test at all**: the plugin scores every chunk by mean-centered cosine, `fuseRetrieval` orders
+them into the **retrieval ranking**, and `retrieve` returns all of it. The only thing that drops a chunk
+is `uncenteredGate`, a wrong-book failsafe on RAW cosine. The only thing that bounds the result is
+`admitCeiling` (`plugin/scoring.mjs`), counting entries (1000) on the pooled plugin path and chunks
+(10000) on the no-plugin path.
+
+**Call the non-plugin route the NO-PLUGIN PATH, not "the fallback".** It is ST's own `/api/vector`
+endpoint, taken when the WA server plugin is absent or errors (`queryCollections`). It does not
+mean-centre and does not pool server-side, so K counts chunks there and the client pools what K let
+through. It has never had BM25; that is no longer a difference between the paths.
+
+Everything lexical left this stage, and the removals are measured — see `plugin/scoring.mjs`'s header
+before proposing any of it back. `scoreThreshold` was a p90 quantile whose every exclusion the `bm25 > 0`
+clause beside it undid (removing it moved admission by 6 entries in 10,103); BM25 then had no admission
+to serve; `retrievalMode` chose between cosine and cosine+BM25 and lost its subject; the ENTITY FILTER
+builds BM25 query terms and so no longer runs here either. **Keys are not in this ranking, and neither is
+any lexical signal** — both live at stage 3.
 
 **2. Activation** — whether an entry is ranked at all. Three independent routes: WA emits
 `WORLDINFO_FORCE_ACTIVATE` on the retrieval winners; ST core keyword-matches whatever keys are live;
 `constant`, decorators and sticky persistence. The result is core's `activated` map.
 
-**3. Scoring** — `rankActivated`, on `WORLDINFO_SCAN_DONE`. Vector and chunk-text scores are looked up
-from what retrieval stored, keyword score is computed over the scan window, and `fuseRanks` produces the
-**layout ranking** — vector + text + keys, normalised by the signals an entry was eligible for.
+**3. Scoring** — `rankActivated`, on `WORLDINFO_SCAN_DONE`. The vector score is looked up from what
+retrieval stored; the TEXT score is BM25 over entry content, computed in the browser by
+`content-lexical.mjs` over every entry (a superset of the vectorized chunks stage 1 sees) and filtered by
+the entity filter's term weights; keyword score is computed over the scan window. `fuseRanks` produces
+the **layout ranking** — vector + text + keys, normalised by the signals an entry was eligible for, with
+no mode switch: eligibility alone decides which columns an entry is scored on.
+
+**This is where the lexical half of WA lives now.** Measured over 7536 judged rows on 69 scenes, text is
+the strongest per-entry predictor of relevance — standardised logistic beta +0.756 against cosine's
++0.570 and keys' +0.069 (`eval/relevance-regress.mjs`). So "stage 1 dropped BM25" is not "WA dropped
+BM25"; say which stage.
 
 **4. Selection** — three cuts, all here, each answering one question over the layout ranking. The CLIFF
 (`selection.mjs` `cutDynamic`) decides relevance over the dynamic block and takes no count; it runs
@@ -249,7 +266,9 @@ and the map is core's.
 
 **Two rankings, not one.** `fuseRetrieval` decides what is activated; `fuseRanks` decides prompt order
 and what survives the budget. **A change to `fuseRanks` can never surface an entry retrieval did not
-return** — so no keyword weight, tilt or fusion change is a recall lever, only a precision one.
+return** — so no keyword weight, tilt or fusion change is a recall lever, only a precision one. With
+stage 1 admitting everything, the retrieval ranking's ORDER now decides nothing except which entries
+survive `admitCeiling`, which no measured book approaches (largest: 208 vectorized entries).
 
 **The two vector-key settings sit at different stages, and only one is about activation.**
 `suppressVectorKeys` blanks a vectorized entry's `key` into `waKeys` so core cannot keyword-ACTIVATE it

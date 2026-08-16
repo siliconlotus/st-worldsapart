@@ -65,8 +65,8 @@ const vecScores = queries.map(q => centeredCosineScores(items, items[q].vector, 
 // formula (which is why it was lifted out of worldsapart.js into ranking.mjs). Only the deepest window is
 // ever inspected, so truncate there.
 //
-// ponytail: no scoreThreshold is applied, where production only fuses chunks that cleared it, so the tail
-// here is longer than a live one. It changes the candidate count, not the shape of the cliff the modes read.
+// The shortcut this used to carry — "no scoreThreshold is applied, so the tail is longer than a live one"
+// — is no longer one: production applies no admission test either, so this tail IS the live tail.
 const CAP = Math.max(...WINDOWS);
 const rankedAt = k => queries.map((q, qi) => {
     const scores = new Map();

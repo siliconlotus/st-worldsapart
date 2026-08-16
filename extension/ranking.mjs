@@ -23,7 +23,11 @@ import { fold, normalizeOrthography } from '../plugin/automaton.mjs';
  * or title. Anything named there is something this corpus treats as a thing worth
  * naming, which is a better salience signal than rarity.
  *
- * DO NOT "fix" the missing keys. At retrieval time this runs AFTER suppressVectorKeys has blanked
+ * READS AT STAGE 3 ONLY. The entity filter's term weights are BM25 query terms, and stage 1 has no BM25
+ * (plugin/scoring.mjs) — so this feeds content-lexical alone and can reweight what an activated entry
+ * scores, never what gets admitted. Measurements taken against the old pipeline mixed both effects.
+ *
+ * DO NOT "fix" the missing keys. This runs AFTER suppressVectorKeys has blanked
  * key/keysecondary on every vectorized entry, so for a mostly-vectorized book the vocabulary is
  * mostly entry TITLES (measured: 1138 terms — 910 from titles, 228 from the 50 non-vectorized
  * entries — where the raw book would give 3131). That looks like a bug and reads like one here.
@@ -39,8 +43,10 @@ import { fold, normalizeOrthography } from '../plugin/automaton.mjs';
  * stopwordDocFreq strips the junk they come with ("and", "they", "001"). n=1 scene, so this is a
  * reason to leave it alone, not a proof; re-run the A/B if a second scene gets graded.
  *
- * The offline harnesses must therefore blank vectorized keys before calling this, or they admit
- * 2.3x the terms production does and inflate BM25 by up to 74% (see eval/graded-scene-grid.mjs).
+ * The offline harnesses must therefore blank vectorized keys before calling this, or they admit 2.3x the
+ * terms production does. The 74% BM25 inflation that number was famous for was measured on stage-1 BM25,
+ * which no longer exists; the term-set mismatch still moves content-lexical's scores at stage 3, so the
+ * rule stands and only its old headline figure is retired.
  *
  * @param {object[]} entries All World Info entries
  * @returns {Set<string>} Lowercased gazetteer terms
@@ -67,6 +73,13 @@ export function buildGazetteer(entries) {
  *
  * Keeps a term only if it is capitalised (a cheap entity proxy) or appears in the
  * lorebook's own vocabulary, and boosts the capitalised ones.
+ *
+ * EVERY TABLE BELOW IS A STAGE-1 MEASUREMENT AND STAGE 1 NO LONGER READS THIS. They ranked the retrieval
+ * ranking when it fused BM25 and when admission could turn on a query term; today the filter reaches only
+ * content-lexical at stage 3. Treat the numbers as history for the DIRECTION they establish — every arm
+ * admitting more terms ranked worse — and re-measure before moving anything on them. The gazetteer SOURCE
+ * question was separately re-run at n=71 scenes paired and came back flat on every arm including an empty
+ * gazetteer (eval/param-screen.mjs `gaz=*`).
  *
  * MEASURE THIS WITH MEAN TARGET RANK, NOT nDCG@5. Read this before tuning anything here: four successive
  * attempts produced four different answers, and every difference was metric or population, not signal.

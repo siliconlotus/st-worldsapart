@@ -2,7 +2,8 @@
 // graded-scene-grid.mjs and param-screen.mjs both need, extracted so there is exactly one copy of it.
 //
 // WHY IT IS A MODULE AND NOT COPY-PASTE. Every line below is a place a second copy would silently drift.
-// The gazetteer alone has already cost this project one wrong answer: reading raw book keys instead of the
+// The gazetteer alone has already cost this project one wrong answer (at stage 1, when it still fed
+// admission): reading raw book keys instead of the
 // suppressed ones admitted 2.3x the query terms and inflated every BM25 score by up to 74%, which is what
 // made a validated sample look unreproducible. A cross-sample tool that re-derived any of this by hand would
 // be comparing two subtly different rankings and reporting the difference as a parameter effect.
