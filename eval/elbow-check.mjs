@@ -69,7 +69,11 @@ eq(n(cutRetrieved(mk(...fused(oe)))), 13, 'dropoff: Orient-Express cuts at the r
 eq(n(cutRetrieved(mk(...fused(vg)))), 11, 'dropoff: Vegas cuts at the real rank 11->12 cliff the elbow missed');
 
 // --- admitCeiling: stage 1's bound, which counts a different thing on each retrieval path ------------
-eq(admitCeiling(true), 100, 'plugin path: K counts ENTRIES, because poolEntries ran server-side');
-eq(admitCeiling(false), 300, 'fallback path: K counts CHUNKS, so it must cover each entry s best one');
-eq(admitCeiling(undefined), 300, 'unknown pooling is treated as unpooled — the safe direction is more chunks');
+eq(admitCeiling(true), 1000, 'plugin path: K counts ENTRIES, because poolEntries ran server-side');
+eq(admitCeiling(false), 10000, 'fallback path: K counts CHUNKS, so it must cover each entry s best one');
+eq(admitCeiling(undefined), 10000, 'unknown pooling is treated as unpooled — the safe direction is more chunks');
 eq(admitCeiling(true) < admitCeiling(false), true, 'the chunk ceiling is the larger of the two');
+// A SANITY BOUND, NOT A CUT. At 100 entries this fired on ordinary scenes and cost 23 of 672 graded-relevant
+// entries; the largest book in the graded corpus holds 208 vectorized entries. If either number ever drops
+// near a real book's size again, it has stopped being a safety limit.
+eq(admitCeiling(true) > 4 * 208, true, 'the entry ceiling clears the largest measured book several times over');

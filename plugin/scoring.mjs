@@ -102,14 +102,26 @@ export function poolEntries(results) {
  * How many records stage 1 asks the store for. A SAFETY LIMIT on what a pathological scene may feed
  * core's scan loop, not a verdict on relevance — stage 4 makes the only relevance decision.
  *
+ * SET AS A SANITY BOUND, NOT TUNED. It was 100 entries, which is below two of the seven books in the
+ * graded corpus, so the safety limit was firing as an ordinary cut on routine scenes: measured over 70
+ * scenes, it dropped 23 of 672 entries graded >= 3, on 20 scenes, and no downstream stage can recover
+ * one — stage 1 is the only place they could have entered. Raising it to 200 recovered all but 2 and
+ * saturated there, because the admission gates admit 100% of every book's indexed entries on every
+ * scene measured, so the candidate set is bounded by the BOOK, never by `score >= threshold || bm25 > 0`.
+ *
+ * The cost is stage 3, which scores each activated entry with one keywordScore pass over the scan
+ * window: measured 13 us per entry against the corpus's widest window (22.8 KB) on its densest keys
+ * (19.6 per entry), linear to 2000. 1000 entries is ~13 ms per turn, which is why the bound sits far
+ * above any real book rather than near one — a limit that binds on ordinary scenes is a cut.
+ *
  * PATH-DEPENDENT, because K counts a different thing on each retrieval path:
  *
- *   pooled server-side   poolEntries runs before selectTopK, so K counts ENTRIES. 100.
- *   not pooled           K counts CHUNKS and the client pools over only what K let through. 300,
- *                        because chunks/entry measures 9.1-10.3 and the per-entry maxima do not
- *                        stabilise until K ~= 150-300 (see poolEntries above).
+ *   pooled server-side   poolEntries runs before selectTopK, so K counts ENTRIES. 1000.
+ *   not pooled           K counts CHUNKS and the client pools over only what K let through. 10000,
+ *                        holding the ~10 chunks/entry ratio (measured 9.1-10.3) so the two paths bound
+ *                        the same number of entries.
  *
- * One number for both would mean "100 entries, correctly pooled" on one path and "100 chunks, with
+ * One number for both would mean "1000 entries, correctly pooled" on one path and "1000 chunks, with
  * understated per-entry maxima" on the other — and those understated scores feed the stage-4 cliff.
  *
  * Unknown resolves to the chunk ceiling: over-asking costs a larger response, under-asking silently
@@ -118,7 +130,7 @@ export function poolEntries(results) {
  * @param {boolean} pooledServerSide Whether the store pooled to one record per entry before cutting
  * @returns {number} topK to request
  */
-export const admitCeiling = pooledServerSide => (pooledServerSide === true ? 100 : 300);
+export const admitCeiling = pooledServerSide => (pooledServerSide === true ? 1000 : 10000);
 
 /** Union the top-K by each signal across collections, dedup, group by collectionId — exactly what the
  *  client receives from the plugin. Fed poolEntries() output, so K counts ENTRIES. */
