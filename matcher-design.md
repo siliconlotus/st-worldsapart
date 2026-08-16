@@ -697,6 +697,29 @@ are currently unanswerable because nothing grades stage 4.
 and `cutBy`, plus the tokenizer, so `applyBudget` replays offline at any budget — verified exact
 against the runtime's own verdicts on 315 rows across 7 arms.
 
+### Stage 4 predicts per-entry relevance
+
+**Ruled, unimplemented.** Regression was measured to be no worse than RRF + nDCG and was chosen for
+explainability.
+
+Each entry gets p(grade >= 3), and ships if it clears the bar. The count falls out — a scene with three
+relevant entries delivers three — so "how many entries does this scene need" is not a separate question
+and takes no parameter of its own.
+
+**Linear in the signals, and fit per tier.** Polynomial terms measured worse. memory and reference have
+different base rates and different achievable recall — reference reaches 95% at 5.4 entries per scene,
+memory needs 38 to reach 73% — so one fit across both spends its capacity on the class prior, which
+predicts genuinely and is not retrieval (`metrics.mjs` `tierRecall`).
+
+**The bar is a chosen trade, not a boundary in the data.** **Measured**: the p distributions of grade
+3-4 and 0-2 overlap by 71%, and the best single cut gives 25% purity at 66% recall. p is calibrated
+(ECE 0.0067), so it reads as a probability and the bar can be argued in those terms; what it cannot do
+is sort rows into the graded bands.
+
+**The labels are the ceiling, not the model.** About a third of boundary positives change side between
+two passes of the same judge, which puts achievable AUC near 0.85 against 0.79 measured. The headroom is
+small and it is not in the fitting.
+
 ---
 
 ## Open work
