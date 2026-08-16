@@ -374,6 +374,31 @@ question: *did a key match*.** On a scan WA intercepts, every keyword-activating
 stashed and blanked at `WORLDINFO_ENTRIES_LOADED`, so core's matcher never fires and the
 inclusion-group filter runs over WA's verdicts. `feedScanLoop` answers each later pass.
 
+**RULED: if WA is enabled, it owns activation.** There is no half-owned mode. `ownActivation` becomes a
+constant rather than a setting, and everything that existed to describe the other half retires with it:
+
+- **The prune direction** (`worldsapart.js`, `matcher.activationPrunes`, `runState.lastPruned`) — it
+  deletes entries core keyword-activated that WA's matcher rejects, and its own comment already says it
+  is off on an owned scan, because core's matcher is blanked and every activation is then WA's own
+  force, a constant, a sticky, or another extension's. Unreachable under the ruling.
+- **`suppressVectorKeys`** — a second blanking mechanism running AHEAD of a more complete one. The
+  takeover blanks every keyword-activating entry and stashes `key` AND `keysecondary`; the suppress
+  branch stashes only `key`, so a vectorized entry's secondaries are destroyed and its stage-3 selective
+  gate judges an empty condition (inert today: 0 of 1,248 vectorized entries carry a secondary key).
+  Deleting the suppress branch routes vectorized entries through the takeover instead, which is strictly
+  better. The stage-3 question survives as `scoreVectorKeys`, which is where it belonged.
+- **`blind`** in the emit — always true once every scan is owned.
+
+**What still needs writing when that lands.** The GAZETTEER currently gets its suppression as a side
+effect of the blanking mutation: `buildGazetteer(getSortedEntries())` sees blanked entries and never had
+to ask. Remove the mutation and it silently widens 2.3x, so `queryTermWeights` has to filter vectorized
+keys explicitly — the shape `eval/scene.mjs` already uses by hand to model the side effect. Once
+production filters deliberately, `suppressGazetteerKeys` stops being needed to split an entanglement
+that no longer exists.
+
+**Dry runs are not an exception to the ruling, they are outside it.** ST skips interceptors for them, so
+WA is never offered the scan and core matches with live keys. That is structural, not a mode.
+
 **The seam.** `getExternallyActivated` is checked inside core's scan loop, after `@@dont_activate` and
 before constant/sticky/key-matching. Every other gate — disable, triggers, character and tag filters,
 delay, cooldown, `delayUntilRecursion`, `excludeRecursion`, decorators — runs *before* it, so
