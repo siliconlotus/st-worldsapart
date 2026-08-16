@@ -16,7 +16,16 @@
 //
 // Usage (any cwd):
 //   node eval/synthetic-data/grade-pending.mjs build [--batch 16] [--jobs <dir>] [--only <name-substring>]
+//   node eval/synthetic-data/grade-pending.mjs build --rows <rows.json> [--batch 16] [--jobs <dir>]
 //   node eval/synthetic-data/grade-pending.mjs merge --jobs <dir> --results <dir> [--write]
+//
+// --rows grades an ARBITRARY row list instead of the *-pending pools: a JSON array of
+// {bundle, world, uid}, where `bundle` is the bundle's FILENAME in eval-data (the identity rule above).
+// The pending flow assumes a job is a scene grading its own pool; a cross-scene audit — re-grading the
+// activation misses, an inter-rater pass — is a row list that happens to span scenes, and this groups it
+// by bundle and emits one job per scene exactly as the pending path would have. Same job shape, same
+// contamination boundary, same merge; a re-grade of already-graded rows is simply never merged, because
+// merge skips any row the bundle already carries a grade for.
 //
 // merge is dry by default and ALWAYS runs the uid diff first: a result whose uid set does not match its
 // job is not merged, and its job path is printed for re-dispatch. A judge dropping one row of sixteen is
@@ -52,26 +61,28 @@ const byUid = book => new Map(Object.values(book ?? {}).map(e => [String(e.uid),
 if (cmd === 'build') {
     const BATCH = Number(arg('--batch', 16));
     const ONLY = arg('--only');
+    const ROWS = arg('--rows');
     mkdirSync(JOBS, { recursive: true });
 
     let files = 0, rows = 0, batches = 0, bytes = 0, dropped = 0;
-    for (const f of readdirSync(DATA).filter(x => x.endsWith('-pending.json')).sort()) {
-        if (ONLY && !f.includes(ONLY)) continue;
-        const pend = JSON.parse(readFileSync(`${DATA}/${f}`, 'utf8'));
-        const bundle = JSON.parse(readFileSync(`${DATA}/${pend.of}`, 'utf8'));
+    // One bundle's worth of rows -> job files. Both input flows end here, so the job shape and the
+    // usable-filter cannot drift between them. `tag` keeps --rows jobs from colliding with a pending
+    // job for the same bundle if the two ever share a directory.
+    const emitJobs = (bundleFile, rowList, tag) => {
+        const bundle = JSON.parse(readFileSync(`${DATA}/${bundleFile}`, 'utf8'));
         const arm = shipped(bundle);
-        const name = bundle.name ?? pend.of.replace(/\.json$/, '');
+        const name = bundle.name ?? bundleFile.replace(/\.json$/, '');
         // IDENTITY IS THE FILENAME, never `name` — two bundles can carry the same name and one pair does
         // (isekai-time-whore-frozen-2-msg3728 and its -null-book variant, the same scene under a different
         // book). Keyed on name, their jobs overwrite each other here and merge writes the survivor's rows
         // into whichever file the name resolves to: measured, one row landed in a bundle whose books do not
         // contain that world. `scene` stays the display label; `bundle` is what merge resolves.
-        const base = pend.of.replace(/\.json$/, '');
+        const base = bundleFile.replace(/\.json$/, '');
         const books = new Map(Object.entries(bundle.books ?? {}).map(([w, bk]) => [w, byUid(bk)]));
 
         // A row whose entry is gone or empty cannot be graded from the entry text, and a judge handed an
         // empty candidate will grade the title. Dropped and counted rather than passed through.
-        const usable = pend.rows.filter(r => {
+        const usable = rowList.filter(r => {
             const e = books.get(r.world)?.get(String(r.uid));
             if (e && (e.content ?? '').trim()) return true;
             dropped++; return false;
@@ -79,10 +90,10 @@ if (cmd === 'build') {
 
         for (let i = 0; i < usable.length; i += BATCH) {
             const chunk = usable.slice(i, i + BATCH);
-            const id = `${base}-b${String(i / BATCH).padStart(2, '0')}`;
+            const id = `${base}-${tag}${String(i / BATCH).padStart(2, '0')}`;
             const job = {
                 scene: name,
-                bundle: pend.of,
+                bundle: bundleFile,
                 out: `${JOBS}/${id}-graded.json`,
                 note: 'Grade every candidate against the scene. Write the JSON your instructions describe to `out`.',
                 sceneText: arm.query,
@@ -96,7 +107,24 @@ if (cmd === 'build') {
             batches++; rows += chunk.length; bytes += JSON.stringify(job).length;
         }
         files++;
-        console.log(`${name.slice(0, 46).padEnd(46)} ${String(usable.length).padStart(4)}/${String(pend.rows.length).padStart(4)} rows  ${Math.ceil(usable.length / BATCH)} jobs`);
+        console.log(`${name.slice(0, 46).padEnd(46)} ${String(usable.length).padStart(4)}/${String(rowList.length).padStart(4)} rows  ${Math.ceil(usable.length / BATCH)} jobs`);
+    };
+
+    if (ROWS) {
+        const list = JSON.parse(readFileSync(resolvePath(ROWS), 'utf8'));
+        const byBundle = new Map();
+        for (const r of list) {
+            if (!r.bundle || r.world === undefined || r.uid === undefined) { console.error(`row missing bundle/world/uid: ${JSON.stringify(r)}`); process.exit(2); }
+            if (!byBundle.has(r.bundle)) byBundle.set(r.bundle, []);
+            byBundle.get(r.bundle).push(r);
+        }
+        for (const [bf, group] of [...byBundle.entries()].sort()) emitJobs(bf, group, 'r');
+    } else {
+        for (const f of readdirSync(DATA).filter(x => x.endsWith('-pending.json')).sort()) {
+            if (ONLY && !f.includes(ONLY)) continue;
+            const pend = JSON.parse(readFileSync(`${DATA}/${f}`, 'utf8'));
+            emitJobs(pend.of, pend.rows, 'b');
+        }
     }
     console.log(`\n${files} scenes, ${batches} jobs, ${rows} rows, ${dropped} dropped (no entry text)`);
     console.log(`${(bytes / 1024 / 1024).toFixed(1)}MB payload (~${Math.round(bytes / 4000)}k input tokens) in ${JOBS}`);
