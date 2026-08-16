@@ -10,6 +10,13 @@
 // substituteParams, BM25 k1, world-info match defaults, fusion weights) is INJECTED by the caller.
 // The extension wraps these with its settings()/ST globals; the harness passes its own values.
 
+// The matcher's fold, because the tokens built here are BM25 QUERY TERMS: buildTermWeights' keys feed
+// bm25Scores directly, so they must be tokenized exactly as the index is (plugin/lexical.mjs tokenize)
+// or an accented query term shatters on this side and silently matches nothing. Same word-character
+// core too (\p{L}\p{N}\p{M} + apostrophe); a private [^A-Za-z0-9'] split was how "Möbius" indexed as
+// "bius" — see the tokenize header for the measurement.
+import { fold, normalizeOrthography } from '../plugin/automaton.mjs';
+
 
 /**
  * Collects the lorebook's own vocabulary — every term appearing in an entry's keys
@@ -44,9 +51,9 @@ export function buildGazetteer(entries) {
     for (const entry of entries) {
         const sources = [...(entry.key ?? []), ...(entry.keysecondary ?? []), entry.comment ?? ''];
         for (const source of sources) {
-            for (const token of String(source).split(/[^A-Za-z0-9']+/)) {
+            for (const token of fold(source).split(/[^\p{L}\p{N}\p{M}']+/u)) {
                 if (token.length > 1) {
-                    terms.add(token.toLowerCase());
+                    terms.add(token);
                 }
             }
         }
@@ -146,22 +153,26 @@ export function buildGazetteer(entries) {
  */
 export function buildTermWeights(queryText, gazetteer, boost) {
     const weights = {};
+    // Orthography before anything reads the text, case preserved: the proper-noun test below needs
+    // capitals, so this is the fold minus its case half, applied once so both loops see one form.
+    // \p{Lu} rather than [A-Z], or an accented-initial name ("Étienne") is never an entity.
+    const query = normalizeOrthography(queryText);
 
     // A capital letter at the start of a sentence says nothing about the word —
     // "Not", "It", "Then", "The" all get capitalised there. Only count a token as
     // an entity if it appears capitalised somewhere that ISN'T sentence-initial.
     const properNouns = new Set();
 
-    for (const sentence of String(queryText).split(/(?<=[.!?])\s+|\n+/)) {
-        const tokens = sentence.trim().split(/[^A-Za-z0-9']+/).filter(x => x.length > 1);
+    for (const sentence of query.split(/(?<=[.!?])\s+|\n+/)) {
+        const tokens = sentence.trim().split(/[^\p{L}\p{N}\p{M}']+/u).filter(x => x.length > 1);
         for (let i = 1; i < tokens.length; i++) {
-            if (/^[A-Z]/.test(tokens[i])) {
+            if (/^\p{Lu}/u.test(tokens[i])) {
                 properNouns.add(tokens[i].toLowerCase());
             }
         }
     }
 
-    for (const token of String(queryText).split(/[^A-Za-z0-9']+/)) {
+    for (const token of query.split(/[^\p{L}\p{N}\p{M}']+/u)) {
         if (token.length < 2) {
             continue;
         }

@@ -5,12 +5,23 @@
 // that appear everywhere (a cast name in most chunks earns almost no weight), which is exactly the
 // discrimination that's lost when every embedding shares a common direction.
 import { COMMON_WORDS } from './commonwords.js';
+import { fold } from './automaton.mjs';
 
 export const DEFAULT_K1 = 1.2, DEFAULT_B = 0.75;
 
-/** Lowercased alphanumeric tokens (len > 1). */
+/**
+ * Folded tokens (len > 1): the matcher's fold (automaton.mjs — NFC, orthography, case), then split on
+ * anything outside the matcher's word-character core (\p{L}\p{N}\p{M}, plus apostrophe as before).
+ *
+ * THE FOLD IS THE MATCHER'S, NOT A LOOKALIKE. Tokenizing with a private notion of sameness made BM25
+ * disagree with every match verdict in the system: the old [^a-z0-9'] split treated an accented letter
+ * as a separator, so "Möbius" indexed as "bius" and could match nothing — measured, 87 word types /
+ * 319 occurrences across four books, character names included (André x51). What the fold deliberately
+ * does NOT do is strip diacritics: é vs e is a distinction an author can write, so "mobius" still does
+ * not match "möbius" — same verdict countKey gives, which is the point.
+ */
 export function tokenize(text) {
-    return String(text ?? '').toLowerCase().split(/[^a-z0-9']+/).filter(t => t.length > 1);
+    return fold(text).split(/[^\p{L}\p{N}\p{M}']+/u).filter(t => t.length > 1);
 }
 
 /** BM25 index over chunk texts: postings, IDF, doc lengths, average length. */

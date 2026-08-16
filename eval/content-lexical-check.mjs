@@ -49,6 +49,18 @@ ok(pooled.docCount === 4, `the repeated entry chunked into separate documents ($
 ok(Math.abs((ps.get('B.1') ?? 0) - (ps.get('B.2') ?? 0)) < 1e-9,
     `identical chunks pool by MAX: saying it three times ties saying it once (${(ps.get('B.1') ?? 0).toFixed(4)} vs ${(ps.get('B.2') ?? 0).toFixed(4)})`);
 
+// --- the fold: BM25 tokenizes under the MATCHER's fold (plugin/automaton.mjs), not a private one ----
+// The old [^a-z0-9'] split treated an accented letter as a separator, so "Möbius" indexed as "bius"
+// and could match nothing — 87 word types / 319 occurrences across four books, character names
+// included. The fold normalizes encoding and typography; it deliberately does NOT strip diacritics,
+// because é vs e is a distinction an author can write and countKey preserves it. Assert both halves,
+// so neither a re-shattering nor a well-meant "fix" into diacritic stripping lands silently.
+const foldIdx = buildContentIndex([e(1, 'The Möbius spire hums over André’s quarter.')], CFG);
+ok(scoreContent(foldIdx, 'möbius spire').has('B.1'), 'an accented word matches its accented query instead of shattering');
+ok(scoreContent(foldIdx, `mo\u0308bius`).has(`B.1`), `NFD in the query matches NFC in the document (one encoding, one token)`);
+ok(scoreContent(foldIdx, "André's").has('B.1'), 'a curly apostrophe in the document matches the straight-quote query');
+ok(!scoreContent(foldIdx, 'mobius').has('B.1'), 'ASCII "mobius" still does NOT match "möbius" — the fold is not diacritic stripping');
+
 // --- staleness --------------------------------------------------------------------------------------
 const base = indexFingerprint(book, CFG);
 ok(indexFingerprint(book, CFG) === base, 'fingerprint is stable for unchanged input');
