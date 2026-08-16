@@ -205,6 +205,16 @@ eq(missedItsChance < keywordOnlyTop, true, '...so it ranks below a keyword-only 
 // beats a MID keyword one. Both halves are asserted because only the pair pins the tilt's size — a large
 // enough multiplier satisfies the first and breaks the second, which is the failure worth catching.
 near(keywordOnlyTop, 1.25 / 21, 'a keyword-only entry takes the tilt');
+// Injectable, because anything that hands a keyword-only entry a cosine takes the tilt away with it
+// (scene.mjs denseAllEntries) and the two halves have to be separable to be readable.
+const untilted = rows => { fuseRanks(rows, { rrfK: 20, retrievalMode: 'hybrid', weightByOrder: false, lexicalWeight: 1.5, keywordWeight: 1.5, keywordOnlyTilt: 1 }); return rows[0].fused; };
+near(untilted([{ key: 1, keywordScore: 5, textScore: 0, vectorEligible: false, textEligible: false, keysEligible: true }]), 1 / 21, 'an injected tilt of 1 removes it, leaving normalisation alone');
+
+// A NULL SCORE IS NOT A COSINE. `null !== undefined` let a caller marking "no cosine" with null enter the
+// vector rank list at effectively 0 — numerator credit with no denominator term, since vectorEligible was
+// false. Measured at 0.0122 mean nDCG@10 across 66 scenes, larger than the effect under test that run.
+const nullScored = fuse1([{ key: 1, score: null, keywordScore: 5, textScore: 0, vectorEligible: false, textEligible: false, keysEligible: true }]);
+near(nullScored, keywordOnlyTop, 'score:null fuses identically to score:undefined — no vector rank, tilt intact');
 
 // THE SECOND SIGNAL, which is what content-lexical buys a keyword entry. Eligible for text as well as keys,
 // it reaches the ceiling only by topping BOTH — winning on keys alone no longer ties an entry that won on

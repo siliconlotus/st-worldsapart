@@ -304,7 +304,42 @@ export function fuseRetrieval(scores, { rrfK: k, retrievalMode: mode, lexicalWei
  * nothing. That was parasitic: text scores could only come from the vector index, so membership stood in
  * for text eligibility. content-lexical.mjs indexes every entry's content, so text no longer asks.
  */
-export const inVectorIndex = it => it.vectorEligible ?? it.entry?.vectorized ?? it.score !== undefined;
+export const inVectorIndex = it => it.vectorEligible ?? it.entry?.vectorized ?? Number.isFinite(it.score);
+
+/**
+ * A KEYWORD-ONLY ENTRY WINS THE TIE. Normalisation in fuseRanks makes the two classes comparable — both top
+ * out at 1/(k+1) — and this decides which way an otherwise-equal pair falls: a key is an author saying "when
+ * this term appears, this entry is relevant", which is a stronger statement of intent than a cosine.
+ *
+ * A TIE-BREAK, NOT A REORDERING, which is what fixes the size. At k=20 the whole rank curve spans 1/21 to
+ * 1/60, so a multiplier buys rank positions fast: 1.25 lets keyword ranks 1-6 clear the BEST vector entry
+ * and no further, which is "a strong vector entry still beats a mid keyword entry". 1.4 reaches rank 9,
+ * 1.5 reaches 11, and past that the tilt stops being a tie-break and starts being a class preference.
+ *
+ * Conditioned on SIGNAL TYPE, not entry class. The intuition behind it is that keyword-only entries are
+ * reference sheets and vectorized ones are scene memories, which holds one way — 97% of vectorized
+ * entries across the books on disk are memory — but only 69% the other, and it inverts on books whose
+ * memory entries were never vectorized (Time Whore: 111 of 133 keyword-only entries are memories). So
+ * this favours the signal, and a book that keys its memories gets the tilt on those too.
+ *
+ * THAT INVERTING POPULATION IS AN ARTIFACT, not a case to design for: an STMB entry that is not
+ * vectorized is a book in a configuration its author has since abandoned — keys were the workaround
+ * for weak vector recall, and the defect is the missing link, not the keys. 289 of 1,393 STMB entries
+ * on disk are in that state and 113 of them are one book. Re-vectorizing it removes the tilt from
+ * those entries, which is correct. The tilt's own reasoning does not depend on them; only this
+ * paragraph's example did.
+ *
+ * Injectable because anything that gives a keyword-only entry a cosine takes the tilt away as a side
+ * effect (eval/scene.mjs denseAllEntries), and a two-part change nobody can split reads as one number.
+ *
+ * THE VALUE IS MEASURED AND CLOSED. A 13-dose ladder (0.75–3, 70 graded scenes, paired, param-screen
+ * `tilt` family) is unimodal on both metrics with a narrow joint plateau at [1.25, 1.3]. The set score's
+ * cliff sits between 1.2 and 1.25 — every lower dose pays, −0.008 F@R at 1.2 (9 of the 10 moving scenes
+ * worse) down to −0.055 at 0.75 — and nDCG's decline starts at 1.35 (−0.007, p=0.003) and is monotone
+ * to −0.081 at 3. Both ends collapse on both metrics at p<=0.005. 1.25 is the plateau's left edge and
+ * 1.3 is statistically indistinguishable from it; nothing between them is decidable at this n.
+ */
+export const KEYWORD_ONLY_TILT = 1.25;
 
 /**
  * Fuses the vector and keyword rankings with reciprocal rank fusion.
@@ -318,8 +353,9 @@ export const inVectorIndex = it => it.vectorEligible ?? it.entry?.vectorized ?? 
  * @param {number} cfg.lexicalWeight BM25-over-TEXT vs vector weight in fusion
  * @param {number|null} [cfg.keywordWeight] BM25-over-KEYS weight; null/unset follows lexicalWeight
  * @param {number} [cfg.sparseWeight] Learned sparse-lexical weight; 0 (default) makes the column inert
+ * @param {number} [cfg.keywordOnlyTilt] Keyword-only tie-break multiplier; defaults to KEYWORD_ONLY_TILT
  */
-export function fuseRanks(items, { rrfK: k, retrievalMode: mode, weightByOrder, lexicalWeight, keywordWeight, sparseWeight = 0 }) {
+export function fuseRanks(items, { rrfK: k, retrievalMode: mode, weightByOrder, lexicalWeight, keywordWeight, sparseWeight = 0, keywordOnlyTilt = KEYWORD_ONLY_TILT }) {
     // TEXT AND KEYS GET SEPARATE WEIGHTS, because they are separate signals that disagree about which books
     // they are good on. Measured across three graded scenes, the best (text, keys) pair was (0.5, 3) on a
     // book with tightly curated keywords, (1.5, 0) on one whose keys are auto-generated noise, and (1.5, 1)
@@ -338,9 +374,14 @@ export function fuseRanks(items, { rrfK: k, retrievalMode: mode, weightByOrder, 
     const keyW = Number.isFinite(keywordWeight) ? keywordWeight : lexicalWeight;
     const rankMap = (list) => new Map(list.map((item, index) => [item.key, index + 1]));
 
+    // isFinite, not `!== undefined` — the same trap the keywordWeight note above records, from the other
+    // direction: a caller that marks "no cosine" with null slips past an undefined test, enters this rank
+    // list at effectively 0, and takes numerator credit while vectorEligible exempts it from the
+    // denominator. Measured: rows carrying score:null shifted a 66-scene mean nDCG@10 baseline by 0.0122,
+    // more than the effect that run was trying to measure.
     const byVector = mode === 'lexical'
         ? new Map()
-        : rankMap(items.filter(x => x.score !== undefined).sort((a, b) => b.score - a.score));
+        : rankMap(items.filter(x => Number.isFinite(x.score)).sort((a, b) => b.score - a.score));
     // BM25 over chunk TEXT, from the plugin. Its IDF is what discounts terms that
     // appear in nearly every chunk — the recurring cast — without any tuning.
     const byText = mode === 'vector'
@@ -358,8 +399,14 @@ export function fuseRanks(items, { rrfK: k, retrievalMode: mode, weightByOrder, 
     // in nobody's denominator, so this is byte-identical for a caller that supplies no sparse scores. That
     // matters because the scores need a serving path the extension does not have yet — Ollama returns the
     // dense vector only — so the column exists to be measured offline before anything is built for it.
+    // PRESENCE, NOT POSITIVITY. `> 0` reads as "had something to say" only for a score whose zero means
+    // absence — a sparse lexical sum with no shared tokens. A centered cosine is SIGNED and its zero is
+    // just the corpus mean, so that test silently excluded every below-average entry from the rank list
+    // while eligibility still charged it the denominator: the worst possible treatment, and applied to
+    // 22 of 335 dense-scored rows here, 9 of them graded relevant. An eligible entry gets ranked; losing
+    // is what the last rank is for.
     const bySparse = sparseWeight > 0
-        ? rankMap(items.filter(x => x.sparseScore > 0).sort((a, b) => b.sparseScore - a.sparseScore))
+        ? rankMap(items.filter(x => Number.isFinite(x.sparseScore)).sort((a, b) => b.sparseScore - a.sparseScore))
         : new Map();
 
     // Optional priority signal: rank every entry by authored Order (descending — higher = higher
@@ -406,28 +453,7 @@ export function fuseRanks(items, { rrfK: k, retrievalMode: mode, weightByOrder, 
     // Same rule as text: eligible means the caller could have produced a score for it, declared explicitly
     // because only the caller knows whether the sparse index covered this entry.
     const sparseEligible = it => sparseWeight > 0 && (it.sparseEligible ?? it.sparseScore !== undefined);
-    // A KEYWORD-ONLY ENTRY WINS THE TIE. Normalisation above makes the two classes comparable — both top out
-    // at 1/(k+1) — and this decides which way an otherwise-equal pair falls: a key is an author saying "when
-    // this term appears, this entry is relevant", which is a stronger statement of intent than a cosine.
-    //
-    // A TIE-BREAK, NOT A REORDERING, which is what fixes the size. At k=20 the whole rank curve spans 1/21 to
-    // 1/60, so a multiplier buys rank positions fast: 1.25 lets keyword ranks 1-6 clear the BEST vector entry
-    // and no further, which is "a strong vector entry still beats a mid keyword entry". 1.4 reaches rank 9,
-    // 1.5 reaches 11, and past that the tilt stops being a tie-break and starts being a class preference.
-    //
-    // Conditioned on SIGNAL TYPE, not entry class. The intuition behind it is that keyword-only entries are
-    // reference sheets and vectorized ones are scene memories, which holds one way — 97% of vectorized
-    // entries across the books on disk are memory — but only 69% the other, and it inverts on books whose
-    // memory entries were never vectorized (Time Whore: 111 of 133 keyword-only entries are memories). So
-    // this favours the signal, and a book that keys its memories gets the tilt on those too.
-    //
-    // THAT INVERTING POPULATION IS AN ARTIFACT, not a case to design for: an STMB entry that is not
-    // vectorized is a book in a configuration its author has since abandoned — keys were the workaround
-    // for weak vector recall, and the defect is the missing link, not the keys. 289 of 1,393 STMB entries
-    // on disk are in that state and 113 of them are one book. Re-vectorizing it removes the tilt from
-    // those entries, which is correct. The tilt's own reasoning does not depend on them; only this
-    // paragraph's example did.
-    const KEYWORD_ONLY_TILT = 1.25;
+    // The tie-break itself is documented at KEYWORD_ONLY_TILT above, where it can be injected.
     const keywordOnly = it => keyEligible(it) && !inVectorIndex(it);
 
     for (const item of items) {
@@ -447,6 +473,6 @@ export function fuseRanks(items, { rrfK: k, retrievalMode: mode, weightByOrder, 
             + (sparseEligible(item) ? sparseWeight : 0)
             + (weightByOrder ? 1 : 0);
         item.fused = eligible > 0 ? raw / eligible : 0;
-        if (keywordOnly(item)) item.fused *= KEYWORD_ONLY_TILT;
+        if (keywordOnly(item)) item.fused *= keywordOnlyTilt;
     }
 }
