@@ -501,8 +501,8 @@ let retrievalQueue = Promise.resolve();
  * @param {string} searchText Text to search with
  * @returns {Promise<{targets: object[], scores: Map<string, {score: number, chunk: string}>}>}
  */
-function scoreEntries(searchText, termWeights = null) {
-    const run = () => scoreEntriesUnsafe(searchText, termWeights);
+function scoreEntries(searchText) {
+    const run = () => scoreEntriesUnsafe(searchText);
     const result = retrievalQueue.then(run, run);
     // The catch is on the QUEUE, deliberately not on `result` — it stops one rejection from poisoning
     // every later call, while the rejection still reaches the caller. Do not "tidy" this into
@@ -517,7 +517,7 @@ function scoreEntries(searchText, termWeights = null) {
  * @param {string} searchText Text to search with
  * @returns {Promise<{targets: object[], scores: Map<string, {score: number, chunk: string}>}>}
  */
-async function scoreEntriesUnsafe(searchText, termWeights = null) {
+async function scoreEntriesUnsafe(searchText) {
     const allEntries = await getSortedEntries();
     const targets = allEntries.filter(x => x.vectorized && !x.disable && x.content);
     /** @type {Map<string, {score: number, chunk: string}>} */
@@ -557,7 +557,6 @@ async function scoreEntriesUnsafe(searchText, termWeights = null) {
     const results = await queryCollections({
         collectionIds,
         searchText,
-        termWeights,
     });
 
     // The plugin now returns one pooled record per entry, so this loop's max-taking is a no-op against a
@@ -773,8 +772,10 @@ async function retrieve(chat) {
     // splitting `lastQuery`, because messages contain blank lines and the join separator is '\n\n'.
     runState.lastQueryChat = queryChat;
 
-    const termWeights = await queryTermWeights(searchText);
-    const { targets, scores } = await scoreEntries(searchText, termWeights);
+    // No entity filter here: it produces BM25 query terms, and stage 1 has no BM25 to spend them on
+    // (plugin/scoring.mjs). It still runs at stage 3, where content-lexical reads it — see
+    // contentTextScores. Building the gazetteer per generation for nobody was the leftover.
+    const { targets, scores } = await scoreEntries(searchText);
 
     // Two different empties, and conflating them sent people off to tune a threshold that was never
     // involved: a book with nothing vectorized has no candidates at all, which no threshold affects.
@@ -2314,7 +2315,7 @@ async function reportLayout(verbose = false, countTokens = true) {
  * @param {string} text Query text
  * @returns {Promise<string>} Empty string — output goes to the console table
  */
-async function probeQuery(_named, text, { unfiltered = false } = {}) {
+async function probeQuery(_named, text) {
     const searchText = String(text ?? '').trim();
 
     if (!searchText) {
@@ -2322,11 +2323,10 @@ async function probeQuery(_named, text, { unfiltered = false } = {}) {
         return '';
     }
 
-    // Same entity filter retrieval applies, or the probe scores a query nothing else will. `unfiltered`
-    // is for probing a SUMMARY: the filter is deliberately never applied to summarized queries (they are
-    // already salience-selected), so filtering one here would show a combination retrieval never runs.
-    const termWeights = unfiltered ? null : await queryTermWeights(searchText);
-    const { targets, scores } = await scoreEntries(searchText, termWeights);
+    // Scores exactly what retrieval scores: stage 1 is cosine over the raw query, with no entity filter to
+    // apply or withhold. The `unfiltered` flag this used to take existed so a SUMMARY probe could skip a
+    // filter that summarized queries never got; there is no filter here to skip now.
+    const { targets, scores } = await scoreEntries(searchText);
 
     if (!scores.size) {
         console.log(`Worlds Apart: the query scored no chunk for "${searchText.slice(0, 60)}…"`);
@@ -3222,7 +3222,7 @@ async function probeSummary() {
         return '';
     }
 
-    await probeQuery(null, summary, { unfiltered: true });
+    await probeQuery(null, summary);
     return '';
 }
 
