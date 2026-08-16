@@ -220,6 +220,15 @@ export const sceneParams = (S, overrides = {}) => ({
     // shipped rank 16. Null follows suppressVectorKeys, which is what production does. Set it explicitly to
     // hold the gazetteer fixed while activation moves, or the reverse, and the two effects separate.
     suppressGazetteerKeys: null,
+    // WHICH FIELDS THE GAZETTEER READS. Production is 'keys+titles' (buildGazetteer's own sources), chosen on
+    // a 5-target gold set that no longer exists; 'bodies' was re-measured at n=3 scenes and lost. This param
+    // exists so the choice can be re-run paired at the current scene count instead of re-argued.
+    //   'keys+titles'  shipped
+    //   'keys'         key/keysecondary only — the header claims this scores identically to shipped
+    //   'titles'       comment only, which is what a mostly-vectorized book already reduces to
+    //   'bodies'       shipped plus every entry's content
+    //   'none'         empty gazetteer: the proper-noun boost alone
+    gazetteerSource: 'keys+titles',
     // Exact key strings to treat as removed from the book (see scoringKeys). Null = none.
     dropKeys: null,
     queryMode: 'messages', retrievalMode: 'hybrid',
@@ -342,7 +351,19 @@ export function loadScene(S, { indexFile, params: P }) {
     const gazEntries = (P.suppressGazetteerKeys ?? P.suppressVectorKeys)
         ? gazSource.map(e => (e.vectorized ? { ...e, key: [], keysecondary: [] } : e))
         : gazSource;
-    const gaz = ranking.buildGazetteer(gazEntries);
+    // Field selection rides on buildGazetteer rather than re-deriving its tokenization — a second tokenizer
+    // is the seam the single-gazetteer rule exists to prevent. `comment` is the title slot, so 'bodies'
+    // passes content through it.
+    const GAZ_FIELDS = {
+        'keys+titles': e => e,
+        keys: e => ({ key: e.key, keysecondary: e.keysecondary }),
+        titles: e => ({ comment: e.comment }),
+        bodies: e => [e, { comment: e.content }],
+        none: () => [],
+    };
+    const pick = GAZ_FIELDS[P.gazetteerSource];
+    if (!pick) throw new Error(`unknown gazetteerSource "${P.gazetteerSource}" — one of ${Object.keys(GAZ_FIELDS).join(', ')}`);
+    const gaz = ranking.buildGazetteer(gazEntries.flatMap(e => pick(e)));
 
     // THE POOL IS WHAT WAS JUDGED, and ONLY that — see graded-scene-grid.mjs. OWN is this capture's own
     // non-durable rows, kept separately so coverage warnings stay about re-derivation failing rather than
@@ -662,8 +683,8 @@ export async function scoreScene({ sample: S, overrides = {}, k = 10, vectors, m
     // rather than trusted, because the failure would be a silently wrong gazetteer and those cost 74% BM25.
     // denseAllEntries is baked in the same way for a different reason: it is read when the index is split,
     // so against a preloaded scene it would silently score the ordinary collection and report flat.
-    if (preloaded && (overrides.suppressVectorKeys !== undefined || overrides.suppressGazetteerKeys !== undefined || overrides.denseAllEntries !== undefined)) {
-        throw new Error('suppressVectorKeys/suppressGazetteerKeys/denseAllEntries are read at load time, so they cannot be swept against a preloaded scene — load per arm');
+    if (preloaded && (overrides.suppressVectorKeys !== undefined || overrides.suppressGazetteerKeys !== undefined || overrides.denseAllEntries !== undefined || overrides.gazetteerSource !== undefined)) {
+        throw new Error('suppressVectorKeys/suppressGazetteerKeys/gazetteerSource/denseAllEntries are read at load time, so they cannot be swept against a preloaded scene — load per arm');
     }
     const scene = preloaded ?? loadScene(S, { indexFile: indexPath(S, { vectors, model, index }), params: P });
     const scoreAll = makeCandidateSet({ ...scene, params: P, topK });

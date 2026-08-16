@@ -70,6 +70,20 @@ const ARMS = {
     'vectorKeys=live': { suppressVectorKeys: false, __reload: true },
     'vectorKeys=live-gazfixed': { suppressVectorKeys: false, suppressGazetteerKeys: true, __reload: true },
     'vectorKeys=gazraw': { suppressVectorKeys: true, suppressGazetteerKeys: false, __reload: true },
+    // WHAT THE GAZETTEER READS. Shipped is keys+titles, and everything defending that choice is thin: the
+    // "keys alone score identically" claim comes from a 5-target gold set that no longer exists, and the
+    // bodies arm lost at n=3 scenes. One family, so the doses correct against each other. __reload because
+    // the gazetteer is baked at load time.
+    //
+    // ALL FOUR MEASURED FLAT, n=71 scenes, paired — including gaz=none, which deletes the gazetteer
+    // outright (nDCG@10 -0.0082, 28/42, p=0.120; F@R -0.0054, 19/15/37, p=0.608). So the field choice is not
+    // what to argue about: at this sample size the whole gazetteer is inside noise, and the proper-noun
+    // boost is carrying the entity filter on its own. Kept as standing arms because that null is the answer
+    // to a question that keeps getting re-asked, and re-asking it should cost one command.
+    'gaz=keys': { gazetteerSource: 'keys', __reload: true },
+    'gaz=titles': { gazetteerSource: 'titles', __reload: true },
+    'gaz=bodies': { gazetteerSource: 'bodies', __reload: true },
+    'gaz=none': { gazetteerSource: 'none', __reload: true },
     'K=10': { K: 10 }, 'K=60': { K: 60 },
     'boost=1': { boost: 1 }, 'boost=5': { boost: 5 }, 'boost=8': { boost: 8 },
     'stopwordDf=0.15': { stopwordDf: 0.15 }, 'stopwordDf=0.4': { stopwordDf: 0.4 },
