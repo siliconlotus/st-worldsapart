@@ -38,6 +38,38 @@ export const CID = 'wa';
  *  derivable rather than configured. Must stay bit-identical to ST's or the index is simply not found. */
 export const getStringHash = (str, seed = 0) => { let h1 = 0xdeadbeef ^ seed, h2 = 0x41c6ce57 ^ seed; for (let i = 0, ch; i < str.length; i++) { ch = str.charCodeAt(i); h1 = Math.imul(h1 ^ ch, 2654435761); h2 = Math.imul(h2 ^ ch, 1597334677); } h1 = Math.imul(h1 ^ (h1 >>> 16), 2246822507) ^ Math.imul(h2 ^ (h2 >>> 13), 3266489909); h2 = Math.imul(h2 ^ (h2 >>> 16), 2246822507) ^ Math.imul(h1 ^ (h1 >>> 13), 3266489909); return 4294967296 * (2097151 & h2) + (h1 >>> 0); };
 
+/**
+ * A book's drift fingerprint: how many entries, and two hashes over the fields that feed the two things a
+ * bundle's numbers rest on.
+ *
+ * TWO HASHES, NOT ONE, because the failure modes are different and a single number cannot say which layer
+ * moved. `gaz` covers key/keysecondary/comment — what buildGazetteer reads, and therefore which query terms
+ * survive the entity filter. `content` covers the bodies — what BM25 and the embeddings see. A key-only
+ * edit moves the first and not the second; a prose edit does the reverse. The sommers defect was purely a
+ * gazetteer-layer problem, and a lumped hash would have said only "something changed".
+ *
+ * A WEAK HASH ON PURPOSE. This detects drift, it does not authenticate: an edit that preserves every
+ * hashed byte slips through, the same tradeoff content-lexical.mjs indexFingerprint already takes for the
+ * same reason. Callers record `null` for a book with NO WORLD FILE — distinct from this function's answer
+ * for a book that exists and is empty, which is a real hash of nothing.
+ *
+ * Entries are walked in uid order so the value is stable across however the object was built; fields are
+ * joined with US and records with RS, which cannot collide with content the way a printable would.
+ *
+ * @param {Record<string, object>} book uid-keyed entries
+ * @returns {{entries: number, gaz: number, content: number}}
+ */
+export const bookFingerprint = (book) => {
+    const list = Object.values(book ?? {}).sort((a, b) => Number(a.uid) - Number(b.uid));
+    const US = '', RS = '';
+    let gaz = '', content = '';
+    for (const e of list) {
+        gaz += [e.uid, (e.key ?? []).join(US), (e.keysecondary ?? []).join(US), e.comment ?? ''].join(US) + RS;
+        content += [e.uid, e.content ?? ''].join(US) + RS;
+    }
+    return { entries: list.length, gaz: getStringHash(gaz), content: getStringHash(content) };
+};
+
 /** An entry's display title, exactly as the extension derives it (comment, else keys, else uid). */
 export const wiTitle = e => (e.comment && e.comment.trim()) ? e.comment.trim() : (e.key?.length ? e.key.join(', ') : `UID ${e.uid}`);
 
@@ -227,6 +259,27 @@ export function loadScene(S, { indexFile, params: P }) {
     // `primaryBook` names a key of `books`, and a bundle whose book was renamed after capture no longer
     // satisfies that. Says so, rather than dying inside Object.values with nothing naming the book.
     if (!S.books?.[primary]) throw new Error(`sample's primaryBook "${primary}" is not among its embedded books (${Object.keys(S.books ?? {}).join(', ') || 'none'})`);
+    // THE BOOKS MUST BE THE ONES THIS BUNDLE WAS DERIVED FROM. generatedFrom.attached records a fingerprint
+    // per book at derivation time (synth-scenes, bookFingerprint), so an edit to an embedded copy afterwards
+    // is detectable — and it has to be, because the gazetteer is built from these books and a silently
+    // narrower vocabulary is what this record exists to catch. SELF-CONTAINED on purpose: it compares the
+    // bundle against itself, so it holds on a machine with no ST install and no matching worlds. Comparing
+    // against the LIVE world file answers a different and useful question ("has the book moved on since?"),
+    // but it is not portable and is therefore nobody's precondition for scoring.
+    //
+    // Legacy bundles carry no `attached` and are skipped rather than rejected: absence is "derived before
+    // this was recorded", which says nothing about whether they drifted.
+    for (const a of S.generatedFrom?.attached ?? []) {
+        if (!a?.fingerprint) continue;                       // named but no world file; nothing was embedded
+        const have = S.books?.[a.world];
+        if (!have) throw new Error(`bundle records book "${a.world}" as embedded but does not carry it — the gazetteer would be narrower than the one it was derived under`);
+        const now = bookFingerprint(have);
+        const moved = ['entries', 'gaz', 'content'].filter(k => now[k] !== a.fingerprint[k]);
+        if (moved.length) {
+            throw new Error(`embedded book "${a.world}" has changed since derivation (${moved.join(', ')} differ) — `
+                + `re-derive rather than score, or the numbers describe a book the grades were not made against`);
+        }
+    }
     const entries = Object.values(S.books[primary]);
     const byUid = new Map(entries.map(e => [Number(e.uid), e]));
     // A KEYWORD-ONLY BOOK HAS NO COLLECTION, and that is a configuration rather than a failure: indexing

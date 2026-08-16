@@ -2,7 +2,7 @@
 // half needs a vector index so it can't run here; what CAN be pinned offline is the statistic every claim
 // about a default will rest on, and the exact p-values that set the floor on what single-digit n can say.
 import { eq, eqNear, signTest, gradeCredit, fbeta, RECALL_WEIGHT } from './metrics.mjs';
-import { sceneParams, ndcg, dcg, nrm, wiTitle, makeGradeOf, makeKeywordScore, scoreScene, tierRecall } from './scene.mjs';
+import { sceneParams, ndcg, dcg, nrm, wiTitle, makeGradeOf, makeKeywordScore, scoreScene, tierRecall, bookFingerprint } from './scene.mjs';
 import { rowKey } from '../extension/grading.mjs';
 import { fuseRanks } from '../extension/ranking.mjs';
 
@@ -37,6 +37,30 @@ eq(signTest([1e-12, -1e-12, 0.5]).ties, 2, 'sub-epsilon deltas are ties, not dir
 // helps once and does nothing five times reports as a large effect.
 eq(Math.abs(signTest([0, 0, 0.03]).mean - 0.01) < 1e-12, true, 'mean delta includes tied scenes');
 
+// --- bookFingerprint: drift detection for the books a bundle's gazetteer was built from ----------------
+// TWO HASHES because the failure modes are different: `gaz` covers key/keysecondary/comment (what
+// buildGazetteer reads, hence which query terms survive the filter) and `content` covers the bodies (what
+// BM25 and the embeddings see). A lumped hash would say "something changed" about a defect that was
+// specifically gazetteer-layer. Weak by design — an edit preserving every hashed byte slips through, the
+// same trade indexFingerprint takes.
+const fpEntry = (uid, o) => ({ uid, key: [], keysecondary: [], comment: '', content: '', ...o });
+const fpBook = { 1: fpEntry(1, { key: ['alpha'], comment: 'A', content: 'body one' }), 2: fpEntry(2, { content: 'body two' }) };
+const fp0 = bookFingerprint(fpBook);
+eq(fp0.entries, 2, 'fingerprint counts the entries');
+const fpKeys = bookFingerprint({ ...fpBook, 1: fpEntry(1, { key: ['alpha', 'beta'], comment: 'A', content: 'body one' }) });
+eq(fpKeys.gaz !== fp0.gaz, true, 'a key edit moves the gazetteer hash');
+eq(fpKeys.content, fp0.content, '...and leaves the content hash alone');
+const fpBody = bookFingerprint({ ...fpBook, 1: fpEntry(1, { key: ['alpha'], comment: 'A', content: 'edited' }) });
+eq(fpBody.content !== fp0.content, true, 'a body edit moves the content hash');
+eq(fpBody.gaz, fp0.gaz, '...and leaves the gazetteer hash alone');
+eq(bookFingerprint({ ...fpBook, 1: fpEntry(1, { key: ['alpha'], comment: 'renamed', content: 'body one' }) }).gaz !== fp0.gaz, true,
+    'a comment edit moves the gazetteer hash — buildGazetteer reads titles too');
+// Stable across however the object was assembled, or the same book fingerprints two ways.
+eq(JSON.stringify(bookFingerprint({ 2: fpBook[2], 1: fpBook[1] })), JSON.stringify(fp0), 'insertion order does not matter');
+// A book that EXISTS and is empty hashes to something real; callers record null for one with no world
+// file, so the two cases stay distinguishable. A bare count would call both of them zero.
+eq(Number.isFinite(bookFingerprint({}).gaz), true, 'an existing but empty book still fingerprints');
+
 // --- tierRecall: the guard that catches a selection trading a hard class for an easy one ---------------
 // memory (~7% relevant here) and reference (~30%) have very different base rates, so an arm that favours
 // the denser class raises every pooled metric while delivering less of what the system retrieves. This
@@ -44,18 +68,18 @@ eq(Math.abs(signTest([0, 0, 0.03]).mean - 0.01) < 1e-12, true, 'mean delta inclu
 // windows use; identity comparison, since kept holds the same row objects the population does.
 const memRow = (uid, grade) => ({ uid, grade, entry: { uid, stmemorybooks: {} } });
 const refRow = (uid, grade) => ({ uid, grade, entry: { uid } });
-const tierPop = [memRow(1, 4), memRow(2, 3), memRow(3, 0), refRow(4, 3), refRow(5, 3), refRow(6, 1)];
+const pop = [memRow(1, 4), memRow(2, 3), memRow(3, 0), refRow(4, 3), refRow(5, 3), refRow(6, 1)];
 const gradeOfRow = r => r.grade;
-const split = tierRecall(tierPop, [tierPop[0], tierPop[3], tierPop[4], tierPop[5]], gradeOfRow);
+const split = tierRecall(pop, [pop[0], pop[3], pop[4], pop[5]], gradeOfRow);
 eq(split.memory.of, 2, 'both relevant memory rows are in the memory denominator');
 eq(split.memory.got, 1, '...and only the delivered one counts');
 eq(split.reference.of, 2, 'the relevant reference rows are counted separately');
 eq(split.reference.got, 2, '...and both were delivered — the imbalance this exists to show');
-eq(tierRecall(tierPop, [], gradeOfRow).memory.got, 0, 'delivering nothing scores zero rather than throwing');
-eq(tierRecall(tierPop, tierPop, () => null).memory.of, 0, 'an ungraded population has no relevant rows to recall');
-// A row equal by uid but not by identity must NOT count: the kept set holds the population's own objects,
-// and a uid join here would be a second rule for the same question.
-eq(tierRecall(tierPop, [memRow(1, 4)], gradeOfRow).memory.got, 0, 'a copy of a kept row is not the kept row');
+eq(tierRecall(pop, [], gradeOfRow).memory.got, 0, 'delivering nothing scores zero rather than throwing');
+eq(tierRecall(pop, pop, r => null).memory.of, 0, 'an ungraded population has no relevant rows to recall');
+// A row present by uid but not by identity must NOT count: the kept set is the same objects, and a uid
+// join here would be a second rule for the same question.
+eq(tierRecall(pop, [memRow(1, 4)], gradeOfRow).memory.got, 0, 'a copy of a kept row is not the kept row');
 
 // --- sceneParams layering: harness defaults < the sample's captureParams < the arm's override ---
 const S = { captureParams: { K1: 2, LEXW: 1.5 } };
