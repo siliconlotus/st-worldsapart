@@ -57,12 +57,10 @@ import { BUNDLE_VERSION } from '../extension/grading.mjs';
 /**
  * The pooling arms, in HARNESS vocabulary. Mirrors worldsapart.js POOL_ARMS, which is written in settings
  * vocabulary and cannot be imported (that module pulls in ST). One thing this must not get wrong:
- * `loose-thr` is scoreThreshold in settings and `threshold` here.
  */
 const POOL_ARMS = {
     shipped: {},
     'no-filter': { entityFilter: false },
-    'loose-thr': { threshold: 0 },
     'keys-live': { suppressVectorKeys: false },
 };
 

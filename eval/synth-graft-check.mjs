@@ -158,7 +158,6 @@ ok(!/\b(0|1|[1-4][0-9])\b/.test(String(picks(a1.out)).split(', ')[0]) || Number(
     const live = names(WA), mine = names(SRC);
     ok(live.length > 0, 'POOL_ARMS was found in worldsapart.js');
     ok(mine.join(',') === live.join(','), 'the generator mirrors worldsapart.js POOL_ARMS exactly');
-    ok(/'loose-thr':\s*\{\s*threshold:\s*0\s*\}/.test(SRC), "loose-thr sets `threshold`, the harness spelling of scoreThreshold");
 }
 
 process.exit(bad ? 1 : 0);

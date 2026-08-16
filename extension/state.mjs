@@ -111,49 +111,10 @@ export const defaultSettings = {
     /** Paragraphs shorter than this are joined with the next one, so stray lines don't become chunks. */
     minChunkSize: 120,
     /**
-     * Minimum cosine similarity for a chunk to count.
-     *
-     * 'auto' = the p90 of the query's own centered score distribution, computed per collection per query in
-     * plugin/scoring.mjs. Internal (no UI). The history that led here: the original 0.6 was calibrated
-     * against UNCENTERED scores (raw cosines reach 0.62-0.72, p90 0.54-0.61), and under centering — which
-     * collapses the range to a 0.25-0.36 top with a p90 of 0.086-0.110 — it sat above the entire range and
-     * admitted ZERO chunks. The fix, 0.1, was "the centered p90 measured on three books with bge-m3" — an
-     * embedder-specific constant. 'auto' computes that same p90 from the scores actually in play, so the
-     * selectivity transfers to any embedder with no recalibration. Verified a no-op where they overlap:
-     * paired vs 0.1 over 80 bge-m3 scenes, 78 byte-identical, mean Δ -0.0001 (eval/param-screen.mjs
-     * `thr=auto`). The stock-ST fallback path cannot run 'auto' (the server quantiles nothing) and pins
-     * 0.1 raw — permissive by design there; client-side selection does the narrowing.
-     *
-     * Note what this gates, which is narrower than it looks (see plugin/scoring.mjs scoreCollection): the
-     * index only ever contains chunks from VECTORIZED entries, so this is the cosine floor for those. Entries
-     * without 🔗 are not in the collection at all and reach the ranking through keyword scoring instead. The
-     * one surprise is that a vectorized chunk can also be admitted by `bm25 > 0` on its own text, which
-     * bypasses this floor — with long queries that clause admits 80-95% of chunks, so this setting currently
-     * only ever WIDENS the candidate set and cannot narrow it.
-     *
-     * THAT BYPASS IS LOAD-BEARING; DO NOT "FIX" IT INTO A STRICT GATE. It reads like sloppiness — the cosine
-     * floor ought to decide for the entries it is named after — and it was measured (eval/param-screen.mjs
-     * `admit=cosine`, three scenes):
-     *
-     *   strict cosine gate   sommers fell 3/3 -> 1/3 on critical (grade-5) entries in the top 10, and
-     *                        time-whore lost a relevant entry from the candidate set entirely (recall 0.88).
-     *                        Worse at every threshold tested down to 0, so it is not a calibration problem.
-     *   strict AND           byte-identical to the above; there is essentially no chunk with a clearing
-     *                        cosine and zero lexical overlap, so the extra conjunct removes nothing.
-     *
-     * The reason is mean-centering. Centered cosine means "more like the query than the average chunk is", so
-     * a chunk can sit BELOW average in embedding space while containing the query's exact terms — and those
-     * chunks carry real relevance. Only the lexical clause can admit them, and no cosine floor can. Consistent
-     * with the vector signal measuring weakest of the three on these books (cosine-alone ranking missed all
-     * three of sommers' grade-5 entries). `admit=cosine` is kept as a standing arm so a future tightening
-     * trips a regression instead of shipping.
-     */
-    scoreThreshold: 'auto',
-    /**
      * Wrong-book failsafe: a chunk must also reach this RAW (uncentered) cosine to be admitted at all.
      * 0 = off. Plugin path only — the stock-ST fallback never sees it.
      *
-     * This is a different job from scoreThreshold, which gates the CENTERED score and so can only rank
+     * This is a different job from the centered cosine, which can only rank
      * within a book — centering subtracts the book's shared direction, which is exactly the information
      * "is this even the right book?" needs. Raw cosine keeps it: measured over 4 graded scenes and 3
      * deliberately unrelated books (bge-m3), every relevant entry scored >= 0.538 raw while wrong-genre
@@ -173,7 +134,7 @@ export const defaultSettings = {
      * Use the Worlds Apart server plugin's mean-centered search when it is loaded.
      * Centering removes the direction every chunk in a single-story corpus shares,
      * which is what compresses similarities into a narrow band. Scores come out much
-     * lower in absolute terms — scoreThreshold is calibrated for centered scores.
+     * lower in absolute terms.
      * Internal (always true): the plugin check in queryCollections is the real gate,
      * so centering is simply on whenever the plugin is present.
      */
@@ -473,7 +434,7 @@ export const defaultSettings = {
  * must not linger at a stale hand-tuned value the user can no longer see.
  */
 const INTERNAL_KEYS = [
-    'meanCentered', 'scoreThreshold', 'entityFilter', 'properNounBoost', 'stopwordDocFreq',
+    'meanCentered', 'entityFilter', 'properNounBoost', 'stopwordDocFreq',
     'bm25K1', 'bm25B', 'rrfK', 'scoreVectorKeys', 'keywordScoring',
     'chunkSize', 'chunkMode', 'minChunkSize',
     // Withdrawn with the query summarizer. queryMode in particular MUST be reset rather than
@@ -503,7 +464,6 @@ export const runState = {
     // Keyed `${world}.${uid}` — ST CORE'S format, which rankActivated receives and looks up here. Not a
     // candidate for the US separator; see the note in worldsapart.js syncWorld.
     lastScores: new Map(),        // vector scores from the last retrieval
-    lastTextScores: new Map(),    // BM25-over-text scores, same keys
     lastLayout: [],               // final layout of the last scan, for /wa-dry
     lastQuery: '',                // last retrieval query text, bundled by /wa-grade
     lastQueryChat: [],            // the messages that query was joined from, for offline depth ablation

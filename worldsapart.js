@@ -278,14 +278,6 @@ async function queryCollections(args) {
                     ...body,
                     centered: settings().meanCentered,
                     uncenteredGate: Number(settings().uncenteredGate) || 0,
-                    bm25K1: settings().bm25K1,
-                    bm25B: settings().bm25B,
-                    termWeights: args.termWeights ?? null,
-                    stopwordDf: settings().stopwordDocFreq,
-                    // Down-weights general-English words in the lexical IDF. A measured wash under hybrid
-                    // fusion (vectors mask it) but a small win for BM25-only, so it's an internal global
-                    // keyed to the mode — not a setting. 0.7 for BM25-only, off (1) for hybrid/vector.
-                    commonWordWeight: settings().retrievalMode === 'lexical' ? 0.7 : 1,
                     sourceSettings: { apiUrl: body.apiUrl, model: body.model, keep: body.keep },
                 }),
             });
@@ -565,7 +557,6 @@ async function scoreEntriesUnsafe(searchText, termWeights = null) {
     const results = await queryCollections({
         collectionIds,
         searchText,
-        threshold: settings().scoreThreshold,
         termWeights,
     });
 
@@ -590,21 +581,15 @@ async function scoreEntriesUnsafe(searchText, termWeights = null) {
             }
 
             const score = typeof item?.score === 'number' ? item.score : 1 - (index / Math.max(1, metadata.length));
-            const bm25 = typeof item?.bm25 === 'number' ? item.bm25 : 0;
 
             for (const owner of chunkOwners) {
                 const previous = scores.get(owner);
 
-                // Vector and lexical are pooled independently: an entry's best semantic
-                // chunk and its best lexical chunk need not be the same one.
+                // One signal, so one maximum. This used to pool vector and lexical independently, because
+                // an entry's best semantic chunk and its best lexical chunk need not be the same one; stage
+                // 1 is cosine-only now (plugin/scoring.mjs) and the server sends no bm25 to pool.
                 if (!previous || previous.score < score) {
-                    scores.set(owner, {
-                        score,
-                        chunk: String(item?.text ?? ''),
-                        bm25: Math.max(bm25, previous?.bm25 ?? 0),
-                    });
-                } else if (bm25 > previous.bm25) {
-                    previous.bm25 = bm25;
+                    scores.set(owner, { score, chunk: String(item?.text ?? '') });
                 }
             }
         });
@@ -705,16 +690,12 @@ async function summarizeQuery(rawText) {
  * The arithmetic lives in ranking.mjs (like fuseRanks below) so the offline cutoff harnesses
  * cut the real ranking rather than a copy; this wrapper only injects settings.
  *
- * @param {Map<string, {score: number, bm25?: number, chunk: string}>} scores Per-entry results
+ * @param {Map<string, {score: number, chunk: string}>} scores Per-entry results
  * @returns {Array<{key: string, value: object, fused: number, vectorRank?: number, textRank?: number}>} Fused ranking
  */
-const fuseRetrieval = (scores) => ranking.fuseRetrieval(scores, {
-    rrfK: settings().rrfK,
-    retrievalMode: settings().retrievalMode,
-    lexicalWeight: settings().lexicalWeight,
-    // No keywordWeight here on purpose: this is the RETRIEVAL ranking the cutoff cuts, and it scores vector
-    // + chunk-text only. Keys never enter it — they exist in the layout ranking (fuseRanks) alone.
-});
+// No settings left to inject: stage 1 orders on cosine and nothing else. Kept as a named wrapper so the
+// call sites and the offline harnesses go through one function rather than re-sorting by hand.
+const fuseRetrieval = (scores) => ranking.fuseRetrieval(scores);
 
 /**
  * Prints the vector-candidates table: the admitted ranking and the gap between neighbours.
@@ -733,20 +714,19 @@ function reportVectorCandidates(ranked, targets, searchText) {
     const spread = ranked[0].value.score - ranked[Math.min(4, ranked.length - 1)].value.score;
 
     console.log(`Worlds Apart: query "${searchText.slice(0, 80)}${searchText.length > 80 ? '…' : ''}" (${searchText.length} chars)`);
-    console.log(`Worlds Apart: ${ranked.length} entries admitted, ${settings().retrievalMode} ranking, top-5 vector spread ${spread.toFixed(5)}`);
+    console.log(`Worlds Apart: ${ranked.length} entries admitted, cosine ranking, top-5 vector spread ${spread.toFixed(5)}`);
     console.log('%cWorlds Apart · vector candidates — the full admitted ranking, best first', 'font-weight: bold');
     // The gap between neighbours and which entry — so stage 4's cut (fuseRanks + applyBudget) is legible
     // against this ranking without dragging columns. Per-signal scores and the matched chunk follow. No
     // slice: the whole admitted ranking is the point of this table now that stage 1 doesn't cut it.
     console.table(ranked.map((row, index) => ({
-        // The gap this row opens below the one above — what a rank-ordered cliff would read.
-        gap: index > 0 ? Number((ranked[index - 1].fused - row.fused).toFixed(6)) : null,
+        // The gap this row opens below the one above — what a rank-ordered cliff would read. On the raw
+        // cosine now that stage 1 has no fused score: same quantity the cliff reads, one signal later.
+        gap: index > 0 ? Number((ranked[index - 1].value.score - row.value.score).toFixed(6)) : null,
         title: byKey.get(row.key)?.comment,
         '#': index + 1,
         vec: Number(row.value.score.toFixed(5)),
         vRank: row.vectorRank ?? null,
-        bm25: row.value.bm25 ? Number(row.value.bm25.toFixed(2)) : null,
-        kRank: row.textRank ?? null,
         matchedChunk: row.value.chunk.slice(0, 70).replace(/\s+/g, ' '),
     })));
 }
@@ -759,7 +739,6 @@ function reportVectorCandidates(ranked, targets, searchText) {
  */
 async function retrieve(chat) {
     runState.lastScores.clear();
-    runState.lastTextScores.clear();
 
     // One substitution pass over the chat serves both the query string and the /wa-grade stash below —
     // queryMessages runs ST's macro engine over every message, so it must not run twice per generation.
@@ -804,7 +783,7 @@ async function retrieve(chat) {
         return [];
     }
     if (!scores.size) {
-        console.log(`Worlds Apart: nothing cleared the ${settings().scoreThreshold} threshold`);
+        console.log('Worlds Apart: the query scored no chunk in any collection');
         return [];
     }
 
@@ -818,12 +797,11 @@ async function retrieve(chat) {
         reportVectorCandidates(ranked, targets, searchText);
     }
 
-    // EVERY admitted entry, not a surviving prefix. Stage 3 looks its vector and text scores up from
-    // here, so stashing only survivors would leave every entry stage 4 has yet to judge without the two
-    // signals it was admitted on — and a missing signal reads as a low score rather than as an error.
+    // EVERY admitted entry, not a surviving prefix. Stage 3 looks its vector score up from here, so
+    // stashing only survivors would leave every entry stage 4 has yet to judge without the signal it was
+    // admitted on — and a missing signal reads as a low score rather than as an error.
     for (const [key, value] of scores) {
         runState.lastScores.set(key, value.score);
-        runState.lastTextScores.set(key, value.bm25 ?? 0);
     }
 
     // winnerKeys is exactly scores' keys — everything that cleared the threshold and got ranked, no
@@ -1260,7 +1238,6 @@ const keywordScore = (entry, text, keys = entry.key) => matcher.keywordScore(ent
 });
 const fuseRanks = (items) => ranking.fuseRanks(items, {
     rrfK: settings().rrfK,
-    retrievalMode: settings().retrievalMode,
     weightByOrder: settings().weightByOrder,
     lexicalWeight: settings().lexicalWeight,
     keywordWeight: settings().keywordWeight,
@@ -1555,13 +1532,12 @@ async function rankActivated(args) {
         }
     }
 
-    // The text signal now comes from content-lexical, which covers every entry rather than only the ones
-    // in the vector collection. ALL OR NOTHING, never merged with lastTextScores: those are the plugin's
-    // BM25 over a vectorized-only corpus, so their IDF is computed against a different population and a
-    // rank list mixing the two would report the seam as a parameter effect. When no index is available
-    // (empty query, no entries) the old source is used whole, which is the previous behaviour intact.
+    // The text signal comes from content-lexical, which covers every entry rather than only the ones in
+    // the vector collection. It is now the ONLY source: the plugin's BM25 was the fallback, and stage 1
+    // stopped computing it (plugin/scoring.mjs), so the fallback was reading an absent field and would
+    // have supplied 0 while looking like a safety net. An empty index means no entry has content, and
+    // there is nothing for either source to score.
     const contentText = await contentTextScores(runState.lastQuery);
-    const contentIndexed = contentText.size > 0;
 
     const items = [...activated.entries()].map(([key, entry]) => {
         // We overwrite `order` below, and this fires once per scan loop — stash the
@@ -1571,13 +1547,9 @@ async function rankActivated(args) {
             key,
             entry,
             score: runState.lastScores.get(key),
-            textScore: (contentIndexed ? contentText.get(key) : runState.lastTextScores.get(key)) ?? 0,
-            // Eligible means COULD have scored, not did. With content indexed, that is every entry
-            // carrying content; without an index it falls back to the vector collection, which is where
-            // the plugin's scores came from.
-            textEligible: contentIndexed
-                ? Boolean(String(entry.content ?? '').trim())
-                : runState.lastTextScores.has(key),
+            textScore: contentText.get(key) ?? 0,
+            // Eligible means COULD have scored, not did: every entry carrying content.
+            textEligible: Boolean(String(entry.content ?? '').trim()),
         };
     });
 
@@ -2086,7 +2058,7 @@ function paramSnapshot() {
         // setting; logged as the value in effect. It modifies the plugin's BM25 IDF on every query.
         // keywordWeight is logged even when null, because null is a real value here ("follow lexicalWeight")
         // and its absence would read as an older capture rather than as a deliberate setting.
-        scoring: { retrievalMode: s.retrievalMode, rrfK: s.rrfK, lexicalWeight: s.lexicalWeight, keywordWeight: s.keywordWeight ?? null, weightByOrder: s.weightByOrder, bm25K1: s.bm25K1, bm25B: s.bm25B, commonWordWeight: s.retrievalMode === 'lexical' ? 0.7 : 1 },
+        scoring: { rrfK: s.rrfK, lexicalWeight: s.lexicalWeight, keywordWeight: s.keywordWeight ?? null, weightByOrder: s.weightByOrder, bm25K1: s.bm25K1, bm25B: s.bm25B, commonWordWeight: 1 },
         // The entity filter only runs on raw-message queries — a summary is already
         // salience-selected — so in summary mode its params are inert and omitted.
         matchText: {
@@ -2095,7 +2067,7 @@ function paramSnapshot() {
         },
         // Acquisition: what vectra gives back — the DB-side similarity gate, mean-centering, and
         // how the vectorized text is chunked. Paired with `cutoff` (WA-side selection) below.
-        vectors: { scoreThreshold: s.scoreThreshold, uncenteredGate: s.uncenteredGate || 0, meanCentered: s.meanCentered, chunkMode: s.chunkMode, chunkSize: s.chunkSize, minChunkSize: s.minChunkSize, suppressVectorKeys: s.suppressVectorKeys },
+        vectors: { uncenteredGate: s.uncenteredGate || 0, meanCentered: s.meanCentered, chunkMode: s.chunkMode, chunkSize: s.chunkSize, minChunkSize: s.minChunkSize, suppressVectorKeys: s.suppressVectorKeys },
         // Selection: the WA-side cliff detector, floor/ceiling, and keyword scoring applied to
         // what was acquired. Mode leads, then the active mode's threshold and floor.
         cutoff: {
@@ -2357,7 +2329,7 @@ async function probeQuery(_named, text, { unfiltered = false } = {}) {
     const { targets, scores } = await scoreEntries(searchText, termWeights);
 
     if (!scores.size) {
-        console.log(`Worlds Apart: nothing cleared the ${settings().scoreThreshold} threshold for "${searchText.slice(0, 60)}…"`);
+        console.log(`Worlds Apart: the query scored no chunk for "${searchText.slice(0, 60)}…"`);
         return '';
     }
 
@@ -2671,19 +2643,15 @@ async function gradeScene(named) {
  *
  *   no-filter   entityFilter off moves the surviving query terms, so it moves BM25 and what stage 1
  *               admits at all.
- *   loose-thr   scoreThreshold gates whether a chunk is admitted at all — with no stage-1 cut it is one
- *               of the two knobs that can still change the population rather than reorder it.
  *   keys-live   suppressVectorKeys off lets WA keyword-match vectorized entries; core's own matcher only
  *               runs redundantly, and only with ownActivation off. Activation (secondary keys, inclusion
  *               groups, recursion, min-activations, probability rolls) is the one thing this project
  *               cannot recompute offline at all, so it can only be sampled live.
  *
- * vector and lexical retired once retrieval stopped cutting: retrievalMode decided which signal ordered the
- * candidates, so a different set survived into the top of the retrieval ranking, and that mattered only
- * because cutRetrieved then kept a prefix of it. With nothing cut at stage 1 there is no top to survive
- * into, so both are pure reordering now, which graded-scene-grid.mjs re-derives offline from the frozen
- * query. They would still matter on a book past admitCeiling, where ordering decides what makes the
- * ceiling; the books measured here hold 70-115 vectorized entries.
+ * vector and lexical retired once retrieval stopped cutting, and retrievalMode itself is gone now: stage 1
+ * ranks on cosine alone, so there is no second signal for a mode to choose between. loose-thr went with
+ * scoreThreshold for the same reason — its whole job was surfacing entries a threshold excluded, and
+ * stage 1 excludes nothing (plugin/scoring.mjs). Neither can change this pool's population again.
  *
  * `summary` was an arm here until the query summarizer was withdrawn. It is not coming back: state.mjs
  * RESETS queryMode rather than un-surfacing it, so an arm setting it would resurrect a withdrawn feature
@@ -2697,7 +2665,6 @@ async function gradeScene(named) {
 const POOL_ARMS = {
     shipped: {},
     'no-filter': { entityFilter: false },
-    'loose-thr': { scoreThreshold: 0 },
     'keys-live': { suppressVectorKeys: false },
 };
 
@@ -3286,13 +3253,6 @@ const SETTINGS_HTML = `
             <small class="opacity50p">How WA lays out the entries it selected, in every prompt. Pick a base sort and, optionally, tiered grouping. (The Studio's sort views reuse this control but are per-session; this one is saved.)</small>
             <div id="wa_presentation_order_mount" style="margin-top:4px;"></div>
 
-            <label for="wa_retrieval_mode">Retrieval (which signals the sections below feed)</label>
-            <select id="wa_retrieval_mode" class="text_pole">
-                <option value="hybrid">Hybrid (BM25 + vector, RRF)</option>
-                <option value="lexical">BM25 only</option>
-                <option value="vector">Vector only</option>
-            </select>
-
             <label for="wa_message_depth">Message depth (recent messages for retrieval + keyword scan)</label>
             <input id="wa_message_depth" type="number" class="text_pole" min="1" max="20" step="1">
 
@@ -3671,7 +3631,6 @@ export async function init() {
         block: true,
     }));
     if (tierMount) tierMount.append(tierEditor = makeTierEditor(getTierCfg, setTierCfg, () => {}));
-    bind('#wa_retrieval_mode', 'retrievalMode', 'string');   // commonWordWeight now derives from this at query time (internal global)
     renderPluginSetup();                     // paints "checking…" then the detected/install state
     // Detect the plugin and fingerprint the source in parallel; re-render once both settle so the box
     // can show up-to-date / out-of-date. Both are cached, so this runs its fetches at most once.
