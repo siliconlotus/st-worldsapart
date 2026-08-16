@@ -355,10 +355,11 @@ either, that has stopped being a difference between the paths. Neither path pass
 
 **The gazetteer is built downstream of `suppressVectorKeys`**, which blanks `key`/`keysecondary` on
 every vectorized entry, so "the lorebook's own vocabulary" is entry TITLES plus the keys of
-non-vectorized entries. Reading the raw book instead admits 2.3x the terms (238 vs 105). The 74% BM25
-inflation that figure used to carry was measured on stage-1 BM25 and is retired with it; the term-set
-mismatch still moves content-lexical's scores at STAGE 3, where the filter now lives, so
-`eval/scene.mjs` reproduces the production order for that reason instead.
+non-vectorized entries. Reading the raw book instead builds a gazetteer 2.3x the size (238 terms against
+105) — a TERM count, not an entry count, and no longer an admission effect at all, since stage 1 admits
+every candidate it scores. The 74% BM25 inflation that figure used to carry was stage-1 BM25 and is
+retired with it. The mismatch still moves content-lexical's scores at STAGE 3, where the filter now
+lives, so `eval/scene.mjs` reproduces the production order for that reason instead.
 
 ---
 

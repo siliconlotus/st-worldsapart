@@ -43,10 +43,15 @@ import { fold, normalizeOrthography } from '../plugin/automaton.mjs';
  * stopwordDocFreq strips the junk they come with ("and", "they", "001"). n=1 scene, so this is a
  * reason to leave it alone, not a proof; re-run the A/B if a second scene gets graded.
  *
- * The offline harnesses must therefore blank vectorized keys before calling this, or they admit 2.3x the
- * terms production does. The 74% BM25 inflation that number was famous for was measured on stage-1 BM25,
- * which no longer exists; the term-set mismatch still moves content-lexical's scores at stage 3, so the
- * rule stands and only its old headline figure is retired.
+ * The offline harnesses must therefore blank vectorized keys before calling this, or they build a
+ * gazetteer 2.3x the size production's is (238 terms against 105) and hand buildTermWeights a wider query
+ * — a TERM count, never an entry count, and now never an admission effect either: stage 1 admits every
+ * candidate it scores. The 74% BM25 inflation this figure used to carry was stage-1 BM25 and is retired
+ * with it. The mismatch still moves content-lexical's scores at STAGE 3, so the rule stands.
+ *
+ * The ordering survives the call site moving to stage 3: the blanking runs in the WORLDINFO_ENTRIES_LOADED
+ * handler and its suppressVectorKeys branch is not guarded by waOwnsScan, so it fires on every load,
+ * including the getSortedEntries() contentTextScores makes.
  *
  * @param {object[]} entries All World Info entries
  * @returns {Set<string>} Lowercased gazetteer terms
