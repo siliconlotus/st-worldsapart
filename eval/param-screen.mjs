@@ -88,11 +88,6 @@ const ARMS = {
     'boost=1': { boost: 1 }, 'boost=5': { boost: 5 }, 'boost=8': { boost: 8 },
     'stopwordDf=0.15': { stopwordDf: 0.15 }, 'stopwordDf=0.4': { stopwordDf: 0.4 },
     'filter=off': { entityFilter: false },
-    'thr=0.3': { threshold: 0.3 }, 'thr=0.8': { threshold: 0.8 },
-    // Self-calibrating floor: p90 of the query's own centered scores (scoring.mjs 'auto'). Shipping this
-    // requires it to be a measured no-op vs the stored 0.1 on bge-m3 scenes — 0.1 IS the bge-m3 p90, so any
-    // gap means the quantile is tracking something the constant didn't.
-    'thr=auto': { threshold: 'auto' },
     // CHUNK ARMS. These change what text gets EMBEDDED, so unlike every arm above they cannot be re-derived
     // from the stored index — each needs its own collection, rebuilt from the sample's embedded books
     // (reindex.mjs) and cached on disk. That makes them the slow arms: first run pays one embedding pass per
@@ -146,33 +141,6 @@ const ARMS = {
     // from comparing the two score columns on a fixed candidate set.
     'centering=off': { meanCentered: false },
 
-    // ADMISSION ARMS — how a vectorized entry's chunk earns its way into the candidate set. The plugin ships
-    // `score >= threshold || bm25 > 0` (scoring.mjs scoreCollection). Kept as standing arms so that if anyone
-    // later "fixes" that OR into something stricter, the regression shows up here instead of shipping.
-    //
-    // WHAT WAS MEASURED (3 scenes, n=3, sample threshold 0.1):
-    //   admit=cosine  the strict per-entry-type gate — cosine alone decides for vector entries, which is what
-    //                 the OR looks like it should be. Sommers dropped 3/3 -> 1/3 critical entries in the top
-    //                 10; time-whore lost a relevant entry outright (recall 0.88). Worse at EVERY threshold
-    //                 down to 0, so it is not a calibration problem: the chunks it drops have below-average
-    //                 centered cosine but real lexical hits, and mean-centering is what puts them there.
-    //   admit=both    strict AND. Byte-identical to admit=cosine on all three scenes (differs by one chunk in
-    //                 two books at threshold 0) — there is essentially no chunk with a clearing cosine and no
-    //                 lexical overlap, so the extra conjunct removes nothing.
-    //   bm25Floor=*   percentile floor on the lexical clause. Free up to p75: recall stayed 1.00, crit@10
-    //                 intact, nDCG moved <=0.007 either way, candidate set shrank 7-10%. A set-size lever, not
-    //                 a quality one. p90 cost time-whore a relevant entry while its nDCG ROSE — read recall
-    //                 alongside. Note it is not free downstream: elbowSensitivity is a multiple of the mean
-    //                 gap across the retrieved list, so shortening the list moves where the cliff fires, and
-    //                 any real adoption needs the cutoff arms re-run.
-    //
-    // These arms only ever NARROW the candidate set, so unlike the chunk arms they cannot surface an unjudged
-    // entry — judged coverage can only improve, and their deltas are not pool-biased lower bounds.
-    // Only admit=cosine is a standing arm. admit=both and bm25FloorPct are still implemented in scene.mjs and
-    // re-runnable by hand (--arms cannot reach them; call scoreScene with the override) — they are left out
-    // here because they measured nothing, and an arm that measures nothing still costs a comparison in every
-    // future run's multiplicity count.
-    'admit=cosine': { admit: 'cosine' },
     // THE HIGH-BAND HOLD-OUT. Sommers curation deliberately retained every key firing above 15.6% of
     // messages (whole-word, frozen chat) so keep-vs-remove could be answered here instead of by intuition:
     // Jeffrey 39%, Liam 29%, Brad 25%, Arthur 22%, Shane 21%. Teddy sits AT 15.6% and was judged per-entry

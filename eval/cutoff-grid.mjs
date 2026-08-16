@@ -71,7 +71,7 @@ const CAP = Math.max(...WINDOWS);
 const rankedAt = k => queries.map((q, qi) => {
     const scores = new Map();
     for (let d = 0; d < N; d++) if (d !== q) scores.set(d, { score: vecScores[qi][d], bm25: bmScores[qi][d] });
-    return fuseRetrieval(scores, { rrfK: k, retrievalMode: 'hybrid', lexicalWeight: LEXW }).slice(0, CAP);
+    return fuseRetrieval(scores).slice(0, CAP);
 });
 
 const stats = (ranked, cfg, W) => {

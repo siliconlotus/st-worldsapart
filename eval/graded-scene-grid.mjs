@@ -440,7 +440,7 @@ const fmt = n => (n == null ? '·' : (+n).toFixed(3));
     const retrieved = scoreAll(DEF.k1, DEF.b).filter(r => r.score !== undefined);
     const ranked = ranking.fuseRetrieval(
         new Map(retrieved.map(r => [r.uid, { score: r.score, bm25: r.textScore }])),
-        { rrfK: P.K, retrievalMode: P.retrievalMode, lexicalWeight: DEF.lexW },
+        { rrfK: P.K, lexicalWeight: DEF.lexW },
     ).map(r => ({ ...r, uid: r.key, title: byUid.get(Number(r.key)) ? wiTitle(byUid.get(Number(r.key))) : String(r.key) }));
     const relN = ranked.filter(r => gradeOf(r) >= 3).length;
     // Cliff modes get the SAMPLE's cap, not a hardcoded 10: capping a cliff search below the candidate

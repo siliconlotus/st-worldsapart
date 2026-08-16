@@ -94,15 +94,15 @@ export function captureParams(s, { caseSensitive, wholeWords, includeNames }) {
         stopwordDf: s.stopwordDocFreq,
         // Derived from the mode rather than stored (see paramSnapshot): BM25-only runs down-weight
         // general-English words, hybrid does not.
-        commonWordWeight: s.retrievalMode === 'lexical' ? 0.7 : 1,
-        threshold: s.scoreThreshold,
+        // Was 0.7 under retrievalMode 'lexical' and 1 otherwise; with no modes it is always 1, i.e. off.
+        // Left in the capture because content-lexical still reads it and a live knob may want it back.
+        commonWordWeight: 1,
         meanCentered: s.meanCentered,
         maxVectorEntries: s.maxVectorEntries,
         minVectorEntries: s.minVectorEntries,
         suppressVectorKeys: s.suppressVectorKeys,
         scoreVectorKeys: s.scoreVectorKeys,
         entityFilter: s.entityFilter,
-        retrievalMode: s.retrievalMode,
         queryMode: s.queryMode,
         weightByOrder: s.weightByOrder,
         vectorCutoff: s.vectorCutoff,

@@ -34,7 +34,6 @@ import sanitize from 'sanitize-filename';
 import { LocalIndex } from 'vectra';
 import { getOllamaVector } from '../../src/vectors/ollama-vectors.js';
 import { scoreCollection, poolEntries, selectTopK } from './scoring.mjs';
-import { DEFAULT_K1, DEFAULT_B, buildLexical } from './lexical.mjs';
 // Same matcher and text fold the extension uses for keyword hits — shared, not copied, so a chat scan and a
 // live keyword match can never disagree about what a key matches.
 import { buildAutomaton, addMessageHits, fold } from './automaton.mjs';
@@ -60,7 +59,7 @@ export const info = {
 /**
  * Cached corpus statistics (items included — listItems() re-parses the whole index file, so it
  * only runs when index.json's mtime changes), keyed by index path.
- * @type {Map<string, { items: object[], mean: Float64Array, lexical: object, mtimeMs: number, size: number }>}
+ * @type {Map<string, { items: object[], mean: Float64Array, mtimeMs: number, size: number }>}
  */
 const meanCache = new Map();
 
@@ -107,7 +106,7 @@ function getIndexPath(directories, collectionId, source, model) {
  * The mean is recomputed when index.json changes on disk, which covers inserts
  * and deletes without needing an explicit invalidation hook.
  * @param {string} indexPath Path to the index
- * @returns {Promise<{items: object[], mean: Float64Array, lexical: object} | null>}
+ * @returns {Promise<{items: object[], mean: Float64Array} | null>}
  */
 async function loadCentered(indexPath) {
     // Validity key is mtime AND size: two rapid writes can land in one mtime tick (or a
@@ -135,11 +134,11 @@ async function loadCentered(indexPath) {
     }
 
     const mean = corpusMean(items);
-    const lexical = buildLexical(items);
-    const loaded = { items, mean, lexical, mtimeMs, size };
+    // No lexical index: stage 1 is cosine-only, so building postings here was work nothing read.
+    const loaded = { items, mean, mtimeMs, size };
 
     meanCache.set(indexPath, loaded);
-    console.log(`[Worlds Apart] indexed ${path.basename(path.dirname(indexPath))}: ${items.length} chunks, mean norm ${norm(mean).toFixed(4)}, ${lexical.postings.size} lexical terms, avg ${lexical.avgdl.toFixed(0)} tokens/chunk`);
+    console.log(`[Worlds Apart] indexed ${path.basename(path.dirname(indexPath))}: ${items.length} chunks, mean norm ${norm(mean).toFixed(4)}`);
 
     return loaded;
 }
@@ -158,15 +157,12 @@ export async function init(router) {
 
             const topK = Number(request.body.topK) || 10;
             const settings = sourceSettings ?? {};
+            // Stage 1 is cosine-only (scoring.mjs header). The lexical fields a client may still send —
+            // threshold, bm25K1, bm25B, termWeights, stopwordDf, commonWordWeight — are IGNORED rather
+            // than rejected: an extension and a deployed plugin drift apart across a redeploy, and a
+            // stricter reading here would turn that ordinary skew into a 400 on every query.
             const opts = {
                 centered: request.body.centered !== false,
-                threshold: request.body.threshold === 'auto' ? 'auto' : (Number(request.body.threshold) || 0),
-                queryText: String(searchText),
-                k1: Number(request.body.bm25K1) > 0 ? Number(request.body.bm25K1) : DEFAULT_K1,
-                b: Number.isFinite(Number(request.body.bm25B)) ? Number(request.body.bm25B) : DEFAULT_B,
-                termWeights: request.body.termWeights && typeof request.body.termWeights === 'object' ? request.body.termWeights : null,
-                stopwordDf: Number(request.body.stopwordDf) || 0,
-                commonWordWeight: Number.isFinite(Number(request.body.commonWordWeight)) ? Number(request.body.commonWordWeight) : 1,
                 uncenteredGate: Number(request.body.uncenteredGate) || 0,
             };
 
@@ -186,14 +182,13 @@ export async function init(router) {
                     continue;
                 }
 
-                // Score this collection with the shared math: centered cosine + BM25, keeping
-                // any chunk either signal likes (score >= threshold OR bm25 > 0).
+                // Score this collection with the shared math: centered cosine, every chunk kept
+                // except what the wrong-book gate drops.
                 results.push(...scoreCollection(String(collectionId), loaded, queryVector, opts));
             }
 
-            // Pool each entry's best chunk FIRST, then union the top-K of each ranking, so a record that
-            // only one signal likes still reaches the client and can win on fusion. Pooling before the cut
-            // is what makes topK a count of entries and the per-entry maxima exact — see poolEntries.
+            // Pool each entry's best chunk FIRST, then cut. Pooling before the cut is what makes topK a
+            // count of entries and the per-entry maxima exact — see poolEntries.
             return response.send(selectTopK(poolEntries(results), topK));
         } catch (error) {
             console.error('[Worlds Apart] query failed:', error);

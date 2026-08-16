@@ -12,8 +12,7 @@
 // re-runnable after the books have been edited.
 import { readFileSync, existsSync } from 'node:fs';
 import { dirname, resolve as resolvePath } from 'node:path';
-import { scoreCollection, poolEntries, selectTopK, quantile, admitCeiling } from '../plugin/scoring.mjs';
-import { buildLexical } from '../plugin/lexical.mjs';
+import { scoreCollection, poolEntries, selectTopK, admitCeiling } from '../plugin/scoring.mjs';
 import { corpusMean, centeredCosineScores } from '../plugin/vector.mjs';
 import * as ranking from '../extension/ranking.mjs';
 import * as matcher from '../extension/matcher.mjs';
@@ -161,7 +160,7 @@ export const sceneParams = (S, overrides = {}) => ({
     // it as a side effect — an entry with a cosine is not keyword-only — so its own cost has to be
     // measurable separately or that arm reports one number for two changes.
     keywordTilt: ranking.KEYWORD_ONLY_TILT,
-    caseSensitive: false, wholeWords: false, includeNames: true, threshold: 0.1,
+    caseSensitive: false, wholeWords: false, includeNames: true,
     // What counts as INSIDE a word when wholeWords is on (state.mjs wordBoundary, shipped 'strict').
     // Unlike the knobs above this one is module state in the matcher, so makeKeywordScore pushes it
     // through setBoundaryMode per call — otherwise every arm scores at whatever the last one set.
@@ -231,26 +230,11 @@ export const sceneParams = (S, overrides = {}) => ({
     gazetteerSource: 'keys+titles',
     // Exact key strings to treat as removed from the book (see scoringKeys). Null = none.
     dropKeys: null,
-    queryMode: 'messages', retrievalMode: 'hybrid',
-    // How a VECTORIZED entry's chunk earns admission to the candidate set. 'either' is what the plugin ships
-    // (scoreCollection: `score >= threshold || bm25 > 0`), so a chunk with a weak embedding can still enter on
-    // its own lexical match. 'cosine' is the strict per-entry-type gate — the cosine floor actually gates the
-    // entries it is named for. Simulated by filtering the plugin's own output rather than forking it: the OR
-    // admits a superset, so the AND result is that set narrowed to the chunks clearing the floor. Non-vectorized
-    // entries are unaffected either way; they are not in the collection at all and arrive via keyword scoring
-    // (measured: 0 non-vectorized entries in any of three real indexes, so the plugin's bm25 clause is a
-    // SECOND route for vector entries, not the non-vector branch). 'both' is the strict AND — a chunk needs a
-    // clearing cosine AND some lexical overlap — which is narrower than either single test.
-    admit: 'either',
-    // Floor for the LEXICAL admission clause. The plugin ships `bm25 > 0`, which at these query lengths admits
-    // 80-95% of every chunk in the book — so the clause is nearly free and the cosine floor can only widen the
-    // set. A percentile floor makes the lexical test selective, and makes it ADAPTIVE: BM25 is not comparable
-    // across queries or corpora, so a fixed number cannot transfer between scenes the way a quantile can.
-    bm25Floor: 0,
-    // Same floor expressed as a PERCENTILE of the nonzero BM25 scores actually in play, computed per query.
-    // This is the form a real implementation would take: measured p25-of-all ranges 2.67 to 10.93 across three
-    // books, a 4x spread, so no fixed number transfers between scenes and the gate has to be adaptive.
-    bm25FloorPct: 0,
+    queryMode: 'messages',
+    // NO ADMISSION PARAMS. `admit`, `bm25Floor`, `bm25FloorPct` and `threshold` are gone with the gates
+    // they simulated — stage 1 now scores by cosine and returns everything (plugin/scoring.mjs). Bundles
+    // captured before that carry `threshold` in captureParams; it is READ AND IGNORED rather than rejected,
+    // because every stored sample has one and refusing them would retire the whole graded corpus.
     ...(S.captureParams ?? {}), ...overrides,
 });
 
@@ -327,7 +311,8 @@ export function loadScene(S, { indexFile, params: P }) {
     // same vector its competitors are. A book with nothing vectorized has no such centroid, and there the
     // arm's own corpus is the only one there is; that book has no baseline cosine to preserve anyway.
     const meanSource = items.length ? items : extra;
-    const loaded = { items, extra, mean: meanSource.length ? corpusMean(meanSource) : [], lexical: buildLexical(items) };
+    // No `lexical`: scoreCollection is cosine-only, and stage 3's text index is content-lexical's.
+    const loaded = { items, extra, mean: meanSource.length ? corpusMean(meanSource) : [] };
 
     // Out-of-scope graded titles: entries from a second attached book, which this harness cannot rank
     // because only one collection is loaded. Token-subset match, same rule as grade matching.
@@ -553,24 +538,14 @@ export function makeCandidateSet({ loaded, byUid, entries, params: P, chunkCfg, 
     const colVectorized = P.denseColumn === 'cos' || P.denseColumn === 'all';
     return (k1, b, tw, qvec, qtext, scanText) => {
         const dense = denseExtra(qvec);
-        // Resolve 'auto' here, once, so the admit/floor filters below compare against the same number
-        // scoreCollection gated with — the same p90-of-live-scores the plugin computes.
-        // --- STAGE 1: RETRIEVAL. Score every chunk, apply the admission gates, pool per entry, take top-K.
-        // Same term weights the admission gates use, so the two stages agree on which query terms count.
+        // --- STAGE 1: RETRIEVAL. Cosine over every chunk, no admission test — plugin/scoring.mjs carries
+        // why the threshold and the lexical clause left this stage. `contentText` is stage 3's text signal
+        // and is computed here only because this pass collapses the stages; it admits nothing.
         const contentText = scoreContent(contentIndex, qtext, { k1, b, termWeights: tw, stopwordDf: P.stopwordDf, commonWordWeight: P.commonWordWeight });
-        const thr = P.threshold === 'auto' ? quantile(centeredCosineScores(loaded.items, qvec, loaded.mean, P.meanCentered), 0.9) : P.threshold;
-        let scored = scoreCollection(CID, loaded, qvec, { centered: P.meanCentered, threshold: thr, queryText: qtext, k1, b, termWeights: tw, stopwordDf: P.stopwordDf, commonWordWeight: P.commonWordWeight, uncenteredGate: P.uncenteredGate });
-        if (P.admit === 'cosine') scored = scored.filter(m => m.score >= thr);
-        else if (P.admit === 'both') scored = scored.filter(m => m.score >= thr && m.bm25 > 0);
-        if (P.bm25Floor > 0) scored = scored.filter(m => m.score >= thr || m.bm25 >= P.bm25Floor);
-        if (P.bm25FloorPct > 0) {
-            const nz = scored.map(m => m.bm25).filter(x => x > 0).sort((a, b) => a - b);
-            const floor = nz.length ? nz[Math.min(nz.length - 1, Math.floor(P.bm25FloorPct * nz.length))] : 0;
-            if (floor > 0) scored = scored.filter(m => m.score >= thr || m.bm25 >= floor);
-        }
+        const scored = scoreCollection(CID, loaded, qvec, { centered: P.meanCentered, uncenteredGate: P.uncenteredGate });
         const grouped = selectTopK(poolEntries(scored), topK);
         const per = new Map();
-        for (const m of grouped[CID]?.metadata ?? []) { const uid = Number(m.index); const c = per.get(uid) ?? { score: -Infinity, bm25: 0 }; c.score = Math.max(c.score, m.score); c.bm25 = Math.max(c.bm25, m.bm25); per.set(uid, c); }
+        for (const m of grouped[CID]?.metadata ?? []) { const uid = Number(m.index); per.set(uid, { score: Math.max(per.get(uid)?.score ?? -Infinity, m.score) }); }
         const rows = [];
         // --- STAGE 2: ACTIVATION (retrieval route). Whatever survived the cut above is in the ranking.
         // `entry` is carried so fuseRanks can read eligibility (and authored order) the way production does.
@@ -609,9 +584,9 @@ export function makeCandidateSet({ loaded, byUid, entries, params: P, chunkCfg, 
  *  so uid is aliased in. Mutates the rows it is handed and returns a sorted copy. */
 export const makeFuse = P => (rows, lexW) => {
     rows.forEach(r => { r.key = r.uid; });
-    // The sample's own retrievalMode, not a hardcoded 'hybrid' — production passes settings().retrievalMode
-    // here, and a scene graded under 'lexical'/'vector' fused as hybrid is a ranking the user never ran.
-    ranking.fuseRanks(rows, { rrfK: P.K, retrievalMode: P.retrievalMode, weightByOrder: false, lexicalWeight: lexW, keywordWeight: P.KEYW, keywordOnlyTilt: P.keywordTilt, sparseWeight: P.denseColumn ? P.denseWeight : 0 });
+    // No retrievalMode: fuseRanks fuses every signal an entry is eligible for. Bundles captured before
+    // that carry one in captureParams and it is read and ignored, like `threshold`.
+    ranking.fuseRanks(rows, { rrfK: P.K, weightByOrder: false, lexicalWeight: lexW, keywordWeight: P.KEYW, keywordOnlyTilt: P.keywordTilt, sparseWeight: P.denseColumn ? P.denseWeight : 0 });
     return [...rows].sort((a, b) => b.fused - a.fused);
 };
 

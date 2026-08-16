@@ -101,7 +101,7 @@ eq(Number.isFinite(all3.get(1).sparseScore) && Number.isFinite(all3.get(2).spars
 const negRow = { key: 9, keywordScore: 5, textScore: 0, sparseScore: -0.3, vectorEligible: false, textEligible: false, keysEligible: true };
 const posRow = { key: 8, keywordScore: 5, textScore: 0, sparseScore: 0.4, vectorEligible: false, textEligible: false, keysEligible: true };
 const pair = [posRow, negRow].map(r => ({ ...r }));
-fuseRanks(pair, { rrfK: 20, retrievalMode: 'hybrid', weightByOrder: false, lexicalWeight: 1.5, keywordWeight: 1.5, sparseWeight: 0.5 });
+fuseRanks(pair, { rrfK: 20, weightByOrder: false, lexicalWeight: 1.5, keywordWeight: 1.5, sparseWeight: 0.5 });
 eq(Number.isFinite(pair[1].sparseRank), true, 'a negative dense score is ranked, not dropped from the column');
 eq(pair[0].sparseRank < pair[1].sparseRank, true, '...and still ranks below a positive one');
 eq(pair[0].fused > pair[1].fused, true, '...so the better cosine wins the pair');

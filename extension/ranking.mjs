@@ -248,49 +248,34 @@ export function queryMessages(chat, { depth, substituteParams = s => s }) {
 }
 
 /**
- * Fuses the RETRIEVAL ranking: vector score against BM25-over-chunk-text, and nothing else.
+ * Orders the RETRIEVAL ranking: cosine, and nothing else.
+ *
+ * NO LONGER A FUSION, and kept as a named function rather than inlined as a sort because stage 1's
+ * ordering is a thing the cutoff harnesses cut and the Studio displays — a second copy of it is the drift
+ * the single-scorer rule exists to prevent. It used to RRF the cosine rank against BM25-over-chunk-text;
+ * plugin/scoring.mjs's header carries why the lexical half left stage 1 and what that concedes.
  *
  * Deliberately not fuseRanks. The question here is only "which retrieved entries force-activate" — keyword and
  * authored-order ranks belong to the final layout ranking, over a population that includes entries
  * retrieval never saw. Feeding them in here would let a keyword-only entry displace a retrieved one
  * from a decision it isn't a candidate in.
  *
- * Lives here rather than in worldsapart.js because it is pure rank arithmetic over injected settings,
- * so the offline cutoff harnesses can cut the real ranking instead of a copy of this formula.
+ * `fused` is gone with the fusion. Callers that ranked on it read `vectorRank` (1-based, best first),
+ * which is what the returned array is already sorted by — an absent cosine sorts last rather than
+ * silently scoring 0, the trap fuseRanks records against null scores.
  *
- * @param {Map<string, {score: number, bm25?: number, chunk?: string}>} scores Per-entry retrieval results
- * @param {object} cfg
- * @param {number} cfg.rrfK RRF constant (settings().rrfK)
- * @param {string} cfg.retrievalMode 'hybrid' | 'vector' | 'lexical'
- * @param {number} cfg.lexicalWeight BM25 vs vector weight in fusion
- * @returns {Array<{key: string, value: object, fused: number, vectorRank?: number, textRank?: number}>} Fused ranking, best first
+ * @param {Map<string, {score: number, chunk?: string}>} scores Per-entry retrieval results
+ * @returns {Array<{key: string, value: object, vectorRank: number}>} Retrieval ranking, best first
  */
-export function fuseRetrieval(scores, { rrfK: k, retrievalMode: mode, lexicalWeight }) {
+export function fuseRetrieval(scores) {
     const entries = [...scores.entries()];
-    const useVector = mode !== 'lexical';
-    const useText = mode !== 'vector';
-
-    const rankOf = (sortKey) => new Map([...entries]
-        .sort((a, b) => (b[1][sortKey] ?? 0) - (a[1][sortKey] ?? 0))
+    const vectorRanks = new Map([...entries]
+        .sort((a, b) => (b[1].score ?? 0) - (a[1].score ?? 0))
         .map(([key], index) => [key, index + 1]));
 
-    const vectorRanks = rankOf('score');
-    const textRanks = rankOf('bm25');
-
     return entries
-        .map(([key, value]) => {
-            const vectorRank = useVector ? vectorRanks.get(key) : undefined;
-            const textRank = useText && value.bm25 > 0 ? textRanks.get(key) : undefined;
-            return {
-                key,
-                value,
-                vectorRank,
-                textRank,
-                fused: (vectorRank ? 1 / (k + vectorRank) : 0)
-                    + (textRank ? lexicalWeight / (k + textRank) : 0),
-            };
-        })
-        .sort((a, b) => b.fused - a.fused);
+        .map(([key, value]) => ({ key, value, vectorRank: vectorRanks.get(key) }))
+        .sort((a, b) => a.vectorRank - b.vectorRank);
 }
 
 /**
@@ -348,14 +333,13 @@ export const KEYWORD_ONLY_TILT = 1.25;
  * @param {object[]} items Ranking items (mutated: vectorRank/textRank/keywordRank/orderRank/fused set)
  * @param {object} cfg
  * @param {number} cfg.rrfK RRF constant (settings().rrfK)
- * @param {string} cfg.retrievalMode 'hybrid' | 'vector' | 'lexical'
  * @param {boolean} cfg.weightByOrder Fuse an authored-order rank too
  * @param {number} cfg.lexicalWeight BM25-over-TEXT vs vector weight in fusion
  * @param {number|null} [cfg.keywordWeight] BM25-over-KEYS weight; null/unset follows lexicalWeight
  * @param {number} [cfg.sparseWeight] Learned sparse-lexical weight; 0 (default) makes the column inert
  * @param {number} [cfg.keywordOnlyTilt] Keyword-only tie-break multiplier; defaults to KEYWORD_ONLY_TILT
  */
-export function fuseRanks(items, { rrfK: k, retrievalMode: mode, weightByOrder, lexicalWeight, keywordWeight, sparseWeight = 0, keywordOnlyTilt = KEYWORD_ONLY_TILT }) {
+export function fuseRanks(items, { rrfK: k, weightByOrder, lexicalWeight, keywordWeight, sparseWeight = 0, keywordOnlyTilt = KEYWORD_ONLY_TILT }) {
     // TEXT AND KEYS GET SEPARATE WEIGHTS, because they are separate signals that disagree about which books
     // they are good on. Measured across three graded scenes, the best (text, keys) pair was (0.5, 3) on a
     // book with tightly curated keywords, (1.5, 0) on one whose keys are auto-generated noise, and (1.5, 1)
@@ -379,14 +363,10 @@ export function fuseRanks(items, { rrfK: k, retrievalMode: mode, weightByOrder, 
     // list at effectively 0, and takes numerator credit while vectorEligible exempts it from the
     // denominator. Measured: rows carrying score:null shifted a 66-scene mean nDCG@10 baseline by 0.0122,
     // more than the effect that run was trying to measure.
-    const byVector = mode === 'lexical'
-        ? new Map()
-        : rankMap(items.filter(x => Number.isFinite(x.score)).sort((a, b) => b.score - a.score));
+    const byVector = rankMap(items.filter(x => Number.isFinite(x.score)).sort((a, b) => b.score - a.score));
     // BM25 over chunk TEXT, from the plugin. Its IDF is what discounts terms that
     // appear in nearly every chunk — the recurring cast — without any tuning.
-    const byText = mode === 'vector'
-        ? new Map()
-        : rankMap(items.filter(x => x.textScore > 0).sort((a, b) => b.textScore - a.textScore));
+    const byText = rankMap(items.filter(x => x.textScore > 0).sort((a, b) => b.textScore - a.textScore));
     // BM25 over entry KEYS. Scores non-vectorized entries; also 🔗 entries when
     // scoreVectorKeys is on (via their stashed keys), otherwise suppressKeys leaves them at 0.
     const byKeyword = rankMap(items.filter(x => x.keywordScore > 0).sort((a, b) => b.keywordScore - a.keywordScore));
@@ -447,8 +427,8 @@ export function fuseRanks(items, { rrfK: k, retrievalMode: mode, weightByOrder, 
     // score for it — declared through `textEligible` on the item, since only the caller knows whether an
     // index was available at all. A plugin-less run with no index falls back to presence, which keeps the
     // old behaviour rather than declaring everything eligible for a signal nothing computed.
-    const vectorEligible = it => mode !== 'lexical' && inVectorIndex(it);
-    const textEligible = it => mode !== 'vector' && (it.textEligible ?? it.textScore !== undefined);
+    const vectorEligible = it => inVectorIndex(it);
+    const textEligible = it => (it.textEligible ?? it.textScore !== undefined);
     const keyEligible = it => it.keysEligible ?? it.keywordScore > 0;
     // Same rule as text: eligible means the caller could have produced a score for it, declared explicitly
     // because only the caller knows whether the sparse index covered this entry.

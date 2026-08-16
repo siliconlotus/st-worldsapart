@@ -178,21 +178,6 @@ export const defaultSettings = {
      * so centering is simply on whenever the plugin is present.
      */
     meanCentered: true,
-    /**
-     * Which retrieval signal to select and rank on: 'hybrid' | 'lexical' | 'vector'.
-     *
-     * Benchmarked on a real lorebook, 785 trials (query = one chunk, target = any
-     * sibling chunk of the same entry):
-     *
-     *   bm25       0.474 MRR / 63.3% recall@5
-     *   vector     0.468 MRR / 64.8%
-     *   hybrid     0.515 MRR / 69.7%
-     *
-     * The two singles are equivalent; fusing them is worth ~9% MRR over either.
-     * An earlier 60-trial run appeared to show BM25 clearly ahead of vectors — that
-     * was a small non-random subsample and did not survive the larger benchmark.
-     */
-    retrievalMode: 'hybrid',
     // Removed: baselineQuery/baselineWeight (subtract a hand-crafted "shared background" query's cosine
     // scores). Measured harmful over a 374-trial LOO grid (baseline-grid.mjs) — monotonic decline, no
     // beneficial weight. It was a worse, redundant hand-rolled version of mean-centering (meanCentered),

@@ -184,7 +184,7 @@ const mkRows = () => [
     { key: 1, score: 0.9, textScore: 10, keywordScore: 1 },
     { key: 2, score: 0.1, textScore: 1, keywordScore: 50 },
 ];
-const fusedWith = opts => { const r = mkRows(); fuseRanks(r, { rrfK: 20, retrievalMode: 'hybrid', weightByOrder: false, ...opts }); return r.map(x => x.fused); };
+const fusedWith = opts => { const r = mkRows(); fuseRanks(r, { rrfK: 20, weightByOrder: false, ...opts }); return r.map(x => x.fused); };
 eq(JSON.stringify(fusedWith({ lexicalWeight: 1.5 })), JSON.stringify(fusedWith({ lexicalWeight: 1.5, keywordWeight: undefined })), 'undefined keywordWeight mirrors lexicalWeight');
 eq(JSON.stringify(fusedWith({ lexicalWeight: 1.5 })), JSON.stringify(fusedWith({ lexicalWeight: 1.5, keywordWeight: null })), 'null keywordWeight mirrors lexicalWeight');
 eq(JSON.stringify(fusedWith({ lexicalWeight: 1.5 })) === JSON.stringify(fusedWith({ lexicalWeight: 1.5, keywordWeight: 3 })), false, 'an explicit keywordWeight actually changes the fusion');
@@ -212,7 +212,7 @@ near(keysOff[0], expect(1, 1, 2, 0), '...and at keywordWeight 0 the keys term le
 // TEXT ELIGIBILITY IS NO LONGER "IS IT VECTORIZED". content-lexical.mjs indexes every entry's content, so a
 // keyword entry with a body can earn a text rank and is divided by lexicalWeight like anything else. The
 // signal-starved case that remains is an entry with NO content — keys and nothing to index.
-const fuse1 = rows => { fuseRanks(rows, { rrfK: 20, retrievalMode: 'hybrid', weightByOrder: false, lexicalWeight: 1.5, keywordWeight: 1.5 }); return rows[0].fused; };
+const fuse1 = rows => { fuseRanks(rows, { rrfK: 20, weightByOrder: false, lexicalWeight: 1.5, keywordWeight: 1.5 }); return rows[0].fused; };
 const keywordOnlyTop = fuse1([{ key: 1, keywordScore: 5, textScore: 0, vectorEligible: false, textEligible: false, keysEligible: true }]);
 const everySignalTop = fuse1([{ key: 1, score: 0.9, textScore: 9, keywordScore: 5, vectorEligible: true, keysEligible: true }]);
 near(everySignalTop, 1 / 21, 'an entry topping all three signals scores 1/(k+1)');
@@ -231,7 +231,7 @@ eq(missedItsChance < keywordOnlyTop, true, '...so it ranks below a keyword-only 
 near(keywordOnlyTop, 1.25 / 21, 'a keyword-only entry takes the tilt');
 // Injectable, because anything that hands a keyword-only entry a cosine takes the tilt away with it
 // (scene.mjs denseAllEntries) and the two halves have to be separable to be readable.
-const untilted = rows => { fuseRanks(rows, { rrfK: 20, retrievalMode: 'hybrid', weightByOrder: false, lexicalWeight: 1.5, keywordWeight: 1.5, keywordOnlyTilt: 1 }); return rows[0].fused; };
+const untilted = rows => { fuseRanks(rows, { rrfK: 20, weightByOrder: false, lexicalWeight: 1.5, keywordWeight: 1.5, keywordOnlyTilt: 1 }); return rows[0].fused; };
 near(untilted([{ key: 1, keywordScore: 5, textScore: 0, vectorEligible: false, textEligible: false, keysEligible: true }]), 1 / 21, 'an injected tilt of 1 removes it, leaving normalisation alone');
 
 // A NULL SCORE IS NOT A COSINE. `null !== undefined` let a caller marking "no cosine" with null enter the
@@ -248,7 +248,7 @@ const bodiedKeysOnly = fuse1([{ key: 1, keywordScore: 5, textScore: 0, vectorEli
 near(bodiedBoth, 1.25 / 21, 'a keyword entry topping keys AND text reaches the same ceiling');
 eq(bodiedKeysOnly < bodiedBoth, true, '...and one topping keys alone does not, being divided by lexicalWeight too');
 eq(keywordOnlyTop > everySignalTop, true, 'all else equal, the keyword-only entry wins');
-const kwAtRank = r => { const rows = [{ key: 0, keywordScore: 100, vectorEligible: false, keysEligible: true }]; for (let i = 1; i < r; i++) rows.unshift({ key: -i, keywordScore: 100 + i, vectorEligible: false, keysEligible: true }); fuseRanks(rows, { rrfK: 20, retrievalMode: 'hybrid', weightByOrder: false, lexicalWeight: 1.5, keywordWeight: 1.5 }); return rows.find(x => x.key === 0).fused; };
+const kwAtRank = r => { const rows = [{ key: 0, keywordScore: 100, vectorEligible: false, keysEligible: true }]; for (let i = 1; i < r; i++) rows.unshift({ key: -i, keywordScore: 100 + i, vectorEligible: false, keysEligible: true }); fuseRanks(rows, { rrfK: 20, weightByOrder: false, lexicalWeight: 1.5, keywordWeight: 1.5 }); return rows.find(x => x.key === 0).fused; };
 eq(kwAtRank(6) > everySignalTop, true, 'a keyword entry at rank 6 still clears the best vector entry');
 eq(kwAtRank(7) < everySignalTop, true, '...and at rank 7 it does not: a strong vector entry beats a mid keyword one');
 // Which is what lets it reorder: the same arithmetic, read as a ranking.

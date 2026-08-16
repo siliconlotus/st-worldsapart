@@ -29,17 +29,19 @@ eq(JSON.stringify(meta).length * 10 < JSON.stringify(full).length, true, 'meta i
 eq(Object.keys(trimBook(Object.values(book), 'meta')).length, 2, 'trimBook accepts an array');
 
 // --- captureParams maps settings onto the harness's argument names ---
-const s = { rrfK: 20, bm25K1: 1.2, bm25B: 0.75, lexicalWeight: 1, properNounBoost: 3, stopwordDocFreq: 0.25, retrievalMode: 'hybrid', scoreThreshold: 0.1, maxVectorEntries: 10, minVectorEntries: 3, suppressVectorKeys: true, scoreVectorKeys: false, entityFilter: true, queryMode: 'messages', weightByOrder: false, vectorCutoff: 'count', elbowSensitivity: 1.5, dropoffThreshold: 0.06 };
+const s = { rrfK: 20, bm25K1: 1.2, bm25B: 0.75, lexicalWeight: 1, properNounBoost: 3, stopwordDocFreq: 0.25,  maxVectorEntries: 10, minVectorEntries: 3, suppressVectorKeys: true, scoreVectorKeys: false, entityFilter: true, queryMode: 'messages', weightByOrder: false, vectorCutoff: 'count', elbowSensitivity: 1.5, dropoffThreshold: 0.06 };
 const p = captureParams(s, { caseSensitive: false, wholeWords: false, includeNames: true });
 eq(p.K, 20, 'rrfK -> K');
 eq(p.K1, 1.2, 'bm25K1 -> K1');
 eq(p.LEXW, 1, 'lexicalWeight -> LEXW');
 eq(p.stopwordDf, 0.25, 'stopwordDocFreq -> stopwordDf');
-eq(p.threshold, 0.1, 'scoreThreshold -> threshold');
+eq('threshold' in p, false, 'no admission threshold is captured — stage 1 has no gate to reproduce');
 eq(p.includeNames, true, 'ST world-info globals are carried, not guessed');
 // commonWordWeight is derived from the mode, not stored — the one value paramSnapshot computes.
 eq(p.commonWordWeight, 1, 'hybrid mode -> commonWordWeight 1');
-eq(captureParams({ ...s, retrievalMode: 'lexical' }, {}).commonWordWeight, 0.7, 'lexical mode -> commonWordWeight 0.7');
+// retrievalMode is gone, so commonWordWeight has no source of variation left: it is 1 for every capture.
+eq(captureParams(s, {}).commonWordWeight, 1, 'commonWordWeight is a constant now that there are no modes');
+eq('retrievalMode' in captureParams(s, {}), false, 'the capture records no retrieval mode');
 // suppressVectorKeys must survive: without it the harness admits 2.3x the query terms (see buildGazetteer).
 eq(p.suppressVectorKeys, true, 'suppressVectorKeys is recorded');
 
@@ -267,7 +269,7 @@ const mk = (arm, over) => ({ arm, sample: buildSample({
     books: { Main: meta }, bookMode: 'full', priority: [], grades: [{ title: 'T', grade: 4, world: 'Main', uid: 1 }],
     cutoff: { mode: 'count' }, gradedCandidates: 1, pluginFP: 'ab', sourceFP: 'ab', now: '2026-07-29',
 }) });
-const bundle = bundleSamples([mk('shipped', {}), mk('summary', { queryMode: 'summary' }), mk('lexical', { retrievalMode: 'lexical' })]);
+const bundle = bundleSamples([mk('shipped', {}), mk('summary', { queryMode: 'summary' }), mk('depth', { messageDepth: 8 })]);
 
 eq(bundle.arms.length, 3, 'every arm is carried');
 eq(bundle.books !== undefined, true, 'the books are hoisted to the shared block');
