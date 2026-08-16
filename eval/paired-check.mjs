@@ -2,7 +2,7 @@
 // half needs a vector index so it can't run here; what CAN be pinned offline is the statistic every claim
 // about a default will rest on, and the exact p-values that set the floor on what single-digit n can say.
 import { eq, eqNear, signTest, gradeCredit, fbeta, RECALL_WEIGHT } from './metrics.mjs';
-import { sceneParams, ndcg, dcg, nrm, wiTitle, makeGradeOf, makeKeywordScore, scoreScene } from './scene.mjs';
+import { sceneParams, ndcg, dcg, nrm, wiTitle, makeGradeOf, makeKeywordScore, scoreScene, tierRecall } from './scene.mjs';
 import { rowKey } from '../extension/grading.mjs';
 import { fuseRanks } from '../extension/ranking.mjs';
 
@@ -36,6 +36,26 @@ eq(signTest([1e-12, -1e-12, 0.5]).ties, 2, 'sub-epsilon deltas are ties, not dir
 // mean is over ALL scenes including ties: the effect size has to reflect the flat ones, or a parameter that
 // helps once and does nothing five times reports as a large effect.
 eq(Math.abs(signTest([0, 0, 0.03]).mean - 0.01) < 1e-12, true, 'mean delta includes tied scenes');
+
+// --- tierRecall: the guard that catches a selection trading a hard class for an easy one ---------------
+// memory (~7% relevant here) and reference (~30%) have very different base rates, so an arm that favours
+// the denser class raises every pooled metric while delivering less of what the system retrieves. This
+// splits delivered recall so that shows up. Ungraded counts as not relevant, matching the `?? 0` rule the
+// windows use; identity comparison, since kept holds the same row objects the population does.
+const memRow = (uid, grade) => ({ uid, grade, entry: { uid, stmemorybooks: {} } });
+const refRow = (uid, grade) => ({ uid, grade, entry: { uid } });
+const tierPop = [memRow(1, 4), memRow(2, 3), memRow(3, 0), refRow(4, 3), refRow(5, 3), refRow(6, 1)];
+const gradeOfRow = r => r.grade;
+const split = tierRecall(tierPop, [tierPop[0], tierPop[3], tierPop[4], tierPop[5]], gradeOfRow);
+eq(split.memory.of, 2, 'both relevant memory rows are in the memory denominator');
+eq(split.memory.got, 1, '...and only the delivered one counts');
+eq(split.reference.of, 2, 'the relevant reference rows are counted separately');
+eq(split.reference.got, 2, '...and both were delivered — the imbalance this exists to show');
+eq(tierRecall(tierPop, [], gradeOfRow).memory.got, 0, 'delivering nothing scores zero rather than throwing');
+eq(tierRecall(tierPop, tierPop, () => null).memory.of, 0, 'an ungraded population has no relevant rows to recall');
+// A row equal by uid but not by identity must NOT count: the kept set holds the population's own objects,
+// and a uid join here would be a second rule for the same question.
+eq(tierRecall(tierPop, [memRow(1, 4)], gradeOfRow).memory.got, 0, 'a copy of a kept row is not the kept row');
 
 // --- sceneParams layering: harness defaults < the sample's captureParams < the arm's override ---
 const S = { captureParams: { K1: 2, LEXW: 1.5 } };

@@ -202,6 +202,8 @@ const fx = n => (n >= 0 ? '+' : '') + n.toFixed(4);
         console.log(`    F@R ${base.atR.f.toFixed(4)} (P ${base.atR.precision.toFixed(3)} R ${base.atR.recall.toFixed(3)}, n ${base.atR.n})`
             + `   F@delivered ${base.delivered.f.toFixed(4)} (P ${base.delivered.precision.toFixed(3)} R ${base.delivered.recall.toFixed(3)}, n ${base.delivered.n})`
             + `   divergence ${(base.divergence >= 0 ? '+' : '') + base.divergence.toFixed(4)}`);
+        const bt = base.byTier;
+        console.log(`    delivered recall by tier: memory ${bt.memory.got}/${bt.memory.of}   reference ${bt.reference.got}/${bt.reference.of}`);
         // `of` is the rankable top-k, so 0 means the reference-tier removal took EVERYTHING — a
         // reference-only book. Every arm then scores 0 and every delta is a tie, so the scene inflates the
         // scene count without contributing evidence. The judged<of check cannot see it: 0 < 0 is false.
@@ -289,7 +291,7 @@ const fx = n => (n >= 0 ? '+' : '') + n.toFixed(4);
             } else {
                 r = await scoreScene({ sample: sc.S, overrides: scoring, k: K, scene: sc.scene, qv: sc.qv });
             }
-            cells.push({ scene: sc.name, delta: mOf(r) - mOf(sc.base), judged: r.judged, of: r.of, unjudged: r.unjudged });
+            cells.push({ scene: sc.name, delta: mOf(r) - mOf(sc.base), judged: r.judged, of: r.of, unjudged: r.unjudged, byTier: r.byTier, baseTier: sc.base.byTier });
         }
         results.push({ arm: armName, cells, stat: signTest(cells.map(c => c.delta)) });
     }
@@ -316,6 +318,19 @@ const fx = n => (n >= 0 ? '+' : '') + n.toFixed(4);
             + r.cells.map(c => `${fx(c.delta)}${c.judged < c.of ? '?' : ''}`).join('  ')
             + (gaps ? `   (${gaps} scene(s) with unjudged rows in top ${K})` : ''));
     }
+
+    // TIER SHIFT, one line per arm. `memory` and `reference` have base rates of roughly 7% and 30% here, so
+    // an arm can raise every metric above by trading the hard class for the easy one — measured on one
+    // threshold that read as a clean win while delivering 93% of relevant reference rows and 56% of memory
+    // ones. Pooled recall, precision, F2, nDCG and calibration were all blind to it. A large negative
+    // memory column beside a positive reference column means the arm moved the population, not the ranking.
+    const tierLine = (r, half) => {
+        let got = 0, of = 0, gotB = 0;
+        for (const c of r.cells) { got += c.byTier[half].got; of += c.byTier[half].of; gotB += c.baseTier[half].got; }
+        return of ? `${((got - gotB) / of >= 0 ? '+' : '') + (100 * (got - gotB) / of).toFixed(1)}%` : '  -  ';
+    };
+    console.log(`\ndelivered-recall shift by tier (an arm that moves these apart changed WHICH CLASS ships, not how well it ranks)`);
+    for (const r of results) console.log(`  ${r.arm.padEnd(w)}  memory ${tierLine(r, 'memory').padStart(7)}   reference ${tierLine(r, 'reference').padStart(7)}`);
 
     console.log('\n^ = helps on every scene, v = hurts on every scene, ? = that cell kept unjudged rows so its Δ is a lower bound.');
     console.log(`comparisons made: ${results.length} across ${byFamily.size} parameter famil${byFamily.size === 1 ? 'y' : 'ies'} (holm corrected within family).`);

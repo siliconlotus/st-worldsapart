@@ -307,6 +307,34 @@ export const isMemory = e => Boolean(e) && ('stmemorybooks' in e || 'STMB_start'
 export const isReference = e => !isMemory(e);
 export const isDurableEntry = e => Boolean(e?.constant);
 
+/**
+ * Recall split by TIER, over one selection's kept set.
+ *
+ * WHY IT IS STANDING RATHER THAN AD HOC. `memory` and `reference` have very different base rates — 7%
+ * against 30% on this corpus — so a rule that favours the denser class raises every pooled metric while
+ * delivering less of what the system exists to retrieve. Measured on a threshold that looked like a clean
+ * win at 69% less material for 29% less relevance: it kept 93% of relevant reference rows and 56% of
+ * relevant memory ones. F2, precision, recall, nDCG and calibration were all blind to it, because a class
+ * prior that tracks base rates genuinely predicts. Only the split shows it.
+ *
+ * Identity comparison, not uid: `kept` holds the same row objects the population does (fuse sorts a copy
+ * of the same references), so a uid join would be a second way to say the same thing and a place to drift.
+ *
+ * @param {Array<object>} population Rows the selection chose from, durable already excluded by the caller
+ * @param {Array<object>} kept The rows it chose
+ * @param {(row: object) => number|null} gradeOf Grade lookup; ungraded counts as not relevant
+ * @returns {{memory: {got: number, of: number}, reference: {got: number, of: number}}}
+ */
+export function tierRecall(population, kept, gradeOf) {
+    const keptSet = new Set(kept);
+    const relevant = population.filter(r => (gradeOf(r) ?? 0) >= 3);
+    const half = pick => {
+        const rows = relevant.filter(pick);
+        return { got: rows.filter(r => keptSet.has(r)).length, of: rows.length };
+    };
+    return { memory: half(r => isMemory(r.entry)), reference: half(r => isReference(r.entry)) };
+}
+
 /** Keys the production scan would actually score. suppressVectorKeys blanks a vectorized entry's keys at
  *  scan time (worldsapart.js suppressKeys), and scoreVectorKeys is what re-admits the stashed originals —
  *  offline the originals ARE e.key, since samples embed the book raw. Scoring raw keys unconditionally gave
@@ -596,7 +624,11 @@ export async function scoreScene({ sample: S, overrides = {}, k = 10, vectors, m
     const atR = scoreWindow(ranked.slice(0, relevant));
     // cliffCut takes the durable-filtered layout INCLUDING reference rows, because the runtime's cliff can
     // drop those too; the reference exclusion is applied to what it returns, not to what it is handed.
-    const delivered = scoreWindow(cliffCut(fuse(all.filter(r => !isDurableEntry(r.entry)), P.LEXW), P).kept.filter(r => !isReference(r.entry)));
+    const cutPopulation = all.filter(r => !isDurableEntry(r.entry));
+    const cutKept = cliffCut(fuse(cutPopulation, P.LEXW), P).kept;
+    const delivered = scoreWindow(cutKept.filter(r => !isReference(r.entry)));
+    // Read BEFORE the reference strip above — the split is only informative while both tiers are present.
+    const byTier = tierRecall(cutPopulation, cutKept, gradeOf);
 
     return {
         n: ndcg(g, k),
@@ -607,6 +639,10 @@ export async function scoreScene({ sample: S, overrides = {}, k = 10, vectors, m
         atR,
         delivered,
         // Reported rather than derived at every call site, so two tools cannot disagree about its sign.
+        // Delivered recall, split by tier. Not a second score — a guard on the one above: a selection that
+        // trades a hard class for an easy one improves every pooled metric here while delivering less of
+        // what the system is for, and nothing else reported by this function can see that.
+        byTier,
         divergence: delivered.f - atR.f,
         relevant,
         judged: top.length - unjudged.length,
