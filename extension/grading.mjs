@@ -93,9 +93,6 @@ export function captureParams(s, { caseSensitive, wholeWords, includeNames }) {
         KEYW: s.keywordWeight ?? null,
         boost: s.properNounBoost,
         stopwordDf: s.stopwordDocFreq,
-        // Always 1, i.e. the general-English down-weight is off. Kept in the capture because
-        // content-lexical still takes the parameter.
-        commonWordWeight: 1,
         meanCentered: s.meanCentered,
         maxVectorEntries: s.maxVectorEntries,
         suppressVectorKeys: s.suppressVectorKeys,

@@ -413,11 +413,9 @@ const fmt = n => (n == null ? '·' : (+n).toFixed(3));
     if (worst.j10 < worst.of) console.log(`!! worst coverage in the grid: ${worst.j10}/${worst.of} at k1=${worst.k1} b=${worst.b} lexW=${worst.lexW} — that cell is penalised for surfacing entries nobody judged.`);
     else console.log('pool is reusable across this grid: every cell\'s top-10 is fully judged.');
 
-    // --- entity filter: re-measures the claims in ranking.mjs buildTermWeights, whose figures ("mean
-    // target rank 11.2 vs 21.6-28.2 unfiltered", "gazetteer costs half a rank", "boost plateaus 3..5")
-    // were taken on a 5-target gold set that no longer exists AND, on the evidence of this harness's own
-    // bug, against a gazetteer built from raw book keys — 2.3x the terms production admits. Same metric
-    // (mean rank of the graded targets) on the validated fixture, at production's suppressed gazetteer.
+    // --- entity filter: mean rank of the graded targets, at production's suppressed gazetteer. This is
+    // the arm that re-measures ranking.mjs buildTermWeights, whose own tuning was done at stage 1 against
+    // a gazetteer built from raw book keys — 2.3x the terms production admits.
     const rankMetrics = tw => {
         const all = scoreAll(DEF.k1, DEF.b, tw);
         // Coverage before the pool filter, same reasoning as the grid above. These arms need it most: turning

@@ -158,7 +158,7 @@ export async function init(router) {
             const topK = Number(request.body.topK) || 10;
             const settings = sourceSettings ?? {};
             // Stage 1 is cosine-only (scoring.mjs header). The lexical fields a client may still send —
-            // threshold, bm25K1, bm25B, termWeights, stopwordDf, commonWordWeight — are IGNORED rather
+            // threshold, bm25K1, bm25B, termWeights, stopwordDf — are IGNORED rather
             // than rejected: an extension and a deployed plugin drift apart across a redeploy, and a
             // stricter reading here would turn that ordinary skew into a 400 on every query.
             const opts = {

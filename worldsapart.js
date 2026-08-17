@@ -441,7 +441,7 @@ async function contentTextScores(query) {
 
     const s = settings();
     const termWeights = await queryTermWeights(query, { log: false });
-    const opts = { k1: s.bm25K1, b: s.bm25B, termWeights, stopwordDf: s.stopwordDocFreq, commonWordWeight: s.commonWordWeight };
+    const opts = { k1: s.bm25K1, b: s.bm25B, termWeights, stopwordDf: s.stopwordDocFreq };
     const out = new Map();
     for (const [world, entries] of byWorld) {
         for (const [key, score] of scoreContent(contentIndexFor(world, entries), query, opts)) {
@@ -2022,11 +2022,9 @@ function paramSnapshot() {
     // line up — makes a logged snapshot greppable straight back to the code. Derived rollups
     // (`maxTokens`, `attached`, `presentationOrder` label) have no single backing setting.
     const snap = {
-        // commonWordWeight is an internal global derived from the mode (0.7 BM25-only, 1 otherwise), not a
-        // setting; logged as the value in effect. It modifies the plugin's BM25 IDF on every query.
         // keywordWeight is logged even when null, because null is a real value here ("follow lexicalWeight")
         // and its absence would read as an older capture rather than as a deliberate setting.
-        scoring: { rrfK: s.rrfK, lexicalWeight: s.lexicalWeight, keywordWeight: s.keywordWeight ?? null, weightByOrder: s.weightByOrder, bm25K1: s.bm25K1, bm25B: s.bm25B, commonWordWeight: 1 },
+        scoring: { rrfK: s.rrfK, lexicalWeight: s.lexicalWeight, keywordWeight: s.keywordWeight ?? null, weightByOrder: s.weightByOrder, bm25K1: s.bm25K1, bm25B: s.bm25B },
         // The entity filter only runs on raw-message queries — a summary is already
         // salience-selected — so in summary mode its params are inert and omitted.
         matchText: {

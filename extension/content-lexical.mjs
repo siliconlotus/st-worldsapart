@@ -70,10 +70,10 @@ export function buildContentIndex(entries, chunkCfg) {
  *
  * @returns {Map<string, number>} `${world}.${uid}` -> best chunk score. Absent when nothing matched.
  */
-export function scoreContent(index, queryText, { k1 = DEFAULT_K1, b = DEFAULT_B, termWeights = null, stopwordDf = 0, commonWordWeight = 1 } = {}) {
+export function scoreContent(index, queryText, { k1 = DEFAULT_K1, b = DEFAULT_B, termWeights = null, stopwordDf = 0 } = {}) {
     const out = new Map();
     if (!index?.docCount) return out;
-    const scores = bm25Scores(index.lexical, queryText, index.docCount, k1, b, termWeights, stopwordDf, commonWordWeight);
+    const scores = bm25Scores(index.lexical, queryText, index.docCount, k1, b, termWeights, stopwordDf);
     for (let i = 0; i < scores.length; i++) {
         if (!(scores[i] > 0)) continue;
         const key = index.keys[i];

@@ -155,7 +155,7 @@ export const embed = async (text, { ollama = 'http://localhost:11434', model = '
 export const sceneParams = (S, overrides = {}) => ({
     // KEYW null mirrors LEXW, exactly as the extension does — so a sample captured before the split scores
     // identically, and an arm that sets KEYW is testing the split rather than a silent default change.
-    K: 20, K1: 2, B: 0.75, LEXW: 1.5, KEYW: null, boost: 3, stopwordDf: 0.25, commonWordWeight: 1,
+    K: 20, K1: 2, B: 0.75, LEXW: 1.5, KEYW: null, boost: 3, stopwordDf: 0.25,
     // The keyword-only tie-break (ranking.mjs KEYWORD_ONLY_TILT). Sweepable because denseAllEntries removes
     // it as a side effect — an entry with a cosine is not keyword-only — so its own cost has to be
     // measurable separately or that arm reports one number for two changes.
@@ -549,7 +549,7 @@ export function makeCandidateSet({ loaded, byUid, entries, params: P, chunkCfg, 
         // --- STAGE 1: RETRIEVAL. Cosine over every chunk, no admission test — plugin/scoring.mjs carries
         // why the threshold and the lexical clause left this stage. `contentText` is stage 3's text signal
         // and is computed here only because this pass collapses the stages; it admits nothing.
-        const contentText = scoreContent(contentIndex, qtext, { k1, b, termWeights: tw, stopwordDf: P.stopwordDf, commonWordWeight: P.commonWordWeight });
+        const contentText = scoreContent(contentIndex, qtext, { k1, b, termWeights: tw, stopwordDf: P.stopwordDf });
         const scored = scoreCollection(CID, loaded, qvec, { centered: P.meanCentered, uncenteredGate: P.uncenteredGate });
         const grouped = selectTopK(poolEntries(scored), topK);
         const per = new Map();

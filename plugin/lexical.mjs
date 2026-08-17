@@ -4,7 +4,6 @@
 // This is what dense retrieval can't do on a single-story corpus: IDF automatically discounts terms
 // that appear everywhere (a cast name in most chunks earns almost no weight), which is exactly the
 // discrimination that's lost when every embedding shares a common direction.
-import { COMMON_WORDS } from './commonwords.js';
 import { fold } from './automaton.mjs';
 
 export const DEFAULT_K1 = 1.2, DEFAULT_B = 0.75;
@@ -43,8 +42,8 @@ export function buildLexical(items) {
 }
 
 /** Per-document BM25. termWeights (entity mode) pre-filters + weights query terms; stopwordDf drops
- *  corpus-common terms; commonWordWeight down-weights general-English words. */
-export function bm25Scores(lexical, queryText, docCount, k1 = DEFAULT_K1, b = DEFAULT_B, termWeights = null, stopwordDf = 0, commonWordWeight = 1) {
+ *  corpus-common terms. */
+export function bm25Scores(lexical, queryText, docCount, k1 = DEFAULT_K1, b = DEFAULT_B, termWeights = null, stopwordDf = 0) {
     const scores = new Float64Array(docCount);
     const maxDocs = stopwordDf > 0 ? stopwordDf * docCount : Infinity;
     const terms = termWeights ? Object.entries(termWeights) : [...new Set(tokenize(queryText))].map(term => [term, 1]);
@@ -52,8 +51,7 @@ export function bm25Scores(lexical, queryText, docCount, k1 = DEFAULT_K1, b = DE
         const list = lexical.postings.get(term);
         if (!list || !(weight > 0)) continue;
         if (list.length > maxDocs) continue;
-        const bg = commonWordWeight !== 1 && COMMON_WORDS.has(term) ? commonWordWeight : 1;
-        const idf = lexical.idf.get(term) * weight * bg;
+        const idf = lexical.idf.get(term) * weight;
         for (const [docIndex, tf] of list) {
             const lenNorm = 1 - b + b * (lexical.docLen[docIndex] / (lexical.avgdl || 1));
             scores[docIndex] += idf * ((tf * (k1 + 1)) / (tf + k1 * lenNorm));

@@ -38,11 +38,8 @@ eq(p.stopwordDf, 0.25, 'stopwordDocFreq -> stopwordDf');
 eq('threshold' in p, false, 'no admission threshold is captured — stage 1 has no gate to reproduce');
 eq('vectorCutoff' in p, false, 'no cliff mode is captured — stage 4 has no relevance cut to reproduce');
 eq(p.includeNames, true, 'ST world-info globals are carried, not guessed');
-// commonWordWeight is derived from the mode, not stored — the one value paramSnapshot computes.
-eq(p.commonWordWeight, 1, 'hybrid mode -> commonWordWeight 1');
-// retrievalMode is gone, so commonWordWeight has no source of variation left: it is 1 for every capture.
-eq(captureParams(s, {}).commonWordWeight, 1, 'commonWordWeight is a constant now that there are no modes');
 eq('retrievalMode' in captureParams(s, {}), false, 'the capture records no retrieval mode');
+eq('commonWordWeight' in p, false, 'no general-English down-weight is captured — BM25 no longer takes one');
 // suppressVectorKeys must survive: without it the harness admits 2.3x the query terms (see buildGazetteer).
 eq(p.suppressVectorKeys, true, 'suppressVectorKeys is recorded');
 

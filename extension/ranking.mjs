@@ -78,90 +78,39 @@ export function buildGazetteer(entries) {
  * Keeps a term only if it is capitalised (a cheap entity proxy) or appears in the
  * lorebook's own vocabulary, and boosts the capitalised ones.
  *
- * EVERY TABLE BELOW IS A STAGE-1 MEASUREMENT AND STAGE 1 NO LONGER READS THIS. They ranked the retrieval
- * ranking when it fused BM25 and when admission could turn on a query term; today the filter reaches only
- * content-lexical at stage 3. Treat the numbers as history for the DIRECTION they establish — every arm
- * admitting more terms ranked worse — and re-measure before moving anything on them. The gazetteer SOURCE
- * question was separately re-run at n=71 scenes paired and came back flat on every arm including an empty
- * gazetteer (eval/param-screen.mjs `gaz=*`).
+ * TUNED AT STAGE 1, WHICH NO LONGER READS THIS. Its arms ranked the retrieval ranking when that fused
+ * BM25 and admission could turn on a query term; today the filter reaches only content-lexical at stage
+ * 3, so the tables are gone and what survives them is the DIRECTION — every arm admitting more terms
+ * ranked worse — plus the two traps that produced four different answers from four attempts:
  *
- * MEASURE THIS WITH MEAN TARGET RANK, NOT nDCG@5. Read this before tuning anything here: four successive
- * attempts produced four different answers, and every difference was metric or population, not signal.
+ * TRAP 1, THE METRIC. Use mean target rank, not nDCG@5. Relevance here is sparse and Poisson-shaped
+ * (5-11 judged-relevant entries per scene), so nDCG@5 sees a handful of placements and has few reachable
+ * states: it returned an IDENTICAL 0.9322 for boost 1/2/3/5/8 on one scene under every population tried.
+ * That is mechanistic rather than noise — the boost is a uniform multiplier over proper nouns, so where
+ * the top entries match the same entities it cannot reorder them at all. Anything that looks like a tie
+ * on nDCG@5 should be re-read on mean rank, which pools every judged-relevant entry and does not saturate.
  *
- * The original note read "mean target rank 11.2 versus 21.6-28.2 for the unfiltered query", from a 5-target
- * gold set that no longer exists and (on later evidence) a gazetteer built from RAW book keys — 2.3x the
- * terms production admits, see buildGazetteer. Re-measured over three graded scenes via
- * eval/graded-scene-grid.mjs (`--unjudged zero`, mean rank of all judged-relevant entries, lower better):
+ * TRAP 2, THE POPULATION. Grades exist only for entries production ACTIVATED, so scoring within that pool
+ * makes a wrong promotion INVISIBLE — the promoted entry is filtered out rather than penalised, and one
+ * scene returned 0.9634 for every arm including no-filter that way. Score unjudged rows as 0 over the
+ * uncut ranking (`--unjudged zero`); the sparse shape licenses it, since past roughly rank 25 the
+ * marginal candidate is almost surely irrelevant (measured: one sample's grades bottom out in zeros by
+ * rank 24), so "unjudged" and "irrelevant" nearly coincide.
  *
- *   arm                        mean rank    verdict
- *   production (gaz, boost 3)     6.43      ships
- *   boost 2                       6.40      dead tie; see below
- *   boost 5                       6.53      plateau
- *   boost 8                       6.83      degrades
- *   boost 1                       7.00      degrades
- *   no gazetteer (boost only)     7.00      gazetteer is worth ~0.6 rank
- *   + entry bodies in gazetteer   7.20      worse than shipped on all metrics
- *   NO entity filter              9.07      the filter is worth ~2.6 ranks
+ * WHAT IS MEASURED AT THIS STAGE is the gazetteer SOURCE question, re-run at n=71 scenes paired: flat on
+ * every arm, INCLUDING an empty gazetteer (eval/param-screen.mjs `gaz=*`). So the boost is the mechanism
+ * and the gazetteer is a thin safety net for entities a query happens to mention in lowercase — treat its
+ * assembly as having nothing to tune, and re-measure before moving `properNounBoost` or the filter itself.
  *
- * That reproduces the original note's shape — boost plateaus 2..5, degrades either side, gazetteer is a
- * thin safety net — on a population and metric that can actually see it. Two traps got in the way first:
+ * Deliberately NOT applied to summarized queries, which are already salience-selected and would only lose
+ * context.
  *
- * TRAP 1, THE METRIC. nDCG@5 cannot resolve these knobs. Relevance here is sparse and Poisson-shaped, not
- * normal: 5-11 judged-relevant entries per scene, so nDCG@5 sees a handful of placements and has only a few
- * reachable states. It returned an IDENTICAL 0.9322 for boost 1/2/3/5/8 on one scene under every population
- * tried — which is mechanistic, not noise: the boost is a uniform multiplier over proper nouns, so wherever
- * the top-ranked entries match the same entities it cannot reorder them at all. Mean rank pools every judged
- * relevant entry and does not saturate. Anything that looks like a tie on nDCG@5 should be re-read there.
- *
- * TRAP 2, THE POPULATION. Grades exist only for entries production ACTIVATED, so restricting the ranking to
- * that pool means a wrong promotion is INVISIBLE — the promoted entry is filtered out rather than penalised.
- * One scene returned 0.9634 for every arm including no-filter that way. Scoring unjudged rows as 0 over the
- * uncut ranking (`--unjudged zero`) restores the resolution for free, and the sparse shape is what licenses
- * it: past roughly rank 25 the marginal candidate is almost surely irrelevant (measured — one sample's
- * grades bottom out in zeros by rank 24), so "unjudged" and "irrelevant" nearly coincide. Grading deeper
- * would buy mostly the same zeros by hand.
- *
- * WHAT IS STILL UNDERPOWERED: three scenes carry 22 judged-relevant entries between them. boost 2 leads on
- * nDCG@5's mean (0.912 vs 0.888) purely because of ONE scene — it is exactly tied with boost 3 on mean rank,
- * and identical to it on the other two scenes. Do not move the default on that. More SCENES is the lever
- * here; deeper grading is not.
- *
- * The CUTOFF result (see selection.mjs) never needed any of this, because that table already sweeps the
- * UNCUT ranking and needs grades only as deep as the pool goes.
- *
- * Note this is deliberately NOT applied to summarized queries, which are already
- * salience-selected and would only lose context.
- *
- * Do not "improve" this by admitting more terms. Both obvious loosenings were
- * measured on the same (now-lost) gold set and both are worse. These two were NOT re-measured above, so
- * they carry the same caveat as the figures replaced there — but both are directionally corroborated by
- * the re-measurement, where every arm that admitted MORE terms ranked worse:
- *
- *   admit terms with high corpus IDF too   5/5 rank 3.0 -> 4/5 rank 5.2 (IDF>=4)
- *   keep content words (POS-style filter)  5/5 rank 3.0 -> 0/5 rank 27.4
- *
- * A third loosening suggests itself once you notice the gazetteer only reads keys and titles: feed it the
- * entry BODIES too, since that is also "the lorebook's vocabulary". It briefly looked competitive on one
- * scene (mean rank 6.8 against 7.3) and that reading was an artifact of the pooled population; across all
- * three scenes it is 7.20 against 6.43 — worse than shipped, at 5-10x the terms. It does NOT collapse to
- * "no filter" (9.07) despite admitting most of the query's distinct terms, because the boost still weights
- * entities and stopwordDocFreq still strips corpus-common ones — but it loses, so it loses for the same
- * reason as the other two: more terms admitted, worse ranking.
- *
- * IDF measures rarity, and on a single-author narrative corpus rarity is dominated
- * by prose variation, not topic — the high-IDF terms this admits are "grind",
- * "flaring", "nape", "gaze". Adding them adds noise at high weight. A part-of-speech
- * filter keeps all of those and more, so it loses by the same mechanism; retaining
- * only nouns and verbs scored 0/5, and restoring the proper-noun boost on top of it
- * recovered to 4/5 rank 3.6. What discriminates here is identity, which no tagger
- * can see and capitalisation can.
- *
- * The boost is the mechanism, not the gazetteer. Measured: dropping the gazetteer
- * entirely costs half a rank (5/5 3.0 -> 4/5 3.4), while setting the boost to 1 and
- * leaving the gazetteer to do the work collapses to 1/5 rank 17.0. Keys, secondary
- * keys and titles score identically to keys alone, so there is nothing to tune in
- * how it is assembled — it is a thin safety net for entities the query happens to
- * mention in lowercase. The boost plateaus from 3 to 5 and degrades by 8.
+ * Do not "improve" this by admitting more terms. IDF measures rarity, and on a single-author narrative
+ * corpus rarity is dominated by prose variation rather than topic — the high-IDF terms an IDF cutoff
+ * admits are "grind", "flaring", "nape", "gaze", noise at high weight. A part-of-speech filter keeps all
+ * of those and more and loses by the same mechanism; feeding the gazetteer entry BODIES admits most of the
+ * query's distinct terms at 5-10x the vocabulary and loses the same way. What discriminates here is
+ * identity, which no tagger can see and capitalisation can.
  *
  * @param {string} queryText Raw query
  * @param {Set<string>} gazetteer Lorebook vocabulary
