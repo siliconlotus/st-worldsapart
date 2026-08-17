@@ -439,10 +439,8 @@ export const isDurableEntry = e => Boolean(e?.constant);
  * Identity comparison, not uid: `kept` holds the same row objects the population does (fuse sorts a copy
  * of the same references), so a uid join would be a second way to say the same thing and a place to drift.
  *
- * NO CALLER TODAY. It split the DELIVERED set, and stage 4 has no relevance cut to deliver one since the
- * cliff was removed (extension/selection.mjs) — the entry maxes and the token budget are cuts this harness
- * does not replay. Kept, and kept under check by paired-check.mjs, because the guard is wanted back the
- * moment a new cut produces a kept set: the failure it catches is invisible to every other metric here.
+ * NO CALLER: stage 4 makes no relevance cut, so nothing here produces a kept set to split. Checked by
+ * paired-check.mjs and kept for the cut that will.
  *
  * @param {Array<object>} population Rows the selection chose from, durable already excluded by the caller
  * @param {Array<object>} kept The rows it chose
@@ -698,12 +696,6 @@ export async function scoreScene({ sample: S, overrides = {}, k = 10, vectors, m
     //
     //   @R          the top `relevant` rows. Budget-invariant by construction — a user's token ceiling is
     //               set by cost and is not a property of the ranking, so it cannot be in the window.
-    // There was a second window, @delivered — the rows stage 4 handed over with capacity not binding. It
-    // read the cliff, and the cliff is gone (extension/selection.mjs), so what stage 4 delivers is now
-    // decided by the entry maxes and the token budget, neither of which this harness replays. Restoring it
-    // is the new cut's work; scoring it against an uncut population would have made it a constant per
-    // scene and every arm's delta zero, which reads as "no effect" rather than as "not measured".
-    //
     // It drops the reference tier, exactly as the block above does — grading a keyword-activated entry is
     // the same category error at any window.
     const scoreWindow = (rows) => {

@@ -1,14 +1,8 @@
 // selection.mjs — entry selection: which activated entries survive, and in what order the budget walks
 // them. Pure; every setting is injected, so the extension and the harnesses run the identical code.
 //
-// THE CLIFF IS GONE. `cutRetrieved` and the `vectorCutoff` modes (elbow / dropoff) cut a score curve for
-// relevance — first over the retrieval ranking, then, from 2026-08, over the layout ranking. Nothing ever
-// graded the second placement: every figure that chose 'elbow' at 1.5 was measured on the retrieval
-// ranking, where the gap between adjacent rows is one signal's spread rather than an
-// eligibility-normalised fusion of three, so none of it transferred. Removed rather than left running at
-// unmeasured defaults, because a relevance cut nobody can defend also confounds every measurement of the
-// stage it sits in. Stage 4 now makes two decisions, not three: how many (the entry maxes) and how much
-// (the token budget). The relevance decision returns when there is something to grade it with.
+// STAGE 4 MAKES TWO DECISIONS: how many (the entry maxes) and how much (the token budget). It makes no
+// relevance decision — see matcher-design.md, Stage 4, for why there is none and what it waits on.
 
 /**
  * The order the budget walks: constants, then armed stickies, then the dynamic block in retention order.

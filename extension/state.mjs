@@ -160,10 +160,8 @@ export const defaultSettings = {
      * tighter it is set, the more it is doing a relevance job it has no signal for, since it cuts by rank
      * position and knows nothing about the gap it cuts across.
      *
-     * WITH THE CLIFF GONE (selection.mjs) nothing else is keeping an irrelevant entry out, so this cap and
-     * the token budget are the only things bounding the dynamic block. That is a widening, and a deliberate
-     * one: an unmeasured relevance cut was making the stage impossible to grade. Do not tighten this to
-     * compensate — a rank-position cap cannot do a relevance job, which is the failure described above.
+     * It and the token budget are the only things bounding the dynamic block: stage 4 makes no relevance
+     * decision (selection.mjs).
      *
      * The failure it does not guard against: a prompt can be well within every cap and still dilute the
      * model's attention across too much material. No metric here sees that — F2@budget scores the SET

@@ -206,9 +206,7 @@ const K = Number(arg('--k') ?? 10);
 // delta to F-beta(2) on the asymmetric bars (scene.mjs), which weights recall twice. Baseline and arm are
 // always scored on the same one, so a run mixing them is impossible.
 // `fAtR` is the window scoreScene reports (see its SET METRICS block); it ignores --k, being sized by the
-// scene's relevant count rather than by a fixed depth. It was one of two: `fDelivered` and `divergence`
-// read the stage-4 cliff, which no longer exists (extension/selection.mjs), and no window replaces them
-// until the new cut does — the entry maxes and the token budget are cuts this harness does not replay.
+// scene's relevant count rather than by a fixed depth.
 const METRIC = arg('--metric') ?? 'n';
 const WINDOWED = { fAtR: r => r.atR.f };
 if (!['n', 'nAt5', 'f2', 'recall', 'precision', ...Object.keys(WINDOWED)].includes(METRIC)) { console.error(`unknown --metric ${METRIC}`); process.exit(2); }
@@ -348,15 +346,6 @@ const fx = n => (n >= 0 ? '+' : '') + n.toFixed(4);
             + r.cells.map(c => `${fx(c.delta)}${c.judged < c.of ? '?' : ''}`).join('  ')
             + (gaps ? `   (${gaps} scene(s) with unjudged rows in top ${K})` : ''));
     }
-
-    // THE TIER-SHIFT BLOCK IS GONE WITH THE CLIFF, and it was a real guard: `memory` and `reference` have
-    // base rates of roughly 7% and 30% here, so an arm can raise every other metric by trading the hard
-    // class for the easy one — measured once on a threshold that read as a clean win while delivering 93%
-    // of relevant reference rows against 56% of memory ones, invisible to pooled recall, precision, F2,
-    // nDCG and calibration alike. It split the DELIVERED set, which stage 4 no longer produces, and over
-    // an uncut population it reports +0.0% for every arm — a guard that always passes. Deleted rather
-    // than left printing that. scene.mjs `tierRecall` is intact and still checked; restoring this block is
-    // one call once the new cut has a kept set.
 
     console.log('\n^ = helps on every scene, v = hurts on every scene, ? = that cell kept unjudged rows so its Δ is a lower bound.');
     console.log(`comparisons made: ${results.length} across ${byFamily.size} parameter famil${byFamily.size === 1 ? 'y' : 'ies'} (holm corrected within family).`);

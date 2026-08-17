@@ -337,9 +337,6 @@ const fmt = n => (n == null ? '·' : (+n).toFixed(3));
         // pure subset operation — a shorter, more focused query can promote an entry the wide capture ranked
         // out of the graded pool entirely — so a depth row with a high blind count is understating itself.
         // If it stays at 0, one wide capture ablates down cleanly and no extra grading is needed.
-        // The cut P/R/F1 and ref-composition columns are gone with the stage-4 cliff they scored
-        // (extension/selection.mjs). Every column left is cut-independent; `blind` now counts over the
-        // whole layout rather than over a kept set.
         console.log(' depth | qChars  msgs  terms | layout@10 layout@R vector@R  meanRank  blind');
         for (const d of DEPTHS) {
             const q = ranking.buildQuery(chat, { depth: d });
@@ -415,16 +412,6 @@ const fmt = n => (n == null ? '·' : (+n).toFixed(3));
     }
     if (worst.j10 < worst.of) console.log(`!! worst coverage in the grid: ${worst.j10}/${worst.of} at k1=${worst.k1} b=${worst.b} lexW=${worst.lexW} — that cell is penalised for surfacing entries nobody judged.`);
     else console.log('pool is reusable across this grid: every cell\'s top-10 is fully judged.');
-
-    // THE CUTOFF-ARM TABLE IS GONE. It swept elbow/dropoff/prefix arms against an %oracle best-F1 cut,
-    // and every one of those arms scored `cutRetrieved`, which was removed with the stage-4 cliff
-    // (extension/selection.mjs). It had also stopped measuring anything before that: it fed `cutRetrieved`
-    // the retrieval ranking, which lost its `fused` field when stage 1 went cosine-only, so every gap was
-    // NaN and every arm kept its whole window while still printing a "<- shipped default" row.
-    //
-    // The instrument the new cut needs is not this one restored: it is the layout score over the dynamic
-    // block at the BUDGET (matcher-design.md Evidence, "Two scores"), which needs an applyBudget replay
-    // this harness does not have. Write that with the cut it scores.
 
     // --- entity filter: re-measures the claims in ranking.mjs buildTermWeights, whose figures ("mean
     // target rank 11.2 vs 21.6-28.2 unfiltered", "gazetteer costs half a rank", "boost plateaus 3..5")

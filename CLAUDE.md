@@ -196,7 +196,7 @@ since it shaped which keys got examined. Removals speak to precision, never to r
 ## Four stages, and the two rankings
 
 **WA is a selection system that uses rank, not a ranking system.** What ships is the set that survives
-stage 4 (today: the entry maxes and the token budget — see stage 4 on the removed cliff); rank is how that set gets chosen, not the product. So the validity score is set-based and
+stage 4; rank is how that set gets chosen, not the product. So the validity score is set-based and
 asymmetric — recall at grade >= 3, precision crediting a 2 at half (`metrics.mjs` `gradeCredit`),
 recall-weighted (`matcher-design.md`,
 *Evidence → Two scores*). nDCG over either ranking is a diagnostic for whether the ordering earns its
@@ -254,13 +254,10 @@ the strongest per-entry predictor of relevance — standardised logistic beta +0
 BM25"; say which stage.
 
 **4. Selection** — two cuts, both here, each answering one question over the layout ranking. **There is
-no relevance cut**: the CLIFF (`cutRetrieved`, elbow/dropoff) was removed on 2026-08-16 rather than
-retuned, because every figure behind it had graded a cut over the RETRIEVAL ranking and none transferred
-when the cut moved to stage 4 — and an unmeasured relevance cut sits between every arm and its result.
-So WA currently makes no relevance decision anywhere; that is a known gap against the one-decision rule,
-not a delegation, and it waits on the layout score. `selection.mjs` `walkOrder` is what remains: it
-hoists constants then armed stickies ahead of the dynamic block, which is what makes every cap below a
-prefix cut. The ENTRY MAXES decide how many, on nested populations — vector ⊆ dynamic ⊆ all, plus the
+no relevance cut, so WA makes no relevance decision anywhere** — a standing exception to the
+one-decision rule, waiting on the layout score (`matcher-design.md`, *Stage 4*). `selection.mjs`
+`walkOrder` hoists constants then armed stickies ahead of the dynamic block, which is what makes every
+cap below a prefix cut; it cuts nothing. The ENTRY MAXES decide how many, on nested populations — vector ⊆ dynamic ⊆ all, plus the
 per-book cap — with `maxVectorEntries` counted off the `vectorized` flag — the cap exists so that at most N vector
 entries are added to the layout, which is a question about what an entry is. The TOKEN BUDGET decides how much. The maxes and the budget live in `applyBudget`,
 which walks the layout ranking constant and sticky first — constant leads, because constant means always
