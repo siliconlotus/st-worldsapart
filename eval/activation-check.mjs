@@ -1,9 +1,9 @@
-// Verifies the stage-2 activation verdicts (matcher.mjs activationAdds / activationPrunes) — the
+// Verifies the stage-2 activation verdicts (matcher.mjs activationAdds) — the
 // union and prune halves of stage-2 activation, and the takeover extensions (blind
 // emission, min-activation depth skew, the recursion rematch window). Guards the candidacy rules
 // the runtime and the tools must share: which keys may carry an activation, which entries are
 // never judged, and that the verdict is keywordScore's over the entry's resolved-depth window.
-import { activationAdds, activationPrunes, makeWindowFor, scanSegments, withExtraTexts } from '../extension/matcher.mjs';
+import { activationAdds, makeWindowFor, scanSegments, withExtraTexts } from '../extension/matcher.mjs';
 import { eq } from './metrics.mjs';
 
 const OPTS = { messageDepth: 4, fallbackDepth: 2, caseSensitiveDefault: false, wholeWordsDefault: false };
@@ -41,12 +41,8 @@ const addedUids = (entries, text, o = {}) =>
     'suppress off: vectorized entries are ordinary keyword candidates');
     eq(addedUids([{ uid: 10, key: ['cosmonaut'], content: '@@dont_activate\nx' }], 'cosmonaut'), '',
         '@@dont_activate is core\'s exclusion; the union must not override it');
-    eq(addedUids([{ uid: 11, key: ['cosmonaut'], delayUntilRecursion: 1, content: 'x' }], 'cosmonaut'), '',
-        'delayUntilRecursion entries never activate on the initial pass — the only pass the union feeds');
-    eq(addedUids([{ uid: 12, key: ['cosmonaut'], delayUntilRecursion: 1, content: 'x' }], 'cosmonaut', { blind: true }), '12',
-        'blind: delayed entries ARE emitted — core\'s gate order and the persistent external map admit them at their level');
-    eq(addedUids([{ uid: 13, key: ['cosmonaut'], content: '@@dont_activate\nx' }], 'cosmonaut', { blind: true }), '',
-        'blind lifts only the delay skip — @@dont_activate is still never overridden');
+    eq(addedUids([{ uid: 11, key: ['cosmonaut'], delayUntilRecursion: 1, content: 'x' }], 'cosmonaut'), '11',
+        'delayed entries ARE emitted — core\'s gate order and the persistent external map admit them at their level, and with core\'s matcher blanked there is no other route in');
     eq(addedUids([{ uid: 14, key: ['cosmonaut'], decorators: ['@@dont_activate'], content: 'x' }], 'cosmonaut'), '',
         'parsed entries (getSortedEntries) carry decorators in the array with content stripped — the array is authoritative');
     console.log('ok   activationAdds: candidacy — SmartKeys admitted, error keys and excluded entries not');
@@ -133,31 +129,4 @@ const addedUids = (entries, text, o = {}) =>
     eq(activationAdds([conj], compose(['the moonbase hummed'], 'scan'), OPTS).map(e => e.uid).join(','), '2',
         'at scan the buffer is one segment — core\'s own cross-pass semantics');
     console.log('ok   withExtraTexts: recursion content matchable, seam scoped by the match window');
-}
-
-// Prune: reject-verdicts over the shared window, minus ownership and structural exemptions.
-{
-    const item = (uid, entry) => ({ key: `book.${uid}`, entry: { uid, content: 'x', ...entry } });
-    const prunes = (items, exempt, text, o = {}) =>
-        activationPrunes(items, new Set(exempt), win(text), { ...OPTS, ...o }).join(',');
-
-    eq(prunes([item(1, { key: ['cosmonaut'] })], [], 'the cosmonaut waited'), '',
-        'a matching entry is kept');
-    eq(prunes([item(1, { key: ['cosmonaut'] })], [], 'nothing relevant'), 'book.1',
-        'a no-match keyword activation is pruned');
-    eq(prunes([item(1, { key: ['cosmonaut'] })], ['book.1'], 'nothing relevant'), '',
-        'exempt keys are never pruned (WA-forced, sticky, external — the caller\'s knowledge)');
-    eq(prunes([item(1, { key: ['cosmonaut'], constant: true })], [], 'nothing relevant'), '',
-        'constant entries are structurally exempt');
-    eq(prunes([item(1, { key: ['cosmonaut'], content: '@@activate\nx' })], [], 'nothing relevant'), '',
-        '@@activate entries were admitted without a key match — not WA\'s to revoke');
-    eq(prunes([item(1, { key: ['cosmonaut'], decorators: ['@@activate'], content: 'x' })], [], 'nothing relevant'), '',
-        '...and the runtime shape (decorators array, stripped content) is exempt too — this was a live prune bug');
-    eq(prunes([item(1, { key: [], waKeys: ['cosmonaut'] })], [], 'nothing relevant'), '',
-        'blanked suppressed-vectorized entries are keys-ineligible — never judged by waKeys');
-    eq(prunes([item(1, { key: ['? !apollo'] })], [], 'quiet evening'), '',
-        'an entry keyed only on error keys was never key-activated in WA\'s terms — kept');
-    eq(prunes([item(1, { key: ['red rain'] })], [], ['the red', 'rain fell']), 'book.1',
-        'prune judges over the same segmentation the scorer uses');
-    console.log('ok   activationPrunes: reject-verdicts pruned, exemptions and ineligibles kept');
 }

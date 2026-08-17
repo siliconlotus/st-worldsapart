@@ -7,21 +7,6 @@ export const MODULE_NAME = 'worldsApart';
 
 export const defaultSettings = {
     enabled: true,
-    /**
-     * WA owns keyword activation. On the scans WA intercepts, every
-     * keyword-activating entry's keys are stashed and blanked before core scans, so core's own
-     * keyword matcher never fires — WA's matcher answers "did a key match" for the initial pass,
-     * every recursion pass and min-activation widening, and force-emits the winners into core's
-     * loop. Constants and @@activate entries keep their keys: core activates them without keys
-     * (they short-circuit before its key path), and the inclusion-group filter's getScore reads
-     * them. Core keeps everything else: gates, timers, group filtering, probability rolls,
-     * recursion control, prompt assembly.
-     * Off = core matches, WA unions what core cannot and prunes what WA rejects. Dry-run scans
-     * always keep that behaviour — ST skips interceptors for them, so WA is
-     * never offered the scan. Quiet generations (Summarize, SD prompts, the LLM expression
-     * classifier) are ordinary generations here and get the takeover like any other.
-     */
-    ownActivation: true,
     /** Suppress keyword matching on entries marked vectorized (🔗). */
     suppressVectorKeys: true,
     /**
@@ -438,7 +423,6 @@ export const runState = {
     forcedActivations: new Set(), // every `${world}.${uid}` force-activated this generation — WA's own
                                   // AND other extensions' (FORCE_ACTIVATE is a broadcast; WA listens).
                                   // The prune's ownership exemption: forced entries are never WA's to revoke.
-    lastPruned: [],               // `${world}.${uid}` the prune deleted last scan, for /wa-debug
     lastScanText: '',             // last global-depth keyword scan window, bundled by /wa-grade
     gradeCutoff: null,            // /wa-grade's candidate-depth cap; null = no capture in flight
     lastCandidates: [],           // selection-candidate rows from the last debug-class run, for /wa-grade

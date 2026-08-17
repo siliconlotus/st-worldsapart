@@ -819,7 +819,8 @@ export const usableKeys = keys => (Array.isArray(keys) ? keys : [])
     .filter(k => String(k ?? '').trim() && !validateSmartKey(k).some(f => f.severity === 'error'));
 
 /**
- * The union direction: entries WA would force-activate, judged over WA's own window.
+ * Entries WA force-activates, judged over WA's own window. WA owns activation, so this is the whole
+ * keyword verdict for the scan rather than an addition to core's — core's matcher is blanked.
  *
  * `windowFor(depth, entry)` returns the scan segments for a resolved depth — injected because the
  * window is ST-side (chat, injects, per-entry match sources); the caller memoises per depth.
@@ -831,10 +832,10 @@ export const usableKeys = keys => (Array.isArray(keys) ? keys : [])
  * NOT yet blanked their keys, so the flag is the guard, not empty `key`); `@@dont_activate`
  * (core's own exclusion, which a force-activate would override).
  *
- * `blind` lifts the delayUntilRecursion skip: once WA owns activation it emits blindly
- * and lets core reject — core's gate order checks the delay level before external activations, and
- * the external-activation map persists for the whole scan, so emitting a delayed entry early is
- * exactly how it activates when its level arrives.
+ * `delayUntilRecursion` is NOT skipped: WA emits blindly and lets core reject. Core's gate order checks
+ * the delay level before external activations, and the external-activation map persists for the whole
+ * scan, so emitting a delayed entry early is exactly how it activates when its level arrives — and under
+ * the takeover WA is the only route in, so skipping it would mean the entry never activates at all.
  *
  * `depthSkew` widens the resolved GLOBAL depth, mirroring core's min-activations
  * advanceScan one message per pass. A per-entry `scanDepth` is authored and never skewed, as in
@@ -843,8 +844,7 @@ export const usableKeys = keys => (Array.isArray(keys) ? keys : [])
  * @param {object[]} entries Candidate entries (getSortedEntries shape)
  * @param {(depth: number, entry: object) => string[]} windowFor
  * @param {{suppressVectorKeys?: boolean, messageDepth?: number, fallbackDepth?: number,
- *          caseSensitiveDefault?: boolean, wholeWordsDefault?: boolean,
- *          blind?: boolean, depthSkew?: number}} opts
+ *          caseSensitiveDefault?: boolean, wholeWordsDefault?: boolean, depthSkew?: number}} opts
  * @returns {object[]} entries to force-activate
  */
 export function activationAdds(entries, windowFor, opts = {}) {
@@ -853,11 +853,6 @@ export function activationAdds(entries, windowFor, opts = {}) {
         if (!entry || entry.disable || entry.constant) continue;
         if (opts.suppressVectorKeys && entry.vectorized) continue;
         if (hasDecorator(entry, '@@dont_activate')) continue;
-        // Authored to never activate on the initial pass — the only pass the 1.5 union feeds.
-        // Core's own gate order already refuses the force (delay/cooldown/delayUntilRecursion are
-        // checked before external activations, world-info.js entry walk), so this is provenance
-        // hygiene, not the protection itself — which is why `blind` may lift it.
-        if (!opts.blind && entry.delayUntilRecursion) continue;
         const keys = usableKeys(entry.key);
         if (!keys.length) continue;
         // Nullish, not truthy: scanDepth 0 is core's authored "match nothing from chat" and must
@@ -872,39 +867,4 @@ export function activationAdds(entries, windowFor, opts = {}) {
     return out;
 }
 
-/**
- * The prune direction: activated entries WA's matcher rejects, as keys to delete from
- * `args.activated.entries`. No group guard: `filterByInclusionGroups` has already run and discarded
- * the losers by the time WA sees the map, so deleting a group winner leaves the group empty for that
- * turn with nothing to promote. Reachable only with `ownActivation` off, and retired with it.
- *
- * `exempt` is ownership the caller can see and this module cannot: WA's own forced set (retrieval
- * + union winners), sticky timed effects, other extensions' external activations. Structural
- * exemptions live here: `constant`, `@@activate` (core admits these without a key match), and
- * keys-ineligible entries — a suppressed-vectorized entry reaches the scan with `key` blanked, so
- * it is never judged by its stashed `waKeys`, and an entry whose only keys carry validator errors
- * was never legitimately key-activated in WA's terms, so its activation is not WA's to revoke.
- *
- * @param {Array<{key: string, entry: object}>} items The activated map, spread
- * @param {Set<string>} exempt `world.uid` keys never to prune
- * @param {(depth: number, entry: object) => string[]} windowFor Same contract as activationAdds
- * @param {{messageDepth?: number, fallbackDepth?: number,
- *          caseSensitiveDefault?: boolean, wholeWordsDefault?: boolean}} opts
- * @returns {string[]} keys to delete
- */
-export function activationPrunes(items, exempt, windowFor, opts = {}) {
-    const out = [];
-    for (const { key, entry } of items ?? []) {
-        if (!entry || exempt?.has(key)) continue;
-        if (entry.constant || hasDecorator(entry, '@@activate')) continue;
-        const keys = usableKeys(entry.key);
-        if (!keys.length) continue;
-        // Same nullish resolution as activationAdds — scanDepth 0 is authored, not unset.
-        const depth = Number(entry.scanDepth ?? (opts.messageDepth || opts.fallbackDepth));
-        if (!keywordScore(entry, windowFor(depth, entry) ?? [], keys, opts).hits.length) {
-            out.push(key);
-        }
-    }
-    return out;
-}
 

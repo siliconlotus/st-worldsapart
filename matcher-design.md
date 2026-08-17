@@ -374,20 +374,26 @@ question: *did a key match*.** On a scan WA intercepts, every keyword-activating
 stashed and blanked at `WORLDINFO_ENTRIES_LOADED`, so core's matcher never fires and the
 inclusion-group filter runs over WA's verdicts. `feedScanLoop` answers each later pass.
 
-**RULED: if WA is enabled, it owns activation.** There is no half-owned mode. `ownActivation` becomes a
-constant rather than a setting, and everything that existed to describe the other half retires with it:
+**RULED: if WA is enabled, it owns activation.** There is no half-owned mode, and no setting selects
+one — the prune direction that existed to describe the other half is gone with it. WA's matcher runs
+BEFORE the inclusion-group filter, which is the ordering the deletion-after-the-fact shape could not
+have: core never sees a match WA rejected, so a group picks its winner from WA's verdicts instead of
+having its winner deleted afterwards and going empty.
 
-- **The prune direction** (`worldsapart.js`, `matcher.activationPrunes`, `runState.lastPruned`) — it
-  deletes entries core keyword-activated that WA's matcher rejects, and its own comment already says it
-  is off on an owned scan, because core's matcher is blanked and every activation is then WA's own
-  force, a constant, a sticky, or another extension's. Unreachable under the ruling.
+**The emit is BLIND.** WA force-activates every entry whose keys match and lets core's gates refuse
+what they refuse — including `delayUntilRecursion`, which WA once skipped for provenance hygiene. Under
+the takeover that skip was a silent veto: core's matcher is blanked, so an entry WA declines to emit has
+no other route in, and core's own gate order (delay level checked before external activations, external
+map persisting for the whole scan) is what admits it at the right moment.
+
+**Still to retire with it:**
+
 - **`suppressVectorKeys`** — a second blanking mechanism running AHEAD of a more complete one. The
   takeover blanks every keyword-activating entry and stashes `key` AND `keysecondary`; the suppress
   branch stashes only `key`, so a vectorized entry's secondaries are destroyed and its stage-3 selective
   gate judges an empty condition (inert today: 0 of 1,248 vectorized entries carry a secondary key).
   Deleting the suppress branch routes vectorized entries through the takeover instead, which is strictly
   better. The stage-3 question survives as `scoreVectorKeys`, which is where it belonged.
-- **`blind`** in the emit — always true once every scan is owned.
 
 **What still needs writing when that lands.** The GAZETTEER currently gets its suppression as a side
 effect of the blanking mutation: `buildGazetteer(getSortedEntries())` sees blanked entries and never had
@@ -845,25 +851,9 @@ instances the books on disk hold.
 9. **A grading row's key count is a SCORE wearing a count's name.** `keywordScore` pushes
    `hits.count = scoreBoost`, so `? fire::3` displays `3` for a single occurrence and the row reads as
    "fired three times". Independent of the witness-span work and fixable on its own.
-10. **Remove `ownActivation`** — deprecated, and still a bound setting (`#wa_own_activation`), so its
-   off position is reachable today. Removing it also retires the only code and the only rules that
-   exist for that configuration: the deletion path (`matcher.activationPrunes`, called at
-   `worldsapart.js` `rankActivated`) and the ruling that **deletion ships with no group guard, so a
-   deleted group winner leaves its group empty for that turn**, which holds because
-   `filterByInclusionGroups` runs before the `SCAN_DONE` emit and has already discarded the losers by
-   the time WA sees the map. On an owned scan the prune does not run at all, since every activation there is WA's
-   own force, constant, sticky or another extension's.
-
-   Two measurements support deleting it rather than fixing it. **Measured** (`eval/prune-audit.mjs`,
-   8-chat standard corpus, core depth 4 / `messageDepth` 10): the prune fires on 319 of 115,527 core
-   keyword activations (0.28%; 115 of 87,255 at core depth 2), all `segmentation` — secondary-keyed
-   entries whose primary and secondary co-occur in the buffer but not in one segment — from 3 entries
-   in 2 books. Zero boundary, zero depth, zero unexplained; sticky exemptions are not modelled offline,
-   so it is an upper bound. **Measured** 0 of 2,112 enabled entries in a group, so the group behaviour
-   is untestable without a fixture; the sentinel's `terrace` group (uids 8–9) is that fixture.
-11. **`reportFailure`: retrieval failure is a failure, not a degradation.** The two-severity split rests
+10. **`reportFailure`: retrieval failure is a failure, not a degradation.** The two-severity split rests
    on "keys are still handled", which is false for any vectorized entry under `suppressVectorKeys`.
-12. **Suggester i18n, none of it started.** `ZIPF_EN` scores non-English function words as maximally
+11. **Suggester i18n, none of it started.** `ZIPF_EN` scores non-English function words as maximally
     rare, so the gate designed to reject common words would propose them; a few are present with
     meaningless values, which is worse than absent. The suggester should detect that its priors do not
     apply and stand down rather than invert. Accent variants belong here too — `Gérard`/`Gerard` is a

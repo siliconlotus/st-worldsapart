@@ -200,7 +200,7 @@
             "disable": false,
             "selectiveLogic": 0,
             "delayUntilRecursion": 1,
-            "comment": "DELAY UNTIL RECURSION — \"midnight\" IS in chat, but this must not fire on the initial pass: core gates delayUntilRecursion before external activations, and WA's union skips it by the same rule (provenance hygiene). It may fire only on a recursion pass.",
+            "comment": "DELAY UNTIL RECURSION — \"midnight\" IS in chat, and WA DOES emit it: the takeover blanks core's matcher, so declining to emit would mean this entry never activates at all. Core must still refuse it on the initial pass — it gates delayUntilRecursion before external activations — and the external map persists for the whole scan, so the emit stands until a recursion pass makes it eligible.",
             "content": "Past midnight the lanes are quiet."
         }
     }

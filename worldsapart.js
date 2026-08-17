@@ -8,8 +8,8 @@
  *
  *   1. WORLDINFO_ENTRIES_LOADED — take the budget; blank keys so core's matcher stays out of what
  *                                  WA owns (vectorized entries always; every keyword-activating
- *                                  entry on a WA-run scan under ownActivation; constants and
- *                                  @@activate keep theirs for group scoring).
+ *                                  entry on a WA-run scan; constants and @@activate keep theirs for
+ *                                  group scoring).
  *   2. generate_interceptor      — chunked vector retrieval + WA's keyword matches, force-activate both.
  *   3. WORLDINFO_SCAN_DONE       — feed the scan loop (recursion / min-activation matches, owned scans),
  *                                  then rank everything activated, apply budget, rewrite `order`.
@@ -836,10 +836,6 @@ async function keywordActivations(chat) {
         fallbackDepth: world_info_depth,
         caseSensitiveDefault: world_info_case_sensitive,
         wholeWordsDefault: world_info_match_whole_words,
-        // Owning activation means emitting blindly: a delayUntilRecursion entry matched on chat
-        // must be in the external map so core admits it when its level arrives — under 1.5 core's
-        // own matcher would have found it then, but under the takeover WA is the only route in.
-        blind: Boolean(settings().ownActivation),
     });
 }
 
@@ -925,11 +921,9 @@ async function selectAndActivate(chat) {
     try {
         adds = await keywordActivations(chat);
     } catch (error) {
-        // TOTAL, and the message must say so. "Core scan still applies" holds only with ownActivation off,
-        // when WA only added to core's matches; under the takeover waOwnsScan is set eleven lines
-        // below regardless, blanking every key, so core does not match either. Ruled
-        // WA owns its failure states — it does not hand matching back per turn,
-        // it fails visibly.
+        // TOTAL, and the message must say so: waOwnsScan is set below regardless, blanking every key,
+        // so core does not match either. WA owns its failure states — it does not hand matching back
+        // per turn, it fails visibly.
         reportFailure('keyword activation failed',
             'No entry will activate by keyword this turn. WA has taken over key matching, so SillyTavern will not match them either — the prompt has only retrieved, constant and sticky entries.',
             error);
@@ -951,7 +945,7 @@ async function selectAndActivate(chat) {
     // WORLDINFO_ENTRIES_LOADED is core's scan, and that is the one whose keys get blanked.
     // Cleared on the scan's final SCAN_DONE loop and at generation end.
     for (const e of activated) runState.waMatched.add(`${e.world}.${e.uid}`);
-    runState.waOwnsScan = Boolean(settings().ownActivation);
+    runState.waOwnsScan = true;
 }
 
 // ---------------------------------------------------------------------------
@@ -1470,55 +1464,6 @@ async function rankActivated(args) {
         runState.lastLayout = [];
         if (!args?.state?.next) renderWiPanel([]);
         return;
-    }
-
-    // The prune direction, live only with ownActivation off: entries core keyword-activated that
-    // WA's matcher rejects over the shared haystack are deleted, so the runtime agrees with what
-    // the audit and the Studio report. INITIAL pass only — recursion and min-activation entries
-    // matched text WA's window does not model, and are core's prerogative. Ownership exemptions
-    // are what WA can see: every force-activation this generation (runState.forcedActivations —
-    // WA's own and other extensions') and sticky timed effects; constant and @@activate are
-    // structural and live in activationPrunes. No group guard (ruled): a deleted group winner
-    // leaves its group empty this turn. Retired with ownActivation.
-    // On an OWNED scan the prune is off: core's matcher is blanked, so every activation
-    // is WA's own force, constant, sticky or another extension's — all exempt, nothing to judge.
-    if (args?.state?.current === scan_state.INITIAL) runState.lastPruned = [];
-    if (!runState.waOwnsScan && args?.state?.current === scan_state.INITIAL && Array.isArray(args?.new?.all) && args.new.all.length) {
-        const exempt = new Set(runState.forcedActivations);
-        for (const entry of args.new.all) {
-            if (args?.timedEffects?.isEffectActive('sticky', entry)) {
-                exempt.add(`${entry.world}.${entry.uid}`);
-            }
-        }
-
-        const windowFor = matcher.makeWindowFor(
-            (runState.scanChat ?? getContext().chat ?? []).filter(x => x && !x.is_system), {
-                injectText: await scanInjects(),
-                sources: scanSources(),
-                matchWindow: settings().matchWindow,
-                includeNames: world_info_include_names,
-            });
-
-        const judged = args.new.all.map(entry => ({ key: `${entry.world}.${entry.uid}`, entry }));
-        const pruned = matcher.activationPrunes(judged, exempt, windowFor, {
-            messageDepth: settings().messageDepth,
-            fallbackDepth: world_info_depth,
-            caseSensitiveDefault: world_info_case_sensitive,
-            wholeWordsDefault: world_info_match_whole_words,
-        });
-
-        runState.lastPruned = pruned;
-        if (pruned.length) {
-            for (const key of pruned) {
-                activated.delete(key);
-            }
-            console.log(`Worlds Apart: pruned ${pruned.length} activation(s) WA's matcher rejects (core matched on rules WA supersedes):`, pruned);
-        }
-        if (activated.size === 0) {
-            runState.lastLayout = [];
-            if (!args?.state?.next) renderWiPanel([]);
-            return;
-        }
     }
 
     // The text signal comes from content-lexical, which covers every entry rather than only the ones in
@@ -2165,9 +2110,6 @@ const POSITION_NAMES = ['before char', 'after char', 'AN top', 'AN bottom', '@de
 async function reportLayout(verbose = false, countTokens = true) {
     // Before the layout, so a scan whose only story is "WA deleted what core matched" still
     // tells it — the runtime must visibly agree with what the audit reports.
-    if (runState.lastPruned.length) {
-        console.log('Worlds Apart · pruned by the matcher (core activated; WA\'s rules reject):', runState.lastPruned);
-    }
 
     if (!runState.lastLayout.length) {
         console.log('Worlds Apart: nothing activated.');
@@ -2602,10 +2544,9 @@ async function gradeScene(named) {
  *
  *   no-filter   entityFilter off moves the surviving query terms, so it moves BM25 and what stage 1
  *               admits at all.
- *   keys-live   suppressVectorKeys off lets WA keyword-match vectorized entries; core's own matcher only
- *               runs redundantly, and only with ownActivation off. Activation (secondary keys, inclusion
- *               groups, recursion, min-activations, probability rolls) is the one thing this project
- *               cannot recompute offline at all, so it can only be sampled live.
+ *   keys-live   suppressVectorKeys off lets WA keyword-match vectorized entries. Activation (secondary
+ *               keys, inclusion groups, recursion, min-activations, probability rolls) is the one thing
+ *               this project cannot recompute offline at all, so it can only be sampled live.
  *
  * `summary` is not eligible however tempting: state.mjs RESETS queryMode rather than un-surfacing it, so
  * an arm setting it would resurrect a withdrawn feature and pay an LLM call per scene for a mode no user
@@ -3322,9 +3263,6 @@ const SETTINGS_HTML = `
                 <div class="inline-drawer-content">
                     <small class="opacity50p">Set once and forget.</small>
 
-                    <label class="checkbox_label" for="wa_own_activation" title="WA's matcher decides all keyword activation (SmartKeys, orthography fold, match window, message depth) — core's own keyword scan is bypassed on WA-run generations. Off: core matches and WA only adds what core cannot and removes what WA rejects.">
-                        <input id="wa_own_activation" type="checkbox"><span>WA owns keyword activation</span>
-                    </label>
 
                     <label class="checkbox_label" for="wa_suppress_keys">
                         <input id="wa_suppress_keys" type="checkbox"><span>Suppress keywords on 🔗 entries</span>
@@ -3512,7 +3450,6 @@ export async function init() {
     $('#wa_studio').on('click', () => { lorebookStudio(chatBook()); });
 
     bind('#wa_enabled', 'enabled', 'checked');
-    bind('#wa_own_activation', 'ownActivation', 'checked');
     bind('#wa_suppress_keys', 'suppressVectorKeys', 'checked');
     // Prompt insertion order — the same sort widget the Studio uses, plus relevance options (prompt-only).
     // The widget's button (.wa-filter) and its popup (.wa-ctx) are styled by ensureStudioStyle, which the
