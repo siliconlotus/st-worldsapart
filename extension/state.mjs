@@ -160,8 +160,8 @@ export const defaultSettings = {
      * decision (selection.mjs).
      *
      * The failure it does not guard against: a prompt can be well within every cap and still dilute the
-     * model's attention across too much material. No metric here sees that — F2@budget scores the SET
-     * that shipped, not what the model did with it.
+     * model's attention across too much material. No metric here sees that — the layout score reads the
+     * SET, not what the model did with it.
      *
      * Counted off the `vectorized` flag, because the cap is about what an entry IS. It read retrieval
      * provenance before — a stage-1 framing from when this WAS the count retrieval cut to, carried onto

@@ -685,12 +685,19 @@ answers is whether anything downstream could have surfaced the entry, and how mu
 out. Homogeneous by construction — the collection holds only vectorized entries' chunks — so no
 exclusion rule is needed.
 
-**The layout score** grades what survives the budget, over the DYNAMIC block. It is set-based and takes
-the asymmetric bars below, because what ships is the surviving SET and rank is only how that set was
-chosen. Beta is not settled; `F2@budget` is the current expectation. Constants and armed stickies are
-hoisted to the front of `ranked` so every cap is a prefix cut, which means they consume budget without
-competing for it — the graded population is exactly what a cut can reject. Everything else is in, cards
-included.
+**The layout score** grades the LAYOUT, over the DYNAMIC block, at a BUDGET-INVARIANT window. It is
+set-based and takes the asymmetric bars below, because what ships is the surviving SET and rank is only
+how that set was chosen. Constants and armed stickies are hoisted to the front of `ranked` so every cap
+is a prefix cut, which means they consume budget without competing for it — the graded population is
+exactly what a cut can reject. Everything else is in, cards included.
+
+**The budget is the SANITY CHECK, not the window.** The layout is what tuning moves; a token ceiling is
+set by cost and is not a property of the ranking, so a score read at the budget moves with a preference
+no arm controls and no tuning can defend. The window is `@R` — the top `relevant` rows — which is
+budget-invariant by construction (`eval/scene.mjs` `atR`, `param-screen --metric fAtR`). Beta is settled
+at `RECALL_WEIGHT` 2 (`metrics.mjs`), so the score is F2@R. Checking that a tuned layout still delivers
+under a real ceiling is a separate pass over `applyBudget`, and it confirms a result rather than
+producing one.
 
 **nDCG is a DIAGNOSTIC, not an evaluation score.** It asks whether the ordering puts the good material
 at the top. The evaluation score asks whether the system delivers the right set. A reordering inside the
@@ -757,11 +764,11 @@ small and it is not in the fitting.
 Ordered by whether a user can see the difference — not by how tidy the fix is, and not by how many
 instances the books on disk hold.
 
-1. **The layout score** — `F2@budget` over the dynamic block, set-based, recall at grade >= 3 and
-   precision crediting a 2 at half (`metrics.mjs` `gradeCredit`). Nothing grades stage 4 until it
-   exists, so it blocks DESIGNING the relevance cut, not just tuning one. It needs an `applyBudget`
-   replay no harness has; `eval/scene.mjs` scores a fixed-k and an @R window only, and `tierRecall` has
-   no kept set to split. Write the window and the cut together. Has data waiting for it now.
+1. **Scoring a candidate CUT.** The layout score itself is not open — F2@R over the dynamic block is
+   `eval/scene.mjs` `atR`, and `param-screen --metric fAtR` reads it, so tuning the layout can proceed.
+   What no harness can score is a proposed relevance cut, which needs a KEPT SET to score and there is
+   no cut to produce one; `tierRecall` is the guard waiting on the same thing. So the cut and the means
+   of judging it are one piece of work, and neither is a budget replay.
 2. **`promote` — an author declaration that activation is sufficient.** A promoted entry enters the
    layout whenever its keys fire, exempt from the relevance cut. It is the per-entry form of *triggered
    == relevant*, which stage 4 broke by having the cliff arbitrate keyword-activated entries alongside
