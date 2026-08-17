@@ -148,11 +148,12 @@ console.log('ok   sentinel: every audit verdict matches its written-down answer'
     eq(adds.includes(11), true, 'cooldown entry: union adds; core gates cooldown BEFORE external activations, so a force cannot break it');
     eq(adds.includes(12), true, 'recursion source fires from chat');
     eq(adds.includes(13), false, 'recursion target has no chat evidence — only the recursion pass admits it');
-    // BLIND: WA emits a delayUntilRecursion entry whose keys match, and core refuses it until its
-    // level arrives. Core's gate order checks the delay before external activations and the external
-    // map persists for the whole scan, so this is exactly how such an entry activates on time — and
-    // with core's matcher blanked, WA declining to emit would mean it never activates at all.
-    eq(adds.includes(14), true, 'delayUntilRecursion IS emitted; core holds it until its level, which is the only route in');
+    // BLIND: WA emits a delayUntilRecursion entry whose keys match and leaves the timing to core, which
+    // checks both delay gates before the external-activation branch. With core's matcher blanked,
+    // declining to emit would leave no route in at all. Whether core ever admits it is core's own
+    // question and this book is the case where it does not — one delay level, recursion off, so no
+    // RECURSION pass is scheduled (see the entry's own comment).
+    eq(adds.includes(14), true, 'delayUntilRecursion IS emitted; core decides when, or whether, to admit it');
 
     // Sticky persistence is core's and WA cannot see it offline: at messageDepth 2 "cold frame"
     // (message 2 of 11) has scrolled out of the window, so WA does not re-emit uid 10 on such a turn

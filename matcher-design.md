@@ -383,8 +383,23 @@ having its winner deleted afterwards and going empty.
 **The emit is BLIND.** WA force-activates every entry whose keys match and lets core's gates refuse
 what they refuse — including `delayUntilRecursion`, which WA once skipped for provenance hygiene. Under
 the takeover that skip was a silent veto: core's matcher is blanked, so an entry WA declines to emit has
-no other route in, and core's own gate order (delay level checked before external activations, external
-map persisting for the whole scan) is what admits it at the right moment.
+no other route in. Verified in `world-info.js`: both delay-level gates are checked BEFORE the
+`getExternallyActivated` branch, so a blind emit is refused on the initial pass rather than overriding
+the delay; and `externalActivations` is a static map, read non-destructively and reset only after the
+loop, so one emit stands for the whole scan and core re-checks it every pass.
+
+**Core still schedules its own loop under the takeover**, which is what the blind emit depends on.
+`successfulNewEntriesForRecursion` is built from `activatedNow`, and the `getExternallyActivated` branch
+adds to `activatedNow` — so WA's emits drive recursion scheduling exactly as core's own matches did.
+
+**But "core admits it when its level arrives" is conditional, and often the level never arrives.**
+`currentRecursionDelayLevel` is PRESET by shifting the lowest level off `availableRecursionDelayLevels`
+before the loop, and the re-arm only fires while that list is non-empty. So a book with ONE distinct
+delay level has an empty list from the start, and with `world_info_recursive` off nothing else sets
+`RECURSION` — the entry is suppressed on every pass and never activates at all. That is core's
+behaviour, not the takeover's, and it was equally true when WA skipped the entry; the blind emit neither
+causes it nor rescues it. Recursion is off in this install, so it is the case that actually obtains
+here.
 
 **Still to retire with it:**
 

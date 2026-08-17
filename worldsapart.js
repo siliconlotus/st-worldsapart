@@ -1368,9 +1368,14 @@ function ensureWorldConfigs(worlds) {
  *
  * Two things this deliberately does NOT do, both verified against core's loop:
  *  - No `state.next` writes. Core schedules the next loop itself in every case WA feeds: a pass
- *    with recursion-eligible successes sets RECURSION, open delay levels set RECURSION, and
+ *    with recursion-eligible successes sets RECURSION, a REMAINING delay level sets RECURSION, and
  *    min-activations sets MIN_ACTIVATIONS — and WA only ever has something new to emit in exactly
  *    those cases (its matches come from that pass's content or that pass's widening).
+ *
+ *    THE TAKEOVER DOES NOT STARVE THAT. Core's scheduler reads `successfulNewEntriesForRecursion`,
+ *    which it builds from `activatedNow` — and an externally-activated entry is added to
+ *    `activatedNow` by the same walk (world-info.js, the `getExternallyActivated` branch). So WA's
+ *    emits drive core's loop exactly as core's own keyword matches used to.
  *  - No re-emission. WorldInfoBuffer.externalActivations is a static map cleared only at scan end,
  *    so one emit is standing for the whole scan — core re-checks it every loop, which is how an
  *    entry refused at one delay level is admitted at a later one.

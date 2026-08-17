@@ -200,7 +200,7 @@
             "disable": false,
             "selectiveLogic": 0,
             "delayUntilRecursion": 1,
-            "comment": "DELAY UNTIL RECURSION — \"midnight\" IS in chat, and WA DOES emit it: the takeover blanks core's matcher, so declining to emit would mean this entry never activates at all. Core must still refuse it on the initial pass — it gates delayUntilRecursion before external activations — and the external map persists for the whole scan, so the emit stands until a recursion pass makes it eligible.",
+            "comment": "DELAY UNTIL RECURSION — \"midnight\" IS in chat and WA DOES emit it: the takeover blanks core's matcher, so declining to emit would mean no route in at all. Core refuses it on the initial pass (both delay gates are checked before the external-activation branch) and the emit then stands for the whole scan. WHETHER IT EVER ACTIVATES IS CORE'S: this book has ONE delay level, so core's level list is empty after its preset shift, and with world_info_recursive off no RECURSION pass is ever scheduled — expect uid 14 to stay out of the prompt. Turn recursion on to see it admitted.",
             "content": "Past midnight the lanes are quiet."
         }
     }
