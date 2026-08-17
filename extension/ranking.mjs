@@ -37,8 +37,7 @@ import { fold, normalizeOrthography } from '../plugin/automaton.mjs';
  *   keys blanked (now)   115                    0.600 / 0.750 / 0.667     0.9510
  *   waKeys restored      243                    0.500 / 0.625 / 0.556     0.9560
  *
- * It buys 0.005 nDCG@5 (a top-5 reshuffle) and costs 0.111 F1 plus one relevant entry inside the
- * shipped cutoff. The keys it restores are triggers like "condom", "grindr", "trash", "utility" —
+ * It buys 0.005 nDCG@5 (a top-5 reshuffle) and costs 0.111 F1. The keys it restores are triggers like "condom", "grindr", "trash", "utility" —
  * generic words admitted at weight 1 that match broadly, where titles carry entity-ish words and
  * stopwordDocFreq strips the junk they come with ("and", "they", "001"). n=1 scene, so this is a
  * reason to leave it alone, not a proof; re-run the A/B if a second scene gets graded.

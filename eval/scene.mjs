@@ -592,8 +592,8 @@ export function makeCandidateSet({ loaded, byUid, entries, params: P, chunkCfg, 
  *  so uid is aliased in. Mutates the rows it is handed and returns a sorted copy. */
 export const makeFuse = P => (rows, lexW) => {
     rows.forEach(r => { r.key = r.uid; });
-    // No retrievalMode: fuseRanks fuses every signal an entry is eligible for. Bundles captured before
-    // that carry one in captureParams and it is read and ignored, like `threshold`.
+    // fuseRanks fuses every signal an entry is eligible for. A bundle captured under the old modes carries
+    // a retrievalMode in captureParams; it is read and ignored, like `threshold`.
     ranking.fuseRanks(rows, { rrfK: P.K, weightByOrder: false, lexicalWeight: lexW, keywordWeight: P.KEYW, keywordOnlyTilt: P.keywordTilt, sparseWeight: P.denseColumn ? P.denseWeight : 0 });
     return [...rows].sort((a, b) => b.fused - a.fused);
 };

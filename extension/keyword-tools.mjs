@@ -43,8 +43,7 @@ async function generateText(prompt, responseLength) {
         // sendRequest forwards `presetName` to presetToGeneratePayload, which maps the preset onto
         // an oai_settings clone; the messages array stays the one we passed. The prompt manager,
         // which is where a roleplay preset's system prompt and jailbreak live, is never called on
-        // this path. (The old `llmBypassPreset` setting claimed it was guarding against exactly
-        // that conditioning. It was not; there is none here to guard against.)
+        // this path — so there is no prompt conditioning here to guard against.
         //
         // Bypassing is still right, for the samplers: a roleplay preset is tuned for prose variety
         // — high temperature and top_p, repetition penalties — and this is an extraction that wants

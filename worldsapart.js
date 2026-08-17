@@ -255,9 +255,8 @@ function renderPluginSetup() {
 }
 
 /**
- * Runs a multi-collection query, preferring the plugin's mean-centered search.
- * Falls back to ST's endpoint if the plugin is absent or errors, so the extension
- * works on a stock install.
+ * Runs a multi-collection query, preferring the plugin's mean-centered search. Takes the NO-PLUGIN PATH
+ * — ST's own /api/vector — when the plugin is absent or errors, so the extension works on a stock install.
  * @param {object} args Query arguments
  * @returns {Promise<object>} Grouped results
  */
@@ -286,9 +285,9 @@ async function queryCollections(args) {
                 return await response.json();
             }
 
-            console.warn(`Worlds Apart: plugin query failed (${response.status}), falling back`, await response.text());
+            console.warn(`Worlds Apart: plugin query failed (${response.status}), taking the no-plugin path`, await response.text());
         } catch (error) {
-            console.warn('Worlds Apart: plugin query threw, falling back', error);
+            console.warn('Worlds Apart: plugin query threw, taking the no-plugin path', error);
         }
     }
 
@@ -679,20 +678,12 @@ async function summarizeQuery(rawText) {
 }
 
 /**
- * Ranks retrieval results by fusing the vector and lexical rankings.
- *
- * Shared by retrieval and by /wa-query so the calibration view can't disagree with
- * what actually gets activated — sorting the probe by vector score alone hid strong
- * lexical matches at the bottom of the table.
- *
- * The arithmetic lives in ranking.mjs (like fuseRanks below) so the offline cutoff harnesses
- * cut the real ranking rather than a copy; this wrapper only injects settings.
+ * Orders retrieval results by cosine and numbers them. Shared by retrieval and by /wa-query so the
+ * calibration view cannot order its table differently from the ranking retrieval built.
  *
  * @param {Map<string, {score: number, chunk: string}>} scores Per-entry results
- * @returns {Array<{key: string, value: object, fused: number, vectorRank?: number, textRank?: number}>} Fused ranking
+ * @returns {Array<{key: string, value: object, vectorRank: number}>} Retrieval ranking, best first
  */
-// No settings left to inject: stage 1 orders on cosine and nothing else. Kept as a named wrapper so the
-// call sites and the offline harnesses go through one function rather than re-sorting by hand.
 const fuseRetrieval = (scores) => ranking.fuseRetrieval(scores);
 
 /**
@@ -2618,15 +2609,9 @@ async function gradeScene(named) {
  *               groups, recursion, min-activations, probability rolls) is the one thing this project
  *               cannot recompute offline at all, so it can only be sampled live.
  *
- * vector and lexical retired once retrieval stopped cutting, and retrievalMode itself is gone now: stage 1
- * ranks on cosine alone, so there is no second signal for a mode to choose between. loose-thr went with
- * scoreThreshold for the same reason — its whole job was surfacing entries a threshold excluded, and
- * stage 1 excludes nothing (plugin/scoring.mjs). Neither can change this pool's population again.
- *
- * `summary` was an arm here until the query summarizer was withdrawn. It is not coming back: state.mjs
- * RESETS queryMode rather than un-surfacing it, so an arm setting it would resurrect a withdrawn feature
- * and pay an LLM call per scene for a mode no user can be in. Bundles captured before the removal still
- * open by name; nothing needs to re-derive them.
+ * `summary` is not eligible however tempting: state.mjs RESETS queryMode rather than un-surfacing it, so
+ * an arm setting it would resurrect a withdrawn feature and pay an LLM call per scene for a mode no user
+ * can be in. Bundles captured under it still open by name.
  *
  * ARM COUNT IS NOT A DESIGN CONSTANT. Add an entry here whenever graded-scene-grid.mjs reports a
  * configuration whose top rows are not fully judged; that number is the stopping rule, not this list's

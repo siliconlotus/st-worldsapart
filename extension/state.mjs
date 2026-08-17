@@ -71,8 +71,7 @@ export const defaultSettings = {
     summaryLength: 1024,
     // The next three are WA's SHARED LLM connection, not the summarizer's — the ✨ keyword
     // suggester (keyword-tools.mjs generateText) is their only production reader now that
-    // queryMode is internalized. Renamed off `summary*` with no migration: prerelease, single
-    // user, so a stored `summaryProfile` is worth less than a name that says what it configures.
+    // queryMode is internalized.
     /**
      * Connection Manager profile id for WA's own generation calls. Empty = the current API.
      * Worth setting: a reasoning model spends its whole budget thinking and returns nothing,
@@ -105,9 +104,6 @@ export const defaultSettings = {
      * disqualify).
      */
     llmTemperature: '1',
-    // Removed: llmBypassPreset. Bypassing is unconditional now (keyword-tools.mjs generateText).
-    // Its rationale had also been wrong — presets contribute samplers here, not the system prompt
-    // and jailbreak it claimed to be guarding against; the prompt manager never runs on this path.
     /** Paragraphs shorter than this are joined with the next one, so stray lines don't become chunks. */
     minChunkSize: 120,
     /**
@@ -120,8 +116,8 @@ export const defaultSettings = {
      * deliberately unrelated books (bge-m3), every relevant entry scored >= 0.538 raw while wrong-genre
      * books topped out at 0.47-0.54. At 0.5 it cuts wrong-book contamination from 10-19 entries to 0-2 in
      * 7 of 9 query x book pairings, and costs little on the right book: measured, 66 graded scenes over 6
-     * books, paired against the same scene at gate 0 — 5 relevant entries dropped at admission and 9 lost
-     * from the cliff-surviving set, none of them on the 10 human-graded captures.
+     * books, paired against the same scene at gate 0 — 5 relevant entries dropped at admission, none of them
+     * on the 10 human-graded captures.
      *
      * Two measured limits: a same-genre wrong book (same author, same idiom) clears any raw-cosine gate —
      * only lexical mismatch can catch those, and this knob does not try; and 0.5 is calibrated on bge-m3,
