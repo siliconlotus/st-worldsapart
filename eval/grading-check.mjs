@@ -21,7 +21,7 @@ eq(Object.keys(meta).length, 2, 'meta keeps every entry (gazetteer + keyword sca
 eq(meta[1].content, undefined, 'meta drops content');
 eq(meta[1].comment, 'Villa Party', 'meta keeps the title — the gazetteer is mostly titles');
 eq(JSON.stringify(meta[1].key), '["villa","party"]', 'meta keeps keys');
-eq(meta[1].vectorized, true, 'meta keeps vectorized (drives suppressVectorKeys offline)');
+eq(meta[1].vectorized, true, 'meta keeps vectorized (drives scoreVectorKeys offline)');
 eq(JSON.stringify(trimBook(book, 'none')), '{}', 'none embeds no entries');
 // Size is the only reason meta exists; assert it actually pays.
 eq(JSON.stringify(meta).length * 10 < JSON.stringify(full).length, true, 'meta is >10x smaller than full');
@@ -40,8 +40,7 @@ eq('vectorCutoff' in p, false, 'no cliff mode is captured — stage 4 has no rel
 eq(p.includeNames, true, 'ST world-info globals are carried, not guessed');
 eq('retrievalMode' in captureParams(s, {}), false, 'the capture records no retrieval mode');
 eq('commonWordWeight' in p, false, 'no general-English down-weight is captured — BM25 no longer takes one');
-// suppressVectorKeys must survive: without it the harness admits 2.3x the query terms (see buildGazetteer).
-eq(p.suppressVectorKeys, true, 'suppressVectorKeys is recorded');
+eq('suppressVectorKeys' in p, false, 'no key-suppression flag is captured — the takeover blanks every keyword-activating entry');
 
 // --- reference tier: constants and CONFIGURED stickies are not relevance results ---
 eq(isDurable({ block: 'constant', sticky: 0 }), true, 'constant is durable');
@@ -182,7 +181,7 @@ eq(JSON.stringify(u.rows.find(r => r.uid === 3).arms), '["shipped","no-filter"]'
 eq(u.rows.find(r => r.uid === 3).cosine, 0.5, 'a duplicate keeps the FIRST arm\'s signals, never a blend');
 eq(u.rows.find(r => r.uid === 3).from, 'shipped', 'the row records which arm supplied its numbers');
 
-// ABSENT-FILL, and the line it must not cross. `keys` is unmeasurable under suppressVectorKeys, so a later
+// ABSENT-FILL, and the line it must not cross. `keys` is unmeasurable with scoreVectorKeys off, so a later
 // arm that CAN measure it fills the hole and says where it came from. A signal the first arm already
 // measured is never overwritten — that would be the blend this function exists to refuse.
 const armKeys = {

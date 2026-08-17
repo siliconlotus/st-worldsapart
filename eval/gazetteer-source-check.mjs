@@ -9,8 +9,8 @@ import { eq } from './metrics.mjs';
 const entry = (uid, extra) => ({ world: 'B', uid, comment: `titleword${uid}`, content: `bodyword${uid}`, key: [`keyword${uid}`], ...extra });
 const S = {
     primaryBook: 'B',
-    // Entry 2 is vectorized, so production blanks its keys before the gazetteer sees them — the arms must
-    // agree with each other about that, or a field comparison is also a suppression comparison.
+    // Entry 2 is vectorized. That no longer changes what the gazetteer reads: production restores the
+    // takeover's stash before building it, so the vocabulary is the AUTHORED one either way.
     books: { B: { 1: entry(1), 2: entry(2, { vectorized: true }) } },
     captureParams: {},
     grades: [], candidates: [],
@@ -31,9 +31,10 @@ has('titles', ['keyword1', false], ['titleword1', true], ['bodyword1', false]);
 has('bodies', ['keyword1', true], ['titleword1', true], ['bodyword1', true]);
 eq(gazOf('none').size, 0, 'none: empty gazetteer, so buildTermWeights keeps only proper nouns');
 
-// Suppression still runs underneath the selection, on every source that reads keys at all.
-has('keys+titles', ['keyword2', false], ['titleword2', true]);
-has('keys', ['keyword2', false]);
+// A vectorized entry contributes exactly as any other does — the gazetteer reads what the author wrote,
+// not what the scan's blanking happened to leave in place when it was asked.
+has('keys+titles', ['keyword2', true], ['titleword2', true]);
+has('keys', ['keyword2', true]);
 
 let threw = '';
 try { gazOf('titles+bodies'); } catch (e) { threw = e.message; }

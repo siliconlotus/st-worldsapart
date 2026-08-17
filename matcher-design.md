@@ -353,13 +353,11 @@ scenes. **A ceiling that binds on an ordinary scene is a cut, not a limit.**
 mean-centre and does not pool server-side. It has never had BM25, and since stage 1 no longer does
 either, that has stopped being a difference between the paths. Neither path passes a threshold now.
 
-**The gazetteer is built downstream of `suppressVectorKeys`**, which blanks `key`/`keysecondary` on
-every vectorized entry, so "the lorebook's own vocabulary" is entry TITLES plus the keys of
-non-vectorized entries. Reading the raw book instead builds a gazetteer 2.3x the size (238 terms against
-105) — a TERM count, not an entry count, and no longer an admission effect at all, since stage 1 admits
-every candidate it scores. The 74% BM25 inflation that figure used to carry was stage-1 BM25 and is
-retired with it. The mismatch still moves content-lexical's scores at STAGE 3, where the filter now
-lives, so `eval/scene.mjs` reproduces the production order for that reason instead.
+**The gazetteer reads the AUTHORED vocabulary** — see *Stage 2* for why that has to be deliberate rather
+than inherited from the scan's blanking. It is a TERM count, not an entry count, and no admission effect
+at all since stage 1 admits every candidate it scores; the 74% BM25 inflation the old figure carried was
+stage-1 BM25 and is retired with it. It still moves content-lexical's scores at STAGE 3, where the filter
+now lives, so `eval/scene.mjs` reproduces production for that reason instead.
 
 ---
 
@@ -401,21 +399,27 @@ behaviour, not the takeover's, and it was equally true when WA skipped the entry
 causes it nor rescues it. Recursion is off in this install, so it is the case that actually obtains
 here.
 
-**Still to retire with it:**
+**`suppressVectorKeys` is gone too**, and its job with it. It blanked a vectorized entry's keys so a
+keyword hit could not activate an entry whose cosine had not earned it — a bypass of ST core, which
+matches those keys like any others. Stage 1 now admits every vectorized entry it scores, so retrieval
+has already activated them and the suppression decided nothing; what it still decided was the residue,
+an entry the wrong-book gate zeroed or one with no chunk in the collection, and there a key hit is the
+author's own evidence. It was also a second blanking mechanism running ahead of a more complete one:
+the takeover stashes `key` AND `keysecondary`, where the suppress branch stashed only `key` and
+destroyed a vectorized entry's secondaries. The stage-3 question survives as `scoreVectorKeys`.
 
-- **`suppressVectorKeys`** — a second blanking mechanism running AHEAD of a more complete one. The
-  takeover blanks every keyword-activating entry and stashes `key` AND `keysecondary`; the suppress
-  branch stashes only `key`, so a vectorized entry's secondaries are destroyed and its stage-3 selective
-  gate judges an empty condition (inert today: 0 of 1,248 vectorized entries carry a secondary key).
-  Deleting the suppress branch routes vectorized entries through the takeover instead, which is strictly
-  better. The stage-3 question survives as `scoreVectorKeys`, which is where it belonged.
+**`scoreVectorKeys` asks about the ENTRY, not about blank keys.** It used to read an empty `key` as
+"this is a suppressed vectorized entry", which only worked because the suppress branch fired on every
+load including WA's own. WA's force-emitted copies carry live keys, so an empty-key test would score
+every retrieved entry and leave the setting inert.
 
-**What still needs writing when that lands.** The GAZETTEER currently gets its suppression as a side
-effect of the blanking mutation: `buildGazetteer(getSortedEntries())` sees blanked entries and never had
-to ask. Remove the mutation and it silently widens 2.3x, so `queryTermWeights` has to filter vectorized
-keys explicitly — the shape `eval/scene.mjs` already uses by hand to model the side effect. Once
-production filters deliberately, `suppressGazetteerKeys` stops being needed to split an entanglement
-that no longer exists.
+**The gazetteer is built from the AUTHORED vocabulary, deliberately.** Its one call site is
+`queryTermWeights` inside `contentTextScores`, at stage 3 with `waOwnsScan` true — and `getSortedEntries`
+emits `WORLDINFO_ENTRIES_LOADED`, so the entries it returns have already been blanked by the takeover.
+Built from those, "the lorebook's own vocabulary" would mean titles plus whatever core exempts, decided
+by when the call happens rather than by anything. `queryTermWeights` therefore restores the stash into a
+local view first. Safe to widen: the gazetteer SOURCE is measured flat at n=71 scenes paired, including
+an empty gazetteer.
 
 **Dry runs are not an exception to the ruling, they are outside it.** ST skips interceptors for them, so
 WA is never offered the scan and core matches with live keys. That is structural, not a mode.
@@ -452,10 +456,6 @@ live-key copy.
 `parseDecorators` and strips the `@@` lines before WA sees an entry, so a content-scan finds nothing at
 runtime. `hasDecorator` prefers the array and falls back to the content walk for raw entries and
 fixtures; `eval/activation-check.mjs` pins both shapes.
-
-**Honour `suppressVectorKeys`** — the stage-2 guard `makeCandidateSet` needs, and the same one the
-keyword fallback loop in `eval/scene.mjs` `makeScorer` needs, since that loop may only admit what core
-could have activated.
 
 **Scope: WA-run generations only.** ST skips generation interceptors for its dry runs (PromptManager
 token counts, chat load), so those keep core's matcher — correct, since a dry run with no WA union
@@ -544,7 +544,7 @@ and what survives the budget. **A change to `fuseRanks` can never surface an ent
 return** — so no keyword weight, tilt or fusion change is a recall lever, only a precision one.
 
 **`scoreVectorKeys` is stage 3 and does not reopen stage 2.** Keys re-rank vector entries; they never
-admit one. `suppressVectorKeys` is the stage-2 counterpart and is a different question.
+admit one — stage 1 already did.
 
 **Open — a recursed entry cannot currently compete.** Stage 3 builds its scan window from chat plus
 injects plus opted-in match sources, and never the recursion buffer, so an entry whose key matched
@@ -867,7 +867,8 @@ instances the books on disk hold.
    `hits.count = scoreBoost`, so `? fire::3` displays `3` for a single occurrence and the row reads as
    "fired three times". Independent of the witness-span work and fixable on its own.
 10. **`reportFailure`: retrieval failure is a failure, not a degradation.** The two-severity split rests
-   on "keys are still handled", which is false for any vectorized entry under `suppressVectorKeys`.
+   on "keys are still handled". Weaker than it was now that a vectorized entry keeps its keys, but a
+   retrieval outage still costs the vector and text signals on every entry it was the only source for.
 11. **Suggester i18n, none of it started.** `ZIPF_EN` scores non-English function words as maximally
     rare, so the gate designed to reject common words would propose them; a few are present with
     meaningless values, which is worse than absent. The suggester should detect that its priors do not

@@ -273,14 +273,16 @@ return** — so no keyword weight, tilt or fusion change is a recall lever, only
 stage 1 admitting everything, the retrieval ranking's ORDER now decides nothing except which entries
 survive `admitCeiling`, which no measured book approaches (largest: 208 vectorized entries).
 
-**The two vector-key settings sit at different stages, and only one is about activation.**
-`suppressVectorKeys` blanks a vectorized entry's `key` into `waKeys` so core cannot keyword-ACTIVATE it
-— stage 2. `scoreVectorKeys` decides whether those stashed keys are SCORED — stage 3, and it does not
-reopen stage 2. Keys re-rank vector entries; they never admit one.
+**`scoreVectorKeys` is stage 3 and does not reopen stage 2.** It decides whether a vectorized entry's
+keys are SCORED, and asks that of the entry rather than of whether its keys are blank. Keys re-rank
+vector entries; they never admit one, because stage 1 already admitted every vectorized entry it scored.
+There is no longer a stage-2 counterpart: `suppressVectorKeys` blanked those keys to stop core
+keyword-activating an entry its cosine had not earned, which stopped deciding anything once stage 1
+admitted everything.
 
-`eval/scene.mjs` models stages 1 and 3. The keyword fallback loop in `makeScorer` is stage 2, so it may
-only admit what core could have activated: not disabled entries, and not vectorized entries under
-`suppressVectorKeys`. Both guards were added after each had already inflated a reported number.
+`eval/scene.mjs` models stages 1 and 3. The keyword loop in `makeCandidateSet` is stage 2, so it may only
+admit what core could have activated — not disabled entries. That guard was added after it had already
+inflated a reported number.
 
 ## countKey is the only matcher
 

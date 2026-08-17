@@ -61,7 +61,7 @@ import { BUNDLE_VERSION } from '../extension/grading.mjs';
 const POOL_ARMS = {
     shipped: {},
     'no-filter': { entityFilter: false },
-    'keys-live': { suppressVectorKeys: false },
+    'keys-live': { scoreVectorKeys: true },
 };
 
 const argv = process.argv.slice(2);
@@ -345,7 +345,7 @@ for (const idx of picks) {
             paramSnapshot: srcArm?.paramSnapshot, excludeTitles: [], index: built.path,
         };
         const P = sceneParams(S);
-        // Loaded per arm, not once: the gazetteer bakes in suppressVectorKeys at load time and keys-live
+        // Loaded per arm, not once: the gazetteer is baked in at load time and an arm
         // moves it. scoreScene throws rather than reuse a scene across that change, for the same reason.
         const scene = loadScene(S, { indexFile: indexPath(S, { model: MODEL }), params: P });
         // Term weights exactly as scoreScene derives them. Passing null instead runs every arm with the

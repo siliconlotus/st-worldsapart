@@ -33,12 +33,8 @@ const addedUids = (entries, text, o = {}) =>
         'disabled entries are never candidates');
     eq(addedUids([{ uid: 7, key: ['cosmonaut'], constant: true, content: 'x' }], 'cosmonaut'), '',
         'constant entries are core\'s to activate — forcing again is noise');
-    eq(addedUids([{ uid: 8, key: ['cosmonaut'], vectorized: true, content: 'x' }], 'cosmonaut',
-        { suppressVectorKeys: true }), '',
-    'suppressVectorKeys makes vectorized entries retrieval-only (flag is the guard — keys are still live at intercept)');
-    eq(addedUids([{ uid: 9, key: ['cosmonaut'], vectorized: true, content: 'x' }], 'cosmonaut',
-        { suppressVectorKeys: false }), '9',
-    'suppress off: vectorized entries are ordinary keyword candidates');
+    eq(addedUids([{ uid: 8, key: ['cosmonaut'], vectorized: true, content: 'x' }], 'cosmonaut'), '8',
+    'vectorized entries are ordinary keyword candidates — stage 1 admits them anyway, so the skip protected nothing');
     eq(addedUids([{ uid: 10, key: ['cosmonaut'], content: '@@dont_activate\nx' }], 'cosmonaut'), '',
         '@@dont_activate is core\'s exclusion; the union must not override it');
     eq(addedUids([{ uid: 11, key: ['cosmonaut'], delayUntilRecursion: 1, content: 'x' }], 'cosmonaut'), '11',

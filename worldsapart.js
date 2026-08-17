@@ -457,7 +457,15 @@ async function queryTermWeights(searchText, { log = true } = {}) {
         return null;
     }
 
-    const gazetteer = buildGazetteer(await getSortedEntries());
+    // THE AUTHORED VOCABULARY, not whatever the mutation left behind. getSortedEntries emits
+    // WORLDINFO_ENTRIES_LOADED, and this runs at stage 3 with waOwnsScan true, so the entries it hands
+    // back have had key/keysecondary blanked into the stash by the takeover — building from them would
+    // make "the lorebook's own vocabulary" mean titles plus whatever core exempts, decided by when this
+    // happens to be called rather than by anything. A local view, never a write-back.
+    const authored = entry => (entry.waKeys || entry.waSecondary)
+        ? { ...entry, key: entry.key?.length ? entry.key : (entry.waKeys ?? []), keysecondary: entry.keysecondary?.length ? entry.keysecondary : (entry.waSecondary ?? []) }
+        : entry;
+    const gazetteer = buildGazetteer((await getSortedEntries()).map(authored));
     const termWeights = buildTermWeights(searchText, gazetteer);
 
     if (log) {
@@ -810,7 +818,6 @@ async function retrieve(chat) {
  */
 async function keywordActivations(chat) {
     const candidates = await getSortedEntries();
-    const suppress = Boolean(settings().suppressVectorKeys);
 
     // Under the takeover: these copies (live keys — waOwnsScan is false during WA's own fetch, so
     // onEntriesLoaded's takeover blanking never touches them) are what the SCAN_DONE feed
@@ -827,11 +834,9 @@ async function keywordActivations(chat) {
     // Register every candidate key up front so the smartkeys automaton is built once — a
     // first-seen key mid-loop would rebuild it and throw away every cached scan. Registering
     // here also pre-covers stage 3's registerKeys for this generation.
-    registerKeys(candidates.flatMap(e =>
-        (e.disable || (suppress && e.vectorized)) ? [] : (e.key ?? [])));
+    registerKeys(candidates.flatMap(e => (e.disable ? [] : (e.key ?? []))));
 
     return matcher.activationAdds(candidates, windowFor, {
-        suppressVectorKeys: suppress,
         messageDepth: settings().messageDepth,
         fallbackDepth: world_info_depth,
         caseSensitiveDefault: world_info_case_sensitive,
@@ -1028,24 +1033,6 @@ function onEntriesLoaded(loaded) {
         return;
     }
 
-    if (settings().suppressVectorKeys) {
-        for (const entry of entries) {
-            if (entry?.vectorized) {
-                // Stash before blanking so scoreVectorKeys can rank on the real keys after core is
-                // blinded to them. keywordScore only reads primary keys, so that's all we keep.
-                //
-                // COPIED, not aliased. getGlobalLore builds each entry with a shallow spread, so
-                // `entry.key` is still the same array object as loadWorldInfo's cached book data —
-                // blanking is safe because it rebinds the field, but holding the reference would put a
-                // live handle on the cache one in-place sort or splice away from corrupting the
-                // lorebook for the session. Keys are strings, so a spread is a full copy.
-                entry.waKeys = [...(entry.key ?? [])];
-                entry.key = [];
-                entry.keysecondary = [];
-            }
-        }
-    }
-
     // On a scan WA intercepted, core's keyword matcher goes blind:
     // every keyword-activating entry's keys are stashed and blanked, so the only keyword route
     // into `activated` is WA's force-emit and the group filter runs over WA's verdicts (the
@@ -1055,7 +1042,7 @@ function onEntriesLoaded(loaded) {
     // stage 3's secondary gate must judge the same condition the author wrote, not an empty one.
     if (runState.waOwnsScan && !runState.generationIsDryRun) {
         for (const entry of entries) {
-            if (!entry || entry.waKeys) continue;   // vectorized above already stashed and blanked
+            if (!entry || entry.waKeys) continue;   // already stashed and blanked this load
             // Constants and @@activate entries KEEP their keys. Core's scan loop short-circuits
             // both before its key-matching path, so live keys cannot leak a core keyword
             // activation — and the inclusion-group filter's getScore reads entry.key, so blanking
@@ -1064,6 +1051,10 @@ function onEntriesLoaded(loaded) {
             // entirely (filterGroupsByTimedEffects), and every keyword-activated entry reaches
             // the filter as WA's live-key copy via the external-activation map.
             if (entry.constant || matcher.hasDecorator(entry, '@@activate')) continue;
+            // COPIED, not aliased. getGlobalLore builds each entry with a shallow spread, so `entry.key`
+            // is still the same array object as loadWorldInfo's cached book data — blanking is safe
+            // because it rebinds the field, but holding the reference would put a live handle on the
+            // cache one in-place sort or splice away from corrupting the lorebook for the session.
             entry.waKeys = [...(entry.key ?? [])];
             entry.waSecondary = [...(entry.keysecondary ?? [])];
             entry.key = [];
@@ -1426,7 +1417,6 @@ async function feedScanLoop(args) {
 
     const adds = matcher.activationAdds(candidates,
         matcher.withExtraTexts(windowFor, runState.waRecursionTexts, settings().matchWindow), {
-            suppressVectorKeys: Boolean(settings().suppressVectorKeys),
             messageDepth: settings().messageDepth,
             fallbackDepth: world_info_depth,
             caseSensitiveDefault: world_info_case_sensitive,
@@ -1513,15 +1503,16 @@ async function rankActivated(args) {
         // every entry regardless of scan depth.
         const injectText = await scanInjects();
 
-        // The keys an activated entry is scored on. Live keys as before; blanked entries score
-        // their stash — a 🔗 entry only under scoreVectorKeys (unchanged), while a takeover-
-        // blanked entry (constant / sticky / @@activate copies from core's own sortedEntries;
-        // WA's force-emitted copies keep live keys) always scores its stash, since blanking was
+        // The keys an activated entry is scored on: live keys, else the takeover's stash — blanking was
         // an activation mechanism, not a scoring opinion.
-        const scoreKeysOf = entry => entry.key?.length ? entry.key
-            : entry.vectorized
-                ? (settings().scoreVectorKeys ? (entry.waKeys ?? []) : [])
-                : (entry.waKeys ?? []);
+        //
+        // scoreVectorKeys GATES ON `vectorized`, NOT ON WHETHER THE KEYS ARE BLANK. WA's force-emitted
+        // copies are fetched with waOwnsScan false and so carry LIVE keys; an empty-key test would score
+        // every retrieved entry's keys and leave the setting inert. The question is about the entry, so
+        // it is asked of the entry.
+        const scoreKeysOf = entry => (entry.vectorized && !settings().scoreVectorKeys)
+            ? []
+            : (entry.key?.length ? entry.key : (entry.waKeys ?? []));
         // Same restoration for the secondary gate: a blanked entry's secondaries live in
         // waSecondary, and the per-segment gate must judge the condition the author wrote, not an
         // empty one. A local view, never a write-back — restoring keys on core's scan copies
@@ -1573,8 +1564,8 @@ async function rankActivated(args) {
                 : undefined;
             // Declared for fuseRanks' eligibility normalisation: having keys to score is the chance to
             // earn the keyword rank, and an entry with none must not be divided by a weight it could
-            // never have collected. Resolved here because this is where suppressVectorKeys /
-            // scoreVectorKeys have already decided what `scoreKeys` is.
+            // never have collected. Resolved here because this is where scoreVectorKeys has already
+            // decided what `scoreKeys` is.
             item.keysEligible = scoreKeys.length > 0;
         }
 
@@ -1687,9 +1678,9 @@ async function rankActivated(args) {
             // IS — and that is what the flag records. It read runState.lastScores before: a stage-1
             // framing ("how much did retrieval contribute") carried onto a stage-4 cap, from when
             // maxVectorEntries WAS the count retrieval cut to. Since stage 1 stopped cutting, the two
-            // differ only for a vectorized entry that keyword-activated without being admitted, which
-            // needs suppressVectorKeys off — a distinction that exists in an arm, bought with an answer
-            // living in per-generation mutable state instead of on the entry.
+            // differ only for a vectorized entry that keyword-activated without being admitted — the
+            // wrong-book gate's residue — which is not worth an answer living in per-generation mutable
+            // state instead of on the entry.
             isVector: item => Boolean(item.entry?.vectorized),
             maxTokens,
             maxTotal,
@@ -1831,8 +1822,8 @@ async function rankActivated(args) {
             text: x.score !== undefined && Number.isFinite(x.textScore) ? Number(x.textScore.toFixed(2)) : null,
             tRank: x.textRank ?? null,
             // BM25 over entry keys, gated on ELIGIBILITY (set at the scan, ~line 1608) rather than on the
-            // value. keywordScore is 0 both when an eligible key missed and when suppressVectorKeys blanked
-            // the keys so nothing could be scored at all — and only the first is a measurement. Reading the
+            // value. keywordScore is 0 both when an eligible key missed and when the entry had no
+            // scorable keys at all (scoreVectorKeys off) — and only the first is a measurement. Reading the
             // value alone reported 32 confident zeros on a capture where those entries had no keys to
             // score, which also silently defeats unionArms' absent-signal fill.
             keys: x.keysEligible === false ? null : (Number.isFinite(x.keywordScore) ? Number(x.keywordScore.toFixed(2)) : null),
@@ -1983,7 +1974,7 @@ function paramSnapshot() {
         },
         // Acquisition: what vectra gives back — the DB-side similarity gate, mean-centering, and
         // how the vectorized text is chunked. Paired with the WA-side selection block below.
-        vectors: { uncenteredGate: s.uncenteredGate || 0, meanCentered: s.meanCentered, chunkMode: s.chunkMode, chunkSize: s.chunkSize, minChunkSize: s.minChunkSize, suppressVectorKeys: s.suppressVectorKeys },
+        vectors: { uncenteredGate: s.uncenteredGate || 0, meanCentered: s.meanCentered, chunkMode: s.chunkMode, chunkSize: s.chunkSize, minChunkSize: s.minChunkSize },
         // Selection: the WA-side caps and the keyword scoring applied to what was acquired. No cliff
         // here any more — stage 4 decides how many and how much, not whether (selection.mjs).
         cutoff: {
@@ -2549,7 +2540,8 @@ async function gradeScene(named) {
  *
  *   no-filter   entityFilter off moves the surviving query terms, so it moves BM25 and what stage 1
  *               admits at all.
- *   keys-live   suppressVectorKeys off lets WA keyword-match vectorized entries. Activation (secondary
+ *   keys-live   scoreVectorKeys on gives a retrieved entry its keyword rank too, which reorders the
+ *               layout and so changes what the entry maxes and the budget keep. Activation (secondary
  *               keys, inclusion groups, recursion, min-activations, probability rolls) is the one thing
  *               this project cannot recompute offline at all, so it can only be sampled live.
  *
@@ -2564,7 +2556,7 @@ async function gradeScene(named) {
 const POOL_ARMS = {
     shipped: {},
     'no-filter': { entityFilter: false },
-    'keys-live': { suppressVectorKeys: false },
+    'keys-live': { scoreVectorKeys: true },
 };
 
 /**
@@ -3269,10 +3261,6 @@ const SETTINGS_HTML = `
                     <small class="opacity50p">Set once and forget.</small>
 
 
-                    <label class="checkbox_label" for="wa_suppress_keys">
-                        <input id="wa_suppress_keys" type="checkbox"><span>Suppress keywords on 🔗 entries</span>
-                    </label>
-
                     <label class="checkbox_label" for="wa_debug_log">
                         <input id="wa_debug_log" type="checkbox"><span>Log selection table on every generation</span>
                     </label>
@@ -3455,7 +3443,6 @@ export async function init() {
     $('#wa_studio').on('click', () => { lorebookStudio(chatBook()); });
 
     bind('#wa_enabled', 'enabled', 'checked');
-    bind('#wa_suppress_keys', 'suppressVectorKeys', 'checked');
     // Prompt insertion order — the same sort widget the Studio uses, plus relevance options (prompt-only).
     // The widget's button (.wa-filter) and its popup (.wa-ctx) are styled by ensureStudioStyle, which the
     // Studio injects lazily; the settings control can be used first, so inject here too (idempotent).

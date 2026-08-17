@@ -828,9 +828,13 @@ export const usableKeys = keys => (Array.isArray(keys) ? keys : [])
  * `fallbackDepth` (core's world_info_depth, injected) — core's depth is otherwise not consulted.
  *
  * Skips: disabled; `constant` (core activates them without keys — forcing again is provenance
- * noise); vectorized under `suppressVectorKeys` (retrieval-only — at intercept onEntriesLoaded has
- * NOT yet blanked their keys, so the flag is the guard, not empty `key`); `@@dont_activate`
- * (core's own exclusion, which a force-activate would override).
+ * noise); `@@dont_activate` (core's own exclusion, which a force-activate would override).
+ *
+ * VECTORIZED ENTRIES ARE ORDINARY CANDIDATES. A keyword hit on one used to be refused, on the grounds
+ * that its cosine had not earned it — but stage 1 admits every vectorized entry it scores, so retrieval
+ * has already activated them and the refusal decided nothing. What it decides now is the residue: an
+ * entry the wrong-book gate zeroed, or one with no chunk in the collection, which its author keyed and
+ * which a key hit is evidence for.
  *
  * `delayUntilRecursion` is NOT skipped: WA emits blindly and lets core reject. Core's gate order checks
  * the delay level before external activations, and the external-activation map persists for the whole
@@ -843,7 +847,7 @@ export const usableKeys = keys => (Array.isArray(keys) ? keys : [])
  *
  * @param {object[]} entries Candidate entries (getSortedEntries shape)
  * @param {(depth: number, entry: object) => string[]} windowFor
- * @param {{suppressVectorKeys?: boolean, messageDepth?: number, fallbackDepth?: number,
+ * @param {{messageDepth?: number, fallbackDepth?: number,
  *          caseSensitiveDefault?: boolean, wholeWordsDefault?: boolean, depthSkew?: number}} opts
  * @returns {object[]} entries to force-activate
  */
@@ -851,7 +855,6 @@ export function activationAdds(entries, windowFor, opts = {}) {
     const out = [];
     for (const entry of entries ?? []) {
         if (!entry || entry.disable || entry.constant) continue;
-        if (opts.suppressVectorKeys && entry.vectorized) continue;
         if (hasDecorator(entry, '@@dont_activate')) continue;
         const keys = usableKeys(entry.key);
         if (!keys.length) continue;

@@ -27,30 +27,20 @@ import { fold, normalizeOrthography } from '../plugin/automaton.mjs';
  * (plugin/scoring.mjs) — so this feeds content-lexical alone and can reweight what an activated entry
  * scores, never what gets admitted. Measurements taken against the old pipeline mixed both effects.
  *
- * DO NOT "fix" the missing keys. This runs AFTER suppressVectorKeys has blanked
- * key/keysecondary on every vectorized entry, so for a mostly-vectorized book the vocabulary is
- * mostly entry TITLES (measured: 1138 terms — 910 from titles, 228 from the 50 non-vectorized
- * entries — where the raw book would give 3131). That looks like a bug and reads like one here.
- * It was A/B'd on the scene1 graded fixture, and feeding the stashed `waKeys` back in is WORSE:
+ * DO NOT "fix" the missing keys. The one production call site is `queryTermWeights`, inside
+ * `contentTextScores` at stage 3, where `waOwnsScan` is true — so the takeover has already blanked
+ * key/keysecondary on every keyword-activating entry of the `getSortedEntries()` this is handed, and the
+ * vocabulary is entry TITLES plus the keys of constants and `@@activate` entries. That looks like a bug
+ * and reads like one here.
  *
- *   gazetteer            admitted query terms   P/R/F1 @ count max=10     nDCG@5
- *   keys blanked (now)   115                    0.600 / 0.750 / 0.667     0.9510
- *   waKeys restored      243                    0.500 / 0.625 / 0.556     0.9560
+ * It is not worth arguing about: the gazetteer SOURCE was swept at n=71 scenes paired and came back flat
+ * on every arm INCLUDING an empty gazetteer (`eval/param-screen.mjs` `gaz=*`), with all four returning a
+ * byte-identical candidate set and differing only in query terms. The proper-noun boost is carrying the
+ * entity filter on its own.
  *
- * It buys 0.005 nDCG@5 (a top-5 reshuffle) and costs 0.111 F1. The keys it restores are triggers like "condom", "grindr", "trash", "utility" —
- * generic words admitted at weight 1 that match broadly, where titles carry entity-ish words and
- * stopwordDocFreq strips the junk they come with ("and", "they", "001"). n=1 scene, so this is a
- * reason to leave it alone, not a proof; re-run the A/B if a second scene gets graded.
- *
- * The offline harnesses must therefore blank vectorized keys before calling this, or they build a
- * gazetteer 2.3x the size production's is (238 terms against 105) and hand buildTermWeights a wider query
- * — a TERM count, never an entry count, and now never an admission effect either: stage 1 admits every
- * candidate it scores. The 74% BM25 inflation this figure used to carry was stage-1 BM25 and is retired
- * with it. The mismatch still moves content-lexical's scores at STAGE 3, so the rule stands.
- *
- * The ordering survives the call site moving to stage 3: the blanking runs in the WORLDINFO_ENTRIES_LOADED
- * handler and its suppressVectorKeys branch is not guarded by waOwnsScan, so it fires on every load,
- * including the getSortedEntries() contentTextScores makes.
+ * The offline harnesses must reproduce whatever production hands this, or they measure a gazetteer
+ * nothing builds — a TERM count, never an entry count, and never an admission effect: stage 1 admits
+ * every candidate it scores and reads no term weights at all.
  *
  * @param {object[]} entries All World Info entries
  * @returns {Set<string>} Lowercased gazetteer terms
@@ -247,8 +237,8 @@ export function fuseRetrieval(scores) {
 /**
  * Whether an item is IN THE VECTOR COLLECTION — not whether it could be embedded, which is true of all
  * text, and not whether it earned a cosine. A vectorized entry that failed to rank is still in, because
- * it competed and lost. Callers may declare it explicitly, since only they know how
- * suppressVectorKeys/scoreVectorKeys resolved; absent flags fall back to presence.
+ * it competed and lost. Callers may declare it explicitly, since only they know how `scoreVectorKeys`
+ * resolved; absent flags fall back to presence.
  *
  * Named for membership because that is the only question it answers. It used to gate the TEXT signal
  * too, which read as "is a non-vector entry in the vector collection" — a question worth asking of
@@ -381,7 +371,7 @@ export function fuseRanks(items, { rrfK: k, weightByOrder, lexicalWeight, keywor
     // or BM25, so it is divided by the keyword weight alone.
     //
     // Callers declare eligibility on the item (`vectorEligible`, `keysEligible`) because only they know it:
-    // `vectorized` is the entry's, and whether keys are scorable depends on suppressVectorKeys/scoreVectorKeys
+    // `vectorized` is the entry's, and whether keys are scorable depends on the scoreVectorKeys
     // resolution the caller has already done. Absent flags fall back to presence, which keeps a caller that
     // sets neither self-consistent rather than silently capping everything it ranks.
     // ELIGIBILITY, one predicate per signal, each naming the question it answers. The denominator below

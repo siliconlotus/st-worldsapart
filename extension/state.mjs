@@ -7,13 +7,12 @@ export const MODULE_NAME = 'worldsApart';
 
 export const defaultSettings = {
     enabled: true,
-    /** Suppress keyword matching on entries marked vectorized (🔗). */
-    suppressVectorKeys: true,
     /**
-     * Also give vectorized (🔗) entries a keyword-over-keys rank, scored against the keys
-     * suppressVectorKeys stashed before blanking them. Lets a retrieved vector entry earn the
-     * keyword signal too (a double boost) WITHOUT its keys re-enabling core keyword activation.
+     * Give vectorized (🔗) entries a keyword-over-keys rank as well as their cosine and text ranks.
      * Off by default — a signal to A/B, not a normal knob.
+     *
+     * STAGE 3 ONLY: it decides what a retrieved entry is SCORED on, never what activates. Stage 2 is
+     * the takeover's, and stage 1 admits every vectorized entry it scores either way.
      */
     scoreVectorKeys: false,
     /** Characters per chunk. Entries are chunked for MATCHING only; the whole entry is still inserted. */
@@ -150,7 +149,7 @@ export const defaultSettings = {
      *
      * Counted off the `vectorized` flag, because the cap is about what an entry IS. It read retrieval
      * provenance before — a stage-1 framing from when this WAS the count retrieval cut to, carried onto
-     * a stage-4 cap. The two coincide unless suppressVectorKeys is off.
+     * a stage-4 cap. The two now differ only for an entry the wrong-book gate zeroed.
      *
      * THE VALUE IS A JUDGEMENT, NOT A MEASUREMENT: 20 is where a deliberately generous cap was put.
      * Nothing grades stage 4 yet, so no measurement chose it and none endorses any other value either.

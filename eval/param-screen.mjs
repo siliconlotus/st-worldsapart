@@ -48,11 +48,9 @@ const ARMS = {
     // used; a number overrides it. The per-scene optima that motivated the split were (text 0.5, keys 3),
     // (1.5, 0) and (1.5, 1), so 0 is a real candidate, not a degenerate one.
     'KEYW=0': { KEYW: 0 }, 'KEYW=0.5': { KEYW: 0.5 }, 'KEYW=1': { KEYW: 1 }, 'KEYW=2': { KEYW: 2 }, 'KEYW=3': { KEYW: 3 },
-    // Whether a VECTORIZED entry's keys score at all — SELECTION vs SCORING, and only the second one.
-    // suppressVectorKeys governs selection: core never activates on those keys, and blanking them is baked
-    // into the gazetteer at load time (hence the throw in scoreScene). scoreVectorKeys governs scoring
-    // alone — the keys are re-admitted to scoringKeys() to re-rank candidates retrieval already returned,
-    // so it can reorder the top 10 but can never add an entry to it.
+    // Whether a VECTORIZED entry's keys score at all. SCORING, never selection: the keys are admitted to
+    // scoringKeys() to re-rank candidates retrieval already returned, so it can reorder the top 10 but can
+    // never add an entry to it.
     //
     // BOTH DIRECTIONS ARE ARMS because values here are absolute and captures disagree: the harness default
     // is off, every sommers capture is on, so only one of these is a live contrast for a given scene and
@@ -73,13 +71,6 @@ const ARMS = {
     // vectorized entry's keys are counted. One upside — an arm that cannot change the population cannot
     // surface an unjudged row, so unlike a chunk arm its delta is not a pool-biased lower bound.
     //
-    // suppressVectorKeys is RULED to be going (matcher-design.md, Stage 2: the takeover already blanks
-    // every keyword-activating entry and stashes both key and keysecondary). These arms outlive it only as
-    // the gazetteer contrast; scoreVectorKeys is where the surviving question lives.
-    // __reload because the gazetteer is baked at load time.
-    'vectorKeys=live': { suppressVectorKeys: false, __reload: true },
-    'vectorKeys=live-gazfixed': { suppressVectorKeys: false, suppressGazetteerKeys: true, __reload: true },
-    'vectorKeys=gazraw': { suppressVectorKeys: true, suppressGazetteerKeys: false, __reload: true },
     // WHAT THE GAZETTEER READS. Shipped is keys+titles, and everything defending that choice is thin: the
     // "keys alone score identically" claim comes from a 5-target gold set that no longer exists, and the
     // bodies arm lost at n=3 scenes. One family, so the doses correct against each other. __reload because

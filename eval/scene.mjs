@@ -210,20 +210,7 @@ export const sceneParams = (S, overrides = {}) => ({
     // only reweight the vector signal. They are run as controls, not as candidates.
     denseColumn: null,
     denseWeight: 0.5,
-    maxVectorEntries: 20, suppressVectorKeys: true, scoreVectorKeys: false, entityFilter: true,
-    // suppressVectorKeys USED TO move two stages at once — blanking vectorized keys so core could not
-    // keyword-ACTIVATE them (stage 2), and widening the gazetteer, which fed stage-1 BM25. Neither reaches
-    // admission now: stage 1 is cosine-only and reads no term weights, and the ceiling admits every indexed
-    // entry, so the keyword route never sees a vectorized entry to add. Measured at the current
-    // architecture over 70 scenes, flipping it returns a BYTE-IDENTICAL candidate set — 10103 vector rows,
-    // 353 keyword rows, 670 relevant — and moves only the term count (6130 -> 9839). The old figure
-    // ("adds 767 keyword-only rows, loses 174 vector rows across 65 scenes") was admitCeiling 100 talking.
-    //
-    // What survives is stage 3: the term set feeds content-lexical, and scoringKeys decides whether a
-    // vectorized entry's keys are counted. suppressGazetteerKeys exists to split those, and stops being
-    // needed once production filters the gazetteer deliberately rather than riding the blanking side
-    // effect (matcher-design.md, Stage 2 — where suppressVectorKeys itself is ruled to be going).
-    suppressGazetteerKeys: null,
+    maxVectorEntries: 20, scoreVectorKeys: false, entityFilter: true,
     // WHICH FIELDS THE GAZETTEER READS. Production is 'keys+titles' (buildGazetteer's own sources), chosen on
     // a 5-target gold set that no longer exists; 'bodies' was re-measured at n=3 scenes and lost. This param
     // exists so the choice can be re-run paired at the current scene count instead of re-argued.
@@ -324,23 +311,17 @@ export function loadScene(S, { indexFile, params: P }) {
     const EXCLUDED = (S.excludeTitles ?? []).map(nrm).filter(x => x.length);
     const isExcluded = title => { const t = new Set(nrm(title)); return EXCLUDED.some(x => x.every(w => t.has(w))); };
 
-    // PRODUCTION BUILDS THE GAZETTEER DOWNSTREAM OF suppressVectorKeys, which blanks key/keysecondary on
-    // every vectorized entry (worldsapart.js) so core can't keyword-match them. By the time retrieval calls
-    // buildGazetteer(getSortedEntries()), those keys are gone and the "lorebook's own vocabulary" is only
-    // entry TITLES plus the keys of non-vectorized entries. Reading the raw book instead admitted 2.3x the
-    // terms (238 vs 105) and inflated every BM25 score by up to 74% — the gap that made a validated sample
-    // look unreproducible. Suppressing reproduces the capture exactly.
+    // THE AUTHORED VOCABULARY, which is what production builds from: queryTermWeights restores the
+    // takeover's stash into a local view before calling buildGazetteer, so the gazetteer does not depend
+    // on when in the scan it is asked. Offline the authored keys ARE e.key, since samples embed the book
+    // raw — so the raw book is the faithful model and no blanking is applied here.
     //
     // The gazetteer spans every book the live chat had attached, as production's does: those extra terms
     // change which query terms survive the filter, so they move BM25 on THIS book's entries even though
     // their own entries are out of scope here. Gazetteer-only — no index, no candidates.
     const embeddedOthers = Object.keys(S.books).filter(w => w !== primary).flatMap(w => Object.values(S.books[w]));
     const gazSource = [...entries, ...embeddedOthers];
-    // suppressGazetteerKeys splits this from the activation half of suppressVectorKeys (see sceneParams);
-    // null is production, where one flag drives both.
-    const gazEntries = (P.suppressGazetteerKeys ?? P.suppressVectorKeys)
-        ? gazSource.map(e => (e.vectorized ? { ...e, key: [], keysecondary: [] } : e))
-        : gazSource;
+    const gazEntries = gazSource;
     // Field selection rides on buildGazetteer rather than re-deriving its tokenization — a second tokenizer
     // is the seam the single-gazetteer rule exists to prevent. `comment` is the title slot, so 'bodies'
     // passes content through it.
@@ -457,11 +438,11 @@ export function tierRecall(population, kept, gradeOf) {
     return { memory: half(r => isMemory(r.entry)), reference: half(r => isReference(r.entry)) };
 }
 
-/** Keys the production scan would actually score. suppressVectorKeys blanks a vectorized entry's keys at
- *  scan time (worldsapart.js suppressKeys), and scoreVectorKeys is what re-admits the stashed originals —
- *  offline the originals ARE e.key, since samples embed the book raw. Scoring raw keys unconditionally gave
- *  vectorized entries a keys signal production can never produce, the keyword-side twin of the gazetteer
- *  bug documented in loadScene.
+/** Keys the production scan would actually score. `scoreVectorKeys` decides whether a vectorized entry's
+ *  keys count at stage 3, and it asks that of the ENTRY rather than of whether its keys happen to be blank
+ *  — the same way worldsapart.js scoreKeysOf asks it. Scoring raw keys unconditionally gave vectorized
+ *  entries a keys signal production would not produce, the keyword-side twin of the gazetteer bug
+ *  documented in loadScene.
  *
  *  P.dropKeys (array of exact key strings) simulates removing those keys from the book: they stop scoring
  *  AND stop keyword-activating, since stage-2 activation tests `keywordScore > 0` through this same
@@ -489,7 +470,7 @@ export const scoringKeys = (e, P) => {
         });
         if (fills.length) base = [...base, ...fills];
     }
-    const ks = (e.vectorized && P.suppressVectorKeys && !P.scoreVectorKeys) ? [] : base;
+    const ks = (e.vectorized && !P.scoreVectorKeys) ? [] : base;
     return P.dropKeys ? ks.filter(k => !P.dropKeys.includes(k)) : ks;
 };
 
@@ -577,13 +558,10 @@ export function makeCandidateSet({ loaded, byUid, entries, params: P, chunkCfg, 
         //                      curated sommers scenes arrived this way before the guard. The retrieval route
         //                      needs the same exclusion for a different reason (see above): a disabled entry
         //                      stays in the collection, so that door does not close on its own.
-        //   suppressVectorKeys blanks a vectorized entry's keys so core CANNOT keyword-activate it. Its only
-        //                      door is retrieval, i.e. `per`. scoreVectorKeys does not reopen this one — that
-        //                      setting is stage 3, and re-admits the stashed keys for SCORING alone. Without
-        //                      this guard a capture with both settings on (every sommers arm) admitted 209
-        //                      more rows by key, and keys appeared to rescue vector entries production would
-        //                      never have ranked.
-        for (const e of entries) { const uid = Number(e.uid); if (per.has(uid) || e.disable || (e.vectorized && P.suppressVectorKeys)) continue; const kw = keywordScore(e, scanText, k1); if (kw > 0) rows.push({ uid, entry: e, title: wiTitle(e), score: P.denseColumn ? undefined : dense.get(uid), sparseScore: colExtras ? dense.get(uid) : undefined, textScore: contentText.get(entryKey(e)) ?? 0, keywordScore: kw, vectorEligible: (!P.denseColumn && dense.has(uid)) || !!e.vectorized, textEligible: hasContent(e), keysEligible: true }); }
+        //
+        // A vectorized entry is not excluded: WA judges it like any other candidate, and stage 1 has
+        // usually admitted it already through `per`.
+        for (const e of entries) { const uid = Number(e.uid); if (per.has(uid) || e.disable) continue; const kw = keywordScore(e, scanText, k1); if (kw > 0) rows.push({ uid, entry: e, title: wiTitle(e), score: P.denseColumn ? undefined : dense.get(uid), sparseScore: colExtras ? dense.get(uid) : undefined, textScore: contentText.get(entryKey(e)) ?? 0, keywordScore: kw, vectorEligible: (!P.denseColumn && dense.has(uid)) || !!e.vectorized, textEligible: hasContent(e), keysEligible: true }); }
         return rows;
     };
 }
@@ -619,12 +597,12 @@ export const makeFuse = P => (rows, lexW) => {
 export async function scoreScene({ sample: S, overrides = {}, k = 10, vectors, model, ollama, index, topK, scene: preloaded, qv: cachedQv } = {}) {
     const P = sceneParams(S, overrides);
     // A preloaded scene is reused across arms so N arms cost ONE embed and ONE index parse per scene. Valid
-    // only while no arm moves suppressVectorKeys, which is baked into the gazetteer at load time — asserted
+    // only while no arm moves the gazetteer, which is baked in at load time — asserted
     // rather than trusted, because the failure would be a silently wrong gazetteer and those cost 74% BM25.
     // denseAllEntries is baked in the same way for a different reason: it is read when the index is split,
     // so against a preloaded scene it would silently score the ordinary collection and report flat.
-    if (preloaded && (overrides.suppressVectorKeys !== undefined || overrides.suppressGazetteerKeys !== undefined || overrides.denseAllEntries !== undefined || overrides.gazetteerSource !== undefined)) {
-        throw new Error('suppressVectorKeys/suppressGazetteerKeys/gazetteerSource/denseAllEntries are read at load time, so they cannot be swept against a preloaded scene — load per arm');
+    if (preloaded && (overrides.denseAllEntries !== undefined || overrides.gazetteerSource !== undefined)) {
+        throw new Error('gazetteerSource/denseAllEntries are read at load time, so they cannot be swept against a preloaded scene — load per arm');
     }
     const scene = preloaded ?? loadScene(S, { indexFile: indexPath(S, { vectors, model, index }), params: P });
     const scoreAll = makeCandidateSet({ ...scene, params: P, topK });

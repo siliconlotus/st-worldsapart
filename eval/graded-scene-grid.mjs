@@ -170,7 +170,7 @@ if (FREEZE) {
     console.log(`froze query (${query.length} chars) + scan window (${scanText.length} chars) into ${path}`);
 }
 
-// --- entity filter: the gazetteer is built in loadScene (see scene.mjs for why suppressVectorKeys matters
+// --- entity filter: the gazetteer is built in loadScene (see scene.mjs for what it reads
 // here — reading raw book keys admitted 2.3x the terms and moved BM25 by up to 74%). Only the query-
 // dependent term weights are derived per run, since --depths rebuilds the query.
 const termWeights = (P.entityFilter && P.queryMode !== 'summary') ? ranking.buildTermWeights(query, gaz, P.boost) : null;

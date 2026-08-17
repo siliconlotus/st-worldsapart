@@ -90,13 +90,15 @@ eq(sceneParams(S, { K1: 3 }).LEXW, 1.5, 'an arm override leaves other params on 
 eq(sceneParams({}).entityFilter, true, 'a sample with no captureParams still gets a full param set');
 
 // --- the arm-reuse guard: reusing a loaded scene is only valid while the gazetteer is unchanged ---
-// suppressVectorKeys is baked in at load time, and a stale gazetteer has already cost this project a 74%
-// BM25 error, so sweeping it against a preloaded scene must throw rather than quietly mislead.
-let threw = false;
+// gazetteerSource is baked in at load time, and a stale gazetteer has already cost this project a 74%
+// BM25 error, so sweeping it against a preloaded scene must throw rather than quietly mislead. Asserted
+// on the MESSAGE, not merely on throwing: a preloaded stub throws for a dozen other reasons, and this
+// test passed against one of them while the guard it names was not firing at all.
+let threw = '';
 try {
-    await scoreScene({ sample: S, overrides: { suppressVectorKeys: false }, scene: { fake: true }, qv: [0] });
-} catch { threw = true; }
-eq(threw, true, 'sweeping suppressVectorKeys against a preloaded scene throws');
+    await scoreScene({ sample: S, overrides: { gazetteerSource: 'keys' }, scene: { fake: true }, qv: [0] });
+} catch (e) { threw = String(e?.message ?? e); }
+eq(threw.includes('cannot be swept against a preloaded scene'), true, 'sweeping the gazetteer against a preloaded scene throws its own error');
 
 // --- shared metric + title helpers (moved into scene.mjs; pin them where they now live) ---
 eq(ndcg([3, 2, 1], 3).toFixed(4), '1.0000', 'a perfectly ordered grade vector is nDCG 1');
@@ -139,7 +141,7 @@ eq(makeGradeOf([{ title: 'Villa', grade: 5, uid: 1 }, { title: 'Other', grade: 3
 // --- keyword scoring honours production's key suppression (worldsapart.js suppressKeys) ---
 // Samples embed books raw, so vectorized entries still carry keys the live scan would have blanked; scoring
 // them gave vectorized entries a keys signal production can never produce.
-const kwP = makeKeywordScore(sceneParams({}));   // suppressVectorKeys true, scoreVectorKeys false — the defaults
+const kwP = makeKeywordScore(sceneParams({}));   // scoreVectorKeys false — the default
 eq(kwP({ vectorized: true, key: ['villa'] }, 'meet me at the villa', 1.2), 0, 'vectorized keys are suppressed, as the live scan sees them');
 eq(kwP({ vectorized: false, key: ['villa'] }, 'meet me at the villa', 1.2) > 0, true, 'non-vectorized keys still score');
 eq(makeKeywordScore(sceneParams({ captureParams: { scoreVectorKeys: true } }))({ vectorized: true, key: ['villa'] }, 'meet me at the villa', 1.2) > 0,
