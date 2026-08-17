@@ -438,7 +438,7 @@ const fmt = n => (n == null ? '·' : (+n).toFixed(3));
         // gets measured like any other arm rather than argued about.
         ['+ entry content in gaz', ranking.buildTermWeights(query, new Set([...gaz, ...gazSource.flatMap(e => tokenize(e.content ?? ''))]), P.boost)],
     ];
-    console.log(`\nentity filter — mean rank of the ${relN} graded targets (grade>=3), lower is better`);
+    console.log(`\nentity filter — mean rank of the ${relCount} graded targets (grade>=3), lower is better`);
     console.log('  arm                          | terms  found  mean rank  in top10  layout@10 layout@R vector@10 vector@R  judged@10');
     for (const [label, tw] of filterArms) {
         const m = rankMetrics(tw);
