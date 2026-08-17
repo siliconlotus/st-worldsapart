@@ -382,7 +382,7 @@ export function buildSample({ name, notes, query, queryChat, scanText, depth, ch
         books,
 
         grades,
-        gradeScale: 4,
+        gradeScale: GRADE_SCALE,
         excludeTitles: foreign.map(g => g.title),
 
         // The grading depth, under its historical name — samples on disk predate the cliff's removal and
@@ -443,13 +443,13 @@ export function bundleSamples(arms) {
  * @returns {object} A plain sample
  */
 export function openBundle(manifest, arm = null) {
-    if (!Array.isArray(manifest?.arms)) return normalizeSample(manifest);
+    if (!Array.isArray(manifest?.arms)) return manifest;
     const names = manifest.arms.map(a => a.arm);
     const wanted = arm ?? (names.includes('shipped') ? 'shipped' : names[0]);
     const hit = manifest.arms.find(a => a.arm === wanted);
     if (!hit) throw new Error(`bundle has no arm "${wanted}" — available: ${names.join(', ')}`);
     const { arms: _drop, bundleVersion: _v, ...shared } = manifest;
-    return normalizeSample({ ...shared, ...hit, name: `${manifest.name}--${hit.arm}` });
+    return { ...shared, ...hit, name: `${manifest.name}--${hit.arm}` };
 }
 
 /**
@@ -464,15 +464,8 @@ export const GRADE_ANCHORS = [
     'Fairly relevant; should likely be included',
     'Directly relevant; should absolutely be included',
 ];
-export const GRADE_SCALE = 4;
-
-// ponytail: transitional 0-5 -> 0-4 remap (grader's own re-reading: 2s->1, 3+->g-1); DELETE normalizeGrade
-// and normalizeSample (leave a passthrough) once every pre-0-4 sample has been regraded or retired.
-export const normalizeGrade = g => (g <= 1 ? g : g <= 2 ? 1 : g - 1);
-export function normalizeSample(sample) {
-    if (!sample || sample.gradeScale === GRADE_SCALE || !Array.isArray(sample.grades)) return sample;
-    return { ...sample, gradeScale: GRADE_SCALE, grades: sample.grades.map(g => ({ ...g, grade: normalizeGrade(Number(g.grade) || 0) })) };
-}
+/** Top of the scale. Derived from the anchors so the two cannot drift apart. */
+export const GRADE_SCALE = GRADE_ANCHORS.length - 1;
 
 /** Sample -> pretty JSON + filename, ready for ST's download(). */
 export function sampleFile(sample) {

@@ -51,7 +51,7 @@ import { runState, defaultSettings, settings, ensureSettings } from './extension
 import { ensureStudioStyle, entryFoldHtml, keyHitsHtml, makeSortControl, makeTierEditor, showEntryText, wiGlyph, wiTooltip } from './extension/ui-widgets.mjs';
 import { PRESENTATION_ALIAS, SORT_FNS, gradeOrder, normPresentation, presentationBaseLabel, presentationLabel, reconcileTiers, tierRank, wiTitleOf } from './extension/sort.mjs';
 import { lorebookStudio } from './extension/studio.mjs';
-import { buildSample, bundleSamples, captureParams, GRADE_ANCHORS, mergeGrades, normalizeSample, rowKey, sampleFile, searchedBook, splitGraded, trimBook, unionArms } from './extension/grading.mjs';
+import { buildSample, bundleSamples, captureParams, GRADE_ANCHORS, GRADE_SCALE, mergeGrades, rowKey, sampleFile, searchedBook, splitGraded, trimBook, unionArms } from './extension/grading.mjs';
 
 /** The grading scale in one caption line, shared by both grading popups. */
 const gradeAnchorLine = () => `Grade 0–4: ${GRADE_ANCHORS.map((a, g) => `${g} = ${a.split(';')[0].toLowerCase()}`).join(' · ')}.`;
@@ -2712,7 +2712,7 @@ async function superGradePopup({ captures, union, entryOf, prior: prior0 = [], s
                 const key = rowKey(row);
                 const num = n => (n == null ? '·' : String(n));
                 const done = priorOf.has(key);
-                // Prior rows are inputs too, pre-filled with the (remapped) earlier grade: an edit re-emits
+                // Prior rows are inputs too, pre-filled with the earlier grade: an edit re-emits
                 // the row as a fresh grade and mergeGrades is last-wins, so the edit overrides the prior.
                 // A carried-over edit stays dirty across repaints, or the next repaint would revert it.
                 //
@@ -2773,9 +2773,7 @@ async function superGradePopup({ captures, union, entryOf, prior: prior0 = [], s
                         added++;
                     }
                 } else if (Array.isArray(parsed?.grades)) {
-                    // Remaps legacy 0-5 grades to the 0-4 scale (no-op on current-scale files), so the
-                    // pre-filled inputs below show the value that will actually be saved.
-                    loaded.push(...normalizeSample(parsed).grades);
+                    loaded.push(...parsed.grades);
                 } else {
                     toastr.warning(`${file.name} has neither "grades" nor "pending" — ignored`, 'Worlds Apart');
                     continue;
@@ -2972,7 +2970,7 @@ const pickJsonFile = () => new Promise(resolve => {
  * from the file. Nothing live is read — no chat, no attached books, no settings — so a scene captured
  * offline (or by someone else, or by an LLM judge) can be reviewed without loading the chat it came from.
  * Entry text resolves from the bundle's embedded books, the stored grades arrive pre-filled and editable
- * (legacy 0-5 remapped on load), and Save downloads the SAME bundle with only `grades`/`gradeScale`
+ * and Save downloads the SAME bundle with only `grades`/`gradeScale`
  * updated — arms, captures, params and books are preserved untouched.
  */
 async function superEvalScene() {
@@ -3012,7 +3010,7 @@ async function superEvalScene() {
         captures,
         union,
         entryOf,
-        prior: normalizeSample(manifest).grades,
+        prior: manifest.grades,
         subtitle: `Reviewing ${file.name} (${manifest.createdBy ?? 'unknown grader'}) — loaded from file, no chat required.`,
         okButton: 'Save updated bundle',
     });
@@ -3027,7 +3025,7 @@ async function superEvalScene() {
     // llmGrade is re-attached here from the loaded manifest for the rows a human did edit.
     const llmOf = new Map(manifest.grades.filter(g => g.llmGrade !== undefined).map(g => [rowKey(g), g.llmGrade]));
     const grades = done.grades.map(g => (llmOf.has(rowKey(g)) ? { ...g, llmGrade: llmOf.get(rowKey(g)) } : g));
-    const updated = { ...manifest, grades, gradeScale: 4 };
+    const updated = { ...manifest, grades, gradeScale: GRADE_SCALE };
     const { filename, content } = sampleFile(updated);
     download(content, filename, 'application/json');
     const rel = grades.filter(g => (g.grade ?? g.llmGrade) >= 3).length;
@@ -3607,7 +3605,7 @@ export async function init() {
     SlashCommandParser.addCommandObject(SlashCommand.fromProps({
         name: 'wa-super-eval',
         callback: superEvalScene,
-        helpString: 'Worlds Apart: review a graded sample/bundle from its FILE, chat-independent — nothing live is read, so scenes captured offline or graded by an LLM judge open without loading their chat. Same grading window as /wa-super-grade; stored grades arrive pre-filled and editable (legacy 0-5 remapped to 0-4), entry text comes from the embedded books, and Save downloads the same bundle with only the grades updated — diff it against the original to see exactly what the review changed.',
+        helpString: 'Worlds Apart: review a graded sample/bundle from its FILE, chat-independent — nothing live is read, so scenes captured offline or graded by an LLM judge open without loading their chat. Same grading window as /wa-super-grade; stored grades arrive pre-filled and editable, entry text comes from the embedded books, and Save downloads the same bundle with only the grades updated — diff it against the original to see exactly what the review changed.',
         returns: 'nothing',
     }));
 

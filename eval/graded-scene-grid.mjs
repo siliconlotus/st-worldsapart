@@ -1,5 +1,5 @@
 // Graded-scene grid: reproduce WA's retrieval ranking for a REAL scene (chat query) offline, score it
-// against human 0-5 grades with nDCG, and sweep any parameter — the sensitive complement to the LOO grid.
+// against human 0-4 grades with nDCG, and sweep any parameter — the sensitive complement to the LOO grid.
 //
 // Vector + BM25 + chunk-selection come from the SHARED scoring module (scoring.mjs), the exact code the
 // server plugin runs; query construction, the entity filter, keyword scoring and RRF fusion come from the

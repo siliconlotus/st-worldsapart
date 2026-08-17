@@ -1,4 +1,4 @@
-// Score WA's actual /wa-debug ranking against human relevance grades (0-5) with nDCG.
+// Score WA's actual /wa-debug ranking against human relevance grades (0-4) with nDCG.
 //
 // Unlike the retrieval harnesses, this reads WA's REAL output — no pipeline reimplementation
 // — so it stays honest across any chat/lorebook. You grade the titles /wa-debug prints, and
