@@ -29,13 +29,14 @@ eq(JSON.stringify(meta).length * 10 < JSON.stringify(full).length, true, 'meta i
 eq(Object.keys(trimBook(Object.values(book), 'meta')).length, 2, 'trimBook accepts an array');
 
 // --- captureParams maps settings onto the harness's argument names ---
-const s = { rrfK: 20, bm25K1: 1.2, bm25B: 0.75, lexicalWeight: 1, properNounBoost: 3, stopwordDocFreq: 0.25,  maxVectorEntries: 10, minVectorEntries: 3, suppressVectorKeys: true, scoreVectorKeys: false, entityFilter: true, queryMode: 'messages', weightByOrder: false, vectorCutoff: 'count', elbowSensitivity: 1.5, dropoffThreshold: 0.06 };
+const s = { rrfK: 20, bm25K1: 1.2, bm25B: 0.75, lexicalWeight: 1, properNounBoost: 3, stopwordDocFreq: 0.25,  maxVectorEntries: 10, suppressVectorKeys: true, scoreVectorKeys: false, entityFilter: true, queryMode: 'messages', weightByOrder: false };
 const p = captureParams(s, { caseSensitive: false, wholeWords: false, includeNames: true });
 eq(p.K, 20, 'rrfK -> K');
 eq(p.K1, 1.2, 'bm25K1 -> K1');
 eq(p.LEXW, 1, 'lexicalWeight -> LEXW');
 eq(p.stopwordDf, 0.25, 'stopwordDocFreq -> stopwordDf');
 eq('threshold' in p, false, 'no admission threshold is captured — stage 1 has no gate to reproduce');
+eq('vectorCutoff' in p, false, 'no cliff mode is captured — stage 4 has no relevance cut to reproduce');
 eq(p.includeNames, true, 'ST world-info globals are carried, not guessed');
 // commonWordWeight is derived from the mode, not stored — the one value paramSnapshot computes.
 eq(p.commonWordWeight, 1, 'hybrid mode -> commonWordWeight 1');
@@ -83,7 +84,7 @@ const sample = buildSample({
         { title: 'Villa Party', grade: 5, world: 'Main', uid: 1 },
         { title: 'Mechanics', grade: 4, world: 'Other', uid: 10 },
     ],
-    cutoff: { mode: 'count', kept: 10 }, now: '2026-07-29',
+    cutoff: { gradingOverride: { maxVectorEntries: 10 } }, now: '2026-07-29',
 });
 eq(sample.query, 'q', 'query is frozen into the sample');
 eq(sample.scanText, 'w', 'scan window is frozen into the sample');
@@ -112,7 +113,7 @@ const IN = {
     chat: 'chats/c.jsonl', book: 'worlds/Main.json', index: 'i.json', primaryBook: 'Main', embedModel: 'bge-m3',
     params: { K: 20 }, snapshot: { a: 1 }, candidates: [{ uid: 1 }], books: { Main: {} }, bookMode: 'none',
     priority: [{ world: 'Main' }], grades: [{ title: 'T', grade: 3, world: 'Main', uid: 1 }],
-    cutoff: { mode: 'elbow' }, gradedCandidates: 20, pluginFP: 'deadbeef', sourceFP: 'deadbeef',
+    cutoff: { gradingOverride: { maxVectorEntries: 20 } }, gradedCandidates: 20, pluginFP: 'deadbeef', sourceFP: 'deadbeef',
     now: '2026-07-29',
 };
 const out = buildSample(IN);
@@ -267,7 +268,7 @@ const mk = (arm, over) => ({ arm, sample: buildSample({
     chat: 'chats/c.jsonl', book: 'worlds/Main.json', index: `i-${arm}.json`, primaryBook: 'Main', embedModel: 'bge-m3',
     params: { K: 20, ...over }, snapshot: { a: 1 }, candidates: [{ uid: 1, title: 'T', world: 'Main' }],
     books: { Main: meta }, bookMode: 'full', priority: [], grades: [{ title: 'T', grade: 4, world: 'Main', uid: 1 }],
-    cutoff: { mode: 'count' }, gradedCandidates: 1, pluginFP: 'ab', sourceFP: 'ab', now: '2026-07-29',
+    cutoff: { gradingOverride: { maxVectorEntries: 1 } }, gradedCandidates: 1, pluginFP: 'ab', sourceFP: 'ab', now: '2026-07-29',
 }) });
 const bundle = bundleSamples([mk('shipped', {}), mk('summary', { queryMode: 'summary' }), mk('depth', { messageDepth: 8 })]);
 

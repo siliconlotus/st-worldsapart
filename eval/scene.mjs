@@ -18,7 +18,6 @@ import { corpusMean, centeredCosineScores } from '../plugin/vector.mjs';
 import * as ranking from '../extension/ranking.mjs';
 import * as matcher from '../extension/matcher.mjs';
 import { isDurable, openBundle } from '../extension/grading.mjs';
-import { cutDynamic } from '../extension/selection.mjs';
 import { buildContentIndex, scoreContent, entryKey } from '../extension/content-lexical.mjs';
 // Cycle: reindex.mjs imports getStringHash from here. Safe because neither side calls across at module
 // scope — both references live inside function bodies, so whichever module loads first finishes evaluating
@@ -440,6 +439,11 @@ export const isDurableEntry = e => Boolean(e?.constant);
  * Identity comparison, not uid: `kept` holds the same row objects the population does (fuse sorts a copy
  * of the same references), so a uid join would be a second way to say the same thing and a place to drift.
  *
+ * NO CALLER TODAY. It split the DELIVERED set, and stage 4 has no relevance cut to deliver one since the
+ * cliff was removed (extension/selection.mjs) — the entry maxes and the token budget are cuts this harness
+ * does not replay. Kept, and kept under check by paired-check.mjs, because the guard is wanted back the
+ * moment a new cut produces a kept set: the failure it catches is invisible to every other metric here.
+ *
  * @param {Array<object>} population Rows the selection chose from, durable already excluded by the caller
  * @param {Array<object>} kept The rows it chose
  * @param {(row: object) => number|null} gradeOf Grade lookup; ungraded counts as not relevant
@@ -597,48 +601,6 @@ export const makeFuse = P => (rows, lexW) => {
 };
 
 /**
- * The stage-4 cliff as the runtime applies it: over the fused LAYOUT ranking's dynamic block, not over
- * the retrieval ranking. One helper so graded-scene-grid and param-screen cannot drift — the same rule
- * that keeps the gazetteer and the scorers in one place.
- *
- * Reference-tier rows are the harness's sticky/constant analogue: they reach the prompt because a key
- * fired, not because ranking chose them, so they are outside the cliff's population exactly as constants
- * are at runtime.
- *
- * DURABLE IS OUT OF THE POPULATION, matching the runtime — the budget may cut a constant for capacity,
- * the cliff may not cut it for relevance. REFERENCE IS IN IT, also matching the runtime, because a
- * keyword-activated entry is neither sticky nor constant and so lands in `results` there.
- *
- * `scoreScene` still strips reference rows before its RANKING metrics (triggered == relevant); whether
- * the cliff is entitled to cut them is a different question and the answer is yes.
- *
- * `refKept`/`refAll` report composition over the CUT population, so a cliff eating the reference tier is
- * visible. Read it as a calibration symptom, not as a case for a quota: the fused score is meant to make
- * a grade-3 memory entry beat a grade-2 reference entry, and if reference rows vanish at equal grade
- * that is fuseRanks failing to compare across provenance, which no cliff placement can rescue.
- *
- * @param {Array<object>} layout Fused layout ranking, best first, durable rows already excluded by the caller
- * @param {object} P Scene params (vectorCutoff, minVectorEntries, elbowSensitivity, …)
- * @returns {{kept: Array<object>, dropped: Array<object>, refKept: number, refAll: number}}
- */
-export function cliffCut(layout, P) {
-    // `layout` is ALREADY durable-filtered by the caller — graded-scene-grid's `layoutOf` does exactly
-    // that split, and re-deriving it here is the second copy the gazetteer rule exists to prevent.
-    const { ranked, dropped } = cutDynamic({ sticky: [], constant: [], results: layout }, {
-        mode: P.vectorCutoff ?? 'off',
-        minVectorEntries: P.minVectorEntries ?? 3,
-        elbowSensitivity: P.elbowSensitivity ?? 1.5,
-        dropoffThreshold: P.dropoffThreshold ?? 0.06,
-    });
-    return {
-        kept: ranked,
-        dropped,
-        refKept: ranked.filter(r => isReference(r.entry)).length,
-        refAll: layout.filter(r => isReference(r.entry)).length,
-    };
-}
-
-/**
  * Scores one scene end to end at one parameter set: nDCG on the pooled rows, plus judged coverage of the
  * unfiltered top-k.
  *
@@ -654,8 +616,7 @@ export function cliffCut(layout, P) {
  * @param {object} [args.overrides] Parameter overrides for this arm
  * @param {number} [args.k] Coverage/nDCG cutoff (10)
  * @returns {Promise<{n: number, nAt5: number, judged: number, of: number, unjudged: string[], terms: number|null,
- *   atR: {precision: number, recall: number, f: number, n: number},
- *   delivered: {precision: number, recall: number, f: number, n: number}, divergence: number}>}
+ *   atR: {precision: number, recall: number, f: number, n: number}}>}
  */
 export async function scoreScene({ sample: S, overrides = {}, k = 10, vectors, model, ollama, index, topK, scene: preloaded, qv: cachedQv } = {}) {
     const P = sceneParams(S, overrides);
@@ -695,10 +656,8 @@ export async function scoreScene({ sample: S, overrides = {}, k = 10, vectors, m
     //
     // REFERENCE IS IN, also newly. Stage 1 once arbitrated a retrieval ranking only vectorized entries
     // could enter, so a keyword entry arrived by a route ranking never judged; stage 4 ended that, and
-    // cliffCut in this file already says "REFERENCE IS IN IT, also matching the runtime".
-    //
-    // The `delivered` window below still models the runtime, durable handling and all, because that one IS
-    // a question about what the pipeline hands over.
+    // a keyword-activated entry is neither sticky nor constant, so at runtime it lands in the dynamic
+    // block beside the retrieved ones.
     const rankable = all.filter(r => !r.entry?.constant);
 
     const top = fuse(rankable, P.LEXW).slice(0, k);
@@ -739,13 +698,14 @@ export async function scoreScene({ sample: S, overrides = {}, k = 10, vectors, m
     //
     //   @R          the top `relevant` rows. Budget-invariant by construction — a user's token ceiling is
     //               set by cost and is not a property of the ranking, so it cannot be in the window.
-    //   @delivered  the rows stage 4 hands over with capacity NOT BINDING, which is the cliff's own output.
-    //               `delivered` is the accurate name: the intent is that it lands under the budget rather
-    //               than at it, so the count is the configuration's, not the ceiling's.
+    // There was a second window, @delivered — the rows stage 4 handed over with capacity not binding. It
+    // read the cliff, and the cliff is gone (extension/selection.mjs), so what stage 4 delivers is now
+    // decided by the entry maxes and the token budget, neither of which this harness replays. Restoring it
+    // is the new cut's work; scoring it against an uncut population would have made it a constant per
+    // scene and every arm's delta zero, which reads as "no effect" rather than as "not measured".
     //
-    // Both drop the reference tier, exactly as the block above does — grading a keyword-activated entry is
-    // the same category error at any window, and a delivered set scored with reference rows in the
-    // denominator against an R that excludes them would not be one metric.
+    // It drops the reference tier, exactly as the block above does — grading a keyword-activated entry is
+    // the same category error at any window.
     const scoreWindow = (rows) => {
         const gr = rows.map(r => gradeOf(r) ?? 0);
         const p = rows.length ? gr.reduce((s, x) => s + gradeCredit(x), 0) / rows.length : 0;
@@ -754,13 +714,6 @@ export async function scoreScene({ sample: S, overrides = {}, k = 10, vectors, m
     };
     const ranked = fuse(rankable, P.LEXW);
     const atR = scoreWindow(ranked.slice(0, relevant));
-    // cliffCut takes the durable-filtered layout INCLUDING reference rows, because the runtime's cliff can
-    // drop those too; the reference exclusion is applied to what it returns, not to what it is handed.
-    const cutPopulation = all.filter(r => !isDurableEntry(r.entry));
-    const cutKept = cliffCut(fuse(cutPopulation, P.LEXW), P).kept;
-    const delivered = scoreWindow(cutKept.filter(r => !isReference(r.entry)));
-    // Read BEFORE the reference strip above — the split is only informative while both tiers are present.
-    const byTier = tierRecall(cutPopulation, cutKept, gradeOf);
 
     return {
         n: ndcg(g, k),
@@ -769,13 +722,6 @@ export async function scoreScene({ sample: S, overrides = {}, k = 10, vectors, m
         recall,
         f2,
         atR,
-        delivered,
-        // Delivered recall, split by tier. Not a second score — a guard on the one above: a selection that
-        // trades a hard class for an easy one improves every pooled metric here while delivering less of
-        // what the system is for, and nothing else reported by this function can see that.
-        byTier,
-        // Reported rather than derived at every call site, so two tools cannot disagree about its sign.
-        divergence: delivered.f - atR.f,
         relevant,
         judged: top.length - unjudged.length,
         of: top.length,

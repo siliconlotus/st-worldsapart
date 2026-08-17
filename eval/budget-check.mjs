@@ -303,40 +303,26 @@ const vAfterCap = await applyBudget({
 });
 eq(vAfterCap.survivors.has(constants[0]), true, 'a constant walked after the vector cap is spent still survives — the block clause checks isDynamic, not just the counter');
 
-// --- cutDynamic: the cliff's population and the list it hands the budget -----------------------------
-import { cutDynamic } from '../extension/selection.mjs';
+// --- walkOrder: the list the budget walks ------------------------------------------------------------
+// The cliff that used to cut this list is gone (extension/selection.mjs); what is left is the ORDER, and
+// the order is load-bearing on its own — it is what makes every cap in applyBudget a prefix cut.
+import { walkOrder } from '../extension/selection.mjs';
 
 const row = (key, fused) => ({ key, fused, entry: {} });
-// A clear cliff after the third row.
-const res = [row('r1', 9), row('r2', 8.9), row('r3', 8.8), row('r4', 1), row('r5', 0.9), row('r6', 0.8)];
+const res = [row('r1', 9), row('r2', 8.9), row('r3', 8.8), row('r4', 1)];
 const stick = [row('s1', 0.1)];
 const cons = [row('k1', 0)];
-const cliffCfg = { mode: 'elbow', minVectorEntries: 1, elbowSensitivity: 1.5 };
 
 // CONSTANT BEFORE STICKY: constant means always, so a world rule only loses its place when constants
 // alone overflow the budget. The walk order is a prefix cut, so whichever class leads is served first.
-{
-    const order = cutDynamic({ sticky: [row('s1', 0.9)], constant: [row('k1', 0.1)], results: [] }, cliffCfg).ranked;
-    eq(order[0].key, 'k1', 'a constant is walked before an armed sticky, whatever their fused scores');
-}
-let c = cutDynamic({ sticky: stick, constant: cons, results: res }, cliffCfg);
-eq(c.ranked.map(x => x.key).join(','), 'k1,s1,r1,r2,r3', 'constant and sticky lead, then the surviving prefix');
-eq(c.dropped.map(x => x.key).join(','), 'r4,r5,r6', 'cliff losers are named, not silently absent');
-eq(c.ranked.includes(stick[0]) && c.ranked.includes(cons[0]), true, 'sticky and constant always survive the cliff');
-
-// The population excludes sticky and constant, so their low fused scores cannot move the cliff. A
-// constant scores low by ELIGIBILITY (no vector signal, often no keys), not by irrelevance.
-const withNoise = cutDynamic({ sticky: [row('s1', 0.05)], constant: [row('k1', 0.04)], results: res }, cliffCfg);
-eq(withNoise.dropped.map(x => x.key).join(','), 'r4,r5,r6', 'a constant s low score does not shift where the cliff falls');
-
-// 'off' disables the cliff without disabling the budget that follows.
-c = cutDynamic({ sticky: stick, constant: cons, results: res }, { ...cliffCfg, mode: 'off' });
-eq(c.dropped.length, 0, 'mode off drops nothing');
-eq(c.ranked.length, 8, 'mode off still assembles the full walk order');
+eq(walkOrder({ sticky: [row('s1', 0.9)], constant: [row('k1', 0.1)], results: [] })[0].key, 'k1',
+    'a constant is walked before an armed sticky, whatever their fused scores');
+eq(walkOrder({ sticky: stick, constant: cons, results: res }).map(x => x.key).join(','), 'k1,s1,r1,r2,r3,r4',
+    'constant and sticky lead, then the dynamic block in retention order');
+eq(walkOrder({ sticky: stick, constant: cons, results: res }).length, 6,
+    'nothing is dropped on the way in — every cut at this stage is applyBudget s');
 
 // Empty blocks are the ordinary keyword-only and retrieval-only cases, not edge cases.
-c = cutDynamic({ sticky: [], constant: [], results: [] }, cliffCfg);
-eq(c.ranked.length, 0, 'nothing activated');
-eq(c.dropped.length, 0, 'and nothing dropped');
-c = cutDynamic({ sticky: stick, constant: cons, results: [] }, cliffCfg);
-eq(c.ranked.map(x => x.key).join(','), 'k1,s1', 'a scene with no dynamic rows still ranks its always-on ones');
+eq(walkOrder({ sticky: [], constant: [], results: [] }).length, 0, 'nothing activated');
+eq(walkOrder({ sticky: stick, constant: cons, results: [] }).map(x => x.key).join(','), 'k1,s1',
+    'a scene with no dynamic rows still ranks its always-on ones');

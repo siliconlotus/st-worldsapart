@@ -100,15 +100,11 @@ export function captureParams(s, { caseSensitive, wholeWords, includeNames }) {
         commonWordWeight: 1,
         meanCentered: s.meanCentered,
         maxVectorEntries: s.maxVectorEntries,
-        minVectorEntries: s.minVectorEntries,
         suppressVectorKeys: s.suppressVectorKeys,
         scoreVectorKeys: s.scoreVectorKeys,
         entityFilter: s.entityFilter,
         queryMode: s.queryMode,
         weightByOrder: s.weightByOrder,
-        vectorCutoff: s.vectorCutoff,
-        elbowSensitivity: s.elbowSensitivity,
-        dropoffThreshold: s.dropoffThreshold,
         caseSensitive,
         wholeWords,
         // The boundary class whole-word matching used. Recorded here rather than only in
@@ -338,7 +334,7 @@ export function searchedBook(rows) {
  * @param {string} args.bookMode Fidelity the books were copied at
  * @param {object[]} args.priority Per-book weight/offset/cap
  * @param {Array<{title: string, grade: number, world?: string, uid?: number}>} args.grades Human grades
- * @param {object} [args.cutoff] What the cutoff did on this run
+ * @param {object} [args.cutoff] The grading depth this run captured to, and the live cap it overrode
  * @param {string} [args.now] ISO date (injected so the check is deterministic)
  * @returns {object} The sample manifest
  */
@@ -395,7 +391,8 @@ export function buildSample({ name, notes, query, queryChat, scanText, depth, ch
         gradeScale: 4,
         excludeTitles: foreign.map(g => g.title),
 
-        // The ranking as it stood, so a later run can be diffed against what was actually graded.
+        // The grading depth, under its historical name — samples on disk predate the cliff's removal and
+        // carry its settings here too. A later run diffs against what was actually graded.
         cutoff,
         // How many rows the grader was actually shown. Rows past it are UNGRADED, not irrelevant, so the
         // harness needs it to know which of its deep cutoff arms it is allowed to believe.

@@ -550,33 +550,39 @@ the weight, buffer scoring admits a depth-3 entry at full strength on text WA it
 
 ## Stage 4: Selection
 
-Three cuts, all here, each answering one question over the same layout ranking.
+Two cuts, both here, each answering one question over the same layout ranking.
 
-**The cliff** (`selection.mjs` `cutDynamic`) decides relevance, over the dynamic block, in the order the
-budget walks. It runs unconditionally: an irrelevant entry should not reach the prompt whether or not
-there was room for it. Constants and ARMED stickies — durable as the runtime reads it — are outside its
-population: the budget may cut a constant for capacity, the cliff may not cut it for relevance, because
-marking an entry constant is that judgement already made, and such an entry scores low by ELIGIBILITY
-rather than by irrelevance. Everything else in the dynamic block is in it and is cut like anything
-else — the fused score is what has to make a grade-3 memory entry beat a grade-2 reference entry, and
-giving either tier a structural exemption would be compensating for a score that is not doing its job.
+**THERE IS NO RELEVANCE CUT.** A cliff (`cutRetrieved`, modes `elbow` / `dropoff`) cut the dynamic block
+at a gap in the fused score until 2026-08-16. It was removed, not retuned, and the reason is that nothing
+could defend it: every figure that chose `elbow` at 1.5 graded a cut over the RETRIEVAL ranking, where a
+gap is one signal's spread rather than an eligibility-normalised fusion of three, so none of it
+transferred when the cut moved here. Leaving it running at carried-over defaults also meant the stage
+could not be graded — an unmeasured relevance cut sits between every arm and its result. **So the system
+currently makes NO relevance decision** (against *Principles*, which rules for exactly one, here). The
+decision is not delegated to another stage; it is absent until there is something to grade it with, and
+`walkOrder` is what remains of the function that made it.
 
-**The entry maxes** then decide how many, on nested populations: vector ⊆ dynamic ⊆ all, plus the
+What that widens: the dynamic block reaches the prompt whole, bounded only by the cuts below. Do not
+tighten `maxVectorEntries` to compensate — a rank-position cap has no relevance signal, and using one
+that way is the failure its own note describes.
+
+**The entry maxes** decide how many, on nested populations: vector ⊆ dynamic ⊆ all, plus the
 per-book quota. `maxVectorEntries` bounds what retrieval contributed and is counted by PROVENANCE —
 retrieval scored the entry — not by the `vectorized` flag.
 
-**The token budget** decides how much, and is the only one of the three measured in tokens rather than
-entries. The maxes and the budget both live in `applyBudget`, which walks the ranked layout once, sticky
+**The token budget** decides how much, and is the only one measured in tokens rather than entries. The maxes and the budget both live in `applyBudget`, which walks the ranked layout once, sticky
 and constant first so every cap is a prefix cut, returns the survivors, and reports every cap that
 rejected a row. `rankActivated` deletes the rest from `activated` — `selection.mjs` is ST-free and the
 map is core's.
 
-This is where the one relevance decision is made (see *Principles*).
+This is the stage the one relevance decision belongs to (see *Principles*), and the stage that is
+currently not making it.
 
-**The cliff can drop a keyword-activated entry with the budget wide open.** That stands against
-*triggered == relevant* (*Evidence*) and is recorded rather than resolved: arbitrating once over the
-whole heterogeneous set is what *Principles* requires, and carving an exemption for keyword rows would
-make stage 4 read provenance.
+**Whatever replaces it must arbitrate over the whole dynamic block**, keyword-activated entries
+included, which means it can drop one with the budget wide open. That stands against *triggered ==
+relevant* (*Evidence*) and is recorded rather than resolved: arbitrating once over the whole
+heterogeneous set is what *Principles* requires, and carving an exemption for keyword rows would make
+stage 4 read provenance. `promote` (*Open work* #2) is the per-entry escape from it.
 
 ---
 
@@ -662,8 +668,9 @@ the trigger deserved to fire; a memory entry is relevant because ranking chose i
 keyword-activated reference entry is not durable and is graded like anything else. Grading reads it off
 the CONFIGURED sticky value (`grading.mjs` `isDurable`, `eval/scene.mjs` `isDurableEntry`), because the
 question is whether ranking would have chosen the entry and the runtime state cannot answer it — a dry
-run arms nothing. Stage 4's cliff reads the ARMED effect instead, so a configured sticky entry on the
-turn it keyword-activates is inside the cliff's population and outside the graded one.
+run arms nothing. Stage 4 reads the ARMED effect instead — `walkOrder` hoists an armed sticky out of the
+dynamic block — so a configured sticky entry on the turn it keyword-activates is inside the runtime's
+dynamic population and outside the graded one.
 
 **Set metrics on a reference-heavy book are JOINT** and cannot tune routing alone: a reference entry
 reaches the prompt because its key fired, so a key miss and a routing miss land in the same recall
@@ -701,9 +708,10 @@ at the top. The evaluation score asks whether the system delivers the right set.
 cut moves nDCG and cannot move the set, so the two correlate without being the same measurement, and an
 nDCG figure is never evidence that the system works.
 
-It is kept because the cliff cuts a PREFIX of the layout ranking, so the ordering bounds what any cut
-placed on it can achieve — a well-placed cut cannot rescue a badly ordered list. The diagnostic is what
-tells a cliff that cut in the wrong place from a ranking where no cut position was good.
+It is kept because every cut at stage 4 takes a PREFIX of the layout ranking, so the ordering bounds
+what any cut placed on it can achieve — a well-placed cut cannot rescue a badly ordered list. The
+diagnostic is what tells a cut that fell in the wrong place from a ranking where no cut position was
+good.
 
 **Reference entries are GRADED, on the same 0-4 scale as anything else — not reduced to a boolean.** A
 two-valued "does it belong" throws away the only evidence there is about contention, which is precisely
@@ -721,9 +729,10 @@ moves, so comparative findings survive but the absolute level does not. **Measur
 ordering inverted at F4 — under the asymmetric bar depth wins at every beta and the inversion
 disappears.
 
-**What this unblocks**: whether `elbow` survives at all, what the cliff's own parameters and
-`maxVectorEntries` should default to, and whether reference entries need contention grades. All three
-are currently unanswerable because nothing grades stage 4.
+**What this unblocks**: what the relevance cut should BE — the cliff was removed rather than retuned, so
+this is now a design question and not a parameter sweep — what `maxVectorEntries` should default to, and
+whether reference entries need contention grades. All three are currently unanswerable because nothing
+grades stage 4.
 
 **The offline half exists.** `/wa-grade` records the pre-budget population with per-row `tokens`, `cut`
 and `cutBy`, plus the tokenizer, so `applyBudget` replays offline at any budget — verified exact
@@ -761,15 +770,19 @@ instances the books on disk hold.
 
 1. **The layout score** — `F2@budget` over the dynamic block, set-based, recall at grade >= 3 and
    precision crediting a 2 at half (`metrics.mjs` `gradeCredit`). Nothing grades stage 4 until it
-   exists, so every cliff default is carried over rather than chosen. Blocks three tuning decisions; has
-   data waiting for it now.
+   exists, which is why the cliff was removed rather than retuned: it now blocks DESIGNING the relevance
+   cut, not just tuning one. It needs an `applyBudget` replay the harnesses do not have — `eval/scene.mjs`
+   lost its `@delivered` window with the cliff, and `param-screen`'s tier-shift guard with it. Write the
+   window and the cut together. Has data waiting for it now.
 2. **`promote` — an author declaration that activation is sufficient.** A promoted entry enters the
-   layout whenever its keys fire, exempt from the cliff. It is the per-entry form of *triggered ==
-   relevant*, which stage 4 broke by having the cliff arbitrate keyword-activated entries alongside
+   layout whenever its keys fire, exempt from the relevance cut. It is the per-entry form of *triggered
+   == relevant*, which stage 4 broke by having the cliff arbitrate keyword-activated entries alongside
    retrieved ones. The fused score still orders it within its block; it no longer gates inclusion.
 
-   The walk becomes `[constant, fired-sticky, promoted, dynamic]`. `cutDynamic` gains one array and
-   exempts those rows as it exempts constants — the harness must too, or it cuts what the runtime
+   **Its premise is currently vacuous** — with no relevance cut there is nothing to be exempt from — so
+   it belongs to whatever replaces the cliff rather than standing on its own. The walk becomes
+   `[constant, fired-sticky, promoted, dynamic]`, which `walkOrder` gains as one more array; the new cut
+   must exempt those rows as it exempts constants, and the harness must too, or it cuts what the runtime
    keeps. The RANKING metrics still rank them: how a haystack should be sorted is a question about the
    entries, and only `constant` is outside that population.
 

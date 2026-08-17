@@ -205,11 +205,12 @@ const K = Number(arg('--k') ?? 10);
 // so an arm whose action is ADMISSION is measured by the half it does not move. `--metric f2` switches the
 // delta to F-beta(2) on the asymmetric bars (scene.mjs), which weights recall twice. Baseline and arm are
 // always scored on the same one, so a run mixing them is impossible.
-// `fAtR` and `fDelivered` are the two windows scoreScene reports (see its SET METRICS block); `divergence`
-// is their difference. All three ignore --k, being sized by the scene's relevant count and by what the
-// configuration delivers rather than by a fixed depth.
+// `fAtR` is the window scoreScene reports (see its SET METRICS block); it ignores --k, being sized by the
+// scene's relevant count rather than by a fixed depth. It was one of two: `fDelivered` and `divergence`
+// read the stage-4 cliff, which no longer exists (extension/selection.mjs), and no window replaces them
+// until the new cut does — the entry maxes and the token budget are cuts this harness does not replay.
 const METRIC = arg('--metric') ?? 'n';
-const WINDOWED = { fAtR: r => r.atR.f, fDelivered: r => r.delivered.f, divergence: r => r.divergence };
+const WINDOWED = { fAtR: r => r.atR.f };
 if (!['n', 'nAt5', 'f2', 'recall', 'precision', ...Object.keys(WINDOWED)].includes(METRIC)) { console.error(`unknown --metric ${METRIC}`); process.exit(2); }
 const mOf = r => (WINDOWED[METRIC] ? WINDOWED[METRIC](r) : r[METRIC]);
 const MODEL = process.env.WA_EMBED_MODEL ?? 'bge-m3';
@@ -231,11 +232,7 @@ const fx = n => (n >= 0 ? '+' : '') + n.toFixed(4);
         const base = await scoreScene({ sample: S, k: K, scene, qv });
         scenes.push({ path, name: S.name ?? path, S, scene, qv, P, base });
         console.log(`scene "${S.name ?? path}": baseline ${METRIC}@${K} ${mOf(base).toFixed(4)} (nDCG ${base.n.toFixed(4)}, P ${base.precision.toFixed(3)}, R ${base.recall.toFixed(3)}, rel ${base.relevant}), judged ${base.judged}/${base.of}${base.judged < base.of ? ' !!' : ''}`);
-        console.log(`    F@R ${base.atR.f.toFixed(4)} (P ${base.atR.precision.toFixed(3)} R ${base.atR.recall.toFixed(3)}, n ${base.atR.n})`
-            + `   F@delivered ${base.delivered.f.toFixed(4)} (P ${base.delivered.precision.toFixed(3)} R ${base.delivered.recall.toFixed(3)}, n ${base.delivered.n})`
-            + `   divergence ${(base.divergence >= 0 ? '+' : '') + base.divergence.toFixed(4)}`);
-        const bt = base.byTier;
-        console.log(`    delivered recall by tier: memory ${bt.memory.got}/${bt.memory.of}   reference ${bt.reference.got}/${bt.reference.of}`);
+        console.log(`    F@R ${base.atR.f.toFixed(4)} (P ${base.atR.precision.toFixed(3)} R ${base.atR.recall.toFixed(3)}, n ${base.atR.n})`);
         // `of` is the rankable top-k, so 0 means the reference-tier removal took EVERYTHING — a
         // reference-only book. Every arm then scores 0 and every delta is a tie, so the scene inflates the
         // scene count without contributing evidence. The judged<of check cannot see it: 0 < 0 is false.
@@ -324,7 +321,7 @@ const fx = n => (n >= 0 ? '+' : '') + n.toFixed(4);
             } else {
                 r = await scoreScene({ sample: sc.S, overrides: scoring, k: K, scene: sc.scene, qv: sc.qv });
             }
-            cells.push({ scene: sc.name, delta: mOf(r) - mOf(sc.base), judged: r.judged, of: r.of, unjudged: r.unjudged, byTier: r.byTier, baseTier: sc.base.byTier });
+            cells.push({ scene: sc.name, delta: mOf(r) - mOf(sc.base), judged: r.judged, of: r.of, unjudged: r.unjudged });
         }
         results.push({ arm: armName, cells, stat: signTest(cells.map(c => c.delta)) });
     }
@@ -352,18 +349,14 @@ const fx = n => (n >= 0 ? '+' : '') + n.toFixed(4);
             + (gaps ? `   (${gaps} scene(s) with unjudged rows in top ${K})` : ''));
     }
 
-    // TIER SHIFT, one line per arm. `memory` and `reference` have base rates of roughly 7% and 30% here, so
-    // an arm can raise every metric above by trading the hard class for the easy one — measured on one
-    // threshold that read as a clean win while delivering 93% of relevant reference rows and 56% of memory
-    // ones. Pooled recall, precision, F2, nDCG and calibration were all blind to it. A large negative
-    // memory column beside a positive reference column means the arm moved the population, not the ranking.
-    const tierLine = (r, half) => {
-        let got = 0, of = 0, gotB = 0;
-        for (const c of r.cells) { got += c.byTier[half].got; of += c.byTier[half].of; gotB += c.baseTier[half].got; }
-        return of ? `${((got - gotB) / of >= 0 ? '+' : '') + (100 * (got - gotB) / of).toFixed(1)}%` : '  -  ';
-    };
-    console.log(`\ndelivered-recall shift by tier (an arm that moves these apart changed WHICH CLASS ships, not how well it ranks)`);
-    for (const r of results) console.log(`  ${r.arm.padEnd(w)}  memory ${tierLine(r, 'memory').padStart(7)}   reference ${tierLine(r, 'reference').padStart(7)}`);
+    // THE TIER-SHIFT BLOCK IS GONE WITH THE CLIFF, and it was a real guard: `memory` and `reference` have
+    // base rates of roughly 7% and 30% here, so an arm can raise every other metric by trading the hard
+    // class for the easy one — measured once on a threshold that read as a clean win while delivering 93%
+    // of relevant reference rows against 56% of memory ones, invisible to pooled recall, precision, F2,
+    // nDCG and calibration alike. It split the DELIVERED set, which stage 4 no longer produces, and over
+    // an uncut population it reports +0.0% for every arm — a guard that always passes. Deleted rather
+    // than left printing that. scene.mjs `tierRecall` is intact and still checked; restoring this block is
+    // one call once the new cut has a kept set.
 
     console.log('\n^ = helps on every scene, v = hurts on every scene, ? = that cell kept unjudged rows so its Δ is a lower bound.');
     console.log(`comparisons made: ${results.length} across ${byFamily.size} parameter famil${byFamily.size === 1 ? 'y' : 'ies'} (holm corrected within family).`);

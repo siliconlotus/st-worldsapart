@@ -62,11 +62,10 @@ import { tokenize } from '../plugin/lexical.mjs';
 import { norm } from '../plugin/vector.mjs';
 import * as ranking from '../extension/ranking.mjs';   // shared client tuning layer — same code the extension runs
 import * as matcher from '../extension/matcher.mjs';
-import { cutRetrieved } from '../extension/selection.mjs';
 import { gradeValue } from './metrics.mjs';
 // Scene loading, the gazetteer, the scorers, the pool and the nDCG math all live in scene.mjs, shared with
 // param-screen.mjs — there must be exactly one copy of them (see that module's header).
-import { CID, cliffCut, dcg, embed as embedWith, indexPath, isDurableEntry, loadScene, makeFuse, makeGradeOf, makeKeywordScore, makeCandidateSet, ndcg, nrm, openSample, sceneParams, inVectorIndex, wiTitle } from './scene.mjs';
+import { CID, dcg, embed as embedWith, indexPath, isDurableEntry, loadScene, makeFuse, makeGradeOf, makeKeywordScore, makeCandidateSet, ndcg, nrm, openSample, sceneParams, inVectorIndex, wiTitle } from './scene.mjs';
 
 const arg = k => { const i = process.argv.indexOf(k); return i >= 0 ? process.argv[i + 1] : null; };
 if (!arg('--sample')) { console.error('need --sample <sample.json> (write one with /wa-grade)'); process.exit(2); }
@@ -338,7 +337,10 @@ const fmt = n => (n == null ? '·' : (+n).toFixed(3));
         // pure subset operation — a shorter, more focused query can promote an entry the wide capture ranked
         // out of the graded pool entirely — so a depth row with a high blind count is understating itself.
         // If it stays at 0, one wide capture ablates down cleanly and no extra grading is needed.
-        console.log(' depth | qChars  msgs  terms | layout@10 layout@R vector@R  meanRank  cut P     R     F1     blind   ref');
+        // The cut P/R/F1 and ref-composition columns are gone with the stage-4 cliff they scored
+        // (extension/selection.mjs). Every column left is cut-independent; `blind` now counts over the
+        // whole layout rather than over a kept set.
+        console.log(' depth | qChars  msgs  terms | layout@10 layout@R vector@R  meanRank  blind');
         for (const d of DEPTHS) {
             const q = ranking.buildQuery(chat, { depth: d });
             const st = scanWindowOf(chat, d);
@@ -350,17 +352,9 @@ const fmt = n => (n == null ? '·' : (+n).toFixed(3));
             const g = fused.map(r => gradeOf(r) ?? 0);   // unjudged occupies its rank and contributes nothing (makeGradeOf returns null)
             const hits = fused.map((r, i) => [gradeOf(r), i + 1]).filter(([gr]) => gr >= 3).map(([, i]) => i);
             const mean = hits.length ? hits.reduce((a, b) => a + b, 0) / hits.length : NaN;
-            // Cutoff, at stage 4, on the layout ranking — reference rows included, because the runtime's
-            // cliff can drop them too. Durable rows are already out via layoutOf/fused above. `fused` is
-            // this ranking's own cutoff config (P.vectorCutoff etc.), not a hardcoded count/10 — a depth
-            // sweep that cuts differently from the configuration under test measures the wrong thing.
-            const { kept: keep, refKept, refAll } = cliffCut(fused, P);
-            const relInRank = fused.filter(r => gradeOf(r) >= 3).length;
-            const tp = keep.filter(r => gradeOf(r) >= 3).length;
-            const pr = keep.length ? tp / keep.length : 0, rc = relInRank ? tp / relInRank : 0;
-            const blind = keep.filter(r => !POOL.has(Number(r.uid))).length;
+            const blind = fused.filter(r => !POOL.has(Number(r.uid))).length;
             const tag = d === DEPTH ? '  <- as graded' : '';
-            console.log(`${String(d).padStart(6)} | ${String(q.length).padStart(6)}  ${String(Math.min(d, chat.length)).padStart(4)}  ${String(tw ? Object.keys(tw).length : 'all').padStart(5)} | ${ndcg(g, 10).toFixed(4)}   ${fmtR(ndcgAtR(g))}   ${fmtR(ndcgAtR(gVec))}  ${mean.toFixed(1).padStart(8)}  ${pr.toFixed(3)} ${rc.toFixed(3)} ${((pr + rc) ? 2 * pr * rc / (pr + rc) : 0).toFixed(3)}  ${String(blind).padStart(4)}/${keep.length}  ${refKept}/${refAll}${tag}`);
+            console.log(`${String(d).padStart(6)} | ${String(q.length).padStart(6)}  ${String(Math.min(d, chat.length)).padStart(4)}  ${String(tw ? Object.keys(tw).length : 'all').padStart(5)} | ${ndcg(g, 10).toFixed(4)}   ${fmtR(ndcgAtR(g))}   ${fmtR(ndcgAtR(gVec))}  ${mean.toFixed(1).padStart(8)}  ${String(blind).padStart(4)}/${fused.length}${tag}`);
         }
         return;
     }
@@ -422,77 +416,15 @@ const fmt = n => (n == null ? '·' : (+n).toFixed(3));
     if (worst.j10 < worst.of) console.log(`!! worst coverage in the grid: ${worst.j10}/${worst.of} at k1=${worst.k1} b=${worst.b} lexW=${worst.lexW} — that cell is penalised for surfacing entries nobody judged.`);
     else console.log('pool is reusable across this grid: every cell\'s top-10 is fully judged.');
 
-    // SUPERSEDED BY THE STAGE-4 MOVE, kept until the tuning pass rewrites it: production cuts the layout
-    // ranking now, so these arms describe a cut WA no longer makes. The rewrite is the tuning work's,
-    // and needs three calls this change does not make — which credit rule the precision uses, which
-    // population it scores, and whether depth returns as an axis once maxVectorEntries is a budget cap
-    // this harness would have to replay applyBudget to apply.
+    // THE CUTOFF-ARM TABLE IS GONE. It swept elbow/dropoff/prefix arms against an %oracle best-F1 cut,
+    // and every one of those arms scored `cutRetrieved`, which was removed with the stage-4 cliff
+    // (extension/selection.mjs). It had also stopped measuring anything before that: it fed `cutRetrieved`
+    // the retrieval ranking, which lost its `fused` field when stage 1 went cosine-only, so every gap was
+    // NaN and every arm kept its whole window while still printing a "<- shipped default" row.
     //
-    // --- selection criteria: where the cut falls, scored as a SET. nDCG above grades the ORDER and is
-    // blind to how many survive it, so the cutoff settings need their own metric. Relevant = grade >= 3,
-    // the same bar relevance-eval.mjs reports recall against. Human grades on a real scene's entry-level
-    // ranking — the production shape, where cutoff-grid.mjs's arm is chunk-level and gold-free.
-    //
-    // The cut is applied to the RETRIEVAL ranking (shared fuseRetrieval: vector + BM25 over retrieved
-    // entries), which is what cutRetrieved is handed in production — NOT the fuseRanks layout ranking used
-    // for nDCG above. That one also carries keyword and order ranks over entries retrieval never saw, so
-    // cutting it would measure a decision WA never makes.
-    const retrieved = scoreAll(DEF.k1, DEF.b).filter(r => r.score !== undefined);
-    const ranked = ranking.fuseRetrieval(
-        new Map(retrieved.map(r => [r.uid, { score: r.score, bm25: r.textScore }])),
-        { rrfK: P.K, lexicalWeight: DEF.lexW },
-    ).map(r => ({ ...r, uid: r.key, title: byUid.get(Number(r.key)) ? wiTitle(byUid.get(Number(r.key))) : String(r.key) }));
-    const relN = ranked.filter(r => gradeOf(r) >= 3).length;
-    // Cliff modes get the SAMPLE's cap, not a hardcoded 10: capping a cliff search below the candidate
-    // list makes it structurally unable to find an inflection further down, which is the whole question.
-    const CAP = P.maxVectorEntries ?? 10;
-    // cutRetrieved takes no count of its own, so an arm's depth is a bound on its INPUT — third tuple
-    // element, sliced before the cut. The prefix arms are the cliff off over a window of N; the cliff arms
-    // search CAP rows, which is the depth %oracle below is measured to, so a prefix arm deeper than CAP is
-    // scored against an oracle that never looked that far.
-    const arms = [
-        ...[...new Set([3, 5, 10, 20, CAP])].sort((a, b) => a - b).map(v => [`prefix  max=${v}`, { mode: 'off' }, v]),
-        ...[1.2, 1.5, 2, 2.5].map(v => [`elbow   sens=${v}`, { mode: 'elbow', elbowSensitivity: v }, CAP]),
-        ...[0.04, 0.06, 0.08, 0.12].map(v => [`dropoff thr=${v}`, { mode: 'dropoff', dropoffThreshold: v }, CAP]),
-    ];
-    // Best F1 any prefix cut of this ranking could achieve — the ceiling the modes are trying to hit. Honest
-    // here (unlike the LOO arm) because the gold set is human, entry-level, and the right size.
-    let oracle = { f1: 0, at: 0 };
-    for (let i = 1; i <= Math.min(CAP, ranked.length); i++) {
-        const tp = ranked.slice(0, i).filter(r => gradeOf(r) >= 3).length;
-        const p = tp / i, r = relN ? tp / relN : 0;
-        const f = (p + r) ? 2 * p * r / (p + r) : 0;
-        if (f > oracle.f1) oracle = { f1: f, at: i, p, r };
-    }
-    // How many rows the grader was actually shown. Beyond this, entries are ungraded and score 0, so a mode
-    // that keeps more is charged for rows nobody judged — it looks worse than it is. /wa-grade switches its
-    // own cliff off precisely to push this boundary out past any mode being assessed.
-    const GRADED = Number(S.gradedCandidates) || 0;
-    console.log(`\ncutoff at shipped k1/b/lexW — ${relN} relevant (grade>=3) of ${ranked.length} candidates, cap=${CAP}, floor min=3`);
-    if (GRADED) console.log(`  grader saw ${GRADED} rows${S.cutoff?.gradingOverride ? ` (graded at ${S.cutoff.gradingOverride.mode}/${S.cutoff.gradingOverride.maxVectorEntries}${S.cutoff.live ? `; live setting was ${S.cutoff.live.mode}/${S.cutoff.live.maxVectorEntries}` : ''})` : ''} — rows past that are ungraded, so any arm keeping more is marked (?)`);
-    else console.log('  !! sample records no gradedCandidates: cannot tell where the grades stop, so deep arms may be scored against ungraded rows');
-    // A NULL scene (0 relevant, by construction) has no oracle cut: the only right answer is "keep nothing",
-    // which no mode can reach (minVectorEntries floors them), so `kept` below reads as pure contamination.
-    if (oracle.at) console.log(`  BEST POSSIBLE cut: keep ${oracle.at} -> P ${oracle.p.toFixed(3)} R ${oracle.r.toFixed(3)} F1 ${oracle.f1.toFixed(3)}  (the inflection a cliff mode should find)`);
-    else console.log('  NULL scene (0 relevant): no oracle cut exists — every kept row is contamination, smaller kept is better');
-    console.log('  mode / param     | kept   P      R      F1   %oracle  missed relevant');
-    for (const [label, cfg, win] of arms) {
-        const keep = cutRetrieved(ranked.slice(0, win), { minVectorEntries: 3, ...cfg });
-        const kept = new Set(keep.map(r => r.uid));
-        const tp = keep.filter(r => gradeOf(r) >= 3).length;
-        const p = keep.length ? tp / keep.length : 0, r = relN ? tp / relN : 0;
-        const missed = ranked.filter(x => gradeOf(x) >= 3 && !kept.has(x.uid)).map(x => `${x.title.slice(0, 24)} (#${ranked.indexOf(x) + 1})`);
-        const shipped = cfg.mode === 'elbow' && cfg.elbowSensitivity === 1.5 ? ' <- shipped default' : '';
-        // (?) = this arm kept rows nobody judged, so its F1 is a LOWER BOUND, not a measurement. Counted per
-        // row against the judged set rather than as `keep.length > gradedCandidates`: with a pooled grade set
-        // the boundary is which entries were judged, not how many, and a count comparison both misses an
-        // unjudged row inside the first N and cries wolf on a deep cut whose rows are all judged anyway.
-        const unjudged = keep.filter(r => !POOL.has(Number(r.uid))).length;
-        const beyond = unjudged ? ` (? ${unjudged} of ${keep.length} kept are unjudged)` : '';
-        const tag = shipped + beyond;
-        const f1 = (p + r) ? 2 * p * r / (p + r) : 0;
-        console.log(`  ${label.padEnd(16)} | ${String(keep.length).padStart(4)}  ${p.toFixed(3)}  ${r.toFixed(3)}  ${f1.toFixed(3)}  ${`${(100 * (oracle.f1 ? f1 / oracle.f1 : 0)).toFixed(0)}%`.padStart(6)}   ${missed.join(', ') || '(none)'}${tag}`);
-    }
+    // The instrument the new cut needs is not this one restored: it is the layout score over the dynamic
+    // block at the BUDGET (matcher-design.md Evidence, "Two scores"), which needs an applyBudget replay
+    // this harness does not have. Write that with the cut it scores.
 
     // --- entity filter: re-measures the claims in ranking.mjs buildTermWeights, whose figures ("mean
     // target rank 11.2 vs 21.6-28.2 unfiltered", "gazetteer costs half a rank", "boost plateaus 3..5")

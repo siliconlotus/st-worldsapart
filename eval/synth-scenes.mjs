@@ -384,8 +384,9 @@ for (const idx of picks) {
             arm: armName, query, queryChat, scanText, depth: DEPTH,
             primaryBook: BOOK, index: built.path, captureParams: capture,
             paramSnapshot: snapshotFor(srcArm?.paramSnapshot), excludeTitles: [],
-            // Nothing was cut, so there is no cutoff to report — recorded explicitly rather than omitted.
-            cutoff: { mode: 'none', maxVectorEntries: null, note: 'offline derivation records the full activated population' },
+            // No grading depth was applied, recorded explicitly rather than omitted. (The field is named
+            // for the stage-4 cliff it also used to carry; that cut no longer exists.)
+            cutoff: { gradingOverride: null, note: 'offline derivation records the full activated population' },
             ...(INCLUDE_HIDDEN ? { includedHidden: true } : {}),
             candidates: out,
         });

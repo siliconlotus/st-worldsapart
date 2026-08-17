@@ -1,116 +1,34 @@
-// selection.mjs — entry selection: how many retrieved entries survive the cut. The cutoff decides the
-// size of the surviving prefix of a fused ranking (count / elbow / dropoff). Pure; the cutoff settings
-// are injected, so the extension and the elbow harness run the identical code (no more string-slicing).
+// selection.mjs — entry selection: which activated entries survive, and in what order the budget walks
+// them. Pure; every setting is injected, so the extension and the harnesses run the identical code.
+//
+// THE CLIFF IS GONE. `cutRetrieved` and the `vectorCutoff` modes (elbow / dropoff) cut a score curve for
+// relevance — first over the retrieval ranking, then, from 2026-08, over the layout ranking. Nothing ever
+// graded the second placement: every figure that chose 'elbow' at 1.5 was measured on the retrieval
+// ranking, where the gap between adjacent rows is one signal's spread rather than an
+// eligibility-normalised fusion of three, so none of it transferred. Removed rather than left running at
+// unmeasured defaults, because a relevance cut nobody can defend also confounds every measurement of the
+// stage it sits in. Stage 4 now makes two decisions, not three: how many (the entry maxes) and how much
+// (the token budget). The relevance decision returns when there is something to grade it with.
 
 /**
- * The cliff: how much of a ranking's head survives.
- *
- * STAGE 4, over the dynamic block of the LAYOUT ranking (see cutDynamic). It ran at stage 1 over the
- * retrieval ranking until 2026-08, which is why every measurement that once lived here is gone rather
- * than moved — they graded a different population.
- *
- * 'off' keeps the head whole and lets the caps decide. The two cliff modes cut at a drop in fused
- * score, so a scene with three strong matches admits three and one with twelve admits twelve. It takes
- * no count: a flat distribution has no cliff and survives whole, and how many of those rows ship is the
- * entry maxes' question, one cut later. They differ only in how big
- * a gap counts as a cliff:
- *   'elbow'   — relative to the MEAN gap (elbowSensitivity × mean). Adapts per query but shifts with
- *               the window, since the mean depends on what is in it.
- *   'dropoff' — a FIXED fraction of the top score (dropoffThreshold × head[0]). Comparable across
- *               queries because RRF bounds the score band, and window-independent where the mean is not.
- *
- * Both cut at the LAST significant gap, not the largest. A decaying score curve often has several
- * cliffs; the largest is usually the earliest, and cutting there discards whole clusters of near-tied
- * entries that sit below it. The largest gap only wins when it is also the last.
- *
- * The search starts at minVectorEntries: the biggest gap in a good ranking is very often the one
- * between rank 1 and rank 2, and cutting there would return a single entry every time.
- *
- * Any mode that is not a cliff mode passes through, so a stored setting that outlives a rename degrades
- * to 'off' rather than throwing.
- *
- * @param {Array<{fused: number}>} ranked Fused ranking, best first
- * @param {object} cfg Cutoff settings (from settings())
- * @param {string} cfg.mode vectorCutoff — 'off' | 'elbow' | 'dropoff'
- * @param {number} cfg.minVectorEntries Floor the cliff search starts at
- * @param {number} cfg.elbowSensitivity Cliff = elbowSensitivity × mean gap (elbow mode)
- * @param {number} cfg.dropoffThreshold Cliff = dropoffThreshold × top score (dropoff mode)
- * @returns {Array<{fused: number}>} The surviving prefix
- */
-export function cutRetrieved(ranked, { mode = 'off', minVectorEntries = 1, elbowSensitivity = 1.5, dropoffThreshold = 0.06 } = {}) {
-    const head = ranked.slice();
-
-    if ((mode !== 'elbow' && mode !== 'dropoff') || head.length <= 1) {
-        return head;
-    }
-
-    const floor = Math.min(Math.max(1, minVectorEntries), head.length);
-    const gaps = [];
-
-    for (let i = floor; i < head.length; i++) {
-        gaps.push(head[i - 1].fused - head[i].fused);
-    }
-
-    if (!gaps.length) {
-        return head;
-    }
-
-    // The gap size that counts as a cliff. Elbow reads it off the mean (relative to this
-    // ranking's own spread); dropoff off the top score (a fixed slice of the RRF band).
-    const threshold = mode === 'dropoff'
-        ? head[0].fused * (Number(dropoffThreshold) || 0.06)
-        : (gaps.reduce((sum, gap) => sum + gap, 0) / gaps.length) * (Number(elbowSensitivity) || 1.5);
-
-    // Cut at the LAST cliff, so clusters below an earlier, larger drop are kept, not discarded.
-    let cutAt = -1;
-
-    for (let i = 0; i < gaps.length; i++) {
-        if (gaps[i] > threshold) {
-            cutAt = i;
-        }
-    }
-
-    return cutAt < 0 ? head : head.slice(0, floor + cutAt);
-}
-
-/**
- * Stage 4's first cut: the cliff, over the dynamic block, ahead of the budget.
- *
- * THREE CUTS AT STAGE 4, EACH ANSWERING ONE QUESTION. The cliff decides relevance; the entry maxes
- * decide how many; the token budget decides how much. The cliff therefore takes no count and runs
- * unconditionally — an irrelevant entry should not reach the prompt whether or not there was room for it,
- * and a flat ranking with no cliff survives whole for the entry maxes to bound.
- *
- * STICKY AND CONSTANT ARE NOT IN THE POPULATION. The budget may cut a constant for capacity; the cliff
- * may not cut it for relevance, because marking an entry constant is that judgement already made. They
- * also score low by ELIGIBILITY rather than by irrelevance — a constant has no vector signal and often
- * no keys — so including them would both cut them immediately and distort the mean gap the elbow reads.
- *
- * `results` must already be in retention order, so the cliff reads the order the budget walks — and that
- * order must be MONOTONE DESCENDING IN `fused`. The gap arithmetic reads raw differences between adjacent
- * rows and their mean, which measure nothing on a list that rises anywhere: a negative gap pulls the mean
- * down and pushes the last significant gap later. Any retention sort whose key is not `fused` alone — a
- * book tier ahead of it, or a per-book weight scaling it — breaks the precondition.
+ * The order the budget walks: constants, then armed stickies, then the dynamic block in retention order.
  *
  * CONSTANT LEADS, because constant means always. A constant should only be cut when constants ALONE
  * exceed the budget — anything else is a world rule losing its place to an entry that persists from an
  * earlier turn, which is a surprise no author asked for. The previous order put sticky first and nothing
  * argued for it; it was incidental.
  *
+ * Walking both classes first is what makes every cap in applyBudget a PREFIX cut: once the dynamic count
+ * is used up there is nothing but dynamic entries left to reject.
+ *
  * @param {object} blocks The three activation classes
- * @param {Array<{fused: number}>} blocks.sticky Armed stickies, authored order
- * @param {Array<{fused: number}>} blocks.constant Constants, authored order
- * @param {Array<{fused: number}>} blocks.results The dynamic block, retention order
- * @param {object} cfg Cutoff settings, as cutRetrieved takes them
- * @returns {{ranked: Array<object>, dropped: Array<object>}} Budget walk order, and the cliff's losers
+ * @param {Array<object>} blocks.sticky Armed stickies, authored order
+ * @param {Array<object>} blocks.constant Constants, authored order
+ * @param {Array<object>} blocks.results The dynamic block, retention order
+ * @returns {Array<object>} Budget walk order
  */
-export function cutDynamic({ sticky = [], constant = [], results = [] }, cfg = {}) {
-    const kept = cutRetrieved(results, cfg);
-    const keptSet = new Set(kept);
-    return {
-        ranked: [...constant, ...sticky, ...kept],
-        dropped: results.filter(item => !keptSet.has(item)),
-    };
+export function walkOrder({ sticky = [], constant = [], results = [] }) {
+    return [...constant, ...sticky, ...results];
 }
 
 /**

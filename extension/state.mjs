@@ -155,11 +155,15 @@ export const defaultSettings = {
      * gets in — which is what ST core does, having no such cap. Capping the vector side is what leaves
      * room for the entries an author keyed by hand.
      *
-     * IT IS ALSO AN INPUT-TOKEN COST the user is choosing, not a ranker protection. The cliff is what
-     * should be keeping irrelevant entries out; this is how much of their context window World Info may
-     * occupy on the retrieval side. So it is deliberately GENEROUS — the tighter it is set, the more it
-     * is doing a relevance job it has no signal for, since it cuts by rank position and knows nothing
-     * about the gap it cuts across.
+     * IT IS ALSO AN INPUT-TOKEN COST the user is choosing, not a ranker protection: how much of their
+     * context window World Info may occupy on the retrieval side. So it is deliberately GENEROUS — the
+     * tighter it is set, the more it is doing a relevance job it has no signal for, since it cuts by rank
+     * position and knows nothing about the gap it cuts across.
+     *
+     * WITH THE CLIFF GONE (selection.mjs) nothing else is keeping an irrelevant entry out, so this cap and
+     * the token budget are the only things bounding the dynamic block. That is a widening, and a deliberate
+     * one: an unmeasured relevance cut was making the stage impossible to grade. Do not tighten this to
+     * compensate — a rank-position cap cannot do a relevance job, which is the failure described above.
      *
      * The failure it does not guard against: a prompt can be well within every cap and still dilute the
      * model's attention across too much material. No metric here sees that — F2@budget scores the SET
@@ -169,43 +173,10 @@ export const defaultSettings = {
      * provenance before — a stage-1 framing from when this WAS the count retrieval cut to, carried onto
      * a stage-4 cap. The two coincide unless suppressVectorKeys is off.
      *
-     * THE VALUE MOVED, AND ON JUDGEMENT RATHER THAN MEASUREMENT: 20 is where a cap generous enough to
-     * leave relevance to the cliff was put, given that a cap deciding relevance is the failure described
-     * above. Nothing grades stage 4 yet, so no measurement chose it and none endorses the old value either.
+     * THE VALUE IS A JUDGEMENT, NOT A MEASUREMENT: 20 is where a deliberately generous cap was put.
+     * Nothing grades stage 4 yet, so no measurement chose it and none endorses any other value either.
      */
     maxVectorEntries: 20,
-    /**
-     * The stage-4 relevance cut, over the dynamic block, ahead of the budget:
-     *   'off'     — no cliff; the caps alone decide.
-     *   'elbow'   — cuts at a gap that stands out from the MEAN gap, so the number adapts to the scene.
-     *   'dropoff' — cuts at a gap larger than a FIXED fraction of the top score, which is comparable
-     *               across scenes where a raw gap value is not.
-     * Both cliff modes cut at the LAST qualifying gap and are floored/capped the same way.
-     *
-     * 'count' retired: maxVectorEntries is the count now, enforced by applyBudget. A stored 'count'
-     * reads as 'off', since cutRetrieved passes through any mode that is not a cliff mode.
-     *
-     * CARRIED-OVER DEFAULT, NOT A MEASUREMENT. Every figure that chose 'elbow' graded a cut over the
-     * RETRIEVAL ranking. On the layout ranking the cliff spans an eligibility-normalised, heterogeneous
-     * list — vector+text+keys entries beside keyword-only ones — so the mean gap is not the same
-     * quantity and none of those results transfers. Nothing grades stage 4 yet; see matcher-design.md
-     * Evidence, "Two scores".
-     */
-    vectorCutoff: 'elbow',
-    /** Cliff modes only: never cut the dynamic block below this many. Carried-over default, unmeasured
-     *  at this stage. */
-    minVectorEntries: 3,
-    /**
-     * Elbow mode only: how large a gap must be, as a multiple of the mean gap, to count as a cliff.
-     * Higher keeps fewer. Below 1 would treat an average gap as a cliff and is meaningless.
-     * Carried-over default, unmeasured at this stage.
-     */
-    elbowSensitivity: 1.5,
-    /**
-     * Dropoff mode only: a gap is a cliff when it erases more than this fraction of the top fused
-     * score. Higher keeps fewer. Carried-over default, unmeasured at this stage.
-     */
-    dropoffThreshold: 0.06,
     /**
      * Filter raw-text queries down to entity-ish terms before lexical scoring:
      * keep capitalised tokens and anything in the lorebook's own vocabulary, drop
@@ -475,9 +446,7 @@ export const runState = {
                                   // The prune's ownership exemption: forced entries are never WA's to revoke.
     lastPruned: [],               // `${world}.${uid}` the prune deleted last scan, for /wa-debug
     lastScanText: '',             // last global-depth keyword scan window, bundled by /wa-grade
-    gradeCutoff: null,            // /wa-grade drops the cliff and caps its candidate depth; null = real settings
-    lastCutKept: null,            // a /wa-grade capture's `cutoff.kept`. Always null: stage 1 admits and
-                                  // cuts nothing, so retrieval has no count to record.
+    gradeCutoff: null,            // /wa-grade's candidate-depth cap; null = no capture in flight
     lastCandidates: [],           // selection-candidate rows from the last debug-class run, for /wa-grade
     lastCandidateEntries: [],     // the WI entries behind those rows, aligned by index (for "view text")
     lastDropped: [],              // entries cut by budget
