@@ -781,17 +781,24 @@ does this scene need" is not a separate question and takes no parameter of its o
 terms are unmeasured rather than rejected, and are not free: every added term is another coefficient
 fitted on the same rows, and the pooled n is thousands of ROWS over 3 corpora, not thousands of corpora.
 memory and reference have different base rates and different achievable recall — reference reaches 95%
-at 5.4 entries per scene, memory needs 38 to reach 73% — so one fit across both spends its capacity on
-the class prior, which predicts genuinely and is not retrieval (`eval/scene.mjs` `tierRecall`).
+at 5.4 entries per scene, memory needs 38 to reach 73%, a pair that names no instrument either — so one
+fit across both spends its capacity on the class prior, which predicts genuinely and is not retrieval
+(`eval/scene.mjs` `tierRecall`).
 
-**The bar is a chosen trade, not a boundary in the data.** **Measured**: the p distributions of grade
-3-4 and 0-2 overlap by 71%, and the best single cut gives 25% purity at 66% recall. p is calibrated
-(ECE 0.0067), so it reads as a probability and the bar can be argued in those terms; what it cannot do
-is sort rows into the graded bands.
+**The bar is a chosen trade, not a boundary in the data.** The p distributions of grade 3-4 and 0-2
+overlap by 71%, the best single cut gives 25% purity at 66% recall, and p is calibrated at ECE 0.0067 —
+so it reads as a probability and the bar can be argued in those terms, but it cannot sort rows into the
+graded bands. **Those four figures name no instrument**: nothing in `eval/` computes an overlap, a
+purity, a calibration error or a per-tier fit, so they cannot be re-run and are assertions until
+something does. Build the calibration readout with the predictor.
 
-**The labels are the ceiling, not the model.** About a third of boundary positives change side between
-two passes of the same judge, which puts achievable AUC near 0.85 against 0.79 measured. The headroom is
-small and it is not in the fitting.
+**The labels are the ceiling, not the model, and the model has nearly reached it.** About a third of
+boundary positives change side between two passes of the same judge — corroborated by the contract
+re-grade, where 4 of 13 rows originally >= 3 came back below it (`CLAUDE.md`, graded scenes) — which puts
+achievable AUC near 0.85. **Measured** at the current architecture, 8924 rows over 69 scenes: the pooled
+three-signal fit reaches AUC 0.8459 at log-loss 0.1901, against 0.79 when this section was written. So
+the headroom is small and it is not in the fitting. That fit is POOLED, not the per-tier one ruled above,
+so it is the floor for what per-tier should reach rather than a measurement of it.
 
 ---
 

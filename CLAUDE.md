@@ -250,10 +250,10 @@ the entity filter's term weights; keyword score is computed over the scan window
 the **layout ranking** — vector + text + keys, normalised by the signals an entry was eligible for, with
 no mode switch: eligibility alone decides which columns an entry is scored on.
 
-**This is where the lexical half of WA lives now.** Measured over 7536 judged rows on 69 scenes, text is
-the strongest per-entry predictor of relevance — standardised logistic beta +0.756 against cosine's
-+0.570 and keys' +0.069 (`eval/relevance-regress.mjs`). So "stage 1 dropped BM25" is not "WA dropped
-BM25"; say which stage.
+**This is where the lexical half of WA lives now.** Measured over 8924 judged rows on 69 scenes, text is
+the strongest per-entry predictor of relevance — standardised logistic beta +0.833 against cosine's
++0.468 and keys' +0.043 (`eval/relevance-regress.mjs`, pooled fit, per-scene intercepts). So "stage 1
+dropped BM25" is not "WA dropped BM25"; say which stage.
 
 **4. Selection** — two cuts, both here, each answering one question over the layout ranking. **There is
 no relevance cut, so WA makes no relevance decision anywhere** — a standing exception to the
