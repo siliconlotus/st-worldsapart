@@ -778,7 +778,7 @@ and takes no parameter of its own.
 **Linear in the signals, and fit per tier.** Polynomial terms measured worse. memory and reference have
 different base rates and different achievable recall — reference reaches 95% at 5.4 entries per scene,
 memory needs 38 to reach 73% — so one fit across both spends its capacity on the class prior, which
-predicts genuinely and is not retrieval (`metrics.mjs` `tierRecall`).
+predicts genuinely and is not retrieval (`eval/scene.mjs` `tierRecall`).
 
 **The bar is a chosen trade, not a boundary in the data.** **Measured**: the p distributions of grade
 3-4 and 0-2 overlap by 71%, and the best single cut gives 25% purity at 66% recall. p is calibrated
