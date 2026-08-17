@@ -377,7 +377,16 @@ const fx = n => (n >= 0 ? '+' : '') + n.toFixed(4);
     }
 
     const movers = results.filter(r => r.stat.consistent);
-    if (!movers.length) {
+    // EXACTLY zero everywhere is invariance, not a null result, and the two want opposite conclusions:
+    // "flat, leave the defaults alone" versus "this metric cannot see this parameter at all". A set
+    // metric read over a population no arm can change reads 0.0000 for every cell — which is what a
+    // whole-population window does while stage 4 makes no relevance decision.
+    const allZero = results.length && results.every(r => r.cells.every(c => c.delta === 0));
+    if (allZero) {
+        console.log(`\nEVERY DELTA IS EXACTLY ZERO across ${results.length} arm(s) and ${scenes.length} scene(s). That is not a`);
+        console.log(`null result at this sample size, it is ${METRIC} being INVARIANT to these parameters — check that the`);
+        console.log('window is one the arms can actually move before reading anything into it.');
+    } else if (!movers.length) {
         console.log('\nNO ARM MOVED THE METRIC CONSISTENTLY. The defensible conclusion is that these parameters are');
         console.log(`flat at this sample size — record "measured flat, n=${scenes.length} scenes, paired" and leave the defaults alone.`);
     } else {

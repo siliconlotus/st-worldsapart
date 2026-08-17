@@ -685,19 +685,30 @@ answers is whether anything downstream could have surfaced the entry, and how mu
 out. Homogeneous by construction — the collection holds only vectorized entries' chunks — so no
 exclusion rule is needed.
 
-**The layout score** grades the LAYOUT, over the DYNAMIC block, at a BUDGET-INVARIANT window. It is
-set-based and takes the asymmetric bars below, because what ships is the surviving SET and rank is only
-how that set was chosen. Constants and armed stickies are hoisted to the front of `ranked` so every cap
-is a prefix cut, which means they consume budget without competing for it — the graded population is
-exactly what a cut can reject. Everything else is in, cards included.
+**The layout score is F2 over the LAYOUT ITSELF** — the set stage 4 delivers, over the dynamic block, on
+the asymmetric bars below, beta settled at `RECALL_WEIGHT` 2 (`metrics.mjs`). No window is imposed on it,
+because CHOOSING THE SET IS THE THING BEING GRADED. Constants and armed stickies are hoisted to the front
+of `ranked` so every cap is a prefix cut, which means they consume budget without competing for it — the
+graded population is exactly what a cut can reject. Everything else is in, cards included.
 
-**The budget is the SANITY CHECK, not the window.** The layout is what tuning moves; a token ceiling is
-set by cost and is not a property of the ranking, so a score read at the budget moves with a preference
-no arm controls and no tuning can defend. The window is `@R` — the top `relevant` rows — which is
-budget-invariant by construction (`eval/scene.mjs` `atR`, `param-screen --metric fAtR`). Beta is settled
-at `RECALL_WEIGHT` 2 (`metrics.mjs`), so the score is F2@R. Checking that a tuned layout still delivers
-under a real ceiling is a separate pass over `applyBudget`, and it confirms a result rather than
-producing one.
+**The budget is the SANITY CHECK, not the window.** A token ceiling is set by cost and is not a property
+of the ranking, so a score read at the budget moves with a preference no arm controls. Checking that a
+delivered layout fits a real ceiling confirms a result rather than producing one.
+
+**`@R` IS A DIAGNOSTIC, alongside nDCG, and for the same reason.** It scores the top `relevant` rows —
+a cardinality the system is not told at runtime and whose choice is precisely what a relevance predictor
+is for. So it measures the ORDERING under an oracle count, not the prediction. Its use is as a BOUND: it
+is the value F2@layout would take if the system predicted the right number, so no relevance decision over
+this ordering can beat it. **In the ideal case the two coincide** — a layout containing all and only the
+relevant entries makes `@R` and `@layout` the same set — and the gap between them is the cardinality
+error.
+
+**Measured, and it is why stage 4's relevance decision comes before any layout tuning:** with no
+relevance cut, F2@layout is EXACTLY invariant to the layout. 5 arms over 4 parameter families (LEXW,
+KEYW, K1, gazetteer source), 3 scenes, every per-scene delta 0.0000 — because the delivered set is
+everything activated, and no ranking parameter changes set membership. The level is F2 ~0.25: precision
+0.064-0.104 with recall 1.000. Read `@R` on the same scenes and arms and it moves, which is the
+diagnostic doing its job and not evidence about the set.
 
 **nDCG is a DIAGNOSTIC, not an evaluation score.** It asks whether the ordering puts the good material
 at the top. The evaluation score asks whether the system delivers the right set. A reordering inside the
@@ -764,11 +775,12 @@ small and it is not in the fitting.
 Ordered by whether a user can see the difference — not by how tidy the fix is, and not by how many
 instances the books on disk hold.
 
-1. **Scoring a candidate CUT.** The layout score itself is not open — F2@R over the dynamic block is
-   `eval/scene.mjs` `atR`, and `param-screen --metric fAtR` reads it, so tuning the layout can proceed.
-   What no harness can score is a proposed relevance cut, which needs a KEPT SET to score and there is
-   no cut to produce one; `tierRecall` is the guard waiting on the same thing. So the cut and the means
-   of judging it are one piece of work, and neither is a budget replay.
+1. **The relevance prediction — stage 4 deciding, per entry, whether it belongs.** This is the whole of
+   the open work, not a step after tuning: F2@layout is the score of record, and until a prediction
+   exists the delivered set is everything activated, so that score is invariant to every layout
+   parameter (measured, *Evidence → Two scores*). It needs no new instrument. The predicted set IS the
+   layout, so scoring it is scoring the prediction, and `tierRecall` gets its kept set back at the same
+   moment. What ranks the entries is already there; what is missing is the decision.
 2. **`promote` — an author declaration that activation is sufficient.** A promoted entry enters the
    layout whenever its keys fire, exempt from the relevance cut. It is the per-entry form of *triggered
    == relevant*, which stage 4 broke by having the cliff arbitrate keyword-activated entries alongside
