@@ -771,14 +771,18 @@ against the runtime's own verdicts on 315 rows across 7 arms.
 **Ruled, unimplemented.** Regression was measured to be no worse than RRF + nDCG and was chosen for
 explainability.
 
-Each entry gets p(grade >= 3), and ships if it clears the bar. The count falls out — a scene with three
-relevant entries delivers three — so "how many entries does this scene need" is not a separate question
-and takes no parameter of its own.
+**LOGISTIC regression**, on the project's own relevance line (grade >= 3). Linear would put predictions
+outside [0,1] on a bounded target and would weight a 0-vs-1 error the same as a 0.4-vs-0.5 one
+(`eval/relevance-regress.mjs`, which fits it). Each entry gets p(grade >= 3), and ships if it clears the
+bar. The count falls out — a scene with three relevant entries delivers three — so "how many entries
+does this scene need" is not a separate question and takes no parameter of its own.
 
-**Linear in the signals, and fit per tier.** Polynomial terms measured worse. memory and reference have
-different base rates and different achievable recall — reference reaches 95% at 5.4 entries per scene,
-memory needs 38 to reach 73% — so one fit across both spends its capacity on the class prior, which
-predicts genuinely and is not retrieval (`eval/scene.mjs` `tierRecall`).
+**Linear in the signals — the linear predictor, not a linear model — and fit per tier.** Polynomial
+terms are unmeasured rather than rejected, and are not free: every added term is another coefficient
+fitted on the same rows, and the pooled n is thousands of ROWS over 3 corpora, not thousands of corpora.
+memory and reference have different base rates and different achievable recall — reference reaches 95%
+at 5.4 entries per scene, memory needs 38 to reach 73% — so one fit across both spends its capacity on
+the class prior, which predicts genuinely and is not retrieval (`eval/scene.mjs` `tierRecall`).
 
 **The bar is a chosen trade, not a boundary in the data.** **Measured**: the p distributions of grade
 3-4 and 0-2 overlap by 71%, and the best single cut gives 25% purity at 66% recall. p is calibrated
