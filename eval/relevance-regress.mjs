@@ -35,7 +35,7 @@
 //
 // Usage (from SillyTavern root):
 //   node .../relevance-regress.mjs <sample.json> [...] [--sweep gazetteerSource=keys,titles]
-//        [--tier memory|reference] [--cut 4] [--ordinal] [--loso]
+//        [--tier memory|reference] [--cut 4] [--ordinal] [--loso] [--lobo]
 import { indexPath, isMemory, loadScene, openSample, sceneParams, makeCandidateSet, makeGradeOf, embed } from './scene.mjs';
 import { ensureIndex } from './reindex.mjs';
 import { gradeValue } from './metrics.mjs';
@@ -73,6 +73,12 @@ const ORDINAL = argv.includes('--ordinal');
 // more than the answer is worth. Within-scene standardisation leaks nothing across the fold: it reads only
 // the held-out scene's own candidates, which stage 3 also holds.
 const LOSO = argv.includes('--loso');
+// HELD OUT BY BOOK, which is the generalisation the system actually needs. A held-out SCENE still shares
+// its book's vocabulary, entry style, chunk statistics and BM25 scale with the rows that fitted the model,
+// so --loso measures "another moment in a book we know" — and production meets books it has never seen.
+// Folds are wildly unequal here (one book is 58% of the rows), so read the per-fold sizes, not just the
+// pooled number.
+const LOBO = argv.includes('--lobo');
 // WHICH BOUNDARY IS THE TARGET. 3 is the project's relevance line and the default; --cut 4 fits the band
 // the anchors reserve for the scene's current subject, which separates far better and is far rarer, so it
 // is the one place AUC and AP disagree loudly enough to be worth reading side by side.
@@ -106,7 +112,7 @@ const fx = n => (Number.isFinite(n) ? (n >= 0 ? '+' : '') + n.toFixed(3) : '  n/
         const S = openSample(path, arg('--arm'));
         if (!S.candidates?.length) { console.error(`${path}: logs no candidates`); process.exit(2); }
         const qv = await embed(S.query, { ollama: OLLAMA, model: MODEL });
-        loaded.push({ path, name: S.name ?? path, S, qv });
+        loaded.push({ path, name: S.name ?? path, book: S.primaryBook ?? path, S, qv });
     }
     console.log(`${loaded.length} scene(s); sweeping ${SWEPT} over ${VALUES.join(', ')}${TIER === 'all' ? '' : `; ${TIER} tier only`}${CUT === 3 ? '' : `; target grade >= ${CUT}`}`);
 
@@ -115,7 +121,7 @@ const fx = n => (Number.isFinite(n) ? (n >= 0 ? '+' : '') + n.toFixed(3) : '  n/
         // Rows keep their scene, because standardisation and the intercepts are within-scene.
         const perScene = [];
         let dropped = 0;
-        for (const { S, qv, name } of loaded) {
+        for (const { S, qv, name, book } of loaded) {
             const P = sceneParams(S, { [SWEPT]: value });
             // THE INDEX FOLLOWS THE PARAMS. denseAllEntries wants a collection covering every entry, not
             // only the vectorized ones — scored against the standard index it would find no extra vectors
@@ -137,7 +143,7 @@ const fx = n => (Number.isFinite(n) ? (n >= 0 ? '+' : '') + n.toFixed(3) : '  n/
                 if (g === null || g === undefined || Number.isNaN(g)) { dropped++; continue; }
                 kept.push({ r, y: g >= CUT ? 1 : 0, g });
             }
-            if (kept.length >= 5 && kept.some(k => k.y) && kept.some(k => !k.y)) perScene.push({ name, kept });
+            if (kept.length >= 5 && kept.some(k => k.y) && kept.some(k => !k.y)) perScene.push({ name, book, kept });
         }
         if (!perScene.length) { console.log(`  ${SWEPT}=${value}: no scene has both classes among its judged rows`); continue; }
 
@@ -172,18 +178,25 @@ const fx = n => (Number.isFinite(n) ? (n >= 0 ? '+' : '') + n.toFixed(3) : '  n/
         const Xp = X.map(row => [1, ...row.slice(perScene.length)]);
         const pooled = logisticFit(Xp, y);
         const etaOf = (fit, rows) => rows.map(row => row.reduce((a, x, j) => a + x * fit.beta[j], 0));
-        let loso = null;
-        if (LOSO) {
+        // One held-out estimator, two groupings. The fold is the unit the model must generalise ACROSS.
+        const holdOut = (groupOf, nGroups) => {
             const held = Array(y.length).fill(NaN);
-            for (let si = 0; si < perScene.length; si++) {
+            for (let g = 0; g < nGroups; g++) {
                 const tr = [], trY = [];
-                Xp.forEach((row, i) => { if (sceneOf[i] !== si) { tr.push(row); trY.push(y[i]); } });
+                Xp.forEach((row, i) => { if (groupOf(i) !== g) { tr.push(row); trY.push(y[i]); } });
                 if (!trY.some(v => v) || trY.every(v => v)) continue;
                 const f = logisticFit(tr, trY);
-                Xp.forEach((row, i) => { if (sceneOf[i] === si) held[i] = row.reduce((a, x, j) => a + x * f.beta[j], 0); });
+                Xp.forEach((row, i) => { if (groupOf(i) === g) held[i] = row.reduce((a, x, j) => a + x * f.beta[j], 0); });
             }
             const keep = held.map((v, i) => [v, y[i]]).filter(([v]) => Number.isFinite(v));
-            loso = { eta: keep.map(k => k[0]), y: keep.map(k => k[1]) };
+            return { eta: keep.map(k => k[0]), y: keep.map(k => k[1]) };
+        };
+        const books = [...new Set(perScene.map(p => p.book))];
+        const bookOf = perScene.flatMap(({ kept, book }) => kept.map(() => books.indexOf(book)));
+        const loso = LOSO ? holdOut(i => sceneOf[i], perScene.length) : null;
+        const lobo = LOBO ? holdOut(i => bookOf[i], books.length) : null;
+        if (LOBO) {
+            console.log(`\n  held out by book: ${books.length} folds — ${books.map(b => `${String(b).split(/[ _]/).slice(-1)[0].slice(0, 10)} ${bookOf.filter(x => x === books.indexOf(b)).length}`).join(', ')} rows`);
         }
         // The raw fit is the same design with unstandardised signals — the per-unit reading. Same intercepts,
         // so the only difference between the two is the scale the slope is expressed in.
@@ -211,6 +224,7 @@ const fx = n => (Number.isFinite(n) ? (n >= 0 ? '+' : '') + n.toFixed(3) : '  n/
                 'per-scene intercepts': { eta: etaOf(stdFit, X), y },
                 'one pooled intercept': { eta: etaOf(pooled, Xp), y },
                 ...(loso ? { 'held out by scene': loso } : {}),
+                ...(lobo ? { 'held out by BOOK': lobo } : {}),
             },
         });
     }
@@ -257,7 +271,7 @@ const fx = n => (Number.isFinite(n) ? (n >= 0 ? '+' : '') + n.toFixed(3) : '  n/
             console.log(`  ${head} ${label.padEnd(21)} | ${`${(100 * m.pos / m.n).toFixed(2)}%`.padStart(9)}  ${auc(f.eta, f.y).toFixed(4)}  ${m.ap.toFixed(3)} | ${cell(0.5)}  ${cell(0.75)}  ${cell(0.9)}`);
         }
     }
-    if (!LOSO) console.log('  (pass --loso for the held-out row: K refits, one per scene, on the pooled design)');
+    if (!LOSO || !LOBO) console.log('  (--loso holds out a scene, --lobo a book; only the second is the generalisation production needs)');
 
     if (table.length > 1) {
         const b = table[0];
