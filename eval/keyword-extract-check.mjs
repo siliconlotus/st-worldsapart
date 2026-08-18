@@ -28,6 +28,34 @@ assert.strictEqual(f0.zzzznope, 'unattested', 'a key in no entry text is unattes
 assert.strictEqual(f0.home, 'english common', 'a common English word is flagged as english-common');
 assert.strictEqual(f0.aX, 'short', 'a sub-minLength key is flagged short');
 assert.ok(!('Quillfeather' in f0), 'a real findable name is not flagged');
+// Keys the MATCHER refuses to act on, reported so an imported book's malformed key stops being
+// invisible. A PRIMARY gets the `unusable` flag on its own chip, ahead of every evidence-based verdict
+// — `/[/` used to come back `unattested`, i.e. "never matches", which reads as prose that happens not
+// to use the key rather than a key WA drops. A SECONDARY has no chip, so unusableKeysOf is its only
+// surface — and position matters: `negation-only` is fatal for a primary (it fires on absence alone)
+// and legitimate for a secondary, which never fires by itself because the primary gates activation.
+// The rule lives in matcher.mjs; this only checks the audit reports its outcome.
+{
+    const book = { entries: {
+        0: { uid: 0, comment: 'Cosmonaut', content: 'the cosmonaut waited', key: ['cosmonaut', '? -zebra', '/[/'],
+            keysecondary: ['? -gagarin', '? "moon', 'apollo'] },
+        1: { uid: 1, comment: 'Clean', content: 'apollo flew', key: ['apollo'], keysecondary: [] },
+    } };
+    const scan = buildKeyPruneScan(book, pruneOpts, new Set());
+    const prim = scan.classifyEntry(book.entries[0]);
+    assert.deepStrictEqual(prim.map(f => `${f.key}:${f.flag}:${f.code ?? ''}`),
+        ['? -zebra:unusable:negation-only', '/[/:unusable:regex-invalid'],
+        'an unusable primary is flagged as such, with the validator\'s own code, not as unattested');
+    assert.ok(prim.every(f => scan.reasonOf(f).text.startsWith('unusable') && scan.reasonOf(f).color),
+        'it reads as unusable on the chip and carries a severity colour');
+    assert.ok(prim.every(f => !scan.defChecked(f)),
+        'and is NOT pre-ticked for deletion — the fix is a correction, not a removal');
+    assert.deepStrictEqual(scan.unusableKeysOf(book.entries[0]).map(r => `${r.key}:${r.code}`), ['? "moon:stray-quote'],
+        'only the secondary needs the separate list; the negation-only one is legitimate there');
+    assert.ok(scan.unusableKeysOf(book.entries[0]).every(r => r.message), 'each carries the validator message the author reads');
+    assert.deepStrictEqual(scan.unusableKeysOf(book.entries[1]), [], 'a clean entry reports nothing');
+}
+
 // The ignore whitelist skips a key entirely.
 assert.ok(!('zzzznope' in flagsOfIgnored()), 'a whitelisted key is skipped');
 function flagsOfIgnored() {

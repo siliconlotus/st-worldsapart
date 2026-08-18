@@ -133,14 +133,18 @@ run([
 }
 
 // --- blanks, and keys that cannot fire -------------------------------------------------------------
-// Blank secondaries are dropped BEFORE the logic, as core does, so an all-whitespace list is ungated
-// rather than impossible. A non-blank key that parses to nothing is a different thing: it is a key
-// that never matches, which is a verdict the logic has to see.
+// Blanks and UNUSABLE keys are both dropped BEFORE the logic (matcher.mjs secondaryKeys), so a list of
+// them is ungated rather than impossible. A key carrying a fatal validator error used to reach the tree
+// and evaluate as never-matching, which silently killed the entry under AND_ALL — accurate, but nobody
+// authors a malformed key to mean "never", and the author had nothing to look at. A key that PARSES and
+// simply does not occur is the different thing: that is a verdict the logic still has to see.
 run([
     ['cosmonaut', ['', '   '], AND_ALL, 'the cosmonaut waited', 1, 'blank secondaries drop out, leaving no gate'],
     ['cosmonaut', ['', '   '], NOT_ANY, 'the cosmonaut waited', 1, '...under every logic, since the list is empty'],
-    ['cosmonaut', ['? '], AND_ALL, 'the cosmonaut waited', 0, 'a secondary that can never match refuses AND_ALL'],
-    ['cosmonaut', ['? '], NOT_ANY, 'the cosmonaut waited', 1, '...and satisfies NOT_ANY, because it did not match'],
+    ['cosmonaut', ['? '], AND_ALL, 'the cosmonaut waited', 1, 'a no-terms secondary drops too, rather than refusing AND_ALL'],
+    ['cosmonaut', ['? "moon', 'apollo'], AND_ALL, 'cosmonaut apollo moon', 1, '...and a stray-quote sibling leaves the usable one gating'],
+    ['cosmonaut', ['? apollo'], AND_ALL, 'the cosmonaut waited', 0, 'a USABLE secondary that does not occur still refuses AND_ALL'],
+    ['cosmonaut', ['? apollo'], NOT_ANY, 'the cosmonaut waited', 1, '...and satisfies NOT_ANY, because it did not match'],
 ]);
 
 // --- the builder's own contract --------------------------------------------------------------------

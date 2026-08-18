@@ -41,7 +41,8 @@ changes what it matches; quoting *across a space* does, turning a conjunction in
 **Validator checks read structure, not intent.** Every check that guessed at what an author meant
 produced false positives on legitimate literals — `"()"` is a real album, `M*A*S*H` is a real title.
 The checks that survive are facts about the SmartKey: no terms, no positive term, an unclosed quote,
-unbalanced parens, a pattern `new RegExp` refuses. A key that expected a feature WA lacks is dead, and
+unbalanced parens, a pattern `new RegExp` refuses — the last asked of a bare `/re/` key too, not only
+of a REGEX term inside a `?` expression. A key that expected a feature WA lacks is dead, and
 the audit reports it as dead from the evidence.
 
 **An unaltered lorebook behaves under WA as it does under core.** Least surprise: every divergence is a
@@ -441,7 +442,8 @@ fire on absence alone.
 
 **Prohibited: `countKey` stays unfiltered.** It answers what an expression does; deciding whether to
 ask is the caller's job. A validator error bars a key from SCORING as well as from activating, and
-`usableKeys` is where that holds — filtering only the stage-2 verdicts left `? -zebra` scoring a full
+`usableKeys` is where that holds for a PRIMARY (`secondaryKeys` for a secondary — they differ by
+exactly one code, see *Selective logic*) — filtering only the stage-2 verdicts left `? -zebra` scoring a full
 hit on every scan where "zebra" is absent. Three ways a key enters a book and only one is guarded (the
 Studio's `keyWriteOk`), so the runtime is where it has to hold.
 
@@ -530,6 +532,24 @@ subtree, or the author's own `::5` would leak), so the conversion is score-neutr
 
 **Measured** population, books on disk: 79 entries of 2,112 enabled (3.7%) across 14 books, 77 of them
 `AND_ANY`.
+
+**Secondaries are validated like primaries, minus one code.** A key carrying a fatal validator error is
+dropped before the logic runs, as blanks already were, so a malformed secondary loosens the gate rather
+than silently killing the entry under `AND_ALL`; a key that PARSES and does not occur is a different
+thing, and still a verdict the logic sees. `negation-only` is tolerated here and only here — a secondary
+never fires by itself, since the primary gates activation, so it can only narrow what the primary already
+matched: `astronaut` with `["cosmonaut", "? -gagarin"]` under `AND_ALL` is "both crews, but not Gagarin's
+territory", which core has no way to write. `secondaryKeys` is the only place that rule lives, and
+`unusableKeysOf` (`keyword-core.mjs`) reports the difference rather than re-deriving it.
+**Measured**: 0 of 161 secondary keys on 84 entries across 43 books change position.
+
+**A key the matcher refuses is flagged per key, ahead of every other verdict.** `classify` asks
+`usableKeys` before anything reads the text: unusability is a fact about the string where the rest of
+the audit is evidence about firing, so `/[/` reading as `unattested` — "never matches" — described the
+prose rather than the key. Red, but never pre-ticked for removal: every other red flag means the key
+fires where it should not and deletion is the fix, while a malformed key means the author wrote
+something WA could not read, where the fix is a correction. A PRIMARY carries this on its own chip; a
+secondary has no chip yet, so the Studio audit reports it separately.
 
 ---
 

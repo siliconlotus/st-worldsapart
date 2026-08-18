@@ -289,6 +289,22 @@ export function validateSmartKey(raw) {
         // that was not their key. A key already containing a `"` has no hatch at all, because the
         // quote would close the term early, so that sentence is dropped rather than made wrong.
         const bare = src.trim();
+        // A bare pattern `new RegExp` refuses, checked here for the same reason the SmartKey body checks
+        // its REGEX terms: it is a fact about the string, and countRegexKey's catch turns it into a key
+        // that silently counts 0 forever. Nobody depends on a broken pattern to never match — the literal
+        // is one rewrite away — so this is an ERROR and usableKeys bars it, in either key position.
+        const rx = bare.match(REGEX_KEY_RE);
+        if (rx) {
+            try {
+                new RegExp(rx[1], rx[2]);
+            } catch (e) {
+                out.push({
+                    severity: 'error', code: 'regex-invalid',
+                    message: `The pattern ${JSON.stringify(bare)} is not a valid regular expression (${e.message}), so it can never match.`,
+                });
+                return out;   // the reading question below is moot for a pattern that cannot run
+            }
+        }
         if (isRegexKey(bare) && !coreReadsAsRegex(bare)) {
             const hatch = bare.includes('"') ? '' : ` If you meant the literal string, use ? "${bare}".`;
             out.push({

@@ -193,12 +193,14 @@ eq(countKey('? fire::3 XOR flood', 'a fire burns', false, false), 3, 'XOR still 
 }
 
 // Smart keys are NOT exempt from the audit — they are audited on df, like any other key. Neither of
-// these queries can match "nothing relevant", so both are dead and both should say so.
+// these queries can match "nothing relevant", and they are dead for DIFFERENT reasons: the first
+// evaluates false against this text, the second is a key the matcher refuses to run at all. The
+// verdicts have to say which, since only one of them would change were the text different.
 {
     const data = { entries: { 0: { uid: 0, key: ['? moon mission', '? -apollo'], content: 'nothing relevant' } } };
     const opts = { scanKeyword: true, scanVectorized: true, scanConstant: true, includeInactive: true, pruneUnattested: true, pruneCommon: true, pruneShort: true, ignoreProper: false, stickySkipCommon: true, bookCommon: 0.5, minLength: 4 };
     const { classifyEntry } = buildKeyPruneScan(data, opts, new Set());
-    eq(classifyEntry(data.entries[0]).map(f => f.flag).join(','), 'unattested', 'a dead query is flagged; "? -apollo" matches on absence so it is not dead');
+    eq(classifyEntry(data.entries[0]).map(f => f.flag).join(','), 'unattested,unusable', 'a dead query is flagged; a negation-only one is flagged unusable, not dead');
 }
 
 // NEITHER IS A REGEX KEY, for the same reason and by the same machinery. `classify` used to discard

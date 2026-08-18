@@ -2217,6 +2217,18 @@ export async function lorebookStudio(preferredBook = null) {
             book: selected, matchWindow: settings().matchWindow, boundChats: bound.length,
             scanned: got?.via ?? 'none', messages: chatMsgs, keys: chatHits?.size ?? 0, firing: got?.live ?? 0,
         });
+        // SECONDARY keys the matcher drops, which no other surface in here can show: a chip is painted
+        // per PRIMARY key — where `unusable` now lands like any other verdict — and a secondary has no
+        // chip to be painted on, so the entry just quietly gates on fewer keys than its author wrote.
+        // A separate toast rather than a clause on the ones below: it is a fact about the book, true
+        // whether or not a chat was scanned, and the only warning-severity thing this button reports.
+        const unusable = (scan?.entries ?? []).flatMap(e => scan.unusableKeysOf(e));
+        if (unusable.length) {
+            console.table(unusable.map(u => ({ entry: u.uid, key: u.key, problem: u.code, why: u.message })));
+            const n = unusable.length;
+            toastr.warning(`${n} secondary key${n === 1 ? '' : 's'} in this book cannot match and ${n === 1 ? 'is' : 'are'} ignored — see the console table for which entries. Secondary keys are not editable here; fix them in SillyTavern's own World Info editor.`,
+                'Worlds Apart', { timeOut: 12000 });
+        }
         if (got) {
             toastr.success(`Audited against entry text + "${chatName}" — ${got.live} of ${got.keys.length} keys fire in its ${chatMsgs} messages.`, 'Worlds Apart', { timeOut: 6000 });
         } else if (!chatHits) {

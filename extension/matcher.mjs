@@ -645,11 +645,25 @@ export function keyExcerpts(key, text, caseSensitive, wholeWords, context = 28, 
  */
 export const WI_LOGIC = { AND_ANY: 0, NOT_ALL: 1, NOT_ANY: 2, AND_ALL: 3 };
 
-/** The entry's non-blank secondary keys, or an empty array. Blanks are dropped before the logic runs,
- *  as core does, so an entry whose secondaries are all whitespace is ungated rather than impossible.
+/** A fatal validator finding, minus one code the caller tolerates. Shared so the primary and secondary
+ *  positions cannot drift about what "unusable" means — they differ by exactly one code. */
+const fatalKey = (key, except) => validateSmartKey(key).some(f => f.severity === 'error' && f.code !== except);
+
+/** The entry's usable secondary keys, or an empty array. Blanks are dropped before the logic runs, as
+ *  core does, and a key carrying a fatal validator error is dropped the same way — so an entry whose
+ *  secondaries are all unusable is ungated rather than impossible, and a malformed one loosens the gate
+ *  rather than silently killing the entry (`? (apollo` used to make every scan of it fail).
+ *
+ *  `negation-only` IS TOLERATED HERE, and only here. It is fatal for a primary because such a key fires
+ *  on absence alone; a secondary never fires — the primary gates activation, so it can only narrow what
+ *  the primary already matched. `astronaut` with `["cosmonaut", "? -gagarin"]` under AND_ALL reads "both
+ *  crews, but not the Gagarin entry's territory" — an exclusion an author reaches for whenever two
+ *  entries cover overlapping ground, and one core cannot express at all.
+ *
  *  Keys are NOT `substituteParams`-expanded — that is ST-side, and primary keys are treated the same. */
 export const secondaryKeys = entry =>
-    (Array.isArray(entry?.keysecondary) ? entry.keysecondary : []).filter(k => String(k ?? '').trim());
+    (Array.isArray(entry?.keysecondary) ? entry.keysecondary : [])
+        .filter(k => String(k ?? '').trim() && !fatalKey(k, 'negation-only'));
 
 /**
  * One primary key's occurrences under the entry's selective logic — countKey, with core's
@@ -767,9 +781,10 @@ export function keywordScore(entry, text, keys = entry.key, { k1, caseSensitiveD
 // ---------------------------------------------------------------------------
 // Stage 2 — activation verdicts.
 //
-// WA's matcher decides activation in both directions: the union force-activates entries WA matches
-// and core cannot (`?` SmartKeys have no core semantics; the fold and depth are supersets), and the
-// prune deletes activated entries WA rejects over the shared haystack. Both verdicts are
+// WA's matcher decides activation outright: it force-activates every entry whose keys match over WA's
+// own window — which core cannot reproduce (`?` SmartKeys have no core semantics; the fold and depth
+// are supersets) — and core's own matcher is blanked, so there is no second verdict to reconcile. The
+// deletion direction that existed while core still matched went with the ruling. The verdict is
 // `keywordScore` hits over the entry's resolved-depth window, so activation, scoring and the audit
 // can never disagree about whether a key matched.
 // ---------------------------------------------------------------------------
@@ -783,8 +798,9 @@ export function keywordScore(entry, text, keys = entry.key, { k1, caseSensitiveD
  * Two entry shapes reach this: raw entries (the ENTRIES_LOADED buckets, fixtures) carry the `@@`
  * lines in `content`; parsed entries (getSortedEntries output — what activationAdds/Prunes see at
  * runtime) carry them in a `decorators` array with content STRIPPED, so the content walk below
- * would always miss. The array is authoritative when present — without this check the runtime
- * guards were inert, and the prune could delete a keyed `@@activate` entry whose keys missed.
+ * would always miss. The array is authoritative when present — without this check the runtime guards
+ * are inert: `activationAdds` stops seeing `@@dont_activate`, and the takeover blanks a keyed
+ * `@@activate` entry's keys, which core's inclusion-group filter reads through `getScore`.
  * ponytail: the `@@@` fallback-chain nuance (it only applies after an unknown decorator) is not
  * mirrored, so this over-detects fallback lines — which errs safe in both callers: over-detecting
  * `@@dont_activate` under-adds, over-detecting `@@activate` under-deletes.
@@ -816,7 +832,7 @@ export function hasDecorator(entry, name) {
  * a book bypass that gate and the runtime is where it has to hold.
  */
 export const usableKeys = keys => (Array.isArray(keys) ? keys : [])
-    .filter(k => String(k ?? '').trim() && !validateSmartKey(k).some(f => f.severity === 'error'));
+    .filter(k => String(k ?? '').trim() && !fatalKey(k));
 
 /**
  * Entries WA force-activates, judged over WA's own window. WA owns activation, so this is the whole

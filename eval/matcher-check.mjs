@@ -1,6 +1,6 @@
 // Verifies WA's keyword matcher tracks core's world-info.js matchKeys semantics.
 // countKey/keywordScore live in matcher.mjs, which is isomorphic — imported directly.
-import { countKey, keyExcerpt, keyExcerpts, keywordScore as rankKeywordScore, setBoundaryMode, wholeWordAdvice } from '../extension/matcher.mjs';
+import { countKey, keyExcerpt, keyExcerpts, keywordScore as rankKeywordScore, setBoundaryMode, usableKeys, wholeWordAdvice } from '../extension/matcher.mjs';
 import { eq } from './metrics.mjs';
 
 // keywordScore with the production defaults injected. Guards the scoreVectorKeys path —
@@ -27,6 +27,38 @@ const scored = (e, t, k) => keywordScore(e, t, k).score > 0;
     }
     eq(keywordScore({ key: ['cosmonaut'] }, T.none, undefined, cfg).score > 0, true, 'no secondary keys: ungated');
     eq(keywordScore(e(0), T.none, undefined, cfg).hits.length, 0, 'a gated entry reports no hits either');
+}
+
+// Secondary keys are VALIDATED like primaries, minus one code. A fatal key is dropped, so the gate
+// loosens (all-dead secondaries are ungated, as blanks already were) instead of the malformed key
+// poisoning the expression and killing every scan. `negation-only` is the exemption: a secondary
+// never fires on its own — the primary gates activation — so "present unless X" is a condition an
+// author can mean, and usableKeys must go on refusing the same shape as a primary.
+{
+    const cfg = { k1: 1.2, caseSensitiveDefault: false, wholeWordsDefault: false };
+    const on = (sec, text, logic = 0) =>
+        keywordScore({ key: ['cosmonaut'], keysecondary: sec, selectiveLogic: logic }, text, undefined, cfg).score > 0;
+
+    eq(on(['? -gagarin'], 'the cosmonaut launched'), true, 'negation-only secondary: fires when the negated term is absent');
+    eq(on(['? -gagarin'], 'cosmonaut gagarin waved'), false, '...and gates when it is present');
+    eq(on(['? -gagarin', 'astronaut'], 'cosmonaut gagarin waved'), false, 'AND_ANY: neither branch holds');
+    eq(on(['? -gagarin', 'astronaut'], 'cosmonaut astronaut gagarin'), true, '...the positive branch still rescues it');
+    eq(usableKeys(['? -gagarin']).length, 0, 'the same key stays fatal as a PRIMARY');
+
+    // AND_ALL is where the shape earns its keep: "both crews, but not Gagarin" — a positive secondary
+    // and a negated one in the same list, which core has no way to write.
+    const both = (text) => keywordScore(
+        { key: ['astronaut'], keysecondary: ['cosmonaut', '? -gagarin'], selectiveLogic: 3 }, text, undefined, cfg).score > 0;
+    eq(both('the astronaut met the cosmonaut'), true, 'AND_ALL: positive secondary present, negated one absent');
+    eq(both('astronaut cosmonaut gagarin'), false, '...the negation still excludes');
+    eq(both('the astronaut waited alone'), false, '...and the positive secondary is still required');
+
+    // The three fatal shapes, each with the gate's terms present in the text: without the filter the
+    // expression fails whatever the text says, so a passing score is what proves the key was dropped.
+    eq(on(['? /[/'], 'the cosmonaut waited'), true, 'regex-invalid secondary is dropped, leaving the entry ungated');
+    eq(on(['?   '], 'the cosmonaut waited'), true, 'no-terms secondary is dropped');
+    eq(on(['? "moon', 'apollo'], 'cosmonaut apollo moon', 3), true, 'AND_ALL: a stray-quote sibling drops, the real one still gates');
+    eq(on(['? "moon', 'apollo'], 'cosmonaut moon', 3), false, '...and the surviving secondary still has to match');
 }
 eq(scored({ key: ['zzz'] }, 'alpha beta', ['alpha']), true, 'keywordScore honors explicit keys over entry.key');
 eq(scored({ key: ['alpha'] }, 'alpha beta', ['zzz']), false, 'explicit keys with no hit score zero even when entry.key would match');

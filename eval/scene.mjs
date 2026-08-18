@@ -536,7 +536,7 @@ export function makeCandidateSet({ loaded, byUid, entries, params: P, chunkCfg, 
         const per = new Map();
         for (const m of grouped[CID]?.metadata ?? []) { const uid = Number(m.index); per.set(uid, { score: Math.max(per.get(uid)?.score ?? -Infinity, m.score) }); }
         const rows = [];
-        // --- STAGE 2: ACTIVATION (retrieval route). Whatever survived the cut above is in the ranking.
+        // --- STAGE 2: ACTIVATION (retrieval route). Whatever the pooled top-K returned is in the ranking.
         // `entry` is carried so fuseRanks can read eligibility (and authored order) the way production does.
         //
         // DISABLED ENTRIES ARE EXCLUDED HERE TOO, and this route is why the exclusion matters. Disabling an
@@ -552,7 +552,7 @@ export function makeCandidateSet({ loaded, byUid, entries, params: P, chunkCfg, 
         // still see every entry, or the term weights move and the comparison measures the wrong thing.
         for (const [uid, s] of per) { const e = byUid.get(uid); if (e && !e.disable) rows.push({ uid, entry: e, title: wiTitle(e), score: s.score, sparseScore: colVectorized ? s.score : undefined, textScore: contentText.get(entryKey(e)) ?? 0, keywordScore: keywordScore(e, scanText, k1), vectorEligible: !!e.vectorized, textEligible: hasContent(e), keysEligible: scoringKeys(e, P).length > 0 }); }
         // --- STAGE 2: ACTIVATION (keyword route). Stands in for ST core's keyword match, so it may only
-        // admit an entry core could actually have activated. Two exclusions, both stage-2 facts:
+        // admit an entry core could actually have activated. One exclusion, a stage-2 fact:
         //
         //   disable            core never activates a disabled entry — 279 of 611 keyword-only rows on the
         //                      curated sommers scenes arrived this way before the guard. The retrieval route

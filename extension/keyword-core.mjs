@@ -5,8 +5,8 @@
 // (popups, saving, generation) on top and injects the world-info match flags.
 import { COMMON_WORDS } from '../plugin/commonwords.js';
 import { ZIPF_EN, POS_VA, POS_VA_STRICT, POS_ADJ } from './zipf-en.js';
-import { countKey, escapeRegex, isRegexKey, segment } from './matcher.mjs';
-import { buildAutomaton, scanAutomaton, createScanScope, primeScan } from './smartkeys.mjs';
+import { countKey, escapeRegex, isRegexKey, secondaryKeys, segment, usableKeys } from './matcher.mjs';
+import { buildAutomaton, scanAutomaton, createScanScope, primeScan, validateSmartKey } from './smartkeys.mjs';
 
 export const KEY_BOOK_COMMON = 0.5;
 
@@ -271,6 +271,13 @@ export function buildKeyPruneScan(data, opts, ignoreSet, { caseSensitiveDefault 
     const classify = (key, cs, ww, sticky) => {
         const k = String(key).trim();
         if (!k) return null;
+        // A key the MATCHER refuses to run, checked before anything reads the text: it is a fact about
+        // the string and it outranks every verdict below, which are all evidence ABOUT firing. Without
+        // it `/[/` scored zero occurrences and came back `unattested` — "never matches", true and
+        // useless, since it reads as a key the prose happens not to use rather than one WA drops.
+        // usableKeys rather than a validator call, so which codes are fatal in this position stays a
+        // matcher.mjs rule; the validator is re-read only for the wording the author sees.
+        if (!usableKeys([k]).length) return { flag: 'unusable', code: validateSmartKey(k).find(f => f.severity === 'error')?.code };
         // NEITHER A SMARTKEY NOR A REGEX IS EXEMPT FROM THE AUDIT. Both used to be, and both were the
         // wrong cut for the same reason: the question the audit asks — does this key fire, and how
         // often — is perfectly answerable for either, because countKey already evaluates them against
@@ -319,6 +326,21 @@ export function buildKeyPruneScan(data, opts, ignoreSet, { caseSensitiveDefault 
         if (literal && k.length < opts.minLength && !ww && opts.pruneShort) return { flag: 'short', bookContent, clean: strictClean(k, cs), total: scan(k, cs, false).total };
         return null;
     };
+    /** SECONDARY keys the matcher will not act on, with the validator's own message. Primaries need no
+     *  such list — `classify` flags them `unusable` and the Explorer paints that on the key's own chip,
+     *  which is where a per-key verdict belongs. A secondary has no chip to land on, so this is the only
+     *  way its author ever learns the entry is gating on fewer keys than they wrote. Neither the Studio's
+     *  save check nor core's WI editor says so, and the latter is where secondaries are edited.
+     *
+     *  A SET DIFFERENCE against the matcher's own filter, so which codes are fatal here stays a
+     *  matcher.mjs rule — `negation-only` is legitimate on a secondary and fatal on a primary, and
+     *  re-deriving that is how the two would drift. */
+    const unusableKeysOf = (e) => {
+        const live = new Set(secondaryKeys(e));
+        return (Array.isArray(e?.keysecondary) ? e.keysecondary : [])
+            .filter(k => String(k ?? '').trim() && !live.has(k))
+            .map(k => ({ uid: e?.uid, key: k, ...(validateSmartKey(k).find(f => f.severity === 'error') ?? {}) }));
+    };
     const classifyEntry = e => {
         if (!inScope(e)) return [];
         const cs = effCase(e), ww = effWhole(e);
@@ -339,6 +361,8 @@ export function buildKeyPruneScan(data, opts, ignoreSet, { caseSensitiveDefault 
     // the tiers drifted: the popup coloured a key yellow while still pre-ticking it for removal.
     const severityOf = p => {
         if (p.flag === 'unattested') return '';
+        // Not a heuristic like the rest of this band — the key cannot run, whoever wrote it.
+        if (p.flag === 'unusable') return RED;
         // The English list is an assertion about the WORD; a chat scan is evidence about this book's
         // prose. Red once the evidence agrees, yellow while it is only asserted — the same shape the
         // book-side flags have, where severity reads a measured ratio rather than a list membership.
@@ -367,6 +391,10 @@ export function buildKeyPruneScan(data, opts, ignoreSet, { caseSensitiveDefault 
         if (p.flag === 'unattested') {
             return { text: !p.literal ? 'never matches' : (p.chatChecked ? 'not in entry text or chat' : 'not in entry text'), color };
         }
+        // The validator's own code, not a second phrasing of it: the codes are already readable
+        // (`regex-invalid`, `negation-only`, `stray-quote`) and a translation table here is one more
+        // thing to drift from the message the Studio's save check shows for the same key.
+        if (p.flag === 'unusable') return { text: p.code ? `unusable — ${p.code}` : 'unusable', color };
         if (p.flag === 'book common') return { text: `book common (${Math.round(100 * p.bookContent / nBook)}%)`, color };
         if (p.flag === 'english common') {
             return { text: p.chatRate === undefined ? 'english common' : `english common · ${Math.round(100 * p.chatRate)}% of chat`, color };
@@ -404,7 +432,10 @@ export function buildKeyPruneScan(data, opts, ignoreSet, { caseSensitiveDefault 
     // colour; this only controls what "accept the defaults" agrees to.
     const generated = e => e?.stmemorybooks !== undefined || e?.STMB_start !== undefined || e?.stmbArc !== undefined;
     const byUid = new Map(allEntries.map(e => [String(e.uid), e]));
-    const defChecked = p => severityOf(p) === RED || (p.flag === 'unattested' && generated(byUid.get(String(p.uid))));
+    // NOT pre-ticked despite being red: every other red flag says the key fires where it should not, and
+    // deleting it is the fix. A malformed key says the author wrote something WA could not read, where
+    // the fix is a correction — so accepting the defaults must not silently throw the intent away.
+    const defChecked = p => p.flag !== 'unusable' && (severityOf(p) === RED || (p.flag === 'unattested' && generated(byUid.get(String(p.uid)))));
 
     // NEAR-DUPLICATE ENTRIES. Two summaries of one scene split its relevance: both rank mid, neither
     // wins, and no key can separate them because they say the same thing. Found by accident in a
@@ -455,7 +486,7 @@ export function buildKeyPruneScan(data, opts, ignoreSet, { caseSensitiveDefault 
         for (const list of dupes.values()) list.sort((p, q) => q.sim - p.sim);
     }
 
-    return { entries, nE, classifyEntry, reasonOf, defChecked, severityOf, effCase, effWhole, dupes };
+    return { entries, nE, classifyEntry, reasonOf, defChecked, severityOf, effCase, effWhole, dupes, unusableKeysOf };
 }
 
 // Few-shot examples, shared so the LLM post-filter can drop them unconditionally: a cold small model

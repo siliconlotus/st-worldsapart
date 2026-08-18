@@ -419,9 +419,6 @@ export const runState = {
     scanChat: null,               // the interceptor's chat — core's own scan haystack (regex-scripted,
                                   // files appended); SCAN_DONE consumers read this, not the raw chat
     lastKeywordAdds: new Set(),   // `${world}.${uid}` of the last union's keyword-only force-activations
-    forcedActivations: new Set(), // every `${world}.${uid}` force-activated this generation — WA's own
-                                  // AND other extensions' (FORCE_ACTIVATE is a broadcast; WA listens).
-                                  // The prune's ownership exemption: forced entries are never WA's to revoke.
     lastScanText: '',             // last global-depth keyword scan window, bundled by /wa-grade
     gradeCutoff: null,            // /wa-grade's candidate-depth cap; null = no capture in flight
     lastCandidates: [],           // selection-candidate rows from the last debug-class run, for /wa-grade

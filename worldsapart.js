@@ -812,7 +812,7 @@ async function retrieve(chat) {
  * The union direction: entries WA's matcher activates over its own
  * window, which core cannot or would not — `?` SmartKeys have no core semantics, the fold and
  * messageDepth are supersets. This function only extracts ST context; the candidacy rules and the
- * verdict live in ranking.mjs (activationAdds), where the check suite exercises them.
+ * verdict live in matcher.mjs (activationAdds), where the check suite exercises them.
  * @param {object[]} chat The interceptor's chat — core's own scan haystack
  * @returns {Promise<object[]>} Entries to force-activate
  */
@@ -831,10 +831,20 @@ async function keywordActivations(chat) {
         includeNames: world_info_include_names,
     });
 
-    // Register every candidate key up front so the smartkeys automaton is built once — a
-    // first-seen key mid-loop would rebuild it and throw away every cached scan. Registering
-    // here also pre-covers stage 3's registerKeys for this generation.
-    registerKeys(candidates.flatMap(e => (e.disable ? [] : (e.key ?? []))));
+    // Register every key this pass will match up front so the smartkeys automaton is built once — a
+    // first-seen key mid-loop dirties it, and the rebuild throws away every cached scan.
+    //
+    // SECONDARIES COUNT. countSelective interns their literals too, so leaving them to be primed per
+    // entry meant a rebuild for the first entry carrying a novel secondary, and another for the next:
+    // measured 102 ms against 2 ms over 200 entries x 20 segments. Filtered exactly as the matching
+    // path filters them, so nothing is registered that will never be asked — and an entry with no
+    // usable primary is skipped whole, as activationAdds skips it.
+    //
+    // Registering here also pre-covers stage 3's registerKeys for this generation.
+    registerKeys(candidates.flatMap(e => {
+        const keys = e.disable ? [] : matcher.usableKeys(e.key);
+        return keys.length ? [...keys, ...matcher.secondaryKeys(e)] : [];
+    }));
 
     return matcher.activationAdds(candidates, windowFor, {
         messageDepth: settings().messageDepth,
@@ -899,7 +909,6 @@ async function selectAndActivate(chat) {
     // against the chat it was handed, not a previous generation's stash. Redundant (same
     // array) on the intercept path.
     runState.scanChat = chat.slice();
-    runState.forcedActivations = new Set();
 
     // Per-scan takeover state. waOwnsScan goes FALSE first — WA's own getSortedEntries calls
     // below fire WORLDINFO_ENTRIES_LOADED, and the takeover blanking must not eat the keys WA
@@ -991,9 +1000,6 @@ async function intercept(chat, _maxContext, _type) {
     // appended, reasoning merged). Sliced so ST's later in-place splices (jailbreak injects)
     // can't shift membership under a SCAN_DONE consumer.
     runState.scanChat = chat.slice();
-    // Fresh per generation, BEFORE any emit: the FORCE_ACTIVATE listener repopulates it as
-    // WA and other extensions emit for this scan. A stale entry only over-exempts the prune.
-    runState.forcedActivations = new Set();
     // BEFORE the gate: a disabled generation's scan is core's, and a takeover flag leaked from
     // an aborted scan would blank its keys with no WA union behind them.
     runState.waOwnsScan = false;
@@ -1007,7 +1013,9 @@ async function intercept(chat, _maxContext, _type) {
 
 
 /**
- * Blanks keys on vectorized entries so the keyword scan skips them, and takes the budget off core.
+ * Blinds core's keyword matcher on a scan WA owns — every keyword-activating entry's keys are stashed
+ * and blanked, so WA's force-emit is the only keyword route into `activated` — and takes the budget
+ * off core.
  * Entries here are freshly-spread objects, so REASSIGNING `key` is safe —
  * mutating the array in place would corrupt the cached world data.
  * @param {object} loaded Lore buckets
@@ -1421,7 +1429,6 @@ async function feedScanLoop(args) {
             fallbackDepth: world_info_depth,
             caseSensitiveDefault: world_info_case_sensitive,
             wholeWordsDefault: world_info_match_whole_words,
-            blind: true,
             depthSkew: runState.waMinSkew,
         });
 
@@ -1523,7 +1530,13 @@ async function rankActivated(args) {
 
         // Register every key this pass will score BEFORE the loop, so the smartkeys automaton is
         // built once — a first-seen key mid-loop would rebuild it and throw away every cached scan.
-        registerKeys(items.flatMap(it => scoreKeysOf(it.entry)));
+        // Secondaries too, off the restored view keywordScore will actually gate against, and only for
+        // entries whose keys are scored at all: keywordScore returns on an empty key list before it
+        // primes anything.
+        registerKeys(items.flatMap(it => {
+            const keys = scoreKeysOf(it.entry);
+            return keys.length ? [...keys, ...matcher.secondaryKeys(scoringView(it.entry))] : [];
+        }));
 
         for (const item of items) {
             // Score keywords over the shared message depth. Per-entry scanDepth still wins
@@ -2538,8 +2551,12 @@ async function gradeScene(named) {
  * a near-identical population. messageDepth is likewise ablatable from `queryChat`. What earns an arm is
  * being unable to compute the population offline:
  *
- *   no-filter   entityFilter off moves the surviving query terms, so it moves BM25 and what stage 1
- *               admits at all.
+ *   no-filter   entityFilter off moves the surviving query terms, so it moves the term weights
+ *               content-lexical scores with at STAGE 3, and with them the layout ranking. It no longer
+ *               moves ADMISSION — stage 1 has no BM25 and no relevance test — and scene.mjs takes
+ *               termWeights as a parameter, so this arm now fails the criterion above. Kept until the
+ *               section is resettled; it still cannot ride a preloaded sweep (scene.mjs's guard names
+ *               only the gazetteer settings).
  *   keys-live   scoreVectorKeys on gives a retrieved entry its keyword rank too, which reorders the
  *               layout and so changes what the entry maxes and the budget keep. Activation (secondary
  *               keys, inclusion groups, recursion, min-activations, probability rolls) is the one thing
@@ -3528,16 +3545,6 @@ export async function init() {
 
     eventSource.on(event_types.WORLDINFO_ENTRIES_LOADED, onEntriesLoaded);
 
-    // Every force-activation this generation, whoever emitted it — WA's own selectAndActivate
-    // AND other extensions'. The prune's ownership exemption: a forced entry was admitted by
-    // authority, not by a key match, so WA's matcher has no standing to revoke it.
-    eventSource.on(event_types.WORLDINFO_FORCE_ACTIVATE, (entries) => {
-        for (const entry of entries ?? []) {
-            if (entry?.world != null && entry?.uid != null) {
-                runState.forcedActivations.add(`${entry.world}.${entry.uid}`);
-            }
-        }
-    });
     // WORLDINFO_ENTRIES_LOADED only fires during a scan, so switching chat/character wouldn't
     // refresh the attached-book set until the next generation. CHAT_CHANGED fires on every
     // switch; re-read the active books then. Also populates once now so it isn't blank on load.
