@@ -251,9 +251,9 @@ the **layout ranking** — vector + text + keys, normalised by the signals an en
 no mode switch: eligibility alone decides which columns an entry is scored on.
 
 **This is where the lexical half of WA lives now.** Measured over 8924 judged rows on 69 scenes, text is
-the strongest per-entry predictor of relevance — standardised logistic beta +0.833 against cosine's
-+0.468 and keys' +0.043 (`eval/relevance-regress.mjs`, pooled fit, per-scene intercepts). So "stage 1
-dropped BM25" is not "WA dropped BM25"; say which stage.
+the strongest per-entry predictor of relevance — standardised logistic beta +0.794 against cosine's
++0.465 and keys' -0.006 (`eval/relevance-regress.mjs`). So "stage 1 dropped BM25" is not "WA dropped
+BM25"; say which stage.
 
 **4. Selection** — two cuts, both here, each answering one question over the layout ranking. **There is
 no relevance cut, so WA makes no relevance decision anywhere** — a standing exception to the

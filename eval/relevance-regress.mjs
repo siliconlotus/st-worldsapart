@@ -25,9 +25,9 @@
 //
 // WITHIN-SCENE standardisation, not pooled: BM25 is not comparable across queries or corpora (the same
 // note governs bm25FloorPct in scene.mjs), so pooling raw scores across 71 scenes would let a scene's
-// scale masquerade as a coefficient. Scenes also differ in base rate, so the fit carries a per-scene
-// intercept — without it a scene with many relevant entries pulls every slope toward its own signal
-// levels, which is Simpson's paradox with the corpora as the strata.
+// scale masquerade as a coefficient. ONE intercept over all of them — a per-scene intercept was tried as
+// a control for differing base rates and measured to buy nothing, while reproducing each scene's base
+// rate by construction and so inflating any in-sample number that carried it.
 //
 // THE POOL IS WHAT WAS JUDGED. An ungraded row has no label, so it is dropped rather than scored 0 — a
 // 0 here would be a claim about relevance, where in a ranking metric it is a claim about a rank. Judged
@@ -67,11 +67,8 @@ const VALUES = valuesRaw.split(',').map(s => coerce(s.trim()));
 // standardised cosine. --ordinal fits every boundary so the scale can be read rather than assumed — see
 // logistic.mjs cumulativeFit for why the slopes are fitted separately instead of shared.
 const ORDINAL = argv.includes('--ordinal');
-// HELD OUT BY SCENE, on the POOLED-intercept design, for two reasons that happen to coincide. A held-out
-// scene has no fitted intercept of its own — which is exactly the runtime case, since production meets a
-// scene it was not fitted on — and the per-scene design is 70-odd columns, so K refits of it would cost
-// more than the answer is worth. Within-scene standardisation leaks nothing across the fold: it reads only
-// the held-out scene's own candidates, which stage 3 also holds.
+// HELD OUT BY SCENE. Within-scene standardisation leaks nothing across the fold: it reads only the
+// held-out scene's own candidates, which stage 3 also holds.
 const LOSO = argv.includes('--loso');
 // HELD OUT BY BOOK, which is the generalisation the system actually needs. A held-out SCENE still shares
 // its book's vocabulary, entry style, chunk statistics and BM25 scale with the rows that fitted the model,
@@ -147,16 +144,16 @@ const fx = n => (Number.isFinite(n) ? (n >= 0 ? '+' : '') + n.toFixed(3) : '  n/
         }
         if (!perScene.length) { console.log(`  ${SWEPT}=${value}: no scene has both classes among its judged rows`); continue; }
 
-        // Design matrix: per-scene intercept, then for each signal its standardised value and its
-        // eligibility indicator. Standardising within scene is what makes one slope mean one thing across
-        // corpora whose BM25 lives on different scales.
+        // Design matrix: one intercept, then for each signal its standardised value and its eligibility
+        // indicator. Standardising within scene is what makes one slope mean one thing across corpora
+        // whose BM25 lives on different scales.
         const X = [], y = [], rawCols = FEATURES.map(() => []), stats = FEATURES.map(() => ({ sd: [], mean: [] }));
         const perSignal = FEATURES.map(() => ({ s: [], y: [] }));
         for (const [si, { kept }] of perScene.entries()) {
             const cols = FEATURES.map(([, get]) => kept.map(k => get(k.r)));
             cols.forEach((c, fi) => { stats[fi].sd.push(sd(c)); stats[fi].mean.push(mean(c)); });
             kept.forEach((k, i) => {
-                const scene = Array.from({ length: perScene.length }, (_, j) => (j === si ? 1 : 0));
+                const scene = [1];
                 const feats = [];
                 cols.forEach((c, fi) => {
                     const s = sd(c) || 1;   // a signal constant within a scene carries no information there; 1 keeps it finite and its column stays flat
@@ -172,21 +169,17 @@ const fx = n => (Number.isFinite(n) ? (n >= 0 ? '+' : '') + n.toFixed(3) : '  n/
         const grades = perScene.flatMap(({ kept }) => kept.map(k => k.g));
         const stdFit = logisticFit(X, y);
 
-        // The same rows with ONE intercept instead of per-scene ones: the design production can actually
-        // run, and the baseline the held-out numbers are comparable against.
         const sceneOf = perScene.flatMap(({ kept }, si) => kept.map(() => si));
-        const Xp = X.map(row => [1, ...row.slice(perScene.length)]);
-        const pooled = logisticFit(Xp, y);
         const etaOf = (fit, rows) => rows.map(row => row.reduce((a, x, j) => a + x * fit.beta[j], 0));
         // One held-out estimator, two groupings. The fold is the unit the model must generalise ACROSS.
         const holdOut = (groupOf, nGroups) => {
             const held = Array(y.length).fill(NaN);
             for (let g = 0; g < nGroups; g++) {
                 const tr = [], trY = [];
-                Xp.forEach((row, i) => { if (groupOf(i) !== g) { tr.push(row); trY.push(y[i]); } });
+                X.forEach((row, i) => { if (groupOf(i) !== g) { tr.push(row); trY.push(y[i]); } });
                 if (!trY.some(v => v) || trY.every(v => v)) continue;
                 const f = logisticFit(tr, trY);
-                Xp.forEach((row, i) => { if (groupOf(i) === g) held[i] = row.reduce((a, x, j) => a + x * f.beta[j], 0); });
+                X.forEach((row, i) => { if (groupOf(i) === g) held[i] = row.reduce((a, x, j) => a + x * f.beta[j], 0); });
             }
             const keep = held.map((v, i) => [v, y[i]]).filter(([v]) => Number.isFinite(v));
             return { eta: keep.map(k => k[0]), y: keep.map(k => k[1]) };
@@ -201,12 +194,12 @@ const fx = n => (Number.isFinite(n) ? (n >= 0 ? '+' : '') + n.toFixed(3) : '  n/
         // The raw fit is the same design with unstandardised signals — the per-unit reading. Same intercepts,
         // so the only difference between the two is the scale the slope is expressed in.
         const Xraw = X.map((row, i) => {
-            const out = row.slice(0, perScene.length);
-            FEATURES.forEach((_, fi) => out.push(rawCols[fi][i], row[perScene.length + fi * 2 + 1]));
+            const out = row.slice(0, 1);
+            FEATURES.forEach((_, fi) => out.push(rawCols[fi][i], row[1 + fi * 2 + 1]));
             return out;
         });
         const rawFit = logisticFit(Xraw, y);
-        const base = perScene.length;
+        const base = 1;
         table.push({
             value, scenes: perScene.length, n: y.length, pos: y.reduce((a, b) => a + b, 0), dropped,
             rows: FEATURES.map(([name], fi) => ({
@@ -221,15 +214,14 @@ const fx = n => (Number.isFinite(n) ? (n >= 0 ? '+' : '') + n.toFixed(3) : '  n/
             ordinal: ORDINAL ? cumulativeFit(X, grades, [1, 2, 3, 4]) : null,
             base,
             fits: {
-                'per-scene intercepts': { eta: etaOf(stdFit, X), y },
-                'one pooled intercept': { eta: etaOf(pooled, Xp), y },
+                'in-sample': { eta: etaOf(stdFit, X), y },
                 ...(loso ? { 'held out by scene': loso } : {}),
                 ...(lobo ? { 'held out by BOOK': lobo } : {}),
             },
         });
     }
 
-    console.log(`\nlogistic fit of P(grade>=${CUT}), per-scene intercepts, signals standardised within scene`);
+    console.log(`\nlogistic fit of P(grade>=${CUT}), signals standardised within scene`);
     console.log(`  ${SWEPT.padEnd(14)} signal | std beta (SE)   raw beta   mean within-scene SD   solo AUC`);
     for (const t of table) {
         for (const [i, r] of t.rows.entries()) {
@@ -258,11 +250,10 @@ const fx = n => (Number.isFinite(n) ? (n >= 0 ? '+' : '') + n.toFixed(3) : '  n/
     }
 
     // WHAT A THRESHOLD WOULD DELIVER, which the AUC above does not say: AP moves with prevalence and the
-    // precision-at-recall rows are in the units a bar is chosen in. Three designs, and the gap between them
-    // is the point — per-scene intercepts are a parameter production does not have, and the in-sample
-    // pooled fit is the same design scored on the rows that fitted it.
+    // precision-at-recall rows are in the units a bar is chosen in. The in-sample row is the same fit
+    // scored on the rows that produced it; the held-out rows are what the number of record reads.
     console.log(`\noperational readout of P(grade>=${CUT}): average precision, and precision at recall`);
-    console.log(`  ${SWEPT.padEnd(14)} design                | prevalence   AUC     AP   | P@R50   P@R75   P@R90`);
+    console.log(`  ${SWEPT.padEnd(14)} scored on            | prevalence   AUC     AP   | P@R50   P@R75   P@R90`);
     for (const t of table) {
         for (const [i, [label, f]] of Object.entries(t.fits).entries()) {
             const m = prCurve(f.eta, f.y);

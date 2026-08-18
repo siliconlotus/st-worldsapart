@@ -119,7 +119,7 @@ export function auc(scores, y) {
  * away into the boundaries that do work.
  *
  * The caller supplies the design matrix once — the features do not change with the cut, only the label —
- * so this is K-1 fits over one X, and any per-scene intercept columns the caller built are reused as they
+ * so this is K-1 fits over one X, and whatever intercept columns the caller built are reused as they
  * are. A cut with one class absent is skipped rather than fitted: it has no boundary to find.
  *
  * @param {number[][]} X Rows of features, intercept columns included by the caller

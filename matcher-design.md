@@ -788,18 +788,22 @@ makes it the right thing for comparing signals and the wrong thing for asking wh
 grade >= 4 it reads 0.975 while 90% recall costs 17.5% precision. `logistic.mjs` `prCurve` prints both.
 The same distinction as nDCG against the layout score, one level down.
 
-**REPORT THE HELD-OUT NUMBER.** The fit carries a per-scene intercept to stop a scene's base rate
-pulling every slope toward its own signal levels — and a live scene has no fitted intercept, so that
-column is a parameter production does not have. `--loso` holds each scene out and refits on the
-one-intercept design, which is the runtime case. **Measured** at grade >= 3: AP 0.465 with per-scene
-intercepts, 0.438 pooled in-sample, 0.433 held out. **The slopes do not overfit** — the whole gap is the
-intercept, worth ~7% AP. Held out, precision is 38.4% at half the relevant rows and 10.3% at 90% of them.
+**HOLD OUT A BOOK, NOT A SCENE.** The system meets books it has never seen, and a held-out scene still
+shares its book's vocabulary, entry style, chunk statistics and BM25 scale with the rows that fitted the
+model. `--lobo` is the honest estimate; `--loso` measures another moment in a book already known.
+
+**The number of record is AP 0.423 at AUC 0.810, held out by book** (`--lobo`, grade >= 3, one intercept).
+In-sample on the same design it is 0.438, so the model extrapolates: an unseen book costs 2% relative
+against an unseen scene. Held out, precision is 37.4% at half the relevant rows and 10.3% at 90% of them.
+Per-scene intercepts were tried as a control for differing base rates and measured to buy nothing.
 
 **Fit PER TIER, on eligibility rather than on base rate.** The tiers do not carry the same signals:
 99.8% of memory rows are vectorized and carry cosine and text, while 84% of reference rows are
 keyword-only. A pooled fit reads one slope across two eligibility regimes, and it is also blind to any
-change confined to the smaller one — adding a cosine to every reference entry moves that tier's
-log-loss from 0.4804 to 0.4430 and its AUC from 0.8224 to 0.8574, while the pooled model moves 0.001.
+change confined to the smaller one — computing a cosine for every reference entry (`denseAllEntries`)
+moves that tier's AUC from 0.7387 to 0.7851 and its log-loss from 0.5539 to 0.5163, while the memory tier
+and the pooled model do not move at all. Reference cosine then carries the tier's largest slope
+(+0.806 standardised, against text's +0.419), where without it the tier runs on keys.
 
 **The base-rate argument for the split does NOT hold, and was measured wrong.** Pooled over all judged
 rows the tiers look 3.7x apart, but base rate correlates -0.63 with how deep a capture was graded, and
@@ -844,12 +848,12 @@ into precision and not into recall. That is the target and the score disagreeing
 recorded rather than resolved, because the alternative is a weight between the halves that no measurement
 here would choose.
 
-**Grade 4 is the band the signals find, and it is a high-confidence core rather than a guarantee.**
-Held out, at 1.29% prevalence: AUC 0.9354, AP 0.401 — a ~31x lift on base rate, roughly one entry per
-scene at ~40% precision for half the 4s. It leans on the per-scene intercept harder than any other
-boundary (in-sample AP 0.578), because 103 positives over 69 intercepts is thin enough to memorise which
-scenes hold one. Its separation is also partly circular: the anchors reserve 4 for the scene's current
-subject, which is close to a definition of what a query embedding matches hardest.
+**Grade 4 is the band the signals find, and it does NOT travel between books.** Held out by book at
+1.29% prevalence: AUC 0.8867, AP 0.324 — a ~25x lift on base rate, but against 0.423 in-sample, and
+precision at 75% recall falls from 16.5% to 7.6%. So its strength is substantially book-specific, which
+follows from the construct: the anchors reserve 4 for the scene's current SUBJECT, and what counts as a
+subject is a property of how a book was written. Treat it as a high-confidence core within a known book,
+never as a guarantee on a new one.
 
 **The labels are the ceiling, not the model.** About a third of boundary positives change side between
 two passes of the same judge — corroborated by the contract re-grade, where 4 of 13 rows originally >= 3
@@ -875,9 +879,9 @@ instances the books on disk hold.
    parameter (measured, *Evidence → Two scores*). The predicted set IS the layout, so scoring it is
    scoring the prediction, and `tierRecall` gets its kept set back at the same moment. The model, its
    evidence and what is still open about it are in *Stage 4 predicts per-entry relevance*; three things
-   have to be decided in the building rather than after it — whether the target is `P(>=3)` or expected
-   `gradeCredit`, what replaces the per-scene intercept at runtime, and the calibration readout, since
-   the bar is argued in probability terms and nothing currently checks the probabilities.
+   have to be decided in the building rather than after it — where the bar goes, the calibration readout
+   that lets it be argued in probability terms, and whether the per-tier split earns two bars as well as
+   two fits.
 2. **`promote` — an author declaration that activation is sufficient.** A promoted entry enters the
    layout whenever its keys fire, exempt from the relevance cut. It is the per-entry form of *triggered
    == relevant*, which stage 4 broke by having the cliff arbitrate keyword-activated entries alongside
