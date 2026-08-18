@@ -107,3 +107,34 @@ export function auc(scores, y) {
     const sumPos = rank.reduce((s, r, i) => s + (y[i] ? r : 0), 0);
     return (sumPos - pos * (pos + 1) / 2) / (pos * neg);
 }
+
+/**
+ * The cumulative-logit family: one binary fit per boundary of an ordinal label, P(g >= k) for each cut.
+ *
+ * SEPARATE SLOPES PER BOUNDARY, WHICH IS NOT PROPORTIONAL ODDS — deliberately. Proportional odds shares
+ * one slope vector across every cut and buys efficiency with that assumption; here the assumption IS the
+ * question. Fitting each boundary alone lets the slopes be compared: if they agree, proportional odds is
+ * justified and can be fitted later for the tighter intervals; if a boundary's slope collapses or inverts,
+ * that is the signals failing to see a distinction the scale asserts, which a shared slope would average
+ * away into the boundaries that do work.
+ *
+ * The caller supplies the design matrix once — the features do not change with the cut, only the label —
+ * so this is K-1 fits over one X, and any per-scene intercept columns the caller built are reused as they
+ * are. A cut with one class absent is skipped rather than fitted: it has no boundary to find.
+ *
+ * @param {number[][]} X Rows of features, intercept columns included by the caller
+ * @param {number[]} g Ordinal labels (need not be integers; the cut is `>= k`)
+ * @param {number[]} cuts Boundaries to fit, e.g. [1, 2, 3, 4]
+ * @param {object} [opts] Passed through to logisticFit
+ * @returns {Array<{cut: number, n: number, pos: number, fit: object|null, auc: number}>}
+ */
+export function cumulativeFit(X, g, cuts, opts = {}) {
+    return cuts.map(cut => {
+        const y = g.map(v => (v >= cut ? 1 : 0));
+        const pos = y.reduce((a, b) => a + b, 0);
+        if (!pos || pos === y.length) return { cut, n: y.length, pos, fit: null, auc: NaN };
+        const fit = logisticFit(X, y, opts);
+        const eta = X.map(row => row.reduce((s, x, j) => s + x * fit.beta[j], 0));
+        return { cut, n: y.length, pos, fit, auc: auc(eta, y) };
+    });
+}

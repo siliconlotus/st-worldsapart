@@ -38,7 +38,7 @@
 import { indexPath, isMemory, loadScene, openSample, sceneParams, makeCandidateSet, makeGradeOf, embed } from './scene.mjs';
 import { ensureIndex } from './reindex.mjs';
 import { gradeValue } from './metrics.mjs';
-import { logisticFit, auc } from './logistic.mjs';
+import { logisticFit, auc, cumulativeFit } from './logistic.mjs';
 import * as ranking from '../extension/ranking.mjs';
 
 const argv = process.argv.slice(2);
@@ -61,6 +61,11 @@ const VALUES = valuesRaw.split(',').map(s => coerce(s.trim()));
 // not carry the same signals — memory is ~all vectorized, reference ~all keyword-only — so a pooled fit
 // reads one slope across two eligibility regimes. 'all' is the pooled fit and stays the default, because
 // it is what the recorded figures were measured on.
+// ORDINAL MODE. The 0-4 scale asserts four boundaries and the shipped model fits only one of them
+// (>=3), which is also the one the signals separate worst: pooled, grades 2 and 3 sit at the same mean
+// standardised cosine. --ordinal fits every boundary so the scale can be read rather than assumed — see
+// logistic.mjs cumulativeFit for why the slopes are fitted separately instead of shared.
+const ORDINAL = argv.includes('--ordinal');
 const TIER = arg('--tier') ?? 'all';
 if (!['all', 'memory', 'reference'].includes(TIER)) { console.error(`--tier must be all|memory|reference, got ${TIER}`); process.exit(2); }
 const MODEL = process.env.WA_EMBED_MODEL ?? 'bge-m3';
@@ -118,7 +123,7 @@ const fx = n => (Number.isFinite(n) ? (n >= 0 ? '+' : '') + n.toFixed(3) : '  n/
                 if (TIER !== 'all' && (isMemory(r.entry) ? 'memory' : 'reference') !== TIER) continue;
                 const g = gradeOf(r);
                 if (g === null || g === undefined || Number.isNaN(g)) { dropped++; continue; }
-                kept.push({ r, y: g >= 3 ? 1 : 0 });
+                kept.push({ r, y: g >= 3 ? 1 : 0, g });
             }
             if (kept.length >= 5 && kept.some(k => k.y) && kept.some(k => !k.y)) perScene.push({ name, kept });
         }
@@ -146,6 +151,7 @@ const fx = n => (Number.isFinite(n) ? (n >= 0 ? '+' : '') + n.toFixed(3) : '  n/
                 y.push(k.y);
             });
         }
+        const grades = perScene.flatMap(({ kept }) => kept.map(k => k.g));
         const stdFit = logisticFit(X, y);
         // The raw fit is the same design with unstandardised signals — the per-unit reading. Same intercepts,
         // so the only difference between the two is the scale the slope is expressed in.
@@ -167,6 +173,8 @@ const fx = n => (Number.isFinite(n) ? (n >= 0 ? '+' : '') + n.toFixed(3) : '  n/
             })),
             logLoss: stdFit.logLoss, converged: stdFit.converged,
             auc: auc(X.map((row, i) => row.reduce((s, x, j) => s + x * stdFit.beta[j], 0)), y),
+            ordinal: ORDINAL ? cumulativeFit(X, grades, [1, 2, 3, 4]) : null,
+            base,
         });
     }
 
@@ -178,6 +186,24 @@ const fx = n => (Number.isFinite(n) ? (n >= 0 ? '+' : '') + n.toFixed(3) : '  n/
             console.log(`  ${head} ${r.name.padEnd(6)} | ${fx(r.std)} (${r.stdSe.toFixed(3)})  ${fx(r.raw).padStart(9)}   ${r.sd.toFixed(4).padStart(20)}   ${r.auc.toFixed(3).padStart(8)}`);
         }
         console.log(`  ${' '.repeat(14)} model  | AUC ${t.auc.toFixed(4)}  log-loss ${t.logLoss.toFixed(4)}  n ${t.n} rows (${t.pos} relevant) over ${t.scenes} scenes, ${t.dropped} ungraded dropped${t.converged ? '' : '  !! DID NOT CONVERGE'}`);
+    }
+
+    if (ORDINAL) {
+        // ONE ROW PER BOUNDARY OF THE SCALE. `n>=k` is how many rows sit at or above that grade, so the
+        // boundaries get rarer down the column and the last one is often too thin to fit. Read the slopes
+        // ACROSS boundaries: a scale whose levels the signals can see gives similar slopes with rising
+        // intercepts, and a boundary whose slope collapses is a distinction the grader made and the
+        // features cannot reproduce.
+        console.log('\nordinal: P(grade >= k) fitted at every boundary, same design matrix, slopes free');
+        for (const t of table) {
+            console.log(`  ${SWEPT}=${t.value}`);
+            console.log('    cut |  n>=k |  cosine     text      keys   | model AUC  log-loss');
+            for (const o of t.ordinal) {
+                if (!o.fit) { console.log(`    >=${o.cut} | ${String(o.pos).padStart(5)} | not fitted — one class absent at this boundary`); continue; }
+                const b = i => o.fit.beta[t.base + i * 2];
+                console.log(`    >=${o.cut} | ${String(o.pos).padStart(5)} | ${fx(b(0))}   ${fx(b(1))}   ${fx(b(2))}   |   ${o.auc.toFixed(4)}    ${o.fit.logLoss.toFixed(4)}${o.fit.converged ? '' : '  !! DID NOT CONVERGE'}`);
+            }
+        }
     }
 
     if (table.length > 1) {

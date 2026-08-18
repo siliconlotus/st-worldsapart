@@ -1,6 +1,6 @@
 // The fit is checked against cases whose answer is known independently of it, because a wrong coefficient
 // does not throw — it prints, and reads exactly like a finding.
-import { logisticFit, auc, inverse } from './logistic.mjs';
+import { logisticFit, auc, inverse, cumulativeFit } from './logistic.mjs';
 import { eq, eqNear } from './metrics.mjs';
 
 // --- inverse ---------------------------------------------------------------------------------------
@@ -45,3 +45,22 @@ eqNear(auc([1, 1, 1, 1], [0, 0, 1, 1]), 0.5, 'all-tied scores 0.5 rather than de
 eq(Number.isNaN(auc([1, 2, 3], [1, 1, 1])), true, 'one class present is NaN, not a number');
 
 console.log('ok   logistic fit recovers known coefficients, stays finite under separation, and AUC handles ties');
+
+// --- cumulativeFit: one fit per ordinal boundary, and the boundaries are allowed to disagree -----------
+// Built so the slopes CAN differ (see its header), so the check is that a label whose boundaries genuinely
+// differ produces different slopes rather than one averaged one. g is ordinal on a single feature: the
+// >=1 boundary is separable at x=0, the >=3 boundary is not separable at all (3s are scattered).
+{
+    const X = [[1, -2], [1, -1], [1, 1], [1, 2], [1, -1.5], [1, 1.5]];
+    const g = [0, 0, 2, 3, 3, 0];   // >=1 tracks x; >=3 deliberately does not
+    const fits = cumulativeFit(X, g, [1, 2, 3, 4]);
+    eq(fits.map(f => f.cut).join(','), '1,2,3,4', 'one entry per requested cut, in order');
+    eq(fits[0].pos, 3, 'the >=1 cut counts every row at or above 1');
+    eq(fits[3].fit, null, 'a cut with no positives is not fitted — there is no boundary to find');
+    eq(Number.isNaN(fits[3].auc), true, '...and reports NaN rather than a number nothing produced');
+    eq(fits[0].auc > fits[2].auc, true, 'the separable boundary scores above the scattered one');
+    // The point of separate fits: a shared slope would have to average these two.
+    eq(Math.abs(fits[0].fit.beta[1]) > Math.abs(fits[2].fit.beta[1]), true,
+        'boundaries carry their own slope, so a weak one cannot borrow strength from a strong one');
+    console.log('ok   cumulativeFit: per-boundary fits, unfittable cuts declared, slopes independent');
+}
