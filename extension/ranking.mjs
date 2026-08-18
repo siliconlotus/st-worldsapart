@@ -73,7 +73,9 @@ export function buildGazetteer(entries) {
  * 3, so the tables are gone and what survives them is the DIRECTION — every arm admitting more terms
  * ranked worse — plus the two traps that produced four different answers from four attempts:
  *
- * TRAP 1, THE METRIC. Use mean target rank, not nDCG@5. Relevance here is sparse and Poisson-shaped
+ * TRAP 1, THE METRIC. Use mean target rank, not nDCG@5. Relevance here is sparse and OVERDISPERSED
+ * (relevant-per-scene mean 9.9, variance 24.5 — var/mean 2.48, where Poisson is 1, which is 71 scenes
+ * over 3 stories showing through)
  * (5-11 judged-relevant entries per scene), so nDCG@5 sees a handful of placements and has few reachable
  * states: it returned an IDENTICAL 0.9322 for boost 1/2/3/5/8 on one scene under every population tried.
  * That is mechanistic rather than noise — the boost is a uniform multiplier over proper nouns, so where

@@ -769,36 +769,82 @@ against the runtime's own verdicts on 315 rows across 7 arms.
 ### Stage 4 predicts per-entry relevance
 
 **Ruled, unimplemented.** Regression was measured to be no worse than RRF + nDCG and was chosen for
-explainability.
+explainability. Everything below is measured on 69 graded scenes, 8924 judged rows, three signals
+(cosine, text, keys), by `eval/relevance-regress.mjs`.
 
 **LOGISTIC regression**, on the project's own relevance line (grade >= 3). Linear would put predictions
-outside [0,1] on a bounded target and would weight a 0-vs-1 error the same as a 0.4-vs-0.5 one
-(`eval/relevance-regress.mjs`, which fits it). Each entry gets p(grade >= 3), and ships if it clears the
-bar. The count falls out — a scene with three relevant entries delivers three — so "how many entries
-does this scene need" is not a separate question and takes no parameter of its own.
+outside [0,1] on a bounded target and would weight a 0-vs-1 error the same as a 0.4-vs-0.5 one. Each
+entry gets p, and ships if it clears the bar. The count falls out — a scene with three relevant entries
+delivers three — so "how many entries does this scene need" is not a separate question and takes no
+parameter of its own.
 
-**Linear in the signals — the linear predictor, not a linear model — and fit per tier.** Polynomial
-terms are unmeasured rather than rejected, and are not free: every added term is another coefficient
-fitted on the same rows, and the pooled n is thousands of ROWS over 3 corpora, not thousands of corpora.
-memory and reference have different base rates and different achievable recall — reference reaches 95%
-at 5.4 entries per scene, memory needs 38 to reach 73%, a pair that names no instrument either — so one
-fit across both spends its capacity on the class prior, which predicts genuinely and is not retrieval
-(`eval/scene.mjs` `tierRecall`).
+**RELEVANCE IS A PROPERTY OF THE PAIR, never of the entry.** Every feature is query-dependent and every
+grade belongs to one scene. **Measured**: of the 594 entries graded in two or more scenes, 89.7% have a
+grade that varies and 54.5% cross the relevance line — the same entry, the same book, relevant here and
+not there. Anything that caches a verdict per entry is wrong by construction.
 
-**The bar is a chosen trade, not a boundary in the data.** The p distributions of grade 3-4 and 0-2
-overlap by 71%, the best single cut gives 25% purity at 66% recall, and p is calibrated at ECE 0.0067 —
-so it reads as a probability and the bar can be argued in those terms, but it cannot sort rows into the
-graded bands. **Those four figures name no instrument**: nothing in `eval/` computes an overlap, a
-purity, a calibration error or a per-tier fit, so they cannot be re-run and are assertions until
-something does. Build the calibration readout with the predictor.
+**JUDGE THE PREDICTOR BY AP AND PRECISION-AT-RECALL, NOT AUC.** AUC is prevalence-independent, which
+makes it the right thing for comparing signals and the wrong thing for asking what clears a bar — at
+grade >= 4 it reads 0.975 while 90% recall costs 17.5% precision. `logistic.mjs` `prCurve` prints both.
+The same distinction as nDCG against the layout score, one level down.
 
-**The labels are the ceiling, not the model, and the model has nearly reached it.** About a third of
-boundary positives change side between two passes of the same judge — corroborated by the contract
-re-grade, where 4 of 13 rows originally >= 3 came back below it (`CLAUDE.md`, graded scenes) — which puts
-achievable AUC near 0.85. **Measured** at the current architecture, 8924 rows over 69 scenes: the pooled
-three-signal fit reaches AUC 0.8459 at log-loss 0.1901, against 0.79 when this section was written. So
-the headroom is small and it is not in the fitting. That fit is POOLED, not the per-tier one ruled above,
-so it is the floor for what per-tier should reach rather than a measurement of it.
+**REPORT THE HELD-OUT NUMBER.** The fit carries a per-scene intercept to stop a scene's base rate
+pulling every slope toward its own signal levels — and a live scene has no fitted intercept, so that
+column is a parameter production does not have. `--loso` holds each scene out and refits on the
+one-intercept design, which is the runtime case. **Measured** at grade >= 3: AP 0.465 with per-scene
+intercepts, 0.438 pooled in-sample, 0.433 held out. **The slopes do not overfit** — the whole gap is the
+intercept, worth ~7% AP. Held out, precision is 38.4% at half the relevant rows and 10.3% at 90% of them.
+
+**Fit PER TIER, on eligibility rather than on base rate.** The tiers do not carry the same signals:
+99.8% of memory rows are vectorized and carry cosine and text, while 84% of reference rows are
+keyword-only. A pooled fit reads one slope across two eligibility regimes, and it is also blind to any
+change confined to the smaller one — adding a cosine to every reference entry moves that tier's
+log-loss from 0.4804 to 0.4430 and its AUC from 0.8224 to 0.8574, while the pooled model moves 0.001.
+
+**The base-rate argument for the split does NOT hold, and was measured wrong.** Pooled over all judged
+rows the tiers look 3.7x apart, but base rate correlates -0.63 with how deep a capture was graded, and
+memory is admitted wholesale while reference only enters when a key fires — so a pooled comparison puts
+memory's whole distribution against reference's head. **Measured at matched rank** (top-K of each
+scene's own ranking, no scene dropped): the tiers are indistinguishable at the head, 38.4% against 37.7%
+at K=10, and the gap grows monotonically with K. Filtering scenes by pool depth instead of matching rank
+reproduces the artifact AND selects the rater — a `judged >= 50` cut drops 39% of every human grade in
+the corpus while keeping 8536 of 8546 judge rows.
+
+**The scale is ordinal in the signals, and the line we threshold is its weakest boundary.** Mean
+standardised signal rises monotonically across grades, so the levels are not decoration — but 2 and 3
+sit together and cosine INVERTS across them (+0.748 against +0.694). Fitted at every boundary
+(`--ordinal`, `logistic.mjs` `cumulativeFit`), cosine runs +0.682, +0.625, **+0.468**, +0.901 across
+>= 1, 2, 3, 4: the operational cut is drawn through the flattest part of the scale. **Proportional odds
+does not hold** — that non-constancy is what a shared slope would average away, which is why the
+boundaries are fitted separately.
+
+**And the flat spot is memory's.** In the reference tier cosine strengthens monotonically across the
+boundaries (+0.123, +0.588, +1.397) and the >= 3 line is real; in memory it collapses at exactly that
+cut. The tiers may not want the same bar, let alone the same model.
+
+**OPEN: the target may be the wrong quantity.** `metrics.mjs` `gradeCredit` scores a delivered 2 at
+HALF, so the evaluation metric carries a middle band that a binary target forbids the model to express.
+Expected credit is `0.5 * P(>=2) + 0.5 * P(>=3)`, both of which the cumulative fit already produces — the
+same threshold architecture, but thresholding the quantity the layout score actually sums, and drawing on
+the >= 2 boundary the signals separate best instead of leaning entirely on the one they separate worst.
+
+**Grade 4 is the band the signals find, and it is a high-confidence core rather than a guarantee.**
+Held out, at 1.29% prevalence: AUC 0.9354, AP 0.401 — a ~31x lift on base rate, roughly one entry per
+scene at ~40% precision for half the 4s. It leans on the per-scene intercept harder than any other
+boundary (in-sample AP 0.578), because 103 positives over 69 intercepts is thin enough to memorise which
+scenes hold one. Its separation is also partly circular: the anchors reserve 4 for the scene's current
+subject, which is close to a definition of what a query embedding matches hardest.
+
+**The labels are the ceiling, not the model.** About a third of boundary positives change side between
+two passes of the same judge — corroborated by the contract re-grade, where 4 of 13 rows originally >= 3
+came back below it (`CLAUDE.md`, graded scenes). The headroom is small and it is not in the fitting.
+
+**Still naming no instrument**, and now suspect rather than merely unverified, since the claim beside
+them was measured wrong: the 71% p-overlap, the 25%-purity-at-66%-recall cut, ECE 0.0067, and the
+per-tier recall curve (reference 95% at 5.4 entries, memory 38 for 73%). Nothing computes an overlap, a
+purity or a calibration error. **The calibration readout is work the predictor has to bring with it** —
+the bar is argued in probability terms and nothing currently checks that the probabilities mean what
+they say.
 
 ---
 
@@ -810,9 +856,12 @@ instances the books on disk hold.
 1. **The relevance prediction — stage 4 deciding, per entry, whether it belongs.** This is the whole of
    the open work, not a step after tuning: F2@layout is the score of record, and until a prediction
    exists the delivered set is everything activated, so that score is invariant to every layout
-   parameter (measured, *Evidence → Two scores*). It needs no new instrument. The predicted set IS the
-   layout, so scoring it is scoring the prediction, and `tierRecall` gets its kept set back at the same
-   moment. What ranks the entries is already there; what is missing is the decision.
+   parameter (measured, *Evidence → Two scores*). The predicted set IS the layout, so scoring it is
+   scoring the prediction, and `tierRecall` gets its kept set back at the same moment. The model, its
+   evidence and what is still open about it are in *Stage 4 predicts per-entry relevance*; three things
+   have to be decided in the building rather than after it — whether the target is `P(>=3)` or expected
+   `gradeCredit`, what replaces the per-scene intercept at runtime, and the calibration readout, since
+   the bar is argued in probability terms and nothing currently checks the probabilities.
 2. **`promote` — an author declaration that activation is sufficient.** A promoted entry enters the
    layout whenever its keys fire, exempt from the relevance cut. It is the per-entry form of *triggered
    == relevant*, which stage 4 broke by having the cliff arbitrate keyword-activated entries alongside
