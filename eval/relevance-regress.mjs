@@ -34,8 +34,9 @@
 // coverage is printed per arm for the same reason param-screen prints it.
 //
 // Usage (from SillyTavern root):
-//   node .../relevance-regress.mjs <sample.json> [more.json ...] [--sweep gazetteerSource=keys,titles]
-import { indexPath, loadScene, openSample, sceneParams, makeCandidateSet, makeGradeOf, embed } from './scene.mjs';
+//   node .../relevance-regress.mjs <sample.json> [...] [--sweep gazetteerSource=keys,titles] [--tier memory]
+import { indexPath, isMemory, loadScene, openSample, sceneParams, makeCandidateSet, makeGradeOf, embed } from './scene.mjs';
+import { ensureIndex } from './reindex.mjs';
 import { gradeValue } from './metrics.mjs';
 import { logisticFit, auc } from './logistic.mjs';
 import * as ranking from '../extension/ranking.mjs';
@@ -56,6 +57,12 @@ const [SWEPT, valuesRaw] = [sweep.slice(0, sweep.indexOf('=')), sweep.slice(swee
 // and compare unequal to every default. Booleans the same.
 const coerce = v => (v === 'true' ? true : v === 'false' ? false : v === 'null' ? null : (v !== '' && !Number.isNaN(Number(v)) ? Number(v) : v));
 const VALUES = valuesRaw.split(',').map(s => coerce(s.trim()));
+// WHICH TIER IS FITTED. The ruled predictor fits per tier (matcher-design.md, Stage 4), and the tiers do
+// not carry the same signals — memory is ~all vectorized, reference ~all keyword-only — so a pooled fit
+// reads one slope across two eligibility regimes. 'all' is the pooled fit and stays the default, because
+// it is what the recorded figures were measured on.
+const TIER = arg('--tier') ?? 'all';
+if (!['all', 'memory', 'reference'].includes(TIER)) { console.error(`--tier must be all|memory|reference, got ${TIER}`); process.exit(2); }
 const MODEL = process.env.WA_EMBED_MODEL ?? 'bge-m3';
 const OLLAMA = process.env.OLLAMA_URL ?? 'http://localhost:11434';
 
@@ -84,7 +91,7 @@ const fx = n => (Number.isFinite(n) ? (n >= 0 ? '+' : '') + n.toFixed(3) : '  n/
         const qv = await embed(S.query, { ollama: OLLAMA, model: MODEL });
         loaded.push({ path, name: S.name ?? path, S, qv });
     }
-    console.log(`${loaded.length} scene(s); sweeping ${SWEPT} over ${VALUES.join(', ')}`);
+    console.log(`${loaded.length} scene(s); sweeping ${SWEPT} over ${VALUES.join(', ')}${TIER === 'all' ? '' : `; ${TIER} tier only`}`);
 
     const table = [];
     for (const value of VALUES) {
@@ -93,7 +100,14 @@ const fx = n => (Number.isFinite(n) ? (n >= 0 ? '+' : '') + n.toFixed(3) : '  n/
         let dropped = 0;
         for (const { S, qv, name } of loaded) {
             const P = sceneParams(S, { [SWEPT]: value });
-            const scene = loadScene(S, { indexFile: indexPath(S, { model: MODEL }), params: P });
+            // THE INDEX FOLLOWS THE PARAMS. denseAllEntries wants a collection covering every entry, not
+            // only the vectorized ones — scored against the standard index it would find no extra vectors
+            // and report a null result that reads like an answer. ensureIndex is cached per (book, cfg,
+            // all), so this costs an existsSync on every scene after the first.
+            const indexFile = P.denseAllEntries
+                ? (await ensureIndex(S, { all: true, model: MODEL, ollama: OLLAMA, log: () => {} })).path
+                : indexPath(S, { model: MODEL });
+            const scene = loadScene(S, { indexFile, params: P });
             const tw = (P.entityFilter && P.queryMode !== 'summary') ? ranking.buildTermWeights(S.query, scene.gaz, P.boost) : null;
             const rows = makeCandidateSet({ ...scene, params: P })(P.K1, P.B, tw, qv, S.query, S.scanText);
             const gradeOf = makeGradeOf(S.grades, scene.isExcluded);
@@ -101,6 +115,7 @@ const fx = n => (Number.isFinite(n) ? (n >= 0 ? '+' : '') + n.toFixed(3) : '  n/
             // applies to them. Ungraded rows are out because they carry no label.
             const kept = [];
             for (const r of rows.filter(r => !r.entry?.constant)) {
+                if (TIER !== 'all' && (isMemory(r.entry) ? 'memory' : 'reference') !== TIER) continue;
                 const g = gradeOf(r);
                 if (g === null || g === undefined || Number.isNaN(g)) { dropped++; continue; }
                 kept.push({ r, y: g >= 3 ? 1 : 0 });
