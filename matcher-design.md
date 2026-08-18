@@ -822,11 +822,27 @@ boundaries are fitted separately.
 boundaries (+0.123, +0.588, +1.397) and the >= 3 line is real; in memory it collapses at exactly that
 cut. The tiers may not want the same bar, let alone the same model.
 
-**OPEN: the target may be the wrong quantity.** `metrics.mjs` `gradeCredit` scores a delivered 2 at
-HALF, so the evaluation metric carries a middle band that a binary target forbids the model to express.
-Expected credit is `0.5 * P(>=2) + 0.5 * P(>=3)`, both of which the cumulative fit already produces — the
-same threshold architecture, but thresholding the quantity the layout score actually sums, and drawing on
-the >= 2 boundary the signals separate best instead of leaning entirely on the one they separate worst.
+**RULED: the target is EXPECTED `gradeCredit`, not `P(>=3)`.** `metrics.mjs` `gradeCredit` scores a
+delivered 2 at HALF, so the layout score's precision numerator is a sum of credits — and the quantity to
+threshold is the one that sum is built from. `E[credit] = 0.5 * P(>=2) + 0.5 * P(>=3)`, both of which the
+cumulative fit already produces. It costs no architecture: still one number per entry, still a bar. It
+also stops the decision resting entirely on the boundary the signals separate worst, and it lets the model
+express the middle band the scale defines and the metric already pays for — a 2 is "50/50 on inclusion",
+so half credit is the grader's own stated probability rather than a weighting invented here.
+
+**Clamp `P(>=3)` to `P(>=2)`.** The boundaries are fitted separately, so nothing guarantees the nesting
+the events have, and `E[credit]` is malformed where it inverts. **Measured**: 39 of 8975 rows invert, by
+at most 0.0002 — numerically trivial, so a clamp costs nothing and removes the case entirely. It is not
+optional for being small; an incoherent probability pair is a bug that reads as a threshold effect.
+
+**Watch the asymmetry when the bar is chosen.** The layout score's two halves read different quantities
+on purpose — precision credits a 2 at half, recall counts only grade >= 3, because recall asks whether the
+must-deliver material arrived. So `E[credit]` is aligned with the precision half and not with the recall
+half, and recall is the half weighted twice. **Measured**, ranking by `E[credit]`: 2s are a steady ~20% of
+what it surfaces at every depth (22.0% of the top 5 per scene, 19.4% of the top 20), and those rows pay
+into precision and not into recall. That is the target and the score disagreeing at the margin. It is
+recorded rather than resolved, because the alternative is a weight between the halves that no measurement
+here would choose.
 
 **Grade 4 is the band the signals find, and it is a high-confidence core rather than a guarantee.**
 Held out, at 1.29% prevalence: AUC 0.9354, AP 0.401 — a ~31x lift on base rate, roughly one entry per
