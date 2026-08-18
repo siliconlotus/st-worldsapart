@@ -1,6 +1,6 @@
 // The fit is checked against cases whose answer is known independently of it, because a wrong coefficient
 // does not throw — it prints, and reads exactly like a finding.
-import { logisticFit, auc, inverse, cumulativeFit } from './logistic.mjs';
+import { logisticFit, auc, inverse, cumulativeFit, prCurve } from './logistic.mjs';
 import { eq, eqNear } from './metrics.mjs';
 
 // --- inverse ---------------------------------------------------------------------------------------
@@ -63,4 +63,24 @@ console.log('ok   logistic fit recovers known coefficients, stays finite under s
     eq(Math.abs(fits[0].fit.beta[1]) > Math.abs(fits[2].fit.beta[1]), true,
         'boundaries carry their own slope, so a weak one cannot borrow strength from a strong one');
     console.log('ok   cumulativeFit: per-boundary fits, unfittable cuts declared, slopes independent');
+}
+
+// --- prCurve: the operational readout, which AUC is not ------------------------------------------------
+{
+    // A perfect ranking: both positives first. AP 1, and full recall at full precision.
+    const perfect = prCurve([9, 8, 2, 1], [1, 1, 0, 0]);
+    eq(perfect.ap, 1, 'a perfect ranking has AP 1');
+    eq(perfect.at[0.5].precision, 1, '...and reaches half its recall at precision 1');
+    eq(perfect.at[0.9].admitted, 2, '...admitting exactly the positives');
+    // One positive buried under three negatives: AP is 1/4, and AUC would read 0.5-ish on the same rows.
+    const buried = prCurve([9, 8, 7, 1], [0, 0, 0, 1]);
+    eq(buried.ap, 0.25, 'a positive at rank 4 scores AP 1/4');
+    // THE POINT OF HAVING IT: a rare class can look excellent on AUC and poor on AP.
+    const rare = Array.from({ length: 100 }, (_, i) => i);          // scores 0..99
+    const ry = rare.map(i => (i === 99 || i === 50 ? 1 : 0));       // one at the top, one mid-pack
+    const a = auc(rare, ry), p = prCurve(rare, ry);
+    eq(a > 0.7, true, 'AUC reads well when one of two positives is ranked top');
+    eq(p.ap < a, true, '...and AP reads the cost of the other one, which AUC discounts');
+    eq(Number.isNaN(prCurve([1, 2], [0, 0]).ap), true, 'no positives means no curve, reported as NaN');
+    console.log('ok   prCurve: AP and precision-at-recall, and AP is the harsher of the two');
 }

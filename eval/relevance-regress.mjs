@@ -34,11 +34,12 @@
 // coverage is printed per arm for the same reason param-screen prints it.
 //
 // Usage (from SillyTavern root):
-//   node .../relevance-regress.mjs <sample.json> [...] [--sweep gazetteerSource=keys,titles] [--tier memory]
+//   node .../relevance-regress.mjs <sample.json> [...] [--sweep gazetteerSource=keys,titles]
+//        [--tier memory|reference] [--cut 4] [--ordinal] [--loso]
 import { indexPath, isMemory, loadScene, openSample, sceneParams, makeCandidateSet, makeGradeOf, embed } from './scene.mjs';
 import { ensureIndex } from './reindex.mjs';
 import { gradeValue } from './metrics.mjs';
-import { logisticFit, auc, cumulativeFit } from './logistic.mjs';
+import { logisticFit, auc, cumulativeFit, prCurve } from './logistic.mjs';
 import * as ranking from '../extension/ranking.mjs';
 
 const argv = process.argv.slice(2);
@@ -66,6 +67,17 @@ const VALUES = valuesRaw.split(',').map(s => coerce(s.trim()));
 // standardised cosine. --ordinal fits every boundary so the scale can be read rather than assumed — see
 // logistic.mjs cumulativeFit for why the slopes are fitted separately instead of shared.
 const ORDINAL = argv.includes('--ordinal');
+// HELD OUT BY SCENE, on the POOLED-intercept design, for two reasons that happen to coincide. A held-out
+// scene has no fitted intercept of its own — which is exactly the runtime case, since production meets a
+// scene it was not fitted on — and the per-scene design is 70-odd columns, so K refits of it would cost
+// more than the answer is worth. Within-scene standardisation leaks nothing across the fold: it reads only
+// the held-out scene's own candidates, which stage 3 also holds.
+const LOSO = argv.includes('--loso');
+// WHICH BOUNDARY IS THE TARGET. 3 is the project's relevance line and the default; --cut 4 fits the band
+// the anchors reserve for the scene's current subject, which separates far better and is far rarer, so it
+// is the one place AUC and AP disagree loudly enough to be worth reading side by side.
+const CUT = Number(arg('--cut') ?? 3);
+if (!Number.isFinite(CUT)) { console.error(`--cut must be a number, got ${arg('--cut')}`); process.exit(2); }
 const TIER = arg('--tier') ?? 'all';
 if (!['all', 'memory', 'reference'].includes(TIER)) { console.error(`--tier must be all|memory|reference, got ${TIER}`); process.exit(2); }
 const MODEL = process.env.WA_EMBED_MODEL ?? 'bge-m3';
@@ -96,7 +108,7 @@ const fx = n => (Number.isFinite(n) ? (n >= 0 ? '+' : '') + n.toFixed(3) : '  n/
         const qv = await embed(S.query, { ollama: OLLAMA, model: MODEL });
         loaded.push({ path, name: S.name ?? path, S, qv });
     }
-    console.log(`${loaded.length} scene(s); sweeping ${SWEPT} over ${VALUES.join(', ')}${TIER === 'all' ? '' : `; ${TIER} tier only`}`);
+    console.log(`${loaded.length} scene(s); sweeping ${SWEPT} over ${VALUES.join(', ')}${TIER === 'all' ? '' : `; ${TIER} tier only`}${CUT === 3 ? '' : `; target grade >= ${CUT}`}`);
 
     const table = [];
     for (const value of VALUES) {
@@ -123,7 +135,7 @@ const fx = n => (Number.isFinite(n) ? (n >= 0 ? '+' : '') + n.toFixed(3) : '  n/
                 if (TIER !== 'all' && (isMemory(r.entry) ? 'memory' : 'reference') !== TIER) continue;
                 const g = gradeOf(r);
                 if (g === null || g === undefined || Number.isNaN(g)) { dropped++; continue; }
-                kept.push({ r, y: g >= 3 ? 1 : 0, g });
+                kept.push({ r, y: g >= CUT ? 1 : 0, g });
             }
             if (kept.length >= 5 && kept.some(k => k.y) && kept.some(k => !k.y)) perScene.push({ name, kept });
         }
@@ -153,6 +165,26 @@ const fx = n => (Number.isFinite(n) ? (n >= 0 ? '+' : '') + n.toFixed(3) : '  n/
         }
         const grades = perScene.flatMap(({ kept }) => kept.map(k => k.g));
         const stdFit = logisticFit(X, y);
+
+        // The same rows with ONE intercept instead of per-scene ones: the design production can actually
+        // run, and the baseline the held-out numbers are comparable against.
+        const sceneOf = perScene.flatMap(({ kept }, si) => kept.map(() => si));
+        const Xp = X.map(row => [1, ...row.slice(perScene.length)]);
+        const pooled = logisticFit(Xp, y);
+        const etaOf = (fit, rows) => rows.map(row => row.reduce((a, x, j) => a + x * fit.beta[j], 0));
+        let loso = null;
+        if (LOSO) {
+            const held = Array(y.length).fill(NaN);
+            for (let si = 0; si < perScene.length; si++) {
+                const tr = [], trY = [];
+                Xp.forEach((row, i) => { if (sceneOf[i] !== si) { tr.push(row); trY.push(y[i]); } });
+                if (!trY.some(v => v) || trY.every(v => v)) continue;
+                const f = logisticFit(tr, trY);
+                Xp.forEach((row, i) => { if (sceneOf[i] === si) held[i] = row.reduce((a, x, j) => a + x * f.beta[j], 0); });
+            }
+            const keep = held.map((v, i) => [v, y[i]]).filter(([v]) => Number.isFinite(v));
+            loso = { eta: keep.map(k => k[0]), y: keep.map(k => k[1]) };
+        }
         // The raw fit is the same design with unstandardised signals — the per-unit reading. Same intercepts,
         // so the only difference between the two is the scale the slope is expressed in.
         const Xraw = X.map((row, i) => {
@@ -175,10 +207,15 @@ const fx = n => (Number.isFinite(n) ? (n >= 0 ? '+' : '') + n.toFixed(3) : '  n/
             auc: auc(X.map((row, i) => row.reduce((s, x, j) => s + x * stdFit.beta[j], 0)), y),
             ordinal: ORDINAL ? cumulativeFit(X, grades, [1, 2, 3, 4]) : null,
             base,
+            fits: {
+                'per-scene intercepts': { eta: etaOf(stdFit, X), y },
+                'one pooled intercept': { eta: etaOf(pooled, Xp), y },
+                ...(loso ? { 'held out by scene': loso } : {}),
+            },
         });
     }
 
-    console.log('\nlogistic fit of P(grade>=3), per-scene intercepts, signals standardised within scene');
+    console.log(`\nlogistic fit of P(grade>=${CUT}), per-scene intercepts, signals standardised within scene`);
     console.log(`  ${SWEPT.padEnd(14)} signal | std beta (SE)   raw beta   mean within-scene SD   solo AUC`);
     for (const t of table) {
         for (const [i, r] of t.rows.entries()) {
@@ -205,6 +242,22 @@ const fx = n => (Number.isFinite(n) ? (n >= 0 ? '+' : '') + n.toFixed(3) : '  n/
             }
         }
     }
+
+    // WHAT A THRESHOLD WOULD DELIVER, which the AUC above does not say: AP moves with prevalence and the
+    // precision-at-recall rows are in the units a bar is chosen in. Three designs, and the gap between them
+    // is the point — per-scene intercepts are a parameter production does not have, and the in-sample
+    // pooled fit is the same design scored on the rows that fitted it.
+    console.log(`\noperational readout of P(grade>=${CUT}): average precision, and precision at recall`);
+    console.log(`  ${SWEPT.padEnd(14)} design                | prevalence   AUC     AP   | P@R50   P@R75   P@R90`);
+    for (const t of table) {
+        for (const [i, [label, f]] of Object.entries(t.fits).entries()) {
+            const m = prCurve(f.eta, f.y);
+            const cell = R => (m.at[R] ? `${(100 * m.at[R].precision).toFixed(1)}%`.padStart(6) : '     -');
+            const head = i === 0 ? String(t.value).padEnd(14) : ' '.repeat(14);
+            console.log(`  ${head} ${label.padEnd(21)} | ${`${(100 * m.pos / m.n).toFixed(2)}%`.padStart(9)}  ${auc(f.eta, f.y).toFixed(4)}  ${m.ap.toFixed(3)} | ${cell(0.5)}  ${cell(0.75)}  ${cell(0.9)}`);
+        }
+    }
+    if (!LOSO) console.log('  (pass --loso for the held-out row: K refits, one per scene, on the pooled design)');
 
     if (table.length > 1) {
         const b = table[0];

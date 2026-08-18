@@ -138,3 +138,36 @@ export function cumulativeFit(X, g, cuts, opts = {}) {
         return { cut, n: y.length, pos, fit, auc: auc(eta, y) };
     });
 }
+
+/**
+ * Precision-recall readout: average precision, and precision at chosen recall levels.
+ *
+ * AUC IS THE WRONG HEADLINE FOR A THRESHOLDED SCORE. It is prevalence-independent, which makes it the
+ * right thing for comparing signals and the wrong thing for asking what a threshold would deliver: at a
+ * 1% base rate an AUC near 0.98 can still mean most of what clears the bar is wrong. AP is the area under
+ * the precision-recall curve and moves with prevalence, so it answers the operational question — and the
+ * precision-at-recall rows answer it in the units a bar is actually chosen in.
+ *
+ * AP by the step-sum (precision summed at each positive, divided by the positive count) rather than by
+ * interpolating the curve: no trapezoid can be drawn through a step function without inventing points
+ * between the ones the data has.
+ *
+ * @param {number[]} scores Higher = more likely positive
+ * @param {number[]} y Labels, 0 or 1
+ * @param {number[]} [recalls] Recall levels to report precision at
+ * @returns {{ap: number, pos: number, n: number, at: Record<number, {precision: number, admitted: number}>}}
+ */
+export function prCurve(scores, y, recalls = [0.5, 0.75, 0.9]) {
+    const pos = y.reduce((a, b) => a + b, 0);
+    const at = {};
+    if (!pos) return { ap: NaN, pos, n: y.length, at };
+    const order = scores.map((s, i) => [s, y[i]]).sort((a, b) => b[0] - a[0]);
+    let tp = 0, ap = 0;
+    order.forEach(([, yi], i) => {
+        if (!yi) return;
+        tp++;
+        ap += tp / (i + 1);
+        for (const R of recalls) if (at[R] === undefined && tp / pos >= R) at[R] = { precision: tp / (i + 1), admitted: i + 1 };
+    });
+    return { ap: ap / pos, pos, n: y.length, at };
+}
