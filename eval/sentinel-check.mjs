@@ -12,6 +12,7 @@
 import fs from 'node:fs';
 import { buildKeyPruneScan } from '../extension/keyword-core.mjs';
 import { keywordScore, scanSegments, countKey, isRegexKey, activationAdds, makeWindowFor } from '../extension/matcher.mjs';
+import { buildKeyPruneScan as _pruneScan } from '../extension/keyword-core.mjs';
 import { buildAutomaton, addMessageHits, fold } from '../extension/smartkeys.mjs';
 import { eq } from './metrics.mjs';
 
@@ -161,4 +162,27 @@ console.log('ok   sentinel: every audit verdict matches its written-down answer'
     const narrow = { ...opts, messageDepth: 2 };
     eq(activationAdds([data.entries['10']], windowFor, narrow).length, 0,
         'sticky entry with its key out of the window is not re-emitted — core\'s timed effect is what carries it');
+
+    // uid 15's GATE. Its three secondaries are one of each kind, and the entry activating is what
+    // certifies that the unusable one was DROPPED rather than evaluated: under AND_ALL a
+    // never-matching secondary can never be satisfied, so a regression there kills the entry silently
+    // — which is the exact failure this whole rule exists to stop.
+    eq(adds.includes(15), true, 'AND_ALL gate passes: the usable secondaries hold and the malformed one is dropped');
+
+    const gated = (text) => keywordScore(data.entries['15'], [text], undefined,
+        { k1: 1.2, caseSensitiveDefault: false, wholeWordsDefault: false }).score > 0;
+    eq(gated('Morning rounds, then.'), true, 'both surviving secondaries satisfied');
+    eq(gated('Morning rounds, then. zzunattested.'), false,
+        'the NEGATION-ONLY secondary is live, not dropped — the term present closes the gate');
+    eq(gated('Evening rounds, then.'), false, 'the positive secondary is still required');
+}
+
+// The audit reports the dropped secondary, and reports ONLY it: `negation-only` is fatal for a primary
+// and legitimate here, so a report that named it would be reading the primary's rule. This is the
+// Studio's sole surface for a secondary — its chips are painted per key from exactly this list.
+{
+    const s = _pruneScan(data, OPTS, new Set());
+    eq(s.unusableKeysOf(data.entries['15']).map(r => `${r.key}:${r.code}`).join(','), '? "moon:stray-quote',
+        'the malformed secondary is reported with the validator\'s code; the negation-only one is not');
+    eq(s.unusableKeysOf(data.entries['0']).length, 0, 'an entry with no secondaries reports nothing');
 }

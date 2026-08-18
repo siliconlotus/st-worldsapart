@@ -548,8 +548,16 @@ territory", which core has no way to write. `secondaryKeys` is the only place th
 the audit is evidence about firing, so `/[/` reading as `unattested` — "never matches" — described the
 prose rather than the key. Red, but never pre-ticked for removal: every other red flag means the key
 fires where it should not and deletion is the fix, while a malformed key means the author wrote
-something WA could not read, where the fix is a correction. A PRIMARY carries this on its own chip; a
-secondary has no chip yet, so the Studio audit reports it separately.
+something WA could not read, where the fix is a correction.
+
+**Secondary keys are chips like any other**, click-to-edit, delete and add against `keysecondary`, under
+a label naming the selective logic — the same list reads as "must also contain" or "must not contain"
+depending on it, so the chips are ambiguous without it. Only the `unusable` verdict is painted there:
+the rest of the audit asks whether a key is a good TRIGGER, and a gate is not a trigger, so a
+common-word secondary is a legitimate thing to require rather than a flag. The collapsed entry's badge
+counts them, since a key nobody expands to is as invisible as one with no surface at all, and the write
+gate asks `secondaryKeys` rather than the validator directly — the editor must not refuse what the
+runtime gates on.
 
 ---
 

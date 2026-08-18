@@ -21,9 +21,13 @@ import { buildKeyPruneScan, llmKeyCandidates, STUDIO_PRUNE_OPTS, STUDIO_SUGGEST_
 import { buildKeySuggest, classifyLlmCand } from './keyword-core.mjs';
 import { buildAutomaton, addMessageHits, fold, validateSmartKey } from './smartkeys.mjs';
 import { findOrphanBindings } from './bindings.mjs';
-import { isRegexKey, wholeWordAdvice } from './matcher.mjs';
+import { WI_LOGIC, isRegexKey, secondaryKeys, usableKeys, wholeWordAdvice } from './matcher.mjs';
 
 const WA_GREEN = '#7bbf6a';   // "no prune" — a keyword the scan doesn't flag
+const WA_RED = '#e06c6c';     // severe — same value keyword-core's severityOf hands back
+// Core's world_info_logic, worded as the sentence the chips beside it complete. The gate reads
+// backwards without it: the same list means "must also contain" or "must not contain" by logic alone.
+const LOGIC_LABEL = { 0: 'only if any of', 1: 'unless all of', 2: 'unless any of', 3: 'only if all of' };
 
 /**
  * Plan an advanced reorder: place the selected entries (given top-to-bottom in `orderedUids`) into a
@@ -639,15 +643,21 @@ export async function lorebookStudio(preferredBook = null) {
      *
      * @returns {boolean} whether the write may proceed
      */
-    const keyWriteOk = term => {
+    const keyWriteOk = (term, list = 'key') => {
         const problems = validateSmartKey(term);
-        const err = problems.find(p => p.severity === 'error');
+        // WHICH codes are fatal depends on the POSITION, and that rule lives in matcher.mjs — asked
+        // through its own filters rather than re-listed here, or the editor would refuse a secondary
+        // the runtime happily gates on. `negation-only` is the whole of the difference: a secondary
+        // never fires by itself, so "present unless X" is a thing an author can mean.
+        const usable = list === 'keysecondary' ? secondaryKeys({ keysecondary: [term] }).length : usableKeys([term]).length;
+        const err = usable ? null : problems.find(p => p.severity === 'error');
         if (err) { toastr.warning(err.message, 'Worlds Apart', { timeOut: 8000 }); return false; }
         // ONE TOAST PER KIND OF PROBLEM, not one per instance. A key can repeat the same fault dozens of
         // times — paste an unquoted Zalgo string and it shreds into forty-odd punctuation terms, each
         // reporting separately — and forty identical toasts is not forty times the information.
         const byCode = new Map();
         for (const w of problems) {
+            if (w.severity === 'error') continue;   // tolerated in this position; not advice about it
             const seen = byCode.get(w.code);
             if (seen) seen.n++; else byCode.set(w.code, { message: w.message, n: 1 });
         }
@@ -840,7 +850,7 @@ export async function lorebookStudio(preferredBook = null) {
     };
 
     // Inline "click to edit" for one keyword (commit on Enter/blur, cancel on Escape).
-    const editKeyInline = (e, oldKey, span) => {
+    const editKeyInline = (e, oldKey, span, list = 'key') => {
         const inp = document.createElement('input');
         inp.type = 'text'; inp.className = 'text_pole'; inp.value = oldKey;
         // Sized to the text, not a fixed 8em. A SmartKey is routinely longer than that, and a fixed
@@ -865,13 +875,13 @@ export async function lorebookStudio(preferredBook = null) {
             // Focus is only reclaimed on an explicit Enter. Grabbing it back on blur traps the cursor:
             // every attempt to click away re-fires the blur and yanks it home again. On blur the editor
             // simply stays where it is, holding the text, and can be returned to or escaped.
-            if (ok && nv && nv !== oldKey && !keyWriteOk(nv)) { if (!viaBlur) inp.focus(); return; }
+            if (ok && nv && nv !== oldKey && !keyWriteOk(nv, list)) { if (!viaBlur) inp.focus(); return; }
             done = true;
-            if (ok && nv && nv !== oldKey && Array.isArray(e.key)) {
-                const idx = e.key.indexOf(oldKey);
+            if (ok && nv && nv !== oldKey && Array.isArray(e[list])) {
+                const idx = e[list].indexOf(oldKey);
                 // The dupe test has to skip the key being edited, or a capitalisation fix ("bob" → "Bob")
                 // collides with itself and merges the key away instead of rewriting it.
-                if (idx >= 0) { if (e.key.some((k, i) => i !== idx && kwNorm(k) === kwNorm(nv))) e.key.splice(idx, 1); else e.key[idx] = nv; save(); }
+                if (idx >= 0) { if (e[list].some((k, i) => i !== idx && kwNorm(k) === kwNorm(nv))) e[list].splice(idx, 1); else e[list][idx] = nv; save(); }
             }
             renderEntry(e);
         };
@@ -1065,16 +1075,20 @@ export async function lorebookStudio(preferredBook = null) {
         const RANK = { '#e06c6c': 3, '#d9b74a': 2, '#7bbf6a': 1 };   // red > yellow > green; '' (dead) = 0
         const SEV = { '#e06c6c': 'severe', '#d9b74a': 'moderate', '#7bbf6a': 'minor' };
         const counted = flagged ? [...flagged.values()].filter(v => { const c = scan.severityOf(v); return c !== '#d9b74a' && c !== '#7bbf6a'; }) : [];
-        if (counted.length) {
+        // Unusable SECONDARIES count here too, and this is why the badge matters more than the chip:
+        // a key the matcher refuses is invisible until its entry is expanded, and a book has hundreds.
+        // Severe by definition — the entry gates on fewer keys than its author wrote.
+        const secBad = scan ? scan.unusableKeysOf(e).length : 0;
+        if (counted.length + secBad) {
             const badge = document.createElement('span'); badge.className = 'wa-entry-badge';
-            badge.textContent = `${counted.length} flagged`;
-            let worst = '';
+            badge.textContent = `${counted.length + secBad} flagged`;
+            let worst = secBad ? WA_RED : '';
             for (const v of counted) { const c = scan.severityOf(v); if ((RANK[c] ?? 0) > (RANK[worst] ?? 0)) worst = c; }
             if (worst) { badge.style.background = worst; badge.style.color = worst === '#e06c6c' ? '#fff' : '#111'; }
             const softer = (flagged?.size ?? 0) - counted.length;
             // No colour means every counted flag is the uncoloured one, so name it from reasonOf rather
             // than restating it here — same reason the chip tooltips do.
-            badge.title = `Keywords the last scan flagged — worst: ${SEV[worst] || scan.reasonOf(counted[0]).text}.${softer ? ` ${softer} more are warnings, not counted here.` : ''} Expand to see which.`;
+            badge.title = `Keywords the last scan flagged — worst: ${SEV[worst] || scan.reasonOf(counted[0]).text}.${secBad ? ` Includes ${secBad} secondary key${secBad === 1 ? '' : 's'} the matcher cannot run.` : ''}${softer ? ` ${softer} more are warnings, not counted here.` : ''} Expand to see which.`;
             h.append(badge);
         }
         // Whole header line toggles level 1; the mode dropdown and tool icons stopPropagation so they
@@ -1203,6 +1217,70 @@ export async function lorebookStudio(preferredBook = null) {
         });
         para.append(add, boltBtn, llmBtn);   // manual + first, then the suggestion triggers
 
+        // --- Secondary keys, on the same footing as the primaries -----------------------------------
+        // They gate the entry, so a broken one changes what fires, and nothing here used to show them
+        // at all: the audit's only surface was a toast, which cannot say WHICH key on a book with two
+        // of them. Rendered only when the entry has any — an empty gate row on every entry is clutter,
+        // and the population is 84 entries across 43 books.
+        //
+        // ONLY the `unusable` verdict is painted. The rest of the audit asks whether a key is a good
+        // TRIGGER — english-common, book-common, fragment, short — and a gate is not a trigger: a
+        // common word is a legitimate thing to require, so those flags would be noise here.
+        // ponytail: a secondary that matches nowhere is meaningful too, but whether it is a fault
+        // depends on the logic (fatal under AND_ALL, harmless under NOT_ANY); wants that read first.
+        let secPara = null;
+        if (Array.isArray(e.keysecondary) && e.keysecondary.length) {
+            const bad = new Map((scan?.unusableKeysOf(e) ?? []).map(r => [r.key, r]));
+            const sec = document.createElement('div'); sec.className = 'wa-kw-para';
+            const label = document.createElement('span'); label.className = 'wa-kw-reason';
+            // The logic is what makes the list readable at all — the same chips mean "must also
+            // contain" or "must not contain" depending on it. Read-only: it is core's own dropdown.
+            label.textContent = `${LOGIC_LABEL[e.selectiveLogic ?? WI_LOGIC.AND_ANY] ?? 'only if'}:`;
+            label.title = 'Secondary keys — they gate the primaries above, they never activate on their own.';
+            sec.append(label);
+            for (const key of e.keysecondary) {
+                const v = bad.get(key);
+                const item = document.createElement('span'); item.className = 'wa-kw-item';
+                const chip = document.createElement('span'); chip.className = 'wa-kw';
+                const text = document.createElement('span'); text.className = 'wa-kw-text'; text.textContent = key;
+                const why = v ? `unusable — ${v.code}` : '';
+                if (v) { chip.style.borderColor = WA_RED; chip.style.background = `color-mix(in srgb, ${WA_RED} 18%, transparent)`; }
+                else if (scan) chip.style.borderColor = WA_GREEN;
+                text.title = v ? `${key} — ${v.message} (click to edit)` : `${key} (click to edit)`;
+                text.addEventListener('click', () => editKeyInline(e, key, text, 'keysecondary'));
+                chip.append(text);
+                const del = document.createElement('i'); del.className = 'fa-solid fa-xmark wa-kw-del'; del.title = 'Delete this secondary key';
+                del.addEventListener('click', () => { e.keysecondary.splice(e.keysecondary.indexOf(key), 1); save(); renderEntry(e); });
+                chip.append(del);
+                item.append(chip);
+                if (why) { const r = document.createElement('span'); r.className = 'wa-kw-reason'; r.textContent = `(${why})`; item.append(r); }
+                sec.append(item);
+            }
+            const addSec = document.createElement('i'); addSec.className = 'fa-solid fa-plus wa-tool'; addSec.title = 'Add a secondary key';
+            addSec.addEventListener('click', () => {
+                const inp = document.createElement('input'); inp.type = 'text'; inp.className = 'text_pole'; inp.placeholder = 'secondary key';
+                inp.style.cssText = 'margin:0;font-size:0.9em;width:auto;';
+                const fit = () => { inp.size = Math.min(64, Math.max(8, inp.value.length + 2)); };
+                fit();
+                inp.addEventListener('input', fit);
+                let done = false;
+                const commit = (ok, viaBlur) => {
+                    if (done) return;
+                    const nv = inp.value.trim();
+                    // Same refusal shape as the primary adder: a rejected key keeps the editor and the text.
+                    if (ok && nv && !keyWriteOk(nv, 'keysecondary')) { if (!viaBlur) inp.focus(); return; }
+                    done = true;
+                    if (ok && nv && !e.keysecondary.some(k => kwNorm(k) === kwNorm(nv))) { e.keysecondary.push(nv); save(); }
+                    renderEntry(e);
+                };
+                inp.addEventListener('keydown', ev => { if (ev.key === 'Enter') { ev.preventDefault(); commit(true); } else if (ev.key === 'Escape') { ev.preventDefault(); commit(false); } });
+                inp.addEventListener('blur', () => commit(true, true));
+                addSec.replaceWith(inp); inp.focus();
+            });
+            sec.append(addSec);
+            secPara = sec;
+        }
+
         // --- Level 2: text section with its own chevron (preview line ↔ editor) ---
         const textSec = document.createElement('div'); textSec.className = 'wa-text-sec';
         const thead = document.createElement('div'); thead.className = 'wa-text-head';
@@ -1239,6 +1317,7 @@ export async function lorebookStudio(preferredBook = null) {
         thead.addEventListener('click', () => { expanded.has(e.uid) ? expanded.delete(e.uid) : expanded.add(e.uid); syncText(); });
         textSec.append(thead, fullWrap);
         body.append(textSec, para);   // entry text first, then keywords (reads more naturally)
+        if (secPara) body.append(secPara);   // the gate reads under the keys it gates
 
         if (advOpen.has(e.uid)) body.prepend(buildAdvancedTray(e, renderEntry));   // above the text + keywords
         row.append(body);
@@ -1427,7 +1506,7 @@ export async function lorebookStudio(preferredBook = null) {
             case 'vector': return !!e.vectorized;
             case 'enabled': return !e.disable;
             case 'disabled': return !!e.disable;
-            case 'flagged': return !!scan && scan.classifyEntry(e).length > 0;
+            case 'flagged': return !!scan && (scan.classifyEntry(e).length > 0 || scan.unusableKeysOf(e).length > 0);
             default: return true;
         }
     };
@@ -2217,18 +2296,6 @@ export async function lorebookStudio(preferredBook = null) {
             book: selected, matchWindow: settings().matchWindow, boundChats: bound.length,
             scanned: got?.via ?? 'none', messages: chatMsgs, keys: chatHits?.size ?? 0, firing: got?.live ?? 0,
         });
-        // SECONDARY keys the matcher drops, which no other surface in here can show: a chip is painted
-        // per PRIMARY key — where `unusable` now lands like any other verdict — and a secondary has no
-        // chip to be painted on, so the entry just quietly gates on fewer keys than its author wrote.
-        // A separate toast rather than a clause on the ones below: it is a fact about the book, true
-        // whether or not a chat was scanned, and the only warning-severity thing this button reports.
-        const unusable = (scan?.entries ?? []).flatMap(e => scan.unusableKeysOf(e));
-        if (unusable.length) {
-            console.table(unusable.map(u => ({ entry: u.uid, key: u.key, problem: u.code, why: u.message })));
-            const n = unusable.length;
-            toastr.warning(`${n} secondary key${n === 1 ? '' : 's'} in this book cannot match and ${n === 1 ? 'is' : 'are'} ignored — see the console table for which entries. Secondary keys are not editable here; fix them in SillyTavern's own World Info editor.`,
-                'Worlds Apart', { timeOut: 12000 });
-        }
         if (got) {
             toastr.success(`Audited against entry text + "${chatName}" — ${got.live} of ${got.keys.length} keys fire in its ${chatMsgs} messages.`, 'Worlds Apart', { timeOut: 6000 });
         } else if (!chatHits) {
