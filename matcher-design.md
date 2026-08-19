@@ -886,6 +886,13 @@ carrying `keys` pure noise. Curvature and combination were tested separately bec
 questions, and a tree ensemble that beat this model would have to be exploiting one of them. Neither
 exists at this n, which is 7 BOOKS however many rows it is.
 
+**Retried once PROPER existed**, since the argument above — three readings of one question cannot
+combine into a fourth — does not cover a pair containing a signal from the empty cell. It does not
+survive either: `cosine*proper` reads -0.059 (SE 0.063) and `text*proper` -0.016 (SE 0.039), both under
+one standard error, held-out AUC slips 0.7980 to 0.7973, and paired against proper alone it is 14 scenes
+up against 12 with 42 TIED. `cosine*text` is the only product ever to reach 2 SE and it has never
+improved a held-out number. The model is linear in its features, at four features as at three.
+
 **RELEVANCE IS A PROPERTY OF THE PAIR, never of the entry.** Every feature is query-dependent and every
 grade belongs to one scene. **Measured**: of the 594 entries graded in two or more scenes, 89.7% have a
 grade that varies and 54.5% cross the relevance line — the same entry, the same book, relevant here and
