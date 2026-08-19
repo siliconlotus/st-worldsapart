@@ -927,6 +927,23 @@ into precision and not into recall. That is the target and the score disagreeing
 recorded rather than resolved, because the alternative is a weight between the halves that no measurement
 here would choose.
 
+**Two cutoffs, one per tier.** **Measured**, F2 over the delivered set, macro-averaged over scenes, with
+`E[credit]` held out by book and `P(>=3)` clamped: memory peaks at 0.14 (F2 0.494, 19.9 delivered against
+7.8 relevant), reference at 0.19 (F2 0.806, 6.5 against 2.5). Pooling costs reference its full-recall
+region and pulls memory off its own peak.
+
+**The cutoff is a RANGE, not a point.** Both curves are flat around their peak — memory stays within
+0.012 of its best across 0.10-0.20, reference within 0.03 across 0.05-0.25 — so a re-tune that moves a
+cutoff inside its band is measuring noise, and a reported third decimal is false precision.
+
+**The reference tier tolerates a weak fit, and its cutoff barely matters.** **Measured**: its AUC falls
+0.733 to 0.698 held out by book, against memory's 0.790 to 0.786 — 342 rows against 8502 — and it still
+reaches F2 0.806 at full recall anywhere below 0.20. Its calibration is unmeasurable at that n (ECE p
+0.336 and 0.044 at the two boundaries). None of this is a reason to work on it: recall is already
+complete, and the score weights that half twice. **This is not the base-rate argument**, which is
+measured wrong above — the tiers' pooled prevalences differ by 5x here and that gap is the grading-depth
+artifact, not evidence about activation. What is measured is the delivered set.
+
 **Grade 4 is the band the signals find, and it does NOT travel between books.** Held out by book at
 1.29% prevalence: AUC 0.8867, AP 0.324 — a ~25x lift on base rate, but against 0.423 in-sample, and
 precision at 75% recall falls from 16.5% to 7.6%. So its strength is substantially book-specific, which
