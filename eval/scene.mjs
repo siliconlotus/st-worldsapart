@@ -72,8 +72,12 @@ export const bookFingerprint = (book) => {
 /** An entry's display title, exactly as the extension derives it (comment, else keys, else uid). */
 export const wiTitle = e => (e.comment && e.comment.trim()) ? e.comment.trim() : (e.key?.length ? e.key.join(', ') : `UID ${e.uid}`);
 
-/** Title normaliser for grade matching: lowercase alphanumeric tokens, singles dropped. */
-export const nrm = s => (s.toLowerCase().match(/[a-z0-9]+/g) ?? []).filter(t => t.length > 1);
+/** Title normaliser for grade matching: lowercase alphanumeric tokens, singles dropped.
+ *  MISSING IS EMPTY, not a throw: a grade row is identified by (world, uid) and `title` is a convenience
+ *  the capture path happens to write — grade-pending's merge does not, so a judge-graded bundle threw
+ *  here on the first row. An untitled grade is simply never excluded by title, which is correct: the
+ *  exclusion names entries from a second attached book, and a row with no title matches no name. */
+export const nrm = s => (String(s ?? '').toLowerCase().match(/[a-z0-9]+/g) ?? []).filter(t => t.length > 1);
 
 export const dcg = (v, k) => v.slice(0, k).reduce((s, x, i) => s + x / Math.log2(i + 2), 0);
 /** Graded nDCG. The ideal is built from the RANKED vector, so a graded title that never gets ranked

@@ -313,7 +313,12 @@ const fx = n => (Number.isFinite(n) ? (n >= 0 ? '+' : '') + n.toFixed(3) : '  n/
             const keep = held.map((v, i) => [v, labels[i]]).filter(([v]) => Number.isFinite(v));
             // `betas` is what lets a row the fit never saw — an ungraded one — be scored by the fold that
             // did not train on its book, which is the only honest way to put it in a delivered set.
-            return { eta: keep.map(k => k[0]), y: keep.map(k => k[1]), betas };
+            // `fold` rides along so the readout can report ONE held-out book on its own: pooling every
+            // fold answers "does this generalise on average", and a validation book asks something else.
+            return {
+                eta: keep.map(k => k[0]), y: keep.map(k => k[1]), betas,
+                fold: held.map((v, i) => [v, i]).filter(([v]) => Number.isFinite(v)).map(([, i]) => groupOf(i)),
+            };
         };
         const books = [...new Set(perScene.map(p => p.book))];
         const bookOf = perScene.flatMap(({ kept, book }) => kept.map(() => books.indexOf(book)));
@@ -354,6 +359,7 @@ const fx = n => (Number.isFinite(n) ? (n >= 0 ? '+' : '') + n.toFixed(3) : '  n/
                 ...(loso ? { 'held out by scene': loso } : {}),
                 ...(lobo ? { 'held out by BOOK': lobo } : {}),
             },
+            books,
             // Calibration is read at BOTH boundaries E[credit] combines, not only the shipped cut: the
             // target is 0.5*P(>=2) + 0.5*P(>=3), and a convex combination of two probabilities is
             // calibrated only if each of them is. Held out by book where that was asked for, and
@@ -469,6 +475,28 @@ const fx = n => (Number.isFinite(n) ? (n >= 0 ? '+' : '') + n.toFixed(3) : '  n/
             console.log(`  ${head} ${label.padEnd(21)} | ${`${(100 * m.pos / m.n).toFixed(2)}%`.padStart(9)}  ${auc(f.eta, f.y).toFixed(4)}  ${m.ap.toFixed(3)} | ${cell(0.5)}  ${cell(0.75)}  ${cell(0.9)}`);
         }
     }
+    // PER HELD-OUT BOOK. The pooled row above answers "does this generalise on average"; a VALIDATION
+    // book asks whether it generalised to one specific corpus nobody fitted on, and averaging that away
+    // is the whole thing being avoided. Small folds are reported with their n rather than suppressed —
+    // an AUC on 40 rows is not wrong, it is imprecise, and hiding it would hide the imprecision too.
+    if (LOBO) {
+        console.log(`\nheld out by BOOK, one row per fold — the fit trained on every OTHER book`);
+        console.log(`  ${SWEPT.padEnd(14)} book                             |     n   pos   prevalence   AUC     AP`);
+        for (const t of table) {
+            const f = t.fits['held out by BOOK'];
+            if (!f?.fold) continue;
+            for (const [bi, book] of t.books.entries()) {
+                const idx = f.fold.map((g, i) => (g === bi ? i : -1)).filter(i => i >= 0);
+                if (!idx.length) continue;
+                const eta = idx.map(i => f.eta[i]), yy = idx.map(i => f.y[i]);
+                const pos = yy.reduce((a, b) => a + b, 0);
+                const m = prCurve(eta, yy);
+                const name = String(book).replace(/[_]+/g, ' ').slice(0, 32);
+                console.log(`  ${String(t.value).padEnd(14)} ${name.padEnd(32)} | ${String(yy.length).padStart(5)} ${String(pos).padStart(5)}   ${`${(100 * pos / yy.length).toFixed(2)}%`.padStart(9)}  ${Number.isFinite(auc(eta, yy)) ? auc(eta, yy).toFixed(4) : '   -  '}  ${Number.isFinite(m.ap) ? m.ap.toFixed(3) : '  -  '}`);
+            }
+        }
+    }
+
     if (!LOSO || !LOBO) console.log('  (--loso holds out a scene, --lobo a book; only the second is the generalisation production needs)');
 
     // WHERE THE CUTOFF GOES. This is the only readout here that scores what stage 4 actually ships — a SET,

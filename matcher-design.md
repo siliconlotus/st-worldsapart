@@ -866,12 +866,18 @@ unweighted count: 45 scenes up against 14 with 9 tied, p 0.0001. Jaccard is WORS
 against 33) and restricting to the gazetteer is a wash (30 against 29, p 1.00), so neither the
 normalisation nor the vocabulary restriction is what matters — the term weighting is.
 
-**Measured**, memory tier, held out by book, against the three shipped signals: +0.431 (SE 0.054), solo
-AUC 0.778 — the BEST single signal in the tier, ahead of text's 0.759 and cosine's 0.737 — and the model
-moves 0.7859 -> 0.8005 AUC, 0.398 -> 0.411 AP, and F2 over the delivered set 0.4942 -> 0.5151. Paired per
-scene the F2 gain is 38 up against 22 with 8 tied, **p 0.052**: the strongest result this feature work
-has produced and right at the line, which does not survive Holm correction over the four variants tried.
-Read it as the direction plus the mean delta, +0.0209 F2, and note that every readout moves the same way.
+**Measured**, memory tier, held out by book, against the three shipped signals: +0.431 (SE 0.054) and
+solo AUC 0.778 — the BEST single signal in the tier, ahead of text's 0.759 and cosine's 0.737. On the
+score of record, over 88 scenes and 8 books: **F2 0.5203 -> 0.5443, paired 52 scenes up against 18 with
+18 tied, p 0.0001**, with AUC 0.7815 -> 0.7974 and AP 0.394 -> 0.405. The first feature change to clear
+the line rather than approach it.
+
+**It transfers to a book nothing was fitted on.** A validation corpus was graded for this — 20 scenes on
+`System, Status Window…` / `Lit RPG - Fenwood`, 149 rows, 5 memory entries, judge-graded — and entered as
+an eighth `--lobo` fold. On it the feature moves AP 0.844 -> 0.873 and AUC 0.8650 -> 0.8858. Per fold, AP
+improves in 6 of 7 books; the one that falls holds 59 rows and 5 positives. Fenwood's own scenes are 4 up
+against 0 down with 16 tied (p 0.125) — a 5-entry book rarely changes its delivered set at all, so the
+per-fold AP is the readable number there and the pooled paired test is what the 20 scenes bought.
 
 **Story-time position carries nothing.** Fitted as the entry's uid, which within-scene standardisation
 makes equivalent to distance from the current point up to sign: solo AUC 0.458, and adding it to
