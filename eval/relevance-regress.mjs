@@ -35,7 +35,7 @@
 //
 // Usage (from SillyTavern root):
 //   node .../relevance-regress.mjs <sample.json> [...] [--sweep gazetteerSource=keys,titles]
-//        [--tier memory|reference] [--cut 4] [--ordinal] [--loso] [--lobo] [--calibration] [--cutoff] [--degree 2] [--interactions] [--with proper,time,oracle,length,density,rarity] [--without keys] [--drop-keys flagged.json] [--emit-rows rows.json] [--proper count|idf|idf-len|jaccard|gaz] [--proper-extract regex|entity|span]
+//        [--tier memory|reference] [--cut 4] [--ordinal] [--loso] [--lobo] [--calibration] [--cutoff] [--degree 2] [--interactions] [--with proper,time,oracle,length,density,rarity,chunkdens] [--without keys] [--drop-keys flagged.json] [--emit-rows rows.json] [--proper count|idf|idf-len|jaccard|gaz] [--proper-extract regex|entity|span]
 import { indexPath, isMemory, loadScene, openSample, sceneParams, makeCandidateSet, makeGradeOf, embed } from './scene.mjs';
 import { ensureIndex } from './reindex.mjs';
 import fs from 'node:fs';
@@ -45,6 +45,7 @@ import { logisticFit, auc, cumulativeFit, prCurve, reliability, sigmoid } from '
 import * as ranking from '../extension/ranking.mjs';
 import { fold, normalizeOrthography } from '../extension/smartkeys.mjs';
 import { tokenize } from '../extension/lexical.mjs';
+import { chunkEntry } from '../extension/chunking.mjs';
 
 const argv = process.argv.slice(2);
 const arg = k => { const i = argv.indexOf(k); return i >= 0 ? argv[i + 1] : null; };
@@ -270,6 +271,12 @@ if (WITH.includes('density')) FEATURES.push(['density', r => Number(r.properDens
 // two axes disagree on a tenth of a book's token mass and a min-of-percentiles combination measured
 // WORSE than this column alone.
 if (WITH.includes('rarity')) FEATURES.push(['rarity', r => Number(r.bookRarity) || 0, () => 1]);
+// NAMES PER CHUNK, the same construct as `density` at the unit the system retrieves in. Found on the
+// DISABLED-entry population, which involves no grades at all: length-controlled it agrees with the
+// author's keep/drop call in 7 books of 7 (book-level sign test p 0.0156), where names-per-token manages
+// 5 and names-per-PARAGRAPH inverts. A raw paragraph count is a unit nothing sees — `minChunkSize` is a
+// merge floor, so short paragraphs are glued together before anything reads them.
+if (WITH.includes('chunkdens')) FEATURES.push(['chunkdens', r => Number(r.chunkDensity) || 0, () => 1]);
 
 // Feature indices carrying a squared term: none at degree 1, the named subset if --square was given,
 // otherwise all of them.
@@ -315,7 +322,9 @@ const tailCut = (s, labels) => {
 };
 
 // The entry-intrinsic columns, named once so the per-scene block can ask whether any was requested.
-const PRIORS = ['length', 'density', 'rarity'];
+const PRIORS = ['length', 'density', 'rarity', 'chunkdens'];
+// The shipped chunking (reindex.mjs chunkConfig), which every sample here was built under.
+const CHUNK_CFG = { chunkMode: 'paragraph', chunkSize: 800, minChunkSize: 120 };
 // Book term-frequency, keyed by book — see the per-scene block.
 const bookTf = new Map();
 
@@ -415,6 +424,12 @@ const fx = n => (Number.isFinite(n) ? (n >= 0 ? '+' : '') + n.toFixed(3) : '  n/
                     r.entryTokens = toks.length;
                     const names = ranking.properNounsOf(normalizeOrthography(String(r.entry?.content ?? '')));
                     r.properDensity = (names?.size ?? 0) / Math.max(1, toks.length) * 100;
+                    // reindex.chunkConfig's defaults, NOT the scene params — those carry no chunk settings
+                    // at all, and passing them gives chunkEntry an undefined chunkSize, which recurses
+                    // until the stack blows rather than failing. Verified against the built index: chunk
+                    // counts match on all 199 shared uids of Sommers, so this is the split the vector
+                    // collection and content-lexical actually saw.
+                    r.chunkDensity = (names?.size ?? 0) / Math.max(1, chunkEntry(String(r.entry?.content ?? ''), CHUNK_CFG).length);
                     r.bookRarity = toks.length ? toks.reduce((a, t) => a + bk.rarity(t), 0) / toks.length : 0;
                 }
             }

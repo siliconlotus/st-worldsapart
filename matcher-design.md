@@ -925,12 +925,17 @@ fitted coefficient is NEGATIVE (-0.307, SE 0.054). Cosine and text over-credit l
 length-driven reasons and this column refunds it. Cosine is not the thing going wrong on them: its solo
 AUC RISES with length (0.661, 0.721, 0.712, 0.751 across quartiles) and its gap to text is flat.
 
-**Mean book-IDF over the entry's tokens HURTS** — solo AUC 0.497, and -0.0049 F2 on 14 scenes up against
-54 with 35 tied, p 0.0000. It is the obvious thing to propose and `--with rarity` keeps it reproducible.
+**Mean book-IDF over the entry's tokens does not clear** — solo AUC 0.497, and -0.0049 F2 scene-level
+(p 0.0000) on 2 books up against 3, so no consistent direction. `--with rarity` keeps it reproducible.
+**Names per CHUNK rather than per token is the same construct at another unit** and adds nothing:
+-0.0027 F2 replacing `density`, -0.0078 added beside it, and 2 books up against 3 either way
+(`--with chunkdens`). In a joint fit the two split one effect and cancel, +0.256 (SE 0.088) against
+-0.179 (SE 0.089), with solo AUCs of 0.547 and 0.548.
 
 **An entry's own relevance rate in its other scenes adds nothing once these two are present**, which is
 what bounds any entry-level prior: `--with oracle` reads grades the runtime cannot have, and still costs
--0.0077 F2 on 29 scenes up against 50 with 24 tied, p 0.0238. It is the sharpest case of the split above —
+-0.0077 F2 scene-level (p 0.0238) on 2 books up against 4 — no consistent direction, so it does not clear
+either. It is the sharpest case of the split above —
 held out by book it RAISES AUC 0.8014 -> 0.8241 and AP 0.392 -> 0.407 while losing the delivered set,
 because a better ordering read at a looser cutoff (0.09, delivering 25.2) is not a better chosen set. The
 entry-level intercept is captured by two columns computable from the entry alone.
@@ -1070,6 +1075,15 @@ at ~67% recall and **+0.5 at ~75%**, so the delivered set falling 33.0 to 19.8 i
 cutoff-free and both rise — but in the HEAD of the list, which is why it shows at a tight cut and not a
 loose one. Any target stated as a recall (*Evidence*) has to be read this way or a feature is credited
 where it does nothing.
+
+**A SCENE-LEVEL SIGN TEST OVERSTATES ITS OWN n, so a contrast reports books up against books down.** The
+test treats ~100 scenes as independent draws where they sit on 7 books, and within-book correlation is
+then counted as evidence — which is why a feature can read p 0.0000 across scenes and have no consistent
+direction across corpora. Both numbers are given above where they disagree, and the book count is the one
+that decides. With 7 books the test itself is nearly powerless (6-0 reaches only p 0.031), so what carries
+a positive result is the AGREEMENT OF MAGNITUDES across books, not the count: `length`+`density` lands
+within 0.005 on four independent books, which is the reason it is in the model and `rarity`, `chunkdens`
+and `oracle` are not.
 
 **A cutoff-curve peak is not a comparison.** Two arms differ by less than the flatness of their own
 curves, so `--cutoff` reports the per-scene F2 vector and the sign test against the first arm. Every
