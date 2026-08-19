@@ -198,13 +198,29 @@ export function prCurve(scores, y, recalls = [0.5, 0.75, 0.9]) {
  * different questions: ECE is what the average prediction is off by, MCE is what the worst region is
  * off by, and a bar sits in one region rather than on the average.
  *
+ * AN ECE IS MEANINGLESS WITHOUT ITS NULL. A bin of n rows at probability p has an observed rate that
+ * scatters around p by ~sqrt(p(1-p)/n) whatever the model does, so a PERFECTLY calibrated predictor
+ * reports a positive ECE, and a smaller sample reports a larger one. Comparing two tiers of very
+ * different size on raw ECE therefore reads sample size as miscalibration — which is not a hypothetical
+ * here: the two tiers differ 25-fold in row count. `nullSamples` draws labels from the model's OWN
+ * probabilities and recomputes ECE, giving the value a well-calibrated model of this size and shape
+ * would produce (`eceNull`) and the share of null draws at least as extreme (`eceP`). A parametric
+ * bootstrap rather than a closed form because the bins are quantile-cut and tie-merged, so their sizes
+ * are data-dependent and no textbook expression describes them.
+ *
+ * SEEDED, because a check that moves between runs cannot fail. The generator is inlined for the same
+ * reason the fit is: three lines nobody has to trust.
+ *
  * @param {number[]} p Predicted probabilities in [0,1]
  * @param {number[]} y Labels, 0 or 1
  * @param {number} [bins] Target bin count
+ * @param {number} [nullSamples] Parametric-bootstrap draws for the calibrated-model null; 0 skips it
+ * @param {number} [seed] PRNG seed, so the null is reproducible
  * @returns {{bins: Array<{n: number, meanP: number, observed: number, lo: number, hi: number}>,
- *            ece: number, mce: number, meanP: number, observed: number, n: number}}
+ *            ece: number, mce: number, meanP: number, observed: number, n: number,
+ *            eceNull: number, eceP: number}}
  */
-export function reliability(p, y, { bins = 10 } = {}) {
+export function reliability(p, y, { bins = 10, nullSamples = 0, seed = 1 } = {}) {
     const n = p.length;
     const order = p.map((v, i) => [v, y[i]]).sort((a, b) => a[0] - b[0]);
     const out = [];
@@ -221,10 +237,39 @@ export function reliability(p, y, { bins = 10 } = {}) {
         });
         i = j + 1;
     }
-    const ece = out.reduce((a, b) => a + b.n * Math.abs(b.meanP - b.observed), 0) / (n || 1);
+    const eceOf = rows => rows.reduce((a, b) => a + b.n * Math.abs(b.meanP - b.observed), 0) / (n || 1);
+    const ece = eceOf(out);
     const mce = out.reduce((a, b) => Math.max(a, Math.abs(b.meanP - b.observed)), 0);
+
+    // The null: keep every bin exactly as cut, redraw each row's label from its own predicted
+    // probability, and recompute. That is what this predictor would score if it were perfectly
+    // calibrated, so it is the floor the observed value has to clear to mean anything.
+    let eceNull = NaN, eceP = NaN;
+    if (nullSamples > 0) {
+        let state = seed >>> 0;
+        const rnd = () => {   // mulberry32
+            state = (state + 0x6D2B79F5) >>> 0;
+            let t = Math.imul(state ^ (state >>> 15), 1 | state);
+            t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+            return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+        };
+        let sum = 0, atLeast = 0;
+        for (let s = 0; s < nullSamples; s++) {
+            let i = 0;
+            const drawn = out.map(b => {
+                let hits = 0;
+                for (let k = 0; k < b.n; k++, i++) if (rnd() < order[i][0]) hits++;
+                return { n: b.n, meanP: b.meanP, observed: hits / b.n };
+            });
+            const e = eceOf(drawn);
+            sum += e;
+            if (e >= ece) atLeast++;
+        }
+        eceNull = sum / nullSamples;
+        eceP = atLeast / nullSamples;
+    }
     return {
-        bins: out, ece, mce, n,
+        bins: out, ece, mce, n, eceNull, eceP,
         meanP: p.reduce((a, b) => a + b, 0) / (n || 1),
         observed: y.reduce((a, b) => a + b, 0) / (n || 1),
     };

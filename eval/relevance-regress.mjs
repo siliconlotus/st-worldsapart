@@ -293,8 +293,8 @@ const fx = n => (Number.isFinite(n) ? (n >= 0 ? '+' : '') + n.toFixed(3) : '  n/
             for (const c of t.calib ?? []) {
                 if (!c.rows.length) { console.log(`  ${SWEPT}=${t.value}  >=${c.cut} | not fitted — one class absent at this boundary`); continue; }
                 for (const [label, f] of c.rows) {
-                    const r = reliability(f.eta.map(sigmoid), f.y);
-                    console.log(`  ${SWEPT}=${t.value}  >=${c.cut}  ${label.padEnd(18)} | ECE ${r.ece.toFixed(4)}  MCE ${r.mce.toFixed(4)}  mean p ${r.meanP.toFixed(4)} vs observed ${r.observed.toFixed(4)}  n ${r.n}`);
+                    const r = reliability(f.eta.map(sigmoid), f.y, { nullSamples: 500, seed: 1 });
+                    console.log(`  ${SWEPT}=${t.value}  >=${c.cut}  ${label.padEnd(18)} | ECE ${r.ece.toFixed(4)} (null ${r.eceNull.toFixed(4)}, p ${r.eceP.toFixed(3)})  MCE ${r.mce.toFixed(4)}  mean p ${r.meanP.toFixed(4)} vs observed ${r.observed.toFixed(4)}  n ${r.n}`);
                     console.log(`      bin |     n | p range         | mean p | observed |    gap`);
                     for (const b of r.bins) {
                         const gap = b.observed - b.meanP;
@@ -304,6 +304,9 @@ const fx = n => (Number.isFinite(n) ? (n >= 0 ? '+' : '') + n.toFixed(3) : '  n/
             }
         }
         console.log('  a positive gap is the model UNDER-confident in that bin, a negative one over-confident.');
+        console.log('  NULL is the ECE a perfectly calibrated model of this size would score; p is the share of such');
+        console.log('  models scoring at least the observed value. Raw ECE is not comparable across tiers — the floor');
+        console.log('  rises as the sample shrinks, so a small tier looks miscalibrated when only its n is different.');
     }
 
     if (table.length > 1) {

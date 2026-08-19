@@ -120,3 +120,37 @@ console.log('ok   logistic fit recovers known coefficients, stays finite under s
     const inSample = reliability(ps, yy);
     eqNear(inSample.meanP, inSample.observed, 'in-sample, mean predicted equals the base rate — a score equation, not a finding', 1e-6);
 }
+
+// --- the calibrated-model null -------------------------------------------------------------------
+// The null is what makes an ECE readable, so it is checked against the one case where the answer is
+// known by construction: labels drawn FROM the model's own probabilities are perfectly calibrated in
+// expectation, so the observed ECE should sit in the body of the null and not in its tail.
+{
+    let st = 7;
+    const rnd = () => { st = (st * 1103515245 + 12345) % 2147483648; return st / 2147483648; };
+    const ps = Array.from({ length: 400 }, () => 0.02 + 0.9 * rnd());
+
+    const honest = reliability(ps, ps.map(v => (rnd() < v ? 1 : 0)), { nullSamples: 300, seed: 3 });
+    eq(honest.ece > 0, true, 'even a perfectly calibrated predictor scores a positive ECE — binomial scatter');
+    eq(honest.eceP > 0.05, true, '...and the null says so: the observed value is unremarkable against it');
+    eq(Math.abs(honest.ece - honest.eceNull) < 0.02, true, '...sitting near the null mean rather than above it');
+
+    // A predictor that is genuinely off, at the same n, must clear the same floor.
+    const skewed = reliability(ps.map(v => Math.min(0.999, v + 0.15)), ps.map(v => (rnd() < v ? 1 : 0)),
+        { nullSamples: 300, seed: 3 });
+    eq(skewed.ece > skewed.eceNull * 2, true, 'a 0.15 bias is well clear of the noise floor');
+    eq(skewed.eceP < 0.01, true, '...and the null rejects it');
+
+    // THE SIZE EFFECT the null exists to absorb: the same calibrated predictor on a tenth of the rows
+    // scores a visibly worse ECE, and the null rises with it rather than staying put.
+    const small = reliability(ps.slice(0, 40), ps.slice(0, 40).map(v => (rnd() < v ? 1 : 0)), { nullSamples: 300, seed: 3 });
+    eq(small.eceNull > honest.eceNull, true, 'a smaller sample has a higher noise floor, which raw ECE would read as a worse model');
+
+    const labels = ps.map(v => (rnd() < v ? 1 : 0));
+    eq(Number.isNaN(reliability(ps, labels).eceNull), true, 'no null is computed unless asked');
+    // Seeded, or the check could not fail: two runs of the same inputs must agree exactly.
+    eq(reliability(ps, labels, { nullSamples: 50, seed: 11 }).eceNull,
+       reliability(ps, labels, { nullSamples: 50, seed: 11 }).eceNull, 'the same seed gives the same null');
+    eq(reliability(ps, labels, { nullSamples: 50, seed: 11 }).eceNull
+       !== reliability(ps, labels, { nullSamples: 50, seed: 12 }).eceNull, true, '...and a different one does not');
+}
