@@ -28,6 +28,17 @@ const WA_RED = '#e06c6c';     // severe — same value keyword-core's severityOf
 // Core's world_info_logic, worded as the sentence the chips beside it complete. The gate reads
 // backwards without it: the same list means "must also contain" or "must not contain" by logic alone.
 const LOGIC_LABEL = { 0: 'only if any of', 1: 'unless all of', 2: 'unless any of', 3: 'only if all of' };
+/** The secondary-key operator select: core's four logics under core's own names, since that is what
+ *  the WI editor, the CCv2 field and every card call them, and a second vocabulary for the same four
+ *  values is a translation the author has to do. The reading rides the tooltip. OFF is the fifth
+ *  position and writes `selective`, not `selectiveLogic`. */
+const LOGIC_OPTS = [
+    ['off', 'OFF', 'selective: false — the keys are kept and never gate'],
+    ['0', 'AND_ANY', LOGIC_LABEL[0]],
+    ['3', 'AND_ALL', LOGIC_LABEL[3]],
+    ['2', 'NOT_ANY', LOGIC_LABEL[2]],
+    ['1', 'NOT_ALL', LOGIC_LABEL[1]],
+];
 
 /**
  * Plan an advanced reorder: place the selected entries (given top-to-bottom in `orderedUids`) into a
@@ -643,13 +654,18 @@ export async function lorebookStudio(preferredBook = null) {
      *
      * @returns {boolean} whether the write may proceed
      */
-    const keyWriteOk = (term, list = 'key') => {
+    const keyWriteOk = (term, list = 'key', entry = null) => {
         const problems = validateSmartKey(term);
-        // WHICH codes are fatal depends on the POSITION, and that rule lives in matcher.mjs — asked
-        // through its own filters rather than re-listed here, or the editor would refuse a secondary
-        // the runtime happily gates on. `negation-only` is the whole of the difference: a secondary
-        // never fires by itself, so "present unless X" is a thing an author can mean.
-        const usable = list === 'keysecondary' ? secondaryKeys({ keysecondary: [term] }).length : usableKeys([term]).length;
+        // WHICH codes are fatal depends on the POSITION and, in the secondary position, on the
+        // OPERATOR — both rules live in matcher.mjs and are asked through its own filter rather than
+        // re-listed here, or the editor would refuse a secondary the runtime happily gates on.
+        // `negation-only` is the whole of the difference: a condition an author can mean under
+        // AND_ALL and the NOT_* pair, and one that dissolves the gate under AND_ANY. So the probe
+        // carries the entry's logic — and deliberately NOT its `selective`, which asks a different
+        // question: a switched-off list is still a list an author is entitled to go on writing.
+        const usable = list === 'keysecondary'
+            ? secondaryKeys({ keysecondary: [term], selectiveLogic: entry?.selectiveLogic }).length
+            : usableKeys([term]).length;
         const err = usable ? null : problems.find(p => p.severity === 'error');
         if (err) { toastr.warning(err.message, 'Worlds Apart', { timeOut: 8000 }); return false; }
         // ONE TOAST PER KIND OF PROBLEM, not one per instance. A key can repeat the same fault dozens of
@@ -875,7 +891,7 @@ export async function lorebookStudio(preferredBook = null) {
             // Focus is only reclaimed on an explicit Enter. Grabbing it back on blur traps the cursor:
             // every attempt to click away re-fires the blur and yanks it home again. On blur the editor
             // simply stays where it is, holding the text, and can be returned to or escaped.
-            if (ok && nv && nv !== oldKey && !keyWriteOk(nv, list)) { if (!viaBlur) inp.focus(); return; }
+            if (ok && nv && nv !== oldKey && !keyWriteOk(nv, list, e)) { if (!viaBlur) inp.focus(); return; }
             done = true;
             if (ok && nv && nv !== oldKey && Array.isArray(e[list])) {
                 const idx = e[list].indexOf(oldKey);
@@ -1230,22 +1246,62 @@ export async function lorebookStudio(preferredBook = null) {
         // depends on the logic (fatal under AND_ALL, harmless under NOT_ANY); wants that read first.
         let secPara = null;
         if (Array.isArray(e.keysecondary) && e.keysecondary.length) {
+            const gated = e.selective !== false;
             const bad = new Map((scan?.unusableKeysOf(e) ?? []).map(r => [r.key, r]));
-            const sec = document.createElement('div'); sec.className = 'wa-kw-para';
-            const label = document.createElement('span'); label.className = 'wa-kw-reason';
+            const sec = document.createElement('div');
+            sec.className = 'wa-kw-para wa-kw-sec';
+
             // The logic is what makes the list readable at all — the same chips mean "must also
-            // contain" or "must not contain" depending on it. Read-only: it is core's own dropdown.
-            label.textContent = `${LOGIC_LABEL[e.selectiveLogic ?? WI_LOGIC.AND_ANY] ?? 'only if'}:`;
-            label.title = 'Secondary keys — they gate the primaries above, they never activate on their own.';
-            sec.append(label);
+            // contain" or "must not contain" depending on it — so it is a control, not a caption:
+            // this is an editor, and a row whose meaning inverts on a field the author cannot reach
+            // from here is a row they cannot finish editing.
+            //
+            // OFF is the fifth position and it is `selective`, not a fifth logic. Core's own dropdown
+            // has no such entry — the field is written true by the template and never offered again —
+            // but the state is real (CCv2: `secondary_keys` is "ignored if selective == false"), it
+            // arrives on character cards, and it is the only way to park a gate without deleting the
+            // keys that express it. Switching off leaves `selectiveLogic` alone, so switching back on
+            // restores the author's own operator rather than the default.
+            const logic = document.createElement('select'); logic.className = 'wa-mode';
+            for (const [val, word, core] of LOGIC_OPTS) {
+                const o = document.createElement('option'); o.value = val; o.textContent = word; o.title = core; logic.append(o);
+            }
+            logic.value = gated ? String(e.selectiveLogic ?? WI_LOGIC.AND_ANY) : 'off';
+            logic.title = gated
+                ? 'How the secondary keys gate the primaries above. They never activate on their own.'
+                : 'Switched off: ST and Worlds Apart both ignore these keys. Pick an operator to gate on them again.';
+            // A negation-only secondary means a different thing under each operator, and switching
+            // between them changes it silently: the chips do not move, only what they do. See
+            // `secondaryKeys` in matcher.mjs for why the key is kept rather than dropped — briefly,
+            // the composition is correct and which operator to write is intent. This is the moment
+            // the meaning moves, so this is where it gets said.
+            const negOnly = e.keysecondary.filter(k => validateSmartKey(k).some(f => f.code === 'negation-only'));
+            logic.addEventListener('change', () => {
+                if (logic.value === 'off') { e.selective = false; }
+                else { e.selective = true; e.selectiveLogic = Number(logic.value); }
+                if (negOnly.length && logic.value !== 'off' && logic.value !== String(WI_LOGIC.AND_ALL)) {
+                    const names = negOnly.join(', ');
+                    toastr.warning(logic.value === String(WI_LOGIC.AND_ANY)
+                        ? `${names} — a negation is satisfied by absence, so AND_ANY would never gate on it. Dropped under this operator; the key is kept, and counts again under any other.`
+                        : `${names} — ${LOGIC_OPTS.find(o => o[0] === logic.value)?.[1]} negates the key again, so it now REQUIRES the term it excludes.`,
+                    'Worlds Apart', { timeOut: 9000 });
+                }
+                save(); renderEntry(e);
+            });
+            sec.append(logic);
             for (const key of e.keysecondary) {
                 const v = bad.get(key);
-                const item = document.createElement('span'); item.className = 'wa-kw-item';
+                const item = document.createElement('span'); item.className = 'wa-kw-item' + (gated ? '' : ' wa-off');
                 const chip = document.createElement('span'); chip.className = 'wa-kw';
                 const text = document.createElement('span'); text.className = 'wa-kw-text'; text.textContent = key;
                 const why = v ? `unusable — ${v.code}` : '';
                 if (v) { chip.style.borderColor = WA_RED; chip.style.background = `color-mix(in srgb, ${WA_RED} 18%, transparent)`; }
-                else if (scan) chip.style.borderColor = WA_GREEN;
+                // Green says "this key is doing its job". A switched-off key is not doing a job, and is
+                // not faulty either — it takes the dimmed neutral a disabled entry's title gets, per
+                // chip rather than per paragraph so the operator select stays legible (opacity on the
+                // row would take the control that turns it back on down with it). Still click-to-edit:
+                // a parked key is one an author is entitled to go on writing.
+                else if (scan && gated) chip.style.borderColor = WA_GREEN;
                 text.title = v ? `${key} — ${v.message} (click to edit)` : `${key} (click to edit)`;
                 text.addEventListener('click', () => editKeyInline(e, key, text, 'keysecondary'));
                 chip.append(text);
@@ -1268,7 +1324,7 @@ export async function lorebookStudio(preferredBook = null) {
                     if (done) return;
                     const nv = inp.value.trim();
                     // Same refusal shape as the primary adder: a rejected key keeps the editor and the text.
-                    if (ok && nv && !keyWriteOk(nv, 'keysecondary')) { if (!viaBlur) inp.focus(); return; }
+                    if (ok && nv && !keyWriteOk(nv, 'keysecondary', e)) { if (!viaBlur) inp.focus(); return; }
                     done = true;
                     if (ok && nv && !e.keysecondary.some(k => kwNorm(k) === kwNorm(nv))) { e.keysecondary.push(nv); save(); }
                     renderEntry(e);

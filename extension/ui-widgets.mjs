@@ -311,7 +311,7 @@ dialog.popup:has(.wa-studio), .wa-studio-nav, .wa-studio-explorer, .wa-studio-en
 .wa-entry { padding: 5px 4px; border-bottom: 1px solid var(--SmartThemeBorderColor, rgba(255,255,255,0.1)); }
 .wa-entry-head { display: flex; align-items: center; gap: 6px; cursor: pointer; }
 .wa-entry-title { font-weight: bold; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
-.wa-entry-title.wa-off { opacity: 0.45; }
+.wa-off { opacity: 0.45; }
 .wa-entry-meta { opacity: 0.45; font-size: 0.85em; white-space: nowrap; flex-shrink: 0; }
 .wa-entry-badge { font-size: 0.78em; background: var(--wa-kw-flag-bg, #274d78); color: #fff;
     border-radius: 8px; padding: 1px 7px; white-space: nowrap; flex-shrink: 0; }
@@ -354,6 +354,11 @@ textarea.wa-entry-full.wa-tall { max-height: 62vh; }
 .wa-kw { display: inline-flex; align-items: center; gap: 4px; padding: 0 8px;
     white-space: nowrap; border: 1px solid color-mix(in srgb, currentColor 40%, transparent); border-radius: 11px; }
 .wa-kw-dead .wa-kw-text { opacity: 0.8; }
+/* The gate row reads under the keys it gates, so it needs a rule to be a second row at all — two
+   paragraphs of chips run together and the secondaries read as more primaries. currentColor for the
+   same reason the chips use it: a fixed border colour vanishes on near-black themes. */
+.wa-kw-sec { border-top: 1px solid color-mix(in srgb, currentColor 15%, transparent); padding-top: 7px; }
+.wa-kw-sec .wa-mode { margin-right: 0.6em; align-self: flex-start; }
 /* Whitelisted (ignored) keys: purple so a deliberately-spared key reads apart from an unflagged one. */
 .wa-kw-ignored { border-color: #a879e0 !important; background: color-mix(in srgb, #a879e0 18%, transparent); }
 .wa-tray { margin: 2px 0 0; }
