@@ -35,11 +35,11 @@
 //
 // Usage (from SillyTavern root):
 //   node .../relevance-regress.mjs <sample.json> [...] [--sweep gazetteerSource=keys,titles]
-//        [--tier memory|reference] [--cut 4] [--ordinal] [--loso] [--lobo]
+//        [--tier memory|reference] [--cut 4] [--ordinal] [--loso] [--lobo] [--calibration]
 import { indexPath, isMemory, loadScene, openSample, sceneParams, makeCandidateSet, makeGradeOf, embed } from './scene.mjs';
 import { ensureIndex } from './reindex.mjs';
 import { gradeValue } from './metrics.mjs';
-import { logisticFit, auc, cumulativeFit, prCurve } from './logistic.mjs';
+import { logisticFit, auc, cumulativeFit, prCurve, reliability, sigmoid } from './logistic.mjs';
 import * as ranking from '../extension/ranking.mjs';
 
 const argv = process.argv.slice(2);
@@ -76,6 +76,7 @@ const LOSO = argv.includes('--loso');
 // Folds are wildly unequal here (one book is 58% of the rows), so read the per-fold sizes, not just the
 // pooled number.
 const LOBO = argv.includes('--lobo');
+const CALIB = argv.includes('--calibration');
 // WHICH BOUNDARY IS THE TARGET. 3 is the project's relevance line and the default; --cut 4 fits the band
 // the anchors reserve for the scene's current subject, which separates far better and is far rarer, so it
 // is the one place AUC and AP disagree loudly enough to be worth reading side by side.
@@ -172,16 +173,19 @@ const fx = n => (Number.isFinite(n) ? (n >= 0 ? '+' : '') + n.toFixed(3) : '  n/
         const sceneOf = perScene.flatMap(({ kept }, si) => kept.map(() => si));
         const etaOf = (fit, rows) => rows.map(row => row.reduce((a, x, j) => a + x * fit.beta[j], 0));
         // One held-out estimator, two groupings. The fold is the unit the model must generalise ACROSS.
-        const holdOut = (groupOf, nGroups) => {
-            const held = Array(y.length).fill(NaN);
+        // `labels` defaults to the shipped cut, and is a parameter so the SAME held-out estimator can be
+        // run at another boundary — E[credit] is built from P(>=2) and P(>=3), and a calibration claim
+        // about it has to hold for both.
+        const holdOut = (groupOf, nGroups, labels = y) => {
+            const held = Array(labels.length).fill(NaN);
             for (let g = 0; g < nGroups; g++) {
                 const tr = [], trY = [];
-                X.forEach((row, i) => { if (groupOf(i) !== g) { tr.push(row); trY.push(y[i]); } });
+                X.forEach((row, i) => { if (groupOf(i) !== g) { tr.push(row); trY.push(labels[i]); } });
                 if (!trY.some(v => v) || trY.every(v => v)) continue;
                 const f = logisticFit(tr, trY);
                 X.forEach((row, i) => { if (groupOf(i) === g) held[i] = row.reduce((a, x, j) => a + x * f.beta[j], 0); });
             }
-            const keep = held.map((v, i) => [v, y[i]]).filter(([v]) => Number.isFinite(v));
+            const keep = held.map((v, i) => [v, labels[i]]).filter(([v]) => Number.isFinite(v));
             return { eta: keep.map(k => k[0]), y: keep.map(k => k[1]) };
         };
         const books = [...new Set(perScene.map(p => p.book))];
@@ -218,6 +222,18 @@ const fx = n => (Number.isFinite(n) ? (n >= 0 ? '+' : '') + n.toFixed(3) : '  n/
                 ...(loso ? { 'held out by scene': loso } : {}),
                 ...(lobo ? { 'held out by BOOK': lobo } : {}),
             },
+            // Calibration is read at BOTH boundaries E[credit] combines, not only the shipped cut: the
+            // target is 0.5*P(>=2) + 0.5*P(>=3), and a convex combination of two probabilities is
+            // calibrated only if each of them is. Held out by book where that was asked for, and
+            // in-sample beside it so the near-zero there is visible as the score equation it is.
+            calib: CALIB ? [2, 3].map(cut => {
+                const yc = grades.map(g => (g >= cut ? 1 : 0));
+                if (!yc.some(v => v) || yc.every(v => v)) return { cut, rows: [] };
+                const inSample = logisticFit(X, yc);
+                const rows = [['in-sample', { eta: etaOf(inSample, X), y: yc }]];
+                if (LOBO) rows.push(['held out by BOOK', holdOut(i => bookOf[i], books.length, yc)]);
+                return { cut, rows };
+            }) : null,
         });
     }
 
@@ -263,6 +279,32 @@ const fx = n => (Number.isFinite(n) ? (n >= 0 ? '+' : '') + n.toFixed(3) : '  n/
         }
     }
     if (!LOSO || !LOBO) console.log('  (--loso holds out a scene, --lobo a book; only the second is the generalisation production needs)');
+
+    // DO THE PROBABILITIES MEAN WHAT THEY SAY. Everything above reads the ORDERING, and a monotone
+    // rescaling leaves AUC and AP untouched — so the readout that decides where a bar goes is not in
+    // any of it. The bar is argued in probability terms, so this is the check that argument rests on.
+    //
+    // The in-sample row is printed to be discounted: a logistic fit with an intercept forces
+    // mean(p) == base rate, so a near-zero ECE there is one of its own score equations. Only the
+    // held-out row is evidence, which is why --calibration is worth little without --lobo.
+    if (CALIB) {
+        console.log('\nreliability of P(grade >= k), quantile bins — ECE is the n-weighted mean gap, MCE the worst bin');
+        for (const t of table) {
+            for (const c of t.calib ?? []) {
+                if (!c.rows.length) { console.log(`  ${SWEPT}=${t.value}  >=${c.cut} | not fitted — one class absent at this boundary`); continue; }
+                for (const [label, f] of c.rows) {
+                    const r = reliability(f.eta.map(sigmoid), f.y);
+                    console.log(`  ${SWEPT}=${t.value}  >=${c.cut}  ${label.padEnd(18)} | ECE ${r.ece.toFixed(4)}  MCE ${r.mce.toFixed(4)}  mean p ${r.meanP.toFixed(4)} vs observed ${r.observed.toFixed(4)}  n ${r.n}`);
+                    console.log(`      bin |     n | p range         | mean p | observed |    gap`);
+                    for (const b of r.bins) {
+                        const gap = b.observed - b.meanP;
+                        console.log(`      ${String(r.bins.indexOf(b)).padStart(3)} | ${String(b.n).padStart(5)} | ${b.lo.toFixed(4)}-${b.hi.toFixed(4)} | ${b.meanP.toFixed(4)} |   ${b.observed.toFixed(4)} | ${(gap >= 0 ? '+' : '') + gap.toFixed(4)}`);
+                    }
+                }
+            }
+        }
+        console.log('  a positive gap is the model UNDER-confident in that bin, a negative one over-confident.');
+    }
 
     if (table.length > 1) {
         const b = table[0];

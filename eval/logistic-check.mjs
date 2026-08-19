@@ -1,6 +1,6 @@
 // The fit is checked against cases whose answer is known independently of it, because a wrong coefficient
 // does not throw — it prints, and reads exactly like a finding.
-import { logisticFit, auc, inverse, cumulativeFit, prCurve } from './logistic.mjs';
+import { logisticFit, auc, inverse, cumulativeFit, prCurve, reliability, sigmoid } from './logistic.mjs';
 import { eq, eqNear } from './metrics.mjs';
 
 // --- inverse ---------------------------------------------------------------------------------------
@@ -83,4 +83,40 @@ console.log('ok   logistic fit recovers known coefficients, stays finite under s
     eq(p.ap < a, true, '...and AP reads the cost of the other one, which AUC discounts');
     eq(Number.isNaN(prCurve([1, 2], [0, 0]).ap), true, 'no positives means no curve, reported as NaN');
     console.log('ok   prCurve: AP and precision-at-recall, and AP is the harsher of the two');
+}
+
+// --- reliability -------------------------------------------------------------------------------------
+// Calibration is checked against constructions whose right answer is arithmetic, because the failure it
+// exists to catch — a model that ranks well and reports wrong numbers — is invisible in AUC and AP.
+{
+    // A predictor that says 0.5 everywhere on a set that is half positive is PERFECTLY calibrated and
+    // completely uninformative. That pair is the whole reason calibration is a separate readout: AUC on
+    // these rows is undefined-by-tie, ECE is 0, and both are correct.
+    const flat = reliability(Array(100).fill(0.5), Array.from({ length: 100 }, (_, i) => i % 2));
+    eqNear(flat.ece, 0, 'a constant 0.5 on a 50% base rate is perfectly calibrated', 1e-12);
+    eq(flat.bins.length, 1, '...in one bin, because ties are never split across bins');
+
+    // Systematically overconfident: the truth is a coin, the model claims 0.9.
+    const over = reliability(Array(100).fill(0.9), Array.from({ length: 100 }, (_, i) => i % 2));
+    eqNear(over.ece, 0.4, 'a 0.9 prediction on a 50% outcome is off by 0.4', 1e-12);
+    eqNear(over.mce, 0.4, '...and with one bin the worst bin is the average one', 1e-12);
+
+    // Perfectly calibrated ACROSS bins, deliberately built so the global mean would hide a fault if the
+    // readout were only a mean: two groups, each right on its own, is ECE 0 — and inverting the labels
+    // between them keeps the global mean identical while making every bin wrong.
+    const p = [...Array(50).fill(0.2), ...Array(50).fill(0.8)];
+    const good = [...Array(50).fill(0).map((_, i) => (i < 10 ? 1 : 0)), ...Array(50).fill(0).map((_, i) => (i < 40 ? 1 : 0))];
+    const swapped = [...Array(50).fill(0).map((_, i) => (i < 40 ? 1 : 0)), ...Array(50).fill(0).map((_, i) => (i < 10 ? 1 : 0))];
+    eqNear(reliability(p, good, { bins: 2 }).ece, 0, 'each bin right on its own is ECE 0', 1e-12);
+    eqNear(reliability(p, swapped, { bins: 2 }).ece, 0.6, '...the same global mean with both bins wrong is not', 1e-12);
+    eqNear(reliability(p, swapped, { bins: 2 }).meanP, reliability(p, good, { bins: 2 }).meanP, 'the two differ in no global statistic', 1e-12);
+
+    // The in-sample identity the doc comment rests on: a logistic fit with an intercept forces
+    // sum(p) == sum(y), so global calibration is zero by construction and only the bins can disagree.
+    const X = Array.from({ length: 200 }, (_, i) => [1, (i % 20) / 10 - 1]);
+    const yy = X.map(([, x], i) => (x + (i % 7) / 14 > 0.5 ? 1 : 0));
+    const fit = logisticFit(X, yy);
+    const ps = X.map(row => sigmoid(row.reduce((s, v, j) => s + v * fit.beta[j], 0)));
+    const inSample = reliability(ps, yy);
+    eqNear(inSample.meanP, inSample.observed, 'in-sample, mean predicted equals the base rate — a score equation, not a finding', 1e-6);
 }

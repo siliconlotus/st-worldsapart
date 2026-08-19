@@ -33,7 +33,7 @@ export function inverse(A) {
     return M.map(row => row.slice(n));
 }
 
-const sigmoid = z => 1 / (1 + Math.exp(-z));
+export const sigmoid = z => 1 / (1 + Math.exp(-z));
 
 /**
  * Fits P(y=1) = sigmoid(X·beta) by iteratively reweighted least squares.
@@ -170,4 +170,62 @@ export function prCurve(scores, y, recalls = [0.5, 0.75, 0.9]) {
         for (const R of recalls) if (at[R] === undefined && tp / pos >= R) at[R] = { precision: tp / (i + 1), admitted: i + 1 };
     });
     return { ap: ap / pos, pos, n: y.length, at };
+}
+
+/**
+ * Reliability: do the predicted probabilities MEAN what they say. AP and AUC read the ordering, and a
+ * monotone rescaling leaves both untouched — so a model can rank perfectly and still be wrong about
+ * every number it reports. A bar argued in probability terms ("ship above 0.3") rests on the numbers,
+ * not the order, and nothing here checked them.
+ *
+ * READ IT OUT OF FOLD OR IT MEASURES NOTHING. A logistic fit with an intercept satisfies
+ * sum(p) == sum(y) at convergence — that is one of its score equations — so in-sample the global
+ * calibration is zero by construction and the bins only show how the residual redistributes. The
+ * in-sample row is worth printing precisely so a near-zero ECE there is recognised as arithmetic
+ * rather than read as evidence.
+ *
+ * QUANTILE BINS, NOT EQUAL WIDTH. Prevalence here is ~7%, so predictions pile up near zero: ten
+ * equal-width bins put nine rows in ten into the first and leave the upper tail — the only region a
+ * bar is ever drawn in — with a handful of rows each, where the observed rate is noise. Equal-count
+ * bins spend the same n on every point of the curve. The cost is that bin EDGES move between runs,
+ * so compare ECE across models rather than bin against bin.
+ *
+ * Ties are kept together: a run of identical probabilities in one bin is a real property of the
+ * predictor, and splitting it to hit a target count would invent a distinction the model did not make.
+ * So bins are approximately, not exactly, equal in size.
+ *
+ * ECE is the n-weighted mean gap, MCE the worst single bin. Both are reported because they answer
+ * different questions: ECE is what the average prediction is off by, MCE is what the worst region is
+ * off by, and a bar sits in one region rather than on the average.
+ *
+ * @param {number[]} p Predicted probabilities in [0,1]
+ * @param {number[]} y Labels, 0 or 1
+ * @param {number} [bins] Target bin count
+ * @returns {{bins: Array<{n: number, meanP: number, observed: number, lo: number, hi: number}>,
+ *            ece: number, mce: number, meanP: number, observed: number, n: number}}
+ */
+export function reliability(p, y, { bins = 10 } = {}) {
+    const n = p.length;
+    const order = p.map((v, i) => [v, y[i]]).sort((a, b) => a[0] - b[0]);
+    const out = [];
+    const target = n / bins;
+    for (let i = 0; i < n;) {
+        let j = Math.min(n, Math.max(i + 1, Math.round((out.length + 1) * target))) - 1;
+        while (j + 1 < n && order[j + 1][0] === order[j][0]) j++;   // never split a tie across bins
+        const slice = order.slice(i, j + 1);
+        out.push({
+            n: slice.length,
+            lo: slice[0][0], hi: slice[slice.length - 1][0],
+            meanP: slice.reduce((a, r) => a + r[0], 0) / slice.length,
+            observed: slice.reduce((a, r) => a + r[1], 0) / slice.length,
+        });
+        i = j + 1;
+    }
+    const ece = out.reduce((a, b) => a + b.n * Math.abs(b.meanP - b.observed), 0) / (n || 1);
+    const mce = out.reduce((a, b) => Math.max(a, Math.abs(b.meanP - b.observed)), 0);
+    return {
+        bins: out, ece, mce, n,
+        meanP: p.reduce((a, b) => a + b, 0) / (n || 1),
+        observed: y.reduce((a, b) => a + b, 0) / (n || 1),
+    };
 }
