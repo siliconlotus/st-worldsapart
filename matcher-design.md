@@ -850,6 +850,15 @@ entry gets p, and ships if it clears the cutoff. The count falls out — a scene
 delivers three — so "how many entries does this scene need" is not a separate question and takes no
 parameter of its own.
 
+**Polynomial terms measured WORSE, on the tier that could afford them.** Squares of the standardised
+signals were fitted on memory (8502 rows, `--degree 2`): held out by book they cost AUC 0.7859 -> 0.7809
+and F2 over the delivered set 0.494 -> 0.491, while gaining 0.001 in-sample — the signature of terms
+fitted to the training books. Only `text^2` had individual support (+0.071, SE 0.027) and it loses held
+out on its own too (AUC 0.7851, F2 0.493), which is what holding out is for: an in-sample t-statistic is
+not evidence a term transfers. `keys` also destabilises beside its own square (+2.244, SE 1.418), the
+collinearity a small slope invites. Not retried on reference, where 342 rows cannot support three more
+coefficients and the delivered set is already at full recall.
+
 **RELEVANCE IS A PROPERTY OF THE PAIR, never of the entry.** Every feature is query-dependent and every
 grade belongs to one scene. **Measured**: of the 594 entries graded in two or more scenes, 89.7% have a
 grade that varies and 54.5% cross the relevance line — the same entry, the same book, relevant here and

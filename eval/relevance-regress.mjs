@@ -8,9 +8,9 @@
 //
 // THE MODEL IS LOGISTIC, on the project's own relevance line (grade >= 3, metrics.mjs). Linear would put
 // predictions outside [0,1] on a bounded target and weight a 0-vs-1 error the same as a 0.4-vs-0.5 one;
-// polynomial terms are not ruled out but are not free — every added term is another coefficient fitted on
-// the same rows, and the pooled n here is thousands of rows over 3 corpora, not thousands of corpora. Fit
-// quality is printed (AUC, log-loss) so a case for either can be made against a number.
+// polynomial terms MEASURED WORSE and `--degree 2` is what measured them (see the doc). Fit quality is
+// printed (AUC, log-loss) so the case is always against a number rather than against the shape of the
+// model.
 //
 // THREE READINGS OF A COEFFICIENT, because they answer different questions and only one of them is what
 // "the weight moved" usually means:
@@ -35,7 +35,7 @@
 //
 // Usage (from SillyTavern root):
 //   node .../relevance-regress.mjs <sample.json> [...] [--sweep gazetteerSource=keys,titles]
-//        [--tier memory|reference] [--cut 4] [--ordinal] [--loso] [--lobo] [--calibration] [--cutoff]
+//        [--tier memory|reference] [--cut 4] [--ordinal] [--loso] [--lobo] [--calibration] [--cutoff] [--degree 2]
 import { indexPath, isMemory, loadScene, openSample, sceneParams, makeCandidateSet, makeGradeOf, embed } from './scene.mjs';
 import { ensureIndex } from './reindex.mjs';
 import { gradeValue, gradeCredit, fbeta, RECALL_WEIGHT } from './metrics.mjs';
@@ -77,6 +77,11 @@ const LOSO = argv.includes('--loso');
 // pooled number.
 const LOBO = argv.includes('--lobo');
 const CUTOFF = argv.includes('--cutoff');
+const DEGREE = Number(arg('--degree') ?? 1);
+// Which signals get a squared term. Empty means all of them — naming a subset is how a term that
+// carries support is tested apart from two that do not, since three added coefficients can lose held
+// out while one of them gains.
+const SQUARE = String(arg('--square') ?? '').split(',').filter(Boolean);
 const CALIB = argv.includes('--calibration');
 // WHICH BOUNDARY IS THE TARGET. 3 is the project's relevance line and the default; --cut 4 fits the band
 // the anchors reserve for the scene's current subject, which separates far better and is far rarer, so it
@@ -98,6 +103,11 @@ const FEATURES = [
     ['text', r => Number(r.textScore) || 0, r => (r.textEligible ? 1 : 0)],
     ['keys', r => Number(r.keywordScore) || 0, r => (r.keysEligible ? 1 : 0)],
 ];
+
+// Feature indices carrying a squared term: none at degree 1, the named subset if --square was given,
+// otherwise all of them.
+const SQUARED = DEGREE < 2 ? []
+    : FEATURES.map((f, i) => i).filter(i => !SQUARE.length || SQUARE.includes(FEATURES[i][0]));
 
 const mean = xs => xs.reduce((a, b) => a + b, 0) / (xs.length || 1);
 const sd = xs => { const m = mean(xs); return Math.sqrt(mean(xs.map(x => (x - m) ** 2))); };
@@ -172,7 +182,12 @@ const fx = n => (Number.isFinite(n) ? (n >= 0 ? '+' : '') + n.toFixed(3) : '  n/
                     perSignal[fi].s.push(c[i]);
                     perSignal[fi].y.push(k.y);
                 });
-                X.push([...scene, ...feats]);
+                // DEGREE 2 APPENDS, never interleaves: every readout below indexes a linear coefficient
+                // as base + fi*2, so a squared column inserted beside its own signal would silently
+                // renumber all of them. The ELIGIBILITY indicators are not squared — they are 0/1, so
+                // x^2 == x and the duplicate column makes the design singular.
+                const sq = SQUARED.map(fi => feats[fi * 2] ** 2);
+                X.push([...scene, ...feats, ...sq]);
                 y.push(k.y);
             });
         }
@@ -213,6 +228,9 @@ const fx = n => (Number.isFinite(n) ? (n >= 0 ? '+' : '') + n.toFixed(3) : '  n/
         const Xraw = X.map((row, i) => {
             const out = row.slice(0, 1);
             FEATURES.forEach((_, fi) => out.push(rawCols[fi][i], row[1 + fi * 2 + 1]));
+            // The raw fit carries the same terms as the standardised one or it is a different model,
+            // and the per-unit column beside it would be read off a design that was never fitted.
+            SQUARED.forEach((_, si) => out.push(row[1 + 2 * FEATURES.length + si]));
             return out;
         });
         const rawFit = logisticFit(Xraw, y);
@@ -227,6 +245,8 @@ const fx = n => (Number.isFinite(n) ? (n >= 0 ? '+' : '') + n.toFixed(3) : '  n/
                 auc: auc(perSignal[fi].s, perSignal[fi].y),
             })),
             logLoss: stdFit.logLoss, converged: stdFit.converged,
+            sq: SQUARED.map((_, si) => stdFit.beta[1 + 2 * FEATURES.length + si]),
+            sqSe: SQUARED.map((_, si) => stdFit.se[1 + 2 * FEATURES.length + si]),
             auc: auc(X.map((row, i) => row.reduce((s, x, j) => s + x * stdFit.beta[j], 0)), y),
             ordinal: ORDINAL ? cumulativeFit(X, grades, [1, 2, 3, 4]) : null,
             base,
@@ -304,6 +324,9 @@ const fx = n => (Number.isFinite(n) ? (n >= 0 ? '+' : '') + n.toFixed(3) : '  n/
         for (const [i, r] of t.rows.entries()) {
             const head = i === 0 ? String(t.value).padEnd(14) : ' '.repeat(14);
             console.log(`  ${head} ${r.name.padEnd(6)} | ${fx(r.std)} (${r.stdSe.toFixed(3)})  ${fx(r.raw).padStart(9)}   ${r.sd.toFixed(4).padStart(20)}   ${r.auc.toFixed(3).padStart(8)}`);
+        }
+        for (const [si, fi] of SQUARED.entries()) {
+            console.log(`  ${' '.repeat(14)} ${(FEATURES[fi][0] + '^2').padEnd(6)} | ${fx(t.sq[si])} (${t.sqSe[si].toFixed(3)})`);
         }
         console.log(`  ${' '.repeat(14)} model  | AUC ${t.auc.toFixed(4)}  log-loss ${t.logLoss.toFixed(4)}  n ${t.n} rows (${t.pos} relevant) over ${t.scenes} scenes, ${t.dropped} ungraded dropped${t.converged ? '' : '  !! DID NOT CONVERGE'}`);
     }
