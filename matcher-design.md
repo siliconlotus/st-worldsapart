@@ -888,10 +888,19 @@ Per-scene intercepts were tried as a control for differing base rates and measur
 99.8% of memory rows are vectorized and carry cosine and text, while 84% of reference rows are
 keyword-only. **And where both carry one, it is not worth the same.** **Measured**, solo AUC per tier:
 cosine 0.737 memory against 0.448 reference, text 0.759 against 0.662, keys 0.503 against 0.668. So the
-strongest signal in one tier is the weakest in the other, and in MEMORY the keyword score does not
-discriminate at all — 0.503 is a coin flip, on a mean within-scene SD of 0.0039 against text's 16.3.
-Reference's cosine reads below chance because most of that tier has none: only `denseAllEntries`
-computes it there, which is the same finding from the other side. A pooled fit reads one slope across two eligibility regimes, and it is also blind to any
+strongest signal in one tier is the weakest in the other. Both of the weak readings are ABSENCE rather
+than failure, and neither is evidence about the signal: reference's cosine is only computed under
+`denseAllEntries`, and memory's keys are not computed at all — `scoringKeys` blanks a vectorized entry's
+keys unless `scoreVectorKeys` is on, it defaults off, and memory is 99.8% vectorized. 0.503 is the AUC
+of a constant. On books whose memory entries are all vectorized the column's within-scene SD is exactly
+0, and the fit returns +0.000 at SE 1000 rather than a slope.
+
+**Scoring memory's keys gives a real signal and buys nothing.** **Measured**, memory tier,
+`scoreVectorKeys` on: keys go from SD 0.0039 and solo AUC 0.503 to SD 0.8147 and 0.691, and from an
+unestimable +0.745 (SE 0.602) to +0.247 (SE 0.043). The model gains 0.0055 AUC in sample and LOSES
+0.0038 held out by book, with AP 0.398 -> 0.394 and F2 over the delivered set 0.494 -> 0.495. A third
+signal exists in that tier; it is redundant, which follows from an entry's keys being drawn from its own
+content while `text` scores that content directly. The default stands. A pooled fit reads one slope across two eligibility regimes, and it is also blind to any
 change confined to the smaller one — computing a cosine for every reference entry (`denseAllEntries`)
 moves that tier's AUC from 0.7387 to 0.7851 and its log-loss from 0.5539 to 0.5163, while the memory tier
 and the pooled model do not move at all. Reference cosine then carries the tier's largest slope
@@ -933,6 +942,15 @@ also stops the decision resting entirely on the boundary the signals separate wo
 express the middle band the scale defines and the metric already pays for — a 2 is "50/50 on inclusion",
 so half credit is the grader's own stated probability rather than a weighting invented here.
 
+**RULED: `E[credit]` decides prompt ORDER too, not just membership.** The dynamic block is ordered by the
+same quantity the cutoff reads, rather than by `fuseRanks`. The reason is coherence rather than elegance:
+`applyBudget` assumes every cap is a prefix cut, and a set chosen by `E[credit]` but ordered by RRF lets
+the budget drop a high-`E[credit]` entry because a different combination of the same three columns ranked
+it low. Ordering by the thresholded quantity makes the prefix property true by construction. Constant and
+armed-sticky hoisting is unaffected, being about kind rather than relevance. This retires `rrfK`,
+`lexicalWeight` and `keywordWeight` for the dynamic block, and costs nothing measured — regression was
+already no worse than RRF on nDCG.
+
 **Clamp `P(>=3)` to `P(>=2)`.** The boundaries are fitted separately, so nothing guarantees the nesting
 the events have, and `E[credit]` is malformed where it inverts. **Measured**: 39 of 8975 rows invert, by
 at most 0.0002 — numerically trivial, so a clamp costs nothing and removes the case entirely. It is not
@@ -946,6 +964,20 @@ what it surfaces at every depth (22.0% of the top 5 per scene, 19.4% of the top 
 into precision and not into recall. That is the target and the score disagreeing at the margin. It is
 recorded rather than resolved, because the alternative is a weight between the halves that no measurement
 here would choose.
+
+**The gazetteer is worth about two F2 points, and keys are the best source of it.** **Measured**, memory
+tier, held out by book, AP: keys 0.397, keys+titles 0.398, titles 0.380, none 0.371, bodies 0.369 — so
+bodies are WORSE than having no gazetteer, a source drawn from every entry weighting everything and
+therefore nothing. F2 over the delivered set spans 0.495 for keys to 0.471 for none. That span is the
+ceiling on the whole line of work: the query terms reaching `text` are not what limits it. Keys are the
+best source while being useless as a SIGNAL in the same tier, which is not a contradiction — a signal
+asks whether an entry's keys fired in the chat, a gazetteer asks what vocabulary the query should weight,
+and an entry's keys can name the right entities without ever matching.
+
+**Curation does not explain it.** Split into the curated books (Sommers, Richard, Time Whore; 50 scenes)
+and the rest (20 scenes), the gazetteer is worth MORE where keys were never reviewed — AP 0.401 against
+0.378 curated, 0.317 against 0.268 uncurated. The uncurated tranche is 4 books with 3 of them tiny, so
+read the direction and not the size.
 
 **Two cutoffs, one per tier.** **Measured**, F2 over the delivered set, macro-averaged over scenes, with
 `E[credit]` held out by book and `P(>=3)` clamped: memory peaks at 0.14 (F2 0.494, 19.9 delivered against
