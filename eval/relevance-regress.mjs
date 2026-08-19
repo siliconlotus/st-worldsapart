@@ -35,7 +35,7 @@
 //
 // Usage (from SillyTavern root):
 //   node .../relevance-regress.mjs <sample.json> [...] [--sweep gazetteerSource=keys,titles]
-//        [--tier memory|reference] [--cut 4] [--ordinal] [--loso] [--lobo] [--calibration] [--cutoff] [--degree 2] [--interactions] [--with proper,time,oracle] [--proper count|idf|jaccard|gaz] [--proper-extract regex|entity|span]
+//        [--tier memory|reference] [--cut 4] [--ordinal] [--loso] [--lobo] [--calibration] [--cutoff] [--degree 2] [--interactions] [--with proper,time,oracle,length,density,rarity] [--emit-rows rows.json] [--proper count|idf|jaccard|gaz] [--proper-extract regex|entity|span]
 import { indexPath, isMemory, loadScene, openSample, sceneParams, makeCandidateSet, makeGradeOf, embed } from './scene.mjs';
 import { ensureIndex } from './reindex.mjs';
 import fs from 'node:fs';
@@ -44,6 +44,7 @@ import { COMMON_WORDS } from '../plugin/commonwords.js';
 import { logisticFit, auc, cumulativeFit, prCurve, reliability, sigmoid } from './logistic.mjs';
 import * as ranking from '../extension/ranking.mjs';
 import { fold, normalizeOrthography } from '../extension/smartkeys.mjs';
+import { tokenize } from '../extension/lexical.mjs';
 
 const argv = process.argv.slice(2);
 const arg = k => { const i = argv.indexOf(k); return i >= 0 ? argv[i + 1] : null; };
@@ -51,7 +52,7 @@ const arg = k => { const i = argv.indexOf(k); return i >= 0 ? argv[i + 1] : null
 // is about to write is opened as an input bundle. Named flags rather than "anything after a --", or
 // `--lobo scene.json` would silently DROP that scene, which is the worse failure: a wrong sample set
 // prints a clean table and says nothing about what it left out.
-const VALUED = new Set(['--arm', '--sweep', '--tier', '--cut', '--degree', '--square', '--with', '--emit', '--proper', '--proper-extract']);
+const VALUED = new Set(['--arm', '--sweep', '--tier', '--cut', '--degree', '--square', '--with', '--emit', '--emit-rows', '--proper', '--proper-extract']);
 const samples = argv.filter((a, i) => a.endsWith('.json') && !a.startsWith('--') && !VALUED.has(argv[i - 1]));
 if (!samples.length) {
     console.error('need at least one sample: node relevance-regress.mjs <sample.json> [more.json ...] [--sweep param=v1,v2]');
@@ -101,6 +102,10 @@ const WITH = String(arg('--with') ?? '').split(',').filter(Boolean);
 // per-scene numbers between them. Scene names go with it: pairing by index is only safe if both runs
 // kept the same scenes, and that has to be checked rather than assumed.
 const EMIT = arg('--emit');
+// Every scored row at the best cutoff, delivered flag included — what --emit carries for the paired TEST,
+// this carries for reading the cut. Separate flags because the per-scene F2 vector is small enough to keep
+// forever and this is not.
+const EMIT_ROWS = arg('--emit-rows');
 // How the proper-noun overlap is scored. `count` = shared names; `idf` = shared names weighted by
 // log(N/df) over the book's own entries, so a name every entry mentions counts for little and the
 // protagonist stops dominating; `jaccard` = intersection over union, which normalises for how many
@@ -231,6 +236,24 @@ if (WITH.includes('time')) FEATURES.push(['time', storyTime, () => 1]);
 // Built below, once every scene is loaded — an entry's prior is read off its OTHER scenes and so cannot
 // be computed inside the per-scene loop the way properShared is.
 if (WITH.includes('oracle')) FEATURES.push(['oracle', r => Number(r.entryBase) || 0, () => 1]);
+// THE THREE COMPUTABLE PRIORS, each an attempt at part of what `oracle` bounds. All are entry-intrinsic
+// — they never read the query — so they are priors rather than signals, and within-scene standardisation
+// still works on them because they vary between the entries of one scene.
+//
+// LENGTH IS LOG, because token counts run over an order of magnitude and a raw column would let one
+// 15k-token entry set the scene's SD. It is not already in the model: BM25 length-normalises INSIDE
+// `text`, which is a different claim — that a long document should not out-score a short one on the same
+// query — and says nothing about whether long entries are likelier to be relevant at all.
+if (WITH.includes('length')) FEATURES.push(['length', r => Math.log(Math.max(1, Number(r.entryTokens) || 0)), () => 1]);
+// NAMES PER 100 TOKENS, on ranking.properNounsOf — the same detector `proper` settled on. A DENSITY, not
+// the count: the count is length wearing another name, and the two would be one column.
+if (WITH.includes('density')) FEATURES.push(['density', r => Number(r.properDensity) || 0, () => 1]);
+// MEAN -log10(tf/total) over the entry's tokens, the book as the corpus. "How rare is this entry's
+// vocabulary among its siblings" — the surviving half of a mean-TF-IDF prior. The English-frequency half
+// is deliberately absent: ZIPF_EN scores a name maximally rare and a book's own coinages with it, so the
+// two axes disagree on a tenth of a book's token mass and a min-of-percentiles combination measured
+// WORSE than this column alone.
+if (WITH.includes('rarity')) FEATURES.push(['rarity', r => Number(r.bookRarity) || 0, () => 1]);
 
 // Feature indices carrying a squared term: none at degree 1, the named subset if --square was given,
 // otherwise all of them.
@@ -274,6 +297,11 @@ const tailCut = (s, labels) => {
     }
     return { at100: Number.isNaN(at100) ? 0 : at100, at95: Number.isNaN(at95) ? 1 : at95 };
 };
+
+// The entry-intrinsic columns, named once so the per-scene block can ask whether any was requested.
+const PRIORS = ['length', 'density', 'rarity'];
+// Book term-frequency, keyed by book — see the per-scene block.
+const bookTf = new Map();
 
 const mean = xs => xs.reduce((a, b) => a + b, 0) / (xs.length || 1);
 const sd = xs => { const m = mean(xs); return Math.sqrt(mean(xs.map(x => (x - m) ** 2))); };
@@ -340,6 +368,31 @@ const fx = n => (Number.isFinite(n) ? (n >= 0 ? '+' : '') + n.toFixed(3) : '  n/
                     r.properShared = v;
                 }
             }
+            // THE ENTRY-INTRINSIC PRIORS, stamped on the row so the feature accessors stay pure lookups.
+            // Book term-frequency is CACHED PER BOOK: it reads scene.entries, which is the same corpus for
+            // every scene of a book, and recomputing it per scene would tokenize the book 14 times over on
+            // the larger lines for an identical answer.
+            if (PRIORS.some(p => WITH.includes(p))) {
+                let bk = bookTf.get(book);
+                if (!bk) {
+                    const tf = new Map();
+                    let total = 0;
+                    for (const e of scene.entries ?? []) {
+                        for (const t of tokenize(e.content)) { tf.set(t, (tf.get(t) ?? 0) + 1); total++; }
+                    }
+                    // An unseen term would divide by a zero count; the book's own vocabulary cannot
+                    // contain one, but an entry excluded from scene.entries can, so it floors at 1.
+                    bk = { rarity: t => -Math.log10((tf.get(t) ?? 1) / Math.max(1, total)) };
+                    bookTf.set(book, bk);
+                }
+                for (const r of rows) {
+                    const toks = tokenize(r.entry?.content);
+                    r.entryTokens = toks.length;
+                    const names = ranking.properNounsOf(normalizeOrthography(String(r.entry?.content ?? '')));
+                    r.properDensity = (names?.size ?? 0) / Math.max(1, toks.length) * 100;
+                    r.bookRarity = toks.length ? toks.reduce((a, t) => a + bk.rarity(t), 0) / toks.length : 0;
+                }
+            }
             const gradeOf = makeGradeOf(S.grades, scene.isExcluded);
             // Same population scoreScene ranks: constants are out, because relevance is not a concept that
             // applies to them. Ungraded rows are out because they carry no label.
@@ -363,7 +416,11 @@ const fx = n => (Number.isFinite(n) ? (n >= 0 ? '+' : '') + n.toFixed(3) : '  n/
             // each other and still informs the slopes. Requiring both classes dropped those rows for a
             // property the fit does not need, and the cutoff sweep separately drops scenes with no
             // relevant row, where recall is undefined rather than uninformative.
-            if (kept.length >= 5) perScene.push({ name, book, kept, ungraded });
+            // THE SCENE TEXT RIDES ALONG for --emit-rows. A grade is a verdict about a (scene, entry)
+            // PAIR, so a dropped row cannot be judged from its title: the same entry is right in one
+            // scene and wrong in the next. Bounded, because the whole query over 103 scenes is a file
+            // nobody opens.
+            if (kept.length >= 5) perScene.push({ name, book, kept, ungraded, query: String(S.query ?? '').slice(-4000) });
         }
         if (!perScene.length) { console.log(`  ${SWEPT}=${value}: no scene has both classes among its judged rows`); continue; }
 
@@ -532,9 +589,15 @@ const fx = n => (Number.isFinite(n) ? (n >= 0 ? '+' : '') + n.toFixed(3) : '  n/
                     return Number.isFinite(p2) && Number.isFinite(p3) ? 0.5 * p2 + 0.5 * Math.min(p3, p2) : NaN;
                 };
                 let gi = 0;
-                const scenes = perScene.map(({ kept, ungraded, name }, si) => {
+                const scenes = perScene.map(({ kept, ungraded, name, query }, si) => {
                     const fold = bookOf[gi];
-                    const rows = kept.map(k => ({ e: scoreRow(X[gi++], fold), g: k.g }));
+                    // IDENTITY AND RAW FEATURES RIDE ALONG, for --emit-rows. The cutoff readout needs
+                    // only (score, grade); what a human reads to understand a cut needs to know WHICH
+                    // entry and what it scored on each column, and reconstructing that from a second run
+                    // would re-derive the standardisation the fit used.
+                    const idOf = r => ({ uid: r.entry?.uid, title: r.entry?.comment || r.entry?.title || `uid ${r.entry?.uid}`,
+                        feats: Object.fromEntries(FEATURES.map(([n, get]) => [n, get(r)])) });
+                    const rows = kept.map(k => ({ e: scoreRow(X[gi++], fold), g: k.g, ...idOf(k.r) }));
                     // An ungraded row is projected through ITS OWN scene's standardisation, the same
                     // statistics the fit used, so it lands on one scale with the rows beside it.
                     for (const u of ungraded) {
@@ -542,14 +605,15 @@ const fx = n => (Number.isFinite(n) ? (n >= 0 ? '+' : '') + n.toFixed(3) : '  n/
                         sceneCols[si].forEach((c, fi) => {
                             design.push((FEATURES[fi][1](u.r) - mean(c)) / (sd(c) || 1), FEATURES[fi][2](u.r));
                         });
-                        rows.push({ e: scoreRow(design, fold), g: 0 });
+                        rows.push({ e: scoreRow(design, fold), g: 0, ungraded: true, ...idOf(u.r) });
                     }
-                    return { name, rows: rows.filter(r => Number.isFinite(r.e)), relevant: kept.filter(k => k.g >= 3).length };
+                    return { name, query, rows: rows.filter(r => Number.isFinite(r.e)), relevant: kept.filter(k => k.g >= 3).length };
                 }).filter(sc => sc.relevant > 0);
                 const grid = Array.from({ length: 99 }, (_, i) => (i + 1) / 100);
                 return {
                     scenes: scenes.length,
                     sceneNames: scenes.map(sc => sc.name),
+                    sceneRows: scenes,
                     meanRelevant: mean(scenes.map(sc => sc.relevant)),
                     grid: grid.map(cut => {
                         const per = scenes.map(sc => {
@@ -670,6 +734,18 @@ const fx = n => (Number.isFinite(n) ? (n >= 0 ? '+' : '') + n.toFixed(3) : '  n/
             }
             console.log(`  best cutoff ${best.cut.toFixed(2)}: F2 ${best.f.toFixed(4)}, delivering ${best.delivered.toFixed(1)} entries against ${b.meanRelevant.toFixed(1)} relevant.`);
             t.best = best;
+            if (EMIT_ROWS) {
+                fs.writeFileSync(EMIT_ROWS, JSON.stringify({
+                    swept: SWEPT, value: t.value, tier: TIER, with: WITH, cut: best.cut, f2: best.f,
+                    features: FEATURES.map(([n]) => n),
+                    scenes: b.sceneRows.map(sc => ({
+                        name: sc.name, relevant: sc.relevant, query: sc.query,
+                        rows: sc.rows.map(r => ({ uid: r.uid, title: r.title, g: r.g, ungraded: !!r.ungraded,
+                            e: Number(r.e.toFixed(4)), delivered: r.e >= best.cut, feats: r.feats })),
+                    })),
+                }, null, 1));
+                console.log(`  per-row delivery written to ${EMIT_ROWS}`);
+            }
             if (EMIT) {
                 fs.writeFileSync(EMIT, JSON.stringify({
                     swept: SWEPT, value: t.value, tier: TIER, with: WITH, interactions: INTERACT, properMode: PROPER_MODE, properExtract: PROPER_EXTRACT,
