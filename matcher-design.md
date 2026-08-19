@@ -899,6 +899,23 @@ improves in 6 of 7 books; the one that falls holds 59 rows and 5 positives. Fenw
 against 0 down with 16 tied (p 0.125) — a 5-entry book rarely changes its delivered set at all, so the
 per-fold AP is the readable number there and the pooled paired test is what the 20 scenes bought.
 
+**Two ENTRY-INTRINSIC columns pay, and neither is about vocabulary.** Entry length (log tokens) and
+proper-noun density (names per 100 tokens, `ranking.properNounsOf`) never read the query, so they are
+priors rather than signals. **Measured**, memory tier, held out by book, 103 scenes: F2 0.5128 -> 0.5409
+over the four shipped signals, 62 scenes up against 25 with 16 tied, p 0.0001, delivering 21.1 entries
+against 34.4 at 40.8% precision to 33.4%.
+
+**They raise the CUTOFF; they do not discriminate.** Solo AUC is 0.551 and 0.547, and the gain comes from
+reshaping the probability scale so 0.11 is safe where 0.07 was. Read off the delivered set, the grade >= 3
+rows it drops differ from the ones it keeps in cosine (0.148 against 0.239) and text (48.4 against 80.5),
+barely in length (7.15 against 6.84) or density (5.29 against 6.22). The haystack falls monotonically in
+grade — g0 -51%, g4 -4% — and 2 of 103 scenes go from a relevant row to none.
+
+**Mean book-IDF over the entry's tokens carries nothing** (solo AUC 0.497; +0.0019 F2, 20 up against 23
+with 60 tied, p 0.76), and an entry's own relevance rate in its other scenes adds nothing once these two
+are present (-0.0003, 38 up against 44, p 0.58) — so the entry-level intercept is fully captured by two
+columns computable from the entry alone.
+
 **Story-time position carries nothing.** Fitted as the entry's uid, which within-scene standardisation
 makes equivalent to distance from the current point up to sign: solo AUC 0.458, and adding it to
 proper-noun overlap COSTS 0.0032 AUC and 0.0045 F2. `order` is deliberately not consulted — it is ST's
