@@ -859,6 +859,12 @@ not evidence a term transfers. `keys` also destabilises beside its own square (+
 collinearity a small slope invites. Not retried on reference, where 342 rows cannot support three more
 coefficients and the delivered set is already at full recall.
 
+**Two-way INTERACTIONS fail the same way** (`--interactions`, memory): AUC 0.7859 -> 0.7845 held out and
+F2 0.494 -> 0.490, with `cosine*text` the one nominally supported term (+0.081, SE 0.037) and the two
+carrying `keys` pure noise. Curvature and combination were tested separately because they are different
+questions, and a tree ensemble that beat this model would have to be exploiting one of them. Neither
+exists at this n, which is 7 BOOKS however many rows it is.
+
 **RELEVANCE IS A PROPERTY OF THE PAIR, never of the entry.** Every feature is query-dependent and every
 grade belongs to one scene. **Measured**: of the 594 entries graded in two or more scenes, 89.7% have a
 grade that varies and 54.5% cross the relevance line — the same entry, the same book, relevant here and
@@ -880,7 +886,12 @@ Per-scene intercepts were tried as a control for differing base rates and measur
 
 **Fit PER TIER, on eligibility rather than on base rate.** The tiers do not carry the same signals:
 99.8% of memory rows are vectorized and carry cosine and text, while 84% of reference rows are
-keyword-only. A pooled fit reads one slope across two eligibility regimes, and it is also blind to any
+keyword-only. **And where both carry one, it is not worth the same.** **Measured**, solo AUC per tier:
+cosine 0.737 memory against 0.448 reference, text 0.759 against 0.662, keys 0.503 against 0.668. So the
+strongest signal in one tier is the weakest in the other, and in MEMORY the keyword score does not
+discriminate at all — 0.503 is a coin flip, on a mean within-scene SD of 0.0039 against text's 16.3.
+Reference's cosine reads below chance because most of that tier has none: only `denseAllEntries`
+computes it there, which is the same finding from the other side. A pooled fit reads one slope across two eligibility regimes, and it is also blind to any
 change confined to the smaller one — computing a cosine for every reference entry (`denseAllEntries`)
 moves that tier's AUC from 0.7387 to 0.7851 and its log-loss from 0.5539 to 0.5163, while the memory tier
 and the pooled model do not move at all. Reference cosine then carries the tier's largest slope
