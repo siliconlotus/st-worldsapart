@@ -38,7 +38,7 @@
 //        [--tier memory|reference] [--cut 4] [--ordinal] [--loso] [--lobo] [--calibration] [--cutoff] [--degree 2] [--interactions]
 import { indexPath, isMemory, loadScene, openSample, sceneParams, makeCandidateSet, makeGradeOf, embed } from './scene.mjs';
 import { ensureIndex } from './reindex.mjs';
-import { gradeValue, gradeCredit, fbeta, RECALL_WEIGHT } from './metrics.mjs';
+import { gradeValue, gradeCredit, fbeta, RECALL_WEIGHT, signTest } from './metrics.mjs';
 import { logisticFit, auc, cumulativeFit, prCurve, reliability, sigmoid } from './logistic.mjs';
 import * as ranking from '../extension/ranking.mjs';
 
@@ -311,6 +311,11 @@ const fx = n => (Number.isFinite(n) ? (n >= 0 ? '+' : '') + n.toFixed(3) : '  n/
                         return {
                             cut, f: mean(per.map(x => x.f)), precision: mean(per.map(x => x.precision)),
                             recall: mean(per.map(x => x.recall)), delivered: mean(per.map(x => x.n)),
+                            // Per scene, kept so arms can be contrasted against each other's OWN scenes.
+                            // A macro-averaged difference between two arms is one number with no test
+                            // behind it, and at 68 scenes on 7 books that is how a flat band gets
+                            // reported as an improvement (CLAUDE.md, graded scenes).
+                            perScene: per.map(x => x.f),
                         };
                     }),
                 };
@@ -391,6 +396,19 @@ const fx = n => (Number.isFinite(n) ? (n >= 0 ? '+' : '') + n.toFixed(3) : '  n/
                 console.log(`    ${g.cut.toFixed(2).padStart(11)} | ${g.f.toFixed(4)}     ${(100 * g.precision).toFixed(1).padStart(5)}%   ${(100 * g.recall).toFixed(1).padStart(5)}%   ${g.delivered.toFixed(1).padStart(9)}${g === best ? '   <- best' : ''}`);
             }
             console.log(`  best cutoff ${best.cut.toFixed(2)}: F2 ${best.f.toFixed(4)}, delivering ${best.delivered.toFixed(1)} entries against ${b.meanRelevant.toFixed(1)} relevant.`);
+            t.best = best;
+        }
+        // PAIRED against the first arm, each at its own best cutoff — the contrast param-screen makes,
+        // and the only one that can tell a real gain from the flatness of the cutoff curve.
+        const bases = table.filter(t => t.best);
+        if (bases.length > 1) {
+            const b0 = bases[0];
+            console.log(`\npaired against ${SWEPT}=${b0.value}, each arm at its own best cutoff — per-scene F2, sign test`);
+            for (const t of bases.slice(1)) {
+                const d = t.best.perScene.map((f, i) => f - b0.best.perScene[i]);
+                const st = signTest(d);
+                console.log(`  ${String(t.value).padEnd(14)} | mean ${(st.mean >= 0 ? '+' : '') + st.mean.toFixed(4)}  ${st.plus} up / ${st.minus} down / ${st.ties} tied  p ${st.p.toFixed(3)}`);
+            }
         }
     }
 

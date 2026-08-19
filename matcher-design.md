@@ -900,7 +900,21 @@ of a constant. On books whose memory entries are all vectorized the column's wit
 unestimable +0.745 (SE 0.602) to +0.247 (SE 0.043). The model gains 0.0055 AUC in sample and LOSES
 0.0038 held out by book, with AP 0.398 -> 0.394 and F2 over the delivered set 0.494 -> 0.495. A third
 signal exists in that tier; it is redundant, which follows from an entry's keys being drawn from its own
-content while `text` scores that content directly. The default stands. A pooled fit reads one slope across two eligibility regimes, and it is also blind to any
+content while `text` scores that content directly.
+
+**Nor does the redundancy hide a denoised copy of `text`.** The agreement term is the shape that
+hypothesis predicts, and it is one standard error: `text*keys` reads +0.034 (SE 0.035) with the signal
+live. PAIRED per scene at each arm's own best cutoff, scoring keys is +0.0011 mean F2 on 28 scenes up
+against 38 DOWN (p 0.268) — the macro-average and the scene count disagree in sign, which is what a
+mean over 68 scenes on 7 books does when a handful move. With interactions it is +0.0112 mean, 37 up
+against 29 (p 0.389), and that arm's own baseline scores 0.4898 against the shipped 0.4942, so the
+apparent 0.5010 peak is measured from a lower floor. The default stands, now on a paired test rather
+than on a macro-averaged difference.
+
+**A cutoff-curve peak is not a comparison.** Two arms differ by less than the flatness of their own
+curves, so `--cutoff` reports the per-scene F2 vector and the sign test against the first arm. Every
+contrast between arms reads that, never the peak — the same rule `param-screen` follows and for the
+same reason. A pooled fit reads one slope across two eligibility regimes, and it is also blind to any
 change confined to the smaller one — computing a cosine for every reference entry (`denseAllEntries`)
 moves that tier's AUC from 0.7387 to 0.7851 and its log-loss from 0.5539 to 0.5163, while the memory tier
 and the pooled model do not move at all. Reference cosine then carries the tier's largest slope
