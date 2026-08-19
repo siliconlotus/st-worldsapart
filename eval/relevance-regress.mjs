@@ -123,7 +123,11 @@ const DROP_KEYS = arg('--drop-keys') ? JSON.parse(fs.readFileSync(arg('--drop-ke
 // protagonist stops dominating; `jaccard` = intersection over union, which normalises for how many
 // names an entry happens to carry; `gaz` = count restricted to the gazetteer, i.e. to names the BOOK
 // declared in a key, secondary or title rather than any capitalised token.
-const PROPER_MODE = arg('--proper') ?? 'count';
+// DEFAULTS TO THE RULED VARIANT. It was `count`, which the doc rejects at p 0.0001 three sections above
+// its own ruling — so every run that passed no flag measured a configuration nobody chose, and credited
+// whatever else it was testing against a handicapped `proper`. A default that disagrees with the ruling
+// is a trap, not a neutral starting point.
+const PROPER_MODE = arg('--proper') ?? 'idf';
 // HOW a name is recognised, orthogonal to how a shared one is scored. `regex` is the private ASCII
 // pattern this feature was found with; `entity` is ranking.mjs's own rule, which the entity filter
 // already uses; `span` takes maximal runs of capitalised tokens as one term, so "Brackenmoor Patrol"

@@ -901,9 +901,17 @@ per-fold AP is the readable number there and the pooled paired test is what the 
 
 **Two ENTRY-INTRINSIC columns pay, and neither is about vocabulary.** Entry length (log tokens) and
 proper-noun density (names per 100 tokens, `ranking.properNounsOf`) never read the query, so they are
-priors rather than signals. **Measured**, memory tier, held out by book, 103 scenes: F2 0.5128 -> 0.5409
-over the four shipped signals, 62 scenes up against 25 with 16 tied, p 0.0001, delivering 21.1 entries
-against 34.4 at 40.8% precision to 33.4%.
+priors rather than signals. **Measured**, memory tier, held out by book, 103 scenes, against the RULED
+IDF-weighted `proper`: F2 0.5162 -> 0.5503, 65 scenes up against 22 with 16 tied, p 0.0000, delivering
+19.8 entries against 33.0 at 42.4% precision to 33.8%. **A 40% smaller delivered set**, which is where
+the value is — recall falls 74.3% to 67.0% and F2 still rises, because precision rises harder.
+
+**Measure against the RULED variant of a feature, not the harness default.** These figures were first
+taken against `--proper count` and understated the gain (+0.0281 against +0.0341): the default disagreed
+with the ruling three sections above, so a run that passed no flag measured a variant already rejected at
+p 0.0001. `length` also shrinks from -0.307 to -0.279 under IDF weighting, which is the overlap between
+the two corrections — IDF discounts a name every entry carries, and `length` normalises HOW MANY names an
+entry has, so they overlap without substituting.
 
 **They raise the CUTOFF; they do not discriminate.** Solo AUC is 0.551 and 0.547, and the gain comes from
 reshaping the probability scale so 0.11 is safe where 0.07 was. Read off the delivered set, the grade >= 3
@@ -920,7 +928,9 @@ AUC RISES with length (0.661, 0.721, 0.712, 0.751 across quartiles) and its gap 
 **Mean book-IDF over the entry's tokens carries nothing** (solo AUC 0.497; +0.0019 F2, 20 up against 23
 with 60 tied, p 0.76), and an entry's own relevance rate in its other scenes adds nothing once these two
 are present (-0.0003, 38 up against 44, p 0.58) — so the entry-level intercept is fully captured by two
-columns computable from the entry alone.
+columns computable from the entry alone. Both of those, and the dropped-set figures above, were taken
+against `--proper count`; the direction is not in doubt at those margins but the numbers are owed a
+re-run against the ruled variant.
 
 **Story-time position carries nothing.** Fitted as the entry's uid, which within-scene standardisation
 makes equivalent to distance from the current point up to sign: solo AUC 0.458, and adding it to
