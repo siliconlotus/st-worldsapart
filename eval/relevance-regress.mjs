@@ -35,7 +35,7 @@
 //
 // Usage (from SillyTavern root):
 //   node .../relevance-regress.mjs <sample.json> [...] [--sweep gazetteerSource=keys,titles]
-//        [--tier memory|reference] [--cut 4] [--ordinal] [--loso] [--lobo] [--calibration] [--cutoff] [--degree 2] [--interactions] [--with proper,time] [--proper count|idf|jaccard|gaz]
+//        [--tier memory|reference] [--cut 4] [--ordinal] [--loso] [--lobo] [--calibration] [--cutoff] [--degree 2] [--interactions] [--with proper,time] [--proper count|idf|jaccard|gaz] [--proper-extract regex|entity|span]
 import { indexPath, isMemory, loadScene, openSample, sceneParams, makeCandidateSet, makeGradeOf, embed } from './scene.mjs';
 import { ensureIndex } from './reindex.mjs';
 import fs from 'node:fs';
@@ -43,6 +43,7 @@ import { gradeValue, gradeCredit, fbeta, RECALL_WEIGHT, signTest } from './metri
 import { COMMON_WORDS } from '../plugin/commonwords.js';
 import { logisticFit, auc, cumulativeFit, prCurve, reliability, sigmoid } from './logistic.mjs';
 import * as ranking from '../extension/ranking.mjs';
+import { fold, normalizeOrthography } from '../extension/smartkeys.mjs';
 
 const argv = process.argv.slice(2);
 const arg = k => { const i = argv.indexOf(k); return i >= 0 ? argv[i + 1] : null; };
@@ -50,7 +51,7 @@ const arg = k => { const i = argv.indexOf(k); return i >= 0 ? argv[i + 1] : null
 // is about to write is opened as an input bundle. Named flags rather than "anything after a --", or
 // `--lobo scene.json` would silently DROP that scene, which is the worse failure: a wrong sample set
 // prints a clean table and says nothing about what it left out.
-const VALUED = new Set(['--arm', '--sweep', '--tier', '--cut', '--degree', '--square', '--with', '--emit', '--proper']);
+const VALUED = new Set(['--arm', '--sweep', '--tier', '--cut', '--degree', '--square', '--with', '--emit', '--proper', '--proper-extract']);
 const samples = argv.filter((a, i) => a.endsWith('.json') && !a.startsWith('--') && !VALUED.has(argv[i - 1]));
 if (!samples.length) {
     console.error('need at least one sample: node relevance-regress.mjs <sample.json> [more.json ...] [--sweep param=v1,v2]');
@@ -105,6 +106,11 @@ const EMIT = arg('--emit');
 // names an entry happens to carry; `gaz` = count restricted to the gazetteer, i.e. to names the BOOK
 // declared in a key, secondary or title rather than any capitalised token.
 const PROPER_MODE = arg('--proper') ?? 'count';
+// HOW a name is recognised, orthogonal to how a shared one is scored. `regex` is the private ASCII
+// pattern this feature was found with; `entity` is ranking.mjs's own rule, which the entity filter
+// already uses; `span` takes maximal runs of capitalised tokens as one term, so "Brackenmoor Patrol"
+// is a name rather than two.
+const PROPER_EXTRACT = arg('--proper-extract') ?? 'regex';
 const CALIB = argv.includes('--calibration');
 // WHICH BOUNDARY IS THE TARGET. 3 is the project's relevance line and the default; --cut 4 fits the band
 // the anchors reserve for the scene's current subject, which separates far better and is far rarer, so it
@@ -136,7 +142,33 @@ const FEATURES = [
 // so it inflates the floor rather than the discrimination, and a POS tagger is not worth it to find out
 // whether the axis exists at all.
 const PROPER_RE = /\b[A-Z][a-z]{2,}\b/g;
+// Maximal runs of capitalised tokens, joined — the arm that asks whether a name is a SPAN. A run of one
+// is still emitted, so this is structurally a superset of the unigram arms rather than a different
+// vocabulary, and IDF then weights "brackenmoor patrol" as its own term against the book's entries.
+// Sentence-initial capitals start a run they do not belong to; that is the arm's known cost.
+const properSpans = text => {
+    const out = new Set();
+    for (const sentence of String(text ?? '').split(/(?<=[.!?])\s+|\n+/)) {
+        let run = [];
+        for (const tok of sentence.trim().split(/[^\p{L}\p{N}\p{M}']+/u)) {
+            if (tok.length > 1 && /^\p{Lu}/u.test(tok)) { run.push(tok.toLowerCase()); continue; }
+            if (run.length) { out.add(run.join(' ')); run = []; }
+        }
+        if (run.length) out.add(run.join(' '));
+    }
+    for (const w of [...out]) if (!w.includes(' ') && COMMON_WORDS.has(w)) out.delete(w);
+    return out;
+};
 const properNouns = text => {
+    if (PROPER_EXTRACT === 'entity') {
+        // ranking.mjs's rule, imported rather than copied: orthography-normalised, sentence-initial
+        // capitals excluded, \p{Lu} so an accented initial still reads as a name. The common-word
+        // filter still applies — that rule is about which names are worth counting, not what a name is.
+        const out = ranking.properNounsOf(normalizeOrthography(String(text ?? '')));
+        for (const w of [...out]) if (COMMON_WORDS.has(w)) out.delete(w);
+        return out;
+    }
+    if (PROPER_EXTRACT === 'span') return properSpans(normalizeOrthography(String(text ?? '')));
     const out = new Set();
     for (const m of String(text ?? '').match(PROPER_RE) ?? []) {
         const w = m.toLowerCase();
@@ -226,7 +258,9 @@ const fx = n => (Number.isFinite(n) ? (n >= 0 ? '+' : '') + n.toFixed(3) : '  n/
                     } else if (PROPER_MODE === 'idf') {
                         for (const w of ents) if (win.has(w)) v += Math.log((ndoc + 1) / ((df.get(w) ?? 0) + 1));
                     } else if (PROPER_MODE === 'gaz') {
-                        for (const w of ents) if (win.has(w) && scene.gaz?.has(w)) v++;
+                        // buildGazetteer stores FOLDED tokens, so the membership test folds too — a
+                        // lowercase compare misses every accented name the book declared.
+                        for (const w of ents) if (win.has(w) && scene.gaz?.has(fold(w))) v++;
                     } else {
                         for (const w of ents) if (win.has(w)) v++;
                     }
@@ -519,7 +553,7 @@ const fx = n => (Number.isFinite(n) ? (n >= 0 ? '+' : '') + n.toFixed(3) : '  n/
             t.best = best;
             if (EMIT) {
                 fs.writeFileSync(EMIT, JSON.stringify({
-                    swept: SWEPT, value: t.value, tier: TIER, with: WITH, interactions: INTERACT, properMode: PROPER_MODE,
+                    swept: SWEPT, value: t.value, tier: TIER, with: WITH, interactions: INTERACT, properMode: PROPER_MODE, properExtract: PROPER_EXTRACT,
                     cut: best.cut, f2: best.f, scenes: b.sceneNames, perScene: best.perScene,
                 }, null, 1));
                 console.log(`  per-scene F2 written to ${EMIT}`);

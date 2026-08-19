@@ -858,12 +858,26 @@ tokens shared between the entry's content and the window, minus the common-Engli
 reweighting of `text`, because BM25 spreads its mass over every shared term and a character name arrives
 diluted among hundreds of ordinary words.
 
+**A NAME IS `ranking.properNounsOf`, which the entity filter already used.** Capitalisation is the
+detection signal and it is preserved: `normalizeOrthography` is the fold MINUS its case half, and a token
+enters the set only where it appears capitalised somewhere that is not sentence-initial — so a window
+saying "apple" the fruit never joins, and cannot match an entry's "Apple". Only the stored key is
+lowercased, after detection. **Measured** against the private ASCII regex this feature was found with,
+paired over 88 scenes: F2 0.5443 -> 0.5476, 47 scenes up against 17 with 24 tied, p 0.0002, and the
+validation fold's AP 0.873 -> 0.883. It is also the reading that removes the second implementation.
+
+**MULTI-TOKEN SPANS LOSE**, so a name is a token and not a phrase. Maximal runs of capitalised tokens
+score F2 0.5395, which is 22 scenes up against 41 against the unigram arm (p 0.0226). Runs break at
+lowercase particles — "Church of the Sun" becomes `church` and `sun` — and sentence-initial capitals
+start runs they do not belong to. Restricting to the GAZETTEER loses too, 15 up against 44 (p 0.0002):
+the signal is a rare name shared with what is on screen, not an author-declared one.
+
 **IDF-WEIGHTED, and the weighting is what makes it work.** A shared name is worth `log((N+1)/(df+1))`
 with the ENTRY as the document and the primary book as the corpus — the same one-index principle
 `content-lexical` rests on — so a protagonist named in every scene summary counts for almost nothing and
 a name two entries share counts for a lot. **Measured**, memory tier, held out by book, against the
 unweighted count: 45 scenes up against 14 with 9 tied, p 0.0001. Jaccard is WORSE than the count (27 up
-against 33) and restricting to the gazetteer is a wash (30 against 29, p 1.00), so neither the
+against 33) and restricting to the gazetteer loses outright (above), so neither the
 normalisation nor the vocabulary restriction is what matters — the term weighting is.
 
 **Measured**, memory tier, held out by book, against the three shipped signals: +0.431 (SE 0.054) and

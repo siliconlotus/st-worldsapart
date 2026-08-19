@@ -109,26 +109,40 @@ export function buildGazetteer(entries) {
  * @param {number} boost Weight for proper nouns (settings().properNounBoost)
  * @returns {Record<string, number>} Term weights for the plugin
  */
+/**
+ * The lowercased tokens a text uses as NAMES.
+ *
+ * A capital letter at the start of a sentence says nothing about the word — "Not", "It", "Then", "The"
+ * all get capitalised there — so a token counts only where it appears capitalised somewhere that is NOT
+ * sentence-initial. `\p{Lu}` rather than `[A-Z]`, or an accented-initial name ("Étienne") is never an
+ * entity.
+ *
+ * Exported because it is the project's definition of a name and more than one thing asks: the entity
+ * filter weights query terms with it, and stage 4's proper-noun overlap feature reads entries and the
+ * scan window with it. A second regex somewhere else is the drift this exists to prevent — the private
+ * one it replaced was ASCII-only, counted sentence-initial capitals, and missed any name under three
+ * letters.
+ *
+ * ORTHOGRAPHY IS THE CALLER'S. buildTermWeights normalises once and hands the result to both loops;
+ * a caller comparing two texts must normalise both the same way or the sets cannot intersect.
+ */
+export function properNounsOf(text) {
+    const out = new Set();
+    for (const sentence of String(text ?? '').split(/(?<=[.!?])\s+|\n+/)) {
+        const tokens = sentence.trim().split(/[^\p{L}\p{N}\p{M}']+/u).filter(x => x.length > 1);
+        for (let i = 1; i < tokens.length; i++) {
+            if (/^\p{Lu}/u.test(tokens[i])) out.add(tokens[i].toLowerCase());
+        }
+    }
+    return out;
+}
+
 export function buildTermWeights(queryText, gazetteer, boost) {
     const weights = {};
     // Orthography before anything reads the text, case preserved: the proper-noun test below needs
     // capitals, so this is the fold minus its case half, applied once so both loops see one form.
-    // \p{Lu} rather than [A-Z], or an accented-initial name ("Étienne") is never an entity.
     const query = normalizeOrthography(queryText);
-
-    // A capital letter at the start of a sentence says nothing about the word —
-    // "Not", "It", "Then", "The" all get capitalised there. Only count a token as
-    // an entity if it appears capitalised somewhere that ISN'T sentence-initial.
-    const properNouns = new Set();
-
-    for (const sentence of query.split(/(?<=[.!?])\s+|\n+/)) {
-        const tokens = sentence.trim().split(/[^\p{L}\p{N}\p{M}']+/u).filter(x => x.length > 1);
-        for (let i = 1; i < tokens.length; i++) {
-            if (/^\p{Lu}/u.test(tokens[i])) {
-                properNouns.add(tokens[i].toLowerCase());
-            }
-        }
-    }
+    const properNouns = properNounsOf(query);
 
     for (const token of query.split(/[^\p{L}\p{N}\p{M}']+/u)) {
         if (token.length < 2) {
