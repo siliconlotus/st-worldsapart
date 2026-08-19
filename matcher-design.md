@@ -401,8 +401,8 @@ every retrieved entry and leave the setting inert.
 emits `WORLDINFO_ENTRIES_LOADED`, so the entries it returns have already been blanked by the takeover.
 Built from those, "the lorebook's own vocabulary" would mean titles plus whatever core exempts, decided
 by when the call happens rather than by anything. `queryTermWeights` therefore restores the stash into a
-local view first. Safe to widen: the gazetteer SOURCE is measured flat at n=71 scenes paired, including
-an empty gazetteer.
+local view first. **Not safe to widen** — see *Evidence*, where the SOURCE is measured and an empty
+gazetteer loses.
 
 **Dry runs are not an exception to the ruling, they are outside it.** ST skips interceptors for them, so
 WA is never offered the scan and core matches with live keys. That is structural, not a mode.
@@ -980,12 +980,38 @@ keys unless `scoreVectorKeys` is on, it defaults off, and memory is 99.8% vector
 of a constant. On books whose memory entries are all vectorized the column's within-scene SD is exactly
 0, and the fit returns +0.000 at SE 1000 rather than a slope.
 
-**Scoring memory's keys gives a real signal and buys nothing.** **Measured**, memory tier,
-`scoreVectorKeys` on: keys go from SD 0.0039 and solo AUC 0.503 to SD 0.8147 and 0.691, and from an
-unestimable +0.745 (SE 0.602) to +0.247 (SE 0.043). The model gains 0.0055 AUC in sample and LOSES
-0.0038 held out by book, with AP 0.398 -> 0.394 and F2 over the delivered set 0.494 -> 0.495. A third
+**Scoring memory's keys gives a real signal and COSTS.** **Measured**, memory tier,
+`scoreVectorKeys` on: keys go from within-scene SD 0.0025 and solo AUC 0.503 to 1.0143 and 0.708. A third
 signal exists in that tier; it is redundant, which follows from an entry's keys being drawn from its own
 content while `text` scores that content directly.
+
+**ASK IT AS A FEATURE CONTRAST, not as a parameter sweep.** Turning the setting off does not remove the
+column — it leaves a DEGENERATE one, near-constant on a tier that is 99.8% vectorized, still consuming a
+value and an eligibility coefficient. `--without keys` drops both, which is the honest counterfactual.
+**Measured** on 98 scenes (Richard excluded, below), both arms at `scoreVectorKeys=true`, held out by
+book: the column costs AUC 0.8044 -> 0.7937, AP 0.393 -> 0.379, and F2 over the delivered set
+0.5513 -> 0.5413, paired 23 scenes up against 46 with 29 tied, **p 0.0076**. The degenerate column is
+worth nothing on its own — off against `--without keys` is 4 up against 2 with 97 TIED.
+
+**FIVE SCENES DECIDED THE SIGN, and they were Richard's.** With its 5 scenes in, the same contrast reads
+45 up against 31 with a NEGATIVE mean — the macro-average and the scene count disagreeing, which is the
+shape that had been read as noise for three revisions of this paragraph. Richard is 134 rows and 15
+positives; its curated keys pulled the fitted coefficient up for every OTHER fold, and Sommers swung from
++0.0026 to -0.0032 on its removal without a single one of its own rows changing. A fold small enough to
+be unstable is not thereby harmless: `--lobo` trains each fold on all the others.
+
+**Curation does not rescue it, and a per-book rule has nothing to key on.** Sommers is the only fully
+curated book in the corpus and loses from the column too (-0.0032 AUC). Selecting the setting per book
+off the curation detector (`eval-data/README.md`) looked 6-for-6 with Richard in and had no signal left
+without it. It stays a user-facing option, defaulting off, because the author knows their books and no
+measurement here can pick for them.
+
+**MOST OF THE MEMORY TIER'S KEYS ARE MACHINE OUTPUT, which every claim above rests on.** **Measured**,
+by key provenance: 6136 of the 10,981 memory rows (55.9%) sit on books whose scene-summary keys nobody
+reviewed, against 4687 curated. Time Whore alone is 5027 of them and its 208 STMB entries average 21.5
+keys where Sommers' average 9.4 — its "mostly curated" label described the reference half. So a claim
+about what KEYS are worth on this tier is a claim about generated keys, and the curated counter-sample is
+one book. `eval-data/README.md` carries the per-book status and how to recover it from a book alone.
 
 **Nor does the redundancy hide a denoised copy of `text`.** The agreement term is the shape that
 hypothesis predicts, and it is one standard error: `text*keys` reads +0.034 (SE 0.035) with the signal
@@ -1067,7 +1093,17 @@ here would choose.
 **The gazetteer is worth about two F2 points, and keys are the best source of it.** **Measured**, memory
 tier, held out by book, AP: keys 0.397, keys+titles 0.398, titles 0.380, none 0.371, bodies 0.369 — so
 bodies are WORSE than having no gazetteer, a source drawn from every entry weighting everything and
-therefore nothing. F2 over the delivered set spans 0.495 for keys to 0.471 for none. That span is the
+therefore nothing. F2 over the delivered set spans 0.495 for keys to 0.471 for none.
+
+**Re-measured on the current model** (103 scenes, `proper+length+density`, memory tier, held out by book),
+and the shape holds while the ordering below the top does not. F2 and the paired sign test against the
+shipped `keys+titles`: keys 0.5473 (+0.0063, 29 up against 22 with 52 tied, p 0.401), titles 0.5363
+(-0.0046, p 0.001), none 0.5300 (-0.0110, **p 0.017**), bodies 0.5243 (-0.0167, p 0.012). AP:
+keys+titles 0.389, keys 0.389, bodies 0.382, titles 0.376, none 0.371. **An empty gazetteer LOSES**, and
+needs 30.5 delivered entries to reach what keys reaches with 21.2 — which is what *Stage 3* points here
+for. `bodies` and `titles` swapped places between the two passes and disagree between AP and F2, so read
+nothing into their order; what replicates is keys at the top and none at the bottom of AP. `keys` against
+`keys+titles` is a coin flip in both passes, so the default stands on neither being better. That span is the
 ceiling on the whole line of work: the query terms reaching `text` are not what limits it. Keys are the
 best source while being useless as a SIGNAL in the same tier, which is not a contradiction — a signal
 asks whether an entry's keys fired in the chat, a gazetteer asks what vocabulary the query should weight,

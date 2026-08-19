@@ -759,7 +759,7 @@ const fx = n => (Number.isFinite(n) ? (n >= 0 ? '+' : '') + n.toFixed(3) : '  n/
             t.best = best;
             if (EMIT_ROWS) {
                 fs.writeFileSync(EMIT_ROWS, JSON.stringify({
-                    swept: SWEPT, value: t.value, tier: TIER, with: WITH, cut: best.cut, f2: best.f,
+                    swept: SWEPT, value: t.value, tier: TIER, with: WITH, without: WITHOUT, cut: best.cut, f2: best.f,
                     features: FEATURES.map(([n]) => n),
                     scenes: b.sceneRows.map(sc => ({
                         name: sc.name, relevant: sc.relevant, query: sc.query,
@@ -771,7 +771,7 @@ const fx = n => (Number.isFinite(n) ? (n >= 0 ? '+' : '') + n.toFixed(3) : '  n/
             }
             if (EMIT) {
                 fs.writeFileSync(EMIT, JSON.stringify({
-                    swept: SWEPT, value: t.value, tier: TIER, with: WITH, interactions: INTERACT, properMode: PROPER_MODE, properExtract: PROPER_EXTRACT,
+                    swept: SWEPT, value: t.value, tier: TIER, with: WITH, without: WITHOUT, interactions: INTERACT, properMode: PROPER_MODE, properExtract: PROPER_EXTRACT,
                     cut: best.cut, f2: best.f, scenes: b.sceneNames, perScene: best.perScene,
                 }, null, 1));
                 console.log(`  per-scene F2 written to ${EMIT}`);

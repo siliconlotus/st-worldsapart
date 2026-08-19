@@ -38,7 +38,10 @@ for (const k of ['tier', 'swept']) {
         process.exit(2);
     }
 }
-const sameWith = String(A.with ?? []) === String(B.with ?? []);
+// `without` is checked alongside `with` because it is the OTHER half of the feature set. It was absent
+// from the emit at first, which made this guard blind to the one dimension a keys-column contrast moves —
+// a guard that cannot see a change cannot refuse it.
+const sameWith = String(A.with ?? []) === String(B.with ?? []) && String(A.without ?? []) === String(B.without ?? []);
 const sameValue = String(A.value) === String(B.value);
 if (!sameWith && !sameValue) {
     console.error(`both the feature set (${A.with} vs ${B.with}) and ${A.swept} (${A.value} vs ${B.value}) differ — the difference cannot be attributed to either`);
@@ -48,7 +51,7 @@ if (sameWith && sameValue) console.error(`note: identical feature set and ${A.sw
 
 const d = B.perScene.map((f, i) => f - A.perScene[i]);
 const st = signTest(d);
-const label = x => (x.with?.length ? x.with.join('+') : 'three signals');
+const label = x => `${x.with?.length ? x.with.join('+') : 'three signals'}${x.without?.length ? ` -${x.without.join('-')}` : ''}`;
 console.log(`${label(B)} against ${label(A)}, ${A.scenes.length} scenes paired, ${A.tier} tier`);
 console.log(`  F2 ${A.f2.toFixed(4)} -> ${B.f2.toFixed(4)}  (cutoff ${A.cut.toFixed(2)} -> ${B.cut.toFixed(2)})`);
 console.log(`  mean per-scene ${(st.mean >= 0 ? '+' : '') + st.mean.toFixed(4)}   ${st.plus} up / ${st.minus} down / ${st.ties} tied   sign test p ${st.p.toFixed(4)}`);
