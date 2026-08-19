@@ -925,12 +925,18 @@ fitted coefficient is NEGATIVE (-0.307, SE 0.054). Cosine and text over-credit l
 length-driven reasons and this column refunds it. Cosine is not the thing going wrong on them: its solo
 AUC RISES with length (0.661, 0.721, 0.712, 0.751 across quartiles) and its gap to text is flat.
 
-**Mean book-IDF over the entry's tokens carries nothing** (solo AUC 0.497; +0.0019 F2, 20 up against 23
-with 60 tied, p 0.76), and an entry's own relevance rate in its other scenes adds nothing once these two
-are present (-0.0003, 38 up against 44, p 0.58) — so the entry-level intercept is fully captured by two
-columns computable from the entry alone. Both of those, and the dropped-set figures above, were taken
-against `--proper count`; the direction is not in doubt at those margins but the numbers are owed a
-re-run against the ruled variant.
+**Mean book-IDF over the entry's tokens HURTS** — solo AUC 0.497, and -0.0049 F2 on 14 scenes up against
+54 with 35 tied, p 0.0000. It is the obvious thing to propose and `--with rarity` keeps it reproducible.
+
+**An entry's own relevance rate in its other scenes adds nothing once these two are present**, which is
+what bounds any entry-level prior: `--with oracle` reads grades the runtime cannot have, and still costs
+-0.0077 F2 on 29 scenes up against 50 with 24 tied, p 0.0238. It is the sharpest case of the split above —
+held out by book it RAISES AUC 0.8014 -> 0.8241 and AP 0.392 -> 0.407 while losing the delivered set,
+because a better ordering read at a looser cutoff (0.09, delivering 25.2) is not a better chosen set. The
+entry-level intercept is captured by two columns computable from the entry alone.
+
+The dropped-set figures above are still owed a re-run: they were taken against `--proper count`, where
+these two now are not.
 
 **BOTH TRANSFER TO REFERENCE, and `density` INVERTS THERE.** **Measured**, reference tier, 518 rows on 64
 scenes, held out by book: over `proper`, adding the two takes AUC 0.7123 -> 0.7702, AP 0.466 -> 0.541 and
@@ -1053,6 +1059,17 @@ mean over 68 scenes on 7 books does when a handful move. With interactions it is
 against 29 (p 0.389), and that arm's own baseline scores 0.4898 against the shipped 0.4942, so the
 apparent 0.5010 peak is measured from a lower floor. The default stands, now on a paired test rather
 than on a macro-averaged difference.
+
+**AND EACH ARM'S PEAK IS A DIFFERENT OPERATING POINT.** The paired sign test compares two arms where each
+sits at ITS own best cutoff, and F2 walks that peak toward precision as a model improves — so a contrast
+between peaks mixes "ranks better" with "cut tighter", and reports the second as the first. `--emit`
+carries the whole cutoff grid and `pair-f2 --at-recall` reads it, which is how the two are separated.
+**Measured**, and it qualifies the entry-intrinsic result above: `length+density` is +4.6 precision points
+at ~67% recall and **+0.5 at ~75%**, so the delivered set falling 33.0 to 19.8 is bought with recall going
+74.3% to 67.0%. Held at MATCHED recall it is 33.0 to 32.4. The ordering does improve — AUC and AP are
+cutoff-free and both rise — but in the HEAD of the list, which is why it shows at a tight cut and not a
+loose one. Any target stated as a recall (*Evidence*) has to be read this way or a feature is credited
+where it does nothing.
 
 **A cutoff-curve peak is not a comparison.** Two arms differ by less than the flatness of their own
 curves, so `--cutoff` reports the per-scene F2 vector and the sign test against the first arm. Every
