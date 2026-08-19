@@ -858,12 +858,20 @@ tokens shared between the entry's content and the window, minus the common-Engli
 reweighting of `text`, because BM25 spreads its mass over every shared term and a character name arrives
 diluted among hundreds of ordinary words.
 
-**Measured**, memory tier, held out by book: it fits at +0.416 (SE 0.061) — the strongest new term
-measured — carries solo AUC 0.727 against cosine's 0.737, and moves the model 0.7859 -> 0.7980 AUC and
-0.398 -> 0.405 AP. On the SCORE OF RECORD it is not established: F2 0.4942 -> 0.5061, but paired per
-scene that is 29 up against 26 with 13 tied, p 0.79. The two readings are not in conflict — AUC and AP
-are estimated over 8502 rows and per-scene F2 over 68 scenes holding ~7.8 relevant entries each, so the
-delivered-set test is much the weaker instrument. Promising and unproven, in that order.
+**IDF-WEIGHTED, and the weighting is what makes it work.** A shared name is worth `log((N+1)/(df+1))`
+with the ENTRY as the document and the primary book as the corpus — the same one-index principle
+`content-lexical` rests on — so a protagonist named in every scene summary counts for almost nothing and
+a name two entries share counts for a lot. **Measured**, memory tier, held out by book, against the
+unweighted count: 45 scenes up against 14 with 9 tied, p 0.0001. Jaccard is WORSE than the count (27 up
+against 33) and restricting to the gazetteer is a wash (30 against 29, p 1.00), so neither the
+normalisation nor the vocabulary restriction is what matters — the term weighting is.
+
+**Measured**, memory tier, held out by book, against the three shipped signals: +0.431 (SE 0.054), solo
+AUC 0.778 — the BEST single signal in the tier, ahead of text's 0.759 and cosine's 0.737 — and the model
+moves 0.7859 -> 0.8005 AUC, 0.398 -> 0.411 AP, and F2 over the delivered set 0.4942 -> 0.5151. Paired per
+scene the F2 gain is 38 up against 22 with 8 tied, **p 0.052**: the strongest result this feature work
+has produced and right at the line, which does not survive Holm correction over the four variants tried.
+Read it as the direction plus the mean delta, +0.0209 F2, and note that every readout moves the same way.
 
 **Story-time position carries nothing.** Fitted as the entry's uid, which within-scene standardisation
 makes equivalent to distance from the current point up to sign: solo AUC 0.458, and adding it to

@@ -35,7 +35,7 @@
 //
 // Usage (from SillyTavern root):
 //   node .../relevance-regress.mjs <sample.json> [...] [--sweep gazetteerSource=keys,titles]
-//        [--tier memory|reference] [--cut 4] [--ordinal] [--loso] [--lobo] [--calibration] [--cutoff] [--degree 2] [--interactions] [--with proper,time]
+//        [--tier memory|reference] [--cut 4] [--ordinal] [--loso] [--lobo] [--calibration] [--cutoff] [--degree 2] [--interactions] [--with proper,time] [--proper count|idf|jaccard|gaz]
 import { indexPath, isMemory, loadScene, openSample, sceneParams, makeCandidateSet, makeGradeOf, embed } from './scene.mjs';
 import { ensureIndex } from './reindex.mjs';
 import fs from 'node:fs';
@@ -50,7 +50,7 @@ const arg = k => { const i = argv.indexOf(k); return i >= 0 ? argv[i + 1] : null
 // is about to write is opened as an input bundle. Named flags rather than "anything after a --", or
 // `--lobo scene.json` would silently DROP that scene, which is the worse failure: a wrong sample set
 // prints a clean table and says nothing about what it left out.
-const VALUED = new Set(['--arm', '--sweep', '--tier', '--cut', '--degree', '--square', '--with', '--emit']);
+const VALUED = new Set(['--arm', '--sweep', '--tier', '--cut', '--degree', '--square', '--with', '--emit', '--proper']);
 const samples = argv.filter((a, i) => a.endsWith('.json') && !a.startsWith('--') && !VALUED.has(argv[i - 1]));
 if (!samples.length) {
     console.error('need at least one sample: node relevance-regress.mjs <sample.json> [more.json ...] [--sweep param=v1,v2]');
@@ -99,6 +99,12 @@ const WITH = String(arg('--with') ?? '').split(',').filter(Boolean);
 // per-scene numbers between them. Scene names go with it: pairing by index is only safe if both runs
 // kept the same scenes, and that has to be checked rather than assumed.
 const EMIT = arg('--emit');
+// How the proper-noun overlap is scored. `count` = shared names; `idf` = shared names weighted by
+// log(N/df) over the book's own entries, so a name every entry mentions counts for little and the
+// protagonist stops dominating; `jaccard` = intersection over union, which normalises for how many
+// names an entry happens to carry; `gaz` = count restricted to the gazetteer, i.e. to names the BOOK
+// declared in a key, secondary or title rather than any capitalised token.
+const PROPER_MODE = arg('--proper') ?? 'count';
 const CALIB = argv.includes('--calibration');
 // WHICH BOUNDARY IS THE TARGET. 3 is the project's relevance line and the default; --cut 4 fits the band
 // the anchors reserve for the scene's current subject, which separates far better and is far rarer, so it
@@ -199,10 +205,32 @@ const fx = n => (Number.isFinite(n) ? (n >= 0 ? '+' : '') + n.toFixed(3) : '  n/
             const rows = makeCandidateSet({ ...scene, params: P })(P.K1, P.B, tw, qv, S.query, S.scanText);
             if (WITH.includes('proper')) {
                 const win = properNouns(Array.isArray(S.scanText) ? S.scanText.join('\n') : S.scanText);
+                // df over THIS book's entries, which is the corpus the names live in — the same reason
+                // content-lexical insists on one index for both classes. Computed once per scene.
+                const df = new Map();
+                let ndoc = 0;
+                if (PROPER_MODE === 'idf') {
+                    for (const e of scene.entries ?? []) {
+                        ndoc++;
+                        for (const w of properNouns(e.content)) df.set(w, (df.get(w) ?? 0) + 1);
+                    }
+                }
                 for (const r of rows) {
-                    let n = 0;
-                    for (const w of properNouns(r.entry?.content)) if (win.has(w)) n++;
-                    r.properShared = n;
+                    const ents = properNouns(r.entry?.content);
+                    let v = 0;
+                    if (PROPER_MODE === 'jaccard') {
+                        let inter = 0;
+                        for (const w of ents) if (win.has(w)) inter++;
+                        const union = ents.size + win.size - inter;
+                        v = union ? inter / union : 0;
+                    } else if (PROPER_MODE === 'idf') {
+                        for (const w of ents) if (win.has(w)) v += Math.log((ndoc + 1) / ((df.get(w) ?? 0) + 1));
+                    } else if (PROPER_MODE === 'gaz') {
+                        for (const w of ents) if (win.has(w) && scene.gaz?.has(w)) v++;
+                    } else {
+                        for (const w of ents) if (win.has(w)) v++;
+                    }
+                    r.properShared = v;
                 }
             }
             const gradeOf = makeGradeOf(S.grades, scene.isExcluded);
@@ -456,7 +484,7 @@ const fx = n => (Number.isFinite(n) ? (n >= 0 ? '+' : '') + n.toFixed(3) : '  n/
             t.best = best;
             if (EMIT) {
                 fs.writeFileSync(EMIT, JSON.stringify({
-                    swept: SWEPT, value: t.value, tier: TIER, with: WITH, interactions: INTERACT,
+                    swept: SWEPT, value: t.value, tier: TIER, with: WITH, interactions: INTERACT, properMode: PROPER_MODE,
                     cut: best.cut, f2: best.f, scenes: b.sceneNames, perScene: best.perScene,
                 }, null, 1));
                 console.log(`  per-scene F2 written to ${EMIT}`);
