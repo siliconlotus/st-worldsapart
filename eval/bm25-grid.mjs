@@ -11,7 +11,7 @@
 //   node public/scripts/extensions/third-party/WorldsApart/eval/bm25-grid.mjs [path/to/index.json]
 // Default corpus path is a personal collection; pass your own vectra index.json to retune.
 import { readFileSync } from 'node:fs';
-import { buildLexical, bm25Scores } from '../plugin/lexical.mjs';
+import { buildLexical, bm25Scores } from '../extension/lexical.mjs';
 import { corpusMean, centeredCosineScores } from '../plugin/vector.mjs';
 import { rankMap, hit } from './metrics.mjs';
 

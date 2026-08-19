@@ -10,7 +10,6 @@ export const PLUGIN_FILES = [
     ['scoring.mjs', 'scoring.mjs'],
     ['automaton.mjs', 'automaton.mjs'],
     ['vector.mjs', 'vector.mjs'],
-    ['lexical.mjs', 'lexical.mjs'],
     ['commonwords.js', 'commonwords.js'],
     ['fingerprint.mjs', 'fingerprint.mjs'],
     ['server.js', 'index.js'],

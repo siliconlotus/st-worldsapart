@@ -15,7 +15,7 @@
 //   node public/scripts/extensions/third-party/WorldsApart/eval/baseline-grid.mjs <index.json> ["baseline text"]
 //   WA_BASELINE="..." OLLAMA_URL=http://localhost:11434 node ... <index.json>
 import { readFileSync } from 'node:fs';
-import { buildLexical, bm25Scores } from '../plugin/lexical.mjs';
+import { buildLexical, bm25Scores } from '../extension/lexical.mjs';
 import { corpusMean, centeredCosineScores } from '../plugin/vector.mjs';
 import { rankMap, hit, ndcgAt } from './metrics.mjs';
 

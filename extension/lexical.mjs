@@ -1,15 +1,22 @@
-// lexical.mjs — lexical similarity: tokenization and BM25 over chunk text. Pure and isomorphic
-// (no DOM/fs), shared by the server plugin, the extension, and the offline harnesses.
+// lexical.mjs — lexical similarity: tokenization and BM25 over entry content. Pure and isomorphic
+// (no DOM/fs), imported by content-lexical.mjs and the offline harnesses.
+//
+// LIVED IN plugin/ UNTIL STAGE 1 WENT COSINE-ONLY. It was the lexical half of admission
+// (`cosine >= threshold || bm25 > 0`); when that gate was cut, nothing plugin-side called it, and a
+// file sitting in plugin/ that the plugin does not run is a standing invitation to misread where the
+// text signal is computed — which it was. It runs in the BROWSER now, over every entry's content,
+// and the plugin scores no text at all. It still imports the fold from plugin/automaton.mjs, which
+// the server does run, so both sides tokenize identically.
 //
 // This is what dense retrieval can't do on a single-story corpus: IDF automatically discounts terms
 // that appear everywhere (a cast name in most chunks earns almost no weight), which is exactly the
 // discrimination that's lost when every embedding shares a common direction.
-import { fold } from './automaton.mjs';
+import { fold } from '../plugin/automaton.mjs';
 
 export const DEFAULT_K1 = 1.2, DEFAULT_B = 0.75;
 
 /**
- * Folded tokens (len > 1): the matcher's fold (automaton.mjs — NFC, orthography, case), then split on
+ * Folded tokens (len > 1): the matcher's fold (plugin/automaton.mjs — NFC, orthography, case), then split on
  * anything outside the matcher's word-character core (\p{L}\p{N}\p{M}, plus apostrophe as before).
  *
  * THE FOLD IS THE MATCHER'S, NOT A LOOKALIKE. Tokenizing with a private notion of sameness made BM25

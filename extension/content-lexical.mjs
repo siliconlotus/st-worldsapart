@@ -25,7 +25,7 @@
 //
 // It also means "common" is no longer defined by the memory entries alone, which moves every BM25 figure
 // measured on a vectorized-only corpus (bm25K1, bm25B, lexicalWeight, stopwordDocFreq's 25% bar).
-import { buildLexical, bm25Scores, DEFAULT_K1, DEFAULT_B } from '../plugin/lexical.mjs';
+import { buildLexical, bm25Scores, DEFAULT_K1, DEFAULT_B } from './lexical.mjs';
 import { chunkEntry } from './chunking.mjs';
 
 /** ST core's key format for an activated entry — `${world}.${uid}`, not our US-separated rowKey. */

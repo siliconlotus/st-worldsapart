@@ -9,7 +9,7 @@
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 import fs from 'node:fs';
-import { PLUGIN_FILES } from './plugin/fingerprint.mjs';
+import { PLUGIN_FILES, pluginFingerprint } from './plugin/fingerprint.mjs';
 
 const SRC = path.dirname(fileURLToPath(import.meta.url));
 const DEST = path.resolve(SRC, '../../../../../plugins/worlds-apart');
@@ -21,6 +21,10 @@ const PACKAGE_JSON = JSON.stringify({
     main: 'index.js',
     private: true,
 }, null, 4) + '\n';
+
+// Everything the deploy is allowed to leave behind: the manifest's deployed names, plus the
+// package.json written below. Anything else in DEST is stale by definition.
+const KEEP = new Set([...PLUGIN_FILES.map(([, to]) => to), 'package.json']);
 
 fs.mkdirSync(DEST, { recursive: true });
 
@@ -34,6 +38,24 @@ for (const [from, to] of PLUGIN_FILES) {
 
 fs.writeFileSync(path.join(DEST, 'package.json'), PACKAGE_JSON);
 console.log('wrote    package.json');
+
+// THE MANIFEST IS THE WHOLE CONTENTS. This directory is generated, so a file the manifest no longer
+// names is a leftover from an older layout — and leaving it is how a module the plugin stopped running
+// goes on looking like plugin code. lexical.mjs sat here after stage 1 went cosine-only, which is
+// exactly the confusion that cost a wrong answer about where the text signal is computed.
+//
+// TOP-LEVEL FILES ONLY, never directories: a node_modules, or anything a user deliberately put here,
+// is theirs to remove and not worth the blast radius of a recursive delete for the tidiness gained.
+for (const name of fs.readdirSync(DEST)) {
+    if (KEEP.has(name)) continue;
+    const stale = path.join(DEST, name);
+    if (!fs.statSync(stale).isFile()) {
+        console.log(`SKIP     ${name}/ is a directory — left alone, remove it yourself if it is stale`);
+        continue;
+    }
+    fs.rmSync(stale);
+    console.log(`removed  plugins/worlds-apart/${name}  (not in the manifest)`);
+}
 
 // Server plugins are off by default in stock ST; flip the flag so the deployed plugin loads.
 // Done here (not via sed) so the whole setup is one cross-platform command on Win/macOS/Linux.
@@ -52,4 +74,8 @@ try {
     console.log(`NOTE     no config.yaml at ${configPath} — launch ST once, then set enableServerPlugins: true`);
 }
 
-console.log(`\nDeployed to ${DEST}\nRestart SillyTavern for the plugin to reload.`);
+// The fingerprint is why this script exists: the panel compares the deployed plugin's against the
+// extension's source and shows a drift banner while they differ. Printing it here turns "did the
+// redeploy take" into a comparison the user can make without opening the panel.
+const fp = pluginFingerprint(...PLUGIN_FILES.map(([from]) => fs.readFileSync(path.join(SRC, 'plugin', from), 'utf8')));
+console.log(`\nDeployed to ${DEST}\nfingerprint ${fp} — the settings panel should show this once ST restarts.\nRestart SillyTavern for the plugin to reload.`);

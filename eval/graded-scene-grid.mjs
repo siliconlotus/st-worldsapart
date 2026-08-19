@@ -58,7 +58,7 @@
 // depth. The query VECTOR is deliberately not frozen: it is one cheap local embed call, and a stored
 // vector would keep answering after the embedding model underneath it changed.
 import { readFileSync, writeFileSync, statSync, openSync, readSync } from 'node:fs';
-import { tokenize } from '../plugin/lexical.mjs';
+import { tokenize } from '../extension/lexical.mjs';
 import { norm } from '../plugin/vector.mjs';
 import * as ranking from '../extension/ranking.mjs';   // shared client tuning layer — same code the extension runs
 import * as matcher from '../extension/matcher.mjs';
