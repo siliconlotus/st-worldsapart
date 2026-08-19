@@ -25,8 +25,9 @@ against the human rater from 0.242 to 0.455. The near neighbours that cost the m
 - **You are not predicting what the retriever will do.** Sharing vocabulary with the scene is how these
   candidates reached you; it is the null hypothesis, not evidence.
 
-A grade belongs to the **pair**, not to the entry. The same entry is a 4 in the scene its subject
-occupies and a 0 two hundred messages later.
+A grade belongs to the **pair**, not to the entry. The same entry is a 4 against the scene its subject
+occupies and a 0 against a scene about something else. What changes is the SCENE, never the clock —
+this illustrates the rule above rather than qualifying it.
 
 ## The scale
 

@@ -162,23 +162,36 @@ const properSpans = (text) => {
     const norm = normalizeOrthography(String(text ?? ''));
     const names = ranking.properNounsOf(norm);
     const out = new Set();
+    const runs = [];
     for (const sentence of norm.split(/(?<=[.!?])\s+|\n+/)) {
         let run = [];
         const flush = () => {
             while (run.length && PARTICLES.has(run[run.length - 1])) run.pop();
-            if (run.length) {
-                out.add(run.join(' '));
-                for (const t of run) if (names.has(t)) out.add(t);
-            }
+            if (run.length) runs.push([...run]);
             run = [];
         };
         for (const tok of sentence.trim().split(/[^\p{L}\p{N}\p{M}']+/u)) {
             const lw = tok.toLowerCase();
-            if (names.has(lw)) { run.push(lw); continue; }
+            // BOTH tests, and the per-occurrence one is not optional. `names` says the token is used as
+            // a name SOMEWHERE in this text; the capital says THIS occurrence is the name rather than
+            // the common noun. Testing membership alone discards exactly the distinction the
+            // capitalisation rule exists to make, so a later "church of the sun" would build the same
+            // span as "Church of the Sun" in a text that used both.
+            if (/^\p{Lu}/u.test(tok) && names.has(lw)) { run.push(lw); continue; }
             if (run.length && PARTICLES.has(lw)) { run.push(lw); continue; }
             flush();
         }
         flush();
+    }
+    // A COMPONENT IS ONLY A NAME IF THE TEXT USES IT ALONE. "Maren's Gap" splitting to `maren's` is
+    // right and to `gap` is not — `gap` is a common noun capitalised because it sits inside a name, and
+    // nothing but standalone use distinguishes it from `maren's`. Same for `corporal` in "Corporal
+    // Persh". So components come from the runs of length ONE, and a longer run contributes only itself
+    // plus whichever of its tokens the text also attests standalone.
+    const solo = new Set(runs.filter(r => r.length === 1).map(r => r[0]));
+    for (const r of runs) {
+        out.add(r.join(' '));
+        if (r.length > 1) for (const t of r) if (solo.has(t)) out.add(t);
     }
     for (const w of [...out]) if (!w.includes(' ') && COMMON_WORDS.has(w)) out.delete(w);
     return out;
