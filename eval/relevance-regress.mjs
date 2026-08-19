@@ -35,7 +35,7 @@
 //
 // Usage (from SillyTavern root):
 //   node .../relevance-regress.mjs <sample.json> [...] [--sweep gazetteerSource=keys,titles]
-//        [--tier memory|reference] [--cut 4] [--ordinal] [--loso] [--lobo] [--calibration] [--cutoff] [--degree 2] [--interactions] [--with proper,time,oracle,length,density,rarity] [--without keys] [--emit-rows rows.json] [--proper count|idf|jaccard|gaz] [--proper-extract regex|entity|span]
+//        [--tier memory|reference] [--cut 4] [--ordinal] [--loso] [--lobo] [--calibration] [--cutoff] [--degree 2] [--interactions] [--with proper,time,oracle,length,density,rarity] [--without keys] [--drop-keys flagged.json] [--emit-rows rows.json] [--proper count|idf|jaccard|gaz] [--proper-extract regex|entity|span]
 import { indexPath, isMemory, loadScene, openSample, sceneParams, makeCandidateSet, makeGradeOf, embed } from './scene.mjs';
 import { ensureIndex } from './reindex.mjs';
 import fs from 'node:fs';
@@ -52,7 +52,7 @@ const arg = k => { const i = argv.indexOf(k); return i >= 0 ? argv[i + 1] : null
 // is about to write is opened as an input bundle. Named flags rather than "anything after a --", or
 // `--lobo scene.json` would silently DROP that scene, which is the worse failure: a wrong sample set
 // prints a clean table and says nothing about what it left out.
-const VALUED = new Set(['--arm', '--sweep', '--tier', '--cut', '--degree', '--square', '--with', '--without', '--emit', '--emit-rows', '--proper', '--proper-extract']);
+const VALUED = new Set(['--arm', '--sweep', '--tier', '--cut', '--degree', '--square', '--with', '--without', '--emit', '--emit-rows', '--drop-keys', '--proper', '--proper-extract']);
 const samples = argv.filter((a, i) => a.endsWith('.json') && !a.startsWith('--') && !VALUED.has(argv[i - 1]));
 if (!samples.length) {
     console.error('need at least one sample: node relevance-regress.mjs <sample.json> [more.json ...] [--sweep param=v1,v2]');
@@ -113,6 +113,11 @@ const EMIT = arg('--emit');
 // this carries for reading the cut. Separate flags because the per-scene F2 vector is small enough to keep
 // forever and this is not.
 const EMIT_ROWS = arg('--emit-rows');
+// SIMULATES A BOOK EDIT the keyword audit recommends, without editing the book: scene.mjs `dropKeys`
+// stops the named keys scoring AND keyword-activating, which is what removing them would do. Takes the
+// JSON array `keyword-audit.mjs --json` writes. It UNDERSTATES removal — the terms stay in the
+// gazetteer, where a real edit would also take them out (scene.mjs, scoringKeys).
+const DROP_KEYS = arg('--drop-keys') ? JSON.parse(fs.readFileSync(arg('--drop-keys'), 'utf8')) : null;
 // How the proper-noun overlap is scored. `count` = shared names; `idf` = shared names weighted by
 // log(N/df) over the book's own entries, so a name every entry mentions counts for little and the
 // protagonist stops dominating; `jaccard` = intersection over union, which normalises for how many
@@ -332,7 +337,7 @@ const fx = n => (Number.isFinite(n) ? (n >= 0 ? '+' : '') + n.toFixed(3) : '  n/
         const perScene = [];
         let dropped = 0;
         for (const { S, qv, name, book } of loaded) {
-            const P = sceneParams(S, { [SWEPT]: value });
+            const P = sceneParams(S, { [SWEPT]: value, ...(DROP_KEYS ? { dropKeys: DROP_KEYS } : {}) });
             // THE INDEX FOLLOWS THE PARAMS. denseAllEntries wants a collection covering every entry, not
             // only the vectorized ones — scored against the standard index it would find no extra vectors
             // and report a null result that reads like an answer. ensureIndex is cached per (book, cfg,
@@ -536,6 +541,17 @@ const fx = n => (Number.isFinite(n) ? (n >= 0 ? '+' : '') + n.toFixed(3) : '  n/
             };
         };
         const books = [...new Set(perScene.map(p => p.book))];
+        // ONE BOOK IS NOT A FOLD. holdOut trains on the rows OUTSIDE each group, so a single-book scene set
+        // leaves an empty training set, the fit is skipped, every eta comes back NaN — and the cutoff grid
+        // then scores an empty row set and prints `F2 0.0000, delivering 0.0` as though it were a result.
+        // Fatal rather than a warning: every held-out number in the run is that same NaN, and a clean zero
+        // is the failure shape this codebase has been bitten by before.
+        if (LOBO && books.length < 2) {
+            console.error(`--lobo needs at least 2 books; these ${perScene.length} scene(s) are all "${books[0]}". `
+                + `Every held-out readout would be NaN and --cutoff would print a zero. `
+                + `Run the full corpus and read the per-book fold, or use --loso.`);
+            process.exit(2);
+        }
         const bookOf = perScene.flatMap(({ kept, book }) => kept.map(() => books.indexOf(book)));
         const loso = LOSO ? holdOut(i => sceneOf[i], perScene.length) : null;
         const lobo = LOBO ? holdOut(i => bookOf[i], books.length) : null;

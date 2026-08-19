@@ -7,13 +7,19 @@
 // entries — fires almost always, no discrimination). Shared triggers carry continuous memory of a
 // person/event, so they are never flagged.
 //
-// Usage:  node keyword-audit.mjs [path/to/index.json] [path/to/lorebook.json]
-import { readFileSync } from 'node:fs';
+// Usage:  node keyword-audit.mjs [path/to/index.json] [path/to/lorebook.json] [--json out.json]
+//
+// --json writes the flagged key strings as a flat array, which is what scene.mjs `dropKeys` takes: it
+// simulates the book edit this audit recommends WITHOUT editing the book, so a curation pass can be
+// scored before anyone spends days on it.
+import { readFileSync, writeFileSync } from 'node:fs';
 import { isRegexKey } from '../extension/matcher.mjs';
 
 const ROOT = '/Users/user/SillyTavern-Launcher/SillyTavern';
-const INDEX = process.argv[2] ?? `${ROOT}/data/default-user/vectors/ollama/wa_3810524038950542/bge-m3/index.json`;
-const LORE = process.argv[3] ?? `${ROOT}/data/default-user/worlds/Sommers_Pack__v22.json`;
+const JSON_OUT = (() => { const i = process.argv.indexOf('--json'); return i >= 0 ? process.argv[i + 1] : null; })();
+const positional = process.argv.slice(2).filter((a, i, xs) => !a.startsWith('--') && xs[i - 1] !== '--json');
+const INDEX = positional[0] ?? `${ROOT}/data/default-user/vectors/ollama/wa_3810524038950542/bge-m3/index.json`;
+const LORE = positional[1] ?? `${ROOT}/data/default-user/worlds/Sommers_Pack__v22.json`;
 const BOOK_COMMON = 0.50;  // matches KEY_BOOK_COMMON in keyword-core.mjs
 
 const idx = JSON.parse(readFileSync(INDEX, 'utf8'));
@@ -65,4 +71,12 @@ console.log(`\nENTRIES WITH FLAGGED KEYS (${flaggedEntries.length} of ${entryRow
 for (const e of flaggedEntries) {
     console.log(`  ${e.title}  (${e.flagged} to prune)`);
     for (const m of e.marks.filter(x => x.prune)) console.log(`      * ${m.key} — content ${m.bookContent}/${nE}, keyed ×${m.bookListed}${m.bookContent === 0 ? ' (dead)' : ` (${Math.round(100 * m.bookContent / nE)}% of entries)`}`);
+}
+
+if (JSON_OUT) {
+    // DEDUPED BY EXACT STRING, because dropKeys matches exactly and the same key is listed by many
+    // entries — a shared trigger flagged once is flagged everywhere it appears.
+    const keys = [...new Set(flaggedEntries.flatMap(e => e.marks.filter(m => m.prune).map(m => m.key)))];
+    writeFileSync(JSON_OUT, JSON.stringify(keys, null, 1));
+    console.log(`\n${keys.length} distinct flagged key strings -> ${JSON_OUT}`);
 }
