@@ -911,6 +911,12 @@ rows it drops differ from the ones it keeps in cosine (0.148 against 0.239) and 
 barely in length (7.15 against 6.84) or density (5.29 against 6.22). The haystack falls monotonically in
 grade — g0 -51%, g4 -4% — and 2 of 103 scenes go from a relevant row to none.
 
+**Length is a SUPPRESSOR, not a quality prior.** Relevance rises with entry length unconditionally — base
+rate 5.1% in the shortest length quartile against 8.0% in the longest, n=10,939 graded rows — while the
+fitted coefficient is NEGATIVE (-0.307, SE 0.054). Cosine and text over-credit long entries for
+length-driven reasons and this column refunds it. Cosine is not the thing going wrong on them: its solo
+AUC RISES with length (0.661, 0.721, 0.712, 0.751 across quartiles) and its gap to text is flat.
+
 **Mean book-IDF over the entry's tokens carries nothing** (solo AUC 0.497; +0.0019 F2, 20 up against 23
 with 60 tied, p 0.76), and an entry's own relevance rate in its other scenes adds nothing once these two
 are present (-0.0003, 38 up against 44, p 0.58) — so the entry-level intercept is fully captured by two
