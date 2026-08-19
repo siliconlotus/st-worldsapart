@@ -271,11 +271,12 @@ if (WITH.includes('density')) FEATURES.push(['density', r => Number(r.properDens
 // two axes disagree on a tenth of a book's token mass and a min-of-percentiles combination measured
 // WORSE than this column alone.
 if (WITH.includes('rarity')) FEATURES.push(['rarity', r => Number(r.bookRarity) || 0, () => 1]);
-// NAMES PER CHUNK, the same construct as `density` at the unit the system retrieves in. Found on the
-// DISABLED-entry population, which involves no grades at all: length-controlled it agrees with the
-// author's keep/drop call in 7 books of 7 (book-level sign test p 0.0156), where names-per-token manages
-// 5 and names-per-PARAGRAPH inverts. A raw paragraph count is a unit nothing sees — `minChunkSize` is a
-// merge floor, so short paragraphs are glued together before anything reads them.
+// NAMES PER CHUNK, the same construct as `density` at the unit the system retrieves in. Proposed off the
+// DISABLED-entry population, where length-controlled it agreed with the author's keep/drop call in 7
+// books of 7 — and that finding is an ARTIFACT: disabled entries sit earlier in the story (mean position
+// 0.33 against 0.60), early entries name fewer distinct people because the cast has not accumulated, and
+// controlling position as well as length takes it to 3 of 7 and mean AUC 0.489. It measures nothing on
+// grades either. Kept because the unit is an obvious thing to try and this answers it both ways.
 if (WITH.includes('chunkdens')) FEATURES.push(['chunkdens', r => Number(r.chunkDensity) || 0, () => 1]);
 
 // Feature indices carrying a squared term: none at degree 1, the named subset if --square was given,
