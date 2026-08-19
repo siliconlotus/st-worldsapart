@@ -14,13 +14,18 @@
 // the names for exactly this test, and a mismatch exits non-zero rather than printing a number.
 //
 // Usage (any cwd):
-//   node eval/pair-f2.mjs <baseline.json> <arm.json>
+//   node eval/pair-f2.mjs <baseline.json> <arm.json> [--at-recall 0.75]
 import fs from 'node:fs';
 import { signTest } from './metrics.mjs';
 
-const [a, b] = process.argv.slice(2);
+const argv = process.argv.slice(2);
+const arg = k => { const i = argv.indexOf(k); return i >= 0 ? (argv[i + 1] ?? null) : null; };
+// A flag's VALUE is not a positional, the same trap relevance-regress names: without this, --at-recall's
+// number would be read as a third file and the pair silently taken from the wrong two arguments.
+const VALUED = new Set(['--at-recall']);
+const [a, b] = argv.filter((x, i) => !x.startsWith('--') && !VALUED.has(argv[i - 1]));
 if (!a || !b) {
-    console.error('usage: node eval/pair-f2.mjs <baseline-emit.json> <arm-emit.json>');
+    console.error('usage: node eval/pair-f2.mjs <baseline-emit.json> <arm-emit.json> [--at-recall 0.75]');
     process.exit(2);
 }
 const [A, B] = [a, b].map(p => JSON.parse(fs.readFileSync(p, 'utf8')));
@@ -49,9 +54,31 @@ if (!sameWith && !sameValue) {
 }
 if (sameWith && sameValue) console.error(`note: identical feature set and ${A.swept} value — this is a self-comparison`);
 
+const label = x => `${x.with?.length ? x.with.join('+') : 'three signals'}${x.without?.length ? ` -${x.without.join('-')}` : ''}`;
+// MATCHED RECALL, when asked for. Each arm's own best cutoff is where ITS curve peaks, so a contrast
+// between two peaks mixes "better model" with "different point on the trade" — and F2 moves the peak
+// toward precision as a model improves, which is exactly when the two stop being comparable. The grid
+// carries every cutoff, so the honest question "at the same recall, which delivers better precision" is
+// answerable. Nearest row by recall, and the row's actual recall is printed rather than the target,
+// because a 1% grid does not hit every target exactly.
+const AT = arg('--at-recall');
+if (AT !== null) {
+    const want = Number(AT);
+    if (!Number.isFinite(want) || want <= 0 || want > 1) { console.error('--at-recall takes a fraction, e.g. 0.75'); process.exit(2); }
+    const near = x => (x.grid ?? []).reduce((best, g) => (best === null || Math.abs(g.recall - want) < Math.abs(best.recall - want) ? g : best), null);
+    const [ga, gb] = [near(A), near(B)];
+    if (!ga || !gb) {
+        console.error('one or both runs predate the emitted cutoff grid — re-run to compare at matched recall');
+        process.exit(2);
+    }
+    console.log(`at recall ~${(100 * want).toFixed(0)}%, ${A.tier} tier`);
+    for (const [x, g] of [[A, ga], [B, gb]])
+        console.log(`  ${label(x).padEnd(34)} cut ${g.cut.toFixed(2)}  recall ${(100 * g.recall).toFixed(1)}%  precision ${(100 * g.precision).toFixed(1)}%  F2 ${g.f2.toFixed(4)}  delivered ${g.delivered.toFixed(1)}`);
+    console.log(`  precision delta ${((gb.precision - ga.precision) >= 0 ? '+' : '') + (100 * (gb.precision - ga.precision)).toFixed(1)} points at ${(100 * gb.recall).toFixed(1)}% vs ${(100 * ga.recall).toFixed(1)}% recall\n`);
+}
+
 const d = B.perScene.map((f, i) => f - A.perScene[i]);
 const st = signTest(d);
-const label = x => `${x.with?.length ? x.with.join('+') : 'three signals'}${x.without?.length ? ` -${x.without.join('-')}` : ''}`;
 console.log(`${label(B)} against ${label(A)}, ${A.scenes.length} scenes paired, ${A.tier} tier`);
 console.log(`  F2 ${A.f2.toFixed(4)} -> ${B.f2.toFixed(4)}  (cutoff ${A.cut.toFixed(2)} -> ${B.cut.toFixed(2)})`);
 console.log(`  mean per-scene ${(st.mean >= 0 ? '+' : '') + st.mean.toFixed(4)}   ${st.plus} up / ${st.minus} down / ${st.ties} tied   sign test p ${st.p.toFixed(4)}`);
