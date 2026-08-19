@@ -931,12 +931,26 @@ never as a guarantee on a new one.
 two passes of the same judge — corroborated by the contract re-grade, where 4 of 13 rows originally >= 3
 came back below it (`CLAUDE.md`, graded scenes). The headroom is small and it is not in the fitting.
 
-**Still naming no instrument**, and now suspect rather than merely unverified, since the claim beside
-them was measured wrong: the 71% p-overlap, the 25%-purity-at-66%-recall cut, ECE 0.0067, and the
-per-tier recall curve (reference 95% at 5.4 entries, memory 38 for 73%). Nothing computes an overlap, a
-purity or a calibration error. **The calibration readout is work the predictor has to bring with it** —
-the bar is argued in probability terms and nothing currently checks that the probabilities mean what
-they say.
+**Calibration is measured, and an ECE is read against its null.** Everything above reads the ORDERING,
+which a monotone rescaling leaves untouched — so a model can rank exactly as measured and be wrong about
+every probability it reports, and the bar is argued in probability terms. `logistic.mjs` `reliability`
+bins by quantile and reports the ECE a perfectly calibrated model of the same size and shape would
+score, because binomial scatter alone produces one and it grows as the sample shrinks: the tiers differ
+25-fold in rows, so raw ECE compares their sizes as much as their models. Read HELD OUT — a fit with an
+intercept forces `mean(p)` to the base rate as one of its score equations, so in-sample calibration is
+arithmetic.
+
+**Measured**, held out by book, 8924 rows on 69 scenes: `P(>=3)` is indistinguishable from calibrated in
+every population (pooled p=0.248, memory p=0.270, reference p=0.044 at n=342). `P(>=2)` is not — memory
+reads ECE 0.0132 against a 0.0072 floor at **p=0.002**, over-confident through the middle of its range.
+So `E[credit]` inherits about half that bias and a bar drawn on it admits marginally more than it says,
+on the boundary the signals already separate worst. The reference tier is unmeasurable at n=342, and its
+precision matters less regardless: activation has already removed the entries a relevance model would
+reject, which is why the score weights its recall twice.
+
+**Still naming no instrument**, and suspect rather than merely unverified, since the claim beside them
+was measured wrong: the 71% p-overlap, the 25%-purity-at-66%-recall cut, and the per-tier recall curve
+(reference 95% at 5.4 entries, memory 38 for 73%). Nothing computes an overlap or a purity.
 
 ---
 
@@ -951,9 +965,11 @@ instances the books on disk hold.
    parameter (measured, *Evidence → Two scores*). The predicted set IS the layout, so scoring it is
    scoring the prediction, and `tierRecall` gets its kept set back at the same moment. The model, its
    evidence and what is still open about it are in *Stage 4 predicts per-entry relevance*; three things
-   have to be decided in the building rather than after it — where the bar goes, the calibration readout
-   that lets it be argued in probability terms, and whether the per-tier split earns two bars as well as
-   two fits.
+   have to be decided in the building rather than after it. The calibration readout is BUILT
+   (`reliability`, above), so two remain: where the bar goes, and whether the per-tier split earns two
+   bars as well as two fits. Calibration does not settle the second — reference cannot be measured at
+   n=342 — so that rests on the per-boundary slopes and on the two tiers' different tolerance for a
+   precision loss.
 2. **`promote` — an author declaration that activation is sufficient.** A promoted entry enters the
    layout whenever its keys fire, exempt from the relevance cut. It is the per-entry form of *triggered
    == relevant*, which stage 4 broke by having the cliff arbitrate keyword-activated entries alongside
