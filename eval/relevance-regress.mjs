@@ -249,7 +249,14 @@ const fx = n => (Number.isFinite(n) ? (n >= 0 ? '+' : '') + n.toFixed(3) : '  n/
                 if (g === null || g === undefined || Number.isNaN(g)) { dropped++; ungraded.push({ r, g: 0 }); continue; }
                 kept.push({ r, y: g >= CUT ? 1 : 0, g });
             }
-            if (kept.length >= 5 && kept.some(k => k.y) && kept.some(k => !k.y)) perScene.push({ name, book, kept, ungraded });
+            // A ROW FLOOR, and nothing about the labels. The features are standardised within scene, so a
+            // scene with a couple of rows scales its columns by an sd estimated from a couple of points;
+            // 5 is where that stops being nonsense. There is no both-classes test: the fit POOLS ACROSS
+            // SCENES behind one intercept, so an all-negative scene still contrasts its own rows against
+            // each other and still informs the slopes. Requiring both classes dropped those rows for a
+            // property the fit does not need, and the cutoff sweep separately drops scenes with no
+            // relevant row, where recall is undefined rather than uninformative.
+            if (kept.length >= 5) perScene.push({ name, book, kept, ungraded });
         }
         if (!perScene.length) { console.log(`  ${SWEPT}=${value}: no scene has both classes among its judged rows`); continue; }
 
