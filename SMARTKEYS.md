@@ -87,9 +87,19 @@ The two places where a rewrite *does* change the SmartKey are quoting across a s
 Flags apply per term, and a SmartKey **ignores the entry's own** *Case-Sensitive* and *Match Whole
 Words* checkboxes. A `?` key says what it wants, term by term.
 
-**Weights** are a postfix: `term::2`, `term::0.5`, or the Lucene spelling `term^2`. A term contributes
-`weight × occurrences` to the key's score. Weight `0` is legal and means "must be present, but do not
-rank on it".
+**Weights** are a postfix: `term::2`, `term::0.5`, or the Lucene spelling `term^2`. A term's
+`weight × occurrences` is what its **thing** is counted by, and the weight then multiplies what that
+thing is worth.
+
+Weight `0` is legal and means "must be present, but do not rank on it" — a condition rather than
+evidence. Put another way: the conjunct does not make the key worth more than the bare term. It earns
+its keep as a **disambiguator**: `? mercury AND planet::0` needs the word *planet* nearby, so the
+entry does not fire on the element or the god, and still scores exactly what `? mercury` alone would.
+Without the `::0` the qualifier counts as a second thing the passage is about, so a page mentioning
+both outranks a page that is actually about mercury.
+
+It is also how a **secondary** key opts out of scoring. Secondary keys score like any other term, so
+`? planet::0` in the secondary box gates without contributing anything of its own.
 
 `::` and not `:`, so a single colon stays ordinary text — `? meeting 10:30`, `? Judges 3:16`, `? re:code`
 and URLs all work as written. A delimiter followed by anything but digits is part of the term
@@ -145,10 +155,26 @@ Escaping costs nothing under WA — `\/` and `/` are the same character to a pat
 may be shared is worth writing the escaped way. The Studio warns on any key in the first row's shape,
 and says nothing about the second. This applies to a bare `/regex/` key and to a `/…/` term alike.
 
-**Scoring.** A term scores `weight × occurrences`. `AND` and `OR` both **sum** — `? (glasses OR
-spectacles)` counts every mention of the concept however it was spelled — and a branch that did not
-match contributes nothing. `XOR` takes the winning side. A key built only from negation scores 1 when
-it matches, since there is nothing to count.
+**Scoring.** A key's score is the sum over the things it is **about**. `AND` joins two different
+things, so each is scored separately and the scores add: `? moon AND rocket` is worth two. `OR` names
+one thing more than one way, so its mentions pool and count as one thing seen more often — `? (glasses
+OR spectacles)` counts every mention of the concept however it was spelled, and scores exactly what the
+bare key `glasses` would on the same number of mentions. `XOR` takes the winning side. A branch that
+did not match contributes nothing, and neither does a negation: `? fire -water` is one thing, not two.
+
+**What one thing is worth.** Being present at all is worth its weight. Further mentions add less and
+less — the second is worth much more than the tenth — and the total keeps climbing without ever
+running away. A key present once scores 1; one mentioned ten times scores about 3, not 10.
+
+**Weight multiplies the thing, not the mentions.** `? (everest OR kailash::2)` scores 1 on a page about
+Everest and 2 on a page about Kailash: `::2` means twice as important, not "as if mentioned twice".
+
+A key built **only** from negation — `? -water`, with no positive term — is refused as a key of its
+own. It would match nearly every message, which is not a trigger; the validator calls it an error and
+the matcher drops it before scoring. It is legal in exactly one place, as a **secondary** key, where
+the primary decides activation and a negation can only narrow what the primary already matched — see
+*Secondary keys*. Even there, `AND_ANY` refuses it, because an `OR` branch satisfied by absence never
+gates.
 
 ## Quoting is the one escape
 
@@ -193,6 +219,71 @@ when you want the two things a literal cannot give you: **order invariance**, an
 between**. `? 6" copper pipe` fires on *"that copper pipe is 6" in diameter"*, where the plain key
 `6" copper pipe` does not.
 
+## Secondary keys
+
+SillyTavern's *Secondary Keywords* box, with its AND_ANY / AND_ALL / NOT_ANY / NOT_ALL dropdown, is a
+second way to write a condition, and WA reads it exactly as SillyTavern does — a book you did not write
+behaves the way its author tested it. It is worth knowing what the two boxes can and cannot say.
+
+**They say one thing: every primary against every secondary, under one operator.** Keys
+`astronaut, cosmonaut, taikonaut` with secondaries `Gagarin, Armstrong, "Yang Liwei"` under AND_ANY is
+nine pairs, and it fires on all nine:
+
+| text | two boxes | what you probably meant |
+|---|---|---|
+| the astronaut Armstrong stepped down | fires | fires |
+| the cosmonaut Gagarin orbited | fires | fires |
+| the taikonaut **Gagarin** waved | fires | — |
+| the astronaut waited | — | — |
+
+That third row is the cross product. It is a legitimate thing to want — any of these words alongside any
+of those names — and the boxes give you no way to say otherwise. Written out, they are:
+
+```
+? (astronaut OR cosmonaut OR taikonaut) AND (Gagarin OR Armstrong OR "Yang Liwei")
+```
+
+If you meant the pairs, write the pairs:
+
+```
+? (astronaut AND Armstrong) OR (cosmonaut AND Gagarin) OR (taikonaut AND "Yang Liwei")
+```
+
+No arrangement of the two boxes writes the second one. Grouping is what they are missing, and grouping
+is most of what a SmartKey is.
+
+**One dropdown means one operator for the whole list**, which is a problem the moment two secondaries
+are the same thing spelled differently. `Yang Liwei` and `Liwei Yang` are one person and belong in an
+OR; a name you actually require belongs in an AND. Under AND_ALL a pair of spellings means "both
+spellings must appear", which nothing will satisfy. Grouped, it just works:
+
+```
+? taikonaut AND ("Yang Liwei" OR "Liwei Yang")
+```
+
+**A secondary scores like any other term.** It is not a free condition: on `the mercury in the planet
+core`, keys `mercury` with secondary `planet` scores 2 — one for each. If you want the qualifier to
+gate without ranking, weight it `0`: `? planet::0` in the secondary box scores 1 and still refuses text
+that omits *planet*.
+
+**And the score scales with how many primary keys you have.** The gate is applied to each primary
+separately, so on `astronaut cosmonaut taikonaut Gagarin` — where *Gagarin* appears once — three
+primaries with a `Gagarin` secondary score 6, where the three primaries alone score 3, and a single
+primary with the same secondary scores 2. That is the same arithmetic as writing three keys that each
+mention *Gagarin*, which is what the two boxes are shorthand for.
+
+**Negation-only keys are legal here, and only here.** `? -gagarin` is refused as a key of its own, but
+as a secondary the primary decides activation and the negation can only narrow what it already matched:
+`astronaut` with `["cosmonaut", "? -gagarin"]` under AND_ALL is "both crews, but not Gagarin's". Two
+cautions. Under AND_ANY it is refused, because an OR branch satisfied by absence never gates. Under the
+NOT operators the dropdown negates it a second time, so `? -gagarin` there means *requires* Gagarin —
+the Studio warns you when you switch.
+
+**OFF is the fifth position in the Studio's operator control**, and it is not a fifth logic: it sets the
+entry's `selective` flag off, which SillyTavern reads as "ignore this list". The keys stay written down
+and stop gating, which is the only way to park a gate without deleting the keys that express it.
+Character cards can arrive this way; nothing you author will unless you ask for it.
+
 ## What the Studio will tell you
 
 Saving a `?` key runs a structural check. It reads the SmartKey's shape only — never a guess at what you
@@ -207,7 +298,7 @@ a bare `/regex/` key as well, which is the one thing the Studio has to say about
 | **error** | a `/pattern/` JavaScript cannot compile |
 | **warn** | a punctuation-only term (usually a second `?`: only the first one is the sentinel) |
 | **warn** | unbalanced parens — it still parses, but probably not the way you grouped it |
-| **warn** | every term weighted 0, so the key gates without scoring |
+| **warn** | when all terms in an expression are weighted 0, the key ranks on nothing. In the secondary box that is a deliberate gate; as a key of its own it still counts as one thing present |
 | **warn** | a `/pattern/` with an unescaped `/` inside — vanilla SillyTavern will not run it (above) |
 
 Whether a term ever actually occurs in your book is a different question, and the audit answers it.

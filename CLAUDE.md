@@ -291,9 +291,16 @@ Anything that reports on how a key will behave (the audit, the pruner, the Studi
 calls it rather than re-deriving the rules, so the audit can't drift from what actually fires at
 runtime. The Aho-Corasick batching in `keyword-core.mjs` changes only when and how often it is called.
 
+**Its checks are split by what they are faithful to.** `core-matcher-check.mjs` holds every claim about
+how WA relates to core on an unmodified lorebook — the parity AND the named divergences, since a
+divergence only means something beside the parity it departs from. `matcher-check.mjs` holds WA's own
+semantics, which core has no opinion about: SmartKeys, scoring units, the saturation curve, key refusals,
+excerpts. A new assertion that cites core as the authority goes in the first; one about what a matched
+expression is WORTH goes in the second.
+
 ## Pure vs ST-coupled
 
-`matcher.mjs`, `ranking.mjs`, `keyword-core.mjs`, `selection.mjs`, `smartkeys.mjs`, `sort.mjs` and `plugin/*.mjs` are
+`matcher.mjs`, `ranking.mjs`, `keyword-core.mjs`, `selection.mjs`, `smartkeys.mjs`, `sort.mjs`, `lexical.mjs` and `plugin/*.mjs` are
 ST-free and node-importable, so the evals exercise the real shipped code instead of string-slicing it.
 Settings and ST globals are injected by the caller, never imported. The ST/DOM half is
 `worldsapart.js`, `keyword-tools.mjs`, `studio.mjs`, `ui-widgets.mjs`.
@@ -321,4 +328,10 @@ Defects in ST core itself go in `upstream-st.md`, in the SillyTavern root — no
 ## Plugin changes need a redeploy
 
 Editing anything in `plugin/` requires `node deploy-plugin.mjs` and an ST restart. `/plugins/worlds-apart/`
-is a generated copy; the settings panel shows a drift banner until the fingerprints match.
+is a generated copy; the settings panel shows a drift banner until the fingerprints match, and the deploy
+prints the fingerprint so you can compare without opening the panel.
+
+**`PLUGIN_FILES` is the whole contents, not just what gets copied.** The deploy REMOVES any top-level
+file the manifest no longer names, so retiring a plugin module is one edit to `fingerprint.mjs` — leaving
+the orphan behind is how a module the plugin stopped running goes on looking like plugin code. Directories
+are left alone; a `node_modules` is yours to remove.

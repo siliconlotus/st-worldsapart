@@ -81,13 +81,9 @@ leading `?` is the one place that trade is deliberately reversed. Only the FIRST
 sentinel, so `what's up?` is a plain key. Accepted cost: a literal key that did start with `?` is read
 as a SmartKey, which both changes what it matches and overweights it.
 
-**Measured**, books on disk: 147 of 46,230 keys start with `?`, across 6 books, and all 147 validate
-clean — none is an accidental prefix that merely happens to parse.
-
 **Weight is `::N`, with `^N` as a Lucene alias.** A single colon is ordinary text, so `10:30`,
 `Judges 3:16` and `https://…` need no quoting. `^` as a *prefix* is the case-sensitivity flag; as a
-*postfix followed by digits* it is the boost. **Measured**: 0 keys on disk contain `^` followed by a
-digit, and 0 in 367KB of scan text.
+*postfix followed by digits* it is the boost.
 
 **`/pattern/flags` is a TERM.** A `/re/` key is evaluated as a pattern everywhere else it appears, and
 the literal reading survived only inside a SmartKey, where the lexer did not know regexes exist. The
@@ -116,10 +112,9 @@ literal stays reachable through the escape already there: `? "/re/"`.
   it as a contributor. Checks that inspect a term's VALUE skip it — `punctuation-term` and
   `stray-quote` would fire on every pattern, one being punctuation by nature.
 
-**Measured**, and it cannot adjudicate any of the above: regex keys on disk are 2 of 46,226, in 2 of 41
-books; `?` keys containing a `/` at all are 0 of 148. Every rule here rests on one syntax having one
-reading. A count sizes exposure and is never the reason for a call or against one. Worked examples
-here are demonstrations of a mechanism, not samples.
+**A count sizes exposure and is never the reason for a call or against one.** Every rule here rests
+on one syntax having one reading, and that holds however many keys happen to use it. Worked examples
+are demonstrations of a mechanism, not samples.
 
 **A regex key is audited like any other key**, on df, by the same machinery that judges a literal and
 a SmartKey. Only the heuristics that read a key AS A LITERAL STRING stay exempt — English-common,
@@ -144,52 +139,43 @@ branches return before the flag arguments are read.
 ### Proximity — `(…)~N`
 
 **Ruled, unimplemented.** `? (copper pipe)~5` constrains a group to a window. Parens already group
-without order, so the slop attaches to something order-free by construction. `"…"~N` is rejected:
+without order, so the slack attaches to something order-free by construction. `"…"~N` is rejected:
 quoting is this grammar's one construct that DOES carry order, and it stays unspent for the ordered
 loosened phrase it looks like.
 
 - **The unit of completeness is the CONJUNCT, not the leaf.** In `? ((Arthur | Kyle) Porsche)~3` the
-  window needs one span from `Porsche` and one from either branch. **Measured**, Sommers chat: 60
-  witnesses against 47 + 16 for the two keys run separately — the sweep takes whichever alternative is
-  nearer, so a paragraph yields one tighter witness rather than two.
+  window needs one span from `Porsche` and one from either branch. The sweep takes whichever alternative
+  is nearer, so a paragraph yields one tighter witness rather than two of them.
 - **N is per junction.** Consecutive spans, sorted by position, each within N words. Decided on intent:
   an author writing a fuzzy phrase claims the steps are short, not that the whole span is compact. The
   corpus cannot adjudicate it, because re-reading plain multi-word keys as groups puts function words
   in the operands, and dropping those takes the key to two terms where the readings are identical.
   Accepted cost: a k-term group can span (k−1)·N.
-- **Slop counts words, off `wordChar()`.** **Measured**, standard corpus: a `\b` counter charges a slop
-  point to `teddy o'neill` and `pack-bond pheromone`, since the apostrophe and hyphen split one word in
-  two — 2.9pp of two-term co-occurrences at `~0`. One boundary class, or two matchers.
+- **Slack counts words, off `wordChar()`.** A `\b` counter charges a slack point to `o'neill` and
+  `mother-in-law`, since the apostrophe and hyphens split one word into two and three. One boundary
+  class, or two matchers.
 - **Occurrences are CLUSTERS.** Three `copper` and two `pipe` are one fact, not six: leftmost minimal
   windows, each consumed before the next is sought.
 - **A negation is a veto over the padded window**, and the window must be fixed before it is tested —
   positives are existential and negatives universal, so one window serves neither (the sweep may always
   shrink to a single positive, which contains no negated term by construction). The rule is the
   positive witness window, padded N words each side, holding no negated operand. Centring on the padded
-  cluster and centring on each positive independently are the same region, since the slop bounds every
+  cluster and centring on each positive independently are the same region, since the slack bounds every
   internal gap by N. `? (-x)~N` has no positive to anchor and is the existing `negation-only` error.
-- **The digits are required.** **Measured**, Sommers chat: `? ((Arthur|Kyle) Porsche)` yields 16
-  witnesses at `~3` and 35 at `~10`, so a bare `~` would make a key depend on a default it does not
-  show.
-- **A group without `~` keeps segment scope**, so no existing key changes meaning. **Measured**, the 26
-  conjunction SmartKeys in `Sommers_Pack__v22` against their own chat: 720 firings, of which `~5` keeps
-  39% and `~10` 57%. A slop cannot be retrofitted onto conjunctions written because the terms are apart.
+- **The digits are required.** A bare `~` would make a key depend on a default it does not show, and
+  the window it asks for is the whole of what it means.
+- **A group without `~` keeps segment scope**, so no existing key changes meaning. Slack cannot be
+  retrofitted onto conjunctions that were written precisely because their terms sit apart.
 - **NEAR is for content terms.** A key reproducing a title stays a plain phrase, and a function word as
   an operand is the failure mode — but *is this a stopword* is language-dependent, so it belongs to the
   suggester and never to the validator.
-- **Where it earns its keep is narrow.** Proper nouns co-occur genuinely, so a slop filters signal.
-  A polyseme's noise sits at slack 0 where no slop reaches it — **measured**, Sommers: `? Jeffrey
-  =watch` fires 48 times against 395 for `? Jeffrey watch`, so `=` is worth 7× the slop. The band is
-  terms individually common and jointly specific, where **measured**, standard corpus, `~5` rejects
-  21.5% of what a segment-scope conjunction admits.
+- **Where it earns its keep is narrow.** Proper nouns co-occur genuinely, so a slack filters signal
+  rather than noise. A polyseme's noise sits at slack 0, which no `~N` can exclude and per-term `=` can.
+  The band it serves is terms individually common and jointly specific.
 - **Negative slack is overlap, and it is the class proximity cannot fix.** A window covering fewer word
-  starts than it has operands means they landed inside one word. **Measured**, standard corpus: 3.8% of
-  two-term co-occurrences, led by `moving in` firing 876 times inside the word "moving", plus the
-  compound written closed (`scrap yard` against `scrap-yard`). All are maximally near, so only
-  per-operand whole-word excludes them.
-- **Rejected — a finer match window in its place.** **Measured**, Sommers conjunction keys: 3% of
-  firings have a minimal window spanning a line break, and 138 of the slack-21+ firings sit on a single
-  line. A `line` mode would buy 3% and leave every distant-pair case untouched.
+  starts than it has operands means they landed inside one word: `moving in` fires inside the word
+  "moving", and a compound written closed matches its spaced spelling (`scrap yard` against
+  `scrap-yard`). All are maximally near, so only per-operand whole-word excludes them.
 
 Implementation: the trie answers presence and positions are walked. `scanAutomaton` computes each match
 start and discards it into a counter, so positions are one push away — but recording them changes
@@ -207,9 +193,7 @@ an operand.
 `foldedHay`, so a pattern runs on raw text as core's does — fold the haystack and a pattern written
 against real text stops working. Normalisation is not that kind of choice, so the segment is
 NFC-composed first: two encodings of `é` are the same letter to everyone not implementing Unicode, and
-a key that visibly matches the text while reporting zero has no spelling that fixes it. **Measured**: 0
-decomposed sequences across 41 books and 196 chats — unexercised here, which is a statement about this
-corpus and not about the case. Inside a SmartKey this means mixed folding: `? /Cap'n/ crunch` has one
+a key that visibly matches the text while reporting zero has no spelling that fixes it. Inside a SmartKey this means mixed folding: `? /Cap'n/ crunch` has one
 term that sees `’` and one that does not.
 
 ### Match Whole Words
@@ -225,6 +209,16 @@ permissive  [\p{L}\p{N}\p{M}]         letters, digits, combining marks
 strict      [\p{L}\p{N}\p{M}\-'’]     ...plus hyphen and both apostrophes
 ```
 
+**A DOUBLED hyphen is a boundary in both modes**, which strict's class alone does not say. The fold
+rewrites an em dash to `--` so `wait--no` matches `wait—no`; strict counts `-` as word-internal so
+`Sara-shaped` does not match `Sara`. Their product read an ordinary em dash as inside a word, costing
+`Sara— catch` and `Hey—Sara` — punctuation, not a compound, and four of the seven spacings prose uses.
+A single hyphen joins a compound; `--` is the ASCII spelling of the dash the fold just rewrote and is
+never inside a word. So the assertion is "the neighbour is not a word character, OR it is a doubled
+hyphen" — `boundaryBefore`/`boundaryAfter`, still zero-width, because the pattern counts under `g` and
+`keyExcerpt` reads its offsets, so consuming the boundary would hide adjacent matches and mis-highlight
+the span.
+
 Default **strict**, because the escapes are asymmetric: a regex key with `\b` recovers permissive
 behaviour for any ASCII key, and `\b` is what core's own boundary approximates, so one hatch returns
 both. From permissive there is no short form. Land in the mode that is cheap to leave. (`\b` fails for
@@ -234,9 +228,8 @@ Practical reading: **plurals break a match under permissive; plurals and affixes
 user-facing wording must name the mode rather than stating either as the rule.
 
 **`_` leaves the class in both modes**, not part of the toggle — underscore is in `\w` for programming
-identifiers and `_Joe_` failing has no defender. **Measured**, one author's chats (178.8M chars): 822
-emphasis-shaped underscores against 1,156,063 asterisks, so this corpus does not motivate it. Presets
-that instruct underscore emphasis do, and corpus absence is not population absence.
+identifiers and `_Joe_` failing has no defender. Presets that instruct underscore emphasis are
+reason enough on their own.
 
 **No CJK carve-out.** Whole-word in a script without word separators is an unanswerable request rather
 than a WA failure. Such a key still fires among Latin text or punctuation and cannot fire inside a
@@ -244,13 +237,6 @@ wholly Chinese or Japanese sentence; `matcher.wholeWordAdvice` says so and the m
 **Tibetan stays out of the trigger class** — the tsheg may be the separator the class is defined by
 absence of. Han, Hiragana, Katakana, Thai, Lao, Khmer and Myanmar are the class; Hangul is not, since
 modern Korean is spaced.
-
-**Measured cost**, books on disk: 66 of 2,120 enabled entries tick the box AND hold a multi-word key —
-430 keys, 10 books; the ST global is off, so the 1,711 entries inheriting it do not move. Under strict,
-44% of whole-word keys lose occurrences but saturation absorbs it (`Sara` 113→100 moves
-`count/(count+k1)` from 0.9895 to 0.9881); 10 keys of 955 go to zero, all singletons; **no entry stops
-activating**. Of the 430, 24 narrow against their own book's text, all the plural case — and book text
-is a floor, since chat prose pluralises more.
 
 ### The match window
 
@@ -267,9 +253,9 @@ degenerate one-segment array that reproduces the pre-setting behaviour exactly.
   is slice-invariant and a multi-word key cannot span the `\n` join, but `^` and `$` are SEGMENT-relative.
   `/^Doc/` counts 1 paragraph-scoped and 0 at `scan`; `/^Doc/m` counts 1 either way, and `/m` is the
   setting-independent form authors want.
-- **Occurrences sum across gate-passing segments and saturate once**, rather than per segment; a
-  segment failing its own secondary gate contributes nothing instead of zeroing the entry. At `scan`
-  this is arithmetically identical to the pre-setting code, which is what `matchwindow-check` pins.
+- **A unit's occurrences sum across gate-passing segments and saturate once**, rather than per segment
+  or per key; a segment failing its own secondary gate contributes nothing instead of zeroing the entry.
+  At `scan` this is arithmetically identical to the unsegmented window, which `matchwindow-check` pins.
 - **Match sources and injects are each their own segment** — nothing may merge a character description
   onto the end of chat prose and let a conjunction span the seam. `segment()` is idempotent.
 - **Split, do not track positions.** **Measured** 1.01x for 8 segments against one join (200 patterns,
@@ -277,12 +263,8 @@ degenerate one-segment array that reproduces the pre-setting behaviour exactly.
   changes — no redeploy, and no window where the browser and server halves disagree.
 - **The audit segments the same way**, so `unattested` means *not attested in any segment*. df still
   counts ENTRIES, not segments, or "how widely is this term used" would move with paragraph length.
-  **Measured** inert on every book on disk: 8 books, 8,970 distinct keys, 0 change df or occurrence
-  total.
-- **Measured**, one author's chats, n=1 (392 messages, 79 windows, 780KB): message-scoping is near a
-  no-op — p90 is 19 paragraphs per message, and 81.6% of scanned text lives in messages of six
-  paragraphs or more. Paragraph is unambiguous in 96.2% of messages; the other 3.8% use single newlines
-  only and degenerate to message-scoped, which is never worse. Split on `\n[ \t]*\n`.
+- **Paragraph splits on `\n[ \t]*\n`.** A message written with single newlines only has no paragraph
+  to find and degenerates to message-scoped, which is never worse than the mode it fell back from.
 - **Rejected — utterance-level.** The right unit, since a multi-sentence quote is one utterance, but it
   has no reliable marker: models drop closing quotes, use `—` for dialogue, and write narration
   unmarked. Rejected as unavailable, not as wrong.
@@ -506,13 +488,7 @@ emits `WORLDINFO_FORCE_ACTIVATE` for anything newly matched.
   is writable; nothing here needs it.
 - **Trigger provenance is not WA's business.** Where an entry was triggered from does not change
   whether it may compete. `delayUntilRecursion` is the author's own and only declaration that an entry
-  is child-only. **Measured**, 44 books / 2,699 enabled entries: 26 are `true`, one carries an explicit
-  level 1, and nothing anywhere is authored deeper — so this rule admits everything on disk and ships
-  unexercised.
-- **Third-party books suppress recursion far harder than this author's do**, which sizes the whole
-  item. **Measured**: `excludeRecursion` is set on 526 of 579 public-book entries (91%) against 140 of
-  2,120 here (6.6%), and the public books set `preventRecursion` and `delayUntilRecursion` on nothing.
-  Read that as a bound on how much this can matter, not as permission to skip it.
+  is child-only.
 
 ### Selective logic (`keysecondary`)
 
@@ -526,22 +502,43 @@ emitting a `?` string the lexer had to read back. A key containing a double quot
 `keysecondary`**, which is the class that decided whether the conversion was possible at all.
 
 Entry flags are stamped on synthesised nodes as `isCaseSensitive`/`isExact`; a spliced `?` subtree and
-a `REGEX` node carry their own. Secondary nodes carry weight 0 (`zeroWeights` reaches into a spliced
-subtree, or the author's own `::5` would leak), so the conversion is score-neutral by construction:
-`AND` and `OR` both sum. `eval/synthesis-check.mjs` is the case table.
+a `REGEX` node carry their own, and so do their weights.
 
-**Measured** population, books on disk: 79 entries of 2,112 enabled (3.7%) across 14 books, 77 of them
-`AND_ANY`.
+**A secondary is a term and scores like one**, so the same logic scores the same whichever of WA's two
+syntaxes wrote it — the disagreement this conversion exists to prevent. `eval/core-matcher-check.mjs`
+is the case table.
+
+Only `AND_ANY` and `AND_ALL` see this: a `NOT` yields no unit whatever its operand weighs, so both NOT
+logics score the primary alone. A gate that does not score is written `::0` on the secondary — a
+condition rather than evidence.
+
+**`keysecondary` is a compatibility surface, and the synthesis is the proof.** Every two-list
+configuration converts mechanically to one expression — that is what `synthesizeSecondary` does, for
+all four logics — and no converse conversion exists: `? (A AND B) OR (C AND D)` has no arrangement of
+two key lists. SmartKeys strictly subsume selective logic, so the field is read because an unaltered
+lorebook must behave as it does under core, not because the shape is one WA would otherwise offer.
+
+**What the shape can say is the full cross product under one operator**, n x m implicit pairs treated
+alike: three primaries against three secondaries is nine, and it fires on the pairs an author did not
+mean as readily as the ones they did. Two lists have no grouping, and grouping is the whole of the
+difference — a variation group and a requirement cannot coexist in one list, because one dropdown is
+one operator. `SMARTKEYS.md` carries the worked comparison for authors.
 
 **Secondaries are validated like primaries, minus one code.** A key carrying a fatal validator error is
-dropped before the logic runs, as blanks already were, so a malformed secondary loosens the gate rather
-than silently killing the entry under `AND_ALL`; a key that PARSES and does not occur is a different
-thing, and still a verdict the logic sees. `negation-only` is tolerated here and only here — a secondary
-never fires by itself, since the primary gates activation, so it can only narrow what the primary already
-matched: `astronaut` with `["cosmonaut", "? -gagarin"]` under `AND_ALL` is "both crews, but not Gagarin's
-territory", which core has no way to write. `secondaryKeys` is the only place that rule lives, and
-`unusableKeysOf` (`keyword-core.mjs`) reports the difference rather than re-deriving it.
-**Measured**: 0 of 161 secondary keys on 84 entries across 43 books change position.
+dropped before the logic runs, as blanks are, so a dropped secondary loosens the gate; a key that PARSES
+and does not occur is a different thing, and still a verdict the logic sees. `fatalKey` is the shared
+predicate, and `usableKeys` and `secondaryKeys` are the two positions that ask it — they differ only in
+what they except.
+
+**The one exception is `negation-only`, and the operator decides.** Under `AND_ALL` it narrows:
+`astronaut` with `["cosmonaut", "? -gagarin"]` is "both crews, but not Gagarin's territory", which core
+has no way to write. Under the NOT logics the operator's own negation cancels the key's, so
+`"? -gagarin"` reads as *requiring* gagarin — surprising, but a condition an author can mean, and the
+Studio says so at the moment the operator changes. Under `AND_ANY` it is refused: a negation is
+satisfied by absence and `AND_ANY` `OR`s its secondaries, so the branch stands open on nearly any text
+and the gate stops gating — the objection that makes the key fatal in a primary, one level down.
+`secondaryKeys` is the only place that rule lives, and `unusableKeysOf` (`keyword-core.mjs`) reports the
+difference rather than re-deriving it.
 
 **A key the matcher refuses is flagged per key, ahead of every other verdict.** `classify` asks
 `usableKeys` before anything reads the text: unusability is a fact about the string where the rest of
@@ -550,14 +547,30 @@ prose rather than the key. Red, but never pre-ticked for removal: every other re
 fires where it should not and deletion is the fix, while a malformed key means the author wrote
 something WA could not read, where the fix is a correction.
 
-**Secondary keys are chips like any other**, click-to-edit, delete and add against `keysecondary`, under
-a label naming the selective logic — the same list reads as "must also contain" or "must not contain"
-depending on it, so the chips are ambiguous without it. Only the `unusable` verdict is painted there:
-the rest of the audit asks whether a key is a good TRIGGER, and a gate is not a trigger, so a
-common-word secondary is a legitimate thing to require rather than a flag. The collapsed entry's badge
-counts them, since a key nobody expands to is as invisible as one with no surface at all, and the write
-gate asks `secondaryKeys` rather than the validator directly — the editor must not refuse what the
-runtime gates on.
+**Secondary keys are chips like any other**, click-to-edit, delete and add against `keysecondary`, in
+their own row under a rule — two paragraphs of chips run together, and the secondaries read as more
+primaries. The operator sits at the head of the row as a CONTROL, not a caption: the same list reads as
+"must also contain" or "must not contain" depending on it, so a row whose meaning inverts on a field the
+author cannot reach from here is a row they cannot finish editing. Core's four names, since that is what
+the WI editor and the CCv2 field call them, with the reading on the tooltip. The collapsed entry's badge
+counts the chips, since a key nobody expands to is as invisible as one with no surface at all.
+
+**Only refusal is painted** — a key the matcher will not act on, shown with the validator's reason:
+`no-terms`, `stray-quote`, `regex-invalid`, `negation-only`. For a secondary that means absent from
+`secondaryKeys`, so it depends on the operator as well as the position. Nothing else is: the rest of the
+audit asks whether a key is a good TRIGGER, and a gate is not a trigger, so a common-word secondary is a
+legitimate thing to require rather than a flag. The write gate asks `secondaryKeys` rather than the
+validator directly — the editor must not refuse what the runtime gates on — and passes the entry's
+operator, since which codes are fatal depends on it.
+
+**OFF is the fifth position, and it is `selective`, not a fifth logic.** Core's dropdown has no such
+entry, but the state is real: CCv2 specifies it — `secondary_keys` is "ignored if `selective == false`"
+— and core reads the flag before `selectiveLogic`, so the list is off under all four operators. It is
+the only way to park a gate without deleting the keys that express it. `secondaryKeys` returns `[]` for
+such an entry, which is the whole of it; `unusableKeysOf` reports nothing, since the list is off by
+declaration rather than malformed; and the Studio dims the chips and labels the row `OFF` rather than
+naming an operator that is not running. Switching off leaves `selectiveLogic` alone, so switching back
+on restores the author's own operator.
 
 ---
 
@@ -566,6 +579,40 @@ runtime gates on.
 `rankActivated`, on `WORLDINFO_SCAN_DONE`. Vector and chunk-text scores are looked up from what
 retrieval stored, keyword score is computed over the scan window, and `fuseRanks` produces the
 **layout ranking** — vector + text + keys, normalised by the signals an entry was eligible for.
+
+**A key's score is the sum over the things it is about.** `AND` joins distinct things and their scores
+add; `OR` names one thing several ways and its mentions pool into one saturation; a weight multiplies
+its unit rather than feeding the curve. `SMARTKEYS.md` is the grammar. What matters here is that the
+UNIT is the saturation boundary and not the key: saturating a key as a whole would make a stricter
+expression outscore its own left operand, and would hand a synonym group a separate budget per
+spelling — breadth the author does not have. Weight outside the curve is the other half of the same
+rule: the curve is concave, so a weight fed INTO it arrives as less than the author wrote, and by an
+amount that moves with the curve — `::2` would land at 1.61x. Outside it, `::2` is 2x whatever the
+curve is set to, which is what makes the weight the author's and the saturation WA's.
+
+**A hit reports a count and a score, and they answer different questions.** `count` is how many times
+the key's terms appeared, so `x3` in the debug column and the WI panel means the text said it three
+times and nothing else. `score` is what the key contributed, and is where weights and saturation live.
+One field cannot do both: Σ weighted occurrences reads as repetition while carrying weight and
+expression size, so `? fire::3` on one mention is indistinguishable from `fire` on three.
+
+**Presence is categorical; only the repeats saturate.** A matched key is worth its weight, and the
+`n-1` repeats accrue as `1 + R x ln(1 + (n-1)/k1)` — `repeatCurveOf`, shipped as `presence-log` with
+`R` 1. `bm25K1` is the RATE repeats accrue at and the curve is the SHAPE; one knob could express
+neither alone, which is why they are two settings.
+
+**A bounded curve stops discriminating, and that is a property of the curve.** Above roughly n=20 its
+entire remaining range is a few percent: `count/(count+k1)` moves 0.041 between n=21 and n=89, and a
+bounded presence form moves 0.043 — so two keys with four times the evidence between them score the
+same, and the curve has stopped ordering entries by how much the text says. Unbounded, the same pair is
+3.872 against 5.309. Whether a given book ever reaches that range is a property of the book; that the
+curve goes deaf when it does is not.
+
+**No frequency discount accompanies this, deliberately.** A ubiquitous key is an author declaration —
+`keyword-core.mjs` already exempts sticky and constant entries from the too-common flags on that
+ground — a badly chosen one is reported by the audit, where the author can act on it, and an entry
+whose key fires broadly but whose content does not fit still ranks low on the other two fused signals.
+A discount here would be that same judgement taken a second time, silently, where nobody can see it.
 
 **Two rankings, not one.** `fuseRetrieval` decides what is activated; `fuseRanks` decides prompt order
 and what survives the budget. **A change to `fuseRanks` can never surface an entry retrieval did not
@@ -634,9 +681,7 @@ matcher difference makes the Studio's audit report on rules that are not what fi
 WA's rules *are* what fires.
 
 - **The fold.** `fold` is `normalizeOrthography` then lowercase; core's `#transformString` only
-  lowercases. For the default substring path WA is a strict superset. **Measured**, one corpus, as an
-  upper bound on the remaining seam: 9 keys of the 1,229 containing quote or hyphen characters match
-  under WA's fold and not under core's lowercase, unioned over 177,499 usable messages.
+  lowercases. For the default substring path WA is a strict superset.
 - **NFC** on the regex path, where core runs raw.
 - **Whole-word applies to multi-word keys.** Core splits the key on whitespace and uses `includes()`,
   so *Match Whole Words* is a silent no-op for any key with a space in it — the same shape as the `\W`
@@ -666,8 +711,7 @@ WA's rules *are* what fires.
   so a body holding a literal newline was a pattern to core and a literal key to WA — the class widened
   to `[\s\S]` and the two now agree.
 - **`?` SmartKeys and `/re/` terms inside them.** Core's `matchKeys` treats `? …` as a literal needle,
-  so an entry keyed only on SmartKeys never activates there. **Measured**: 2 such entries of 3,403
-  keyed entries on disk. Un-extended cores see the raw string and silently never match it, which is the
+  so an entry keyed only on SmartKeys never activates there.
   compatibility story that keeps books portable.
 - **`messageDepth` supersedes `world_info_depth`** when WA runs (see *Stage 2: Activation*).
 
@@ -930,9 +974,9 @@ instances the books on disk hold.
 
    **It replaces sticky-as-priority.** ST fills sticky entries first, making sticky the only reliable
    way to guarantee a keyword entry is inserted, so it carries persistence, cliff exemption and queue
-   position at once — and the ST maintainers recommend it for exactly that. **Measured**: 34 of
-   `Sommers_Pack__v22`'s 45 live reference entries are `sticky: 1, constant: false`. Promoting them
-   keeps the exemption the author wanted and drops the rest.
+   position at once — and the ST maintainers recommend it for exactly that. A reference entry marked
+   `sticky: 1, constant: false` is reaching for the insertion guarantee, not the persistence; promoting
+   it keeps that and drops the two it was never asking for.
 
    Stored as `entry.promote`, top-level beside `sticky` and `vectorized` rather than under
    `extensions` — `convertCharacterBook` reads 25 fields OUT of `extensions` and never copies the map,
@@ -966,18 +1010,13 @@ instances the books on disk hold.
    set is the apostrophe family, the double-quote family, en-dash ↔ hyphen, and nbsp ↔ space; em-dash
    and ellipsis are left to the author, being visible in both pattern and prose.
 
-   **Measured**, one author's 196 chats (1.28G chars, 3.28M possessives): 10.6% use a curly apostrophe
-   overall, but the share belongs to whoever wrote the chat — of 144 chats with at least 200
    possessives, 18 are above 90% curly (worst 97.6%), 91 sit between 5% and 95%, and 44 are under 5%.
    The mixed chats are the worse failure, since a key that fires SOMETIMES reads as weak rather than
    broken. Which argues for building it BEFORE the keys exist.
-9. **A grading row's key count is a SCORE wearing a count's name.** `keywordScore` pushes
-   `hits.count = scoreBoost`, so `? fire::3` displays `3` for a single occurrence and the row reads as
-   "fired three times". Independent of the witness-span work and fixable on its own.
-10. **`reportFailure`: retrieval failure is a failure, not a degradation.** The two-severity split rests
+9. **`reportFailure`: retrieval failure is a failure, not a degradation.** The two-severity split rests
    on "keys are still handled". Weaker than it was now that a vectorized entry keeps its keys, but a
    retrieval outage still costs the vector and text signals on every entry it was the only source for.
-11. **Suggester i18n, none of it started.** `ZIPF_EN` scores non-English function words as maximally
+10. **Suggester i18n, none of it started.** `ZIPF_EN` scores non-English function words as maximally
     rare, so the gate designed to reject common words would propose them; a few are present with
     meaningless values, which is worse than absent. The suggester should detect that its priors do not
     apply and stand down rather than invert. Accent variants belong here too — `Gérard`/`Gerard` is a
