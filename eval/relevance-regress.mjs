@@ -35,7 +35,7 @@
 //
 // Usage (from SillyTavern root):
 //   node .../relevance-regress.mjs <sample.json> [...] [--sweep gazetteerSource=keys,titles]
-//        [--tier memory|reference] [--cut 4] [--ordinal] [--loso] [--lobo] [--calibration] [--cutoff] [--degree 2] [--interactions] [--with proper,time,oracle,length,density,rarity] [--emit-rows rows.json] [--proper count|idf|jaccard|gaz] [--proper-extract regex|entity|span]
+//        [--tier memory|reference] [--cut 4] [--ordinal] [--loso] [--lobo] [--calibration] [--cutoff] [--degree 2] [--interactions] [--with proper,time,oracle,length,density,rarity] [--without keys] [--emit-rows rows.json] [--proper count|idf|jaccard|gaz] [--proper-extract regex|entity|span]
 import { indexPath, isMemory, loadScene, openSample, sceneParams, makeCandidateSet, makeGradeOf, embed } from './scene.mjs';
 import { ensureIndex } from './reindex.mjs';
 import fs from 'node:fs';
@@ -52,7 +52,7 @@ const arg = k => { const i = argv.indexOf(k); return i >= 0 ? argv[i + 1] : null
 // is about to write is opened as an input bundle. Named flags rather than "anything after a --", or
 // `--lobo scene.json` would silently DROP that scene, which is the worse failure: a wrong sample set
 // prints a clean table and says nothing about what it left out.
-const VALUED = new Set(['--arm', '--sweep', '--tier', '--cut', '--degree', '--square', '--with', '--emit', '--emit-rows', '--proper', '--proper-extract']);
+const VALUED = new Set(['--arm', '--sweep', '--tier', '--cut', '--degree', '--square', '--with', '--without', '--emit', '--emit-rows', '--proper', '--proper-extract']);
 const samples = argv.filter((a, i) => a.endsWith('.json') && !a.startsWith('--') && !VALUED.has(argv[i - 1]));
 if (!samples.length) {
     console.error('need at least one sample: node relevance-regress.mjs <sample.json> [more.json ...] [--sweep param=v1,v2]');
@@ -97,6 +97,13 @@ const INTERACT = argv.includes('--interactions');
 // scenes, a CEILING on any entry-level prior rather than a shippable column. All are ADDITIONS to the
 // three shipped signals, never replacements, and all are here to be measured rather than to ship.
 const WITH = String(arg('--with') ?? '').split(',').filter(Boolean);
+// DROPS A SHIPPED SIGNAL from the design, which a parameter sweep sometimes needs and cannot express.
+// A column that is CONSTANT within a scene is not the same as an absent one: standardisation divides by
+// the scene's own SD, so a scene where one row breaks an otherwise-constant column sends that row to a
+// large z where a fitted slope meets it. `scoreVectorKeys=false` on the memory tier is exactly that shape
+// — 99.8% vectorized, keys blanked, and the remainder fitted at +0.765 (SE 0.580). Contrasting the two
+// settings with the column present measures the parameter PLUS that nuisance term.
+const WITHOUT = String(arg('--without') ?? '').split(',').filter(Boolean);
 // Where to write the per-scene F2 vector. Two feature sets cannot be swept in one process — the design
 // matrix is built once — so the paired contrast is made between two RUNS, and this is what carries the
 // per-scene numbers between them. Scene names go with it: pairing by index is only safe if both runs
@@ -137,7 +144,7 @@ const FEATURES = [
     ['cosine', r => (Number.isFinite(r.score) ? r.score : 0), r => (Number.isFinite(r.score) ? 1 : 0)],
     ['text', r => Number(r.textScore) || 0, r => (r.textEligible ? 1 : 0)],
     ['keys', r => Number(r.keywordScore) || 0, r => (r.keysEligible ? 1 : 0)],
-];
+].filter(([n]) => !WITHOUT.includes(n));
 // PROPER NOUNS shared between the entry and the scan window. NOT a reweighting of `text`: BM25 spreads
 // its mass over every term the two share, so a character name arrives diluted among hundreds of ordinary
 // words. Restricting the vocabulary to names asks a different question — is this entry about someone who

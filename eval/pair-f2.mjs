@@ -29,14 +29,22 @@ if (A.scenes.length !== B.scenes.length || A.scenes.some((s, i) => s !== B.scene
     console.error(`scene sets differ (${A.scenes.length} vs ${B.scenes.length}) — pairing by index would compare different scenes`);
     process.exit(2);
 }
-// A contrast between two tiers, two cuts or two swept values is not a feature contrast, and pairing them
-// silently would attribute the difference to whichever column changed name.
-for (const k of ['tier', 'swept', 'value']) {
+// EXACTLY ONE THING MAY DIFFER. Two runs contrast either a FEATURE SET at one parameter value or a
+// PARAMETER at one feature set; if both moved, the difference cannot be attributed to either and the
+// number is uninterpretable. The tier and the swept parameter's NAME must match in both cases.
+for (const k of ['tier', 'swept']) {
     if (String(A[k]) !== String(B[k])) {
         console.error(`${k} differs (${A[k]} vs ${B[k]}) — these runs are not the same experiment`);
         process.exit(2);
     }
 }
+const sameWith = String(A.with ?? []) === String(B.with ?? []);
+const sameValue = String(A.value) === String(B.value);
+if (!sameWith && !sameValue) {
+    console.error(`both the feature set (${A.with} vs ${B.with}) and ${A.swept} (${A.value} vs ${B.value}) differ — the difference cannot be attributed to either`);
+    process.exit(2);
+}
+if (sameWith && sameValue) console.error(`note: identical feature set and ${A.swept} value — this is a self-comparison`);
 
 const d = B.perScene.map((f, i) => f - A.perScene[i]);
 const st = signTest(d);
