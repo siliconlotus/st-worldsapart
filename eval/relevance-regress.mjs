@@ -35,7 +35,7 @@
 //
 // Usage (from SillyTavern root):
 //   node .../relevance-regress.mjs <sample.json> [...] [--sweep gazetteerSource=keys,titles]
-//        [--tier memory|reference] [--cut 4] [--ordinal] [--loso] [--lobo] [--calibration] [--cutoff] [--degree 2] [--interactions] [--with proper,time] [--proper count|idf|jaccard|gaz] [--proper-extract regex|entity|span]
+//        [--tier memory|reference] [--cut 4] [--ordinal] [--loso] [--lobo] [--calibration] [--cutoff] [--degree 2] [--interactions] [--with proper,time,oracle] [--proper count|idf|jaccard|gaz] [--proper-extract regex|entity|span]
 import { indexPath, isMemory, loadScene, openSample, sceneParams, makeCandidateSet, makeGradeOf, embed } from './scene.mjs';
 import { ensureIndex } from './reindex.mjs';
 import fs from 'node:fs';
@@ -92,8 +92,9 @@ const DEGREE = Number(arg('--degree') ?? 1);
 const SQUARE = String(arg('--square') ?? '').split(',').filter(Boolean);
 const INTERACT = argv.includes('--interactions');
 // Extra candidate features, off by default: `proper` = shared proper nouns with the scan window,
-// `time` = the entry's story-time position. Both are ADDITIONS to the three shipped signals, not
-// replacements, and both are here to be measured rather than to ship.
+// `time` = the entry's story-time position, `oracle` = the entry's own relevance rate in its OTHER
+// scenes, a CEILING on any entry-level prior rather than a shippable column. All are ADDITIONS to the
+// three shipped signals, never replacements, and all are here to be measured rather than to ship.
 const WITH = String(arg('--with') ?? '').split(',').filter(Boolean);
 // Where to write the per-scene F2 vector. Two feature sets cannot be swept in one process — the design
 // matrix is built once — so the paired contrast is made between two RUNS, and this is what carries the
@@ -227,6 +228,9 @@ const storyTime = r => Number(r.entry?.uid ?? 0);
 
 if (WITH.includes('proper')) FEATURES.push(['proper', r => Number(r.properShared) || 0, () => 1]);
 if (WITH.includes('time')) FEATURES.push(['time', storyTime, () => 1]);
+// Built below, once every scene is loaded — an entry's prior is read off its OTHER scenes and so cannot
+// be computed inside the per-scene loop the way properShared is.
+if (WITH.includes('oracle')) FEATURES.push(['oracle', r => Number(r.entryBase) || 0, () => 1]);
 
 // Feature indices carrying a squared term: none at degree 1, the named subset if --square was given,
 // otherwise all of them.
@@ -238,6 +242,38 @@ const SQUARED = DEGREE < 2 ? []
 const PAIRS = INTERACT
     ? FEATURES.flatMap((_, i) => FEATURES.map((__, j) => [i, j]).filter(([a, b]) => a < b))
     : [];
+
+// WHAT A SIGNAL IS WORTH AS A REJECTION FILTER, which is a different question from AUC and the one an
+// entry-level prior is actually for. A prior that says "this entry is generic" is not a claim that a
+// high-scoring entry is relevant, so the symmetric number hides it: a column can sit near 0.5 AUC and
+// still have a pure low tail. This walks the signal's own ranking from the bottom and reports how much
+// of the pool can be cut before the first relevant row is lost, and again at 95% recall.
+//
+// POOLED ACROSS SCENES ON PURPOSE, where solo AUC carries the same caveat by accident: a rejection
+// filter has ONE threshold for every scene, so the pooled ranking is the population it would face. That
+// makes the number honest for a scene-independent prior and pessimistic for a signal whose scale moves
+// per scene (BM25), which is the right way round.
+// TIE-AWARE, which is not a detail here: a threshold cuts on a VALUE, so every row sharing the lowest
+// positive's value is kept with it. An entry-level prior is tied by construction — a whole block of
+// entries scores exactly 0 — and walking row indices instead would let the sort order inside that block
+// decide the answer, reporting a filter as pure when the tie it sits on contains relevant rows.
+const tailCut = (s, labels) => {
+    const order = s.map((v, i) => [v, labels[i]]).sort((a, b) => a[0] - b[0]);
+    const pos = order.reduce((a, [, l]) => a + (l ? 1 : 0), 0);
+    if (!pos) return { at100: NaN, at95: NaN };
+    let below = 0, lost = 0, at100 = NaN, at95 = NaN, i = 0;
+    while (i < order.length) {
+        let j = i;
+        while (j + 1 < order.length && order[j + 1][0] === order[i][0]) j++;
+        const groupPos = order.slice(i, j + 1).reduce((a, [, l]) => a + (l ? 1 : 0), 0);
+        // `below` is what a cut placed under this group would drop, and it is recorded BEFORE the group
+        // is counted — dropping the group itself costs the positives inside it.
+        if (groupPos && Number.isNaN(at100)) at100 = below / order.length;
+        if (Number.isNaN(at95) && (lost + groupPos) / pos > 0.05) at95 = below / order.length;
+        below = j + 1; lost += groupPos; i = j + 1;
+    }
+    return { at100: Number.isNaN(at100) ? 0 : at100, at95: Number.isNaN(at95) ? 1 : at95 };
+};
 
 const mean = xs => xs.reduce((a, b) => a + b, 0) / (xs.length || 1);
 const sd = xs => { const m = mean(xs); return Math.sqrt(mean(xs.map(x => (x - m) ** 2))); };
@@ -331,6 +367,50 @@ const fx = n => (Number.isFinite(n) ? (n >= 0 ? '+' : '') + n.toFixed(3) : '  n/
         }
         if (!perScene.length) { console.log(`  ${SWEPT}=${value}: no scene has both classes among its judged rows`); continue; }
 
+        // THE ORACLE ENTRY PRIOR — a CEILING, not a candidate feature. It reads the entry's own grades in
+        // the OTHER scenes, so nothing computable from an entry's text can beat it; the question it answers
+        // is whether an entry-level prior has any room at all beside the query-dependent signals, before a
+        // proxy for one is built. `RELEVANCE IS A PROPERTY OF THE PAIR` (matcher-design.md) rules out
+        // caching a verdict per entry; it does not rule out an INTERCEPT, and this measures that intercept
+        // at its best possible value.
+        //
+        // LEAVE-ONE-SCENE-OUT within the entry, which removes the self-leak — with the row's own label in
+        // the average, a singleton entry would predict itself perfectly and the column would read as an
+        // oracle for being one. What it does NOT remove is the cross-scene leak inside a book, so --lobo
+        // does not protect this column and its held-out number is optimistic BY CONSTRUCTION. That is what
+        // makes it a bound: a real prior gets none of this.
+        //
+        // An entry seen in one scene only has no out-of-fold estimate, so it takes the pooled base rate —
+        // the neutral value, which keeps the row population identical to the run without the column and so
+        // keeps the two runs paired. The count is printed because a column mostly made of imputed rows is
+        // measuring the imputation.
+        if (WITH.includes('oracle')) {
+            const tally = new Map();
+            const idOf = r => `${r.entry?.world ?? ''}${r.entry?.uid ?? ''}`;
+            for (const { kept } of perScene) for (const k of kept) {
+                const t = tally.get(idOf(k.r)) ?? { n: 0, pos: 0 };
+                t.n++; t.pos += k.y; tally.set(idOf(k.r), t);
+            }
+            const pooled = perScene.reduce((a, p) => a + p.kept.reduce((b, k) => b + k.y, 0), 0)
+                / perScene.reduce((a, p) => a + p.kept.length, 0);
+            let imputed = 0;
+            for (const { kept, ungraded } of perScene) {
+                for (const k of kept) {
+                    const t = tally.get(idOf(k.r));
+                    if (t.n > 1) k.r.entryBase = (t.pos - k.y) / (t.n - 1);
+                    else { k.r.entryBase = pooled; imputed++; }
+                }
+                // An ungraded row never entered the tally, so it has no estimate of its own even when its
+                // entry does. It takes the entry's full rate where one exists — there is no self to leave
+                // out — and the pooled rate otherwise.
+                for (const u of ungraded) {
+                    const t = tally.get(idOf(u.r));
+                    u.r.entryBase = t ? t.pos / t.n : pooled;
+                }
+            }
+            console.log(`  oracle: ${tally.size} distinct entries, pooled base ${pooled.toFixed(3)}, ${imputed} single-scene rows imputed`);
+        }
+
         // Design matrix: one intercept, then for each signal its standardised value and its eligibility
         // indicator. Standardising within scene is what makes one slope mean one thing across corpora
         // whose BM25 lives on different scales.
@@ -418,6 +498,7 @@ const fx = n => (Number.isFinite(n) ? (n >= 0 ? '+' : '') + n.toFixed(3) : '  n/
                 raw: rawFit.beta[base + fi * 2],
                 sd: mean(stats[fi].sd),
                 auc: auc(perSignal[fi].s, perSignal[fi].y),
+                cut: tailCut(perSignal[fi].s, perSignal[fi].y),
             })),
             logLoss: stdFit.logLoss, converged: stdFit.converged,
             sq: [...SQUARED, ...PAIRS].map((_, si) => stdFit.beta[1 + 2 * FEATURES.length + si]),
@@ -501,11 +582,12 @@ const fx = n => (Number.isFinite(n) ? (n >= 0 ? '+' : '') + n.toFixed(3) : '  n/
     }
 
     console.log(`\nlogistic fit of P(grade>=${CUT}), signals standardised within scene`);
-    console.log(`  ${SWEPT.padEnd(14)} signal | std beta (SE)   raw beta   mean within-scene SD   solo AUC`);
+    console.log(`  ${SWEPT.padEnd(14)} signal | std beta (SE)   raw beta   mean within-scene SD   solo AUC   droppable @100%/95% recall`);
     for (const t of table) {
         for (const [i, r] of t.rows.entries()) {
             const head = i === 0 ? String(t.value).padEnd(14) : ' '.repeat(14);
-            console.log(`  ${head} ${r.name.padEnd(6)} | ${fx(r.std)} (${r.stdSe.toFixed(3)})  ${fx(r.raw).padStart(9)}   ${r.sd.toFixed(4).padStart(20)}   ${r.auc.toFixed(3).padStart(8)}`);
+            const pc = v => (Number.isFinite(v) ? `${(100 * v).toFixed(1)}%` : 'n/a');
+            console.log(`  ${head} ${r.name.padEnd(6)} | ${fx(r.std)} (${r.stdSe.toFixed(3)})  ${fx(r.raw).padStart(9)}   ${r.sd.toFixed(4).padStart(20)}   ${r.auc.toFixed(3).padStart(8)}   ${`${pc(r.cut.at100)} / ${pc(r.cut.at95)}`.padStart(25)}`);
         }
         const extraNames = [...SQUARED.map(fi => `${FEATURES[fi][0]}^2`),
             ...PAIRS.map(([a, b]) => `${FEATURES[a][0]}*${FEATURES[b][0]}`)];
