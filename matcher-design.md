@@ -846,7 +846,7 @@ explainability. Everything below is measured on 69 graded scenes, 8924 judged ro
 
 **LOGISTIC regression**, on the project's own relevance line (grade >= 3). Linear would put predictions
 outside [0,1] on a bounded target and would weight a 0-vs-1 error the same as a 0.4-vs-0.5 one. Each
-entry gets p, and ships if it clears the bar. The count falls out — a scene with three relevant entries
+entry gets p, and ships if it clears the cutoff. The count falls out — a scene with three relevant entries
 delivers three — so "how many entries does this scene need" is not a separate question and takes no
 parameter of its own.
 
@@ -856,7 +856,7 @@ grade that varies and 54.5% cross the relevance line — the same entry, the sam
 not there. Anything that caches a verdict per entry is wrong by construction.
 
 **JUDGE THE PREDICTOR BY AP AND PRECISION-AT-RECALL, NOT AUC.** AUC is prevalence-independent, which
-makes it the right thing for comparing signals and the wrong thing for asking what clears a bar — at
+makes it the right thing for comparing signals and the wrong thing for asking what clears a cutoff — at
 grade >= 4 it reads 0.975 while 90% recall costs 17.5% precision. `logistic.mjs` `prCurve` prints both.
 The same distinction as nDCG against the layout score, one level down.
 
@@ -896,12 +896,19 @@ boundaries are fitted separately.
 
 **And the flat spot is memory's.** In the reference tier cosine strengthens monotonically across the
 boundaries (+0.123, +0.588, +1.397) and the >= 3 line is real; in memory it collapses at exactly that
-cut. The tiers may not want the same bar, let alone the same model.
+cut. The tiers may not want the same cutoff, let alone the same model.
+
+**`cutoff` is the threshold; `cut` is the mechanism; a `bar` is a GRADE boundary.** Three words for three
+things, kept apart because the section needs all three in one sentence. The asymmetric bars are where
+the metric reads the scale (recall at >= 3, precision at >= 2); the relevance cut is what stage 4 does;
+the cutoff is the number on `E[credit]` it does it at. The CLIFF was the removed drop-off on the fused
+layout score — relative and ranking-shaped, where a cutoff is absolute and per pair — and the word now
+survives only in what is exempt from it.
 
 **RULED: the target is EXPECTED `gradeCredit`, not `P(>=3)`.** `metrics.mjs` `gradeCredit` scores a
 delivered 2 at HALF, so the layout score's precision numerator is a sum of credits — and the quantity to
 threshold is the one that sum is built from. `E[credit] = 0.5 * P(>=2) + 0.5 * P(>=3)`, both of which the
-cumulative fit already produces. It costs no architecture: still one number per entry, still a bar. It
+cumulative fit already produces. It costs no architecture: still one number per entry, still a cutoff. It
 also stops the decision resting entirely on the boundary the signals separate worst, and it lets the model
 express the middle band the scale defines and the metric already pays for — a 2 is "50/50 on inclusion",
 so half credit is the grader's own stated probability rather than a weighting invented here.
@@ -911,7 +918,7 @@ the events have, and `E[credit]` is malformed where it inverts. **Measured**: 39
 at most 0.0002 — numerically trivial, so a clamp costs nothing and removes the case entirely. It is not
 optional for being small; an incoherent probability pair is a bug that reads as a threshold effect.
 
-**Watch the asymmetry when the bar is chosen.** The layout score's two halves read different quantities
+**Watch the asymmetry when the cutoff is chosen.** The layout score's two halves read different quantities
 on purpose — precision credits a 2 at half, recall counts only grade >= 3, because recall asks whether the
 must-deliver material arrived. So `E[credit]` is aligned with the precision half and not with the recall
 half, and recall is the half weighted twice. **Measured**, ranking by `E[credit]`: 2s are a steady ~20% of
@@ -933,7 +940,7 @@ came back below it (`CLAUDE.md`, graded scenes). The headroom is small and it is
 
 **Calibration is measured, and an ECE is read against its null.** Everything above reads the ORDERING,
 which a monotone rescaling leaves untouched — so a model can rank exactly as measured and be wrong about
-every probability it reports, and the bar is argued in probability terms. `logistic.mjs` `reliability`
+every probability it reports, and the cutoff is argued in probability terms. `logistic.mjs` `reliability`
 bins by quantile and reports the ECE a perfectly calibrated model of the same size and shape would
 score, because binomial scatter alone produces one and it grows as the sample shrinks: the tiers differ
 25-fold in rows, so raw ECE compares their sizes as much as their models. Read HELD OUT — a fit with an
@@ -943,7 +950,7 @@ arithmetic.
 **Measured**, held out by book, 8924 rows on 69 scenes: `P(>=3)` is indistinguishable from calibrated in
 every population (pooled p=0.248, memory p=0.270, reference p=0.044 at n=342). `P(>=2)` is not — memory
 reads ECE 0.0132 against a 0.0072 floor at **p=0.002**, over-confident through the middle of its range.
-So `E[credit]` inherits about half that bias and a bar drawn on it admits marginally more than it says,
+So `E[credit]` inherits about half that bias and a cutoff drawn on it admits marginally more than it says,
 on the boundary the signals already separate worst. The reference tier is unmeasurable at n=342, and its
 precision matters less regardless: activation has already removed the entries a relevance model would
 reject, which is why the score weights its recall twice.
@@ -966,8 +973,8 @@ instances the books on disk hold.
    scoring the prediction, and `tierRecall` gets its kept set back at the same moment. The model, its
    evidence and what is still open about it are in *Stage 4 predicts per-entry relevance*; three things
    have to be decided in the building rather than after it. The calibration readout is BUILT
-   (`reliability`, above), so two remain: where the bar goes, and whether the per-tier split earns two
-   bars as well as two fits. Calibration does not settle the second — reference cannot be measured at
+   (`reliability`, above), so two remain: where the cutoff goes, and whether the per-tier split earns
+   two cutoffs as well as two fits. Calibration does not settle the second — reference cannot be measured at
    n=342 — so that rests on the per-boundary slopes and on the two tiers' different tolerance for a
    precision loss.
 2. **`promote` — an author declaration that activation is sufficient.** A promoted entry enters the

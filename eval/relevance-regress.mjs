@@ -35,10 +35,10 @@
 //
 // Usage (from SillyTavern root):
 //   node .../relevance-regress.mjs <sample.json> [...] [--sweep gazetteerSource=keys,titles]
-//        [--tier memory|reference] [--cut 4] [--ordinal] [--loso] [--lobo] [--calibration]
+//        [--tier memory|reference] [--cut 4] [--ordinal] [--loso] [--lobo] [--calibration] [--cutoff]
 import { indexPath, isMemory, loadScene, openSample, sceneParams, makeCandidateSet, makeGradeOf, embed } from './scene.mjs';
 import { ensureIndex } from './reindex.mjs';
-import { gradeValue } from './metrics.mjs';
+import { gradeValue, gradeCredit, fbeta, RECALL_WEIGHT } from './metrics.mjs';
 import { logisticFit, auc, cumulativeFit, prCurve, reliability, sigmoid } from './logistic.mjs';
 import * as ranking from '../extension/ranking.mjs';
 
@@ -76,6 +76,7 @@ const LOSO = argv.includes('--loso');
 // Folds are wildly unequal here (one book is 58% of the rows), so read the per-fold sizes, not just the
 // pooled number.
 const LOBO = argv.includes('--lobo');
+const CUTOFF = argv.includes('--cutoff');
 const CALIB = argv.includes('--calibration');
 // WHICH BOUNDARY IS THE TARGET. 3 is the project's relevance line and the default; --cut 4 fits the band
 // the anchors reserve for the scene's current subject, which separates far better and is far rarer, so it
@@ -134,14 +135,20 @@ const fx = n => (Number.isFinite(n) ? (n >= 0 ? '+' : '') + n.toFixed(3) : '  n/
             const gradeOf = makeGradeOf(S.grades, scene.isExcluded);
             // Same population scoreScene ranks: constants are out, because relevance is not a concept that
             // applies to them. Ungraded rows are out because they carry no label.
-            const kept = [];
+            const kept = [], ungraded = [];
             for (const r of rows.filter(r => !r.entry?.constant)) {
                 if (TIER !== 'all' && (isMemory(r.entry) ? 'memory' : 'reference') !== TIER) continue;
                 const g = gradeOf(r);
-                if (g === null || g === undefined || Number.isNaN(g)) { dropped++; continue; }
+                // An ungraded row carries no label, so it is out of the FIT — a 0 there would be a claim
+                // about relevance. It is kept for the bar sweep, where the same row scored 0 is a claim
+                // about DELIVERY: a bar that admits it puts an unvetted entry in front of a user and
+                // should pay precision for it, which is the `?? 0` convention scene.mjs already uses.
+                // Dropping them from both would score every bar on the rows some arm already surfaced,
+                // and so would reward a bar for reaching deeper than the pool.
+                if (g === null || g === undefined || Number.isNaN(g)) { dropped++; ungraded.push({ r, g: 0 }); continue; }
                 kept.push({ r, y: g >= CUT ? 1 : 0, g });
             }
-            if (kept.length >= 5 && kept.some(k => k.y) && kept.some(k => !k.y)) perScene.push({ name, book, kept });
+            if (kept.length >= 5 && kept.some(k => k.y) && kept.some(k => !k.y)) perScene.push({ name, book, kept, ungraded });
         }
         if (!perScene.length) { console.log(`  ${SWEPT}=${value}: no scene has both classes among its judged rows`); continue; }
 
@@ -150,8 +157,10 @@ const fx = n => (Number.isFinite(n) ? (n >= 0 ? '+' : '') + n.toFixed(3) : '  n/
         // whose BM25 lives on different scales.
         const X = [], y = [], rawCols = FEATURES.map(() => []), stats = FEATURES.map(() => ({ sd: [], mean: [] }));
         const perSignal = FEATURES.map(() => ({ s: [], y: [] }));
+        const sceneCols = [];
         for (const [si, { kept }] of perScene.entries()) {
             const cols = FEATURES.map(([, get]) => kept.map(k => get(k.r)));
+            sceneCols[si] = cols;
             cols.forEach((c, fi) => { stats[fi].sd.push(sd(c)); stats[fi].mean.push(mean(c)); });
             kept.forEach((k, i) => {
                 const scene = [1];
@@ -178,15 +187,19 @@ const fx = n => (Number.isFinite(n) ? (n >= 0 ? '+' : '') + n.toFixed(3) : '  n/
         // about it has to hold for both.
         const holdOut = (groupOf, nGroups, labels = y) => {
             const held = Array(labels.length).fill(NaN);
+            const betas = Array(nGroups).fill(null);
             for (let g = 0; g < nGroups; g++) {
                 const tr = [], trY = [];
                 X.forEach((row, i) => { if (groupOf(i) !== g) { tr.push(row); trY.push(labels[i]); } });
                 if (!trY.some(v => v) || trY.every(v => v)) continue;
                 const f = logisticFit(tr, trY);
+                betas[g] = f.beta;
                 X.forEach((row, i) => { if (groupOf(i) === g) held[i] = row.reduce((a, x, j) => a + x * f.beta[j], 0); });
             }
             const keep = held.map((v, i) => [v, labels[i]]).filter(([v]) => Number.isFinite(v));
-            return { eta: keep.map(k => k[0]), y: keep.map(k => k[1]) };
+            // `betas` is what lets a row the fit never saw — an ungraded one — be scored by the fold that
+            // did not train on its book, which is the only honest way to put it in a delivered set.
+            return { eta: keep.map(k => k[0]), y: keep.map(k => k[1]), betas };
         };
         const books = [...new Set(perScene.map(p => p.book))];
         const bookOf = perScene.flatMap(({ kept, book }) => kept.map(() => books.indexOf(book)));
@@ -226,6 +239,54 @@ const fx = n => (Number.isFinite(n) ? (n >= 0 ? '+' : '') + n.toFixed(3) : '  n/
             // target is 0.5*P(>=2) + 0.5*P(>=3), and a convex combination of two probabilities is
             // calibrated only if each of them is. Held out by book where that was asked for, and
             // in-sample beside it so the near-zero there is visible as the score equation it is.
+            // THE CUTOFF. Stage 4's question is not "which rows rank highest" but "which rows belong", so the
+            // sweep scores the DELIVERED SET at each candidate cutoff rather than a window: F2 on the asymmetric
+            // bars (recall at grade >= 3, precision crediting a 2 at half), macro-averaged over scenes so a
+            // scene with many candidates does not outvote one with few.
+            //
+            // Scored on E[credit] = 0.5*P(>=2) + 0.5*P(>=3), both held out BY BOOK and P(>=3) clamped to
+            // P(>=2) — the boundaries are fitted separately, so nothing guarantees the nesting the events
+            // have, and E[credit] is malformed where they invert.
+            cutoff: CUTOFF && LOBO ? (() => {
+                const cuts = [2, 3].map(c => holdOut(i => bookOf[i], books.length, grades.map(g => (g >= c ? 1 : 0))).betas);
+                const scoreRow = (design, fold) => {
+                    const eta = b => (b ? design.reduce((a, x, j) => a + x * b[j], 0) : NaN);
+                    const p2 = sigmoid(eta(cuts[0][fold])), p3 = sigmoid(eta(cuts[1][fold]));
+                    return Number.isFinite(p2) && Number.isFinite(p3) ? 0.5 * p2 + 0.5 * Math.min(p3, p2) : NaN;
+                };
+                let gi = 0;
+                const scenes = perScene.map(({ kept, ungraded }, si) => {
+                    const fold = bookOf[gi];
+                    const rows = kept.map(k => ({ e: scoreRow(X[gi++], fold), g: k.g }));
+                    // An ungraded row is projected through ITS OWN scene's standardisation, the same
+                    // statistics the fit used, so it lands on one scale with the rows beside it.
+                    for (const u of ungraded) {
+                        const design = [1];
+                        sceneCols[si].forEach((c, fi) => {
+                            design.push((FEATURES[fi][1](u.r) - mean(c)) / (sd(c) || 1), FEATURES[fi][2](u.r));
+                        });
+                        rows.push({ e: scoreRow(design, fold), g: 0 });
+                    }
+                    return { rows: rows.filter(r => Number.isFinite(r.e)), relevant: kept.filter(k => k.g >= 3).length };
+                }).filter(sc => sc.relevant > 0);
+                const grid = Array.from({ length: 99 }, (_, i) => (i + 1) / 100);
+                return {
+                    scenes: scenes.length,
+                    meanRelevant: mean(scenes.map(sc => sc.relevant)),
+                    grid: grid.map(cut => {
+                        const per = scenes.map(sc => {
+                            const got = sc.rows.filter(r => r.e >= cut);
+                            const precision = got.length ? mean(got.map(r => gradeCredit(r.g))) : 0;
+                            const recall = got.filter(r => r.g >= 3).length / sc.relevant;
+                            return { f: fbeta(precision, recall, RECALL_WEIGHT), precision, recall, n: got.length };
+                        });
+                        return {
+                            cut, f: mean(per.map(x => x.f)), precision: mean(per.map(x => x.precision)),
+                            recall: mean(per.map(x => x.recall)), delivered: mean(per.map(x => x.n)),
+                        };
+                    }),
+                };
+            })() : null,
             calib: CALIB ? [2, 3].map(cut => {
                 const yc = grades.map(g => (g >= cut ? 1 : 0));
                 if (!yc.some(v => v) || yc.every(v => v)) return { cut, rows: [] };
@@ -279,6 +340,26 @@ const fx = n => (Number.isFinite(n) ? (n >= 0 ? '+' : '') + n.toFixed(3) : '  n/
         }
     }
     if (!LOSO || !LOBO) console.log('  (--loso holds out a scene, --lobo a book; only the second is the generalisation production needs)');
+
+    // WHERE THE CUTOFF GOES. This is the only readout here that scores what stage 4 actually ships — a SET,
+    // chosen by the model rather than cut at a rank someone picked. Everything above is a diagnostic on
+    // the ordering; F2 over the delivered set is the score of record.
+    if (CUTOFF) {
+        if (!LOBO) console.log('\n--cutoff needs --lobo: a cutoff chosen on in-sample probabilities is chosen on rows the fit has seen.');
+        else for (const t of table) {
+            const b = t.cutoff;
+            if (!b) continue;
+            const best = b.grid.reduce((a, x) => (x.f > a.f ? x : a));
+            console.log(`\nthe cutoff: F2 over the delivered set, macro-averaged over ${b.scenes} scenes (mean ${b.meanRelevant.toFixed(1)} relevant each)`);
+            console.log(`  ${SWEPT}=${t.value}`);
+            console.log('    E[credit] >= |     F2   precision   recall   delivered');
+            for (const g of b.grid) {
+                if (Math.round(g.cut * 100) % 5 && g !== best) continue;
+                console.log(`    ${g.cut.toFixed(2).padStart(11)} | ${g.f.toFixed(4)}     ${(100 * g.precision).toFixed(1).padStart(5)}%   ${(100 * g.recall).toFixed(1).padStart(5)}%   ${g.delivered.toFixed(1).padStart(9)}${g === best ? '   <- best' : ''}`);
+            }
+            console.log(`  best cutoff ${best.cut.toFixed(2)}: F2 ${best.f.toFixed(4)}, delivering ${best.delivered.toFixed(1)} entries against ${b.meanRelevant.toFixed(1)} relevant.`);
+        }
+    }
 
     // DO THE PROBABILITIES MEAN WHAT THEY SAY. Everything above reads the ORDERING, and a monotone
     // rescaling leaves AUC and AP untouched — so the readout that decides where a bar goes is not in
