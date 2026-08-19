@@ -88,6 +88,10 @@ export function captureParams(s, { caseSensitive, wholeWords, includeNames }) {
         K: s.rrfK,
         K1: s.bm25K1,
         B: s.bm25B,
+        // Recorded so a sample scores under the curve it was captured under. A bundle taken before
+        // this existed has no field and falls back to sceneParams' 'bm25', which is what it ran under.
+        repeatCurve: s.repeatCurve,
+        repeatR: s.repeatR,
         LEXW: s.lexicalWeight,
         // null = follows LEXW; recorded as-is so a sample says which of the two it was captured under.
         KEYW: s.keywordWeight ?? null,

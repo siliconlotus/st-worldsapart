@@ -27,6 +27,9 @@ export function escapeRegex(str) { return String(str).replace(/[.*+?^${}()|[\]\\
  *   permissive  [\p{L}\p{N}\p{M}]        letters, digits, combining marks — `Joe` matches `Joe's`
  *   strict      [\p{L}\p{N}\p{M}\-'’]    ...plus hyphen and apostrophes — it does not
  *
+ * A DOUBLED hyphen is excepted in both directions — see boundaryBefore/boundaryAfter below, which is
+ * what the whole-word assertions actually use.
+ *
  * Strict is the default because THE ESCAPES ARE ASYMMETRIC. A `/regex/` key with `\b` recovers
  * permissive behaviour for any ASCII key, and `\b` is what core's own boundary approximates, so one
  * escape hatch returns both. From permissive there is no short form — strict needs the explicit class
@@ -73,6 +76,24 @@ export const setBoundaryMode = mode => { boundaryMode = Object.hasOwn(BOUNDARY_C
 /** The live boundary class, as a regex-source string. A function, not a const, so a mode change
  *  cannot leave a stale class baked into a caller's template literal. */
 export const wordChar = () => BOUNDARY_CLASSES[boundaryMode];
+
+/**
+ * The whole-word assertions: the neighbour is not a word character, OR it is a doubled hyphen.
+ *
+ * A DOUBLED HYPHEN IS ALWAYS A BOUNDARY. `normalizeOrthography` folds an em dash to `--` so that
+ * `wait--no` matches `wait—no`; strict counts `-` as inside a word so that `Sara-shaped` does not match
+ * `Sara`. Both are right alone and their product was not: an ordinary em dash read as word-internal, so
+ * `Sara— catch` and `Hey—Sara` stopped matching `Sara` — four of the seven spacings prose uses. A single
+ * hyphen joins a compound; `--` is the ASCII spelling of the dash the fold just rewrote, and is never
+ * inside a word. Permissive has no hyphen in its class, so the second branch is dead there and costs it
+ * nothing.
+ *
+ * ZERO-WIDTH, not a consumed character class: the pattern runs under `g` to COUNT occurrences and
+ * keyExcerpt reads the match offsets, so eating a boundary character would both hide the next adjacent
+ * match and mis-highlight the span.
+ */
+export const boundaryBefore = () => `(?:(?<!${wordChar()})|(?<=--))`;
+export const boundaryAfter = () => `(?:(?!${wordChar()})|(?=--))`;
 
 /**
  * Scripts written without word separators, in the order a key is tested against them. Kana first, so
@@ -450,7 +471,7 @@ export function countKey(key, text, caseSensitive, wholeWords, scope) {
             // unlike \b, still matches keys that start or end with punctuation ("+5", "v2"
             // in "v2s" would not, but "v2" alone does). Lookaround keeps it non-consuming
             // so adjacent occurrences are all counted. wordChar() rather than \w: see above.
-            const regex = new RegExp(`(?<!${wordChar()})${escapeRegex(needle)}(?!${wordChar()})`, 'gu');
+            const regex = new RegExp(`${boundaryBefore()}${escapeRegex(needle)}${boundaryAfter()}`, 'gu');
             return (hay.match(regex) ?? []).length;
         } catch {
             return 0;
@@ -611,7 +632,7 @@ export function keyExcerpts(key, text, caseSensitive, wholeWords, context = 28, 
         if (!needle) continue;
         if (wholeWords) {
             try {
-                const re = new RegExp(`(?<!${wordChar()})${escapeRegex(needle)}(?!${wordChar()})`, 'gu');
+                const re = new RegExp(`${boundaryBefore()}${escapeRegex(needle)}${boundaryAfter()}`, 'gu');
                 for (let m = re.exec(hay); m; m = re.exec(hay)) {
                     if (!m[0]) { re.lastIndex += 1; continue; }
                     if (push(segment, m.index, m[0].length)) return out;
@@ -655,15 +676,50 @@ const fatalKey = (key, except) => validateSmartKey(key).some(f => f.severity ===
  *  rather than silently killing the entry (`? (apollo` used to make every scan of it fail).
  *
  *  `negation-only` IS TOLERATED HERE, and only here. It is fatal for a primary because such a key fires
- *  on absence alone; a secondary never fires — the primary gates activation, so it can only narrow what
- *  the primary already matched. `astronaut` with `["cosmonaut", "? -gagarin"]` under AND_ALL reads "both
- *  crews, but not the Gagarin entry's territory" — an exclusion an author reaches for whenever two
- *  entries cover overlapping ground, and one core cannot express at all.
+ *  on absence alone; a secondary never fires, since the primary gates activation. `astronaut` with
+ *  `["cosmonaut", "? -gagarin"]` under AND_ALL reads "both crews, but not the Gagarin entry's territory"
+ *  — an exclusion an author reaches for whenever two entries cover overlapping ground, and one core
+ *  cannot express at all.
+ *
+ *  WHAT SUCH A KEY DOES DEPENDS ON THE OPERATOR, and AND_ALL is the only one it does the above under.
+ *  so the tolerance does too — AND_ANY is excluded from it, on the ground that made the key fatal as
+ *  a primary. A negation is satisfied by ABSENCE, and AND_ANY ORs its secondaries: the branch is open
+ *  on nearly any text, so the gate stops gating and the key has negated the purpose of writing a gate,
+ *  exactly as a negation-only primary negates the purpose of writing a keyword. No author intent
+ *  survives the test — an entry meant to match everything is a Constant entry, which is a field, not
+ *  a key.
+ *
+ *  The NOT_* pair keeps the tolerance. There the operator's own negation cancels the key's, so it
+ *  reads as a REQUIREMENT — `["b", "c", "? -d"]` is `? a && (-b || -c || d)` under NOT_ALL and
+ *  `? a && -b && -c && d` under NOT_ANY — and both are conditions an author can mean and core cannot
+ *  write. Surprising to read, which is the Studio's job to flag at the moment the operator changes,
+ *  not a reason to drop the key.
+ *
+ *  Dropping under AND_ANY LOOSENS, as every drop here does: the surviving secondaries gate alone, and
+ *  an entry whose whole list was negations is ungated rather than impossible. That is the direction
+ *  the key was already pushing — its branch was open — so nothing that used to fire stops.
+ *
+ *  `selective: false` MEANS "ignore this list", and core reads it — `entry.selective && ...`
+ *  (world-info.js). The comment there, "all entries are selective now", is about the field DEFAULTING
+ *  to true, not about it going unread. CCv2 is where the switch is specified: `secondary_keys` is
+ *  "ignored if selective == false", which is the off position ST's own editor has no control for.
+ *  Only a character-embedded book reaches the combination — `convertCharacterBook` writes
+ *  `keysecondary: entry.secondary_keys || []` beside `selective: entry.selective || false`, and
+ *  `addMissingWorldInfoFields` fills only ABSENT fields, so that false survives the save and every
+ *  later load. Without this WA gated an entry core ungates, and no lorebook on disk shows the
+ *  difference; the card does.
+ *
+ *  The test is `=== false` so a missing field keeps core's `default: true`, and so the Studio's write
+ *  gate can go on probing without one — it passes the entry's LOGIC, which the negation rule needs,
+ *  and deliberately not its `selective`, which asks a different question.
  *
  *  Keys are NOT `substituteParams`-expanded — that is ST-side, and primary keys are treated the same. */
-export const secondaryKeys = entry =>
-    (Array.isArray(entry?.keysecondary) ? entry.keysecondary : [])
-        .filter(k => String(k ?? '').trim() && !fatalKey(k, 'negation-only'));
+export const secondaryKeys = (entry) => {
+    if (entry?.selective === false) return [];
+    const except = (entry?.selectiveLogic ?? WI_LOGIC.AND_ANY) === WI_LOGIC.AND_ANY ? undefined : 'negation-only';
+    return (Array.isArray(entry?.keysecondary) ? entry.keysecondary : [])
+        .filter(k => String(k ?? '').trim() && !fatalKey(k, except));
+};
 
 /**
  * One primary key's occurrences under the entry's selective logic — countKey, with core's
@@ -686,11 +742,47 @@ export const secondaryKeys = entry =>
  */
 const SELECTIVE_SEP = '\u001f';
 export function countSelective(entry, key, text, caseSensitive, wholeWords, sec = secondaryKeys(entry)) {
+    const { matched, scoreBoost } = selectiveEval(entry, key, text, caseSensitive, wholeWords, sec);
+    return matched ? (scoreBoost > 0 ? scoreBoost : 1) : 0;
+}
+
+/** countSelective's evaluation, undivided — countKey's caller wants the scalar, keywordScore wants
+ *  the units, and building the tree twice would be two cache entries for one expression. */
+function selectiveEval(entry, key, text, caseSensitive, wholeWords, sec) {
     const logic = entry?.selectiveLogic ?? WI_LOGIC.AND_ANY;
     const id = [key, logic, caseSensitive ? 1 : 0, wholeWords ? 1 : 0, ...sec].join(SELECTIVE_SEP);
-    const { matched, scoreBoost } = evaluateAst(
-        id, () => synthesizeSecondary(key, sec, logic, { caseSensitive, wholeWords }), text);
-    return matched ? (scoreBoost > 0 ? scoreBoost : 1) : 0;
+    return evaluateAst(id, () => synthesizeSecondary(key, sec, logic, { caseSensitive, wholeWords }), text);
+}
+
+/**
+ * One key's SCORING UNITS against one segment (smartkeys.mjs `evaluate` for the shape of a unit).
+ *
+ * A plain or regex key is one unit by construction: the key itself, seen n times. Only a SmartKey has
+ * internal structure, and only there can a key be several units (AND) or several spellings of one
+ * (OR). So this is where the two kinds stop being the same question, and everything below is the
+ * SmartKey case — which is also why plain keys score identically to before the split.
+ *
+ * The `id` is what pools a unit across segments, so it must be stable across them: AST nodes are
+ * interned per (cache id, scope) and the key string is a constant, so both are.
+ *
+ * A MATCHED EXPRESSION WITH NO UNITS still counts as one. That is countKey's negation-only floor
+ * (`? -apollo` accumulates no weight and must not read as absent), kept identical here rather than
+ * re-derived — the two would disagree about whether such a key scored at all.
+ */
+function keyUnits(entry, key, text, caseSensitive, wholeWords, sec) {
+    const raw = String(key ?? '').trim();
+    if (!raw || !text) return [];
+
+    if (sec?.length || raw.startsWith('?')) {
+        const { matched, units } = sec?.length
+            ? selectiveEval(entry, raw, text, caseSensitive, wholeWords, sec)
+            : evaluateSmartKey(raw, text);
+        if (!matched) return [];
+        return units.length ? units : [{ id: raw, wsum: 1, n: 1 }];
+    }
+
+    const n = countKey(raw, text, caseSensitive, wholeWords);
+    return n > 0 ? [{ id: raw, wsum: n, n }] : [];
 }
 
 /**
@@ -701,7 +793,33 @@ export function countSelective(entry, key, text, caseSensitive, wholeWords, sec 
  * @param {string[]} [keys]
  * @returns {{score: number, hits: Array<{key: string, count: number}>}}
  */
-export function keywordScore(entry, text, keys = entry.key, { k1, caseSensitiveDefault, wholeWordsDefault } = {}) {
+/**
+ * Occurrences -> a key's contribution. `bm25` is what has always shipped: `count/(count+k1)`, the BM25
+ * tf term, bounded by 1 and approached from below — so a key present once scores 1/(1+k1) (0.455 at the
+ * shipped k1) and the gap between present-once and present-often is as large as the gap between absent
+ * and present.
+ *
+ * The other two split those apart: PRESENCE is categorical and worth the key's full weight, and only the
+ * n-1 REPEATS accrue. `presence` bounds what repeats can add at R (so R=1 caps a key at 2x, R=2 at 3x);
+ * `presence-log` never bounds it, which is the only shape that still separates 20 mentions from 200.
+ *
+ * WHY BOUNDED IS THE DEFAULT and unbounded is the arm: keywordScore has no IDF. Core BM25 bounds tf
+ * because the per-term IDF factor is what stops a common term dominating; nothing here does that job, so
+ * the bound is load-bearing rather than principled. An unbounded curve wants a df discount on keys first.
+ *
+ * @param {number} n Occurrences (weight x count, as evaluate accumulates it)
+ * @param {number} k1 Saturation rate — how fast repeats accrue, never how far they go
+ * @param {'bm25'|'presence'|'presence-log'} curve
+ * @param {number} R What repeats may add, as a multiple of presence
+ */
+export function repeatCurveOf(n, k1, curve = 'presence-log', R = 1) {
+    if (!(n > 0)) return 0;
+    if (curve === 'presence') return 1 + R * (n - 1) / ((n - 1) + k1);
+    if (curve === 'presence-log') return 1 + R * Math.log(1 + (n - 1) / k1);
+    return n / (n + k1);
+}
+
+export function keywordScore(entry, text, keys = entry.key, { k1, caseSensitiveDefault, wholeWordsDefault, repeatCurve = 'presence-log', repeatR = 1 } = {}) {
     if (!Array.isArray(keys) || !keys.length) {
         return { score: 0, hits: [] };
     }
@@ -738,7 +856,9 @@ export function keywordScore(entry, text, keys = entry.key, { k1, caseSensitiveD
 
     let score = 0;
     const hits = [];
-    const counts = new Map();
+    // key -> (unit id -> pooled unit). Two levels because a key reports ONE hit count to the debug
+    // column and the audit, while its score is the sum over however many units it turned out to be.
+    const byKey = new Map();
 
     for (const segment of segments) {
         if (!segment) continue;
@@ -758,23 +878,49 @@ export function keywordScore(entry, text, keys = entry.key, { k1, caseSensitiveD
         // The gate is INSIDE countSelective's expression rather than a separate pass over the segment,
         // so "did this key match" stays one question with one evaluator (see there).
         for (const key of keys) {
-            const n = sec.length
-                ? countSelective(entry, key, segment, caseSensitive, wholeWords, sec)
-                : countKey(key, segment, caseSensitive, wholeWords);
-            if (n > 0) counts.set(key, (counts.get(key) ?? 0) + n);
+            const units = keyUnits(entry, key, segment, caseSensitive, wholeWords, sec);
+            if (!units.length) continue;
+            let pooled = byKey.get(key);
+            if (!pooled) byKey.set(key, pooled = new Map());
+            for (const u of units) {
+                const prev = pooled.get(u.id);
+                if (prev) { prev.wsum += u.wsum; prev.n += u.n; }
+                else pooled.set(u.id, { wsum: u.wsum, n: u.n });
+            }
         }
     }
 
-    // Occurrences SUM across gate-passing segments and saturate once, rather than saturating per
-    // segment: a key is as repeated as the window says it is, and k1 is calibrated against a whole
-    // window's counts. At `scan` this is arithmetically identical to the pre-setting code.
-    for (const [key, count] of counts) {
-        score += count / (count + k1);
-        hits.push({ key, count });
+    // Occurrences SUM across gate-passing segments and saturate once PER UNIT, rather than per segment
+    // or per key: a unit is as repeated as the whole window says it is, and k1 is calibrated against a
+    // whole window's counts. For a plain key — one unit — this is arithmetically identical to every
+    // version before units existed.
+    //
+    // A UNIT'S WEIGHT IS ITS MEAN, `wsum/n`, and it multiplies the curve rather than feeding it. That
+    // is the difference between `::2` meaning "twice as important" and meaning "as if seen twice":
+    // inside the curve a doubling survives as 1.38x, outside it survives as 2x, which is what the
+    // author wrote. Repetition still saturates; the author's weight does not.
+    // TWO NUMBERS PER KEY, because they answer different questions and one field cannot.
+    //
+    //   count — how many times this key's terms actually appeared. A COUNT, so `×3` in the debug
+    //           column and the WI panel means the text said it three times and nothing else.
+    //   score — what the key contributed to the entry. Weights and saturation live here.
+    //
+    // Σ weighted occurrences, which used to be reported as `count`, is neither: it reads as repetition
+    // while carrying weight and expression size, so `? fire::3` on ONE mention displayed the same `×3`
+    // as `fire` on three, and a grading row recorded a score under a count's name.
+    for (const [key, pooled] of byKey) {
+        let count = 0, keyScore = 0;
+        for (const u of pooled.values()) {
+            keyScore += (u.wsum / u.n) * repeatCurveOf(u.n, k1, repeatCurve, repeatR);
+            count += u.n;
+        }
+        score += keyScore;
+        hits.push({ key, count, score: keyScore });
     }
 
-    // Most-repeated key first, so the debug column leads with the strongest evidence.
-    hits.sort((a, b) => b.count - a.count);
+    // Strongest evidence first, which is the SCORE — the debug column exists to say which key earned
+    // the entry its place, and a raw count cannot answer that once weights exist.
+    hits.sort((a, b) => b.score - a.score);
     return { score, hits };
 }
 

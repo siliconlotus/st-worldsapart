@@ -230,11 +230,45 @@ export const defaultSettings = {
      */
     wordBoundary: 'strict',
     /**
-     * BM25 term-frequency saturation, for both the key scorer and the plugin's
-     * text scorer. Roughly: how many distinct matching terms one heavily-repeated
-     * term is worth. Higher = repetition counts for more.
+     * BM25 term-frequency saturation, for the key scorer (matcher.mjs) and the CONTENT text scorer
+     * (content-lexical.mjs, in the browser). Roughly: how many distinct matching terms one
+     * heavily-repeated term is worth. Higher = repetition counts for more.
+     *
+     * NOT the plugin: stage 1 is cosine-only since the admission gate was cut, and server.js ignores
+     * this field if a client sends it. lexical.mjs moved out of plugin/ with that cut.
+     *
+     * For the key scorer this is the RATE only; repeatCurve below is the shape.
      */
     bm25K1: 1.2,
+    /**
+     * OCCURRENCES -> a key's contribution (matcher.mjs repeatCurveOf). k1 above is the RATE repeats
+     * accrue at; this is the SHAPE, and the two used to be one knob that could not express both.
+     *
+     * 'bm25' is the classic tf term, `count/(count+k1)`: bounded by 1, so a key present once scores
+     * 0.455 and everything above n~20 is compressed into the top 4% of the range. 'presence-log'
+     * makes presence categorical — a matched key is worth its full weight — and lets only the n-1
+     * repeats accrue, unbounded and ever more slowly.
+     *
+     * MEASURED, why the default moved. Two books' graded scenes, raw keyword scores over the real
+     * scan windows. Foxbridge tops out at n=10 and the curves barely differ. Sommers and Time Whore
+     * run to n=90, which is where 'bm25' has nothing left to say: across n=21..89 — a 4.2x difference
+     * in evidence — it moves 0.041, so `cock` at 21 and `Arthur` at 89 score 0.946 and 0.987. Under
+     * 'presence-log' they are 3.872 and 5.309. Those counts are not noise to be discounted: across 14
+     * sommers scenes NO key fires in all of them at n>=5, and `Arthur` is absent from nine scenes and
+     * dominant in one, so the compressed range was the book's sharpest signal about which scene it is.
+     *
+     * NO FREQUENCY DISCOUNT accompanies this, deliberately. A ubiquitous key is an author declaration
+     * (keyword-core.mjs already exempts sticky and constant entries from the too-common flags on that
+     * ground), a badly chosen one is reported by the audit where the author can act on it, and an
+     * entry whose key fires broadly but whose content does not fit still ranks low on the other two
+     * fused signals. Discounting here would be that same judgement taken a second time, silently.
+     *
+     * ACTIVATION IS UNAFFECTED: stage 2 counts hits, never the score (matcher.mjs), so this moves
+     * ranking only and can never admit or refuse an entry.
+     */
+    repeatCurve: 'presence-log',
+    /** What repeats may add, as a multiple of presence. Rate is bm25K1; this is reach. */
+    repeatR: 1,
     /**
      * BM25 length normalisation, 0..1. At 1 a long chunk must work proportionally
      * harder to score; at 0 length is ignored entirely. Text scorer only.
@@ -384,7 +418,7 @@ export const defaultSettings = {
  */
 const INTERNAL_KEYS = [
     'meanCentered', 'entityFilter', 'properNounBoost', 'stopwordDocFreq',
-    'bm25K1', 'bm25B', 'rrfK', 'scoreVectorKeys', 'keywordScoring',
+    'bm25K1', 'bm25B', 'repeatCurve', 'repeatR', 'rrfK', 'scoreVectorKeys', 'keywordScoring',
     'chunkSize', 'chunkMode', 'minChunkSize',
     // Withdrawn with the query summarizer. queryMode in particular MUST be reset rather than
     // merely un-surfaced: anyone who had it on 'summary' would otherwise keep paying an LLM call

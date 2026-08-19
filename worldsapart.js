@@ -544,7 +544,7 @@ async function scoreEntriesUnsafe(searchText) {
      *
      * SCOPED BY COLLECTION, because a score only means something inside the corpus it was computed in. A
      * collection is one book: the plugin centers each one on its own centroid and derives its own BM25 IDF
-     * (plugin/vector.mjs, plugin/lexical.mjs), so two books sharing a paragraph score it differently and
+     * (plugin/vector.mjs, extension/lexical.mjs), so two books sharing a paragraph score it differently and
      * neither number transfers. Keyed by hash alone, a row scored in Foxbridge also credited the Sommers
      * entry holding the same text, and the max-pooling below handed each of them whichever book flattered
      * the chunk more — which defeats IDF exactly where it does its job: a phrase that is boilerplate in a
@@ -1215,6 +1215,8 @@ const withMatchSources = (chatWindow, entry, sources) =>
 // for fusion — all from settings.
 const keywordScore = (entry, text, keys = entry.key) => matcher.keywordScore(entry, text, keys, {
     k1: settings().bm25K1,
+    repeatCurve: settings().repeatCurve,
+    repeatR: settings().repeatR,
     caseSensitiveDefault: world_info_case_sensitive,
     wholeWordsDefault: world_info_match_whole_words,
 });
@@ -1572,7 +1574,7 @@ async function rankActivated(args) {
                     // the judgement being made. `excerpt` is contexts[0] rather than a second call, so
                     // the displayed line and the hover can never disagree.
                     const contexts = matcher.keyExcerpts(h.key, scanText, item.entry.caseSensitive, item.entry.matchWholeWords);
-                    return { key: h.key, count: h.count, excerpt: contexts[0] ?? null, contexts };
+                    return { key: h.key, count: h.count, score: h.score, excerpt: contexts[0] ?? null, contexts };
                 })
                 : undefined;
             // Declared for fuseRanks' eligibility normalisation: having keys to score is the chance to
@@ -1978,7 +1980,7 @@ function paramSnapshot() {
     const snap = {
         // keywordWeight is logged even when null, because null is a real value here ("follow lexicalWeight")
         // and its absence would read as an older capture rather than as a deliberate setting.
-        scoring: { rrfK: s.rrfK, lexicalWeight: s.lexicalWeight, keywordWeight: s.keywordWeight ?? null, weightByOrder: s.weightByOrder, bm25K1: s.bm25K1, bm25B: s.bm25B },
+        scoring: { rrfK: s.rrfK, lexicalWeight: s.lexicalWeight, keywordWeight: s.keywordWeight ?? null, weightByOrder: s.weightByOrder, bm25K1: s.bm25K1, bm25B: s.bm25B, repeatCurve: s.repeatCurve, repeatR: s.repeatR },
         // The entity filter only runs on raw-message queries — a summary is already
         // salience-selected — so in summary mode its params are inert and omitted.
         matchText: {

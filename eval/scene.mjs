@@ -168,6 +168,11 @@ export const sceneParams = (S, overrides = {}) => ({
     // or apostrophe, but `_` a word character), so it cannot reproduce byte-identically; it is read
     // at the shipped default, which is what its numbers mean today.
     wordBoundary: 'strict',
+    // Occurrences -> score (matcher.mjs repeatCurveOf). 'bm25' here, NOT the shipped 'presence-log',
+    // for the reason uncenteredGate is 0 above: every sample captured before the setting existed must
+    // reproduce byte-identically, and those all ran under bm25. New captures record their own curve in
+    // captureParams, which is spread over these defaults, so this fallback only ever reaches old ones.
+    repeatCurve: 'bm25', repeatR: 1,
     // Wrong-book failsafe (see state.mjs uncenteredGate). 0 here, NOT the shipped 0.5: every sample captured
     // before the gate existed must reproduce byte-identically, and a gate arm overrides this explicitly.
     uncenteredGate: 0,
@@ -479,7 +484,7 @@ export const scoringKeys = (e, P) => {
  *  a mode set at build time would be whichever arm was constructed last. */
 export const makeKeywordScore = P => (e, text, k1) => {
     matcher.setBoundaryMode(P.wordBoundary);
-    return matcher.keywordScore(e, text, scoringKeys(e, P), { k1, caseSensitiveDefault: P.caseSensitive, wholeWordsDefault: P.wholeWords }).score;
+    return matcher.keywordScore(e, text, scoringKeys(e, P), { k1, caseSensitiveDefault: P.caseSensitive, wholeWordsDefault: P.wholeWords, repeatCurve: P.repeatCurve, repeatR: P.repeatR }).score;
 };
 
 /**

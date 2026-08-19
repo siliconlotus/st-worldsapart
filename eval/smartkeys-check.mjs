@@ -1,6 +1,6 @@
 // Verifies the SmartKeys boolean-query engine against the spec's acceptance table,
 // plus the lexer edge cases the spec calls out (internal hyphens, weights, flags).
-import { countKey, keywordScore, setBoundaryMode, isRegexKey } from '../extension/matcher.mjs';
+import { countKey, keywordScore, repeatCurveOf, setBoundaryMode, isRegexKey } from '../extension/matcher.mjs';
 import { tokenize, parse, evaluate, buildAutomaton, scanAutomaton, validateSmartKey, fold, resetSmartKeys } from '../extension/smartkeys.mjs';
 import { buildKeyPruneScan } from '../extension/keyword-core.mjs';
 import { eq } from './metrics.mjs';
@@ -170,7 +170,11 @@ eq(matches('? hers she', 'the ushers she saw'), true, 'unflagged substring terms
     const entry = { key: ['cat', 'Jubilee', 'hot tub', 'nope'] };
     const { score, hits: h } = keywordScore(entry, text, entry.key, { k1: 2, caseSensitiveDefault: false, wholeWordsDefault: false });
     eq(h.map(x => `${x.key}:${x.count}`).join(' '), 'cat:3 Jubilee:1 hot tub:1', 'primed counts equal naive substring counts');
-    eq(score.toFixed(3), (3 / 5 + 1 / 3 + 1 / 3).toFixed(3), 'BM25 saturation unchanged by the fast path');
+    // The claim is that the automaton's counts reach the scorer unchanged, so the expectation is built
+    // from those counts through the shared curve rather than from an inlined formula — otherwise this
+    // fails whenever the curve moves, reporting a scoring change as an Aho-Corasick fault.
+    eq(score.toFixed(3), (repeatCurveOf(3, 2) + repeatCurveOf(1, 2) + repeatCurveOf(1, 2)).toFixed(3),
+        'saturation unchanged by the fast path');
     // Same primed text, flagged variants must fall through to the exact walk.
     eq(countKey('cat', text, false, true), 1, 'primed candidate, whole-word verify: standalone "cat" only');
     eq(countKey('jubilee', text, true, false), 0, 'primed candidate, case-sensitive verify rejects');

@@ -43,6 +43,15 @@ const samples = argv.filter(a => a.endsWith('.json') && !a.startsWith('--'));
 const ARMS = {
     'K1=1.2': { K1: 1.2 }, 'K1=2': { K1: 2 }, 'K1=3': { K1: 3 },
     'B=0.6': { B: 0.6 }, 'B=0.9': { B: 0.9 },
+    // OCCURRENCES -> SCORE. The shipped curve gives a key present once 1/(1+k1); these make presence worth
+    // the key's full weight and let only repeats accrue, bounded at R (presence) or never (presence-log).
+    // R and k1 are independent: k1 is how fast repeats accrue, R is how far they can go.
+    'repeat=presence': { repeatCurve: 'presence', repeatR: 1 },
+    'repeat=presence-R2': { repeatCurve: 'presence', repeatR: 2 },
+    'repeat=presence-R3': { repeatCurve: 'presence', repeatR: 3 },
+    'repeat=log': { repeatCurve: 'presence-log', repeatR: 1 },
+    'repeat=log-R0.5': { repeatCurve: 'presence-log', repeatR: 0.5 },
+    'repeat=log-R2': { repeatCurve: 'presence-log', repeatR: 2 },
     'LEXW=0.5': { LEXW: 0.5 }, 'LEXW=1': { LEXW: 1 }, 'LEXW=2': { LEXW: 2 }, 'LEXW=3': { LEXW: 3 },
     // KEYS WEIGHT, now separable from text. null mirrors LEXW, which is what every capture before the split
     // used; a number overrides it. The per-scene optima that motivated the split were (text 0.5, keys 3),

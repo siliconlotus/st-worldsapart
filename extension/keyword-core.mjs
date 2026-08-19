@@ -336,6 +336,10 @@ export function buildKeyPruneScan(data, opts, ignoreSet, { caseSensitiveDefault 
      *  matcher.mjs rule — `negation-only` is legitimate on a secondary and fatal on a primary, and
      *  re-deriving that is how the two would drift. */
     const unusableKeysOf = (e) => {
+        // `selective: false` switches the whole list off by DECLARATION — CCv2's own "ignored if
+        // selective == false". Nothing here is malformed, so the set difference would report every
+        // key with no validator finding behind it, and paint the entry red for doing as it was told.
+        if (e?.selective === false) return [];
         const live = new Set(secondaryKeys(e));
         return (Array.isArray(e?.keysecondary) ? e.keysecondary : [])
             .filter(k => String(k ?? '').trim() && !live.has(k))

@@ -1,7 +1,7 @@
 // matchWindow — the unit a key has to match within. Three properties carry the whole feature:
 // `scan` is byte-for-byte the pre-setting behaviour, narrower settings stop cross-segment
 // conjunctions (both signs), and segmentation never merges texts that were separate.
-import { scanWindow, scanSegments, segment, keywordScore } from '../extension/matcher.mjs';
+import { keywordScore, repeatCurveOf, scanSegments, scanWindow, segment } from '../extension/matcher.mjs';
 import { eq } from './metrics.mjs';
 
 const cfg = { k1: 1.2, caseSensitiveDefault: false, wholeWordsDefault: false };
@@ -52,7 +52,11 @@ const win = m => scanSegments(chat, { depth: 10, matchWindow: m });
     const e = { key: ['fire'] };
     const three = ['fire', 'fire', 'fire'];
     eq(keywordScore(e, three, e.key, cfg).hits[0].count, 3, 'occurrences accumulate across segments');
-    eq(keywordScore(e, three, e.key, cfg).score, 3 / (3 + 1.2), '...and saturate once, not three times');
+    // Against repeatCurveOf, not an inlined formula: the claim here is about the COUNT reaching the
+    // curve as 3, which is a fact about segmentation and holds under any curve. The second assertion
+    // is what makes it a test — one saturation of 3 is strictly less than three saturations of 1.
+    eq(keywordScore(e, three, e.key, cfg).score, repeatCurveOf(3, 1.2), '...and the curve sees a count of 3');
+    eq(keywordScore(e, three, e.key, cfg).score < 3 * repeatCurveOf(1, 1.2), true, '...saturating once, not three times');
 }
 
 // Segmentation never MERGES separate texts, and re-segmenting is idempotent — the property that lets

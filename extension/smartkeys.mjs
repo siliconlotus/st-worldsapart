@@ -31,7 +31,7 @@
 // Isomorphic like ranking.mjs: no DOM, no ST imports. Entry point is evaluateSmartKey();
 // countKey() in ranking.mjs routes `?` keys here.
 
-import { escapeRegex, isRegexKey, wordChar, foldedHay, countRegexKey, REGEX_KEY_RE, coreReadsAsRegex } from './matcher.mjs';
+import { coreReadsAsRegex, countRegexKey, escapeRegex, foldedHay, isRegexKey, REGEX_KEY_RE, boundaryAfter, boundaryBefore, wordChar } from './matcher.mjs';
 // The literal matcher and its text fold live under plugin/ so the server can use them too — one copy, or
 // the browser and the server would silently disagree about what a key matches. Re-exported because
 // ranking.mjs, keyword-tools.mjs and studio.mjs all import them from here.
@@ -431,24 +431,10 @@ export function validateSmartKey(raw) {
 const SCAN_CACHE_MAX = 8;
 
 /**
- * Sets every weight in a subtree to 0 — the `::0` of the synthesis below, applied structurally
- * because a spliced `?` subtree carries the author's own weights and they must not reach the score.
- * Mutates, so callers hand it a freshly parsed tree and never a cached one.
- */
-const zeroWeights = node => {
-    if (!node) return node;
-    if (node.type === 'TERM' || node.type === 'REGEX') node.weight = 0;
-    else if (node.type === 'NOT') zeroWeights(node.operand);
-    else { zeroWeights(node.left); zeroWeights(node.right); }
-    return node;
-};
-
-/**
  * One key as one node, by the same three-way split countKey makes — so the synthesis inherits
  * "entry flags reach plain keys only" rather than restating it.
  *
- *   `? …`      parses and splices in as a SUBTREE, carrying its own per-term flags. Freshly parsed
- *              rather than pulled from the AST cache, because zeroWeights mutates it.
+ *   `? …`      parses and splices in as a SUBTREE, carrying its own per-term flags and weights.
  *   `/re/`     a REGEX node, which carries its own case sensitivity in its flags.
  *   anything   a TERM carrying the ENTRY's flags. No escaping and no quoting: a node holds arbitrary
  *              text verbatim, which is why a key containing a double quote needs no escape here.
@@ -479,8 +465,17 @@ const keyNode = (raw, { caseSensitive = false, wholeWords = false } = {}, weight
  * double quote had no escape in the grammar, and a `?` or `/re/` key could not survive being quoted
  * as a term. A node carries its value verbatim and nothing lexes it.
  *
- * SECONDARY NODES CARRY WEIGHT 0, which is what makes this score-neutral: evaluate's AND and OR both
- * sum, so a gate contributing anything would inflate the primary's count. NOT already returns 0.
+ * SECONDARY NODES CARRY WEIGHT 1, like any other term, so this converts the two-list form into the
+ * expression an author would have written by hand and the two score alike. They used to be zeroed,
+ * on the reasoning that a gate contributing anything would inflate the primary's count — true while
+ * AND and OR summed into ONE count, and dissolved by scoring units: a secondary is now its own unit
+ * and inflates nothing. What was left was a policy that the same logic scored differently depending
+ * on which of WA's two syntaxes wrote it, which is the disagreement synthesizeSecondary exists to
+ * prevent.
+ *
+ * THE NOT LOGICS ARE UNAFFECTED either way, which is why the zeroing looked more principled than it
+ * was: NOT yields no unit whatever its operand weighs, so the weight only ever reached AND_ANY and
+ * AND_ALL — where the secondary is a positive term the author required, not a condition.
  *
  * A non-blank secondary that parses to nothing stays in the list as a null child rather than being
  * dropped — evaluate reads null as "did not match", which is core's answer for a key that cannot
@@ -499,7 +494,7 @@ export function synthesizeSecondary(primary, secondaries, logic = 0, flags = {})
     const sec = [];
     for (const k of Array.isArray(secondaries) ? secondaries : []) {
         if (!String(k ?? '').trim()) continue;   // blanks are dropped before the logic, as core does
-        sec.push(zeroWeights(keyNode(k, flags, 0)));
+        sec.push(keyNode(k, flags, 1));
     }
     if (!sec.length) return p;                   // no secondaries: the condition is vacuously true
 
@@ -583,8 +578,40 @@ function ensureScan(scope, text) {
  * @param {Map<number, number>} [acHits] Pass-1 counts for this text; omitted = pure regex path.
  * @returns {{matched: boolean, scoreBoost: number}}
  */
+/**
+ * A SCORING UNIT: one thing the expression is about, with the occurrences it was seen by and the
+ * weight those occurrences carried. `n` is a count and `wsum` is weight x count, so the unit's mean
+ * weight is `wsum/n` — which is how a mixed group (`? (everest OR kailash::2)`) reports 2 when only
+ * the weighted alternative fired and 1 when only the plain one did.
+ *
+ * WHY UNITS AND NOT ONE NUMBER. Saturation has to be applied per unit, and a single accumulated
+ * count cannot say how many units it came from: `? moon AND rocket` and `? moon` on a text holding
+ * both reach 2 and 1 the old way, so the STRICTER expression scored higher. AND joins distinct
+ * things, so its operands are separate units and their scores add; OR names one thing several ways,
+ * so its operands POOL into one unit and their occurrences share a single saturation. Everything
+ * else in the tree is a condition, not a thing, and yields no unit.
+ *
+ * `id` is the AST node heading the unit. Nodes are interned per (cache id, scope), so the same unit
+ * is the same object across every segment of a window — which is what lets keywordScore pool a
+ * unit's occurrences across segments and saturate it once, as it always has for a plain key.
+ *
+ * WEIGHT 0 YIELDS NO UNIT. That is the whole meaning of a zero weight: a condition, never evidence.
+ * `? a AND b::0` is how an author says it by hand. Excluded from the unit entirely rather than
+ * averaged in at 0, or a zero-weight member of an OR group would drag its mean down and quietly
+ * discount the term the author did mean.
+ */
+const unit = (id, wsum, n) => (wsum > 0 && n > 0 ? [{ id, wsum, n }] : []);
+/** Pool units into one — OR's rule: the same thing, spelled more than one way. */
+const pool = (id, units) => (units.length
+    ? unit(id, units.reduce((a, u) => a + u.wsum, 0), units.reduce((a, u) => a + u.n, 0))
+    : []);
+/** Σ weighted occurrences — EXACTLY the scalar evaluate returned before units existed, under every
+ *  operator (AND concatenates and OR pools, and both sum the same wsums). Kept so countKey's contract
+ *  and every caller reading a count are untouched by the unit split. */
+const boostOf = units => units.reduce((a, u) => a + u.wsum, 0);
+
 export function evaluate(node, text, acHits) {
-    if (!node) return { matched: false, scoreBoost: 0 };
+    if (!node) return { matched: false, scoreBoost: 0, units: [] };
     switch (node.type) {
         // A TERM's contribution is weight x OCCURRENCES, not weight alone. Scoring on presence made a
         // SmartKey blind to recurrence: "? (glasses | spectacles)" returned the same number whether the
@@ -596,9 +623,9 @@ export function evaluate(node, text, acHits) {
             if (acHits && node.acIndex !== undefined) {
                 // Candidate filter: no folded-substring hit means no match under any flags.
                 const n = acHits.get(node.acIndex);
-                if (!n) return { matched: false, scoreBoost: 0 };
+                if (!n) return { matched: false, scoreBoost: 0, units: [] };
                 // Unflagged term = case-insensitive substring, which is exactly what Pass 1 proved.
-                if (!node.isExact && !node.isCaseSensitive) return { matched: true, scoreBoost: node.weight * n };
+                if (!node.isExact && !node.isCaseSensitive) return { matched: true, scoreBoost: node.weight * n, units: unit(node, node.weight * n, n) };
             }
             // Fold BOTH sides, exactly as countKey's naive walk does. Pass 1 proved the term present in
             // FOLDED text, so verifying the flags against raw text asks a different question than the
@@ -610,11 +637,11 @@ export function evaluate(node, text, acHits) {
             // Same lookaround boundary as countKey's whole-word path — \b would make punctuation-edged
             // terms like =c++ unmatchable. Shares wordChar() with countKey rather than restating it:
             // two boundary definitions is two matchers, which is exactly what CLAUDE.md forbids.
-            if (node.isExact) pattern = `(?<!${wordChar()})${pattern}(?!${wordChar()})`;
+            if (node.isExact) pattern = `${boundaryBefore()}${pattern}${boundaryAfter()}`;
             // Counted, not tested: same walk of the text either way, and a flagged term has as much
             // right to recurrence as an unflagged one.
             const n = (hay.match(new RegExp(pattern, 'gu')) ?? []).length;
-            return { matched: n > 0, scoreBoost: node.weight * n };
+            return { matched: n > 0, scoreBoost: node.weight * n, units: unit(node, node.weight * n, n) };
         }
         // Structurally a TERM that never uses the candidate filter. It shares countRegexKey with
         // countKey, so "countKey is the only matcher" holds across the regex path too — and, like a
@@ -623,34 +650,48 @@ export function evaluate(node, text, acHits) {
         // insensitivity is written.
         case 'REGEX': {
             const n = countRegexKey(node.value, text);
-            return { matched: n > 0, scoreBoost: node.weight * n };
+            return { matched: n > 0, scoreBoost: node.weight * n, units: unit(node, node.weight * n, n) };
         }
+        // A negation is a CONDITION: it narrows what matched and is never itself a thing the text is
+        // about, so it yields no unit and no boost however its operand scored.
         case 'NOT': {
             const r = evaluate(node.operand, text, acHits);
-            return { matched: !r.matched, scoreBoost: 0 };
+            return { matched: !r.matched, scoreBoost: 0, units: [] };
         }
         // Invariant: an unmatched node carries scoreBoost 0. Parents read child boosts without
         // re-checking child.matched (AND and OR both sum), so a failed branch that kept a
         // boost would leak it upward — e.g. "? (fire:3 XOR flood:3) OR water:0.5" with both fire
         // and flood present must score 0.5, not 3.
+        // AND joins DISTINCT things, so each side keeps its own units and their scores will add. This
+        // is why a conjunction no longer outscores its own left operand: `? moon AND rocket` is two
+        // units of one occurrence each, not one unit of two.
         case 'AND': {
             const l = evaluate(node.left, text, acHits), r = evaluate(node.right, text, acHits);
             const matched = l.matched && r.matched;
-            return { matched, scoreBoost: matched ? l.scoreBoost + r.scoreBoost : 0 };
+            const units = matched ? [...l.units, ...r.units] : [];
+            return { matched, scoreBoost: boostOf(units), units };
         }
         // OR SUMS, like AND. max() was only ever right because it coincided with the sum whenever a
         // single branch matched — unmatched branches carry 0 — and it diverged exactly where a synonym
         // group needs the total: "(glasses | spectacles)" is one concept, and its mentions are its
         // mentions however they were spelled. Summing is also what keywordScore already does across
         // keys, and saturation caps the result, so a wide alternation cannot run away.
+        // OR names ONE thing several ways, so its operands pool into a single unit: the mentions are
+        // the concept's mentions however they were spelled, and they share one saturation. That is what
+        // makes `? (glasses OR spectacles)` score exactly as the bare key does on equal evidence,
+        // instead of collecting a separate saturation budget per synonym.
         case 'OR': {
             const l = evaluate(node.left, text, acHits), r = evaluate(node.right, text, acHits);
-            return { matched: l.matched || r.matched, scoreBoost: l.scoreBoost + r.scoreBoost };
+            const units = pool(node, [...l.units, ...r.units]);
+            return { matched: l.matched || r.matched, scoreBoost: boostOf(units), units };
         }
+        // XOR is an alternation like OR — one thing, exclusively one of two spellings — so the side
+        // that matched supplies the unit and the other contributes nothing.
         case 'XOR': {
             const l = evaluate(node.left, text, acHits), r = evaluate(node.right, text, acHits);
             const matched = l.matched !== r.matched;
-            return { matched, scoreBoost: matched ? (l.matched ? l.scoreBoost : r.scoreBoost) : 0 };
+            const units = matched ? pool(node, l.matched ? l.units : r.units) : [];
+            return { matched, scoreBoost: boostOf(units), units };
         }
     }
 }

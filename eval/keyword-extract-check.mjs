@@ -38,7 +38,7 @@ assert.ok(!('Quillfeather' in f0), 'a real findable name is not flagged');
 {
     const book = { entries: {
         0: { uid: 0, comment: 'Cosmonaut', content: 'the cosmonaut waited', key: ['cosmonaut', '? -zebra', '/[/'],
-            keysecondary: ['? -gagarin', '? "moon', 'apollo'] },
+            keysecondary: ['? -gagarin', '? "moon', 'apollo'], selectiveLogic: 3 },
         1: { uid: 1, comment: 'Clean', content: 'apollo flew', key: ['apollo'], keysecondary: [] },
     } };
     const scan = buildKeyPruneScan(book, pruneOpts, new Set());
@@ -53,6 +53,13 @@ assert.ok(!('Quillfeather' in f0), 'a real findable name is not flagged');
     assert.deepStrictEqual(scan.unusableKeysOf(book.entries[0]).map(r => `${r.key}:${r.code}`), ['? "moon:stray-quote'],
         'only the secondary needs the separate list; the negation-only one is legitimate there');
     assert.ok(scan.unusableKeysOf(book.entries[0]).every(r => r.message), 'each carries the validator message the author reads');
+    // AND_ALL above, because under AND_ANY the negation-only key is dropped too (matcher.mjs: a
+    // negation is satisfied by absence, so an OR branch built from one never gates). The audit is the
+    // only place an author is told, so it has to follow the operator rather than the position alone.
+    assert.deepStrictEqual(
+        scan.unusableKeysOf({ ...book.entries[0], selectiveLogic: 0 }).map(r => `${r.key}:${r.code}`),
+        ['? -gagarin:negation-only', '? "moon:stray-quote'],
+        'under AND_ANY the negation-only secondary is reported too, with its own code');
     assert.deepStrictEqual(scan.unusableKeysOf(book.entries[1]), [], 'a clean entry reports nothing');
 }
 

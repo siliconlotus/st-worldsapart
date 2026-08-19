@@ -11,7 +11,7 @@
 // The extension wraps these with its settings()/ST globals; the harness passes its own values.
 
 // The matcher's fold, because the tokens built here are BM25 QUERY TERMS: buildTermWeights' keys feed
-// bm25Scores directly, so they must be tokenized exactly as the index is (plugin/lexical.mjs tokenize)
+// bm25Scores directly, so they must be tokenized exactly as the index is (lexical.mjs tokenize)
 // or an accented query term shatters on this side and silently matches nothing. Same word-character
 // core too (\p{L}\p{N}\p{M} + apostrophe); a private [^A-Za-z0-9'] split was how "Möbius" indexed as
 // "bius" — see the tokenize header for the measurement.
@@ -322,8 +322,10 @@ export function fuseRanks(items, { rrfK: k, weightByOrder, lexicalWeight, keywor
     // denominator. Measured: rows carrying score:null shifted a 66-scene mean nDCG@10 baseline by 0.0122,
     // more than the effect that run was trying to measure.
     const byVector = rankMap(items.filter(x => Number.isFinite(x.score)).sort((a, b) => b.score - a.score));
-    // BM25 over chunk TEXT, from the plugin. Its IDF is what discounts terms that
-    // appear in nearly every chunk — the recurring cast — without any tuning.
+    // BM25 over entry CONTENT, computed in the browser by content-lexical.mjs over extension/lexical.mjs.
+    // NOT the plugin: stage 1 is cosine-only and scores no text at all (scoring.mjs header), which is why
+    // lexical.mjs no longer lives there. Its IDF is what discounts terms appearing in nearly every chunk
+    // — the recurring cast — without any tuning.
     const byText = rankMap(items.filter(x => x.textScore > 0).sort((a, b) => b.textScore - a.textScore));
     // BM25 over entry KEYS. Scores non-vectorized entries; also 🔗 entries when
     // scoreVectorKeys is on (via their stashed keys), otherwise suppressKeys leaves them at 0.

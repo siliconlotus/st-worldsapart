@@ -1,6 +1,16 @@
-// Verifies WA's keyword matcher tracks core's world-info.js matchKeys semantics.
+// WA'S OWN MATCHER SEMANTICS — the half core has no opinion about.
+//
+// SmartKeys, what a matched expression is WORTH (scoring units, the saturation curve, weights), which
+// keys the matcher refuses, and the excerpt machinery the Studio reads. Core gates activation and
+// never scores, so none of this has anything to be faithful to.
+//
+// PARITY AND DIVERGENCE ARE core-matcher-check.mjs: whether an unaltered lorebook behaves under WA as
+// it does under core, and the named places it deliberately does not. A claim that cites core as the
+// authority belongs there, not here.
+//
 // countKey/keywordScore live in matcher.mjs, which is isomorphic — imported directly.
-import { countKey, keyExcerpt, keyExcerpts, keywordScore as rankKeywordScore, setBoundaryMode, usableKeys, wholeWordAdvice } from '../extension/matcher.mjs';
+import { countKey, keyExcerpt, keyExcerpts, keywordScore as rankKeywordScore, repeatCurveOf, secondaryKeys, usableKeys, WI_LOGIC } from '../extension/matcher.mjs';
+import { validateSmartKey } from '../extension/smartkeys.mjs';
 import { eq } from './metrics.mjs';
 
 // keywordScore with the production defaults injected. Guards the scoreVectorKeys path —
@@ -33,16 +43,18 @@ const scored = (e, t, k) => keywordScore(e, t, k).score > 0;
 // loosens (all-dead secondaries are ungated, as blanks already were) instead of the malformed key
 // poisoning the expression and killing every scan. `negation-only` is the exemption: a secondary
 // never fires on its own — the primary gates activation — so "present unless X" is a condition an
-// author can mean, and usableKeys must go on refusing the same shape as a primary.
+// author can mean, and usableKeys must go on refusing the same shape as a primary. The exemption is
+// itself exempted under AND_ANY, which is the block below; AND_ALL is used here so this one keeps
+// testing the POSITION rule rather than the operator rule.
 {
     const cfg = { k1: 1.2, caseSensitiveDefault: false, wholeWordsDefault: false };
     const on = (sec, text, logic = 0) =>
         keywordScore({ key: ['cosmonaut'], keysecondary: sec, selectiveLogic: logic }, text, undefined, cfg).score > 0;
 
-    eq(on(['? -gagarin'], 'the cosmonaut launched'), true, 'negation-only secondary: fires when the negated term is absent');
-    eq(on(['? -gagarin'], 'cosmonaut gagarin waved'), false, '...and gates when it is present');
-    eq(on(['? -gagarin', 'astronaut'], 'cosmonaut gagarin waved'), false, 'AND_ANY: neither branch holds');
-    eq(on(['? -gagarin', 'astronaut'], 'cosmonaut astronaut gagarin'), true, '...the positive branch still rescues it');
+    eq(on(['? -gagarin'], 'the cosmonaut launched', 3), true, 'negation-only secondary: fires when the negated term is absent');
+    eq(on(['? -gagarin'], 'cosmonaut gagarin waved', 3), false, '...and gates when it is present');
+    eq(on(['? -gagarin', 'astronaut'], 'cosmonaut gagarin waved', 3), false, 'AND_ALL: the negation bites past a positive sibling');
+    eq(on(['? -gagarin', 'astronaut'], 'cosmonaut astronaut', 3), true, '...and passes when both conditions hold');
     eq(usableKeys(['? -gagarin']).length, 0, 'the same key stays fatal as a PRIMARY');
 
     // AND_ALL is where the shape earns its keep: "both crews, but not Gagarin" — a positive secondary
@@ -60,6 +72,57 @@ const scored = (e, t, k) => keywordScore(e, t, k).score > 0;
     eq(on(['? "moon', 'apollo'], 'cosmonaut apollo moon', 3), true, 'AND_ALL: a stray-quote sibling drops, the real one still gates');
     eq(on(['? "moon', 'apollo'], 'cosmonaut moon', 3), false, '...and the surviving secondary still has to match');
 }
+
+// WHAT A NEGATION-ONLY SECONDARY DOES DEPENDS ON THE OPERATOR, so AND_ANY is cut out of the tolerance.
+// A negation is satisfied by ABSENCE and AND_ANY ORs its secondaries, so the branch is open on nearly
+// any text: the gate stops gating, which is the same objection that makes the key fatal as a primary.
+// The NOT_* pair keeps the tolerance — there the operator's own negation cancels the key's, turning it
+// into a REQUIREMENT ("unless gagarin" reads "only when gagarin"), which is surprising but is a
+// condition an author can mean and core cannot write.
+//
+// Pinned because nothing fails on its own if it drifts: the composition is CORRECT at every position
+// (`NOT (NOT x)` is `x`), so the wrong answer here is a plausible one. The Studio makes the flip one
+// click, and the chips look identical either side of it.
+{
+    const cfg = { k1: 1.2, caseSensitiveDefault: false, wholeWordsDefault: false };
+    const on = (sec, logic, text) =>
+        keywordScore({ key: ['cosmonaut'], keysecondary: sec, selectiveLogic: logic }, text, undefined, cfg).score > 0;
+    const ABSENT = 'the cosmonaut waited', PRESENT = 'cosmonaut gagarin waved';
+
+    // AND_ANY drops it, and dropping LOOSENS: a list that was nothing but negations leaves the entry
+    // ungated, so BOTH texts pass. That is the direction the key was already pushing.
+    eq(secondaryKeys({ keysecondary: ['? -gagarin'], selectiveLogic: 0 }).length, 0, 'AND_ANY drops a negation-only secondary');
+    eq(on(['? -gagarin'], 0, ABSENT), true, '...leaving the entry ungated, so absence passes');
+    eq(on(['? -gagarin'], 0, PRESENT), true, '...and so does presence — the key is gone, not inverted');
+
+    // With a positive sibling the drop TIGHTENS, because the branch that was always open is gone and
+    // the real key gates alone. This is the case the ban exists for.
+    eq(secondaryKeys({ keysecondary: ['apollo', '? -gagarin'], selectiveLogic: 0 }).join(), 'apollo', 'the positive sibling survives alone');
+    eq(on(['apollo', '? -gagarin'], 0, 'the cosmonaut waited'), false, 'AND_ANY: the surviving secondary gates, where the OR used to stand open');
+    eq(on(['apollo', '? -gagarin'], 0, 'cosmonaut apollo'), true, '...and passes when it is satisfied');
+
+    // AND_ALL keeps it: this is the narrowing the tolerance was written for.
+    eq(on(['? -gagarin'], 3, ABSENT), true, 'AND_ALL: a negation-only secondary passes on absence');
+    eq(on(['? -gagarin'], 3, PRESENT), false, '...and gates on presence');
+    eq(on(['apollo', '? -gagarin'], 3, 'the cosmonaut waited'), false, '...and the positive sibling is still required');
+
+    // The NOT pair keeps it too, inverted. Absence — the ordinary state of the text — now FAILS.
+    eq(on(['? -gagarin'], 2, ABSENT), false, 'NOT_ANY: the operator negates the key again, so absence gates');
+    eq(on(['? -gagarin'], 2, PRESENT), true, '...and the excluded term is now REQUIRED');
+    eq(on(['? -gagarin'], 1, ABSENT), false, 'NOT_ALL: the same inversion');
+    eq(on(['? -gagarin'], 1, PRESENT), true, '...and the same requirement');
+
+    // The shape AND_ANY refuses is still writable — as ONE primary SmartKey, where the author reads
+    // the OR they are asking for. The ban takes away an operator that produced it by accident, not
+    // the ability to mean it: secondaries are synthesised into the primary's expression anyway, so
+    // this is the same tree by the explicit route, and it validates clean because it has a positive
+    // term. Which is also why `negation-only` here is a verdict about the BRANCH, not the expression.
+    const explicit = '? cosmonaut && (apollo || -gagarin)';
+    eq(validateSmartKey(explicit).length, 0, 'the explicit route validates clean');
+    eq(countKey(explicit, 'the cosmonaut waited', false, false) > 0, true, '...and reproduces the branch AND_ANY no longer offers');
+    eq(countKey(explicit, 'cosmonaut gagarin', false, false) > 0, false, '...negation and all');
+}
+
 eq(scored({ key: ['zzz'] }, 'alpha beta', ['alpha']), true, 'keywordScore honors explicit keys over entry.key');
 eq(scored({ key: ['alpha'] }, 'alpha beta', ['zzz']), false, 'explicit keys with no hit score zero even when entry.key would match');
 eq(scored({ key: ['alpha'] }, 'alpha beta'), true, 'defaults to entry.key when no list passed');
@@ -71,158 +134,171 @@ eq(scored({ key: ['alpha'] }, 'alpha beta', []), false, 'empty key list (blanked
 eq(keywordScore({ key: ['? -zebra', 'cosmonaut'] }, 'the cosmonaut waited').hits.map(h => h.key).join(','),
     'cosmonaut', 'a validator-error key is dropped from scoring, the valid one is not');
 eq(scored({ key: ['? -zebra'] }, 'the cosmonaut waited'), false, 'an entry keyed only on error keys scores zero');
+// SCORING UNITS. A key's score is the sum over the things it is ABOUT, each saturating on its own
+// pooled occurrences (smartkeys.mjs `evaluate`). AND joins distinct things and their scores add; OR
+// names one thing several ways and its mentions pool into a single saturation; a weight multiplies
+// its unit rather than feeding the curve, so `::2` is twice as important rather than as-if-seen-twice.
+//
+// EVERY ROW HERE WAS A DEFECT before units. A stricter expression outscored its own left operand, a
+// synonym group collected a saturation budget per spelling, and `::2` survived the curve as 1.38x.
+// None of it was visible to a `score > 0` assertion, which is what the rest of this file mostly makes.
+//
+// Through this file's own `keywordScore` wrapper, so k1 is 2 here and `curve` says so — passing a cfg
+// to that wrapper does nothing, which is how the first draft of this block silently scored at a k1 it
+// was not comparing against.
+{
+    const sc = (key, text) => Number(keywordScore({ key: [key] }, text).score.toFixed(3));
+    const curve = n => Number(repeatCurveOf(n, 2).toFixed(3));
+
+    // PRESENCE IS THE UNIT. One matched thing is worth exactly its weight, whatever it is made of.
+    eq(sc('? moon', 'moon'), 1, 'a matched expression is worth 1');
+    eq(sc('moon', 'moon'), 1, '...and a plain key is the same expression');
+
+    // AND: distinct things, so they ADD — and a conjunction no longer beats its own operand for free.
+    eq(sc('? moon AND rocket', 'moon rocket launch'), 2, 'AND: two units, two things present');
+    eq(sc('? moon AND rocket AND launch', 'moon rocket launch'), 3, '...three of them');
+    eq(sc('? moon', 'moon rocket launch'), 1, '...against the same text, one thing is still worth one');
+
+    // OR: one thing, several spellings — the mentions pool and saturate ONCE. The bare key is the
+    // control: on equal evidence a synonym group must not out-earn the key it generalises.
+    eq(sc('? (glasses OR spectacles)', 'glasses spectacles'), curve(2), 'OR pools its spellings into one unit');
+    eq(sc('? glasses', 'glasses glasses'), curve(2), '...which is exactly what the bare key scores');
+    eq(sc('? (glasses OR spectacles)', 'a glasses store called Spectacles, more glasses'), curve(3),
+        'three mentions across two spellings is one thing seen three times');
+
+    // WEIGHT MULTIPLIES THE UNIT, so a ratio the author wrote survives to the score.
+    eq(sc('? (everest OR kailash::2)', 'Everest'), 1, 'the unweighted alternative is worth 1');
+    eq(sc('? (everest OR kailash::2)', 'Kailash'), 2, '...and ::2 is worth exactly twice it');
+    eq(sc('? (everest OR kailash::2) AND mount', 'Mount Everest'), 2, 'the conjunct adds its own unit');
+    eq(sc('? (everest OR kailash::2) AND mount', 'Mount Kailash'), 3, '...to either alternative');
+
+    // WEIGHT 0 IS A CONDITION, NOT EVIDENCE: no unit, and excluded from its group's mean rather than
+    // averaged in — or a zero-weight sibling would quietly discount the term the author did mean.
+    eq(sc('? moon AND rocket::0', 'moon rocket'), 1, 'a zero-weight conjunct gates without scoring');
+    eq(sc('? (moon OR rocket::0)', 'moon rocket'), 1, '...and does not drag its group\'s mean down');
+
+    // A matched expression carrying NO unit is still one hit — countKey's negation-only floor, which
+    // keyUnits reproduces rather than re-deriving, or the two disagree about whether it scored. A
+    // wholly zero-weighted key is the reachable case: negation-only is fatal in a primary (usableKeys
+    // drops it before scoring), so it cannot be tested from here.
+    eq(sc('? moon::0', 'moon'), 1, 'an all-zero-weight key that matches still counts as one');
+
+    // THE TWO SYNTAXES MUST AGREE. keysecondary is rewritten into one expression per primary
+    // (synthesizeSecondary), so the same logic written either way has to score the same — that
+    // agreement is the whole reason the rewrite exists, and it held for the NOT logics only until
+    // secondaries stopped being zero-weighted.
+    const gated = (logic, sec, text) => Number(keywordScore(
+        { key: ['cosmonaut'], keysecondary: sec, selectiveLogic: logic }, text).score.toFixed(3));
+    const T = 'cosmonaut apollo soyuz';
+    eq(gated(3, ['apollo'], T), sc('? cosmonaut AND apollo', T), 'AND_ALL agrees with the hand-written form');
+    eq(gated(3, ['apollo', 'soyuz'], T), sc('? cosmonaut AND apollo AND soyuz', T), '...with two secondaries');
+    eq(gated(0, ['apollo', 'soyuz'], T), sc('? cosmonaut AND (apollo OR soyuz)', T), 'AND_ANY agrees — its secondaries are one unit');
+    eq(gated(2, ['gagarin'], T), sc('? cosmonaut AND NOT gagarin', T), 'NOT_ANY agrees, as it always did');
+    eq(gated(2, ['gagarin'], T), 1, '...at the primary alone, because a NOT yields no unit');
+
+    // Units pool ACROSS SEGMENTS, not just within one: the id is the AST node, interned per scope, so
+    // the same unit in two segments is one unit seen twice. This is the plain-key rule generalised.
+    eq(Number(keywordScore({ key: ['? (glasses OR spectacles)'] }, ['glasses', 'spectacles']).score.toFixed(3)),
+        curve(2), 'a unit saturates once across the whole window');
+}
+
+// WHAT A MATCHED EXPRESSION IS WORTH. Core gates activation and never scores, so none of this is a
+// core-parity claim — core-matcher-check.mjs holds those, and these two blocks lived there until the
+// verdict and the count stopped agreeing.
+//
+// The values below are COUNTS (Σ weighted occurrences) and verdicts, both independent of k1, so they
+// read the same here as they did beside the truth table.
+{
+    const { AND_ANY, NOT_ANY, AND_ALL } = WI_LOGIC;
+    /** The primary's hit through the shipped path — `count` is occurrences, `score` is contribution. */
+    const hit = (primary, sec, logic, text) => {
+        const e = { key: [primary], keysecondary: sec, selectiveLogic: logic };
+        return keywordScore(e, text, e.key).hits.find(h => h.key === primary);
+    };
+    const count = (...a) => hit(...a)?.count ?? 0;
+    const keyScore = (...a) => hit(...a)?.score ?? 0;
+    const fired = (...a) => (count(...a) > 0 ? 1 : 0);
+
+    // A SECONDARY IS A TERM AND SCORES LIKE ONE. They were zeroed while AND and OR summed into one
+    // count, where a contributing gate would have inflated the primary's; scoring units ended that —
+    // a secondary is its own unit — and what the zeroing left behind was the same logic scoring
+    // differently depending on which of WA's two syntaxes wrote it.
+    //
+    // ONLY THE AND LOGICS EVER SAW THIS: a NOT yields no unit whatever its operand weighs.
+    eq(count('cosmonaut', ['apollo'], AND_ANY, 'cosmonaut and cosmonaut, with apollo'), 3,
+        'the primary\'s two occurrences plus the secondary\'s one');
+    eq(count('cosmonaut', ['apollo', 'soyuz'], AND_ALL, 'cosmonaut apollo soyuz'), 3,
+        'two matched secondaries contribute their own occurrences');
+    // COUNT AND SCORE ARE DIFFERENT QUESTIONS, and a weighted key is where they part: two terms
+    // appeared once each, and the author's ::5 says what that is worth.
+    eq(count('cosmonaut', ['? apollo::5'], AND_ALL, 'cosmonaut apollo'), 2,
+        'count is occurrences: the primary once, the secondary once');
+    eq(keyScore('cosmonaut', ['? apollo::5'], AND_ALL, 'cosmonaut apollo'), 6,
+        '...and score carries the weight — a `?` secondary\'s ::5 is theirs to mean');
+    eq(count('cosmonaut', ['gagarin'], NOT_ANY, 'cosmonaut soyuz'), 1,
+        'an excluded secondary contributes nothing, as it never could');
+    eq(count('? moon mission', ['apollo'], AND_ANY, 'a mission to the moon with apollo'), 3,
+        'a spliced `?` primary keeps its own two terms, and the secondary adds its one');
+
+    // A PASSED GATE IS `> 0`, NOT `>= 1`. A matched key is normally worth at least 1, so the two agree
+    // almost everywhere — but a fractional `::weight` is documented (`? whisper::0.3` down-weights
+    // rather than clamping), and two fractional sides total below 1 while having passed.
+    eq(keyScore('? cosmonaut::0.3', ['? apollo::0.2'], AND_ALL, 'cosmonaut apollo'), 0.5,
+        'fractional weights on both sides SCORE below 1 — and the gate PASSED');
+    eq(count('? cosmonaut::0.3', ['? apollo::0.2'], AND_ALL, 'cosmonaut apollo'), 2,
+        '...while the count is still two plain occurrences, which is why they are separate fields');
+    eq(fired('? cosmonaut::0.3', ['? apollo::0.2'], AND_ALL, 'cosmonaut apollo'), 1,
+        '...and `> 0` reads the pass, where `>= 1` on the score would call it a refusal');
+    eq(count('? cosmonaut::0.3', ['? apollo::0.2'], AND_ALL, 'cosmonaut alone'), 0,
+        'a real refusal reports no hit at all');
+    eq(keyScore('? cosmonaut::0', ['apollo'], AND_ALL, 'cosmonaut apollo'), 1,
+        'an all-zero-weight key that matched is floored to one, not dropped to nothing');
+}
+
+// OCCURRENCES -> SCORE (repeatCurveOf). k1 is the RATE repeats accrue at; the curve is the SHAPE, and
+// they were one knob until the shape started mattering. 'bm25' is the classic tf term and what every
+// stored capture ran under; 'presence-log' is what ships, and makes presence categorical so a matched
+// key is worth its full weight with only the n-1 repeats accruing.
+//
+// PINNED AS A TABLE because the difference only shows at counts a synthetic test would not think to
+// use. Foxbridge's busiest key reaches 10 and every curve looks alike there; sommers runs to 90, and
+// across n=21..89 — 4.2x the evidence — bm25 moves 0.041 while presence-log moves 1.44. A regression
+// that flattened the tail again would pass every other assertion in this file.
+{
+    const at = (n, c, R = 1) => Number(repeatCurveOf(n, 1.2, c, R).toFixed(3));
+
+    eq(at(1, 'bm25'), 0.455, 'bm25: a key present once is worth less than half a saturated one');
+    eq(at(1, 'presence-log'), 1, 'presence-log: present once is worth exactly the key\'s weight');
+    eq(at(1, 'presence'), 1, '...as it is under the bounded form');
+    eq(repeatCurveOf(0, 1.2, 'presence-log'), 0, 'absent is 0 under every curve');
+    eq(repeatCurveOf(0, 1.2, 'bm25'), 0, '...including bm25');
+
+    // The tail, which is the whole reason the default moved. Real counts from the sommers scenes.
+    eq(at(21, 'bm25'), 0.946, 'bm25 at n=21');
+    eq(at(89, 'bm25'), 0.987, '...and at n=89, having moved 0.041 over 4.2x the evidence');
+    eq(at(21, 'presence'), 1.943, 'the BOUNDED presence form is just as flat at n=21');
+    eq(at(89, 'presence'), 1.987, '...and at n=89 — fixing the floor does nothing for the ceiling');
+    eq(at(21, 'presence-log'), 3.872, 'presence-log at n=21');
+    eq(at(89, 'presence-log'), 5.309, '...and at n=89, still separating them');
+
+    // R is reach, k1 is rate, and they are independent — one knob could express neither alone.
+    eq(at(20, 'presence', 1) < at(20, 'presence', 2), true, 'R raises what repeats may add');
+    eq(repeatCurveOf(1, 1.2, 'presence', 5), 1, '...and never touches presence itself');
+    eq(Number(repeatCurveOf(3, 0.5, 'presence-log').toFixed(3)) > at(3, 'presence-log'), true,
+        'a lower k1 accrues repeats faster');
+    eq(at(1, 'presence-log') === at(1, 'presence'), true, 'the curves differ only once there is a repeat');
+
+    // Bounded means bounded: presence can never exceed 1+R, log has no ceiling at all.
+    eq(at(100000, 'presence', 1) < 2.001, true, 'presence R=1 is capped at 2x');
+    eq(at(100000, 'presence-log') > 10, true, 'presence-log is not capped');
+
+    // The default is what ships (state.mjs), so an omitted curve is not silently the old one.
+    eq(repeatCurveOf(5, 1.2), repeatCurveOf(5, 1.2, 'presence-log'), 'the default curve is the shipped curve');
+}
+
 eq(countKey('? -zebra', 'the cosmonaut waited', false, false), 1,
     'countKey itself is unfiltered — it answers what the expression does, and the filter is the caller\'s');
 
-// The regression that started this: core substring-matches when whole-word is off.
-eq(countKey('Jubilee', 'the Jubilees arrived', false, false), 1, 'substring: Jubilee inside Jubilees (whole-word off)');
-eq(countKey('Jubilee', 'the Jubilees arrived', false, true), 0, 'whole-word on: not inside a larger word');
-eq(countKey('Jubilee', 'Jubilee met Jubilee', false, true), 2, 'whole-word counts standalone occurrences');
-eq(countKey('cat', 'cat cats scatter', false, false), 3, 'substring counts every occurrence');
-eq(countKey('cat', 'cat cats scatter', false, true), 1, 'whole-word counts only the standalone');
-eq(countKey('v2', 'the v2 model', false, true), 1, 'single token with a digit, whole-word');
-// Whole-word boundaries are Unicode, not \w. With \w every non-ASCII letter reads as a boundary, so
-// whole-word matching silently degraded to substring for every script but English.
-eq(countKey('caf', 'the caf\u00e9 was busy', false, true), 0, 'whole-word: ASCII prefix does not match into an accented word');
-eq(countKey('caf\u00e9', 'the caf\u00e9 was busy', false, true), 1, 'whole-word: the accented word itself still matches');
-eq(countKey('\u041c\u0430\u0440\u0438', '\u0432\u0441\u0442\u0440\u0435\u0442\u0438\u043b \u041c\u0430\u0440\u0438\u044e', false, true), 0, 'whole-word: Cyrillic prefix does not leak');
-eq(countKey('\u041c\u0430\u0440\u0438\u044e', '\u0432\u0441\u0442\u0440\u0435\u0442\u0438\u043b \u041c\u0430\u0440\u0438\u044e', false, true), 1, 'whole-word: the Cyrillic word itself matches');
-eq(countKey('caf', 'the caf\u00e9 was busy', false, false), 1, 'substring mode is unaffected');
-eq(countKey('hot tub', 'in the hot tub', false, true), 1, 'multi-word key, whole-word, standing alone');
-eq(countKey('Kyle', 'kyle KYLE Kyle', false, false), 3, 'case-insensitive by default');
-eq(countKey('Kyle', 'kyle KYLE', true, false), 0, 'case-sensitive when asked');
-eq(countKey('/jubi\\w+/i', 'the Jubilees came', false, true), 1, 'regex key with flags overrides options');
-eq(countKey('nope', 'nothing here', false, false), 0, 'no match is zero');
-
-// --- Match Whole Words means what it says -----------------------------------------------------------
-// Core under-applies its own label twice: it skips any key containing a space, and it stops at an
-// affix. WA applies it in both directions, and which characters count as "inside a word" is the
-// wordBoundary setting rather than a rule, because both readings are defensible.
-{
-    // THE MULTI-WORD HALF, unconditional — a space in the key is not an exemption.
-    eq(countKey('satyr camp', 'the satyr camps burned', false, true), 0, 'a multi-word key is NOT exempt from whole-word');
-    eq(countKey('satyr camp', 'the satyr camp burned', false, true), 1, '...and still matches standing alone');
-    eq(countKey('satyr camp', 'the satyr camps burned', false, false), 1, 'substring mode is where the plural still counts');
-    eq(countKey('hot tub', 'unhot tub', false, true), 0, 'the LEFT edge of a multi-word key is bounded too');
-
-    // `_` is in neither class. It is in \w for programming identifiers, and underscore emphasis puts
-    // it around whole words exactly as asterisks do, so `_Joe_` failing has no defender.
-    eq(countKey('Joe', '_Joe_ arrived', false, true), 1, 'underscore is a boundary, so emphasis does not hide a word');
-    eq(countKey('Joe', 'Joe_Bloggs', false, true), 1, '...in both directions, including an identifier');
-
-    // Combining marks ARE in both classes: a mark is part of the letter it sits on, so a decomposed
-    // spelling must not match where its precomposed twin does not.
-    // x + COMBINING ACUTE (U+0301) has no precomposed form, so it survives the fold's NFC pass
-    // as a real mark — which \p{L} alone would read as a boundary.
-    eq(countKey('x', 'the x\u0301 mark', false, true), 0, 'a combining mark is inside the word, not a boundary');
-
-    // THE SETTING. Strict is the default; permissive is core's own reading of an affix.
-    setBoundaryMode('permissive');
-    eq(countKey('Joe', "that is Joe's coat", false, true), 1, 'permissive: an apostrophe is a boundary, so a possessive matches');
-    eq(countKey('hot tub', 'the hot tub-side chair', false, true), 1, 'permissive: a hyphen is a boundary too');
-    eq(countKey('Joe', 'Joel arrived', false, true), 0, 'permissive still stops at a letter');
-
-    setBoundaryMode('strict');
-    eq(countKey('Joe', "that is Joe's coat", false, true), 0, 'strict: an apostrophe is inside the word');
-    eq(countKey('Joe', 'that is Joe\u2019s coat', false, true), 0, '...and the fold means the curly form behaves identically');
-    eq(countKey('hot tub', 'the hot tub-side chair', false, true), 0, 'strict: a hyphen is inside the word');
-    eq(countKey('Joe', 'Joe arrived', false, true), 1, 'strict still matches a word standing alone');
-    eq(countKey("Joe's", "that is Joe's coat", false, true), 1, '...and the affixed form is reachable by keying it');
-    // A `\b` regex key is the escape hatch that makes strict the cheap default to leave.
-    eq(countKey('/\\bJoe\\b/', "that is Joe's coat", false, true), 1, 'a \\b regex key recovers permissive behaviour');
-
-    setBoundaryMode('nonsense');
-    eq(countKey('Joe', "that is Joe's coat", false, true), 0, 'an unknown mode falls back to the default');
-    // An inherited name is an unknown mode too. `in` accepted these, and the fallback that makes the
-    // line above pass never ran — the class became a Function and every whole-word key answered 0.
-    setBoundaryMode('constructor');
-    eq(countKey('Joe', 'Joe arrived', false, true), 1, 'a prototype property name is not a mode');
-    setBoundaryMode('strict');
-
-    // Substring mode never reads the class at all.
-    eq(countKey('Joe', "that is Joe's coat", false, false), 1, 'the setting does not reach substring matching');
-}
-console.log('ok   whole words: multi-word keys included, _ excluded, permissive/strict boundary class');
-
-// The Studio's structural flag for the same change: computable from the entry, no text and no second
-// matcher. Two triggers, both only when the box is on, and nothing else earns one.
-{
-    const n = (keys, ww = true) => wholeWordAdvice(keys, ww).length;
-    eq(n(['satyr camp'], false), 0, 'box off: nothing to say');
-    eq(n(['satyr']), 0, 'a single-word Latin key is unremarkable');
-    eq(n(['satyr camp']), 1, 'a multi-word key narrows, and core would not have narrowed it');
-    eq(n(['? hot tub']), 0, 'a SmartKey does not take entry flags, so neither trigger is true of it');
-    eq(n(['/hot tub/']), 0, '...nor does a regex key');
-    eq(n(['\u9f8d\u306e\u5bfa']), 1, 'a spaceless script is advised about');
-    eq(n(['satyr camp', '\u0e01\u0e23\u0e38\u0e07\u0e40\u0e17\u0e1e']), 2, 'both triggers can fire on one entry');
-    // Name the script actually detected — a Thai author must not read copy about Japanese.
-    const named = k => /written in (\w+)/.exec(wholeWordAdvice([k], true)[0])?.[1];
-    eq(named('\u3072\u3089\u304c\u306a'), 'Japanese', 'kana is named Japanese');
-    eq(named('\u9f8d\u5bfa'), 'Chinese', 'Han alone is named Chinese');
-    eq(named('\u0e01\u0e23\u0e38\u0e07'), 'Thai', 'Thai is named Thai');
-    eq(named('\u9f8d\u306e\u5bfa'), 'Japanese', 'kana wins over the Han it sits beside');
-    eq(n(['\uc11c\uc6b8']), 0, 'Hangul is not in the class — modern Korean is spaced');
-    eq(n(['\u0f56\u0f7c\u0f51']), 0, 'Tibetan is deliberately out of scope');
-}
-console.log('ok   whole-word advisory: structural, two triggers, names the script it found');
-
-// --- apostrophe normalisation ---------------------------------------------------------------------
-// A key typed with ASCII ' never matched prose written with U+2019, and nothing surfaced it: the key just
-// never fired. Models emit typographic apostrophes constantly, so this silently killed possessive and
-// contraction keys against chat as well as against entry text. Both directions occur in real books.
-const CURLY = String.fromCharCode(0x2019);
-eq(countKey("Cap'n Joe", `the ${CURLY}n is silent at Cap${CURLY}n Joe${CURLY}s`, false, false), 1, 'straight key matches curly text');
-eq(countKey(`Cap${CURLY}n Joe`, "docked at Cap'n Joe's", false, false), 1, 'curly key matches straight text');
-eq(countKey("Kyle's heat", `${CURLY}bout Kyle${CURLY}s heat again`, false, false), 1, 'possessive key, curly text');
-eq(countKey(`Jeffrey${CURLY}s watch`, "Jeffrey's watch stopped", false, false), 1, 'curly possessive key, straight text');
-// Case-sensitive keys normalise too: quote form is orthogonal to case.
-eq(countKey("Cap'n Joe", `Cap${CURLY}n Joe`, true, false), 1, 'case-sensitive still normalises apostrophes');
-eq(countKey("cap'n joe", `Cap${CURLY}n Joe`, true, false), 0, 'case-sensitive still respects CASE');
-// Whole-word path shares the normalised needle.
-eq(countKey("don't", `I don${CURLY}t think so`, false, true), 1, 'whole-word matching normalises too');
-// Other variants collapse to the same form.
-for (const [name, ch] of [['left single quote', '‘'], ['modifier letter', 'ʼ'], ['prime', '′'], ['acute', '´'], ['grave', '`'],
-    ['modifier letter prime', 'ʹ'], ['low-9 quote', '‚'], ['high-reversed-9 quote', '‛'],
-    ['left single guillemet', '‹'], ['right single guillemet', '›']]) {
-    eq(countKey("Cap'n", `Cap${ch}n`, false, false), 1, `${name} normalises`);
-}
-// The double family, same test. `″` was the asymmetry: `′` was in the class and `″` in none, so a key
-// `5'10"` half-matched prose written `5′10″` and `6" pipe` missed `6″ pipe` outright.
-for (const [name, ch] of [['double prime', '″'], ['modifier letter double prime', 'ʺ'], ['low-9 double', '„'],
-    ['high-reversed-9 double', '‟'], ['left guillemet', '«'], ['right guillemet', '»']]) {
-    eq(countKey('6" pipe', `a 6${ch} pipe`, false, false), 1, `${name} normalises`);
-}
-eq(countKey(`5'10"`, '5′10″ barefoot', false, false), 1, 'both primes fold, so a height key matches typeset prose');
-// FINER-GRAINED, not variants: these partition what " collapses, so folding them would erase a
-// distinction in the haystack that no key could ask back.
-eq(countKey('"title"', '《title》', false, false), 0, 'CJK angle brackets are NOT folded');
-eq(countKey('"spoken"', '「spoken」', false, false), 0, 'CJK corner brackets are NOT folded');
-// Orthographic variants normalise; anything that could carry meaning does not (see normalizeOrthography).
-eq(countKey('a-b', 'a–b', false, false), 1, 'en dash normalises to hyphen');
-eq(countKey('"quoted"', '“quoted”', false, false), 1, 'curly double quotes normalise');
-eq(countKey('wait--no', 'wait—no', false, false), 1, 'em dash normalises to TWO hyphens');
-eq(countKey('wait-no', 'wait—no', false, false), 0, 'em dash does NOT collapse onto a single hyphen');
-eq(countKey('a...b', 'a…b', false, false), 1, 'ellipsis normalises');
-eq(countKey('a b', 'a b', false, false), 1, 'non-breaking space normalises');
-// A hyphen is NOT folded to a space: it can carry meaning, and the haystack is the wrong place to lose it.
-eq(countKey('three-inch', 'three inch', false, false), 0, 'hyphen is not folded to a space');
-// NFC: precomposed and decomposed spellings of one name are the same name, and look identical on screen.
-eq(countKey('Jos\u00e9', `Jose\u0301 Sommers`, false, false), 1, 'decomposed text matches a precomposed key');
-eq(countKey(`Jose\u0301`, 'Jos\u00e9 Sommers', false, false), 1, 'precomposed text matches a decomposed key');
-eq(countKey(`Jose\u0301`, `Jose\u0301 Sommers`, false, false), 1, 'decomposed both sides still matches');
-// Counting still works across repeats and mixed forms in one text.
-eq(countKey("Cap'n", `Cap'n and Cap${CURLY}n and Capʼn`, false, false), 3, 'mixed forms all counted');
-console.log('ok   apostrophe normalisation: straight/curly interchangeable, orthographic variants folded, meaning-bearing characters untouched');
-
-// Markdown in the scan text, both directions. Emphasis around a WHOLE word is fine; emphasis INSIDE
-// one is not, and it fails in opposite directions depending on the mode. Pinned so the behaviour is a
-// recorded limit rather than something rediscovered — see countKey's docblock for why it stays.
-eq(countKey('sister', "She's my *sister*, Tim", false, false), 1, 'emphasis around a whole word: substring matches');
-eq(countKey('sister', "She's my *sister*, Tim", false, true), 1, '...and whole-word matches, since * is a boundary');
-eq(countKey('sisterhood', 'It is called *sister*hood', false, false), 0, 'in-word emphasis BREAKS a substring match');
-eq(countKey('sister', 'It is called *sister*hood', false, true), 1, 'in-word emphasis CREATES a false word boundary');
-eq(countKey('sister', 'It is called sisterhood', false, true), 0, '...which the unemphasised control correctly does not');
-console.log('ok   markdown in the scan text: whole-word emphasis fine, in-word emphasis is a known limit');
 
 // keyExcerpt — the /wa-grade "why did this pop" display. It shares countKey's machinery but is
 // display-only: called for keys countKey already counted, so these pin (a) agreement with countKey
