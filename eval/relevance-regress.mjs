@@ -35,16 +35,23 @@
 //
 // Usage (from SillyTavern root):
 //   node .../relevance-regress.mjs <sample.json> [...] [--sweep gazetteerSource=keys,titles]
-//        [--tier memory|reference] [--cut 4] [--ordinal] [--loso] [--lobo] [--calibration] [--cutoff] [--degree 2] [--interactions]
+//        [--tier memory|reference] [--cut 4] [--ordinal] [--loso] [--lobo] [--calibration] [--cutoff] [--degree 2] [--interactions] [--with proper,time]
 import { indexPath, isMemory, loadScene, openSample, sceneParams, makeCandidateSet, makeGradeOf, embed } from './scene.mjs';
 import { ensureIndex } from './reindex.mjs';
+import fs from 'node:fs';
 import { gradeValue, gradeCredit, fbeta, RECALL_WEIGHT, signTest } from './metrics.mjs';
+import { COMMON_WORDS } from '../plugin/commonwords.js';
 import { logisticFit, auc, cumulativeFit, prCurve, reliability, sigmoid } from './logistic.mjs';
 import * as ranking from '../extension/ranking.mjs';
 
 const argv = process.argv.slice(2);
 const arg = k => { const i = argv.indexOf(k); return i >= 0 ? argv[i + 1] : null; };
-const samples = argv.filter(a => a.endsWith('.json') && !a.startsWith('--'));
+// A .json that is the VALUE of a flag is not a sample — --emit takes one, and without this the file it
+// is about to write is opened as an input bundle. Named flags rather than "anything after a --", or
+// `--lobo scene.json` would silently DROP that scene, which is the worse failure: a wrong sample set
+// prints a clean table and says nothing about what it left out.
+const VALUED = new Set(['--arm', '--sweep', '--tier', '--cut', '--degree', '--square', '--with', '--emit']);
+const samples = argv.filter((a, i) => a.endsWith('.json') && !a.startsWith('--') && !VALUED.has(argv[i - 1]));
 if (!samples.length) {
     console.error('need at least one sample: node relevance-regress.mjs <sample.json> [more.json ...] [--sweep param=v1,v2]');
     process.exit(2);
@@ -83,6 +90,15 @@ const DEGREE = Number(arg('--degree') ?? 1);
 // out while one of them gains.
 const SQUARE = String(arg('--square') ?? '').split(',').filter(Boolean);
 const INTERACT = argv.includes('--interactions');
+// Extra candidate features, off by default: `proper` = shared proper nouns with the scan window,
+// `time` = the entry's story-time position. Both are ADDITIONS to the three shipped signals, not
+// replacements, and both are here to be measured rather than to ship.
+const WITH = String(arg('--with') ?? '').split(',').filter(Boolean);
+// Where to write the per-scene F2 vector. Two feature sets cannot be swept in one process — the design
+// matrix is built once — so the paired contrast is made between two RUNS, and this is what carries the
+// per-scene numbers between them. Scene names go with it: pairing by index is only safe if both runs
+// kept the same scenes, and that has to be checked rather than assumed.
+const EMIT = arg('--emit');
 const CALIB = argv.includes('--calibration');
 // WHICH BOUNDARY IS THE TARGET. 3 is the project's relevance line and the default; --cut 4 fits the band
 // the anchors reserve for the scene's current subject, which separates far better and is far rarer, so it
@@ -104,6 +120,38 @@ const FEATURES = [
     ['text', r => Number(r.textScore) || 0, r => (r.textEligible ? 1 : 0)],
     ['keys', r => Number(r.keywordScore) || 0, r => (r.keysEligible ? 1 : 0)],
 ];
+// PROPER NOUNS shared between the entry and the scan window. NOT a reweighting of `text`: BM25 spreads
+// its mass over every term the two share, so a character name arrives diluted among hundreds of ordinary
+// words. Restricting the vocabulary to names asks a different question — is this entry about someone who
+// is on screen — and that is the axis the three shipped signals do not have.
+//
+// Title-case token minus the common-English list, which is the same heuristic keyword-core's looksProper
+// uses. It over-fires on sentence-initial words; that noise is shared by both sides of the intersection,
+// so it inflates the floor rather than the discrimination, and a POS tagger is not worth it to find out
+// whether the axis exists at all.
+const PROPER_RE = /\b[A-Z][a-z]{2,}\b/g;
+const properNouns = text => {
+    const out = new Set();
+    for (const m of String(text ?? '').match(PROPER_RE) ?? []) {
+        const w = m.toLowerCase();
+        if (!COMMON_WORDS.has(w)) out.add(w);
+    }
+    return out;
+};
+
+// STORY TIME. Within-scene standardisation makes "distance from the current point" and "position in the
+// book" the same column up to sign, because the current point is one value per scene — so the position
+// is what is stored and the coefficient's SIGN says whether recent wins. STMB appends, so uid order is
+// story order.
+//
+// uid ONLY, never `order`: that field is ST's insertion PRIORITY and an author may or may not have set
+// it, so a column that fell back between the two would mean story position in one book and priority in
+// the next — which a fit held out BY BOOK cannot survive, and which reads as a feature failing to
+// transfer rather than as two features sharing a column.
+const storyTime = r => Number(r.entry?.uid ?? 0);
+
+if (WITH.includes('proper')) FEATURES.push(['proper', r => Number(r.properShared) || 0, () => 1]);
+if (WITH.includes('time')) FEATURES.push(['time', storyTime, () => 1]);
 
 // Feature indices carrying a squared term: none at degree 1, the named subset if --square was given,
 // otherwise all of them.
@@ -149,6 +197,14 @@ const fx = n => (Number.isFinite(n) ? (n >= 0 ? '+' : '') + n.toFixed(3) : '  n/
             const scene = loadScene(S, { indexFile, params: P });
             const tw = (P.entityFilter && P.queryMode !== 'summary') ? ranking.buildTermWeights(S.query, scene.gaz, P.boost) : null;
             const rows = makeCandidateSet({ ...scene, params: P })(P.K1, P.B, tw, qv, S.query, S.scanText);
+            if (WITH.includes('proper')) {
+                const win = properNouns(Array.isArray(S.scanText) ? S.scanText.join('\n') : S.scanText);
+                for (const r of rows) {
+                    let n = 0;
+                    for (const w of properNouns(r.entry?.content)) if (win.has(w)) n++;
+                    r.properShared = n;
+                }
+            }
             const gradeOf = makeGradeOf(S.grades, scene.isExcluded);
             // Same population scoreScene ranks: constants are out, because relevance is not a concept that
             // applies to them. Ungraded rows are out because they carry no label.
@@ -283,7 +339,7 @@ const fx = n => (Number.isFinite(n) ? (n >= 0 ? '+' : '') + n.toFixed(3) : '  n/
                     return Number.isFinite(p2) && Number.isFinite(p3) ? 0.5 * p2 + 0.5 * Math.min(p3, p2) : NaN;
                 };
                 let gi = 0;
-                const scenes = perScene.map(({ kept, ungraded }, si) => {
+                const scenes = perScene.map(({ kept, ungraded, name }, si) => {
                     const fold = bookOf[gi];
                     const rows = kept.map(k => ({ e: scoreRow(X[gi++], fold), g: k.g }));
                     // An ungraded row is projected through ITS OWN scene's standardisation, the same
@@ -295,11 +351,12 @@ const fx = n => (Number.isFinite(n) ? (n >= 0 ? '+' : '') + n.toFixed(3) : '  n/
                         });
                         rows.push({ e: scoreRow(design, fold), g: 0 });
                     }
-                    return { rows: rows.filter(r => Number.isFinite(r.e)), relevant: kept.filter(k => k.g >= 3).length };
+                    return { name, rows: rows.filter(r => Number.isFinite(r.e)), relevant: kept.filter(k => k.g >= 3).length };
                 }).filter(sc => sc.relevant > 0);
                 const grid = Array.from({ length: 99 }, (_, i) => (i + 1) / 100);
                 return {
                     scenes: scenes.length,
+                    sceneNames: scenes.map(sc => sc.name),
                     meanRelevant: mean(scenes.map(sc => sc.relevant)),
                     grid: grid.map(cut => {
                         const per = scenes.map(sc => {
@@ -397,6 +454,13 @@ const fx = n => (Number.isFinite(n) ? (n >= 0 ? '+' : '') + n.toFixed(3) : '  n/
             }
             console.log(`  best cutoff ${best.cut.toFixed(2)}: F2 ${best.f.toFixed(4)}, delivering ${best.delivered.toFixed(1)} entries against ${b.meanRelevant.toFixed(1)} relevant.`);
             t.best = best;
+            if (EMIT) {
+                fs.writeFileSync(EMIT, JSON.stringify({
+                    swept: SWEPT, value: t.value, tier: TIER, with: WITH, interactions: INTERACT,
+                    cut: best.cut, f2: best.f, scenes: b.sceneNames, perScene: best.perScene,
+                }, null, 1));
+                console.log(`  per-scene F2 written to ${EMIT}`);
+            }
         }
         // PAIRED against the first arm, each at its own best cutoff — the contrast param-screen makes,
         // and the only one that can tell a real gain from the flatness of the cutoff curve.

@@ -850,6 +850,27 @@ entry gets p, and ships if it clears the cutoff. The count falls out — a scene
 delivers three — so "how many entries does this scene need" is not a separate question and takes no
 parameter of its own.
 
+**The three shipped signals never compare entry CONTENT to the scan WINDOW, and that cell is where a
+new signal was found.** Cosine is query against chunk, `text` is query against content, `keys` is the
+entry's keys against the window — three readings of one question, which is why they are collinear and
+why neither curvature nor interaction adds anything. PROPER-NOUN OVERLAP fills the empty cell: title-case
+tokens shared between the entry's content and the window, minus the common-English list. It is not a
+reweighting of `text`, because BM25 spreads its mass over every shared term and a character name arrives
+diluted among hundreds of ordinary words.
+
+**Measured**, memory tier, held out by book: it fits at +0.416 (SE 0.061) — the strongest new term
+measured — carries solo AUC 0.727 against cosine's 0.737, and moves the model 0.7859 -> 0.7980 AUC and
+0.398 -> 0.405 AP. On the SCORE OF RECORD it is not established: F2 0.4942 -> 0.5061, but paired per
+scene that is 29 up against 26 with 13 tied, p 0.79. The two readings are not in conflict — AUC and AP
+are estimated over 8502 rows and per-scene F2 over 68 scenes holding ~7.8 relevant entries each, so the
+delivered-set test is much the weaker instrument. Promising and unproven, in that order.
+
+**Story-time position carries nothing.** Fitted as the entry's uid, which within-scene standardisation
+makes equivalent to distance from the current point up to sign: solo AUC 0.458, and adding it to
+proper-noun overlap COSTS 0.0032 AUC and 0.0045 F2. `order` is deliberately not consulted — it is ST's
+insertion priority, and a column falling back between the two would mean story position in one book and
+priority in the next, which a fit held out BY BOOK cannot survive.
+
 **Polynomial terms measured WORSE, on the tier that could afford them.** Squares of the standardised
 signals were fitted on memory (8502 rows, `--degree 2`): held out by book they cost AUC 0.7859 -> 0.7809
 and F2 over the delivered set 0.494 -> 0.491, while gaining 0.001 in-sample — the signature of terms
