@@ -866,11 +866,17 @@ lowercased, after detection. **Measured** against the private ASCII regex this f
 paired over 88 scenes: F2 0.5443 -> 0.5476, 47 scenes up against 17 with 24 tied, p 0.0002, and the
 validation fold's AP 0.873 -> 0.883. It is also the reading that removes the second implementation.
 
-**MULTI-TOKEN SPANS LOSE**, so a name is a token and not a phrase. Maximal runs of capitalised tokens
-score F2 0.5395, which is 22 scenes up against 41 against the unigram arm (p 0.0226). Runs break at
-lowercase particles — "Church of the Sun" becomes `church` and `sun` — and sentence-initial capitals
-start runs they do not belong to. Restricting to the GAZETTEER loses too, 15 up against 44 (p 0.0002):
-the signal is a rare name shared with what is on screen, not an author-declared one.
+**MULTI-TOKEN SPANS LOSE, and they lose REPAIRED.** The first attempt broke runs at lowercase particles
+and let sentence-initial capitals start them, so it was rebuilt on the same name detection: particles
+join only BETWEEN name tokens and a trailing one is trimmed ("Church of the Sun", "Maren's Gap",
+"van der Berg"), `and` is excluded because it joins entities rather than living inside one, and each run
+emits its parts as well as itself — a span alone is brittle, since an entry's "Brackenmoor Patrol" would
+share nothing with a window's "Brackenmoor". **Measured**: the repair is worth 43 scenes up against 21
+(p 0.0081) over the broken version, and the repaired arm still loses to plain unigrams 15 up against 50
+(p 0.0000). So a name is a TOKEN, and the phrase is noise on top of it rather than evidence beside it.
+
+Restricting to the GAZETTEER loses too, 15 up against 44 (p 0.0002): the signal is a rare name shared
+with what is on screen, not an author-declared one.
 
 **IDF-WEIGHTED, and the weighting is what makes it work.** A shared name is worth `log((N+1)/(df+1))`
 with the ENTRY as the document and the primary book as the corpus — the same one-index principle

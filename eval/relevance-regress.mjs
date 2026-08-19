@@ -142,19 +142,43 @@ const FEATURES = [
 // so it inflates the floor rather than the discrimination, and a POS tagger is not worth it to find out
 // whether the axis exists at all.
 const PROPER_RE = /\b[A-Z][a-z]{2,}\b/g;
-// Maximal runs of capitalised tokens, joined — the arm that asks whether a name is a SPAN. A run of one
-// is still emitted, so this is structurally a superset of the unigram arms rather than a different
-// vocabulary, and IDF then weights "brackenmoor patrol" as its own term against the book's entries.
-// Sentence-initial capitals start a run they do not belong to; that is the arm's known cost.
-const properSpans = text => {
+// A name may CONTAIN lowercase — "Church of the Sun", "Maren's Gap", "van der Berg" — so a run cannot
+// simply break at the first uncapitalised token. Particles join a run only between name tokens, and a
+// trailing one is trimmed, so "Sun of" never forms.
+//
+// Built on ranking.properNounsOf rather than on capitalisation directly: the first span arm started runs
+// at sentence-initial capitals, which is how "The" became the head of a name, and it lost to plain
+// unigrams because of it.
+//
+// EMITS THE SPAN AND ITS PARTS. Spans alone are brittle — an entry saying "Brackenmoor Patrol" against a
+// window saying only "Brackenmoor" would share nothing, which is worse than the unigram arm rather than
+// better. Both levels means the phrase is extra evidence when it agrees, never a replacement.
+// NOT 'and': it joins two entities rather than living inside one, so "Maren and Brackenmoor Patrol"
+// formed a single three-name span. Every member here is a genitive or article particle that appears
+// INSIDE a name.
+const PARTICLES = new Set(['of', 'the', 'de', 'del', 'della', 'di', 'da', 'van', 'von', 'der', 'den',
+    'du', 'la', 'le', 'el', 'bin', 'ibn']);
+const properSpans = (text) => {
+    const norm = normalizeOrthography(String(text ?? ''));
+    const names = ranking.properNounsOf(norm);
     const out = new Set();
-    for (const sentence of String(text ?? '').split(/(?<=[.!?])\s+|\n+/)) {
+    for (const sentence of norm.split(/(?<=[.!?])\s+|\n+/)) {
         let run = [];
+        const flush = () => {
+            while (run.length && PARTICLES.has(run[run.length - 1])) run.pop();
+            if (run.length) {
+                out.add(run.join(' '));
+                for (const t of run) if (names.has(t)) out.add(t);
+            }
+            run = [];
+        };
         for (const tok of sentence.trim().split(/[^\p{L}\p{N}\p{M}']+/u)) {
-            if (tok.length > 1 && /^\p{Lu}/u.test(tok)) { run.push(tok.toLowerCase()); continue; }
-            if (run.length) { out.add(run.join(' ')); run = []; }
+            const lw = tok.toLowerCase();
+            if (names.has(lw)) { run.push(lw); continue; }
+            if (run.length && PARTICLES.has(lw)) { run.push(lw); continue; }
+            flush();
         }
-        if (run.length) out.add(run.join(' '));
+        flush();
     }
     for (const w of [...out]) if (!w.includes(' ') && COMMON_WORDS.has(w)) out.delete(w);
     return out;
@@ -168,7 +192,7 @@ const properNouns = text => {
         for (const w of [...out]) if (COMMON_WORDS.has(w)) out.delete(w);
         return out;
     }
-    if (PROPER_EXTRACT === 'span') return properSpans(normalizeOrthography(String(text ?? '')));
+    if (PROPER_EXTRACT === 'span') return properSpans(text);
     const out = new Set();
     for (const m of String(text ?? '').match(PROPER_RE) ?? []) {
         const w = m.toLowerCase();
