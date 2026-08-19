@@ -932,6 +932,28 @@ columns computable from the entry alone. Both of those, and the dropped-set figu
 against `--proper count`; the direction is not in doubt at those margins but the numbers are owed a
 re-run against the ruled variant.
 
+**BOTH TRANSFER TO REFERENCE, and `density` INVERTS THERE.** **Measured**, reference tier, 518 rows on 64
+scenes, held out by book: over `proper`, adding the two takes AUC 0.7123 -> 0.7702, AP 0.466 -> 0.541 and
+F2 0.8062 -> 0.8196, paired 33 scenes up against 10 with 15 tied, p 0.0006. All of it is PRECISION —
+50.6% -> 57.7% — because the tier's baseline already sits at 100% recall, so there is none to buy.
+`proper` itself is worth nothing here (+0.0003, 12 up against 3 with 43 TIED), which is the opposite of
+its memory-tier standing.
+
+**`density` runs -0.935 (SE 0.185) on reference against +0.108 on memory**, and its solo AUC is 0.336 —
+strongly predictive INVERTED. A reference entry thick with names is a roster or an index, scaffolding
+rather than subject, where a memory scene-summary thick with names is a specific scene. This is the
+concrete case for *Fit PER TIER*: a shared coefficient would not be merely suboptimal on one tier, it
+would carry the wrong SIGN there. `length` is negative in both (-0.341 reference, -0.279 memory), so the
+tiers agree about it.
+
+**`length` corrects `proper`'s COUNT, not BM25.** **Measured** in both tiers: dropping `text` leaves it at
+-0.366 memory and -0.456 reference, while dropping `proper` collapses it to -0.128 (SE 0.049) and -0.127
+(SE 0.154). `proper` is an un-normalised sum over shared names, so a longer entry shares more by
+construction. Normalising INSIDE the feature loses to the two columns, though: `--proper idf-len` divides
+the IDF sum by log tokens and reads F2 0.5233 alone against 0.5162 for the raw sum — better as a lone
+column — but 0.5396 with `density` against the two-column 0.5503, delivering 25.9 entries against 19.8. A
+ratio fixes an exchange rate the fit would otherwise choose.
+
 **Story-time position carries nothing.** Fitted as the entry's uid, which within-scene standardisation
 makes equivalent to distance from the current point up to sign: solo AUC 0.458, and adding it to
 proper-noun overlap COSTS 0.0032 AUC and 0.0045 F2. `order` is deliberately not consulted — it is ST's

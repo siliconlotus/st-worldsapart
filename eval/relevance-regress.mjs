@@ -35,7 +35,7 @@
 //
 // Usage (from SillyTavern root):
 //   node .../relevance-regress.mjs <sample.json> [...] [--sweep gazetteerSource=keys,titles]
-//        [--tier memory|reference] [--cut 4] [--ordinal] [--loso] [--lobo] [--calibration] [--cutoff] [--degree 2] [--interactions] [--with proper,time,oracle,length,density,rarity] [--without keys] [--drop-keys flagged.json] [--emit-rows rows.json] [--proper count|idf|jaccard|gaz] [--proper-extract regex|entity|span]
+//        [--tier memory|reference] [--cut 4] [--ordinal] [--loso] [--lobo] [--calibration] [--cutoff] [--degree 2] [--interactions] [--with proper,time,oracle,length,density,rarity] [--without keys] [--drop-keys flagged.json] [--emit-rows rows.json] [--proper count|idf|idf-len|jaccard|gaz] [--proper-extract regex|entity|span]
 import { indexPath, isMemory, loadScene, openSample, sceneParams, makeCandidateSet, makeGradeOf, embed } from './scene.mjs';
 import { ensureIndex } from './reindex.mjs';
 import fs from 'node:fs';
@@ -358,7 +358,7 @@ const fx = n => (Number.isFinite(n) ? (n >= 0 ? '+' : '') + n.toFixed(3) : '  n/
                 // content-lexical insists on one index for both classes. Computed once per scene.
                 const df = new Map();
                 let ndoc = 0;
-                if (PROPER_MODE === 'idf') {
+                if (PROPER_MODE === 'idf' || PROPER_MODE === 'idf-len') {
                     for (const e of scene.entries ?? []) {
                         ndoc++;
                         for (const w of properNouns(e.content)) df.set(w, (df.get(w) ?? 0) + 1);
@@ -374,6 +374,15 @@ const fx = n => (Number.isFinite(n) ? (n >= 0 ? '+' : '') + n.toFixed(3) : '  n/
                         v = union ? inter / union : 0;
                     } else if (PROPER_MODE === 'idf') {
                         for (const w of ents) if (win.has(w)) v += Math.log((ndoc + 1) / ((df.get(w) ?? 0) + 1));
+                    } else if (PROPER_MODE === 'idf-len') {
+                        // ONE COLUMN FOR WHAT THE MODEL RECONSTRUCTS FROM TWO. `length` was measured to be a
+                        // correction to `proper`'s COUNT — dropping proper collapses it to under 1 SE — so
+                        // the normalised overlap is the quantity the pair is expressing. Divided by log
+                        // tokens rather than tokens, because that is the column the fit standardises.
+                        // NOT the jaccard arm, which normalises by the UNION of both name sets and lost.
+                        let idf = 0;
+                        for (const w of ents) if (win.has(w)) idf += Math.log((ndoc + 1) / ((df.get(w) ?? 0) + 1));
+                        v = idf / Math.log(Math.max(2, tokenize(r.entry?.content).length));
                     } else if (PROPER_MODE === 'gaz') {
                         // buildGazetteer stores FOLDED tokens, so the membership test folds too — a
                         // lowercase compare misses every accented name the book declared.
