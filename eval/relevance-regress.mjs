@@ -35,9 +35,9 @@
 //
 // Usage (from SillyTavern root):
 //   node .../relevance-regress.mjs <sample.json> [...] [--sweep gazetteerSource=keys,titles]
-//        [--tier memory|reference] [--cut 4] [--ordinal] [--loso] [--lobo] [--calibration] [--cutoff] [--degree 2] [--interactions] [--with proper,time,oracle,length,density,rarity,chunkdens] [--without keys] [--drop-keys flagged.json] [--emit-rows rows.json] [--proper count|idf|idf-len|jaccard|gaz] [--proper-extract regex|entity|span]
+//        [--tier memory|reference] [--cut 4] [--ordinal] [--loso] [--lobo] [--calibration] [--cutoff] [--at 0.10] [--degree 2] [--interactions] [--with proper,time,oracle,length,density,rarity,chunkdens] [--without keys] [--drop-keys flagged.json] [--emit-rows rows.json] [--proper count|idf|idf-len|jaccard|gaz] [--proper-extract regex|entity|span]
 import { indexPath, isMemory, loadScene, openSample, sceneParams, makeCandidateSet, makeGradeOf, embed } from './scene.mjs';
-import { ensureIndex } from './reindex.mjs';
+import { ensureIndex, resolveModel } from './reindex.mjs';
 import fs from 'node:fs';
 import { gradeValue, gradeCredit, fbeta, RECALL_WEIGHT, signTest } from './metrics.mjs';
 import { COMMON_WORDS } from '../plugin/commonwords.js';
@@ -68,6 +68,17 @@ const [SWEPT, valuesRaw] = [sweep.slice(0, sweep.indexOf('=')), sweep.slice(swee
 // and compare unequal to every default. Booleans the same.
 const coerce = v => (v === 'true' ? true : v === 'false' ? false : v === 'null' ? null : (v !== '' && !Number.isNaN(Number(v)) ? Number(v) : v));
 const VALUES = valuesRaw.split(',').map(s => coerce(s.trim()));
+// THE EMBEDDING MODEL IS SWEPT HERE AND NOT IN param-screen, because it is a stage-1 change whose effect
+// is only readable at stage 4: cosine is one column of the ruled predictor, and what a better cosine buys
+// is a better DELIVERED SET (--cutoff), not a better ranking at a window nobody chose. It is not a
+// sceneParams field — a value rebuilds the collection under that model and re-embeds the query under it,
+// so unlike every other sweep the arms do not share an index. `<model>/raw` drops the task prefixes
+// (reindex.mjs resolveModel).
+//
+// EVERY ARM IS BUILT BY ensureIndex, including the baseline, so the only difference between two arms is
+// the model. Scoring bge-m3 off ST's live collection instead would contrast a model change against a
+// build-path change at the same time.
+const EMBED_SWEEP = SWEPT === 'embedModel';
 // WHICH TIER IS FITTED. The ruled predictor fits per tier (matcher-design.md, Stage 4), and the tiers do
 // not carry the same signals — memory is ~all vectorized, reference ~all keyword-only — so a pooled fit
 // reads one slope across two eligibility regimes. 'all' is the pooled fit and stays the default, because
@@ -87,6 +98,7 @@ const LOSO = argv.includes('--loso');
 // pooled number.
 const LOBO = argv.includes('--lobo');
 const CUTOFF = argv.includes('--cutoff');
+const AT = arg('--at') === null ? null : Number(arg('--at'));
 const DEGREE = Number(arg('--degree') ?? 1);
 // Which signals get a squared term. Empty means all of them — naming a subset is how a term that
 // carries support is tested apart from two that do not, since three added coefficients can lose held
@@ -333,6 +345,15 @@ const mean = xs => xs.reduce((a, b) => a + b, 0) / (xs.length || 1);
 const sd = xs => { const m = mean(xs); return Math.sqrt(mean(xs.map(x => (x - m) ** 2))); };
 const fx = n => (Number.isFinite(n) ? (n >= 0 ? '+' : '') + n.toFixed(3) : '  n/a');
 
+// One query embedding per (scene, arm). The baseline sweep embeds once per scene up front; an embedModel
+// sweep cannot, since the model is what varies.
+const QV = new Map();
+const queryVec = async (S, name, value, em) => {
+    const k = `${name}\u001f${value}`;
+    if (!QV.has(k)) QV.set(k, await embed(em.query + S.query, { model: em.model, endpoint: em.endpoint, url: em.endpoint === 'ollama' ? OLLAMA : em.url }));
+    return QV.get(k);
+};
+
 (async () => {
     // Load once, embed once. Only the gazetteer-dependent half is rebuilt per value, and loadScene is
     // cheap next to the embed call it would otherwise repeat.
@@ -356,12 +377,17 @@ const fx = n => (Number.isFinite(n) ? (n >= 0 ? '+' : '') + n.toFixed(3) : '  n/
             // only the vectorized ones — scored against the standard index it would find no extra vectors
             // and report a null result that reads like an answer. ensureIndex is cached per (book, cfg,
             // all), so this costs an existsSync on every scene after the first.
-            const indexFile = P.denseAllEntries
-                ? (await ensureIndex(S, { all: true, model: MODEL, ollama: OLLAMA, log: () => {} })).path
+            const em = resolveModel(EMBED_SWEEP ? value : MODEL);
+            const indexFile = P.denseAllEntries || EMBED_SWEEP
+                ? (await ensureIndex(S, { all: !!P.denseAllEntries, model: em.model, prefix: em.doc, label: em.label, endpoint: em.endpoint, url: em.endpoint === 'ollama' ? OLLAMA : em.url, log: () => {} })).path
                 : indexPath(S, { model: MODEL });
+            // The query has to be embedded by the same model as the collection it is scored against. A
+            // stale qv here returns plausible cosines that mean nothing, which is the one failure mode of
+            // this sweep that produces a number rather than an error. Memoised per (scene, arm).
+            const qvec = EMBED_SWEEP ? await queryVec(S, name, value, em) : qv;
             const scene = loadScene(S, { indexFile, params: P });
             const tw = (P.entityFilter && P.queryMode !== 'summary') ? ranking.buildTermWeights(S.query, scene.gaz, P.boost) : null;
-            const rows = makeCandidateSet({ ...scene, params: P })(P.K1, P.B, tw, qv, S.query, S.scanText);
+            const rows = makeCandidateSet({ ...scene, params: P })(P.K1, P.B, tw, qvec, S.query, S.scanText);
             if (WITH.includes('proper')) {
                 const win = properNouns(Array.isArray(S.scanText) ? S.scanText.join('\n') : S.scanText);
                 // df over THIS book's entries, which is the corpus the names live in — the same reason
@@ -659,12 +685,15 @@ const fx = n => (Number.isFinite(n) ? (n >= 0 ? '+' : '') + n.toFixed(3) : '  n/
                         });
                         rows.push({ e: scoreRow(design, fold), g: 0, ungraded: true, ...idOf(u.r) });
                     }
-                    return { name, query, rows: rows.filter(r => Number.isFinite(r.e)), relevant: kept.filter(k => k.g >= 3).length };
+                    return { name, query, book: books[fold], rows: rows.filter(r => Number.isFinite(r.e)), relevant: kept.filter(k => k.g >= 3).length };
                 }).filter(sc => sc.relevant > 0);
                 const grid = Array.from({ length: 99 }, (_, i) => (i + 1) / 100);
                 return {
                     scenes: scenes.length,
                     sceneNames: scenes.map(sc => sc.name),
+                    // Which BOOK each scene sits on, so the paired test can be read at the n that is
+                    // actually independent — see the per-book block below.
+                    sceneBooks: scenes.map(sc => sc.book),
                     sceneRows: scenes,
                     meanRelevant: mean(scenes.map(sc => sc.relevant)),
                     grid: grid.map(cut => {
@@ -776,7 +805,14 @@ const fx = n => (Number.isFinite(n) ? (n >= 0 ? '+' : '') + n.toFixed(3) : '  n/
         else for (const t of table) {
             const b = t.cutoff;
             if (!b) continue;
-            const best = b.grid.reduce((a, x) => (x.f > a.f ? x : a));
+            // --at PINS THE OPERATING POINT so two arms can be contrasted at the SAME cutoff. Each arm's
+            // own best is chosen on the same macro F2 the arms are then compared by, so an arm whose
+            // optimum sits deeper is credited for delivering more as if that were free — measured, the
+            // proper-noun arm optimised to 0.04 against the baseline's 0.10 and delivered twice as many
+            // entries, which moved 39 of 63 scenes' per-scene F2 down while the macro mean went up. A
+            // paired sign test across arms is only a statement about the feature when the cutoff is held.
+            const best = AT === null ? b.grid.reduce((a, x) => (x.f > a.f ? x : a))
+                : b.grid.reduce((a, x) => (Math.abs(x.cut - AT) < Math.abs(a.cut - AT) ? x : a));
             console.log(`\nthe cutoff: F2 over the delivered set, macro-averaged over ${b.scenes} scenes (mean ${b.meanRelevant.toFixed(1)} relevant each)`);
             console.log(`  ${SWEPT}=${t.value}`);
             console.log('    E[credit] >= |     F2   precision   recall   delivered');
@@ -815,10 +851,24 @@ const fx = n => (Number.isFinite(n) ? (n >= 0 ? '+' : '') + n.toFixed(3) : '  n/
         if (bases.length > 1) {
             const b0 = bases[0];
             console.log(`\npaired against ${SWEPT}=${b0.value}, each arm at its own best cutoff — per-scene F2, sign test`);
+            // AND AGAIN PER BOOK, because the scene-level p above is not the evidence it looks like:
+            // scenes on one book share its vocabulary, its entry style and its BM25 scale, so 90 scenes
+            // on 5 books is nearer 5 observations than 90 and a within-book correlation is counted as
+            // independent agreement (CLAUDE.md, *Graded scenes*). A change that wins on every book is a
+            // change; one that wins on the largest book and loses elsewhere is a book finding wearing the
+            // parameter's name — and the scene-level test cannot tell them apart, since the largest book
+            // supplies most of the scenes.
+            const bk = b0.cutoff?.sceneBooks ?? [];
+            const bookNames = [...new Set(bk)];
             for (const t of bases.slice(1)) {
                 const d = t.best.perScene.map((f, i) => f - b0.best.perScene[i]);
                 const st = signTest(d);
-                console.log(`  ${String(t.value).padEnd(14)} | mean ${(st.mean >= 0 ? '+' : '') + st.mean.toFixed(4)}  ${st.plus} up / ${st.minus} down / ${st.ties} tied  p ${st.p.toFixed(3)}`);
+                console.log(`  ${String(t.value).padEnd(22)} | mean ${(st.mean >= 0 ? '+' : '') + st.mean.toFixed(4)}  ${st.plus} up / ${st.minus} down / ${st.ties} tied  p ${st.p.toFixed(3)}`);
+                if (bk.length !== d.length || bookNames.length < 2) continue;
+                const perBook = bookNames.map(n => mean(d.filter((_, i) => bk[i] === n)));
+                const sb = signTest(perBook);
+                console.log(`      per book: ${bookNames.map((n, i) => `${n} ${fx(perBook[i])}`).join('   ')}`);
+                console.log(`      across books: ${sb.plus} up / ${sb.minus} down of ${bookNames.length}, mean ${fx(sb.mean)}, p ${sb.p.toFixed(3)} — the honest n for a corpus-level change`);
             }
         }
     }

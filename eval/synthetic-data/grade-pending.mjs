@@ -67,6 +67,14 @@ const byUid = book => new Map(Object.values(book ?? {}).map(e => [String(e.uid),
 const contractHash = existsSync(CONTRACT)
     ? createHash('sha256').update(readFileSync(CONTRACT)).digest('hex').slice(0, 8) : 'unknown';
 
+// A RUN LABEL MAKES A REPEAT PASS DISTINCT FROM THE ONE IT REPEATS. Pass identity is contract+model,
+// which is what stops a re-merge from appending the same verdicts twice — but it also refuses a
+// DELIBERATE second opinion under the same rubric from the same model, which is exactly what a
+// tiebreak is. `build --run <label>` stamps the job, and merge appends `#<label>` to the pass id, so
+// the third verdict lands beside the first two instead of colliding with them, and still cannot be
+// merged twice itself.
+const RUN = arg('--run');
+
 if (cmd === 'build') {
     const BATCH = Number(arg('--batch', 16));
     const ONLY = arg('--only');
@@ -104,6 +112,7 @@ if (cmd === 'build') {
                 scene: name,
                 bundle: bundleFile,
                 contract: contractHash,
+                ...(RUN ? { run: RUN } : {}),
                 out: `${JOBS}/${id}-graded.json`,
                 note: 'Grade every candidate against the scene. Write the JSON your instructions describe to `out`.',
                 sceneText: arm.query,
@@ -144,7 +153,7 @@ if (cmd === 'build') {
 // ---- merge ----
 const RESULTS = resolvePath(arg('--results', JOBS));
 const MODEL = arg('--model', 'claude-sonnet-5');
-const passOf = job => `scene-relevance@${job.contract ?? contractHash}/${MODEL}`;
+const passOf = job => `scene-relevance@${job.contract ?? contractHash}/${MODEL}${job.run ? '#' + job.run : ''}`;
 const STAMP = new Date().toISOString().slice(0, 10);
 
 const jobFiles = readdirSync(JOBS).filter(f => f.endsWith('.json') && !f.endsWith('-graded.json')).sort();
