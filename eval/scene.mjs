@@ -33,26 +33,19 @@ const US = String.fromCharCode(31);
  * Drops rows whose entry POST-DATES the scene — an STMB summary covering messages after the frozen turn
  * could not be in the book when that turn was live, so production can never retrieve it.
  *
- * OFFLINE DERIVATION IS THE ONLY SOURCE OF THESE. `synth-scenes.mjs` cuts a scene out of a finished chat
- * against a finished book, so the book it attaches holds summaries of everything, including what had not
- * happened yet. A live `/wa-grade` capture cannot contain one, which is why the filter keys on
- * `generatedFrom.msg` and no-ops when it is absent: it is exactly the derived samples that need it.
+ * Only offline derivation produces these: `synth-scenes.mjs` cuts a scene out of a finished chat against
+ * a finished book. A live /wa-grade capture cannot contain one, which is why it keys on
+ * `generatedFrom.msg` and no-ops when that is absent.
  *
- * **Measured** over the 96 syn scenes: 43% of graded rows go, but only 20% of the grade >= 3 rows (future
- * entries mean 0.17), and every scene keeps a relevant set — 96 of 96 still hold one, 74 of 77 still hold
- * three. Judge disagreement was concentrated here too: gemma-4 against Sonnet ran recall 0.80 over
- * everything and 0.88 once these were gone.
+ * **Measured** over the 96 syn scenes: 43% of graded rows go and 20% of the grade >= 3 rows.
  *
- * GRADES AND CANDIDATES TOGETHER, never one alone. A dropped grade leaves the row in the arm's ranking,
- * where it still occupies a rank ahead of real entries — which would understate every arm while claiming
- * to correct it. They are one population and are filtered in one pass.
+ * BOOKS, NOT ONLY GRADES. `makeCandidateSet` re-derives the pool from the books, so filtering the grades
+ * alone leaves every future entry in the pool as an UNJUDGED row still holding a rank — worse than
+ * leaving it graded. Dropping them from the books also takes them out of the gazetteer, the BM25 IDF and
+ * the keyword scan, none of which existed over an entry the book did not yet hold.
  *
- * Relevance itself is NOT chronological: an entry about a later event can be squarely on topic, and the
- * rubric is right to say so. This is about what the book HOLDS, not what the grade means.
- *
- * CALLED FROM loadScene, NOT openSample, and the ordering is a correctness constraint rather than taste —
- * see the comment at the call site. It lives on the read side because `synth-scenes.mjs` writes
- * `generatedFrom` only after its own loadScene, so derivation is unaffected and no bundle needs re-deriving.
+ * Relevance itself is NOT chronological — an entry about a later event can be squarely on topic, and the
+ * rubric is right to say so. This is about what the book HOLDS, not what a grade means.
  */
 export const dropUnavailable = (S, label = "sample") => {
     const at = Number(S?.generatedFrom?.msg);
@@ -69,16 +62,6 @@ export const dropUnavailable = (S, label = "sample") => {
     const keep = list => (list ?? []).filter(r => (future(r) ? (cut++, false) : true));
     S.grades = keep(S.grades);
     for (const a of (Array.isArray(S.arms) ? S.arms : [S])) a.candidates = keep(a.candidates);
-    // THE BOOKS TOO, and this is the load-bearing half. The offline path does not replay an arm's stored
-    // candidates — `makeCandidateSet` re-derives the pool from the books — so filtering only the grades
-    // leaves every future entry in the pool as an UNJUDGED row occupying a rank, which is strictly worse
-    // than leaving it graded. Measured when this was missed: candidates barely moved (5050 -> 5022) while
-    // judged rows fell 4501 -> 2610 and the ungraded remainder rose 549 -> 2412; delivered went UP to
-    // 107.7 and precision fell 33.5% -> 15.5%.
-    //
-    // Dropping them from the books also takes them out of the gazetteer, the BM25 IDF and the keyword
-    // scan, which is correct rather than incidental: none of those existed over an entry the book did
-    // not yet hold.
     for (const [w, bk] of Object.entries(S.books ?? {})) {
         for (const [k, e] of Object.entries(bk ?? {})) {
             if (future({ world: w, uid: e.uid })) { delete bk[k]; gone++; }
@@ -90,10 +73,7 @@ export const dropUnavailable = (S, label = "sample") => {
 
 /** Reads a manifest from disk as a plain sample, whether it is one or a /wa-super-grade multi-arm bundle.
  *  Every tool goes through this so `--arm` behaves identically everywhere and a bundle is never scored as
- *  though its first arm were the only one — and so the availability filter above is applied once, rather
- *  than per tool. graded-scene-grid and param-screen reach grades by different routes (makeGradeOf
- *  directly, and scoreScene); filtering in either one alone would let the two disagree about which rows
- *  exist, which this file's own scorers already carry a warning about. */
+ *  though its first arm were the only one. */
 export const openSample = (path, arm = null) => openBundle(JSON.parse(readFileSync(path, 'utf8')), arm);
 
 export const CID = 'wa';
@@ -327,11 +307,8 @@ export function loadScene(S, { indexFile, params: P }) {
     // Legacy bundles carry no `attached` and are skipped rather than rejected: absence is "derived before
     // this was recorded", which says nothing about whether they drifted.
     //
-    // RUNS ONCE PER SAMPLE, because dropUnavailable below mutates the books in place and a sweep calls
-    // loadScene repeatedly on the SAME object — relevance-regress does exactly that, five times over
-    // gazetteerSource. Re-checking on the second pass compares the stripped book against the pristine
-    // fingerprint and throws on a bundle nobody edited. The guard's question is about the file as loaded,
-    // so answering it once is answering it.
+    // ONCE PER SAMPLE: dropUnavailable mutates the books in place, and a sweep calls loadScene repeatedly
+    // on the SAME object, so re-checking would compare a stripped book against the pristine fingerprint.
     for (const a of (S.availabilityFiltered ? [] : S.generatedFrom?.attached ?? [])) {
         if (!a?.fingerprint) continue;                       // named but no world file; nothing was embedded
         const have = S.books?.[a.world];
@@ -343,12 +320,9 @@ export function loadScene(S, { indexFile, params: P }) {
                 + `re-derive rather than score, or the numbers describe a book the grades were not made against`);
         }
     }
-    // AFTER the fingerprint guard and BEFORE anything is built from the books. Both halves of that are
-    // load-bearing: the guard asks whether these are the books the bundle was derived from, which is a
-    // question about the PRISTINE bundle — stripping first makes every derived sample fail it, since the
-    // recorded fingerprint counts entries this deliberately removes. And `entries`, `byUid`, the gazetteer
-    // and POOL are all derived below, so a strip any later would leave them describing a book the scoring
-    // no longer uses.
+    // AFTER the fingerprint guard — which asks whether these are the books the bundle was derived from, a
+    // question about the PRISTINE bundle — and BEFORE `entries`, `byUid`, the gazetteer and POOL are built
+    // from them.
     if (!S.availabilityFiltered) { dropUnavailable(S, S.name ?? 'sample'); S.availabilityFiltered = true; }
     const entries = Object.values(S.books[primary]);
     const byUid = new Map(entries.map(e => [Number(e.uid), e]));

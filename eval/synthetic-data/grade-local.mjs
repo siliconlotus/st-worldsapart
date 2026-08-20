@@ -2,17 +2,14 @@
 // OpenAI-compatible server (oMLX, llama.cpp, vLLM). `--api openai` picks the second.
 //
 // The other half of grade-pending: `build` writes jobs, something grades them, `merge` reads the answers
-// back. That something has so far been a Claude subagent; this is the same contract handed to a local
-// model instead, so a judge can be swapped without touching the job shape, the contamination boundary or
-// the merge. The system prompt is `.claude/agents/scene-relevance.md` VERBATIM (frontmatter stripped) —
-// the rubric is the thing under test, so it is not paraphrased for a local model.
+// back. Swapping the judge touches nothing else. The system prompt is `.claude/agents/scene-relevance.md`
+// VERBATIM (frontmatter stripped) — the rubric is the thing under test, not something to paraphrase.
 //
 // Candidates go in INLINE rather than as a job path: ollama has no filesystem, and the contract already
 // carries that branch ("Otherwise return only the JSON"). `out` and `note` are dropped for the same reason.
 //
-// Fixed seed and temperature 0, because a model comparison is only readable when nothing else moves
-// (CLAUDE.md, "Prompt work belongs on a local model with a fixed seed"). `think` is off by default: the
-// Sonnet passes these results are compared against ran without extended thinking.
+// Fixed seed and temperature 0 (CLAUDE.md, "Prompt work belongs on a local model with a fixed seed").
+// `think` is off by default: the Sonnet passes these are compared against ran without extended thinking.
 //
 // APPEND, never collect: one job -> one result file, written only after the answer parses and its uid set
 // matches the job's. A kill costs the call in flight; a re-run resumes, because an existing result file is
@@ -26,16 +23,14 @@
 //        [--jobs eval/grade-jobs] [--contract 8460b922] [--limit N] [--seed 7] [--ctx 65536] [--think]
 //        [--api ollama|openai] [--host http://localhost:8008]
 //
-// The two APIs differ in three places and nowhere else: the path, the body, and which field of a
-// streamed chunk holds the text. Both stream LINE-DELIMITED JSON, so there is one parse loop reading
-// two field paths rather than two transports — `data:` prefixes and the `[DONE]` sentinel are the only
-// OpenAI-isms, and stripping them costs two lines. `--ctx` and `--think` are ollama-only; an
-// OpenAI-compatible server takes its context from how it was launched.
+// The two APIs differ in the path, the body, and which chunk field holds the text. Both stream
+// line-delimited JSON, so one parse loop reads two field paths. `--ctx` and `--think` are ollama-only.
 //
 // --contract restricts to jobs stamped with that rubric hash, which is what makes the result comparable
 // to an existing pass; without it every job in the directory is dispatched regardless of which rubric it
 // was built under.
 import { readFileSync, writeFileSync, appendFileSync, mkdirSync, readdirSync, existsSync } from 'node:fs';
+import { createHash } from 'node:crypto';
 import { dirname, resolve as resolvePath } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -62,8 +57,14 @@ const API = arg('--api', 'ollama');
 if (!['ollama', 'openai'].includes(API)) { console.error(`--api must be ollama|openai, got ${API}`); process.exit(2); }
 const HOST = arg('--host', process.env.OLLAMA_HOST ?? (API === 'openai' ? 'http://localhost:8008' : 'http://localhost:11434'));
 
-const system = readFileSync(resolvePath(ROOT, '.claude', 'agents', 'scene-relevance.md'), 'utf8')
-    .replace(/^---[\s\S]*?\n---\n/, '');
+// --rubric swaps the system prompt for a VARIANT: editing the contract of record would change the hash
+// stamped on every job, making an experiment indistinguishable from a ruling.
+const RUBRIC = resolvePath(arg('--rubric', resolvePath(ROOT, '.claude', 'agents', 'scene-relevance.md')));
+const rubricRaw = readFileSync(RUBRIC);
+const system = rubricRaw.toString('utf8').replace(/^---[\s\S]*?\n---\n/, '');
+// Hashed as grade-pending hashes the contract — whole file, sha256, first 8 — so an unmodified rubric
+// hashes to the job's own stamp. A filename cannot: a variant can be edited between runs.
+const rubricHash = createHash('sha256').update(rubricRaw).digest('hex').slice(0, 8);
 
 mkdirSync(OUTDIR, { recursive: true });
 const LOG = `${OUTDIR}/dispatch.jsonl`;
@@ -85,9 +86,8 @@ for (const p of pending) {
     if (!byScene.has(s)) byScene.set(s, []);
     byScene.get(s).push(p);
 }
-// Round-robin over BOOKS first, then over that book's scenes. Interleaving scenes alone is not enough:
-// scene names sort by book, so a scene-only round-robin still grades one book to exhaustion before it
-// touches the next — measured, the first 12 jobs of a 36-scene run were all one book.
+// Round-robin over BOOKS first, then that book's scenes: scene names sort by book, so interleaving
+// scenes alone still grades one book to exhaustion before touching the next.
 const byBook = new Map();
 for (const s of byScene.keys()) {
     const bk = bookOf(s);
@@ -101,6 +101,12 @@ const queue = [];
 for (let i = 0; queue.length < pending.length; i++) for (const s of sceneOrder) if (byScene.get(s)[i]) queue.push(byScene.get(s)[i]);
 const work = queue.slice(0, LIMIT);
 
+const jobContract = work[0]?.job?.contract;
+if (jobContract && jobContract !== rubricHash) {
+    // A legitimate A/B, but the result no longer matches the job's stamp, so merging it would file these
+    // grades under a rubric that did not produce them.
+    console.log(`  NOTE: jobs stamped contract ${jobContract}, grading with rubric ${rubricHash} (${RUBRIC.split('/').pop()}) — read these results, do not merge them`);
+}
 console.log(`${work.length} jobs (${byScene.size} scenes) -> ${OUTDIR}  model=${MODEL} api=${API} host=${HOST} seed=${SEED}${API === "ollama" ? ` ctx=${CTX} think=${THINK}` : ""}`);
 
 /** Ollama's json mode still fences sometimes; the fence is the only thing stripped. */
@@ -121,16 +127,11 @@ for (const { id, job } of work) {
             body: JSON.stringify(API === 'openai' ? {
                 model: MODEL, messages, stream: true, seed: SEED, temperature: 0,
                 response_format: { type: 'json_object' },
-                // Usage only arrives on the final chunk if it is asked for, and a run whose cost cannot be
-                // read afterwards is the one you end up re-running to find out.
+                // Usage only arrives on the final chunk if asked for.
                 stream_options: { include_usage: true },
             } : {
-                // STREAM, because node's fetch aborts at 300s waiting for HEADERS (undici's default
-                // headersTimeout) and an unstreamed ollama reply sends none until the whole answer is
-                // ready. MEASURED: 8 jobs died at exactly 301s with `fetch failed` while the GPU was
-                // shared, and the server logged those same requests at took=5m0.88s — it was recording
-                // the client hanging up, not a limit of its own. Streaming makes headers arrive at once,
-                // so a slow job is slow rather than dead, and no request timeout has to be guessed at.
+                // STREAM: node's fetch aborts at 300s waiting for HEADERS, and an unstreamed reply sends
+                // none until the whole answer is ready, so a slow job dies rather than being slow.
                 model: MODEL, messages, stream: true, think: THINK, format: 'json',
                 options: { seed: SEED, temperature: 0, num_ctx: CTX },
             }),
@@ -164,10 +165,8 @@ for (const { id, job } of work) {
     if (!why) {
         try {
             parsed = JSON.parse(unfence(res.message?.content ?? ''));
-            // Two shapes that are the right ANSWER in the wrong wrapper, and both are cheap to accept:
-            // the object inside a one-element array (measured: gemma-4-31B-it-MLX-8bit does this every
-            // time), and the bare rows with no envelope. Anything else is a real refusal to answer the
-            // question and still fails the uid check below.
+            // The right ANSWER in the wrong wrapper: the object inside a one-element array, or bare rows
+            // with no envelope. Anything else still fails the uid check below.
             if (Array.isArray(parsed)) parsed = parsed.length === 1 && parsed[0]?.grades ? parsed[0] : { grades: parsed };
         } catch (e) { why = `parse: ${e.message}`; }
     }
@@ -184,12 +183,11 @@ for (const { id, job } of work) {
     if (why) { bad++; console.log(`  FAIL ${id}  ${dt.toFixed(0)}s  ${why}`); }
     else { ok++; writeFileSync(`${OUTDIR}/${id}-graded.json`, JSON.stringify({ scene: job.scene, grades: parsed.grades }, null, 1)); }
     appendFileSync(LOG, JSON.stringify({
-        id, model: MODEL, api: API, host: HOST, seed: SEED, contract: job.contract, ok: !why, why,
+        id, model: MODEL, api: API, host: HOST, seed: SEED, rubric: rubricHash, rubricFile: RUBRIC.split('/').pop(), contract: job.contract, ok: !why, why,
         secs: Number(dt.toFixed(1)), rows: job.candidates.length,
         promptTokens: res?.prompt_eval_count ?? null, outTokens: res?.eval_count ?? null,
-        // The head of the raw answer, ON FAILURE ONLY. A rejected result writes no file, so without this
-        // the only record of WHY is a shape count — and the first failure here ("0/7 rows") turned out to
-        // be the right answer inside a one-element array, which cost a round trip to discover.
+        // The head of the raw answer, ON FAILURE ONLY: a rejected result writes no file, so otherwise the
+        // only record of why is a shape count.
         ...(why ? { raw: (res?.message?.content ?? '').slice(0, 400) } : {}),
     }) + '\n');
     if ((ok + bad) % 10 === 0) console.log(`  ${ok} ok, ${bad} failed, ${(secs / 60).toFixed(1)}min elapsed`);
