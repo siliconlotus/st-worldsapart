@@ -6,7 +6,7 @@
 import { COMMON_WORDS } from '../plugin/commonwords.js';
 import { ZIPF_EN, POS_VA, POS_VA_STRICT, POS_ADJ } from './zipf-en.js';
 import { countKey, escapeRegex, isRegexKey, secondaryKeys, segment, usableKeys } from './matcher.mjs';
-import { buildAutomaton, scanAutomaton, createScanScope, primeScan, validateSmartKey } from './smartkeys.mjs';
+import { buildAutomaton, scanAutomaton, createScanScope, parse, primeScan, tokenize, validateSmartKey } from './smartkeys.mjs';
 
 export const KEY_BOOK_COMMON = 0.5;
 
@@ -99,6 +99,58 @@ export function looksLikeFragment(key) {
  * sticky, home~137/street~497 flagged everywhere). */
 const ENGLISH_COMMON_STICKY_CUT = 1000;
 const COMMON_HEAD = new Set([...COMMON_WORDS].slice(0, ENGLISH_COMMON_STICKY_CUT));
+
+/**
+ * The common-English word a SmartKey's matching surface reduces to, or null if it has a selective term.
+ *
+ * The audit's English-common check reads a key AS A STRING, which is meaningless for a SmartKey: the
+ * matching surface of `? fire water` is its terms. Walked per term instead, with the two operators
+ * pulling in opposite directions —
+ *
+ *   OR takes the LOOSEST branch. A group fires when any branch does, so one common word opens it on
+ *   almost every window: `(your|my|Kyle's)` is as selective as `your`, and `Kyle's` being rare does not
+ *   help. This is the case authors get wrong, because an alternation of possessives reads as a phrase
+ *   alternation and is not one (matcher-design.md, *Quoting is the single escape*).
+ *
+ *   AND takes the TIGHTEST conjunct. One selective term gates the whole expression, so `? tortoiseshell
+ *   glasses` is a good key however common `glasses` is. Flagging on any common conjunct would condemn
+ *   most legitimate SmartKeys.
+ *
+ * So a key is flagged only when it has NO selective term anywhere — which is what makes it equivalent to
+ * a bare common word, the thing the literal check already refuses.
+ *
+ * A NOT contributes no firing and a REGEX cannot be judged as a word; both read as selective, since the
+ * flag must claim over-firing rather than merely fail to rule it out.
+ *
+ * @returns {string|null} the common word the key reduces to, for the reason text
+ */
+export function commonSurfaceOf(node, common = COMMON_WORDS) {
+    if (!node) return null;
+    switch (node.type) {
+        // A quoted phrase is a phrase, whatever its words are: `"your husband"` is selective.
+        case 'TERM': {
+            const v = String(node.value ?? '').trim();
+            return !/\s/.test(v) && common.has(v.toLowerCase()) ? v : null;
+        }
+        case 'OR': {
+            const l = commonSurfaceOf(node.left, common);
+            return l ?? commonSurfaceOf(node.right, common);
+        }
+        case 'AND': {
+            const l = commonSurfaceOf(node.left, common);
+            if (!l) return null;
+            const r = commonSurfaceOf(node.right, common);
+            return r ? l : null;
+        }
+        default: return null;
+    }
+}
+
+/** `commonSurfaceOf` from the raw key, or null when it does not parse or is not a SmartKey. */
+export function commonSmartKey(raw, common = COMMON_WORDS) {
+    if (!String(raw ?? '').trim().startsWith('?')) return null;
+    try { return commonSurfaceOf(parse(tokenize(String(raw))), common); } catch { return null; }
+}
 
 /**
  * Flag-aware keyword prune analysis for one loaded lorebook — one classifier shared by the Lorebook
@@ -304,7 +356,17 @@ export function buildKeyPruneScan(data, opts, ignoreSet, { caseSensitiveDefault 
         // story simply does not use. So the flag stands when unevidenced, and severityOf reads `chatRate`
         // to decide how loudly. It is NOT suppressed by a quiet chat: absence of over-firing here is not
         // evidence the word denotes anything, which is the other half of what this flag is claiming.
-        if (literal && opts.pruneCommon && !/\s/.test(k) && (sticky ? COMMON_HEAD : COMMON_WORDS).has(k.toLowerCase())) return { flag: 'english common', bookContent, chatRate };
+        // A SMARTKEY IS JUDGED ON ITS TERMS, not on the string it is written with — commonSurfaceOf walks
+        // it and reports the common word it reduces to, or nothing if any term is selective. The flag is
+        // the same one: a key whose whole matching surface is a common English word over-fires whether it
+        // was written `heat` or `? (your|my|Kyle's) heat`.
+        if (opts.pruneCommon) {
+            const list = sticky ? COMMON_HEAD : COMMON_WORDS;
+            if (literal && !/\s/.test(k) && list.has(k.toLowerCase())) return { flag: 'english common', bookContent, chatRate };
+            // `term` only on this path: naming it beside a literal key would just repeat the key.
+            const term = literal ? null : commonSmartKey(k, list);
+            if (term) return { flag: 'english common', term, bookContent, chatRate };
+        }
         // ignoreProper spares a capitalised key from the dead flag on the grounds it is a name the chat
         // will use. A SmartKey is not a name, so it gets no such reprieve — one that never evaluates
         // true anywhere is exactly the broken-key case the audit exists to surface.
@@ -401,7 +463,11 @@ export function buildKeyPruneScan(data, opts, ignoreSet, { caseSensitiveDefault 
         if (p.flag === 'unusable') return { text: p.code ? `unusable — ${p.code}` : 'unusable', color };
         if (p.flag === 'book common') return { text: `book common (${Math.round(100 * p.bookContent / nBook)}%)`, color };
         if (p.flag === 'english common') {
-            return { text: p.chatRate === undefined ? 'english common' : `english common · ${Math.round(100 * p.chatRate)}% of chat`, color };
+            // The TERM is named for a SmartKey, since "english common" against `? (your|my|Kyle's) heat`
+            // otherwise reads as a claim about the whole expression and the author cannot see which
+            // branch opened it.
+            const which = p.term ? ` · ${p.term}` : '';
+            return { text: p.chatRate === undefined ? `english common${which}` : `english common${which} · ${Math.round(100 * p.chatRate)}% of chat`, color };
         }
         if (p.flag === 'book shared') return { text: `book shared (${Math.round(100 * p.bookListed / nBook)}%)`, color };
         if (p.flag === 'fragment') return { text: 'phrase fragment', color };

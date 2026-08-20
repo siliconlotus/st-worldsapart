@@ -39,17 +39,25 @@ marks a punctuation-only term as deliberate. One rule to learn, not four. Quotin
 changes what it matches; quoting *across a space* does, turning a conjunction into a phrase.
 
 That last clause is the one authors get wrong, because an alternation of possessives READS as a phrase
-alternation and is not one:
+alternation and is not one. **Measured**, against the default paragraph window:
 
 ```
-? (your|my|Kyle's) husband        (your OR my OR Kyle's) AND husband, each anywhere in the window
-? ("your husband"|"my husband"|"Kyle's husband")     three phrases
+                                        Your husband   Your sister's    …a husband at this point.
+                                             Michael   husband Thomas   Your relationship…
+? ("your husband" | "my husband")                  1                0                        0
+? (your | my) husband                              2                2                        2
 ```
 
-The first fires on "I know your name" plus "her husband" nine messages later. **An alternation is only as
-selective as its loosest branch** — `Kyle's` is rare, `your` is not, so the group is open on almost every
-window and the conjunction collapses to bare `husband`. Two good branches do not save it, and the false
-fire scores 2 rather than 1, so it also outranks a genuine single-phrase match.
+The second is `(your OR my)` AND `husband`, co-occurring anywhere in the paragraph — a different claim
+from the phrase, and true of every line above. **An alternation is only as selective as its loosest
+branch**: `Kyle's` is rare, `your` is not, so a group containing both is open on almost every paragraph
+and the conjunction collapses to bare `husband`. Two good branches do not save it, and the loose form
+scores 2 against the phrase's 1, so it also outranks a genuine phrase match.
+
+The third reading is the one that is **ruled but not built**: `? ((your | my) husband)~3` constrains the
+group to a window (*Ruled, unimplemented*, below) and would separate "Your sister's husband Thomas" from
+the two sentences apart. Until it lands, `~` is a literal character and such a key is dead — which the
+audit reports from evidence, since a key expecting a feature WA lacks never fires.
 
 **Validator checks read structure, not intent.** Every check that guessed at what an author meant
 produced false positives on legitimate literals — `"()"` is a real album, `M*A*S*H` is a real title.

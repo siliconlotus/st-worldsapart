@@ -308,16 +308,18 @@ console.log('ok   SmartKey structural validation');
 
 // SmartKeys are audited like any other key, not exempted. countKey already evaluates a query against
 // the same primed trie every literal goes through, so df was being computed for them all along and
-// then discarded. What genuinely does not apply is the heuristics that read the key as a LITERAL
-// STRING — English-common, fragment, short — because the matching surface of `? fire water` is its
-// terms, not the twelve characters of the query.
+// then discarded. What does not apply is the heuristics read against the key as a LITERAL STRING —
+// fragment and short — because the matching surface of `? fire water` is its terms, not the twelve
+// characters of the query. English-common is now read against those TERMS instead of skipped.
 {
     const entries = {};
     for (let i = 1; i <= 12; i++) entries[i] = { uid: i, key: [], content: `Marjorie walked. Entry number ${i} of the set.` };
     entries[1].key = ['? Marjorie'];          // fires everywhere
     entries[2].key = ['? zebra unicorn'];     // fires nowhere
     entries[3].key = ['Marjorie'];            // plain control with the same df
-    entries[4].key = ['? the'];               // an English-common TERM, but not an English-common KEY
+    entries[4].key = ['? the'];               // reduces to an English-common term
+    entries[5].key = ["? (the|Marjorie)"];    // OR: as loose as its loosest branch
+    entries[6].key = ['? the Marjorie'];      // AND: one selective term gates it
     const opts = { scanKeyword: true, scanVectorized: true, scanConstant: true, pruneUnattested: true,
         pruneCommon: true, pruneShort: true, pruneShared: true, pruneFragment: true,
         minLength: 4, bookCommon: 0.5, bookShared: 0.5, ignoreProper: true };
@@ -327,12 +329,17 @@ console.log('ok   SmartKey structural validation');
     eq(verdict(2), 'unattested|never matches', 'a query that evaluates false everywhere is flagged dead');
     eq(verdict(1), verdict(3), 'a SmartKey and the equivalent plain key get the same df verdict');
     eq(verdict(1), 'book common|book common (100%)', '...and that verdict is the df one, not a string one');
-    // The literal-string heuristics stay off: `? the` is a bad key because of its TERM, which is a
-    // per-term check that does not exist yet — not because the string "? the" is a common English word.
-    // The English-common check says "common"; the df check says "frequent (N%)". "? the" fires
-    // everywhere, so it earns the df verdict — what it must NOT earn is the English-common one, which
-    // would be reading the query as though the string "? the" were an English word.
-    eq(verdict(4), 'book common|book common (100%)', 'a query earns the df verdict, not the English-common one');
+    // ENGLISH-COMMON IS READ PER TERM, and the reason names the term — "english common" against a query
+    // otherwise reads as a claim about the whole expression, and the author cannot see which branch
+    // opened it. It outranks the df verdict here exactly as it does for a literal.
+    eq(verdict(4), 'english common|english common · the', 'a query reducing to a common word earns the English-common flag');
+    // THE TWO OPERATORS PULL OPPOSITE WAYS. An OR fires when any branch does, so one common word opens
+    // the group however rare its siblings — this is the possessive-alternation mistake, which reads as a
+    // phrase alternation and is not one. An AND needs every conjunct, so one selective term is enough to
+    // gate it and flagging on any common conjunct would condemn most legitimate SmartKeys.
+    eq(sc.classifyEntry(entries[5])[0]?.flag, 'english common', 'an alternation is as loose as its loosest branch');
+    eq(sc.reasonOf(sc.classifyEntry(entries[5])[0]).text, 'english common · the', '...and the loose branch is named');
+    eq(sc.classifyEntry(entries[6])[0]?.flag, 'book common', 'a conjunction is as tight as its tightest conjunct');
 }
 console.log('ok   SmartKeys are audited on df, exempt only from the literal-string heuristics');
 
