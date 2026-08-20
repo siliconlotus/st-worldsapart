@@ -3384,6 +3384,11 @@ const SETTINGS_HTML = `
                     <label class="checkbox_label" for="wa_debug_log">
                         <input id="wa_debug_log" type="checkbox"><span>Log selection table on every generation</span>
                     </label>
+
+                    <small class="opacity50p">Reviewing graded bundles needs no chat, but running a slash
+                    command does — ST opens a placeholder assistant chat to dispatch one. This launches the
+                    same reviewer without touching the chat input.</small>
+                    <div id="wa_review_bundles" class="menu_button" style="width:auto;padding:0.3em 0.8em;">Review graded bundles…</div>
                 </div>
             </div>
         </div>
@@ -3642,6 +3647,7 @@ export async function init() {
     // After bind(), so the dropdown's value survives being rebuilt.
     populateProfiles();
     $('#wa_refresh_profiles').on('click', () => populateProfiles(true));
+    $('#wa_review_bundles').on('click', () => superEvalScene());
 
     // ST fires a dry-run generation on chat load and for token estimates; note it so the
     // scan-done handler can stay quiet, since its interceptor (and our retrieval) is skipped.
