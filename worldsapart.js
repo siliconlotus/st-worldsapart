@@ -360,7 +360,22 @@ async function syncWorld(world, entries) {
 
     if (newItems.length) {
         console.log(`Worlds Apart: embedding ${newItems.length} new chunks for "${world}"`);
-        await vectorPost('insert', { collectionId, items: newItems });
+        // Timed, not counted: ms/chunk is the endpoint's, not the book's — measured 110ms on 8B over
+        // MLX against 910ms over llama.cpp, so no chunk count means "slow" for every user
+        // (embedding-models.md). Indeterminate because the insert is one awaited call; a percentage
+        // would need it batched client-side.
+        let announced = false;
+        const slow = setTimeout(() => {
+            announced = true;
+            toastr.info(`Embedding ${newItems.length} chunks for "${world}". A large embedding model can make the first sync of a big book take several minutes.`, 'Worlds Apart', { timeOut: 15000 });
+        }, 3000);
+        const started = Date.now();
+        try {
+            await vectorPost('insert', { collectionId, items: newItems });
+        } finally {
+            clearTimeout(slow);
+        }
+        if (announced) toastr.success(`Embedded ${newItems.length} chunks for "${world}" in ${Math.round((Date.now() - started) / 1000)}s.`, 'Worlds Apart', { timeOut: 5000 });
     }
 
     if (staleHashes.length) {
