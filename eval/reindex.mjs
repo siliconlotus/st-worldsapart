@@ -93,8 +93,100 @@ export function cachePath(S, cfg, model, book = S.primaryBook, all = false) {
     return new URL(`./eval-data/indexes/${slug}__${model}${all ? `__all` : ``}__${key}/index.json`, import.meta.url).pathname;
 }
 
-const embedBatch = async (texts, { ollama, model }) => {
-    const r = await fetch(`${ollama}/api/embed`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ model, input: texts }) });
+/** How a model is CALLED and how its collection is NAMED.
+ *
+ * EmbeddingGemma and Qwen3-Embedding are trained with TASK PREFIXES and lose quality without them, and
+ * ollama's template for both is a bare `{{ .Prompt }}` — so applying them is the caller's job, not the
+ * server's. bge-m3 wants none, which is why it needs no entry here.
+ *
+ * `<model>/raw` is the same model called with no prefix. It is a separate arm rather than a correction
+ * because it answers a separate question: prefixed asks whether the model is better, raw asks whether it
+ * is better AS ST WOULD CALL IT, since nothing in the vector path prefixes anything today.
+ *
+ * The DOC prefix is in the cache label — a collection embedded with one is a different collection. The
+ * QUERY prefix is not, since it never reaches a stored vector: two arms differing only there share a
+ * build, and should.
+ *
+ * KEYED BY FAMILY STEM, matched as a prefix of the model name: the contract is a property of how the
+ * family was trained, not of which size you pulled, so qwen3-embedding:0.6b must not silently fall
+ * through to no prefix and be reported as a worse model than its 4b sibling.
+ *
+ * A SERVER STEM (`lms:`, `omlx:`) names a model served by something other than ollama, over its
+ * OpenAI-compatible /v1/embeddings. The transport is in the spec rather than in a flag so that two arms in
+ * one sweep can sit on different servers: an MLX build and a GGUF one of the same weights are a
+ * comparison, and a global --endpoint would make them two runs.
+ *
+ * LM Studio cannot actually serve an MLX embedder — its mlx-llm engine declares only the `llm` domain, so
+ * /v1/embeddings falls through to whatever GGUF embedder is loaded (see the served-model check in
+ * embedTexts). oMLX is the one that does; `lms:` stays because llama.cpp GGUF embedders work there.
+ */
+export const SERVERS = { 'lms:': 'http://localhost:1234', 'omlx:': 'http://localhost:8008' };
+export const PREFIXES = {
+    embeddinggemma: { doc: 'title: none | text: ', query: 'task: search result | query: ' },
+    'mxbai-embed-large': { doc: '', query: 'Represent this sentence for searching relevant passages: ' },
+    'qwen3-embedding': { doc: '', query: 'Instruct: Given a roleplay scene, retrieve lorebook entries relevant to it\nQuery: ' },
+};
+
+/** @returns {{model: string, doc: string, query: string, label: string}} */
+export const resolveModel = (spec) => {
+    const raw = String(spec).endsWith('/raw');
+    const named = raw ? String(spec).slice(0, -4) : String(spec);
+    const stem = Object.keys(SERVERS).find(k => named.startsWith(k)) ?? null;
+    const model = stem ? named.slice(stem.length) : named;
+    const endpoint = stem ? 'openai' : 'ollama';
+    const url = stem ? SERVERS[stem] : 'http://localhost:11434';
+    // SUBSTRING, CASE-INSENSITIVE. The served id is whoever packaged the model's spelling, and every
+    // server rewrites it differently: `qwen3-embedding:4b` (ollama), `Qwen3-Embedding-8B-4bit-DWQ` (oMLX),
+    // `text-embedding-qwen3-embedding-8b` (LM Studio, which PREPENDS its own type tag). Anchoring the
+    // match at either end drops the instruction from an arm that should have it, and a missing prefix
+    // does not fail — it quietly reports the model as worse than it is. This has now bitten twice, at
+    // both ends of the string, which is why the match is anchored at neither.
+    const fam = model.toLowerCase();
+    const { doc, query } = (raw ? null : Object.entries(PREFIXES).find(([stem]) => fam.includes(stem))?.[1]) ?? { doc: '', query: '' };
+    // The label carries the SERVER too: the same weights quantized differently are different vectors, and
+    // the served id is what distinguishes them ('...-8B-4bit-DWQ' vs '...-8B-4bit-MLX').
+    return { model, endpoint, url, doc, query, label: (stem ? stem.replace(':', '-') : '') + model + (doc ? '__p' : '') };
+};
+
+/** One embedding call, either transport. OpenAI returns its vectors in a `data` array that is documented
+ *  as index-ordered and is sorted here anyway — a silently permuted batch would attach every vector to the
+ *  wrong chunk and still build a plausible-looking index. */
+export const embedTexts = async (texts, opts) => {
+    // ONE DROPPED CONNECTION MUST NOT COST THE RUN. A 4-arm sweep died on a single ECONNRESET partway
+    // through its last collection and took three already-fitted arms with it, because the readouts print
+    // at the end. The per-book index cache is the resume unit, so a retry here is what keeps a transient
+    // blip from costing anything at all.
+    //
+    // ONLY TRANSPORT FAILURES. undici throws TypeError for those; every error raised below is a plain
+    // Error about what the server actually answered, and retrying one of those would just ask a wrong
+    // model the same question three times.
+    for (let attempt = 0; ; attempt++) {
+        try { return await embedOnce(texts, opts); }
+        catch (e) {
+            if (attempt >= 2 || e?.name !== 'TypeError') throw e;
+            await new Promise(r => setTimeout(r, 1000 * 2 ** attempt));
+        }
+    }
+};
+
+const embedOnce = async (texts, { model, endpoint = 'ollama', url = 'http://localhost:11434', prefix = '' }) => {
+    const input = prefix ? texts.map(t => prefix + t) : texts;
+    if (endpoint === 'openai') {
+        const r = await fetch(`${url}/v1/embeddings`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ model, input }) });
+        const j = await r.json();
+        if (!Array.isArray(j.data) || j.data.length !== texts.length) throw new Error(`embed returned ${j.data?.length ?? 0} vectors for ${texts.length} inputs${j.error ? ` (${JSON.stringify(j.error)})` : ''}`);
+        // WHICH MODEL ANSWERED, checked rather than assumed. LM Studio ignores the requested id on
+        // /v1/embeddings and serves whatever embedding model is loaded — asking it for an 8B qwen while
+        // nomic was resident returned 768-dim nomic vectors under a qwen label, which would have built a
+        // whole index and a whole result table for a model that never ran. The response says who really
+        // answered, so the mismatch is detectable and is the only thing standing between that and a
+        // silently mislabelled arm.
+        if (j.model && String(j.model).toLowerCase() !== String(model).toLowerCase()) {
+            throw new Error(`asked ${url} for "${model}" and "${j.model}" answered — load the right model (lms load "${model}"), or its vectors would be cached under the wrong name`);
+        }
+        return [...j.data].sort((a, b) => a.index - b.index).map(d => d.embedding);
+    }
+    const r = await fetch(`${url}/api/embed`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ model, input }) });
     const j = await r.json();
     if (!j.embeddings || j.embeddings.length !== texts.length) throw new Error(`embed returned ${j.embeddings?.length ?? 0} vectors for ${texts.length} inputs${j.error ? ` (${j.error})` : ''}`);
     return j.embeddings;
@@ -107,9 +199,12 @@ const l2 = v => { let s = 0; for (const x of v) s += x * x; return Math.sqrt(s);
  *
  * @returns {Promise<{path: string, built: boolean, items: number}>}
  */
-export async function ensureIndex(S, { overrides = {}, model = 'bge-m3', ollama = 'http://localhost:11434', book = S.primaryBook, out = null, batch = 64, force = false, all = false, log = () => {} } = {}) {
+export async function ensureIndex(S, { overrides = {}, model = 'bge-m3', prefix = '', label = model, endpoint = 'ollama', ollama = 'http://localhost:11434', url = ollama, book = S.primaryBook, out = null, batch = 64, force = false, all = false, log = () => {} } = {}) {
     const cfg = chunkConfig(S, overrides);
-    const path = out ?? cachePath(S, cfg, model, book, all);
+    // `label` names the cache, `model` names what ollama is asked for: a model embedded WITH its documented
+    // document prefix is a different collection from the same model without one, and the two must not share
+    // a file. Defaults to the model, so every existing cache path stays where it is.
+    const path = out ?? cachePath(S, cfg, label, book, all);
     if (!force && existsSync(path)) return { path, built: false, items: JSON.parse(readFileSync(path, 'utf8')).items.length };
 
     const entries = S.books?.[book];
@@ -123,7 +218,7 @@ export async function ensureIndex(S, { overrides = {}, model = 'bge-m3', ollama 
     const out_ = [];
     for (let i = 0; i < items.length; i += batch) {
         const slice = items.slice(i, i + batch);
-        const vectors = await embedBatch(slice.map(x => x.text), { ollama, model });
+        const vectors = await embedTexts(slice.map(x => x.text), { model, endpoint, url, prefix });
         slice.forEach((it, k) => out_.push({
             id: crypto.randomUUID(),
             metadata: { hash: it.hash, text: it.text, index: it.index },
