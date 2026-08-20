@@ -37,3 +37,11 @@ eq(grew.added, 1, '...and counted as added, not changed');
 // world is part of the identity: uid alone collides across books.
 const twoBooks = mergeReview([{ world: 'A', uid: 1, llmGrade: 0 }], [{ world: 'B', uid: 1, grade: 4 }]);
 eq(twoBooks.grades.length, 2, 'same uid in a different world is a different row');
+
+// `entryText` travels in the review so it can be read standalone, and is dropped on the way into the
+// bundle — the books already hold the entry, and a duplicate on the grade row goes stale silently.
+const stripped = mergeReview([{ world: 'W', uid: 1, llmGrade: 1 }],
+    [{ world: 'W', uid: 1, grade: 3, why: 'human', entryText: 'the whole entry body' }]);
+eq(stripped.grades[0].entryText, undefined, 'entryText is not written into the bundle');
+eq(stripped.grades[0].grade, 3, '...but the human grade is');
+eq(stripped.grades[0].why, 'human', '...and so is the rest of the row');

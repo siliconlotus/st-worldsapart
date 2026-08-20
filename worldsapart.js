@@ -3045,7 +3045,15 @@ async function superGradeScene(named) {
     return '';
 }
 
-/** Opens the browser file picker for JSON. Resolves [] when the user cancels. `multiple` picks a batch. */
+/**
+ * Opens the browser file picker for JSON. Resolves [] when the user cancels. `multiple` picks a batch.
+ *
+ * The click needs live user activation, and a slash command run with no chat open spends it: ST creates
+ * an Assistant chat first, and by the time the callback runs the gesture has expired. The picker is then
+ * silently ignored — no `change`, no `cancel` — so the promise never settles and the command hangs. The
+ * timeout turns that into a message. A native dialog takes focus off the document, so still having it is
+ * what says nothing opened.
+ */
 const pickJsonFiles = ({ multiple = false } = {}) => new Promise(resolve => {
     const input = document.createElement('input');
     input.type = 'file';
@@ -3054,6 +3062,13 @@ const pickJsonFiles = ({ multiple = false } = {}) => new Promise(resolve => {
     input.addEventListener('change', () => resolve([...(input.files ?? [])]), { once: true });
     input.addEventListener('cancel', () => resolve([]), { once: true });
     input.click();
+    // ponytail: focus heuristic, 2s. A dialog that opens without taking focus would be mistaken for a
+    // blocked one; nothing cheaper distinguishes them, since a blocked click fires no event at all.
+    setTimeout(() => {
+        if (!document.hasFocus()) return;
+        toastr.warning('The browser blocked the file picker — run it again now that the chat is open.', 'Worlds Apart');
+        resolve([]);
+    }, 2000);
 });
 
 /**
@@ -3062,31 +3077,40 @@ const pickJsonFiles = ({ multiple = false } = {}) => new Promise(resolve => {
  * offline (or by someone else, or by an LLM judge) can be reviewed without loading the chat it came from.
  * Entry text resolves from each bundle's embedded books and stored grades arrive pre-filled and editable.
  *
- * ONE SECTION PER FILE, ONE SAVE FILE PER RUN. Grading 15 scenes was 15 imports and would have been 15
- * download prompts; the save is a single `{reviewed: [{file, grades}]}` that
- * `eval/synthetic-data/apply-review.mjs` writes back into eval-data. The bundles are not re-emitted —
- * they are mostly embedded books, and re-downloading megabytes to carry a handful of grades is the
- * expensive way to move a few numbers.
+ * ONE SECTION PER BUNDLE, ONE SAVE FILE PER RUN. Grading 15 scenes was 15 imports and would have been 15
+ * download prompts; the save is a single file that `eval/synthetic-data/apply-review.mjs` writes back
+ * into eval-data. It is SELF-CONTAINED, as a grading bundle is: each section carries the scene, and each
+ * graded row the entry text and the judge verdicts it was weighed against, so the review can be read
+ * without the bundle it came from. Only graded rows carry that, so it stays small.
+ *
+ * A PACK — a file whose top level is an ARRAY of bundles — becomes one section per element, so a
+ * shortlist spanning N scenes is one pick rather than N. `eval/synthetic-data/slice-bundles.mjs` emits
+ * one. Each element names the bundle it was cut from, and that name is what the save records, so a pack
+ * of sliced copies still applies to the real bundles in eval-data.
  */
 async function superEvalScene() {
     const files = await pickJsonFiles({ multiple: true });
     if (!files.length) {
         return '';
     }
-    // ONE SECTION PER FILE. A bad file is skipped by name rather than aborting the batch — picking 15 and
-    // losing all of them to one stale export is the failure this command exists to avoid.
-    const secs = [];
+    // A bad file is skipped by name rather than aborting the batch — picking 15 and losing all of them to
+    // one stale export is the failure this command exists to avoid.
+    const bundles = [];
     for (const file of files) {
-        let manifest;
+        let parsed;
         try {
-            manifest = JSON.parse(await file.text());
+            parsed = JSON.parse(await file.text());
         } catch {
             toastr.warning(`Could not parse ${file.name} — skipped`, 'Worlds Apart');
             continue;
         }
+        for (const m of (Array.isArray(parsed) ? parsed : [parsed])) bundles.push({ name: m?.file ?? file.name, manifest: m });
+    }
+    const secs = [];
+    for (const { name: fileName, manifest } of bundles) {
         const armsRaw = Array.isArray(manifest?.arms) ? manifest.arms : (Array.isArray(manifest?.candidates) ? [manifest] : []);
         if (!armsRaw.length || !Array.isArray(manifest?.grades)) {
-            toastr.warning(`${file.name} is not a graded sample/bundle — skipped`, 'Worlds Apart');
+            toastr.warning(`${fileName} is not a graded sample/bundle — skipped`, 'Worlds Apart');
             continue;
         }
         const books = manifest.books ?? {};
@@ -3100,10 +3124,10 @@ async function superEvalScene() {
         }));
         const union = unionArms(captures);
         if (!union.rows.some(r => r.block === 'dynamic')) {
-            toastr.warning(`${file.name} has no gradeable rows — skipped`, 'Worlds Apart');
+            toastr.warning(`${fileName} has no gradeable rows — skipped`, 'Worlds Apart');
             continue;
         }
-        secs.push({ file: file.name, name: manifest.name ?? file.name, manifest, captures, union, entryOf, prior: manifest.grades });
+        secs.push({ file: fileName, name: manifest.name ?? fileName, manifest, captures, union, entryOf, prior: manifest.grades });
     }
     if (!secs.length) {
         toastr.warning('No usable graded bundles in that selection.', 'Worlds Apart');
@@ -3127,20 +3151,46 @@ async function superEvalScene() {
     }
 
     // ONE FILE OUT, whatever the section count. N bundle downloads is the same annoyance as N manual
-    // imports pointed the other way, which is the whole reason this takes a batch — and the bundles
-    // themselves are large and mostly embedded books, so re-emitting them to carry a handful of grades
-    // is the expensive way to move a few numbers. eval/synthetic-data/apply-review.mjs puts them back.
+    // imports pointed the other way, which is the whole reason this takes a batch.
+    //
+    // A REVIEW IS STANDALONE, the same way a grading bundle is: everything needed to interpret a verdict
+    // travels with it — the scene the row was graded against, the entry text it was graded on, and what
+    // the judges had said. A file recording only {file, grades} is a diff against eval-data, so reading
+    // it a month later means finding the exact bundle it was cut from and hoping nothing moved. Only the
+    // GRADED rows carry that weight, which is what keeps it cheap: forty rows, not the union.
+    //
+    // `file` stays, as provenance and as what apply-review.mjs writes back to — but nothing about
+    // reading the review depends on that file still existing.
     //
     // WHICH RATER GRADED A ROW IS READ OFF WHICH FIELDS IT HAS: `grade` is written by a human alone,
     // `llmGrade` by the judge alone. A row with both was reviewed by a human; llmGrade by itself means
-    // no human has looked. The shell's rows drop extra fields, so llmGrade is re-attached here per
-    // section from the manifest it came from.
+    // no human has looked. The shell's rows drop extra fields, so the judge's verdict and its history
+    // are re-attached here per section from the manifest the section came from.
     const reviewed = done.sections.map((sec, si) => {
-        const src = secs[si].manifest.grades ?? [];
-        const llmOf = new Map(src.filter(g => g.llmGrade !== undefined).map(g => [rowKey(g), g.llmGrade]));
+        const src = secs[si];
+        const priorOf = new Map((src.manifest.grades ?? []).map(g => [rowKey(g), g]));
+        const arm0 = src.manifest.arms?.[0] ?? src.manifest;
         return {
             file: sec.file,
-            grades: sec.grades.map(g => (llmOf.has(rowKey(g)) ? { ...g, llmGrade: llmOf.get(rowKey(g)) } : g)),
+            name: src.name,
+            chat: src.manifest.chat,
+            generatedFrom: src.manifest.generatedFrom,
+            query: arm0.query ?? '',
+            scanText: arm0.scanText ?? '',
+            grades: sec.grades.map(g => {
+                const p = priorOf.get(rowKey(g)) ?? {};
+                const entry = src.entryOf(g.world, g.uid);
+                return {
+                    ...g,
+                    ...(p.llmGrade !== undefined ? { llmGrade: p.llmGrade } : {}),
+                    ...(p.llmGrades ? { llmGrades: p.llmGrades } : {}),
+                    ...(p.by ? { by: p.by } : {}),
+                    // Named for the reviewer rather than the entry, because apply-review strips it: the
+                    // bundle's own books are where entry text belongs, and a second copy on the grade row
+                    // is the kind of duplicate that goes stale without anyone noticing.
+                    ...(entry?.content ? { entryText: String(entry.content) } : {}),
+                };
+            }),
         };
     });
     const all = reviewed.flatMap(r => r.grades);

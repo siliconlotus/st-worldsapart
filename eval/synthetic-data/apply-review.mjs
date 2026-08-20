@@ -6,6 +6,10 @@
 // or coalesced, so a row a human did not touch keeps its judge verdict and gains no `grade` — which is
 // what keeps "no human has looked at this" readable (see split-rater.mjs).
 //
+// `entryText` is the one field dropped. The review carries it so it can be READ on its own; the bundle
+// already has the entry in its books, and a second copy on the grade row is a duplicate that goes stale
+// the moment the entry is edited.
+//
 // The bundle is otherwise untouched: arms, captures, params and books stay byte-identical.
 //
 // Usage (any cwd):
@@ -35,7 +39,8 @@ export const rowKey = r => `${r.world ?? ''}${US}${r.uid}`;
 export function mergeReview(bundleGrades, sectionGrades) {
     const by = new Map((bundleGrades ?? []).map(g => [rowKey(g), g]));
     let added = 0, changed = 0;
-    for (const r of sectionGrades ?? []) {
+    for (const raw of sectionGrades ?? []) {
+        const { entryText, ...r } = raw;
         const k = rowKey(r);
         const prior = by.get(k);
         if (!prior) { added++; by.set(k, r); continue; }
