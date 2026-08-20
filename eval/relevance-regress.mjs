@@ -53,7 +53,7 @@ const arg = k => { const i = argv.indexOf(k); return i >= 0 ? argv[i + 1] : null
 // is about to write is opened as an input bundle. Named flags rather than "anything after a --", or
 // `--lobo scene.json` would silently DROP that scene, which is the worse failure: a wrong sample set
 // prints a clean table and says nothing about what it left out.
-const VALUED = new Set(['--arm', '--sweep', '--tier', '--cut', '--degree', '--square', '--with', '--without', '--emit', '--emit-rows', '--drop-keys', '--proper', '--proper-extract']);
+const VALUED = new Set(['--arm', '--sweep', '--tier', '--cut', '--degree', '--square', '--with', '--without', '--emit', '--emit-rows', '--emit-model', '--drop-keys', '--proper', '--proper-extract']);
 const samples = argv.filter((a, i) => a.endsWith('.json') && !a.startsWith('--') && !VALUED.has(argv[i - 1]));
 if (!samples.length) {
     console.error('need at least one sample: node relevance-regress.mjs <sample.json> [more.json ...] [--sweep param=v1,v2]');
@@ -126,6 +126,7 @@ const EMIT = arg('--emit');
 // this carries for reading the cut. Separate flags because the per-scene F2 vector is small enough to keep
 // forever and this is not.
 const EMIT_ROWS = arg('--emit-rows');
+const EMIT_MODEL = arg('--emit-model');
 // SIMULATES A BOOK EDIT the keyword audit recommends, without editing the book: scene.mjs `dropKeys`
 // stops the named keys scoring AND keyword-activating, which is what removing them would do. Takes the
 // JSON array `keyword-audit.mjs --json` writes. It UNDERSTATES removal — the terms stay in the
@@ -627,6 +628,16 @@ const queryVec = async (S, name, value, em) => {
         const base = 1;
         table.push({
             value, scenes: perScene.length, n: y.length, pos: y.reduce((a, b) => a + b, 0), dropped,
+            stdBeta: stdFit.beta, nRows: y.length,
+            // WHICH ELIGIBILITY COLUMNS WERE CONSTANT. A signal every row is eligible for makes its
+            // indicator a column of 1s, collinear with the intercept, and the fit splits ONE coefficient
+            // evenly across them — so those betas are not separately meaningful and only their SUM is.
+            // A consumer that always passes 1 reproduces the fit exactly, which is why this is a note
+            // rather than a repair; recorded so nobody reads a shared value as a finding.
+            eligConstant: FEATURES.map((_, fi) => {
+                const col = X.map(row => row[base + fi * 2 + 1]);
+                return col.every(v => v === col[0]);
+            }),
             rows: FEATURES.map(([name], fi) => ({
                 name,
                 std: stdFit.beta[base + fi * 2], stdSe: stdFit.se[base + fi * 2],
@@ -822,6 +833,41 @@ const queryVec = async (S, name, value, em) => {
             }
             console.log(`  best cutoff ${best.cut.toFixed(2)}: F2 ${best.f.toFixed(4)}, delivering ${best.delivered.toFixed(1)} entries against ${b.meanRelevant.toFixed(1)} relevant.`);
             t.best = best;
+            // THE SHIPPED MODEL IS THE POOLED FIT, and the held-out numbers above are what say whether it
+            // generalises. Shipping a fold's betas would ship a model deliberately trained on less than
+            // the corpus. The cutoff rides along because it is not a property of the coefficients: it is
+            // read off the delivered set, and a model shipped without the operating point it was chosen
+            // at is not a selection rule.
+            //
+            // COLUMN ORDER IS THE CONTRACT: [intercept, (standardised, eligible) per feature, then any
+            // squared/interaction columns appended]. The consumer must standardise WITHIN THE SCENE it is
+            // scoring, as the fit did — the coefficients are per within-scene sd and mean nothing against
+            // a raw value.
+            if (EMIT_MODEL) {
+                fs.writeFileSync(EMIT_MODEL, JSON.stringify({
+                    tier: TIER, cut: CUT, cutoff: best.cut, f2: best.f,
+                    features: FEATURES.map(([n]) => n),
+                    properMode: PROPER_MODE, properExtract: PROPER_EXTRACT,
+                    layout: ['intercept', ...FEATURES.flatMap(([n]) => [`${n}.z`, `${n}.eligible`])],
+                    beta: Array.from(t.stdBeta ?? []),
+                    constantEligible: FEATURES.filter((_, fi) => t.eligConstant?.[fi]).map(([n]) => n),
+                    // BOTH AUCs, because they answer different questions and the in-sample one alone
+                    // would flatter a model shipped for books it has never seen. Held out by BOOK is the
+                    // generalisation number production actually gets.
+                    auc: t.auc ?? null,
+                    heldOutAuc: t.fits?.['held out by BOOK']
+                        ? auc(t.fits['held out by BOOK'].eta, t.fits['held out by BOOK'].y) : null,
+                    // COUNTS, NEVER NAMES. The model file is checked in; the corpus is one person's
+                    // chats and `eval-data/` is gitignored for exactly that reason. A book title names a
+                    // private story, so the fold count is what travels and the named provenance stays
+                    // beside the data it describes (eval-data/README.md).
+                    fittedOn: {
+                        scenes: b.scenes, rows: t.nRows ?? null,
+                        books: Array.isArray(t.books) ? t.books.length : (Number(t.books) || null),
+                    },
+                }, null, 1));
+                console.log(`  pooled model written to ${EMIT_MODEL}`);
+            }
             if (EMIT_ROWS) {
                 fs.writeFileSync(EMIT_ROWS, JSON.stringify({
                     swept: SWEPT, value: t.value, tier: TIER, with: WITH, without: WITHOUT,
