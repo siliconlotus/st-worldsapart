@@ -38,6 +38,19 @@ test (a compound is a compound in any language that hyphenates); accents do not 
 marks a punctuation-only term as deliberate. One rule to learn, not four. Quoting a single term never
 changes what it matches; quoting *across a space* does, turning a conjunction into a phrase.
 
+That last clause is the one authors get wrong, because an alternation of possessives READS as a phrase
+alternation and is not one:
+
+```
+? (your|my|Kyle's) husband        (your OR my OR Kyle's) AND husband, each anywhere in the window
+? ("your husband"|"my husband"|"Kyle's husband")     three phrases
+```
+
+The first fires on "I know your name" plus "her husband" nine messages later. **An alternation is only as
+selective as its loosest branch** — `Kyle's` is rare, `your` is not, so the group is open on almost every
+window and the conjunction collapses to bare `husband`. Two good branches do not save it, and the false
+fire scores 2 rather than 1, so it also outranks a genuine single-phrase match.
+
 **Validator checks read structure, not intent.** Every check that guessed at what an author meant
 produced false positives on legitimate literals — `"()"` is a real album, `M*A*S*H` is a real title.
 The checks that survive are facts about the SmartKey: no terms, no positive term, an unclosed quote,
