@@ -2680,9 +2680,26 @@ async function captureArm(overrides, wanted) {
  * @param {string} [args.okButton] Confirm-button label
  * @returns {Promise<{grades: object[], prior: object[]}|null>} Merged grades, or null on cancel
  */
-async function superGradePopup({ captures, union, entryOf, prior: prior0 = [], subtitle = '', okButton = 'Save samples' }) {
+async function superGradePopup({ captures, union, entryOf, prior: prior0 = [], subtitle = '', okButton = 'Save samples', sections = null }) {
     const esc = s => escapeHtml(String(s ?? ''));
     let prior = [...prior0];
+
+    // ONE SECTION OR MANY, through one shell. `sections` is /wa-super-eval reviewing N bundles at once;
+    // without it this is the single-scene path exactly as before, expressed as a one-element list so
+    // there is no second rendering routine to drift from this one.
+    //
+    // THE DOM INDEX IS FLAT ACROSS SECTIONS. `data-i` addresses `flat`, not a section's own rows, which
+    // is what lets wireFolds, gradeOrder and the row renderer stay untouched — a per-section index would
+    // collide the moment the same entry appears against two scenes, and 10 of 19 entries in the set this
+    // was built for do exactly that. Section membership rides on the row instead, for the collector.
+    const secs = sections ?? [{ captures, union, entryOf, prior: prior0 }];
+    const multi = Boolean(sections);
+    const flat = [];
+    for (let s = 0; s < secs.length; s++) {
+        const u = secs[s].union;
+        for (let i = 0; i < u.rows.length; i++) flat.push({ sec: s, row: u.rows[i], entry: u.entries[i] });
+    }
+    const flatIndex = new Map(flat.map((f, i) => [`${f.sec}:${f.row.world}:${f.row.uid}`, i]));
 
     const wrap = document.createElement('div');
     const head = document.createElement('div');
@@ -2694,56 +2711,79 @@ async function superGradePopup({ captures, union, entryOf, prior: prior0 = [], s
     // often a paragraph the query window never reached). Grouped by distinct text rather than shown once,
     // because the arms do NOT share a query — the summary arm retrieves against model-written text while the
     // rest use raw messages, and an entry can be a fair hit for one and a miss for the other.
-    const byQuery = new Map();
-    for (const cap of captures) {
-        if (!cap.query) continue;
-        const hit = byQuery.get(cap.query) ?? [];
-        hit.push(cap.arm);
-        byQuery.set(cap.query, hit);
-    }
-    const queryBlocks = [...byQuery.entries()].map(([text, arms]) => {
-        const label = byQuery.size === 1 ? 'Query text — what retrieval actually matched on' : `Query text (${esc(arms.join(', '))})`;
-        return `<details style="margin-bottom:0.4em;"><summary style="cursor:pointer;">${label} `
-            + `(${text.length} chars, depth ${captures[0].depth})</summary>`
-            + `<pre style="white-space:pre-wrap;max-height:14em;overflow:auto;font-size:0.85em;opacity:0.85;border:1px solid var(--SmartThemeBorderColor);padding:0.5em;margin-top:0.5em;">${esc(text)}</pre></details>`;
-    }).join('');
+    // Per section, because each scene has its own query text — the whole point of reviewing N scenes in one
+    // pass is that each section shows the text ITS grades are about.
+    const queryBlocksFor = sc => {
+        const caps = sc.captures ?? [];
+        const byQ = new Map();
+        for (const cap of caps) {
+            if (!cap.query) continue;
+            const hit = byQ.get(cap.query) ?? [];
+            hit.push(cap.arm);
+            byQ.set(cap.query, hit);
+        }
+        return [...byQ.entries()].map(([text, arms]) => {
+            const label = byQ.size === 1 ? 'Query text — what retrieval actually matched on' : `Query text (${esc(arms.join(', '))})`;
+            return `<details style="margin-bottom:0.4em;"><summary style="cursor:pointer;">${label} `
+                + `(${text.length} chars, depth ${caps[0]?.depth ?? '?'})</summary>`
+                + `<pre style="white-space:pre-wrap;max-height:14em;overflow:auto;font-size:0.85em;opacity:0.85;border:1px solid var(--SmartThemeBorderColor);padding:0.5em;margin-top:0.5em;">${esc(text)}</pre></details>`;
+        }).join('')
+            + (byQ.size > 1 ? `<small style="display:block;opacity:0.6;margin-bottom:0.5em;">${byQ.size} arms retrieved against different text — judge relevance to the SCENE, not to any one query.</small>` : '');
+    };
+    const queryBlocks = multi ? '' : queryBlocksFor(secs[0]);
 
-    head.innerHTML = '<h3 style="margin:0 0 0.25em;">Grade this scene — pooled across arms</h3>'
+    head.innerHTML = `<h3 style="margin:0 0 0.25em;">${multi ? `Grade ${secs.length} scenes` : 'Grade this scene — pooled across arms'}</h3>`
         + `${subtitle ? `<small style="display:block;opacity:0.7;margin-bottom:0.25em;">${esc(subtitle)}</small>` : ''}`
-        + `<small style="display:block;opacity:0.7;margin-bottom:0.5em;">${gradeAnchorLine()} ${union.rows.length} distinct entries from ${captures.length} arm(s): ${esc(captures.map(c => c.arm).join(', '))}.</small>`
+        + `<small style="display:block;opacity:0.7;margin-bottom:0.5em;">${gradeAnchorLine()} ${multi
+            ? `${flat.length} rows across ${secs.length} scenes; each section shows its own query text.`
+            : `${union.rows.length} distinct entries from ${captures.length} arm(s): ${esc(captures.map(c => c.arm).join(', '))}.`}</small>`
         + queryBlocks
-        + `${byQuery.size > 1 ? `<small style="display:block;opacity:0.6;margin-bottom:0.5em;">${byQuery.size} arms retrieved against different text — judge relevance to the SCENE, not to any one query.</small>` : ''}`
         // A bare <input type="file"> inherits nothing from ST's theme and reads as a paragraph of text, so it
         // went unnoticed. Drive it from a real menu_button instead, and keep a PERSISTENT status line: a
         // toast that has already faded is no way to confirm the priors loaded, and grading a round without
         // them silently means re-judging everything the last round already covered.
-        + '<div style="margin:0.6em 0;display:flex;align-items:center;gap:0.6em;flex-wrap:wrap;">'
+        + (multi ? '' : '<div style="margin:0.6em 0;display:flex;align-items:center;gap:0.6em;flex-wrap:wrap;">'
         + '<div class="menu_button wa-sg-pick" style="width:auto;padding:0.3em 0.8em;">Load earlier samples / pool requests…</div>'
         + `<small class="wa-sg-loaded" style="opacity:0.7;">${prior0.length ? `${prior0.length} grade(s) pre-loaded, shown in the table` : 'nothing loaded — grading everything from scratch'}</small>`
         + '<input type="file" class="wa-sg-prior" accept=".json,application/json" multiple style="display:none;">'
         + '</div>'
-        + '<small style="display:block;opacity:0.6;margin-bottom:0.5em;">Earlier rounds\' samples: their grades are subtracted so you only judge what is new. Pool requests from eval/pool-extend.mjs: their entries are added.</small>';
+        + '<small style="display:block;opacity:0.6;margin-bottom:0.5em;">Earlier rounds\' samples: their grades are subtracted so you only judge what is new. Pool requests from eval/pool-extend.mjs: their entries are added.</small>');
 
     // Repaint rather than patch: loading priors changes which rows are gradeable at all. Only grades the
     // user actually EDITED (data-dirty, set below) are carried across — every row is an input now, so
     // carrying pristine "0"s would shadow the prior grades a freshly loaded file is supposed to pre-fill.
     const paint = () => {
         const typed = new Map([...body.querySelectorAll('.wa-grade')].filter(i => i.dataset.dirty).map(i => [i.dataset.key, i.value]));
-        const { fresh, known, priorOf } = splitGraded(union.rows, prior);
+        // Split PER SECTION, because splitGraded matches rows against one scene's prior grades and a
+        // shared pool would pre-fill a row from another scene's verdict for the same entry.
+        const split = secs.map((sc, si) => splitGraded(sc.union.rows, si === 0 && !multi ? prior : (sc.prior ?? [])));
         // Counted over the GRADEABLE subset — the union now carries durable rows for completeness, and
         // "N to grade" must not count rows this table renders as uneditable.
-        const freshN = fresh.filter(r => r.block === 'dynamic').length;
-        const scaffoldN = union.rows.filter(r => r.block !== 'dynamic').length;
+        const freshN = split.reduce((a, x) => a + x.fresh.filter(r => r.block === 'dynamic').length, 0);
+        const known = split.flatMap(x => x.known);
+        const scaffoldN = secs.reduce((a, sc) => a + sc.union.rows.filter(r => r.block !== 'dynamic').length, 0);
 
         body.innerHTML = `<small style="display:block;opacity:0.7;margin-bottom:0.5em;">${freshN} to grade`
             + `${known.length ? `; ${known.length} judged in an earlier round (pre-filled — edit any you disagree with, untouched rows carry through as shown)` : ''}`
             + `${scaffoldN ? `; ${scaffoldN} constant/persisting-sticky row(s) listed but not graded — WA did not choose them this turn` : ''}. Blank means UNGRADED, not 0.</small>`
             + '<table style="width:100%;border-collapse:collapse;font-size:0.9em;text-align:left;"><thead><tr style="text-align:left;">'
             + '<th style="width:4em;">Grade</th><th>Entry</th><th style="width:9em;">surfaced by</th><th style="width:4em;">best#</th><th style="width:4em;">cos</th><th style="width:4em;">text</th><th style="width:4em;">keys</th></tr></thead><tbody>'
-            // Block + bestRank order. Fused scores are not comparable across arms, so bestRank is the
-            // only cross-arm quantity that means the same thing in every row (see gradeOrder).
-            + gradeOrder(union.rows, r => r.bestRank ?? Infinity).map(({ row, i }) => {
-                const key = rowKey(row);
+            // Block + bestRank order WITHIN a section. Fused scores are not comparable across arms, so
+            // bestRank is the only cross-arm quantity that means the same thing in every row (see
+            // gradeOrder) — and it is not comparable across SCENES either, which is why the ordering is
+            // per section rather than over the flattened list.
+            + secs.map((sc, si) => (multi
+                ? `<tr><td colspan="7" style="padding:0.9em 0.25em 0.35em;border-top:2px solid var(--SmartThemeBorderColor);">`
+                  + `<b>${esc(sc.name ?? sc.file ?? `scene ${si + 1}`)}</b>`
+                  + `<small style="opacity:0.6;"> — ${sc.union.rows.filter(r => r.block === 'dynamic').length} gradeable, ${split[si].known.length} pre-filled</small>`
+                  + queryBlocksFor(sc) + `</td></tr>`
+                : '')
+            + gradeOrder(sc.union.rows, r => r.bestRank ?? Infinity).map(({ row, i: rowI }) => {
+                const i = flatIndex.get(`${si}:${row.world}:${row.uid}`);
+                const priorOf = split[si].priorOf;
+                // Section-qualified: the same entry can appear against several scenes, and an unqualified
+                // key would carry one scene's typed value onto another's row across a repaint.
+                const key = `${si}${String.fromCharCode(31)}${rowKey(row)}`;
                 const num = n => (n == null ? '·' : String(n));
                 const done = priorOf.has(key);
                 // Prior rows are inputs too, pre-filled with the earlier grade: an edit re-emits
@@ -2761,7 +2801,7 @@ async function superGradePopup({ captures, union, entryOf, prior: prior0 = [], s
                     // wiGlyph, as /wa-grade and the Explorer use it. It matters most in THIS table:
                     // whether a row can carry a keys signal at all depends on being a 🔗 vector entry,
                     // and a non-null cosine is the wrong tell — one that failed retrieval shows none.
-                    + `<td>${row.cut ? `<i class="fa-solid fa-scissors" style="opacity:0.55;margin-right:0.35em;" title="cut by the budget${row.cutBy ? ` — ${esc(row.cutBy)} cap` : ''}${row.tokens ? `; ${row.tokens} tokens` : ''}"></i>` : ''}${union.entries[i] ? wiGlyph(union.entries[i]) + ' ' : ''}${esc(row.title)}<br><small style="opacity:0.5;">${esc(row.world)} · uid ${num(row.uid)}</small>${keyHitsHtml(row.why)}<br><i class="fa-solid fa-chevron-right wa-chevron wa-fold" data-i="${i}" title="Show keys and entry text" style="margin-top:0.35em;"></i></td>`
+                    + `<td>${row.cut ? `<i class="fa-solid fa-scissors" style="opacity:0.55;margin-right:0.35em;" title="cut by the budget${row.cutBy ? ` — ${esc(row.cutBy)} cap` : ''}${row.tokens ? `; ${row.tokens} tokens` : ''}"></i>` : ''}${flat[i].entry ? wiGlyph(flat[i].entry) + ' ' : ''}${esc(row.title)}<br><small style="opacity:0.5;">${esc(row.world)} · uid ${num(row.uid)}</small>${keyHitsHtml(row.why)}<br><i class="fa-solid fa-chevron-right wa-chevron wa-fold" data-i="${i}" title="Show keys and entry text" style="margin-top:0.35em;"></i></td>`
                     // Which arms surfaced a row is the pooling diagnostic: rows only one arm found are where
                     // the overlap assumption is failing, and they are why that arm is in the list. The arm
                     // that SUPPLIED the numbers is underlined, because the signal columns are one arm's
@@ -2771,17 +2811,19 @@ async function superGradePopup({ captures, union, entryOf, prior: prior0 = [], s
                     // so the reader can tell a measurement from a fill (see unionArms).
                     + `<td>${num(row.bestRank)}</td>${['cosine', 'text', 'keys'].map(s => `<td>${num(row[s])}${row.filled?.[s] ? `<br><small style="opacity:0.5;font-size:0.75em;" title="filled from the ${esc(row.filled[s])} arm — this arm could not measure it">${esc(row.filled[s])}</small>` : ''}</td>`).join('')}`
                     + `</tr>`
-                    + `<tr class="wa-foldrow" data-i="${i}" style="display:none;"><td colspan="7" style="padding:0.5em 0.75em 0.9em;">${entryFoldHtml(union.entries[i], i)}</td></tr>`;
-            }).join('')
+                    + `<tr class="wa-foldrow" data-i="${i}" style="display:none;"><td colspan="7" style="padding:0.5em 0.75em 0.9em;">${entryFoldHtml(flat[i].entry, i)}</td></tr>`;
+            }).join('')).join('')
             + '</tbody></table>';
 
-        wireFolds(body, i => union.entries[i]);
+        wireFolds(body, i => flat[i].entry);
         // A user edit marks the input dirty; only dirty values survive a repaint (see `typed` above).
         body.querySelectorAll('.wa-grade').forEach(input => input.addEventListener('input', () => { input.dataset.dirty = '1'; }));
     };
 
-    head.querySelector('.wa-sg-pick').addEventListener('click', () => head.querySelector('.wa-sg-prior').click());
-    head.querySelector('.wa-sg-prior').addEventListener('change', async event => {
+    // The prior-load picker is a single-scene control: a multi-scene review's grades arrive in the
+    // files themselves, so it is not rendered and must not be wired.
+    head.querySelector('.wa-sg-pick')?.addEventListener('click', () => head.querySelector('.wa-sg-prior').click());
+    head.querySelector('.wa-sg-prior')?.addEventListener('change', async event => {
         const loaded = [];
         let added = 0;
         const names = [];
@@ -2853,13 +2895,25 @@ async function superGradePopup({ captures, union, entryOf, prior: prior0 = [], s
     // precisely so that "no human has looked at this" stays readable. mergeGrades replaces the whole
     // object on conflict, so an untouched row skipping `fresh` also keeps the `why` it came with.
     // dataset.dirty survives a repaint (see `typed` in paint).
-    const fresh = [...body.querySelectorAll('.wa-grade')]
+    const edited = [...body.querySelectorAll('.wa-grade')]
         .filter(input => String(input.value).trim() !== '' && input.dataset.dirty)
         .map(input => {
-            const row = union.rows[Number(input.dataset.i)];
-            return { title: row.title, grade: Number(input.value), world: row.world, uid: row.uid };
+            const { sec, row } = flat[Number(input.dataset.i)];
+            return { sec, g: { title: row.title, grade: Number(input.value), world: row.world, uid: row.uid } };
         });
-    return { grades: mergeGrades(prior, fresh), prior };
+    // PER SECTION, because mergeGrades keys on world+uid and a shared merge would let one scene's verdict
+    // overwrite another's for the same entry. Each section merges onto its own prior and comes back with
+    // the file it belongs to, which is what apply-review.mjs needs to put it anywhere.
+    if (multi) {
+        return {
+            sections: secs.map((sc, si) => ({
+                file: sc.file ?? sc.name,
+                grades: mergeGrades(sc.prior ?? [], edited.filter(e => e.sec === si).map(e => e.g)),
+            })),
+            edited: edited.length,
+        };
+    }
+    return { grades: mergeGrades(prior, edited.map(e => e.g)), prior };
 }
 
 async function superGradeScene(named) {
@@ -2989,88 +3043,122 @@ async function superGradeScene(named) {
     return '';
 }
 
-/** Opens the browser file picker for one JSON file. Resolves null when the user cancels. */
-const pickJsonFile = () => new Promise(resolve => {
+/** Opens the browser file picker for JSON. Resolves [] when the user cancels. `multiple` picks a batch. */
+const pickJsonFiles = ({ multiple = false } = {}) => new Promise(resolve => {
     const input = document.createElement('input');
     input.type = 'file';
     input.accept = '.json,application/json';
-    input.addEventListener('change', () => resolve(input.files?.[0] ?? null), { once: true });
-    input.addEventListener('cancel', () => resolve(null), { once: true });
+    input.multiple = multiple;
+    input.addEventListener('change', () => resolve([...(input.files ?? [])]), { once: true });
+    input.addEventListener('cancel', () => resolve([]), { once: true });
     input.click();
 });
 
 /**
- * /wa-super-eval — chat-independent review of a graded sample/bundle: the super-grade shell, fed entirely
- * from the file. Nothing live is read — no chat, no attached books, no settings — so a scene captured
+ * /wa-super-eval — chat-independent review of N graded samples/bundles: the super-grade shell, fed entirely
+ * from files. Nothing live is read — no chat, no attached books, no settings — so a scene captured
  * offline (or by someone else, or by an LLM judge) can be reviewed without loading the chat it came from.
- * Entry text resolves from the bundle's embedded books, the stored grades arrive pre-filled and editable
- * and Save downloads the SAME bundle with only `grades`/`gradeScale`
- * updated — arms, captures, params and books are preserved untouched.
+ * Entry text resolves from each bundle's embedded books and stored grades arrive pre-filled and editable.
+ *
+ * ONE SECTION PER FILE, ONE SAVE FILE PER RUN. Grading 15 scenes was 15 imports and would have been 15
+ * download prompts; the save is a single `{reviewed: [{file, grades}]}` that
+ * `eval/synthetic-data/apply-review.mjs` writes back into eval-data. The bundles are not re-emitted —
+ * they are mostly embedded books, and re-downloading megabytes to carry a handful of grades is the
+ * expensive way to move a few numbers.
  */
 async function superEvalScene() {
-    const file = await pickJsonFile();
-    if (!file) {
+    const files = await pickJsonFiles({ multiple: true });
+    if (!files.length) {
         return '';
     }
-    let manifest;
-    try {
-        manifest = JSON.parse(await file.text());
-    } catch {
-        toastr.warning(`Could not parse ${file.name}`, 'Worlds Apart');
+    // ONE SECTION PER FILE. A bad file is skipped by name rather than aborting the batch — picking 15 and
+    // losing all of them to one stale export is the failure this command exists to avoid.
+    const secs = [];
+    for (const file of files) {
+        let manifest;
+        try {
+            manifest = JSON.parse(await file.text());
+        } catch {
+            toastr.warning(`Could not parse ${file.name} — skipped`, 'Worlds Apart');
+            continue;
+        }
+        const armsRaw = Array.isArray(manifest?.arms) ? manifest.arms : (Array.isArray(manifest?.candidates) ? [manifest] : []);
+        if (!armsRaw.length || !Array.isArray(manifest?.grades)) {
+            toastr.warning(`${file.name} is not a graded sample/bundle — skipped`, 'Worlds Apart');
+            continue;
+        }
+        const books = manifest.books ?? {};
+        const entryOf = (world, uid) => Object.values(books[world] ?? {}).find(e => Number(e.uid) === Number(uid));
+        const captures = armsRaw.map(a => ({
+            arm: a.arm ?? manifest.name ?? 'capture',
+            rows: a.candidates ?? [],
+            entries: (a.candidates ?? []).map(r => entryOf(r.world, r.uid) ?? null),
+            query: a.query ?? '',
+            depth: a.depth ?? manifest.depth ?? '?',
+        }));
+        const union = unionArms(captures);
+        if (!union.rows.some(r => r.block === 'dynamic')) {
+            toastr.warning(`${file.name} has no gradeable rows — skipped`, 'Worlds Apart');
+            continue;
+        }
+        secs.push({ file: file.name, name: manifest.name ?? file.name, manifest, captures, union, entryOf, prior: manifest.grades });
+    }
+    if (!secs.length) {
+        toastr.warning('No usable graded bundles in that selection.', 'Worlds Apart');
         return '';
     }
-    const armsRaw = Array.isArray(manifest?.arms) ? manifest.arms : (Array.isArray(manifest?.candidates) ? [manifest] : []);
-    if (!armsRaw.length || !Array.isArray(manifest?.grades)) {
-        toastr.warning(`${file.name} is not a graded sample/bundle (needs "grades" and captured candidates)`, 'Worlds Apart');
-        return '';
-    }
-
-    const books = manifest.books ?? {};
-    const entryOf = (world, uid) => Object.values(books[world] ?? {}).find(e => Number(e.uid) === Number(uid));
-    const captures = armsRaw.map(a => ({
-        arm: a.arm ?? manifest.name ?? 'capture',
-        rows: a.candidates ?? [],
-        entries: (a.candidates ?? []).map(r => entryOf(r.world, r.uid) ?? null),
-        query: a.query ?? '',
-        depth: a.depth ?? manifest.depth ?? '?',
-    }));
-    const union = unionArms(captures);
-    if (!union.rows.some(r => r.block === 'dynamic')) {
-        toastr.warning('No gradeable candidate rows in this file.', 'Worlds Apart');
-        return '';
-    }
+    const manifest = secs[0].manifest;
+    const { captures, union, entryOf } = secs[0];
 
     const done = await superGradePopup({
         captures,
         union,
         entryOf,
-        prior: manifest.grades,
-        subtitle: `Reviewing ${file.name} (${manifest.createdBy ?? 'unknown grader'}) — loaded from file, no chat required.`,
-        okButton: 'Save updated bundle',
+        sections: secs,
+        subtitle: secs.length === 1
+            ? `Reviewing ${secs[0].file} (${manifest.createdBy ?? 'unknown grader'}) — loaded from file, no chat required.`
+            : `Reviewing ${secs.length} bundles — loaded from files, no chat required.`,
+        okButton: 'Save review',
     });
     if (!done) {
         return '';
     }
 
-    // Same bundle out, grades swapped — never rebuilt, so captures/params/books stay byte-identical.
-    // ONE file carries both raters, and WHICH ONE GRADED A ROW IS READ OFF WHICH FIELDS IT HAS: `grade`
-    // is written by a human alone, `llmGrade` by the judge alone. A row with both was reviewed by a
-    // human; llmGrade by itself means no human has looked. The shell's rows drop extra fields, so
-    // llmGrade is re-attached here from the loaded manifest for the rows a human did edit.
-    const llmOf = new Map(manifest.grades.filter(g => g.llmGrade !== undefined).map(g => [rowKey(g), g.llmGrade]));
-    const grades = done.grades.map(g => (llmOf.has(rowKey(g)) ? { ...g, llmGrade: llmOf.get(rowKey(g)) } : g));
-    const updated = { ...manifest, grades, gradeScale: GRADE_SCALE };
-    const { filename, content } = sampleFile(updated);
-    download(content, filename, 'application/json');
-    const rel = grades.filter(g => (g.grade ?? g.llmGrade) >= 3).length;
+    // ONE FILE OUT, whatever the section count. N bundle downloads is the same annoyance as N manual
+    // imports pointed the other way, which is the whole reason this takes a batch — and the bundles
+    // themselves are large and mostly embedded books, so re-emitting them to carry a handful of grades
+    // is the expensive way to move a few numbers. eval/synthetic-data/apply-review.mjs puts them back.
+    //
+    // WHICH RATER GRADED A ROW IS READ OFF WHICH FIELDS IT HAS: `grade` is written by a human alone,
+    // `llmGrade` by the judge alone. A row with both was reviewed by a human; llmGrade by itself means
+    // no human has looked. The shell's rows drop extra fields, so llmGrade is re-attached here per
+    // section from the manifest it came from.
+    const reviewed = done.sections.map((sec, si) => {
+        const src = secs[si].manifest.grades ?? [];
+        const llmOf = new Map(src.filter(g => g.llmGrade !== undefined).map(g => [rowKey(g), g.llmGrade]));
+        return {
+            file: sec.file,
+            grades: sec.grades.map(g => (llmOf.has(rowKey(g)) ? { ...g, llmGrade: llmOf.get(rowKey(g)) } : g)),
+        };
+    });
+    const all = reviewed.flatMap(r => r.grades);
+    const rel = all.filter(g => (g.grade ?? g.llmGrade) >= 3).length;
+    const stamp = new Date().toISOString().slice(0, 10);
+    // Named for WHAT was reviewed, dated last so a directory of them sorts by subject and not by day.
+    // One scene is identified by its own name — which already carries chat and message — and a batch by
+    // its size, because a common prefix across fifteen scenes is not an identity anyone would recognise.
+    const slug = String(reviewed.length === 1 ? (secs[0].name ?? secs[0].file.replace(/\.json$/, '')) : `${reviewed.length}-scenes`)
+        .trim().replace(/\.json$/, '').replace(/[^\w.-]+/g, '-').replace(/^-+|-+$/g, '') || 'scenes';
+    const filename = `review-${slug}-${stamp}.json`;
+    download(JSON.stringify({ reviewed, gradeScale: GRADE_SCALE, at: stamp }, null, 1), filename, 'application/json');
     // Agreement is over the rows a human actually reviewed — those carrying BOTH. Filtering on llmGrade
     // alone would drag in every untouched judge row and report them as disagreements, since their
     // `grade` is absent rather than equal.
-    const both = grades.filter(g => g.llmGrade !== undefined && g.grade !== undefined);
+    const both = all.filter(g => g.llmGrade !== undefined && g.grade !== undefined);
     const irr = both.length
         ? ` LLM agreement: ${both.filter(g => g.grade === g.llmGrade).length}/${both.length} exact, ${both.filter(g => Math.abs(g.grade - g.llmGrade) <= 1).length}/${both.length} within 1.`
         : '';
-    toastr.success(`Saved ${filename} — ${grades.length} grades, ${rel} relevant (>=3).${irr} Replace the old file in eval/eval-data/.`, 'Worlds Apart', { timeOut: 10000 });
+    toastr.success(`Saved ${filename} — ${done.edited} row(s) edited across ${reviewed.length} scene(s), ${rel} relevant (>=3).${irr} Apply with: node eval/synthetic-data/apply-review.mjs --write`, 'Worlds Apart', { timeOut: 15000 });
     return '';
 }
 
@@ -3629,7 +3717,7 @@ export async function init() {
     SlashCommandParser.addCommandObject(SlashCommand.fromProps({
         name: 'wa-super-eval',
         callback: superEvalScene,
-        helpString: 'Worlds Apart: review a graded sample/bundle from its FILE, chat-independent — nothing live is read, so scenes captured offline or graded by an LLM judge open without loading their chat. Same grading window as /wa-super-grade; stored grades arrive pre-filled and editable, entry text comes from the embedded books, and Save downloads the same bundle with only the grades updated — diff it against the original to see exactly what the review changed.',
+        helpString: 'Worlds Apart: review graded samples/bundles from their FILES, chat-independent — nothing live is read, so scenes captured offline or graded by an LLM judge open without loading their chat. Pick several and each becomes a section with its own query text; stored grades arrive pre-filled and editable, entry text comes from the embedded books. Save downloads ONE review file for the whole run; apply it with node eval/synthetic-data/apply-review.mjs <file> --write.',
         returns: 'nothing',
     }));
 
