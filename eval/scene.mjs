@@ -22,13 +22,78 @@ import { buildContentIndex, scoreContent, entryKey } from '../extension/content-
 // Cycle: reindex.mjs imports getStringHash from here. Safe because neither side calls across at module
 // scope — both references live inside function bodies, so whichever module loads first finishes evaluating
 // before the other needs a binding.
-import { cachePath, chunkConfig } from './reindex.mjs';
+import { cachePath, chunkConfig, embedTexts } from './reindex.mjs';
 import { gradeCredit, fbeta, RECALL_WEIGHT, gradeValue } from './metrics.mjs';
 export { inVectorIndex } from '../extension/ranking.mjs';
 
+/** Unit Separator — see CLAUDE.md. Never NUL: that makes git treat the file as binary. */
+const US = String.fromCharCode(31);
+
+/**
+ * Drops rows whose entry POST-DATES the scene — an STMB summary covering messages after the frozen turn
+ * could not be in the book when that turn was live, so production can never retrieve it.
+ *
+ * OFFLINE DERIVATION IS THE ONLY SOURCE OF THESE. `synth-scenes.mjs` cuts a scene out of a finished chat
+ * against a finished book, so the book it attaches holds summaries of everything, including what had not
+ * happened yet. A live `/wa-grade` capture cannot contain one, which is why the filter keys on
+ * `generatedFrom.msg` and no-ops when it is absent: it is exactly the derived samples that need it.
+ *
+ * **Measured** over the 96 syn scenes: 43% of graded rows go, but only 20% of the grade >= 3 rows (future
+ * entries mean 0.17), and every scene keeps a relevant set — 96 of 96 still hold one, 74 of 77 still hold
+ * three. Judge disagreement was concentrated here too: gemma-4 against Sonnet ran recall 0.80 over
+ * everything and 0.88 once these were gone.
+ *
+ * GRADES AND CANDIDATES TOGETHER, never one alone. A dropped grade leaves the row in the arm's ranking,
+ * where it still occupies a rank ahead of real entries — which would understate every arm while claiming
+ * to correct it. They are one population and are filtered in one pass.
+ *
+ * Relevance itself is NOT chronological: an entry about a later event can be squarely on topic, and the
+ * rubric is right to say so. This is about what the book HOLDS, not what the grade means.
+ *
+ * CALLED FROM loadScene, NOT openSample, and the ordering is a correctness constraint rather than taste —
+ * see the comment at the call site. It lives on the read side because `synth-scenes.mjs` writes
+ * `generatedFrom` only after its own loadScene, so derivation is unaffected and no bundle needs re-deriving.
+ */
+export const dropUnavailable = (S, label = "sample") => {
+    const at = Number(S?.generatedFrom?.msg);
+    if (!Number.isFinite(at)) return S;
+    const start = new Map();
+    for (const [w, bk] of Object.entries(S.books ?? {})) {
+        for (const e of Object.values(bk ?? {})) start.set(`${w}${US}${e.uid}`, Number(e.STMB_start));
+    }
+    const future = r => {
+        const s = start.get(`${r.world}${US}${r.uid}`);
+        return Number.isFinite(s) && s > at;
+    };
+    let cut = 0, gone = 0;
+    const keep = list => (list ?? []).filter(r => (future(r) ? (cut++, false) : true));
+    S.grades = keep(S.grades);
+    for (const a of (Array.isArray(S.arms) ? S.arms : [S])) a.candidates = keep(a.candidates);
+    // THE BOOKS TOO, and this is the load-bearing half. The offline path does not replay an arm's stored
+    // candidates — `makeCandidateSet` re-derives the pool from the books — so filtering only the grades
+    // leaves every future entry in the pool as an UNJUDGED row occupying a rank, which is strictly worse
+    // than leaving it graded. Measured when this was missed: candidates barely moved (5050 -> 5022) while
+    // judged rows fell 4501 -> 2610 and the ungraded remainder rose 549 -> 2412; delivered went UP to
+    // 107.7 and precision fell 33.5% -> 15.5%.
+    //
+    // Dropping them from the books also takes them out of the gazetteer, the BM25 IDF and the keyword
+    // scan, which is correct rather than incidental: none of those existed over an entry the book did
+    // not yet hold.
+    for (const [w, bk] of Object.entries(S.books ?? {})) {
+        for (const [k, e] of Object.entries(bk ?? {})) {
+            if (future({ world: w, uid: e.uid })) { delete bk[k]; gone++; }
+        }
+    }
+    if (cut || gone) console.error(`  ${label}: dropped ${gone} entr(ies) and ${cut} graded/candidate row(s) post-dating message ${at}`);
+    return S;
+};
+
 /** Reads a manifest from disk as a plain sample, whether it is one or a /wa-super-grade multi-arm bundle.
  *  Every tool goes through this so `--arm` behaves identically everywhere and a bundle is never scored as
- *  though its first arm were the only one. */
+ *  though its first arm were the only one — and so the availability filter above is applied once, rather
+ *  than per tool. graded-scene-grid and param-screen reach grades by different routes (makeGradeOf
+ *  directly, and scoreScene); filtering in either one alone would let the two disagree about which rows
+ *  exist, which this file's own scorers already carry a warning about. */
 export const openSample = (path, arm = null) => openBundle(JSON.parse(readFileSync(path, 'utf8')), arm);
 
 export const CID = 'wa';
@@ -143,10 +208,8 @@ export const indexPath = (S, { vectors = 'data/default-user/vectors/ollama', mod
 
 /** One local embed call. Deliberately not cached to disk: a stored vector would keep answering after the
  *  embedding model underneath it changed. */
-export const embed = async (text, { ollama = 'http://localhost:11434', model = 'bge-m3' } = {}) => {
-    const r = await fetch(`${ollama}/api/embed`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ model, input: text }) });
-    return (await r.json()).embeddings[0];
-};
+export const embed = async (text, { ollama = 'http://localhost:11434', model = 'bge-m3', endpoint = 'ollama', url = ollama } = {}) =>
+    (await embedTexts([text], { model, endpoint, url }))[0];
 
 /**
  * The parameter set a sample was captured under, layered over the harness defaults.
@@ -274,6 +337,13 @@ export function loadScene(S, { indexFile, params: P }) {
                 + `re-derive rather than score, or the numbers describe a book the grades were not made against`);
         }
     }
+    // AFTER the fingerprint guard and BEFORE anything is built from the books. Both halves of that are
+    // load-bearing: the guard asks whether these are the books the bundle was derived from, which is a
+    // question about the PRISTINE bundle — stripping first makes every derived sample fail it, since the
+    // recorded fingerprint counts entries this deliberately removes. And `entries`, `byUid`, the gazetteer
+    // and POOL are all derived below, so a strip any later would leave them describing a book the scoring
+    // no longer uses.
+    dropUnavailable(S, S.name ?? 'sample');
     const entries = Object.values(S.books[primary]);
     const byUid = new Map(entries.map(e => [Number(e.uid), e]));
     // A KEYWORD-ONLY BOOK HAS NO COLLECTION, and that is a configuration rather than a failure: indexing

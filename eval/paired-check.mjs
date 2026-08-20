@@ -298,3 +298,41 @@ eq(fbeta(0.5, 1, 2) > fbeta(1, 0.5, 2), true, 'at beta=2, high recall beats the 
 eq(fbeta(0.5, 1, 1) === fbeta(1, 0.5, 1), true, '...and at beta=1 the two are symmetric, which is what beta buys');
 eq(fbeta(0, 0, 2), 0, 'no signal either way is 0, not NaN');
 eq(fbeta(0, 1, 2), 0, 'zero precision cannot be rescued by recall');
+
+// --- qwk: hand-computed matrices, because a self-consistent formula proves nothing about the formula.
+const { qwk } = await import('./metrics.mjs');
+eq(qwk([[0, 0], [1, 1], [2, 2], [3, 3], [4, 4]]), 1, 'identical grades -> 1');
+// a=[0,0,4,4] b=[0,4,0,4]: numerator 2, expected 2, so exactly chance.
+eq(qwk([[0, 0], [0, 4], [4, 0], [4, 4]]), 0, 'grades independent of each other -> 0');
+// a=[0,0,4,4] b=[0,0,4,0]: one 4-vs-0 error (num 1) against expected 2.
+eq(qwk([[0, 0], [0, 0], [4, 4], [4, 0]]), 0.5, 'one full-scale miss in four -> 0.5');
+eq(qwk([[0, 4], [4, 0]]) < 0, true, 'systematic inversion is worse than chance');
+eq(Number.isNaN(qwk([])), true, 'no rows -> NaN, not a fake 1');
+eq(Number.isNaN(qwk([[2, 2], [2, 2]])), true, 'one cell only -> NaN: no expected disagreement to correct against');
+
+// --- availability: a row whose entry post-dates the scene could not be in the book when it was live.
+// Filtered at openSample so graded-scene-grid and param-screen cannot disagree about which rows exist.
+const { dropUnavailable } = await import('./scene.mjs');
+const mkSample = (msg, extra = {}) => ({
+    generatedFrom: msg === null ? {} : { msg },
+    books: { W: { 1: { uid: 1, STMB_start: 10, STMB_end: 20 }, 2: { uid: 2, STMB_start: 300, STMB_end: 400 }, 3: { uid: 3 } } },
+    grades: [{ world: 'W', uid: 1 }, { world: 'W', uid: 2 }, { world: 'W', uid: 3 }],
+    candidates: [{ world: 'W', uid: 1 }, { world: 'W', uid: 2 }],
+    ...extra,
+});
+eq(dropUnavailable(mkSample(100)).grades.length, 2, 'a grade whose entry starts after the scene is dropped');
+eq(dropUnavailable(mkSample(100)).grades.some(g => g.uid === 2), false, '...and it is the post-dating one, not an arbitrary row');
+eq(dropUnavailable(mkSample(100)).candidates.length, 1, 'the same row leaves the arm ranking too, or it still occupies a rank');
+eq(dropUnavailable(mkSample(500)).grades.length, 3, 'past the entry\'s own range, nothing is unavailable');
+eq(dropUnavailable(mkSample(100)).grades.some(g => g.uid === 3), true, 'an entry with no STMB range is reference, always available');
+// A live /wa-grade capture records no generatedFrom.msg and cannot contain a future entry by construction.
+eq(dropUnavailable(mkSample(null)).grades.length, 3, 'no scene message index -> no-op, not a silent drop of everything');
+const multi = dropUnavailable(mkSample(100, { arms: [{ candidates: [{ world: 'W', uid: 1 }, { world: 'W', uid: 2 }] }, { candidates: [{ world: 'W', uid: 2 }] }] }));
+eq(multi.arms[0].candidates.length + multi.arms[1].candidates.length, 1, 'every arm of a super-grade bundle is filtered, not just the first');
+// The books are the half that matters: makeCandidateSet re-derives the pool from them, so an entry left
+// there returns as an UNJUDGED row holding a rank. Measured when this was missed: precision 33.5% -> 15.5%.
+const booked = dropUnavailable(mkSample(100));
+eq(Object.keys(booked.books.W).length, 2, 'a post-dating entry leaves the BOOK, not just the grade list');
+eq(booked.books.W['2'], undefined, '...and it is the post-dating uid that goes');
+eq(Object.keys(dropUnavailable(mkSample(500)).books.W).length, 3, 'nothing leaves the book when the scene is past every range');
+eq(Object.keys(dropUnavailable(mkSample(null)).books.W).length, 3, 'no scene index -> the book is untouched');

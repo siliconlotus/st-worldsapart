@@ -184,3 +184,30 @@ export const spearman = (x, y) => {
     for (let i = 0; i < n; i++) { num += (a[i] - ma) * (b[i] - mb); da += (a[i] - ma) ** 2; db += (b[i] - mb) ** 2; }
     return (da && db) ? num / Math.sqrt(da * db) : NaN;
 };
+
+/**
+ * Quadratic weighted kappa over the 0-4 grade anchors — inter-rater agreement corrected for chance.
+ *
+ * WEIGHTED because the anchors are ordered: 3-vs-4 is not the same error as 0-vs-4, and unweighted kappa
+ * cannot say so. `pairs` is [[a, b], …] of two raters' grades for the same rows.
+ *
+ * It is an agreement statistic, so it answers one narrow question — do two raters put rows in the same
+ * band — and NOT whether either is right. Against grades produced under a superseded rubric it measures
+ * a changed construct as much as rater drift (CLAUDE.md, "Graded scenes"), which is why the tools that
+ * print it print the band counts beside it.
+ */
+export const qwk = (pairs, k = 5) => {
+    const n = pairs.length;
+    if (!n) return NaN;
+    const O = Array.from({ length: k }, () => new Array(k).fill(0));
+    for (const [a, b] of pairs) O[a][b]++;
+    const ra = new Array(k).fill(0), rb = new Array(k).fill(0);
+    for (let i = 0; i < k; i++) for (let j = 0; j < k; j++) { ra[i] += O[i][j]; rb[j] += O[i][j]; }
+    let num = 0, den = 0;
+    for (let i = 0; i < k; i++) for (let j = 0; j < k; j++) {
+        const w = ((i - j) ** 2) / ((k - 1) ** 2);
+        num += w * O[i][j];
+        den += w * ra[i] * rb[j] / n;
+    }
+    return den ? 1 - num / den : NaN;
+};
