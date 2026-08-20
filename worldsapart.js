@@ -3657,7 +3657,10 @@ export async function init() {
     eventSource.on(event_types.CHAT_CHANGED, refreshAttached);
     // New chat = possibly different books; drop the smartkeys key registry so the automaton
     // tracks the active vocabulary instead of the union of every book ever scanned.
-    eventSource.on(event_types.CHAT_CHANGED, resetSmartKeys);
+    // WRAPPED, not passed by reference: CHAT_CHANGED emits getCurrentChatId(), which would land in
+    // resetSmartKeys's `scope` parameter and defeat its default. It threw only when a chat was actually
+    // open, since the id is undefined otherwise.
+    eventSource.on(event_types.CHAT_CHANGED, () => resetSmartKeys());
     // The panel survives dry-run scans untouched (rankActivated ignores them), so without
     // this it would carry the previous chat's selection across a switch.
     eventSource.on(event_types.CHAT_CHANGED, () => { runState.lastLayout = []; renderWiPanel([]); });
