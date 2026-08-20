@@ -16,7 +16,7 @@ const DEST = path.resolve(SRC, '../../../../../plugins/worlds-apart');
 
 const PACKAGE_JSON = JSON.stringify({
     name: 'worlds-apart-plugin',
-    version: '0.1.0',
+    version: '0.2.0',
     type: 'module',
     main: 'index.js',
     private: true,
