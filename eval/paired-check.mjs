@@ -336,3 +336,10 @@ eq(Object.keys(booked.books.W).length, 2, 'a post-dating entry leaves the BOOK, 
 eq(booked.books.W['2'], undefined, '...and it is the post-dating uid that goes');
 eq(Object.keys(dropUnavailable(mkSample(500)).books.W).length, 3, 'nothing leaves the book when the scene is past every range');
 eq(Object.keys(dropUnavailable(mkSample(null)).books.W).length, 3, 'no scene index -> the book is untouched');
+// Idempotent, because a sweep calls loadScene repeatedly on the SAME sample object and the filter mutates
+// it. Without the guard skip, pass two compares the stripped book against the pristine fingerprint and
+// throws on a bundle nobody edited — measured: relevance-regress died on fold 1 of a gazetteerSource sweep.
+const twice = mkSample(100);
+dropUnavailable(twice); dropUnavailable(twice);
+eq(Object.keys(twice.books.W).length, 2, 'filtering twice removes the same entries, not more');
+eq(twice.grades.length, 2, '...and the grade list is stable across a second pass');

@@ -326,7 +326,13 @@ export function loadScene(S, { indexFile, params: P }) {
     //
     // Legacy bundles carry no `attached` and are skipped rather than rejected: absence is "derived before
     // this was recorded", which says nothing about whether they drifted.
-    for (const a of S.generatedFrom?.attached ?? []) {
+    //
+    // RUNS ONCE PER SAMPLE, because dropUnavailable below mutates the books in place and a sweep calls
+    // loadScene repeatedly on the SAME object — relevance-regress does exactly that, five times over
+    // gazetteerSource. Re-checking on the second pass compares the stripped book against the pristine
+    // fingerprint and throws on a bundle nobody edited. The guard's question is about the file as loaded,
+    // so answering it once is answering it.
+    for (const a of (S.availabilityFiltered ? [] : S.generatedFrom?.attached ?? [])) {
         if (!a?.fingerprint) continue;                       // named but no world file; nothing was embedded
         const have = S.books?.[a.world];
         if (!have) throw new Error(`bundle records book "${a.world}" as embedded but does not carry it — the gazetteer would be narrower than the one it was derived under`);
@@ -343,7 +349,7 @@ export function loadScene(S, { indexFile, params: P }) {
     // recorded fingerprint counts entries this deliberately removes. And `entries`, `byUid`, the gazetteer
     // and POOL are all derived below, so a strip any later would leave them describing a book the scoring
     // no longer uses.
-    dropUnavailable(S, S.name ?? 'sample');
+    if (!S.availabilityFiltered) { dropUnavailable(S, S.name ?? 'sample'); S.availabilityFiltered = true; }
     const entries = Object.values(S.books[primary]);
     const byUid = new Map(entries.map(e => [Number(e.uid), e]));
     // A KEYWORD-ONLY BOOK HAS NO COLLECTION, and that is a configuration rather than a failure: indexing
