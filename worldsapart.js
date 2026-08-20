@@ -2781,11 +2781,13 @@ async function superGradePopup({ captures, union, entryOf, prior: prior0 = [], s
             + gradeOrder(sc.union.rows, r => r.bestRank ?? Infinity).map(({ row, i: rowI }) => {
                 const i = flatIndex.get(`${si}:${row.world}:${row.uid}`);
                 const priorOf = split[si].priorOf;
-                // Section-qualified: the same entry can appear against several scenes, and an unqualified
-                // key would carry one scene's typed value onto another's row across a repaint.
-                const key = `${si}${String.fromCharCode(31)}${rowKey(row)}`;
+                // TWO KEYS. `priorOf` comes from splitGraded and is keyed by plain rowKey within a scene;
+                // the DOM key is section-qualified, because the same entry appears against several scenes
+                // and an unqualified one would carry a typed value onto another section's row on repaint.
+                const pkey = rowKey(row);
+                const key = `${si}${String.fromCharCode(31)}${pkey}`;
                 const num = n => (n == null ? '·' : String(n));
-                const done = priorOf.has(key);
+                const done = priorOf.has(pkey);
                 // Prior rows are inputs too, pre-filled with the earlier grade: an edit re-emits
                 // the row as a fresh grade and mergeGrades is last-wins, so the edit overrides the prior.
                 // A carried-over edit stays dirty across repaints, or the next repaint would revert it.
@@ -2795,7 +2797,7 @@ async function superGradePopup({ captures, union, entryOf, prior: prior0 = [], s
                 // it has to be made here or the grader is asked to judge an always-on entry.
                 const cell = row.block !== 'dynamic'
                     ? `<span style="opacity:0.5;font-size:0.85em;">${row.block === 'constant' ? 'const' : 'sticky'}</span>`
-                    : `<input type="number" class="wa-grade text_pole" data-key="${esc(key)}" data-i="${i}" min="0" max="4" step="1" ${typed.has(key) ? 'data-dirty="1" ' : ''}value="${esc(typed.get(key) ?? (done ? priorOf.get(key) : ''))}" placeholder="—" title="${esc(GRADE_ANCHORS.map((a, g) => `${g}: ${a}`).join('\n'))}" style="width:4em;padding:2px 4px;">`;
+                    : `<input type="number" class="wa-grade text_pole" data-key="${esc(key)}" data-i="${i}" min="0" max="4" step="1" ${typed.has(key) ? 'data-dirty="1" ' : ''}value="${esc(typed.get(key) ?? (done ? priorOf.get(pkey) : ''))}" placeholder="—" title="${esc(GRADE_ANCHORS.map((a, g) => `${g}: ${a}`).join('\n'))}" style="width:4em;padding:2px 4px;">`;
                 return `<tr style="border-top:1px solid var(--SmartThemeBorderColor);${done ? 'opacity:0.55;' : ''}">`
                     + `<td>${cell}</td>`
                     // wiGlyph, as /wa-grade and the Explorer use it. It matters most in THIS table:

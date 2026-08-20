@@ -294,3 +294,17 @@ eq(openBundle(sample).name, 'scene9', 'a plain sample passes through unchanged')
 let bundleThrew = false;
 try { openBundle(bundle, 'nope'); } catch { bundleThrew = true; }
 eq(bundleThrew, true, 'an unknown arm throws rather than falling back');
+
+// splitGraded pre-fills from the value IN FORCE. Reading `grade` alone made /wa-super-eval blind to every
+// judge-graded row once that field became human-only — which is nearly the whole corpus.
+{
+    const rows = [{ world: 'W', uid: 1 }, { world: 'W', uid: 2 }, { world: 'W', uid: 3 }];
+    const split = splitGraded(rows, [
+        { world: 'W', uid: 1, grade: 4, llmGrade: 2 },
+        { world: 'W', uid: 2, llmGrade: 0 },
+    ]);
+    eq(split.known.length, 2, 'a judge-only row counts as judged, not as never-graded');
+    eq(split.priorOf.get(rowKey({ world: 'W', uid: 1 })), 4, 'a human grade outranks the judge on the same row');
+    eq(split.priorOf.get(rowKey({ world: 'W', uid: 2 })), 0, 'a judge 0 pre-fills as 0, not as blank');
+    eq(split.fresh.length === 1 && split.fresh[0].uid === 3, true, 'only the ungraded row is fresh');
+}

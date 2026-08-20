@@ -250,8 +250,13 @@ export function unionArms(arms) {
 export function splitGraded(rows, prior) {
     const priorOf = new Map();
     for (const g of prior ?? []) {
-        if (g && g.uid !== undefined && Number.isFinite(Number(g.grade))) {
-            priorOf.set(rowKey(g), Number(g.grade));
+        // THE VALUE IN FORCE, human first and judge as fallback — the same rule metrics.mjs gradeValue
+        // applies. Reading `grade` alone made the reviewer blind to every judge-graded row the moment that
+        // field became human-only, which is most of the corpus: the table rendered as if nothing had ever
+        // been graded. Writing stays human-only; only the pre-fill reads both.
+        const v = Number(g?.grade ?? g?.llmGrade);
+        if (g && g.uid !== undefined && Number.isFinite(v)) {
+            priorOf.set(rowKey(g), v);
         }
     }
     return {
