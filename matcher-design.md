@@ -1311,6 +1311,38 @@ instances the books on disk hold.
     meaningless values, which is worse than absent. The suggester should detect that its priors do not
     apply and stand down rather than invert. Accent variants belong here too — `Gérard`/`Gerard` is a
     real miss, but whether stripping is safe depends on the language, so it wants a human in the loop.
+11. **Bundle v3, to be DESIGNED rather than migrated into.** Enough has changed under v2 that a rename
+    would not reach it; these are inputs to that design, not the design.
+
+    **Rank is dead.** Once the regression is live, `/wa-grade` and `/wa-super-grade` log the COMPOSITE
+    SCORE and ordering is on that. It replaces rank as the matching variable between raters and is
+    strictly better at it: a score is comparable across scenes where a rank is not (rank 10 of 40 and
+    rank 10 of 200 are different positions), which retires *Graded scenes*' rank-band rule rather than
+    working around it. Grades then carry no rank because nothing needs one.
+
+    **A logged score needs the model that produced it.** `score: 0.31` is uninterpretable once the
+    coefficients move — the same failure as a grade whose rubric was not recorded, which cost a repair
+    of 4053 rows. `eval/relevance-model.json` carries no identity field yet; it wants one (hash of
+    `beta` + `features` + `layout`), cited by captures as `scoredBy`, so a bundle holding two model
+    versions is detectable instead of silently mixed.
+
+    **`grades` is a ROW TABLE, not grades.** Each element is a (scene, entry) pair with verdicts hung
+    off it, so `row.grade` reads as a field of a grade. The plural is also taken, which is why a human
+    history cannot follow `llmGrades`' naming — `humanGrades` is the workaround, and IRR across human
+    raters is what wants it. A human `by` is a PERSON and has no hash, so rater ids must be stable and
+    distinct or two raters merge into one column. Median is the wrong resolver there: two humans
+    disagreeing is the signal being measured, where three judges disagreeing is noise.
+
+    **`grading.passes` is nearly redundant** now that `llmGrades[].by` records provenance per row; it
+    says a pass produced N rows and cannot say which.
+
+    **Per-bundle embedded books are the one structural cost a rename cannot reach** — 140 bundles carry
+    many copies of the same book, guarded by a fingerprint check because they drift.
+
+    **CARRY THE GUARD LIST ACROSS VERBATIM.** Each came from a specific failure, and they are the part
+    of v2 that has caught real defects: the book fingerprint, identity-is-the-FILENAME (never `name`),
+    `dropUnavailable`, merge's uid diff, and split-rater's refusal to collapse two raters into one
+    column. A ground-up redesign re-litigates all of them for free unless they are written down first.
 
 ---
 
