@@ -83,7 +83,7 @@ const VALIDATE = process.argv.includes('--validate') ? ((vArg && !vArg.startsWit
 // The converse silent turn is just as wrong: an explicitly requested validation must not quietly become a
 // grid run because the sample happens to record no capture (/wa-grade doesn't write one).
 if (process.argv.includes('--validate') && !VALIDATE) { console.error('--validate given but the sample records no "capture" — pass --validate <capture.json>, or add a "capture" path to the sample'); process.exit(2); }
-const DEPTH = Number(arg('--depth') ?? S.depth ?? 5);
+const DEPTH = Number(arg('--depth') ?? S.depth ?? 10);
 const OLLAMA = process.env.OLLAMA_URL ?? 'http://localhost:11434', MODEL = process.env.WA_EMBED_MODEL ?? 'bge-m3';
 // Signals the capture was produced under. Defaults are one tuned chat's snapshot, NOT the shipped defaults
 // (extension/state.mjs ships K1 1.2, LEXW 1) — a sample overrides them via its own captureParams, which is

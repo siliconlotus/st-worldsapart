@@ -79,7 +79,11 @@ const srcArm = src && (Array.isArray(src.arms) ? (src.arms.find(a => a.arm === '
 // DEPTH IS PART OF THE SCENE, so --from inherits it. Defaulting to 5 under --from silently builds a
 // different query out of the same turn: the source scenes were captured at 10, and the shorter window
 // scored as a scene nobody had graded while looking identical in every field a reader checks.
-const DEPTH = Number(arg('--depth') ?? srcArm?.depth ?? 5);
+// DEPTH 10 IS THE CORPUS, so it is the default rather than something every invocation has to remember.
+// All 97 existing bundles across all six books record depth 10; a set derived at anything else cannot be
+// compared with them, and the failure is silent — the bundle looks fine and only its query is short.
+// Deriving at the old default of 5 has now produced two sets that had to be thrown away and re-derived.
+const DEPTH = Number(arg('--depth') ?? srcArm?.depth ?? 10);
 const CHAT = arg('--chat') ?? src?.chat ?? srcArm?.chat;
 const BOOK = arg('--book') ?? srcArm?.primaryBook ?? src?.primaryBook;
 const PREFIX = arg('--prefix') ?? (FROM ? basename(FROM).replace(/-msg\d+\.json$/, '') : 'syn');
