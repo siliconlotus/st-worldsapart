@@ -106,11 +106,13 @@ Three constraints shape every tuning claim, and each has tooling rather than a w
 irrelevant, and HUMAN grading is the scarce input. Deriving scenes offline (`synth-scenes.mjs`) raised it to
 56, which is enough for a paired screen to clear Holm correction but not enough to make the scenes
 independent draws. Count the LINES, not the files: the 56 sit on 4 chat files but only 3 books and 3
-stories — `timewhore-syn` and `timewhore-sample-syn` are two chat files of the same story on one
-lorebook, so 28 of the 56 share a corpus. Anything resting on corpus statistics has an effective n
-nearer 3 than 56. The shared prefix is deliberate: the second set was called `adventure-syn` and read as
-a fourth line for as long as nobody checked its `primaryBook`. So prefer `param-screen.mjs`, which contrasts one parameter at a time against each
-scene's own baseline and reports the sign test. At n<6 nothing can reach p<0.05, so the finding is the
+stories — `timewhore-syn` and `timewhore-sample-syn` are two chat files of one CONTINUOUS chat, split
+because ST slows on a large file, so 28 of the 56 share both a corpus and a narrative. **A story is not
+a chat file**: any long run may have been continued into a new one, so never take a per-story n off a
+file count. Anything resting on corpus statistics has an effective n nearer 3 than 56. The shared prefix
+is deliberate: the second set was called `adventure-syn` and read as a fourth line for as long as nobody
+checked its `primaryBook`. So prefer `param-screen.mjs`, which contrasts one parameter at a time against
+each scene's own baseline and reports the sign test. At n<6 nothing can reach p<0.05, so the finding is the
 direction plus the mean delta, and "measured flat, n=X scenes across Y chats, paired" is a legitimate and
 common outcome to write next to a default.
 
