@@ -24,6 +24,8 @@ import { armNames, openBundle, rowKey, setGrades } from '../extension/grading.mj
 import * as matcher from '../extension/matcher.mjs';
 import { gradeValue } from './metrics.mjs';
 
+/** Unit Separator — joins title to content so neither can spell the other's boundary. */
+const US = String.fromCharCode(31);
 const argv = process.argv.slice(2);
 const arg = k => { const i = argv.indexOf(k); return i >= 0 ? argv[i + 1] : null; };
 const VALUE_FLAGS = new Set(['--from', '--from-dir', '--rename-book']);
@@ -102,14 +104,41 @@ for (const path of files) {
     const pool = new Map();
     for (const name of armNames(fresh)) for (const c of openBundle(fresh, name).candidates) if (!pool.has(rowKey(c))) pool.set(rowKey(c), c);
     const grades = (armOf(src).entries ?? []).map(g => (RENAME && g.book === RENAME.from ? { ...g, book: RENAME.to } : g));
-    const landed = grades.filter(g => pool.has(key(g)));
-    const orphan = grades.filter(g => !pool.has(key(g)));
+
+    // THE ENTRY HALF IS A NAME TOO, and the scene half already taught this lesson: book + uid says the row
+    // is the same ROW, not that the entry still says what it said when it was graded. Books are edited
+    // outside ST between captures — new reference entries, a summary split in two — so a grade can land on
+    // text its rater never read. What a relevance verdict is about is the TITLE AND CONTENT the rater saw,
+    // so those are what must match; a new key, a changed order or a flipped flag does not invalidate it.
+    // The book hash is the fast path — equal books cannot have moved an entry, which is the ordinary case —
+    // and a MISSING hash on either side compares anyway, since absence is not proof of sameness.
+    const srcName = n => (RENAME && n === RENAME.to ? RENAME.from : n);
+    const settled = n => {
+        const a = src.bookHashes?.[srcName(n)], b = fresh.bookHashes?.[n];
+        return Boolean(a && b && a === b);
+    };
+    const textOf = e => (e ? `${e.comment ?? ''}${US}${e.content ?? ''}` : null);
+    // BOTH SIDES OR NO VERDICT. A conforming bundle embeds its books, so a missing entry means the text was
+    // never recorded — a malformed bundle — rather than that the entry moved. Comparing against that absence
+    // would orphan every grade in it and report the malformation as drift.
+    const rewritten = g => {
+        if (settled(g.book)) return false;
+        const was = src.books?.[srcName(g.book)]?.[String(g.uid)];
+        const now = fresh.books?.[g.book]?.[String(g.uid)];
+        return was !== undefined && now !== undefined && textOf(was) !== textOf(now);
+    };
+
+    const landed = grades.filter(g => pool.has(key(g)) && !rewritten(g));
+    const orphan = grades.filter(g => !pool.has(key(g)) || rewritten(g));
 
     // Reason per orphan, read off the FRESH bundle's embedded book, which is the live one.
     const entries = new Map(Object.values(fresh.books?.[armOf(fresh).primaryBook] ?? {}).map(e => [Number(e.uid), e]));
     const reasonOf = g => {
         const e = entries.get(Number(g.uid));
         if (!e) return 'uid gone from the book';
+        // Ahead of the classification facts, because it is the one that says the GRADE is stale rather than
+        // that the entry was never rankable. Re-grading recovers it; nothing recovers the others.
+        if (rewritten(g)) return 'entry text changed since it was graded';
         if (e.disable) return 'disabled';
         if (e.constant || Number(e.sticky) > 0) return 'durable (constant/sticky)';
         if (!isMemoryTitle(e.comment ?? e.title)) return 'reference tier (no STMB marker)';

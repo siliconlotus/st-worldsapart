@@ -43,8 +43,9 @@ const ENTRIES = {
 };
 const candidate = (uid, i) => ({ title: ENTRIES[uid].comment, uid, book: WORLD, index: i, score: 1 - i / 10, cosine: 0.5, keys: null });
 
-const bundle = async (name, { query = 'Q', scanText = 'S', depth = 10, cands = [1, 2, 3], grades = null, world = WORLD } = {}) => {
+const bundle = async (name, { query = 'Q', scanText = 'S', depth = 10, cands = [1, 2, 3], grades = null, world = WORLD, edit = null } = {}) => {
     const books = { [world]: Object.fromEntries(Object.entries(ENTRIES).map(([k, e]) => [k, { ...e, world }])) };
+    if (edit) books[world][edit.uid] = { ...books[world][edit.uid], ...edit.set };
     const sample = {
         name, books, bookMode: 'full', chat: 'data/chat.jsonl', createdAt: '2026-01-01',
         query, scanChat: String(scanText).split('\n\n').map(t => ({ name: 'X', mes: t })), depth, primaryBook: world, params: {},
@@ -58,6 +59,37 @@ const bundle = async (name, { query = 'Q', scanText = 'S', depth = 10, cands = [
     return await bundleSamples([{ arm: 'shipped', sample }], { start: 90, end: 99 }, { population: 'ranked' });
 };
 const put = (file, obj) => { const p = join(TMP, file); writeFileSync(p, JSON.stringify(obj)); return p; };
+
+// --- graft: the entry guard -----------------------------------------------------------------------------
+// A book gets edited outside ST between captures, so book+uid can name a row whose TEXT has moved since a
+// rater read it. The book hash says whether to look; what decides is the title and content themselves.
+{
+    const src = put('entry-src.json', await bundle('scene', { grades: [[1, 4], [2, 0], [3, 0]] }));
+
+    const rewrote = put('entry-rewrote.json', await bundle('scene', { edit: { uid: 2, set: { content: 'entirely different text' } } }));
+    let e = run('graft-grades.mjs', [rewrote, '--from', src]);
+    ok(e.code === 0 && /entry-rewrote\.json\s+2\s+1\s/.test(e.out), 'a rewritten entry orphans its grade and the others still graft');
+    ok(e.out.includes('entry text changed since it was graded'), '...under a reason that says the GRADE is stale, not that the entry was unrankable');
+
+    const retitled = put('entry-retitled.json', await bundle('scene', { edit: { uid: 2, set: { comment: '002 - Renamed' } } }));
+    ok(/entry-retitled\.json\s+2\s+1\s/.test(run('graft-grades.mjs', [retitled, '--from', src]).out),
+        'the title is part of what was graded, so changing it orphans too');
+
+    // THE ONE THAT MATTERS: the book hash differs here, and nothing a rater read has moved. A guard keyed on
+    // the book rather than the entry would throw away every grade in the book for one added keyword.
+    // A bundle that embeds no entries is malformed, and its grades have no stored text — so nothing can
+    // have moved, and comparing against the absence would orphan all of them and blame drift for it.
+    const bare = await bundle('scene', { grades: [[1, 4], [2, 0], [3, 0]] });
+    bare.books = { [WORLD]: {} }; bare.bookHashes = { [WORLD]: 'empty' };
+    const noBook = put('entry-nobook.json', bare);
+    const fromBare = run('graft-grades.mjs', [put('entry-plain.json', await bundle('scene')), '--from', noBook]);
+    ok(/entry-plain\.json\s+3\s+0\s/.test(fromBare.out),
+        'a source embedding no text has nothing to have moved, so its grades still graft');
+
+    const rekeyed = put('entry-rekeyed.json', await bundle('scene', { edit: { uid: 2, set: { key: ['brand', 'new', 'keys'], order: 42 } } }));
+    e = run('graft-grades.mjs', [rekeyed, '--from', src]);
+    ok(e.code === 0 && /entry-rekeyed\.json\s+3\s+0\s/.test(e.out), 'keys and order are not what a relevance verdict is about, so grades still graft');
+}
 
 // --- graft: the scene guard -----------------------------------------------------------------------------
 const graded = put('graded.json', await bundle('scene', { grades: [[1, 4], [2, 0], [3, 0]] }));
