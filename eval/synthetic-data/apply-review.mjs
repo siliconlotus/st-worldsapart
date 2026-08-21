@@ -48,7 +48,7 @@ export const rowKey = r => `${r.book ?? ''}${US}${r.uid}`;
  *
  * @param {object[]} bundleGrades Rows as openBundle hands them out
  * @param {object[]} sectionGrades The review section's rows
- * @param {{user?: string, now?: string}} [who] The reviewer, as v3 names them
+ * @param {{user?: string, now?: string, tool?: string}} [who] The reviewer, when, and what produced the file
  * @returns {{grades: object[], added: number, changed: number, untouched: number}}
  */
 export function mergeReview(bundleGrades, sectionGrades, who = {}) {
@@ -57,11 +57,18 @@ export function mergeReview(bundleGrades, sectionGrades, who = {}) {
     for (const raw of sectionGrades ?? []) {
         // `entryText` travels in the review so a section reads standalone; the books already hold the
         // entry, and a duplicate on the row goes stale silently.
-        const { entryText, grade, why, llmGrade, llmGrades, humanGrades, grades: _g, by: _by, at: _at, ...r } = raw;
+        const { entryText, grade, why, llmGrade, llmGrades, humanGrades, grades: _g, by: _by, at: _at, world, ...rest } = raw;
+        const r = { ...rest, book: rest.book ?? world };
         if (!Number.isFinite(Number(grade))) continue;
         const verdict = {
             kind: 'human',
             ...(who.user ? { id: who.user } : {}),
+            // WHICH TOOL PRODUCED IT. A human grade can arrive three ways — `/wa-grade`, a merge from
+            // `/wa-super-grade`, or `/wa-super-eval` writing a review back — and nothing on a verdict used
+            // to say which. That absence is what let 37 review verdicts be read as an llm pass's, because
+            // the only signal left was the document's creator, and a synth document has no human path of
+            // its own. It is provenance of the pass, so it rides with the rest of it.
+            ...(who.tool ? { params: { tool: who.tool } } : {}),
             grade: Number(grade),
             ...(who.now ? { gradedAt: who.now } : {}),
             ...(why ? { why } : {}),
@@ -84,9 +91,9 @@ if (import.meta.url === `file://${process.argv[1]}`) {
     const argv = process.argv.slice(2);
     const arg = (k, d = null) => { const i = argv.indexOf(k); return i >= 0 ? argv[i + 1] : d; };
     const WRITE = argv.includes('--write');
-    // WHO REVIEWED, as v3 names a rater: the ST handle AND the host, because almost nobody changes
-    // `default-user` and two people's verdicts would otherwise read as one person's.
-    const USER = arg('--user', 'default-user@hephaestus');
+    // WHO REVIEWED. No default: a verdict signed as the wrong person is not recoverable, and this tool
+    // has no way to know whose review file it was handed.
+    const USER = arg('--user', '');
     // WHEN THE HUMAN REVIEWED, taken from the review file. This tool's own run time is a FALLBACK and a
     // poor one: a review applied a week later would record the verdict as passed then, and two reviews
     // applied in one invocation would share a stamp and collapse into one pass.
@@ -125,7 +132,7 @@ if (import.meta.url === `file://${process.argv[1]}`) {
         const path = `${DATA}/${s.file}`;
         if (!existsSync(path)) { console.log(`  MISSING ${s.file} — not in ${DATA}`); missing++; continue; }
         const bundle = JSON.parse(readFileSync(path, 'utf8'));
-        const { grades, added, changed, untouched } = mergeReview(openBundle(bundle).entries, s.grades, { user: USER, now: review.reviewedAt ?? RAN_AT });
+        const { grades, added, changed, untouched } = mergeReview(openBundle(bundle).entries, s.grades, { user: USER, now: review.reviewedAt ?? RAN_AT, tool: review.createdBy ?? 'wa-super-eval' });
         const human = (s.grades ?? []).filter(g => g.grade !== undefined).length;
         totalHuman += human;
         console.log(`${WRITE ? 'wrote' : 'would write'} ${String(changed).padStart(3)} changed, ${String(added).padStart(3)} added, ${String(untouched).padStart(4)} untouched  (${human} human-graded)  ${s.file}`);

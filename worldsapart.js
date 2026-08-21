@@ -3318,7 +3318,9 @@ async function superEvalScene() {
     const slug = String(reviewed.length === 1 ? (secs[0].name ?? secs[0].file.replace(/\.json$/, '')) : `${reviewed.length}-scenes`)
         .trim().replace(/\.json$/, '').replace(/[^\w.-]+/g, '-').replace(/^-+|-+$/g, '') || 'scenes';
     const filename = `review-${slug}-${stamp}.json`;
-    download(JSON.stringify({ reviewed, gradeScale: GRADE_SCALE, reviewedAt }, null, 1), filename, 'application/json');
+    // `createdBy` so a verdict can say what produced it: a human grade arrives three ways, and nothing
+    // downstream could tell them apart without it.
+    download(JSON.stringify({ reviewed, gradeScale: GRADE_SCALE, createdBy: 'wa-super-eval', reviewedAt }, null, 1), filename, 'application/json');
     // Agreement is over the rows a human actually reviewed — those carrying BOTH kinds of verdict.
     // Filtering on the judge's alone would drag in every untouched judge row and report it as a
     // disagreement, since it has no human verdict rather than a matching one.
