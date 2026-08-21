@@ -186,6 +186,9 @@ chat in the set is 65% hidden, so `CORPUS-MAP.md`'s line counts overstate it thr
 
 Book-only measurements are not so limited: 40 books are available, 19 with no chat at all and 11 of
 those third-party lorebooks never played — the widest sample of other people's key authoring here.
+**Count LINEAGES, not files, here too**: 43 book files collapse to 34 lineages at 30% shared content,
+because a book is versioned in place — `Daddy_Next_Door` is seven files and `Sommers_Pack__v22` is its
+v21 renamed, 190 of 327 entries byte-identical. Two versions of one book are not two books.
 Say which population a two-part finding rests on; the chat half cannot be widened by adding books.
 
 **A key existing in a book is not evidence that it is a good key**, and which books are curated is
