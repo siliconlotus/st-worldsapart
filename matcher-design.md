@@ -636,7 +636,7 @@ broadly but whose content does not fit still ranks low on the other two fused si
 would be that same judgement taken a second time, silently, where nobody can see it.
 
 **The exemption belongs to `constant` and `promote`, not to `sticky`.** `constant` declares presence
-unconditionally and `promote` declares it on activation (*Open work* #2), so a broad key on either is
+unconditionally and `promote` declares it on activation (*Open work* #3), so a broad key on either is
 doing what it was told. `sticky` declares only that an entry PERSISTS once fired — a claim about
 duration, not about breadth — and a broad key there latches on the wrong turn and then holds for as
 long as the author asked, which is the expensive version of the mistake rather than an intended one.
@@ -686,7 +686,7 @@ Two cuts, both here, each answering one question over the same layout ranking.
 
 **THERE IS NO RELEVANCE CUT, so the system makes no relevance decision at all** — a standing exception to
 *Principles*, which rules for exactly one and puts it here. The dynamic block reaches the prompt whole,
-bounded only by the two cuts below. Designing the cut waits on the layout score (*Open work* #1).
+bounded only by the two cuts below. Designing the cut waits on the layout score (*Open work* #2).
 `selection.mjs` `walkOrder` orders the classes and cuts nothing.
 
 **The entry maxes** decide how many, on nested populations: vector ⊆ dynamic ⊆ all, plus the
@@ -703,7 +703,7 @@ map is core's.
 means it can drop one with the budget wide open. That stands against *triggered == relevant*
 (*Evidence*) and is recorded rather than resolved: arbitrating once over the whole heterogeneous set is
 what *Principles* requires, and carving an exemption for keyword rows would make stage 4 read
-provenance. `promote` (*Open work* #2) is the per-entry escape from it.
+provenance. `promote` (*Open work* #3) is the per-entry escape from it.
 
 ---
 
@@ -1268,8 +1268,34 @@ was measured wrong: the 71% p-overlap, the 25%-purity-at-66%-recall cut, and the
 
 Ordered by whether a user can see the difference — not by how tidy the fix is, and not by how many
 instances the books on disk hold.
+1. **Bundle v3 — the schema is DESIGNED, and nothing reads or writes it.** `bundle-schema.md` carries
+   the shape and the rules that decide it. What is open is the two ends: a writer (`/wa-super-grade`,
+   `grade-pending`, `graft-grades`, `scene.mjs`) and a reader (`metrics.mjs` resolving from the verdict
+   arrays instead of a stored scalar), plus the migration of the bundles on disk. It leads the list
+   because every other measurement flows through these files, and the corpus keeps accreting rows in a
+   shape the design has already superseded.
 
-1. **The relevance prediction — stage 4 deciding, per entry, whether it belongs.** This is the whole of
+   Three inputs the schema doc does not carry, because they are about what a CAPTURE records rather
+   than what a bundle holds:
+
+   **Rank is dead.** Once the regression is live, `/wa-grade` and `/wa-super-grade` log the COMPOSITE
+   SCORE and ordering is on that. It replaces rank as the matching variable between raters and is
+   strictly better at it: a score is comparable across scenes where a rank is not (rank 10 of 40 and
+   rank 10 of 200 are different positions), which retires *Graded scenes*' rank-band rule rather than
+   working around it.
+
+   **A logged score needs the model that produced it.** `score: 0.31` is uninterpretable once the
+   coefficients move — the same failure as a grade whose rubric was not recorded, which cost a repair
+   of 4053 rows. `eval/relevance-model.json` carries no identity field yet; it wants one (hash of
+   `beta` + `features` + `layout`), cited by captures as `scoredBy`, so a bundle holding two model
+   versions is detectable instead of silently mixed. `waVersion`/`stVersion` do not cover this: the
+   model ships as data, not as code.
+
+   **CARRY THE GUARD LIST ACROSS VERBATIM.** Each came from a specific failure, and they are the part
+   of v2 that has caught real defects: the book fingerprint, identity-is-the-FILENAME (never `name`),
+   `dropUnavailable`, merge's uid diff, and split-rater's refusal to collapse two raters into one
+   column. A ground-up rewrite re-litigates all of them for free unless they are written down first.
+2. **The relevance prediction — stage 4 deciding, per entry, whether it belongs.** This is the whole of
    the open work, not a step after tuning: F2@layout is the score of record, and until a prediction
    exists the delivered set is everything activated, so that score is invariant to every layout
    parameter (measured, *Evidence → Two scores*). The predicted set IS the layout, so scoring it is
@@ -1280,7 +1306,7 @@ instances the books on disk hold.
    two cutoffs as well as two fits. Calibration does not settle the second — reference cannot be measured at
    n=342 — so that rests on the per-boundary slopes and on the two tiers' different tolerance for a
    precision loss.
-2. **`promote` — an author declaration that activation is sufficient.** A promoted entry enters the
+3. **`promote` — an author declaration that activation is sufficient.** A promoted entry enters the
    layout whenever its keys fire, exempt from the relevance cut. It is the per-entry form of *triggered
    == relevant*, which stage 4 broke by having the cliff arbitrate keyword-activated entries alongside
    retrieved ones. The fused score still orders it within its block; it no longer gates inclusion.
@@ -1320,19 +1346,19 @@ instances the books on disk hold.
    forty constants — activation gates them and most turns fire a handful. The number that means
    something is how many fired on THIS turn, which is a runtime observation.
 
-3. **Recursion scoring** — buffer scoring plus trigger-depth weighting, one change. Ships on reasoning
+4. **Recursion scoring** — buffer scoring plus trigger-depth weighting, one change. Ships on reasoning
    rather than evidence (`world_info_recursive` is off here and no book in the corpus exercises it), so
    it waits on a recursion-using book.
-4. **Witness spans**, then **proximity** — they share one collector, and the display half lands first
+5. **Witness spans**, then **proximity** — they share one collector, and the display half lands first
    because it is what tells a proximity key's classes apart.
-5. **`probeKeys`** (pure: keys × segments → verdict, count, witnesses), then the **Keyword Lab** tab
+6. **`probeKeys`** (pure: keys × segments → verdict, count, witnesses), then the **Keyword Lab** tab
    (paste text or pick an entry/chat, see what hits), then wiring the same function into `scanChats` so
    `?` and `/re/` keys finally get chat evidence.
-6. **`chat common` as a raising flag** — currently `KEY_CHAT_COMMON` can only confirm another flag. It
+7. **`chat common` as a raising flag** — currently `KEY_CHAT_COMMON` can only confirm another flag. It
    needs the structural exclusion (constant/sticky) decided and the 20% re-read against what survives.
-7. **Key-side variant expansion**: hyphen ↔ space, since compounds are written both ways and prose
+8. **Key-side variant expansion**: hyphen ↔ space, since compounds are written both ways and prose
    picks per term. Quoting suppresses generation.
-8. **Orthographic expansion for REGEX keys**, which belongs to that pass and not to the fold — a
+9. **Orthographic expansion for REGEX keys**, which belongs to that pass and not to the fold — a
    pattern is code, so rewriting `…` to `...` turns a literal into three wildcards. Expansion has no
    equivalent problem because a character class matches exactly one character while an alternation has
    no such limit. **Only 1→1 substitutions are generated**: a one-character swap is local and splices
@@ -1344,47 +1370,20 @@ instances the books on disk hold.
    possessives, 18 are above 90% curly (worst 97.6%), 91 sit between 5% and 95%, and 44 are under 5%.
    The mixed chats are the worse failure, since a key that fires SOMETIMES reads as weak rather than
    broken. Which argues for building it BEFORE the keys exist.
-9. **`reportFailure`: retrieval failure is a failure, not a degradation.** The two-severity split rests
+10. **`reportFailure`: retrieval failure is a failure, not a degradation.** The two-severity split rests
    on "keys are still handled". Weaker than it was now that a vectorized entry keeps its keys, but a
    retrieval outage still costs the vector and text signals on every entry it was the only source for.
-10. **Suggester i18n, none of it started.** `ZIPF_EN` scores non-English function words as maximally
+11. **Suggester i18n, none of it started.** `ZIPF_EN` scores non-English function words as maximally
     rare, so the gate designed to reject common words would propose them; a few are present with
     meaningless values, which is worse than absent. The suggester should detect that its priors do not
     apply and stand down rather than invert. Accent variants belong here too — `Gérard`/`Gerard` is a
     real miss, but whether stripping is safe depends on the language, so it wants a human in the loop.
-11. **Bundle v3, to be DESIGNED rather than migrated into.** Enough has changed under v2 that a rename
-    would not reach it; these are inputs to that design, not the design.
-
-    **Rank is dead.** Once the regression is live, `/wa-grade` and `/wa-super-grade` log the COMPOSITE
-    SCORE and ordering is on that. It replaces rank as the matching variable between raters and is
-    strictly better at it: a score is comparable across scenes where a rank is not (rank 10 of 40 and
-    rank 10 of 200 are different positions), which retires *Graded scenes*' rank-band rule rather than
-    working around it. Grades then carry no rank because nothing needs one.
-
-    **A logged score needs the model that produced it.** `score: 0.31` is uninterpretable once the
-    coefficients move — the same failure as a grade whose rubric was not recorded, which cost a repair
-    of 4053 rows. `eval/relevance-model.json` carries no identity field yet; it wants one (hash of
-    `beta` + `features` + `layout`), cited by captures as `scoredBy`, so a bundle holding two model
-    versions is detectable instead of silently mixed.
-
-    **`grades` is a ROW TABLE, not grades.** Each element is a (scene, entry) pair with verdicts hung
-    off it, so `row.grade` reads as a field of a grade. The plural is also taken, which is why a human
-    history cannot follow `llmGrades`' naming — `humanGrades` is the workaround, and IRR across human
-    raters is what wants it. A human `by` is a PERSON and has no hash, so rater ids must be stable and
-    distinct or two raters merge into one column. Median is the wrong resolver there: two humans
-    disagreeing is the signal being measured, where three judges disagreeing is noise.
-
-    **`grading.passes` is nearly redundant** now that `llmGrades[].by` records provenance per row; it
-    says a pass produced N rows and cannot say which.
-
-    **Per-bundle embedded books are the one structural cost a rename cannot reach** — 140 bundles carry
-    many copies of the same book, guarded by a fingerprint check because they drift.
-
-    **CARRY THE GUARD LIST ACROSS VERBATIM.** Each came from a specific failure, and they are the part
-    of v2 that has caught real defects: the book fingerprint, identity-is-the-FILENAME (never `name`),
-    `dropUnavailable`, merge's uid diff, and split-rater's refusal to collapse two raters into one
-    column. A ground-up redesign re-litigates all of them for free unless they are written down first.
-
+12. **Group weights, `(...)::N`.** A weight is per unit and a conjunction has one intent, so the author's
+   unit is the group — but the grammar has nowhere to put it. `? (copper pipe)::3` tokenizes to
+   `(copper AND pipe) AND TERM("::3")`, a required literal no text contains, and the validator passes
+   it. **Measured** across 43 books: 1 of 148 SmartKeys carries a per-term weight and it is a
+   single-term key, so nothing on disk depends on the current reading and the change is free. Until it
+   lands, a bare `::N` or `^N` term is a silently dead key of the same class as `~N` proximity.
 ---
 
 ## Standing caveats
