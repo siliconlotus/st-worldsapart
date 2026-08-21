@@ -24,16 +24,19 @@
 // The pending flow assumes a job is a scene grading its own pool; a cross-scene audit — re-grading the
 // activation misses, an inter-rater pass — is a row list that happens to span scenes, and this groups it
 // by bundle and emits one job per scene exactly as the pending path would have. Same job shape, same
-// contamination boundary, same merge; a re-grade of already-graded rows is simply never merged, because
-// merge skips any row the bundle already carries a grade for.
+// contamination boundary, same merge. A RE-GRADE OF ALREADY-GRADED ROWS IS THE POINT: the new verdict is
+// appended to the row's `llmGrades`, beside the one it disagrees with rather than over it, because
+// comparing the two IS the validation that a rubric correction worked. Only an exact repeat — same rubric,
+// same model, same day — is skipped, and only so that re-merging the same results is idempotent.
 //
 // merge is dry by default and ALWAYS runs the uid diff first: a result whose uid set does not match its
 // job is not merged, and its job path is printed for re-dispatch. A judge dropping one row of sixteen is
 // silent otherwise — it has happened — and a partial merge would bake the gap into the bundle.
-import { readFileSync, writeFileSync, mkdirSync, readdirSync, existsSync } from 'node:fs';
+import { readFileSync, writeFileSync, mkdirSync, readdirSync, existsSync, statSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 import { dirname, resolve as resolvePath } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { openBundle, passKey, raterParts, setGrades } from '../../extension/grading.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const EVAL = resolvePath(HERE, '..');
@@ -53,8 +56,10 @@ if (cmd !== 'build' && cmd !== 'merge') {
 
 const JOBS = resolvePath(arg('--jobs', resolvePath(EVAL, 'grade-jobs')));
 const US = String.fromCharCode(31);
-const rowKey = (world, uid) => [world, uid].join(US);
-const shipped = b => (Array.isArray(b.arms) ? (b.arms.find(a => a.arm === 'shipped') ?? b.arms[0]) : b);
+const rowKey = (book, uid) => [book, uid].join(US);
+/** The shipped arm as a flat sample. Reading through openBundle is what keeps this tool out of the file
+ *  layout: v3 moved the haystack, the params and every verdict, and none of that shows up here. */
+const shipped = b => openBundle(b);
 /** Books are keyed by array position, which equals uid in some books and not in others. Always map. */
 const byUid = book => new Map(Object.values(book ?? {}).map(e => [String(e.uid), e]));
 
@@ -93,14 +98,14 @@ if (cmd === 'build') {
         // (isekai-time-whore-frozen-2-msg3728 and its -null-book variant, the same scene under a different
         // book). Keyed on name, their jobs overwrite each other here and merge writes the survivor's rows
         // into whichever file the name resolves to: measured, one row landed in a bundle whose books do not
-        // contain that world. `scene` stays the display label; `bundle` is what merge resolves.
+        // contain that book. `scene` stays the display label; `bundle` is what merge resolves.
         const base = bundleFile.replace(/\.json$/, '');
-        const books = new Map(Object.entries(bundle.books ?? {}).map(([w, bk]) => [w, byUid(bk)]));
+        const books = new Map(Object.entries(bundle.books ?? {}).map(([b, bk]) => [b, byUid(bk)]));
 
         // A row whose entry is gone or empty cannot be graded from the entry text, and a judge handed an
         // empty candidate will grade the title. Dropped and counted rather than passed through.
         const usable = rowList.filter(r => {
-            const e = books.get(r.world)?.get(String(r.uid));
+            const e = books.get(r.book)?.get(String(r.uid));
             if (e && (e.content ?? '').trim()) return true;
             dropped++; return false;
         });
@@ -117,8 +122,8 @@ if (cmd === 'build') {
                 note: 'Grade every candidate against the scene. Write the JSON your instructions describe to `out`.',
                 sceneText: arm.query,
                 candidates: chunk.map(r => {
-                    const e = books.get(r.world).get(String(r.uid));
-                    return { world: r.world, uid: r.uid, title: e.comment || r.title, text: e.content };
+                    const e = books.get(r.book).get(String(r.uid));
+                    return { book: r.book, uid: r.uid, title: e.comment || r.title, text: e.content };
                 }),
             };
             const path = `${JOBS}/${id}.json`;
@@ -133,7 +138,7 @@ if (cmd === 'build') {
         const list = JSON.parse(readFileSync(resolvePath(ROWS), 'utf8'));
         const byBundle = new Map();
         for (const r of list) {
-            if (!r.bundle || r.world === undefined || r.uid === undefined) { console.error(`row missing bundle/world/uid: ${JSON.stringify(r)}`); process.exit(2); }
+            if (!r.bundle || r.book === undefined || r.uid === undefined) { console.error(`row missing bundle/book/uid: ${JSON.stringify(r)}`); process.exit(2); }
             if (!byBundle.has(r.bundle)) byBundle.set(r.bundle, []);
             byBundle.get(r.bundle).push(r);
         }
@@ -153,8 +158,26 @@ if (cmd === 'build') {
 // ---- merge ----
 const RESULTS = resolvePath(arg('--results', JOBS));
 const MODEL = arg('--model', 'claude-sonnet-5');
-const passOf = job => `scene-relevance@${job.contract ?? contractHash}/${MODEL}${job.run ? '#' + job.run : ''}`;
-const STAMP = new Date().toISOString().slice(0, 10);
+// The reasoning effort the pass ran at. A component of the rater id, not a note beside it: two passes
+// differing only in effort would otherwise collide on the idempotency key and the second be dropped.
+const EFFORT = arg('--effort', '');
+/** WHO GRADED, as v3 names them: the model, and the rubric that told it what to grade. The pass's REASON
+ *  is not part of either — a tiebreak verdict is a third verdict, and the array's order already says so. */
+const raterOf = job => ({ kind: 'llm', modelName: MODEL, rubric: `scene-relevance@${job.contract ?? contractHash}` });
+/** Two verdicts from the same rater, under the same knobs, on the same day are indistinguishable in the
+ *  file, so that is the key a re-merge is idempotent under. A pass that CHANGED a knob — another seed,
+ *  another effort — is a different pass and appends. `--run` is the operator asserting that an otherwise
+ *  identical same-day repeat is a deliberate extra verdict rather than the same jobs merged twice. */
+const samePass = (a, b) => a.kind === 'llm' && b.kind === 'llm' && passKey(a) === passKey(b);
+// FALLBACK ONLY. A verdict is stamped with when the PASS ran, taken from the result itself or, failing
+// that, from when the result file was written — a subagent writes its own answer, so its mtime is the
+// grading moment. Merge time is the last resort and is the one that cannot separate two passes filed
+// together, which is precisely the adjudication case.
+const STAMP = new Date().toISOString();
+const gradedAtOf = (res, path) => {
+    if (res?.gradedAt) return res.gradedAt;
+    try { return statSync(path).mtime.toISOString(); } catch { return STAMP; }
+};
 
 const jobFiles = readdirSync(JOBS).filter(f => f.endsWith('.json') && !f.endsWith('-graded.json')).sort();
 const missing = [], mismatched = [];
@@ -167,9 +190,10 @@ for (const jf of jobFiles) {
 
     let res;
     try { res = JSON.parse(readFileSync(rf, 'utf8')); } catch (e) { mismatched.push([`${JOBS}/${jf}`, `unparseable result: ${e.message}`]); continue; }
+    const gradedAt = gradedAtOf(res, rf);
 
-    const want = new Set(job.candidates.map(c => rowKey(c.world, c.uid)));
-    const got = new Map((res.grades ?? []).map(g => [rowKey(g.world, g.uid), g]));
+    const want = new Set(job.candidates.map(c => rowKey(c.book, c.uid)));
+    const got = new Map((res.grades ?? []).map(g => [rowKey(g.book, g.uid), g]));
     const lost = [...want].filter(k => !got.has(k));
     const extra = [...got.keys()].filter(k => !want.has(k));
     const bad = [...got.values()].filter(g => !Number.isInteger(Number(g.grade)) || g.grade < 0 || g.grade > 4);
@@ -194,16 +218,14 @@ for (const jf of jobFiles) {
     // `llmGrade` stays as the value IN FORCE so every existing reader (metrics.mjs `gradeValue`) is
     // untouched and 9340 rows need no migration; `llmGrades` is the history, newest last, and the two
     // are kept in step here. A row graded once has a one-element history, which is the same shape.
-    const pass = passOf(job);
+    const rater = raterOf(job);
     bySceneRows.get(target).push(...job.candidates.map(c => {
-        const g = got.get(rowKey(c.world, c.uid));
-        // `llmGrade` INSIDE the element too, never `grade`. The array is judge-only, and `grade` is the
-        // human's field — a project rule, not a convention. An element keyed `grade` would make
-        // metrics.mjs `gradeValue` return a judge's number through its HUMAN branch, which is the
-        // provenance collapse split-rater.mjs already had to migrate 8394 rows out of once.
-        // A human's verdict never enters this array; it stays the row's top-level `grade` scalar.
-        const one = { llmGrade: Number(g.grade), by: pass, at: STAMP, why: g.why };
-        return { title: c.title, llmGrade: one.llmGrade, llmGrades: [one], by: pass, world: c.world, uid: c.uid, why: g.why };
+        const g = got.get(rowKey(c.book, c.uid));
+        // KIND `llm`, never `human`. The rater a verdict names IS its provenance — that is the whole of
+        // what tells an unreviewed row from one a human reviewed and agreed with, and it is structural
+        // rather than policed: this writer names no other kind.
+        const one = { ...rater, ...(EFFORT ? { params: { effort: EFFORT } } : {}), grade: Number(g.grade), gradedAt, ...(g.why ? { why: g.why } : {}) };
+        return { title: c.title, grades: [one], book: c.book, uid: c.uid };
     }));
 }
 
@@ -222,27 +244,27 @@ for (const [target, rows] of bySceneRows) {
     // re-grade under a CHANGED contract or a different model appends instead of being refused. The
     // old rule — skip anything already graded — made a rubric correction unmergeable: the rows that
     // most need re-grading are precisely the ones that already carry a verdict.
-    const byRow = new Map((bundle.grades ?? []).map(g => [rowKey(g.world, g.uid), g]));
+    const priorRows = openBundle(bundle).entries ?? [];
+    const byRow = new Map(priorRows.map(g => [rowKey(g.book, g.uid), g]));
     let appended = 0;
     const perPass = new Map();
-    const bump = p => perPass.set(p, (perPass.get(p) ?? 0) + 1);
+    const label = v => raterParts(v).rubric + '/' + raterParts(v).model;
+    const bump = v => perPass.set(label(v), (perPass.get(label(v)) ?? 0) + 1);
     const fresh = rows.filter(r => {
-        const prior = byRow.get(rowKey(r.world, r.uid));
-        if (!prior) { bump(r.by); return true; }
-        const seen = prior.llmGrades ?? (prior.llmGrade === undefined ? [] : [{ llmGrade: prior.llmGrade, by: prior.by, at: prior.at, why: prior.why }]);
-        if (seen.some(x => x.by === r.by)) { collided++; return false; }
-        // A HUMAN's `grade` is never overwritten — it stays the value in force, and the judge's new
-        // verdict joins the history beside it so the disagreement is inspectable.
-        prior.llmGrades = [...seen, ...r.llmGrades];
-        prior.llmGrade = r.llmGrade;
-        prior.by = r.by;
-        if (r.why) prior.why = r.why;
-        appended++; bump(r.by);
+        const prior = byRow.get(rowKey(r.book, r.uid));
+        const one = r.grades[0];
+        if (!prior) { bump(one); return true; }
+        const seen = prior.grades ?? [];
+        if (!RUN && seen.some(x => samePass(x, one))) { collided++; return false; }
+        // A HUMAN's verdict is never touched — it outranks an llm's at read time, and the new verdict
+        // joins the record beside it so the disagreement stays inspectable.
+        prior.grades = [...seen, one];
+        appended++; bump(one);
         return false;
     });
     if (!fresh.length && !appended) continue;
 
-    bundle.grades = [...(bundle.grades ?? []), ...fresh];
+    setGrades(bundle, [...priorRows, ...fresh]);
     // Provenance is per PASS, not per bundle: these files already carry fable-5 grades from 2026-07-31,
     // and a single `by` string cannot describe a mixed set. `by` stays the latest so existing readers see
     // something current; `passes` is what says which prompt and which model produced how many rows.
@@ -250,6 +272,8 @@ for (const [target, rows] of bySceneRows) {
     bundle.grading.passes = [...(bundle.grading.passes ?? []),
         ...[...perPass].map(([by, n]) => ({ by, at: STAMP, rows: n, contract: 'scene-relevance.md' }))];
     bundle.grading.by = [...perPass.keys()].pop();
+    // A SUMMARY, and derivable from the verdicts now that each one names its own rater — kept because the
+    // row COUNT per pass is what says a merge landed, which no per-row field records.
     if (WRITE) writeFileSync(file, JSON.stringify(bundle, null, 1));
     for (const [by, n] of perPass) passTally.set(by, (passTally.get(by) ?? 0) + n);
     merged += fresh.length + appended; touched++;

@@ -41,21 +41,10 @@ export const eqNear = (got, want, label, tol = 1e-9) => {
  */
 export const gradeCredit = g => (g >= 3 ? 1 : g >= 2 ? 0.5 : 0);
 
-/**
- * The grade in force on a row, whoever set it. NaN when nothing has graded it, so a caller's existing
- * `|| 0` or `Number.isFinite` guard keeps its meaning.
- *
- * ONLY A HUMAN WRITES `grade`. A judge writes `llmGrade` and nothing else, so rater provenance is
- * readable off the shape — `grade !== undefined` is "a human set this", and llmGrade alone is "no human
- * has looked". They used to be written together at the same value, which made an unreviewed row
- * indistinguishable from one a human reviewed and agreed with; at the contract's 87.7% self-agreement
- * most reviews DO agree, so that collision would have arrived silently on first use of the review flow
- * and taken the whole human/synthetic split with it.
- *
- * Provenance cannot be inferred from anything else here: a judge's bundle and a human's are structurally
- * identical, and a filename convention is enforced by nothing.
- */
-export const gradeValue = g => Number(g?.grade ?? g?.llmGrade);
+// The verdict in force on a row — human first, then the judges' median. It lives in extension/grading.mjs
+// with the schema whose record it resolves, and is re-exported here because every reader imports it from
+// this module and a second copy of the rule is the drift the single-matcher discipline exists to prevent.
+export { gradeValue } from '../extension/grading.mjs';
 
 /**
  * F-beta. beta > 1 weights recall; the harness passes RECALL_WEIGHT.

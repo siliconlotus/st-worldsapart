@@ -331,24 +331,46 @@ export function withMatchSources(chatWindow, entry, sources, matchWindow) {
  * memo. Pure assembly: the caller extracts, this builds, so the check can exercise the real window
  * construction instead of a stand-in.
  *
+ * AN INJECT AT A CHAT DEPTH IS BOUNDED BY THE WINDOW, which is where this DIVERGES FROM CORE. Core
+ * collects every `scan: true` extension prompt and appends the lot outside its depth slice
+ * (`WorldInfoBuffer.get`), having dropped the depth at `addInject` — so a persona description or an
+ * Author's Note placed "In-chat @ Depth 100" is matched by a depth-10 scan exactly as if it sat in the
+ * current turn. That makes the text permanently present in the haystack and removes the only lever a
+ * user has over distant matches, since lowering scan depth cannot reach something that was never in the
+ * depth-bounded half. Recorded as `upstream-st.md` #16.
+ *
+ * WA owns activation, so reproducing that faithfully would make WA wrong in the same way rather than
+ * compatible. An inject placed IN the chat is scanned only when its depth falls inside the window; one
+ * with no chat position (`IN_PROMPT`, before/after story string) has no depth to test and stays ambient,
+ * exactly as core treats it. Depth 0 keeps an at-depth inject in every window, which is what "always" already
+ * means everywhere else in the buffer.
+ *
+ * `ambient` rather than a position constant, so this stays ST-free: the caller resolves
+ * `position !== extension_prompt_types.IN_CHAT` and hands over a boolean.
+ *
  * @param {Array<{name?: string, mes?: string}>} chat Scan-eligible messages (is_system removed)
- * @param {{injectText?: string, sources?: object, matchWindow?: string, includeNames?: boolean}} cfg
+ * @param {{injects?: Array<{text: string, ambient?: boolean, depth?: number}>, sources?: object, matchWindow?: string, includeNames?: boolean}} cfg
  * @returns {(depth: number, entry: object) => string[]}
  */
-export function makeWindowFor(chat, { injectText = '', sources = {}, matchWindow = 'scan', includeNames = true } = {}) {
+export function makeWindowFor(chat, { injects = [], sources = {}, matchWindow = 'scan', includeNames = true } = {}) {
     const windows = new Map();
-    return (depth, entry) => {
-        if (!windows.has(depth)) {
-            const window = scanSegments(chat, { depth, includeNames, matchWindow });
-            // Its own text, not a continuation of the last message. Pushed raw: withMatchSources
-            // re-segments the whole array, so splitting it here would be done twice.
-            if (injectText) {
-                window.push(injectText);
-            }
-            windows.set(depth, window);
-        }
-        return withMatchSources(windows.get(depth), entry, sources, matchWindow);
+    const windowFor = (depth, entry) => {
+        if (!windows.has(depth)) windows.set(depth, scanSegments(chat, { depth, includeNames, matchWindow }));
+        // Each admitted inject is its own text, never a continuation of the last message. Passed raw:
+        // withMatchSources re-segments the whole array, so splitting here would do it twice.
+        const admitted = injects
+            // `<`, matching core's own `#depthBuffer.slice(startDepth, depth)`: a message at depth d is
+            // inside a scan of depth D when d < D, and an inject placed at d sits in the same place.
+            .filter(i => i?.text && (i.ambient || Number(i.depth ?? 0) < depth))
+            .map(i => i.text);
+        return withMatchSources([...windows.get(depth), ...admitted], entry, sources, matchWindow);
     };
+    // The memoised CHAT windows, per depth — chat only, before injects and before any entry's opted-in
+    // sources. That is the half a capture freezes: injects are recorded beside it as their own list, so a
+    // reader RECONSTRUCTS the haystack by admitting them at a depth rather than trying to pick them back
+    // out of a joined blob. Recomputing the admitted set per call is a filter over a handful of items.
+    windowFor.windows = windows;
+    return windowFor;
 }
 
 /**

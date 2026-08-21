@@ -7,29 +7,38 @@
 import assert from 'node:assert';
 import { sliceBundle } from './synthetic-data/slice-bundles.mjs';
 
-const K = (w, u) => `${w}${u}`;
+/** Unit Separator — the same key slice-bundles builds. It used to join with nothing, so `W`+`11` and
+ *  `W1`+`1` were one shortlist entry. */
+const US = String.fromCharCode(31);
+const K = (w, u) => `${w}${US}${u}`;
+const cand = (uid) => ({ book: 'W', uid, block: 'dynamic' });
 const bundle = () => ({
-    name: 'demo', grades: [{ world: 'W', uid: 1, llmGrade: 3 }, { world: 'W', uid: 9, llmGrade: 0 }],
-    books: { W: { 1: { uid: 1, content: 'kept' }, 2: { uid: 2, content: 'also kept' }, 9: { uid: 9, content: 'dropped' } } },
+    schemaVersion: 3, name: 'demo',
+    scenes: [{
+        id: 'c-msg-99', sceneChat: 'c.jsonl', sceneEnd: 99,
+        entries: [
+            { book: 'W', uid: 1, grades: [{ rater: 0, grade: 3 }] },
+            { book: 'W', uid: 9, grades: [{ rater: 0, grade: 0 }] },
+        ],
+    }],
+    raters: [{ rater: 0, kind: 'llm', id: 'm\u001fr' }],
     arms: [
-        { arm: 'a', query: 'q', candidates: [
-            { world: 'W', uid: 1, block: 'dynamic' }, { world: 'W', uid: 9, block: 'dynamic' },
-        ] },
-        { arm: 'b', query: 'q', candidates: [
-            { world: 'W', uid: 1, block: 'dynamic' }, { world: 'W', uid: 2, block: 'dynamic' },
-        ] },
+        { name: 'a', params: {}, scenes: { 'c-msg-99': { sceneStart: 90, query: 'q', candidates: [cand(1), cand(9)] } } },
+        { name: 'b', params: {}, scenes: { 'c-msg-99': { sceneStart: 90, query: 'q', candidates: [cand(1), cand(2)] } } },
     ],
+    books: { W: { 1: { uid: 1, content: 'kept' }, 2: { uid: 2, content: 'also kept' }, 9: { uid: 9, content: 'dropped' } } },
 });
+const armsOf = d => (d.arms ?? []).map(a => a.scenes['c-msg-99']);
 
 // The shortlist's rows survive in every arm that carried them, and nothing else does.
 {
     const { sliced, dyn, lost } = sliceBundle(bundle(), new Set([K('W', 1), K('W', 2)]));
     assert.deepStrictEqual([...dyn].sort(), [K('W', 1), K('W', 2)]);
     assert.deepStrictEqual(lost, []);
-    assert.deepStrictEqual(sliced.arms.map(a => a.candidates.map(c => c.uid)), [[1], [1, 2]]);
+    assert.deepStrictEqual(armsOf(sliced).map(a => a.candidates.map(c => c.uid)), [[1], [1, 2]]);
     // The reviewer's own admission test, asserted here so a slice can never fail it silently.
-    assert.ok(Array.isArray(sliced.arms) && Array.isArray(sliced.grades));
-    assert.ok(sliced.arms.some(a => a.candidates.some(c => c.block === 'dynamic')));
+    assert.ok(Array.isArray(sliced.arms) && Array.isArray(sliced.scenes[0].entries));
+    assert.ok(armsOf(sliced).some(a => a.candidates.some(c => c.block === 'dynamic')));
 }
 
 // Books are cut to the kept rows — the whole reason a pack of eleven scenes is small — but every kept
@@ -40,33 +49,27 @@ const bundle = () => ({
     assert.strictEqual(sliced.books.W[1].content, 'kept');
 }
 
-// Grades are copied whole: they pre-fill the reviewer with what the judges said, and a row's prior
+// Verdicts are copied whole: they pre-fill the reviewer with what the judges said, and a row's prior
 // verdict is the thing being adjudicated.
 {
     const { sliced } = sliceBundle(bundle(), new Set([K('W', 1)]));
-    assert.strictEqual(sliced.grades.length, 2);
+    assert.strictEqual(sliced.scenes[0].entries.length, 2);
 }
 
 // A constant row is not gradeable, so it is reported lost rather than packed — a section built from one
 // alone would be refused by the reviewer with nothing said about why.
 {
     const b = bundle();
-    b.arms[0].candidates[0].block = 'constant';
-    b.arms[1].candidates[0].block = 'constant';
+    armsOf(b)[0].candidates[0].block = 'constant';
+    armsOf(b)[1].candidates[0].block = 'constant';
     const { dyn, lost } = sliceBundle(b, new Set([K('W', 1)]));
     assert.strictEqual(dyn.size, 0);
     assert.deepStrictEqual(lost, [K('W', 1)]);
 }
 
-// The unbundled shape — a bare sample with `candidates` and no `arms` — cuts the same way.
-{
-    const flat = { name: 'flat', grades: [], books: { W: { 1: { uid: 1 }, 2: { uid: 2 } } },
-        candidates: [{ world: 'W', uid: 1, block: 'dynamic' }, { world: 'W', uid: 2, block: 'dynamic' }] };
-    const { sliced, dyn } = sliceBundle(flat, new Set([K('W', 2)]));
-    assert.deepStrictEqual(sliced.candidates.map(c => c.uid), [2]);
-    assert.deepStrictEqual([...dyn], [K('W', 2)]);
-    assert.deepStrictEqual(Object.keys(sliced.books.W), ['2']);
-}
+// Something that is not a graded-scene document is refused rather than half-sliced: a slice that found
+// no candidates would produce an empty review section instead of an error.
+assert.throws(() => sliceBundle({ name: 'not one', arms: [{ candidates: [] }] }, new Set()), /graded-scene document/);
 
 // A shortlist naming a row the bundle does not carry is reported, not silently absorbed: it means the
 // shortlist and the bundle disagree about what was captured.
@@ -80,7 +83,7 @@ const bundle = () => ({
 {
     const b = bundle();
     sliceBundle(b, new Set([K('W', 1)]));
-    assert.strictEqual(b.arms[0].candidates.length, 2);
+    assert.strictEqual(armsOf(b)[0].candidates.length, 2);
     assert.strictEqual(Object.keys(b.books.W).length, 3);
 }
 

@@ -55,26 +55,52 @@ export const dropUnavailable = (S, label = "sample") => {
         for (const e of Object.values(bk ?? {})) start.set(`${w}${US}${e.uid}`, Number(e.STMB_start));
     }
     const future = r => {
-        const s = start.get(`${r.world}${US}${r.uid}`);
+        const s = start.get(`${r.book}${US}${r.uid}`);
         return Number.isFinite(s) && s > at;
     };
     let cut = 0, gone = 0;
     const keep = list => (list ?? []).filter(r => (future(r) ? (cut++, false) : true));
-    S.grades = keep(S.grades);
-    for (const a of (Array.isArray(S.arms) ? S.arms : [S])) a.candidates = keep(a.candidates);
-    for (const [w, bk] of Object.entries(S.books ?? {})) {
+    S.entries = keep(S.entries);
+    S.candidates = keep(S.candidates);
+    for (const [book, bk] of Object.entries(S.books ?? {})) {
         for (const [k, e] of Object.entries(bk ?? {})) {
-            if (future({ world: w, uid: e.uid })) { delete bk[k]; gone++; }
+            if (future({ book, uid: e.uid })) { delete bk[k]; gone++; }
         }
     }
     if (cut || gone) console.error(`  ${label}: dropped ${gone} entr(ies) and ${cut} graded/candidate row(s) post-dating message ${at}`);
     return S;
 };
 
-/** Reads a manifest from disk as a plain sample, whether it is one or a /wa-super-grade multi-arm bundle.
- *  Every tool goes through this so `--arm` behaves identically everywhere and a bundle is never scored as
- *  though its first arm were the only one. */
+/** Reads a graded-scene document from disk as one arm's view. Every tool goes through this, so `--arm`
+ *  behaves identically everywhere and a document is never scored as though its first arm were the only
+ *  one. The view's field names are the schema's — `entries`, `params`, `scanChat`, `book` — see
+ *  grading.mjs `openBundle`. */
 export const openSample = (path, arm = null) => openBundle(JSON.parse(readFileSync(path, 'utf8')), arm);
+
+/**
+ * How a scene-and-arm is named in output. Composed at the point of display from the document's `name` and
+ * the arm's, rather than baked into either: the view returns both fields as the schema spells them, and a
+ * label that looks like a field is how `name` came to mean two different things.
+ */
+export const sceneLabel = S => (S?.arm ? `${S.name ?? ''}--${S.arm}` : String(S?.name ?? ''));
+
+/**
+ * Key hits for one entry against a scan window — the same call `rankActivated` makes, so the excerpt
+ * localises the match that was actually scored rather than a re-derivation of the match rules.
+ *
+ * Lives here beside `scoringKeys`, which decides what it is allowed to score. It used to live in the v1
+ * migration tool, which was the only thing that needed it at the time and is now deleted.
+ */
+export function whyFor(entry, scanText, P) {
+    matcher.setBoundaryMode(P.wordBoundary);
+    const keys = scoringKeys(entry, P);
+    if (!keys.length || !scanText) return [];
+    const { hits } = matcher.keywordScore(entry, scanText, keys, { k1: P.K1, caseSensitiveDefault: P.caseSensitive, wholeWordsDefault: P.wholeWords });
+    return hits.slice(0, 4).map(h => {
+        const contexts = matcher.keyExcerpts(h.key, scanText, entry.caseSensitive, entry.matchWholeWords);
+        return { key: h.key, count: h.count, excerpt: contexts[0] ?? null, contexts };
+    });
+}
 
 export const CID = 'wa';
 
@@ -195,7 +221,7 @@ export const embed = async (text, { ollama = 'http://localhost:11434', model = '
  * The parameter set a sample was captured under, layered over the harness defaults.
  *
  * The defaults are one tuned chat's snapshot, NOT the shipped defaults (extension/state.mjs ships K1 1.2,
- * LEXW 1) — a sample overrides them via its own captureParams, which is the point of putting them in the
+ * LEXW 1) — an arm overrides them via its own `params`, which is the point of putting them in the
  * manifest: each graded scene carries the settings it was graded under. `overrides` on top is how an arm
  * asks "what would this scene look like at these parameters instead".
  */
@@ -218,7 +244,7 @@ export const sceneParams = (S, overrides = {}) => ({
     // Occurrences -> score (matcher.mjs repeatCurveOf). 'bm25' here, NOT the shipped 'presence-log',
     // for the reason uncenteredGate is 0 above: every sample captured before the setting existed must
     // reproduce byte-identically, and those all ran under bm25. New captures record their own curve in
-    // captureParams, which is spread over these defaults, so this fallback only ever reaches old ones.
+    // `params`, which is spread over these defaults, so this fallback only ever reaches old ones.
     repeatCurve: 'bm25', repeatR: 1,
     // Wrong-book failsafe (see state.mjs uncenteredGate). 0 here, NOT the shipped 0.5: every sample captured
     // before the gate existed must reproduce byte-identically, and a gate arm overrides this explicitly.
@@ -226,7 +252,7 @@ export const sceneParams = (S, overrides = {}) => ({
     // Whether the cosine subtracts the corpus mean (state.mjs meanCentered, shipped on). An arm here contrasts
     // the CENTERED and RAW rankings on graded scenes; centering-grid.mjs measures the same switch on the
     // leave-one-out chunk-to-sibling task, which is a different question and can disagree without either
-    // being wrong. Samples captured before captureParams recorded it fall back to this default, which is the
+    // being wrong. Captures taken before `params` recorded it fall back to this default, which is the
     // value they in fact ran under.
     meanCentered: true,
     // DENSE FOR EVERY ENTRY — a cosine for the entries the vector collection has no row for, which is the
@@ -277,9 +303,9 @@ export const sceneParams = (S, overrides = {}) => ({
     queryMode: 'messages',
     // NO ADMISSION PARAMS. `admit`, `bm25Floor`, `bm25FloorPct` and `threshold` are gone with the gates
     // they simulated — stage 1 now scores by cosine and returns everything (plugin/scoring.mjs). Bundles
-    // captured before that carry `threshold` in captureParams; it is READ AND IGNORED rather than rejected,
+    // captured before that carry `threshold` in `params`; it is READ AND IGNORED rather than rejected,
     // because every stored sample has one and refusing them would retire the whole graded corpus.
-    ...(S.captureParams ?? {}), ...overrides,
+    ...(S.params ?? {}), ...overrides,
 });
 
 /**
@@ -311,12 +337,12 @@ export function loadScene(S, { indexFile, params: P }) {
     // on the SAME object, so re-checking would compare a stripped book against the pristine fingerprint.
     for (const a of (S.availabilityFiltered ? [] : S.generatedFrom?.attached ?? [])) {
         if (!a?.fingerprint) continue;                       // named but no world file; nothing was embedded
-        const have = S.books?.[a.world];
-        if (!have) throw new Error(`bundle records book "${a.world}" as embedded but does not carry it — the gazetteer would be narrower than the one it was derived under`);
+        const have = S.books?.[a.book];
+        if (!have) throw new Error(`document records book "${a.book}" as embedded but does not carry it — the gazetteer would be narrower than the one it was derived under`);
         const now = bookFingerprint(have);
         const moved = ['entries', 'gaz', 'content'].filter(k => now[k] !== a.fingerprint[k]);
         if (moved.length) {
-            throw new Error(`embedded book "${a.world}" has changed since derivation (${moved.join(', ')} differ) — `
+            throw new Error(`embedded book "${a.book}" has changed since derivation (${moved.join(', ')} differ) — `
                 + `re-derive rather than score, or the numbers describe a book the grades were not made against`);
         }
     }
@@ -404,9 +430,9 @@ export function loadScene(S, { indexFile, params: P }) {
     // population wider than the graded set. A re-derived bundle logging 144 rows against 47 grades then
     // reported judged@10 of 100% on a scene that was 18% judged, so the stopping rule said "pool is
     // adequate" precisely where it was not. An ungraded row is unjudged no matter who logged it.
-    const OWN = new Set((S.candidates ?? []).filter(c => !isDurable(c) && (!c.world || c.world === primary)).map(c => Number(c.uid)));
-    const POOL = new Set((S.grades ?? [])
-        .filter(g => Number.isFinite(Number(g.uid)) && (!g.world || g.world === primary) && !isExcluded(g.title))
+    const OWN = new Set((S.candidates ?? []).filter(c => !isDurable(c) && (!c.book || c.book === primary)).map(c => Number(c.uid)));
+    const POOL = new Set((S.entries ?? [])
+        .filter(g => Number.isFinite(Number(g.uid)) && (!g.book || g.book === primary) && !isExcluded(g.title))
         .map(g => Number(g.uid)));
 
     return { primary, entries, byUid, items, loaded, gaz, gazSource, isExcluded, POOL, OWN, chunkCfg: chunkConfig(S) };
@@ -630,7 +656,7 @@ export function makeCandidateSet({ loaded, byUid, entries, params: P, chunkCfg, 
 export const makeFuse = P => (rows, lexW) => {
     rows.forEach(r => { r.key = r.uid; });
     // fuseRanks fuses every signal an entry is eligible for. A bundle captured under the old modes carries
-    // a retrievalMode in captureParams; it is read and ignored, like `threshold`.
+    // a retrievalMode in `params`; it is read and ignored, like `threshold`.
     ranking.fuseRanks(rows, { rrfK: P.K, weightByOrder: false, lexicalWeight: lexW, keywordWeight: P.KEYW, keywordOnlyTilt: P.keywordTilt, sparseWeight: P.denseColumn ? P.denseWeight : 0 });
     return [...rows].sort((a, b) => b.fused - a.fused);
 };
@@ -666,7 +692,7 @@ export async function scoreScene({ sample: S, overrides = {}, k = 10, vectors, m
     const scene = preloaded ?? loadScene(S, { indexFile: indexPath(S, { vectors, model, index }), params: P });
     const scoreAll = makeCandidateSet({ ...scene, params: P, topK });
     const fuse = makeFuse(P);
-    const gradeOf = makeGradeOf(S.grades, scene.isExcluded);
+    const gradeOf = makeGradeOf(S.entries, scene.isExcluded);
 
     const query = S.query;
     const tw = (P.entityFilter && P.queryMode !== 'summary') ? ranking.buildTermWeights(query, scene.gaz, P.boost) : null;
@@ -674,7 +700,9 @@ export async function scoreScene({ sample: S, overrides = {}, k = 10, vectors, m
     // Under denseAllEntries a keyword-only book has an empty stage-1 collection and still has vectors to
     // score against, which is the whole point of the arm there.
     const qv = cachedQv ?? ((scene.items.length || scene.loaded?.extra?.length) ? await embed(query, { ollama, model }) : []);
-    const all = scoreAll(P.K1, P.B, tw, qv, query, S.scanText);
+    // REBUILT, not read: the document stores the scan MESSAGES, so the window is made here at this arm's
+    // depth, matchWindow and includeNames rather than baked in at capture.
+    const all = scoreAll(P.K1, P.B, tw, qv, query, matcher.scanWindow(S.scanChat ?? [], { depth: S.depth, includeNames: P.includeNames }));
 
     // WHAT IS RANKED: the haystack, minus CONSTANTS. These metrics tune RANKING FEATURES — how should this
     // set be sorted for this query — so what the pipeline later filters out does not bear on them.

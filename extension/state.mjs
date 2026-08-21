@@ -229,6 +229,19 @@ export const defaultSettings = {
      * construction, and threading it would touch every countKey caller for a value none of them vary.
      */
     wordBoundary: 'strict',
+    // WHO A TYPED GRADE IS SIGNED AS — a UUIDv4, generated once on first use and kept.
+    //
+    // RANDOM RATHER THAN DESCRIPTIVE, because grades are meant to arrive from other users on their own
+    // books. A composed `<st-user>@<host>` cannot carry that: almost nobody changes `default-user`, and
+    // the browser sees only the address it dialled, which is `localhost` for everyone — so two
+    // contributors sign the same string and merge into one rater, silently and unrecoverably once pooled.
+    // Asking the server plugin for `os.hostname()` fixes the collision and buys a second problem, since a
+    // hostname is frequently a person's name and would ship in every shared document.
+    //
+    // Not a security boundary: a contributor can write any id they like whatever generates it, so the
+    // strength of the generator is not what protects a merge. Collision-by-accident is what it prevents.
+    raterId: '',
+
     /**
      * BM25 term-frequency saturation, for the key scorer (matcher.mjs) and the CONTENT text scorer
      * (content-lexical.mjs, in the browser). Roughly: how many distinct matching terms one
@@ -453,7 +466,7 @@ export const runState = {
     scanChat: null,               // the interceptor's chat — core's own scan haystack (regex-scripted,
                                   // files appended); SCAN_DONE consumers read this, not the raw chat
     lastKeywordAdds: new Set(),   // `${world}.${uid}` of the last union's keyword-only force-activations
-    lastScanText: '',             // last global-depth keyword scan window, bundled by /wa-grade
+    lastScanChat: [],             // scan-eligible messages at capture depth, bundled by /wa-grade
     gradeCutoff: null,            // /wa-grade's candidate-depth cap; null = no capture in flight
     lastCandidates: [],           // selection-candidate rows from the last debug-class run, for /wa-grade
     lastCandidateEntries: [],     // the WI entries behind those rows, aligned by index (for "view text")

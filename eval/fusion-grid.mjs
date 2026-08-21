@@ -25,7 +25,7 @@
 //   node .../fusion-grid.mjs <sample.json> [more.json ...] [--k 10]
 import { readFileSync } from 'node:fs';
 import { openBundle, isDurable, rowKey } from '../extension/grading.mjs';
-import { ndcg, sceneParams } from './scene.mjs';
+import { ndcg, sceneParams, sceneLabel } from './scene.mjs';
 import { signTest, spearman, gradeValue } from './metrics.mjs';
 
 const argv = process.argv.slice(2);
@@ -78,9 +78,9 @@ for (const path of samples) {
     const P = sceneParams(S);
     const rows = (S.candidates ?? []).filter(c => !isDurable(c));
     // Grades are keyed by world+uid; durable rows are excluded above because relevance never chose them.
-    const gradeOf = new Map((S.grades ?? []).filter(g => g.uid !== undefined).map(g => [rowKey(g), gradeValue(g) || 0]));
+    const gradeOf = new Map((S.entries ?? []).filter(g => g.uid !== undefined).map(g => [rowKey(g), gradeValue(g) || 0]));
     const judged = rows.filter(r => gradeOf.has(rowKey(r)));
-    if (judged.length < 5) { console.log(`${S.name}: only ${judged.length} judged candidate rows — skipping`); continue; }
+    if (judged.length < 5) { console.log(`${sceneLabel(S)}: only ${judged.length} judged candidate rows — skipping`); continue; }
 
     const cos = judged.map(r => (r.cosine == null ? null : Number(r.cosine)));
     const txt = judged.map(r => (r.text ? Number(r.text) : null));
@@ -131,7 +131,7 @@ for (const path of samples) {
     const crit = g.filter(x => x >= 5).length;
     const critIn = fn => { const order = judged.map((_, i) => i).sort((a, b) => fn(b) - fn(a)); return order.slice(0, K).filter(i => g[i] >= 5).length; };
 
-    console.log(`\n${S.name} — ${judged.length} judged rows, ${g.filter(x => x >= 3).length} relevant, ${crit} critical (5), weights cos=1 txt=${W.txt} key=${W.key}`);
+    console.log(`\n${sceneLabel(S)} — ${judged.length} judged rows, ${g.filter(x => x >= 3).length} relevant, ${crit} critical (5), weights cos=1 txt=${W.txt} key=${W.key}`);
     console.log(`  method                 | nDCG@${K}  crit@${K}`);
     const out = {};
     for (const [label, fn] of methods) {

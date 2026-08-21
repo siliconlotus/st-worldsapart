@@ -712,6 +712,12 @@ provenance. `promote` (*Open work* #3) is the per-entry escape from it.
 Every difference between WA's matching and core's, and each is deliberate. Core *defects* are recorded
 in `upstream-st.md` in the SillyTavern root, not here; this section carries WA's semantics.
 
+**Some of these ARE a defect being routed around, and those cite its number.** The two documents split by
+whose behaviour is described, not by whether WA acts — so an entry can be both a WA semantic and a fix,
+and without the citation neither document says which. Reproducing a core defect faithfully in the layer
+that now owns activation does not make WA compatible, it makes WA wrong in the same way; parity is owed
+to core's intent, not to its bugs.
+
 Divergence is free where WA owns activation and costly where core owns it — while core activates, every
 matcher difference makes the Studio's audit report on rules that are not what fires. Once WA activates,
 WA's rules *are* what fires.
@@ -720,14 +726,25 @@ WA's rules *are* what fires.
   lowercases. For the default substring path WA is a strict superset.
 - **NFC** on the regex path, where core runs raw.
 - **Whole-word applies to multi-word keys.** Core splits the key on whitespace and uses `includes()`,
-  so *Match Whole Words* is a silent no-op for any key with a space in it — the same shape as the `\W`
-  boundary bug rather than a considered semantic. The `=` flag was never constrained, being WA syntax
+  so *Match Whole Words* is a silent no-op for any key with a space in it — the same shape as
+  `upstream-st.md` #1 rather than a considered semantic. The `=` flag was never constrained, being WA syntax
   no unaltered book can contain.
 - **Whole-word stops at an affix in core**, so `Joe` matches `Joe's`. WA applies the flag in both
   directions. **The documented contract is preserved exactly**: ST documents one example — `king`
   matches "long live the king" and not "it's not to my liking" — and core, permissive and strict all
   reproduce it. Every divergence lives in territory core never described.
-- **The boundary class** (`wordChar()`) against core's `\W`, which diverges both ways.
+- **The boundary class** (`wordChar()`) against core's `\W`, which diverges both ways. Fixes
+  `upstream-st.md` #1 — core's whole-word test is ASCII-only, so an accented or non-Latin key never
+  matches as a word.
+- **A scanned inject is bounded by the window it was placed in.** Core collects every `scan: true`
+  extension prompt and appends the lot outside its depth slice, having dropped the depth at `addInject` —
+  so an Author's Note or persona description placed "In-chat @ Depth 100" is matched by a depth-10 scan
+  as though it sat in the current turn, and is effectively CONSTANT in the haystack. WA scans an inject
+  placed in the chat only when its depth falls inside the window; one with no chat position
+  (`IN_PROMPT`, before/after story string) has no depth to test and stays ambient, exactly as core treats
+  it. Depth 0 keeps an at-depth inject in every window, which is what "always" already means in that
+  buffer. `scanDepth: 0` — "match nothing from chat" — therefore excludes chat-placed injects and keeps
+  ambient ones, which is the case that setting exists for. Fixes `upstream-st.md` #16.
 - **A bare `/re/` key.** Core's `parseRegexFromString` refuses a pattern whose delimiter appears
   unescaped inside it and falls back to matching the whole delimited string as literal text;
   `REGEX_KEY_RE` does not refuse it, so `/and/or/` is the pattern `and/or` here and the literal
@@ -1268,34 +1285,28 @@ was measured wrong: the 71% p-overlap, the 25%-purity-at-66%-recall cut, and the
 
 Ordered by whether a user can see the difference — not by how tidy the fix is, and not by how many
 instances the books on disk hold.
-1. **Bundle v3 — the schema is DESIGNED, and nothing reads or writes it.** `bundle-schema.md` carries
-   the shape and the rules that decide it. What is open is the two ends: a writer (`/wa-super-grade`,
-   `grade-pending`, `graft-grades`, `scene.mjs`) and a reader (`metrics.mjs` resolving from the verdict
-   arrays instead of a stored scalar), plus the migration of the bundles on disk. It leads the list
-   because every other measurement flows through these files, and the corpus keeps accreting rows in a
-   shape the design has already superseded.
+1. **Bundle v3 — LANDED.** `bundle-schema.md` carries the shape and the rules that decide it; the writer
+   is `bundleSamples`, the reader is `openBundle`, and `gradeValue` resolves the verdict in force out of
+   the record rather than reading a stored scalar. The corpus is on it: 107 documents, one schema, no
+   compatibility path — the migration was one-shot and is deleted, along with the v1 tool before it.
 
-   Three inputs the schema doc does not carry, because they are about what a CAPTURE records rather
-   than what a bundle holds:
+   `resolve-grades.mjs`, `normalize-grades.mjs` and `split-rater.mjs` went too; all three existed to
+   maintain or repair a reduced scalar that no longer exists.
 
-   **Rank is dead.** Once the regression is live, `/wa-grade` and `/wa-super-grade` log the COMPOSITE
-   SCORE and ordering is on that. It replaces rank as the matching variable between raters and is
-   strictly better at it: a score is comparable across scenes where a rank is not (rank 10 of 40 and
-   rank 10 of 200 are different positions), which retires *Graded scenes*' rank-band rule rather than
-   working around it.
+   **Measured** on the way through, each having caught a real defect: the reader's resolution rule
+   reproduces all 11,946 stored `llmGrade` scalars; 611 bare grades sit in `/wa-grade` documents and are
+   human, while 37 sat in synth documents and were llm verdicts in the wrong field; every one of the 107
+   frozen haystacks re-derives from its source chat, so all decompose to messages; and the grids print
+   byte-identical numbers either side of the whole change.
 
-   **A logged score needs the model that produced it.** `score: 0.31` is uninterpretable once the
-   coefficients move — the same failure as a grade whose rubric was not recorded, which cost a repair
-   of 4053 rows. The model is a knob, so it rides in `arms[].params` as `scoredBy` alongside `depth`;
-   `waVersion`/`stVersion` cannot stand in for it, since the model ships as data rather than as code.
-   What is missing is the thing to cite: `eval/relevance-model.json` carries no identity field yet and
-   wants one — a hash of `beta` + `features` + `layout` — so a bundle holding two model versions is
-   detectable instead of silently mixed.
+   **THE READERS READ THE SCHEMA'S NAMES.** `openBundle` selects a view across the nesting levels and
+   translates nothing: `entries`, `params`, `scanChat`, `book`, `index`, `scores`. `entry.world` is ST's
+   field, read where an ST entry becomes a WA row and nowhere else.
 
-   **CARRY THE GUARD LIST ACROSS VERBATIM.** Each came from a specific failure, and they are the part
-   of v2 that has caught real defects: the book fingerprint, identity-is-the-FILENAME (never `name`),
-   `dropUnavailable`, merge's uid diff, and split-rater's refusal to collapse two raters into one
-   column. A ground-up rewrite re-litigates all of them for free unless they are written down first.
+   What is still open is in `bundle-schema.md`'s own *Open*: `waVersion` has no browser source, `why` is
+   bulk sitting ahead of the hoisted blocks, `query`/`queryChat` duplicate per arm, and nothing yet fills
+   `modelDigest` or a pass's `params` at capture.
+
 2. **The relevance prediction — stage 4 deciding, per entry, whether it belongs.** This is the whole of
    the open work, not a step after tuning: F2@layout is the score of record, and until a prediction
    exists the delivered set is everything activated, so that score is invariant to every layout

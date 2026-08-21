@@ -42,7 +42,7 @@ const S = {
         },
     },
     // threshold -1 admits every chunk, so admission is not what this check is varying.
-    captureParams: { threshold: -1 },
+    params: { threshold: -1 },
     grades: [], candidates: [],
 };
 

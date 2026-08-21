@@ -27,15 +27,17 @@ import {
     saveSettingsDebounced,
     substituteParams,
     getExtensionPromptByName,
+    extension_prompt_types,
 } from '../../../../script.js';
 import { extension_settings, getContext } from '../../../extensions.js';
+
 import { getSortedEntries, getWorldInfoPrompt, loadWorldInfo, saveWorldInfo, reloadEditor, world_names, world_info_include_names, world_info_depth, world_info_min_activations, world_info_match_whole_words, world_info_case_sensitive, world_info_recursive, selected_world_info, world_info, METADATA_KEY, scan_state } from '../../../world-info.js';
 import { power_user } from '../../../power-user.js';
 import { SlashCommandParser } from '../../../slash-commands/SlashCommandParser.js';
 import { SlashCommand } from '../../../slash-commands/SlashCommand.js';
 import { ARGUMENT_TYPE, SlashCommandArgument, SlashCommandNamedArgument } from '../../../slash-commands/SlashCommandArgument.js';
 import { ConnectionManagerRequestService } from '../../shared.js';
-import { getStringHash, escapeHtml, getCharaFilename, download } from '../../../utils.js';
+import { getStringHash, escapeHtml, getCharaFilename, download, uuidv4 } from '../../../utils.js';
 import { pluginFingerprint, PLUGIN_FILES } from './plugin/fingerprint.mjs';
 import { admitCeiling } from './plugin/scoring.mjs';
 import * as ranking from './extension/ranking.mjs';
@@ -51,7 +53,7 @@ import { runState, defaultSettings, settings, ensureSettings } from './extension
 import { ensureStudioStyle, entryFoldHtml, keyHitsHtml, makeSortControl, makeTierEditor, showEntryText, wiGlyph, wiTooltip } from './extension/ui-widgets.mjs';
 import { PRESENTATION_ALIAS, SORT_FNS, gradeOrder, normPresentation, presentationBaseLabel, presentationLabel, reconcileTiers, tierRank, wiTitleOf } from './extension/sort.mjs';
 import { lorebookStudio } from './extension/studio.mjs';
-import { buildSample, bundleSamples, captureParams, GRADE_ANCHORS, GRADE_SCALE, mergeGrades, rowKey, sampleFile, searchedBook, splitGraded, trimBook, unionArms } from './extension/grading.mjs';
+import { armNames, buildSample, bundleSamples, captureParams, GRADE_ANCHORS, GRADE_SCALE, gradeValue, mergeGrades, openBundle, rowKey, sampleFile, searchedBook, splitGraded, trimBook, unionArms } from './extension/grading.mjs';
 
 /** The grading scale in one caption line, shared by both grading popups. */
 const gradeAnchorLine = () => `Grade 0–4: ${GRADE_ANCHORS.map((a, g) => `${g} = ${a.split(';')[0].toLowerCase()}`).join(' · ')}.`;
@@ -167,7 +169,7 @@ async function hasPlugin() {
     try {
         const response = await fetch('/api/plugins/worlds-apart/ping', { method: 'POST', headers: getRequestHeaders() });
         runState.pluginAvailable = response.ok;
-        if (response.ok) { try { const d = await response.json(); runState.pluginRoot = d?.root ?? null; runState.pluginFP = d?.fingerprint ?? null; } catch { /* older plugin: no root/fingerprint fields */ } }
+        if (response.ok) { try { const d = await response.json(); runState.pluginRoot = d?.root ?? null; runState.pluginHost = d?.hostname ?? null; runState.pluginFP = d?.fingerprint ?? null; } catch { /* older plugin: no root/hostname/fingerprint fields */ } }
     } catch {
         runState.pluginAvailable = false;
     }
@@ -736,6 +738,8 @@ function reportVectorCandidates(ranked, targets, searchText) {
         // cosine now that stage 1 has no fused score: same quantity the cliff reads, one signal later.
         gap: index > 0 ? Number((ranked[index - 1].value.score - row.value.score).toFixed(6)) : null,
         title: byKey.get(row.key)?.comment,
+        // A console.table COLUMN HEADING, not a field — this table is never serialized. The candidate
+        // row's layout position is `index`, which is what the schema calls it.
         '#': index + 1,
         vec: Number(row.value.score.toFixed(5)),
         vRank: row.vectorRank ?? null,
@@ -840,7 +844,7 @@ async function keywordActivations(chat) {
     runState.waCandidates = candidates;
 
     const windowFor = matcher.makeWindowFor(chat.filter(x => x && !x.is_system), {
-        injectText: await scanInjects(),
+        injects: await scanInjects(),
         sources: scanSources(),
         matchWindow: settings().matchWindow,
         includeNames: world_info_include_names,
@@ -1202,22 +1206,34 @@ function scanSources() {
  *
  * Mirrors core's loop in getWorldInfoPrompt: filter + macro handling come from
  * getExtensionPromptByName, so this is the same text core scanned.
- * @returns {Promise<string>} The scan-enabled inject text, joined
+ *
+ * WHERE EACH ONE SITS COMES BACK WITH IT, which core throws away. `addInject` takes a bare string, so by
+ * the time core's buffer assembles a window the depth is unrecoverable and every inject is ambient — the
+ * defect in `upstream-st.md` #16. `ambient` collapses the position to the one question a window has to
+ * ask, and keeps matcher.mjs ST-free; `makeWindowFor` decides what that means.
+ *
+ * @returns {Promise<Array<{key: string, text: string, ambient: boolean, depth: number}>>} Scan-enabled injects
  */
 async function scanInjects() {
     const prompts = getContext().extensionPrompts ?? {};
-    const parts = [];
+    const out = [];
 
     for (const key of Object.keys(prompts)) {
-        if (prompts[key]?.scan) {
-            const prompt = await getExtensionPromptByName(key);
-            if (prompt) {
-                parts.push(prompt);
-            }
-        }
+        if (!prompts[key]?.scan) continue;
+        const text = await getExtensionPromptByName(key);
+        if (!text) continue;
+        out.push({
+            key,
+            text,
+            // Only an IN_CHAT prompt has a chat position to bound. IN_PROMPT, BEFORE_PROMPT and NONE
+            // carry a `depth` that means nothing as a message index, so testing it would be inventing a
+            // position core never gave them.
+            ambient: prompts[key].position !== extension_prompt_types.IN_CHAT,
+            depth: Number(prompts[key].depth) || 0,
+        });
     }
 
-    return parts.join('\n');
+    return out;
 }
 
 // withMatchSources and MATCH_SOURCE_FIELDS live in ranking.mjs now (pure window assembly, shared
@@ -1268,6 +1284,76 @@ function priorityKey() {
  * under groupchats/ with no per-character folder.
  * @returns {string} Relative chat path
  */
+/**
+ * The message span this capture covers, as CHAT FILE RECORD indices — what a scene id is composed from.
+ *
+ * READ OFF THE WINDOW, not computed as `last - depth`. The query window drops empty and hidden messages,
+ * so the two differ exactly when a scene contains any; `queryMessages` tags each kept message with where it
+ * came from, which is the only thing that can say where the span really starts.
+ *
+ * +1 because ST's in-memory chat array is the jsonl MINUS its header line, and a scene id names a span of
+ * the FILE — the artifact `sceneChat` points at, and the only one a reader can open and check it against.
+ *
+ * @returns {{start: number, end: number}}
+ */
+function sceneRange() {
+    const win = runState.lastQueryChat ?? [];
+    if (!win.length) {
+        // No window captured (a summary-mode run clears it). The last message is the honest fallback: the
+        // scene ends where the chat does, and a zero-length span at least does not claim a start it lacks.
+        const last = Math.max(0, (getContext().chat?.length ?? 1) - 1) + 1;
+        return { start: last, end: last };
+    }
+    return { start: win[0].i + 1, end: win[win.length - 1].i + 1 };
+}
+
+/**
+ * SillyTavern's resolved version, as `<branch>@<commit>` — what actually ran, not what package.json says.
+ *
+ * ST's declared version only advances on pushes to main, so a staging checkout reports a number with
+ * nothing to do with the tree serving the page. `/version` gives the branch and a short HEAD; it has no
+ * tags and no dirty flag, so this is the thinner form of the schema's `<branch>@<git describe>` rather
+ * than a different convention. Empty when the endpoint cannot be read — an absent field reads as an older
+ * capture, and a guessed version would not.
+ *
+ * Cached: it cannot change without a page reload.
+ */
+let stVersionCache = null;
+async function stVersion() {
+    if (stVersionCache !== null) return stVersionCache;
+    try {
+        const r = await fetch('/version', { headers: getRequestHeaders() });
+        const d = r.ok ? await r.json() : null;
+        stVersionCache = d?.gitBranch && d?.gitRevision ? `${d.gitBranch}@${d.gitRevision}` : '';
+    } catch { stVersionCache = ''; }
+    return stVersionCache;
+}
+
+/** WHEN A VERDICT WAS PASSED, to the second. Not a day: a second pass over the same rows on the same day
+ *  is the adjudication case, and at day granularity it is indistinguishable from the first pass merged
+ *  twice — so the writers would drop it. `createdAt` on the document stays a day; that is provenance. */
+const today = () => new Date().toISOString();
+
+/**
+ * Who a typed grade is signed as: a UUIDv4, minted once and kept in settings.
+ *
+ * GENERATED LAZILY, on the first grade actually signed, so merely installing WA writes no id. See
+ * state.mjs `raterId` for why it is random rather than `<st-user>@<host>` — the short version is that
+ * grades are meant to arrive from other users, and every composed identity available in a browser
+ * collides across installs.
+ *
+ * ST's own `uuidv4` rather than `crypto.randomUUID`, which is secure-context only and so undefined when
+ * ST is served over plain HTTP on a LAN address; the helper falls back to Math.random there.
+ */
+function raterId() {
+    const s = settings();
+    if (!String(s.raterId ?? '').trim()) {
+        s.raterId = uuidv4();
+        saveSettingsDebounced();
+    }
+    return s.raterId;
+}
+
 function chatFilePath() {
     const ctx = getContext();
     if (!ctx.chatId) {
@@ -1434,7 +1520,7 @@ async function feedScanLoop(args) {
 
     const windowFor = matcher.makeWindowFor(
         (runState.scanChat ?? []).filter(x => x && !x.is_system), {
-            injectText: await scanInjects(),
+            injects: await scanInjects(),
             sources: scanSources(),
             matchWindow: settings().matchWindow,
             includeNames: world_info_include_names,
@@ -1513,7 +1599,6 @@ async function rankActivated(args) {
     ensureWorldConfigs(scanWorlds);
 
     if (settings().keywordScoring) {
-        const windows = new Map();
         // The stash from intercept IS core's transformed scan haystack — regex scripts
         // applied, file content and titles appended, reasoning merged — so WA matches the
         // text core matched. Raw context chat is the fallback only for a scan no WA entry
@@ -1523,9 +1608,21 @@ async function rankActivated(args) {
         // a keyword core matched one message further back.
         const chat = (runState.scanChat ?? getContext().chat ?? []).filter(x => x && !x.is_system);
         const sources = scanSources();
-        // Scanned once and shared across depths — core adds injects to the buffer for
-        // every entry regardless of scan depth.
-        const injectText = await scanInjects();
+        // Collected once and reused across depths. WHICH of them a given depth scans is makeWindowFor's
+        // call: an inject placed in the chat is bounded by the window, an ambient one is not
+        // (`upstream-st.md` #16). Core appends all of them to every window regardless.
+        const injects = await scanInjects();
+        // Stashed for the capture. The frozen haystack is the CHAT half alone (`windowFor.windows` is
+        // chat-only); the injects ride beside it as their own list, so a reader RECONSTRUCTS the window
+        // at any depth by admitting them, instead of trying to pick them back out of a joined blob. It
+        // also stops the same inject text being written once per depth.
+        runState.lastInjects = injects;
+        const windowFor = matcher.makeWindowFor(chat, {
+            injects,
+            sources,
+            matchWindow: settings().matchWindow,
+            includeNames: world_info_include_names,
+        });
 
         // The keys an activated entry is scored on: live keys, else the takeover's stash — blanking was
         // an activation mechanism, not a scoring opinion.
@@ -1562,19 +1659,10 @@ async function rankActivated(args) {
             // Nullish on scanDepth: 0 is core's authored "match nothing from chat" (the entry
             // lives on injects/sources), not an unset value to fall through.
             const depth = Number(item.entry.scanDepth ?? (settings().messageDepth || world_info_depth));
-            if (!windows.has(depth)) {
-                const window = matcher.scanSegments(chat, {
-                    depth, includeNames: world_info_include_names, matchWindow: settings().matchWindow,
-                });
-                // Its own text, not a continuation of the last message. Pushed raw: withMatchSources
-                // re-segments the whole array, so splitting it here would be done twice.
-                if (injectText) {
-                    window.push(injectText);
-                }
-                windows.set(depth, window);
-            }
-            // Append the character/persona/scenario texts this entry opted into scanning.
-            const scanText = withMatchSources(windows.get(depth), item.entry, sources);
+            // ONE window builder, not a second copy of it. This open-coded its own memo + inject push +
+            // withMatchSources, which is exactly makeWindowFor — and a second copy is where the depth
+            // bound would have been applied on one path and not the other.
+            const scanText = windowFor(depth, item.entry);
             const scoreKeys = scoreKeysOf(item.entry);
             const scored = keywordScore(scoringView(item.entry), scanText, scoreKeys);
             item.keywordScore = scored.score;
@@ -1607,11 +1695,16 @@ async function rankActivated(args) {
         // The global-depth window, for /wa-grade's sample (per-entry scanDepth overrides also live here).
         // Joined with a BLANK line, not a single one, so the capture round-trips: re-segmenting this
         // string recovers the same units the scan actually used, at any setting.
-        runState.lastScanText = (windows.get(settings().messageDepth) ?? [...windows.values()][0] ?? []).join('\n\n');
+        // THE MESSAGES, NOT THE WINDOW. A joined haystack is fixed at one depth, one matchWindow and one
+        // includeNames — narrowing it is impossible and re-deriving it needs the chat file. These are the
+        // scan-eligible messages as core transformed them (regex applied, attachments folded in), which
+        // no other source has, so a reader rebuilds any window from them: `scanWindow(scanChat, {depth})`.
+        runState.lastScanChat = chat.slice(-Math.max(1, settings().messageDepth))
+            .map(x => ({ name: String(x?.name ?? ''), mes: String(x?.mes ?? '') }));
 
         if (runState.verboseRun) {
             console.log('%cWorlds Apart · keyword scan windows — the exact text WA searched, by depth', 'font-weight: bold');
-            console.log(Object.fromEntries([...windows]));
+            console.log(Object.fromEntries([...windowFor.windows]));
         }
     }
 
@@ -1863,12 +1956,16 @@ async function rankActivated(args) {
             // Which cap rejected it — 'tokens' means it did not FIT, which is a different fact from
             // ranking too low and is the one a grader can act on (raise the budget, or trim the entry).
             cutBy: blockedOf.get(x) || null,
-            '#': i,
+            // Layout position. `index`, not `#`: the row and the bundle candidate it becomes are the same
+            // thing seen twice, and one name for it is what keeps either greppable.
+            index: i,
         }));
 
-        // uid alone is ambiguous across books, so carry the world for the grader and the eval.
+        // uid alone is ambiguous across books, so carry the book for the grader and the eval. THE ONE
+        // PLACE `entry.world` IS READ — that is ST's field on an ST entry (core sets it as `entry.world =
+        // file`), and past this line WA calls it `book`, in a row, in a key and in the schema.
         // `why` rides here rather than in `rows` so console.table stays scannable.
-        runState.lastCandidates = rows.map((row, i) => ({ ...row, world: population[i].entry.world, why: population[i].keywordWhy }));
+        runState.lastCandidates = rows.map((row, i) => ({ ...row, book: population[i].entry.world, why: population[i].keywordWhy }));
         runState.lastCandidateEntries = population.map(x => x.entry);
 
         console.log('%cWorlds Apart · selection candidates — every activated entry with its per-signal scores, before caps or layout', 'font-weight: bold');
@@ -1932,7 +2029,7 @@ async function dryRun(verbose = false) {
     runState.lastCandidates = [];
     runState.lastCandidateEntries = [];
     runState.lastQuery = '';
-    runState.lastScanText = '';
+    runState.lastScanChat = [];
     runState.lastQueryChat = [];
 
     const chatForWI = chat
@@ -2490,7 +2587,7 @@ async function gradeScene(named) {
         .filter(input => String(input.value).trim() !== '')
         .map(input => {
             const row = rows[Number(input.dataset.i)];
-            return { title: row.title, grade: Number(input.value), world: row.world, uid: row.uid };
+            return { title: row.title, grade: Number(input.value), book: row.book, uid: row.uid };
         });
 
     // Every attached book, at the requested fidelity — so a later lorebook edit can't move the numbers.
@@ -2512,10 +2609,12 @@ async function gradeScene(named) {
         notes: named?.notes,
         query: runState.lastQuery,
         queryChat: runState.lastQueryChat,
-        scanText: runState.lastScanText,
+        scanChat: runState.lastScanChat,
+        injects: runState.lastInjects,
         depth: settings().messageDepth,
         pluginFP: runState.pluginFP,
         sourceFP: runState.sourceFP,
+        stVersion: await stVersion(),
         chat: chatFilePath(),
         book: primaryBook ? `data/default-user/worlds/${primaryBook}.json` : '',
         index: primaryBook ? vectorIndexPath(primaryBook) : '',
@@ -2525,6 +2624,7 @@ async function gradeScene(named) {
             caseSensitive: world_info_case_sensitive,
             wholeWords: world_info_match_whole_words,
             includeNames: world_info_include_names,
+            allowWIScan: Boolean(extension_settings.note?.allowWIScan),
         }),
         snapshot: paramSnapshot(),
         candidates: rows,
@@ -2542,12 +2642,15 @@ async function gradeScene(named) {
             gradingOverride: { maxVectorEntries: wanted },
         },
         gradedCandidates: gradeable.length,
-        now: new Date().toISOString().slice(0, 10),
+        now: new Date().toISOString(),
     });
 
-    const { filename, content } = sampleFile(sample);
+    // ONE SCENE IS A ONE-ELEMENT `scenes` LIST. There is no flat single-arm shape any more, so /wa-grade
+    // and /wa-super-grade write the same kind of file and every reader handles both without asking which.
+    const bundle = bundleSamples([{ arm: 'shipped', sample }], { ...sceneRange(), user: raterId(), captureId: uuidv4() });
+    const { filename, content } = sampleFile(bundle);
     download(content, filename, 'application/json');
-    const graded = grades.filter(g => g.grade > 0).length;
+    const graded = grades.filter(g => gradeValue(g) > 0).length;
     toastr.success(`Saved ${filename} — ${graded} of ${grades.length} graded above 0. Move it to eval/eval-data/ and run graded-scene-grid.mjs --sample`, 'Worlds Apart', { timeOut: 8000 });
     console.log(`Worlds Apart: sample "${sample.name}" — ${grades.length} graded rows, ${Object.keys(books).length} book(s) at fidelity "${bookMode}"`, sample);
 
@@ -2623,12 +2726,14 @@ async function captureArm(overrides, wanted) {
             entries: runState.lastCandidateEntries ?? [],
             query: runState.lastQuery,
             queryChat: runState.lastQueryChat,
-            scanText: runState.lastScanText,
+            scanChat: runState.lastScanChat,
+            injects: runState.lastInjects,
             depth: s.messageDepth,
             params: captureParams(s, {
                 caseSensitive: world_info_case_sensitive,
                 wholeWords: world_info_match_whole_words,
                 includeNames: world_info_include_names,
+                allowWIScan: Boolean(extension_settings.note?.allowWIScan),
             }),
             snapshot: paramSnapshot(),
             // This arm's own cap, which the grading depth overrode.
@@ -2652,7 +2757,7 @@ async function captureArm(overrides, wanted) {
  * only genuinely new entries need a human, and the written samples carry the accumulated grade set. That is
  * what lets the arm list grow without the grading cost growing with it.
  *
- * Writes ONE SAMPLE PER ARM, each with its own captureParams, its own candidate rows and its own recorded
+ * Writes ONE SAMPLE PER ARM, each with its own `params`, its own candidate rows and its own recorded
  * cutoff — a merged row would carry one arm's signals under another's parameters. They share only the grades.
  *
  * Books default to 'full' despite N samples meaning N copies. 'meta' is lossless for how the harness scores
@@ -2838,9 +2943,9 @@ async function superGradePopup({ captures, union, entryOf, prior: prior0 = [], s
                     for (const row of parsed.pending) {
                         const key = rowKey(row);
                         if (union.rows.some(r => rowKey(r) === key)) continue;
-                        const entry = entryOf(row.world, row.uid);
+                        const entry = entryOf(row.book, row.uid);
                         union.rows.push({
-                            title: entry?.comment || row.title, world: row.world, uid: row.uid,
+                            title: entry?.comment || row.title, book: row.book, uid: row.uid,
                             block: 'dynamic', sticky: 0, score: null, cosine: null, text: null, keys: null,
                             // Labelled so the grader can see this row came from a rebuilt index rather than a
                             // live arm — it is being judged for a configuration this machine isn't running.
@@ -2850,10 +2955,12 @@ async function superGradePopup({ captures, union, entryOf, prior: prior0 = [], s
                         union.entries.push(entry);
                         added++;
                     }
-                } else if (Array.isArray(parsed?.grades)) {
-                    loaded.push(...parsed.grades);
+                } else if (Array.isArray(parsed?.scenes)) {
+                    // openBundle, not `parsed.grades`: v3 keeps verdicts on the scene's entries, and this
+                    // is the one place a previous round's file is read back in the browser.
+                    loaded.push(...(openBundle(parsed).entries ?? []));
                 } else {
-                    toastr.warning(`${file.name} has neither "grades" nor "pending" — ignored`, 'Worlds Apart');
+                    toastr.warning(`${file.name} has neither graded scenes nor "pending" — ignored`, 'Worlds Apart');
                     continue;
                 }
                 names.push(file.name);
@@ -2861,7 +2968,7 @@ async function superGradePopup({ captures, union, entryOf, prior: prior0 = [], s
                 toastr.warning(`Could not parse ${file.name} — ignored`, 'Worlds Apart');
             }
         }
-        prior = mergeGrades(prior, loaded);
+        prior = mergeGrades(prior, loaded, { user: raterId(), now: today() });
         head.querySelector('.wa-sg-loaded').textContent = names.length
             ? `${names.length} file(s): ${prior.length} prior grade(s)${added ? `, ${added} entry(ies) requested offline` : ''}`
             : 'no usable files — nothing loaded';
@@ -2891,31 +2998,32 @@ async function superGradePopup({ captures, union, entryOf, prior: prior0 = [], s
 
     // Blank means ungraded, not 0 — see the /wa-grade collector.
     //
-    // DIRTY ONLY, because `grade` means a human set it. A prior row arrives pre-filled and is never
-    // blank, so emitting every non-blank input made opening a review and saving it stamp `grade` on
-    // every row in the table, including ones nobody read — and a judge's row carries `llmGrade` alone
-    // precisely so that "no human has looked at this" stays readable. mergeGrades replaces the whole
-    // object on conflict, so an untouched row skipping `fresh` also keeps the `why` it came with.
+    // DIRTY ONLY, because a human verdict means a human set it. A prior row arrives pre-filled and is
+    // never blank, so emitting every non-blank input made opening a review and saving it sign every row
+    // in the table, including ones nobody read — and a judge-only row carries no human verdict precisely
+    // so that "no human has looked at this" stays readable. mergeGrades APPENDS, so a row skipping
+    // `fresh` gains nothing and a row in it replaces nothing.
     // dataset.dirty survives a repaint (see `typed` in paint).
     const edited = [...body.querySelectorAll('.wa-grade')]
         .filter(input => String(input.value).trim() !== '' && input.dataset.dirty)
         .map(input => {
             const { sec, row } = flat[Number(input.dataset.i)];
-            return { sec, g: { title: row.title, grade: Number(input.value), world: row.world, uid: row.uid } };
+            return { sec, g: { title: row.title, grade: Number(input.value), book: row.book, uid: row.uid } };
         });
+    const who = { user: raterId(), now: today() };
     // PER SECTION, because mergeGrades keys on world+uid and a shared merge would let one scene's verdict
-    // overwrite another's for the same entry. Each section merges onto its own prior and comes back with
+    // land on another scene's row for the same entry. Each section merges onto its own prior and comes back with
     // the file it belongs to, which is what apply-review.mjs needs to put it anywhere.
     if (multi) {
         return {
             sections: secs.map((sc, si) => ({
                 file: sc.file ?? sc.name,
-                grades: mergeGrades(sc.prior ?? [], edited.filter(e => e.sec === si).map(e => e.g)),
+                grades: mergeGrades(sc.prior ?? [], edited.filter(e => e.sec === si).map(e => e.g), who),
             })),
             edited: edited.length,
         };
     }
-    return { grades: mergeGrades(prior, edited.map(e => e.g)), prior };
+    return { grades: mergeGrades(prior, edited.map(e => e.g), who), prior };
 }
 
 async function superGradeScene(named) {
@@ -2988,6 +3096,7 @@ async function superGradeScene(named) {
     const { grades, prior } = done;
 
     const base = named?.name || defaultSampleName();
+    const stv = await stVersion();
     const built = [];
     for (const cap of captures) {
         // Per arm, because a lexical-only arm can retrieve from a different book than the hybrid one — and the
@@ -2999,10 +3108,12 @@ async function superGradeScene(named) {
             notes: named?.notes || `Arm "${cap.arm}" of a ${captures.length}-arm pooled grading (${captures.map(c => c.arm).join(', ')}); ${grades.length} grades pooled across arms and rounds.`,
             query: cap.query,
             queryChat: cap.queryChat,
-            scanText: cap.scanText,
+            scanChat: cap.scanChat,
+            injects: cap.injects,
             depth: cap.depth,
             pluginFP: runState.pluginFP,
             sourceFP: runState.sourceFP,
+            stVersion: stv,
             chat: chatFilePath(),
             book: primaryBook ? `data/default-user/worlds/${primaryBook}.json` : '',
             index: primaryBook ? vectorIndexPath(primaryBook) : '',
@@ -3024,19 +3135,19 @@ async function superGradeScene(named) {
             // Counts what a human was actually offered — constants excepted, stickies included, matching
             // the two grading tables. It is the boundary the harness reads to know where grades stop.
             gradedCandidates: cap.rows.filter(r => r.block === 'dynamic').length,
-            now: new Date().toISOString().slice(0, 10),
+            now: new Date().toISOString(),
         });
         built.push({ arm: cap.arm, sample });
     }
 
     // ONE download. The arms share the grades and — overwhelmingly the bulk of the bytes — the embedded book
     // copies, so N files meant N browser download prompts and N duplicates of a 300-entry lorebook.
-    const bundle = bundleSamples(built);
+    const bundle = bundleSamples(built, { ...sceneRange(), user: raterId(), captureId: uuidv4() });
     const { filename, content } = sampleFile({ ...bundle, name: base });
     download(content, filename, 'application/json');
     console.log(`Worlds Apart: ${built.length}-arm bundle -> ${filename}`, bundle);
 
-    const above = grades.filter(g => g.grade > 0).length;
+    const above = grades.filter(g => gradeValue(g) > 0).length;
     toastr.success(
         `Saved ${filename} — ${built.length} arms in one file, ${union.rows.length} rows this round, ${grades.length} pooled, ${above} above 0. `
         + 'Move it to eval/eval-data/ and run graded-scene-grid.mjs --sample (add --arm to pick one); watch judged@10.',
@@ -3108,26 +3219,29 @@ async function superEvalScene() {
     }
     const secs = [];
     for (const { name: fileName, manifest } of bundles) {
-        const armsRaw = Array.isArray(manifest?.arms) ? manifest.arms : (Array.isArray(manifest?.candidates) ? [manifest] : []);
-        if (!armsRaw.length || !Array.isArray(manifest?.grades)) {
-            toastr.warning(`${fileName} is not a graded sample/bundle — skipped`, 'Worlds Apart');
+        // Every arm as a flat sample, through the one adapter. `armNames` covers a v3 document and the
+        // older shapes alike, so a review can still open a file nobody has migrated.
+        const names = armNames(manifest);
+        const arms = (names.length ? names : [null]).map(n => { try { return openBundle(manifest, n); } catch { return null; } }).filter(Boolean);
+        if (!arms.length || !arms[0].candidates?.length || !Array.isArray(arms[0].entries)) {
+            toastr.warning(`${fileName} is not a graded scene — skipped`, 'Worlds Apart');
             continue;
         }
         const books = manifest.books ?? {};
         const entryOf = (world, uid) => Object.values(books[world] ?? {}).find(e => Number(e.uid) === Number(uid));
-        const captures = armsRaw.map(a => ({
-            arm: a.arm ?? manifest.name ?? 'capture',
+        const captures = arms.map((a, i) => ({
+            arm: names[i] ?? manifest.name ?? 'capture',
             rows: a.candidates ?? [],
-            entries: (a.candidates ?? []).map(r => entryOf(r.world, r.uid) ?? null),
+            entries: (a.candidates ?? []).map(r => entryOf(r.book, r.uid) ?? null),
             query: a.query ?? '',
-            depth: a.depth ?? manifest.depth ?? '?',
+            depth: a.depth ?? '?',
         }));
         const union = unionArms(captures);
         if (!union.rows.some(r => r.block === 'dynamic')) {
             toastr.warning(`${fileName} has no gradeable rows — skipped`, 'Worlds Apart');
             continue;
         }
-        secs.push({ file: fileName, name: manifest.name ?? fileName, manifest, captures, union, entryOf, prior: manifest.grades });
+        secs.push({ file: fileName, name: manifest.name ?? fileName, manifest, captures, union, entryOf, prior: arms[0].entries });
     }
     if (!secs.length) {
         toastr.warning('No usable graded bundles in that selection.', 'Worlds Apart');
@@ -3162,29 +3276,26 @@ async function superEvalScene() {
     // `file` stays, as provenance and as what apply-review.mjs writes back to — but nothing about
     // reading the review depends on that file still existing.
     //
-    // WHICH RATER GRADED A ROW IS READ OFF WHICH FIELDS IT HAS: `grade` is written by a human alone,
-    // `llmGrade` by the judge alone. A row with both was reviewed by a human; llmGrade by itself means
-    // no human has looked. The shell's rows drop extra fields, so the judge's verdict and its history
-    // are re-attached here per section from the manifest the section came from.
+    // WHICH RATER GRADED A ROW IS READ OFF WHICH ARRAY THE VERDICT SITS IN: `humanGrades` is written by a
+    // person alone, `llmGrades` by a judge alone. A row with both was reviewed; judge verdicts alone mean
+    // no human has looked. The shell's rows drop extra fields, so the judge's history is re-attached here
+    // per section from the document the section came from.
     const reviewed = done.sections.map((sec, si) => {
-        const src = secs[si];
-        const priorOf = new Map((src.manifest.grades ?? []).map(g => [rowKey(g), g]));
-        const arm0 = src.manifest.arms?.[0] ?? src.manifest;
+        const src = openBundle(secs[si].manifest);
+        const priorOf = new Map((src.entries ?? []).map(g => [rowKey(g), g]));
         return {
             file: sec.file,
-            name: src.name,
-            chat: src.manifest.chat,
-            generatedFrom: src.manifest.generatedFrom,
-            query: arm0.query ?? '',
-            scanText: arm0.scanText ?? '',
+            name: secs[si].name,
+            sceneChat: src.sceneChat,
+            generatedFrom: src.generatedFrom,
+            query: src.query ?? '',
+            scanChat: src.scanChat ?? [],
             grades: sec.grades.map(g => {
                 const p = priorOf.get(rowKey(g)) ?? {};
-                const entry = src.entryOf(g.world, g.uid);
+                const entry = secs[si].entryOf(g.book, g.uid);
                 return {
                     ...g,
-                    ...(p.llmGrade !== undefined ? { llmGrade: p.llmGrade } : {}),
                     ...(p.llmGrades ? { llmGrades: p.llmGrades } : {}),
-                    ...(p.by ? { by: p.by } : {}),
                     // Named for the reviewer rather than the entry, because apply-review strips it: the
                     // bundle's own books are where entry text belongs, and a second copy on the grade row
                     // is the kind of duplicate that goes stale without anyone noticing.
@@ -3194,21 +3305,31 @@ async function superEvalScene() {
         };
     });
     const all = reviewed.flatMap(r => r.grades);
-    const rel = all.filter(g => (g.grade ?? g.llmGrade) >= 3).length;
-    const stamp = new Date().toISOString().slice(0, 10);
+    const rel = all.filter(g => gradeValue(g) >= 3).length;
+    // WHEN THE REVIEW WAS PASSED, to the millisecond — apply-review stamps every verdict with this, so a
+    // day would make two reviews in one day one pass, and taking the CLI's own run time would record the
+    // verdict as passed whenever someone got round to applying it. `fileStamp` is the day, for the name
+    // only: a filename is not a record of an instant.
+    const reviewedAt = new Date().toISOString();
+    const stamp = reviewedAt.slice(0, 10);
     // Named for WHAT was reviewed, dated last so a directory of them sorts by subject and not by day.
     // One scene is identified by its own name — which already carries chat and message — and a batch by
     // its size, because a common prefix across fifteen scenes is not an identity anyone would recognise.
     const slug = String(reviewed.length === 1 ? (secs[0].name ?? secs[0].file.replace(/\.json$/, '')) : `${reviewed.length}-scenes`)
         .trim().replace(/\.json$/, '').replace(/[^\w.-]+/g, '-').replace(/^-+|-+$/g, '') || 'scenes';
     const filename = `review-${slug}-${stamp}.json`;
-    download(JSON.stringify({ reviewed, gradeScale: GRADE_SCALE, at: stamp }, null, 1), filename, 'application/json');
-    // Agreement is over the rows a human actually reviewed — those carrying BOTH. Filtering on llmGrade
-    // alone would drag in every untouched judge row and report them as disagreements, since their
-    // `grade` is absent rather than equal.
-    const both = all.filter(g => g.llmGrade !== undefined && g.grade !== undefined);
-    const irr = both.length
-        ? ` LLM agreement: ${both.filter(g => g.grade === g.llmGrade).length}/${both.length} exact, ${both.filter(g => Math.abs(g.grade - g.llmGrade) <= 1).length}/${both.length} within 1.`
+    download(JSON.stringify({ reviewed, gradeScale: GRADE_SCALE, reviewedAt }, null, 1), filename, 'application/json');
+    // Agreement is over the rows a human actually reviewed — those carrying BOTH kinds of verdict.
+    // Filtering on the judge's alone would drag in every untouched judge row and report it as a
+    // disagreement, since it has no human verdict rather than a matching one.
+    //
+    // Each side resolved by its own rule: the human's LATEST against the judges' MEDIAN, which is what
+    // `gradeValue` would return if the other array were absent. Comparing a stored scalar to a stored
+    // scalar is what this used to do, and there are no stored scalars any more.
+    const both = all.filter(g => (g.llmGrades ?? []).length && (g.humanGrades ?? []).length);
+    const pairs = both.map(g => [gradeValue({ humanGrades: g.humanGrades }), gradeValue({ llmGrades: g.llmGrades })]);
+    const irr = pairs.length
+        ? ` LLM agreement: ${pairs.filter(([h, j]) => h === j).length}/${pairs.length} exact, ${pairs.filter(([h, j]) => Math.abs(h - j) <= 1).length}/${pairs.length} within 1.`
         : '';
     toastr.success(`Saved ${filename} — ${done.edited} row(s) edited across ${reviewed.length} scene(s), ${rel} relevant (>=3).${irr} Apply with: node eval/synthetic-data/apply-review.mjs --write`, 'Worlds Apart', { timeOut: 15000 });
     return '';
@@ -3437,6 +3558,15 @@ const SETTINGS_HTML = `
                         <input id="wa_debug_log" type="checkbox"><span>Log selection table on every generation</span>
                     </label>
 
+                    <label for="wa_rater_id">Rater id (who your grades are signed as)</label>
+                    <input id="wa_rater_id" type="text" class="text_pole" placeholder="generated on your first grade">
+                    <small class="opacity50p">A random id, minted once and kept, written onto every grade you
+                    type — so that when graded scenes are pooled from several people, two verdicts on the same
+                    entry stay two verdicts. Random rather than your name or machine, because a composed
+                    identity collides (almost nobody changes <code>default-user</code>) and a hostname is
+                    usually a person's name, which would then travel in everything you share.</small>
+
+
                     <small class="opacity50p">Reviewing graded bundles needs no chat, but running a slash
                     command does — ST opens a placeholder assistant chat to dispatch one. This launches the
                     same reviewer without touching the chat input.</small>
@@ -3646,6 +3776,7 @@ export async function init() {
     // can show up-to-date / out-of-date. Both are cached, so this runs its fetches at most once.
     Promise.all([hasPlugin(), computeSourceFingerprint()]).then(renderPluginSetup);
     bind('#wa_debug_log', 'debugLog', 'checked');
+    bind('#wa_rater_id', 'raterId', 'string');
     bind('#wa_message_depth', 'messageDepth', 'number');
     bind('#wa_match_window', 'matchWindow', 'string');
     bind('#wa_word_boundary', 'wordBoundary', 'string');

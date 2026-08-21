@@ -79,9 +79,16 @@ const addedUids = (entries, text, o = {}) =>
     const zero = { uid: 1, key: ['cosmonaut'], scanDepth: 0, content: 'x' };
     eq(activationAdds([zero], makeWindowFor(chat, { matchWindow: 'message' }), { ...OPTS }).length, 0,
         'scanDepth-0 entry cannot activate from chat');
-    eq(activationAdds([zero], makeWindowFor(chat, { matchWindow: 'message', injectText: 'cosmonaut log' }),
+    // AMBIENT injects still carry it: `scanDepth: 0` says "match nothing from CHAT", and a prompt with no
+    // chat position was never chat. This is the case the setting exists for — an entry living on injects.
+    eq(activationAdds([zero], makeWindowFor(chat, { matchWindow: 'message', injects: [{ text: 'cosmonaut log', ambient: true }] }),
         { ...OPTS }).length, 1,
-    'scanDepth-0 entry still activates from the inject text');
+    'scanDepth-0 entry still activates from an ambient inject');
+    // An inject PLACED IN THE CHAT is chat, so the same setting excludes it — the rule reaches injects
+    // and messages by the same test rather than exempting one of them.
+    eq(activationAdds([zero], makeWindowFor(chat, { matchWindow: 'message', injects: [{ text: 'cosmonaut log', ambient: false, depth: 4 }] }),
+        { ...OPTS }).length, 0,
+    'scanDepth-0 entry does NOT activate from an inject placed in the chat');
 
     const flagged = { uid: 2, key: ['stardust'], scanDepth: 0, matchScenario: true, content: 'x' };
     const sources = { scenario: 'stardust over the pale city' };

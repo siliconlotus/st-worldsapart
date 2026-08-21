@@ -34,7 +34,7 @@
 //     "bookMode": "full",                                       // fidelity those copies were taken at
 //     "capture": ".../sceneN_off.json",                         // /wa-debug capture, for --validate
 //     "depth": 5,                                               // messageDepth the query was built at
-//     "captureParams": { "K1": 2, "LEXW": 1.5, ... },            // overrides P below, per sample
+//     "params": { "K1": 2, "LEXW": 1.5, ... },                   // overrides P below, per arm
 //     "excludeTitles": ["Intimacy & Mechanics"],                 // graded, but out of THIS harness's scope
 //     "notes": "free text"
 //   }
@@ -65,7 +65,7 @@ import * as matcher from '../extension/matcher.mjs';
 import { gradeValue } from './metrics.mjs';
 // Scene loading, the gazetteer, the scorers, the pool and the nDCG math all live in scene.mjs, shared with
 // param-screen.mjs — there must be exactly one copy of them (see that module's header).
-import { CID, dcg, embed as embedWith, indexPath, isDurableEntry, loadScene, makeFuse, makeGradeOf, makeKeywordScore, makeCandidateSet, ndcg, nrm, openSample, sceneParams, inVectorIndex, wiTitle } from './scene.mjs';
+import { CID, dcg, embed as embedWith, indexPath, isDurableEntry, loadScene, makeFuse, makeGradeOf, makeKeywordScore, makeCandidateSet, ndcg, nrm, openSample, sceneParams, inVectorIndex, wiTitle, sceneLabel } from './scene.mjs';
 
 const arg = k => { const i = process.argv.indexOf(k); return i >= 0 ? process.argv[i + 1] : null; };
 if (!arg('--sample')) { console.error('need --sample <sample.json> (write one with /wa-grade)'); process.exit(2); }
@@ -73,8 +73,8 @@ const S = openSample(arg('--sample'), arg('--arm'));
 // '' is a failed capture (retrieval activated nothing), not a frozen query — treat it as missing so the
 // guards below demand a chat instead of silently embedding and scoring an empty string.
 if (!S.query) delete S.query;
-const CHAT = arg('--chat') ?? S.chat;
-const GRADES = S.grades ?? [];
+const CHAT = arg('--chat') ?? S.sceneChat;
+const GRADES = S.entries ?? [];
 const UNJUDGED_ZERO = arg('--unjudged') === 'zero';
 // --validate is opt-in: a sample RECORDS its capture (so the check is always one bare flag away) but
 // naming one must not silently turn a grid run into a validation run.
@@ -83,10 +83,10 @@ const VALIDATE = process.argv.includes('--validate') ? ((vArg && !vArg.startsWit
 // The converse silent turn is just as wrong: an explicitly requested validation must not quietly become a
 // grid run because the sample happens to record no capture (/wa-grade doesn't write one).
 if (process.argv.includes('--validate') && !VALIDATE) { console.error('--validate given but the sample records no "capture" — pass --validate <capture.json>, or add a "capture" path to the sample'); process.exit(2); }
-const DEPTH = Number(arg('--depth') ?? S.depth ?? 10);
+const DEPTH = Number(arg('--depth') ?? S.params?.depth ?? 10);
 const OLLAMA = process.env.OLLAMA_URL ?? 'http://localhost:11434', MODEL = process.env.WA_EMBED_MODEL ?? 'bge-m3';
 // Signals the capture was produced under. Defaults are one tuned chat's snapshot, NOT the shipped defaults
-// (extension/state.mjs ships K1 1.2, LEXW 1) — a sample overrides them via its own captureParams, which is
+// (extension/state.mjs ships K1 1.2, LEXW 1) — an arm overrides them via its own `params`, which is
 // the point of putting them in the manifest: each graded scene carries the settings it was graded under.
 const P = sceneParams(S);
 const FREEZE = process.argv.includes('--freeze');
@@ -104,8 +104,8 @@ if (!Object.keys(S.books?.[S.primaryBook] ?? {}).length) { console.error(`sample
 if (!S.candidates?.length) { console.error('sample logs no `candidates` — nothing to rank; re-grade with /wa-grade'); process.exit(2); }
 // --depths needs a message list, not necessarily the FILE: an embedded `queryChat` ablates down to any
 // depth <= the capture depth without it (see below). Only going wider needs the chat.
-if (!CHAT && !S.chat && (S.query === undefined || (DEPTHS && !S.queryChat?.length))) { console.error(DEPTHS ? '--depths needs the original chat or an embedded "queryChat": pass --chat, or record "chat" in the sample' : 'sample has no frozen "query" — pass --chat (with --freeze to snapshot it into the sample)'); process.exit(2); }
-if (S.name) console.log(`sample: ${S.name}${S.notes ? ` — ${S.notes}` : ''}`);
+if (!CHAT && !S.sceneChat && (S.query === undefined || (DEPTHS && !S.queryChat?.length))) { console.error(DEPTHS ? '--depths needs the original chat or an embedded "queryChat": pass --chat, or record "sceneChat" on the scene' : 'sample has no frozen "query" — pass --chat (with --freeze to snapshot it into the sample)'); process.exit(2); }
+if (S.name) console.log(`scene: ${sceneLabel(S)}${S.notes ? ` — ${S.notes}` : ''}`);
 const VECTORS = arg('--vectors') ?? 'data/default-user/vectors/ollama';
 const INDEX = indexPath(S, { vectors: VECTORS, model: MODEL, index: arg('--index') });
 const TOPK = Number(arg('--topk')) || undefined;   // unset = stage 1's own bound (scene.mjs makeCandidateSet); --topk probes the elbow's window sensitivity.
@@ -145,11 +145,17 @@ if (DEPTHS && chat === S.queryChat) {
     if (over.length) console.log(`!! depths ${over.join(',')} exceed the ${S.queryChat.length} captured messages — those rows repeat the widest window; pass --chat to actually widen it`);
 }
 const query = chat ? ranking.buildQuery(chat, { depth: DEPTH }) : S.query;
-const scanText = chat ? scanWindowOf(chat, DEPTH) : S.scanText;
+const scanText = scanWindowOf(chat ?? S.scanChat ?? [], DEPTH);
 // The retrieval math lives in the deployed plugin, so a redeploy can move every per-entry signal without a
 // settings change (server-side entry pooling did). Grades collected under different arithmetic are still
 // valid as RELEVANCE, but the ranking they were paired with is not the one being scored here.
+if (S.invalidConfiguration) console.log(`!! NOT A REAL CONFIGURATION — ${S.invalidConfiguration}. Scored here for inspection; it must not enter a pooled set.`);
 if (S.pluginFP && S.sourceFP && S.pluginFP !== S.sourceFP) console.log(`!! sample captured against a STALE plugin (deployed ${S.pluginFP} vs source ${S.sourceFP}) — its recorded scores predate the current retrieval math`);
+// THE OFFLINE SCAN WINDOW MODELS NO INJECTS. `matcher.scanWindow` is messages only, so a capture taken with
+// "Include in World Info Scanning" on scanned text this cannot rebuild: the Author's Note, and the
+// character's depth prompt — the latter for EVERY entry, bypassing `matchCharacterDepthPrompt`. The frozen
+// `sceneText` still holds it, so a plain run is faithful; a --depths row is not, because it re-derives.
+if (S.params?.allowWIScan && DEPTHS) console.log('!! captured with the Author\'s Note in the WI scan, which the offline rebuild cannot reproduce — the depth rows scan less text than the capture did');
 // The embedding model is the one input that silently invalidates everything: cosines from a different model
 // are not comparable, the derived index path would point somewhere else, and nothing downstream would look
 // wrong. Harmless to skip while every sample is your own capture at your own default; a hard stop as soon as
@@ -166,7 +172,7 @@ if (FREEZE) {
     if (S.query !== undefined && S.query !== query) {
         console.warn('!! --freeze is REPLACING an existing snapshot and the chat no longer yields the same query — has the chat been played on since grading? The grades may no longer describe this scene.');
     }
-    writeFileSync(path, `${JSON.stringify({ ...S, query, scanText, frozenAt: new Date().toISOString().slice(0, 10) }, null, 2)}\n`);
+    writeFileSync(path, `${JSON.stringify({ ...S, query, scanText, frozenAt: new Date().toISOString() }, null, 2)}\n`);
     console.log(`froze query (${query.length} chars) + scan window (${scanText.length} chars) into ${path}`);
 }
 
@@ -314,7 +320,7 @@ const fmt = n => (n == null ? '·' : (+n).toFixed(3));
     const gradesAll = GRADES.filter(x => x && x.title && Number.isFinite(gradeValue(x))).map(x => ({ tk: nrm(x.title), g: gradeValue(x), title: x.title }));
     const grades = gradesAll.filter(g => !isExcluded(g.title));
     if (grades.length < gradesAll.length) console.log(`excluded ${gradesAll.length - grades.length} out-of-scope grade(s) — not rankable from this book: ${gradesAll.filter(g => isExcluded(g.title)).map(g => `"${g.title}"`).join(', ')}\n`);
-    const gradeOf = makeGradeOf(S.grades, isExcluded);
+    const gradeOf = makeGradeOf(S.entries, isExcluded);
     const DEF = { k1: 1.2, b: 0.75, lexW: 1 };   // shipped defaults (extension/state.mjs)
     const relCount = grades.filter(x => x.g >= 3).length;
 

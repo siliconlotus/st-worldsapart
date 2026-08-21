@@ -128,14 +128,18 @@ and cooldown, character and tag filters, `@@dont_activate`, `delayUntilRecursion
 which WA owns and `scene.mjs` models through the same `keywordScore` that fires at runtime. No arm surfaces
 those either, since a probability roll is not made reproducible by adding one.
 
-**`grade` is a human's verdict; `llmGrade` is a judge's. Only a human writes `grade`.** Read the value in
-force through `metrics.mjs` `gradeValue` (human first, judge as fallback, NaN when ungraded) and the rater
-off the shape: `grade` present means a human set it, `llmGrade` alone means none has looked. Nothing else
-can recover this — a judge's bundle and a human's are structurally identical, and a filename convention is
-enforced by nothing. The two were once written together at the same value, which made an unreviewed row
-indistinguishable from a reviewed-and-agreed one; `eval/synthetic-data/split-rater.mjs` migrated the 8394
-duplicated rows and refuses any row where the two differ. **Measured** after it: 611 human-only rows,
-8394 judge-only, 0 reviewed.
+**`humanGrades` holds a person's verdicts; `llmGrades` holds a judge's. Nothing writes into both.** Read
+the value in force through `metrics.mjs` `gradeValue` (NaN when ungraded) and the rater off which array a
+verdict sits in: a non-empty `humanGrades` means a person set it, judge verdicts alone mean none has
+looked. Nothing else can recover this — a judge's bundle and a human's are structurally identical, and a
+filename convention is enforced by nothing. The two were once ONE column written at the same value, which
+made an unreviewed row indistinguishable from a reviewed-and-agreed one. **Measured** on the migrated
+corpus: 648 human verdicts, 16,962 judge verdicts, 12,569 rows across 107 bundles.
+
+**No verdict is ever overwritten** (`bundle-schema.md`, *Verdict elements*). A re-grade appends beside the
+one it disagrees with — that comparison is the only thing that says whether a rater or a rubric moved. The
+one exemption is a repeated PASS, so a re-run of a merge is idempotent: same rater and day for a human,
+same rubric, model and day for a judge.
 
 **Grading is the expensive step, so extend a pool by delta and never re-pool.** Loaded grades are
 subtracted (`/wa-super-grade`), carried onto a fresh capture (`graft-grades.mjs`), or built into jobs only
@@ -153,8 +157,8 @@ contract emitted fell on a row the human also graded 4, n=5 — while 19 of its 
 called 0-2. Quadratic weighted kappa is 0.690 over those 258 rows and Kendall tau-b averages 0.54 per scene,
 but both are agreement statistics against a superseded construct, and neither is what the validity score
 reads, which is which band a row lands in. Raw means across two passes said 0.26 vs 0.83 and almost all of
-that was which rows each pass drew, not disagreement. Match the band or make no comparison; `grades` rows
-carry no rank, so join through the arm's `candidates`.
+that was which rows each pass drew, not disagreement. Match the band or make no comparison; a scene's
+`entries` carry no rank, so join through the arm's `candidates`.
 
 That cuts two ways once a bundle holds more than one pass. Which rater graded a row correlates with rank
 band, so an arm whose wins come from deep rows is scored on a different scale than one winning at the head,

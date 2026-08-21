@@ -1,7 +1,7 @@
 // graft-grades.mjs — puts existing judgements back onto a freshly derived bundle.
 //
 // A grade is a verdict about a (scene, entry) PAIR, so grafting is only meaningful where both halves are
-// the same. The entry half is a row identity, world + uid. The scene half is the turn, and it is the one
+// the same. The entry half is a row identity, book + uid. The scene half is the turn, and it is the one
 // that can look right while being wrong: two bundles can name the same message id and hold different
 // scenes, because the id is a position in a file that gets branched, edited and replayed — and because
 // the query is built at a depth that is itself a parameter. So the scene is compared by its FROZEN TEXT,
@@ -16,16 +16,17 @@
 //
 // Usage (any cwd):
 //   node eval/graft-grades.mjs <fresh.json ...> --from <graded.json> [--write]
-//   node eval/graft-grades.mjs <fresh.json ...> --from-dir <dir> [--rename-world "old=new"] [--write]
+//   node eval/graft-grades.mjs <fresh.json ...> --from-dir <dir> [--rename-book "old=new"] [--write]
 // Dry by default. Writes the grafted bundle in place and <name>-pending.json beside it.
 import { readFileSync, writeFileSync, existsSync } from 'node:fs';
 import { basename, resolve as resolvePath } from 'node:path';
-import { rowKey } from '../extension/grading.mjs';
+import { armNames, openBundle, rowKey, setGrades } from '../extension/grading.mjs';
+import * as matcher from '../extension/matcher.mjs';
 import { gradeValue } from './metrics.mjs';
 
 const argv = process.argv.slice(2);
 const arg = k => { const i = argv.indexOf(k); return i >= 0 ? argv[i + 1] : null; };
-const VALUE_FLAGS = new Set(['--from', '--from-dir', '--rename-world']);
+const VALUE_FLAGS = new Set(['--from', '--from-dir', '--rename-book']);
 const files = argv.filter((a, i) => a.endsWith('.json') && !a.startsWith('--') && !VALUE_FLAGS.has(argv[i - 1]));
 const WRITE = argv.includes('--write');
 const FROM = arg('--from');
@@ -33,24 +34,26 @@ const FROM_DIR = arg('--from-dir');
 const WS_DRIFT = argv.includes('--allow-whitespace-drift');
 
 if (!files.length || (!FROM && !FROM_DIR)) {
-    console.error('usage: node eval/graft-grades.mjs <fresh.json ...> (--from <graded.json> | --from-dir <dir>) [--rename-world "old=new"] [--write]');
+    console.error('usage: node eval/graft-grades.mjs <fresh.json ...> (--from <graded.json> | --from-dir <dir>) [--rename-book "old=new"] [--write]');
     console.error('  refuses unless the frozen scene matches; reports orphans by reason');
     console.error('  --allow-whitespace-drift accepts a scene differing only in trailing whitespace, and records that it did');
     process.exit(2);
 }
 
-/** A book renamed between grading and generation. rowKey is world+uid, so without this every grade orphans
+/** A book renamed between grading and generation. rowKey is book+uid, so without this every grade orphans
  *  while the uids line up perfectly — named explicitly because "the uids overlap" is also true of a book's
  *  wrong-book control, and a uid-only fallback would graft that silently. */
 const RENAME = (() => {
-    const raw = arg('--rename-world');
+    const raw = arg('--rename-book');
     if (!raw) return null;
     const i = raw.indexOf('=');
-    if (i < 0) { console.error('--rename-world takes "old=new"'); process.exit(2); }
+    if (i < 0) { console.error('--rename-book takes "old=new"'); process.exit(2); }
     return { from: raw.slice(0, i), to: raw.slice(i + 1) };
 })();
 
-const armOf = b => (Array.isArray(b.arms) ? (b.arms.find(a => a.arm === 'shipped') ?? b.arms[0]) : b);
+/** One arm as a flat sample. Every read of a bundle here goes through openBundle, so this tool never
+ *  learns where in the document a query, a haystack or a verdict lives — v3 moved all three. */
+const armOf = b => openBundle(b);
 const isMemoryTitle = t => /^\s*\[?\s*ARC\s*[-—]?\s*\d+/i.test(String(t)) || /^\s*\d+[A-Za-z]?\s*[-—.:]/.test(String(t));
 
 let failed = 0;
@@ -63,7 +66,12 @@ for (const path of files) {
 
     // --- the scene guard, before anything is read out of the source -----------------------------------
     const a = armOf(fresh), b = armOf(src);
-    let diff = ['query', 'scanText'].filter(f => a[f] !== b[f]).concat(Number(a.depth) !== Number(b.depth) ? ['depth'] : []);
+    // Compared on the scan MESSAGES rather than a joined window: that is what the document stores, and a
+    // window would compare two derivations rather than the frozen input.
+    const scanOf = v => matcher.scanWindow(v.scanChat ?? [], { depth: v.depth, includeNames: true });
+    let diff = ['query'].filter(f => a[f] !== b[f])
+        .concat(scanOf(a) !== scanOf(b) ? ['scanChat'] : [])
+        .concat(Number(a.depth) !== Number(b.depth) ? ['depth'] : []);
     // TRAILING WHITESPACE ONLY, and only when asked for. Measured on 4 of 56 scenes across 3 chats: the
     // capture's scanText is one character shorter than the window rebuilt from the same turn, because a
     // message in the chat file ends with a space that the capture did not record. Production reads `mes`
@@ -74,14 +82,15 @@ for (const path of files) {
     let drifted = false;
     if (diff.length && WS_DRIFT) {
         const flat = s => String(s).split('\n').map(l => l.replace(/[ \t]+$/, '')).join('\n');
-        const still = diff.filter(f => (f === 'depth' ? Number(a[f]) !== Number(b[f]) : flat(a[f]) !== flat(b[f])));
+        const still = diff.filter(f => (f === 'depth' ? Number(a.depth) !== Number(b.depth) : flat(f === 'scanChat' ? scanOf(a) : a[f]) !== flat(f === 'scanChat' ? scanOf(b) : b[f])));
         if (!still.length) { drifted = true; console.error(`   ${basename(path)}: ${diff.join(', ')} differ by trailing whitespace only — accepted under --allow-whitespace-drift`); }
         diff = still;
     }
     if (diff.length) {
         console.error(`!! ${basename(path)}: REFUSED — ${diff.join(', ')} differ from ${basename(srcPath)}, so these grades were not made about this scene`);
         for (const f of diff) {
-            const [x, y] = [a[f], b[f]].map(v => (typeof v === 'string' ? `${v.length}ch` : String(v)));
+            const [x, y] = (f === 'scanChat' ? [scanOf(a), scanOf(b)] : [a[f], b[f]])
+                .map(v => (typeof v === 'string' ? `${v.length}ch` : String(v)));
             console.error(`     ${f}: fresh ${x}, graded ${y}`);
         }
         failed++;
@@ -89,10 +98,10 @@ for (const path of files) {
     }
 
     // --- the entry half -------------------------------------------------------------------------------
-    const key = r => rowKey(RENAME && r.world === RENAME.from ? { ...r, world: RENAME.to } : r);
+    const key = r => rowKey(RENAME && r.book === RENAME.from ? { ...r, book: RENAME.to } : r);
     const pool = new Map();
-    for (const arm of fresh.arms) for (const c of arm.candidates) if (!pool.has(rowKey(c))) pool.set(rowKey(c), c);
-    const grades = (src.grades ?? []).map(g => (RENAME && g.world === RENAME.from ? { ...g, world: RENAME.to } : g));
+    for (const name of armNames(fresh)) for (const c of openBundle(fresh, name).candidates) if (!pool.has(rowKey(c))) pool.set(rowKey(c), c);
+    const grades = (armOf(src).entries ?? []).map(g => (RENAME && g.book === RENAME.from ? { ...g, book: RENAME.to } : g));
     const landed = grades.filter(g => pool.has(key(g)));
     const orphan = grades.filter(g => !pool.has(key(g)));
 
@@ -100,7 +109,7 @@ for (const path of files) {
     const entries = new Map(Object.values(fresh.books?.[armOf(fresh).primaryBook] ?? {}).map(e => [Number(e.uid), e]));
     const reasonOf = g => {
         const e = entries.get(Number(g.uid));
-        if (!e) return 'uid gone from the world';
+        if (!e) return 'uid gone from the book';
         if (e.disable) return 'disabled';
         if (e.constant || Number(e.sticky) > 0) return 'durable (constant/sticky)';
         if (!isMemoryTitle(e.comment ?? e.title)) return 'reference tier (no STMB marker)';
@@ -123,9 +132,8 @@ for (const path of files) {
     }
 
     if (WRITE) {
-        const out = {
-            ...fresh,
-            grades,
+        const out = setGrades(fresh, grades);
+        Object.assign(out, {
             gradeScale: src.gradeScale,
             // GRADING provenance, separate from the generation provenance synth-scenes wrote. They are
             // different events by different agents and only one of them is repeatable.
@@ -134,16 +142,16 @@ for (const path of files) {
                 by: src.grading?.by ?? src.createdBy ?? null,
                 at: src.grading?.at ?? src.createdAt ?? null,
                 notes: src.grading?.notes ?? src.notes ?? null,
-                graftedAt: new Date().toISOString().slice(0, 10),
-                ...(RENAME ? { renamedWorld: `${RENAME.from} -> ${RENAME.to}` } : {}),
+                graftedAt: new Date().toISOString(),
+                ...(RENAME ? { renamedBook: `${RENAME.from} -> ${RENAME.to}` } : {}),
                 ...(drifted ? { sceneMatchedIgnoringTrailingWhitespace: true } : {}),
                 orphans: [...byReason].map(([reason, gs]) => ({ reason, uids: gs.map(g => Number(g.uid)) })),
             },
-        };
+        });
         writeFileSync(resolvePath(path), JSON.stringify(out));
         writeFileSync(resolvePath(path).replace(/\.json$/, '-pending.json'), JSON.stringify({
-            name: `${fresh.name} — pending`, of: basename(path), createdAt: new Date().toISOString().slice(0, 10),
-            rows: pending.map(r => ({ world: r.world, uid: r.uid, title: r.title })),
+            name: `${fresh.name} — pending`, of: basename(path), createdAt: new Date().toISOString(),
+            rows: pending.map(r => ({ book: r.book, uid: r.uid, title: r.title })),
         }));
     }
 }

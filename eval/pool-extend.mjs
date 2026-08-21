@@ -24,7 +24,7 @@
 // is the slow step; they are cached by book + model + chunk settings, so a second run is nearly free.
 import { readFileSync, writeFileSync, mkdirSync } from 'node:fs';
 import { dirname, basename } from 'node:path';
-import { scoreScene, loadScene, indexPath, openSample, sceneParams, embed } from './scene.mjs';
+import { scoreScene, loadScene, indexPath, openSample, sceneParams, embed, sceneLabel } from './scene.mjs';
 import { ensureIndex } from './reindex.mjs';
 
 const argv = process.argv.slice(2);
@@ -95,13 +95,13 @@ const DRY = argv.includes('--dry');
                 : await scoreScene({ sample: S, overrides: {}, k: K, model: MODEL, ollama: OLLAMA, qv,
                     index: (await ensureIndex(S, { overrides: CHUNK_ARMS[arm], model: MODEL, ollama: OLLAMA, log: () => {} })).path });
             note(r.unjudgedRows, arm);
-            process.stdout.write(`\r  ${S.name ?? basename(path)}: scored ${arm}                    `);
+            process.stdout.write(`\r  ${sceneLabel(S) || basename(path)}: scored ${arm}                    `);
         }
         process.stdout.write('\r');
 
         const rows = [...wanted.values()].sort((a, b) => a.bestRank - b.bestRank);
         grandTotal += rows.length;
-        console.log(`${S.name ?? basename(path)}: ${rows.length} ungraded entr${rows.length === 1 ? 'y' : 'ies'} surfaced by ${picked.length} dose(s) + baseline, over top-${K}`);
+        console.log(`${sceneLabel(S) || basename(path)}: ${rows.length} ungraded entr${rows.length === 1 ? 'y' : 'ies'} surfaced by ${picked.length} dose(s) + baseline, over top-${K}`);
         for (const r of rows.slice(0, 12)) console.log(`  uid ${String(r.uid).padStart(5)}  #${String(r.bestRank).padStart(2)}  ${r.title.slice(0, 44).padEnd(44)} ${r.doses.length > 3 ? `${r.doses.length} doses` : r.doses.join(', ')}`);
         if (rows.length > 12) console.log(`  … and ${rows.length - 12} more`);
         if (!rows.length) { console.log('  pool already covers every dose — chunk arms on this scene are measurements, not lower bounds.'); continue; }
@@ -112,12 +112,12 @@ const DRY = argv.includes('--dry');
         mkdirSync(outDir, { recursive: true });
         writeFileSync(out, `${JSON.stringify({
             // `pending` is what /wa-super-grade's file picker keys on to tell this from a prior sample.
-            pending: rows.map(r => ({ world: S.primaryBook, uid: r.uid, title: r.title, bestRank: r.bestRank, doses: r.doses })),
-            forSample: S.name ?? basename(path),
+            pending: rows.map(r => ({ book: S.primaryBook, uid: r.uid, title: r.title, bestRank: r.bestRank, doses: r.doses })),
+            forScene: sceneLabel(S) || basename(path),
             primaryBook: S.primaryBook,
             k: K,
             arms: picked,
-            createdAt: new Date().toISOString().slice(0, 10),
+            createdAt: new Date().toISOString(),
             note: 'Entries an offline arm would rank in its top-k that nobody has graded. Load into /wa-super-grade alongside the prior samples; they will appear in the grading table.',
         }, null, 2)}\n`);
         console.log(`  -> ${out}`);

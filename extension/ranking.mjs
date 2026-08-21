@@ -206,9 +206,13 @@ export function joinQueryMessages(messages) {
  */
 export function queryMessages(chat, { depth, substituteParams = s => s }) {
     return chat
-        .map(x => ({
+        .map((x, i) => ({
             name: String(x?.name ?? '').trim(),
             mes: substituteParams(String(x?.mes || '').substring(x?.extra?.fileLength || 0).trim()),
+            // Index in the array HANDED IN, not in any canonical chat — a caller that pre-filtered maps it
+            // back itself. It is what lets a capture record the message range it covers rather than
+            // approximating it as `last - depth`, which is wrong the moment an empty message is skipped.
+            i,
         }))
         .filter(x => x.mes)
         .reverse()

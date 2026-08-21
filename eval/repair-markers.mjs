@@ -30,6 +30,7 @@
 import { readFileSync, writeFileSync } from 'node:fs';
 import { basename } from 'node:path';
 import { cachePath, chunkConfig } from './reindex.mjs';
+import { openBundle } from '../extension/grading.mjs';
 
 const argv = process.argv.slice(2);
 const WRITE = argv.includes('--write');
@@ -55,21 +56,20 @@ let touched = 0;
 
 for (const path of files) {
     const m = JSON.parse(readFileSync(path, 'utf8'));
-    // A world file is `{ entries, name }`; a bundle is `{ books: { world: entries }, arms }`. Normalising to
+    // A world file is `{ entries, name }`; a document is `{ books: { book: entries }, scenes }`. Normalising to
     // the bundle's shape means one repair rule serves both rather than two copies drifting apart.
     const isWorld = !m.books && Boolean(m.entries);
     // THE FILENAME IS THE WORLD'S IDENTITY, not the `name` inside it. ST addresses a book by file and hashes
     // that name into the collection id, while the embedded `name` is whatever the file was last copied from
     // and goes stale silently — Sommers_Pack__v22.json still calls itself a Daddy Next Door book.
     const books = isWorld ? { [basename(path, '.json')]: m.entries } : (m.books ?? {});
-    // primaryBook and paramSnapshot live on the ARM in a multi-arm bundle, not at the root — same merge
-    // openSample does. Reading them off the root silently yields undefined, which is a book name that
-    // matches nothing and a chunk config that falls back to defaults.
-    const shipped = Array.isArray(m.arms) ? (m.arms.find(a => a.arm === 'shipped') ?? m.arms[0]) : m;
-    const view = { ...m, ...shipped };
+    // primaryBook and paramSnapshot live on the ARM, not at the root, so the read goes through the same
+    // adapter openSample uses. Reading them off the root silently yields undefined, which is a book name
+    // that matches nothing and a chunk config that falls back to defaults.
+    const view = isWorld ? m : openBundle(m);
     let dirty = false;
-    for (const [world, entries] of Object.entries(books)) {
-        const log = seen.get(world) ?? seen.set(world, new Map()).get(world);
+    for (const [book, entries] of Object.entries(books)) {
+        const log = seen.get(book) ?? seen.set(book, new Map()).get(book);
         for (const e of Object.values(entries)) {
             const memory = isMemoryTitle(title(e));
             const acts = [];
@@ -80,7 +80,7 @@ for (const path of files) {
             if (memory && !e.vectorized && indexable(e) && !durable(e)) acts.push('vectorize');
             if (!acts.length) continue;
             log.set(Number(e.uid), { acts: acts.join('+'), title: title(e) });
-            if (acts.includes('vectorize') && world === view.primaryBook) vectorized.add(path);
+            if (acts.includes('vectorize') && book === view.primaryBook) vectorized.add(path);
             if (WRITE) {
                 if (acts.includes('strip-marker')) { delete e.stmemorybooks; delete e.STMB_start; delete e.STMB_end; }
                 // Presence is the whole signal — scene.mjs's isMemory and keyword-core's `generated` both test
@@ -99,8 +99,10 @@ for (const path of files) {
     // settings and so names the same file on any machine (absent there, indexPath falls through to it anyway).
     if (!isWorld && vectorized.has(path)) {
         const target = cachePath(view, chunkConfig(view), m.embedModel ?? 'bge-m3');
-        for (const a of (Array.isArray(m.arms) ? m.arms : [m])) a.index = target;
-        if (!Array.isArray(m.arms)) m.index = target;
+        // EVERY arm, whichever schema: the repair changed the book, so no arm's recorded collection is
+        // current any more.
+        for (const a of (m.scenes?.[0]?.arms ?? (Array.isArray(m.arms) ? m.arms : [m]))) a.index = target;
+        if (!m.scenes && !Array.isArray(m.arms)) m.index = target;
         dirty = true;
     }
     // ST writes worlds pretty-printed at 4 spaces; bundles are minified. Match whichever this was,
@@ -108,9 +110,9 @@ for (const path of files) {
     if (WRITE && dirty) writeFileSync(path, isWorld ? `${JSON.stringify(m, null, 4)}\n` : JSON.stringify(m));
 }
 
-for (const [world, log] of seen) {
+for (const [book, log] of seen) {
     const by = a => [...log.values()].filter(x => x.acts === a);
-    console.log(`\n${world}  — ${log.size} distinct entries across ${files.length} bundle(s)`);
+    console.log(`\n${book}  — ${log.size} distinct entries across ${files.length} document(s)`);
     for (const a of ['strip-marker', 'add-marker', 'vectorize', 'add-marker+vectorize']) {
         const rows = by(a);
         if (!rows.length) continue;

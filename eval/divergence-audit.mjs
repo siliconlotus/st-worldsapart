@@ -23,7 +23,9 @@
 // Usage: node eval/divergence-audit.mjs <sample.json> [more samples...]
 // Needs bookMode 'full' samples (the default) — 'meta'/'none' have no entry text to match against.
 import { readFileSync } from 'node:fs';
+import * as matcher from '../extension/matcher.mjs';
 import { countKey } from '../extension/matcher.mjs';
+import { openBundle } from '../extension/grading.mjs';
 import { gradeValue } from './metrics.mjs';
 
 const files = process.argv.slice(2);
@@ -35,16 +37,17 @@ if (!files.length) {
 const tokOf = e => Math.ceil(String(e.content ?? '').length / 4);
 
 for (const file of files) {
-    const j = JSON.parse(readFileSync(file, 'utf8'));
+    const j = openBundle(JSON.parse(readFileSync(file, 'utf8')));
     const name = file.split('/').pop();
-    if (!j.candidates?.length || !j.grades?.length || !j.scanText) {
-        console.log(`\n== ${name}: not a gradeable single-sample bundle (needs candidates, grades, scanText) — skipped`);
+    const sceneText = matcher.scanWindow(j.scanChat ?? [], { depth: j.depth, includeNames: true });
+    if (!j.candidates?.length || !j.entries?.length || !sceneText) {
+        console.log(`\n== ${name}: not a gradeable scene (needs candidates, entries, scanChat) — skipped`);
         continue;
     }
     const entries = Object.values(j.books?.[j.primaryBook] ?? Object.values(j.books ?? {})[0] ?? {});
     const byUid = new Map(entries.map(e => [Number(e.uid), e]));
     const fired = new Set(j.candidates.map(r => Number(r.uid)));
-    const gradeOf = new Map(j.grades.map(g => [Number(g.uid), gradeValue(g)]));
+    const gradeOf = new Map(j.entries.map(g => [Number(g.uid), gradeValue(g)]));
 
     console.log(`\n== ${name} — book "${j.primaryBook}", ${entries.length} entries ==`);
     const firedTok = [...fired].reduce((a, u) => a + (byUid.has(u) ? tokOf(byUid.get(u)) : 0), 0);
@@ -69,12 +72,12 @@ for (const file of files) {
     // Same stage-2 guard as scene.mjs makeCandidateSet: a vectorized entry under suppressVectorKeys
     // has blanked keys, so core could never keyword-fire it — it is not a window miss, it has no
     // keyword door at all. Matters only when this tool is pointed at a mixed book.
-    const suppress = j.captureParams?.suppressVectorKeys ?? j.paramSnapshot?.suppressVectorKeys;
+    const suppress = j.params?.suppressVectorKeys ?? j.paramSnapshot?.suppressVectorKeys;
     let eligible = 0, misses = 0;
     for (const e of entries) {
         if (fired.has(Number(e.uid)) || e.disable || e.constant || (e.vectorized && suppress)) continue;
         eligible++;
-        const hits = (e.key ?? []).filter(k => countKey(k, j.scanText, e.caseSensitive, e.matchWholeWords) > 0);
+        const hits = (e.key ?? []).filter(k => countKey(k, sceneText, e.caseSensitive, e.matchWholeWords) > 0);
         if (hits.length) {
             misses++;
             console.log(`  WINDOW MISS uid=${e.uid} "${(e.comment ?? '').slice(0, 40)}" — in WA window: ${hits.slice(0, 4).join(', ')}`);

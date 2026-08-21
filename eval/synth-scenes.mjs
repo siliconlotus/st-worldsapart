@@ -46,13 +46,16 @@
 // Dry by default: prints what it would generate. Each bundle is written as it is produced, never at the end.
 import { readFileSync, writeFileSync, mkdirSync, existsSync } from 'node:fs';
 import { basename, dirname, resolve as resolvePath } from 'node:path';
-import { loadScene, makeCandidateSet, makeFuse, sceneParams, indexPath, embed, stInstall, wiTitle, bookFingerprint } from './scene.mjs';
+import { fileURLToPath } from 'node:url';
+import { randomUUID } from 'node:crypto';
+import { loadScene, makeCandidateSet, makeFuse, sceneParams, indexPath, embed, stInstall, wiTitle, bookFingerprint, whyFor } from './scene.mjs';
 import { ensureIndex } from './reindex.mjs';
-import { whyFor } from './migrate-bundle.mjs';
+
 import { offlineTokenCounter } from './tokens.mjs';
 import * as ranking from '../extension/ranking.mjs';
 import * as matcher from '../extension/matcher.mjs';
-import { BUNDLE_VERSION } from '../extension/grading.mjs';
+import { bundleSamples, openBundle } from '../extension/grading.mjs';
+import { execFileSync } from 'node:child_process';
 
 /**
  * The pooling arms, in HARNESS vocabulary. Mirrors worldsapart.js POOL_ARMS, which is written in settings
@@ -74,8 +77,9 @@ const OUT_DIR = arg('--out-dir') ?? (FROM ? dirname(resolvePath(FROM)) : '.');
 const MODEL = arg('--model') ?? process.env.WA_EMBED_MODEL ?? 'bge-m3';
 const OLLAMA = process.env.OLLAMA_URL ?? 'http://localhost:11434';
 
-const src = FROM ? JSON.parse(readFileSync(FROM, 'utf8')) : null;
-const srcArm = src && (Array.isArray(src.arms) ? (src.arms.find(a => a.arm === 'shipped') ?? src.arms[0]) : src);
+// The DONOR: an existing graded scene whose chat, book, depth, params and chunking a fresh derivation
+// inherits. Read through openBundle, so this file never learns where in a document those live.
+const src = FROM ? openBundle(JSON.parse(readFileSync(FROM, 'utf8'))) : null;
 // DEPTH IS PART OF THE SCENE, so --from inherits it. Defaulting to 5 under --from silently builds a
 // different query out of the same turn: the source scenes were captured at 10, and the shorter window
 // scored as a scene nobody had graded while looking identical in every field a reader checks.
@@ -83,10 +87,13 @@ const srcArm = src && (Array.isArray(src.arms) ? (src.arms.find(a => a.arm === '
 // All 97 existing bundles across all six books record depth 10; a set derived at anything else cannot be
 // compared with them, and the failure is silent — the bundle looks fine and only its query is short.
 // Deriving at the old default of 5 has now produced two sets that had to be thrown away and re-derived.
-const DEPTH = Number(arg('--depth') ?? srcArm?.depth ?? 10);
-const CHAT = arg('--chat') ?? src?.chat ?? srcArm?.chat;
-const BOOK = arg('--book') ?? srcArm?.primaryBook ?? src?.primaryBook;
-const PREFIX = arg('--prefix') ?? (FROM ? basename(FROM).replace(/-msg\d+\.json$/, '') : 'syn');
+const DEPTH = Number(arg('--depth') ?? src?.params?.depth ?? 10);
+const CHAT = arg('--chat') ?? src?.sceneChat;
+const BOOK = arg('--book') ?? src?.primaryBook;
+// From the donor's own `name`, not its filename — `sampleFile` derives one from the other, so they agree
+// until someone renames the file. A prefix is how a fold is told apart by eye, and CLAUDE.md records a set
+// that read as a separate lineage for as long as nobody checked its `primaryBook`.
+const PREFIX = arg('--prefix') ?? (FROM ? String(src?.name ?? basename(FROM)).replace(/-msg\d+(\.json)?$/, '') : 'syn');
 
 if (!CHAT || !BOOK) {
     console.error('usage: node eval/synth-scenes.mjs --chat <chat.jsonl> --book <world name> (--msgs a,b,c | --n N [--seed S]) [--write]');
@@ -212,15 +219,15 @@ const allBooks = { [BOOK]: byUidWorld, ...otherBooks };
  * narrower vocabulary. `loaded` is the flag that makes the invariant testable: the loaded names must be
  * exactly the keys of `books`.
  */
-const attached = [BOOK, ...ALSO].map(world => ({
-    world,
-    source: detected.get(world) ?? 'named',
+const attached = [BOOK, ...ALSO].map(book => ({
+    book,
+    source: detected.get(book) ?? 'named',
     // null = NO WORLD FILE. Distinct from the fingerprint of a book that exists and is empty, which is a
     // real hash of nothing; a boolean cannot tell those apart, and a bare count calls both of them zero.
-    fingerprint: allBooks[world] ? bookFingerprint(allBooks[world]) : null,
+    fingerprint: allBooks[book] ? bookFingerprint(allBooks[book]) : null,
 }));
 {
-    const fingerprinted = attached.filter(a => a.fingerprint).map(a => a.world).sort().join(SEP);
+    const fingerprinted = attached.filter(a => a.fingerprint).map(a => a.book).sort().join(SEP);
     const embedded = Object.keys(allBooks).sort().join(SEP);
     if (fingerprinted !== embedded) {
         console.error(`internal: fingerprinted books [${fingerprinted}] do not match the embedded ones [${embedded}]`);
@@ -255,10 +262,14 @@ const mulberry32 = a => () => { a |= 0; a = (a + 0x6D2B79F5) | 0; let t = Math.i
 
 let picks;
 if (arg('--msgs') === 'same') {
-    if (!srcArm) { console.error('--msgs same needs --from'); process.exit(2); }
-    const m = basename(FROM).match(/-msg(\d+)\.json$/);
-    if (!m) { console.error(`cannot read a message id out of ${basename(FROM)}`); process.exit(2); }
-    picks = [Number(m[1])];
+    if (!src) { console.error('--msgs same needs --from'); process.exit(2); }
+    // FROM THE DONOR'S OWN FIELDS, never from its filename. Parsing `-msg(\d+)` out of the name derived a
+    // scene at whatever number the file happened to be called — so a rename by a well-meaning hand
+    // silently produced a DIFFERENT turn while every field in the document still said the original.
+    // `sceneEnd` is the message the scene ends at; `generatedFrom.msg` is what wrote it.
+    const same = src.sceneEnd ?? src.generatedFrom?.msg;
+    if (!Number.isFinite(Number(same))) { console.error(`${basename(FROM)} records no scene end to reuse`); process.exit(2); }
+    picks = [Number(same)];
 } else if (arg('--msgs')) {
     picks = String(arg('--msgs')).split(',').map(x => Number(x.trim())).filter(Number.isFinite);
 } else if (arg('--n')) {
@@ -302,6 +313,27 @@ if (!WRITE) {
     process.exit(0);
 }
 
+/**
+ * A repo's RESOLVED version, as the schema wants it: `<branch>@<git describe --tags --always --dirty>`.
+ *
+ * Resolved, never declared — manifest.json and package.json name the next release, not what ran, and only
+ * a tag makes a version a fact about a commit. `+dirty` rather than git's `-dirty` because it is SemVer
+ * BUILD metadata: `0.2.0+dirty` compares equal to `0.2.0`, which is what a dirty tree is, where a
+ * pre-release suffix would sort below it — backwards for a tree that is that version plus changes.
+ *
+ * Empty when the directory is not a repo or git is absent; an absent field reads as a thinner capture.
+ */
+const gitVersion = (dir) => {
+    const git = (...a) => execFileSync('git', ['-C', dir, ...a], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim();
+    try {
+        return `${git('rev-parse', '--abbrev-ref', 'HEAD')}@${git('describe', '--tags', '--always', '--dirty=+dirty')}`;
+    } catch { return ''; }
+};
+
+// The two repos this capture came out of. WA is this file's own tree; ST is the install serving it.
+const WA_VERSION = gitVersion(resolvePath(dirname(fileURLToPath(import.meta.url)), '..'));
+const ST_VERSION = st?.root ? gitVersion(st.root) : '';
+
 const r5 = x => (Number.isFinite(x) ? Number(x.toFixed(5)) : null);
 const r2 = x => (Number.isFinite(x) ? Number(x.toFixed(2)) : null);
 
@@ -313,7 +345,7 @@ const r2 = x => (Number.isFinite(x) ? Number(x.toFixed(2)) : null);
 // The tokenizer is the source capture's when there is one and the default otherwise, and either way it is
 // WRITTEN DOWN below — offline it is a harness choice, not an observation, and the `block` field's
 // derived-not-observed note is the precedent.
-const TOKENIZER = srcArm?.paramSnapshot?.budget?.tokenizer ?? 'gpt-3.5-turbo';
+const TOKENIZER = src?.paramSnapshot?.budget?.tokenizer ?? 'gpt-3.5-turbo';
 const tokens = offlineTokenCounter(TOKENIZER);
 
 // The budget block a derived bundle should carry: the settings it was derived under, minus the one field
@@ -325,18 +357,28 @@ const budgetFor = snap => ({ ...(snap?.budget ?? {}), maxTokens: null, tokenizer
 const snapshotFor = snap => (snap ? { ...snap, budget: budgetFor(snap) } : { budget: budgetFor(null) });
 
 // The collection, built once from the live world and shared by every scene — same book, same chunking.
-const chunkOverrides = srcArm?.paramSnapshot?.vectors ?? {};
-const shell = { primaryBook: BOOK, books: allBooks, paramSnapshot: srcArm?.paramSnapshot };
+const chunkOverrides = src?.paramSnapshot?.vectors ?? {};
+const shell = { primaryBook: BOOK, books: allBooks, paramSnapshot: src?.paramSnapshot };
 const built = await ensureIndex(shell, { overrides: chunkOverrides, model: MODEL, ollama: OLLAMA, log: m => console.log(`  ${m}`) });
 console.log(`collection: ${built.items} chunks${built.built ? ' (built)' : ' (cached)'}\n`);
 
 console.log(`scene                          arms  pooled  vectorized  keyword-only`);
 for (const idx of picks) {
-    const visible = records.slice(0, idx + 1).filter(r => isMessage(r) && (INCLUDE_HIDDEN || !r.is_system));
+    // The visible messages AND where each came from, so the scene can record the message range it covers
+    // rather than approximating it as `idx - DEPTH`: the window skips hidden and empty messages, so the
+    // two differ exactly when a scene has any. queryMessages' `i` indexes into what it was handed.
+    const visible = [], srcIndex = [];
+    records.forEach((r, i) => {
+        if (i > idx || !isMessage(r) || (!INCLUDE_HIDDEN && r.is_system)) return;
+        visible.push(r); srcIndex.push(i);
+    });
     const query = ranking.buildQuery(visible, { depth: DEPTH });
     const queryChat = ranking.queryMessages(visible, { depth: DEPTH });
-    const base = { ...(srcArm?.captureParams ?? {}) };
-    const scanText = matcher.scanWindow(visible, { depth: DEPTH, includeNames: sceneParams({ captureParams: base }).includeNames });
+    const sceneStart = srcIndex[queryChat[0].i];
+    const sceneEnd = srcIndex[queryChat[queryChat.length - 1].i];
+    // The donor's knobs, minus `depth` — that is the scene's span, and this derivation sets its own.
+    const { depth: _d, ...base } = { ...(src?.params ?? {}) };
+    const scanText = matcher.scanWindow(visible, { depth: DEPTH, includeNames: sceneParams({ params: base }).includeNames });
     const qv = await embed(query, { ollama: OLLAMA, model: MODEL });
 
     const armsOut = [];
@@ -345,8 +387,8 @@ for (const idx of picks) {
         const capture = { ...base, ...override };
         const S = {
             primaryBook: BOOK, books: allBooks, chat: CHAT,
-            query, queryChat, scanText, depth: DEPTH, captureParams: capture,
-            paramSnapshot: srcArm?.paramSnapshot, excludeTitles: [], index: built.path,
+            query, queryChat, scanText, depth: DEPTH, params: capture,
+            paramSnapshot: src?.paramSnapshot, excludeTitles: [], index: built.path,
         };
         const P = sceneParams(S);
         // Loaded per arm, not once: the gazetteer is baked in at load time and an arm
@@ -378,7 +420,8 @@ for (const idx of picks) {
                 cosine: r.score !== undefined ? r5(r.score) : null, vRank: r.vectorRank ?? null,
                 text: r.score !== undefined ? r2(r.textScore) : null, tRank: r.textRank ?? null,
                 keys: r.keysEligible === false ? null : r2(r.keywordScore), kRank: r.keywordRank ?? null,
-                '#': i, world: e.world ?? BOOK,
+                // ST's `entry.world` read once, into WA's name for it.
+                index: i, book: e.world ?? BOOK,
                 why: whyFor(e, scanText, P),
             };
             if (!pool.has(`${row.world}${row.uid}`)) pool.set(`${row.world}${row.uid}`, row);
@@ -386,8 +429,8 @@ for (const idx of picks) {
         });
         armsOut.push({
             arm: armName, query, queryChat, scanText, depth: DEPTH,
-            primaryBook: BOOK, index: built.path, captureParams: capture,
-            paramSnapshot: snapshotFor(srcArm?.paramSnapshot), excludeTitles: [],
+            primaryBook: BOOK, index: built.path, params: capture,
+            paramSnapshot: snapshotFor(src?.paramSnapshot), excludeTitles: [],
             // No grading depth was applied, recorded explicitly rather than omitted. (The field is named
             // for the stage-4 cliff it also used to carry; that cut no longer exists.)
             cutoff: { gradingOverride: null, note: 'offline derivation records the full activated population' },
@@ -401,18 +444,29 @@ for (const idx of picks) {
     console.log(`${name.slice(0, 30).padEnd(30)} ${String(armsOut.length).padStart(4)} ${String(pool.size).padStart(7)} ${String(vec).padStart(11)} ${String(pool.size - vec).padStart(13)}`);
 
     if (WRITE) {
-        const bundle = {
-            bundleVersion: BUNDLE_VERSION,
+        // Shared on every arm's sample because bundleSamples reads them off the first and hoists them
+        // once; an arm never carries a copy.
+        const shared = {
             name,
-            // GENERATION provenance only. How the grades were made is the grades' own, and travels with
-            // them in graft-grades.mjs — conflating the two is what made a bundle's history unreadable.
-            createdAt: new Date().toISOString().slice(0, 10),
+            createdAt: new Date().toISOString(),
             createdBy: 'synth-scenes',
-            generatedFrom: { chat: CHAT, world: BOOK, attached, msg: idx, depth: DEPTH, model: MODEL, records: records.length },
             books: allBooks, bookMode: 'full',
             embedModel: MODEL, chat: CHAT,
-            arms: armsOut, population: 'ranked',
+            waVersion: WA_VERSION, stVersion: ST_VERSION,
+            // NOTHING IS GRADED YET. A derived scene is a pool waiting for verdicts; graft-grades.mjs or
+            // grade-pending.mjs puts them on.
+            grades: [],
         };
+        const bundle = bundleSamples(
+            armsOut.map(a => ({ arm: a.arm, sample: { ...shared, ...a } })),
+            { start: sceneStart, end: sceneEnd, captureId: randomUUID() },
+            // GENERATION provenance only. How the grades were made is the grades' own, and travels with
+            // them in graft-grades.mjs — conflating the two is what made a bundle's history unreadable.
+            {
+                generatedFrom: { chat: CHAT, book: BOOK, attached, msg: idx, depth: DEPTH, model: MODEL, records: records.length },
+                population: 'ranked',
+            },
+        );
         mkdirSync(resolvePath(OUT_DIR), { recursive: true });
         // Written per scene as it is produced: a run killed halfway keeps every scene it finished.
         writeFileSync(`${resolvePath(OUT_DIR)}/${name}.json`, JSON.stringify(bundle));

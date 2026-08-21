@@ -14,7 +14,7 @@
 //
 // A tokenizer with no entry here THROWS. The alternative is a silent 0 offset, which is a 6-token error
 // per entry that nothing would ever surface — and at ~10 entries per prompt that is most of a slack
-// allowance. migrate-bundle's HTTP path against a running ST is the fallback for anything not listed.
+// allowance. A model not listed has no offline counter; count it against a running SillyTavern instead.
 import { createRequire } from 'node:module';
 import { stInstall } from './scene.mjs';
 
@@ -42,7 +42,7 @@ export function offlineTokenCounter(tokenizer) {
     const offset = TOKENIZER_OFFSET[tokenizer];
     if (offset === undefined) {
         throw new Error(`no measured offset for tokenizer "${tokenizer}" — add one via tokens-check.mjs against a capture that used it, `
-            + 'or use migrate-bundle.mjs --tokenizer against a running SillyTavern');
+            + 'or count against a running SillyTavern');
     }
     const enc = requireST()('tiktoken').encoding_for_model(tokenizer);
     return {

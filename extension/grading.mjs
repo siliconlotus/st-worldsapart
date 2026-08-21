@@ -81,9 +81,10 @@ export function trimBook(entries, mode = 'full') {
  * @param {boolean} wi.caseSensitive world_info_case_sensitive
  * @param {boolean} wi.wholeWords world_info_match_whole_words
  * @param {boolean} wi.includeNames world_info_include_names
- * @returns {object} captureParams for graded-scene-grid
+ * @param {boolean} wi.allowWIScan extension_settings.note.allowWIScan
+ * @returns {object} An arm's `params` for the harness
  */
-export function captureParams(s, { caseSensitive, wholeWords, includeNames }) {
+export function captureParams(s, { caseSensitive, wholeWords, includeNames, allowWIScan }) {
     return {
         K: s.rrfK,
         K1: s.bm25K1,
@@ -110,8 +111,65 @@ export function captureParams(s, { caseSensitive, wholeWords, includeNames }) {
         // a permissive capture is re-scored at the default and the gap reads as a parameter effect.
         wordBoundary: s.wordBoundary,
         includeNames,
+        // "Include in World Info Scanning" on the Author's Note panel. An ST global that changes what the
+        // haystack CONTAINS, so it belongs with the other three rather than in the snapshot: with it on,
+        // the Author's Note and the character's depth prompt enter the scan through the inject buffer.
+        //
+        // THE DEPTH PROMPT ENTERS FOR EVERY ENTRY when this is on, bypassing `matchCharacterDepthPrompt` —
+        // which is the same text's per-entry opt-in. So an entry that never asked to scan it still does,
+        // and two captures of one scene under different settings of this flag activate differently.
+        allowWIScan,
     };
 }
+
+/** Median of an odd or even count; even falls back to the LOWER middle rather than averaging, so the
+ *  result is always a grade a rater actually gave rather than a 2.5 the scale has no anchor for. */
+const median = v => [...v].sort((a, b) => a - b)[Math.floor((v.length - 1) / 2)];
+
+/**
+ * The grade in force on a row, whoever set it. NaN when nothing has graded it, so a caller's existing
+ * `|| 0` or `Number.isFinite` guard keeps its meaning.
+ *
+ * THE FILE CARRIES THE RECORD; THIS RESOLVES IT. A row holds every verdict ever passed, in the order
+ * passed, and no reduced value beside them (bundle-schema.md, *The bundle presents the record*) — so which
+ * one counts is decided here and two readers may answer differently without either being wrong about what
+ * the file says.
+ *
+ * A HUMAN OUTRANKS AN LLM, and among humans the LATEST wins: a person re-grading a row has looked at the
+ * earlier verdict and replaced it, which is a revision rather than a second opinion.
+ *
+ * AMONG LLM VERDICTS THE MEDIAN WINS once three exist, and latest-wins is the fallback below that.
+ * Newest-first is only defensible when a later pass is known to be better, and it is not: re-grading the
+ * same rows with the same model under a corrected rubric moved ~30% of the relevant set out and a smaller
+ * number in, the same magnitude as the contract's own non-reproduction rate (CLAUDE.md, graded scenes).
+ * At three the median is the majority on the >= 3 line whenever a majority exists, stays on the 0-4 scale
+ * and needs no tie policy for an odd count. Two disagreeing verdicts cannot be resolved by any rule over
+ * themselves; those keep the latest and want a third pass.
+ *
+ * MEASURED: this rule reproduces all 11,946 of the stored `llmGrade` scalars in eval-data exactly, which
+ * is what makes moving the resolution out of the file lossless rather than a silent re-labelling.
+ *
+ * EVERY VERDICT NAMES ITS RATER, and the rater's `kind` is the provenance — a verdict of kind `human` is
+ * "a person set this", and a row with only `llm` verdicts is "no human has looked". The two used to be one
+ * column written at the same value, which made an unreviewed row indistinguishable from one a human
+ * reviewed and agreed with; at 87.7% self-agreement most reviews DO agree, so that collision would have
+ * arrived silently on first use of the review flow.
+ *
+ * Provenance cannot be inferred from anything else here: an llm-graded document and a human-graded one are
+ * structurally identical, and a filename convention is enforced by nothing.
+ */
+export const gradeValue = (g) => {
+    const of = kind => (g?.grades ?? []).filter(v => v?.kind === kind).map(v => Number(v.grade)).filter(Number.isFinite);
+    const human = of('human');
+    if (human.length) return human[human.length - 1];
+    const llm = of('llm');
+    if (llm.length >= 3) return median(llm);
+    if (llm.length) return llm[llm.length - 1];
+    // A BARE `grade` IS A VERDICT NOT YET WRITTEN DOWN — what a human has just typed into the grading
+    // table, before `gradeEntries` turns it into a record naming its rater. `splitGraded` and
+    // `makeGradeOf` read rows in that state, so this is the live path rather than a legacy one.
+    return Number(g?.grade);
+};
 
 /**
  * A candidate row is DURABLE — always-on or persist-on-trigger — rather than a relevance result.
@@ -161,14 +219,21 @@ export const isDurable = row => row.block === 'constant' || row.block === 'stick
 /** Unit Separator — see CLAUDE.md. A composite key git diffs, grep matches and awk doesn't truncate. */
 const US = '';
 
-/** A candidate row's identity. uid alone is ambiguous across books, so it is world + uid. */
-export const rowKey = row => `${row.world ?? ''}${US}${row.uid}`;
+/**
+ * A row's identity. uid alone is ambiguous across books, so it is book + uid.
+ *
+ * `book`, never `world`. `entry.world` is ST's own field on an ST entry — set by core as `entry.world =
+ * file`, "required by the timed effects manager" — and WA reads it exactly where an ST entry is turned
+ * into a WA row. Past that boundary the name is `book` everywhere: in the schema, in a row, in a key. One
+ * name per concept is what makes either of them greppable.
+ */
+export const rowKey = row => `${row.book ?? ''}${US}${row.uid}`;
 
 /**
  * Unions several arms' candidate rows into one list for the grader.
  *
  * FOR THE UI ONLY. Each arm's SAMPLE keeps its own rows, with its own per-signal scores under its own
- * captureParams — that is what makes a sample re-runnable. A merged row would carry one arm's numbers under
+ * `params` — that is what makes a capture re-runnable. A merged row would carry one arm's numbers under
  * another arm's parameters, which is a lie the offline harness would then reproduce faithfully.
  *
  * A duplicate keeps the FIRST arm's row (arms are passed best-understood-first, normally shipped-defaults
@@ -212,7 +277,7 @@ export function unionArms(arms) {
         (rows ?? []).forEach((row, i) => {
             const key = rowKey(row);
             const hit = seen.get(key);
-            const rank = Number(row['#'] ?? Infinity);
+            const rank = Number(row.index ?? Infinity);
             if (hit) {
                 hit.row.arms.push(arm);
                 hit.row.bestRank = Math.min(hit.row.bestRank, rank);
@@ -239,22 +304,21 @@ export function unionArms(arms) {
 /**
  * Splits a union into rows that still need a human and rows an earlier round already judged.
  *
- * Matched on world+uid, never on title: titles get edited, and a retitled entry silently regraded from
+ * Matched on book+uid, never on title: titles get edited, and a retitled entry silently regraded from
  * zero would move the numbers of every arm that surfaced it. Prior rounds carry both fields (every sample
  * /wa-grade has ever written records them), so identity matching costs nothing.
  *
  * @param {object[]} rows Union rows from unionArms
- * @param {Array<{world?: string, uid?: number, grade: number}>} prior Grades from earlier rounds
+ * @param {Array<{book?: string, uid?: number, grade: number}>} prior Verdict rows from earlier rounds
  * @returns {{fresh: object[], known: object[], priorOf: Map<string, number>}} Split, plus rowKey -> prior grade
  */
 export function splitGraded(rows, prior) {
     const priorOf = new Map();
     for (const g of prior ?? []) {
-        // THE VALUE IN FORCE, human first and judge as fallback — the same rule metrics.mjs gradeValue
-        // applies. Reading `grade` alone made the reviewer blind to every judge-graded row the moment that
-        // field became human-only, which is most of the corpus: the table rendered as if nothing had ever
-        // been graded. Writing stays human-only; only the pre-fill reads both.
-        const v = Number(g?.grade ?? g?.llmGrade);
+        // THE VALUE IN FORCE, through the one function that decides it. Reading a human field alone made
+        // the reviewer blind to every judge-graded row, which is most of the corpus: the table rendered as
+        // if nothing had ever been graded. Writing stays human-only; only the pre-fill reads both.
+        const v = gradeValue(g);
         if (g && g.uid !== undefined && Number.isFinite(v)) {
             priorOf.set(rowKey(g), v);
         }
@@ -267,20 +331,39 @@ export function splitGraded(rows, prior) {
 }
 
 /**
- * Accumulates this round's grades onto the earlier rounds'.
+ * Accumulates this round's verdicts onto the earlier rounds'.
  *
- * Later rounds win on conflict, so a regrade is an overwrite rather than a duplicate. Prior grades are kept
- * even when this round's arms surfaced nothing matching them: they still describe judged entries of the same
- * book and scene, and the harness's pool is the judged set, not one capture's candidate list.
+ * NOTHING IS EVER OVERWRITTEN. A regrade APPENDS to the row's `grades`; it does not replace the row,
+ * and it does not replace the verdict it disagrees with. This used to be last-writer-wins, which meant a
+ * second pass over an already-graded scene silently deleted the first pass's verdict — the one comparison
+ * that says whether a rater or a rubric moved.
  *
- * @param {Array<object>} prior Grades from earlier rounds
- * @param {Array<object>} fresh This round's grades
- * @returns {object[]} Merged grade list
+ * The exemption is a repeated PASS, not a repeated value — `passKey`: same rater, same knobs, same day is
+ * one sitting, and a second Save of the same table must not stack a duplicate. Another day is a person
+ * looking again, which is an event even when they land on the same grade. The same rule apply-review.mjs
+ * and grade-pending.mjs apply, so all three writers agree about what a repeat is.
+ *
+ * Prior grades are kept even when this round's arms surfaced nothing matching them: they still describe
+ * judged entries of the same book and scene, and the harness's pool is the judged set, not one capture's
+ * candidate list.
+ *
+ * @param {Array<object>} prior Rows from earlier rounds
+ * @param {Array<object>} fresh This round's rows, each a bare `grade` a human just typed
+ * @param {{user?: string, now?: string}} [who] The rater, as v3 names them
+ * @returns {object[]} Merged rows
  */
-export function mergeGrades(prior, fresh) {
+export function mergeGrades(prior, fresh, who = {}) {
     const by = new Map();
-    for (const g of [...(prior ?? []), ...(fresh ?? [])]) {
-        if (g && g.uid !== undefined) by.set(rowKey(g), g);
+    for (const g of prior ?? []) if (g && g.uid !== undefined) by.set(rowKey(g), g);
+    for (const g of fresh ?? []) {
+        if (!g || g.uid === undefined) continue;
+        const seen = by.get(rowKey(g));
+        const lifted = gradeEntries([g], who)[0];
+        if (!seen) { by.set(rowKey(g), lifted); continue; }
+        const verdict = lifted?.grades?.slice(-1)[0];
+        if (!verdict) continue;
+        if ((seen.grades ?? []).some(v => v.kind === 'human' && passKey(v) === passKey(verdict))) continue;
+        by.set(rowKey(g), { ...seen, grades: [...(seen.grades ?? []), verdict] });
     }
     return [...by.values()];
 }
@@ -309,8 +392,8 @@ export function mergeGrades(prior, fresh) {
 export function searchedBook(rows) {
     const counts = new Map();
     for (const row of rows ?? []) {
-        if (row?.cosine !== null && row?.cosine !== undefined && row.world) {
-            counts.set(row.world, (counts.get(row.world) ?? 0) + 1);
+        if (row?.cosine !== null && row?.cosine !== undefined && row.book) {
+            counts.set(row.book, (counts.get(row.book) ?? 0) + 1);
         }
     }
     return [...counts.entries()].sort((a, b) => b[1] - a[1])[0]?.[0] ?? null;
@@ -323,30 +406,31 @@ export function searchedBook(rows) {
  * @param {string} args.name Sample name (used for the filename)
  * @param {string} [args.notes] Free text
  * @param {string} args.query Retrieval query, verbatim
- * @param {string} args.scanText Keyword scan window
+ * @param {Array<{name: string, mes: string}>} args.scanChat Scan-eligible messages at capture depth
+ * @param {Array<{key: string, text: string, ambient: boolean, depth: number}>} [args.injects] Scan-enabled injects
  * @param {number} args.depth messageDepth the query was built at
  * @param {string} args.index Vector index path (recorded, not embedded)
  * @param {string} [args.chat] Chat file path — provenance, and the ONLY way to re-derive the query at another depth
  * @param {string} [args.book] Primary book path — the harness's fallback when no entries are embedded
  * @param {string} args.primaryBook Book whose collection was searched
  * @param {string} [args.embedModel] Embedding model id
- * @param {object} args.params captureParams() output
+ * @param {object} args.params The arm's knobs, from captureParams()
  * @param {object} args.snapshot Raw grouped paramSnapshot(), for the record
- * @param {object[]} args.candidates Candidate rows, as /wa-debug builds them
+ * @param {object[]} args.candidates Candidate rows, as /wa-debug builds them (flat signals, `book`, `index`)
  * @param {Record<string, object>} args.books world -> uid-keyed entries (already trimmed)
  * @param {string} args.bookMode Fidelity the books were copied at
  * @param {object[]} args.priority Per-book weight/offset/cap
- * @param {Array<{title: string, grade: number, world?: string, uid?: number}>} args.grades Human grades
+ * @param {Array<{title: string, grade: number, book?: string, uid?: number}>} args.grades Human grades
  * @param {object} [args.cutoff] The grading depth this run captured to, and the live cap it overrode
  * @param {string} [args.now] ISO date (injected so the check is deterministic)
  * @returns {object} The sample manifest
  */
-export function buildSample({ name, notes, query, queryChat, scanText, depth, chat, book, index, primaryBook, embedModel, params, snapshot, candidates, books, bookMode, priority, grades, cutoff, gradedCandidates, pluginFP, sourceFP, now }) {
+export function buildSample({ name, notes, query, queryChat, scanChat, injects, depth, chat, book, index, primaryBook, embedModel, params, snapshot, candidates, books, bookMode, priority, grades, cutoff, gradedCandidates, pluginFP, sourceFP, waVersion, stVersion, now }) {
     // Grades for entries outside the searched collection can't be ranked offline: the harness loads one
     // vector collection, so a second book's entries have no cosine and never enter the ranking. Declaring
     // them here means the harness reports "excluded" instead of scoring them as irrelevant — the exact
     // confound the interleaved-books case introduces.
-    const foreign = grades.filter(g => g.world && g.world !== primaryBook);
+    const foreign = grades.filter(g => g.book && g.book !== primaryBook);
 
     return {
         name,
@@ -364,7 +448,15 @@ export function buildSample({ name, notes, query, queryChat, scanText, depth, ch
         // Splitting `query` back apart cannot substitute for this. buildQuery joins with '\n\n' and RP
         // messages routinely contain blank lines, so the boundaries are not recoverable from the blob.
         queryChat,
-        scanText,
+        // THE HAYSTACK'S INPUTS, NOT THE HAYSTACK. `scanChat` is the scan-eligible MESSAGES as core
+        // transformed them; `injects` are the scan-enabled extension prompts beside them, each with the
+        // position and depth that decide which windows admit it. A reader builds the window for any depth,
+        // matchWindow and includeNames from these (matcher.mjs `makeWindowFor`) — the only direction that
+        // works, since a joined window cannot be narrowed and cannot be re-segmented.
+        //
+        // Same shape as `queryChat`, which freezes the query's messages for the same reason.
+        scanChat,
+        injects,
         depth,
         // Path only, for provenance and for re-deriving a WIDER window than was captured — the one thing
         // queryChat can't do. A played-on chat invalidates it; queryChat is what's actually frozen.
@@ -376,6 +468,13 @@ export function buildSample({ name, notes, query, queryChat, scanText, depth, ch
         // is comparing rankings to grades collected under different arithmetic.
         pluginFP,
         sourceFP,
+        // WHAT PRODUCED THIS CAPTURE, resolved rather than declared: `<branch>@<git describe>`. Undefined
+        // where the writer cannot resolve it — the browser has no git, and ST's own /version reports a
+        // branch and a short HEAD with no tags and no dirty flag, which is the honest resolution available
+        // there. A missing field reads as an older or thinner capture, never as a broken file; `sourceFP`
+        // is the stronger drift signal for WA anyway, being a hash of the code rather than a name for it.
+        waVersion,
+        stVersion,
         embedModel,
         primaryBook,
         // Path to the primary book on disk — the harness's fallback when the sample embeds no entries
@@ -383,7 +482,10 @@ export function buildSample({ name, notes, query, queryChat, scanText, depth, ch
         book,
         index,
 
-        captureParams: params,
+        // The arm's knobs, under the name the schema gives them. `captureParams` was the v2 name and is
+        // gone: one name for the concept, so a grep for `params` finds the schema, the writer and every
+        // reader at once.
+        params,
         paramSnapshot: snapshot,
 
         bookMode,
@@ -404,61 +506,396 @@ export function buildSample({ name, notes, query, queryChat, scanText, depth, ch
     };
 }
 
-/** Fields that are identical across every arm of one pooled grading, so they are stored ONCE in a bundle.
- *  Everything else — query, candidates, captureParams, cutoff, primaryBook — is per-arm and must not be
- *  hoisted: the summary arm has a different query, and a lexical-only arm can retrieve from a different
- *  book. */
-const SHARED_FIELDS = ['name', 'notes', 'createdAt', 'createdBy', 'books', 'bookMode', 'bookPriority', 'grades', 'gradeScale', 'embedModel', 'pluginFP', 'sourceFP', 'chat'];
+/** Fields that are identical across every arm of one graded scene, so they are stored ONCE at the top of
+ *  the document. Everything else — query, candidates, params, cutoff, primaryBook — is per-arm and must
+ *  not be hoisted: the summary arm has a different query, and a lexical-only arm can retrieve from a
+ *  different book. `books` and the haystacks are shared too but are NOT here: they are the bulk, and the
+ *  schema puts them last (bundle-schema.md, *Field order is part of the schema*). */
+const SHARED_FIELDS = ['name', 'notes', 'createdAt', 'createdBy', 'bookMode', 'bookPriority', 'gradeScale', 'embedModel', 'pluginFP', 'sourceFP'];
+
+/** Per-arm fields that are the SCENE's, not the arm's, and so move onto the scene rather than repeating. */
+const SCENE_FIELDS = ['chat', 'scanChat', 'injects'];   // a sample's names for sceneChat / sceneChats / sceneInjects
+
+/** Every field `bundleSamples` reads off a sample and places itself. A caller assembling samples out of an
+ *  older document uses this to tell the document's own fields from an arm's: anything NOT here and not
+ *  already on the arm is document-level and belongs in `extra`, or it repeats once per arm. */
+export const DOC_FIELDS = [...SHARED_FIELDS, ...SCENE_FIELDS, 'books', 'grades'];
+
+/** Per-candidate fields that are numeric SIGNAL VALUES, and so live under `scores`. Everything else on a
+ *  candidate — identity, index, tokens, the fused score, the ranks, the budget verdict — stays flat beside
+ *  it, because `scores` is "whatever the capture recorded, keyed by the feature's own name" and a fitted
+ *  model indexes into it by that name (bundle-schema.md, *`scores` is a capture record*). A rank is not a
+ *  feature and the fused score is not one either: both are arm-relative positions, not measurements. */
+const SIGNAL_FIELDS = ['cosine', 'text', 'keys', 'proper', 'length'];
+
+/** The schema this writer emits and this reader accepts. One version exists; nothing on disk predates it. */
+export const SCHEMA_VERSION = 3;
 
 /**
- * Packs one sample per arm into a single bundle.
+ * A scene's id: `<normalized chat>-msg-<start>-<end>`.
+ *
+ * Composed rather than opaque, so a reader reasons from the id alone and can check it against the fields it
+ * was built from. Normalized is the chat's basename without extension, with every run of anything outside
+ * `[A-Za-z0-9_]` collapsed to `-` — which is also what makes the id safe to compose at all, chat names
+ * being filenames.
+ *
+ * @param {string} chat Chat file path or name
+ * @param {number} end The message the scene ends at — the graded moment
+ * @returns {string} Scene id
+ */
+export const sceneId = (chat, end) => {
+    const base = String(chat ?? '').split(/[\\/]/).pop().replace(/\.[^.]*$/, '');
+    return `${base.replace(/[^A-Za-z0-9_]+/g, '-')}-msg-${end}`;
+};
+
+/**
+ * A rater's canonical id: ONE field, so grouping is a plain key comparison.
+ *
+ * A RATER IS WHOEVER PASSED A VERDICT, and `kind` says which sort — `human` or `llm`. A human is
+ * identified by a UUID and that is the whole id. An llm is identified by three things, US-joined:
+ *
+ *   model         the reference as invoked, e.g. `gemma4:31b-mlx`
+ *   modelDigest   what that reference RESOLVED to; empty when nothing can resolve it
+ *   rubric        the contract it graded under, e.g. `scene-relevance@8460b922`
+ *
+ * THE DIGEST IS IN THE ID BECAUSE THE NAME IS NOT AN IDENTITY. `bge-m3:latest` is whatever was pulled
+ * most recently, so two captures months apart record one string for different weights — the same failure
+ * as reading a declared version instead of a resolved one. Ollama's API returns a manifest digest per
+ * model; a hosted model has none to give, and an empty component says so rather than implying stability
+ * nothing provides.
+ *
+ * US, NOT A PRINTABLE SEPARATOR. **Measured** on this machine: 11 of 11 Ollama models carry a `:`
+ * (`gemma4:31b-mlx`, `bge-m3:latest`) and every MLX model is a HuggingFace repo id carrying a `/`, while
+ * `@` already appears inside a rubric — so a printable join cannot be decomposed. US is a control
+ * character and cannot occur in either component, which is why CLAUDE.md makes it the project's composite
+ * key everywhere else.
+ */
+export const raterKey = r => (r?.kind === 'human'
+    ? String(r.id ?? '')
+    : [r?.modelDigest || r?.modelName || '', r?.rubric ?? ''].join(US));
+
+/** The inverse. A human's id has no components; an llm's decomposes into the two above. `isDigest` says
+ *  whether the model half is a resolved content digest or a name standing in for one. */
+export const raterParts = r => (r?.kind === 'human'
+    ? { id: r.id }
+    : (([modelId, rubric]) => ({ modelId, rubric, isDigest: /^[0-9a-f]{64}$/.test(modelId) }))(String(r?.id ?? '').split(US)));
+
+/**
+ * A PASS's identity: the rater, the knobs it ran under, and the day. This is what a writer deduplicates
+ * on, and it is NOT the rater — that was the confusion this replaces.
+ *
+ * SETTINGS ARE NOT IDENTITY. Seed, effort, temperature, context length and thinking change the SAMPLE, not
+ * who produced it: the same weights under the same rubric sampled twice is one rater giving two verdicts,
+ * which is exactly the third vote the median rule wants. Folding a seed into the rater would also assert a
+ * determinism nothing has — a model without one is nondeterministic, one with it frequently still is, and
+ * CLAUDE.md records hosted reasoning models honouring neither seed nor temperature (measured: identical
+ * requests, same seed, 1815 vs 935 reasoning tokens).
+ *
+ * WHO AND WHEN, and nothing else. Dedup runs over ONE entry's verdicts and a pass grades each row exactly
+ * once, so two verdicts on a row always came from two dispatches — which differ in their millisecond
+ * stamp. `params` therefore never disambiguates, and putting it in the key would only make identity
+ * sensitive to a writer's completeness: start recording one more knob and an old verdict stops matching
+ * its own re-merge. A description does not belong inside an identity, which is the same mistake as
+ * folding effort into the rater.
+ */
+export const passKey = v => [v?.id ?? '', v?.gradedAt ?? ''].join(US);
+
+/** Provenance a person reads, carried beside the id and never part of it. */
+const RATER_DESC = ['modelName', 'family', 'quant', 'modelParams'];
+
+/**
+ * The distinct raters across a scene's verdicts, as one table plus the index each verdict carries.
+ *
+ * ONE `grades` ARRAY, NOT ONE PER KIND. The file promises every verdict "in the order it was passed"
+ * (bundle-schema.md), and two arrays cannot express that across kinds — a human grading, an llm
+ * re-grading under a corrected rubric, then the human revising is exactly the sequence the review flow
+ * produces, and split arrays record it as two unrelated orders. Provenance is not lost by merging them:
+ * it moves from which array a verdict sits in to which rater it names, which is structural either way.
+ * The collapse the split guarded against was one FIELD holding both kinds at one value with nothing
+ * saying which; here nothing can be written without naming a rater.
+ *
+ * A VERDICT NAMES ITS RATER BY INDEX. Spelled out per verdict these are the same handful of strings
+ * repeated tens of thousands of times — measured on the corpus, 645KB of llm identity across 3 models and
+ * 4 rubrics — and unreadable by eye, which is most of what anyone does with a bundle.
+ *
+ * DEREFERENCING IS NOT TRANSLATING. `openBundle` resolves the index back to the whole rater, so every
+ * reader and writer works in identities and only the file is indexed. Unlike a joined blob, an index can
+ * always be followed.
+ *
+ * The table is per DOCUMENT, so an index is document-local. Pooling several documents means remapping
+ * through each one's own table — which is why the id, not the index, is the identity.
+ */
+function indexVerdicts(entries) {
+    const raters = [];
+    const at = new Map();
+    const index = (v) => {
+        const kind = v.kind === 'human' ? 'human' : 'llm';
+        const id = raterKey({ kind, ...v });
+        const key = `${kind}${US}${id}`;
+        if (!at.has(key)) {
+            // Provenance is recorded from the FIRST verdict that named this rater. A later verdict with
+            // the same id and a different recorded name is the same rater under another alias, which is
+            // exactly what keying on the digest is for — so the alias is not a second row.
+            const desc = {};
+            for (const k of RATER_DESC) if (v[k]) desc[k] = v[k];
+            at.set(key, raters.length);
+            raters.push({ rater: raters.length, kind, id, ...desc });
+        }
+        return at.get(key);
+    };
+    /** Splits a verdict into WHO passed it and WHAT it says; only the second stays on the row. */
+    // WHO passed it against WHAT it says. `params` stays with the verdict: it is how this sample was
+    // drawn, not who drew it.
+    const who = ({ kind, id, modelDigest, rubric, modelName, family, quant, modelParams, ...rest }) =>
+        [{ kind, id, modelDigest, rubric, modelName, family, quant, modelParams }, rest];
+    const out = (entries ?? []).map(e => ({
+        ...e,
+        ...((e.grades ?? []).length
+            ? { grades: e.grades.map(g => { const [r, v] = who(g); return { rater: index(r), ...v }; }) }
+            : {}),
+    }));
+    return { entries: out, raters };
+}
+
+/** The inverse: an index back to the rater it names, so a reader never handles indices. */
+const deref = (entries, raters = []) => (entries ?? []).map(e => ({
+    ...e,
+    ...(e.grades ? { grades: e.grades.map(({ rater, ...v }) => { const { rater: _i, ...who } = raters[rater] ?? {}; return { ...who, ...v }; }) } : {}),
+}));
+
+/**
+ * A live grade row -> the scene entry that carries its verdicts.
+ *
+ * THE RECORD, NOT A RESOLUTION. A human's verdict appends to `humanGrades` and a judge's to `llmGrades`,
+ * both in the order taken, and nothing writes a reduced value beside them — which verdict counts is the
+ * reader's question (metrics.mjs `gradeValue`). A reduced value stored beside the record is
+ * indistinguishable from a verdict someone gave, which is the collision `grade`/`llmGrade` used to be.
+ *
+ * Rows arriving from an earlier round already carry arrays; a freshly typed one carries a bare `grade`,
+ * which is a human's by definition (only a human writes `grade` — CLAUDE.md, graded scenes).
+ *
+ * @param {object[]} grades Live grade rows: {title, book, uid, grade?, grades?}
+ * @param {{user?: string, now?: string}} [who] Rater identity for a bare `grade`, and the date to stamp
+ * @returns {object[]} Scene entries
+ */
+export function gradeEntries(grades, { user, now } = {}) {
+    const out = [];
+    for (const g of grades ?? []) {
+        if (!g || g.uid === undefined) continue;
+        const verdicts = [...(g.grades ?? [])];
+        if (Number.isFinite(Number(g.grade))) {
+            verdicts.push({ kind: 'human', ...(user ? { id: user } : {}), grade: Number(g.grade), ...(now ? { gradedAt: now } : {}) });
+        }
+        out.push({
+            book: g.book ?? '',
+            uid: g.uid,
+            // Duplicated from the entry for triage: reading a bundle by eye is most of what anyone does
+            // with one, and a list of uids is unreadable.
+            title: g.title,
+            ...(verdicts.length ? { grades: verdicts } : {}),
+        });
+    }
+    return out;
+}
+
+
+/**
+ * A DEBUG ROW -> a v3 candidate: signals gathered under `scores`, everything else carried across as-is.
+ *
+ * THE ONE TRANSFORMATION, and it runs in one direction only. `/wa-debug`'s row exists to be handed to
+ * `console.table`, which is why its signals are flat — a nested `scores` renders as `[object Object]` and
+ * the table is the row's whole purpose. So the runtime keeps the display shape, the file keeps the schema
+ * shape, and this is the named crossing between them.
+ *
+ * GATHERING IS ALL IT DOES. Every other field keeps its name on both sides, so a row and a candidate are
+ * the same thing seen twice rather than two vocabularies — `book`, `index`, `block`, `tokens`, `cut` read
+ * the same in the console table and in the file.
+ *
+ * There is deliberately no inverse. A reader gets the candidate as the file holds it: flattening `scores`
+ * on the way out would put a superseded shape in front of every reader, and then no grep could tell a v2
+ * leftover from a live runtime field.
+ */
+const toCandidate = (row, i) => {
+    const scores = {};
+    const flat = {};
+    for (const [k, v] of Object.entries(row)) {
+        if (SIGNAL_FIELDS.includes(k)) scores[k] = v; else flat[k] = v;
+    }
+    return { book: row.book ?? '', uid: row.uid, index: Number(row.index ?? i), ...flat, scores };
+};
+
+/**
+ * Packs one sample per arm into one graded-scene document.
  *
  * ONE FILE, NOT N. The arms of a pooled grading differ only in how they were scored; they share the graded
- * scene, the grades, and — the bulk of the bytes by a wide margin — the embedded copies of every attached
+ * scene, the verdicts, and — the bulk of the bytes by a wide margin — the embedded copies of every attached
  * book. Writing them separately meant N browser downloads to accept and N duplicate copies of a 300-entry
  * lorebook on disk, which is why the first version of this was annoying enough to replace.
  *
+ * ONE SCENE IS A ONE-ELEMENT `scenes` LIST. There is no single-scene shape, so a reader that handles the
+ * list handles everything and a writer never chooses between two layouts.
+ *
  * @param {Array<{arm: string, sample: object}>} arms Per-arm samples from buildSample
- * @returns {object} Bundle: shared fields once, `arms` carrying the rest
+ * @param {object} scene The scene's identity
+ * @param {number} scene.start First message index covered
+ * @param {number} scene.end Last message index covered
+ * @param {string} [scene.user] Rater id for freshly typed grades — a UUID, see state.mjs `raterId`
+ * @param {object} [extra] Document-level fields to carry (generatedFrom, population, grading, …)
+ * @returns {object} A schemaVersion 3 document
  */
-/** Bundle shape. 1: rows carry cosine/text/keys under the truthiness gate, no per-row tokens or key hits.
- *  2: `text` and `keys` gate on the CONDITION (rankActivated's row builder) so an absent signal is null and
- *  a measured zero is 0; rows carry `tokens`, `cut`, `cutBy` and `why`. Only 2 can be read field-by-field
- *  without knowing when it was written — under 1, `keys: null` means either "scored 0" or "had no keys",
- *  and nothing on the row tells them apart. eval/migrate-bundle.mjs lifts a 1 to a 2. */
-export const BUNDLE_VERSION = 2;
-
-export function bundleSamples(arms) {
+export function bundleSamples(arms, scene = {}, extra = {}) {
     const first = arms[0]?.sample ?? {};
-    const bundle = { bundleVersion: BUNDLE_VERSION };
-    for (const f of SHARED_FIELDS) if (first[f] !== undefined) bundle[f] = first[f];
-    bundle.arms = arms.map(({ arm, sample }) => {
-        const per = { arm };
-        for (const [k, v] of Object.entries(sample)) if (!SHARED_FIELDS.includes(k)) per[k] = v;
+    const doc = { schemaVersion: SCHEMA_VERSION };
+    // WHAT IDENTIFIES THIS CAPTURE, surviving a rename. Nothing content-derived can: `name` and the scene
+    // id both collide — two captures of one turn under different books share them, and the corpus has such
+    // a pair whose only distinguishing mark was its filename. Minted by the caller so this module stays
+    // ST-free; absent on a capture taken before the field existed.
+    if (scene.captureId) doc.captureId = scene.captureId;
+    for (const f of SHARED_FIELDS) if (first[f] !== undefined) doc[f] = first[f];
+    Object.assign(doc, extra);
+
+    const id = sceneId(first.chat, scene.end);
+    const indexed = indexVerdicts(gradeEntries(first.grades, { user: scene.user, now: first.createdAt }));
+
+    // A SCENE IS THE GRADED MOMENT — a chat and the message it ends at. Not a span: the span is what an
+    // arm chose to read, and `graded-scene-grid`'s depth sweep holds the grades fixed while it varies
+    // that, because widening the window reaches further back from the SAME moment. So `sceneStart` and
+    // `depth` belong to the arm's capture of this scene, not to the scene.
+    doc.scenes = [{ id, sceneChat: first.chat ?? '', sceneEnd: scene.end, entries: indexed.entries }];
+
+    // ARMS AT DOCUMENT LEVEL, because an arm is a CONFIGURATION and a configuration spans scenes — that is
+    // what a grid search is. Nesting them inside a scene records `params`, `waVersion` and `stVersion`
+    // once per scene, so a fifteen-scene run repeats one arm's knobs fifteen times.
+    doc.arms = arms.map(({ arm, sample }) => {
+        const per = { name: arm };
+        if (sample.waVersion !== undefined) per.waVersion = sample.waVersion;
+        if (sample.stVersion !== undefined) per.stVersion = sample.stVersion;
+        per.params = { ...(sample.params ?? {}), ...(sample.scoredBy ? { scoredBy: sample.scoredBy } : {}) };
+        // THE CELL: this arm's capture of that scene. Everything varying with BOTH coordinates lives here
+        // — the span it read, the query it built, the rows it surfaced. What varies with the
+        // configuration alone stays on the arm; what varies with the moment alone stays on the scene.
+        const cell = { sceneStart: scene.start, depth: sample.depth };
+        for (const [k, v] of Object.entries(sample)) {
+            if (SHARED_FIELDS.includes(k) || SCENE_FIELDS.includes(k) || k in extra) continue;
+            if (['arm', 'grades', 'candidates', 'params', 'depth', 'waVersion', 'stVersion', 'scoredBy', 'books'].includes(k)) continue;
+            if (v === undefined) continue;
+            cell[k] = v;
+        }
+        // IN LAYOUT ORDER, which is load-bearing: every stage-4 cap is a prefix cut, so a reader can
+        // replay the budget walk over the array as it stands.
+        cell.candidates = (sample.candidates ?? []).map(toCandidate);
+        per.scenes = { [id]: cell };
         return per;
     });
-    return bundle;
+
+    // WHO THE INDICES NAME. Ahead of the bulk, because a verdict is unreadable without them.
+    if (indexed.raters.length) doc.raters = indexed.raters;
+
+    // THE BULK, LAST. Anything ahead of these is reachable with `head` — every scene, every param, every
+    // verdict — and anything behind them is not.
+    // THE MESSAGES THE HAYSTACK IS BUILT FROM, once per scene — not a window. A window is fixed at one
+    // depth, one matchWindow and one includeNames; these rebuild any of them, so arms reading the same
+    // moment at different depths share one stored input instead of needing one blob each.
+    doc.sceneChats = { [id]: first.scanChat ?? [] };
+    // ONCE PER SCENE, beside the chat half they are admitted into. Every arm of a capture scans the same
+    // injects — they are a property of the moment, not of a configuration — so hoisting them here is what
+    // stops a six-arm document carrying six copies of an Author's Note.
+    if ((first.injects ?? []).length) doc.sceneInjects = { [id]: first.injects };
+    doc.books = first.books ?? {};
+    return doc;
 }
 
 /**
- * Unpacks one arm of a bundle back into an ordinary sample, so every existing tool keeps working unchanged.
+ * Selects one arm of one scene, as a flat view.
  *
- * A plain sample passes through untouched, which is what lets callers open any manifest without knowing
- * which kind it is. An unknown arm name is an error rather than a silent fallback — scoring the wrong
- * configuration and reporting it as the requested one is the failure mode worth being loud about.
+ * FLAT, BUT NOT TRANSLATED. The document, the scene and the arm are three nesting levels and a caller
+ * almost always wants one field from each, so the view merges them — but every field keeps the name the
+ * SCHEMA gives it. A reader says `S.entries`, `S.params`, `c.book`, `c.scores.cosine`, which are the names
+ * in `bundle-schema.md`, so a grep for any of them finds the schema and the readers together.
  *
- * @param {object} manifest A bundle or a plain sample
+ * The v2 view this replaces handed back `grades`, `captureParams`, `world` and `#`. Those are superseded
+ * SCHEMA names, and manufacturing them for readers meant nothing downstream could be traced to the format
+ * it was reading — and `world` in particular became unsearchable, since ST's own `entry.world` is spelled
+ * the same and is a different thing.
+ *
+ * `arm` is the arm's `name` under a key that does not collide with the document's. It is the one field
+ * here whose key differs from the schema's, and only because two levels both spell it `name`.
+ *
+ * @param {object} doc A schemaVersion 3 document
  * @param {string} [arm] Arm name; defaults to 'shipped' when present, else the first
- * @returns {object} A plain sample
+ * @param {string} [scene] Scene id; defaults to the only scene, and is required past the first
+ * @returns {object} The merged view
  */
-export function openBundle(manifest, arm = null) {
-    if (!Array.isArray(manifest?.arms)) return manifest;
-    const names = manifest.arms.map(a => a.arm);
+export function openBundle(doc, arm = null, scene = null) {
+    if (!Array.isArray(doc?.scenes)) {
+        throw new Error('not a graded-scene document — no `scenes`');
+    }
+    const ids = doc.scenes.map(s => s.id);
+    const sc = scene ? doc.scenes.find(s => s.id === scene) : doc.scenes[0];
+    if (!sc) throw new Error(`document has no scene "${scene}" — available: ${ids.join(', ')}`);
+
+    // An arm only counts here if it CAPTURED this scene: a grid is not guaranteed rectangular, and an arm
+    // added in a later round may have run over some scenes and not others.
+    const over = (doc.arms ?? []).filter(a => a.scenes?.[sc.id]);
+    const names = over.map(a => a.name);
     const wanted = arm ?? (names.includes('shipped') ? 'shipped' : names[0]);
-    const hit = manifest.arms.find(a => a.arm === wanted);
-    if (!hit) throw new Error(`bundle has no arm "${wanted}" — available: ${names.join(', ')}`);
-    const { arms: _drop, bundleVersion: _v, ...shared } = manifest;
-    return { ...shared, ...hit, name: `${manifest.name}--${hit.arm}` };
+    const hit = over.find(a => a.name === wanted);
+    // An unknown arm is an error rather than a silent fallback — scoring the wrong configuration and
+    // reporting it as the requested one is the failure mode worth being loud about.
+    if (!hit) throw new Error(`scene "${sc.id}" has no arm "${wanted}" — available: ${names.join(', ')}`);
+
+    const { scenes: _s, arms: _a, sceneChats, sceneInjects, raters, schemaVersion: _v, ...docFields } = doc;
+    const { entries, ...sceneFields } = sc;
+    const { name: armName, scenes: _cells, params, ...armFields } = hit;
+    const { depth, ...cell } = hit.scenes[sc.id];
+    return {
+        ...docFields,
+        ...sceneFields,
+        // The scene's haystack INPUTS, singular. `scanChat` is the messages; `injects` are admitted
+        // beside them per depth by matcher.mjs `makeWindowFor`, which is how a reader builds a window.
+        scanChat: sceneChats?.[sc.id] ?? [],
+        injects: sceneInjects?.[sc.id] ?? [],
+        // Indices resolved back to whole identities: every reader and writer works in those, and only the
+        // file is indexed. Lossless both ways — an index can always be followed.
+        entries: deref(entries, raters),
+        ...armFields,
+        // The arm's knobs, and its capture of THIS scene flattened in beside them — the three nesting
+        // levels a caller wants one field from each of, merged with every name the schema gives them.
+        params,
+        depth,
+        ...cell,
+        arm: armName,
+    };
+}
+
+/** Every arm name in a scene. The handle a caller passes back to openBundle, which is how a tool that
+ *  must see all the arms reads them without touching the file layout itself. */
+export const armNames = (doc, scene = null) => {
+    const sc = scene ? doc?.scenes?.find(s => s.id === scene) : doc?.scenes?.[0];
+    return sc ? (doc.arms ?? []).filter(a => a.scenes?.[sc.id]).map(a => a.name) : [];
+};
+
+/**
+ * Writes verdict rows back onto a single-scene document — the mirror of the `entries` openBundle hands
+ * out, and the ONLY writer of the file layout besides bundleSamples. A tool that grafts, merges or
+ * reviews grades reads through openBundle, works in that row shape, and lands its result here; none of
+ * them needs to know where in a document a verdict lives.
+ *
+ * Single-scene only, and loud about it: every producer writes one scene per file today, and silently
+ * putting one pass's verdicts on the first of fifteen scenes is not a failure anyone would see.
+ *
+ * @param {object} doc A schemaVersion 3 document
+ * @param {object[]} rows Rows in the entry shape — book, uid, title, verdict arrays
+ * @param {{user?: string, now?: string}} [who] Rater identity for any bare `grade` among them
+ * @returns {object} The same document, mutated
+ */
+export function setGrades(doc, rows, who = {}) {
+    if (!Array.isArray(doc?.scenes)) throw new Error('setGrades expects a schemaVersion 3 document');
+    if (doc.scenes.length !== 1) throw new Error(`setGrades is for single-scene documents; this one has ${doc.scenes.length}`);
+    const indexed = indexVerdicts(gradeEntries(rows, who));
+    doc.scenes[0].entries = indexed.entries;
+    if (indexed.raters.length) doc.raters = indexed.raters; else delete doc.raters;
+    return doc;
 }
 
 /**

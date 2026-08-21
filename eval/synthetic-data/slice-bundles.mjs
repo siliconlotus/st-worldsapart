@@ -44,22 +44,31 @@ const OUT = resolvePath(arg('--out', resolvePath(DATA, 'review-pack.json')));
  * @returns {{sliced: object, dyn: Set<string>, lost: string[]}} the cut bundle, the keys that survived as
  *   gradeable rows, and the keys that did not.
  */
+/** Unit Separator — see CLAUDE.md. This key used to join book and uid with NOTHING, so `W`+`11` and
+ *  `W1`+`1` were the same shortlist entry; the collision needs two books whose names differ by a numeric
+ *  suffix, which is why nothing has hit it yet. `rowKey` in grading.mjs is the same key with the same
+ *  separator, and this is deliberately not a second copy of the rule so much as the same one. */
+const US = String.fromCharCode(31);
+
 export function sliceBundle(m, keys) {
-    const arms = Array.isArray(m.arms) ? m.arms : null;
-    const cut = a => (a.candidates ?? []).filter(c => keys.has(`${c.world ?? ''}${c.uid}`));
-    const sliced = arms
-        ? { ...m, arms: arms.map(a => ({ ...a, candidates: cut(a) })) }
-        : { ...m, candidates: cut(m) };
+    if (!Array.isArray(m?.scenes)) throw new Error('sliceBundle expects a graded-scene document — no `scenes`');
+    const key = c => `${c.book ?? ''}${US}${c.uid}`;
+    const cut = cell => (cell.candidates ?? []).filter(c => keys.has(key(c)));
+    // ARMS ARE AT DOCUMENT LEVEL and hold one CELL per scene they captured, so the cut walks the cells.
+    const sliced = { ...m, arms: (m.arms ?? []).map(a => ({
+        ...a,
+        scenes: Object.fromEntries(Object.entries(a.scenes ?? {}).map(([id, cell]) => [id, { ...cell, candidates: cut(cell) }])),
+    })) };
+    const kept = (sliced.arms ?? []).flatMap(a => Object.values(a.scenes ?? {}));
     // The reviewer grades the dynamic block only, and refuses a section with none — a constant row is in
     // the prompt whatever it scores, so a shortlist naming one yields a section that cannot be opened.
-    const dyn = new Set((arms ? sliced.arms : [sliced])
-        .flatMap(a => (a.candidates ?? []).filter(c => c.block === 'dynamic').map(c => `${c.world ?? ''}${c.uid}`)));
+    const dyn = new Set(kept.flatMap(a => (a.candidates ?? []).filter(c => c.block === 'dynamic').map(key)));
     // Books down to the kept rows. Entries are keyed by their own uid in the book map, but the row's uid
     // is what is authoritative, so the match is on the entry rather than on the key.
     const need = new Map();
-    for (const a of (arms ? sliced.arms : [sliced])) for (const c of (a.candidates ?? [])) {
-        if (!need.has(c.world)) need.set(c.world, new Set());
-        need.get(c.world).add(Number(c.uid));
+    for (const a of kept) for (const c of (a.candidates ?? [])) {
+        if (!need.has(c.book)) need.set(c.book, new Set());
+        need.get(c.book).add(Number(c.uid));
     }
     sliced.books = Object.fromEntries(Object.entries(m.books ?? {}).map(([w, bk]) => [
         w, Object.fromEntries(Object.entries(bk).filter(([, e]) => need.get(w)?.has(Number(e?.uid)))),
@@ -75,7 +84,7 @@ if (CLI) {
         const b = basename(r.bundle ?? r.file ?? '');
         if (!b) continue;
         if (!want.has(b)) want.set(b, new Set());
-        want.get(b).add(`${r.world ?? ''}${r.uid}`);
+        want.get(b).add(`${r.book ?? ''}${US}${r.uid}`);
     }
 
     const pack = [];

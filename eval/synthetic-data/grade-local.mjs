@@ -173,15 +173,18 @@ for (const { id, job } of work) {
     if (!why) {
         // Same guard merge applies, applied here so a short answer never reaches disk: a judge dropping one
         // row of sixteen is silent otherwise, and a written-then-rejected result would have to be hunted.
-        const want = new Set(job.candidates.map(c => `${c.world}/${c.uid}`));
-        const got = (parsed.grades ?? []).map(g => `${g.world}/${g.uid}`);
+        const want = new Set(job.candidates.map(c => `${c.book}/${c.uid}`));
+        const got = (parsed.grades ?? []).map(g => `${g.book}/${g.uid}`);
         const bads = (parsed.grades ?? []).filter(g => !Number.isInteger(Number(g.grade)) || g.grade < 0 || g.grade > 4);
         const lost = [...want].filter(k => !got.includes(k));
         if (lost.length || got.length !== want.size || bads.length) why = `shape: ${lost.length} missing, ${got.length}/${want.size} rows, ${bads.length} out-of-range`;
     }
 
     if (why) { bad++; console.log(`  FAIL ${id}  ${dt.toFixed(0)}s  ${why}`); }
-    else { ok++; writeFileSync(`${OUTDIR}/${id}-graded.json`, JSON.stringify({ scene: job.scene, grades: parsed.grades }, null, 1)); }
+    // `gradedAt` is WHEN THIS PASS RAN, not when someone later merged it. Merge time cannot separate two
+    // passes filed in one invocation, and a day cannot separate two passes run in one day — which is the
+    // adjudication case, where a second pass over the same rows is the entire point.
+    else { ok++; writeFileSync(`${OUTDIR}/${id}-graded.json`, JSON.stringify({ scene: job.scene, gradedAt: new Date().toISOString(), grades: parsed.grades }, null, 1)); }
     appendFileSync(LOG, JSON.stringify({
         id, model: MODEL, api: API, host: HOST, seed: SEED, rubric: rubricHash, rubricFile: RUBRIC.split('/').pop(), contract: job.contract, ok: !why, why,
         secs: Number(dt.toFixed(1)), rows: job.candidates.length,

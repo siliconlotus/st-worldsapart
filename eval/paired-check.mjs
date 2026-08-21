@@ -81,13 +81,13 @@ eq(tierRecall(pop, pop, r => null).memory.of, 0, 'an ungraded population has no 
 // join here would be a second rule for the same question.
 eq(tierRecall(pop, [memRow(1, 4)], gradeOfRow).memory.got, 0, 'a copy of a kept row is not the kept row');
 
-// --- sceneParams layering: harness defaults < the sample's captureParams < the arm's override ---
-const S = { captureParams: { K1: 2, LEXW: 1.5 } };
+// --- sceneParams layering: harness defaults < the arm's own `params` < an explicit override ---
+const S = { params: { K1: 2, LEXW: 1.5 } };
 eq(sceneParams(S).K1, 2, 'a sample overrides the harness default');
 eq(sceneParams(S).B, 0.75, 'unspecified params fall back to the harness default');
 eq(sceneParams(S, { K1: 3 }).K1, 3, 'an arm override beats the sample');
 eq(sceneParams(S, { K1: 3 }).LEXW, 1.5, 'an arm override leaves other params on the sample baseline');
-eq(sceneParams({}).entityFilter, true, 'a sample with no captureParams still gets a full param set');
+eq(sceneParams({}).entityFilter, true, 'a view with no params still gets a full param set');
 
 // --- the arm-reuse guard: reusing a loaded scene is only valid while the gazetteer is unchanged ---
 // gazetteerSource is baked in at load time, and a stale gazetteer has already cost this project a 74%
@@ -144,7 +144,7 @@ eq(makeGradeOf([{ title: 'Villa', grade: 5, uid: 1 }, { title: 'Other', grade: 3
 const kwP = makeKeywordScore(sceneParams({}));   // scoreVectorKeys false — the default
 eq(kwP({ vectorized: true, key: ['villa'] }, 'meet me at the villa', 1.2), 0, 'vectorized keys are suppressed, as the live scan sees them');
 eq(kwP({ vectorized: false, key: ['villa'] }, 'meet me at the villa', 1.2) > 0, true, 'non-vectorized keys still score');
-eq(makeKeywordScore(sceneParams({ captureParams: { scoreVectorKeys: true } }))({ vectorized: true, key: ['villa'] }, 'meet me at the villa', 1.2) > 0,
+eq(makeKeywordScore(sceneParams({ params: { scoreVectorKeys: true } }))({ vectorized: true, key: ['villa'] }, 'meet me at the villa', 1.2) > 0,
     true, 'scoreVectorKeys re-admits the originals, as production scores waKeys');
 
 // --- scene independence (jaccard on relevant sets) ---
@@ -158,7 +158,7 @@ eq(jaccard([], []), 0, 'two empty sets are 0, not NaN');
 eq(jaccard([1], []), 0, 'one empty set is 0');
 eq(jaccard(new Set([1, 2]), new Set([2])), 0.5, 'accepts Sets as well as arrays');
 // Grade-keyed identity: same uid in different books is not the same entry, so it must not read as overlap.
-eq(jaccard([rowKey({ world: 'A', uid: 1 })], [rowKey({ world: 'B', uid: 1 })]), 0,
+eq(jaccard([rowKey({ book: 'A', uid: 1 })], [rowKey({ book: 'B', uid: 1 })]), 0,
     'same uid in different books is not shared relevance');
 
 // --- Spearman, tie-corrected (metrics.mjs) ---
@@ -316,19 +316,20 @@ const { dropUnavailable } = await import('./scene.mjs');
 const mkSample = (msg, extra = {}) => ({
     generatedFrom: msg === null ? {} : { msg },
     books: { W: { 1: { uid: 1, STMB_start: 10, STMB_end: 20 }, 2: { uid: 2, STMB_start: 300, STMB_end: 400 }, 3: { uid: 3 } } },
-    grades: [{ world: 'W', uid: 1 }, { world: 'W', uid: 2 }, { world: 'W', uid: 3 }],
-    candidates: [{ world: 'W', uid: 1 }, { world: 'W', uid: 2 }],
+    entries: [{ book: 'W', uid: 1 }, { book: 'W', uid: 2 }, { book: 'W', uid: 3 }],
+    candidates: [{ book: 'W', uid: 1 }, { book: 'W', uid: 2 }],
     ...extra,
 });
-eq(dropUnavailable(mkSample(100)).grades.length, 2, 'a grade whose entry starts after the scene is dropped');
-eq(dropUnavailable(mkSample(100)).grades.some(g => g.uid === 2), false, '...and it is the post-dating one, not an arbitrary row');
+eq(dropUnavailable(mkSample(100)).entries.length, 2, 'a grade whose entry starts after the scene is dropped');
+eq(dropUnavailable(mkSample(100)).entries.some(g => g.uid === 2), false, '...and it is the post-dating one, not an arbitrary row');
 eq(dropUnavailable(mkSample(100)).candidates.length, 1, 'the same row leaves the arm ranking too, or it still occupies a rank');
-eq(dropUnavailable(mkSample(500)).grades.length, 3, 'past the entry\'s own range, nothing is unavailable');
-eq(dropUnavailable(mkSample(100)).grades.some(g => g.uid === 3), true, 'an entry with no STMB range is reference, always available');
+eq(dropUnavailable(mkSample(500)).entries.length, 3, 'past the entry\'s own range, nothing is unavailable');
+eq(dropUnavailable(mkSample(100)).entries.some(g => g.uid === 3), true, 'an entry with no STMB range is reference, always available');
 // A live /wa-grade capture records no generatedFrom.msg and cannot contain a future entry by construction.
-eq(dropUnavailable(mkSample(null)).grades.length, 3, 'no scene message index -> no-op, not a silent drop of everything');
-const multi = dropUnavailable(mkSample(100, { arms: [{ candidates: [{ world: 'W', uid: 1 }, { world: 'W', uid: 2 }] }, { candidates: [{ world: 'W', uid: 2 }] }] }));
-eq(multi.arms[0].candidates.length + multi.arms[1].candidates.length, 1, 'every arm of a super-grade bundle is filtered, not just the first');
+eq(dropUnavailable(mkSample(null)).entries.length, 3, 'no scene message index -> no-op, not a silent drop of everything');
+// It used to have to walk `arms` itself, and filtering only the first was a real bug. openBundle now
+// hands out ONE arm's view, so there is no second list here to forget — the guard moved into the shape.
+eq('arms' in dropUnavailable(mkSample(100)), false, 'the filter sees one arm\'s view, never a list of them');
 // The books are the half that matters: makeCandidateSet re-derives the pool from them, so an entry left
 // there returns as an UNJUDGED row holding a rank. Measured when this was missed: precision 33.5% -> 15.5%.
 const booked = dropUnavailable(mkSample(100));
@@ -342,4 +343,4 @@ eq(Object.keys(dropUnavailable(mkSample(null)).books.W).length, 3, 'no scene ind
 const twice = mkSample(100);
 dropUnavailable(twice); dropUnavailable(twice);
 eq(Object.keys(twice.books.W).length, 2, 'filtering twice removes the same entries, not more');
-eq(twice.grades.length, 2, '...and the grade list is stable across a second pass');
+eq(twice.entries.length, 2, '...and the grade list is stable across a second pass');

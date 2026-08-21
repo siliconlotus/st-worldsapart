@@ -36,7 +36,7 @@
 // Usage (from SillyTavern root):
 //   node .../relevance-regress.mjs <sample.json> [...] [--sweep gazetteerSource=keys,titles]
 //        [--tier memory|reference] [--cut 4] [--ordinal] [--loso] [--lobo] [--calibration] [--cutoff] [--at 0.10] [--degree 2] [--interactions] [--with proper,time,oracle,length,density,rarity,chunkdens] [--without keys] [--drop-keys flagged.json] [--emit-rows rows.json] [--proper count|idf|idf-len|jaccard|gaz] [--proper-extract regex|entity|span]
-import { indexPath, isMemory, loadScene, openSample, sceneParams, makeCandidateSet, makeGradeOf, embed } from './scene.mjs';
+import { indexPath, isMemory, loadScene, openSample, sceneParams, makeCandidateSet, makeGradeOf, embed, sceneLabel } from './scene.mjs';
 import { ensureIndex, resolveModel } from './reindex.mjs';
 import fs from 'node:fs';
 import { gradeValue, gradeCredit, fbeta, RECALL_WEIGHT, signTest } from './metrics.mjs';
@@ -363,7 +363,7 @@ const queryVec = async (S, name, value, em) => {
         const S = openSample(path, arg('--arm'));
         if (!S.candidates?.length) { console.error(`${path}: logs no candidates`); process.exit(2); }
         const qv = await embed(S.query, { ollama: OLLAMA, model: MODEL });
-        loaded.push({ path, name: S.name ?? path, book: S.primaryBook ?? path, S, qv });
+        loaded.push({ path, name: sceneLabel(S) || path, book: S.primaryBook ?? path, S, qv });
     }
     console.log(`${loaded.length} scene(s); sweeping ${SWEPT} over ${VALUES.join(', ')}${TIER === 'all' ? '' : `; ${TIER} tier only`}${CUT === 3 ? '' : `; target grade >= ${CUT}`}`);
 
@@ -388,9 +388,10 @@ const queryVec = async (S, name, value, em) => {
             const qvec = EMBED_SWEEP ? await queryVec(S, name, value, em) : qv;
             const scene = loadScene(S, { indexFile, params: P });
             const tw = (P.entityFilter && P.queryMode !== 'summary') ? ranking.buildTermWeights(S.query, scene.gaz, P.boost) : null;
-            const rows = makeCandidateSet({ ...scene, params: P })(P.K1, P.B, tw, qvec, S.query, S.scanText);
+            const scanText = matcher.scanWindow(S.scanChat ?? [], { depth: S.depth, includeNames: P.includeNames });
+            const rows = makeCandidateSet({ ...scene, params: P })(P.K1, P.B, tw, qvec, S.query, scanText);
             if (WITH.includes('proper')) {
-                const win = properNouns(Array.isArray(S.scanText) ? S.scanText.join('\n') : S.scanText);
+                const win = properNouns(Array.isArray(scanText) ? scanText.join('\n') : scanText);
                 // df over THIS book's entries, which is the corpus the names live in — the same reason
                 // content-lexical insists on one index for both classes. Computed once per scene.
                 const df = new Map();
@@ -461,7 +462,7 @@ const queryVec = async (S, name, value, em) => {
                     r.bookRarity = toks.length ? toks.reduce((a, t) => a + bk.rarity(t), 0) / toks.length : 0;
                 }
             }
-            const gradeOf = makeGradeOf(S.grades, scene.isExcluded);
+            const gradeOf = makeGradeOf(S.entries, scene.isExcluded);
             // Same population scoreScene ranks: constants are out, because relevance is not a concept that
             // applies to them. Ungraded rows are out because they carry no label.
             const kept = [], ungraded = [];

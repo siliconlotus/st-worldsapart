@@ -28,7 +28,7 @@
 // an arm that surfaces unjudged entries scores them 0 and looks worse than it is, so judged coverage is
 // reported per cell and a run with gaps is flagged. Pool first with /wa-super-grade, then screen here.
 import { readFileSync } from 'node:fs';
-import { indexPath, loadScene, openSample, sceneParams, scoreScene, embed } from './scene.mjs';
+import { indexPath, loadScene, openSample, sceneParams, scoreScene, embed, sceneLabel } from './scene.mjs';
 import { jaccard, signTest, spearman, gradeValue } from './metrics.mjs';
 import { isDurable, rowKey } from '../extension/grading.mjs';
 import { ensureIndex } from './reindex.mjs';
@@ -38,7 +38,7 @@ const arg = k => { const i = argv.indexOf(k); return i >= 0 ? argv[i + 1] : null
 const samples = argv.filter(a => a.endsWith('.json') && !a.startsWith('--'));
 
 // One-at-a-time deviations. Values are ABSOLUTE, not offsets: each scene is compared against its own
-// captureParams baseline, so the tool prints that baseline per parameter and flags when the samples disagree
+// `params` baseline, so the tool prints that baseline per parameter and flags when the scenes disagree
 // about it — a contrast that means +1.8 on one scene and +1.0 on another is not one contrast.
 const ARMS = {
     'K1=1.2': { K1: 1.2 }, 'K1=2': { K1: 2 }, 'K1=3': { K1: 3 },
@@ -228,8 +228,9 @@ const fx = n => (n >= 0 ? '+' : '') + n.toFixed(4);
         const scene = loadScene(S, { indexFile: indexPath(S, { model: MODEL }), params: P });
         const qv = await embed(S.query, { ollama: OLLAMA, model: MODEL });
         const base = await scoreScene({ sample: S, k: K, scene, qv });
-        scenes.push({ path, name: S.name ?? path, S, scene, qv, P, base });
-        console.log(`scene "${S.name ?? path}": baseline ${METRIC}@${K} ${mOf(base).toFixed(4)} (nDCG ${base.n.toFixed(4)}, P ${base.precision.toFixed(3)}, R ${base.recall.toFixed(3)}, rel ${base.relevant}), judged ${base.judged}/${base.of}${base.judged < base.of ? ' !!' : ''}`);
+        if (S.invalidConfiguration) console.log(`!! ${sceneLabel(S) || path} IS NOT A REAL CONFIGURATION — ${S.invalidConfiguration}; it must not be pooled with the rest`);
+        scenes.push({ path, name: sceneLabel(S) || path, S, scene, qv, P, base });
+        console.log(`scene "${sceneLabel(S) || path}": baseline ${METRIC}@${K} ${mOf(base).toFixed(4)} (nDCG ${base.n.toFixed(4)}, P ${base.precision.toFixed(3)}, R ${base.recall.toFixed(3)}, rel ${base.relevant}), judged ${base.judged}/${base.of}${base.judged < base.of ? ' !!' : ''}`);
         console.log(`    F@R ${base.atR.f.toFixed(4)} (P ${base.atR.precision.toFixed(3)} R ${base.atR.recall.toFixed(3)}, n ${base.atR.n})`);
         // `of` is the rankable top-k, so 0 means the reference-tier removal took EVERYTHING — a
         // reference-only book. Every arm then scores 0 and every delta is a tie, so the scene inflates the
@@ -251,8 +252,8 @@ const fx = n => (n >= 0 ? '+' : '') + n.toFixed(4);
     // Also reported: how many relevant entries each scene has. nDCG on a scene with two or three is fragile —
     // one rank change swings it hard — so a thin scene contributes noise to the sign test at full weight.
     // That is the other half of "signals fairly clear", and it is worth knowing BEFORE spending grading time.
-    const relOf = S => new Set((S.grades ?? []).filter(g => gradeValue(g) >= 3 && g.uid !== undefined).map(rowKey));
-    const judgedOf = S => new Set((S.grades ?? []).filter(g => g.uid !== undefined).map(rowKey));
+    const relOf = S => new Set((S.entries ?? []).filter(g => gradeValue(g) >= 3 && g.uid !== undefined).map(rowKey));
+    const judgedOf = S => new Set((S.entries ?? []).filter(g => g.uid !== undefined).map(rowKey));
     console.log('\nscene independence — relevant-set overlap (grade>=3); the sign test assumes these are separate draws');
     const thin = scenes.filter(s => relOf(s.S).size < 4);
     for (const s of scenes) console.log(`  ${s.name.slice(0, 34).padEnd(34)} ${String(relOf(s.S).size).padStart(3)} relevant, ${String(judgedOf(s.S).size).padStart(3)} judged${relOf(s.S).size < 4 ? '   << thin: nDCG here is fragile' : ''}`);
@@ -280,7 +281,7 @@ const fx = n => (n >= 0 ? '+' : '') + n.toFixed(4);
     // Measured with tie-corrected Spearman (graded pools are mostly zeros); absent signals count as 0.
     console.log('\nsignal quality — Spearman against the human grade (absent signal counts as 0)');
     for (const sc of scenes) {
-        const gm = new Map((sc.S.grades ?? []).filter(x => x.uid !== undefined).map(x => [rowKey(x), gradeValue(x) || 0]));
+        const gm = new Map((sc.S.entries ?? []).filter(x => x.uid !== undefined).map(x => [rowKey(x), gradeValue(x) || 0]));
         const rs = (sc.S.candidates ?? []).filter(c => !isDurable(c) && gm.has(rowKey(c)));
         if (rs.length < 5) { console.log(`  ${sc.name.slice(0, 34).padEnd(34)} only ${rs.length} judged candidate rows — skipped`); continue; }
         const gv = rs.map(r => gm.get(rowKey(r)));
@@ -288,7 +289,7 @@ const fx = n => (n >= 0 ? '+' : '') + n.toFixed(4);
         console.log(`  ${sc.name.slice(0, 34).padEnd(34)} cosine ${sig(r => (r.cosine == null ? 0 : Number(r.cosine)))}   text ${sig(r => Number(r.text) || 0)}   keys ${sig(r => Number(r.keys) || 0)}`);
     }
 
-    console.log(`\n${scenes.length} scene(s), ${picked.length} arm(s), ${METRIC}@${K}, each scene against its OWN captureParams baseline.`);
+    console.log(`\n${scenes.length} scene(s), ${picked.length} arm(s), ${METRIC}@${K}, each scene against its OWN params baseline.`);
 
     // Baseline disagreement check. If the scenes don't share a starting value for a parameter, an absolute arm
     // is a different contrast on each of them and the sign test is answering a muddled question.

@@ -13,6 +13,7 @@ import { mkdtempSync, writeFileSync, readFileSync, existsSync, mkdirSync } from 
 import { tmpdir } from 'node:os';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { bundleSamples, openBundle } from '../extension/grading.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const TMP = mkdtempSync(join(tmpdir(), 'wa-synth-check-'));
@@ -40,20 +41,21 @@ const ENTRIES = {
     5: entry(5, '005 - Pinned Memory', { constant: true }),
     6: entry(6, '006 - Never Surfaced'),
 };
-const candidate = (uid, i) => ({ title: ENTRIES[uid].comment, uid, world: WORLD, '#': i, score: 1 - i / 10, cosine: 0.5, keys: null });
+const candidate = (uid, i) => ({ title: ENTRIES[uid].comment, uid, book: WORLD, index: i, score: 1 - i / 10, cosine: 0.5, keys: null });
 
 const bundle = (name, { query = 'Q', scanText = 'S', depth = 10, cands = [1, 2, 3], grades = null, world = WORLD } = {}) => {
     const books = { [world]: Object.fromEntries(Object.entries(ENTRIES).map(([k, e]) => [k, { ...e, world }])) };
-    const b = {
-        name, books, bookMode: 'full', chat: 'data/chat.jsonl', population: 'ranked',
-        arms: [{
-            arm: 'shipped', query, scanText, depth, primaryBook: world, captureParams: {},
-            candidates: cands.map((u, i) => ({ ...candidate(u, i), world })),
-        }],
+    const sample = {
+        name, books, bookMode: 'full', chat: 'data/chat.jsonl', createdAt: '2026-01-01',
+        query, scanChat: String(scanText).split('\n\n').map(t => ({ name: 'X', mes: t })), depth, primaryBook: world, params: {},
+        candidates: cands.map((u, i) => ({ ...candidate(u, i), book: world })),
+        // A uid with no entry is deliberate: it is the "deleted from the book" orphan reason.
+        grades: (grades ?? []).map(([uid, grade]) => ({ uid, grade, title: ENTRIES[uid]?.comment ?? `gone-${uid}`, book: world })),
     };
-    // A uid with no entry is deliberate: it is the "deleted from the book" orphan reason.
-    if (grades) { b.grades = grades.map(([uid, grade]) => ({ uid, grade, title: ENTRIES[uid]?.comment ?? `gone-${uid}`, world })); b.gradeScale = 4; b.createdBy = 'a-judge'; }
-    return b;
+    if (grades) { sample.gradeScale = 4; sample.createdBy = 'a-judge'; }
+    // Built through the real assembler rather than by hand, so the fixture cannot drift from the schema the
+    // tools read — the whole reason grading.mjs is ST-free.
+    return bundleSamples([{ arm: 'shipped', sample }], { start: 90, end: 99 }, { population: 'ranked' });
 };
 const put = (file, obj) => { const p = join(TMP, file); writeFileSync(p, JSON.stringify(obj)); return p; };
 
@@ -65,7 +67,7 @@ let r = run('graft-grades.mjs', [same, '--from', graded]);
 ok(r.code === 0 && /same\.json\s+3\s+0\s/.test(r.out), 'a matching scene grafts every grade, with no orphans');
 ok(!r.out.includes('REFUSED'), 'a matching scene is not refused');
 
-for (const [field, over] of [['query', { query: 'different' }], ['scanText', { scanText: 'different' }], ['depth', { depth: 5 }]]) {
+for (const [field, over] of [['query', { query: 'different' }], ['scanChat', { scanText: 'different' }], ['depth', { depth: 5 }]]) {
     const f = put(`diff-${field}.json`, bundle('scene', over));
     const res = run('graft-grades.mjs', [f, '--from', graded]);
     ok(res.code !== 0 && res.out.includes('REFUSED') && res.out.includes(field),
@@ -89,7 +91,7 @@ ok(JSON.parse(readFileSync(ws, 'utf8')).grading?.sceneMatchedIgnoringTrailingWhi
 // --- graft: the entry half ------------------------------------------------------------------------------
 r = run('graft-grades.mjs', [same, '--from', graded, '--write']);
 const written = JSON.parse(readFileSync(same, 'utf8'));
-ok(written.grades?.length === 3, 'grades are carried onto the fresh bundle');
+ok(openBundle(written).entries?.length === 3, 'verdicts are carried onto the fresh scene');
 ok(written.gradeScale === 4 && written.grading?.by === 'a-judge', 'grading provenance travels with the grades, not with the generation');
 ok(written.grading?.graftedAt && written.createdBy !== 'a-judge', 'generation provenance is not overwritten by grading provenance');
 ok(existsSync(same.replace(/\.json$/, '-pending.json')), 'uncovered rows are written as -pending.json');
@@ -100,11 +102,11 @@ ok(existsSync(same.replace(/\.json$/, '-pending.json')), 'uncovered rows are wri
 // wrong-book control, and a uid-only fallback would graft one silently.
 const renamed = put('renamed.json', bundle('scene', { world: 'New Name' }));
 r = run('graft-grades.mjs', [renamed, '--from', graded]);
-ok(r.code === 0 && /\s+0\s+3\s/.test(r.out), 'without --rename-world a renamed book orphans every grade');
-r = run('graft-grades.mjs', [renamed, '--from', graded, '--rename-world', `${WORLD}=New Name`]);
-ok(r.out.includes(' 3 ') && !r.out.includes('REFUSED'), 'with --rename-world the same grades land');
-r = run('graft-grades.mjs', [renamed, '--from', graded, '--rename-world', 'no-equals-sign']);
-ok(r.code !== 0, 'a malformed --rename-world is refused rather than ignored');
+ok(r.code === 0 && /\s+0\s+3\s/.test(r.out), 'without --rename-book a renamed book orphans every grade');
+r = run('graft-grades.mjs', [renamed, '--from', graded, '--rename-book', `${WORLD}=New Name`]);
+ok(r.out.includes(' 3 ') && !r.out.includes('REFUSED'), 'with --rename-book the same grades land');
+r = run('graft-grades.mjs', [renamed, '--from', graded, '--rename-book', 'no-equals-sign']);
+ok(r.code !== 0, 'a malformed --rename-book is refused rather than ignored');
 
 // --- graft: orphans are classified, not counted -----------------------------------------------------------
 // Only "rankable, but nothing surfaced it" says the population moved; the others are classification facts
@@ -112,7 +114,7 @@ ok(r.code !== 0, 'a malformed --rename-world is refused rather than ignored');
 const wide = put('wide.json', bundle('scene', { cands: [1, 2] }));
 const wideGrades = put('wide-graded.json', bundle('scene', { grades: [[1, 4], [3, 0], [4, 2], [5, 3], [6, 3], [99, 1]] }));
 r = run('graft-grades.mjs', [wide, '--from', wideGrades]);
-for (const reason of ['reference tier', 'disabled', 'durable', 'uid gone from the world', 'rankable, but nothing surfaced it']) {
+for (const reason of ['reference tier', 'disabled', 'durable', 'uid gone from the book', 'rankable, but nothing surfaced it']) {
     ok(r.out.includes(reason), `orphan reason reported: ${reason}`);
 }
 ok(/rankable, but nothing surfaced it\s+<</.test(r.out), 'the one reason that means retrieval moved is flagged');
