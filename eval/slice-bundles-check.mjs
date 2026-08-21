@@ -87,4 +87,13 @@ assert.throws(() => sliceBundle({ name: 'not one', arms: [{ candidates: [] }] },
     assert.strictEqual(Object.keys(b.books.W).length, 3);
 }
 
+// A pack's books are a SUBSET of the capture's, so carrying its content hashes forward would assert an
+// identity the pack does not hold. Dropped rather than recomputed — a shortlist is not a capture.
+{
+    const src = { ...bundle(), bookHashes: { W: 'f'.repeat(64) } };
+    const { sliced } = sliceBundle(src, new Set([K('W', 1)]));
+    assert.strictEqual('bookHashes' in sliced, false, 'the pack drops the capture book hashes');
+    assert.strictEqual('bookHashes' in src, true, 'and does not strip them from the source document');
+}
+
 console.log('ok');

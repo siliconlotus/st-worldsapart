@@ -40,11 +40,11 @@ const bundle = (book, uid) => ({
     grades: [],
 });
 /** Built through the real assembler, so the fixture cannot drift from the schema the tool writes. */
-const doc = (book, uid) => bundleSamples([{ arm: 'shipped', sample: bundle(book, uid) }], { start: 90, end: 99 });
+const doc = async (book, uid) => await bundleSamples([{ arm: 'shipped', sample: bundle(book, uid) }], { start: 90, end: 99 });
 
 try {
-    put(`${TAG}-a.json`, doc('book-A', 11));
-    put(`${TAG}-b.json`, doc('book-B', 22));
+    put(`${TAG}-a.json`, await doc('book-A', 11));
+    put(`${TAG}-b.json`, await doc('book-B', 22));
     put(`${TAG}-a-pending.json`, { name: `${TAG}-scene`, of: `${TAG}-a.json`, rows: [{ book: 'book-A', uid: 11, title: 'entry 11' }] });
     put(`${TAG}-b-pending.json`, { name: `${TAG}-scene`, of: `${TAG}-b.json`, rows: [{ book: 'book-B', uid: 22, title: 'entry 22' }] });
 

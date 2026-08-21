@@ -33,7 +33,7 @@ chat's basename without extension, with every run of anything outside `[A-Za-z0-
 that is also what makes the id safe to compose at all, since chat names are filenames.
 
 Composing it means a reader reasons from the id alone, and that it can be checked against the fields it
-was built from — a cheap guard against a mis-extracted scene. It is the key into `sceneTexts`,
+was built from — a cheap guard against a mis-extracted scene. It is the key into `sceneChats`,
 `sceneInjects` and every arm's `scenes` map, and the handle anything outside the document refers to a
 scene by.
 
@@ -42,7 +42,7 @@ scene by.
 reaches further back from one graded moment rather than moving to another. So `sceneStart` and `depth`
 belong to the arm's capture of the scene, not to the scene — which is why neither is in the id.
 
-**One capture has one haystack.** `sceneTexts` is hoisted per scene, so arms reading different windows
+**One capture has one haystack.** `sceneChats` is hoisted per scene, so arms reading different windows
 would silently share the first one's, and every count taken over it. A writer refuses to pack those as one
 capture; until the haystack is stored per cell, arms at different depths belong in separate documents.
 
@@ -139,11 +139,14 @@ carry.
     { "rater": 1, "kind": "human", "id": "f47ac10b-58cc-4372-a567-0e02b2c3d479" }
   ],
 
-  // THE HAYSTACK'S INPUTS, NOT THE HAYSTACK. `sceneTexts` is the CHAT half; `sceneInjects` are the
+  // THE HAYSTACK'S INPUTS, NOT THE HAYSTACK. `sceneChats` is the CHAT half; `sceneInjects` are the
   // scan-enabled extension prompts beside it, each carrying the position and depth that decide which
   // windows admit it. A reader RECONSTRUCTS a window by admitting them at a depth (matcher.mjs
   // `makeWindowFor`) — the only direction that works, since a joined blob cannot be taken apart.
-  "sceneTexts": { "Sommers-ABO-Frozen-Test-msg-1044": "…" },
+  // CONTENT IDENTITY, keyed by the same names as `books`. Two captures hold the same book when these
+  // agree — answerable without inflating two megabytes of entries.
+  "bookHashes": { "Sommers_Pack__v22": "10bdb8e8…" },
+  "sceneChats": { "Sommers-ABO-Frozen-Test-msg-1044": [ { "name": "Ada", "mes": "…" } ] },
   "sceneInjects": { "Sommers-ABO-Frozen-Test-msg-1044": [
     { "key": "NOTE", "text": "…", "ambient": false, "depth": 2 },
     { "key": "1_memory", "text": "…", "ambient": true, "depth": 0 }
@@ -154,8 +157,9 @@ carry.
 
 ## Field order is part of the schema
 
-`sceneTexts`, `sceneInjects` and `books` go LAST, in that order, and every writer emits them so — books
-last, being the largest by a wide margin. They are almost all of a bundle's
+`sceneChats`, `sceneInjects` and `books` go LAST, in that order, and every writer emits them so — books
+last, being the largest by a wide margin. `bookHashes` sits just AHEAD of them: it describes the bulk but
+is two lines, and putting it in front is what makes "same book?" answerable with `head`. They are almost all of a bundle's
 bytes, so anything ahead of them is reachable with `head` — every scene, every param, every grade — and
 anything behind them is not.
 
@@ -414,7 +418,7 @@ file lossless rather than a silent re-labelling.
   signal there anyway, being a hash of the code rather than a name for it. Node-side writers resolve both
   properly. Closing this wants a plugin route reporting `git describe` over the extension directory.
 - **`why` is bulk, and it is not last.** A candidate's matched-key excerpts are most of what sits ahead of
-  `sceneTexts` — 18% of a two-megabyte document, against 0.6% for every scene field and verdict combined.
+  `sceneChats` — 18% of a two-megabyte document, against 0.6% for every scene field and verdict combined.
   The field-order rule names only the two hoisted blocks, so this is within the letter of it and against
   the point.
 - **Arms nest inside scenes, so a configuration is recorded once per scene.** A fifteen-scene document

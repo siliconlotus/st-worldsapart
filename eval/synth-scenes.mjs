@@ -457,7 +457,7 @@ for (const idx of picks) {
             // grade-pending.mjs puts them on.
             grades: [],
         };
-        const bundle = bundleSamples(
+        const bundle = await bundleSamples(
             armsOut.map(a => ({ arm: a.arm, sample: { ...shared, ...a } })),
             { start: sceneStart, end: sceneEnd, captureId: randomUUID() },
             // GENERATION provenance only. How the grades were made is the grades' own, and travels with

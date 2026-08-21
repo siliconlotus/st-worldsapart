@@ -2,7 +2,7 @@
 // this pins the part that decides what a sample CONTAINS: book fidelity, the settings mapping, the
 // reference tier, and the foreign-book exclusion. A sample that silently loses a field is a graded scene
 // that can't be re-run, which is the whole failure this feature exists to prevent.
-import { buildSample, bundleSamples, captureParams, isDurable, mergeGrades, openBundle, passKey, rowKey, sampleFile, searchedBook, splitGraded, trimBook, unionArms } from '../extension/grading.mjs';
+import { buildSample, bundleSamples, captureParams, hashBooks, isDurable, mergeGrades, openBundle, passKey, rowKey, sampleFile, searchedBook, splitGraded, trimBook, unionArms } from '../extension/grading.mjs';
 import { eq, gradeValue } from './metrics.mjs';
 import * as ranking from '../extension/ranking.mjs';
 
@@ -320,7 +320,7 @@ const mk = (arm, over) => ({ arm, sample: buildSample({
     books: { Main: meta }, bookMode: 'full', priority: [], grades: [{ title: 'T', grade: 4, book: 'Main', uid: 1 }],
     cutoff: { gradingOverride: { maxVectorEntries: 1 } }, gradedCandidates: 1, pluginFP: 'ab', sourceFP: 'ab', now: '2026-07-29',
 }) });
-const bundle = bundleSamples(
+const bundle = await bundleSamples(
     [mk('shipped', {}), mk('summary', { queryMode: 'summary' }), mk('depth', { messageDepth: 8 })],
     { start: 90, end: 100, user: 'f47ac10b-58cc-4372-a567-0e02b2c3d479', captureId: 'cap-test' },
 );
@@ -434,7 +434,7 @@ eq(sceneThrew, true, 'and so does naming a missing scene');
 // ARMS MAY NOW READ THE SAME MOMENT AT DIFFERENT DEPTHS. The guard that refused them is gone, because
 // what is hoisted is the MESSAGES: each arm's window is rebuilt from them at its own depth, so there is
 // no first-arm window for a second to silently inherit.
-const twoDepths = bundleSamples([mk('a', {}), { arm: 'b', sample: { ...mk('b', {}).sample, depth: 20 } }], { start: 0, end: 1 });
+const twoDepths = await bundleSamples([mk('a', {}), { arm: 'b', sample: { ...mk('b', {}).sample, depth: 20 } }], { start: 0, end: 1 });
 eq(twoDepths.arms.map(a => a.scenes['c-msg-1'].depth).join(','), '5,20', 'two arms may read one moment at different depths');
 eq(Object.keys(twoDepths.sceneChats).length, 1, '...sharing one stored set of messages between them');
 
@@ -452,4 +452,31 @@ eq(Object.keys(twoDepths.sceneChats).length, 1, '...sharing one stored set of me
     eq(split.priorOf.get(rowKey({ book: 'W', uid: 1 })), 4, 'a human grade outranks the judge on the same row');
     eq(split.priorOf.get(rowKey({ book: 'W', uid: 2 })), 0, 'a judge 0 pre-fills as 0, not as blank');
     eq(split.fresh.length === 1 && split.fresh[0].uid === 3, true, 'only the ungraded row is fresh');
+}
+
+// --- book content identity ------------------------------------------------------------------------------
+// The field answers "did these two captures grade the same book" ACROSS INSTALLS, so the two things that
+// must hold are that irrelevant serialisation differences do not move it and relevant content differences do.
+{
+    const entry = { uid: 1, comment: 'A', content: 'text', keys: ['k'] };
+    const reordered = { keys: ['k'], content: 'text', comment: 'A', uid: 1 };
+    const [a, b] = await Promise.all([hashBooks({ W: { 1: entry } }), hashBooks({ W: { 1: reordered } })]);
+    eq(a.W, b.W, 'key order does not move a book hash — two installs need not agree on it');
+
+    const renamed = await hashBooks({ Other: { 1: entry } });
+    eq(renamed.Other, a.W, 'the hash is of the CONTENT, so renaming the book does not move it');
+
+    const trimmed = await hashBooks({ W: { 1: { uid: 1, comment: 'A' } } });
+    eq(trimmed.W === a.W, false, 'a trimmed copy is not the same stored book, so bookMode moves the hash');
+
+    const edited = await hashBooks({ W: { 1: { ...entry, content: 'text.' } } });
+    eq(edited.W === a.W, false, 'a one-character content edit moves the hash');
+
+    // ST sets `entry.world` on some paths and not others, and it only ever restates the book name that
+    // already keys the map. Left in, the same lorebook hashed two ways depending on how it was captured.
+    const located = await hashBooks({ W: { 1: { ...entry, world: 'W' } } });
+    eq(located.W, a.W, 'ST\'s entry.world back-pointer is location, not content, so it does not move the hash');
+
+    eq(/^[0-9a-f]{64}$/.test(a.W), true, 'lowercase hex SHA-256, the same shape a digest rater id carries');
+    eq(Object.keys(await hashBooks(undefined)).length, 0, 'no books is an empty map, not a throw');
 }

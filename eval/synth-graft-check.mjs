@@ -43,7 +43,7 @@ const ENTRIES = {
 };
 const candidate = (uid, i) => ({ title: ENTRIES[uid].comment, uid, book: WORLD, index: i, score: 1 - i / 10, cosine: 0.5, keys: null });
 
-const bundle = (name, { query = 'Q', scanText = 'S', depth = 10, cands = [1, 2, 3], grades = null, world = WORLD } = {}) => {
+const bundle = async (name, { query = 'Q', scanText = 'S', depth = 10, cands = [1, 2, 3], grades = null, world = WORLD } = {}) => {
     const books = { [world]: Object.fromEntries(Object.entries(ENTRIES).map(([k, e]) => [k, { ...e, world }])) };
     const sample = {
         name, books, bookMode: 'full', chat: 'data/chat.jsonl', createdAt: '2026-01-01',
@@ -55,33 +55,33 @@ const bundle = (name, { query = 'Q', scanText = 'S', depth = 10, cands = [1, 2, 
     if (grades) { sample.gradeScale = 4; sample.createdBy = 'a-judge'; }
     // Built through the real assembler rather than by hand, so the fixture cannot drift from the schema the
     // tools read — the whole reason grading.mjs is ST-free.
-    return bundleSamples([{ arm: 'shipped', sample }], { start: 90, end: 99 }, { population: 'ranked' });
+    return await bundleSamples([{ arm: 'shipped', sample }], { start: 90, end: 99 }, { population: 'ranked' });
 };
 const put = (file, obj) => { const p = join(TMP, file); writeFileSync(p, JSON.stringify(obj)); return p; };
 
 // --- graft: the scene guard -----------------------------------------------------------------------------
-const graded = put('graded.json', bundle('scene', { grades: [[1, 4], [2, 0], [3, 0]] }));
+const graded = put('graded.json', await bundle('scene', { grades: [[1, 4], [2, 0], [3, 0]] }));
 
-const same = put('same.json', bundle('scene'));
+const same = put('same.json', await bundle('scene'));
 let r = run('graft-grades.mjs', [same, '--from', graded]);
 ok(r.code === 0 && /same\.json\s+3\s+0\s/.test(r.out), 'a matching scene grafts every grade, with no orphans');
 ok(!r.out.includes('REFUSED'), 'a matching scene is not refused');
 
 for (const [field, over] of [['query', { query: 'different' }], ['scanChat', { scanText: 'different' }], ['depth', { depth: 5 }]]) {
-    const f = put(`diff-${field}.json`, bundle('scene', over));
+    const f = put(`diff-${field}.json`, await bundle('scene', over));
     const res = run('graft-grades.mjs', [f, '--from', graded]);
     ok(res.code !== 0 && res.out.includes('REFUSED') && res.out.includes(field),
         `a scene differing only in ${field} is refused, and ${field} is named`);
 }
 
 // --- graft: the whitespace escape, which must not widen into anything else -------------------------------
-const ws = put('ws.json', bundle('scene', { scanText: 'S \nT' }));
-const wsSrc = put('ws-graded.json', bundle('scene', { scanText: 'S\nT', grades: [[1, 4]] }));
+const ws = put('ws.json', await bundle('scene', { scanText: 'S \nT' }));
+const wsSrc = put('ws-graded.json', await bundle('scene', { scanText: 'S\nT', grades: [[1, 4]] }));
 ok(run('graft-grades.mjs', [ws, '--from', wsSrc]).code !== 0, 'trailing whitespace still refuses by default');
 r = run('graft-grades.mjs', [ws, '--from', wsSrc, '--allow-whitespace-drift']);
 ok(r.code === 0 && /whitespace only/.test(r.out), '--allow-whitespace-drift accepts it, and says it did');
 // A space in the MIDDLE is a different scene, not drift, and the flag must not reach it.
-const mid = put('mid.json', bundle('scene', { scanText: 'S T' }));
+const mid = put('mid.json', await bundle('scene', { scanText: 'S T' }));
 ok(run('graft-grades.mjs', [mid, '--from', wsSrc, '--allow-whitespace-drift']).code !== 0,
     'the flag does not excuse a difference anywhere but at a line end');
 r = run('graft-grades.mjs', [ws, '--from', wsSrc, '--allow-whitespace-drift', '--write']);
@@ -100,7 +100,7 @@ ok(existsSync(same.replace(/\.json$/, '-pending.json')), 'uncovered rows are wri
 // rowKey is world+uid, so a book renamed between grading and generation orphans every grade while the uids
 // still line up perfectly. That is why the mapping is explicit: "the uids overlap" is also true of a
 // wrong-book control, and a uid-only fallback would graft one silently.
-const renamed = put('renamed.json', bundle('scene', { world: 'New Name' }));
+const renamed = put('renamed.json', await bundle('scene', { world: 'New Name' }));
 r = run('graft-grades.mjs', [renamed, '--from', graded]);
 ok(r.code === 0 && /\s+0\s+3\s/.test(r.out), 'without --rename-book a renamed book orphans every grade');
 r = run('graft-grades.mjs', [renamed, '--from', graded, '--rename-book', `${WORLD}=New Name`]);
@@ -111,8 +111,8 @@ ok(r.code !== 0, 'a malformed --rename-book is refused rather than ignored');
 // --- graft: orphans are classified, not counted -----------------------------------------------------------
 // Only "rankable, but nothing surfaced it" says the population moved; the others are classification facts
 // about the entry and carry no information about retrieval.
-const wide = put('wide.json', bundle('scene', { cands: [1, 2] }));
-const wideGrades = put('wide-graded.json', bundle('scene', { grades: [[1, 4], [3, 0], [4, 2], [5, 3], [6, 3], [99, 1]] }));
+const wide = put('wide.json', await bundle('scene', { cands: [1, 2] }));
+const wideGrades = put('wide-graded.json', await bundle('scene', { grades: [[1, 4], [3, 0], [4, 2], [5, 3], [6, 3], [99, 1]] }));
 r = run('graft-grades.mjs', [wide, '--from', wideGrades]);
 for (const reason of ['reference tier', 'disabled', 'durable', 'uid gone from the book', 'rankable, but nothing surfaced it']) {
     ok(r.out.includes(reason), `orphan reason reported: ${reason}`);

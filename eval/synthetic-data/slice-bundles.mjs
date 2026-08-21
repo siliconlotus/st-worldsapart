@@ -73,6 +73,9 @@ export function sliceBundle(m, keys) {
     sliced.books = Object.fromEntries(Object.entries(m.books ?? {}).map(([w, bk]) => [
         w, Object.fromEntries(Object.entries(bk).filter(([, e]) => need.get(w)?.has(Number(e?.uid)))),
     ]));
+    // The pack's books are a SUBSET, so the capture's content hashes no longer describe them. Dropped
+    // rather than recomputed: a shortlist is not a capture and nothing downstream asks it what book it holds.
+    delete sliced.bookHashes;
     return { sliced, dyn, lost: [...keys].filter(k => !dyn.has(k)) };
 }
 

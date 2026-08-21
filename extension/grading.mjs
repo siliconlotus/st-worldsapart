@@ -725,6 +725,63 @@ const toCandidate = (row, i) => {
 };
 
 /**
+ * A book's content identity, stable across installs.
+ *
+ * WHAT IS HASHED IS THE STORED BOOK, not the book on someone's disk. `bookMode` decides how much of an
+ * entry is copied, so a 'full' capture and a trimmed one of the same source lorebook hash differently —
+ * which is the honest answer to "did these two captures grade the same thing", since they did not.
+ *
+ * KEY ORDER IS NORMALISED because it carries no meaning and two installs need not agree on it: ST builds
+ * an entry object however its own code happens to, and `JSON.stringify` preserves insertion order. Without
+ * the sort, the same book captured by two people would hash apart and the field would answer nothing.
+ *
+ * Web Crypto rather than `node:crypto`, because this module is imported by the browser half too. That
+ * makes it async, which is why `bundleSamples` is.
+ */
+const canonical = v => {
+    if (v === undefined || typeof v === 'function') return 'null';
+    if (v === null || typeof v !== 'object') return JSON.stringify(v);
+    if (Array.isArray(v)) return `[${v.map(canonical).join(',')}]`;
+    return `{${Object.keys(v).sort()
+        .filter(k => v[k] !== undefined && typeof v[k] !== 'function')
+        .map(k => `${JSON.stringify(k)}:${canonical(v[k])}`)
+        .join(',')}}`;
+};
+
+const sha256Hex = async text => [...new Uint8Array(
+    await crypto.subtle.digest('SHA-256', new TextEncoder().encode(text)))]
+    .map(b => b.toString(16).padStart(2, '0')).join('');
+
+/** A field that restates WHERE an entry is stored is not part of what the entry IS. `entry.world` is ST's
+ *  own back-pointer to the book name — which is already the key of the `books` map holding it — and it is
+ *  present or absent depending on which ST path produced the entries, so leaving it in made one lorebook
+ *  hash two ways. Measured across the corpus: 21,077 entries carry it, 0 disagree with their book's name. */
+const withoutLocation = e => {
+    if (!e || typeof e !== 'object' || Array.isArray(e)) return e;
+    const { world, ...rest } = e;
+    return rest;
+};
+
+/**
+ * Content hashes for a `books` map, keyed by the same book names.
+ *
+ * SITS BESIDE `books` RATHER THAN INSIDE IT: a book is a uid-keyed map of entries and every reader walks
+ * it with `Object.values`, so a `hash` key would arrive as a phantom entry in all of them. That is safe
+ * because A CAPTURE'S BOOKS ARE IMMUTABLE — one document is one capture, and nothing rewrites the books it
+ * froze. The two things that cut a book both do it away from disk: `scene.mjs` `dropUnavailable` filters a
+ * loaded copy in memory, and `slice-bundles.mjs` cuts into a disposable review pack, which DROPS this field
+ * rather than recomputing it — a subset of a book has no business claiming that book's identity.
+ *
+ * @param {Record<string, object>} books book name -> uid-keyed entries
+ * @returns {Promise<Record<string, string>>} book name -> lowercase hex SHA-256
+ */
+export async function hashBooks(books) {
+    return Object.fromEntries(await Promise.all(Object.entries(books ?? {}).map(
+        async ([name, bk]) => [name, await sha256Hex(canonical(Object.fromEntries(
+            Object.entries(bk ?? {}).map(([uid, e]) => [uid, withoutLocation(e)]))))])));
+}
+
+/**
  * Packs one sample per arm into one graded-scene document.
  *
  * ONE FILE, NOT N. The arms of a pooled grading differ only in how they were scored; they share the graded
@@ -741,9 +798,9 @@ const toCandidate = (row, i) => {
  * @param {number} scene.end Last message index covered
  * @param {string} [scene.user] Rater id for freshly typed grades — a UUID, see state.mjs `raterId`
  * @param {object} [extra] Document-level fields to carry (generatedFrom, population, grading, …)
- * @returns {object} A schemaVersion 3 document
+ * @returns {Promise<object>} A schemaVersion 3 document
  */
-export function bundleSamples(arms, scene = {}, extra = {}) {
+export async function bundleSamples(arms, scene = {}, extra = {}) {
     const first = arms[0]?.sample ?? {};
     const doc = { schemaVersion: SCHEMA_VERSION };
     // WHAT IDENTIFIES THIS CAPTURE, surviving a rename. Nothing content-derived can: `name` and the scene
@@ -793,6 +850,11 @@ export function bundleSamples(arms, scene = {}, extra = {}) {
 
     // THE BULK, LAST. Anything ahead of these is reachable with `head` — every scene, every param, every
     // verdict — and anything behind them is not.
+    // CONTENT IDENTITY AHEAD OF THE BULK, because it is two lines and the trailing block is ordered by
+    // size. It is also what a reader wants without inflating a 2MB book: "same book?" is answerable here.
+    const books = first.books ?? {};
+    doc.bookHashes = await hashBooks(books);
+
     // THE MESSAGES THE HAYSTACK IS BUILT FROM, once per scene — not a window. A window is fixed at one
     // depth, one matchWindow and one includeNames; these rebuild any of them, so arms reading the same
     // moment at different depths share one stored input instead of needing one blob each.
@@ -801,7 +863,7 @@ export function bundleSamples(arms, scene = {}, extra = {}) {
     // injects — they are a property of the moment, not of a configuration — so hoisting them here is what
     // stops a six-arm document carrying six copies of an Author's Note.
     if ((first.injects ?? []).length) doc.sceneInjects = { [id]: first.injects };
-    doc.books = first.books ?? {};
+    doc.books = books;
     return doc;
 }
 

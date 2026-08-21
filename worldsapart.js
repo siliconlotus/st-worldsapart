@@ -2647,7 +2647,7 @@ async function gradeScene(named) {
 
     // ONE SCENE IS A ONE-ELEMENT `scenes` LIST. There is no flat single-arm shape any more, so /wa-grade
     // and /wa-super-grade write the same kind of file and every reader handles both without asking which.
-    const bundle = bundleSamples([{ arm: 'shipped', sample }], { ...sceneRange(), user: raterId(), captureId: uuidv4() });
+    const bundle = await bundleSamples([{ arm: 'shipped', sample }], { ...sceneRange(), user: raterId(), captureId: uuidv4() });
     const { filename, content } = sampleFile(bundle);
     download(content, filename, 'application/json');
     const graded = grades.filter(g => gradeValue(g) > 0).length;
@@ -3142,7 +3142,7 @@ async function superGradeScene(named) {
 
     // ONE download. The arms share the grades and — overwhelmingly the bulk of the bytes — the embedded book
     // copies, so N files meant N browser download prompts and N duplicates of a 300-entry lorebook.
-    const bundle = bundleSamples(built, { ...sceneRange(), user: raterId(), captureId: uuidv4() });
+    const bundle = await bundleSamples(built, { ...sceneRange(), user: raterId(), captureId: uuidv4() });
     const { filename, content } = sampleFile({ ...bundle, name: base });
     download(content, filename, 'application/json');
     console.log(`Worlds Apart: ${built.length}-arm bundle -> ${filename}`, bundle);
