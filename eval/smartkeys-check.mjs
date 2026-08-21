@@ -340,6 +340,14 @@ console.log('ok   SmartKey structural validation');
     eq(sc.classifyEntry(entries[5])[0]?.flag, 'english common', 'an alternation is as loose as its loosest branch');
     eq(sc.reasonOf(sc.classifyEntry(entries[5])[0]).text, 'english common · the', '...and the loose branch is named');
     eq(sc.classifyEntry(entries[6])[0]?.flag, 'book common', 'a conjunction is as tight as its tightest conjunct');
+    // A CASE-SENSITIVE capitalised term cannot be the common word, so the collision is impossible rather
+    // than unlikely. Measured: this is 2 of the 7 SmartKeys the flag caught across the books on disk,
+    // both the same character name. A term written PLAINLY is not spared — `Mark` does match `mark`, and
+    // sparing it would put this path at odds with the literal one.
+    entries[7].key = ['? ^Mark'];
+    entries[8].key = ['? Mark'];
+    eq(sc.classifyEntry(entries[7])[0]?.flag !== 'english common', true, 'a case-sensitive capital cannot be the lower-case common word');
+    eq(sc.classifyEntry(entries[8])[0]?.flag, 'english common', '...where the same term written plainly can');
 }
 console.log('ok   SmartKeys are audited on df, exempt only from the literal-string heuristics');
 
@@ -426,6 +434,28 @@ console.log('ok   quoting a single term is free; quoting across a space is not')
     eq(c('? (fire::3 XOR flood::3) OR water::0.5', 'fire and flood near the water'), 0.5, 'a failed XOR leaks no boost');
     eq(c('? (fire::3 alpha) OR water::0.5', 'fire and water'), 0.5, 'a half-matched AND leaks no boost');
 }
+// AND SHORT-CIRCUITS, so operand ORDER now decides how much work is done — and must decide nothing
+// else. Every pair here is the same conjunction written both ways, including a REGEX operand, which is
+// the case the short-circuit exists for: the automaton cannot pre-filter a pattern, so a failed left
+// operand is what spares the scan.
+{
+    const pairs = [
+        ['? (Arthur | Kyle) Porsche', '? Porsche (Arthur | Kyle)', 'Kyle drove the Porsche. Arthur watched.'],
+        ['? (Arthur | Kyle) Porsche', '? Porsche (Arthur | Kyle)', 'Arthur walked home.'],
+        ['? /P[o]rsche/ Arthur', '? Arthur /P[o]rsche/', 'Arthur and the Porsche'],
+        ['? /P[o]rsche/ Arthur', '? Arthur /P[o]rsche/', 'Arthur alone'],
+        ['? =Kyle^2 Porsche', '? Porsche =Kyle^2', 'Kyle and the Porsche'],
+        ['? fire -water', '? -water fire', 'fire alone'],
+        ['? fire -water', '? -water fire', 'fire and water'],
+    ];
+    for (const [a, b, text] of pairs) {
+        eq(countKey(a, text), countKey(b, text), `order does not change the count: ${a}  /  ${b}`);
+    }
+    // The failure shape itself, since that is the branch the short-circuit returns from directly.
+    eq(countKey('? zebra /P[o]rsche/', 'Arthur and the Porsche'), 0, 'a failed left operand yields no match');
+}
+console.log('ok   AND short-circuits without changing what it counts');
+
 console.log('ok   terms score on weight x occurrences; OR sums');
 
 // WA has no wildcards and no fuzzy matching, so * and ~ are ordinary characters and get no warning.

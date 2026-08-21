@@ -665,11 +665,21 @@ export function evaluate(node, text, acHits) {
         // AND joins DISTINCT things, so each side keeps its own units and their scores will add. This
         // is why a conjunction no longer outscores its own left operand: `? moon AND rocket` is two
         // units of one occurrence each, not one unit of two.
+        // SHORT-CIRCUITS, alone among the operators, because it is the only one that throws its operands
+        // away on failure: an unmatched AND contributes no units, so a right operand evaluated after a
+        // failed left cannot affect the result. Worth nothing for a plain term, which the automaton has
+        // already reduced to a map lookup — the saving is a REGEX operand or a flagged term (`=`, `^`),
+        // both of which fall through to a regex over the folded haystack that no candidate filter can
+        // spare them.
+        //
+        // OR and XOR must still visit both: OR pools the two sides into one unit and sums them, and XOR
+        // needs both verdicts to know whether exactly one held.
         case 'AND': {
-            const l = evaluate(node.left, text, acHits), r = evaluate(node.right, text, acHits);
-            const matched = l.matched && r.matched;
-            const units = matched ? [...l.units, ...r.units] : [];
-            return { matched, scoreBoost: boostOf(units), units };
+            const l = evaluate(node.left, text, acHits);
+            if (!l.matched) return { matched: false, scoreBoost: 0, units: [] };
+            const r = evaluate(node.right, text, acHits);
+            const units = r.matched ? [...l.units, ...r.units] : [];
+            return { matched: r.matched, scoreBoost: boostOf(units), units };
         }
         // OR SUMS, like AND. max() was only ever right because it coincided with the sum whenever a
         // single branch matched — unmatched branches carry 0 — and it diverged exactly where a synonym

@@ -128,8 +128,15 @@ export function commonSurfaceOf(node, common = COMMON_WORDS) {
     if (!node) return null;
     switch (node.type) {
         // A quoted phrase is a phrase, whatever its words are: `"your husband"` is selective.
+        //
+        // A CASE-SENSITIVE capitalised term cannot BE the common word — `? ^Mark` never matches `mark`,
+        // so the collision the flag asserts is impossible rather than merely unlikely. That is matcher
+        // semantics, not a guess about intent, which is why it is read here where `looksProper` is not:
+        // the literal path deliberately does not spare a capitalised key, since `Mark` written plainly
+        // does match `mark`.
         case 'TERM': {
             const v = String(node.value ?? '').trim();
+            if (node.isCaseSensitive && v !== v.toLowerCase()) return null;
             return !/\s/.test(v) && common.has(v.toLowerCase()) ? v : null;
         }
         case 'OR': {
