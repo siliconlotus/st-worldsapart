@@ -101,11 +101,11 @@ const ENGLISH_COMMON_STICKY_CUT = 1000;
 const COMMON_HEAD = new Set([...COMMON_WORDS].slice(0, ENGLISH_COMMON_STICKY_CUT));
 
 /**
- * The common-English word a SmartKey's matching surface reduces to, or null if it has a selective term.
+ * The term a SmartKey's matching surface reduces to under `isLoose`, or null if it has a selective term.
  *
- * The audit's English-common check reads a key AS A STRING, which is meaningless for a SmartKey: the
- * matching surface of `? fire water` is its terms. Walked per term instead, with the two operators
- * pulling in opposite directions —
+ * The audit's per-key checks read a key AS A STRING, which is meaningless for a SmartKey: the matching
+ * surface of `? fire water` is its terms. Walked per term instead, with the two operators pulling in
+ * opposite directions —
  *
  *   OR takes the LOOSEST branch. A group fires when any branch does, so one common word opens it on
  *   almost every window: `(your|my|Kyle's)` is as selective as `your`, and `Kyle's` being rare does not
@@ -122,9 +122,14 @@ const COMMON_HEAD = new Set([...COMMON_WORDS].slice(0, ENGLISH_COMMON_STICKY_CUT
  * A NOT contributes no firing and a REGEX cannot be judged as a word; both read as selective, since the
  * flag must claim over-firing rather than merely fail to rule it out.
  *
- * @returns {string|null} the common word the key reduces to, for the reason text
+ * `isLoose` is the caller's question about ONE term — English-common for the word list, book-df for the
+ * "everyone in this family is a Sommers" case. The walk is the same either way, which is the point of
+ * taking a predicate: two copies of the OR/AND asymmetry is two rules to drift.
+ *
+ * @param {(term: string) => boolean} isLoose
+ * @returns {string|null} the loose term the key reduces to, for the reason text
  */
-export function commonSurfaceOf(node, common = COMMON_WORDS) {
+export function commonSurfaceOf(node, isLoose) {
     if (!node) return null;
     switch (node.type) {
         // A quoted phrase is a phrase, whatever its words are: `"your husband"` is selective.
@@ -137,16 +142,16 @@ export function commonSurfaceOf(node, common = COMMON_WORDS) {
         case 'TERM': {
             const v = String(node.value ?? '').trim();
             if (node.isCaseSensitive && v !== v.toLowerCase()) return null;
-            return !/\s/.test(v) && common.has(v.toLowerCase()) ? v : null;
+            return v && isLoose(v) ? v : null;
         }
         case 'OR': {
-            const l = commonSurfaceOf(node.left, common);
-            return l ?? commonSurfaceOf(node.right, common);
+            const l = commonSurfaceOf(node.left, isLoose);
+            return l ?? commonSurfaceOf(node.right, isLoose);
         }
         case 'AND': {
-            const l = commonSurfaceOf(node.left, common);
+            const l = commonSurfaceOf(node.left, isLoose);
             if (!l) return null;
-            const r = commonSurfaceOf(node.right, common);
+            const r = commonSurfaceOf(node.right, isLoose);
             return r ? l : null;
         }
         default: return null;
@@ -154,10 +159,13 @@ export function commonSurfaceOf(node, common = COMMON_WORDS) {
 }
 
 /** `commonSurfaceOf` from the raw key, or null when it does not parse or is not a SmartKey. */
-export function commonSmartKey(raw, common = COMMON_WORDS) {
+export function commonSmartKey(raw, isLoose) {
     if (!String(raw ?? '').trim().startsWith('?')) return null;
-    try { return commonSurfaceOf(parse(tokenize(String(raw))), common); } catch { return null; }
+    try { return commonSurfaceOf(parse(tokenize(String(raw))), isLoose); } catch { return null; }
 }
+
+/** A single word from the English list — the predicate the English-common flag walks with. */
+export const isEnglishCommon = (list) => (v) => !/\s/.test(v) && list.has(v.toLowerCase());
 
 /**
  * Flag-aware keyword prune analysis for one loaded lorebook — one classifier shared by the Lorebook
@@ -371,7 +379,7 @@ export function buildKeyPruneScan(data, opts, ignoreSet, { caseSensitiveDefault 
             const list = sticky ? COMMON_HEAD : COMMON_WORDS;
             if (literal && !/\s/.test(k) && list.has(k.toLowerCase())) return { flag: 'english common', bookContent, chatRate };
             // `term` only on this path: naming it beside a literal key would just repeat the key.
-            const term = literal ? null : commonSmartKey(k, list);
+            const term = literal ? null : commonSmartKey(k, isEnglishCommon(list));
             if (term) return { flag: 'english common', term, bookContent, chatRate };
         }
         // ignoreProper spares a capitalised key from the dead flag on the grounds it is a name the chat
@@ -386,6 +394,15 @@ export function buildKeyPruneScan(data, opts, ignoreSet, { caseSensitiveDefault 
         // as unflagged like any other key.
         if (bookContent === 0 && opts.pruneUnattested && !(literal && opts.ignoreProper && looksProper(k)) && !chatRate) return { flag: 'unattested', bookContent, literal, chatChecked: chatRate !== undefined };
         if (nBook >= KEY_MIN_BOOK_COMMON_ENTRIES && bookContent / nBook > opts.bookCommon * 0.75 && opts.pruneCommon) return { flag: 'book common', bookContent };
+        // THE SAME QUESTION PER TERM. A SmartKey's own df is the df of the whole expression, so a
+        // conjunction with one ubiquitous branch reads as rare — `? Brad (Murphy | Sommers)` fires on
+        // few entries while `Sommers` is most of the book, and every extra `Sommers` in the window
+        // enters the score as though it were evidence about Brad. The flag says WHICH branch, because
+        // "book common" against a query is otherwise unactionable.
+        if (nBook >= KEY_MIN_BOOK_COMMON_ENTRIES && !literal && opts.pruneCommon) {
+            const term = commonSmartKey(k, v => scan(v, cs, ww).df / nBook > opts.bookCommon * 0.75);
+            if (term) return { flag: 'book common', term, bookContent: scan(term, cs, ww).df };
+        }
         // Activation breadth, checked after firing rate: a key can be rare in the prose yet listed on
         // most entries, which the content-df flags above can't see. Same small-corpus guard, since
         // "75% of 4 entries" is as meaningless here as it is there.
@@ -468,7 +485,7 @@ export function buildKeyPruneScan(data, opts, ignoreSet, { caseSensitiveDefault 
         // (`regex-invalid`, `negation-only`, `stray-quote`) and a translation table here is one more
         // thing to drift from the message the Studio's save check shows for the same key.
         if (p.flag === 'unusable') return { text: p.code ? `unusable — ${p.code}` : 'unusable', color };
-        if (p.flag === 'book common') return { text: `book common (${Math.round(100 * p.bookContent / nBook)}%)`, color };
+        if (p.flag === 'book common') return { text: `book common${p.term ? ` · ${p.term}` : ''} (${Math.round(100 * p.bookContent / nBook)}%)`, color };
         if (p.flag === 'english common') {
             // The TERM is named for a SmartKey, since "english common" against `? (your|my|Kyle's) heat`
             // otherwise reads as a claim about the whole expression and the author cannot see which

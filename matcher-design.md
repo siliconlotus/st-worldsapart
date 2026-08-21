@@ -630,10 +630,25 @@ same, and the curve has stopped ordering entries by how much the text says. Unbo
 curve goes deaf when it does is not.
 
 **No frequency discount accompanies this, deliberately.** A ubiquitous key is an author declaration —
-`keyword-core.mjs` already exempts sticky and constant entries from the too-common flags on that
-ground — a badly chosen one is reported by the audit, where the author can act on it, and an entry
-whose key fires broadly but whose content does not fit still ranks low on the other two fused signals.
-A discount here would be that same judgement taken a second time, silently, where nobody can see it.
+`keyword-core.mjs` exempts entries carrying one from the too-common flags on that ground — a badly
+chosen one is reported by the audit, where the author can act on it, and an entry whose key fires
+broadly but whose content does not fit still ranks low on the other two fused signals. A discount here
+would be that same judgement taken a second time, silently, where nobody can see it.
+
+**The exemption belongs to `constant` and `promote`, not to `sticky`.** `constant` declares presence
+unconditionally and `promote` declares it on activation (*Open work* #2), so a broad key on either is
+doing what it was told. `sticky` declares only that an entry PERSISTS once fired — a claim about
+duration, not about breadth — and a broad key there latches on the wrong turn and then holds for as
+long as the author asked, which is the expensive version of the mistake rather than an intended one.
+The two were one thing before `promote` separated them, and the exemption stayed on the half that
+kept the name.
+
+So sticky is audited like any other entry: the whole English list rather than the head-of-list cut, and
+no book-common reprieve. **Measured** across 43 books: 2 SmartKeys on sticky entries are hidden by the
+head cut and 23 book-common flags by the reprieve — small, and both of the SmartKeys are keys their
+author had already judged bad by eye. The exemption lands with `promote`, since until then a
+declaration has nowhere to live and the main-cast-name-on-a-sticky-sheet pattern would flag with no way
+to say it was meant.
 
 **Two rankings, not one.** `fuseRetrieval` decides what is activated; `fuseRanks` decides prompt order
 and what survives the budget. **A change to `fuseRanks` can never surface an entry retrieval did not
@@ -1288,6 +1303,11 @@ instances the books on disk hold.
    position at once — and the ST maintainers recommend it for exactly that. A reference entry marked
    `sticky: 1, constant: false` is reaching for the insertion guarantee, not the persistence; promoting
    it keeps that and drops the two it was never asking for.
+
+   **It also takes the too-common exemption over from `sticky`** (`stickySkipCommon`, which becomes
+   `promoteSkipCommon`): the audit's reprieve is for an author declaring an entry should be present,
+   which is what `promote` says and what `sticky` only used to imply. Until then sticky keeps it, for
+   want of anywhere else to put it.
 
    Stored as `entry.promote`, top-level beside `sticky` and `vectorized` rather than under
    `extensions` — `convertCharacterBook` reads 25 fields OUT of `extensions` and never copies the map,
