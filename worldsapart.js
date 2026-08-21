@@ -53,7 +53,7 @@ import { runState, defaultSettings, settings, ensureSettings } from './extension
 import { ensureStudioStyle, entryFoldHtml, keyHitsHtml, makeSortControl, makeTierEditor, showEntryText, wiGlyph, wiTooltip } from './extension/ui-widgets.mjs';
 import { PRESENTATION_ALIAS, SORT_FNS, gradeOrder, normPresentation, presentationBaseLabel, presentationLabel, reconcileTiers, tierRank, wiTitleOf } from './extension/sort.mjs';
 import { lorebookStudio } from './extension/studio.mjs';
-import { armNames, buildSample, bundleSamples, captureParams, GRADE_ANCHORS, GRADE_SCALE, gradeValue, mergeGrades, openBundle, rowKey, sampleFile, searchedBook, splitGraded, trimBook, unionArms } from './extension/grading.mjs';
+import { armNames, buildSample, bundleSamples, captureParams, GRADE_ANCHORS, GRADE_SCALE, gradeValue, keyByUid, mergeGrades, openBundle, rowKey, sampleFile, searchedBook, splitGraded, unionArms } from './extension/grading.mjs';
 
 /** The grading scale in one caption line, shared by both grading popups. */
 const gradeAnchorLine = () => `Grade 0–4: ${GRADE_ANCHORS.map((a, g) => `${g} = ${a.split(';')[0].toLowerCase()}`).join(' · ')}.`;
@@ -2475,12 +2475,7 @@ function fillReadZeros(root) {
  * @returns {Promise<string>} Empty string — output is a downloaded file
  */
 async function gradeScene(named) {
-    const bookMode = String(named?.books ?? 'full').toLowerCase();
 
-    if (!['full', 'meta', 'none'].includes(bookMode)) {
-        toastr.warning('books= must be full, meta or none', 'Worlds Apart');
-        return '';
-    }
 
     // Cap the dynamic rows at the depth asked for. Nothing cuts the population for relevance any more, at
     // either stage, so this is purely a grading budget: without it a capture pools the whole admitted set.
@@ -2595,7 +2590,7 @@ async function gradeScene(named) {
     for (const world of runState.attachedWorlds) {
         const data = await loadWorldInfo(world);
         if (data?.entries) {
-            books[world] = trimBook(data.entries, bookMode);
+            books[world] = keyByUid(data.entries);
         }
     }
 
@@ -2629,7 +2624,6 @@ async function gradeScene(named) {
         snapshot: paramSnapshot(),
         candidates: rows,
         books,
-        bookMode,
         priority: (scopedPriority() ?? []).map(x => x.cfg),
         grades,
         // Kept under its historical name so samples on disk stay readable; it now records only the
@@ -2652,7 +2646,7 @@ async function gradeScene(named) {
     download(content, filename, 'application/json');
     const graded = grades.filter(g => gradeValue(g) > 0).length;
     toastr.success(`Saved ${filename} — ${graded} of ${grades.length} graded above 0. Move it to eval/eval-data/ and run graded-scene-grid.mjs --sample`, 'Worlds Apart', { timeOut: 8000 });
-    console.log(`Worlds Apart: sample "${sample.name}" — ${grades.length} graded rows, ${Object.keys(books).length} book(s) at fidelity "${bookMode}"`, sample);
+    console.log(`Worlds Apart: sample "${sample.name}" — ${grades.length} graded rows, ${Object.keys(books).length} book(s) embedded`, sample);
 
     return '';
 }
@@ -3027,16 +3021,8 @@ async function superGradePopup({ captures, union, entryOf, prior: prior0 = [], s
 }
 
 async function superGradeScene(named) {
-    const bookMode = String(named?.books ?? 'full').toLowerCase();
-    if (!['full', 'meta', 'none'].includes(bookMode)) {
-        toastr.warning('books= must be full, meta or none', 'Worlds Apart');
-        return '';
-    }
     // Sharable dumps need content to be re-indexable by anyone but their author (see above), so a downgrade
     // is allowed but never silent.
-    if (bookMode !== 'full') {
-        toastr.warning(`books=${bookMode} drops entry content, so nobody without your vector index can re-score these samples`, 'Worlds Apart', { timeOut: 8000 });
-    }
 
     const wanted = Math.max(1, Number(named?.candidates ?? 30));
     const picked = String(named?.arms ?? '').trim()
@@ -3084,7 +3070,7 @@ async function superGradeScene(named) {
     for (const world of runState.attachedWorlds) {
         const data = await loadWorldInfo(world);
         if (data?.entries) {
-            books[world] = trimBook(data.entries, bookMode);
+            books[world] = keyByUid(data.entries);
         }
     }
     const entryOf = (world, uid) => Object.values(books[world] ?? {}).find(e => Number(e.uid) === Number(uid));
@@ -3123,7 +3109,6 @@ async function superGradeScene(named) {
             snapshot: cap.snapshot,
             candidates: cap.rows,
             books,
-            bookMode,
             priority: (scopedPriority() ?? []).map(x => x.cfg),
             grades,
             cutoff: {
@@ -3886,7 +3871,6 @@ export async function init() {
         callback: gradeScene,
         namedArgumentList: [
             SlashCommandNamedArgument.fromProps({ name: 'name', description: 'sample name, used as the filename', typeList: [ARGUMENT_TYPE.STRING], defaultValue: 'scene-<date>' }),
-            SlashCommandNamedArgument.fromProps({ name: 'books', description: 'lorebook copy fidelity: full (verbatim), meta (entries without content), none (paths only)', typeList: [ARGUMENT_TYPE.STRING], defaultValue: 'full', enumList: ['full', 'meta', 'none'] }),
             SlashCommandNamedArgument.fromProps({ name: 'candidates', description: 'how many retrieved entries to surface for grading (the cliff is switched off for the run, so the sample can assess every cutoff mode offline)', typeList: [ARGUMENT_TYPE.NUMBER], defaultValue: '20' }),
             SlashCommandNamedArgument.fromProps({ name: 'notes', description: 'free-text note stored in the sample', typeList: [ARGUMENT_TYPE.STRING] }),
         ],
@@ -3900,7 +3884,6 @@ export async function init() {
         namedArgumentList: [
             SlashCommandNamedArgument.fromProps({ name: 'name', description: 'base sample name; each arm gets "<name>--<arm>.json"', typeList: [ARGUMENT_TYPE.STRING], defaultValue: 'chat-msgN' }),
             SlashCommandNamedArgument.fromProps({ name: 'arms', description: 'which arms to capture, comma-separated (default: all)', typeList: [ARGUMENT_TYPE.STRING], enumList: Object.keys(POOL_ARMS) }),
-            SlashCommandNamedArgument.fromProps({ name: 'books', description: 'lorebook copy fidelity: full (default — content is what makes a sample re-indexable by anyone else), meta, none', typeList: [ARGUMENT_TYPE.STRING], defaultValue: 'full', enumList: ['full', 'meta', 'none'] }),
             SlashCommandNamedArgument.fromProps({ name: 'candidates', description: 'candidate depth per arm (the cliff is switched off for each run)', typeList: [ARGUMENT_TYPE.NUMBER], defaultValue: '30' }),
             SlashCommandNamedArgument.fromProps({ name: 'notes', description: 'free-text note stored in every sample written', typeList: [ARGUMENT_TYPE.STRING] }),
         ],

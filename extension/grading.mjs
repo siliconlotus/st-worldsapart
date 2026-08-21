@@ -12,29 +12,12 @@
 // answering after the embedding model changed. The index path is recorded; the harness self-checks it by
 // re-embedding a stored chunk and comparing cosine.
 
-/** Fields of an entry the offline harness actually reads. `content` is NOT one of them, which is what makes
- *  'meta' lossless and ~20x smaller: the chunk text being scored comes from the vector index, and the
- *  gazetteer is built from keys and titles only.
- *
- *  This makes 'meta' lossless for the CURRENT gazetteer but not for experimenting with a wider one, which is
- *  why it is not the default. The widening that motivated keeping content — a gazetteer fed entry bodies —
- *  has since measured WORSE than shipped across three scenes (mean rank 7.20 vs 6.43; see
- *  ranking.mjs buildTermWeights), so 'full' is now just cheap insurance against the next such question
- *  rather than support for a live one. 'meta' is the better default the day sample size starts to hurt. */
-const META_FIELDS = ['uid', 'comment', 'key', 'keysecondary', 'vectorized', 'constant', 'sticky', 'order', 'disable', 'caseSensitive', 'matchWholeWords', 'scanDepth', 'ignoreBudget'];
-
 /**
- * Copies a book's entries at the requested fidelity.
+ * Copies a book's entries, keyed by uid.
  *
- * 'full' — verbatim, including entry content. THE DEFAULT: content is what a widened gazetteer would read,
- *          and that arm measures competitively (see META_FIELDS), so a sample that drops it can't test it.
- *          A book is a couple of MB and eval-data is gitignored, so the size is not worth the foreclosure.
- * 'meta' — every entry, `content` dropped. Lossless for the harness AS IT SCORES TODAY (see META_FIELDS)
- *          at ~1/20th the size. It keeps every entry, which matters: the gazetteer and the keyword scan read
- *          the whole book, so dropping "irrelevant" ENTRIES silently changes the entity filter and ranking.
- * 'none' — no entries; the sample just records which books were attached. graded-scene-grid.mjs REJECTS such
- *          a sample: it has no live-book fallback by design, since reading the current lorebook is what let a
- *          later edit move an already-graded scene's numbers. Provenance only.
+ * VERBATIM, AND THE WHOLE BOOK. A bundle that does not embed its books is malformed — there is no live-book
+ * fallback anywhere by design, because reading the current lorebook is what let a later edit move an
+ * already-graded scene's numbers.
  *
  * There is deliberately no "only the candidate entries" mode. It looks like the thrifty choice and is a
  * trap: the entity filter's gazetteer is built from every entry's keys and title, and admitting 2.3x too
@@ -42,30 +25,11 @@ const META_FIELDS = ['uid', 'comment', 'key', 'keysecondary', 'vectorized', 'con
  * figure that used to sit here was stage-1 BM25, which no longer exists).
  *
  * @param {Record<string, object>|object[]} entries A book's entries (ST stores a uid-keyed object)
- * @param {'full'|'meta'|'none'} mode Fidelity
  * @returns {Record<string, object>} uid-keyed entries
  */
-export function trimBook(entries, mode = 'full') {
-    const list = Array.isArray(entries) ? entries : Object.values(entries ?? {});
-
-    if (mode === 'none') {
-        return {};
-    }
-
+export function keyByUid(entries) {
     const out = {};
-    for (const entry of list) {
-        if (mode === 'full') {
-            out[entry.uid] = entry;
-            continue;
-        }
-        const kept = {};
-        for (const field of META_FIELDS) {
-            if (entry[field] !== undefined) {
-                kept[field] = entry[field];
-            }
-        }
-        out[entry.uid] = kept;
-    }
+    for (const entry of (Array.isArray(entries) ? entries : Object.values(entries ?? {}))) out[entry.uid] = entry;
     return out;
 }
 
@@ -418,14 +382,13 @@ export function searchedBook(rows) {
  * @param {object} args.snapshot Raw grouped paramSnapshot(), for the record
  * @param {object[]} args.candidates Candidate rows, as /wa-debug builds them (flat signals, `book`, `index`)
  * @param {Record<string, object>} args.books world -> uid-keyed entries (already trimmed)
- * @param {string} args.bookMode Fidelity the books were copied at
  * @param {object[]} args.priority Per-book weight/offset/cap
  * @param {Array<{title: string, grade: number, book?: string, uid?: number}>} args.grades Human grades
  * @param {object} [args.cutoff] The grading depth this run captured to, and the live cap it overrode
  * @param {string} [args.now] ISO date (injected so the check is deterministic)
  * @returns {object} The sample manifest
  */
-export function buildSample({ name, notes, query, queryChat, scanChat, injects, depth, chat, book, index, primaryBook, embedModel, params, snapshot, candidates, books, bookMode, priority, grades, cutoff, gradedCandidates, pluginFP, sourceFP, waVersion, stVersion, now }) {
+export function buildSample({ name, notes, query, queryChat, scanChat, injects, depth, chat, book, index, primaryBook, embedModel, params, snapshot, candidates, books, priority, grades, cutoff, gradedCandidates, pluginFP, sourceFP, waVersion, stVersion, now }) {
     // Grades for entries outside the searched collection can't be ranked offline: the harness loads one
     // vector collection, so a second book's entries have no cosine and never enter the ranking. Declaring
     // them here means the harness reports "excluded" instead of scoring them as irrelevant — the exact
@@ -477,8 +440,8 @@ export function buildSample({ name, notes, query, queryChat, scanChat, injects, 
         stVersion,
         embedModel,
         primaryBook,
-        // Path to the primary book on disk — the harness's fallback when the sample embeds no entries
-        // (bookMode 'none'), and provenance otherwise.
+        // Path to the primary book on disk. PROVENANCE ONLY, never a fallback: no reader may open it,
+        // because reading the live lorebook is what let a later edit move an already-graded scene's numbers.
         book,
         index,
 
@@ -488,7 +451,6 @@ export function buildSample({ name, notes, query, queryChat, scanChat, injects, 
         params,
         paramSnapshot: snapshot,
 
-        bookMode,
         bookPriority: priority,
         books,
 
@@ -511,7 +473,7 @@ export function buildSample({ name, notes, query, queryChat, scanChat, injects, 
  *  not be hoisted: the summary arm has a different query, and a lexical-only arm can retrieve from a
  *  different book. `books` and the haystacks are shared too but are NOT here: they are the bulk, and the
  *  schema puts them last (bundle-schema.md, *Field order is part of the schema*). */
-const SHARED_FIELDS = ['name', 'notes', 'createdAt', 'createdBy', 'bookMode', 'bookPriority', 'gradeScale', 'embedModel', 'pluginFP', 'sourceFP'];
+const SHARED_FIELDS = ['name', 'notes', 'createdAt', 'createdBy', 'bookPriority', 'gradeScale', 'embedModel', 'pluginFP', 'sourceFP'];
 
 /** Per-arm fields that are the SCENE's, not the arm's, and so move onto the scene rather than repeating. */
 const SCENE_FIELDS = ['chat', 'scanChat', 'injects'];   // a sample's names for sceneChat / sceneChats / sceneInjects
@@ -727,9 +689,8 @@ const toCandidate = (row, i) => {
 /**
  * A book's content identity, stable across installs.
  *
- * WHAT IS HASHED IS THE STORED BOOK, not the book on someone's disk. `bookMode` decides how much of an
- * entry is copied, so a 'full' capture and a trimmed one of the same source lorebook hash differently —
- * which is the honest answer to "did these two captures grade the same thing", since they did not.
+ * WHAT IS HASHED IS THE STORED BOOK, not the book on someone's disk — which is the honest answer to "did
+ * these two captures grade the same thing", since a capture can only speak for what it froze.
  *
  * KEY ORDER IS NORMALISED because it carries no meaning and two installs need not agree on it: ST builds
  * an entry object however its own code happens to, and `JSON.stringify` preserves insertion order. Without

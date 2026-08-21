@@ -2,7 +2,7 @@
 // this pins the part that decides what a sample CONTAINS: book fidelity, the settings mapping, the
 // reference tier, and the foreign-book exclusion. A sample that silently loses a field is a graded scene
 // that can't be re-run, which is the whole failure this feature exists to prevent.
-import { buildSample, bundleSamples, captureParams, hashBooks, isDurable, mergeGrades, openBundle, passKey, rowKey, sampleFile, searchedBook, splitGraded, trimBook, unionArms } from '../extension/grading.mjs';
+import { buildSample, bundleSamples, captureParams, hashBooks, keyByUid, isDurable, mergeGrades, openBundle, passKey, rowKey, sampleFile, searchedBook, splitGraded, unionArms } from '../extension/grading.mjs';
 import { eq, gradeValue } from './metrics.mjs';
 import * as ranking from '../extension/ranking.mjs';
 
@@ -11,22 +11,11 @@ const book = {
     2: { uid: 2, comment: 'Mechanics', key: ['knot'], vectorized: false, constant: true, content: 'B'.repeat(2000) },
 };
 
-// --- trimBook fidelity ---
-const full = trimBook(book, 'full');
-eq(Object.keys(full).length, 2, 'full keeps every entry');
-eq(full[1].content.length, 3000, 'full keeps entry content');
-
-const meta = trimBook(book, 'meta');
-eq(Object.keys(meta).length, 2, 'meta keeps every entry (gazetteer + keyword scan read the whole book)');
-eq(meta[1].content, undefined, 'meta drops content');
-eq(meta[1].comment, 'Villa Party', 'meta keeps the title — the gazetteer is mostly titles');
-eq(JSON.stringify(meta[1].key), '["villa","party"]', 'meta keeps keys');
-eq(meta[1].vectorized, true, 'meta keeps vectorized (drives scoreVectorKeys offline)');
-eq(JSON.stringify(trimBook(book, 'none')), '{}', 'none embeds no entries');
-// Size is the only reason meta exists; assert it actually pays.
-eq(JSON.stringify(meta).length * 10 < JSON.stringify(full).length, true, 'meta is >10x smaller than full');
-// An array of entries is accepted too (the harness holds them that way).
-eq(Object.keys(trimBook(Object.values(book), 'meta')).length, 2, 'trimBook accepts an array');
+// --- keyByUid ---
+const full = keyByUid(book);
+eq(Object.keys(full).length, 2, 'every entry is kept — the gazetteer and the keyword scan read the whole book');
+eq(full[1].content.length, 3000, 'entries are verbatim; a bundle that drops content is malformed');
+eq(Object.keys(keyByUid(Object.values(book))).length, 2, 'an array of entries is accepted too');
 
 // --- captureParams maps settings onto the harness's argument names ---
 const s = { rrfK: 20, bm25K1: 1.2, bm25B: 0.75, lexicalWeight: 1, properNounBoost: 3, stopwordDocFreq: 0.25,  maxVectorEntries: 10, suppressVectorKeys: true, scoreVectorKeys: false, entityFilter: true, queryMode: 'messages', weightByOrder: false };
@@ -81,7 +70,7 @@ eq(searchedBook([{ book: 'B', cosine: 0.9 }, { book: 'A', cosine: 0.8 }]), 'B', 
 const sample = buildSample({
     name: 'scene9', query: 'q', scanChat: [{ name: 'A', mes: 'w' }], depth: 5, index: 'i', chat: 'chats/c.jsonl', primaryBook: 'Main',
     params: p, snapshot: { scoring: {} }, candidates: [{ title: 'Villa Party' }],
-    books: { Main: meta, Other: {} }, bookMode: 'meta', priority: [{ book: 'Main', weight: 1 }],
+    books: { Main: full, Other: {} }, priority: [{ book: 'Main', weight: 1 }],
     grades: [
         { title: 'Villa Party', grade: 5, book: 'Main', uid: 1 },
         { title: 'Mechanics', grade: 4, book: 'Other', uid: 10 },
@@ -97,7 +86,6 @@ eq(sample.grades.length, 2, 'all grades kept');
 // not dropped, or the eval scores a relevant entry as irrelevant.
 eq(JSON.stringify(sample.excludeTitles), '["Mechanics"]', 'grades from a non-primary book are auto-excluded');
 eq(sample.excludeTitles.includes('Villa Party'), false, 'primary-book grades are not excluded');
-eq(sample.bookMode, 'meta', 'fidelity is recorded so a reader knows what was dropped');
 eq(Object.keys(sample.books).length, 2, 'every attached book is recorded');
 
 const { filename, content } = sampleFile(sample);
@@ -113,7 +101,7 @@ eq(sampleFile({}).filename, 'scene.json', 'missing name falls back');
 const IN = {
     name: 'rt', notes: 'n', query: 'q', queryChat: [{ name: 'A', mes: 'm' }], scanChat: [{ name: 'A', mes: 'w' }], depth: 20,
     chat: 'chats/c.jsonl', book: 'worlds/Main.json', index: 'i.json', primaryBook: 'Main', embedModel: 'bge-m3',
-    params: { K: 20 }, snapshot: { a: 1 }, candidates: [{ uid: 1 }], books: { Main: {} }, bookMode: 'none',
+    params: { K: 20 }, snapshot: { a: 1 }, candidates: [{ uid: 1 }], books: { Main: {} },
     priority: [{ book: 'Main' }], grades: [{ title: 'T', grade: 3, book: 'Main', uid: 1 }],
     cutoff: { gradingOverride: { maxVectorEntries: 20 } }, gradedCandidates: 20, pluginFP: 'deadbeef', sourceFP: 'deadbeef',
     now: '2026-07-29',
@@ -317,7 +305,7 @@ const mk = (arm, over) => ({ arm, sample: buildSample({
     chat: 'chats/c.jsonl', book: 'worlds/Main.json', index: `i-${arm}.json`, primaryBook: 'Main', embedModel: 'bge-m3',
     params: { K: 20, ...over }, snapshot: { a: 1 }, candidates: [{ uid: 1, title: 'T', book: 'Main' }],
     injects: INJECTS,
-    books: { Main: meta }, bookMode: 'full', priority: [], grades: [{ title: 'T', grade: 4, book: 'Main', uid: 1 }],
+    books: { Main: full }, priority: [], grades: [{ title: 'T', grade: 4, book: 'Main', uid: 1 }],
     cutoff: { gradingOverride: { maxVectorEntries: 1 } }, gradedCandidates: 1, pluginFP: 'ab', sourceFP: 'ab', now: '2026-07-29',
 }) });
 const bundle = await bundleSamples(
@@ -467,7 +455,7 @@ eq(Object.keys(twoDepths.sceneChats).length, 1, '...sharing one stored set of me
     eq(renamed.Other, a.W, 'the hash is of the CONTENT, so renaming the book does not move it');
 
     const trimmed = await hashBooks({ W: { 1: { uid: 1, comment: 'A' } } });
-    eq(trimmed.W === a.W, false, 'a trimmed copy is not the same stored book, so bookMode moves the hash');
+    eq(trimmed.W === a.W, false, 'a book missing an entry\'s fields is not the same stored book');
 
     const edited = await hashBooks({ W: { 1: { ...entry, content: 'text.' } } });
     eq(edited.W === a.W, false, 'a one-character content edit moves the hash');

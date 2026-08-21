@@ -47,7 +47,7 @@ const bundle = async (name, { query = 'Q', scanText = 'S', depth = 10, cands = [
     const books = { [world]: Object.fromEntries(Object.entries(ENTRIES).map(([k, e]) => [k, { ...e, world }])) };
     if (edit) books[world][edit.uid] = { ...books[world][edit.uid], ...edit.set };
     const sample = {
-        name, books, bookMode: 'full', chat: 'data/chat.jsonl', createdAt: '2026-01-01',
+        name, books, chat: 'data/chat.jsonl', createdAt: '2026-01-01',
         query, scanChat: String(scanText).split('\n\n').map(t => ({ name: 'X', mes: t })), depth, primaryBook: world, params: {},
         candidates: cands.map((u, i) => ({ ...candidate(u, i), book: world })),
         // A uid with no entry is deliberate: it is the "deleted from the book" orphan reason.

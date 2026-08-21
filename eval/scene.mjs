@@ -188,7 +188,7 @@ export function stInstall() {
  * THE SAMPLE'S OWN `index` IS SKIPPED WHEN IT DOESN'T EXIST HERE, which is the normal case for a graded scene
  * somebody else captured: it records an absolute-ish path on THEIR machine. So does the derived path — it
  * hashes the book name into THIS machine's vectors dir, which a stranger's book will not occupy. Both are
- * author-machine concepts, and a bundle that carries `bookMode: 'full'`, `paramSnapshot.vectors` and
+ * author-machine concepts, and a bundle that carries its books, `paramSnapshot.vectors` and
  * `embedModel` needs neither: cachePath keys on (book, model, chunk settings), so it names the same file on
  * every machine and ensureIndex can fill it. That cache is the last resort rather than the first so no run
  * that resolves today resolves anywhere else — it is reached only when the two local paths are both absent.

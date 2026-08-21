@@ -208,11 +208,9 @@ export async function ensureIndex(S, { overrides = {}, model = 'bge-m3', prefix 
     if (!force && existsSync(path)) return { path, built: false, items: JSON.parse(readFileSync(path, 'utf8')).items.length };
 
     const entries = S.books?.[book];
-    if (!entries || !Object.keys(entries).length) throw new Error(`sample embeds no entries for book "${book}" (bookMode "${S.bookMode ?? '?'}") — needs a 'full' capture`);
+    if (!entries || !Object.keys(entries).length) throw new Error(`sample embeds no entries for book "${book}" — a bundle that does not embed its books is malformed`);
     const items = buildItems(entries, cfg, all);
     if (!items.length) throw new Error(`no ${all ? '' : 'vectorized '}entries with content in "${book}" — nothing to index`);
-    // 'meta' fidelity drops content, so the chunks would silently be empty rather than wrong. Say so.
-    if (S.bookMode && S.bookMode !== 'full') log(`!! sample bookMode is "${S.bookMode}"; only 'full' carries the entry content this rebuilds from`);
 
     log(`building ${items.length} chunks for "${book}"${all ? ' (EVERY entry, not just vectorized)' : ''} at ${cfg.chunkMode}/${cfg.chunkSize}/${cfg.minChunkSize} -> ${path}`);
     const out_ = [];

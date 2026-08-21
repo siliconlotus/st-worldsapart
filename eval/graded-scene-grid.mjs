@@ -31,7 +31,6 @@
 //     "candidates": [ ...selection-candidate rows... ],         // the population; REQUIRED, see POOL below
 //     "primaryBook": "<book name>",                             // the book whose collection was searched
 //     "books": { "<book name>": { "<uid>": {entry}, ... } },     // embedded copies of every attached book
-//     "bookMode": "full",                                       // fidelity those copies were taken at
 //     "capture": ".../sceneN_off.json",                         // /wa-debug capture, for --validate
 //     "depth": 5,                                               // messageDepth the query was built at
 //     "params": { "K1": 2, "LEXW": 1.5, ... },                   // overrides P below, per arm
@@ -97,8 +96,8 @@ const FREEZE = process.argv.includes('--freeze');
 const DEPTHS = arg('--depths') ? String(arg('--depths')).split(',').map(Number).filter(d => d > 0) : null;
 // The books must be IN the sample. There is no disk fallback: reading the live lorebook is what let a later
 // edit move the numbers of an already-graded scene, which is the whole reason samples embed their books.
-// Keyed-but-empty is the bookMode 'none' case: the book is named, its entries were not copied.
-if (!Object.keys(S.books?.[S.primaryBook] ?? {}).length) { console.error(`sample embeds no entries for its primary book "${S.primaryBook ?? '?'}" (bookMode "${S.bookMode ?? '?'}") — re-grade with /wa-grade books=full`); process.exit(2); }
+// Keyed-but-empty is a malformed bundle: the book is named, its entries were not copied.
+if (!Object.keys(S.books?.[S.primaryBook] ?? {}).length) { console.error(`sample embeds no entries for its primary book "${S.primaryBook ?? '?'}" — malformed; re-capture it with /wa-grade`); process.exit(2); }
 // The population is the log, never a re-derivation: half of what core activates (secondary keys, inclusion
 // groups, recursion, min-activations, probability rolls) is not computable offline. See POOL below.
 if (!S.candidates?.length) { console.error('sample logs no `candidates` — nothing to rank; re-grade with /wa-grade'); process.exit(2); }
@@ -114,7 +113,7 @@ const TOPK = Number(arg('--topk')) || undefined;   // unset = stage 1's own boun
 // A /wa-grade sample carries copies of every attached book, so it re-runs identically after the live
 // lorebooks have been edited. Nothing here reads a live book.
 const { primary, entries, byUid, items, loaded, gaz, gazSource, isExcluded, POOL, OWN } = loadScene(S, { indexFile: INDEX, params: P });
-console.log(`books: ${Object.keys(S.books).length} embedded at fidelity "${S.bookMode ?? '?'}" (primary "${primary}")`);
+console.log(`books: ${Object.keys(S.books).length} embedded (primary "${primary}")`);
 
 // --- query (shared buildQuery; macros left literal via identity substituteParams) + keyword scan window.
 // Read from the sample's snapshot; the chat is opened only to mint one (--freeze) or re-derive one (--requery).

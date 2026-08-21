@@ -21,7 +21,7 @@
 // unfired" beyond the window class needs a judge, since ungraded unfired entries have no grades.
 //
 // Usage: node eval/divergence-audit.mjs <sample.json> [more samples...]
-// Needs bookMode 'full' samples (the default) — 'meta'/'none' have no entry text to match against.
+// Needs a conforming bundle: one that does not embed its books has no entry text to match against.
 import { readFileSync } from 'node:fs';
 import * as matcher from '../extension/matcher.mjs';
 import { countKey } from '../extension/matcher.mjs';
@@ -66,7 +66,7 @@ for (const file of files) {
     // window misses: unfired, but a key occurs in the frozen scanText (WA's window) — evidence was
     // in reach and core's shallower scan expired it. The real matcher decides, not a re-derivation.
     if (!entries.length || entries.every(e => !e.content)) {
-        console.log('  (book has no entry text — bookMode was not \'full\'; unfired analysis skipped)');
+        console.log('  (book embeds no entry text — malformed bundle; unfired analysis skipped)');
         continue;
     }
     // Same stage-2 guard as scene.mjs makeCandidateSet: a vectorized entry under suppressVectorKeys

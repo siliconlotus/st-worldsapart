@@ -450,7 +450,7 @@ for (const idx of picks) {
             name,
             createdAt: new Date().toISOString(),
             createdBy: 'synth-scenes',
-            books: allBooks, bookMode: 'full',
+            books: allBooks,
             embedModel: MODEL, chat: CHAT,
             waVersion: WA_VERSION, stVersion: ST_VERSION,
             // NOTHING IS GRADED YET. A derived scene is a pool waiting for verdicts; graft-grades.mjs or
