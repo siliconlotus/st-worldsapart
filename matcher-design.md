@@ -1286,10 +1286,11 @@ instances the books on disk hold.
 
    **A logged score needs the model that produced it.** `score: 0.31` is uninterpretable once the
    coefficients move — the same failure as a grade whose rubric was not recorded, which cost a repair
-   of 4053 rows. `eval/relevance-model.json` carries no identity field yet; it wants one (hash of
-   `beta` + `features` + `layout`), cited by captures as `scoredBy`, so a bundle holding two model
-   versions is detectable instead of silently mixed. `waVersion`/`stVersion` do not cover this: the
-   model ships as data, not as code.
+   of 4053 rows. The model is a knob, so it rides in `arms[].params` as `scoredBy` alongside `depth`;
+   `waVersion`/`stVersion` cannot stand in for it, since the model ships as data rather than as code.
+   What is missing is the thing to cite: `eval/relevance-model.json` carries no identity field yet and
+   wants one — a hash of `beta` + `features` + `layout` — so a bundle holding two model versions is
+   detectable instead of silently mixed.
 
    **CARRY THE GUARD LIST ACROSS VERBATIM.** Each came from a specific failure, and they are the part
    of v2 that has caught real defects: the book fingerprint, identity-is-the-FILENAME (never `name`),

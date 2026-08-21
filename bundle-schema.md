@@ -95,7 +95,10 @@ entries and its own grades, not a variant of one scene. The id distinguishes the
           // `depth` lives here because it is a knob, not a property of the scene. It is redundant with
           // the scene's range on purpose — the range is what was graded, the depth is what produced it,
           // and the two disagreeing means the scene was mis-extracted.
-          "params": { "depth": 10, "lexicalWeight": 1, "chunk": "paragraph" },
+          // `scoredBy` is the fitted model's identity — a knob like any other, and the one thing
+          // waVersion/stVersion cannot carry, since the model ships as data rather than as code.
+          "params": { "depth": 10, "lexicalWeight": 1, "chunk": "paragraph",
+                      "scoredBy": "relevance-model@a1b2c3d4" },
           // IN LAYOUT ORDER — see below. `index` and `tokens` are the fields a reader can count on;
           // `scores` is WHATEVER THE CAPTURE RECORDED, keyed by the feature's own name.
           "candidates": [
