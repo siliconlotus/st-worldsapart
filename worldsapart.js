@@ -1630,13 +1630,13 @@ async function rankActivated(args) {
         // The keys an activated entry is scored on: live keys, else the takeover's stash — blanking was
         // an activation mechanism, not a scoring opinion.
         //
-        // scoreVectorKeys GATES ON `vectorized`, NOT ON WHETHER THE KEYS ARE BLANK. WA's force-emitted
-        // copies are fetched with waOwnsScan false and so carry LIVE keys; an empty-key test would score
-        // every retrieved entry's keys and leave the setting inert. The question is about the entry, so
-        // it is asked of the entry.
-        const scoreKeysOf = entry => (entry.vectorized && !settings().scoreVectorKeys)
-            ? []
-            : (entry.key?.length ? entry.key : (entry.waKeys ?? []));
+        // EVERY ENTRY'S KEYS ARE SCORED, including a vectorized one's. The value is MEASURED here and
+        // RECORDED in the capture; whether anything acts on it is the model's business, and the shipped
+        // fit does not carry the column (matcher-design.md, *Scoring memory's keys*). A setting that
+        // suppressed the measurement made the column null in every bundle it was off for, which is the
+        // one thing that cannot be recovered later — and left every contributed bundle ambiguous about
+        // whether a blank meant "no keys fired" or "nobody looked".
+        const scoreKeysOf = entry => (entry.key?.length ? entry.key : (entry.waKeys ?? []));
         // Same restoration for the secondary gate: a blanked entry's secondaries live in
         // waSecondary, and the per-segment gate must judge the condition the author wrote, not an
         // empty one. A local view, never a write-back — restoring keys on core's scan copies
@@ -1685,7 +1685,7 @@ async function rankActivated(args) {
                 : undefined;
             // Declared for fuseRanks' eligibility normalisation: having keys to score is the chance to
             // earn the keyword rank, and an entry with none must not be divided by a weight it could
-            // never have collected. Resolved here because this is where scoreVectorKeys has already
+            // never have collected. Resolved here because this is where the scan has already
             // decided what `scoreKeys` is.
             item.keysEligible = scoreKeys.length > 0;
         }
@@ -1949,7 +1949,7 @@ async function rankActivated(args) {
             tRank: x.textRank ?? null,
             // BM25 over entry keys, gated on ELIGIBILITY (set at the scan, ~line 1608) rather than on the
             // value. keywordScore is 0 both when an eligible key missed and when the entry had no
-            // scorable keys at all (scoreVectorKeys off) — and only the first is a measurement. Reading the
+            // scorable keys at all — and only the first is a measurement. Reading the
             // value alone reported 32 confident zeros on a capture where those entries had no keys to
             // score, which also silently defeats unionArms' absent-signal fill.
             keys: x.keysEligible === false ? null : (Number.isFinite(x.keywordScore) ? Number(x.keywordScore.toFixed(2)) : null),
@@ -2108,7 +2108,7 @@ function paramSnapshot() {
         // Selection: the WA-side caps and the keyword scoring applied to what was acquired. No cliff
         // here any more — stage 4 decides how many and how much, not whether (selection.mjs).
         cutoff: {
-            maxVectorEntries: s.maxVectorEntries, keywordScoring: s.keywordScoring, scoreVectorKeys: s.scoreVectorKeys,
+            maxVectorEntries: s.maxVectorEntries, keywordScoring: s.keywordScoring,
         },
         // `tokenizer` is what the per-row `tokens` counts were produced by. Without it those counts are
         // unreadable — a sample re-simulated after a model switch would report a budget that never existed.
@@ -2676,11 +2676,6 @@ async function gradeScene(named) {
  *               termWeights as a parameter, so this arm now fails the criterion above. Kept until the
  *               section is resettled; it still cannot ride a preloaded sweep (scene.mjs's guard names
  *               only the gazetteer settings).
- *   keys-live   scoreVectorKeys on gives a retrieved entry its keyword rank too, which reorders the
- *               layout and so changes what the entry maxes and the budget keep. Activation (secondary
- *               keys, inclusion groups, recursion, min-activations, probability rolls) is the one thing
- *               this project cannot recompute offline at all, so it can only be sampled live.
- *
  * `summary` is not eligible however tempting: state.mjs RESETS queryMode rather than un-surfacing it, so
  * an arm setting it would resurrect a withdrawn feature and pay an LLM call per scene for a mode no user
  * can be in. Bundles captured under it still open by name.
@@ -2692,7 +2687,6 @@ async function gradeScene(named) {
 const POOL_ARMS = {
     shipped: {},
     'no-filter': { entityFilter: false },
-    'keys-live': { scoreVectorKeys: true },
 };
 
 /**
@@ -3510,10 +3504,6 @@ const SETTINGS_HTML = `
                     </label>
                     <small class="opacity50p">Folds each entry's Order into the fused score as another rank, so higher-order entries rank higher — for books that use Order as priority. Order stays a tiebreak either way.</small>
 
-                    <label class="checkbox_label" for="wa_score_vector_keys">
-                        <input id="wa_score_vector_keys" type="checkbox"><span>Score a retrieved entry's own keys</span>
-                    </label>
-                    <small class="opacity50p">Lets an entry's keyword matches re-rank it even when the vector search is what found it. Tick it if you curated this book's memory keys yourself — measured, unreviewed generated keys cost about a point of F2, so the default leaves them out of the ranking.</small>
                 </div>
             </div>
 
@@ -3796,7 +3786,6 @@ export async function init() {
     // number binding would collapse it to 0 and silently switch the keys signal off.
     bind('#wa_keyword_weight', 'keywordWeight', 'number?');
     bind('#wa_weight_by_order', 'weightByOrder', 'checked');
-    bind('#wa_score_vector_keys', 'scoreVectorKeys', 'checked');
     bind('#wa_llm_profile', 'llmProfile', 'string');
     bind('#wa_llm_temp', 'llmTemperature', 'string');
     bind('#wa_uncentered_gate', 'uncenteredGate', 'number');

@@ -344,7 +344,7 @@ export const sceneParams = (S, overrides = {}) => ({
     // only reweight the vector signal. They are run as controls, not as candidates.
     denseColumn: null,
     denseWeight: 0.5,
-    maxVectorEntries: 20, scoreVectorKeys: false, entityFilter: true,
+    maxVectorEntries: 20, entityFilter: true,
     // WHICH FIELDS THE GAZETTEER READS. Production is 'keys+titles' (buildGazetteer's own sources), chosen on
     // a 5-target gold set that no longer exists; 'bodies' was re-measured at n=3 scenes and lost. This param
     // exists so the choice can be re-run paired at the current scene count instead of re-argued.
@@ -579,11 +579,9 @@ export function tierRecall(population, kept, gradeOf) {
     return { memory: half(r => isMemory(r.entry)), reference: half(r => isReference(r.entry)) };
 }
 
-/** Keys the production scan would actually score. `scoreVectorKeys` decides whether a vectorized entry's
- *  keys count at stage 3, and it asks that of the ENTRY rather than of whether its keys happen to be blank
- *  — the same way worldsapart.js scoreKeysOf asks it. Scoring raw keys unconditionally gave vectorized
- *  entries a keys signal production would not produce, the keyword-side twin of the gazetteer bug
- *  documented in loadScene.
+/** Keys the production scan would actually score — every entry's, a vectorized one included, as
+ *  worldsapart.js `scoreKeysOf` does. The value is measured and recorded; whether the model reads it is
+ *  a question about the FEATURE SET, which `--without keys` answers.
  *
  *  P.dropKeys (array of exact key strings) simulates removing those keys from the book: they stop scoring
  *  AND stop keyword-activating, since stage-2 activation tests `keywordScore > 0` through this same
@@ -611,7 +609,7 @@ export const scoringKeys = (e, P) => {
         });
         if (fills.length) base = [...base, ...fills];
     }
-    const ks = (e.vectorized && !P.scoreVectorKeys) ? [] : base;
+    const ks = base;
     return P.dropKeys ? ks.filter(k => !P.dropKeys.includes(k)) : ks;
 };
 

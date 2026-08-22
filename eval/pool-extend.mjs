@@ -44,7 +44,6 @@ const CHUNK_ARMS = {
 // somebody is actually going to score, and an offline rescore of an edited book is exactly the case where
 // the live capture no longer covers them. Names match param-screen.mjs so a pool and a screen agree.
 const PARAM_ARMS = {
-    'scoreVectorKeys=on': { scoreVectorKeys: true }, 'scoreVectorKeys=off': { scoreVectorKeys: false },
     'KEYW=0': { KEYW: 0 }, 'KEYW=0.5': { KEYW: 0.5 }, 'KEYW=1': { KEYW: 1 }, 'KEYW=2': { KEYW: 2 }, 'KEYW=3': { KEYW: 3 },
     'LEXW=0.5': { LEXW: 0.5 }, 'LEXW=1': { LEXW: 1 }, 'LEXW=3': { LEXW: 3 },
 };

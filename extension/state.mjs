@@ -7,17 +7,6 @@ export const MODULE_NAME = 'worldsApart';
 
 export const defaultSettings = {
     enabled: true,
-    /**
-     * Give vectorized (🔗) entries a keyword-over-keys rank as well as their cosine and text ranks.
-     * OFF by default, though the shipped model carries the column so that ticking it reaches the
-     * prediction. Measured, the column costs 0.005 to 0.019 F2 across the operating band on three of
-     * five books, so the default is the case that does not punish a book whose keys nobody reviewed —
-     * see matcher-design.md, *Scoring memory's keys gives a real signal and costs a little*.
-     *
-     * STAGE 3 ONLY: it decides what a retrieved entry is SCORED on, never what activates. Stage 2 is
-     * the takeover's, and stage 1 admits every vectorized entry it scores either way.
-     */
-    scoreVectorKeys: false,
     /** Characters per chunk. Entries are chunked for MATCHING only; the whole entry is still inserted. */
     chunkSize: 800,
     /** 'paragraph' keeps semantic boundaries; 'length' fills to chunkSize (chunking.mjs splitRecursive). */
@@ -434,7 +423,7 @@ export const defaultSettings = {
  */
 const INTERNAL_KEYS = [
     'meanCentered', 'entityFilter', 'properNounBoost', 'stopwordDocFreq',
-    'bm25K1', 'bm25B', 'repeatCurve', 'repeatR', 'rrfK', 'scoreVectorKeys', 'keywordScoring',
+    'bm25K1', 'bm25B', 'repeatCurve', 'repeatR', 'rrfK', 'keywordScoring',
     'chunkSize', 'chunkMode', 'minChunkSize',
     // Withdrawn with the query summarizer. queryMode in particular MUST be reset rather than
     // merely un-surfaced: anyone who had it on 'summary' would otherwise keep paying an LLM call

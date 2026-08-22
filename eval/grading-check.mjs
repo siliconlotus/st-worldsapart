@@ -18,7 +18,7 @@ eq(full[1].content.length, 3000, 'entries are verbatim; a bundle that drops cont
 eq(Object.keys(keyByUid(Object.values(book))).length, 2, 'an array of entries is accepted too');
 
 // --- captureParams maps settings onto the harness's argument names ---
-const s = { rrfK: 20, bm25K1: 1.2, bm25B: 0.75, lexicalWeight: 1, properNounBoost: 3, stopwordDocFreq: 0.25,  maxVectorEntries: 10, suppressVectorKeys: true, scoreVectorKeys: false, entityFilter: true, queryMode: 'messages', weightByOrder: false };
+const s = { rrfK: 20, bm25K1: 1.2, bm25B: 0.75, lexicalWeight: 1, properNounBoost: 3, stopwordDocFreq: 0.25,  maxVectorEntries: 10, suppressVectorKeys: true, entityFilter: true, queryMode: 'messages', weightByOrder: false };
 const p = captureParams(s, { caseSensitive: false, wholeWords: false, includeNames: true, allowWIScan: true });
 eq(p.K, 20, 'rrfK -> K');
 eq(p.K1, 1.2, 'bm25K1 -> K1');

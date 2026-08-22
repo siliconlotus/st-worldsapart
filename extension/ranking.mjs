@@ -257,7 +257,7 @@ export function fuseRetrieval(scores) {
 /**
  * Whether an item is IN THE VECTOR COLLECTION — not whether it could be embedded, which is true of all
  * text, and not whether it earned a cosine. A vectorized entry that failed to rank is still in, because
- * it competed and lost. Callers may declare it explicitly, since only they know how `scoreVectorKeys`
+ * it competed and lost. Callers may declare it explicitly, since only they know how the scan
  * resolved; absent flags fall back to presence.
  *
  * Named for membership because that is the only question it answers. It used to gate the TEXT signal
@@ -346,7 +346,7 @@ export function fuseRanks(items, { rrfK: k, weightByOrder, lexicalWeight, keywor
     // — the recurring cast — without any tuning.
     const byText = rankMap(items.filter(x => x.textScore > 0).sort((a, b) => b.textScore - a.textScore));
     // BM25 over entry KEYS. Scores non-vectorized entries; also 🔗 entries when
-    // scoreVectorKeys is on (via their stashed keys), otherwise suppressKeys leaves them at 0.
+    // their stashed keys are restored, otherwise suppressKeys leaves them at 0.
     const byKeyword = rankMap(items.filter(x => x.keywordScore > 0).sort((a, b) => b.keywordScore - a.keywordScore));
     // LEARNED SPARSE LEXICAL — a per-token weight from the embedder rather than a corpus statistic, scored
     // as the sum over shared tokens of the two sides' weights. It answers the question IDF answers badly on
@@ -393,7 +393,7 @@ export function fuseRanks(items, { rrfK: k, weightByOrder, lexicalWeight, keywor
     // or BM25, so it is divided by the keyword weight alone.
     //
     // Callers declare eligibility on the item (`vectorEligible`, `keysEligible`) because only they know it:
-    // `vectorized` is the entry's, and whether keys are scorable depends on the scoreVectorKeys
+    // `vectorized` is the entry's, and whether keys are scorable depends on the scan
     // resolution the caller has already done. Absent flags fall back to presence, which keeps a caller that
     // sets neither self-consistent rather than silently capping everything it ranks.
     // ELIGIBILITY, one predicate per signal, each naming the question it answers. The denominator below

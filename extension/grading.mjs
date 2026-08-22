@@ -94,7 +94,6 @@ export function captureParams(s, { caseSensitive, wholeWords, includeNames, allo
         stopwordDf: s.stopwordDocFreq,
         meanCentered: s.meanCentered,
         maxVectorEntries: s.maxVectorEntries,
-        scoreVectorKeys: s.scoreVectorKeys,
         entityFilter: s.entityFilter,
         queryMode: s.queryMode,
         weightByOrder: s.weightByOrder,
@@ -243,7 +242,7 @@ export const rowKey = row => `${row.book ?? ''}${US}${row.uid}`;
  * solves the N-times problem the old rule was aimed at.
  * ABSENT SIGNALS ARE FILLED FROM AN ARM THAT HAS THEM; competing ones never are. The two are different
  * operations and only the second is the blend this function refuses. `keys` on a vectorized entry with
- * `scoreVectorKeys` off is not a low score, it is a quantity that arm cannot express — so such an entry
+ * an arm that could not score keys reports not a low score but a quantity it cannot express — so such an entry
  * showed no keys signal on every row except the one `keys-live` happened to surface first, which made the
  * arm's entire purpose invisible in the UI that exists to motivate running it. Filling the hole is honest; picking a winner
  * between two arms that both measured a value would not be.
