@@ -345,7 +345,7 @@ const r2 = x => (Number.isFinite(x) ? Number(x.toFixed(2)) : null);
 // The tokenizer is the source capture's when there is one and the default otherwise, and either way it is
 // WRITTEN DOWN below — offline it is a harness choice, not an observation, and the `block` field's
 // derived-not-observed note is the precedent.
-const TOKENIZER = src?.paramSnapshot?.budget?.tokenizer ?? 'gpt-3.5-turbo';
+const TOKENIZER = src?.budget?.tokenizer ?? 'gpt-3.5-turbo';
 const tokens = offlineTokenCounter(TOKENIZER);
 
 // The budget block a derived bundle should carry: the settings it was derived under, minus the one field
@@ -353,8 +353,10 @@ const tokens = offlineTokenCounter(TOKENIZER);
 // context window was open on that machine — and no budget was applied here at all, so passing it through
 // describes a run that never happened. Same class of staleness as the inherited candidate lists this tool
 // was rewritten to stop producing.
-const budgetFor = snap => ({ ...(snap?.budget ?? {}), maxTokens: null, tokenizer: TOKENIZER });
-const snapshotFor = snap => (snap ? { ...snap, budget: budgetFor(snap) } : { budget: budgetFor(null) });
+/** `budget` is a document field of its own now, so the snapshot no longer carries it. */
+/** The document's own budget block: the source's, with the live token cap dropped (a derived scene
+ *  imposes none) and the tokenizer pinned so the recorded per-entry counts stay interpretable. */
+const budgetFor = () => ({ ...(src?.budget ?? {}), maxTokens: null, tokenizer: TOKENIZER });
 
 // The collection, built once from the live world and shared by every scene — same book, same chunking.
 const chunkOverrides = src?.paramSnapshot?.vectors ?? {};
@@ -432,7 +434,7 @@ for (const idx of picks) {
         armsOut.push({
             arm: armName, query, queryChat, scanText, depth: DEPTH,
             primaryBook: BOOK, index: built.path, params: capture,
-            paramSnapshot: snapshotFor(src?.paramSnapshot), excludeTitles: [],
+            paramSnapshot: src?.paramSnapshot, budget: budgetFor(), excludeTitles: [],
             // No grading depth was applied, recorded explicitly rather than omitted. (The field is named
             // for the stage-4 cliff it also used to carry; that cut no longer exists.)
             cutoff: { gradingOverride: null, note: 'offline derivation records the full activated population' },

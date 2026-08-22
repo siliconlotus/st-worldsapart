@@ -182,6 +182,18 @@ shipped under a different budget without re-running retrieval.
 That is what `tokens` on each candidate is for: without it the walk cannot be simulated at all, only
 described, and re-tokenizing offline gives a different answer than the tokenizer that made the decision.
 
+**`budget` is DOCUMENT-LEVEL, and that is a consequence of the above.** It holds stage 4's caps — the entry
+maxes, the token budget, the slack mode — and `tokenizer`, the name those per-candidate counts were produced
+under. No arm carries a variant, because none is ever captured: a budget arm is a prefix cut over a layout
+ranking that is already recorded, so it is swept OFFLINE through `selection.mjs` `applyBudget` instead of
+costing a capture. `tokenizer` could not vary in any case — it is ST's `getTokenizerModel()`, an environment
+fact WA does not set, which is why it sits beside `embedModel` rather than inside `paramSnapshot`. **Measured**
+across the corpus: 0 of 106 multi-arm documents varied any field of it.
+
+`paramSnapshot` stays per-arm and does vary — `scoring`, `matchText`, `vectors` and `nonDefaults` all differ
+between arms in 9 documents. It is the settings the arm ran under; `budget` is what the whole capture was
+budgeted by.
+
 A writer that sorts candidates by anything else produces a valid bundle that silently answers budget
 questions wrongly, and array order is the only record of layout — so `index` restates it as the one
 witness a reader can check the order against. Without it a reordered file is undetectable.

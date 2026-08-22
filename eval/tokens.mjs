@@ -36,7 +36,7 @@ const requireST = () => {
 /**
  * A counter for one tokenizer, matching what the runtime would have recorded.
  *
- * @param {string} tokenizer The name from paramSnapshot.budget.tokenizer
+ * @param {string} tokenizer The name from the document's `budget.tokenizer`
  * @returns {{ count: (text: string) => number, tokenizer: string, offset: number, free: () => void }}
  */
 export function offlineTokenCounter(tokenizer) {
@@ -70,13 +70,14 @@ export function deriveOffsets(manifests) {
     const acc = new Map();
 
     for (const m of manifests) {
-        // THROUGH openBundle, not by walking the nesting here. `paramSnapshot` and `candidates` sit on the
-        // arm's SCENE CELL, not the arm — reading them off the arm found neither, so every capture looked
-        // like it recorded no tokenizer and the offsets derived from nothing at all.
+        // ONE TOKENIZER PER DOCUMENT. It is ST's `getTokenizerModel()`, not a WA knob, so no arm can have
+        // used a different one — looping arms to look it up would be asking a question with one answer.
+        const tok = m.budget?.tokenizer;
+        if (!tok) continue;
+        // Candidates ARE per arm, and sit on the arm's SCENE CELL rather than the arm, which is why this
+        // goes through openBundle rather than walking the nesting here.
         for (const arm of armNames(m)) {
             const S = openBundle(m, arm);
-            const tok = S.paramSnapshot?.budget?.tokenizer;
-            if (!tok) continue;
             const byUid = new Map();
             for (const [book, bk] of Object.entries(m.books ?? {})) for (const e of Object.values(bk)) byUid.set(`${book}${e.uid}`, e);
             if (!encs.has(tok)) encs.set(tok, tiktoken.encoding_for_model(tok));

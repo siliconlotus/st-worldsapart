@@ -389,6 +389,8 @@ export function searchedBook(rows) {
  * @returns {object} The sample manifest
  */
 export function buildSample({ name, notes, query, queryChat, scanChat, injects, depth, chat, book, index, primaryBook, embedModel, params, snapshot, candidates, books, priority, grades, cutoff, gradedCandidates, pluginFP, sourceFP, waVersion, stVersion, now }) {
+    // `budget` leaves the snapshot and becomes a field of its own, so the document-level hoist carries it.
+    const { budget, ...rest } = snapshot ?? {};
     // Grades for entries outside the searched collection can't be ranked offline: the harness loads one
     // vector collection, so a second book's entries have no cosine and never enter the ranking. Declaring
     // them here means the harness reports "excluded" instead of scoring them as irrelevant — the exact
@@ -439,6 +441,13 @@ export function buildSample({ name, notes, query, queryChat, scanChat, injects, 
         waVersion,
         stVersion,
         embedModel,
+        // STAGE 4'S CAPS, DOCUMENT-LEVEL, split out of the snapshot beside `embedModel` for the same
+        // reason that one is: an arm never varies them. `tokenizer` is ST's `getTokenizerModel()`, an
+        // environment fact WA cannot change. The maxes and the token budget are WA's own, but a budget
+        // arm is never CAPTURED — every cap is a prefix cut over the layout ranking, and the per-entry
+        // `tokens` counts are recorded, so it is swept offline through `applyBudget` instead. Measured:
+        // 0 of 106 multi-arm documents vary any of it.
+        budget,
         primaryBook,
         // Path to the primary book on disk. PROVENANCE ONLY, never a fallback: no reader may open it,
         // because reading the live lorebook is what let a later edit move an already-graded scene's numbers.
@@ -449,7 +458,7 @@ export function buildSample({ name, notes, query, queryChat, scanChat, injects, 
         // gone: one name for the concept, so a grep for `params` finds the schema, the writer and every
         // reader at once.
         params,
-        paramSnapshot: snapshot,
+        paramSnapshot: rest,
 
         bookPriority: priority,
         books,
@@ -471,9 +480,10 @@ export function buildSample({ name, notes, query, queryChat, scanChat, injects, 
 /** Fields that are identical across every arm of one graded scene, so they are stored ONCE at the top of
  *  the document. Everything else — query, candidates, params, cutoff, primaryBook — is per-arm and must
  *  not be hoisted: the summary arm has a different query, and a lexical-only arm can retrieve from a
- *  different book. `books` and the haystacks are shared too but are NOT here: they are the bulk, and the
+ *  different book. `budget` is here rather than in `paramSnapshot` because stage 4's caps are replayed
+ *  OFFLINE from the recorded layout order and per-entry token counts, so no arm ever captures a variant. `books` and the haystacks are shared too but are NOT here: they are the bulk, and the
  *  schema puts them last (bundle-schema.md, *Field order is part of the schema*). */
-const SHARED_FIELDS = ['name', 'notes', 'createdAt', 'createdBy', 'bookPriority', 'gradeScale', 'embedModel', 'pluginFP', 'sourceFP'];
+const SHARED_FIELDS = ['name', 'notes', 'createdAt', 'createdBy', 'bookPriority', 'gradeScale', 'embedModel', 'budget', 'pluginFP', 'sourceFP'];
 
 /** Per-arm fields that are the SCENE's, not the arm's, and so move onto the scene rather than repeating. */
 const SCENE_FIELDS = ['chat', 'scanChat', 'injects'];   // a sample's names for sceneChat / sceneChats / sceneInjects
