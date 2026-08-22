@@ -50,12 +50,25 @@ const US = String.fromCharCode(31);
 export const dropUnavailable = (S, label = "sample") => {
     const at = Number(S?.generatedFrom?.msg);
     if (!Number.isFinite(at)) return S;
-    const start = new Map();
+    const start = new Map(), end = new Map();
     for (const [w, bk] of Object.entries(S.books ?? {})) {
-        for (const e of Object.values(bk ?? {})) start.set(`${w}${US}${e.uid}`, Number(e.STMB_start));
+        for (const e of Object.values(bk ?? {})) {
+            start.set(`${w}${US}${e.uid}`, Number(e.STMB_start));
+            end.set(`${w}${US}${e.uid}`, Number(e.STMB_end));
+        }
     }
+    // THE BOUNDARY IS THE END, NOT THE START. A summary exists once the messages it covers have happened,
+    // so an entry spanning the frozen turn — `start <= at < end` — could not be in the book either, and a
+    // start-only test kept every one of them. They are not merely unavailable, they are the scene's own
+    // haystack paraphrased: **measured**, 66 of the corpus's 446 memory positives straddled their scene,
+    // scoring within-scene z 2.795 against clean positives' 0.800 and ranking FIRST in 53% of their scenes
+    // against 7%. A grade of 4 on such a row is correct and the retrieval is correct; the SCENE is
+    // impossible, and both the score and the fitted coefficients were reading it.
     const future = r => {
-        const s = start.get(`${r.book}${US}${r.uid}`);
+        const k = `${r.book}${US}${r.uid}`;
+        const e = end.get(k);
+        if (Number.isFinite(e)) return e >= at;
+        const s = start.get(k);
         return Number.isFinite(s) && s > at;
     };
     let cut = 0, gone = 0;
