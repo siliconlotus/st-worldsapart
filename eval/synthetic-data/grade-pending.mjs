@@ -1,4 +1,4 @@
-// grade-pending.mjs — turns graft-grades' *-pending rows into judge jobs, and judged jobs back into grades.
+// grade-pending.mjs — turns a row list into judge jobs, and judged jobs back into grades.
 //
 // Two halves of one pass, deliberately separate processes: `build` writes the job files, a judge grades
 // them one file at a time, `merge` puts the answers back. Nothing here calls a model; the dispatch is the
@@ -15,16 +15,15 @@
 // bundles in, grade-jobs out) because that is what consumes them.
 //
 // Usage (any cwd):
-//   node eval/synthetic-data/grade-pending.mjs build [--batch 16] [--jobs <dir>] [--only <name-substring>]
 //   node eval/synthetic-data/grade-pending.mjs build --rows <rows.json> [--batch 16] [--jobs <dir>]
 //   node eval/synthetic-data/grade-pending.mjs merge --jobs <dir> --results <dir> [--write]
 //
-// --rows grades an ARBITRARY row list instead of the *-pending pools: a JSON array of
-// {bundle, world, uid}, where `bundle` is the bundle's FILENAME in eval-data (the identity rule above).
-// The pending flow assumes a job is a scene grading its own pool; a cross-scene audit — re-grading the
-// activation misses, an inter-rater pass — is a row list that happens to span scenes, and this groups it
-// by bundle and emits one job per scene exactly as the pending path would have. Same job shape, same
-// contamination boundary, same merge. A RE-GRADE OF ALREADY-GRADED ROWS IS THE POINT: the new verdict is
+// THE INPUT IS A ROW LIST: a JSON array of {bundle, book, uid}, where `bundle` is the bundle's FILENAME in
+// eval-data (the identity rule above). Rows are grouped by bundle and emitted as one job per scene, so a
+// cross-scene audit — re-grading the activation misses, an inter-rater pass — is expressed the same way as
+// one scene's ungraded remainder: it is a row list that happens to span scenes.
+//
+// A RE-GRADE OF ALREADY-GRADED ROWS IS THE POINT: the new verdict is
 // appended to the row's `llmGrades`, beside the one it disagrees with rather than over it, because
 // comparing the two IS the validation that a rubric correction worked. Only an exact repeat — same rubric,
 // same model, same day — is skipped, and only so that re-merging the same results is idempotent.
@@ -49,7 +48,7 @@ const arg = (k, d = null) => { const i = argv.indexOf(k); return i >= 0 ? argv[i
 const WRITE = argv.includes('--write');
 
 if (cmd !== 'build' && cmd !== 'merge') {
-    console.error('usage: node eval/synthetic-data/grade-pending.mjs build [--batch 16] [--jobs <dir>] [--only <substr>]');
+    console.error('usage: node eval/synthetic-data/grade-pending.mjs build --rows <rows.json> [--batch 16] [--jobs <dir>]');
     console.error('       node eval/synthetic-data/grade-pending.mjs merge --jobs <dir> --results <dir> [--write]');
     process.exit(2);
 }
@@ -82,15 +81,12 @@ const RUN = arg('--run');
 
 if (cmd === 'build') {
     const BATCH = Number(arg('--batch', 16));
-    const ONLY = arg('--only');
     const ROWS = arg('--rows');
     mkdirSync(JOBS, { recursive: true });
 
     let files = 0, rows = 0, batches = 0, bytes = 0, dropped = 0;
-    // One bundle's worth of rows -> job files. Both input flows end here, so the job shape and the
-    // usable-filter cannot drift between them. `tag` keeps --rows jobs from colliding with a pending
-    // job for the same bundle if the two ever share a directory.
-    const emitJobs = (bundleFile, rowList, tag) => {
+    // One bundle's worth of rows -> job files.
+    const emitJobs = (bundleFile, rowList) => {
         const bundle = JSON.parse(readFileSync(`${DATA}/${bundleFile}`, 'utf8'));
         const arm = shipped(bundle);
         const name = bundle.name ?? bundleFile.replace(/\.json$/, '');
@@ -112,7 +108,7 @@ if (cmd === 'build') {
 
         for (let i = 0; i < usable.length; i += BATCH) {
             const chunk = usable.slice(i, i + BATCH);
-            const id = `${base}-${tag}${String(i / BATCH).padStart(2, '0')}`;
+            const id = `${base}-r${String(i / BATCH).padStart(2, '0')}`;
             const job = {
                 scene: name,
                 bundle: bundleFile,
@@ -134,7 +130,11 @@ if (cmd === 'build') {
         console.log(`${name.slice(0, 46).padEnd(46)} ${String(usable.length).padStart(4)}/${String(rowList.length).padStart(4)} rows  ${Math.ceil(usable.length / BATCH)} jobs`);
     };
 
-    if (ROWS) {
+    if (!ROWS) {
+        console.error('build needs --rows <rows.json>: a JSON array of {bundle, book, uid}');
+        process.exit(2);
+    }
+    {
         const list = JSON.parse(readFileSync(resolvePath(ROWS), 'utf8'));
         const byBundle = new Map();
         for (const r of list) {
@@ -142,13 +142,7 @@ if (cmd === 'build') {
             if (!byBundle.has(r.bundle)) byBundle.set(r.bundle, []);
             byBundle.get(r.bundle).push(r);
         }
-        for (const [bf, group] of [...byBundle.entries()].sort()) emitJobs(bf, group, 'r');
-    } else {
-        for (const f of readdirSync(DATA).filter(x => x.endsWith('-pending.json')).sort()) {
-            if (ONLY && !f.includes(ONLY)) continue;
-            const pend = JSON.parse(readFileSync(`${DATA}/${f}`, 'utf8'));
-            emitJobs(pend.of, pend.rows, 'b');
-        }
+        for (const [bf, group] of [...byBundle.entries()].sort()) emitJobs(bf, group);
     }
     console.log(`\n${files} scenes, ${batches} jobs, ${rows} rows, ${dropped} dropped (no entry text)`);
     console.log(`${(bytes / 1024 / 1024).toFixed(1)}MB payload (~${Math.round(bytes / 4000)}k input tokens) in ${JOBS}`);

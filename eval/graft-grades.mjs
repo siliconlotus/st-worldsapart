@@ -17,7 +17,11 @@
 // Usage (any cwd):
 //   node eval/graft-grades.mjs <fresh.json ...> --from <graded.json> [--write]
 //   node eval/graft-grades.mjs <fresh.json ...> --from-dir <dir> [--rename-book "old=new"] [--write]
-// Dry by default. Writes the grafted bundle in place and <name>-pending.json beside it.
+// Dry by default. Writes the grafted bundle in place.
+//
+// The ungraded remainder is REPORTED, not written: it used to go to <name>-pending.json for grade-pending
+// to pick up, which is a row list under a second name and a second reader. grade-pending takes a row list
+// ({bundle, book, uid}) and that shape says everything this one did, plus spanning scenes.
 import { readFileSync, writeFileSync, existsSync } from 'node:fs';
 import { basename, resolve as resolvePath } from 'node:path';
 import { armNames, openBundle, rowKey, setGrades } from '../extension/grading.mjs';
@@ -178,10 +182,6 @@ for (const path of files) {
             },
         });
         writeFileSync(resolvePath(path), JSON.stringify(out));
-        writeFileSync(resolvePath(path).replace(/\.json$/, '-pending.json'), JSON.stringify({
-            name: `${fresh.name} — pending`, of: basename(path), createdAt: new Date().toISOString(),
-            rows: pending.map(r => ({ book: r.book, uid: r.uid, title: r.title })),
-        }));
     }
 }
 

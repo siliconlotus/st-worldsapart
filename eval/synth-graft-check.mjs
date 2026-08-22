@@ -126,7 +126,7 @@ const written = JSON.parse(readFileSync(same, 'utf8'));
 ok(openBundle(written).entries?.length === 3, 'verdicts are carried onto the fresh scene');
 ok(written.gradeScale === 4 && written.grading?.by === 'a-judge', 'grading provenance travels with the grades, not with the generation');
 ok(written.grading?.graftedAt && written.createdBy !== 'a-judge', 'generation provenance is not overwritten by grading provenance');
-ok(existsSync(same.replace(/\.json$/, '-pending.json')), 'uncovered rows are written as -pending.json');
+ok(!existsSync(same.replace(/\.json$/, '-pending.json')), 'the ungraded remainder is reported, not written — grade-pending takes a row list');
 
 // --- graft: a renamed world ------------------------------------------------------------------------------
 // rowKey is world+uid, so a book renamed between grading and generation orphans every grade while the uids

@@ -56,7 +56,7 @@ problem here came from a new claim, none from a deletion.
   print a usage line and exit non-zero; that is not a test failure.
 
 **`synthetic-data/` is a fourth thing: it GENERATES graded data and measures nothing.**
-`grade-pending.mjs` turns `graft-grades`' `*-pending` rows into judge jobs and merges the answers back,
+`grade-pending.mjs` turns a row list (`{bundle, book, uid}`) into judge jobs and merges the answers back,
 reading `eval-data` and writing `grade-jobs` — both stay a level up, because that is what consumes them.
 The rubric it dispatches against is `.claude/agents/scene-relevance.md`, which lives there because Claude
 Code discovers subagents from that directory; `scene-relevance-min.md` is the minimal-prompt arm, for

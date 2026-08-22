@@ -45,10 +45,13 @@ const doc = async (book, uid) => await bundleSamples([{ arm: 'shipped', sample: 
 try {
     put(`${TAG}-a.json`, await doc('book-A', 11));
     put(`${TAG}-b.json`, await doc('book-B', 22));
-    put(`${TAG}-a-pending.json`, { name: `${TAG}-scene`, of: `${TAG}-a.json`, rows: [{ book: 'book-A', uid: 11, title: 'entry 11' }] });
-    put(`${TAG}-b-pending.json`, { name: `${TAG}-scene`, of: `${TAG}-b.json`, rows: [{ book: 'book-B', uid: 22, title: 'entry 22' }] });
+    // The input is a row list naming its bundle per row — the only build input there is.
+    const rows = put(`${TAG}-rows.json`, [
+        { bundle: `${TAG}-a.json`, book: 'book-A', uid: 11 },
+        { bundle: `${TAG}-b.json`, book: 'book-B', uid: 22 },
+    ]);
 
-    execFileSync('node', [TOOL, 'build', '--batch', '8', '--jobs', JOBS, '--only', TAG], { encoding: 'utf8' });
+    execFileSync('node', [TOOL, 'build', '--batch', '8', '--jobs', JOBS, '--rows', rows], { encoding: 'utf8' });
     const jobFiles = readdirSync(JOBS).filter(f => f.endsWith('.json'));
     ok(jobFiles.length === 2, `two same-named bundles produce two job files, not one (got ${jobFiles.length})`);
 

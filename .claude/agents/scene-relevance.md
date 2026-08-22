@@ -1,6 +1,6 @@
 ---
 name: scene-relevance
-description: Grades lorebook entries against ONE scene of a roleplay chat on the anchored 0-4 scale — is this entry topically relevant to what the scene is about. Takes the scene text plus a batch of candidate entries (title, uid, whole entry text — nothing derived from retrieval), inline or as a job file path. Use when filling in a graded scene's ungraded pairs (graft-grades' *-pending rows) or re-grading for inter-rater comparison.
+description: Grades lorebook entries against ONE scene of a roleplay chat on the anchored 0-4 scale — is this entry topically relevant to what the scene is about. Takes the scene text plus a batch of candidate entries (title, uid, whole entry text — nothing derived from retrieval), inline or as a job file path. Use when filling in a graded scene's ungraded pairs or re-grading for inter-rater comparison.
 model: sonnet
 tools: Read, Write
 ---

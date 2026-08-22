@@ -127,7 +127,7 @@ eq(gradeValue(stripped.grades[0]), 3, '...but the human verdict is');
     // eval-data holds review files and `*-pending` lists beside the documents, and a review NAMES the
     // captureIds of its sections. Scanning those made every reviewed bundle look copied.
     put('review-of-them.json', { user: 'u', reviewed: [{ captureId: 'cap-PAD', file: 'padded.json' }] });
-    put('padded-pending.json', { name: 'x', of: 'padded.json', rows: [] });
+    put('padded-pending.json', { pending: [], forScene: 'x', primaryBook: 'W' });
     eq(at({ captureId: 'cap-PAD', file: 'padded.json' }).path, join(dir, 'padded.json'),
         'a review naming an id is not a document carrying one');
 
