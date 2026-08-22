@@ -48,7 +48,7 @@ import { readFileSync, writeFileSync, mkdirSync, existsSync } from 'node:fs';
 import { basename, dirname, resolve as resolvePath } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { randomUUID } from 'node:crypto';
-import { loadScene, makeCandidateSet, makeFuse, sceneParams, indexPath, embed, stInstall, wiTitle, bookFingerprint, whyFor } from './scene.mjs';
+import { haystackFor, loadScene, makeCandidateSet, makeFuse, sceneParams, indexPath, embed, stInstall, wiTitle, bookFingerprint, whyFor } from './scene.mjs';
 import { ensureIndex } from './reindex.mjs';
 
 import { offlineTokenCounter } from './tokens.mjs';
@@ -380,7 +380,11 @@ for (const idx of picks) {
     const sceneEnd = srcIndex[queryChat[queryChat.length - 1].i];
     // The donor's knobs, minus `depth` — that is the scene's span, and this derivation sets its own.
     const { depth: _d, ...base } = { ...(src?.params ?? {}) };
-    const scanText = matcher.scanWindow(visible, { depth: DEPTH, includeNames: sceneParams({ params: base }).includeNames });
+    // THE MESSAGES, NOT A WINDOW — the same thing /wa-grade freezes (`runState.lastScanChat`), sliced to
+    // the derivation's depth and trimmed to what a haystack is built from. A joined string was the v2
+    // shape: it landed on every arm's cell under a name the schema no longer has, and left `sceneChats`
+    // empty, so a derived scene had no haystack inputs at all.
+    const scanChat = visible.slice(-DEPTH).map(r => ({ name: r.name, mes: r.mes }));
     const qv = await embed(query, { ollama: OLLAMA, model: MODEL });
 
     const armsOut = [];
@@ -389,19 +393,20 @@ for (const idx of picks) {
         const capture = { ...base, ...override };
         const S = {
             primaryBook: BOOK, books: allBooks, chat: CHAT,
-            query, queryChat, scanText, depth: DEPTH, params: capture,
+            query, queryChat, scanChat, depth: DEPTH, params: capture,
             paramSnapshot: src?.paramSnapshot, excludeTitles: [], index: built.path,
         };
         const P = sceneParams(S);
         // Loaded per arm, not once: the gazetteer is baked in at load time and an arm
         // moves it. scoreScene throws rather than reuse a scene across that change, for the same reason.
         const scene = loadScene(S, { indexFile: indexPath(S, { model: MODEL }), params: P });
+        const haystack = haystackFor(S, P);
         // Term weights exactly as scoreScene derives them. Passing null instead runs every arm with the
         // entity filter off — the gazetteer path that admitted 2.3x the query terms and moved BM25 by up
         // to 74%, which is a difference no arm label would have shown.
         const tw = P.entityFilter ? ranking.buildTermWeights(query, scene.gaz, P.boost) : null;
         const rows = makeCandidateSet({ ...scene, params: P })(
-            P.K1, P.B, tw, qv, query, scanText,
+            P.K1, P.B, tw, qv, query, haystack,
         );
         // EVERY ACTIVATED ROW, ordered but not truncated — a pool that is the whole population is one no
         // later re-ranking can orphan a grade out of.
@@ -424,7 +429,7 @@ for (const idx of picks) {
                 keys: r.keysEligible === false ? null : r2(r.keywordScore), kRank: r.keywordRank ?? null,
                 // ST's `entry.world` read once, into WA's name for it.
                 index: i, book: e.world ?? BOOK,
-                why: whyFor(e, scanText, P),
+                why: whyFor(e, haystack(e), P),
             };
             // `row.book` — the row is built with `book` two lines up, and `row.world` is undefined, so every
             // book's rows shared one key and a uid present in two books kept whichever came first.
@@ -432,7 +437,7 @@ for (const idx of picks) {
             return row;
         });
         armsOut.push({
-            arm: armName, query, queryChat, scanText, depth: DEPTH,
+            arm: armName, query, queryChat, scanChat, depth: DEPTH,
             primaryBook: BOOK, index: built.path, params: capture,
             paramSnapshot: src?.paramSnapshot, budget: budgetFor(), excludeTitles: [],
             // No grading depth was applied, recorded explicitly rather than omitted. (The field is named

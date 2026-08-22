@@ -1056,6 +1056,24 @@ export const usableKeys = keys => (Array.isArray(keys) ? keys : [])
  *          caseSensitiveDefault?: boolean, wholeWordsDefault?: boolean, depthSkew?: number}} opts
  * @returns {object[]} entries to force-activate
  */
+/**
+ * The depth an entry's chat window is scanned at.
+ *
+ * NULLISH, NOT TRUTHY. `scanDepth: 0` is core's authored "match nothing from chat", so it must not fall
+ * through to the globals — an unaltered book has to behave under WA as it does under core. That one
+ * distinction is the whole reason this is a named rule rather than an inline `||`.
+ *
+ * A per-entry `scanDepth` is never skewed: core's min-activations skew widens the DEFAULT window only.
+ *
+ * @param {object} entry World Info entry
+ * @param {number} [messageDepth] WA's own scan depth
+ * @param {number} [fallbackDepth] Core's world_info_depth, injected
+ * @param {number} [depthSkew] Widening applied to the global depth only
+ * @returns {number}
+ */
+export const scanDepthFor = (entry, messageDepth, fallbackDepth = 0, depthSkew = 0) =>
+    Number(entry?.scanDepth ?? ((messageDepth || fallbackDepth) + (depthSkew || 0)));
+
 export function activationAdds(entries, windowFor, opts = {}) {
     const out = [];
     for (const entry of entries ?? []) {
@@ -1063,9 +1081,7 @@ export function activationAdds(entries, windowFor, opts = {}) {
         if (hasDecorator(entry, '@@dont_activate')) continue;
         const keys = usableKeys(entry.key);
         if (!keys.length) continue;
-        // Nullish, not truthy: scanDepth 0 is core's authored "match nothing from chat" and must
-        // not fall through to the globals (an unaltered book behaves as it does under core).
-        const depth = Number(entry.scanDepth ?? ((opts.messageDepth || opts.fallbackDepth) + (opts.depthSkew || 0)));
+        const depth = scanDepthFor(entry, opts.messageDepth, opts.fallbackDepth, opts.depthSkew);
         // hits, not score: the verdict must not depend on k1, and hits are counted only in
         // segments that pass the entry's own secondary-key gate (keywordScore).
         if (keywordScore(entry, windowFor(depth, entry) ?? [], keys, opts).hits.length) {

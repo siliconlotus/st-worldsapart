@@ -52,7 +52,7 @@ const QV = [0.7, 0.7, 0.1];
 const rowsOf = (indexFile, overrides) => {
     const P = sceneParams(S, overrides);
     const scene = loadScene(S, { indexFile, params: P });
-    const rows = makeCandidateSet({ ...scene, params: P })(2, 0.75, null, QV, 'text of entry', 'the spire looms over the quarter');
+    const rows = makeCandidateSet({ ...scene, params: P })(2, 0.75, null, QV, 'text of entry', () => ['the spire looms over the quarter']);
     return { scene, byUid: new Map(rows.map(r => [r.uid, r])) };
 };
 

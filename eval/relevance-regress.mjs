@@ -36,7 +36,7 @@
 // Usage (from SillyTavern root):
 //   node .../relevance-regress.mjs <sample.json> [...] [--sweep gazetteerSource=keys,titles]
 //        [--tier memory|reference] [--cut 4] [--ordinal] [--loso] [--lobo] [--calibration] [--cutoff] [--at 0.10] [--degree 2] [--interactions] [--with proper,time,oracle,length,density,rarity,chunkdens] [--without keys] [--drop-keys flagged.json] [--emit-rows rows.json] [--proper count|idf|idf-len|jaccard|gaz] [--proper-extract regex|entity|span]
-import { indexPath, isMemory, loadScene, openSample, sceneParams, makeCandidateSet, makeGradeOf, embed, sceneLabel } from './scene.mjs';
+import { haystackFor, indexPath, isMemory, loadScene, openSample, sceneParams, makeCandidateSet, makeGradeOf, embed, sceneLabel } from './scene.mjs';
 import { ensureIndex, resolveModel } from './reindex.mjs';
 import fs from 'node:fs';
 import { gradeValue, gradeCredit, fbeta, RECALL_WEIGHT, signTest } from './metrics.mjs';
@@ -388,10 +388,12 @@ const queryVec = async (S, name, value, em) => {
             const qvec = EMBED_SWEEP ? await queryVec(S, name, value, em) : qv;
             const scene = loadScene(S, { indexFile, params: P });
             const tw = (P.entityFilter && P.queryMode !== 'summary') ? ranking.buildTermWeights(S.query, scene.gaz, P.boost) : null;
-            const scanText = matcher.scanWindow(S.scanChat ?? [], { depth: S.depth, includeNames: P.includeNames });
-            const rows = makeCandidateSet({ ...scene, params: P })(P.K1, P.B, tw, qvec, S.query, scanText);
+            const haystack = haystackFor(S, P);
+            const rows = makeCandidateSet({ ...scene, params: P })(P.K1, P.B, tw, qvec, S.query, haystack);
             if (WITH.includes('proper')) {
-                const win = properNouns(Array.isArray(scanText) ? scanText.join('\n') : scanText);
+                // Proper nouns are a property of the SCENE, so read off a plain entry's window: an entry's
+                // own sources are its, not the scene's.
+                const win = properNouns(haystack({}).join('\n'));
                 // df over THIS book's entries, which is the corpus the names live in — the same reason
                 // content-lexical insists on one index for both classes. Computed once per scene.
                 const df = new Map();

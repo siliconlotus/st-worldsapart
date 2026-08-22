@@ -344,3 +344,44 @@ const twice = mkSample(100);
 dropUnavailable(twice); dropUnavailable(twice);
 eq(Object.keys(twice.books.W).length, 2, 'filtering twice removes the same entries, not more');
 eq(twice.entries.length, 2, '...and the grade list is stable across a second pass');
+
+
+// --- haystackFor: the reader COMPOSES a window, it does not read one ------------------------------------
+// A document stores the scan messages, the injects and the opted-in sources SEPARATELY, because a joined
+// blob is fixed at one depth, one matchWindow and one includeNames and cannot be taken apart. All three of
+// the things that vary do so PER ENTRY, so one window for every entry silently drops all three.
+{
+    const { haystackFor, sceneParams } = await import('./scene.mjs');
+    const S = {
+        scanChat: [{ name: 'A', mes: 'first' }, { name: 'B', mes: 'second' }],
+        depth: 2,
+        injects: [
+            { key: 'NEAR', text: 'NEAR', ambient: false, depth: 1 },
+            { key: 'FAR', text: 'FAR', ambient: false, depth: 99 },
+            { key: 'AMB', text: 'AMBIENT', ambient: true, depth: 0 },
+        ],
+        sources: { scenario: 'SCEN' },
+    };
+    const h = haystackFor(S, sceneParams({}));
+    const win = e => h(e).join('\n');
+
+    eq(win({ uid: 1 }).includes('first'), true, 'the chat messages are in every entry\'s haystack');
+    eq(win({ uid: 1 }).includes('NEAR'), true, 'an inject inside the depth is admitted');
+    eq(win({ uid: 1 }).includes('FAR'), false, 'one beyond it is not — which is the divergence from core that WA owns');
+    eq(win({ uid: 1 }).includes('AMBIENT'), true, 'an ambient inject has no chat position, so no depth can exclude it');
+
+    // The sources are the whole reason this is per entry rather than per scene.
+    eq(win({ uid: 1 }).includes('SCEN'), false, 'an entry that opted into nothing sees no card or persona text');
+    eq(win({ uid: 2, matchScenario: true }).includes('SCEN'), true, '...and the one that opted in sees exactly what it named');
+
+    // scanDepth 0 is core's authored "match nothing from chat", which a truthy check would swallow.
+    const zero = win({ uid: 3, scanDepth: 0 });
+    eq(zero.includes('first') || zero.includes('second'), false, 'scanDepth 0 matches nothing from the chat');
+    eq(zero.includes('AMBIENT'), true, '...but an ambient inject is not chat, so it stays');
+    eq(win({ uid: 4, scanDepth: 1 }).includes('first'), false, 'a per-entry scanDepth narrows the window to its own value');
+    eq(win({ uid: 4, scanDepth: 1 }).includes('second'), true, '...keeping what that depth reaches');
+
+    // A document with neither is the ordinary case, and must compose to exactly the chat window.
+    const bare = haystackFor({ scanChat: S.scanChat, depth: 2 }, sceneParams({}));
+    eq(bare({ uid: 1 }).join('\n'), 'A: first\nB: second', 'no injects and no sources composes to the chat window alone');
+}

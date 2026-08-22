@@ -64,7 +64,7 @@ import * as matcher from '../extension/matcher.mjs';
 import { gradeValue } from './metrics.mjs';
 // Scene loading, the gazetteer, the scorers, the pool and the nDCG math all live in scene.mjs, shared with
 // param-screen.mjs — there must be exactly one copy of them (see that module's header).
-import { CID, dcg, embed as embedWith, indexPath, isDurableEntry, loadScene, makeFuse, makeGradeOf, makeKeywordScore, makeCandidateSet, ndcg, nrm, openSample, sceneParams, inVectorIndex, wiTitle, sceneLabel } from './scene.mjs';
+import { CID, dcg, embed as embedWith, haystackFor, indexPath, isDurableEntry, loadScene, makeFuse, makeGradeOf, makeKeywordScore, makeCandidateSet, ndcg, nrm, openSample, sceneParams, inVectorIndex, wiTitle, sceneLabel } from './scene.mjs';
 
 const arg = k => { const i = process.argv.indexOf(k); return i >= 0 ? process.argv[i + 1] : null; };
 if (!arg('--sample')) { console.error('need --sample <sample.json> (write one with /wa-grade)'); process.exit(2); }
@@ -127,7 +127,9 @@ function tailMessages(path, bytes = 8e6) {
     if (start > 0) lines.shift();   // a mid-line start yields a broken first record
     return lines.filter(Boolean).flatMap(l => { try { return [JSON.parse(l)]; } catch { return []; } });
 }
-const scanWindowOf = (msgs, depth) => matcher.scanWindow(msgs, { depth, includeNames: P.includeNames });
+// THE COMPOSER, not a window: per entry, so its own scanDepth, the injects that depth reaches and the
+// card/persona fields it opted into all apply — the same assembly the runtime uses.
+const haystackOf = (msgs, depth) => haystackFor(S, P, { chat: msgs, depth });
 // DEPTH ABLATION FROM ONE CAPTURE. A sample's `queryChat` holds the messages its query was joined from, so
 // any depth <= the capture depth is reproducible exactly with no chat file: capture deliberately too wide
 // (say 20) and narrow from there. Preferred over the chat file, which a played-on chat invalidates — but an
@@ -144,17 +146,16 @@ if (DEPTHS && chat === S.queryChat) {
     if (over.length) console.log(`!! depths ${over.join(',')} exceed the ${S.queryChat.length} captured messages — those rows repeat the widest window; pass --chat to actually widen it`);
 }
 const query = chat ? ranking.buildQuery(chat, { depth: DEPTH }) : S.query;
-const scanText = scanWindowOf(chat ?? S.scanChat ?? [], DEPTH);
+const scanText = haystackOf(chat ?? S.scanChat ?? [], DEPTH);
 // The retrieval math lives in the deployed plugin, so a redeploy can move every per-entry signal without a
 // settings change (server-side entry pooling did). Grades collected under different arithmetic are still
 // valid as RELEVANCE, but the ranking they were paired with is not the one being scored here.
 if (S.invalidConfiguration) console.log(`!! NOT A REAL CONFIGURATION — ${S.invalidConfiguration}. Scored here for inspection; it must not enter a pooled set.`);
 if (S.pluginFP && S.sourceFP && S.pluginFP !== S.sourceFP) console.log(`!! sample captured against a STALE plugin (deployed ${S.pluginFP} vs source ${S.sourceFP}) — its recorded scores predate the current retrieval math`);
-// THE OFFLINE SCAN WINDOW MODELS NO INJECTS. `matcher.scanWindow` is messages only, so a capture taken with
-// "Include in World Info Scanning" on scanned text this cannot rebuild: the Author's Note, and the
-// character's depth prompt — the latter for EVERY entry, bypassing `matchCharacterDepthPrompt`. The frozen
-// `sceneText` still holds it, so a plain run is faithful; a --depths row is not, because it re-derives.
-if (S.params?.allowWIScan && DEPTHS) console.log('!! captured with the Author\'s Note in the WI scan, which the offline rebuild cannot reproduce — the depth rows scan less text than the capture did');
+// Injects ARE modelled now — the document records them with their depth and `haystackFor` admits them, so a
+// depth row scans what the capture would have at that depth. What it cannot invent is an inject a capture
+// never recorded, which is what a pre-`sceneInjects` bundle is.
+if (S.params?.allowWIScan && !(S.injects ?? []).length) console.log('!! captured with the Author\'s Note in the WI scan but recording no injects — the rebuild scans less text than the capture did');
 // The embedding model is the one input that silently invalidates everything: cosines from a different model
 // are not comparable, the derived index path would point somewhere else, and nothing downstream would look
 // wrong. Harmless to skip while every sample is your own capture at your own default; a hard stop as soon as
@@ -345,10 +346,10 @@ const fmt = n => (n == null ? '·' : (+n).toFixed(3));
         console.log(' depth | qChars  msgs  terms | layout@10 layout@R vector@R  meanRank  blind');
         for (const d of DEPTHS) {
             const q = ranking.buildQuery(chat, { depth: d });
-            const st = scanWindowOf(chat, d);
+            const st = haystackOf(chat, d);
             const tw = P.entityFilter && P.queryMode !== 'summary' ? ranking.buildTermWeights(q, gaz, P.boost) : null;
             const v = await embed(q);
-            const rows = scoreAll(DEF.k1, DEF.b, tw, v, q).map(r => ({ ...r, keywordScore: keywordScore(byUid.get(Number(r.uid)) ?? { key: [] }, st, DEF.k1) }));
+            const rows = scoreAll(DEF.k1, DEF.b, tw, v, q).map(r => ({ ...r, keywordScore: (e => keywordScore(e, st(e), DEF.k1))(byUid.get(Number(r.uid)) ?? { key: [] }) }));
             const fused = fuse(layoutOf(rows), DEF.lexW);
             const gVec = fuse(vectorOf(rows), DEF.lexW).map(r => gradeOf(r) ?? 0);
             const g = fused.map(r => gradeOf(r) ?? 0);   // unjudged occupies its rank and contributes nothing (makeGradeOf returns null)

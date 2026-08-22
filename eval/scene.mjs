@@ -91,6 +91,33 @@ export const sceneLabel = S => (S?.arm ? `${S.name ?? ''}--${S.arm}` : String(S?
  * Lives here beside `scoringKeys`, which decides what it is allowed to score. It used to live in the v1
  * migration tool, which was the only thing that needed it at the time and is now deleted.
  */
+/**
+ * The haystack composer for a scene: `(entry) => string[]`.
+ *
+ * THE DOCUMENT STORES INPUTS, NOT A WINDOW — the scan messages, the injects and the sources some entry
+ * opted into, each on its own. Composing them here is the whole reason they are stored apart: a joined
+ * blob is fixed at one depth, one matchWindow and one includeNames, and cannot be taken back apart.
+ *
+ * Per entry, because all three of the things that vary do so per entry: its own `scanDepth`, which
+ * injects that depth reaches, and which card or persona fields its `matchXxx` flags pull in. Reading one
+ * window for every entry — which this did until now — silently dropped all three.
+ *
+ * @param {object} S An opened sample
+ * @param {object} P Resolved scene params
+ * @param {{chat?: object[], depth?: number}} [over] For the depth ablation, which re-derives from a wider
+ *        chat than the capture froze. Everything else still comes from the document.
+ * @returns {(entry: object) => string[]}
+ */
+export function haystackFor(S, P, over = {}) {
+    const windowFor = matcher.makeWindowFor(over.chat ?? S.scanChat ?? [], {
+        injects: S.injects ?? [],
+        sources: S.sources ?? {},
+        matchWindow: P.matchWindow,
+        includeNames: P.includeNames,
+    });
+    return entry => windowFor(matcher.scanDepthFor(entry, over.depth ?? S.depth), entry);
+}
+
 export function whyFor(entry, scanText, P) {
     matcher.setBoundaryMode(P.wordBoundary);
     const keys = scoringKeys(entry, P);
@@ -234,6 +261,10 @@ export const sceneParams = (S, overrides = {}) => ({
     // measurable separately or that arm reports one number for two changes.
     keywordTilt: ranking.KEYWORD_ONLY_TILT,
     caseSensitive: false, wholeWords: false, includeNames: true,
+    // How the haystack is SEGMENTED, which decides what `scan` means to countKey. Captured in `params`
+    // (worldsapart.js captureParams), so a document that records it overrides this; 'scan' is what
+    // `matcher.scanWindow` hardcoded when the window here was chat-only and one segment.
+    matchWindow: 'scan',
     // What counts as INSIDE a word when wholeWords is on (state.mjs wordBoundary, shipped 'strict').
     // Unlike the knobs above this one is module state in the matcher, so makeKeywordScore pushes it
     // through setBoundaryMode per call — otherwise every arm scores at whatever the last one set.
@@ -582,7 +613,7 @@ export const makeKeywordScore = P => (e, text, k1) => {
  * plugin, so K counts ENTRIES. It is not a function of any stage-4 cap: admission depth and how many
  * entries may reach the prompt are separate questions. Pass it only to probe window sensitivity.
  *
- * @returns {(k1: number, b: number, tw: object|null, qvec: number[], qtext: string, scanText: string) => object[]}
+ * @returns {(k1: number, b: number, tw: object|null, qvec: number[], qtext: string, haystackFor: (entry: object) => string[]) => object[]}
  */
 export function makeCandidateSet({ loaded, byUid, entries, params: P, chunkCfg, topK = admitCeiling(true) }) {
     const keywordScore = makeKeywordScore(P);
@@ -610,7 +641,11 @@ export function makeCandidateSet({ loaded, byUid, entries, params: P, chunkCfg, 
     // Which rows carry the dense cosine in the fourth column rather than in `score` (see denseColumn).
     const colExtras = P.denseColumn === 'nocos' || P.denseColumn === 'all';
     const colVectorized = P.denseColumn === 'cos' || P.denseColumn === 'all';
-    return (k1, b, tw, qvec, qtext, scanText) => {
+    // A HAYSTACK IS PER ENTRY, so the caller hands over the composer rather than one built window. It
+    // resolves the entry's own scanDepth, admits the injects that depth reaches, and appends the sources
+    // the entry opted into — which is what the runtime does. The document stores those inputs separately
+    // precisely so a reader COMPOSES the window rather than taking a joined one apart.
+    return (k1, b, tw, qvec, qtext, haystackFor) => {
         const dense = denseExtra(qvec);
         // --- STAGE 1: RETRIEVAL. Cosine over every chunk, no admission test — plugin/scoring.mjs carries
         // why the threshold and the lexical clause left this stage. `contentText` is stage 3's text signal
@@ -635,7 +670,7 @@ export function makeCandidateSet({ loaded, byUid, entries, params: P, chunkCfg, 
         //
         // Dropped at admission rather than filtered from `entries`: the gazetteer and the BM25 corpus must
         // still see every entry, or the term weights move and the comparison measures the wrong thing.
-        for (const [uid, s] of per) { const e = byUid.get(uid); if (e && !e.disable) rows.push({ uid, entry: e, title: wiTitle(e), score: s.score, sparseScore: colVectorized ? s.score : undefined, textScore: contentText.get(entryKey(e)) ?? 0, keywordScore: keywordScore(e, scanText, k1), vectorEligible: !!e.vectorized, textEligible: hasContent(e), keysEligible: scoringKeys(e, P).length > 0 }); }
+        for (const [uid, s] of per) { const e = byUid.get(uid); if (e && !e.disable) rows.push({ uid, entry: e, title: wiTitle(e), score: s.score, sparseScore: colVectorized ? s.score : undefined, textScore: contentText.get(entryKey(e)) ?? 0, keywordScore: keywordScore(e, haystackFor(e), k1), vectorEligible: !!e.vectorized, textEligible: hasContent(e), keysEligible: scoringKeys(e, P).length > 0 }); }
         // --- STAGE 2: ACTIVATION (keyword route). Stands in for ST core's keyword match, so it may only
         // admit an entry core could actually have activated. One exclusion, a stage-2 fact:
         //
@@ -646,7 +681,7 @@ export function makeCandidateSet({ loaded, byUid, entries, params: P, chunkCfg, 
         //
         // A vectorized entry is not excluded: WA judges it like any other candidate, and stage 1 has
         // usually admitted it already through `per`.
-        for (const e of entries) { const uid = Number(e.uid); if (per.has(uid) || e.disable) continue; const kw = keywordScore(e, scanText, k1); if (kw > 0) rows.push({ uid, entry: e, title: wiTitle(e), score: P.denseColumn ? undefined : dense.get(uid), sparseScore: colExtras ? dense.get(uid) : undefined, textScore: contentText.get(entryKey(e)) ?? 0, keywordScore: kw, vectorEligible: (!P.denseColumn && dense.has(uid)) || !!e.vectorized, textEligible: hasContent(e), keysEligible: true }); }
+        for (const e of entries) { const uid = Number(e.uid); if (per.has(uid) || e.disable) continue; const kw = keywordScore(e, haystackFor(e), k1); if (kw > 0) rows.push({ uid, entry: e, title: wiTitle(e), score: P.denseColumn ? undefined : dense.get(uid), sparseScore: colExtras ? dense.get(uid) : undefined, textScore: contentText.get(entryKey(e)) ?? 0, keywordScore: kw, vectorEligible: (!P.denseColumn && dense.has(uid)) || !!e.vectorized, textEligible: hasContent(e), keysEligible: true }); }
         return rows;
     };
 }
@@ -700,9 +735,10 @@ export async function scoreScene({ sample: S, overrides = {}, k = 10, vectors, m
     // Under denseAllEntries a keyword-only book has an empty stage-1 collection and still has vectors to
     // score against, which is the whole point of the arm there.
     const qv = cachedQv ?? ((scene.items.length || scene.loaded?.extra?.length) ? await embed(query, { ollama, model }) : []);
-    // REBUILT, not read: the document stores the scan MESSAGES, so the window is made here at this arm's
-    // depth, matchWindow and includeNames rather than baked in at capture.
-    const all = scoreAll(P.K1, P.B, tw, qv, query, matcher.scanWindow(S.scanChat ?? [], { depth: S.depth, includeNames: P.includeNames }));
+    // REBUILT, not read: the document stores the scan MESSAGES, the injects and the opted-in sources
+    // SEPARATELY, so the haystack is composed here at this arm's depth, matchWindow and includeNames
+    // rather than baked in at capture.
+    const all = scoreAll(P.K1, P.B, tw, qv, query, haystackFor(S, P));
 
     // WHAT IS RANKED: the haystack, minus CONSTANTS. These metrics tune RANKING FEATURES — how should this
     // set be sorted for this query — so what the pipeline later filters out does not bear on them.
