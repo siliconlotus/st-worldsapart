@@ -135,7 +135,8 @@ carry.
 
   // WHO THE INDICES NAME.
   "raters": [
-    { "rater": 0, "kind": "llm", "id": "637cc0ff…40840\x1fscene-relevance@8460b922", "modelName": "gemma4:31b-mlx" },
+    { "rater": 0, "kind": "llm", "id": "637cc0ff…40840\x1fscene-relevance@8460b922",
+      "modelName": "gemma4:31b-mlx", "family": "gemma4", "quant": "Q4_K_M", "modelParams": "25.8B" },
     { "rater": 1, "kind": "human", "id": "f47ac10b-58cc-4372-a567-0e02b2c3d479" }
   ],
 
@@ -322,21 +323,40 @@ manufacture an empty row for.
 
 ## Verdict elements
 
-A verdict is `{ rater, grade }` plus what qualifies it: `gradedAt`, an optional `why`, and an optional
-`params`. `rater` is an index into the document's `raters` table; nothing else on the element says who
-passed it, because the table is where an identity is spelled out.
+```jsonc
+// entries[].grades[] — one element per verdict passed on that row
+{
+  "rater":    0,                            // int       index into raters[]
+  "grade":    3,                            // int       0..gradeScale (4)
+  "gradedAt": "2026-08-21T09:14:02.118Z",   // string    full ISO instant, UTC, ms
+  "why":      "…",                          // string?   optional
+  "params":   { }                           // object?   what the pass RAN under; never identity
+}
+```
 
-**`params` is what the pass was RUN under, and it is not identity.** Seed, temperature, context length,
-`think`, `effort` — whatever the invocation set, recorded under the name the invocation used. Not
-condensed into a common scale across backends: `params` exists so a pass can be reproduced, and
-`reasoning: high` cannot say whether to send `think: true` or `effort: high`. Those are also not the same
-thing — `think: false` is a capability declined, `effort: low` is a level — and a cross-backend reading
-belongs beside `gradeValue`, with the other reader-side questions.
+```jsonc
+// grades[].params — best-effort, each key named as the INVOCATION named it, never normalised
+{
+  "seed":        42,                // as sent
+  "temperature": 0,
+  "num_ctx":     32768,
+  "think":       true,              // capability used or declined; ABSENT if the model has none
+  "effort":      "high",            // a level — not the same fact as `think`
+  "tool":        "wa-super-eval"    // what produced the verdict
+}
+```
 
-Best-effort throughout. A knob a writer does not know is simply absent, and absence stays legible:
-a model with no thinking capability records no `think`, which is a different fact from one that has it and
-declined. In a positional id those three states — unsupported, unset, unrecorded — collapse into one empty
-string, which is why the knobs are here and not there.
+`rater` is an index; nothing else on the element says who passed it, because the table is where an identity
+is spelled out.
+
+**`params` is what a pass RAN under, never who ran it**, and it is not normalised across backends: it
+exists so a pass can be reproduced, and `reasoning: high` cannot say whether to send `think: true` or
+`effort: high`. Those are different facts — a capability declined against a level — so a cross-backend
+reading belongs beside `gradeValue`, with the other reader-side questions.
+
+Absence is legible. A model with no thinking capability records no `think`, which is a different fact from
+one that has it and declined; a positional id would collapse unsupported, unset and unrecorded into one
+empty string, which is why the knobs are here and not there.
 
 **Why a pass ran is not who ran it.** An adjudication verdict is another verdict, and its position in the
 array already says so; nothing records the reason, and it is never a suffix on the rater's name.
@@ -375,50 +395,36 @@ time is a last resort and cannot separate two passes filed in one invocation.
 
 ## A rater is whoever passed a verdict
 
-`kind` is `human` or `llm`, and **`id` is one canonical field either way** — so grouping verdicts by rater
-is a plain key comparison, in metrics and everywhere else.
-
-A human's id is a UUID, minted once per install. An llm's is two components joined with **US**
-(`\x1f`), decomposable and never printable-joined:
-
 ```jsonc
-"raters": [
-  { "rater": 0, "kind": "human", "id": "f47ac10b-58cc-4372-a567-0e02b2c3d479" },
-  { "rater": 1, "kind": "llm",   "id": "637cc0ff…40840\x1fscene-relevance@8460b922",
-    "modelName": "gemma4:31b-mlx", "family": "gemma4", "quant": "Q4_K_M", "modelParams": "25.8B" }
-]
+// raters[] — one row per rater, referenced by index from every verdict
+{
+  "rater":       0,                 // int      index; a verdict's `rater` is this
+  "kind":        "llm",             // enum     "human" | "llm"
+  "id":          "…",               // string   human: a UUID. llm: `modelId␟rubric`, joined with US (\x1f)
+
+  // llm only, and DESCRIPTIVE — every one optional, absent when the writer could not resolve it.
+  // These answer the groupings the id cannot: same model line, same architecture.
+  "modelName":   "gemma4:31b-mlx",  // string   the model LINE; spans digests
+  "family":      "gemma4",          // string   architecture
+  "quant":       "Q4_K_M",          // string   quantisation
+  "modelParams": "25.8B"            // string   parameter count, as the backend reports it
+}
 ```
 
-| component | is |
-|---|---|
-| `modelId` | the resolved model — a content digest where one exists, else the invoked name |
-| `rubric` | the contract it graded under — `scene-relevance@8460b922` |
+| `id` component | is | when unavailable |
+|---|---|---|
+| `modelId` | a content digest where the backend has one, else the invoked name | empty |
+| `rubric` | the contract graded under — `scene-relevance@8460b922` | empty |
 
-**WEIGHTS AND CONTRACT ONLY.** The knobs a pass ran under live on the verdict (*Verdict elements*), not
-here: they change the sample, not who produced it. The same weights under the same rubric sampled twice is
-ONE rater giving two verdicts, which is how a third vote for the median is reached — and folding a seed
-into the identity would assert a determinism nothing has, since a model without one is nondeterministic
-and one with it frequently still is (CLAUDE.md: hosted reasoning models honour neither seed nor
-temperature, measured at 1815 vs 935 reasoning tokens on identical requests).
+Three facts the block above cannot carry:
 
-**The digest is in the id because the name is not an identity.** `bge-m3:latest` is whatever was pulled
-most recently, so two captures months apart record one string for different weights — the same failure as
-reading a declared version instead of a resolved one. Ollama's API returns a manifest digest per model; a
-hosted model has none to give, and an empty component says so rather than implying a stability nothing
-provides.
-
-**US, not a printable separator.** **Measured**: 11 of 11 local Ollama models carry a `:`
-(`gemma4:31b-mlx`, `bge-m3:latest`), every MLX model is a HuggingFace repo id carrying a `/`, and `@`
-already appears inside a rubric — so a printable join cannot be decomposed. US is a control character and
-cannot occur in either component, which is why it is the project's composite key everywhere else
-(CLAUDE.md). `raterKey`/`raterParts` in `extension/grading.mjs` are the only join and split.
-
-**Coarser groupings live in the descriptive fields**, and are not derivable from the id: `modelName` is
-the model LINE and spans digests (`bge-m3:latest` re-pulled is two raters and one line); `family` is the
-architecture. Three questions — same rater, same model, same architecture — and three fields, which is why
-a hashed id would have been strictly worse: it destroys exactly that addressability and buys nothing over
-the raw components. The components themselves are NOT duplicated as fields, since `raterParts` splits the
-id in one call and a second copy could only drift.
+- **US, not a printable separator.** **Measured**: 11 of 11 local Ollama models carry a `:`, every MLX
+  model is a HuggingFace repo id carrying a `/`, and `@` already appears inside a rubric.
+  `raterKey`/`raterParts` in `extension/grading.mjs` are the only join and split.
+- **A digest, because a name is not an identity.** `bge-m3:latest` is whatever was pulled most recently,
+  so two captures months apart record one string for different weights.
+- **Weights and contract only.** Knobs live on the verdict: the same weights under the same rubric sampled
+  twice is ONE rater giving two verdicts, which is how a third vote for a median is reached.
 
 ## One `grades` array, in the order passed
 
