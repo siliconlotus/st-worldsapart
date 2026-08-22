@@ -17,6 +17,7 @@
 // allowance. A model not listed has no offline counter; count it against a running SillyTavern instead.
 import { createRequire } from 'node:module';
 import { stInstall } from './scene.mjs';
+import { armNames, openBundle } from '../extension/grading.mjs';
 
 /** Offsets are MEASURED, not chosen; tokens-check.mjs is what keeps them honest. */
 export const TOKENIZER_OFFSET = {
@@ -69,17 +70,21 @@ export function deriveOffsets(manifests) {
     const acc = new Map();
 
     for (const m of manifests) {
-        for (const arm of (Array.isArray(m.arms) ? m.arms : [m])) {
-            const tok = arm.paramSnapshot?.budget?.tokenizer;
+        // THROUGH openBundle, not by walking the nesting here. `paramSnapshot` and `candidates` sit on the
+        // arm's SCENE CELL, not the arm — reading them off the arm found neither, so every capture looked
+        // like it recorded no tokenizer and the offsets derived from nothing at all.
+        for (const arm of armNames(m)) {
+            const S = openBundle(m, arm);
+            const tok = S.paramSnapshot?.budget?.tokenizer;
             if (!tok) continue;
             const byUid = new Map();
-            for (const [world, bk] of Object.entries(m.books ?? {})) for (const e of Object.values(bk)) byUid.set(`${world}${e.uid}`, e);
+            for (const [book, bk] of Object.entries(m.books ?? {})) for (const e of Object.values(bk)) byUid.set(`${book}${e.uid}`, e);
             if (!encs.has(tok)) encs.set(tok, tiktoken.encoding_for_model(tok));
             const enc = encs.get(tok);
 
-            for (const c of arm.candidates ?? []) {
+            for (const c of S.candidates ?? []) {
                 const real = Number(c.tokens);
-                const text = byUid.get(`${c.world}${c.uid}`)?.content;
+                const text = byUid.get(`${c.book}${c.uid}`)?.content;
                 if (!(real > 0) || !text) continue;
                 const d = real - enc.encode(text).length;
                 const a = acc.get(tok) ?? { min: Infinity, max: -Infinity, n: 0, first: d };

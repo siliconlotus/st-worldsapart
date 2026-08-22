@@ -39,7 +39,10 @@ const load = dir => {
     for (const f of readdirSync(dir).filter(x => x.endsWith('-graded.json'))) {
         const id = f.replace(/-graded\.json$/, '');
         let j; try { j = JSON.parse(readFileSync(`${dir}/${f}`, 'utf8')); } catch { continue; }
-        for (const g of j.grades ?? []) out.set(`${id}|${g.world}|${g.uid}`, Number(g.grade));
+        // `book`, the name a judge result actually uses (grade-pending's merge reads `g.book`). Under the
+        // superseded `world` every row keyed to `id|undefined|uid`, so one file's grades collapsed onto one
+        // entry per uid and the agreement was computed over whatever landed last.
+        for (const g of j.grades ?? []) out.set(`${id}|${g.book}|${g.uid}`, Number(g.grade));
     }
     return out;
 };

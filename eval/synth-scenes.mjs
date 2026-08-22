@@ -424,7 +424,9 @@ for (const idx of picks) {
                 index: i, book: e.world ?? BOOK,
                 why: whyFor(e, scanText, P),
             };
-            if (!pool.has(`${row.world}${row.uid}`)) pool.set(`${row.world}${row.uid}`, row);
+            // `row.book` — the row is built with `book` two lines up, and `row.world` is undefined, so every
+            // book's rows shared one key and a uid present in two books kept whichever came first.
+            if (!pool.has(`${row.book}${row.uid}`)) pool.set(`${row.book}${row.uid}`, row);
             return row;
         });
         armsOut.push({

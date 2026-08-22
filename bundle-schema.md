@@ -308,7 +308,7 @@ keying on params would only make identity depend on how completely a writer reco
 recording one more later would stop an old verdict matching its own re-merge.
 
 **Every `…At` field is `toISOString()` — UTC, `Z`, milliseconds, and the SAME precision throughout.**
-`createdAt`, `gradedAt`, `migratedAt`, `graftedAt` and `frozenAt` all record an instant; a reader wanting a
+`createdAt`, `gradedAt`, `reviewedAt`, `graftedAt` and `frozenAt` all record an instant; a reader wanting a
 day slices one. Truncating at write time is the same error as freezing a joined haystack — it discards
 what cannot be recovered to save a step that costs nothing. It also had a live consequence: a document's
 `createdAt` stamps the human verdicts captured with it, so a day-granularity `createdAt` made two

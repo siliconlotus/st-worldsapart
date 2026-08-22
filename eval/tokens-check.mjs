@@ -10,6 +10,7 @@
 import { readFileSync, readdirSync, existsSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { armNames, openBundle } from '../extension/grading.mjs';
 import { TOKENIZER_OFFSET, deriveOffsets, offlineTokenCounter } from './tokens.mjs';
 
 const DATA = resolve(dirname(fileURLToPath(import.meta.url)), 'eval-data');
@@ -39,14 +40,19 @@ for (const [tok, d] of derived) {
 
 // End to end on one real row: the counter reproduces a recorded number exactly, which is the claim the
 // offset table exists to support.
-const withRows = manifests.find(m => (Array.isArray(m.arms) ? m.arms : [m]).some(a => a.paramSnapshot?.budget?.tokenizer && (a.candidates ?? []).some(c => Number(c.tokens) > 0)));
+// One real row end to end: the counter reproduces a recorded number exactly, which is the claim the offset
+// table exists to support. THROUGH openBundle — `paramSnapshot` and `candidates` are on the arm's scene
+// cell, and reading them off the arm made this block unreachable and the check silently vacuous.
+const armWith = m => armNames(m).map(a => openBundle(m, a))
+    .find(S => S.paramSnapshot?.budget?.tokenizer && (S.candidates ?? []).some(c => Number(c.tokens) > 0));
+const withRows = manifests.map(m => ({ m, S: armWith(m) })).find(x => x.S);
 if (withRows) {
-    const arm = (Array.isArray(withRows.arms) ? withRows.arms : [withRows]).find(a => a.paramSnapshot?.budget?.tokenizer);
+    const { m, S } = withRows;
     const byUid = new Map();
-    for (const [world, bk] of Object.entries(withRows.books ?? {})) for (const e of Object.values(bk)) byUid.set(`${world}${e.uid}`, e);
-    const counter = offlineTokenCounter(arm.paramSnapshot.budget.tokenizer);
-    const rows = (arm.candidates ?? []).filter(c => Number(c.tokens) > 0 && byUid.get(`${c.world}${c.uid}`)?.content);
-    const wrong = rows.filter(c => counter.count(byUid.get(`${c.world}${c.uid}`).content) !== Number(c.tokens));
+    for (const [book, bk] of Object.entries(m.books ?? {})) for (const e of Object.values(bk)) byUid.set(`${book}${e.uid}`, e);
+    const counter = offlineTokenCounter(S.paramSnapshot.budget.tokenizer);
+    const rows = (S.candidates ?? []).filter(c => Number(c.tokens) > 0 && byUid.get(`${c.book}${c.uid}`)?.content);
+    const wrong = rows.filter(c => counter.count(byUid.get(`${c.book}${c.uid}`).content) !== Number(c.tokens));
     counter.free();
     ok(wrong.length === 0, `offlineTokenCounter reproduces every recorded count on one capture (${rows.length} rows, ${wrong.length} mismatched)`);
 }

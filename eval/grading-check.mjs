@@ -253,8 +253,13 @@ eq(gradeValue({ grades: [L(0)] }), 0, 'an llm 0 is a measurement, not an absence
 // silently resolves noise in favour of whichever pass ran last.
 eq(gradeValue({ grades: [L(0), L(4), L(3)] }), 3, 'three llm verdicts resolve to their median');
 eq(gradeValue({ grades: [L(0), L(4)] }), 4, 'two that disagree cannot be resolved, so the latest stands');
-// The v1/v2 scalars still read, so an unmigrated file is an older capture rather than a broken one.
-eq(gradeValue({ grade: 2, llmGrade: 3 }), 2, 'a v2 row still resolves through its stored scalars');
+// A BARE `grade` IS A FRESHLY TYPED HUMAN VERDICT — the value a grading UI holds before it becomes a
+// verdict in `grades`. It is the live path, not a legacy one.
+eq(gradeValue({ grade: 2 }), 2, 'a bare grade reads as the value in force');
+// The superseded scalar has NO path. Nothing on disk predates v3, so a reader that still honoured
+// `llmGrade` would be resolving a field no writer emits — and silently outranking a real verdict.
+eq(Number.isNaN(gradeValue({ llmGrade: 3 })), true, 'a v2 llmGrade scalar is not read at all');
+eq(gradeValue({ grade: 2, llmGrade: 3 }), 2, '...and cannot displace the value that is');
 
 // A row the review did NOT touch gains no human verdict — that is what keeps "no human has looked at
 // this" readable, and it keeps the llm's reasoning where the llm put it.
