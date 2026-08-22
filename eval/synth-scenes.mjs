@@ -54,7 +54,7 @@ import { ensureIndex } from './reindex.mjs';
 import { offlineTokenCounter } from './tokens.mjs';
 import * as ranking from '../extension/ranking.mjs';
 import * as matcher from '../extension/matcher.mjs';
-import { bundleSamples, openBundle } from '../extension/grading.mjs';
+import { bundleSamples, openBundle, stRelative } from '../extension/grading.mjs';
 import { execFileSync } from 'node:child_process';
 
 /**
@@ -472,7 +472,8 @@ for (const idx of picks) {
             // GENERATION provenance only. How the grades were made is the grades' own, and travels with
             // them in graft-grades.mjs — conflating the two is what made a bundle's history unreadable.
             {
-                generatedFrom: { chat: CHAT, book: BOOK, attached, msg: idx, depth: DEPTH, model: MODEL, records: records.length },
+                // Relative like every other stored path — this one rides in `extra`, so it misses buildSample's choke point.
+                generatedFrom: { chat: stRelative(CHAT), book: BOOK, attached, msg: idx, depth: DEPTH, model: MODEL, records: records.length },
                 population: 'ranked',
             },
         );

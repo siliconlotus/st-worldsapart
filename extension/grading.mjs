@@ -12,6 +12,36 @@
 // answering after the embedding model changed. The index path is recorded; the harness self-checks it by
 // re-embedding a stored chunk and comparing cosine.
 
+/** ST's own top-level directories. A stored path is cut at the FIRST of these, which is what makes it
+ *  relative to the install root without having to know where that root is — the writer is the browser and
+ *  cannot look for `config.yaml`. First rather than last, because a chat or a book may itself be named
+ *  `data`, and the leftmost match is the install's. */
+const ST_ROOTS = /[\\/](data|public|plugins|backups|default)[\\/]/;
+
+/**
+ * A path as a document should store it: relative to the ST install.
+ *
+ * AN ABSOLUTE PATH IS MACHINE IDENTITY AND NOTHING ELSE. It names a directory no other install has, so no
+ * reader can use it — `eval/scene.mjs` skips a stored `index` that does not exist locally and derives its
+ * own, which is the normal case for a scene somebody else captured. What it does carry is the author's OS
+ * username, in a document meant to be shared. Measured before this existed: 97 of 107 documents held one,
+ * across two different usernames.
+ *
+ * The reader half already assumed this — `stInstall().resolve` maps a `data/` prefix through config.yaml's
+ * own `dataRoot` and anything else through the install root, and returns an absolute path untouched, which
+ * is how absolutes went on working locally while defeating the design.
+ *
+ * Separators are normalised to `/` so a document written on Windows reads the same everywhere.
+ *
+ * @param {string} path
+ * @returns {string} The path from the install root down, or the input if it names no ST directory
+ */
+export function stRelative(path) {
+    if (typeof path !== 'string') return path;
+    const m = ST_ROOTS.exec(path);
+    return m ? path.slice(m.index + 1).replace(/\\/g, '/') : path;
+}
+
 /**
  * Copies a book's entries, keyed by uid.
  *
@@ -427,7 +457,7 @@ export function buildSample({ name, notes, query, queryChat, scanChat, injects, 
         depth,
         // Path only, for provenance and for re-deriving a WIDER window than was captured — the one thing
         // queryChat can't do. A played-on chat invalidates it; queryChat is what's actually frozen.
-        chat,
+        chat: stRelative(chat),
         // Which deployed plugin produced these scores. Retrieval math lives in plugin/ and a redeploy can
         // move every per-entry signal in the sample without touching a single setting — server-side entry
         // pooling did exactly that. `pluginFP` is what served the capture, `sourceFP` what the extension's
@@ -453,8 +483,10 @@ export function buildSample({ name, notes, query, queryChat, scanChat, injects, 
         primaryBook,
         // Path to the primary book on disk. PROVENANCE ONLY, never a fallback: no reader may open it,
         // because reading the live lorebook is what let a later edit move an already-graded scene's numbers.
-        book,
-        index,
+        // RELATIVE TO THE ST INSTALL, both of them — see stRelative. An absolute path is the author's home
+        // directory, which no reader can use and every reader can be identified by.
+        book: stRelative(book),
+        index: stRelative(index),
 
         // The arm's knobs, under the name the schema gives them. `captureParams` was the v2 name and is
         // gone: one name for the concept, so a grep for `params` finds the schema, the writer and every

@@ -234,6 +234,25 @@ A reader that needs a score it cannot find has met an older capture, not a broke
 name; they sit flat on the candidate with `index`, `tokens` and the classification fields. The test is
 whether a feature list could legitimately name it.
 
+## Every stored path is relative to the ST install
+
+`chat`, `sceneChat`, `index`, `book` and `generatedFrom.chat` are written from the install root down —
+`data/default-user/chats/…`, `public/scripts/extensions/…` — never absolute. `grading.mjs` `stRelative`
+cuts at the FIRST of ST's own top-level directories, which is how the browser produces one without knowing
+where the root is; first rather than last, because a chat folder may itself be named `data`.
+
+**An absolute path is machine identity and nothing else.** No reader can use one — `eval/scene.mjs` skips a
+stored `index` that does not exist locally and derives its own, which is the normal case for a scene
+somebody else captured — while it does carry the author's OS username, in a document meant to be shared.
+**Measured** before the rule existed: 97 of 107 documents held one, across two different usernames.
+
+The reader half already assumed this. `stInstall().resolve` maps a `data/` prefix through the install's own
+`config.yaml` `dataRoot` and anything else through the root, and returns an absolute path untouched — which
+is exactly how absolutes went on working on the machine that wrote them while defeating the design
+everywhere else.
+
+A path naming no ST directory is stored unchanged rather than guessed at.
+
 ## The version fields record what was resolved, not what was declared
 
 Both are `<branch>@<git describe --tags --always --dirty='+dirty'>`, and the two projects use the one rule

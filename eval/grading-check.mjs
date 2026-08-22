@@ -2,7 +2,7 @@
 // this pins the part that decides what a sample CONTAINS: book fidelity, the settings mapping, the
 // reference tier, and the foreign-book exclusion. A sample that silently loses a field is a graded scene
 // that can't be re-run, which is the whole failure this feature exists to prevent.
-import { buildSample, bundleSamples, captureParams, hashBooks, keyByUid, isDurable, mergeGrades, openBundle, passKey, rowKey, sampleFile, searchedBook, splitGraded, unionArms } from '../extension/grading.mjs';
+import { buildSample, bundleSamples, captureParams, hashBooks, keyByUid, stRelative, isDurable, mergeGrades, openBundle, passKey, rowKey, sampleFile, searchedBook, splitGraded, unionArms } from '../extension/grading.mjs';
 import { eq, gradeValue } from './metrics.mjs';
 import * as ranking from '../extension/ranking.mjs';
 
@@ -472,4 +472,38 @@ eq(Object.keys(twoDepths.sceneChats).length, 1, '...sharing one stored set of me
 
     eq(/^[0-9a-f]{64}$/.test(a.W), true, 'lowercase hex SHA-256, the same shape a digest rater id carries');
     eq(Object.keys(await hashBooks(undefined)).length, 0, 'no books is an empty map, not a throw');
+}
+
+
+// --- stRelative: a stored path names the install, never the machine -------------------------------------
+// An absolute path is the author's home directory. No reader can use it — scene.mjs skips a stored `index`
+// that is not local and derives its own — and every reader can be identified by it.
+{
+    const B = String.fromCharCode(92);
+    eq(stRelative('/Users/someone/SillyTavern-launcher/SillyTavern/data/default-user/chats/A/x.jsonl'),
+        'data/default-user/chats/A/x.jsonl', 'a chat path is cut at ST\'s data/');
+    eq(stRelative('/Users/other/ST/public/scripts/extensions/third-party/WorldsApart/eval/eval-data/indexes/a/index.json'),
+        'public/scripts/extensions/third-party/WorldsApart/eval/eval-data/indexes/a/index.json', '...and an index path at public/');
+    eq(stRelative(`C:${B}Users${B}bob${B}SillyTavern${B}data${B}default-user${B}chats${B}x.jsonl`),
+        'data/default-user/chats/x.jsonl', 'a Windows path relativises and normalises its separators');
+
+    eq(stRelative('data/default-user/chats/x.jsonl'), 'data/default-user/chats/x.jsonl', 'an already-relative path is unchanged');
+    // FIRST match, not last: a chat or a book may itself be named `data`, and the install's is leftmost.
+    eq(stRelative('/Users/x/ST/data/default-user/chats/data/session.jsonl'), 'data/default-user/chats/data/session.jsonl',
+        'a chat folder named "data" does not move the cut');
+    // Nothing to anchor on is left alone rather than mangled into a wrong relative path.
+    eq(stRelative('/Users/x/elsewhere/file.json'), '/Users/x/elsewhere/file.json', 'a path naming no ST directory is untouched');
+    eq(stRelative(undefined), undefined, 'an absent path is not a throw');
+
+    // The choke point is buildSample, so no writer has to remember.
+    const withPaths = buildSample({
+        name: 'p', query: 'q', scanChat: [{ name: 'A', mes: 'm' }], primaryBook: 'B', books: { B: {} },
+        candidates: [], grades: [], params: {}, snapshot: {}, now: '2026-01-01T00:00:00.000Z',
+        chat: '/Users/someone/ST/data/default-user/chats/A/x.jsonl',
+        index: '/Users/someone/ST/public/scripts/x/index.json',
+        book: '/Users/someone/ST/data/default-user/worlds/B.json',
+    });
+    eq(withPaths.chat, 'data/default-user/chats/A/x.jsonl', 'buildSample relativises the chat path');
+    eq(withPaths.index, 'public/scripts/x/index.json', '...the index path');
+    eq(withPaths.book, 'data/default-user/worlds/B.json', '...and the book path, so no writer has to remember');
 }
