@@ -414,7 +414,15 @@ time is a last resort and cannot separate two passes filed in one invocation.
 | `id` component | is | when unavailable |
 |---|---|---|
 | `modelId` | the backend's manifest digest where it has one, else the invoked name | empty |
-| `rubric` | the contract graded under — `scene-relevance@8460b922` | empty |
+| `rubric` | the contract graded under — `scene-relevance@8460b922`, resolvable in `eval/contracts/` | a named pass, or empty |
+
+**Where a version cannot be named, name the pass by what IS known** — never by what is not. A pass whose
+instructions were never an artifact still has an identity, and a hole named `unknown` folds the next such
+pass into the same rater.
+
+**Measured**: 33 rater rows are `scene-relevance@fable-inline-1` — the 2026-07-31 round, graded inline by
+claude-fable-5 before any rubric was a file. The lineage is real: `scene-relevance.md` was recovered from
+that session. Such a name does not resolve in `eval/contracts/` and must not.
 
 Only Ollama surfaces one. `/api/tags` gives `digest` (sha256, 64 hex) and `/api/show` gives
 `details.family`, `.quantization_level`, `.parameter_size` and `capabilities` — the last being what makes an
