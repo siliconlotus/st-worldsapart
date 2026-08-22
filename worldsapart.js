@@ -2676,7 +2676,7 @@ async function gradeScene(named) {
  *               termWeights as a parameter, so this arm now fails the criterion above. Kept until the
  *               section is resettled; it still cannot ride a preloaded sweep (scene.mjs's guard names
  *               only the gazetteer settings).
- *   keys-live   scoreVectorKeys on gives a retrieved entry its keyword rank too, which reorders the
+ *   keys-off    scoreVectorKeys off takes a retrieved entry's keyword rank away, which reorders the
  *               layout and so changes what the entry maxes and the budget keep. Activation (secondary
  *               keys, inclusion groups, recursion, min-activations, probability rolls) is the one thing
  *               this project cannot recompute offline at all, so it can only be sampled live.
@@ -2692,7 +2692,7 @@ async function gradeScene(named) {
 const POOL_ARMS = {
     shipped: {},
     'no-filter': { entityFilter: false },
-    'keys-live': { scoreVectorKeys: true },
+    'keys-off': { scoreVectorKeys: false },
 };
 
 /**
@@ -3506,6 +3506,11 @@ const SETTINGS_HTML = `
                         <input id="wa_weight_by_order" type="checkbox"><span>Weight by entry order (order = priority)</span>
                     </label>
                     <small class="opacity50p">Folds each entry's Order into the fused score as another rank, so higher-order entries rank higher — for books that use Order as priority. Order stays a tiebreak either way.</small>
+
+                    <label class="checkbox_label" for="wa_score_vector_keys">
+                        <input id="wa_score_vector_keys" type="checkbox"><span>Score a retrieved entry's own keys</span>
+                    </label>
+                    <small class="opacity50p">Lets an entry's keyword matches re-rank it even when the vector search is what found it. Untick if this book's memory keys are unreviewed machine output — measured, the column gains slightly on books whose keys were reviewed and costs a third of a percent on those where they were not.</small>
                 </div>
             </div>
 
@@ -3788,6 +3793,7 @@ export async function init() {
     // number binding would collapse it to 0 and silently switch the keys signal off.
     bind('#wa_keyword_weight', 'keywordWeight', 'number?');
     bind('#wa_weight_by_order', 'weightByOrder', 'checked');
+    bind('#wa_score_vector_keys', 'scoreVectorKeys', 'checked');
     bind('#wa_llm_profile', 'llmProfile', 'string');
     bind('#wa_llm_temp', 'llmTemperature', 'string');
     bind('#wa_uncentered_gate', 'uncenteredGate', 'number');

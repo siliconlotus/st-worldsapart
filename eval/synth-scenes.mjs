@@ -64,7 +64,7 @@ import { execFileSync } from 'node:child_process';
 const POOL_ARMS = {
     shipped: {},
     'no-filter': { entityFilter: false },
-    'keys-live': { scoreVectorKeys: true },
+    'keys-off': { scoreVectorKeys: false },
 };
 
 const argv = process.argv.slice(2);

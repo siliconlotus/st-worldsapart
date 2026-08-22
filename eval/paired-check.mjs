@@ -141,11 +141,11 @@ eq(makeGradeOf([{ title: 'Villa', grade: 5, uid: 1 }, { title: 'Other', grade: 3
 // --- keyword scoring honours production's key suppression (worldsapart.js suppressKeys) ---
 // Samples embed books raw, so vectorized entries still carry keys the live scan would have blanked; scoring
 // them gave vectorized entries a keys signal production can never produce.
-const kwP = makeKeywordScore(sceneParams({}));   // scoreVectorKeys false — the default
-eq(kwP({ vectorized: true, key: ['villa'] }, 'meet me at the villa', 1.2), 0, 'vectorized keys are suppressed, as the live scan sees them');
-eq(kwP({ vectorized: false, key: ['villa'] }, 'meet me at the villa', 1.2) > 0, true, 'non-vectorized keys still score');
-eq(makeKeywordScore(sceneParams({ params: { scoreVectorKeys: true } }))({ vectorized: true, key: ['villa'] }, 'meet me at the villa', 1.2) > 0,
-    true, 'scoreVectorKeys re-admits the originals, as production scores waKeys');
+const kwOff = makeKeywordScore(sceneParams({ params: { scoreVectorKeys: false } }));
+eq(kwOff({ vectorized: true, key: ['villa'] }, 'meet me at the villa', 1.2), 0, 'scoreVectorKeys off suppresses a vectorized entry\'s keys, as the live scan would');
+eq(kwOff({ vectorized: false, key: ['villa'] }, 'meet me at the villa', 1.2) > 0, true, 'non-vectorized keys still score');
+eq(makeKeywordScore(sceneParams({}))({ vectorized: true, key: ['villa'] }, 'meet me at the villa', 1.2) > 0,
+    true, 'the DEFAULT scores them, as production does');
 
 // --- scene independence (jaccard on relevant sets) ---
 // Pseudo-replication is the failure: two near-identical scenes counted as two draws invent power the data
