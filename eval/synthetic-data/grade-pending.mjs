@@ -32,7 +32,7 @@
 // job is not merged, and its job path is printed for re-dispatch. A judge dropping one row of sixteen is
 // silent otherwise — it has happened — and a partial merge would bake the gap into the bundle.
 import { readFileSync, writeFileSync, mkdirSync, readdirSync, existsSync, statSync } from 'node:fs';
-import { createHash } from 'node:crypto';
+import { archiveContract, contractBody } from './contract.mjs';
 import { dirname, resolve as resolvePath } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { openBundle, passKey, raterParts, setGrades } from '../../extension/grading.mjs';
@@ -68,11 +68,10 @@ const byUid = book => new Map(Object.values(book ?? {}).map(e => [String(e.uid),
 // correction relabelled 395 old-contract job files as if they had been graded under the new one, and
 // the appended history said so. The job is written and the judge dispatched in the same breath, so the
 // hash at build time is the only one that describes the grading.
-// HASHED OVER WHAT IS SENT, not the file. The frontmatter is how Claude Code discovers the agent and is
-// stripped before the model sees it, so including it made an edit to the `description` line move the
-// contract while the graded instructions were byte-identical. grade-local hashes the same way.
+// One definition of what a contract IS and what it hashes to, shared with grade-local — see contract.mjs.
+// The block is archived under its hash, so a verdict's `scene-relevance@<hash>` resolves to text.
 const contractHash = existsSync(CONTRACT)
-    ? createHash('sha256').update(readFileSync(CONTRACT, 'utf8').replace(/^---[\s\S]*?\n---\n/, '')).digest('hex').slice(0, 8)
+    ? archiveContract(contractBody(readFileSync(CONTRACT, 'utf8'))).hash
     : 'unknown';
 
 // A RUN LABEL MAKES A REPEAT PASS DISTINCT FROM THE ONE IT REPEATS. Pass identity is contract+model,

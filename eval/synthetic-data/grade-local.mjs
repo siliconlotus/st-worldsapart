@@ -31,6 +31,7 @@
 // was built under.
 import { readFileSync, writeFileSync, appendFileSync, mkdirSync, readdirSync, existsSync } from 'node:fs';
 import { homedir } from 'node:os';
+import { archiveContract, contractBody, contractHash } from './contract.mjs';
 import { createHash } from 'node:crypto';
 import { dirname, resolve as resolvePath } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -62,12 +63,12 @@ const HOST = arg('--host', process.env.OLLAMA_HOST ?? (API === 'openai' ? 'http:
 // stamped on every job, making an experiment indistinguishable from a ruling.
 const RUBRIC = resolvePath(arg('--rubric', resolvePath(ROOT, '.claude', 'agents', 'scene-relevance.md')));
 const rubricRaw = readFileSync(RUBRIC);
-// THE FRONTMATTER IS NOT THE CONTRACT. Claude Code reads it to discover the agent; the grading prompt
-// strips it, so the model never sees it — and hashing it made an edit to the `description` line move the
-// contract from 8460b922 to 4ddd6466 while the graded instructions stayed byte-identical. Hash what is
-// SENT. grade-pending hashes the same way, so an unmodified rubric still hashes to the job's own stamp.
-const system = rubricRaw.toString('utf8').replace(/^---[\s\S]*?\n---\n/, '');
-const rubricHash = createHash('sha256').update(system).digest('hex').slice(0, 8);
+// One definition of what a contract IS and what it hashes to, shared with grade-pending — see contract.mjs.
+const system = contractBody(rubricRaw.toString('utf8'));
+const rubricHash = contractHash(system);
+// The block this pass sent, recorded under its own hash, so the hash on every verdict below can be read
+// back as text. Idempotent: content-addressed, so a second pass under the same contract writes nothing.
+if (archiveContract(system, rubricHash).written) console.log(`contract ${rubricHash} archived`);
 
 /**
  * Who the rater is, resolved from the backend rather than from what was typed.

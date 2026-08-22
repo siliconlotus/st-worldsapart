@@ -136,13 +136,13 @@ JSON only, one object per candidate you were given, in the order you were given 
 {
   "scene": "<scene name if given, else null>",
   "grades": [
-    {"world": "...", "uid": 94, "grade": 0, "why": "<one clause: what in the scene this turns on>"}
+    {"book": "...", "uid": 94, "grade": 0, "why": "<one clause: what in the scene this turns on>"}
   ]
 }
 ```
 
 - Every candidate gets a row. Never drop one, never invent one.
-- `world` and `uid` copied exactly as given — together they are the identity the grade is stored under.
+- `book` and `uid` copied exactly as given — together they are the identity the grade is stored under.
 - `why` is one short clause for a human reviewer to disagree with, not a paragraph.
 
 You may be handed the scene and candidates inline, or a path to a job file holding both — in that case
