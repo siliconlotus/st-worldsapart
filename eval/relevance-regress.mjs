@@ -106,6 +106,13 @@ const CUTOFF = argv.includes('--cutoff');
 // EXPERIMENT (uncommitted default): mirror gradeCredit onto recall, so a 2 is half a hit on BOTH bars
 // instead of half on precision and nothing on recall. Off = the shipped asymmetric definition.
 const HALF_RECALL = argv.includes('--half-recall');
+// EXPERIMENT: where the relevant/irrelevant line sits for the SCORING BARS (not the fit target, which
+// is --cut). At 3 the shipped definition holds: full credit >= 3, a 2 at half, recall over >= 3. At 2
+// the class is "anything a delivery would not be unequivocally wrong about": full credit >= 2, nothing
+// below, recall over >= 2, and the score cut on becomes P(>=2) rather than E[credit], since a half band
+// no longer exists to take an expectation over.
+const RELEVANT_AT = Number(arg('--relevant-at') ?? 3);
+const creditOf = g => (RELEVANT_AT === 2 ? (g >= 2 ? 1 : 0) : gradeCredit(g));
 const AT = arg('--at') === null ? null : Number(arg('--at'));
 const DEGREE = Number(arg('--degree') ?? 1);
 // Which signals get a squared term. Empty means all of them — naming a subset is how a term that
@@ -692,7 +699,8 @@ const queryVec = async (S, name, value, em) => {
                 const scoreRow = (design, fold) => {
                     const eta = b => (b ? design.reduce((a, x, j) => a + x * b[j], 0) : NaN);
                     const p2 = sigmoid(eta(cuts[0][fold])), p3 = sigmoid(eta(cuts[1][fold]));
-                    return Number.isFinite(p2) && Number.isFinite(p3) ? 0.5 * p2 + 0.5 * Math.min(p3, p2) : NaN;
+                    return RELEVANT_AT === 2 ? p2
+                        : Number.isFinite(p2) && Number.isFinite(p3) ? 0.5 * p2 + 0.5 * Math.min(p3, p2) : NaN;
                 };
                 let gi = 0;
                 const scenes = perScene.map(({ kept, ungraded, name, query }, si) => {
@@ -714,7 +722,7 @@ const queryVec = async (S, name, value, em) => {
                         rows.push({ e: scoreRow(design, fold), g: 0, ungraded: true, ...idOf(u.r) });
                     }
                     return { name, query, book: books[fold], rows: rows.filter(r => Number.isFinite(r.e)),
-                        relevant: HALF_RECALL ? kept.reduce((a, k) => a + gradeCredit(k.g), 0) : kept.filter(k => k.g >= 3).length };
+                        relevant: HALF_RECALL ? kept.reduce((a, k) => a + creditOf(k.g), 0) : kept.filter(k => k.g >= RELEVANT_AT).length };
                 }).filter(sc => sc.relevant > 0);
                 const grid = Array.from({ length: 99 }, (_, i) => (i + 1) / 100);
                 return {
@@ -728,8 +736,8 @@ const queryVec = async (S, name, value, em) => {
                     grid: grid.map(cut => {
                         const per = scenes.map(sc => {
                             const got = sc.rows.filter(r => r.e >= cut);
-                            const precision = got.length ? mean(got.map(r => gradeCredit(r.g))) : 0;
-                            const recall = (HALF_RECALL ? got.reduce((a, r) => a + gradeCredit(r.g), 0) : got.filter(r => r.g >= 3).length) / sc.relevant;
+                            const precision = got.length ? mean(got.map(r => creditOf(r.g))) : 0;
+                            const recall = (HALF_RECALL ? got.reduce((a, r) => a + creditOf(r.g), 0) : got.filter(r => r.g >= RELEVANT_AT).length) / sc.relevant;
                             return { f: fbeta(precision, recall, RECALL_WEIGHT), precision, recall, n: got.length };
                         });
                         return {
