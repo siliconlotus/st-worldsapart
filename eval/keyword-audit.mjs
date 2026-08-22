@@ -12,14 +12,25 @@
 // --json writes the flagged key strings as a flat array, which is what scene.mjs `dropKeys` takes: it
 // simulates the book edit this audit recommends WITHOUT editing the book, so a curation pass can be
 // scored before anyone spends days on it.
-import { readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { isRegexKey } from '../extension/matcher.mjs';
+import { stInstall } from './scene.mjs';
 
-const ROOT = '/Users/user/SillyTavern-Launcher/SillyTavern';
+// The install is LOCATED, never named: an absolute path here is one machine's, and this file carried
+// another host's for long enough that both defaults were dead on this one (scene.mjs stInstall).
+const ST = stInstall();
 const JSON_OUT = (() => { const i = process.argv.indexOf('--json'); return i >= 0 ? process.argv[i + 1] : null; })();
 const positional = process.argv.slice(2).filter((a, i, xs) => !a.startsWith('--') && xs[i - 1] !== '--json');
-const INDEX = positional[0] ?? `${ROOT}/data/default-user/vectors/ollama/wa_3810524038950542/bge-m3/index.json`;
-const LORE = positional[1] ?? `${ROOT}/data/default-user/worlds/Sommers_Pack__v22.json`;
+const INDEX = positional[0] ?? ST?.resolve('data/default-user/vectors/ollama/wa_3810524038950542/bge-m3/index.json');
+const LORE = positional[1] ?? ST?.resolve('data/default-user/worlds/Sommers_Pack__v22.json');
+// The defaults name one collection on one install, so say which path is missing rather than throwing an
+// ENOENT out of the first read — the usual cause is that they were never yours.
+for (const [what, path] of [['index', INDEX], ['lorebook', LORE]]) {
+    if (path && existsSync(path)) continue;
+    console.error(path ? `${what} not found: ${path}` : 'no SillyTavern install found from here');
+    console.error('usage: node keyword-audit.mjs <path/to/index.json> <path/to/lorebook.json> [--json out.json]');
+    process.exit(2);
+}
 const BOOK_COMMON = 0.50;  // matches KEY_BOOK_COMMON in keyword-core.mjs
 
 const idx = JSON.parse(readFileSync(INDEX, 'utf8'));
