@@ -9,15 +9,15 @@ export const defaultSettings = {
     enabled: true,
     /**
      * Give vectorized (🔗) entries a keyword-over-keys rank as well as their cosine and text ranks.
-     * ON by default: the shipped model carries a keys column, so unticking it is the author's assertion
-     * that their memory entries' keys are unreviewed machine output rather than judgement. Measured, the
-     * column helps the two curated books in the corpus and costs the uncurated ones a third of a
-     * percent — see matcher-design.md, *Scoring memory's keys gives a real signal and costs a little*.
+     * OFF by default, though the shipped model carries the column so that ticking it reaches the
+     * prediction. Measured, the column costs 0.005 to 0.019 F2 across the operating band on three of
+     * five books, so the default is the case that does not punish a book whose keys nobody reviewed —
+     * see matcher-design.md, *Scoring memory's keys gives a real signal and costs a little*.
      *
      * STAGE 3 ONLY: it decides what a retrieved entry is SCORED on, never what activates. Stage 2 is
      * the takeover's, and stage 1 admits every vectorized entry it scores either way.
      */
-    scoreVectorKeys: true,
+    scoreVectorKeys: false,
     /** Characters per chunk. Entries are chunked for MATCHING only; the whole entry is still inserted. */
     chunkSize: 800,
     /** 'paragraph' keeps semantic boundaries; 'length' fills to chunkSize (chunking.mjs splitRecursive). */

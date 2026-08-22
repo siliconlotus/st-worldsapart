@@ -2676,7 +2676,7 @@ async function gradeScene(named) {
  *               termWeights as a parameter, so this arm now fails the criterion above. Kept until the
  *               section is resettled; it still cannot ride a preloaded sweep (scene.mjs's guard names
  *               only the gazetteer settings).
- *   keys-off    scoreVectorKeys off takes a retrieved entry's keyword rank away, which reorders the
+ *   keys-live   scoreVectorKeys on gives a retrieved entry its keyword rank too, which reorders the
  *               layout and so changes what the entry maxes and the budget keep. Activation (secondary
  *               keys, inclusion groups, recursion, min-activations, probability rolls) is the one thing
  *               this project cannot recompute offline at all, so it can only be sampled live.
@@ -2692,7 +2692,7 @@ async function gradeScene(named) {
 const POOL_ARMS = {
     shipped: {},
     'no-filter': { entityFilter: false },
-    'keys-off': { scoreVectorKeys: false },
+    'keys-live': { scoreVectorKeys: true },
 };
 
 /**
@@ -3510,7 +3510,7 @@ const SETTINGS_HTML = `
                     <label class="checkbox_label" for="wa_score_vector_keys">
                         <input id="wa_score_vector_keys" type="checkbox"><span>Score a retrieved entry's own keys</span>
                     </label>
-                    <small class="opacity50p">Lets an entry's keyword matches re-rank it even when the vector search is what found it. Untick if this book's memory keys are unreviewed machine output — measured, the column gains slightly on books whose keys were reviewed and costs a third of a percent on those where they were not.</small>
+                    <small class="opacity50p">Lets an entry's keyword matches re-rank it even when the vector search is what found it. Tick it if you curated this book's memory keys yourself — measured, unreviewed generated keys cost about a point of F2, so the default leaves them out of the ranking.</small>
                 </div>
             </div>
 

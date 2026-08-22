@@ -1039,7 +1039,7 @@ of a constant. On books whose memory entries are all vectorized the column's wit
 
 **Scoring memory's keys gives a real signal and costs a little.** **Measured**, memory tier,
 `scoreVectorKeys` on: keys go from within-scene SD 0 and solo AUC 0.500 to 0.7573 and 0.717, fitting at
-std beta +0.165 (SE 0.052) in the six-feature model. A third signal exists in that tier; it is redundant,
+std beta +0.172 (SE 0.051) in the shipped model. A third signal exists in that tier; it is redundant,
 which follows from an entry's keys being drawn from its own content while `text` scores that content
 directly.
 
@@ -1051,12 +1051,20 @@ scenes, so its SD is 0, the fit returns +0.000 at SE 1000, and `scoreVectorKeys=
 `--without keys` to the bit on all 97 scored scenes. They stop coinciding at the first scene holding an
 unvectorized memory entry whose keys score, where the one row breaking the constant meets a fitted slope.
 
-**Measured** on the shipped design (`relevance-model-memory.json`: cosine, text, keys, properNouns, density),
-103 scenes, 6231 rows, 446 relevant, both arms at `scoreVectorKeys=true`, held out by
-book. **The score of record is F2 over the delivered set**, and it reads 0.5545 -> 0.5514 with the column
-live. AUC is 0.8239 -> 0.8238 and AP 0.464 -> 0.466, but those rank rows rather than choose a set and do
-not carry the decision. So the column costs about three F2 thousandths, and it changes nothing at all on
-15 of the 97 scenes, which deliver an identical set either way.
+**Measured** across the two shipped fits, 103 scenes, 6231 rows, 446 relevant, held out by book. **The score of record is F2 over the
+delivered set**, and each arm at its own peak reads 0.5654 -> 0.5520 with the column live. AUC is
+0.8274 -> 0.8269 and AP 0.465 -> 0.469, so the ordering is a wash and the delivered set is not.
+
+**PEAK TO PEAK IS THE SHIPPING COMPARISON HERE, and it is the exception to the rule below.** *A
+cutoff-curve peak is not a comparison* governs a screen, where a moved peak masquerades as a better
+ordering. This is not a screen: each setting ships as a fit with its OWN derived cutoff, so what a user
+gets is one peak or the other — 0.5654 at 0.11 against 0.5520 at 0.09.
+
+**What matched reads add is the diagnosis, not the verdict.** Held at one cutoff the cost is 0.0045 at
+0.09 and 0.019 at 0.11 and 0.13, and the sign FLIPS with depth — the column loses through 0.09-0.15 and
+wins below 0.20, at cuts delivering seven entries or fewer. At matched RECALL it is -0.4 precision points
+at 60%, -2.1 at 70% and +0.6 at 80%. So the column sharpens the head of the list and adds noise through
+the middle, which is what a redundant reading of an entry's own content would do.
 
 **WHETHER A SIGNAL IS IN THE MODEL IS A QUESTION ABOUT THE FEATURE SET, never about a row.** The fit
 carries one standardised column per signal and nothing else, so a signal is either fitted for the whole
@@ -1068,10 +1076,11 @@ WITHOUT cosine, on the four remaining columns, or with a cosine COMPUTED FOR ALL
 is not vectorizing the entry — it is a column in the fit, where `vectorized` decides what stage 1
 retrieves.
 
-**Per book the sign follows curation.** The column moves Sommers +0.004 and Richard +0.014, the two
-curated books, against Time Whore -0.001, Ascensus -0.007 and Panopticon -0.010. Five books is not a rule
-and these are AUC deltas in the third decimal, but nothing dominates and the direction is the one key
-quality would predict.
+**Per book it is two books, and curation is not what picks them.** At a matched 0.11 the column costs
+Ascensus -0.058 and Richard -0.060 while Sommers reads +0.009 and Time Whore +0.012 — and Richard is
+curated where Ascensus is not. Read at each arm's own peak instead, Sommers appears to lose most
+(-0.027); that is the two cutoffs differing and not the book. What does separate the two losers is the
+column's dispersion (*Open work* #13).
 
 **A SMALL FOLD IS NOT A HARMLESS FOLD**, because `--lobo` trains each fold on all the others. At 5 scenes
 Richard decided the sign of this contrast for every other book, Sommers moving between +0.0026 and
@@ -1082,17 +1091,16 @@ out (27 / 34 over 78 scenes).
 **A per-book rule has nothing to key on, so the AUTHOR asserts it.** Selecting the setting off the
 curation detector (`eval-data/README.md`) has read 6-for-6 and then signless across corpus revisions, and
 wants a book nobody fitted the threshold on. `scoreVectorKeys` is therefore a checkbox in Ranking &
-fusion, **defaulting ON**: a key is authored, so the default is to read it, and UNTICKING is the
-assertion — that this book's memory keys are machine output nobody reviewed. The corpus argues both ways
-and neither loudly: three of its five books are uncurated and the column costs them, but by a third of a
-percent, where the two curated ones gain.
+fusion, **defaulting OFF**: the column costs across the operating band on most of the corpus, so the
+default is the reading that does not punish a book whose keys nobody reviewed, and TICKING it is the
+author's assertion that they curated theirs.
 
-**ONE MODEL SERVES BOTH SETTINGS, and it is the keys-live one**, fitted with the column so the checkbox
-reaches the prediction — a keys-free fit would leave it with nothing to change. A fit made with keys live
-and run with them blanked ranks as well as one refitted for it (AUC 0.8420 against 0.8416) and holds its
-operating point (F2 0.5751 at its unchanged cutoff against the refit's 0.5804, delivering 13.0 rather
-than 13.5). A blanked column standardises to 0 for every row, so the keys term drops out and the other
-five decide, which is what makes the transfer free.
+**ONE FIT SERVES BOTH SETTINGS, and it is the keys-live one.** `relevance-model-memory.json` carries the
+column so that ticking the box reaches the prediction; unticking blanks the keys, the column standardises
+to 0 for every row, and the other four decide. **Measured** on blanked rows, `P(>=3)`: that fit reads F2
+0.5800 at its own 0.09 against 0.5731 for a purpose-built keys-free fit at its 0.11, the two peaking
+within 0.003 of each other around 0.10. So the setting and the fit are separate questions — the setting
+is worth about a point of F2 and the fit it is read through is worth nothing.
 
 **MOST OF THE MEMORY TIER'S KEYS ARE MACHINE OUTPUT, which every claim above rests on.** **Measured**,
 by key provenance: 6136 of the 10,981 memory rows (55.9%) sit on books whose scene-summary keys nobody
@@ -1104,8 +1112,8 @@ one book. `eval-data/README.md` carries the per-book status and how to recover i
 **Nor does the redundancy hide a denoised copy of `text`.** The agreement term is the shape that
 hypothesis predicts, and it is inside one standard error: `text*keys` reads -0.021 (SE 0.065) with the
 signal live. PAIRED per scene at each arm's own best cutoff, scoring keys is
--0.0031 mean F2 on 22 scenes up against 60 (*Scoring memory's keys gives a real signal and costs a
-little*), which is the redundancy priced rather than a denoised copy appearing.
+-0.0134 mean F2 on 15 scenes up against 55, which is the redundancy priced rather than a denoised copy
+appearing.
 
 **AND EACH ARM'S PEAK IS A DIFFERENT OPERATING POINT.** The paired sign test compares two arms where each
 sits at ITS own best cutoff, and F2 walks that peak toward precision as a model improves — so a contrast
@@ -1301,10 +1309,10 @@ instances the books on disk hold.
    scoring the prediction, and `tierRecall` gets its kept set back at the same moment. The model, its
    evidence and what is still open about it are in *Stage 4 predicts per-entry relevance*.
 
-   THE MODEL IS FITTED AND THE CUTOFF WITH IT. `relevance-model-memory.json` carries seven coefficients
-   and the operating point the held-out F2 curve peaks at, so what remains is the CONSUMER: `rankActivated`
-   reading the file, standardising each signal within the scene it is scoring as the fit did, and cutting
-   the layout at that probability. Reference has neither a fit nor a cutoff, and gets both or neither —
+   THE MODEL IS FITTED AND THE CUTOFF WITH IT. `relevance-model-memory.json` carries six coefficients
+   and the operating point its held-out F2 curve peaks at, so what remains is the CONSUMER:
+   `rankActivated` reading the file, standardising each signal within the scene it is scoring as the fit
+   did, and cutting the layout at that probability. Reference has neither a fit nor a cutoff, and gets both or neither —
    its own question is whether cosine is a feature there at all.
 3. **`promote` — an author declaration that activation is sufficient.** A promoted entry enters the
    layout whenever its keys fire, exempt from the relevance cut. It is the per-entry form of *triggered

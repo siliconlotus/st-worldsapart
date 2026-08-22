@@ -319,7 +319,7 @@ export const sceneParams = (S, overrides = {}) => ({
     // only reweight the vector signal. They are run as controls, not as candidates.
     denseColumn: null,
     denseWeight: 0.5,
-    maxVectorEntries: 20, scoreVectorKeys: true, entityFilter: true,
+    maxVectorEntries: 20, scoreVectorKeys: false, entityFilter: true,
     // WHICH FIELDS THE GAZETTEER READS. Production is 'keys+titles' (buildGazetteer's own sources), chosen on
     // a 5-target gold set that no longer exists; 'bodies' was re-measured at n=3 scenes and lost. This param
     // exists so the choice can be re-run paired at the current scene count instead of re-argued.
