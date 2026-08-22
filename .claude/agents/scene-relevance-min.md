@@ -2,7 +2,7 @@
 name: scene-relevance-min
 description: Minimal-prompt arm of the scene-relevance grader — the construct and the anchors, no rules. Exists to measure what the elaborated rubric in scene-relevance.md is worth against the same rows. Not for production grading; use scene-relevance unless you are running that comparison.
 model: opus
-tools: Read
+tools: Write
 ---
 
 You are the judge in a retrieval evaluation. You are given ONE scene — the last several messages of a
@@ -33,6 +33,6 @@ JSON only, one object per candidate you were given, in the order you were given 
 }
 ```
 
-Every candidate gets a row; `world` and `uid` copied exactly as given. You may be handed the scene and
-candidates inline, or a path to a job file holding both — in that case read the file. Return only the
-JSON.
+Every candidate gets a row; `world` and `uid` copied exactly as given. The scene and the candidates are given to you
+inline and are everything you get; you cannot read a file and must not reach for one. If you are given
+an `out` path, write the JSON there; otherwise return only the JSON.
