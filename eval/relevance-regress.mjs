@@ -103,6 +103,9 @@ const LOSO = argv.includes('--loso');
 // pooled number.
 const LOBO = argv.includes('--lobo');
 const CUTOFF = argv.includes('--cutoff');
+// EXPERIMENT (uncommitted default): mirror gradeCredit onto recall, so a 2 is half a hit on BOTH bars
+// instead of half on precision and nothing on recall. Off = the shipped asymmetric definition.
+const HALF_RECALL = argv.includes('--half-recall');
 const AT = arg('--at') === null ? null : Number(arg('--at'));
 const DEGREE = Number(arg('--degree') ?? 1);
 // Which signals get a squared term. Empty means all of them — naming a subset is how a term that
@@ -710,7 +713,8 @@ const queryVec = async (S, name, value, em) => {
                         });
                         rows.push({ e: scoreRow(design, fold), g: 0, ungraded: true, ...idOf(u.r) });
                     }
-                    return { name, query, book: books[fold], rows: rows.filter(r => Number.isFinite(r.e)), relevant: kept.filter(k => k.g >= 3).length };
+                    return { name, query, book: books[fold], rows: rows.filter(r => Number.isFinite(r.e)),
+                        relevant: HALF_RECALL ? kept.reduce((a, k) => a + gradeCredit(k.g), 0) : kept.filter(k => k.g >= 3).length };
                 }).filter(sc => sc.relevant > 0);
                 const grid = Array.from({ length: 99 }, (_, i) => (i + 1) / 100);
                 return {
@@ -725,7 +729,7 @@ const queryVec = async (S, name, value, em) => {
                         const per = scenes.map(sc => {
                             const got = sc.rows.filter(r => r.e >= cut);
                             const precision = got.length ? mean(got.map(r => gradeCredit(r.g))) : 0;
-                            const recall = got.filter(r => r.g >= 3).length / sc.relevant;
+                            const recall = (HALF_RECALL ? got.reduce((a, r) => a + gradeCredit(r.g), 0) : got.filter(r => r.g >= 3).length) / sc.relevant;
                             return { f: fbeta(precision, recall, RECALL_WEIGHT), precision, recall, n: got.length };
                         });
                         return {
