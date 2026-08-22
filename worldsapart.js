@@ -3211,8 +3211,9 @@ async function superEvalScene() {
     }
     const secs = [];
     for (const { name: fileName, manifest } of bundles) {
-        // Every arm as a flat sample, through the one adapter. `armNames` covers a v3 document and the
-        // older shapes alike, so a review can still open a file nobody has migrated.
+        // Every arm as a flat sample, through the one adapter. v3 ONLY: the migration was one-shot and
+        // took the compatibility path with it, so a pre-v3 pack throws in `openBundle` and lands in the
+        // skip below, one toast per section and no mention of the version.
         const names = armNames(manifest);
         const arms = (names.length ? names : [null]).map(n => { try { return openBundle(manifest, n); } catch { return null; } }).filter(Boolean);
         if (!arms.length || !arms[0].candidates?.length || !Array.isArray(arms[0].entries)) {

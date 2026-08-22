@@ -16,7 +16,7 @@
 // 10KB of rows), and a section only ever renders text for its own rows. `grades` are copied whole, so the
 // reviewer still pre-fills with what the judges said.
 //
-// The shortlist is a JSON array of {bundle, world, uid}; anything else on the row (grader scores, notes)
+// The shortlist is a JSON array of {bundle, book, uid}; anything else on the row (grader scores, notes)
 // is ignored, so a contested-rows dump can be passed as-is.
 //
 // Usage (any cwd):
