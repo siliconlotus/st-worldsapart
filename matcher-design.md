@@ -895,8 +895,8 @@ against the runtime's own verdicts on 315 rows across 7 arms.
 
 **Ruled, unimplemented.** Regression was measured to be no worse than RRF + nDCG and was chosen for
 explainability. Unless a paragraph says otherwise, everything below is measured by
-`eval/relevance-regress.mjs` on the memory tier, 103 graded scenes, 6231 judged rows on 5 books, held
-out by book.
+`eval/relevance-regress.mjs` on the memory tier, 102 graded scenes, 6051 judged rows and 379 positives on
+5 books, held out by book — the corpus with entries that STRADDLE their scene removed (`dropUnavailable`).
 
 **LOGISTIC regression**, on the project's own relevance line (grade >= 3). Linear would put predictions
 outside [0,1] on a bounded target and would weight a 0-vs-1 error the same as a 0.4-vs-0.5 one. Each
@@ -940,11 +940,11 @@ unweighted count: 45 scenes up against 14 with 9 tied, p 0.0001. Jaccard is WORS
 against 33) and restricting to the gazetteer loses outright (above), so neither the
 normalisation nor the vocabulary restriction is what matters — the term weighting is.
 
-**Measured**, memory tier, held out by book, against the three shipped signals: +0.456 (SE 0.071) and
-solo AUC 0.783, second only to text's 0.787 and ahead of cosine's 0.746. On the score of record, over 103
-scenes and 5 books: **F2 0.5326 -> 0.5495, paired 42 scenes up against 17 with 38 tied, p 0.0015**, with
-AUC 0.8117 -> 0.8216 and AP 0.455 -> 0.463. The first feature change to clear the line rather than
-approach it.
+**Measured**, memory tier, held out by book, against the three shipped signals: +0.476 (SE 0.070) — the
+LARGEST coefficient in the model, ahead of text's +0.424 and cosine's +0.313 — at solo AUC 0.758 against
+text's 0.759 and cosine's 0.713. On the score of record: **F2 0.4801 -> 0.5010, paired 53 scenes up
+against 22 with 19 tied, p 0.0004**, with AUC 0.7805 -> 0.7915 and AP 0.325 -> 0.340. The first feature
+change to clear the line rather than approach it, and now the one the model leans on hardest.
 
 **It improves 6 of 7 folds** on the corpus it was found on; the one that falls holds 59 rows and 5
 positives. A Fenwood validation fold was graded for it and is NOT quotable: on `--tier memory` that book
@@ -953,14 +953,15 @@ population this model is not fitted for.
 
 **Of the two ENTRY-INTRINSIC columns, `density` earns and `length` costs.** Neither reads the query —
 entry length (log tokens) and proper-noun density (names per 100 tokens, `ranking.properNounsOf`) are
-priors rather than signals. **Measured** over the full lattice on `properNouns`, `length` and `density`,
-memory tier, 103 scenes, held out by book: `length` costs wherever it sits — -0.0041 mean F2 alone,
--0.0027 given `properNouns`, -0.0006 given both, and -0.4 and -1.7 precision points at matched 60% and
-70% recall. `density` earns +1.9 and +2.2 points at those same recalls, so it is a better ordering rather
-than a looser cut.
+priors rather than signals. **Measured** over the full lattice on `properNouns`, `length` and `density`, held out by book: `length`
+costs wherever it sits — F2 0.4801 -> 0.4723 alone, -0.0094 mean given `properNouns`, -0.0069 given both
+on 12 scenes up against 53, and -0.5 precision points at matched 70% recall. `density` earns +0.0129 mean
+given `properNouns` (56 up against 21, p 0.0001) and **+2.8 precision points at matched recall**, so it is
+a better ordering rather than a looser cut.
 
-**The shipped model is cosine, text, keys, properNouns, density**: AUC 0.8269, AP 0.469, F2 0.5520
-delivering 16.0 entries, against 0.8238 / 0.466 / 0.5514 at 17.7 with `length` added back. What `length`
+**The shipped model is cosine, text, keys, properNouns, density**: AUC 0.7989, AP 0.346, F2 0.5139
+delivering 17.5 entries against 4.0 relevant, against 0.7958 / 0.345 / 0.5070 at 20.0 with `length` added
+back. What `length`
 did was correct `properNouns`'s un-normalised COUNT — dropping `text` leaves it at -0.366 while dropping
 `properNouns` collapses it to -0.128 (SE 0.049) — and `keys` supplies enough of that correction to make
 it cost more than it returns.
@@ -980,22 +981,22 @@ scene-summary thick with names is a specific scene. A shared coefficient would c
 Measured before keys were scored, and reference has no fitted model to re-measure it against.
 
 **Story-time position carries nothing.** Fitted as the entry's uid, which within-scene standardisation
-makes equivalent to distance from the current point up to sign: adding it to `properNouns` costs
-0.0006 AUC and 0.0020 F2, 19 scenes up against 17 with 61 tied (p 0.87). `order` is deliberately not consulted — it is ST's
+makes equivalent to distance from the current point up to sign: added to the shipped model it costs
+0.0055 mean F2 on 24 scenes up against 53 (p 0.0013) and leaves AUC flat. `order` is deliberately not consulted — it is ST's
 insertion priority, and a column falling back between the two would mean story position in one book and
 priority in the next, which a fit held out BY BOOK cannot survive.
 
 **Polynomial terms measured WORSE, on the tier that could afford them.** Squares of the standardised
-signals were fitted on memory (6231 rows, `--degree 2`): held out by book they cost AUC 0.8238 -> 0.8173
-and AP 0.466 -> 0.453 while leaving F2 flat at 0.5516 against 0.5514, and gain in-sample — the signature
-of terms fitted to the training books. No square reaches two standard errors except `properNouns^2` at
+signals were fitted on memory (6051 rows, `--degree 2`): held out by book they cost AUC 0.7989 -> 0.7966,
+AP 0.346 -> 0.336 and F2 0.5139 -> 0.5109, while gaining in-sample — the signature of terms fitted to the
+training books. No square reaches two standard errors except `properNouns^2` at
 -0.066 (SE 0.034), and a negative curvature on the strongest feature is what an overfit looks like rather
 than a shape worth keeping. `keys^2` reads +0.002 (SE 0.019); it once destabilised at +2.244 (SE 1.418),
 which was the blanked column and not the signal. Not retried on reference, where 342 rows cannot support
 three more coefficients and the delivered set is already at full recall.
 
-**Two-way INTERACTIONS fail the same way** (`--interactions`, memory): AUC 0.8238 -> 0.8068 held out,
-AP 0.466 -> 0.428 and F2 0.5514 -> 0.5409, with `cosine*text` the one term near two standard errors
+**Two-way INTERACTIONS fail the same way** (`--interactions`, memory): AUC 0.7989 -> 0.7971 held out,
+AP 0.346 -> 0.328 and F2 0.5139 -> 0.5074, with `cosine*text` the one term near two standard errors
 (+0.135, SE 0.070) and the two carrying `keys` pure noise (-0.017 and -0.021, both under one). Curvature and combination were tested separately because they are different
 questions, and a tree ensemble that beat this model would have to be exploiting one of them. Neither
 exists at this n, which is 5 BOOKS however many rows it is.
@@ -1021,15 +1022,15 @@ The same distinction as nDCG against the layout score, one level down.
 shares its book's vocabulary, entry style, chunk statistics and BM25 scale with the rows that fitted the
 model. `--lobo` is the honest estimate; `--loso` measures another moment in a book already known.
 
-**The number of record is AP 0.469 at AUC 0.827, held out by book** (`--lobo`, grade >= 3, one intercept,
-the shipped five columns). In-sample on the same design it is 0.843, so the model extrapolates: an unseen
-book costs it about 2% relative on AUC against an unseen scene.
+**The number of record is AP 0.346 at AUC 0.799, held out by book** (`--lobo`, grade >= 3, one intercept,
+the shipped five columns). In-sample on the same design it is 0.820, so an unseen book costs about 2.5%
+relative on AUC against an unseen scene.
 Per-scene intercepts were tried as a control for differing base rates and measured to buy nothing.
 
 **Fit PER TIER, on which signals the tier carries rather than on base rate.** The tiers do not carry the same signals:
 99.8% of memory rows are vectorized and carry cosine and text, while 84% of reference rows are
 keyword-only. **And where both carry one, it is not worth the same.** **Measured**, solo AUC per tier:
-cosine 0.746 memory against 0.448 reference, text 0.787 against 0.662, keys 0.717 against 0.668. Cosine
+cosine 0.713 memory against 0.448 reference, text 0.759 against 0.662, keys 0.687 against 0.668. Cosine
 is the reading to distrust: reference's is only computed under `denseAllEntries`, so 0.448 is an absence
 rather than a failure. Memory's keys once read 0.503 for the same reason — `scoringKeys` blanked a
 vectorized entry's keys unless `scoreVectorKeys` was on, it defaulted off, and memory is 99.8%
@@ -1038,8 +1039,8 @@ of a constant. On books whose memory entries are all vectorized the column's wit
 0, and the fit returns +0.000 at SE 1000 rather than a slope.
 
 **Scoring memory's keys gives a real signal and costs a little.** **Measured**, memory tier,
-`scoreVectorKeys` on: keys go from within-scene SD 0 and solo AUC 0.500 to 0.7573 and 0.717, fitting at
-std beta +0.172 (SE 0.051) in the shipped model. A third signal exists in that tier; it is redundant,
+`scoreVectorKeys` on: keys go from within-scene SD 0 and solo AUC 0.500 to 0.7134 and 0.687, fitting at
+std beta +0.123 (SE 0.052) in the shipped model. A third signal exists in that tier; it is redundant,
 which follows from an entry's keys being drawn from its own content while `text` scores that content
 directly.
 
@@ -1051,20 +1052,20 @@ scenes, so its SD is 0, the fit returns +0.000 at SE 1000, and `scoreVectorKeys=
 `--without keys` to the bit on all 97 scored scenes. They stop coinciding at the first scene holding an
 unvectorized memory entry whose keys score, where the one row breaking the constant meets a fitted slope.
 
-**Measured** across the two shipped fits, 103 scenes, 6231 rows, 446 relevant, held out by book. **The score of record is F2 over the
-delivered set**, and each arm at its own peak reads 0.5654 -> 0.5520 with the column live. AUC is
-0.8274 -> 0.8269 and AP 0.465 -> 0.469, so the ordering is a wash and the delivered set is not.
+**Measured** on the shipped design, 102 scenes, 6051 rows, 379 relevant, held out by book. **The score of
+record is F2 over the delivered set**, and each arm at its own peak reads 0.5160 -> 0.5139 with the column
+live. AUC is 0.7996 -> 0.7989 and AP 0.345 -> 0.346, so the ordering is a wash and the delivered set is
+not.
 
 **PEAK TO PEAK IS THE SHIPPING COMPARISON HERE, and it is the exception to the rule below.** *A
 cutoff-curve peak is not a comparison* governs a screen, where a moved peak masquerades as a better
 ordering. This is not a screen: each setting ships as a fit with its OWN derived cutoff, so what a user
-gets is one peak or the other — 0.5654 at 0.11 against 0.5520 at 0.09.
+gets is one peak or the other — 0.5160 at 0.10 against 0.5139 at 0.08.
 
-**What matched reads add is the diagnosis, not the verdict.** Held at one cutoff the cost is 0.0045 at
-0.09 and 0.019 at 0.11 and 0.13, and the sign FLIPS with depth — the column loses through 0.09-0.15 and
-wins below 0.20, at cuts delivering seven entries or fewer. At matched RECALL it is -0.4 precision points
-at 60%, -2.1 at 70% and +0.6 at 80%. So the column sharpens the head of the list and adds noise through
-the middle, which is what a redundant reading of an entry's own content would do.
+**What matched reads add is the diagnosis, not the verdict.** Paired per scene the column is -0.0021 mean
+F2 on 19 scenes up against 54 (p 0.0001), and at matched RECALL it is -0.7 precision points at 60% and
+-2.3 at 70%. So it costs a fifth of a percent, concentrated in the band the system operates in — a
+redundant reading of an entry's own content, priced.
 
 **WHETHER A SIGNAL IS IN THE MODEL IS A QUESTION ABOUT THE FEATURE SET, never about a row.** The fit
 carries one standardised column per signal and nothing else, so a signal is either fitted for the whole
@@ -1076,11 +1077,11 @@ WITHOUT cosine, on the four remaining columns, or with a cosine COMPUTED FOR ALL
 is not vectorizing the entry — it is a column in the fit, where `vectorized` decides what stage 1
 retrieves.
 
-**Per book it is two books, and curation is not what picks them.** At a matched 0.11 the column costs
-Ascensus -0.058 and Richard -0.060 while Sommers reads +0.009 and Time Whore +0.012 — and Richard is
-curated where Ascensus is not. Read at each arm's own peak instead, Sommers appears to lose most
-(-0.027); that is the two cutoffs differing and not the book. What does separate the two losers is the
-column's dispersion (*Open work* #13).
+**Per book it is small in both directions, and curation does not pick the sign.** Held-out AUC with the
+column against without: Ascensus 0.7996 / 0.8056, Panopticon 0.8014 / 0.8139, Time Whore 0.8177 / 0.8190,
+Sommers 0.8444 / 0.8429, Richard 0.7775 / 0.7689 — the two that gain are one curated book and one
+uncurated, and the largest single loss is Panopticon at 63 rows. What separates them is the column's
+dispersion (*Open work* #13).
 
 **A SMALL FOLD IS NOT A HARMLESS FOLD**, because `--lobo` trains each fold on all the others. At 5 scenes
 Richard decided the sign of this contrast for every other book, Sommers moving between +0.0026 and
@@ -1098,9 +1099,8 @@ author's assertion that they curated theirs.
 **ONE FIT SERVES BOTH SETTINGS, and it is the keys-live one.** `relevance-model-memory.json` carries the
 column so that ticking the box reaches the prediction; unticking blanks the keys, the column standardises
 to 0 for every row, and the other four decide. **Measured** on blanked rows, `P(>=3)`: that fit reads F2
-0.5800 at its own 0.09 against 0.5731 for a purpose-built keys-free fit at its 0.11, the two peaking
-within 0.003 of each other around 0.10. So the setting and the fit are separate questions — the setting
-is worth about a point of F2 and the fit it is read through is worth nothing.
+0.5164 at its own 0.08 against 0.5161 for a purpose-built keys-free fit at its 0.10. So the setting and the fit are separate questions — the setting
+is worth a fifth of a percent of F2 and the fit it is read through is worth nothing.
 
 **MOST OF THE MEMORY TIER'S KEYS ARE MACHINE OUTPUT, which every claim above rests on.** **Measured**,
 by key provenance: 6136 of the 10,981 memory rows (55.9%) sit on books whose scene-summary keys nobody
@@ -1206,14 +1206,13 @@ tier, held out by book, AP: keys 0.397, keys+titles 0.398, titles 0.380, none 0.
 bodies are WORSE than having no gazetteer, a source drawn from every entry weighting everything and
 therefore nothing. F2 over the delivered set spans 0.495 for keys to 0.471 for none.
 
-**Re-measured** (103 scenes, `properNouns+length+density`, memory tier, held out by book),
-and the shape holds while the ordering below the top does not. F2 and the paired sign test against the
-shipped `keys+titles`: keys 0.5473 (+0.0063, 29 up against 22 with 52 tied, p 0.401), titles 0.5363
-(-0.0046, p 0.001), none 0.5300 (-0.0110, **p 0.017**), bodies 0.5243 (-0.0167, p 0.012). AP:
-keys+titles 0.389, keys 0.389, bodies 0.382, titles 0.376, none 0.371. **An empty gazetteer LOSES**, and
-needs 30.5 delivered entries to reach what keys reaches with 21.2 — which is what *Stage 3* points here
-for. `bodies` and `titles` swapped places between the two passes and disagree between AP and F2, so read
-nothing into their order; what replicates is keys at the top and none at the bottom of AP. `keys` against
+**Re-measured** on the shipped design over the availability-filtered corpus, and only the SPAN survives:
+F2 against the shipped `keys+titles` (0.5160), bodies 0.5234 (**+0.0074**, 45 scenes up against 24,
+p 0.015), none 0.5134, keys 0.5088 (-0.0071), titles 0.5065 (-0.0095). Held-out AP is 0.345 for
+keys+titles against 0.346 for keys and 0.339 for titles. So `bodies`, which the first pass called worse
+than no gazetteer at all, now reads best — and per book it is 2 up against 3, carried by Sommers +0.040
+and Panopticon +0.079. **The ordering below the top does not replicate across passes and should not be
+read**; what does is that every source lands within about a point of every other. `keys` against
 `keys+titles` is a coin flip in both passes, so the default stands on neither being better. That span is the
 ceiling on the whole line of work: the query terms reaching `text` are not what limits it. Keys are the
 best source while being useless as a SIGNAL in the same tier, which is not a contradiction — a signal
@@ -1226,8 +1225,8 @@ and the rest (20 scenes), the gazetteer is worth MORE where keys were never revi
 read the direction and not the size.
 
 **Two cutoffs, one per tier.** **Measured**, F2 over the delivered set, macro-averaged over scenes, with
-`E[credit]` held out by book and `P(>=3)` clamped: memory peaks at 0.14 (F2 0.494, 19.9 delivered against
-7.8 relevant), reference at 0.19 (F2 0.806, 6.5 against 2.5). Pooling costs reference its full-recall
+`E[credit]` held out by book and `P(>=3)` clamped: memory peaks at 0.08 (F2 0.5139, 17.5 delivered against
+4.0 relevant), reference at 0.19 (F2 0.806, 6.5 against 2.5). Pooling costs reference its full-recall
 region and pulls memory off its own peak.
 
 **The cutoff is a RANGE, not a point.** Both curves are flat around their peak — memory stays within
@@ -1235,17 +1234,18 @@ region and pulls memory off its own peak.
 cutoff inside its band is measuring noise, and a reported third decimal is false precision.
 
 **The reference tier tolerates a weak fit, and its cutoff barely matters.** **Measured**: its AUC falls
-0.733 to 0.698 held out by book, against memory's 0.790 to 0.786 — 342 rows against 8502 — and it still
+0.733 to 0.698 held out by book, against memory's 0.820 to 0.799 — 342 rows against 6051 — and it still
 reaches F2 0.806 at full recall anywhere below 0.20. Its calibration is unmeasurable at that n (ECE p
 0.336 and 0.044 at the two boundaries). None of this is a reason to work on it: recall is already
 complete, and the score weights that half twice. **This is not the base-rate argument**, which is
 measured wrong above — the tiers' pooled prevalences differ by 5x here and that gap is the grading-depth
 artifact, not evidence about activation. What is measured is the delivered set.
 
-**Grade 4 is the band the signals find, and it does NOT travel between books.** Held out by book at
-1.29% prevalence: AUC 0.8867, AP 0.324 — a ~25x lift on base rate, but against 0.423 in-sample, and
-precision at 75% recall falls from 16.5% to 7.6%. So its strength is substantially book-specific, which
-follows from the construct: the anchors reserve 4 for the scene's current SUBJECT, and what counts as a
+**Grade 4 is a band the ORDERING finds and the delivered set cannot.** Held out by book at 0.63%
+prevalence: AUC 0.8877 — a strong ordering — against AP 0.139 and precision 3.4% at 75% recall. Half of
+the grade-4 rows were entries straddling their own scene, and removing them halved the prevalence and cut
+AP from 0.324 to 0.139: what the signals were finding at this band was substantially the paraphrase. Its
+remaining strength is also book-specific, which follows from the construct: the anchors reserve 4 for the scene's current SUBJECT, and what counts as a
 subject is a property of how a book was written. Treat it as a high-confidence core within a known book,
 never as a guarantee on a new one.
 
@@ -1262,11 +1262,11 @@ score, because binomial scatter alone produces one and it grows as the sample sh
 intercept forces `mean(p)` to the base rate as one of its score equations, so in-sample calibration is
 arithmetic.
 
-**Measured**, held out by book, 8924 rows on 69 scenes: `P(>=3)` is indistinguishable from calibrated in
-every population (pooled p=0.248, memory p=0.270, reference p=0.044 at n=342). `P(>=2)` is not — memory
-reads ECE 0.0132 against a 0.0072 floor at **p=0.002**, over-confident through the middle of its range.
-So `E[credit]` inherits about half that bias and a cutoff drawn on it admits marginally more than it says,
-on the boundary the signals already separate worst. The reference tier is unmeasurable at n=342, and its
+**Measured**, held out by book, 6051 memory rows on 102 scenes: `P(>=3)` is indistinguishable from
+calibrated (ECE 0.0077 against a 0.0067 null, p 0.252). `P(>=2)` reads ECE 0.0112 against 0.0080 at
+**p 0.080** — over-confident through the middle of its range, but no longer at the p 0.002 the leaked
+corpus showed, so most of that bias was the straddling rows. `E[credit]` inherits about half of what
+remains, on the boundary the signals already separate worst. The reference tier is unmeasurable at n=342, and its
 precision matters less regardless: activation has already removed the entries a relevance model would
 reject, which is why the score weights its recall twice.
 
