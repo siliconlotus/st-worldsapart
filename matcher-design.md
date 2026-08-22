@@ -977,6 +977,27 @@ measured a variant already discarded. It defaults to `idf` now.
 prior: `--with oracle` reads grades the runtime cannot have and still fails, held out by book, raising
 AUC while losing the delivered set. A better ordering read at a looser cutoff is not a better chosen set.
 
+**Nor does its embedding profile, which is the grade-FREE form of the same idea and the reason to record
+this one.** An entry that belongs somewhere should sit close to a few windows of its chat and far from
+the rest, and that is computable from the index and the chat alone — no grading pass, so it could have
+been an author-facing diagnostic. **Measured** on Sommers, 282 memory entries against 219 depth-10
+windows, mean-centred: peakedness `(max - median)/sd` reads AUC 0.517 against the author's own DISABLE
+calls and 0.612 against whether the entry ever earned a 3, neither surviving its controls. Height —
+the 95th-percentile centred cosine — reads 0.743 against disable and collapses to +0.070 (SE 0.224) once
+length and story position are in.
+
+**LENGTH IS WHAT BOTH LABELS ARE MOSTLY MADE OF**, at AUC 0.809 and 0.724, with opposite signs that
+agree: a short entry is likelier to be disabled (-2.170) and less likely to ever be relevant (+0.847 the
+other way). Disabled entries are also earlier (mean STMB_start 805 against 1650), which is the
+`chunkdens` artifact reproduced. Two things fall out worth keeping: the author's keep/drop calls and the
+judge's grades agree with each other, and the unconditional half of *Length is a SUPPRESSOR* is now
+measured on its own — long entries ARE likelier to be relevant, which is why the fitted coefficient
+being negative is a correction rather than a quality prior.
+
+Re-run it (`peaked.mjs` shape: embed entries and windows, profile, logistic against both labels) if the
+embedding model changes or a second book gets a curation pass — it is cheap and it is the third
+entry-level quantity to die the same way.
+
 **`density` INVERTS ON REFERENCE**, which is the concrete case for *Fit PER TIER*: it runs -0.935
 (SE 0.185) there against +0.215 on memory, solo AUC 0.336 — strongly predictive inverted. A reference
 entry thick with names is a roster or an index, scaffolding rather than subject, where a memory
