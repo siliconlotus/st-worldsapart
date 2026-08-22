@@ -53,7 +53,7 @@ import { runState, defaultSettings, settings, ensureSettings } from './extension
 import { ensureStudioStyle, entryFoldHtml, keyHitsHtml, makeSortControl, makeTierEditor, showEntryText, wiGlyph, wiTooltip } from './extension/ui-widgets.mjs';
 import { PRESENTATION_ALIAS, SORT_FNS, gradeOrder, normPresentation, presentationBaseLabel, presentationLabel, reconcileTiers, tierRank, wiTitleOf } from './extension/sort.mjs';
 import { lorebookStudio } from './extension/studio.mjs';
-import { armNames, buildSample, bundleSamples, captureParams, GRADE_ANCHORS, GRADE_SCALE, gradeValue, keyByUid, mergeGrades, openBundle, rowKey, sampleFile, searchedBook, splitGraded, unionArms } from './extension/grading.mjs';
+import { armNames, buildSample, bundleSamples, captureParams, GRADE_ANCHORS, GRADE_SCALE, gradeValue, keyByUid, mergeGrades, openBundle, rowKey, sampleFile, searchedBook, splitGraded, toCandidate, unionArms } from './extension/grading.mjs';
 
 /** The grading scale in one caption line, shared by both grading popups. */
 const gradeAnchorLine = () => `Grade 0–4: ${GRADE_ANCHORS.map((a, g) => `${g} = ${a.split(';')[0].toLowerCase()}`).join(' · ')}.`;
@@ -2546,7 +2546,7 @@ async function gradeScene(named) {
                 // wiGlyph — the Studio's own 🔵 constant / 🔗 vector / 🟢 keyword mapping, not a local
                 // one. These tables show the same entries the Explorer does and must classify them the
                 // same way; a second mapping drifts the moment either side gains a class.
-                + `<td>${row.cut ? `<i class="fa-solid fa-scissors" style="opacity:0.55;margin-right:0.35em;" title="cut by the budget${row.cutBy ? ` — ${esc(row.cutBy)} cap` : ''}${row.tokens ? `; ${row.tokens} tokens` : ''}"></i>` : ''}${entries[i] ? wiGlyph(entries[i]) + ' ' : ''}${esc(row.title)}<br><small style="opacity:0.5;">${esc(row.world)} · uid ${num(row.uid)}</small>${keyHitsHtml(row.why)}<br><i class="fa-solid fa-chevron-right wa-chevron wa-fold" data-i="${i}" title="Show keys and entry text" style="margin-top:0.35em;"></i></td>`
+                + `<td>${row.cut ? `<i class="fa-solid fa-scissors" style="opacity:0.55;margin-right:0.35em;" title="cut by the budget${row.cutBy ? ` — ${esc(row.cutBy)} cap` : ''}${row.tokens ? `; ${row.tokens} tokens` : ''}"></i>` : ''}${entries[i] ? wiGlyph(entries[i]) + ' ' : ''}${esc(row.title)}<br><small style="opacity:0.5;">${esc(row.book)} · uid ${num(row.uid)}</small>${keyHitsHtml(row.why)}<br><i class="fa-solid fa-chevron-right wa-chevron wa-fold" data-i="${i}" title="Show keys and entry text" style="margin-top:0.35em;"></i></td>`
                 + `<td>${num(row.score)}</td><td>${num(row.cosine)}</td><td>${num(row.text)}</td><td>${num(row.keys)}</td>`
                 + `</tr>`
                 + `<tr class="wa-foldrow" data-i="${i}" style="display:none;"><td colspan="6" style="padding:0.5em 0.75em 0.9em;">${entryFoldHtml(entries[i], i)}</td></tr>`;
@@ -2804,7 +2804,7 @@ async function superGradePopup({ captures, union, entryOf, prior: prior0 = [], s
         const u = secs[s].union;
         for (let i = 0; i < u.rows.length; i++) flat.push({ sec: s, row: u.rows[i], entry: u.entries[i] });
     }
-    const flatIndex = new Map(flat.map((f, i) => [`${f.sec}:${f.row.world}:${f.row.uid}`, i]));
+    const flatIndex = new Map(flat.map((f, i) => [`${f.sec}:${f.row.book}:${f.row.uid}`, i]));
 
     const wrap = document.createElement('div');
     const head = document.createElement('div');
@@ -2884,7 +2884,7 @@ async function superGradePopup({ captures, union, entryOf, prior: prior0 = [], s
                   + queryBlocksFor(sc) + `</td></tr>`
                 : '')
             + gradeOrder(sc.union.rows, r => r.bestRank ?? Infinity).map(({ row, i: rowI }) => {
-                const i = flatIndex.get(`${si}:${row.world}:${row.uid}`);
+                const i = flatIndex.get(`${si}:${row.book}:${row.uid}`);
                 const priorOf = split[si].priorOf;
                 // TWO KEYS. `priorOf` comes from splitGraded and is keyed by plain rowKey within a scene;
                 // the DOM key is section-qualified, because the same entry appears against several scenes
@@ -2908,7 +2908,7 @@ async function superGradePopup({ captures, union, entryOf, prior: prior0 = [], s
                     // wiGlyph, as /wa-grade and the Explorer use it. It matters most in THIS table:
                     // whether a row can carry a keys signal at all depends on being a 🔗 vector entry,
                     // and a non-null cosine is the wrong tell — one that failed retrieval shows none.
-                    + `<td>${row.cut ? `<i class="fa-solid fa-scissors" style="opacity:0.55;margin-right:0.35em;" title="cut by the budget${row.cutBy ? ` — ${esc(row.cutBy)} cap` : ''}${row.tokens ? `; ${row.tokens} tokens` : ''}"></i>` : ''}${flat[i].entry ? wiGlyph(flat[i].entry) + ' ' : ''}${esc(row.title)}<br><small style="opacity:0.5;">${esc(row.world)} · uid ${num(row.uid)}</small>${keyHitsHtml(row.why)}<br><i class="fa-solid fa-chevron-right wa-chevron wa-fold" data-i="${i}" title="Show keys and entry text" style="margin-top:0.35em;"></i></td>`
+                    + `<td>${row.cut ? `<i class="fa-solid fa-scissors" style="opacity:0.55;margin-right:0.35em;" title="cut by the budget${row.cutBy ? ` — ${esc(row.cutBy)} cap` : ''}${row.tokens ? `; ${row.tokens} tokens` : ''}"></i>` : ''}${flat[i].entry ? wiGlyph(flat[i].entry) + ' ' : ''}${esc(row.title)}<br><small style="opacity:0.5;">${esc(row.book)} · uid ${num(row.uid)}</small>${keyHitsHtml(row.why)}<br><i class="fa-solid fa-chevron-right wa-chevron wa-fold" data-i="${i}" title="Show keys and entry text" style="margin-top:0.35em;"></i></td>`
                     // Which arms surfaced a row is the pooling diagnostic: rows only one arm found are where
                     // the overlap assumption is failing, and they are why that arm is in the list. The arm
                     // that SUPPLIED the numbers is underlined, because the signal columns are one arm's
@@ -2916,7 +2916,7 @@ async function superGradePopup({ captures, union, entryOf, prior: prior0 = [], s
                     + `<td><small style="opacity:0.7;">${row.arms.map(a => (a === row.from ? `<u>${esc(a)}</u>` : esc(a))).join(', ')}</small></td>`
                     // A borrowed signal is marked with the arm it came from: absent-filled, never blended,
                     // so the reader can tell a measurement from a fill (see unionArms).
-                    + `<td>${num(row.bestRank)}</td>${['cosine', 'text', 'keys'].map(s => `<td>${num(row[s])}${row.filled?.[s] ? `<br><small style="opacity:0.5;font-size:0.75em;" title="filled from the ${esc(row.filled[s])} arm — this arm could not measure it">${esc(row.filled[s])}</small>` : ''}</td>`).join('')}`
+                    + `<td>${num(row.bestRank)}</td>${['cosine', 'text', 'keys'].map(s => `<td>${num(row.scores?.[s])}${row.filled?.[s] ? `<br><small style="opacity:0.5;font-size:0.75em;" title="filled from the ${esc(row.filled[s])} arm — this arm could not measure it">${esc(row.filled[s])}</small>` : ''}</td>`).join('')}`
                     + `</tr>`
                     + `<tr class="wa-foldrow" data-i="${i}" style="display:none;"><td colspan="7" style="padding:0.5em 0.75em 0.9em;">${entryFoldHtml(flat[i].entry, i)}</td></tr>`;
             }).join('')).join('')
@@ -3054,7 +3054,9 @@ async function superGradeScene(named) {
             console.warn(`Worlds Apart: arm "${arm}" retrieved nothing (no query to freeze) — skipped`);
             continue;
         }
-        captures.push({ arm, ...cap });
+        // CONVERTED HERE, so everything downstream — unionArms, the popup, the sample writer — reads a
+        // candidate. /wa-debug's row keeps its flat signals for `console.table`; this is the crossing.
+        captures.push({ arm, ...cap, rows: (cap.rows ?? []).map(toCandidate) });
     }
 
     if (!captures.length) {

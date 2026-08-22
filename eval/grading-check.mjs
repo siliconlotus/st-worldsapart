@@ -147,17 +147,17 @@ eq(rowKey({ book: 'A', uid: 7 }) === rowKey({ book: 'B', uid: 7 }), false, 'rowK
 const armA = {
     arm: 'shipped',
     rows: [
-        { title: 'Villa', book: 'W', uid: 1, block: 'dynamic', sticky: 0, index: 0, cosine: 0.9 },
+        { title: 'Villa', book: 'W', uid: 1, block: 'dynamic', sticky: 0, index: 0, scores: { cosine: 0.9 } },
         { title: 'Mechanics', book: 'W', uid: 2, block: 'constant', sticky: 0, index: 1 },
-        { title: 'Maren', book: 'W', uid: 3, block: 'dynamic', sticky: 0, index: 2, cosine: 0.5 },
+        { title: 'Maren', book: 'W', uid: 3, block: 'dynamic', sticky: 0, index: 2, scores: { cosine: 0.5 } },
     ],
     entries: [{ uid: 1 }, { uid: 2 }, { uid: 3 }],
 };
 const armB = {
     arm: 'no-filter',
     rows: [
-        { title: 'Maren', book: 'W', uid: 3, block: 'dynamic', sticky: 0, index: 0, cosine: 0.7 },
-        { title: 'Ironhold', book: 'W', uid: 4, block: 'dynamic', sticky: 0, index: 1, cosine: 0.6 },
+        { title: 'Maren', book: 'W', uid: 3, block: 'dynamic', sticky: 0, index: 0, scores: { cosine: 0.7 } },
+        { title: 'Ironhold', book: 'W', uid: 4, block: 'dynamic', sticky: 0, index: 1, scores: { cosine: 0.6 } },
     ],
     entries: [{ uid: 3 }, { uid: 4 }],
 };
@@ -172,7 +172,7 @@ eq(u.rows.some(r => r.uid === 2), true, 'the constant is captured, not dropped')
 eq(u.rows.filter(r => r.uid === 2).length, 1, 'the constant is deduped like any other row, so N arms do not list it N times');
 eq(u.rows.find(r => r.uid === 4) !== undefined, true, 'an entry only a sibling arm surfaced is pooled');
 eq(JSON.stringify(u.rows.find(r => r.uid === 3).arms), '["shipped","no-filter"]', 'a shared row records every arm that surfaced it');
-eq(u.rows.find(r => r.uid === 3).cosine, 0.5, 'a duplicate keeps the FIRST arm\'s signals, never a blend');
+eq(u.rows.find(r => r.uid === 3).scores.cosine, 0.5, 'a duplicate keeps the FIRST arm\'s signals, never a blend');
 eq(u.rows.find(r => r.uid === 3).from, 'shipped', 'the row records which arm supplied its numbers');
 
 // ABSENT-FILL, and the line it must not cross. `keys` is unmeasurable with scoreVectorKeys off, so a later
@@ -181,16 +181,16 @@ eq(u.rows.find(r => r.uid === 3).from, 'shipped', 'the row records which arm sup
 const armKeys = {
     arm: 'keys-live',
     rows: [
-        { title: 'Villa', book: 'W', uid: 1, block: 'dynamic', sticky: 0, index: 0, cosine: 0.1, keys: 2.5 },
-        { title: 'Maren', book: 'W', uid: 3, block: 'dynamic', sticky: 0, index: 1, cosine: 0.7, keys: 1.5 },
+        { title: 'Villa', book: 'W', uid: 1, block: 'dynamic', sticky: 0, index: 0, scores: { cosine: 0.1, keys: 2.5 } },
+        { title: 'Maren', book: 'W', uid: 3, block: 'dynamic', sticky: 0, index: 1, scores: { cosine: 0.7, keys: 1.5 } },
     ],
     entries: [{ uid: 1 }, { uid: 3 }],
 };
 const uf = unionArms([armA, armKeys]);
 const villa = uf.rows.find(r => r.uid === 1);
-eq(villa.keys, 2.5, 'an absent signal is filled from an arm that could measure it');
+eq(villa.scores.keys, 2.5, 'an absent signal is filled from an arm that could measure it');
 eq(villa.filled.keys, 'keys-live', 'the fill records its source arm');
-eq(villa.cosine, 0.9, 'a signal the first arm measured is NOT overwritten by a later arm');
+eq(villa.scores.cosine, 0.9, 'a signal the first arm measured is NOT overwritten by a later arm');
 eq(villa.filled.cosine, undefined, 'and is not marked as filled');
 eq(villa.from, 'shipped', 'the base row still names its own arm');
 
@@ -198,12 +198,33 @@ eq(villa.from, 'shipped', 'the base row still names its own arm');
 // is what the fill produced before this.
 const armWhy = {
     arm: 'keys-live',
-    rows: [{ title: 'Villa', book: 'W', uid: 1, block: 'dynamic', sticky: 0, index: 0, keys: 2.5, why: [{ key: 'villa', count: 2 }] }],
+    rows: [{ title: 'Villa', book: 'W', uid: 1, block: 'dynamic', sticky: 0, index: 0, scores: { keys: 2.5 }, why: [{ key: 'villa', count: 2 }] }],
     entries: [{ uid: 1 }],
 };
 const uw = unionArms([armA, armWhy]);
 eq(uw.rows.find(r => r.uid === 1).why?.[0]?.key, 'villa', 'why travels with the keys value it explains');
 eq(unionArms([armWhy, armA]).rows.find(r => r.uid === 1).why?.[0]?.key, 'villa', 'and a base row that has its own why keeps it');
+// THE UNION SPEAKS THE SCHEMA'S SHAPE. A row read back out of a bundle carries its signals under
+// `scores` (grading.mjs toCandidate), and /wa-super-eval renders those columns straight off the union —
+// so a union that only understands the flat runtime shape shows an empty table against every stored
+// bundle while the live path looks fine. Both the display and the cross-arm fill are asserted on the
+// stored shape for that reason.
+const armStored = {
+    arm: 'shipped',
+    rows: [{ title: 'Villa', book: 'W', uid: 1, block: 'dynamic', sticky: 0, index: 0, scores: { cosine: 0.9, text: 12.5, keys: null } }],
+    entries: [{ uid: 1 }],
+};
+const armStoredKeys = {
+    arm: 'keys-live',
+    rows: [{ title: 'Villa', book: 'W', uid: 1, block: 'dynamic', sticky: 0, index: 0, scores: { cosine: 0.1, text: 9, keys: 2.5 } }],
+    entries: [{ uid: 1 }],
+};
+const us = unionArms([armStored, armStoredKeys]).rows[0];
+eq(us.scores.cosine, 0.9, 'a stored row keeps the first arm\'s measured signal');
+eq(us.scores.keys, 2.5, 'an absent stored signal is filled from an arm that could measure it');
+eq(us.filled.keys, 'keys-live', 'the stored fill records its source arm');
+eq(us.filled.cosine, undefined, 'a stored signal the first arm measured is not marked filled');
+
 // Ordered by best rank across arms: Maren reached #0 under no-filter, so it outranks the constant (#1).
 eq(u.rows.map(r => r.uid).join(','), '1,3,2,4', 'union is ordered by best rank achieved across arms');
 eq(u.entries.map(e => e.uid).join(','), '1,3,2,4', 'entries stay aligned with rows after dedupe + sort');

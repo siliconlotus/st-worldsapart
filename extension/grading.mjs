@@ -248,6 +248,11 @@ export const rowKey = row => `${row.book ?? ''}${US}${row.uid}`;
  * arm's entire purpose invisible in the UI that exists to motivate running it. Filling the hole is honest; picking a winner
  * between two arms that both measured a value would not be.
  *
+ * IT UNIONS CANDIDATES, so signals are read and written under `scores` — the shape the file holds and the
+ * one `toCandidate` produces. A caller holding live /wa-debug rows converts them first rather than being
+ * accommodated here: two shapes in this function is what let /wa-super-eval render an empty signal table
+ * against every stored bundle while the live path looked correct.
+ *
  * ONLY THE RAW PER-SIGNAL MEASUREMENTS ARE FILLABLE (cosine, text, keys). `score` is fused and the ranks
  * are positions within one arm's ranking, so both are arm-relative — a value copied from elsewhere would
  * mean something different in its new row. Those stay as the supplying arm left them.
@@ -276,8 +281,8 @@ export function unionArms(arms) {
                 hit.row.arms.push(arm);
                 hit.row.bestRank = Math.min(hit.row.bestRank, rank);
                 for (const sig of FILLABLE) {
-                    if (hit.row[sig] == null && row[sig] != null) {
-                        hit.row[sig] = row[sig];
+                    if (hit.row.scores?.[sig] == null && row.scores?.[sig] != null) {
+                        (hit.row.scores ??= {})[sig] = row.scores[sig];
                         (hit.row.filled ??= {})[sig] = arm;
                         // `why` — the matched keys and their excerpts — travels with the keys value it
                         // explains, from the SAME arm. An arm that could not score keys also had no hits
@@ -288,7 +293,10 @@ export function unionArms(arms) {
                 }
                 return;
             }
-            seen.set(key, { row: { ...row, arms: [arm], bestRank: rank, from: arm }, entry: entries?.[i] });
+            // `scores` is CLONED, not shared: the fill writes into it, and a shallow copy would reach back
+            // through the caller's row and mutate the arm it came from — two unions over the same capture
+            // then disagree, the second one seeing fills the first performed.
+            seen.set(key, { row: { ...row, scores: { ...(row.scores ?? {}) }, arms: [arm], bestRank: rank, from: arm }, entry: entries?.[i] });
         });
     }
     const merged = [...seen.values()].sort((a, b) => a.row.bestRank - b.row.bestRank);
@@ -721,12 +729,16 @@ export function gradeEntries(grades, { user, now } = {}) {
  * on the way out would put a superseded shape in front of every reader, and then no grep could tell a v2
  * leftover from a live runtime field.
  */
-const toCandidate = (row, i) => {
-    const scores = {};
+export const toCandidate = (row, i) => {
+    const scores = { ...(row.scores ?? {}) };
     const flat = {};
     for (const [k, v] of Object.entries(row)) {
         if (SIGNAL_FIELDS.includes(k)) scores[k] = v; else flat[k] = v;
     }
+    // IDEMPOTENT: a row that is already a candidate keeps its `scores` rather than having them replaced by
+    // an empty object. The UI converts at its own boundary and `bundleSamples` converts again on the way
+    // to disk, so this runs twice on the same row whenever a live capture is graded and then saved.
+    delete flat.scores;
     return { book: row.book ?? '', uid: row.uid, index: Number(row.index ?? i), ...flat, scores };
 };
 
