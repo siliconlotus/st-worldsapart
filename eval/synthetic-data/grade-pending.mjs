@@ -55,7 +55,10 @@ if (cmd !== 'build' && cmd !== 'merge') {
 
 const JOBS = resolvePath(arg('--jobs', resolvePath(EVAL, 'grade-jobs')));
 const US = String.fromCharCode(31);
-const rowKey = (book, uid) => [book, uid].join(US);
+// Trimmed because the judge now ECHOES the book string from its prompt rather than copying it out of a
+// file it read, and one already came back a trailing space short. Only the match key is trimmed — a
+// merged row stores the job's own `book` (see below), so identity is unaffected.
+const rowKey = (book, uid) => [String(book ?? '').trim(), uid].join(US);
 /** The shipped arm as a flat sample. Reading through openBundle is what keeps this tool out of the file
  *  layout: v3 moved the haystack, the params and every verdict, and none of that shows up here. */
 const shipped = b => openBundle(b);
