@@ -62,12 +62,17 @@ if (!samples.length) {
 
 // One parameter, several values — the same shape param-screen's arms have, minus the pairing, because a
 // coefficient is fitted over the pooled rows and has no per-scene counterpart to pair.
-const sweep = arg('--sweep') ?? 'gazetteerSource=keys+titles,keys,titles,bodies,none';
-const [SWEPT, valuesRaw] = [sweep.slice(0, sweep.indexOf('=')), sweep.slice(sweep.indexOf('=') + 1)];
+//
+// NO DEFAULT SWEEP. Bare, this fits the shipped configuration once. It used to default to a five-value
+// gazetteerSource sweep, which quintupled every bare run and — since the emits are written inside the
+// per-arm block — left --emit describing whichever arm happened to run last.
+const sweep = arg('--sweep');
+const SWEPT = sweep ? sweep.slice(0, sweep.indexOf('=')) : 'shipped';
+const valuesRaw = sweep ? sweep.slice(sweep.indexOf('=') + 1) : '';
 // Values arrive as strings from a shell; a numeric parameter swept as "0.5" would silently become a string
 // and compare unequal to every default. Booleans the same.
 const coerce = v => (v === 'true' ? true : v === 'false' ? false : v === 'null' ? null : (v !== '' && !Number.isNaN(Number(v)) ? Number(v) : v));
-const VALUES = valuesRaw.split(',').map(s => coerce(s.trim()));
+const VALUES = sweep ? valuesRaw.split(',').map(s => coerce(s.trim())) : [null];
 // THE EMBEDDING MODEL IS SWEPT HERE AND NOT IN param-screen, because it is a stage-1 change whose effect
 // is only readable at stage 4: cosine is one column of the ruled predictor, and what a better cosine buys
 // is a better DELIVERED SET (--cutoff), not a better ranking at a window nobody chose. It is not a
@@ -127,6 +132,13 @@ const EMIT = arg('--emit');
 // forever and this is not.
 const EMIT_ROWS = arg('--emit-rows');
 const EMIT_MODEL = arg('--emit-model');
+
+// AN EMIT DESCRIBES ONE ARM. All three are written inside the per-arm block, so a multi-value sweep would
+// leave the file holding whichever arm ran last, silently and with no field saying which.
+if ((EMIT || EMIT_MODEL || EMIT_ROWS) && VALUES.length > 1) {
+    console.error(`--emit* writes one arm, but --sweep names ${VALUES.length} (${VALUES.join(', ')}) — run them one value at a time`);
+    process.exit(2);
+}
 // SIMULATES A BOOK EDIT the keyword audit recommends, without editing the book: scene.mjs `dropKeys`
 // stops the named keys scoring AND keyword-activating, which is what removing them would do. Takes the
 // JSON array `keyword-audit.mjs --json` writes. It UNDERSTATES removal — the terms stay in the
@@ -375,7 +387,7 @@ const queryVec = async (S, name, value, em) => {
         const qv = await embed(S.query, { ollama: OLLAMA, model: MODEL });
         loaded.push({ path, name: sceneLabel(S) || path, book: S.primaryBook ?? path, S, qv });
     }
-    console.log(`${loaded.length} scene(s); sweeping ${SWEPT} over ${VALUES.join(', ')}${TIER === 'all' ? '' : `; ${TIER} tier only`}${CUT === 3 ? '' : `; target grade >= ${CUT}`}`);
+    console.log(`${loaded.length} scene(s); ${sweep ? `sweeping ${SWEPT} over ${VALUES.join(', ')}` : 'shipped configuration'}${TIER === 'all' ? '' : `; ${TIER} tier only`}${CUT === 3 ? '' : `; target grade >= ${CUT}`}`);
 
     const table = [];
     for (const value of VALUES) {
@@ -383,7 +395,7 @@ const queryVec = async (S, name, value, em) => {
         const perScene = [];
         let dropped = 0;
         for (const { S, qv, name, book } of loaded) {
-            const P = sceneParams(S, { [SWEPT]: value, ...(DROP_KEYS ? { dropKeys: DROP_KEYS } : {}) });
+            const P = sceneParams(S, { ...(sweep ? { [SWEPT]: value } : {}), ...(DROP_KEYS ? { dropKeys: DROP_KEYS } : {}) });
             // THE INDEX FOLLOWS THE PARAMS. denseAllEntries wants a collection covering every entry, not
             // only the vectorized ones — scored against the standard index it would find no extra vectors
             // and report a null result that reads like an answer. ensureIndex is cached per (book, cfg,
