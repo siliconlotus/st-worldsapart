@@ -258,28 +258,29 @@ any lexical signal** — both live at stage 3.
 retrieval stored; the TEXT score is BM25 over entry content, computed in the browser by
 `content-lexical.mjs` over every entry (a superset of the vectorized chunks stage 1 sees) and filtered by
 the entity filter's term weights; keyword score is computed over the scan window. `fuseRanks` produces
-the **layout ranking** — vector + text + keys, normalised by the signals an entry was eligible for, with
-no mode switch: eligibility alone decides which columns an entry is scored on.
+the **layout order** — the quantity stage 4 cuts on, which every cap then takes a prefix of. It is not
+the PROMPT order, which is a user setting defaulting to `entry.order` and is applied to whatever
+survived.
 
 **This is where the lexical half of WA lives now.** Measured over 8924 judged rows on 69 scenes, text is
 the strongest per-entry predictor of relevance — standardised logistic beta +0.794 against cosine's
 +0.465 and keys' -0.006 (`eval/relevance-regress.mjs`). So "stage 1 dropped BM25" is not "WA dropped
 BM25"; say which stage.
 
-**4. Selection** — two cuts, both here, each answering one question over the layout ranking. **There is
+**4. Selection** — two cuts, both here, each answering one question over the layout order. **There is
 no relevance cut, so WA makes no relevance decision anywhere** — a standing exception to the
 one-decision rule, waiting on the layout score (`matcher-design.md`, *Stage 4*). `selection.mjs`
 `walkOrder` hoists constants then armed stickies ahead of the dynamic block, which is what makes every
 cap below a prefix cut; it cuts nothing. The ENTRY MAXES decide how many, on nested populations — vector ⊆ dynamic ⊆ all, plus the
 per-book cap — with `maxVectorEntries` counted off the `vectorized` flag — the cap exists so that at most N vector
 entries are added to the layout, which is a question about what an entry is. The TOKEN BUDGET decides how much. The maxes and the budget live in `applyBudget`,
-which walks the layout ranking constant and sticky first — constant leads, because constant means always
+which walks the layout order constant and sticky first — constant leads, because constant means always
 and should only be cut when constants alone overflow — so every cap is a prefix cut, and returns the
 survivors; `rankActivated` is what deletes the rest from `activated`, since `selection.mjs` is ST-free
 and the map is core's.
 
-**Two rankings, not one.** `fuseRetrieval` decides what is activated; `fuseRanks` decides prompt order
-and what survives the budget. **A change to `fuseRanks` can never surface an entry retrieval did not
+**THREE ORDERINGS, and only one is a ranking.** `fuseRetrieval` decides what is ACTIVATED; LAYOUT ORDER
+is the score the caps and budget take a prefix of; PROMPT ORDER is the user's sort over the survivors. **A change to `fuseRanks` can never surface an entry retrieval did not
 return** — so no keyword weight, tilt or fusion change is a recall lever, only a precision one. With
 stage 1 admitting everything, the retrieval ranking's ORDER now decides nothing except which entries
 survive `admitCeiling`, which no measured book approaches (largest: 208 vectorized entries).

@@ -75,7 +75,7 @@ overridden, `@@activate` is never revoked, and a forced entry still takes core's
 **The system makes exactly ONE relevance decision, and it makes it at stage 4.** Everything earlier is
 either an author's declaration or a mechanical bound, and neither is a judgement WA is entitled to make
 on its own. Stages 1 and 2 ADMIT — generously, cheaply, on rules that need no taste; stage 4
-arbitrates, once, over the whole heterogeneous set, on the layout ranking that is the only place all
+arbitrates, once, over the whole heterogeneous set, on the layout order, the only place all
 three signals and the real constraint meet.
 
 What this does NOT absorb, because these are not WA's calls: an author's declarations (`constant`,
@@ -599,7 +599,7 @@ on restores the author's own operator.
 
 `rankActivated`, on `WORLDINFO_SCAN_DONE`. Vector and chunk-text scores are looked up from what
 retrieval stored, keyword score is computed over the scan window, and `fuseRanks` produces the
-**layout ranking** — vector + text + keys, normalised by the signals an entry was eligible for.
+**layout order** — the quantity stage 4 cuts on, which every cap then takes a prefix of.
 
 **A key's score is the sum over the things it is about.** `AND` joins distinct things and their scores
 add; `OR` names one thing several ways and its mentions pool into one saturation; a weight multiplies
@@ -650,8 +650,11 @@ author had already judged bad by eye. The exemption lands with `promote`, since 
 declaration has nowhere to live and the main-cast-name-on-a-sticky-sheet pattern would flag with no way
 to say it was meant.
 
-**Two rankings, not one.** `fuseRetrieval` decides what is activated; `fuseRanks` decides prompt order
-and what survives the budget. **A change to `fuseRanks` can never surface an entry retrieval did not
+**THREE ORDERINGS, and only one of them is a ranking.** `fuseRetrieval` decides what is ACTIVATED.
+LAYOUT ORDER is by predicted score: `applyBudget` walks it, so `maxVectorEntries`, the per-book cap and
+the token budget each take a PREFIX and drop the tail. PROMPT ORDER is what the surviving set is
+sequenced by in the prompt — a user setting, defaulting to `entry.order`, and downstream of every cut.
+The LAYOUT is the set that comes out. `F2@layout` scores that set and reads no order at all. **A change to `fuseRanks` can never surface an entry retrieval did not
 return** — so no keyword weight, tilt or fusion change is a recall lever, only a precision one.
 
 **`scoreVectorKeys` is stage 3 and does not reopen stage 2.** Keys re-rank vector entries; they never
@@ -682,7 +685,7 @@ the weight, buffer scoring admits a depth-3 entry at full strength on text WA it
 
 ## Stage 4: Selection
 
-Two cuts, both here, each answering one question over the same layout ranking.
+Two cuts, both here, each answering one question over the same layout order.
 
 **THERE IS NO RELEVANCE CUT, so the system makes no relevance decision at all** — a standing exception to
 *Principles*, which rules for exactly one and puts it here. The dynamic block reaches the prompt whole,
@@ -861,7 +864,7 @@ at the top. The evaluation score asks whether the system delivers the right set.
 cut moves nDCG and cannot move the set, so the two correlate without being the same measurement, and an
 nDCG figure is never evidence that the system works.
 
-It is kept because every cut at stage 4 takes a PREFIX of the layout ranking, so the ordering bounds
+It is kept because every cut at stage 4 takes a PREFIX of the layout order, so the ordering bounds
 what any cut placed on it can achieve — a well-placed cut cannot rescue a badly ordered list. The
 diagnostic is what tells a cut that fell in the wrong place from a ranking where no cut position was
 good.
@@ -1178,8 +1181,8 @@ also stops the decision resting entirely on the boundary the signals separate wo
 express the middle band the scale defines and the metric already pays for — a 2 is "50/50 on inclusion",
 so half credit is the grader's own stated probability rather than a weighting invented here.
 
-**RULED: `E[credit]` decides prompt ORDER too, not just membership.** The dynamic block is ordered by the
-same quantity the cutoff reads, rather than by `fuseRanks`. The reason is coherence rather than elegance:
+**RULED: `E[credit]` decides LAYOUT ORDER too, not just membership.** The dynamic block is walked in the
+same quantity the cutoff reads. Prompt order is the user's and is not at issue here. The reason is coherence rather than elegance:
 `applyBudget` assumes every cap is a prefix cut, and a set chosen by `E[credit]` but ordered by RRF lets
 the budget drop a high-`E[credit]` entry because a different combination of the same three columns ranked
 it low. Ordering by the thresholded quantity makes the prefix property true by construction. Constant and
