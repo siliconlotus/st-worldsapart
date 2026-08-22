@@ -81,7 +81,7 @@ const VALUES = valuesRaw.split(',').map(s => coerce(s.trim()));
 const EMBED_SWEEP = SWEPT === 'embedModel';
 // WHICH TIER IS FITTED. The ruled predictor fits per tier (matcher-design.md, Stage 4), and the tiers do
 // not carry the same signals — memory is ~all vectorized, reference ~all keyword-only — so a pooled fit
-// reads one slope across two eligibility regimes. 'all' is the pooled fit and stays the default, because
+// reads one slope across two populations that hold different columns. 'all' is the pooled fit and stays the default, because
 // it is what the recorded figures were measured on.
 // ORDINAL MODE. The 0-4 scale asserts four boundaries and the shipped model fits only one of them
 // (>=3), which is also the one the signals separate worst: pooled, grades 2 and 3 sit at the same mean
@@ -158,15 +158,24 @@ if (!['all', 'memory', 'reference'].includes(TIER)) { console.error(`--tier must
 const MODEL = process.env.WA_EMBED_MODEL ?? 'bge-m3';
 const OLLAMA = process.env.OLLAMA_URL ?? 'http://localhost:11434';
 
-// THE FEATURE SET, and the eligibility indicators that go with it. An absent signal and a signal that
-// competed and scored zero are different states — the distinction fuseRanks is built around — so each
-// signal carries its own indicator and the slope is read on the rows that could earn it. Without them a
-// keyword-only entry's missing cosine reads as "average-cosine entry", which is the one reading that is
-// certainly wrong.
+// THE FEATURE SET. One standardised column per signal and NO ELIGIBILITY INDICATORS: whether a signal is
+// absent is a question about the FEATURE SET, not about a row, and it is answered by dropping the column
+// (`--without`). Every memory entry carries cosine and text, and 4 of 496 have no keys; on reference the
+// only signal that varies is cosine, missing because nobody computed one, which `reindex --all` plus
+// `denseAllEntries` closes. So the model is either fitted on a signal or it is not, and a mixed state is
+// an author's vectorization choices rather than something to model.
+//
+// THE INDICATORS DID DAMAGE. A column that is 1 on 99.2% of rows is near-collinear with the intercept, so
+// how the fit splits weight between them is arbitrary AND VARIES PER FOLD — and `--lobo` pools etas from
+// different folds into one AUC, where those offsets stop cancelling. **Measured**, memory tier with keys
+// live: removing them moved held-out AUC 0.8155 -> 0.8238, AP 0.462 -> 0.466, F2 over the delivered set
+// 0.5416 -> 0.5514, and moved Ascensus — which holds 2 of the 4 keyless entries — from -0.067 to -0.007,
+// the whole of what had read as one book rejecting keys. Arms whose indicators were already constant do
+// not move at all.
 const FEATURES = [
-    ['cosine', r => (Number.isFinite(r.score) ? r.score : 0), r => (Number.isFinite(r.score) ? 1 : 0)],
-    ['text', r => Number(r.textScore) || 0, r => (r.textEligible ? 1 : 0)],
-    ['keys', r => Number(r.keywordScore) || 0, r => (r.keysEligible ? 1 : 0)],
+    ['cosine', r => (Number.isFinite(r.score) ? r.score : 0)],
+    ['text', r => Number(r.textScore) || 0],
+    ['keys', r => Number(r.keywordScore) || 0],
 ].filter(([n]) => !WITHOUT.includes(n));
 // PROPER NOUNS shared between the entry and the scan window. NOT a reweighting of `text`: BM25 spreads
 // its mass over every term the two share, so a character name arrives diluted among hundreds of ordinary
@@ -261,11 +270,11 @@ const properNouns = text => {
 // transfer rather than as two features sharing a column.
 const storyTime = r => Number(r.entry?.uid ?? 0);
 
-if (WITH.includes('proper')) FEATURES.push(['proper', r => Number(r.properShared) || 0, () => 1]);
-if (WITH.includes('time')) FEATURES.push(['time', storyTime, () => 1]);
+if (WITH.includes('proper')) FEATURES.push(['proper', r => Number(r.properShared) || 0]);
+if (WITH.includes('time')) FEATURES.push(['time', storyTime]);
 // Built below, once every scene is loaded — an entry's prior is read off its OTHER scenes and so cannot
 // be computed inside the per-scene loop the way properShared is.
-if (WITH.includes('oracle')) FEATURES.push(['oracle', r => Number(r.entryBase) || 0, () => 1]);
+if (WITH.includes('oracle')) FEATURES.push(['oracle', r => Number(r.entryBase) || 0]);
 // THE THREE COMPUTABLE PRIORS, each an attempt at part of what `oracle` bounds. All are entry-intrinsic
 // — they never read the query — so they are priors rather than signals, and within-scene standardisation
 // still works on them because they vary between the entries of one scene.
@@ -274,23 +283,24 @@ if (WITH.includes('oracle')) FEATURES.push(['oracle', r => Number(r.entryBase) |
 // 15k-token entry set the scene's SD. It is not already in the model: BM25 length-normalises INSIDE
 // `text`, which is a different claim — that a long document should not out-score a short one on the same
 // query — and says nothing about whether long entries are likelier to be relevant at all.
-if (WITH.includes('length')) FEATURES.push(['length', r => Math.log(Math.max(1, Number(r.entryTokens) || 0)), () => 1]);
+if (WITH.includes('length')) FEATURES.push(['length', r => Math.log(Math.max(1, Number(r.entryTokens) || 0))]);
 // NAMES PER 100 TOKENS, on ranking.properNounsOf — the same detector `proper` settled on. A DENSITY, not
 // the count: the count is length wearing another name, and the two would be one column.
-if (WITH.includes('density')) FEATURES.push(['density', r => Number(r.properDensity) || 0, () => 1]);
+if (WITH.includes('density')) FEATURES.push(['density', r => Number(r.properDensity) || 0]);
 // MEAN -log10(tf/total) over the entry's tokens, the book as the corpus. "How rare is this entry's
 // vocabulary among its siblings" — the surviving half of a mean-TF-IDF prior. The English-frequency half
 // is deliberately absent: ZIPF_EN scores a name maximally rare and a book's own coinages with it, so the
 // two axes disagree on a tenth of a book's token mass and a min-of-percentiles combination measured
 // WORSE than this column alone.
-if (WITH.includes('rarity')) FEATURES.push(['rarity', r => Number(r.bookRarity) || 0, () => 1]);
+if (WITH.includes('rarity')) FEATURES.push(['rarity', r => Number(r.bookRarity) || 0]);
 // NAMES PER CHUNK, the same construct as `density` at the unit the system retrieves in. Proposed off the
 // DISABLED-entry population, where length-controlled it agreed with the author's keep/drop call in 7
 // books of 7 — and that finding is an ARTIFACT: disabled entries sit earlier in the story (mean position
 // 0.33 against 0.60), early entries name fewer distinct people because the cast has not accumulated, and
 // controlling position as well as length takes it to 3 of 7 and mean AUC 0.489. It measures nothing on
 // grades either. Kept because the unit is an obvious thing to try and this answers it both ways.
-if (WITH.includes('chunkdens')) FEATURES.push(['chunkdens', r => Number(r.chunkDensity) || 0, () => 1]);
+if (WITH.includes('chunkdens')) FEATURES.push(['chunkdens', r => Number(r.chunkDensity) || 0]);
+
 
 // Feature indices carrying a squared term: none at degree 1, the named subset if --square was given,
 // otherwise all of them.
@@ -539,9 +549,8 @@ const queryVec = async (S, name, value, em) => {
             console.log(`  oracle: ${tally.size} distinct entries, pooled base ${pooled.toFixed(3)}, ${imputed} single-scene rows imputed`);
         }
 
-        // Design matrix: one intercept, then for each signal its standardised value and its eligibility
-        // indicator. Standardising within scene is what makes one slope mean one thing across corpora
-        // whose BM25 lives on different scales.
+        // Design matrix: one intercept, then each signal's standardised value. Standardising within scene
+        // is what makes one slope mean one thing across corpora whose BM25 lives on different scales.
         const X = [], y = [], rawCols = FEATURES.map(() => []), stats = FEATURES.map(() => ({ sd: [], mean: [] }));
         const perSignal = FEATURES.map(() => ({ s: [], y: [] }));
         const sceneCols = [];
@@ -554,17 +563,16 @@ const queryVec = async (S, name, value, em) => {
                 const feats = [];
                 cols.forEach((c, fi) => {
                     const s = sd(c) || 1;   // a signal constant within a scene carries no information there; 1 keeps it finite and its column stays flat
-                    feats.push((c[i] - mean(c)) / s, FEATURES[fi][2](k.r));
+                    feats.push((c[i] - mean(c)) / s);
                     rawCols[fi].push(c[i]);
                     perSignal[fi].s.push(c[i]);
                     perSignal[fi].y.push(k.y);
                 });
                 // DEGREE 2 APPENDS, never interleaves: every readout below indexes a linear coefficient
-                // as base + fi*2, so a squared column inserted beside its own signal would silently
-                // renumber all of them. The ELIGIBILITY indicators are not squared — they are 0/1, so
-                // x^2 == x and the duplicate column makes the design singular.
-                const sq = [...SQUARED.map(fi => feats[fi * 2] ** 2),
-                    ...PAIRS.map(([a, b]) => feats[a * 2] * feats[b * 2])];
+                // as base + fi, so a squared column inserted beside its own signal would silently
+                // renumber all of them.
+                const sq = [...SQUARED.map(fi => feats[fi] ** 2),
+                    ...PAIRS.map(([a, b]) => feats[a] * feats[b])];
                 X.push([...scene, ...feats, ...sq]);
                 y.push(k.y);
             });
@@ -621,10 +629,10 @@ const queryVec = async (S, name, value, em) => {
         // so the only difference between the two is the scale the slope is expressed in.
         const Xraw = X.map((row, i) => {
             const out = row.slice(0, 1);
-            FEATURES.forEach((_, fi) => out.push(rawCols[fi][i], row[1 + fi * 2 + 1]));
+            FEATURES.forEach((_, fi) => out.push(rawCols[fi][i]));
             // The raw fit carries the same terms as the standardised one or it is a different model,
             // and the per-unit column beside it would be read off a design that was never fitted.
-            [...SQUARED, ...PAIRS].forEach((_, si) => out.push(row[1 + 2 * FEATURES.length + si]));
+            [...SQUARED, ...PAIRS].forEach((_, si) => out.push(row[1 + FEATURES.length + si]));
             return out;
         });
         const rawFit = logisticFit(Xraw, y);
@@ -632,26 +640,17 @@ const queryVec = async (S, name, value, em) => {
         table.push({
             value, scenes: perScene.length, n: y.length, pos: y.reduce((a, b) => a + b, 0), dropped,
             stdBeta: stdFit.beta, nRows: y.length,
-            // WHICH ELIGIBILITY COLUMNS WERE CONSTANT. A signal every row is eligible for makes its
-            // indicator a column of 1s, collinear with the intercept, and the fit splits ONE coefficient
-            // evenly across them — so those betas are not separately meaningful and only their SUM is.
-            // A consumer that always passes 1 reproduces the fit exactly, which is why this is a note
-            // rather than a repair; recorded so nobody reads a shared value as a finding.
-            eligConstant: FEATURES.map((_, fi) => {
-                const col = X.map(row => row[base + fi * 2 + 1]);
-                return col.every(v => v === col[0]);
-            }),
             rows: FEATURES.map(([name], fi) => ({
                 name,
-                std: stdFit.beta[base + fi * 2], stdSe: stdFit.se[base + fi * 2],
-                raw: rawFit.beta[base + fi * 2],
+                std: stdFit.beta[base + fi], stdSe: stdFit.se[base + fi],
+                raw: rawFit.beta[base + fi],
                 sd: mean(stats[fi].sd),
                 auc: auc(perSignal[fi].s, perSignal[fi].y),
                 cut: tailCut(perSignal[fi].s, perSignal[fi].y),
             })),
             logLoss: stdFit.logLoss, converged: stdFit.converged,
-            sq: [...SQUARED, ...PAIRS].map((_, si) => stdFit.beta[1 + 2 * FEATURES.length + si]),
-            sqSe: [...SQUARED, ...PAIRS].map((_, si) => stdFit.se[1 + 2 * FEATURES.length + si]),
+            sq: [...SQUARED, ...PAIRS].map((_, si) => stdFit.beta[1 + FEATURES.length + si]),
+            sqSe: [...SQUARED, ...PAIRS].map((_, si) => stdFit.se[1 + FEATURES.length + si]),
             auc: auc(X.map((row, i) => row.reduce((s, x, j) => s + x * stdFit.beta[j], 0)), y),
             ordinal: ORDINAL ? cumulativeFit(X, grades, [1, 2, 3, 4]) : null,
             base,
@@ -695,7 +694,7 @@ const queryVec = async (S, name, value, em) => {
                     for (const u of ungraded) {
                         const design = [1];
                         sceneCols[si].forEach((c, fi) => {
-                            design.push((FEATURES[fi][1](u.r) - mean(c)) / (sd(c) || 1), FEATURES[fi][2](u.r));
+                            design.push((FEATURES[fi][1](u.r) - mean(c)) / (sd(c) || 1));
                         });
                         rows.push({ e: scoreRow(design, fold), g: 0, ungraded: true, ...idOf(u.r) });
                     }
@@ -842,7 +841,7 @@ const queryVec = async (S, name, value, em) => {
             // read off the delivered set, and a model shipped without the operating point it was chosen
             // at is not a selection rule.
             //
-            // COLUMN ORDER IS THE CONTRACT: [intercept, (standardised, eligible) per feature, then any
+            // COLUMN ORDER IS THE CONTRACT: [intercept, one standardised column per feature, then any
             // squared/interaction columns appended]. The consumer must standardise WITHIN THE SCENE it is
             // scoring, as the fit did — the coefficients are per within-scene sd and mean nothing against
             // a raw value.
@@ -851,9 +850,8 @@ const queryVec = async (S, name, value, em) => {
                     tier: TIER, cut: CUT, cutoff: best.cut, f2: best.f,
                     features: FEATURES.map(([n]) => n),
                     properMode: PROPER_MODE, properExtract: PROPER_EXTRACT,
-                    layout: ['intercept', ...FEATURES.flatMap(([n]) => [`${n}.z`, `${n}.eligible`])],
+                    layout: ['intercept', ...FEATURES.map(([n]) => `${n}.z`)],
                     beta: Array.from(t.stdBeta ?? []),
-                    constantEligible: FEATURES.filter((_, fi) => t.eligConstant?.[fi]).map(([n]) => n),
                     // BOTH AUCs, because they answer different questions and the in-sample one alone
                     // would flatter a model shipped for books it has never seen. Held out by BOOK is the
                     // generalisation number production actually gets.
