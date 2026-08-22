@@ -1384,6 +1384,17 @@ instances the books on disk hold.
    it. **Measured** across 43 books: 1 of 148 SmartKeys carries a per-term weight and it is a
    single-term key, so nothing on disk depends on the current reading and the change is free. Until it
    lands, a bare `::N` or `^N` term is a silently dead key of the same class as `~N` proximity.
+13. **A signal's within-scene SD varies by book, and the two books `keys` costs are its extremes.**
+    **Measured**, memory tier with keys live, solo AUC against mean within-scene SD of the column:
+    Richard 0.744 at SD 0.249 and Ascensus 0.576 at 1.761, against 0.67-0.79 at SD 0.71-0.75 for the
+    three books the column does not cost. Standardisation divides by the scene's own SD, so a
+    near-constant column has its few small differences amplified into large z meeting a slope fitted on
+    other books, and a wide noisy one is taken at face value. Richard is contemporary and
+    character-driven — the same cast in every scene, so no key separates them — which is also why it
+    holds the corpus's lowest cosine AUC (0.676) and its highest positive rate (18%). No use proposed
+    yet. What makes it worth keeping is that it is a property a book can be MEASURED for, where curation
+    is a label someone applies.
+
 ---
 
 ## Standing caveats
