@@ -87,7 +87,7 @@ if (cmd === 'build') {
     const ROWS = arg('--rows');
     mkdirSync(JOBS, { recursive: true });
 
-    let files = 0, rows = 0, batches = 0, bytes = 0, dropped = 0;
+    let files = 0, rows = 0, batches = 0, bytes = 0, dropped = 0, future = 0;
     // One bundle's worth of rows -> job files.
     const emitJobs = (bundleFile, rowList) => {
         const bundle = JSON.parse(readFileSync(`${DATA}/${bundleFile}`, 'utf8'));
@@ -101,12 +101,24 @@ if (cmd === 'build') {
         const base = bundleFile.replace(/\.json$/, '');
         const books = new Map(Object.entries(bundle.books ?? {}).map(([b, bk]) => [b, byUid(bk)]));
 
+        // AVAILABILITY IS FILTERED HERE TOO, not only when a scene is scored. An entry whose STMB range
+        // ends at or after the frozen turn could not be in the book when that turn was live, so a verdict
+        // on it is a verdict on a scene that cannot happen — and the judge would be paid to give it.
+        // scene.mjs `dropUnavailable` owns the rule; this asks it the same question one row at a time.
+        const at = Number(bundle.generatedFrom?.msg);
+        const unavailable = (r) => {
+            if (!Number.isFinite(at)) return false;
+            const e = books.get(r.book)?.get(String(r.uid));
+            const end = Number(e?.STMB_end), start = Number(e?.STMB_start);
+            return Number.isFinite(end) ? end >= at : (Number.isFinite(start) && start > at);
+        };
         // A row whose entry is gone or empty cannot be graded from the entry text, and a judge handed an
         // empty candidate will grade the title. Dropped and counted rather than passed through.
         const usable = rowList.filter(r => {
             const e = books.get(r.book)?.get(String(r.uid));
-            if (e && (e.content ?? '').trim()) return true;
-            dropped++; return false;
+            if (!e || !(e.content ?? '').trim()) { dropped++; return false; }
+            if (unavailable(r)) { future++; return false; }
+            return true;
         });
 
         for (let i = 0; i < usable.length; i += BATCH) {
@@ -147,7 +159,8 @@ if (cmd === 'build') {
         }
         for (const [bf, group] of [...byBundle.entries()].sort()) emitJobs(bf, group);
     }
-    console.log(`\n${files} scenes, ${batches} jobs, ${rows} rows, ${dropped} dropped (no entry text)`);
+    console.log(`\n${files} scenes, ${batches} jobs, ${rows} rows, ${dropped} dropped (no entry text)`
+        + `${future ? `, ${future} dropped (post-dates its scene)` : ''}`);
     console.log(`${(bytes / 1024 / 1024).toFixed(1)}MB payload (~${Math.round(bytes / 4000)}k input tokens) in ${JOBS}`);
     process.exit(0);
 }
