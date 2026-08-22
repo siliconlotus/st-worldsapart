@@ -1065,42 +1065,74 @@ In-sample on the same design it is 0.438, so the model extrapolates: an unseen b
 against an unseen scene. Held out, precision is 37.4% at half the relevant rows and 10.3% at 90% of them.
 Per-scene intercepts were tried as a control for differing base rates and measured to buy nothing.
 
-**Fit PER TIER, on eligibility rather than on base rate.** The tiers do not carry the same signals:
+**Fit PER TIER, on which signals the tier carries rather than on base rate.** The tiers do not carry the same signals:
 99.8% of memory rows are vectorized and carry cosine and text, while 84% of reference rows are
 keyword-only. **And where both carry one, it is not worth the same.** **Measured**, solo AUC per tier:
 cosine 0.737 memory against 0.448 reference, text 0.759 against 0.662, keys 0.503 against 0.668. So the
 strongest signal in one tier is the weakest in the other. Both of the weak readings are ABSENCE rather
 than failure, and neither is evidence about the signal: reference's cosine is only computed under
 `denseAllEntries`, and memory's keys are not computed at all — `scoringKeys` blanks a vectorized entry's
-keys unless `scoreVectorKeys` is on, it defaults off, and memory is 99.8% vectorized. 0.503 is the AUC
+keys unless `scoreVectorKeys` is on, which it now is by default, and memory is 99.8% vectorized. That
+reading was taken with it off; 0.503 is the AUC
 of a constant. On books whose memory entries are all vectorized the column's within-scene SD is exactly
 0, and the fit returns +0.000 at SE 1000 rather than a slope.
 
-**Scoring memory's keys gives a real signal and COSTS.** **Measured**, memory tier,
-`scoreVectorKeys` on: keys go from within-scene SD 0.0025 and solo AUC 0.503 to 1.0143 and 0.708. A third
-signal exists in that tier; it is redundant, which follows from an entry's keys being drawn from its own
-content while `text` scores that content directly.
+**Scoring memory's keys gives a real signal and costs a little.** **Measured**, memory tier,
+`scoreVectorKeys` on: keys go from within-scene SD 0 and solo AUC 0.500 to 0.7573 and 0.717, fitting at
+std beta +0.165 (SE 0.052) in the six-feature model. A third signal exists in that tier; it is redundant,
+which follows from an entry's keys being drawn from its own content while `text` scores that content
+directly.
 
 **ASK IT AS A FEATURE CONTRAST, not as a parameter sweep.** Turning the setting off does not remove the
-column — it leaves a DEGENERATE one, near-constant on a tier that is 99.8% vectorized, still consuming a
-value and an eligibility coefficient. `--without keys` drops both, which is the honest counterfactual.
-**Measured** on 98 scenes (Richard excluded, below), both arms at `scoreVectorKeys=true`, held out by
-book: the column costs AUC 0.8044 -> 0.7937, AP 0.393 -> 0.379, and F2 over the delivered set
-0.5513 -> 0.5413, paired 23 scenes up against 46 with 29 tied, **p 0.0076**. The degenerate column is
-worth nothing on its own — off against `--without keys` is 4 up against 2 with 97 TIED.
+column — it leaves a DEGENERATE one on a tier that is all but entirely vectorized, still consuming a
+coefficient. `--without keys` drops it, which is the honest counterfactual.
+On the current corpus the two coincide exactly: the blanked column is constant in every one of the 103
+scenes, so its SD is 0, the fit returns +0.000 at SE 1000, and `scoreVectorKeys=false` reproduces
+`--without keys` to the bit on all 97 scored scenes. They stop coinciding at the first scene holding an
+unvectorized memory entry whose keys score, where the one row breaking the constant meets a fitted slope.
 
-**FIVE SCENES DECIDED THE SIGN, and they were Richard's.** With its 5 scenes in, the same contrast reads
-45 up against 31 with a NEGATIVE mean — the macro-average and the scene count disagreeing, which is the
-shape that had been read as noise for three revisions of this paragraph. Richard is 134 rows and 15
-positives; its curated keys pulled the fitted coefficient up for every OTHER fold, and Sommers swung from
-+0.0026 to -0.0032 on its removal without a single one of its own rows changing. A fold small enough to
-be unstable is not thereby harmless: `--lobo` trains each fold on all the others.
+**Measured** on the shipped design (`relevance-model-memory.json`: cosine, text, keys, proper, length,
+density), 103 scenes, 6231 rows, 446 relevant, both arms at `scoreVectorKeys=true`, held out by
+book. **The score of record is F2 over the delivered set**, and it reads 0.5545 -> 0.5514 with the column
+live. AUC is 0.8239 -> 0.8238 and AP 0.464 -> 0.466, but those rank rows rather than choose a set and do
+not carry the decision. So the column costs about three F2 thousandths, and it changes nothing at all on
+15 of the 97 scenes, which deliver an identical set either way.
 
-**Curation does not rescue it, and a per-book rule has nothing to key on.** Sommers is the only fully
-curated book in the corpus and loses from the column too (-0.0032 AUC). Selecting the setting per book
-off the curation detector (`eval-data/README.md`) looked 6-for-6 with Richard in and had no signal left
-without it. It stays a user-facing option, defaulting off, because the author knows their books and no
-measurement here can pick for them.
+**WHETHER A SIGNAL IS IN THE MODEL IS A QUESTION ABOUT THE FEATURE SET, never about a row.** The fit
+carries one standardised column per signal and nothing else, so a signal is either fitted for the whole
+tier or dropped from it (`--without`). On the memory tier every entry is vectorized and 4 of 496 have no
+keys, so nothing varies. On reference, `cosine` is missing on 124 of 135 entries — missing because nobody
+computed one, not because the quantity does not exist, since `reindex --all` builds a collection over
+every entry with content and `denseAllEntries` scores it. So the reference model is one of two designs:
+WITHOUT cosine, on the four remaining columns, or with a cosine COMPUTED FOR ALL OF THEM. Computing one
+is not vectorizing the entry — it is a column in the fit, where `vectorized` decides what stage 1
+retrieves.
+
+**Per book the sign follows curation.** The column moves Sommers +0.004 and Richard +0.014, the two
+curated books, against Time Whore -0.001, Ascensus -0.007 and Panopticon -0.010. Five books is not a rule
+and these are AUC deltas in the third decimal, but nothing dominates and the direction is the one key
+quality would predict.
+
+**A SMALL FOLD IS NOT A HARMLESS FOLD**, because `--lobo` trains each fold on all the others. At 5 scenes
+Richard decided the sign of this contrast for every other book, Sommers moving between +0.0026 and
+-0.0032 on its inclusion without one of its own rows changing. At 25 scenes it no longer does: on the
+three-signal design the contrast reads the same with Richard in (29 scenes up / 34 down) as with it held
+out (27 / 34 over 78 scenes).
+
+**A per-book rule has nothing to key on, so the AUTHOR asserts it.** Selecting the setting off the
+curation detector (`eval-data/README.md`) has read 6-for-6 and then signless across corpus revisions, and
+wants a book nobody fitted the threshold on. `scoreVectorKeys` is therefore a checkbox in Ranking &
+fusion, **defaulting ON**: a key is authored, so the default is to read it, and UNTICKING is the
+assertion — that this book's memory keys are machine output nobody reviewed. The corpus argues both ways
+and neither loudly: three of its five books are uncurated and the column costs them, but by a third of a
+percent, where the two curated ones gain.
+
+**ONE MODEL SERVES BOTH SETTINGS, and it is the keys-live one**, fitted with the column so the checkbox
+reaches the prediction — a keys-free fit would leave it with nothing to change. A fit made with keys live
+and run with them blanked ranks as well as one refitted for it (AUC 0.8420 against 0.8416) and holds its
+operating point (F2 0.5751 at its unchanged cutoff against the refit's 0.5804, delivering 13.0 rather
+than 13.5). A blanked column standardises to 0 for every row, so the keys term drops out and the other
+five decide, which is what makes the transfer free.
 
 **MOST OF THE MEMORY TIER'S KEYS ARE MACHINE OUTPUT, which every claim above rests on.** **Measured**,
 by key provenance: 6136 of the 10,981 memory rows (55.9%) sit on books whose scene-summary keys nobody
@@ -1141,7 +1173,7 @@ and `oracle` are not.
 **A cutoff-curve peak is not a comparison.** Two arms differ by less than the flatness of their own
 curves, so `--cutoff` reports the per-scene F2 vector and the sign test against the first arm. Every
 contrast between arms reads that, never the peak — the same rule `param-screen` follows and for the
-same reason. A pooled fit reads one slope across two eligibility regimes, and it is also blind to any
+same reason. A pooled fit reads one slope across two tiers holding different columns, and it is also blind to any
 change confined to the smaller one — computing a cosine for every reference entry (`denseAllEntries`)
 moves that tier's AUC from 0.7387 to 0.7851 and its log-loss from 0.5539 to 0.5163, while the memory tier
 and the pooled model do not move at all. Reference cosine then carries the tier's largest slope
