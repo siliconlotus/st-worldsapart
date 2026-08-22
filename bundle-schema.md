@@ -413,13 +413,32 @@ time is a last resort and cannot separate two passes filed in one invocation.
 
 | `id` component | is | when unavailable |
 |---|---|---|
-| `modelId` | a content digest where the backend has one, else the invoked name | empty |
+| `modelId` | the backend's manifest digest where it has one, else the invoked name | empty |
 | `rubric` | the contract graded under — `scene-relevance@8460b922` | empty |
+
+Only Ollama surfaces one. `/api/tags` gives `digest` (sha256, 64 hex) and `/api/show` gives
+`details.family`, `.quantization_level`, `.parameter_size` and `capabilities` — the last being what makes an
+absent `think` mean "unsupported" rather than "unrecorded".
+
+**oMLX's API surfaces neither the digest nor the org.** Its OpenAI-shaped `/v1/models` carries `id`,
+`created`, `owned_by` and `max_model_len` and nothing else, with no per-model route, and the `id` is the
+repo id's TAIL — its own UI shows `mlx-community/gemma-4-31B-it-qat-mxfp4` and hands over the bare name.
+The org is not decoration: **measured**, the local models come from 6 different accounts, so two
+publishing one tail would record as one rater.
+
+Its STORE has it, though. `~/.omlx/models/` is `<org>/<name>` for anything oMLX downloaded and flat for a
+model copied in from elsewhere — so the org is resolvable rather than guessable, at the cost of reading
+the filesystem beside the API. **Measured**: 7 of 10 resolve, and the other 3 were copied in and have no
+org to record, which is an absence rather than a lookup failure. Nothing reads this yet.
+
+Names often encode size and quantisation (`gemma-4-31B-it-MLX-8bit`), and parsing that IS guessing, so
+those fields stay absent — but a local model's `config.json` names its `architectures`, which is `family`
+resolved rather than parsed. A hosted model has none of any of it.
 
 Three facts the block above cannot carry:
 
-- **US, not a printable separator.** **Measured**: 11 of 11 local Ollama models carry a `:`, every MLX
-  model is a HuggingFace repo id carrying a `/`, and `@` already appears inside a rubric.
+- **US, not a printable separator.** **Measured**: 11 of 11 Ollama models carry a `:`, an MLX model's
+  identity is an HF repo id carrying a `/`, and `@` already appears inside a rubric.
   `raterKey`/`raterParts` in `extension/grading.mjs` are the only join and split.
 - **A digest, because a name is not an identity.** `bge-m3:latest` is whatever was pulled most recently,
   so two captures months apart record one string for different weights.
