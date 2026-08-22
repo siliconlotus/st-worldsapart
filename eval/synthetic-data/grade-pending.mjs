@@ -157,7 +157,13 @@ const MODEL = arg('--model', 'claude-sonnet-5');
 const EFFORT = arg('--effort', '');
 /** WHO GRADED, as v3 names them: the model, and the rubric that told it what to grade. The pass's REASON
  *  is not part of either — a tiebreak verdict is a third verdict, and the array's order already says so. */
-const raterOf = job => ({ kind: 'llm', modelName: MODEL, rubric: `scene-relevance@${job.contract ?? contractHash}` });
+// WHAT THE RESULT SAYS PRODUCED IT, before what this run was told. grade-local resolves the model against
+// the backend — a manifest digest from Ollama, an org-qualified repo id from oMLX's store — and a --model
+// flag can only repeat what someone typed. The flags remain for a result written by something that records
+// nothing, a subagent among them.
+const raterOf = (job, res) => (res?.rater
+    ? { kind: 'llm', ...res.rater, rubric: res.rater.rubric ?? `scene-relevance@${job.contract ?? contractHash}` }
+    : { kind: 'llm', modelName: MODEL, rubric: `scene-relevance@${job.contract ?? contractHash}` });
 /** Two verdicts from the same rater, under the same knobs, on the same day are indistinguishable in the
  *  file, so that is the key a re-merge is idempotent under. A pass that CHANGED a knob — another seed,
  *  another effort — is a different pass and appends. `--run` is the operator asserting that an otherwise
@@ -212,13 +218,16 @@ for (const jf of jobFiles) {
     // `llmGrade` stays as the value IN FORCE so every existing reader (metrics.mjs `gradeValue`) is
     // untouched and 9340 rows need no migration; `llmGrades` is the history, newest last, and the two
     // are kept in step here. A row graded once has a one-element history, which is the same shape.
-    const rater = raterOf(job);
+    const rater = raterOf(job, res);
     bySceneRows.get(target).push(...job.candidates.map(c => {
         const g = got.get(rowKey(c.book, c.uid));
         // KIND `llm`, never `human`. The rater a verdict names IS its provenance — that is the whole of
         // what tells an unreviewed row from one a human reviewed and agreed with, and it is structural
         // rather than policed: this writer names no other kind.
-        const one = { ...rater, ...(EFFORT ? { params: { effort: EFFORT } } : {}), grade: Number(g.grade), gradedAt, ...(g.why ? { why: g.why } : {}) };
+        // The knobs the pass RAN under, from the result, with --effort filling what a result cannot know
+        // about itself (a subagent is not told its own reasoning level).
+        const params = { ...(res.params ?? {}), ...(EFFORT ? { effort: EFFORT } : {}) };
+        const one = { ...rater, ...(Object.keys(params).length ? { params } : {}), grade: Number(g.grade), gradedAt, ...(g.why ? { why: g.why } : {}) };
         return { title: c.title, grades: [one], book: c.book, uid: c.uid };
     }));
 }

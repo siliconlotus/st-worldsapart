@@ -30,6 +30,7 @@
 // to an existing pass; without it every job in the directory is dispatched regardless of which rubric it
 // was built under.
 import { readFileSync, writeFileSync, appendFileSync, mkdirSync, readdirSync, existsSync } from 'node:fs';
+import { homedir } from 'node:os';
 import { createHash } from 'node:crypto';
 import { dirname, resolve as resolvePath } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -65,6 +66,84 @@ const system = rubricRaw.toString('utf8').replace(/^---[\s\S]*?\n---\n/, '');
 // Hashed as grade-pending hashes the contract — whole file, sha256, first 8 — so an unmodified rubric
 // hashes to the job's own stamp. A filename cannot: a variant can be edited between runs.
 const rubricHash = createHash('sha256').update(rubricRaw).digest('hex').slice(0, 8);
+
+/**
+ * Who the rater is, resolved from the backend rather than from what was typed.
+ *
+ * A NAME IS NOT AN IDENTITY. `bge-m3:latest` is whatever was pulled most recently, and an oMLX id is a
+ * repo id's tail, so two accounts publishing one tail would record as one rater. What each backend can
+ * actually answer differs, and a field it cannot answer stays ABSENT — a guess here is worse than a gap,
+ * because the gap is legible and the guess is not (bundle-schema.md, *A rater is whoever passed a verdict*).
+ *
+ * Ollama: `/api/tags` carries the manifest digest, `/api/show` the descriptive fields and `capabilities`.
+ * oMLX: its API carries neither, but its STORE is `<org>/<name>` for anything it downloaded — so the org
+ * is read rather than guessed, and a model copied in from elsewhere sits flat and has no org to record.
+ * A local model's `config.json` names its `architectures`, which is `family` resolved rather than parsed
+ * out of a filename.
+ */
+async function resolveModel() {
+    const out = { modelName: MODEL };
+    const j = async (url, body) => {
+        try {
+            const r = await fetch(url, body
+                ? { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) }
+                : { signal: AbortSignal.timeout(5000) });
+            return r.ok ? await r.json() : null;
+        } catch { return null; }
+    };
+
+    if (API === 'ollama') {
+        const hit = ((await j(`${HOST}/api/tags`))?.models ?? []).find(m => m.name === MODEL);
+        // `modelDigest`, the field raterKey reads. `modelId` is the name of the COMPONENT it becomes
+        // inside the joined id, not a field — raterParts hands that back.
+        if (hit?.digest) out.modelDigest = hit.digest;
+        const show = await j(`${HOST}/api/show`, { model: MODEL });
+        const d = show?.details ?? {};
+        if (d.family) out.family = d.family;
+        if (d.quantization_level) out.quant = d.quantization_level;
+        if (d.parameter_size) out.modelParams = d.parameter_size;
+        if (Array.isArray(show?.capabilities)) out.capabilities = show.capabilities;
+        return out;
+    }
+
+    // The oMLX store. Not the HuggingFace cache: a model oMLX downloaded is under its org here, and one
+    // copied in is flat — the cache answers for neither reliably.
+    const store = `${homedir()}/.omlx/models`;
+    let dir = null;
+    if (existsSync(store)) {
+        for (const e of readdirSync(store, { withFileTypes: true })) {
+            if (!e.isDirectory()) continue;
+            if (e.name === MODEL) { dir = `${store}/${MODEL}`; break; }
+            if (existsSync(`${store}/${e.name}/${MODEL}/config.json`)) {
+                // The ORG-QUALIFIED name, into `modelName` — not `modelDigest`, which is a digest and
+                // this is not. The schema calls modelName the model LINE, and the repo id is that line
+                // more precisely than its tail.
+                out.modelName = `${e.name}/${MODEL}`;
+                dir = `${store}/${e.name}/${MODEL}`;
+                break;
+            }
+        }
+    }
+    if (dir) {
+        try {
+            const arch = JSON.parse(readFileSync(`${dir}/config.json`, 'utf8')).architectures;
+            if (Array.isArray(arch) && arch.length) out.family = arch[0];
+        } catch { /* a model without a readable config records no family */ }
+    }
+    return out;
+}
+
+const MODEL_INFO = await resolveModel();
+const { capabilities: _caps, ...RATER } = MODEL_INFO;
+// WHAT THE INVOCATION SET, under the names it set them. Mirrors the request body exactly rather than a
+// common scale: `num_ctx` and `think` are Ollama's and are not sent on the OpenAI path, and `think` is
+// recorded only where the model declares the capability — so an absent one means unsupported, not unset.
+const PARAMS = API === 'ollama'
+    ? { seed: SEED, temperature: 0, num_ctx: CTX, ...((MODEL_INFO.capabilities ?? []).includes('thinking') ? { think: THINK } : {}) }
+    : { seed: SEED, temperature: 0 };
+console.log(`rater: ${MODEL_INFO.modelDigest ?? MODEL_INFO.modelName}${MODEL_INFO.modelDigest ? ` (${MODEL_INFO.modelName})` : ''}`
+    + `${MODEL_INFO.family ? `  family=${MODEL_INFO.family}` : ''}${MODEL_INFO.quant ? ` quant=${MODEL_INFO.quant}` : ''}`
+    + `${MODEL_INFO.modelParams ? ` params=${MODEL_INFO.modelParams}` : ''}`);
 
 mkdirSync(OUTDIR, { recursive: true });
 const LOG = `${OUTDIR}/dispatch.jsonl`;
@@ -184,7 +263,16 @@ for (const { id, job } of work) {
     // `gradedAt` is WHEN THIS PASS RAN, not when someone later merged it. Merge time cannot separate two
     // passes filed in one invocation, and a day cannot separate two passes run in one day — which is the
     // adjudication case, where a second pass over the same rows is the entire point.
-    else { ok++; writeFileSync(`${OUTDIR}/${id}-graded.json`, JSON.stringify({ scene: job.scene, gradedAt: new Date().toISOString(), grades: parsed.grades }, null, 1)); }
+    else { ok++; writeFileSync(`${OUTDIR}/${id}-graded.json`, JSON.stringify({
+        scene: job.scene, gradedAt: new Date().toISOString(),
+        // WHAT PRODUCED THIS, carried rather than re-stated at merge time. The merge used to rebuild the
+        // rater from a --model flag, so the tool that resolved the model dropped it and the tool that
+        // wrote it guessed.
+        // `capabilities` decided whether `think` is a knob at all; it is not a rater field and does not travel.
+        rater: { ...RATER, rubric: `${RUBRIC.split('/').pop().replace(/\.md$/, '')}@${rubricHash}` },
+        params: PARAMS,
+        grades: parsed.grades,
+    }, null, 1)); }
     appendFileSync(LOG, JSON.stringify({
         id, model: MODEL, api: API, host: HOST, seed: SEED, rubric: rubricHash, rubricFile: RUBRIC.split('/').pop(), contract: job.contract, ok: !why, why,
         secs: Number(dt.toFixed(1)), rows: job.candidates.length,

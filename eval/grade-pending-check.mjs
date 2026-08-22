@@ -14,6 +14,7 @@ import { bundleSamples, openBundle, raterParts } from '../extension/grading.mjs'
 import { gradeValue } from './metrics.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
+const US = String.fromCharCode(31);
 const TOOL = resolve(HERE, 'synthetic-data', 'grade-pending.mjs');
 let fails = 0;
 const ok = (cond, what) => { console.log(`${cond ? 'ok  ' : 'FAIL'}  ${what}`); if (!cond) fails++; };
@@ -58,7 +59,14 @@ try {
     // Answer each job with the grade its own candidates ask for; the judge is not what is under test.
     for (const jf of jobFiles) {
         const job = JSON.parse(readFileSync(`${JOBS}/${jf}`, 'utf8'));
-        writeFileSync(job.out, JSON.stringify({ grades: job.candidates.map(c => ({ book: c.book, uid: c.uid, grade: 3, why: 'test' })) }, null, 1));
+        // The result carries WHAT PRODUCED IT, as grade-local writes it: the model resolved against the
+        // backend, and the knobs the pass ran under. Merge must prefer this over its own --model flag,
+        // which can only repeat what someone typed.
+        writeFileSync(job.out, JSON.stringify({
+            rater: { modelDigest: 'a'.repeat(64), modelName: 'gemma4:e4b-mxfp8', family: 'gemma4', quant: 'mxfp8', modelParams: '8.1B', rubric: 'scene-relevance@deadbeef' },
+            params: { seed: 7, temperature: 0, num_ctx: 65536, think: false },
+            grades: job.candidates.map(c => ({ book: c.book, uid: c.uid, grade: 3, why: 'test' })),
+        }, null, 1));
     }
     execFileSync('node', [TOOL, 'merge', '--jobs', JOBS, '--write'], { encoding: 'utf8' });
 
@@ -77,12 +85,26 @@ try {
     const rater = openBundle(JSON.parse(readFileSync(`${DATA}/${TAG}-a.json`, 'utf8'))).raters?.[v[0].rater]
         ?? JSON.parse(readFileSync(`${DATA}/${TAG}-a.json`, 'utf8')).raters[0];
     const who = raterParts(rater);
+    // RESOLVED, NOT REPEATED. The digest is what the result said, not the --model flag this run defaulted
+    // to, and `isDigest` is the difference between a rater pinned to weights and one pinned to a name.
+    ok(who.isDigest, 'the rater id carries the digest the result resolved, not the name the flag defaulted to');
+    ok(who.rubric === 'scene-relevance@deadbeef', '...and the rubric the result graded under');
+    ok(rater.family === 'gemma4' && rater.quant === 'mxfp8' && rater.modelParams === '8.1B',
+        'the descriptive fields survive the merge');
+    ok(rater.capabilities === undefined, 'capabilities decided whether `think` is a knob and is not a rater field');
+    ok(v[0].params?.seed === 7 && v[0].params?.num_ctx === 65536 && v[0].params?.think === false,
+        'the verdict carries the knobs the pass ran under, under the names the invocation used');
     ok(v[0].grade === 3 && who.modelId && who.rubric,
         'and its rater id decomposes to the model that ran and the rubric it ran under');
-    // A HOSTED model has no digest to resolve, so its NAME stands in — flagged, because that id is not
-    // stable the way a content digest is.
-    ok(who.isDigest === false, '...with isDigest false, since a served model is opaque and cannot be pinned');
     ok(gradeValue(a.entries[0]) === 3, 'which the reader resolves to the value in force');
+
+    // A HOSTED model has no digest to resolve, so its NAME stands in — flagged, because that id is not
+    // stable the way a manifest digest is. The same split raterParts makes on the digest above, on the
+    // other side of it: the field says which of the two an id holds.
+    const hosted = raterParts({ kind: 'llm', id: `claude-sonnet-5${US}scene-relevance@deadbeef` });
+    ok(hosted.isDigest === false, 'a served model is opaque, so its id is a name and isDigest says so');
+    ok(hosted.modelId === 'claude-sonnet-5' && hosted.rubric === 'scene-relevance@deadbeef',
+        '...and it still decomposes to the model that ran and the rubric it ran under');
 } finally {
     for (const p of written) if (existsSync(p)) rmSync(p);
     rmSync(JOBS, { recursive: true, force: true });
