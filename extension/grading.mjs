@@ -532,7 +532,7 @@ export const DOC_FIELDS = [...SHARED_FIELDS, ...SCENE_FIELDS, 'books', 'grades']
  *  it, because `scores` is "whatever the capture recorded, keyed by the feature's own name" and a fitted
  *  model indexes into it by that name (bundle-schema.md, *`scores` is a capture record*). A rank is not a
  *  feature and the fused score is not one either: both are arm-relative positions, not measurements. */
-const SIGNAL_FIELDS = ['cosine', 'text', 'keys', 'proper', 'length'];
+const SIGNAL_FIELDS = ['cosine', 'text', 'keys', 'properNouns', 'length'];
 
 /** The schema this writer emits and this reader accepts. One version exists; nothing on disk predates it. */
 export const SCHEMA_VERSION = 3;

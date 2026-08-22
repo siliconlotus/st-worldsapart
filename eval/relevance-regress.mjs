@@ -35,7 +35,7 @@
 //
 // Usage (from SillyTavern root):
 //   node .../relevance-regress.mjs <sample.json> [...] [--sweep gazetteerSource=keys,titles]
-//        [--tier memory|reference] [--cut 4] [--ordinal] [--loso] [--lobo] [--calibration] [--cutoff] [--at 0.10] [--degree 2] [--interactions] [--with proper,time,oracle,length,density,rarity,chunkdens] [--without keys] [--drop-keys flagged.json] [--emit-rows rows.json] [--proper count|idf|idf-len|jaccard|gaz] [--proper-extract regex|entity|span]
+//        [--tier memory|reference] [--cut 4] [--ordinal] [--loso] [--lobo] [--calibration] [--cutoff] [--at 0.10] [--degree 2] [--interactions] [--with properNouns,time,oracle,length,density,rarity,chunkdens] [--without keys] [--drop-keys flagged.json] [--emit-rows rows.json] [--proper-nouns count|idf|idf-len|jaccard|gaz] [--proper-nouns-extract regex|entity|span]
 import { haystackFor, indexPath, isMemory, loadScene, openSample, sceneParams, makeCandidateSet, makeGradeOf, embed, sceneLabel } from './scene.mjs';
 import { ensureIndex, resolveModel } from './reindex.mjs';
 import fs from 'node:fs';
@@ -53,7 +53,7 @@ const arg = k => { const i = argv.indexOf(k); return i >= 0 ? argv[i + 1] : null
 // is about to write is opened as an input bundle. Named flags rather than "anything after a --", or
 // `--lobo scene.json` would silently DROP that scene, which is the worse failure: a wrong sample set
 // prints a clean table and says nothing about what it left out.
-const VALUED = new Set(['--arm', '--sweep', '--tier', '--cut', '--degree', '--square', '--with', '--without', '--emit', '--emit-rows', '--emit-model', '--drop-keys', '--proper', '--proper-extract']);
+const VALUED = new Set(['--arm', '--sweep', '--tier', '--cut', '--degree', '--square', '--with', '--without', '--emit', '--emit-rows', '--emit-model', '--drop-keys', '--proper-nouns', '--proper-nouns-extract']);
 const samples = argv.filter((a, i) => a.endsWith('.json') && !a.startsWith('--') && !VALUED.has(argv[i - 1]));
 if (!samples.length) {
     console.error('need at least one sample: node relevance-regress.mjs <sample.json> [more.json ...] [--sweep param=v1,v2]');
@@ -153,12 +153,12 @@ const DROP_KEYS = arg('--drop-keys') ? JSON.parse(fs.readFileSync(arg('--drop-ke
 // its own ruling — so every run that passed no flag measured a configuration nobody chose, and credited
 // whatever else it was testing against a handicapped `proper`. A default that disagrees with the ruling
 // is a trap, not a neutral starting point.
-const PROPER_MODE = arg('--proper') ?? 'idf';
+const PROPER_MODE = arg('--proper-nouns') ?? 'idf';
 // HOW a name is recognised, orthogonal to how a shared one is scored. `regex` is the private ASCII
 // pattern this feature was found with; `entity` is ranking.mjs's own rule, which the entity filter
 // already uses; `span` takes maximal runs of capitalised tokens as one term, so "Brackenmoor Patrol"
 // is a name rather than two.
-const PROPER_EXTRACT = arg('--proper-extract') ?? 'regex';
+const PROPER_EXTRACT = arg('--proper-nouns-extract') ?? 'regex';
 const CALIB = argv.includes('--calibration');
 // WHICH BOUNDARY IS THE TARGET. 3 is the project's relevance line and the default; --cut 4 fits the band
 // the anchors reserve for the scene's current subject, which separates far better and is far rarer, so it
@@ -282,7 +282,7 @@ const properNouns = text => {
 // transfer rather than as two features sharing a column.
 const storyTime = r => Number(r.entry?.uid ?? 0);
 
-if (WITH.includes('proper')) FEATURES.push(['proper', r => Number(r.properShared) || 0]);
+if (WITH.includes('properNouns')) FEATURES.push(['properNouns', r => Number(r.properShared) || 0]);
 if (WITH.includes('time')) FEATURES.push(['time', storyTime]);
 // Built below, once every scene is loaded — an entry's prior is read off its OTHER scenes and so cannot
 // be computed inside the per-scene loop the way properShared is.
@@ -412,7 +412,7 @@ const queryVec = async (S, name, value, em) => {
             const tw = (P.entityFilter && P.queryMode !== 'summary') ? ranking.buildTermWeights(S.query, scene.gaz, P.boost) : null;
             const haystack = haystackFor(S, P);
             const rows = makeCandidateSet({ ...scene, params: P })(P.K1, P.B, tw, qvec, S.query, haystack);
-            if (WITH.includes('proper')) {
+            if (WITH.includes('properNouns')) {
                 // Proper nouns are a property of the SCENE, so read off a plain entry's window: an entry's
                 // own sources are its, not the scene's.
                 const win = properNouns(haystack({}).join('\n'));
@@ -861,7 +861,7 @@ const queryVec = async (S, name, value, em) => {
                 fs.writeFileSync(EMIT_MODEL, JSON.stringify({
                     tier: TIER, cut: CUT, cutoff: best.cut, f2: best.f,
                     features: FEATURES.map(([n]) => n),
-                    properMode: PROPER_MODE, properExtract: PROPER_EXTRACT,
+                    properNounsMode: PROPER_MODE, properNounsExtract: PROPER_EXTRACT,
                     layout: ['intercept', ...FEATURES.map(([n]) => `${n}.z`)],
                     beta: Array.from(t.stdBeta ?? []),
                     // BOTH AUCs, because they answer different questions and the in-sample one alone
@@ -884,7 +884,7 @@ const queryVec = async (S, name, value, em) => {
             if (EMIT_ROWS) {
                 fs.writeFileSync(EMIT_ROWS, JSON.stringify({
                     swept: SWEPT, value: t.value, tier: TIER, with: WITH, without: WITHOUT,
-                    interactions: INTERACT, properMode: PROPER_MODE, properExtract: PROPER_EXTRACT,
+                    interactions: INTERACT, properNounsMode: PROPER_MODE, properNounsExtract: PROPER_EXTRACT,
                     cut: best.cut, f2: best.f,
                     features: FEATURES.map(([n]) => n),
                     scenes: b.sceneRows.map(sc => ({
@@ -897,7 +897,7 @@ const queryVec = async (S, name, value, em) => {
             }
             if (EMIT) {
                 fs.writeFileSync(EMIT, JSON.stringify({
-                    swept: SWEPT, value: t.value, tier: TIER, with: WITH, without: WITHOUT, interactions: INTERACT, properMode: PROPER_MODE, properExtract: PROPER_EXTRACT,
+                    swept: SWEPT, value: t.value, tier: TIER, with: WITH, without: WITHOUT, interactions: INTERACT, properNounsMode: PROPER_MODE, properNounsExtract: PROPER_EXTRACT,
                     cut: best.cut, f2: best.f, scenes: b.sceneNames, perScene: best.perScene,
                     grid: b.grid.map(g => ({ cut: g.cut, f2: g.f, precision: g.precision, recall: g.recall, delivered: g.delivered })),
                 }, null, 1));
