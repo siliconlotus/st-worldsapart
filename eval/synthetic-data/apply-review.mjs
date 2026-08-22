@@ -56,7 +56,13 @@ export function resolveSections(sections, dir) {
             const buf = Buffer.alloc(HEAD_BYTES);
             const len = readSync(fd, buf, 0, HEAD_BYTES, 0);
             closeSync(fd);
-            const hit = /"captureId":\s*"([^"]+)"/.exec(buf.subarray(0, len).toString('utf8'));
+            const head = buf.subarray(0, len).toString('utf8');
+            // A DOCUMENT, not any JSON that mentions an id. eval-data also holds review files, `*-pending`
+            // lists and whatever else, and a review carries its sections' captureIds — which the scan
+            // matched, so a review sitting beside its own bundles made every one of them ambiguous.
+            // `schemaVersion` is the first key a writer emits, so the opening brace settles it.
+            if (!/^\s*\{\s*"schemaVersion"\s*:/.test(head)) continue;
+            const hit = /"captureId":\s*"([^"]+)"/.exec(head);
             if (!hit || !wanted.has(hit[1])) continue;
             byId.set(hit[1], [...(byId.get(hit[1]) ?? []), f]);
         }
