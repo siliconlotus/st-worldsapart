@@ -764,8 +764,8 @@ WA's rules *are* what fires.
   so a body holding a literal newline was a pattern to core and a literal key to WA — the class widened
   to `[\s\S]` and the two now agree.
 - **`?` SmartKeys and `/re/` terms inside them.** Core's `matchKeys` treats `? …` as a literal needle,
-  so an entry keyed only on SmartKeys never activates there.
-  compatibility story that keeps books portable.
+  so an entry keyed only on SmartKeys never activates there. `SMARTKEYS.md` carries what that means for
+  an author porting a book to a non-WA install.
 - **`messageDepth` supersedes `world_info_depth`** when WA runs (see *Stage 2: Activation*).
 
 ---
@@ -894,8 +894,9 @@ against the runtime's own verdicts on 315 rows across 7 arms.
 ### Stage 4 predicts per-entry relevance
 
 **Ruled, unimplemented.** Regression was measured to be no worse than RRF + nDCG and was chosen for
-explainability. Everything below is measured on 69 graded scenes, 8924 judged rows, three signals
-(cosine, text, keys), by `eval/relevance-regress.mjs`.
+explainability. Unless a paragraph says otherwise, everything below is measured by
+`eval/relevance-regress.mjs` on the memory tier, 103 graded scenes, 6231 judged rows on 5 books, held
+out by book.
 
 **LOGISTIC regression**, on the project's own relevance line (grade >= 3). Linear would put predictions
 outside [0,1] on a bounded target and would weight a 0-vs-1 error the same as a 0.4-vs-0.5 one. Each
@@ -945,12 +946,10 @@ scenes and 5 books: **F2 0.5326 -> 0.5495, paired 42 scenes up against 17 with 3
 AUC 0.8117 -> 0.8216 and AP 0.455 -> 0.463. The first feature change to clear the line rather than
 approach it.
 
-**It transfers to a book nothing was fitted on.** A validation corpus was graded for this — 20 scenes on
-`System, Status Window…` / `Lit RPG - Fenwood`, 149 rows, 5 memory entries, judge-graded — and entered as
-an eighth `--lobo` fold. On it the feature moves AP 0.844 -> 0.873 and AUC 0.8650 -> 0.8858. Per fold, AP
-improves in 6 of 7 books; the one that falls holds 59 rows and 5 positives. Fenwood's own scenes are 4 up
-against 0 down with 16 tied (p 0.125) — a 5-entry book rarely changes its delivered set at all, so the
-per-fold AP is the readable number there and the pooled paired test is what the 20 scenes bought.
+**It improves 6 of 7 folds** on the corpus it was found on; the one that falls holds 59 rows and 5
+positives. A Fenwood validation fold was graded for it and is NOT quotable: on `--tier memory` that book
+yields 20 rows and 9 positives, its 149 judged rows being almost entirely reference, so its AP moved on a
+population this model is not fitted for.
 
 **Of the two ENTRY-INTRINSIC columns, `density` earns and `length` costs.** Neither reads the query —
 entry length (log tokens) and proper-noun density (names per 100 tokens, `ranking.properNounsOf`) are
@@ -989,17 +988,17 @@ priority in the next, which a fit held out BY BOOK cannot survive.
 **Polynomial terms measured WORSE, on the tier that could afford them.** Squares of the standardised
 signals were fitted on memory (6231 rows, `--degree 2`): held out by book they cost AUC 0.8238 -> 0.8173
 and AP 0.466 -> 0.453 while leaving F2 flat at 0.5516 against 0.5514, and gain in-sample — the signature
-of terms fitted to the training books. Only `text^2` had individual support (+0.071, SE 0.027) and it loses held
-out on its own too (AUC 0.7851, F2 0.493), which is what holding out is for: an in-sample t-statistic is
-not evidence a term transfers. `keys` also destabilises beside its own square (+2.244, SE 1.418), the
-collinearity a small slope invites. Not retried on reference, where 342 rows cannot support three more
-coefficients and the delivered set is already at full recall.
+of terms fitted to the training books. No square reaches two standard errors except `properNouns^2` at
+-0.066 (SE 0.034), and a negative curvature on the strongest feature is what an overfit looks like rather
+than a shape worth keeping. `keys^2` reads +0.002 (SE 0.019); it once destabilised at +2.244 (SE 1.418),
+which was the blanked column and not the signal. Not retried on reference, where 342 rows cannot support
+three more coefficients and the delivered set is already at full recall.
 
 **Two-way INTERACTIONS fail the same way** (`--interactions`, memory): AUC 0.8238 -> 0.8068 held out,
-AP 0.466 -> 0.428 and F2 0.5514 -> 0.5409, with `cosine*text` the one nominally supported term (+0.081, SE 0.037) and the two
-carrying `keys` pure noise. Curvature and combination were tested separately because they are different
+AP 0.466 -> 0.428 and F2 0.5514 -> 0.5409, with `cosine*text` the one term near two standard errors
+(+0.135, SE 0.070) and the two carrying `keys` pure noise (-0.017 and -0.021, both under one). Curvature and combination were tested separately because they are different
 questions, and a tree ensemble that beat this model would have to be exploiting one of them. Neither
-exists at this n, which is 7 BOOKS however many rows it is.
+exists at this n, which is 5 BOOKS however many rows it is.
 
 **Retried once PROPER existed**, since the argument above — three readings of one question cannot
 combine into a fourth — does not cover a pair containing a signal from the empty cell. It does not
@@ -1103,8 +1102,8 @@ about what KEYS are worth on this tier is a claim about generated keys, and the 
 one book. `eval-data/README.md` carries the per-book status and how to recover it from a book alone.
 
 **Nor does the redundancy hide a denoised copy of `text`.** The agreement term is the shape that
-hypothesis predicts, and it is one standard error: `text*keys` reads +0.034 (SE 0.035) with the signal
-live. PAIRED per scene at each arm's own best cutoff, scoring keys is
+hypothesis predicts, and it is inside one standard error: `text*keys` reads -0.021 (SE 0.065) with the
+signal live. PAIRED per scene at each arm's own best cutoff, scoring keys is
 -0.0031 mean F2 on 22 scenes up against 60 (*Scoring memory's keys gives a real signal and costs a
 little*), which is the redundancy priced rather than a denoised copy appearing.
 
@@ -1119,13 +1118,12 @@ is negative there while `density` is worth two. Any target stated as a recall (*
 where it does nothing.
 
 **A SCENE-LEVEL SIGN TEST OVERSTATES ITS OWN n, so a contrast reports books up against books down.** The
-test treats ~100 scenes as independent draws where they sit on 7 books, and within-book correlation is
+test treats ~100 scenes as independent draws where they sit on 5 books, and within-book correlation is
 then counted as evidence — which is why a feature can read p 0.0000 across scenes and have no consistent
 direction across corpora. Both numbers are given above where they disagree, and the book count is the one
-that decides. With 7 books the test itself is nearly powerless (6-0 reaches only p 0.031), so what carries
-a positive result is the AGREEMENT OF MAGNITUDES across books, not the count: `length`+`density` lands
-within 0.005 on four independent books, which is the reason it is in the model and `rarity`, `chunkdens`
-and `oracle` are not.
+that decides. With 5 books the test itself is nearly powerless, so what carries a positive result is the
+AGREEMENT OF MAGNITUDES across books, not the count — which is what separates `density` from `rarity`,
+`chunkdens` and `oracle`.
 
 **A cutoff-curve peak is not a comparison.** Two arms differ by less than the flatness of their own
 curves, so `--cutoff` reports the per-scene F2 vector and the sign test against the first arm. Every
