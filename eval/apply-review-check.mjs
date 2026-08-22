@@ -1,7 +1,10 @@
 // Checks for apply-review.mjs's merge rule. The write half is I/O and argv; this is the part that decides
 // what a review does to a scene, and the rule that matters is what it leaves ALONE.
 import { eq, gradeValue } from './metrics.mjs';
-const { mergeReview } = await import('./synthetic-data/apply-review.mjs');
+const { mergeReview, resolveSections } = await import('./synthetic-data/apply-review.mjs');
+const { mkdtempSync, writeFileSync, rmSync } = await import('node:fs');
+const { tmpdir } = await import('node:os');
+const { join } = await import('node:path');
 
 const ME = { user: 'f47ac10b-58cc-4372-a567-0e02b2c3d479', now: '2026-08-21' };
 // An llm rater is a MODEL and a RUBRIC, two fields — never one composed string. Measured: every Ollama
@@ -76,3 +79,50 @@ const stripped = mergeReview([{ book: 'W', uid: 1, grades: llm(1) }],
     [{ book: 'W', uid: 1, grade: 3, entryText: 'the whole entry body' }], ME);
 eq(stripped.grades[0].entryText, undefined, 'entryText is not written into the scene');
 eq(gradeValue(stripped.grades[0]), 3, '...but the human verdict is');
+
+
+// --- resolving a section to its bundle -------------------------------------------------------------------
+// BY ID, WITH NO FALLBACK TO THE NAME. This is the one place in the harness where being wrong is not
+// recoverable — the grades look native once written — and a basename that exists is not evidence it is the
+// right bundle, since two captures of one turn under different books share one.
+{
+    const dir = mkdtempSync(join(tmpdir(), 'wa-resolve-'));
+    const put = (f, doc) => writeFileSync(join(dir, f), JSON.stringify(doc, null, 1));
+    put('renamed-by-a-user.json', { schemaVersion: 3, captureId: 'cap-A' });
+    put('decoy.json', { schemaVersion: 3, captureId: 'cap-B' });
+    put('no-id.json', { schemaVersion: 3 });
+
+    const at = s => resolveSections([s], dir).get(s);
+
+    const moved = at({ captureId: 'cap-A', file: 'what-it-was-called.json' });
+    eq(moved.path, join(dir, 'renamed-by-a-user.json'), 'a renamed bundle is still found, by id');
+    eq(moved.renamedFrom, 'what-it-was-called.json', '...and the run reports the name it no longer answers to');
+
+    const still = at({ captureId: 'cap-B', file: 'decoy.json' });
+    eq(still.path, join(dir, 'decoy.json'), 'an unrenamed bundle resolves by id too, not by luck');
+    eq(still.renamedFrom, undefined, '...and says nothing, because nothing moved');
+
+    // THE FAILURE THIS PREVENTS: a name that exists but belongs to a different capture.
+    eq(at({ captureId: 'cap-A', file: 'decoy.json' }).path, join(dir, 'renamed-by-a-user.json'),
+        'the id decides, never the name beside it');
+
+    eq(Boolean(at({ captureId: 'cap-GONE', file: 'decoy.json' }).error), true,
+        'an id nothing carries REFUSES — it does not fall back to a name that happens to resolve');
+    eq(at({ captureId: 'cap-GONE', file: 'decoy.json' }).path, undefined, '...and offers no path to write to');
+
+    eq(Boolean(at({ file: 'no-id.json' }).error), true, 'a section with no id refuses, since nothing else identifies a bundle');
+    eq(Boolean(at({ captureId: 'cap-A', file: 'no-id.json' }).path), true, 'a document carrying no id is never a match for a section that has one');
+
+    // Two files with one id means a bundle was copied, and nothing in either says which was reviewed.
+    put('a-copy.json', { schemaVersion: 3, captureId: 'cap-A' });
+    const ambiguous = at({ captureId: 'cap-A', file: 'decoy.json' });
+    eq(Boolean(ambiguous.error), true, 'an id in two files refuses rather than picking one');
+    eq(ambiguous.path, undefined, '...and offers no path to write to');
+
+    // The id is read from the head, so a document whose bulk pushes it past the window must not hide.
+    put('padded.json', { schemaVersion: 3, captureId: 'cap-PAD', books: {} });
+    eq(at({ captureId: 'cap-PAD', file: 'padded.json' }).path, join(dir, 'padded.json'),
+        'the id is the second key, so a head read finds it whatever follows');
+
+    rmSync(dir, { recursive: true, force: true });
+}

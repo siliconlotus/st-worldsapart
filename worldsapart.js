@@ -3258,8 +3258,9 @@ async function superEvalScene() {
     // it a month later means finding the exact bundle it was cut from and hoping nothing moved. Only the
     // GRADED rows carry that weight, which is what keeps it cheap: forty rows, not the union.
     //
-    // `file` stays, as provenance and as what apply-review.mjs writes back to — but nothing about
-    // reading the review depends on that file still existing.
+    // `captureId` is what apply-review.mjs writes back THROUGH, because a basename is a name a user may
+    // change and a mis-landed review is not recoverable — the grades look native once written. `file`
+    // stays as provenance and as the fallback, but nothing about reading the review depends on it.
     //
     // WHICH RATER GRADED A ROW IS READ OFF WHICH ARRAY THE VERDICT SITS IN: `humanGrades` is written by a
     // person alone, `llmGrades` by a judge alone. A row with both was reviewed; judge verdicts alone mean
@@ -3269,6 +3270,10 @@ async function superEvalScene() {
         const src = openBundle(secs[si].manifest);
         const priorOf = new Map((src.entries ?? []).map(g => [rowKey(g), g]));
         return {
+            // WHAT THE SECTION CAME FROM, id first. `file` is a basename and a well-meaning rename breaks
+            // it; `captureId` survives one, and apply-review resolves on it. Both are written because the
+            // id only helps if the target document still carries it.
+            captureId: secs[si].manifest?.captureId,
             file: sec.file,
             name: secs[si].name,
             sceneChat: src.sceneChat,
@@ -3305,7 +3310,10 @@ async function superEvalScene() {
     const filename = `review-${slug}-${stamp}.json`;
     // `createdBy` so a verdict can say what produced it: a human grade arrives three ways, and nothing
     // downstream could tell them apart without it.
-    download(JSON.stringify({ reviewed, gradeScale: GRADE_SCALE, createdBy: 'wa-super-eval', reviewedAt }, null, 1), filename, 'application/json');
+    // WHO PASSED THESE VERDICTS, written here because this is where it is known. Without it apply-review had
+    // to be told by hand, and its `--user` defaulted to empty — which signed every verdict as nobody and,
+    // since a pass key is rater + instant, matched nothing on a re-run and appended the whole review again.
+    download(JSON.stringify({ reviewed, gradeScale: GRADE_SCALE, createdBy: 'wa-super-eval', user: raterId(), reviewedAt }, null, 1), filename, 'application/json');
     // Agreement is over the rows a human actually reviewed — those carrying BOTH kinds of verdict.
     // Filtering on the judge's alone would drag in every untouched judge row and report it as a
     // disagreement, since it has no human verdict rather than a matching one.

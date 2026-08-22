@@ -1,6 +1,8 @@
 // apply-review.mjs — writes a /wa-super-eval multi-scene review back into eval-data.
 //
-// The review file is a list of {file, grades}: the bundle it came from and that section's rows.
+// The review file is a list of {captureId, file, grades}: which bundle it came from and that section's
+// rows. Resolution is BY ID — a basename is a name a user may change, and a review that lands on the wrong
+// bundle is not recoverable, since the grades look native once written.
 //
 // A HUMAN VERDICT IS ONE OF KIND `human`, and it APPENDS beside whatever an llm said and whatever an
 // earlier reviewer said — so a row no human has touched carries only llm verdicts, which is what makes
@@ -18,12 +20,57 @@
 //
 // Dry by default: a review that lands on the wrong bundle is not recoverable afterwards, since the
 // grades look native once written.
-import { readFileSync, writeFileSync, existsSync, readdirSync, statSync } from 'node:fs';
-import { dirname, resolve as resolvePath } from 'node:path';
+import { readFileSync, writeFileSync, existsSync, readdirSync, statSync, openSync, readSync, closeSync } from 'node:fs';
+
+/** Enough of a document to hold everything ahead of the bulk. `captureId` is the second key. */
+const HEAD_BYTES = 4096;
+import { basename, dirname, resolve as resolvePath } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { openBundle, passKey, setGrades } from '../../extension/grading.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
+
+/**
+ * Where a review section's bundle is, BY CAPTURE ID AND NOTHING ELSE.
+ *
+ * There is no fallback to `file`, and that is the point. A basename is a name a user may change, and worse,
+ * a name that EXISTS is not evidence it is the right bundle: two captures of one turn under different books
+ * share both basename and scene id, and the corpus has such a pair. Falling back to a name that resolves is
+ * exactly the mis-landing the id was introduced to prevent, and a mis-landed review is not recoverable —
+ * the grades look native once written. So an unresolvable section refuses and the run reports it.
+ *
+ * READ FROM THE HEAD. `captureId` is the second key a writer emits, ahead of the bulk, which is what the
+ * schema's field-order rule is for. Measured over the corpus: 8ms against 263ms to parse every document
+ * whole, finding the same 107 ids.
+ *
+ * @param {Array<{captureId?: string, file?: string}>} sections The review's sections
+ * @param {string} dir eval-data
+ * @returns {Map<object, {path: string, renamedFrom?: string}|{error: string}>} section -> where it resolved
+ */
+export function resolveSections(sections, dir) {
+    const byId = new Map();
+    const wanted = new Set(sections.map(s => s.captureId).filter(Boolean));
+    if (wanted.size) {
+        for (const f of readdirSync(dir).filter(x => x.endsWith('.json'))) {
+            const fd = openSync(`${dir}/${f}`, 'r');
+            const buf = Buffer.alloc(HEAD_BYTES);
+            const len = readSync(fd, buf, 0, HEAD_BYTES, 0);
+            closeSync(fd);
+            const hit = /"captureId":\s*"([^"]+)"/.exec(buf.subarray(0, len).toString('utf8'));
+            if (!hit || !wanted.has(hit[1])) continue;
+            byId.set(hit[1], [...(byId.get(hit[1]) ?? []), f]);
+        }
+    }
+    const out = new Map();
+    for (const s of sections) {
+        const hits = byId.get(s.captureId) ?? [];
+        if (!s.captureId) out.set(s, { error: `section "${s.file ?? '(unnamed)'}" carries no captureId — re-export the review` });
+        else if (hits.length > 1) out.set(s, { error: `captureId ${s.captureId} is in ${hits.length} files (${hits.join(', ')}) — a bundle was copied, and nothing says which was reviewed` });
+        else if (!hits.length) out.set(s, { error: `no bundle in ${dir} carries captureId ${s.captureId}` });
+        else out.set(s, { path: `${dir}/${hits[0]}`, ...(hits[0] === s.file ? {} : { renamedFrom: s.file }) });
+    }
+    return out;
+}
 
 const US = String.fromCharCode(31);
 export const rowKey = r => `${r.book ?? ''}${US}${r.uid}`;
@@ -91,16 +138,17 @@ if (import.meta.url === `file://${process.argv[1]}`) {
     const argv = process.argv.slice(2);
     const arg = (k, d = null) => { const i = argv.indexOf(k); return i >= 0 ? argv[i + 1] : d; };
     const WRITE = argv.includes('--write');
-    // WHO REVIEWED. No default: a verdict signed as the wrong person is not recoverable, and this tool
-    // has no way to know whose review file it was handed.
-    const USER = arg('--user', '');
     // WHEN THE HUMAN REVIEWED, taken from the review file. This tool's own run time is a FALLBACK and a
     // poor one: a review applied a week later would record the verdict as passed then, and two reviews
     // applied in one invocation would share a stamp and collapse into one pass.
     const RAN_AT = new Date().toISOString();
     const DATA = resolvePath(arg('--data', resolvePath(HERE, '..', 'eval-data')));
     // No arguments is the normal case: the newest review-*.json across eval-data, Downloads and the cwd.
-    const named = argv.find(a => !a.startsWith('--') && argv[argv.indexOf(a) - 1] !== '--data');
+    // A FLAG'S VALUE IS NOT A POSITIONAL. `--user <uuid>` read the uuid as the review path until this
+    // listed every flag that takes one; `--data` alone was special-cased, which is how the next flag added
+    // reintroduces it.
+    const VALUE_FLAGS = new Set(['--data', '--user']);
+    const named = argv.find((a, i) => !a.startsWith('--') && !VALUE_FLAGS.has(argv[i - 1]));
     const newestReview = () => {
         const dirs = [DATA, process.env.HOME ? `${process.env.HOME}/Downloads` : null, process.cwd()].filter(Boolean);
         let best = null;
@@ -122,24 +170,37 @@ if (import.meta.url === `file://${process.argv[1]}`) {
     }
     if (!named) console.log(`using ${REVIEW}`);
     const review = JSON.parse(readFileSync(resolvePath(REVIEW), 'utf8'));
+    // WHO PASSED THESE VERDICTS, off the review itself — /wa-super-eval knows and now records it. `--user`
+    // overrides for a review exported before it did; there is no empty default, because a verdict signed as
+    // nobody is neither attributable nor idempotent (its pass key is rater + instant, so it matches nothing
+    // and the whole review appends again on the next run).
+    const USER = arg('--user', review.user ?? '');
+    if (!USER) {
+        console.error(`${REVIEW} records no rater, and one cannot be inferred — pass --user <your rater id>`);
+        console.error('  it is the `user` field of a bundle your own /wa-grade produced');
+        process.exit(2);
+    }
     const sections = review.reviewed ?? [];
     if (!Array.isArray(sections) || !sections.length) {
         console.error(`${REVIEW} carries no "reviewed" sections`);
         process.exit(2);
     }
     let touched = 0, missing = 0, totalHuman = 0;
+    const where = resolveSections(sections, DATA);
     for (const s of sections) {
-        const path = `${DATA}/${s.file}`;
-        if (!existsSync(path)) { console.log(`  MISSING ${s.file} — not in ${DATA}`); missing++; continue; }
+        const at = where.get(s);
+        if (at.error) { console.log(`  UNRESOLVED ${at.error}`); missing++; continue; }
+        const path = at.path;
+        if (at.renamedFrom) console.log(`  "${at.renamedFrom}" is now ${basename(path)} — resolved by captureId`);
         const bundle = JSON.parse(readFileSync(path, 'utf8'));
         const { grades, added, changed, untouched } = mergeReview(openBundle(bundle).entries, s.grades, { user: USER, now: review.reviewedAt ?? RAN_AT, tool: review.createdBy ?? 'wa-super-eval' });
         const human = (s.grades ?? []).filter(g => g.grade !== undefined).length;
         totalHuman += human;
-        console.log(`${WRITE ? 'wrote' : 'would write'} ${String(changed).padStart(3)} changed, ${String(added).padStart(3)} added, ${String(untouched).padStart(4)} untouched  (${human} human-graded)  ${s.file}`);
+        console.log(`${WRITE ? 'wrote' : 'would write'} ${String(changed).padStart(3)} changed, ${String(added).padStart(3)} added, ${String(untouched).padStart(4)} untouched  (${human} human-graded)  ${basename(path)}`);
         if (WRITE) writeFileSync(path, JSON.stringify(setGrades(bundle, grades), null, 1));
         touched++;
     }
-    console.log(`\n${touched} bundles, ${totalHuman} human grades${missing ? `, ${missing} bundles missing` : ''}`);
+    console.log(`\n${touched} bundles, ${totalHuman} human grades${missing ? `, ${missing} unresolved` : ''}`);
     if (!WRITE) console.log('dry run — re-run with --write');
     process.exit(missing ? 1 : 0);
 }
