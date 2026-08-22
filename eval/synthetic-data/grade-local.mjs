@@ -62,10 +62,12 @@ const HOST = arg('--host', process.env.OLLAMA_HOST ?? (API === 'openai' ? 'http:
 // stamped on every job, making an experiment indistinguishable from a ruling.
 const RUBRIC = resolvePath(arg('--rubric', resolvePath(ROOT, '.claude', 'agents', 'scene-relevance.md')));
 const rubricRaw = readFileSync(RUBRIC);
+// THE FRONTMATTER IS NOT THE CONTRACT. Claude Code reads it to discover the agent; the grading prompt
+// strips it, so the model never sees it — and hashing it made an edit to the `description` line move the
+// contract from 8460b922 to 4ddd6466 while the graded instructions stayed byte-identical. Hash what is
+// SENT. grade-pending hashes the same way, so an unmodified rubric still hashes to the job's own stamp.
 const system = rubricRaw.toString('utf8').replace(/^---[\s\S]*?\n---\n/, '');
-// Hashed as grade-pending hashes the contract — whole file, sha256, first 8 — so an unmodified rubric
-// hashes to the job's own stamp. A filename cannot: a variant can be edited between runs.
-const rubricHash = createHash('sha256').update(rubricRaw).digest('hex').slice(0, 8);
+const rubricHash = createHash('sha256').update(system).digest('hex').slice(0, 8);
 
 /**
  * Who the rater is, resolved from the backend rather than from what was typed.

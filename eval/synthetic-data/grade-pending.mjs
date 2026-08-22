@@ -68,8 +68,12 @@ const byUid = book => new Map(Object.values(book ?? {}).map(e => [String(e.uid),
 // correction relabelled 395 old-contract job files as if they had been graded under the new one, and
 // the appended history said so. The job is written and the judge dispatched in the same breath, so the
 // hash at build time is the only one that describes the grading.
+// HASHED OVER WHAT IS SENT, not the file. The frontmatter is how Claude Code discovers the agent and is
+// stripped before the model sees it, so including it made an edit to the `description` line move the
+// contract while the graded instructions were byte-identical. grade-local hashes the same way.
 const contractHash = existsSync(CONTRACT)
-    ? createHash('sha256').update(readFileSync(CONTRACT)).digest('hex').slice(0, 8) : 'unknown';
+    ? createHash('sha256').update(readFileSync(CONTRACT, 'utf8').replace(/^---[\s\S]*?\n---\n/, '')).digest('hex').slice(0, 8)
+    : 'unknown';
 
 // A RUN LABEL MAKES A REPEAT PASS DISTINCT FROM THE ONE IT REPEATS. Pass identity is contract+model,
 // which is what stops a re-merge from appending the same verdicts twice — but it also refuses a
