@@ -952,84 +952,36 @@ improves in 6 of 7 books; the one that falls holds 59 rows and 5 positives. Fenw
 against 0 down with 16 tied (p 0.125) — a 5-entry book rarely changes its delivered set at all, so the
 per-fold AP is the readable number there and the pooled paired test is what the 20 scenes bought.
 
-**Two ENTRY-INTRINSIC columns stopped paying once keys were scored.** Entry length (log tokens) and
-proper-noun density (names per 100 tokens, `ranking.properNounsOf`) never read the query, so they are
-priors rather than signals. They cleared decisively when the baseline had no keys column: F2 0.5162 ->
-0.5503 on a 40% smaller delivered set. **Measured** against the same baseline with keys live, memory
-tier, held out by book, 103 scenes: F2 0.5495 -> 0.5514, mean per-scene +0.0019 on 25 scenes up against
-55, and at matched recall (~70%) they are worth half a precision point. The delivered set moves the wrong
-way too — the peak shifts 0.13 -> 0.08 and delivery 10.9 -> 17.7 entries against 4.6 relevant.
+**Of the two ENTRY-INTRINSIC columns, `density` earns and `length` costs.** Neither reads the query —
+entry length (log tokens) and proper-noun density (names per 100 tokens, `ranking.properNounsOf`) are
+priors rather than signals. **Measured** over the full lattice on `properNouns`, `length` and `density`,
+memory tier, 103 scenes, held out by book: `length` costs wherever it sits — -0.0041 mean F2 alone,
+-0.0027 given `properNouns`, -0.0006 given both, and -0.4 and -1.7 precision points at matched 60% and
+70% recall. `density` earns +1.9 and +2.2 points at those same recalls, so it is a better ordering rather
+than a looser cut.
 
-They are what the model reached for in the absence of a third signal, and `keys` supplies it. They remain
-in the shipped fit because they are not negative, but a four-column model scores 0.5495 while delivering
-10.9, and dropping them is the open question the next refit should answer.
+**The shipped model is cosine, text, keys, properNouns, density**: AUC 0.8269, AP 0.469, F2 0.5520
+delivering 16.0 entries, against 0.8238 / 0.466 / 0.5514 at 17.7 with `length` added back. What `length`
+did was correct `properNouns`'s un-normalised COUNT — dropping `text` leaves it at -0.366 while dropping
+`properNouns` collapses it to -0.128 (SE 0.049) — and `keys` supplies enough of that correction to make
+it cost more than it returns.
 
-**Measure against the RULED variant of a feature, not the harness default.** These figures were first
-taken against `--proper count`, which understated the gain: the default disagreed with the ruling three
-sections above, so a run that passed no flag measured a variant already rejected at p 0.0001. `length` also shrinks from -0.307 to -0.279 under IDF weighting, which is the overlap between
-the two corrections — IDF discounts a name every entry carries, and `length` normalises HOW MANY names an
-entry has, so they overlap without substituting.
+**Measure against the RULED variant of a feature, not the harness default.** `--proper-nouns` defaulted
+to `count`, which the ruling three sections above rejects at p 0.0001, so a run that passed no flag
+measured a variant already discarded. It defaults to `idf` now.
 
-**They raise the CUTOFF; they do not discriminate.** Solo AUC is 0.586 and 0.548, and the gain comes from
-reshaping the probability scale so 0.11 is safe where 0.07 was. Read off the delivered set, the grade >= 3
-rows it drops differ from the ones it keeps in cosine (0.148 against 0.239) and text (48.4 against 80.5),
-barely in length (7.15 against 6.84) or density (5.29 against 6.22). The haystack falls monotonically in
-grade — g0 -51%, g4 -4% — and 2 of 103 scenes go from a relevant row to none.
+**An entry's own relevance rate in its other scenes adds nothing**, which is what bounds any entry-level
+prior: `--with oracle` reads grades the runtime cannot have and still fails, held out by book, raising
+AUC while losing the delivered set. A better ordering read at a looser cutoff is not a better chosen set.
 
-**EVERYTHING FROM HERE TO *`length` corrects `proper`'s COUNT* PREDATES KEYS BEING SCORED**, and the two
-columns read differently now: `length` is -0.047 (SE 0.065) in the shipped fit where it was -0.307, and
-`density` +0.195 (SE 0.063). The mechanisms below are what was learned while the columns were earning;
-the coefficients they quote are not the shipped ones, and the reference-tier readings have not been
-re-run at all.
-
-**Length is a SUPPRESSOR, not a quality prior.** Relevance rises with entry length unconditionally — base
-rate 5.1% in the shortest length quartile against 8.0% in the longest, n=10,939 graded rows — while the
-fitted coefficient was NEGATIVE (-0.307, SE 0.054). Cosine and text over-credit long entries for
-length-driven reasons and this column refunds it. Cosine is not the thing going wrong on them: its solo
-AUC RISES with length (0.661, 0.721, 0.712, 0.751 across quartiles) and its gap to text is flat.
-
-**Mean book-IDF over the entry's tokens does not clear** — replacing `density` it costs -0.0095 mean F2
-(58 scenes up against 27, p 0.0010) and drops the delivered set to 9.6 entries at a 0.14 cutoff.
-`--with rarity` keeps it reproducible. **Names per CHUNK rather than per token is the same construct at
-another unit** and adds nothing: -0.0054 mean F2 added beside `density`, 45 scenes up against 16
-(`--with chunkdens`). In a joint fit the two split one effect and cancel, +0.256 (SE 0.088) against
--0.179 (SE 0.089), with solo AUCs of 0.547 and 0.548.
-
-**An entry's own relevance rate in its other scenes adds nothing once these two are present**, which is
-what bounds any entry-level prior: `--with oracle` reads grades the runtime cannot have, and still costs
--0.0077 F2 scene-level (p 0.0238) on 2 books up against 4 — no consistent direction, so it does not clear
-either. It is the sharpest case of the split above —
-held out by book it RAISES AUC 0.8014 -> 0.8241 and AP 0.392 -> 0.407 while losing the delivered set,
-because a better ordering read at a looser cutoff (0.09, delivering 25.2) is not a better chosen set. The
-entry-level intercept is captured by two columns computable from the entry alone.
-
-The dropped-set figures above are owed a re-run against the shipped baseline, as are the `idf-len` and
-reference-tier readings below.
-
-**BOTH TRANSFER TO REFERENCE, and `density` INVERTS THERE.** **Measured**, reference tier, 518 rows on 64
-scenes, held out by book: over `proper`, adding the two takes AUC 0.7123 -> 0.7702, AP 0.466 -> 0.541 and
-F2 0.8062 -> 0.8196, paired 33 scenes up against 10 with 15 tied, p 0.0006. All of it is PRECISION —
-50.6% -> 57.7% — because the tier's baseline already sits at 100% recall, so there is none to buy.
-`proper` itself is worth nothing here (+0.0003, 12 up against 3 with 43 TIED), which is the opposite of
-its memory-tier standing.
-
-**`density` runs -0.935 (SE 0.185) on reference against +0.108 on memory**, and its solo AUC is 0.336 —
-strongly predictive INVERTED. A reference entry thick with names is a roster or an index, scaffolding
-rather than subject, where a memory scene-summary thick with names is a specific scene. This is the
-concrete case for *Fit PER TIER*: a shared coefficient would not be merely suboptimal on one tier, it
-would carry the wrong SIGN there. `length` is negative in both (-0.341 reference, -0.279 memory), so the
-tiers agree about it.
-
-**`length` corrects `proper`'s COUNT, not BM25.** **Measured** in both tiers: dropping `text` leaves it at
--0.366 memory and -0.456 reference, while dropping `proper` collapses it to -0.128 (SE 0.049) and -0.127
-(SE 0.154). `proper` is an un-normalised sum over shared names, so a longer entry shares more by
-construction. Normalising INSIDE the feature loses to the two columns, though: `--proper idf-len` divides
-the IDF sum by log tokens and reads F2 0.5233 alone against 0.5162 for the raw sum — better as a lone
-column — but 0.5396 with `density` against the two-column 0.5503, delivering 25.9 entries against 19.8. A
-ratio fixes an exchange rate the fit would otherwise choose.
+**`density` INVERTS ON REFERENCE**, which is the concrete case for *Fit PER TIER*: it runs -0.935
+(SE 0.185) there against +0.215 on memory, solo AUC 0.336 — strongly predictive inverted. A reference
+entry thick with names is a roster or an index, scaffolding rather than subject, where a memory
+scene-summary thick with names is a specific scene. A shared coefficient would carry the wrong SIGN.
+Measured before keys were scored, and reference has no fitted model to re-measure it against.
 
 **Story-time position carries nothing.** Fitted as the entry's uid, which within-scene standardisation
-makes equivalent to distance from the current point up to sign: adding it to proper-noun overlap costs
+makes equivalent to distance from the current point up to sign: adding it to `properNouns` costs
 0.0006 AUC and 0.0020 F2, 19 scenes up against 17 with 61 tied (p 0.87). `order` is deliberately not consulted — it is ST's
 insertion priority, and a column falling back between the two would mean story position in one book and
 priority in the next, which a fit held out BY BOOK cannot survive.
@@ -1051,8 +1003,8 @@ exists at this n, which is 7 BOOKS however many rows it is.
 
 **Retried once PROPER existed**, since the argument above — three readings of one question cannot
 combine into a fourth — does not cover a pair containing a signal from the empty cell. It does not
-survive either: `cosine*proper` reads -0.059 (SE 0.063) and `text*proper` -0.016 (SE 0.039), both under
-one standard error, held-out AUC slips 0.7980 to 0.7973, and paired against proper alone it is 14 scenes
+survive either: `cosine*properNouns` reads -0.059 (SE 0.063) and `text*properNouns` -0.016 (SE 0.039),
+both under one standard error, held-out AUC slips 0.7980 to 0.7973, and paired against it alone it is 14 scenes
 up against 12 with 42 TIED. `cosine*text` is the only product ever to reach 2 SE and it has never
 improved a held-out number. The model is linear in its features, at four features as at three.
 
@@ -1070,10 +1022,9 @@ The same distinction as nDCG against the layout score, one level down.
 shares its book's vocabulary, entry style, chunk statistics and BM25 scale with the rows that fitted the
 model. `--lobo` is the honest estimate; `--loso` measures another moment in a book already known.
 
-**The number of record is AP 0.466 at AUC 0.824, held out by book** (`--lobo`, grade >= 3, one intercept,
-the shipped six columns). In-sample on the same design it is 0.488 at 0.843, so the model extrapolates:
-an unseen book costs 4% relative on AP against an unseen scene. Held out, precision is 41.4% at half the
-relevant rows and 10.5% at 90% of them.
+**The number of record is AP 0.469 at AUC 0.827, held out by book** (`--lobo`, grade >= 3, one intercept,
+the shipped five columns). In-sample on the same design it is 0.843, so the model extrapolates: an unseen
+book costs it about 2% relative on AUC against an unseen scene.
 Per-scene intercepts were tried as a control for differing base rates and measured to buy nothing.
 
 **Fit PER TIER, on which signals the tier carries rather than on base rate.** The tiers do not carry the same signals:
@@ -1101,8 +1052,8 @@ scenes, so its SD is 0, the fit returns +0.000 at SE 1000, and `scoreVectorKeys=
 `--without keys` to the bit on all 97 scored scenes. They stop coinciding at the first scene holding an
 unvectorized memory entry whose keys score, where the one row breaking the constant meets a fitted slope.
 
-**Measured** on the shipped design (`relevance-model-memory.json`: cosine, text, keys, proper, length,
-density), 103 scenes, 6231 rows, 446 relevant, both arms at `scoreVectorKeys=true`, held out by
+**Measured** on the shipped design (`relevance-model-memory.json`: cosine, text, keys, properNouns, density),
+103 scenes, 6231 rows, 446 relevant, both arms at `scoreVectorKeys=true`, held out by
 book. **The score of record is F2 over the delivered set**, and it reads 0.5545 -> 0.5514 with the column
 live. AUC is 0.8239 -> 0.8238 and AP 0.464 -> 0.466, but those rank rows rather than choose a set and do
 not carry the decision. So the column costs about three F2 thousandths, and it changes nothing at all on
@@ -1161,11 +1112,10 @@ little*), which is the redundancy priced rather than a denoised copy appearing.
 sits at ITS own best cutoff, and F2 walks that peak toward precision as a model improves — so a contrast
 between peaks mixes "ranks better" with "cut tighter", and reports the second as the first. `--emit`
 carries the whole cutoff grid and `pair-f2 --at-recall` reads it, which is how the two are separated.
-**Measured**, and it is what emptied the entry-intrinsic result above: `length+density` peaks at a looser
-cutoff than `proper` alone (0.08 against 0.13) and delivers 17.7 entries against 10.9, so the two peaks
-are nowhere near the same operating point. Held at MATCHED recall (~70%) the pair is worth +0.5 precision
-points, 40.0% against 39.4%, on an identical delivered set of 14.2. The ordering does improve — AUC and
-AP are cutoff-free and both rise — but by less than a peak-to-peak reading suggests. Any target stated as a recall (*Evidence*) has to be read this way or a feature is credited
+**Measured**, and it is what split the two entry-intrinsic columns above: `length+density` peaks at 0.08
+where `properNouns` alone peaks at 0.13, delivering 17.7 entries against 10.9 — nowhere near the same
+operating point. Held at matched recall the pair is worth half a precision point, and `length` on its own
+is negative there while `density` is worth two. Any target stated as a recall (*Evidence*) has to be read this way or a feature is credited
 where it does nothing.
 
 **A SCENE-LEVEL SIGN TEST OVERSTATES ITS OWN n, so a contrast reports books up against books down.** The
@@ -1250,7 +1200,7 @@ tier, held out by book, AP: keys 0.397, keys+titles 0.398, titles 0.380, none 0.
 bodies are WORSE than having no gazetteer, a source drawn from every entry weighting everything and
 therefore nothing. F2 over the delivered set spans 0.495 for keys to 0.471 for none.
 
-**Re-measured on the current model** (103 scenes, `proper+length+density`, memory tier, held out by book),
+**Re-measured** (103 scenes, `properNouns+length+density`, memory tier, held out by book),
 and the shape holds while the ordering below the top does not. F2 and the paired sign test against the
 shipped `keys+titles`: keys 0.5473 (+0.0063, 29 up against 22 with 52 tied, p 0.401), titles 0.5363
 (-0.0046, p 0.001), none 0.5300 (-0.0110, **p 0.017**), bodies 0.5243 (-0.0167, p 0.012). AP:

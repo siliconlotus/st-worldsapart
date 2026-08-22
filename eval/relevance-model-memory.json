@@ -1,38 +1,35 @@
 {
  "tier": "memory",
  "cut": 3,
- "cutoff": 0.08,
- "f2": 0.5513655345079453,
+ "cutoff": 0.09,
+ "f2": 0.5520109799799138,
  "features": [
   "cosine",
   "text",
   "keys",
-  "proper",
-  "length",
+  "properNouns",
   "density"
  ],
- "properMode": "idf",
- "properExtract": "entity",
+ "properNounsMode": "idf",
+ "properNounsExtract": "entity",
  "layout": [
   "intercept",
   "cosine.z",
   "text.z",
   "keys.z",
-  "proper.z",
-  "length.z",
+  "properNouns.z",
   "density.z"
  ],
  "beta": [
-  -3.243039258153991,
-  0.41126519494503233,
-  0.5112766985811472,
-  0.1650719859907792,
-  0.47889445614393616,
-  -0.047281675495852486,
-  0.19465355570649928
+  -3.246322087492004,
+  0.4099342937886831,
+  0.5110301516522389,
+  0.17214557787849974,
+  0.459120204751471,
+  0.21526149885507037
  ],
- "auc": 0.8424679567925398,
- "heldOutAuc": 0.823773405009864,
+ "auc": 0.8428617384530117,
+ "heldOutAuc": 0.8268740480057052,
  "fittedOn": {
   "scenes": 97,
   "rows": 6231,
