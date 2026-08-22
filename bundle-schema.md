@@ -108,7 +108,7 @@ carry.
       "stVersion": "staging@4ed137241",
       // `scoredBy` is the fitted model's identity — a knob like any other, and the one thing
       // waVersion/stVersion cannot carry, since the model ships as data rather than as code.
-      "params": { "lexicalWeight": 1, "chunk": "paragraph", "scoredBy": "relevance-model@a1b2c3d4" },
+      "params": { "lexicalWeight": 1, "chunk": "paragraph", "scoredBy": "relevance-model-memory@a1b2c3d4" },
 
       // THE CELL: this arm's capture of that scene, keyed by scene id. Everything varying with BOTH
       // coordinates is here — the span it read, the query it built, the rows it surfaced.
@@ -219,7 +219,7 @@ reason: the two should always agree, and the capture where they do not is the on
 
 ## `scores` is a capture record, not a schema
 
-Its keys are whatever the capturing version computed, named as the model names them — `relevance-model.json`
+Its keys are whatever the capturing version computed, named as the model names them — `relevance-model-memory.json`
 lists `features`, and those strings index into `scores` directly. That is why the scores are a nested
 object rather than `cosineScore`, `textScore` and so on: a reader looks up a literal feature name instead
 of composing a key, and a feature that arrives or leaves changes nothing structural.
