@@ -2812,6 +2812,19 @@ async function superGradePopup({ captures, union, entryOf, prior: prior0 = [], s
     // rest use raw messages, and an entry can be a fair hit for one and a miss for the other.
     // Per section, because each scene has its own query text — the whole point of reviewing N scenes in one
     // pass is that each section shows the text ITS grades are about.
+    // The scene text a row is graded AGAINST, and it is read far more often than any one entry, so it
+    // gets the entry text's affordances: a taller default box and a pop-out to the full width. `sceneText`
+    // collects each block's text so the handler can find it by index — the blocks are built as HTML
+    // strings into two different containers (head for one section, body for many), so a closure cannot
+    // reach them.
+    // DEDUPED AND NEVER CLEARED, because the two containers are written at different times: `head` gets
+    // its block once at setup and `body` is rewritten on every repaint. Clearing per paint would strand
+    // the index head already rendered; pushing per paint would leak a copy of the text per keystroke.
+    const sceneText = [];
+    const sceneRef = (text, label) => {
+        const hit = sceneText.findIndex(x => x.text === text);
+        return hit >= 0 ? hit : sceneText.push({ text, label }) - 1;
+    };
     const queryBlocksFor = sc => {
         const caps = sc.captures ?? [];
         const byQ = new Map();
@@ -2823,9 +2836,11 @@ async function superGradePopup({ captures, union, entryOf, prior: prior0 = [], s
         }
         return [...byQ.entries()].map(([text, arms]) => {
             const label = byQ.size === 1 ? 'Query text — what retrieval actually matched on' : `Query text (${esc(arms.join(', '))})`;
+            const si = sceneRef(text, sc.name ?? sc.file ?? 'Scene text');
             return `<details style="margin-bottom:0.4em;"><summary style="cursor:pointer;">${label} `
-                + `(${text.length} chars, depth ${caps[0]?.depth ?? '?'})</summary>`
-                + `<pre style="white-space:pre-wrap;max-height:14em;overflow:auto;font-size:0.85em;opacity:0.85;border:1px solid var(--SmartThemeBorderColor);padding:0.5em;margin-top:0.5em;">${esc(text)}</pre></details>`;
+                + `(${text.length} chars, depth ${caps[0]?.depth ?? '?'}) `
+                + `<i class="fa-solid fa-up-right-and-down-left-from-center wa-scene-pop" data-i="${si}" title="Open the whole scene text" style="opacity:0.55;margin-left:0.35em;cursor:pointer;"></i></summary>`
+                + `<pre style="white-space:pre-wrap;max-height:32em;overflow:auto;font-size:0.85em;opacity:0.85;border:1px solid var(--SmartThemeBorderColor);padding:0.5em;margin-top:0.5em;">${esc(text)}</pre></details>`;
         }).join('')
             + (byQ.size > 1 ? `<small style="display:block;opacity:0.6;margin-bottom:0.5em;">${byQ.size} arms retrieved against different text — judge relevance to the SCENE, not to any one query.</small>` : '');
     };
@@ -2917,6 +2932,15 @@ async function superGradePopup({ captures, union, entryOf, prior: prior0 = [], s
             + '</tbody></table>';
 
         wireFolds(body, i => flat[i].entry);
+        // BOTH CONTAINERS: one section renders its scene text into `head`, many render into `body`.
+        for (const root of [head, body]) {
+            root.querySelectorAll('.wa-scene-pop').forEach(pop => pop.addEventListener('click', event => {
+                event.preventDefault();
+                event.stopPropagation();          // inside a <summary>, or the click also toggles the fold
+                const hit = sceneText[Number(pop.dataset.i)];
+                if (hit) showEntryText({ content: hit.text, comment: hit.label });
+            }));
+        }
         // A user edit marks the input dirty; only dirty values survive a repaint (see `typed` above).
         body.querySelectorAll('.wa-grade').forEach(input => input.addEventListener('input', () => { input.dataset.dirty = '1'; }));
     };
