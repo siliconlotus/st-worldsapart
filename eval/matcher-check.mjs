@@ -9,7 +9,7 @@
 // authority belongs there, not here.
 //
 // countKey/keywordScore live in matcher.mjs, which is isomorphic — imported directly.
-import { countKey, keyExcerpt, keyExcerpts, keywordScore as rankKeywordScore, repeatCurveOf, secondaryKeys, usableKeys, WI_LOGIC } from '../extension/matcher.mjs';
+import { countKey, keyExcerpt, keyExcerpts, keywordScore as rankKeywordScore, repeatCurveOf, secondaryKeys, usableKeys, usedMatchSources, withMatchSources, WI_LOGIC } from '../extension/matcher.mjs';
 import { validateSmartKey } from '../extension/smartkeys.mjs';
 import { eq } from './metrics.mjs';
 
@@ -352,3 +352,34 @@ eq(keyExcerpt('ghost', 'no such word here', false, false), null, 'no match, no e
 eq(keyExcerpt('bare', ['first segment', 'the threadbare one'], false, false),
     'the thread«bare» one', 'segments: later segment searched when earlier ones miss');
 console.log('ok   keyExcerpt: localises what countKey counted, folded-haystack display, smartkeys excluded');
+
+
+// --- usedMatchSources: what a capture is allowed to freeze ----------------------------------------------
+// A capture freezes what determined the result. These are a character card and a persona description — the
+// most personal text a bundle could carry — so a source no entry names must not ride along.
+{
+    const SRC = {
+        personaDescription: 'PERSONA', characterDescription: 'CARD', characterPersonality: 'PERS',
+        characterDepthPrompt: 'DEPTH', scenario: 'SCEN', creatorNotes: 'NOTES',
+    };
+    const none = usedMatchSources(SRC, [{ uid: 1 }, { uid: 2 }]);
+    eq(Object.keys(none).length, 0, 'no entry opts in, so a capture freezes none of the card or persona text');
+
+    const one = usedMatchSources(SRC, [{ uid: 1 }, { uid: 2, matchScenario: true }]);
+    eq(JSON.stringify(one), '{"scenario":"SCEN"}', 'one entry opting in pulls in THAT field and no other');
+
+    const two = usedMatchSources(SRC, [{ uid: 1, matchPersonaDescription: true }, { uid: 2, matchScenario: true }]);
+    eq(Object.keys(two).sort().join(','), 'personaDescription,scenario', 'each flag pulls its own field, across entries');
+
+    eq(Object.keys(usedMatchSources({ scenario: '' }, [{ matchScenario: true }])).length, 0,
+        'a flag naming an empty source freezes nothing — there is no text to have matched');
+    eq(Object.keys(usedMatchSources(undefined, [{ matchScenario: true }])).length, 0, 'no sources at all is not a throw');
+    eq(Object.keys(usedMatchSources(SRC, undefined)).length, 0, 'no entries at all is not a throw');
+
+    // The gate decides what is CAPTURED; withMatchSources decides what is MATCHED. Feeding one the other s
+    // output is the round trip a reader performs, so the window must come out the same either way.
+    const entry = { uid: 2, matchScenario: true, key: ['x'] };
+    eq(JSON.stringify(withMatchSources(['chat'], entry, usedMatchSources(SRC, [entry]), 'scan')),
+        JSON.stringify(withMatchSources(['chat'], entry, SRC, 'scan')),
+        'a gated capture rebuilds the same window as the full source set');
+}

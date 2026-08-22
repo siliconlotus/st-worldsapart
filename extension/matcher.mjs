@@ -295,6 +295,27 @@ export const MATCH_SOURCE_FIELDS = {
 };
 
 /**
+ * The subset of `scanSources()` that any entry actually opted into.
+ *
+ * WHAT A CAPTURE FREEZES IS WHAT DETERMINED THE RESULT, and a source no entry names determined nothing.
+ * Gating on the books rather than on the candidates because activation could have reached any entry, and
+ * on the books rather than capturing all six because these are a persona description and a character
+ * card — the most personal text a bundle could carry, in a format meant to be shared.
+ *
+ * @param {object} sources scanSources() output, keyed as MATCH_SOURCE_FIELDS' values
+ * @param {object[]} entries Every entry of every attached book
+ * @returns {object} Only the fields some entry's flag pulls in; empty when none do
+ */
+export function usedMatchSources(sources, entries) {
+    const out = {};
+    const list = entries ?? [];
+    for (const [flag, field] of Object.entries(MATCH_SOURCE_FIELDS)) {
+        if (sources?.[field] && list.some(e => e?.[flag])) out[field] = sources[field];
+    }
+    return out;
+}
+
+/**
  * Appends the extra scan sources an entry opted into, so a verdict or score is over the same text
  * core matched against — not just the chat window.
  *

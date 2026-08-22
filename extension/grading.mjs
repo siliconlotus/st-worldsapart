@@ -372,6 +372,7 @@ export function searchedBook(rows) {
  * @param {string} args.query Retrieval query, verbatim
  * @param {Array<{name: string, mes: string}>} args.scanChat Scan-eligible messages at capture depth
  * @param {Array<{key: string, text: string, ambient: boolean, depth: number}>} [args.injects] Scan-enabled injects
+ * @param {object} [args.sources] Scan sources some entry opted into (matcher.usedMatchSources)
  * @param {number} args.depth messageDepth the query was built at
  * @param {string} args.index Vector index path (recorded, not embedded)
  * @param {string} [args.chat] Chat file path — provenance, and the ONLY way to re-derive the query at another depth
@@ -388,7 +389,7 @@ export function searchedBook(rows) {
  * @param {string} [args.now] ISO date (injected so the check is deterministic)
  * @returns {object} The sample manifest
  */
-export function buildSample({ name, notes, query, queryChat, scanChat, injects, depth, chat, book, index, primaryBook, embedModel, params, snapshot, candidates, books, priority, grades, cutoff, gradedCandidates, pluginFP, sourceFP, waVersion, stVersion, now }) {
+export function buildSample({ name, notes, query, queryChat, scanChat, injects, sources, depth, chat, book, index, primaryBook, embedModel, params, snapshot, candidates, books, priority, grades, cutoff, gradedCandidates, pluginFP, sourceFP, waVersion, stVersion, now }) {
     // `budget` leaves the snapshot and becomes a field of its own, so the document-level hoist carries it.
     const { budget, ...rest } = snapshot ?? {};
     // Grades for entries outside the searched collection can't be ranked offline: the harness loads one
@@ -422,6 +423,7 @@ export function buildSample({ name, notes, query, queryChat, scanChat, injects, 
         // Same shape as `queryChat`, which freezes the query's messages for the same reason.
         scanChat,
         injects,
+        sources,
         depth,
         // Path only, for provenance and for re-deriving a WIDER window than was captured — the one thing
         // queryChat can't do. A played-on chat invalidates it; queryChat is what's actually frozen.
@@ -486,7 +488,7 @@ export function buildSample({ name, notes, query, queryChat, scanChat, injects, 
 const SHARED_FIELDS = ['name', 'notes', 'createdAt', 'createdBy', 'bookPriority', 'gradeScale', 'embedModel', 'budget', 'pluginFP', 'sourceFP'];
 
 /** Per-arm fields that are the SCENE's, not the arm's, and so move onto the scene rather than repeating. */
-const SCENE_FIELDS = ['chat', 'scanChat', 'injects'];   // a sample's names for sceneChat / sceneChats / sceneInjects
+const SCENE_FIELDS = ['chat', 'scanChat', 'injects', 'sources'];   // a sample's names for sceneChat / sceneChats / sceneInjects / sceneSources
 
 /** Every field `bundleSamples` reads off a sample and places itself. A caller assembling samples out of an
  *  older document uses this to tell the document's own fields from an arm's: anything NOT here and not
@@ -834,6 +836,11 @@ export async function bundleSamples(arms, scene = {}, extra = {}) {
     // injects — they are a property of the moment, not of a configuration — so hoisting them here is what
     // stops a six-arm document carrying six copies of an Author's Note.
     if ((first.injects ?? []).length) doc.sceneInjects = { [id]: first.injects };
+    // THE CARD AND PERSONA TEXT AN ENTRY OPTED INTO, once per scene for the same reason as the injects:
+    // they are a property of the moment, not of a configuration. Only the fields some entry's `matchXxx`
+    // names are here (matcher.usedMatchSources) — the rest determined nothing, and a persona description
+    // is the most personal thing a shareable document could carry.
+    if (Object.keys(first.sources ?? {}).length) doc.sceneSources = { [id]: first.sources };
     doc.books = books;
     return doc;
 }
@@ -877,7 +884,7 @@ export function openBundle(doc, arm = null, scene = null) {
     // reporting it as the requested one is the failure mode worth being loud about.
     if (!hit) throw new Error(`scene "${sc.id}" has no arm "${wanted}" — available: ${names.join(', ')}`);
 
-    const { scenes: _s, arms: _a, sceneChats, sceneInjects, raters, schemaVersion: _v, ...docFields } = doc;
+    const { scenes: _s, arms: _a, sceneChats, sceneInjects, sceneSources, raters, schemaVersion: _v, ...docFields } = doc;
     const { entries, ...sceneFields } = sc;
     const { name: armName, scenes: _cells, params, ...armFields } = hit;
     const { depth, ...cell } = hit.scenes[sc.id];
@@ -888,6 +895,7 @@ export function openBundle(doc, arm = null, scene = null) {
         // beside them per depth by matcher.mjs `makeWindowFor`, which is how a reader builds a window.
         scanChat: sceneChats?.[sc.id] ?? [],
         injects: sceneInjects?.[sc.id] ?? [],
+        sources: sceneSources?.[sc.id] ?? {},
         // Indices resolved back to whole identities: every reader and writer works in those, and only the
         // file is indexed. Lossless both ways — an index can always be followed.
         entries: deref(entries, raters),

@@ -1617,6 +1617,9 @@ async function rankActivated(args) {
         // at any depth by admitting them, instead of trying to pick them back out of a joined blob. It
         // also stops the same inject text being written once per depth.
         runState.lastInjects = injects;
+        // Beside them, and RAW: which of the six a capture keeps depends on the books it attaches, so the
+        // gate (matcher.usedMatchSources) runs where those are in scope rather than here.
+        runState.lastSources = sources;
         const windowFor = matcher.makeWindowFor(chat, {
             injects,
             sources,
@@ -2606,6 +2609,8 @@ async function gradeScene(named) {
         queryChat: runState.lastQueryChat,
         scanChat: runState.lastScanChat,
         injects: runState.lastInjects,
+        // Only the card/persona fields an entry's `matchXxx` actually pulls in — see usedMatchSources.
+        sources: matcher.usedMatchSources(runState.lastSources, Object.values(books).flatMap(b => Object.values(b))),
         depth: settings().messageDepth,
         pluginFP: runState.pluginFP,
         sourceFP: runState.sourceFP,
@@ -2722,6 +2727,7 @@ async function captureArm(overrides, wanted) {
             queryChat: runState.lastQueryChat,
             scanChat: runState.lastScanChat,
             injects: runState.lastInjects,
+            sources: runState.lastSources,
             depth: s.messageDepth,
             params: captureParams(s, {
                 caseSensitive: world_info_case_sensitive,
@@ -3096,6 +3102,7 @@ async function superGradeScene(named) {
             queryChat: cap.queryChat,
             scanChat: cap.scanChat,
             injects: cap.injects,
+            sources: matcher.usedMatchSources(cap.sources, Object.values(books).flatMap(b => Object.values(b))),
             depth: cap.depth,
             pluginFP: runState.pluginFP,
             sourceFP: runState.sourceFP,

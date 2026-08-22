@@ -151,6 +151,8 @@ carry.
     { "key": "NOTE", "text": "…", "ambient": false, "depth": 2 },
     { "key": "1_memory", "text": "…", "ambient": true, "depth": 0 }
   ] },
+  // Only the card/persona fields some entry's `matchXxx` names. Absent when none does.
+  "sceneSources": { "Sommers-ABO-Frozen-Test-msg-1044": { "scenario": "…" } },
   "books": { "Sommers_Pack__v22": { /* … */ } }
 }
 ```
@@ -162,6 +164,19 @@ last, being the largest by a wide margin. `bookHashes` sits just AHEAD of them: 
 is two lines, and putting it in front is what makes "same book?" answerable with `head`. They are almost all of a bundle's
 bytes, so anything ahead of them is reachable with `head` — every scene, every param, every grade — and
 anything behind them is not.
+
+**`sceneSources` carries only what an entry opted into.** There are eight things that can enter a
+haystack: five character-card fields and the persona description, each gated by a per-entry `matchXxx`
+flag, plus the chat and character Author's Notes, which ST merges into one injection and gates globally on
+`note.allowWIScan`. The Author's Notes need nothing here — they arrive as injects like any other
+scan-enabled extension prompt. The other six are `scanSources()`, and a capture keeps only the fields some
+entry actually names (`matcher.usedMatchSources`), because a source no entry names determined nothing and
+these are the most personal text a shareable document could carry. Absent when no entry opts in.
+
+Two of them have a second route, which is why the flag is not the only thing to look at: the persona
+description is spliced INTO the Author's Note when its position is `TOP_AN`/`BOTTOM_AN`, and the character
+depth prompt is injected separately under `allowWIScan` for every entry rather than only those opting in.
+Both then arrive as injects, and both are captured that way.
 
 **An absent `sceneInjects` means no injects.** **Measured** across all 107 documents: every haystack ends
 at its own last chat message, so none has inject text folded into it — the only scan-enabled prompt on the
