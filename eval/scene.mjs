@@ -68,6 +68,18 @@ export const dropUnavailable = (S, label = "sample") => {
         }
     }
     if (cut || gone) console.error(`  ${label}: dropped ${gone} entr(ies) and ${cut} graded/candidate row(s) post-dating message ${at}`);
+    // WHAT IT COULD NOT CHECK, and why that is not the same as "reference". A missing `STMB_start` reads
+    // here as an entry STMB never wrote, which is always available — true of a reference sheet and false
+    // of a MEMORY entry that lost the field. Richard's summaries were rewritten offline against an LLM and
+    // no longer map to their original ranges, so 11 of its 37 memory entries are unverifiable and the
+    // guard is silently inert on exactly them. **Measured** corpus-wide: 41 memory entries, carrying 456
+    // of 6075 judged rows and 63 of 446 graded >= 3.
+    //
+    // REPORTED, NOT DROPPED. Dropping them is defensible and costs Richard 30 of its 37 positives, so it
+    // is a corpus decision rather than one this function should take on its own.
+    const unverified = Object.entries(S.books ?? {}).flatMap(([, bk]) => Object.values(bk ?? {}))
+        .filter(e => isMemory(e) && !Number.isFinite(Number(e.STMB_start))).length;
+    if (unverified) console.error(`  ${label}: ${unverified} MEMORY entr(ies) carry no STMB_start — availability unchecked, not verified as available`);
     return S;
 };
 
