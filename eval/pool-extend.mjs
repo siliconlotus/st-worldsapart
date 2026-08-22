@@ -67,7 +67,7 @@ const DRY = argv.includes('--dry');
     let grandTotal = 0;
     for (const path of samples) {
         const S = openSample(path, arg('--arm'));
-        if (!Object.keys(S.books?.[S.primaryBook] ?? {}).length) { console.error(`${path}: no embedded entries for "${S.primaryBook}" — needs a 'full' capture`); continue; }
+        if (!Object.keys(S.books?.[S.primaryBook] ?? {}).length) { console.error(`${path}: no embedded entries for "${S.primaryBook}" — a bundle that does not embed its books is malformed`); continue; }
         const scene = loadScene(S, { indexFile: indexPath(S, { model: MODEL }), params: sceneParams(S) });
         const qv = await embed(S.query, { ollama: OLLAMA, model: MODEL });
 
