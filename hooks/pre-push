@@ -16,7 +16,9 @@ while read -r _local_ref local_sha remote_ref _remote_sha; do
     [ "$remote_ref" = "refs/heads/main" ] || continue
     [ "$local_sha" = "$ZERO" ] && continue   # deleting the branch is not a release
 
-    version=$(sed -n 's/.*"version"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' manifest.json | head -1)
+    # Read the manifest OUT OF THE COMMIT BEING PUSHED, not the worktree: pushing main from a feature
+    # branch is the normal case, and the worktree's version then belongs to the branch, not to main.
+    version=$(git show "$local_sha:manifest.json" | sed -n 's/.*"version"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' | head -1)
     if [ -z "$version" ]; then
         echo "pre-push: no version in manifest.json" >&2
         status=1
