@@ -1611,15 +1611,10 @@ function charPriority() {
     const key = priorityKey();
     if (key == null) return null;
     const byChar = (settings().worldPriorityByChar ??= {});
-    if (!byChar[key]) {
-        // Migration seed: copy the legacy global list once, abstracting the current chat's
-        // book to the 'chat' sentinel so the seeded order is already branch-stable.
-        const legacy = settings().worldPriority;
-        const book = chatBook();
-        byChar[key] = legacy?.length
-            ? structuredClone(legacy).map(w => (book && w.world === book ? { ...w, world: 'chat' } : w))
-            : [];
-    }
+    // A key with no list starts EMPTY, and ensureWorldConfigs seeds it in source order from the books
+    // actually in the scan. There was a `worldPriority` array before this was scoped, copied in here
+    // once per key; it is gone, having nothing left to seed.
+    byChar[key] ??= [];
     return byChar[key];
 }
 
@@ -2359,12 +2354,10 @@ function paramSnapshot() {
         // A STRUCTURED SETTING IS STORAGE, NOT A KNOB, and is left out. `worldPriorityByChar` holds one
         // priority list per CHARACTER OR GROUP (`priorityKey`), every book any of them has ever seen, so
         // dumping it printed the priority order of every book of every character on a debug run for one
-        // chat. Nothing computes it — it is persisted and was being echoed. `worldPriority` beside it is
-        // not a global order in force: it is the pre-scoping array, read once per key to SEED a
-        // character's list and never again. A rule rather than a list of the two: anything whose DEFAULT
-        // is structured is storage by that fact.
+        // chat. Nothing computes it — it is persisted and was being echoed. A rule rather than a named
+        // exception: anything whose DEFAULT is structured is storage by that fact.
         //
-        // Nothing is lost, which is why these are dropped rather than summarised: `derived.attached`
+        // Nothing is lost, which is why it is dropped rather than summarised: `derived.attached`
         // below is this character's list filtered to the books actually attached, and that is the only
         // part of it that describes this run.
         settings: Object.fromEntries(Object.keys(defaultSettings)

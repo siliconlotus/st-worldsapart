@@ -348,15 +348,9 @@ export const defaultSettings = {
      */
     worldPriorityMode: 'interleaved',
     /**
-     * Legacy global ordered book list. Kept only as the migration seed: the first time a
-     * character needs an order, this list is copied into `worldPriorityByChar` so existing
-     * tuning carries over. New installs leave it empty. Not read by the engine any more.
-     * @type {Array<{ world: string, weight: number, offset: number }>}
-     */
-    worldPriority: [],
-    /**
-     * Per-character ordered book list, keyed by a stable character/group id so two chats
-     * (or branches) of the same character share one order. Position is the tier (sequential);
+     * The ordered book list, keyed by a stable character/group id so two chats (or branches) of the
+     * same character share one order. There is no global list: a `worldPriority` array preceded this
+     * and was read once per key to seed it, and it is gone now that every key it could seed is seeded. Position is the tier (sequential);
      * weight/offset/cap ride per book. The current chat's book is stored as the sentinel
      * `'chat'` (resolved at runtime) so the order survives switching chats.
      * @type {Record<string, Array<{ world: string, weight: number, offset: number, cap: number }>>}
