@@ -1273,16 +1273,17 @@ region and pulls memory off its own peak.
 0.012 of its best across 0.10-0.20, reference within 0.03 across 0.05-0.25 — so a re-tune that moves a
 cutoff inside its band is measuring noise, and a reported third decimal is false precision.
 
-**The reference fit is `text`, `properNouns`, `density` at cutoff 0.17**
-(`extension/relevance-model-reference.json`). No `keys`, as on memory; no cosine, for the reason below.
+**The reference fit is `cosine`, `text`, `properNouns`, `density` at cutoff 0.17**
+(`extension/relevance-model-reference.json`), the same columns as memory. Cosine is the tier's strongest
+signal there (+0.683 standardised), which it can only be now that every entry has one.
 
 **COSINE IS ADMITTED FOR ALL OF A TIER'S ENTRIES OR FOR NONE.** Fitted on the subset that happens to
 carry one it is an ABSENCE INDICATOR, not a similarity: -0.281 (SE 0.119) at solo AUC 0.442, below
 chance, and it inverts on the vectorized entries where the number is real. **Measured**, reference
 tier, 647 rows on 84 scenes held out by book, with one computed for every entry: +0.683 (SE 0.122) at
-solo AUC 0.759, the tier's strongest signal — AUC 0.7417 -> 0.7712 and F2 0.7674 -> 0.7746 at a shared
-cutoff of 0.17, paired 25 scenes up against 9 with 32 tied, p 0.0090, delivering 6.4 entries against
-6.8 for the same 2.9 relevant.
+solo AUC 0.759, the tier's strongest signal — AUC 0.7417 -> 0.7712, held-out AUC 0.679 -> 0.718, and
+F2 0.7674 -> 0.7746 at a shared cutoff of 0.17, paired 25 scenes up against 9 with 32 tied, p 0.0090,
+delivering 6.4 entries against 6.8 for the same 2.9 relevant.
 
 **LANDED: every entry with content is embedded and scored, and only `vectorized` ones are admitted.**
 The two were one filter because they had always named the same set. Computing a cosine is not
