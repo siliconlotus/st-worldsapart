@@ -30,7 +30,9 @@ const sample = (vectorized, extra = {}) => ({
     ...extra,
 });
 
-const load = S => loadScene(S, { indexFile: indexPath(S), params: sceneParams(S) });
+// denseAllEntries off: these fixtures build a vectorized-only collection, and index RESOLUTION is what
+// is under test — the split would only add a precondition this check has no reason to satisfy.
+const load = S => loadScene(S, { indexFile: indexPath(S), params: sceneParams(S, { denseAllEntries: false }) });
 
 // --- resolution -------------------------------------------------------------------------------------
 eq(indexPath(sample(true), { index: '/explicit/path.json' }), '/explicit/path.json',

@@ -19,7 +19,8 @@ const S = {
 // No vectorized entry has content here, so loadScene's missing-collection guard does not fire and no index
 // is needed; the gazetteer is built before anything reads one.
 S.books.B[2].content = '';
-const gazOf = source => loadScene(S, { indexFile: '(no collection)', params: sceneParams(S, { gazetteerSource: source }) }).gaz;
+// denseAllEntries off: this fixture has no collection at all, and the gazetteer is what is under test.
+const gazOf = source => loadScene(S, { indexFile: '(no collection)', params: sceneParams(S, { gazetteerSource: source, denseAllEntries: false }) }).gaz;
 const has = (source, ...want) => {
     const g = gazOf(source);
     for (const [term, expected] of want) eq(g.has(term), expected, `${source}: ${expected ? 'reads' : 'ignores'} ${term}`);

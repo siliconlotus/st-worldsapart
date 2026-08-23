@@ -49,7 +49,9 @@ const ORDINARY = write('ordinary.json', [1, 5]);
 const ALL = write('all.json', [1, 5, 2, 3]);
 const QV = [0.7, 0.7, 0.1];
 const rowsOf = (indexFile, overrides) => {
-    const P = sceneParams(S, overrides);
+    // The ORDINARY form has to be asked for now that production's split is the default — this check
+    // contrasts the two, so neither may come from a default.
+    const P = sceneParams(S, { denseAllEntries: false, ...overrides });
     const scene = loadScene(S, { indexFile, params: P });
     const rows = makeCandidateSet({ ...scene, params: P })(2, 0.75, null, QV, 'text of entry', () => ['the spire looms over the quarter']);
     return { scene, byUid: new Map(rows.map(r => [r.uid, r])) };

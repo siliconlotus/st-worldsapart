@@ -108,6 +108,33 @@ function getIndexPath(directories, collectionId, source, model) {
  * @param {string} indexPath Path to the index
  * @returns {Promise<{items: object[], mean: Float64Array} | null>}
  */
+/**
+ * The centroid over a NAMED SUBSET of a loaded collection, memoised on the loaded object.
+ *
+ * Cached per uid set rather than recomputed per query: the set is the book's vectorized entries, which
+ * changes only when the author changes a flag, while a query arrives every generation. The cache dies
+ * with the loaded collection, so an index rewrite drops it along with the items it described.
+ *
+ * @param {{items: object[], mean: Float64Array}} loaded
+ * @param {number[]|undefined} uids Entries that define the corpus; absent or empty means all of them
+ * @returns {Float64Array}
+ */
+function centroidFor(loaded, uids) {
+    if (!Array.isArray(uids) || !uids.length) return loaded.mean;
+    const key = uids.join(',');
+    loaded.subsetMeans ??= new Map();
+    const hit = loaded.subsetMeans.get(key);
+    if (hit) return hit;
+    const wanted = new Set(uids.map(Number));
+    const subset = loaded.items.filter(it => wanted.has(Number(it.metadata?.index)));
+    // An empty subset would divide by zero and return NaNs, which score as nothing and look like a bad
+    // model rather than a bad request. Falling back to the full corpus is the old behaviour.
+    const mean = subset.length ? corpusMean(subset) : loaded.mean;
+    loaded.subsetMeans.set(key, mean);
+    console.log(`[Worlds Apart] centroid over ${subset.length}/${loaded.items.length} chunks (${wanted.size} entries define the corpus)`);
+    return mean;
+}
+
 async function loadCentered(indexPath) {
     // Validity key is mtime AND size: two rapid writes can land in one mtime tick (or a
     // coarse-mtime mount can hide one entirely), and serving a stale item set from that would
@@ -165,6 +192,18 @@ export async function init(router) {
                 centered: request.body.centered !== false,
                 uncenteredGate: Number(request.body.uncenteredGate) || 0,
             };
+            // WHICH ENTRIES DEFINE THE CENTROID, per collection: `{ collectionId: [uid, ...] }`.
+            //
+            // THE CORPUS AND THE SCORED SET ARE NO LONGER THE SAME. A collection now holds every entry
+            // with content, so that a keyword-activated entry has a cosine at stage 3 — but the centroid
+            // must stay the ADMITTED corpus, or every fitted coefficient and every cosine measured
+            // against it moves. Mean-centering subtracts a vector carrying most of an embedding's mass,
+            // so widening it is not a small change.
+            //
+            // ABSENT MEANS EVERYTHING COUNTS, which is exactly the old behaviour and what an older
+            // client sends. A deployed plugin and an extension drift across a redeploy; this way the
+            // skew costs nothing rather than silently recentering the corpus.
+            const centroidUids = request.body.centroidUids ?? {};
 
             // The disk loads and the embed round-trip are independent — run them concurrently.
             const loading = Promise.all(collectionIds.map(collectionId =>
@@ -184,7 +223,8 @@ export async function init(router) {
 
                 // Score this collection with the shared math: centered cosine, every chunk kept
                 // except what the wrong-book gate drops.
-                results.push(...scoreCollection(String(collectionId), loaded, queryVector, opts));
+                const mean = centroidFor(loaded, centroidUids[String(collectionId)]);
+                results.push(...scoreCollection(String(collectionId), mean === loaded.mean ? loaded : { ...loaded, mean }, queryVector, opts));
             }
 
             // Pool each entry's best chunk FIRST, then cut. Pooling before the cut is what makes topK a

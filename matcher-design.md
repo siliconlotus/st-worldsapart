@@ -1284,10 +1284,19 @@ solo AUC 0.759, the tier's strongest signal — AUC 0.7417 -> 0.7712 and F2 0.76
 cutoff of 0.17, paired 25 scenes up against 9 with 32 tied, p 0.0090, delivering 6.4 entries against
 6.8 for the same 2.9 relevant.
 
-**What that costs is an ADMISSION rule, not a capability.** The collection admits
-`vectorized && !disable && content` — an author flag, not a tier property — so a reference entry marked
-vectorized already scores a cosine by the path a memory entry uses. Scoring all of them means admitting
-on content instead of on the flag, and re-embedding at that size.
+**LANDED: every entry with content is embedded and scored, and only `vectorized` ones are admitted.**
+The two were one filter because they had always named the same set. Computing a cosine is not
+vectorizing an entry — `vectorized` decides what stage 1 RETRIEVES, and a cosine is a column stage 3
+reads — so a keyword-activated entry now carries one.
+
+**THE CENTROID STAYS THE ADMITTED CORPUS**, named per collection in the query (`centroidUids`) rather
+than stored, since `metadata.index` already carries the uid and ST's insert drops unknown fields.
+Mean-centering subtracts a vector holding most of an embedding's mass, so widening it moves every
+cosine, including the memory tier's, whose coefficient was fitted against this one. An absent set means
+every item counts, which is the old behaviour and what an older client sends.
+
+The reference fit does not read the new column — it has no cosine feature — so nothing about it moves
+until it is refitted. That refit is what the measurement above argues for, and it is now possible.
 
 **The reference tier tolerates a weak fit, and its cutoff barely matters.** **Measured**: its AUC falls
 0.733 to 0.698 held out by book, against memory's 0.820 to 0.799 — 342 rows against 6051 — and it still

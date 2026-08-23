@@ -314,11 +314,15 @@ export const sceneParams = (S, overrides = {}) => ({
     // and every baseline cosine are unchanged, and the rest are scored at stage 3 against that same mean so
     // the two classes share a scale. Nothing here activates — an entry no key fired for gets no row.
     //
-    // IT MOVES TWO THINGS. An entry that earns a cosine is no longer keyword-only, so ranking.mjs's
-    // KEYWORD_ONLY_TILT stops applying to it. Ranking that entry as though it still had one signal would be
-    // the opposite error, so this is the honest form of the arm rather than a confound to remove — but a
-    // flat result cannot tell the two apart. denseColumn below is the form that does not move it.
-    denseAllEntries: false,
+    // IT IS PRODUCTION NOW, not an arm, which is why it defaults ON. `scoreEntriesUnsafe` embeds and
+    // scores every entry with content while force-activating only the vectorized ones, and the plugin
+    // centroids on the vectorized uids the client names — the same split this models. Off, a harness run
+    // scores the pipeline as it was before that, which is the one setting here that reports the old
+    // architecture as a result.
+    //
+    // It still needs an `--all` index (`node eval/reindex.mjs <sample.json> --all`), and loadScene
+    // throws rather than quietly scoring the ordinary collection if one is missing.
+    denseAllEntries: true,
     // WHERE THAT COSINE IS FUSED, and it decides which question is being asked.
     //
     // null puts it in the entry's own `score`: the entry becomes vector-eligible, is normalised by the

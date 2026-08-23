@@ -696,7 +696,12 @@ function scoreEntries(searchText) {
  */
 async function scoreEntriesUnsafe(searchText) {
     const allEntries = await getSortedEntries();
-    const targets = allEntries.filter(x => x.vectorized && !x.disable && x.content);
+    // EVERY ENTRY WITH CONTENT IS EMBEDDED AND SCORED. Computing a cosine is not vectorizing an entry:
+    // `vectorized` decides what stage 1 RETRIEVES, and a cosine is a column stage 3 reads. An entry that
+    // arrives by keyword had no cosine at all before this, which left the relevance model reading an
+    // absence as evidence — measured on the reference tier, a column fitted on the entries that happened
+    // to carry one runs solo AUC 0.442, below chance, and inverts on the entries where it is real.
+    const targets = allEntries.filter(x => !x.disable && x.content);
     /** @type {Map<string, {score: number, chunk: string}>} */
     const scores = new Map();
 
@@ -731,9 +736,18 @@ async function scoreEntriesUnsafe(searchText) {
         synced.owners.forEach((v, k) => owners.set(`${synced.collectionId}${US}${k}`, v));
     }
 
+    // THE CENTROID IS THE ADMITTED CORPUS, named per collection. Widening what is stored must not widen
+    // what mean-centering subtracts: the mean carries most of an embedding's mass, so moving it moves
+    // every cosine — including the memory tier's, whose fitted coefficient was measured against this one.
+    const centroidUids = {};
+    for (const [world, entries] of Object.entries(byWorld)) {
+        centroidUids[`wa_${getStringHash(world)}`] = entries.filter(e => e.vectorized).map(e => Number(e.uid));
+    }
+
     const results = await queryCollections({
         collectionIds,
         searchText,
+        centroidUids,
     });
 
     // The plugin now returns one pooled record per entry, so this loop's max-taking is a no-op against a
@@ -937,7 +951,7 @@ async function retrieve(chat) {
     // Two different empties, and conflating them sent people off to tune a threshold that was never
     // involved (and no longer exists): a book with nothing vectorized has no candidates at all.
     if (!targets.length) {
-        console.log('Worlds Apart: no vectorized entries in the active books, so retrieval has nothing to score');
+        console.log('Worlds Apart: no entries with content in the active books, so retrieval has nothing to score');
         return [];
     }
     if (!scores.size) {
@@ -945,10 +959,18 @@ async function retrieve(chat) {
         return [];
     }
 
-    // NO RETRIEVAL RANKING. Stage 1 admits everything it scores, so an ordering here decided nothing
+    // NO RETRIEVAL RANKING. Stage 1 admits everything it ADMITS, so an ordering here decided nothing
     // except which entries survive `admitCeiling` — and that bound is the plugin's, applied before these
-    // scores ever reach the client. The winners are simply everything that scored.
-    const winnerKeys = new Set(scores.keys());
+    // scores ever reach the client.
+    //
+    // ADMISSION IS NARROWER THAN SCORING NOW, and the two must not be confused. Every entry with content
+    // is embedded and scored, so a keyword-activated entry has a cosine for stage 3 to read — but only a
+    // `vectorized` entry is force-activated here. The author's flag is what says an entry should be
+    // RETRIEVABLE; a cosine is just a number computed about it. Admitting on the score instead would put
+    // every entry of every attached book into the prompt's candidate set on the strength of a similarity
+    // nobody asked for it to have.
+    const vectorizedKeys = new Set(targets.filter(x => x.vectorized).map(x => `${x.world}.${x.uid}`));
+    const winnerKeys = new Set([...scores.keys()].filter(k => vectorizedKeys.has(k)));
 
     // NO STAGE-1 TABLE. It printed the admitted ranking, the neighbour gaps and each entry's matched
     // chunk, which was worth reading while stage 1 CHOSE something. It no longer does: admission is
@@ -965,10 +987,9 @@ async function retrieve(chat) {
         runState.lastScores.set(key, value.score);
     }
 
-    // winnerKeys is exactly scores' keys — everything the store returned and ranked, no narrower cut.
-    // targets includes vectorized entries the query never scored at all (absent from the response,
-    // or absent from the store's response); admitting those too would return an entry with no vector
-    // score for stage 3 to look up.
+    // winnerKeys is the VECTORIZED half of what scored. targets includes entries the query never scored
+    // at all (absent from the response, or absent from the store's); admitting those would return an
+    // entry with no vector score for stage 3 to look up.
     return targets.filter(x => winnerKeys.has(`${x.world}.${x.uid}`));
 }
 
