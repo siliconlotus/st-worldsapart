@@ -2356,7 +2356,18 @@ function paramSnapshot() {
     //
     // It includes `raterId` and `summaryPrompt`, so a snapshot pasted somewhere public carries them.
     const snap = {
-        settings: Object.fromEntries(Object.keys(defaultSettings).map(k => [k, s[k]])),
+        // A STRUCTURED SETTING IS STORAGE, NOT A KNOB, and is left out. `worldPriorityByChar` holds one
+        // priority list PER CHARACTER, every book any of them has ever seen, so dumping it printed the
+        // priority order of every book of every character on a debug run for one chat. Nothing computes
+        // it — it is persisted and was being echoed. A rule rather than a list of the two offenders:
+        // anything whose DEFAULT is structured is storage by that fact.
+        //
+        // Nothing is lost, which is why these are dropped rather than summarised: `derived.attached`
+        // below is this character's list filtered to the books actually attached, and that is the only
+        // part of it that describes this run.
+        settings: Object.fromEntries(Object.keys(defaultSettings)
+            .filter(k => defaultSettings[k] === null || typeof defaultSettings[k] !== 'object')
+            .map(k => [k, s[k]])),
         // The values with NO single backing setting, which is the only reason anything but the dump
         // above survives here. `maxTokens` is a percentage resolved against a live context size,
         // `tokenizer` is what the per-row `tokens` counts were produced by — without it those counts are
