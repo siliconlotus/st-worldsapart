@@ -1879,7 +1879,7 @@ async function rankActivated(args) {
     // constant that also matched keywords is a durable row, not a retrieval result.
     const sticky = [];
     const constant = [];
-    const results = [];
+    let results = [];
 
     for (const item of items) {
         if (args?.timedEffects?.isEffectActive('sticky', item.entry)) {
@@ -1944,8 +1944,25 @@ async function rankActivated(args) {
     // the cuts were prefixes of.
     runState.lastRanked = [...sticky, ...constant, ...results];
 
-    // Constants and stickies lead, which is what makes every cap below a prefix cut. No relevance cut
-    // precedes them any more (selection.mjs): stage 4 decides how many and how much, not whether.
+    // THE RELEVANCE CUT, before the walk and before the caps. It is the only decision here that asks
+    // WHETHER an entry belongs; everything after it asks how many and how much. `lastRanked` above kept
+    // the whole pre-cut population, so a row dropped here is still captured and gradeable — a harness
+    // that only saw survivors could never score the decision that produced them.
+    //
+    // Per tier, at the cutoff its own fit was chosen at. A row in no fitted tier, or one the model
+    // could not score, is kept: that is an absent verdict, not a negative one.
+    const cutoffs = relevanceModel.value ?? {};
+    const { cut: relevanceCutRows } = selection.relevanceCut(results, {
+        scoreOf: it => it.eCredit,
+        cutoffOf: it => cutoffs[isMemory(it.entry) ? 'memory' : 'reference']?.cutoff ?? NaN,
+    });
+    const cutByRelevance = new Set(relevanceCutRows);
+    results = results.filter(it => !cutByRelevance.has(it));
+    if (relevanceCutRows.length) {
+        console.log(`Worlds Apart: relevance cut dropped ${relevanceCutRows.length} of ${relevanceCutRows.length + results.length} dynamic entries`);
+    }
+
+    // Constants and stickies lead, which is what makes every cap below a prefix cut.
     let ranked = selection.walkOrder({ sticky, constant, results });
 
     const maxTokens = effectiveTokenBudget();

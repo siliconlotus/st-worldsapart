@@ -5,6 +5,7 @@
 // arithmetic is pinned against closed forms computed by hand rather than against a second implementation,
 // because a second implementation is the drift this codebase keeps paying for.
 import { properNames, buildNameDf, properShared, properDensity, scoreRelevance } from '../extension/relevance.mjs';
+import { relevanceCut } from '../extension/selection.mjs';
 import { eq } from './metrics.mjs';
 import fs from 'node:fs';
 
@@ -133,5 +134,39 @@ const live = scoreRelevance(shipped, [
 ]);
 eq(live.every(v => v > 0 && v < 1), true, 'the shipped model returns a probability for every row');
 eq(live[1] > live[0], true, 'a row stronger on every signal scores higher, so no sign is inverted');
+
+
+// ---- the relevance cut -------------------------------------------------------------------------
+
+// Stage 4's only relevance decision. Checked here rather than in budget-check because it is a question
+// about the MODEL's verdict, not about the caps: the caps ask how many and how much, this asks whether.
+const cutRows = [
+    { t: 'clears',      e: 0.50, tier: 'memory' },
+    { t: 'below',       e: 0.02, tier: 'memory' },
+    { t: 'exactly-at',  e: 0.10, tier: 'memory' },
+    { t: 'unscored',    e: NaN,  tier: 'memory' },
+    { t: 'no-fit-tier', e: 0.01, tier: 'nosuch' },
+];
+const CUTOFFS = { memory: 0.10, reference: 0.17 };
+const { kept: cutKept, cut: cutOut } = relevanceCut(cutRows, {
+    scoreOf: r => r.e,
+    cutoffOf: r => CUTOFFS[r.tier] ?? NaN,
+});
+eq(cutKept.map(r => r.t).join(','), 'clears,exactly-at,unscored,no-fit-tier',
+    'the cut keeps what clears its tier cutoff, and everything it cannot judge');
+eq(cutOut.map(r => r.t).join(','), 'below', 'only a row scored below its own tier cutoff is cut');
+
+// AT the cutoff is IN. The sweep that chose it scored the delivered set as `e >= cut`, so a strict
+// comparison here would deliver a different set than the number was chosen on.
+eq(cutKept.some(r => r.t === 'exactly-at'), true, 'a row exactly at the cutoff is delivered');
+
+// PER TIER, and the tiers do not share a number: 0.12 clears memory's 0.10 and fails reference's 0.17,
+// so one score lands on both sides depending only on which fit covers it.
+const tiered = relevanceCut([{ t: 'm', e: 0.12, tier: 'memory' }, { t: 'r', e: 0.12, tier: 'reference' }],
+    { scoreOf: r => r.e, cutoffOf: r => CUTOFFS[r.tier] });
+eq(tiered.kept.map(r => r.t).join(','), 'm', 'the same score is delivered on one tier and cut on the other');
+
+// THE SET IS THE POINT: nothing is reordered, and every row lands in exactly one of the two lists.
+eq(cutKept.length + cutOut.length, cutRows.length, 'every row is either kept or cut, never both or neither');
 
 console.log('ok');
