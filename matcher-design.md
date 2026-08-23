@@ -943,6 +943,19 @@ unweighted count: 45 scenes up against 14 with 9 tied, p 0.0001. Jaccard is WORS
 against 33) and restricting to the gazetteer loses outright (above), so neither the
 normalisation nor the vocabulary restriction is what matters — the term weighting is.
 
+**THE df CORPUS IS EVERY ENTRY IN THE BOOK, DISABLED INCLUDED**, and that is a decision rather than an
+oversight. df asks how DISTINCTIVE a name is in the book's vocabulary, which a disabled entry still
+contributes to; `buildContentIndex` excludes disabled entries beside it because it is asking a different
+question, what can be RETRIEVED. Parity does not decide this — the entries are in the book, so the
+runtime can compute it either way — and the measurement does. **Measured**, memory tier, held out by
+book, excluding them: F2 0.5160 -> 0.5105 with each arm at its own cutoff, 7 scenes up against 53 with
+34 tied, and **4 books down of 5** (Ascensus -0.019, Sommers -0.023, Time Whore -0.016, Panopticon
+-0.017, against Richard +0.053 on 2 up / 3 down). Not a marginal population either: the fitted books run
+15-39% disabled. An entry with no CONTENT is excluded, which is the separate question — it would raise
+`ndoc` while contributing no df, inflating every name's idf by pretending the corpus is larger than the
+text in it. Measured no-op here (0 empty of 844 entries across 6 books), so it guards other people's
+books rather than changing this fit.
+
 **Measured**, memory tier, held out by book, against the three shipped signals: +0.476 (SE 0.070) — the
 LARGEST coefficient in the model, ahead of text's +0.424 and cosine's +0.313 — at solo AUC 0.758 against
 text's 0.759 and cosine's 0.713. On the score of record: **F2 0.4801 -> 0.5010, paired 53 scenes up
@@ -971,7 +984,10 @@ it cost more than it returns.
 
 **Measure against the RULED variant of a feature, not the harness default.** `--proper-nouns` defaulted
 to `count`, which the ruling three sections above rejects at p 0.0001, so a run that passed no flag
-measured a variant already discarded. It defaults to `idf` now.
+measured a variant already discarded. It defaults to `idf` now. `--proper-nouns-extract` had the same
+defect and the same fix — it defaulted to `regex` against a ruling for `entity` at p 0.0002 — so the
+shipped model is now what a run reproduces passing NEITHER flag, which is the property that makes the
+trap impossible rather than merely documented.
 
 **An entry's own relevance rate in its other scenes adds nothing**, which is what bounds any entry-level
 prior: `--with oracle` reads grades the runtime cannot have and still fails, held out by book, raising
@@ -1333,11 +1349,37 @@ instances the books on disk hold.
    scoring the prediction, and `tierRecall` gets its kept set back at the same moment. The model, its
    evidence and what is still open about it are in *Stage 4 predicts per-entry relevance*.
 
-   THE MODEL IS FITTED AND THE CUTOFF WITH IT. `relevance-model-memory.json` carries six coefficients
-   and the operating point its held-out F2 curve peaks at, so what remains is the CONSUMER:
-   `rankActivated` reading the file, standardising each signal within the scene it is scoring as the fit
-   did, and cutting the layout at that probability. Reference has neither a fit nor a cutoff, and gets both or neither —
+   THE MODEL IS FITTED AND THE CUTOFF WITH IT. `relevance-model-memory.json` carries TWO coefficient
+   vectors — one per boundary `E[credit]` is built from, five columns each — and the operating point its
+   held-out F2 curve peaks at, so what remains is the CONSUMER: `rankActivated` reading the file,
+   standardising each signal within the scene it is scoring as the fit did, and cutting the layout at
+   that probability. Reference has neither a fit nor a cutoff, and gets both or neither —
    its own question is whether cosine is a feature there at all.
+
+   **The file used to carry ONE vector and it was the wrong one.** `--emit-model` wrote the single
+   `--cut` fit — P(>=3) — beside a cutoff read off the E[credit] grid, so its two halves described
+   different quantities and a consumer thresholding them together would have delivered a strictly
+   tighter set than the number was chosen on (`E[credit] >= P(>=3)` wherever the clamp holds). Both
+   vectors travel now, since the boundaries are fitted separately and neither derives from the other.
+   The emitted `ge3` is bit-identical to what the file carried before, so nothing about the fit moved.
+
+   **`--emit-model` runs at the shipped definition or it refuses** — `--cut 3`, `--relevant-at 3`, no
+   `--half-recall`, and `--cutoff --lobo` present. Each of those otherwise produces a file that reads as
+   the shipping artefact and is not; the last was a silent no-op that printed a full table and wrote
+   nothing.
+
+   **THE PURE HALF OF THE CONSUMER LANDED** as `extension/relevance.mjs`, checked by
+   `eval/relevance-model-check.mjs`: `properNames` (what a name is, for both sides of the overlap),
+   `buildNameDf` (df over the book with the ENTRY as the document), `properShared`, `properDensity`, and
+   `scoreRelevance`, which standardises within the scene as the fit did and returns clamped `E[credit]`
+   per row. `relevance-regress` calls `properNames` rather than its own copy, so the fit and the runtime
+   cannot drift on what a name is; the model re-emits byte-identical through it.
+
+   What remains is the ST-coupled wiring: `rankActivated` building the two signals per turn — the df map
+   riding `contentIndexFor`'s per-book cache and fingerprint, since it is the same corpus statistic over
+   the same walk — then cutting the layout at the tier's cutoff and ordering the dynamic block by the
+   same quantity. **`ndoc` counts ENTRIES where the BM25 index beside it counts CHUNKS**, so the two Ns
+   come off one traversal and must not be read for each other.
 3. **`promote` — an author declaration that activation is sufficient.** A promoted entry enters the
    layout whenever its keys fire, exempt from the relevance cut. It is the per-entry form of *triggered
    == relevant*, which stage 4 broke by having the cliff arbitrate keyword-activated entries alongside

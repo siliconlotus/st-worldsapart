@@ -1,0 +1,162 @@
+// relevance.mjs — stage 4's per-entry relevance prediction: the two features the fitted model needs
+// that nothing else in the pipeline computes, and the consumer that turns a fitted model file into one
+// number per entry.
+//
+// WHAT THIS IS FOR. Stage 4 has two cuts (entry maxes, token budget) and no relevance decision, so the
+// delivered set is everything activated and the score of record is invariant to every layout parameter
+// (matcher-design.md, *Evidence → Two scores*). This is the missing decision: each entry gets
+// `E[credit]` and ships if it clears the tier's cutoff, so "how many entries does this scene need" falls
+// out of the prediction rather than taking a parameter of its own.
+//
+// THE TARGET IS EXPECTED gradeCredit, NOT P(>=3). The layout score's precision numerator is a sum of
+// credits — a delivered 2 scores half — so the quantity to threshold is the one that sum is built from:
+// `E[credit] = 0.5*P(>=2) + 0.5*P(>=3)`. That is why a fitted model file carries TWO coefficient vectors.
+// The boundaries are fitted separately because proportional odds does not hold here (measured: cosine
+// runs +0.682, +0.625, +0.468, +0.901 across the four boundaries), so neither vector derives from the
+// other.
+//
+// ST-FREE AND NODE-IMPORTABLE, like the rest of the pure half — the model file is data, the settings and
+// the entries are the caller's. `worldsapart.js` wires it; nothing here reads a global.
+import { properNounsOf } from './ranking.mjs';
+import { normalizeOrthography } from '../plugin/automaton.mjs';
+import { entryKey } from './content-lexical.mjs';
+import { tokenize } from './lexical.mjs';
+import { COMMON_WORDS } from '../plugin/commonwords.js';
+
+/**
+ * The names a text uses, as the relevance model counts them.
+ *
+ * `ranking.properNounsOf` decides what a name IS — capitalisation somewhere that is not sentence-initial
+ * — and this adds the two rules that are about which names are worth COUNTING: orthography is normalised
+ * first so a curly apostrophe and a straight one are one name, and common English words are dropped so a
+ * sentence-initial "Then" that also appears mid-sentence cannot join.
+ *
+ * NORMALISE BOTH SIDES OR THE SETS CANNOT INTERSECT, which is why this is one function rather than a
+ * convention. The entry and the scan window are compared as sets of these strings.
+ */
+export function properNames(text) {
+    const out = properNounsOf(normalizeOrthography(String(text ?? '')));
+    for (const w of [...out]) if (COMMON_WORDS.has(w)) out.delete(w);
+    return out;
+}
+
+/**
+ * Document frequency of every name in a book, with the ENTRY as the document.
+ *
+ * THE CORPUS IS THE BOOK, and `ndoc` counts ENTRIES — not chunks. The BM25 index this sits beside counts
+ * chunks (`content-lexical` `docCount`), so the two Ns are different numbers over the same walk; reading
+ * one for the other would silently rescale every idf.
+ *
+ * DISABLED ENTRIES ARE INCLUDED. df asks how distinctive a name is in the book's vocabulary, which a
+ * disabled entry still contributes to — where `buildContentIndex` excludes them because it is asking
+ * what can be RETRIEVED. Measured, memory tier held out by book: excluding them costs F2 0.5160 -> 0.5105
+ * and loses on 4 books of 5 (matcher-design.md, *Stage 4 predicts per-entry relevance*).
+ *
+ * AN ENTRY WITH NO CONTENT IS NOT A DOCUMENT, which is the separate question: counting one raises `ndoc`
+ * while contributing no df, so it inflates every name's idf by pretending the corpus is larger than the
+ * text in it.
+ *
+ * The per-entry name sets ride along because this walk already extracted them, and the caller needs
+ * exactly those to score against the window.
+ *
+ * @param {object[]} entries Every entry of ONE book
+ * @returns {{df: Map<string, number>, ndoc: number, names: Map<string, Set<string>>}} keyed `world.uid`
+ */
+export function buildNameDf(entries) {
+    const df = new Map();
+    const names = new Map();
+    let ndoc = 0;
+    for (const entry of entries ?? []) {
+        if (typeof entry?.content !== 'string' || !entry.content.trim()) continue;
+        ndoc++;
+        const found = properNames(entry.content);
+        names.set(entryKey(entry), found);
+        for (const w of found) df.set(w, (df.get(w) ?? 0) + 1);
+    }
+    return { df, ndoc, names };
+}
+
+/**
+ * The `properNouns` signal: idf-weighted count of names an entry shares with the scan window.
+ *
+ * NOT A REWEIGHTING OF `text`. BM25 spreads its mass over every term the two share, so a character name
+ * arrives diluted among hundreds of ordinary words; restricting the vocabulary to names asks whether
+ * this entry is about someone who is ON SCREEN, which is the axis the three older signals do not have.
+ *
+ * THE WEIGHTING IS WHAT MAKES IT WORK — measured against the unweighted count, 45 scenes up against 14,
+ * p 0.0001 — so a protagonist named in every scene summary counts for almost nothing. Jaccard measured
+ * worse and restricting to the gazetteer lost outright, so it is neither the normalisation nor the
+ * vocabulary restriction that matters.
+ */
+export function properShared(entryNames, windowNames, { df, ndoc }) {
+    let v = 0;
+    for (const w of entryNames ?? []) {
+        if (!windowNames?.has(w)) continue;
+        v += Math.log((ndoc + 1) / ((df.get(w) ?? 0) + 1));
+    }
+    return v;
+}
+
+/**
+ * The `density` signal: names per 100 tokens of the entry.
+ *
+ * A DENSITY, NOT A COUNT — the count is length wearing another name, and the two would be one column.
+ * Entry-intrinsic, so it never reads the query: it is a prior, and within-scene standardisation still
+ * works on it because it varies between the entries of one scene.
+ *
+ * MEMORY TIER ONLY. Measured, this INVERTS on reference (-0.935 against +0.215), where an entry thick
+ * with names is a roster rather than a subject — so a shared coefficient would carry the wrong sign.
+ */
+export function properDensity(content) {
+    const text = String(content ?? '');
+    const toks = tokenize(text);
+    return (properNames(text).size / Math.max(1, toks.length)) * 100;
+}
+
+const sigmoid = x => 1 / (1 + Math.exp(-x));
+const mean = xs => xs.reduce((a, b) => a + b, 0) / (xs.length || 1);
+const sd = xs => { const m = mean(xs); return Math.sqrt(mean(xs.map(x => (x - m) ** 2))); };
+
+/**
+ * `E[credit]` for every row of ONE scene, from a fitted model file.
+ *
+ * STANDARDISED WITHIN THE SCENE, as the fit was. The coefficients are per within-scene sd and mean
+ * nothing against a raw value — BM25 is not comparable across queries or corpora, so a pooled scale
+ * would let a scene's own spread masquerade as a coefficient. That is also why this takes the whole
+ * scene at once rather than scoring an entry alone: an entry has no standardised value by itself.
+ *
+ * A COLUMN CONSTANT WITHIN THE SCENE STANDARDISES TO 0, via `sd || 1` — the same guard the fit used, and
+ * it has to be the same one or a signal that carries no information here would be divided by ~0 and meet
+ * a slope fitted on other books.
+ *
+ * P(>=3) IS CLAMPED TO P(>=2). The boundaries are fitted separately, so nothing guarantees the nesting
+ * the events have, and `E[credit]` is malformed where they invert. Measured: 39 of 8975 rows invert, by
+ * at most 0.0002 — trivial in size, which is exactly why leaving it out would read as a threshold effect
+ * rather than as the incoherent probability pair it is.
+ *
+ * @param {{features: string[], beta: {ge2: number[], ge3: number[]}}} model A fitted model file
+ * @param {object[]} rows One scene's candidates, each carrying a raw value per `model.features`
+ * @returns {number[]} `E[credit]` per row, in the order given
+ */
+export function scoreRelevance(model, rows) {
+    const feats = model?.features ?? [];
+    const { ge2, ge3 } = model?.beta ?? {};
+    if (!rows?.length || !ge2?.length || !ge3?.length) return (rows ?? []).map(() => NaN);
+    // COLUMN ORDER IS THE CONTRACT: [intercept, one standardised column per feature]. A model whose beta
+    // is the wrong length is a file from another design, and scoring through it would return plausible
+    // numbers rather than an error — the one failure mode here that produces a result.
+    if (ge2.length !== feats.length + 1 || ge3.length !== feats.length + 1) {
+        throw new Error(`relevance model has ${feats.length} features but ${ge2.length}/${ge3.length} coefficients; expected ${feats.length + 1} of each`);
+    }
+    const z = feats.map(name => {
+        const col = rows.map(r => Number(r?.[name]) || 0);
+        const m = mean(col), s = sd(col) || 1;
+        return col.map(x => (x - m) / s);
+    });
+    return rows.map((_, i) => {
+        const eta = beta => feats.reduce((a, _f, fi) => a + z[fi][i] * beta[fi + 1], beta[0]);
+        const p2 = sigmoid(eta(ge2));
+        const p3 = Math.min(sigmoid(eta(ge3)), p2);
+        return 0.5 * p2 + 0.5 * p3;
+    });
+}

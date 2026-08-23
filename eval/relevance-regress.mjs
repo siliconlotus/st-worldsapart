@@ -35,7 +35,14 @@
 //
 // Usage (from SillyTavern root):
 //   node .../relevance-regress.mjs <sample.json> [...] [--sweep gazetteerSource=keys,titles]
-//        [--tier memory|reference] [--cut 4] [--ordinal] [--loso] [--lobo] [--calibration] [--cutoff] [--at 0.10] [--degree 2] [--interactions] [--with properNouns,time,oracle,length,density,rarity,chunkdens] [--without keys] [--drop-keys flagged.json] [--emit-rows rows.json] [--proper-nouns count|idf|idf-len|jaccard|gaz] [--proper-nouns-extract regex|entity|span]
+//        [--tier memory|reference] [--cut 4] [--ordinal] [--loso] [--lobo] [--calibration] [--cutoff] [--at 0.10] [--degree 2] [--interactions] [--with properNouns,time,oracle,length,density,rarity,chunkdens] [--without keys] [--drop-keys flagged.json] [--emit-rows rows.json] [--emit-model relevance-model-<tier>.json] [--proper-nouns count|idf|idf-len|jaccard|gaz] [--proper-nouns-extract regex|entity|span]
+//
+// THE SHIPPED MEMORY FIT, which is what `relevance-model-memory.json` was emitted by — the four columns
+// the doc rules (keys is computed and recorded, and deliberately not fitted), the entity name detector,
+// held out by book:
+//   node .../relevance-regress.mjs eval-data/*-syn-msg*.json <the rest of the graded corpus>
+//        --tier memory --with properNouns,density --without keys --proper-nouns-extract entity
+//        --lobo --cutoff --emit-model eval/relevance-model-memory.json
 import { haystackFor, indexPath, isMemory, loadScene, openSample, sceneParams, makeCandidateSet, makeGradeOf, embed, sceneLabel } from './scene.mjs';
 import { ensureIndex, resolveModel } from './reindex.mjs';
 import fs from 'node:fs';
@@ -43,6 +50,7 @@ import { gradeValue, gradeCredit, fbeta, RECALL_WEIGHT, signTest } from './metri
 import { COMMON_WORDS } from '../plugin/commonwords.js';
 import { logisticFit, auc, cumulativeFit, prCurve, reliability, sigmoid } from './logistic.mjs';
 import * as ranking from '../extension/ranking.mjs';
+import { properNames } from '../extension/relevance.mjs';
 import { fold, normalizeOrthography } from '../extension/smartkeys.mjs';
 import { tokenize } from '../extension/lexical.mjs';
 import { chunkEntry } from '../extension/chunking.mjs';
@@ -168,7 +176,11 @@ const PROPER_MODE = arg('--proper-nouns') ?? 'idf';
 // pattern this feature was found with; `entity` is ranking.mjs's own rule, which the entity filter
 // already uses; `span` takes maximal runs of capitalised tokens as one term, so "Brackenmoor Patrol"
 // is a name rather than two.
-const PROPER_EXTRACT = arg('--proper-nouns-extract') ?? 'regex';
+// DEFAULTS TO THE RULED VARIANT, for the same reason --proper-nouns does: `entity` beat `regex` at
+// p 0.0002 paired over 88 scenes and is what the shipped model was emitted with, so a no-flag run under
+// the old default measured a variant the doc had already rejected and credited whatever else it was
+// testing against a handicapped `properNouns`.
+const PROPER_EXTRACT = arg('--proper-nouns-extract') ?? 'entity';
 const CALIB = argv.includes('--calibration');
 // WHICH BOUNDARY IS THE TARGET. 3 is the project's relevance line and the default; --cut 4 fits the band
 // the anchors reserve for the scene's current subject, which separates far better and is far rarer, so it
@@ -177,6 +189,22 @@ const CUT = Number(arg('--cut') ?? 3);
 if (!Number.isFinite(CUT)) { console.error(`--cut must be a number, got ${arg('--cut')}`); process.exit(2); }
 const TIER = arg('--tier') ?? 'all';
 if (!['all', 'memory', 'reference'].includes(TIER)) { console.error(`--tier must be all|memory|reference, got ${TIER}`); process.exit(2); }
+// A SHIPPED MODEL IS EMITTED AT THE SHIPPED DEFINITION, or the file's two halves describe different
+// targets — which is exactly the defect this guard was added with. The emitted coefficients are the
+// boundaries E[credit] is built from (2 and 3, fixed by gradeCredit), so --cut only moves the AUC printed
+// beside them, --relevant-at 2 replaces the target with P(>=2) outright, and --half-recall changes the
+// bars the cutoff was chosen on. Each would produce a file that reads as the shipping artefact and is not.
+if (EMIT_MODEL && (CUT !== 3 || RELEVANT_AT !== 3 || HALF_RECALL)) {
+    console.error('--emit-model writes the shipping artefact, so it runs at the shipped definition: --cut 3, --relevant-at 3, no --half-recall. '
+        + 'Drop --emit-model to explore another target.');
+    process.exit(2);
+}
+// And it is written inside the --cutoff block, since the operating point is half of what a selection rule
+// is. Without this the flag is a silent no-op: the run prints a full table and writes nothing.
+if (EMIT_MODEL && !(CUTOFF && LOBO)) {
+    console.error('--emit-model needs --cutoff --lobo: the cutoff is read off the held-out delivered set, and a model shipped without its operating point is not a selection rule.');
+    process.exit(2);
+}
 const MODEL = process.env.WA_EMBED_MODEL ?? 'bge-m3';
 const OLLAMA = process.env.OLLAMA_URL ?? 'http://localhost:11434';
 
@@ -264,14 +292,11 @@ const properSpans = (text) => {
     return out;
 };
 const properNouns = text => {
-    if (PROPER_EXTRACT === 'entity') {
-        // ranking.mjs's rule, imported rather than copied: orthography-normalised, sentence-initial
-        // capitals excluded, \p{Lu} so an accented initial still reads as a name. The common-word
-        // filter still applies — that rule is about which names are worth counting, not what a name is.
-        const out = ranking.properNounsOf(normalizeOrthography(String(text ?? '')));
-        for (const w of [...out]) if (COMMON_WORDS.has(w)) out.delete(w);
-        return out;
-    }
+    // THE SHIPPED ONE IS THE SHIPPED FUNCTION, not a copy of its three lines. `relevance.properNames`
+    // is what stage 4 calls at runtime, so the fit and the runtime cannot drift on what a name is — the
+    // same rule countKey follows for matching and scene.mjs follows for the scorers. It was open-coded
+    // here, identically, right up until there were two of them.
+    if (PROPER_EXTRACT === 'entity') return properNames(text);
     if (PROPER_EXTRACT === 'span') return properSpans(text);
     const out = new Set();
     for (const m of String(text ?? '').match(PROPER_RE) ?? []) {
@@ -373,6 +398,9 @@ const PRIORS = ['length', 'density', 'rarity', 'chunkdens'];
 const CHUNK_CFG = { chunkMode: 'paragraph', chunkSize: 800, minChunkSize: 120 };
 // Book term-frequency, keyed by book — see the per-scene block.
 const bookTf = new Map();
+// The set of entry contents each book NAME holds, for the fold-identity check below. One entry per name,
+// filled the first time a scene on that book is loaded.
+const bookContents = new Map();
 
 const mean = xs => xs.reduce((a, b) => a + b, 0) / (xs.length || 1);
 const sd = xs => { const m = mean(xs); return Math.sqrt(mean(xs.map(x => (x - m) ** 2))); };
@@ -419,6 +447,11 @@ const queryVec = async (S, name, value, em) => {
             // this sweep that produces a number rather than an error. Memoised per (scene, arm).
             const qvec = EMBED_SWEEP ? await queryVec(S, name, value, em) : qv;
             const scene = loadScene(S, { indexFile, params: P });
+            if (!bookContents.has(book)) {
+                bookContents.set(book, new Set((scene.entries ?? [])
+                    .filter(e => typeof e.content === 'string' && e.content.trim())
+                    .map(e => e.content.trim())));
+            }
             const tw = (P.entityFilter && P.queryMode !== 'summary') ? ranking.buildTermWeights(S.query, scene.gaz, P.boost) : null;
             const haystack = haystackFor(S, P);
             const rows = makeCandidateSet({ ...scene, params: P })(P.K1, P.B, tw, qvec, S.query, haystack);
@@ -431,7 +464,23 @@ const queryVec = async (S, name, value, em) => {
                 const df = new Map();
                 let ndoc = 0;
                 if (PROPER_MODE === 'idf' || PROPER_MODE === 'idf-len') {
+                    // EVERY ENTRY IS A DOCUMENT HERE, disabled included, and that is a modelling choice
+                    // rather than an oversight. df asks how DISTINCTIVE a name is in the book's
+                    // vocabulary, which a disabled entry still contributes to — where buildContentIndex
+                    // excludes disabled entries because it is asking what can be RETRIEVED. **Measured**,
+                    // memory tier, held out by book: excluding them costs F2 0.5160 -> 0.5105 at each
+                    // arm's own cutoff, 7 scenes up against 53 with 34 tied, and 4 books down of 5. The
+                    // runtime can compute it either way — the entries are in the book — so parity does
+                    // not decide it and the measurement does.
+                    //
+                    // AN ENTRY WITH NO CONTENT IS NOT A DOCUMENT, which is a different question from
+                    // whether it is enabled. Counting one raises ndoc while contributing no df, so it
+                    // inflates every name's idf by pretending the corpus is larger than the text in it —
+                    // the one way a malformed book could move this column without anybody seeing it.
+                    // **Measured** no-op on this corpus (0 empty of 844 entries across 6 books), so it is
+                    // a guard for other people's books and not a change to the fit.
                     for (const e of scene.entries ?? []) {
+                        if (typeof e.content !== 'string' || !e.content.trim()) continue;
                         ndoc++;
                         for (const w of properNouns(e.content)) df.set(w, (df.get(w) ?? 0) + 1);
                     }
@@ -474,7 +523,9 @@ const queryVec = async (S, name, value, em) => {
                 if (!bk) {
                     const tf = new Map();
                     let total = 0;
+                    // Same corpus definition as the df map above: disabled entries in, contentless ones out.
                     for (const e of scene.entries ?? []) {
+                        if (typeof e.content !== 'string' || !e.content.trim()) continue;
                         for (const t of tokenize(e.content)) { tf.set(t, (tf.get(t) ?? 0) + 1); total++; }
                     }
                     // An unseen term would divide by a zero count; the book's own vocabulary cannot
@@ -641,6 +692,34 @@ const queryVec = async (S, name, value, em) => {
                 + `Run the full corpus and read the per-book fold, or use --loso.`);
             process.exit(2);
         }
+        // TWO NAMES FOR ONE BOOK ARE NOT TWO FOLDS. holdOut groups by book NAME, and a book is versioned
+        // and renamed in place (CLAUDE.md, *Chat-based measurement*: 43 files collapse to 34 lineages at
+        // 30% shared content), so a renamed copy in the sample set splits one lineage across two folds —
+        // and each is then TRAINED ON ITS OWN BOOK under the other name, which is the leak holding out by
+        // book exists to prevent. Observed: `LTM - Ascensus` and `LTM - Isekai Adventure - …2026-03-04`
+        // are 145 entries each and 145 of 145 identical, and the fold that read as "the one that falls"
+        // was the one whose training set contained itself.
+        //
+        // SHARE OF THE SMALLER BOOK, not of the union, and 30% is CLAUDE.md's own lineage bar rather than
+        // a number chosen here. Fatal for the same reason the guard above is: a leaked fold still prints a
+        // full table, and it prints a BETTER one.
+        if (LOBO && books.length > 1) {
+            for (let i = 0; i < books.length; i++) {
+                for (let j = i + 1; j < books.length; j++) {
+                    const a = bookContents.get(books[i]) ?? new Set(), b = bookContents.get(books[j]) ?? new Set();
+                    if (!a.size || !b.size) continue;
+                    let shared = 0;
+                    for (const c of a) if (b.has(c)) shared++;
+                    const pct = shared / Math.min(a.size, b.size);
+                    if (pct < 0.30) continue;
+                    console.error(`--lobo folds by book name, but "${books[i]}" (${a.size} entries) and "${books[j]}" (${b.size}) `
+                        + `share ${shared} identical entries — ${(100 * pct).toFixed(0)}% of the smaller. `
+                        + `They are one lineage, so each fold would train on its own book under the other name. `
+                        + `Drop one from the sample set.`);
+                    process.exit(2);
+                }
+            }
+        }
         const bookOf = perScene.flatMap(({ kept, book }) => kept.map(() => books.indexOf(book)));
         const loso = LOSO ? holdOut(i => sceneOf[i], perScene.length) : null;
         const lobo = LOBO ? holdOut(i => bookOf[i], books.length) : null;
@@ -695,7 +774,14 @@ const queryVec = async (S, name, value, em) => {
             // P(>=2) — the boundaries are fitted separately, so nothing guarantees the nesting the events
             // have, and E[credit] is malformed where they invert.
             cutoff: CUTOFF && LOBO ? (() => {
-                const cuts = [2, 3].map(c => holdOut(i => bookOf[i], books.length, grades.map(g => (g >= c ? 1 : 0))).betas);
+                const labelsAt = c => grades.map(g => (g >= c ? 1 : 0));
+                const cuts = [2, 3].map(c => holdOut(i => bookOf[i], books.length, labelsAt(c)).betas);
+                // THE SAME TWO BOUNDARIES, POOLED — what --emit-model ships. The grid above scores each row
+                // through the fold that did not train on its book, which is the honest way to CHOOSE a
+                // cutoff and the wrong thing to ship: a fold's betas are deliberately fitted on less than
+                // the corpus. So the operating point is read held out and the coefficients that ride with
+                // it are the pooled fit at the same two boundaries.
+                const pooled = [2, 3].map(c => logisticFit(X, labelsAt(c)).beta);
                 const scoreRow = (design, fold) => {
                     const eta = b => (b ? design.reduce((a, x, j) => a + x * b[j], 0) : NaN);
                     const p2 = sigmoid(eta(cuts[0][fold])), p3 = sigmoid(eta(cuts[1][fold]));
@@ -727,6 +813,7 @@ const queryVec = async (S, name, value, em) => {
                 const grid = Array.from({ length: 99 }, (_, i) => (i + 1) / 100);
                 return {
                     scenes: scenes.length,
+                    pooled,
                     sceneNames: scenes.map(sc => sc.name),
                     // Which BOOK each scene sits on, so the paired test can be read at the n that is
                     // actually independent — see the per-book block below.
@@ -869,16 +956,33 @@ const queryVec = async (S, name, value, em) => {
             // squared/interaction columns appended]. The consumer must standardise WITHIN THE SCENE it is
             // scoring, as the fit did — the coefficients are per within-scene sd and mean nothing against
             // a raw value.
+            //
+            // TWO COEFFICIENT VECTORS, ONE PER BOUNDARY, because the target is E[credit] and not P(>=3).
+            // The file used to carry the single --cut fit beside a cutoff read off the E[credit] grid, so
+            // its two halves described different quantities: E[credit] >= P(>=3) everywhere the clamp
+            // holds, and a consumer thresholding the emitted beta at the emitted cutoff delivered a
+            // strictly tighter set than the one the number was chosen on. The boundaries are fitted
+            // SEPARATELY (proportional odds does not hold here), so neither vector can be derived from
+            // the other and both have to travel.
             if (EMIT_MODEL) {
                 fs.writeFileSync(EMIT_MODEL, JSON.stringify({
-                    tier: TIER, cut: CUT, cutoff: best.cut, f2: best.f,
+                    tier: TIER, cutoff: best.cut, f2: best.f,
+                    // The rule the two vectors combine under, stated where a consumer reads them. The
+                    // clamp is not optional for being small: 39 of 8975 rows invert, by at most 0.0002,
+                    // and an incoherent probability pair is a bug that reads as a threshold effect.
+                    target: 'E[credit] = 0.5*P(>=2) + 0.5*min(P(>=3), P(>=2))',
                     features: FEATURES.map(([n]) => n),
                     properNounsMode: PROPER_MODE, properNounsExtract: PROPER_EXTRACT,
                     layout: ['intercept', ...FEATURES.map(([n]) => `${n}.z`)],
-                    beta: Array.from(t.stdBeta ?? []),
+                    beta: { ge2: Array.from(b.pooled[0] ?? []), ge3: Array.from(b.pooled[1] ?? []) },
                     // BOTH AUCs, because they answer different questions and the in-sample one alone
                     // would flatter a model shipped for books it has never seen. Held out by BOOK is the
                     // generalisation number production actually gets.
+                    //
+                    // AT THE >= 3 BOUNDARY, which is the guard above forcing --cut 3: an AUC is read on
+                    // ONE ordering and E[credit] combines two, so this names the boundary rather than the
+                    // shipped target. `f2` beside it is the one number here read on E[credit] itself.
+                    aucAt: 3,
                     auc: t.auc ?? null,
                     heldOutAuc: t.fits?.['held out by BOOK']
                         ? auc(t.fits['held out by BOOK'].eta, t.fits['held out by BOOK'].y) : null,
