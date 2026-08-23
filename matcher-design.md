@@ -1299,6 +1299,17 @@ every item counts, which is the old behaviour and what an older client sends.
 The reference fit does not read the new column — it has no cosine feature — so nothing about it moves
 until it is refitted. That refit is what the measurement above argues for, and it is now possible.
 
+**REFERENCE IS SCORED AND NOT CUT.** The column orders reference rows for the budget walk; no threshold
+is applied to them. A reference entry is ranked only because a key fired, so activation already made the
+decision, and the fit does not generalise to the books where a cut would matter. **Measured** at the
+reference model's own peak (0.17): it drops 35.3% of Foxbridge's relevant rows and 3 of its 10 grade-4s,
+against 1.0% on Sommers — and Foxbridge is the corpus's only reference-ONLY book, contributing 21 of the
+fit's 647 rows. What it loses there is `weave theory`, `mandala`, `scrying`, `thread`, `energy`: abstract
+world-mechanics entries carrying few names, which is what a hand-authored reference book is made of and
+what `properNouns` and a negative `density` both score down. **Recall at that cutoff is 94.4%, not full**
+— the claim below that the tier reaches full recall anywhere under 0.20 was measured on the cosine-free
+fit and does not survive the refit.
+
 **The reference tier tolerates a weak fit, and its cutoff barely matters.** **Measured**: its AUC falls
 0.733 to 0.698 held out by book, against memory's 0.820 to 0.799 — 342 rows against 6051 — and it still
 reaches F2 0.806 at full recall anywhere below 0.20. Its calibration is unmeasurable at that n (ECE p
