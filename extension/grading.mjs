@@ -79,24 +79,24 @@ export function keyByUid(entries) {
  * @returns {object} An arm's `params` for the harness
  */
 export function captureParams(s, { caseSensitive, wholeWords, includeNames, allowWIScan }) {
+    // NO FUSION PARAMS. K, LEXW, KEYW and weightByOrder described RRF over the layout, which no longer
+    // exists — E[credit] orders the dynamic block and reads the signals directly. They are not recorded
+    // as null either: a null would claim the capture ran with fusion disabled, where the truth is that
+    // the question stopped being asked. Bundles captured before this carry them, and sceneParams reads
+    // and ignores what it no longer has a use for, the same way it treats the retired `threshold`.
     return {
-        K: s.rrfK,
         K1: s.bm25K1,
         B: s.bm25B,
         // Recorded so a sample scores under the curve it was captured under. A bundle taken before
         // this existed has no field and falls back to sceneParams' 'bm25', which is what it ran under.
         repeatCurve: s.repeatCurve,
         repeatR: s.repeatR,
-        LEXW: s.lexicalWeight,
-        // null = follows LEXW; recorded as-is so a sample says which of the two it was captured under.
-        KEYW: s.keywordWeight ?? null,
         boost: s.properNounBoost,
         stopwordDf: s.stopwordDocFreq,
         meanCentered: s.meanCentered,
         maxVectorEntries: s.maxVectorEntries,
         entityFilter: s.entityFilter,
         queryMode: s.queryMode,
-        weightByOrder: s.weightByOrder,
         caseSensitive,
         wholeWords,
         // The boundary class whole-word matching used. Recorded here rather than only in

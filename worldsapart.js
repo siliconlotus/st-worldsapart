@@ -857,47 +857,33 @@ async function summarizeQuery(rawText) {
 }
 
 /**
- * Orders retrieval results by cosine and numbers them. Shared by retrieval and by /wa-query so the
- * calibration view cannot order its table differently from the ranking retrieval built.
+ * Prints /wa-query's table: every scored entry by cosine, with the gap between neighbours.
+ *
+ * Takes the scores retrieval computed rather than re-scoring. /wa-debug used to render this by calling the
+ * probe, which scored the query a SECOND time and could disagree with the retrieval it was explaining (it
+ * did: the probe skipped the entity filter).
  *
  * @param {Map<string, {score: number, chunk: string}>} scores Per-entry results
- * @returns {Array<{key: string, value: object, vectorRank: number}>} Retrieval ranking, best first
- */
-const fuseRetrieval = (scores) => ranking.fuseRetrieval(scores);
-
-/**
- * Prints the vector-candidates table: the admitted ranking and the gap between neighbours.
- *
- * Takes a ranking rather than computing one. /wa-debug used to render this by calling the /wa-query probe,
- * which scored the query a SECOND time — a replay that could disagree with the retrieval it was explaining
- * (it did: the probe skipped the entity filter). Now retrieval hands over the very objects it selected on,
- * so the table is a view of what happened, not a re-enactment. /wa-query still calls it for arbitrary text.
- *
- * @param {Array<{key: string, value: object, fused: number, vectorRank?: number, textRank?: number}>} ranked fuseRetrieval output
- * @param {object[]} targets Vectorized entries in the active books
+ * @param {object[]} targets Entries in the active books
  * @param {string} searchText The query
  */
-function reportVectorCandidates(ranked, targets, searchText) {
+function reportVectorCandidates(scores, targets, searchText) {
     const byKey = new Map(targets.map(x => [`${x.world}.${x.uid}`, x]));
-    const spread = ranked[0].value.score - ranked[Math.min(4, ranked.length - 1)].value.score;
+    const rows = [...scores.entries()].sort((a, b) => b[1].score - a[1].score);
+    const spread = rows[0][1].score - rows[Math.min(4, rows.length - 1)][1].score;
 
-    console.log(`Worlds Apart: query "${searchText.slice(0, 80)}${searchText.length > 80 ? '…' : ''}" (${searchText.length} chars)`);
-    console.log(`Worlds Apart: ${ranked.length} entries admitted, cosine ranking, top-5 vector spread ${spread.toFixed(5)}`);
-    console.log('%cWorlds Apart · vector candidates — the full admitted ranking, best first', 'font-weight: bold');
-    // The gap between neighbours and which entry — so stage 4's cut (fuseRanks + applyBudget) is legible
-    // against this ranking without dragging columns. Per-signal scores and the matched chunk follow. No
-    // slice: the whole admitted ranking is the point of this table now that stage 1 doesn't cut it.
-    console.table(ranked.map((row, index) => ({
-        // The gap this row opens below the one above — what a rank-ordered cliff would read. On the raw
-        // cosine now that stage 1 has no fused score: same quantity the cliff reads, one signal later.
-        gap: index > 0 ? Number((ranked[index - 1].value.score - row.value.score).toFixed(6)) : null,
-        title: byKey.get(row.key)?.comment,
-        // A console.table COLUMN HEADING, not a field — this table is never serialized. The candidate
-        // row's layout position is `index`, which is what the schema calls it.
+    console.log(`Worlds Apart: query "${searchText.slice(0, 80)}${searchText.length > 80 ? '\u2026' : ''}" (${searchText.length} chars)`);
+    console.log(`Worlds Apart: ${rows.length} entries scored, cosine order, top-5 spread ${spread.toFixed(5)}`);
+    console.log('%cWorlds Apart \u00b7 /wa-query \u2014 every scored entry by cosine, best first', 'font-weight: bold');
+    // SORTED HERE, NOT RANKED UPSTREAM. Stage 1 assigns no rank any more: it admits everything it scores,
+    // so a stored rank ordered nothing. This is a presentation order for one command, computed where it
+    // is displayed, which is the only place the question "what is most similar to this text" is asked.
+    console.table(rows.map(([key, value], index) => ({
+        gap: index > 0 ? Number((rows[index - 1][1].score - value.score).toFixed(6)) : null,
+        title: byKey.get(key)?.comment,
         '#': index + 1,
-        vec: Number(row.value.score.toFixed(5)),
-        vRank: row.vectorRank ?? null,
-        matchedChunk: row.value.chunk.slice(0, 70).replace(/\s+/g, ' '),
+        vec: Number(value.score.toFixed(5)),
+        matchedChunk: value.chunk.slice(0, 70).replace(/\s+/g, ' '),
     })));
 }
 
@@ -959,8 +945,10 @@ async function retrieve(chat) {
         return [];
     }
 
-    const ranked = fuseRetrieval(scores);
-    const winnerKeys = new Set(ranked.map(x => x.key));
+    // NO RETRIEVAL RANKING. Stage 1 admits everything it scores, so an ordering here decided nothing
+    // except which entries survive `admitCeiling` — and that bound is the plugin's, applied before these
+    // scores ever reach the client. The winners are simply everything that scored.
+    const winnerKeys = new Set(scores.keys());
 
     // NO STAGE-1 TABLE. It printed the admitted ranking, the neighbour gaps and each entry's matched
     // chunk, which was worth reading while stage 1 CHOSE something. It no longer does: admission is
@@ -1407,12 +1395,6 @@ const keywordScore = (entry, text, keys = entry.key) => matcher.keywordScore(ent
     repeatR: settings().repeatR,
     caseSensitiveDefault: world_info_case_sensitive,
     wholeWordsDefault: world_info_match_whole_words,
-});
-const fuseRanks = (items) => ranking.fuseRanks(items, {
-    rrfK: settings().rrfK,
-    weightByOrder: settings().weightByOrder,
-    lexicalWeight: settings().lexicalWeight,
-    keywordWeight: settings().keywordWeight,
 });
 
 /**
@@ -1876,12 +1858,20 @@ async function rankActivated(args) {
     }
 
     // STAGE 4'S QUANTITY, COMPUTED EVERY SCAN. Not a setting: `E[credit]` is what stage 4 selects and
-    // orders on, so a switch would mean carrying two orderings for the dynamic block forever — and the
-    // fusion knobs it replaces there (`rrfK`, `lexicalWeight`, `keywordWeight`) are already retired from
-    // the panel. It measures and cuts nothing yet; that is a step in landing it, not an option.
+    // orders on, so a switch would mean carrying two orderings for the dynamic block forever. The fusion
+    // it replaced is gone rather than defaulted off — `rrfK`, `lexicalWeight`, `keywordWeight` and
+    // `weightByOrder` no longer exist as settings.
     await scoreRelevanceColumn(items, windowFor);
 
-    fuseRanks(items);
+    // THE LAYOUT SCORE IS E[credit], the quantity stage 4 selects on. Ordering the dynamic block by
+    // anything else would break the prefix property applyBudget assumes: a set chosen by E[credit] but
+    // ordered by a different combination of the same signals lets the budget drop a high-E[credit] entry
+    // because that other combination ranked it low.
+    //
+    // An unscored row sorts BELOW every scored one rather than beside them at 0 — a missing score means
+    // the model file did not load or the row is not in a fitted tier, which is not the same claim as
+    // "predicted irrelevant", and authored order is what remains to order them by.
+    const layoutScore = it => (Number.isFinite(it.eCredit) ? it.eCredit : -1);
 
     // Budget walk order — NOT prompt order. Stickies and constants are always-on by
     // authorial intent, so they go first and the budget can only ever cut into the
@@ -1924,8 +1914,8 @@ async function rankActivated(args) {
     const baseCompare =
         orderKey === 'order-asc'  ? authored :
         orderKey === 'order-desc' ? (a, b) => -authored(a, b) :
-        orderKey === 'best-first' ? (a, b) => (b.fused - a.fused) || authored(a, b) :
-        orderKey === 'best-last'  ? (a, b) => (a.fused - b.fused) || authored(a, b) :
+        orderKey === 'best-first' ? (a, b) => (layoutScore(b) - layoutScore(a)) || authored(a, b) :
+        orderKey === 'best-last'  ? (a, b) => (layoutScore(a) - layoutScore(b)) || authored(a, b) :
         SORT_FNS[orderKey]        ? (a, b) => SORT_FNS[orderKey](a.entry, b.entry) || authored(a, b) :
         authored;
     // Optional tiered grouping (default off — preserves existing output). Groups by tier first (shared
@@ -1939,10 +1929,10 @@ async function rankActivated(args) {
     // lower book only gets slots the higher books leave. Interleaved: a per-book weight
     // scales fused, so a strong low-book entry can still out-rank a weak high-book one.
     if (priorityMode === 'sequential') {
-        results.sort((a, b) => (rankOf(a.entry.world) - rankOf(b.entry.world)) || (b.fused - a.fused) || authored(a, b));
+        results.sort((a, b) => (rankOf(a.entry.world) - rankOf(b.entry.world)) || (layoutScore(b) - layoutScore(a)) || authored(a, b));
     } else {
         // Interleaved: per-book weight scales fused (weight 1 = plain relevance ranking).
-        results.sort((a, b) => (b.fused * cfgOf(b.entry.world).weight - a.fused * cfgOf(a.entry.world).weight) || authored(a, b));
+        results.sort((a, b) => (layoutScore(b) * cfgOf(b.entry.world).weight - layoutScore(a) * cfgOf(a.entry.world).weight) || authored(a, b));
     }
     sticky.sort(authored);
     constant.sort(authored);
@@ -2107,23 +2097,20 @@ async function rankActivated(args) {
             title: x.entry.comment,
             block: blockOf.get(x) ?? 'dynamic',
             sticky: x.entry.sticky || 0,
-            score: Number.isFinite(x.fused) ? Number(x.fused.toFixed(5)) : null,
+            score: Number.isFinite(x.eCredit) ? Number(x.eCredit.toFixed(5)) : null,
             uid: x.entry.uid,
             wiOrder: x.entry.waOriginalOrder,
             cosine: x.score !== undefined ? Number(x.score.toFixed(5)) : null,
-            vRank: x.vectorRank ?? null,
             // BM25 over chunk text. Gated on the same condition as cosine, because both come from the
             // retrieval path: an entry with no chunks in the collection has no text score to report, and
             // the scorer returning 0 for it is a default, not a measurement.
             text: x.score !== undefined && Number.isFinite(x.textScore) ? Number(x.textScore.toFixed(2)) : null,
-            tRank: x.textRank ?? null,
             // BM25 over entry keys, gated on ELIGIBILITY (set at the scan, ~line 1608) rather than on the
             // value. keywordScore is 0 both when an eligible key missed and when the entry had no
             // scorable keys at all — and only the first is a measurement. Reading the
             // value alone reported 32 confident zeros on a capture where those entries had no keys to
             // score, which also silently defeats unionArms' absent-signal fill.
             keys: x.keysEligible === false ? null : (Number.isFinite(x.keywordScore) ? Number(x.keywordScore.toFixed(2)) : null),
-            kRank: x.keywordRank ?? null,
             tokens: tokens[i],
             cut: !kept.has(x),
             // Which cap rejected it — 'tokens' means it did not FIT, which is a different fact from
@@ -2331,10 +2318,14 @@ function whySelected(item, block) {
         return 'always-on';
     }
 
+    // THE SIGNALS, NOT THEIR RANKS. There are no per-signal ranks any more: fusing them into a layout
+    // position was RRF's job, and E[credit] reads the signals directly. So this names what the entry had
+    // to say and what the model made of it, which is the same question the ranks were standing in for.
     const parts = [
-        item.vectorRank ? `vec#${item.vectorRank}` : null,
-        item.textRank ? `text#${item.textRank}` : null,
-        item.keywordRank ? `keys#${item.keywordRank}` : null,
+        Number.isFinite(item.eCredit) ? `E[credit] ${item.eCredit.toFixed(3)}` : null,
+        Number.isFinite(item.score) ? `vec ${item.score.toFixed(3)}` : null,
+        item.textScore ? `text ${item.textScore.toFixed(2)}` : null,
+        item.keywordScore ? `keys ${item.keywordScore.toFixed(2)}` : null,
     ].filter(Boolean);
 
     if (parts.length) {
@@ -2434,7 +2425,7 @@ async function reportLayout(verbose = false, countTokens = true) {
         // number now; what used to overload it with the block name lives in the `block` column.
         rows.push({
             title: entry.comment || `uid ${entry.uid}`,
-            score: item.fused ? Number(item.fused.toFixed(5)) : null,
+            score: Number.isFinite(item.eCredit) ? Number(item.eCredit.toFixed(5)) : null,
             uid: entry.uid,
             // wiOrder is the entry's own WI `order` field (what "WI Order" layout sorts
             // by); waOrder is the value WA writes to control the final prompt sequence.
@@ -2488,7 +2479,7 @@ async function reportLayout(verbose = false, countTokens = true) {
                 tokens,
                 // What would admit it, so the log points at the fix rather than the symptom.
                 fix: describeFix(blockedBy),
-                fused: item.fused ? Number(item.fused.toFixed(5)) : null,
+                eCredit: Number.isFinite(item.eCredit) ? Number(item.eCredit.toFixed(5)) : null,
                 entry: item.entry.comment || `uid ${item.entry.uid}`,
                 uid: item.entry.uid,
             })));
@@ -2509,7 +2500,7 @@ async function reportLayout(verbose = false, countTokens = true) {
             console.log(`%cWorlds Apart · cut (exhausted) — ${caps} used up, nothing here fits: ${tail.length} entries, smallest is ${smallest} tokens, ${sum.toLocaleString()} in total${toFitAll === null ? '' : ` (raise the budget by ${toFitAll.toLocaleString()} to fit them all)`}`, 'font-weight: bold');
             console.table(tail.map(({ item, tokens }) => ({
                 tokens,
-                fused: item.fused ? Number(item.fused.toFixed(5)) : null,
+                eCredit: Number.isFinite(item.eCredit) ? Number(item.eCredit.toFixed(5)) : null,
                 entry: item.entry.comment || `uid ${item.entry.uid}`,
                 uid: item.entry.uid,
             })));
@@ -2543,8 +2534,7 @@ async function probeQuery(_named, text) {
         return '';
     }
 
-    const ranked = fuseRetrieval(scores);
-    reportVectorCandidates(ranked, targets, searchText);
+    reportVectorCandidates(scores, targets, searchText);
 
     return '';
 }
@@ -3698,15 +3688,7 @@ const SETTINGS_HTML = `
                 <div class="inline-drawer-content">
                     <small class="opacity50p">How the lexical (BM25) and vector signals fuse.</small>
 
-                    <label for="wa_lexical_weight">Lexical weight (BM25 vs vector in fusion)</label>
-                    <input id="wa_lexical_weight" type="number" class="text_pole" min="0" max="5" step="0.1">
-                    <label for="wa_keyword_weight">Keyword weight (BM25 over keys) — blank follows lexical weight</label>
-                    <input id="wa_keyword_weight" type="number" class="text_pole" min="0" max="5" step="0.1" placeholder="follow lexical">
 
-                    <label class="checkbox_label" for="wa_weight_by_order">
-                        <input id="wa_weight_by_order" type="checkbox"><span>Weight by entry order (order = priority)</span>
-                    </label>
-                    <small class="opacity50p">Folds each entry's Order into the fused score as another rank, so higher-order entries rank higher — for books that use Order as priority. Order stays a tiebreak either way.</small>
 
 
                 </div>
@@ -3986,11 +3968,7 @@ export async function init() {
     bind('#wa_match_window', 'matchWindow', 'string');
     bind('#wa_word_boundary', 'wordBoundary', 'string');
     $('#wa_word_boundary').on('change', () => matcher.setBoundaryMode(settings().wordBoundary));
-    bind('#wa_lexical_weight', 'lexicalWeight', 'number');
-    // 'number?', not 'number': blank means "follow lexicalWeight" and must persist as null, where a plain
     // number binding would collapse it to 0 and silently switch the keys signal off.
-    bind('#wa_keyword_weight', 'keywordWeight', 'number?');
-    bind('#wa_weight_by_order', 'weightByOrder', 'checked');
     bind('#wa_llm_profile', 'llmProfile', 'string');
     bind('#wa_llm_temp', 'llmTemperature', 'string');
     bind('#wa_uncentered_gate', 'uncenteredGate', 'number');

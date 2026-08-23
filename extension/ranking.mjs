@@ -223,36 +223,6 @@ export function queryMessages(chat, { depth, substituteParams = s => s }) {
         .reverse();
 }
 
-/**
- * Orders the RETRIEVAL ranking: cosine, and nothing else.
- *
- * NO LONGER A FUSION, and kept as a named function rather than inlined as a sort because stage 1's
- * ordering is a thing the cutoff harnesses cut and the Studio displays — a second copy of it is the drift
- * the single-scorer rule exists to prevent. It used to RRF the cosine rank against BM25-over-chunk-text;
- * plugin/scoring.mjs's header carries why the lexical half left stage 1 and what that concedes.
- *
- * Deliberately not fuseRanks. The question here is only "which retrieved entries force-activate" — keyword and
- * authored-order ranks belong to the final layout ranking, over a population that includes entries
- * retrieval never saw. Feeding them in here would let a keyword-only entry displace a retrieved one
- * from a decision it isn't a candidate in.
- *
- * `fused` is gone with the fusion. Callers that ranked on it read `vectorRank` (1-based, best first),
- * which is what the returned array is already sorted by — an absent cosine sorts last rather than
- * silently scoring 0, the trap fuseRanks records against null scores.
- *
- * @param {Map<string, {score: number, chunk?: string}>} scores Per-entry retrieval results
- * @returns {Array<{key: string, value: object, vectorRank: number}>} Retrieval ranking, best first
- */
-export function fuseRetrieval(scores) {
-    const entries = [...scores.entries()];
-    const vectorRanks = new Map([...entries]
-        .sort((a, b) => (b[1].score ?? 0) - (a[1].score ?? 0))
-        .map(([key], index) => [key, index + 1]));
-
-    return entries
-        .map(([key, value]) => ({ key, value, vectorRank: vectorRanks.get(key) }))
-        .sort((a, b) => a.vectorRank - b.vectorRank);
-}
 
 /**
  * Whether an item is IN THE VECTOR COLLECTION — not whether it could be embedded, which is true of all

@@ -18,11 +18,14 @@ eq(full[1].content.length, 3000, 'entries are verbatim; a bundle that drops cont
 eq(Object.keys(keyByUid(Object.values(book))).length, 2, 'an array of entries is accepted too');
 
 // --- captureParams maps settings onto the harness's argument names ---
-const s = { rrfK: 20, bm25K1: 1.2, bm25B: 0.75, lexicalWeight: 1, properNounBoost: 3, stopwordDocFreq: 0.25,  maxVectorEntries: 10, suppressVectorKeys: true, entityFilter: true, queryMode: 'messages', weightByOrder: false };
+const s = { bm25K1: 1.2, bm25B: 0.75, properNounBoost: 3, stopwordDocFreq: 0.25,  maxVectorEntries: 10, suppressVectorKeys: true, entityFilter: true, queryMode: 'messages' };
 const p = captureParams(s, { caseSensitive: false, wholeWords: false, includeNames: true, allowWIScan: true });
-eq(p.K, 20, 'rrfK -> K');
 eq(p.K1, 1.2, 'bm25K1 -> K1');
-eq(p.LEXW, 1, 'lexicalWeight -> LEXW');
+// NO FUSION PARAMS. K/LEXW/KEYW/weightByOrder described RRF over the layout, which no longer exists —
+// E[credit] orders the dynamic block and reads the signals directly. Absent, not null: a null would say
+// the capture ran with fusion off, where the truth is the question stopped being asked.
+eq('K' in p || 'LEXW' in p || 'KEYW' in p || 'weightByOrder' in p, false,
+    'a capture records no fusion parameters, because there is no fusion');
 eq(p.stopwordDf, 0.25, 'stopwordDocFreq -> stopwordDf');
 eq('threshold' in p, false, 'no admission threshold is captured — stage 1 has no gate to reproduce');
 eq('vectorCutoff' in p, false, 'no cliff mode is captured — stage 4 has no relevance cut to reproduce');

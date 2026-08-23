@@ -131,10 +131,10 @@ export function makeSortControl({ getSort, setSort, getTiered, setTiered, getTie
 export function wiTooltip({ item, block }) {
     const e = item.entry;
     const lines = [`[${e.world}] ${wiTitleOf(e)}`, block];
-    if (item.fused) lines.push(`fused ${item.fused.toFixed(4)}`);
-    if (item.score !== undefined) lines.push(`vector ${item.score.toFixed(3)}${item.vectorRank ? ` (#${item.vectorRank})` : ''}`);
-    if (item.textScore) lines.push(`text ${item.textScore.toFixed(2)}${item.textRank ? ` (#${item.textRank})` : ''}`);
-    if (item.keywordScore) lines.push(`keys ${item.keywordScore.toFixed(2)}${item.keywordRank ? ` (#${item.keywordRank})` : ''}`);
+    if (Number.isFinite(item.eCredit)) lines.push(`E[credit] ${item.eCredit.toFixed(4)}`);
+    if (item.score !== undefined) lines.push(`vector ${item.score.toFixed(3)}`);
+    if (item.textScore) lines.push(`text ${item.textScore.toFixed(2)}`);
+    if (item.keywordScore) lines.push(`keys ${item.keywordScore.toFixed(2)}`);
     if (item.keywordHits?.length) lines.push('hits: ' + item.keywordHits.map(h => `${h.key} ×${h.count}`).join(', '));
     return lines.join('\n');
 }

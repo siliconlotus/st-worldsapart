@@ -280,55 +280,6 @@ export const defaultSettings = {
      */
     bm25B: 0.75,
     /**
-     * Reciprocal rank fusion constant: weight is 1/(k + rank). Higher = flatter.
-     *
-     * The usual 60 assumes thousands of candidates. Over ~90 chunk-level candidates it
-     * makes rank 20 worth 76% of rank 1, so entries that are mediocre on both signals
-     * outrank ones that are excellent on a single signal. Roughly matching k to the
-     * number of entries you keep restores the discrimination.
-     */
-    rrfK: 20,
-    /**
-     * Multiplier on the lexical (BM25) contribution to the fused score; vector is
-     * always 1. Above 1 favours BM25, below 1 favours the embeddings.
-     *
-     * Equal weighting benchmarked best when the query is a full chunk of prose. A
-     * short entity-dense query — a generated summary — is a different regime: IDF is
-     * length-agnostic while embeddings degrade when query and document lengths
-     * diverge, so BM25 deserves more weight there.
-     */
-    lexicalWeight: 1,
-    /**
-     * Weight for BM25-over-KEYS in the layout fusion, separate from lexicalWeight (BM25-over-chunk-text).
-     *
-     * 1 is the measured optimum of the dose ladder (83 graded scenes, paired; 8 of them contribute only
-     * ties, being reference-only books the tier rule empties): 1 helps 40/22 (+0.011 nDCG@10, p=0.030),
-     * 0 hurts (−0.048, p=0.009), 3 hurts (−0.029, p=0.006). 2 is NOT distinguishable (−0.009, p=0.350) —
-     * an earlier reading of it as harmful predates the reference-tier exclusion reaching nDCG at all, and
-     * did not survive it. Consistent in sign across book types, and not an artifact of books that key
-     * their memory entries: the gain is largest on Sommers (+0.021) and Richard (+0.020), which have none
-     * of those, and smallest on Time Whore (+0.005), which is half of them.
-     *
-     * READ THE SIZE AGAINST THE NOISE FLOOR: the same grader re-scoring one scene moved its nDCG@10 by
-     * 0.058, larger than any arm mean here. Pairing is what rescues these — the same grades sit on both
-     * sides of every contrast — but no unpaired or cross-capture comparison at this size means anything.
-     * null = follow lexicalWeight (the pre-split
-     * behavior); pinning a number decouples the two so raising lexicalWeight no longer silently
-     * drags the keys weight past its optimum.
-     *
-     * Only reaches the layout ranking. fuseRetrieval (what the cutoff cuts) scores vector + text and never
-     * sees keys at all.
-     */
-    keywordWeight: 1,
-    /**
-     * Fold each entry's authored Order into the fused score as an extra RRF rank (higher order =
-     * higher priority: ST sorts `b.order - a.order` and fills until the budget is gone, so a higher order
-     * is served first. That is emergent, not declared — ST has no priority concept, and `budgetPriority`
-     * exists in its tree only as an importer's name for a foreign format's field. Off by default; for books that
-     * use Order as a priority proxy. Order remains the presentation/retention tiebreak regardless.
-     */
-    weightByOrder: false,
-    /**
      * Token budget as a percentage of max prompt tokens. 0 = off.
      *
      * Independent of maxTokens, and both apply — the tighter of the two wins, the same
@@ -423,7 +374,7 @@ export const defaultSettings = {
  */
 const INTERNAL_KEYS = [
     'meanCentered', 'entityFilter', 'properNounBoost', 'stopwordDocFreq',
-    'bm25K1', 'bm25B', 'repeatCurve', 'repeatR', 'rrfK', 'keywordScoring',
+    'bm25K1', 'bm25B', 'repeatCurve', 'repeatR', 'keywordScoring',
     'chunkSize', 'chunkMode', 'minChunkSize',
     // Withdrawn with the query summarizer. queryMode in particular MUST be reset rather than
     // merely un-surfaced: anyone who had it on 'summary' would otherwise keep paying an LLM call
