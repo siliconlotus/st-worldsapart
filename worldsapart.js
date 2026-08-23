@@ -60,7 +60,8 @@ const gradeAnchorLine = () => `Grade 0–4: ${GRADE_ANCHORS.map((a, g) => `${g} 
 // Chunking is WA's own, not ST's: it is unreachable under node and it determines every stored vector, so an
 // upstream edit would silently invalidate existing indexes. See extension/chunking.mjs.
 import { chunkEntry } from './extension/chunking.mjs';
-import { buildContentIndex, scoreContent, indexFingerprint } from './extension/content-lexical.mjs';
+import { buildContentIndex, scoreContent, indexFingerprint, entryKey } from './extension/content-lexical.mjs';
+import { buildNameDf, properNames, properShared, properDensity, scoreRelevance, isMemory } from './extension/relevance.mjs';
 
 /** Base value for the rewritten `order` sequence. WA rewrites every activated entry's order, so only
  * the relative index matters and the base is free. It is parked far above any plausible authored value
@@ -425,13 +426,144 @@ const buildTermWeights = (queryText, gazetteer) => ranking.buildTermWeights(quer
 const contentIndexes = new Map();
 
 function contentIndexFor(world, entries) {
+    return bookIndexes(world, entries).index;
+}
+
+/**
+ * Both per-book indexes over one book's entries, behind one fingerprint.
+ *
+ * THE NAME INDEX RIDES THIS CACHE rather than getting its own, because it is the same kind of quantity:
+ * a corpus statistic over the book's entries, query-independent, stale exactly when the book changes.
+ * It is not persisted the way the vector collection is — embeddings cost network calls, name extraction
+ * is local string work over text already in memory, so a store would be a staleness bug bought with
+ * nothing.
+ *
+ * TWO WALKS, NOT ONE, AND DELIBERATELY: `buildContentIndex` excludes disabled entries because it is
+ * asking what can be RETRIEVED, while `buildNameDf` includes them because df asks how DISTINCTIVE a name
+ * is in the book's vocabulary (matcher-design.md, *Stage 4 predicts per-entry relevance*, measured).
+ * Their document counts also differ — chunks against entries — so neither N may be read for the other.
+ *
+ * The name index is built only when something wants it: it is a whole-book pass, and the fingerprint
+ * would otherwise pay for it on every book of every scan for a column nothing reads.
+ */
+function bookIndexes(world, entries, { names = false } = {}) {
     const fingerprint = indexFingerprint(entries, settings());
     const hit = contentIndexes.get(world);
-    if (hit?.fingerprint === fingerprint) return hit.index;
-    const index = buildContentIndex(entries, settings());
-    contentIndexes.set(world, { fingerprint, index });
-    console.log(`Worlds Apart: content-lexical index for "${world}" — ${index.entryCount} entries, ${index.docCount} chunks`);
-    return index;
+    if (hit?.fingerprint === fingerprint && (!names || hit.nameDf)) return hit;
+    const index = hit?.fingerprint === fingerprint ? hit.index : buildContentIndex(entries, settings());
+    const nameDf = names ? buildNameDf(entries) : hit?.fingerprint === fingerprint ? hit.nameDf : null;
+    const fresh = { fingerprint, index, nameDf };
+    contentIndexes.set(world, fresh);
+    if (hit?.fingerprint !== fingerprint) {
+        console.log(`Worlds Apart: content-lexical index for "${world}" — ${index.entryCount} entries, ${index.docCount} chunks`);
+    }
+    if (names && nameDf && nameDf !== hit?.nameDf) {
+        console.log(`Worlds Apart: name index for "${world}" — ${nameDf.ndoc} entries, ${nameDf.df.size} distinct names`);
+    }
+    return fresh;
+}
+
+/**
+ * The fitted relevance model, loaded once.
+ *
+ * FETCHED RATHER THAN IMPORTED. A JSON module import would tie the whole extension's load to a syntax
+ * not every browser accepts, so a user on an older build would lose WA entirely rather than lose one
+ * column. `import.meta.url` keeps the path independent of where ST mounts the extension.
+ *
+ * A MISSING OR MALFORMED FILE DISABLES THE COLUMN, it does not throw: this is a scoring signal, and a
+ * scan that cannot read it should rank exactly as it did before the model existed. `null` is cached too,
+ * so a 404 is not re-fetched every turn.
+ * @type {{promise: Promise<object|null>|null}}
+ */
+const relevanceModel = { promise: null };
+
+function loadRelevanceModel() {
+    relevanceModel.promise ??= fetch(new URL('./extension/relevance-model-memory.json', import.meta.url))
+        .then(r => (r.ok ? r.json() : Promise.reject(new Error(`HTTP ${r.status}`))))
+        .then((m) => {
+            console.log(`Worlds Apart: relevance model — ${m.tier} tier, ${m.features?.join(', ')}, cutoff ${m.cutoff}`);
+            return m;
+        })
+        .catch((e) => {
+            console.warn('Worlds Apart: no relevance model, E[credit] will not be scored —', e.message);
+            return null;
+        });
+    return relevanceModel.promise;
+}
+
+/**
+ * Stage 4's relevance column: the two signals the fitted model needs that nothing else computes, then
+ * `E[credit]` per entry.
+ *
+ * MEASURED AND RECORDED, NOT ACTED ON. Nothing here drops an entry. The runtime's `properNouns` and
+ * `density` have to be shown to agree with the harness's before a cut placed on them means anything,
+ * and the way to show that is to capture both and compare — so this fills the column and stops.
+ *
+ * THE SAME WINDOW THE FIT SAW, at the GLOBAL depth with a plain entry: proper-noun overlap is a property
+ * of the SCENE, so an entry's own opted-in sources are its and not the scene's. `eval/scene.mjs`
+ * `haystackFor` calls the same builder with the same inputs, which is why `windowFor` is passed in
+ * rather than rebuilt.
+ *
+ * SCORED PER BOOK, because standardisation is per SCENE and the model is per TIER — but df is a
+ * statistic of one book, so an entry's names are weighted against its own corpus and never against the
+ * pooled attached set. That is the same one-index rule content-lexical rests on.
+ *
+ * MEMORY TIER ONLY. The shipped fit is memory's; reference has neither a fit nor a cutoff, and `density`
+ * measured INVERTED there (-0.935 against +0.215), so scoring reference rows through these coefficients
+ * would carry the wrong sign rather than merely being imprecise.
+ */
+async function scoreRelevanceColumn(items, windowFor) {
+    const model = await loadRelevanceModel();
+    if (!model) return;
+
+    // Every entry of every book in the scan, which is what df is a statistic OF — not the activated
+    // subset, whose population changes every turn and would move an entry's weight because its
+    // neighbours did.
+    const byWorld = new Map();
+    for (const entry of await getSortedEntries()) {
+        if (!byWorld.has(entry.world)) byWorld.set(entry.world, []);
+        byWorld.get(entry.world).push(entry);
+    }
+
+    const depth = Number(settings().messageDepth || world_info_depth);
+    const windowNames = properNames(windowFor(depth, {}).join('\n'));
+
+    const scored = items.filter(it => isMemory(it.entry));
+    for (const item of scored) {
+        const book = bookIndexes(item.entry.world, byWorld.get(item.entry.world) ?? [], { names: true }).nameDf;
+        // The entry's names come off the book walk that built df, so they are extracted once per book
+        // rather than once per turn per entry.
+        const names = book?.names.get(entryKey(item.entry)) ?? properNames(item.entry.content);
+        item.properNouns = book ? properShared(names, windowNames, book) : 0;
+        item.density = properDensity(item.entry.content);
+    }
+
+    // ONE SCENE, ONE STANDARDISATION. The columns are centred over the rows being scored together, which
+    // is what the coefficients are in units of — so this is a single call over the whole memory block and
+    // never a per-entry one.
+    const eCredit = scoreRelevance(model, scored.map(it => ({
+        cosine: Number.isFinite(it.score) ? it.score : 0,
+        text: Number(it.textScore) || 0,
+        keys: Number(it.keywordScore) || 0,
+        properNouns: Number(it.properNouns) || 0,
+        density: Number(it.density) || 0,
+    })));
+    scored.forEach((it, i) => { it.eCredit = eCredit[i]; });
+
+    if (runState.verboseRun) {
+        console.log(`%cWorlds Apart · E[credit] over ${scored.length} memory entries (cutoff ${model.cutoff}, nothing cut)`, 'font-weight: bold');
+        console.table([...scored]
+            .sort((a, b) => b.eCredit - a.eCredit)
+            .map(it => ({
+                entry: it.entry.comment || it.entry.key?.[0] || it.entry.uid,
+                eCredit: Number(it.eCredit.toFixed(4)),
+                clears: it.eCredit >= model.cutoff,
+                cosine: Number.isFinite(it.score) ? Number(it.score.toFixed(4)) : null,
+                text: Number((it.textScore ?? 0).toFixed(3)),
+                properNouns: Number(it.properNouns.toFixed(3)),
+                density: Number(it.density.toFixed(2)),
+            })));
+    }
 }
 
 /**
@@ -1598,7 +1730,14 @@ async function rankActivated(args) {
     const scanWorlds = new Set(items.map(it => it.entry.world));
     ensureWorldConfigs(scanWorlds);
 
-    if (settings().keywordScoring) {
+    // THE SCAN WINDOW IS SHARED, and building it is gated on WHETHER ANYTHING WANTS IT rather than
+    // hoisted unconditionally — `scanInjects` is an await and `scanSources` a collection pass, so a
+    // scan with both consumers off must not start paying for a window nobody reads. Keyword scoring
+    // owns it today; the relevance column needs the SAME window, because that is what the model was
+    // fitted against (`eval/scene.mjs` `haystackFor` builds it with this builder and these inputs).
+    // A second window here would be a second definition of what WA searched.
+    let windowFor = null;
+    if (settings().keywordScoring || settings().relevanceScoring) {
         // The stash from intercept IS core's transformed scan haystack — regex scripts
         // applied, file content and titles appended, reasoning merged — so WA matches the
         // text core matched. Raw context chat is the fallback only for a scan no WA entry
@@ -1620,74 +1759,76 @@ async function rankActivated(args) {
         // Beside them, and RAW: which of the six a capture keeps depends on the books it attaches, so the
         // gate (matcher.usedMatchSources) runs where those are in scope rather than here.
         runState.lastSources = sources;
-        const windowFor = matcher.makeWindowFor(chat, {
+        windowFor = matcher.makeWindowFor(chat, {
             injects,
             sources,
             matchWindow: settings().matchWindow,
             includeNames: world_info_include_names,
         });
+        if (settings().keywordScoring) {
 
-        // The keys an activated entry is scored on: live keys, else the takeover's stash — blanking was
-        // an activation mechanism, not a scoring opinion.
-        //
-        // EVERY ENTRY'S KEYS ARE SCORED, including a vectorized one's. The value is MEASURED here and
-        // RECORDED in the capture; whether anything acts on it is the model's business, and the shipped
-        // fit does not carry the column (matcher-design.md, *Scoring memory's keys*). A setting that
-        // suppressed the measurement made the column null in every bundle it was off for, which is the
-        // one thing that cannot be recovered later — and left every contributed bundle ambiguous about
-        // whether a blank meant "no keys fired" or "nobody looked".
-        const scoreKeysOf = entry => (entry.key?.length ? entry.key : (entry.waKeys ?? []));
-        // Same restoration for the secondary gate: a blanked entry's secondaries live in
-        // waSecondary, and the per-segment gate must judge the condition the author wrote, not an
-        // empty one. A local view, never a write-back — restoring keys on core's scan copies
-        // mid-scan would hand core's next loop the keys the takeover blanked.
-        const scoringView = entry => (!entry.keysecondary?.length && entry.waSecondary?.length)
-            ? { ...entry, keysecondary: entry.waSecondary }
-            : entry;
+            // The keys an activated entry is scored on: live keys, else the takeover's stash — blanking was
+            // an activation mechanism, not a scoring opinion.
+            //
+            // EVERY ENTRY'S KEYS ARE SCORED, including a vectorized one's. The value is MEASURED here and
+            // RECORDED in the capture; whether anything acts on it is the model's business, and the shipped
+            // fit does not carry the column (matcher-design.md, *Scoring memory's keys*). A setting that
+            // suppressed the measurement made the column null in every bundle it was off for, which is the
+            // one thing that cannot be recovered later — and left every contributed bundle ambiguous about
+            // whether a blank meant "no keys fired" or "nobody looked".
+            const scoreKeysOf = entry => (entry.key?.length ? entry.key : (entry.waKeys ?? []));
+            // Same restoration for the secondary gate: a blanked entry's secondaries live in
+            // waSecondary, and the per-segment gate must judge the condition the author wrote, not an
+            // empty one. A local view, never a write-back — restoring keys on core's scan copies
+            // mid-scan would hand core's next loop the keys the takeover blanked.
+            const scoringView = entry => (!entry.keysecondary?.length && entry.waSecondary?.length)
+                ? { ...entry, keysecondary: entry.waSecondary }
+                : entry;
 
-        // Register every key this pass will score BEFORE the loop, so the smartkeys automaton is
-        // built once — a first-seen key mid-loop would rebuild it and throw away every cached scan.
-        // Secondaries too, off the restored view keywordScore will actually gate against, and only for
-        // entries whose keys are scored at all: keywordScore returns on an empty key list before it
-        // primes anything.
-        registerKeys(items.flatMap(it => {
-            const keys = scoreKeysOf(it.entry);
-            return keys.length ? [...keys, ...matcher.secondaryKeys(scoringView(it.entry))] : [];
-        }));
+            // Register every key this pass will score BEFORE the loop, so the smartkeys automaton is
+            // built once — a first-seen key mid-loop would rebuild it and throw away every cached scan.
+            // Secondaries too, off the restored view keywordScore will actually gate against, and only for
+            // entries whose keys are scored at all: keywordScore returns on an empty key list before it
+            // primes anything.
+            registerKeys(items.flatMap(it => {
+                const keys = scoreKeysOf(it.entry);
+                return keys.length ? [...keys, ...matcher.secondaryKeys(scoringView(it.entry))] : [];
+            }));
 
-        for (const item of items) {
-            // Score keywords over the shared message depth. Per-entry scanDepth still wins
-            // (as in core), so an entry that declares its own window is honoured; otherwise
-            // the unified messageDepth, falling back to core's scan depth only if it's unset.
-            // Nullish on scanDepth: 0 is core's authored "match nothing from chat" (the entry
-            // lives on injects/sources), not an unset value to fall through.
-            const depth = Number(item.entry.scanDepth ?? (settings().messageDepth || world_info_depth));
-            // ONE window builder, not a second copy of it. This open-coded its own memo + inject push +
-            // withMatchSources, which is exactly makeWindowFor — and a second copy is where the depth
-            // bound would have been applied on one path and not the other.
-            const scanText = windowFor(depth, item.entry);
-            const scoreKeys = scoreKeysOf(item.entry);
-            const scored = keywordScore(scoringView(item.entry), scanText, scoreKeys);
-            item.keywordScore = scored.score;
-            item.keywordHits = scored.hits;
-            // Debug-class runs only: WHERE each key matched, for /wa-grade's "why did this pop"
-            // column. Flags mirror the keywordScore call above exactly — same entry overrides,
-            // same defaults — so the excerpt localises the match that was actually scored.
-            item.keywordWhy = runState.verboseRun
-                ? scored.hits.slice(0, 4).map(h => {
-                    // Every place it landed, not just the first. One excerpt cannot tell a key firing
-                    // thirteen times on one phrase from one firing across thirteen scenes, and that is
-                    // the judgement being made. `excerpt` is contexts[0] rather than a second call, so
-                    // the displayed line and the hover can never disagree.
-                    const contexts = matcher.keyExcerpts(h.key, scanText, item.entry.caseSensitive, item.entry.matchWholeWords);
-                    return { key: h.key, count: h.count, score: h.score, excerpt: contexts[0] ?? null, contexts };
-                })
-                : undefined;
-            // Declared for fuseRanks' eligibility normalisation: having keys to score is the chance to
-            // earn the keyword rank, and an entry with none must not be divided by a weight it could
-            // never have collected. Resolved here because this is where the scan has already
-            // decided what `scoreKeys` is.
-            item.keysEligible = scoreKeys.length > 0;
+            for (const item of items) {
+                // Score keywords over the shared message depth. Per-entry scanDepth still wins
+                // (as in core), so an entry that declares its own window is honoured; otherwise
+                // the unified messageDepth, falling back to core's scan depth only if it's unset.
+                // Nullish on scanDepth: 0 is core's authored "match nothing from chat" (the entry
+                // lives on injects/sources), not an unset value to fall through.
+                const depth = Number(item.entry.scanDepth ?? (settings().messageDepth || world_info_depth));
+                // ONE window builder, not a second copy of it. This open-coded its own memo + inject push +
+                // withMatchSources, which is exactly makeWindowFor — and a second copy is where the depth
+                // bound would have been applied on one path and not the other.
+                const scanText = windowFor(depth, item.entry);
+                const scoreKeys = scoreKeysOf(item.entry);
+                const scored = keywordScore(scoringView(item.entry), scanText, scoreKeys);
+                item.keywordScore = scored.score;
+                item.keywordHits = scored.hits;
+                // Debug-class runs only: WHERE each key matched, for /wa-grade's "why did this pop"
+                // column. Flags mirror the keywordScore call above exactly — same entry overrides,
+                // same defaults — so the excerpt localises the match that was actually scored.
+                item.keywordWhy = runState.verboseRun
+                    ? scored.hits.slice(0, 4).map(h => {
+                        // Every place it landed, not just the first. One excerpt cannot tell a key firing
+                        // thirteen times on one phrase from one firing across thirteen scenes, and that is
+                        // the judgement being made. `excerpt` is contexts[0] rather than a second call, so
+                        // the displayed line and the hover can never disagree.
+                        const contexts = matcher.keyExcerpts(h.key, scanText, item.entry.caseSensitive, item.entry.matchWholeWords);
+                        return { key: h.key, count: h.count, score: h.score, excerpt: contexts[0] ?? null, contexts };
+                    })
+                    : undefined;
+                // Declared for fuseRanks' eligibility normalisation: having keys to score is the chance to
+                // earn the keyword rank, and an entry with none must not be divided by a weight it could
+                // never have collected. Resolved here because this is where the scan has already
+                // decided what `scoreKeys` is.
+                item.keysEligible = scoreKeys.length > 0;
+            }
         }
 
         // The scan text WA actually searched, so a "WA scored 0" mystery is answered by
@@ -1709,6 +1850,10 @@ async function rankActivated(args) {
             console.log('%cWorlds Apart · keyword scan windows — the exact text WA searched, by depth', 'font-weight: bold');
             console.log(Object.fromEntries([...windowFor.windows]));
         }
+    }
+
+    if (settings().relevanceScoring && windowFor) {
+        await scoreRelevanceColumn(items, windowFor);
     }
 
     fuseRanks(items);
@@ -2272,6 +2417,14 @@ async function reportLayout(verbose = false, countTokens = true) {
                 cosine: item.score !== undefined ? Number(item.score.toFixed(5)) : null,
                 text: item.textScore ? Number(item.textScore.toFixed(2)) : null,
                 keys: item.keywordScore ? Number(item.keywordScore.toFixed(2)) : null,
+                // The stage-4 relevance column, and NULL means nobody looked rather than nothing shared:
+                // `relevanceScoring` gates the whole computation, and a reference entry is never scored
+                // because the shipped fit is memory's. Recorded at full precision — this is the value a
+                // harness run is compared against to show the runtime and the fit agree, and rounding it
+                // to the display's 2 places would put the comparison inside the rounding.
+                properNouns: Number.isFinite(item.properNouns) ? item.properNouns : null,
+                density: Number.isFinite(item.density) ? item.density : null,
+                eCredit: Number.isFinite(item.eCredit) ? item.eCredit : null,
                 // Which keys actually matched, strongest first: "Kyle×3 · pool". Textual by nature.
                 hits: item.keywordHits?.length
                     ? item.keywordHits.map(h => (h.count > 1 ? `${h.key}×${h.count}` : h.key)).join(' · ')
@@ -3528,6 +3681,11 @@ const SETTINGS_HTML = `
                     </label>
                     <small class="opacity50p">Folds each entry's Order into the fused score as another rank, so higher-order entries rank higher — for books that use Order as priority. Order stays a tiebreak either way.</small>
 
+                    <label class="checkbox_label" for="wa_relevance_scoring">
+                        <input id="wa_relevance_scoring" type="checkbox"><span>Score relevance (measure only — nothing is cut)</span>
+                    </label>
+                    <small class="opacity50p">Computes each memory entry's predicted relevance from the fitted model and records it in <code>/wa-grade</code> captures. Nothing is dropped on it: the runtime's signals have to be shown to match the harness's before a cut placed on them means anything. Costs a per-book name index and a scan-window pass per generation.</small>
+
                 </div>
             </div>
 
@@ -3810,6 +3968,7 @@ export async function init() {
     // number binding would collapse it to 0 and silently switch the keys signal off.
     bind('#wa_keyword_weight', 'keywordWeight', 'number?');
     bind('#wa_weight_by_order', 'weightByOrder', 'checked');
+    bind('#wa_relevance_scoring', 'relevanceScoring', 'checked');
     bind('#wa_llm_profile', 'llmProfile', 'string');
     bind('#wa_llm_temp', 'llmTemperature', 'string');
     bind('#wa_uncentered_gate', 'uncenteredGate', 'number');

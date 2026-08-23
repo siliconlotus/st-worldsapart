@@ -194,6 +194,17 @@ export const defaultSettings = {
     /** Score normal entries by keyword match quality and fuse them with the vector ranking. */
     keywordScoring: true,
     /**
+     * Compute stage 4's per-entry relevance prediction — `E[credit]` from the fitted model
+     * (`relevance-model-memory.json`), recorded on every ranked row and in the capture.
+     *
+     * MEASURING, NOT YET CUTTING. Nothing drops an entry on this number: the runtime's own
+     * `properNouns` and `density` have to be shown to match the harness's before a cut placed on them
+     * can mean anything, and recording the value is what makes that comparison possible. Off by
+     * default because it costs a per-book name index and a scan-window pass per turn for a column
+     * nothing acts on yet.
+     */
+    relevanceScoring: false,
+    /**
      * The unit a key has to match WITHIN — `scan` | `message` | `paragraph`.
      *
      * A conjunction over the whole window matches terms a dozen messages apart, and the same

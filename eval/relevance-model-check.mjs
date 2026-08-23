@@ -112,7 +112,7 @@ eq(threw, true, 'a model whose beta does not match its feature count throws');
 // THE CHECKED-IN FILE IS THE CONTRACT the consumer reads, so its shape is pinned here rather than
 // trusted: a file emitted by an older harness carried ONE beta vector at a boundary the cutoff was not
 // chosen on, and nothing would have noticed at runtime.
-const shipped = JSON.parse(fs.readFileSync(new URL('./relevance-model-memory.json', import.meta.url), 'utf8'));
+const shipped = JSON.parse(fs.readFileSync(new URL('../extension/relevance-model-memory.json', import.meta.url), 'utf8'));
 eq(shipped.tier, 'memory', 'the shipped fit is the memory tier');
 eq(Array.isArray(shipped.beta?.ge2) && Array.isArray(shipped.beta?.ge3), true,
     'the model carries one coefficient vector per boundary E[credit] is built from');

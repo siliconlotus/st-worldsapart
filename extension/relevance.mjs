@@ -24,6 +24,18 @@ import { tokenize } from './lexical.mjs';
 import { COMMON_WORDS } from '../plugin/commonwords.js';
 
 /**
+ * Which TIER an entry belongs to — provenance, not kind. `memory` is STMB-marked, `reference` is
+ * everything that is not.
+ *
+ * IT LIVES HERE BECAUSE THE TIER DECIDES WHICH FIT APPLIES. The tiers do not carry the same signals
+ * (99.8% of memory rows are vectorized against 84% of reference rows keyword-only) and `density`
+ * INVERTS between them, so a shared coefficient would carry the wrong sign — the model is per tier, and
+ * the predicate that selects one is part of reading it. It was defined in the harness alone, which is
+ * one copy short of what the runtime now needs.
+ */
+export const isMemory = e => Boolean(e) && ('stmemorybooks' in e || 'STMB_start' in e);
+
+/**
  * The names a text uses, as the relevance model counts them.
  *
  * `ranking.properNounsOf` decides what a name IS — capitalisation somewhere that is not sentence-initial

@@ -1375,11 +1375,25 @@ instances the books on disk hold.
    per row. `relevance-regress` calls `properNames` rather than its own copy, so the fit and the runtime
    cannot drift on what a name is; the model re-emits byte-identical through it.
 
-   What remains is the ST-coupled wiring: `rankActivated` building the two signals per turn — the df map
-   riding `contentIndexFor`'s per-book cache and fingerprint, since it is the same corpus statistic over
-   the same walk — then cutting the layout at the tier's cutoff and ordering the dynamic block by the
-   same quantity. **`ndoc` counts ENTRIES where the BM25 index beside it counts CHUNKS**, so the two Ns
-   come off one traversal and must not be read for each other.
+   **THE RUNTIME MEASURES THE COLUMN AND CUTS NOTHING.** `relevanceScoring` (Ranking & fusion, default
+   OFF) has `rankActivated` build both signals and record `properNouns`, `density` and `eCredit` on every
+   memory row and in the verbose capture. The order is deliberate rather than partial: a cut placed on
+   these signals means nothing until the runtime's values are shown to agree with the fit's, and
+   capturing both is what makes that comparison possible. The model file moved to
+   `extension/relevance-model-memory.json` — it is shipped data, not harness output — and is fetched
+   rather than imported, so a browser that rejects JSON modules loses one column instead of the
+   extension.
+
+   The name index rides `contentIndexes`' per-book cache and fingerprint, since it is the same kind of
+   corpus statistic and goes stale at the same moment. **Two walks, not one**: `buildContentIndex`
+   excludes disabled entries and counts CHUNKS, `buildNameDf` includes them and counts ENTRIES, so
+   neither N may be read for the other. The window is the shared `windowFor` at global depth with a plain
+   entry — the same builder and inputs `eval/scene.mjs` `haystackFor` uses — because a second window here
+   would be a second definition of what WA searched.
+
+   What remains is the CUT: comparing a capture's `eCredit` against a harness run on the same scene, then
+   cutting the layout at the tier's cutoff and ordering the dynamic block by the same quantity. Reference
+   rows are not scored at all — the shipped fit is memory's, and `density` inverts there.
 3. **`promote` — an author declaration that activation is sufficient.** A promoted entry enters the
    layout whenever its keys fire, exempt from the relevance cut. It is the per-entry form of *triggered
    == relevant*, which stage 4 broke by having the cliff arbitrate keyword-activated entries alongside

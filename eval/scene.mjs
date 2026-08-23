@@ -544,7 +544,13 @@ export function makeGradeOf(grades, isExcluded) {
  * `isDurableEntry` asks of an entry what `isDurable` (extension/grading.mjs) asks of a capture row; the
  * two shapes carry the constant flag differently and cannot share an implementation.
  */
-export const isMemory = e => Boolean(e) && ('stmemorybooks' in e || 'STMB_start' in e);
+// The tier predicate lives in relevance.mjs, where the per-tier fit reads it, and is re-exported here so
+// the harness's callers keep one import. Two definitions of "is this a memory entry" is how the runtime
+// and the fit would end up scoring different populations.
+// Imported AND re-exported: a bare `export ... from` forwards the name without binding it in this
+// module, and scene.mjs calls isMemory itself (tierRecall, the STMB_start audit).
+import { isMemory } from '../extension/relevance.mjs';
+export { isMemory };
 export const isReference = e => !isMemory(e);
 export const isDurableEntry = e => Boolean(e?.constant);
 

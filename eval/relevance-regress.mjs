@@ -42,7 +42,7 @@
 // held out by book:
 //   node .../relevance-regress.mjs eval-data/*-syn-msg*.json <the rest of the graded corpus>
 //        --tier memory --with properNouns,density --without keys --proper-nouns-extract entity
-//        --lobo --cutoff --emit-model eval/relevance-model-memory.json
+//        --lobo --cutoff --emit-model extension/relevance-model-memory.json
 import { haystackFor, indexPath, isMemory, loadScene, openSample, sceneParams, makeCandidateSet, makeGradeOf, embed, sceneLabel } from './scene.mjs';
 import { ensureIndex, resolveModel } from './reindex.mjs';
 import fs from 'node:fs';
