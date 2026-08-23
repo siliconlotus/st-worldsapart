@@ -464,6 +464,64 @@ function bookIndexes(world, entries, { names = false } = {}) {
 }
 
 /**
+ * Which vector collections on disk nothing claims any more.
+ *
+ * NOTHING HAS EVER REMOVED A COLLECTION. `syncWorld` prunes stale CHUNKS, but only for a book it is
+ * currently syncing — so a renamed, deleted or detached book leaves its whole collection behind, and so
+ * does a switch of embedding source or model, since both are path components. Orphans are invisible to
+ * chunk pruning by construction.
+ *
+ * A BOOK THAT IS NOT ATTACHED IS NOT AN ORPHAN. The test is whether any lorebook the user still HAS
+ * hashes to that collection id — `world_names`, not this chat's attached set — because a book you have
+ * not opened in a month is not garbage. What that cannot tell apart is a live book whose vectors were
+ * built under a different source or model: those are listed as `stale config` rather than unclaimed,
+ * since switching back would use them again.
+ *
+ * REPORTS, NEVER DELETES. Somebody paid embedding time for these.
+ * @returns {Promise<{unclaimed: object[], staleConfig: object[], live: object[], bytes: number}|null>}
+ */
+async function findOrphanCollections() {
+    if (!await hasPlugin()) return null;
+    const response = await fetch('/api/plugins/worlds-apart/collections', { method: 'POST', headers: getRequestHeaders() });
+    if (!response.ok) return null;
+    const all = await response.json();
+    const claimed = new Set((world_names ?? []).map(n => `wa_${getStringHash(n)}`));
+    const v = extension_settings.vectors ?? {};
+    const source = v.source || 'transformers';
+    // PER SOURCE, not a `??` chain over all of them: `ollama_model` carries a non-empty DEFAULT, so a
+    // chain reads it even when the source is vllm and every collection then looks like it was built
+    // under another model. `<source>_model` is ST's own naming for the rest; unknown means empty, which
+    // compares source alone rather than guessing.
+    const model = String(({ ollama: v.ollama_model, vllm: v.vllm_model })[source] ?? v[`${source}_model`] ?? '');
+    const unclaimed = [], staleConfig = [], live = [];
+    for (const c of all) {
+        if (!claimed.has(c.collectionId)) unclaimed.push(c);
+        else if (c.source !== source || (model && c.model !== model)) staleConfig.push(c);
+        else live.push(c);
+    }
+    return { unclaimed, staleConfig, live, bytes: all.reduce((a, c) => a + c.bytes, 0) };
+}
+
+const mib = b => `${(b / 1048576).toFixed(1)} MiB`;
+
+/** Prints the orphan report and returns a one-line summary for the panel. */
+async function reportOrphanCollections() {
+    const found = await findOrphanCollections();
+    if (!found) return 'Needs the server plugin.';
+    const { unclaimed, staleConfig, live, bytes } = found;
+    const table = rows => rows.map(c => ({ collection: c.collectionId, source: c.source, model: c.model, size: mib(c.bytes), lastWritten: new Date(c.mtimeMs).toISOString().slice(0, 10) }));
+    console.log(`%cWorlds Apart · vector collections — ${mib(bytes)} total`, 'font-weight: bold');
+    if (live.length) { console.log(`in use by a book you still have, at the current source/model (${live.length}):`); console.table(table(live)); }
+    if (staleConfig.length) { console.log(`the book still exists, but these were built under another source or model (${staleConfig.length}) — switching back would use them again:`); console.table(table(staleConfig)); }
+    if (unclaimed.length) { console.log(`NO lorebook hashes to these (${unclaimed.length}) — renamed or deleted books. Nothing will ever read them again:`); console.table(table(unclaimed)); }
+    const dead = unclaimed.reduce((a, c) => a + c.bytes, 0);
+    const stale = staleConfig.reduce((a, c) => a + c.bytes, 0);
+    return unclaimed.length || staleConfig.length
+        ? `${mib(bytes)} in ${live.length + staleConfig.length + unclaimed.length} collections — ${mib(dead)} unclaimed, ${mib(stale)} on another source/model. Listed in the console; delete by hand from data/<user>/vectors/.`
+        : `${mib(bytes)} in ${live.length} collection(s), all claimed.`;
+}
+
+/**
  * The fitted relevance model, loaded once.
  *
  * FETCHED RATHER THAN IMPORTED. A JSON module import would tie the whole extension's load to a syntax
@@ -3719,6 +3777,10 @@ const SETTINGS_HTML = `
                     <label>Mean-centered search (automatic when the server plugin is installed)</label>
                     <div id="wa_plugin_setup" style="margin:0.4em 0;font-size:0.85em;opacity:0.75;"></div>
 
+                    <div id="wa_find_orphans" class="menu_button" style="width:auto;padding:0.3em 0.8em;">Find unused vector collections…</div>
+                    <div id="wa_orphans_out" class="opacity50p" style="margin:0.4em 0;font-size:0.85em;"></div>
+                    <small class="opacity50p">Nothing removes a vector collection: chunk pruning only runs for a book being synced, so a renamed, deleted or detached book leaves its whole collection on disk, as does switching embedding source or model. This reports what nothing claims — it deletes nothing, because these cost embedding time and a book you have not opened is not garbage.</small>
+
                     <label for="wa_uncentered_gate" title="A chunk must also reach this raw (uncentered) cosine to be admitted. Catches a wrong book attached by mistake; 0.5 is calibrated for bge-m3. 0 = off.">Wrong-book gate (raw cosine)</label>
                     <input id="wa_uncentered_gate" type="number" class="text_pole" min="0" max="1" step="0.05">
                 </div>
@@ -4007,6 +4069,12 @@ export async function init() {
     // can show up-to-date / out-of-date. Both are cached, so this runs its fetches at most once.
     Promise.all([hasPlugin(), computeSourceFingerprint()]).then(renderPluginSetup);
     bind('#wa_debug_log', 'debugLog', 'checked');
+    document.querySelector('#wa_find_orphans')?.addEventListener('click', async () => {
+        const out = document.querySelector('#wa_orphans_out');
+        if (out) out.textContent = 'Looking…';
+        try { const line = await reportOrphanCollections(); if (out) out.textContent = line; }
+        catch (error) { if (out) out.textContent = `Failed: ${error.message}`; }
+    });
     bind('#wa_rater_id', 'raterId', 'string');
     bind('#wa_message_depth', 'messageDepth', 'number');
     bind('#wa_match_window', 'matchWindow', 'string');

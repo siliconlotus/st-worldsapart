@@ -338,6 +338,40 @@ export async function init(router) {
         }
     });
 
+    // WHAT IS ON DISK, so the client can tell it from what is still claimed. WA's collections are
+    // `vectors/<source>/wa_<hash(world)>/<model>/`, and NOTHING has ever removed one: chunk-level pruning
+    // only fires for a book being synced, so a renamed, deleted or detached book — or a switch of
+    // embedding source or model — leaves a whole collection behind, invisible to it by construction.
+    //
+    // REPORTS, NEVER DELETES. These are vectors somebody paid embedding time for, and the client cannot
+    // always tell a dead collection from one belonging to a book that is simply not attached right now.
+    // Size and mtime only: counting chunks means parsing an index.json that runs to hundreds of MB.
+    router.post('/collections', (request, response) => {
+        try {
+            const root = request.user.directories.vectors;
+            const out = [];
+            for (const source of fs.readdirSync(root, { withFileTypes: true })) {
+                if (!source.isDirectory()) continue;
+                const sourceDir = path.join(root, source.name);
+                for (const coll of fs.readdirSync(sourceDir, { withFileTypes: true })) {
+                    if (!coll.isDirectory() || !coll.name.startsWith('wa_')) continue;
+                    const collDir = path.join(sourceDir, coll.name);
+                    for (const model of fs.readdirSync(collDir, { withFileTypes: true })) {
+                        if (!model.isDirectory()) continue;
+                        const index = path.join(collDir, model.name, 'index.json');
+                        const stat = fs.statSync(index, { throwIfNoEntry: false });
+                        if (!stat) continue;
+                        out.push({ source: source.name, collectionId: coll.name, model: model.name, bytes: stat.size, mtimeMs: stat.mtimeMs });
+                    }
+                }
+            }
+            return response.send(out);
+        } catch (error) {
+            console.error('[Worlds Apart] collections failed:', error);
+            return response.status(500).send({ error: String(error?.message ?? error) });
+        }
+    });
+
     router.post('/ping', (_request, response) => response.send({ ok: true, id: info.id, root: ST_ROOT, fingerprint: FINGERPRINT }));
 
     console.log('[Worlds Apart] server plugin ready at /api/plugins/worlds-apart');
