@@ -155,3 +155,9 @@ CLAUDE.local.md
 .claude/settings.local.json
 .claude/worktrees/
 .DS_Store
+
+# Contract archives and eval grading arms are eval-data creation artifacts, not project code.
+# The rubrics that MATTER are copied into eval/eval-data alongside the runs they graded.
+eval/contracts/
+.claude/agents/sr-*.md
+.claude/agents/scene-relevance-useful.md
