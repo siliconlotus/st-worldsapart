@@ -475,13 +475,18 @@ function bookIndexes(world, entries, { names = false } = {}) {
  * so a 404 is not re-fetched every turn.
  * @type {{promise: Promise<object|null>|null}}
  */
-const relevanceModel = { promise: null };
+const relevanceModel = { promise: null, value: null };
 
 function loadRelevanceModel() {
     relevanceModel.promise ??= fetch(new URL('./extension/relevance-model-memory.json', import.meta.url))
         .then(r => (r.ok ? r.json() : Promise.reject(new Error(`HTTP ${r.status}`))))
         .then((m) => {
             console.log(`Worlds Apart: relevance model — ${m.tier} tier, ${m.features?.join(', ')}, cutoff ${m.cutoff}`);
+            // Kept resolved so paramSnapshot, which is synchronous, can name the fit a capture's
+            // eCredit column came out of. A refit changes those numbers and a bundle that does not
+            // record WHICH fit produced them cannot be compared across one — the same argument the
+            // `tokenizer` field carries for the per-row token counts.
+            relevanceModel.value = m;
             return m;
         })
         .catch((e) => {
@@ -514,7 +519,7 @@ function loadRelevanceModel() {
  */
 async function scoreRelevanceColumn(items, windowFor) {
     const model = await loadRelevanceModel();
-    if (!model) return;
+    if (!model || !windowFor) return;
 
     // Every entry of every book in the scan, which is what df is a statistic OF — not the activated
     // subset, whose population changes every turn and would move an entry's weight because its
@@ -940,10 +945,13 @@ async function retrieve(chat) {
     const ranked = fuseRetrieval(scores);
     const winnerKeys = new Set(ranked.map(x => x.key));
 
-    // /wa-debug's stage-1 table, rendered from the admission that just happened rather than a replay.
-    if (runState.verboseRun) {
-        reportVectorCandidates(ranked, targets, searchText);
-    }
+    // NO STAGE-1 TABLE. It printed the admitted ranking, the neighbour gaps and each entry's matched
+    // chunk, which was worth reading while stage 1 CHOSE something. It no longer does: admission is
+    // unconditional and the cosine ranking's order now decides nothing except which entries survive
+    // `admitCeiling`, which no measured book approaches (largest: 208 vectorized entries). So the table
+    // was one row per entry in the book, ranked by a quantity with no consequence — and the per-entry
+    // cosine it carried is in the stage-3/4 table beside the signals it is actually weighed against.
+    // `/wa-query` still renders it, where an explicit ranking of arbitrary text IS the answer.
 
     // EVERY admitted entry, not a surviving prefix. Stage 3 looks its vector score up from here, so
     // stashing only survivors would leave every entry stage 4 has yet to judge without the signal it was
@@ -1730,14 +1738,12 @@ async function rankActivated(args) {
     const scanWorlds = new Set(items.map(it => it.entry.world));
     ensureWorldConfigs(scanWorlds);
 
-    // THE SCAN WINDOW IS SHARED, and building it is gated on WHETHER ANYTHING WANTS IT rather than
-    // hoisted unconditionally — `scanInjects` is an await and `scanSources` a collection pass, so a
-    // scan with both consumers off must not start paying for a window nobody reads. Keyword scoring
-    // owns it today; the relevance column needs the SAME window, because that is what the model was
-    // fitted against (`eval/scene.mjs` `haystackFor` builds it with this builder and these inputs).
-    // A second window here would be a second definition of what WA searched.
+    // THE SCAN WINDOW IS SHARED AND UNCONDITIONAL. It used to be built only for keyword scoring; the
+    // relevance column needs the SAME window, because that is what the model was fitted against
+    // (`eval/scene.mjs` `haystackFor` builds it with this builder and these inputs), and a second
+    // window here would be a second definition of what WA searched.
     let windowFor = null;
-    if (settings().keywordScoring || settings().relevanceScoring) {
+    {
         // The stash from intercept IS core's transformed scan haystack — regex scripts
         // applied, file content and titles appended, reasoning merged — so WA matches the
         // text core matched. Raw context chat is the fallback only for a scan no WA entry
@@ -1852,9 +1858,11 @@ async function rankActivated(args) {
         }
     }
 
-    if (settings().relevanceScoring && windowFor) {
-        await scoreRelevanceColumn(items, windowFor);
-    }
+    // STAGE 4'S QUANTITY, COMPUTED EVERY SCAN. Not a setting: `E[credit]` is what stage 4 selects and
+    // orders on, so a switch would mean carrying two orderings for the dynamic block forever — and the
+    // fusion knobs it replaces there (`rrfK`, `lexicalWeight`, `keywordWeight`) are already retired from
+    // the panel. It measures and cuts nothing yet; that is a step in landing it, not an option.
+    await scoreRelevanceColumn(items, windowFor);
 
     fuseRanks(items);
 
@@ -2230,44 +2238,47 @@ function paramSnapshot() {
     const s = settings();
     // Scoped to the books attached to this chat — the same set the priority actually acts on.
     const attached = (scopedPriority() ?? []).map(x => x.cfg);
-    const nonDefaults = Object.keys(defaultSettings)
-        .filter(k => typeof s[k] !== 'object' && s[k] !== defaultSettings[k]);
-
-
-    // Keys are the real setting names so grouped values, `nonDefaults`, and the UI bindings all
-    // line up — makes a logged snapshot greppable straight back to the code. Derived rollups
-    // (`maxTokens`, `attached`, `presentationOrder` label) have no single backing setting.
+    // EVERY SETTING, NEVER A CURATED VIEW. This was a hand-maintained grouping plus a `nonDefaults`
+    // diff, and a hand-maintained allowlist silently omits whatever was added last — a newly added
+    // setting shipped missing from it, and `nonDefaults` could not cover for that, since it names a
+    // setting only when it DIFFERS from default, so an off run was indistinguishable from a capture
+    // taken before the setting existed. A complete dump cannot drift, and it makes the diff unnecessary
+    // rather than merely easier: the defaults are in the source next to the values.
+    //
+    // DECLARATION ORDER, not sorted — defaultSettings is already written in rough pipeline order, so
+    // that grouping comes free and alphabetising would throw it away.
+    //
+    // It includes `raterId` and `summaryPrompt`, so a snapshot pasted somewhere public carries them.
     const snap = {
-        // keywordWeight is logged even when null, because null is a real value here ("follow lexicalWeight")
-        // and its absence would read as an older capture rather than as a deliberate setting.
-        scoring: { rrfK: s.rrfK, lexicalWeight: s.lexicalWeight, keywordWeight: s.keywordWeight ?? null, weightByOrder: s.weightByOrder, bm25K1: s.bm25K1, bm25B: s.bm25B, repeatCurve: s.repeatCurve, repeatR: s.repeatR },
-        // The entity filter only runs on raw-message queries — a summary is already
-        // salience-selected — so in summary mode its params are inert and omitted.
-        matchText: {
-            queryMode: s.queryMode, messageDepth: s.messageDepth, matchWindow: s.matchWindow, wordBoundary: s.wordBoundary,
-            ...(s.queryMode === 'summary' ? {} : { entityFilter: s.entityFilter, properNounBoost: s.properNounBoost, stopwordDocFreq: s.stopwordDocFreq }),
+        settings: Object.fromEntries(Object.keys(defaultSettings).map(k => [k, s[k]])),
+        // The values with NO single backing setting, which is the only reason anything but the dump
+        // above survives here. `maxTokens` is a percentage resolved against a live context size,
+        // `tokenizer` is what the per-row `tokens` counts were produced by — without it those counts are
+        // unreadable, since a sample re-simulated after a model switch reports a budget that never
+        // existed — `insertionOrder` is a label over `presentationOrder`, and `attached` is scoped to
+        // the books this chat actually has.
+        derived: {
+            maxTokens: tokenBudgetLabel(),
+            tokenizer: getTokenizerModel(),
+            insertionOrder: presentationBaseLabel(s.presentationOrder),
+            attached,
+            // WHICH FIT the eCredit column came out of, present only when the column exists. Same
+            // argument as `tokenizer` right above it: a refit moves every value, so a capture that
+            // names no fit cannot be compared across one. `null` distinguishes a third state — the
+            // setting is on and the model file did not load — from the column being off entirely.
+            relevanceModel: relevanceModel.value
+                ? { tier: relevanceModel.value.tier, features: relevanceModel.value.features,
+                    cutoff: relevanceModel.value.cutoff, heldOutAuc: relevanceModel.value.heldOutAuc,
+                    fittedOn: relevanceModel.value.fittedOn }
+                : null,
+            // The profile NAME and endpoint behind `llmProfile`, which stores an id.
+            ...(s.queryMode === 'summary' ? { summaryProfile: (() => {
+                const profile = (extension_settings.connectionManager?.profiles ?? []).find(x => x.id === s.llmProfile);
+                return { name: profile ? profile.name : 'current API', endpoint: profile ? (profile['api-url'] || profile.api || '—') : '—' };
+            })() } : {}),
         },
-        // Acquisition: what vectra gives back — the DB-side similarity gate, mean-centering, and
-        // how the vectorized text is chunked. Paired with the WA-side selection block below.
-        vectors: { uncenteredGate: s.uncenteredGate || 0, meanCentered: s.meanCentered, chunkMode: s.chunkMode, chunkSize: s.chunkSize, minChunkSize: s.minChunkSize },
-        // Selection: the WA-side caps and the keyword scoring applied to what was acquired. No cliff
-        // here any more — stage 4 decides how many and how much, not whether (selection.mjs).
-        cutoff: {
-            maxVectorEntries: s.maxVectorEntries, keywordScoring: s.keywordScoring,
-        },
-        // `tokenizer` is what the per-row `tokens` counts were produced by. Without it those counts are
-        // unreadable — a sample re-simulated after a model switch would report a budget that never existed.
-        budget: { maxTotalEntries: s.maxTotalEntries || null, maxDynamicEntries: s.maxDynamicEntries || null, maxTokens: tokenBudgetLabel(), maxTokensIncludesExempt: s.maxTokensIncludesExempt, budgetSlackMode: s.budgetSlackMode, budgetSlackPercent: s.budgetSlackPercent || 0, tokenizer: getTokenizerModel() },
-        layout: { insertionOrder: presentationBaseLabel(s.presentationOrder), tiered: !!s.presentationTiered },
-        books: { worldPriorityMode: s.worldPriorityMode, attached },
     };
 
-    if (s.queryMode === 'summary') {
-        const profile = (extension_settings.connectionManager?.profiles ?? []).find(x => x.id === s.llmProfile);
-        snap.summary = { llmProfile: profile ? profile.name : 'current API', endpoint: profile ? (profile['api-url'] || profile.api || '—') : '—', llmTemperature: s.llmTemperature || 'preset', summaryLength: s.summaryLength };
-    }
-
-    snap.nonDefaults = nonDefaults;   // last — the flat exact-name diff list, after the grouped view
     return snap;
 }
 
@@ -2417,9 +2428,9 @@ async function reportLayout(verbose = false, countTokens = true) {
                 cosine: item.score !== undefined ? Number(item.score.toFixed(5)) : null,
                 text: item.textScore ? Number(item.textScore.toFixed(2)) : null,
                 keys: item.keywordScore ? Number(item.keywordScore.toFixed(2)) : null,
-                // The stage-4 relevance column, and NULL means nobody looked rather than nothing shared:
-                // `relevanceScoring` gates the whole computation, and a reference entry is never scored
-                // because the shipped fit is memory's. Recorded at full precision — this is the value a
+                // The stage-4 relevance column. NULL means the row was not scored rather than scored
+                // zero — a reference entry never is, because the shipped fit is memory's, and neither is
+                // any row when the model file failed to load. Recorded at full precision — this is the value a
                 // harness run is compared against to show the runtime and the fit agree, and rounding it
                 // to the display's 2 places would put the comparison inside the rounding.
                 properNouns: Number.isFinite(item.properNouns) ? item.properNouns : null,
@@ -3681,10 +3692,6 @@ const SETTINGS_HTML = `
                     </label>
                     <small class="opacity50p">Folds each entry's Order into the fused score as another rank, so higher-order entries rank higher — for books that use Order as priority. Order stays a tiebreak either way.</small>
 
-                    <label class="checkbox_label" for="wa_relevance_scoring">
-                        <input id="wa_relevance_scoring" type="checkbox"><span>Score relevance (measure only — nothing is cut)</span>
-                    </label>
-                    <small class="opacity50p">Computes each memory entry's predicted relevance from the fitted model and records it in <code>/wa-grade</code> captures. Nothing is dropped on it: the runtime's signals have to be shown to match the harness's before a cut placed on them means anything. Costs a per-book name index and a scan-window pass per generation.</small>
 
                 </div>
             </div>
@@ -3968,7 +3975,6 @@ export async function init() {
     // number binding would collapse it to 0 and silently switch the keys signal off.
     bind('#wa_keyword_weight', 'keywordWeight', 'number?');
     bind('#wa_weight_by_order', 'weightByOrder', 'checked');
-    bind('#wa_relevance_scoring', 'relevanceScoring', 'checked');
     bind('#wa_llm_profile', 'llmProfile', 'string');
     bind('#wa_llm_temp', 'llmTemperature', 'string');
     bind('#wa_uncentered_gate', 'uncenteredGate', 'number');
