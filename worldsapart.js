@@ -1972,14 +1972,12 @@ async function rankActivated(args) {
     //
     // Per tier, at the cutoff its own fit was chosen at. A row in no fitted tier, or one the model
     // could not score, is kept: that is an absent verdict, not a negative one.
-    // MEMORY ONLY. Reference entries are SCORED — the column orders them for the budget walk — and never
-    // cut. A reference entry is ranked only because a key fired, so activation already made the decision
-    // a relevance model would make, and the fit does not generalise to the books where that matters:
-    // **measured** at its own 0.17, the reference cut drops 35.3% of Foxbridge's relevant rows and 3 of
-    // its 10 grade-4s, against 1.0% on Sommers. Foxbridge is the corpus's only reference-ONLY book and
-    // contributes 21 of the fit's 647 rows; what it loses is `weave theory`, `mandala`, `scrying` —
-    // abstract world-mechanics entries carrying few names, which is what a hand-authored reference book
-    // is made of and what `properNouns` and a negative `density` both score down.
+    // MEMORY ONLY, because a key on a REFERENCE entry is the authorial decision. Reference rows are
+    // scored — the column orders them for the budget walk — and never cut: an author writing keys on a
+    // world-rules entry is declaring when it should be present, so every reference entry that fires is
+    // included and answers only to the budget cap. Measured, the fit agrees rather than deciding it: at
+    // its own 0.17 the cut drops 35.3% of Foxbridge's relevant rows and 3 of its 10 grade-4s against
+    // 1.0% on Sommers, Foxbridge being the only reference-ONLY book in the corpus.
     const cutoffs = relevanceModel.value ?? {};
     const { cut: relevanceCutRows } = selection.relevanceCut(results, {
         scoreOf: it => it.eCredit,

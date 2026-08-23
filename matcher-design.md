@@ -1299,16 +1299,20 @@ every item counts, which is the old behaviour and what an older client sends.
 The reference fit does not read the new column — it has no cosine feature — so nothing about it moves
 until it is refitted. That refit is what the measurement above argues for, and it is now possible.
 
-**REFERENCE IS SCORED AND NOT CUT.** The column orders reference rows for the budget walk; no threshold
-is applied to them. A reference entry is ranked only because a key fired, so activation already made the
-decision, and the fit does not generalise to the books where a cut would matter. **Measured** at the
-reference model's own peak (0.17): it drops 35.3% of Foxbridge's relevant rows and 3 of its 10 grade-4s,
-against 1.0% on Sommers — and Foxbridge is the corpus's only reference-ONLY book, contributing 21 of the
-fit's 647 rows. What it loses there is `weave theory`, `mandala`, `scrying`, `thread`, `energy`: abstract
-world-mechanics entries carrying few names, which is what a hand-authored reference book is made of and
-what `properNouns` and a negative `density` both score down. **Recall at that cutoff is 94.4%, not full**
-— the claim below that the tier reaches full recall anywhere under 0.20 was measured on the cosine-free
-fit and does not survive the refit.
+**REFERENCE IS SCORED AND NOT CUT, because a key on a reference entry IS the authorial decision.** The
+column orders reference rows for the budget walk; no threshold is applied to them. An author writing keys
+on a world-rules entry is declaring when it should be present, and WA has nothing to add to that — so
+every reference entry that fires is included, subject only to the user's budget cap. This is the tier-wide
+form of *triggered == relevant*, and it is why the tier needs no relevance model to be considered
+finished.
+
+**The fit corroborates it rather than carrying it.** At the reference model's own peak (0.17) the cut
+drops 35.3% of Foxbridge's relevant rows and 3 of its 10 grade-4s, against 1.0% on Sommers — and
+Foxbridge is the corpus's only reference-ONLY book, contributing 21 of the fit's 647 rows. What goes
+there is abstract world-mechanics material carrying few names, which is what a hand-authored reference
+book is made of and what `properNouns` and a negative `density` both score down. **Recall at that cutoff
+is 94.4%, not full**: the claim below that the tier reaches full recall anywhere under 0.20 was measured
+on the cosine-free fit and does not survive the refit.
 
 **The reference tier tolerates a weak fit, and its cutoff barely matters.** **Measured**: its AUC falls
 0.733 to 0.698 held out by book, against memory's 0.820 to 0.799 — 342 rows against 6051 — and it still
@@ -1509,7 +1513,16 @@ instances the books on disk hold.
    it. **Measured** across 43 books: 1 of 148 SmartKeys carries a per-term weight and it is a
    single-term key, so nothing on disk depends on the current reading and the change is free. Until it
    lands, a bare `::N` or `^N` term is a silently dead key of the same class as `~N` proximity.
-13. **A signal's within-scene SD varies by book, and the two books `keys` costs are its extremes.**
+13. **A firing-rate diagnostic for LOOSE reference keys.** Reference entries are never cut, so a key
+    that fires too easily costs budget on every turn it wins and nothing warns anybody. The tier's
+    correctness rests on the author's keys meaning what they say, which makes "how often does this key
+    actually fire" the diagnostic that supports the decision not to model the tier at all — the
+    author-facing counterpart to a relevance cut rather than a substitute for one. It belongs beside the
+    keyword audit, which already owns the vocabulary for a key that is too common; what it lacks is the
+    per-entry firing rate over a real chat. Not started, and not blocking: an over-firing reference entry
+    is a budget cost, where a wrongly cut one is missing material.
+
+14. **A signal's within-scene SD varies by book, and the two books `keys` costs are its extremes.**
     **Measured**, memory tier with keys live, solo AUC against mean within-scene SD of the column:
     Richard 0.744 at SD 0.249 and Ascensus 0.576 at 1.761, against 0.67-0.79 at SD 0.71-0.75 for the
     three books the column does not cost. Standardisation divides by the scene's own SD, so a
