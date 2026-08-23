@@ -1273,6 +1273,22 @@ region and pulls memory off its own peak.
 0.012 of its best across 0.10-0.20, reference within 0.03 across 0.05-0.25 — so a re-tune that moves a
 cutoff inside its band is measuring noise, and a reported third decimal is false precision.
 
+**The reference fit is `text`, `properNouns`, `density` at cutoff 0.17**
+(`extension/relevance-model-reference.json`). No `keys`, as on memory; no cosine, for the reason below.
+
+**COSINE IS ADMITTED FOR ALL OF A TIER'S ENTRIES OR FOR NONE.** Fitted on the subset that happens to
+carry one it is an ABSENCE INDICATOR, not a similarity: -0.281 (SE 0.119) at solo AUC 0.442, below
+chance, and it inverts on the vectorized entries where the number is real. **Measured**, reference
+tier, 647 rows on 84 scenes held out by book, with one computed for every entry: +0.683 (SE 0.122) at
+solo AUC 0.759, the tier's strongest signal — AUC 0.7417 -> 0.7712 and F2 0.7674 -> 0.7746 at a shared
+cutoff of 0.17, paired 25 scenes up against 9 with 32 tied, p 0.0090, delivering 6.4 entries against
+6.8 for the same 2.9 relevant.
+
+**What that costs is an ADMISSION rule, not a capability.** The collection admits
+`vectorized && !disable && content` — an author flag, not a tier property — so a reference entry marked
+vectorized already scores a cosine by the path a memory entry uses. Scoring all of them means admitting
+on content instead of on the flag, and re-embedding at that size.
+
 **The reference tier tolerates a weak fit, and its cutoff barely matters.** **Measured**: its AUC falls
 0.733 to 0.698 held out by book, against memory's 0.820 to 0.799 — 342 rows against 6051 — and it still
 reaches F2 0.806 at full recall anywhere below 0.20. Its calibration is unmeasurable at that n (ECE p

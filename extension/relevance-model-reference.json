@@ -1,0 +1,41 @@
+{
+ "tier": "reference",
+ "cutoff": 0.17,
+ "f2": 0.7673822576526588,
+ "target": "E[credit] = 0.5*P(>=2) + 0.5*min(P(>=3), P(>=2))",
+ "features": [
+  "text",
+  "properNouns",
+  "density"
+ ],
+ "properNounsMode": "idf",
+ "properNounsExtract": "entity",
+ "layout": [
+  "intercept",
+  "text.z",
+  "properNouns.z",
+  "density.z"
+ ],
+ "beta": {
+  "ge2": [
+   -0.21134942535102413,
+   0.5845329128041851,
+   0.3484750717062346,
+   -0.5889355777157692
+  ],
+  "ge3": [
+   -1.064731240318225,
+   0.5387949785194249,
+   0.3148487575972146,
+   -0.5805395536277252
+  ]
+ },
+ "aucAt": 3,
+ "auc": 0.7416561096395256,
+ "heldOutAuc": 0.6794310722100656,
+ "fittedOn": {
+  "scenes": 66,
+  "rows": 647,
+  "books": 5
+ }
+}

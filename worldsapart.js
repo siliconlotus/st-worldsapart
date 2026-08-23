@@ -478,20 +478,30 @@ function bookIndexes(world, entries, { names = false } = {}) {
 const relevanceModel = { promise: null, value: null };
 
 function loadRelevanceModel() {
-    relevanceModel.promise ??= fetch(new URL('./extension/relevance-model-memory.json', import.meta.url))
-        .then(r => (r.ok ? r.json() : Promise.reject(new Error(`HTTP ${r.status}`))))
-        .then((m) => {
-            console.log(`Worlds Apart: relevance model — ${m.tier} tier, ${m.features?.join(', ')}, cutoff ${m.cutoff}`);
-            // Kept resolved so paramSnapshot, which is synchronous, can name the fit a capture's
+    // ONE FILE PER TIER, because the tiers do not carry the same signals and do not agree on their
+    // sign. `density` fits +0.21 on memory and -0.58 on reference — an entry thick with names is a
+    // specific scene there and a roster here — so a shared coefficient would carry the wrong sign
+    // rather than merely being imprecise. Reference also drops `cosine` entirely: it is absent on 124
+    // of 135 of its entries, so a fitted slope reads "nobody computed one" as evidence and would
+    // invert on exactly the vectorized reference entries where the number is real.
+    relevanceModel.promise ??= Promise.all(['memory', 'reference'].map(tier =>
+        fetch(new URL(`./extension/relevance-model-${tier}.json`, import.meta.url))
+            .then(r => (r.ok ? r.json() : Promise.reject(new Error(`HTTP ${r.status}`))))
+            .then((m) => {
+                console.log(`Worlds Apart: relevance model — ${m.tier} tier, ${m.features?.join(', ')}, cutoff ${m.cutoff}`);
+                return [tier, m];
+            })
+            .catch((e) => {
+                console.warn(`Worlds Apart: no ${tier} relevance model, that tier's E[credit] will not be scored —`, e.message);
+                return [tier, null];
+            })))
+        .then((pairs) => {
+            // Kept resolved so paramSnapshot, which is synchronous, can name the fits a capture's
             // eCredit column came out of. A refit changes those numbers and a bundle that does not
             // record WHICH fit produced them cannot be compared across one — the same argument the
             // `tokenizer` field carries for the per-row token counts.
-            relevanceModel.value = m;
-            return m;
-        })
-        .catch((e) => {
-            console.warn('Worlds Apart: no relevance model, E[credit] will not be scored —', e.message);
-            return null;
+            relevanceModel.value = Object.fromEntries(pairs);
+            return relevanceModel.value;
         });
     return relevanceModel.promise;
 }
@@ -518,8 +528,8 @@ function loadRelevanceModel() {
  * would carry the wrong sign rather than merely being imprecise.
  */
 async function scoreRelevanceColumn(items, windowFor) {
-    const model = await loadRelevanceModel();
-    if (!model || !windowFor) return;
+    const models = await loadRelevanceModel();
+    if (!models || !windowFor) return;
 
     // Every entry of every book in the scan, which is what df is a statistic OF — not the activated
     // subset, whose population changes every turn and would move an entry's weight because its
@@ -533,8 +543,7 @@ async function scoreRelevanceColumn(items, windowFor) {
     const depth = Number(settings().messageDepth || world_info_depth);
     const windowNames = properNames(windowFor(depth, {}).join('\n'));
 
-    const scored = items.filter(it => isMemory(it.entry));
-    for (const item of scored) {
+    for (const item of items) {
         const book = bookIndexes(item.entry.world, byWorld.get(item.entry.world) ?? [], { names: true }).nameDf;
         // The entry's names come off the book walk that built df, so they are extracted once per book
         // rather than once per turn per entry.
@@ -543,26 +552,34 @@ async function scoreRelevanceColumn(items, windowFor) {
         item.density = properDensity(item.entry.content);
     }
 
-    // ONE SCENE, ONE STANDARDISATION. The columns are centred over the rows being scored together, which
-    // is what the coefficients are in units of — so this is a single call over the whole memory block and
-    // never a per-entry one.
-    const eCredit = scoreRelevance(model, scored.map(it => ({
-        cosine: Number.isFinite(it.score) ? it.score : 0,
-        text: Number(it.textScore) || 0,
-        keys: Number(it.keywordScore) || 0,
-        properNouns: Number(it.properNouns) || 0,
-        density: Number(it.density) || 0,
-    })));
-    scored.forEach((it, i) => { it.eCredit = eCredit[i]; });
+    // ONE SCENE, ONE STANDARDISATION — PER TIER. The columns are centred over the rows being scored
+    // together, which is what the coefficients are in units of, and each fit standardised over its OWN
+    // tier's rows. So memory rows are centred among memory rows and reference among reference; pooling
+    // them would score every row on a scale neither fit was built in.
+    for (const [tier, model] of Object.entries(models)) {
+        if (!model) continue;
+        const rows = items.filter(it => (isMemory(it.entry) ? 'memory' : 'reference') === tier);
+        if (!rows.length) continue;
+        const eCredit = scoreRelevance(model, rows.map(it => ({
+            cosine: Number.isFinite(it.score) ? it.score : 0,
+            text: Number(it.textScore) || 0,
+            keys: Number(it.keywordScore) || 0,
+            properNouns: Number(it.properNouns) || 0,
+            density: Number(it.density) || 0,
+        })));
+        rows.forEach((it, i) => { it.eCredit = eCredit[i]; it.eCreditTier = tier; });
+    }
 
     if (runState.verboseRun) {
-        console.log(`%cWorlds Apart · E[credit] over ${scored.length} memory entries (cutoff ${model.cutoff}, nothing cut)`, 'font-weight: bold');
+        const scored = items.filter(it => Number.isFinite(it.eCredit));
+        console.log(`%cWorlds Apart · E[credit] over ${scored.length} entries (nothing cut)`, 'font-weight: bold');
         console.table([...scored]
             .sort((a, b) => b.eCredit - a.eCredit)
             .map(it => ({
                 entry: it.entry.comment || it.entry.key?.[0] || it.entry.uid,
+                tier: it.eCreditTier,
                 eCredit: Number(it.eCredit.toFixed(4)),
-                clears: it.eCredit >= model.cutoff,
+                clears: it.eCredit >= models[it.eCreditTier].cutoff,
                 cosine: Number.isFinite(it.score) ? Number(it.score.toFixed(4)) : null,
                 text: Number((it.textScore ?? 0).toFixed(3)),
                 properNouns: Number(it.properNouns.toFixed(3)),
@@ -2266,11 +2283,10 @@ function paramSnapshot() {
             // argument as `tokenizer` right above it: a refit moves every value, so a capture that
             // names no fit cannot be compared across one. `null` distinguishes a third state — the
             // setting is on and the model file did not load — from the column being off entirely.
-            relevanceModel: relevanceModel.value
-                ? { tier: relevanceModel.value.tier, features: relevanceModel.value.features,
-                    cutoff: relevanceModel.value.cutoff, heldOutAuc: relevanceModel.value.heldOutAuc,
-                    fittedOn: relevanceModel.value.fittedOn }
-                : null,
+            relevanceModel: Object.fromEntries(Object.entries(relevanceModel.value ?? {})
+                .map(([tier, m]) => [tier, m
+                    ? { features: m.features, cutoff: m.cutoff, heldOutAuc: m.heldOutAuc, fittedOn: m.fittedOn }
+                    : null])),
             // The profile NAME and endpoint behind `llmProfile`, which stores an id.
             ...(s.queryMode === 'summary' ? { summaryProfile: (() => {
                 const profile = (extension_settings.connectionManager?.profiles ?? []).find(x => x.id === s.llmProfile);
