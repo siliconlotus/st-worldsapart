@@ -257,8 +257,9 @@ any lexical signal** — both live at stage 3.
 **3. Scoring** — `rankActivated`, on `WORLDINFO_SCAN_DONE`. The vector score is looked up from what
 retrieval stored; the TEXT score is BM25 over entry content, computed in the browser by
 `content-lexical.mjs` over every entry (a superset of the vectorized chunks stage 1 sees) and filtered by
-the entity filter's term weights; keyword score is computed over the scan window. `fuseRanks` produces
-the **layout order** — the quantity stage 4 cuts on, which every cap then takes a prefix of. It is not
+the entity filter's term weights; keyword score is computed over the scan window. Those signals plus
+`properNouns` and `density` feed the fitted per-tier model (`relevance.mjs` `scoreRelevance`), whose
+`E[credit]` is the **layout order** — the quantity stage 4 cuts on, which every cap then takes a prefix of. It is not
 the PROMPT order, which is a user setting defaulting to `entry.order` and is applied to whatever
 survived.
 
@@ -280,7 +281,7 @@ survivors; `rankActivated` is what deletes the rest from `activated`, since `sel
 and the map is core's.
 
 **THREE ORDERINGS, and only one is a ranking.** `fuseRetrieval` decides what is ACTIVATED; LAYOUT ORDER
-is the score the caps and budget take a prefix of; PROMPT ORDER is the user's sort over the survivors. **A change to `fuseRanks` can never surface an entry retrieval did not
+is the score the caps and budget take a prefix of; PROMPT ORDER is the user's sort over the survivors. **A change to the layout score can never surface an entry retrieval did not
 return** — so no keyword weight, tilt or fusion change is a recall lever, only a precision one. With
 stage 1 admitting everything, the retrieval ranking's ORDER now decides nothing except which entries
 survive `admitCeiling`, which no measured book approaches (largest: 208 vectorized entries).

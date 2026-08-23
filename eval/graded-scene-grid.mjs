@@ -280,13 +280,13 @@ const fmt = n => (n == null ? '·' : (+n).toFixed(3));
         return kept;
     };
 
-    const fuse = makeFuse(P);
+    const fuse = makeFuse({ scene, haystack: haystackFor(S, P) });
 
     if (VALIDATE) {
         const capAll = JSON.parse(readFileSync(VALIDATE, 'utf8')).filter(r => (r.block === undefined || r.block === 'dynamic') && !(Number(r.sticky) > 0));
         const cap = capAll.filter(r => !isExcluded(r.title));
         if (cap.length < capAll.length) console.log(`(skipping ${capAll.length - cap.length} out-of-scope row(s): ${capAll.filter(r => isExcluded(r.title)).map(r => r.title).join(', ')})`);
-        const mine = fuse(scoreAll(P.K1, P.B), P.LEXW);
+        const mine = fuse(scoreAll(P.K1, P.B));
         const find = title => { const gt = nrm(title); return mine.find(m => { const mt = new Set(nrm(m.title)); return gt.length && gt.every(t => mt.has(t)); }); };
         console.log('validation vs capture (dynamic) — cosine / text / keys, then ranks:');
         console.log('cap#  my#  | cosine(cap/mine)  text(cap/mine)  keys(cap/mine)  title');
@@ -350,8 +350,8 @@ const fmt = n => (n == null ? '·' : (+n).toFixed(3));
             const tw = P.entityFilter && P.queryMode !== 'summary' ? ranking.buildTermWeights(q, gaz, P.boost) : null;
             const v = await embed(q);
             const rows = scoreAll(DEF.k1, DEF.b, tw, v, q).map(r => ({ ...r, keywordScore: (e => keywordScore(e, st(e), DEF.k1))(byUid.get(Number(r.uid)) ?? { key: [] }) }));
-            const fused = fuse(layoutOf(rows), DEF.lexW);
-            const gVec = fuse(vectorOf(rows), DEF.lexW).map(r => gradeOf(r) ?? 0);
+            const fused = fuse(layoutOf(rows));
+            const gVec = fuse(vectorOf(rows)).map(r => gradeOf(r) ?? 0);
             const g = fused.map(r => gradeOf(r) ?? 0);   // unjudged occupies its rank and contributes nothing (makeGradeOf returns null)
             const hits = fused.map((r, i) => [gradeOf(r), i + 1]).filter(([gr]) => gr >= 3).map(([, i]) => i);
             const mean = hits.length ? hits.reduce((a, b) => a + b, 0) / hits.length : NaN;
@@ -396,11 +396,11 @@ const fmt = n => (n == null ? '·' : (+n).toFixed(3));
             // The named titles below are how you tell that case from a real pooling gap: if a missing entry
             // shows up in a live /wa-super-grade run, grade it; if no arm ever surfaces it, it is a phantom of
             // offline re-derivation and the honest ceiling for this cell is below 10/10.
-            const top = fuse(all, lexW).slice(0, 10);
+            const top = fuse(all).slice(0, 10);
             const unjudged = top.filter(r => !POOL.has(Number(r.uid)));
             const j10 = top.length - unjudged.length;
-            const g = fuse(layoutOf(rows), lexW).map(r => gradeOf(r) ?? 0);   // unjudged occupies its rank and contributes nothing (makeGradeOf returns null)
-            const gVec = fuse(vectorOf(rows), lexW).map(r => gradeOf(r) ?? 0);
+            const g = fuse(layoutOf(rows)).map(r => gradeOf(r) ?? 0);   // unjudged occupies its rank and contributes nothing (makeGradeOf returns null)
+            const gVec = fuse(vectorOf(rows)).map(r => gradeOf(r) ?? 0);
             const n10 = ndcg(g, 10), v10 = ndcg(gVec, 10), nR = ndcgAtR(g), vR = ndcgAtR(gVec);
             if (!best || nR > best.nR || (Number.isNaN(best.nR) && n10 > best.n10)) best = { k1, b, lexW, nR, n10, j10, of: top.length, unjudged: unjudged.map(r => `${r.title} (#${top.indexOf(r) + 1})`) };
             if (!worst || j10 - top.length < worst.j10 - worst.of) worst = { k1, b, lexW, j10, of: top.length };
@@ -426,7 +426,7 @@ const fmt = n => (n == null ? '·' : (+n).toFixed(3));
         const all = scoreAll(DEF.k1, DEF.b, tw);
         // Coverage before the pool filter, same reasoning as the grid above. These arms need it most: turning
         // the entity filter off is exactly the kind of population change a defaults-shaped pool never saw.
-        const top = fuse(all, DEF.lexW).slice(0, 10);
+        const top = fuse(all).slice(0, 10);
         const j10 = top.filter(r => POOL.has(Number(r.uid))).length;
         const rows = fuse(layoutOf(activated(all)), DEF.lexW);
         const gVec = fuse(vectorOf(activated(all)), DEF.lexW).map(r => gradeOf(r) ?? 0);

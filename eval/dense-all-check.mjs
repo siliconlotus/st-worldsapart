@@ -19,7 +19,6 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { loadScene, makeCandidateSet, sceneParams } from './scene.mjs';
 import { eq } from './metrics.mjs';
-import { fuseRanks } from '../extension/ranking.mjs';
 
 const DIR = mkdtempSync(join(tmpdir(), 'wa-dense-'));
 const vec = { 1: [1, 0, 0], 2: [0.6, 0.8, 0], 3: [0, 0, 1], 5: [0.9, 0.1, 0.2] };
@@ -94,17 +93,11 @@ eq(rowsOf(ALL, { denseAllEntries: true, denseColumn: 'cos' }).byUid.get(2).spars
 const all3 = rowsOf(ALL, { denseAllEntries: true, denseColumn: 'all' }).byUid;
 eq(Number.isFinite(all3.get(1).sparseScore) && Number.isFinite(all3.get(2).sparseScore), true, "'all' scores both classes");
 
-// --- a signed score in the fourth column ------------------------------------------------------------
-// A centered cosine's zero is the corpus mean, not absence, so a below-average entry must still be
-// RANKED — it is eligible either way, and excluding it charges the denominator for a rank it cannot
-// earn. Asserted through fuseRanks rather than by inspecting the column, since the filter is what broke.
-const negRow = { key: 9, keywordScore: 5, textScore: 0, sparseScore: -0.3, vectorEligible: false, textEligible: false, keysEligible: true };
-const posRow = { key: 8, keywordScore: 5, textScore: 0, sparseScore: 0.4, vectorEligible: false, textEligible: false, keysEligible: true };
-const pair = [posRow, negRow].map(r => ({ ...r }));
-fuseRanks(pair, { rrfK: 20, weightByOrder: false, lexicalWeight: 1.5, keywordWeight: 1.5, sparseWeight: 0.5 });
-eq(Number.isFinite(pair[1].sparseRank), true, 'a negative dense score is ranked, not dropped from the column');
-eq(pair[0].sparseRank < pair[1].sparseRank, true, '...and still ranks below a positive one');
-eq(pair[0].fused > pair[1].fused, true, '...so the better cosine wins the pair');
+// --- the fourth-column ranking assertions are RETIRED, with fuseRanks ------------------------------
+// They pinned that a negative centered cosine still entered RRF's sparse column rather than being
+// dropped from it. There is no such column: E[credit] reads the signals directly, and a below-average
+// cosine is simply a low value of a feature the model already weights. The column form above still
+// matters — it is what puts the cosine on the row at all — so only the ranking half goes.
 
 // --- pointed at the wrong collection ---------------------------------------------------------------
 let threw = false;

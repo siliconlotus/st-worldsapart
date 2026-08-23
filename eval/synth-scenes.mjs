@@ -409,7 +409,7 @@ for (const idx of picks) {
         );
         // EVERY ACTIVATED ROW, ordered but not truncated — a pool that is the whole population is one no
         // later re-ranking can orphan a grade out of.
-        const ranked = makeFuse(P)(rows, P.LEXW);
+        const ranked = makeFuse({ scene, haystack: haystackFor(S, P) })(rows);
         const out = ranked.map((r, i) => {
             const e = r.entry;
             const row = {

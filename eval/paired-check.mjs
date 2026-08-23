@@ -4,7 +4,6 @@
 import { eq, eqNear, signTest, gradeCredit, fbeta, RECALL_WEIGHT } from './metrics.mjs';
 import { sceneParams, ndcg, dcg, nrm, wiTitle, makeGradeOf, makeKeywordScore, scoreScene, tierRecall, bookFingerprint } from './scene.mjs';
 import { rowKey } from '../extension/grading.mjs';
-import { fuseRanks } from '../extension/ranking.mjs';
 
 // --- exact two-sided sign-test p-values. These are the numbers that decide whether a screening hit is
 // reportable, so they are asserted against hand-computed binomials rather than trusted.
@@ -179,87 +178,11 @@ eq(spearman([0, 0, 1, 2], [0, 1, 2, 3]) < 1, true, 'ties on one side cap the coe
 eq(spearman([0, 0, 1, 2], [0, 1, 2, 3]) > 0.8, true, '...but still reports a strong positive');
 eq(Math.abs(spearman([1, 2, 3, 4], [2, 4, 6, 8]) - 1), 0, 'monotone rescaling is still +1');
 
-// --- keywordWeight: separable from lexicalWeight, mirroring it when unset ---
-// The split exists because the two signals disagree about which books they are good on: measured optima
-// were (text 0.5, keys 3), (1.5, 0) and (1.5, 1) across three scenes, and one coupled knob can reach none
-// of them. Mirroring on null is what keeps an upgrade byte-identical for anyone running LEXW != 1.
-const mkRows = () => [
-    { key: 1, score: 0.9, textScore: 10, keywordScore: 1 },
-    { key: 2, score: 0.1, textScore: 1, keywordScore: 50 },
-];
-const fusedWith = opts => { const r = mkRows(); fuseRanks(r, { rrfK: 20, weightByOrder: false, ...opts }); return r.map(x => x.fused); };
-eq(JSON.stringify(fusedWith({ lexicalWeight: 1.5 })), JSON.stringify(fusedWith({ lexicalWeight: 1.5, keywordWeight: undefined })), 'undefined keywordWeight mirrors lexicalWeight');
-eq(JSON.stringify(fusedWith({ lexicalWeight: 1.5 })), JSON.stringify(fusedWith({ lexicalWeight: 1.5, keywordWeight: null })), 'null keywordWeight mirrors lexicalWeight');
-eq(JSON.stringify(fusedWith({ lexicalWeight: 1.5 })) === JSON.stringify(fusedWith({ lexicalWeight: 1.5, keywordWeight: 3 })), false, 'an explicit keywordWeight actually changes the fusion');
-// 0 must mean "ignore keys", not "fall back to lexicalWeight" — (1.5, 0) was one of the three optima, so
-// the nullish coalesce has to distinguish 0 from unset.
-const keysOff = fusedWith({ lexicalWeight: 1.5, keywordWeight: 0 });
-const keysOn = fusedWith({ lexicalWeight: 1.5, keywordWeight: 1.5 });
-eq(keysOff[1] < keysOn[1], true, 'keywordWeight 0 suppresses the keys contribution rather than mirroring');
-// PIN THE ARITHMETIC, not just the ordering. Row 2 overtakes row 1 at keywordWeight 3 by a thin margin,
-// and any change to the fusion formula would flip it silently with the failure reading as "keywordWeight
-// stopped working". So assert the whole expression: keyW multiplies that row's keyword-rank term in the
-// numerator AND joins its eligibility denominator, which is why it no longer scales the term linearly.
-// Both rows here declare no eligibility, so all three signals are present and all three are eligible.
-const heavy = fusedWith({ lexicalWeight: 1.5, keywordWeight: 3 });
-const near = (a, b, why) => eq(Math.abs(a - b) < 1e-12, true, why);
-const expect = (vr, tr, kr, W) => (1 / (20 + vr) + 1.5 / (20 + tr) + W / (20 + kr)) / (1 + 1.5 + W);
-near(heavy[0], expect(1, 1, 2, 3), 'row 1: vector 1, text 1, keyword 2, normalised by 1+LEXW+keyW');
-near(heavy[1], expect(2, 2, 1, 3), 'row 2: vector 2, text 2, keyword 1, same denominator');
-near(keysOff[0], expect(1, 1, 2, 0), '...and at keywordWeight 0 the keys term leaves both sides');
-
-// ELIGIBILITY NORMALISATION — the point of the divisor. An entry is not measured against a signal it could
-// never earn: top of what it was eligible for ties top of all three. Before this, a keys-only ceiling was
-// keyW/(k+1) against (1+LEXW+keyW)/(k+1) — 37% at shipped weights, unreachable by any key.
-//
-// TEXT ELIGIBILITY IS NO LONGER "IS IT VECTORIZED". content-lexical.mjs indexes every entry's content, so a
-// keyword entry with a body can earn a text rank and is divided by lexicalWeight like anything else. The
-// signal-starved case that remains is an entry with NO content — keys and nothing to index.
-const fuse1 = rows => { fuseRanks(rows, { rrfK: 20, weightByOrder: false, lexicalWeight: 1.5, keywordWeight: 1.5 }); return rows[0].fused; };
-const keywordOnlyTop = fuse1([{ key: 1, keywordScore: 5, textScore: 0, vectorEligible: false, textEligible: false, keysEligible: true }]);
-const everySignalTop = fuse1([{ key: 1, score: 0.9, textScore: 9, keywordScore: 5, vectorEligible: true, keysEligible: true }]);
-near(everySignalTop, 1 / 21, 'an entry topping all three signals scores 1/(k+1)');
-near(keywordOnlyTop / 1.25, everySignalTop, '...and normalisation alone puts a keyword-only entry level with it (tilt asserted below)');
-
-// ELIGIBILITY, NOT PRESENCE. A vectorized entry that failed to rank on cosine or text is still divided by
-// those weights — it competed and lost. Normalising by signals PRESENT would instead reward it for the
-// miss, handing the weakest vector entry the same ceiling as the strongest.
-const missedItsChance = fuse1([{ key: 1, score: undefined, textScore: 0, keywordScore: 5, vectorEligible: true, keysEligible: true }]);
-near(missedItsChance, (1.5 / 21) / 4, 'a vectorized entry with only a keyword rank still divides by 1+LEXW+keyW');
-eq(missedItsChance < keywordOnlyTop, true, '...so it ranks below a keyword-only entry that earned the same rank');
-
-// THE TIE-BREAK. All else equal a keyword-only entry outranks a vectorized one; a STRONG vector entry still
-// beats a MID keyword one. Both halves are asserted because only the pair pins the tilt's size — a large
-// enough multiplier satisfies the first and breaks the second, which is the failure worth catching.
-near(keywordOnlyTop, 1.25 / 21, 'a keyword-only entry takes the tilt');
-// Injectable, because anything that hands a keyword-only entry a cosine takes the tilt away with it
-// (scene.mjs denseAllEntries) and the two halves have to be separable to be readable.
-const untilted = rows => { fuseRanks(rows, { rrfK: 20, weightByOrder: false, lexicalWeight: 1.5, keywordWeight: 1.5, keywordOnlyTilt: 1 }); return rows[0].fused; };
-near(untilted([{ key: 1, keywordScore: 5, textScore: 0, vectorEligible: false, textEligible: false, keysEligible: true }]), 1 / 21, 'an injected tilt of 1 removes it, leaving normalisation alone');
-
-// A NULL SCORE IS NOT A COSINE. `null !== undefined` let a caller marking "no cosine" with null enter the
-// vector rank list at effectively 0 — numerator credit with no denominator term, since vectorEligible was
-// false. Measured at 0.0122 mean nDCG@10 across 66 scenes, larger than the effect under test that run.
-const nullScored = fuse1([{ key: 1, score: null, keywordScore: 5, textScore: 0, vectorEligible: false, textEligible: false, keysEligible: true }]);
-near(nullScored, keywordOnlyTop, 'score:null fuses identically to score:undefined — no vector rank, tilt intact');
-
-// THE SECOND SIGNAL, which is what content-lexical buys a keyword entry. Eligible for text as well as keys,
-// it reaches the ceiling only by topping BOTH — winning on keys alone no longer ties an entry that won on
-// everything. That is the point: one noisy signal used to decide where a keyword entry landed.
-const bodiedBoth = fuse1([{ key: 1, keywordScore: 5, textScore: 9, vectorEligible: false, textEligible: true, keysEligible: true }]);
-const bodiedKeysOnly = fuse1([{ key: 1, keywordScore: 5, textScore: 0, vectorEligible: false, textEligible: true, keysEligible: true }]);
-near(bodiedBoth, 1.25 / 21, 'a keyword entry topping keys AND text reaches the same ceiling');
-eq(bodiedKeysOnly < bodiedBoth, true, '...and one topping keys alone does not, being divided by lexicalWeight too');
-eq(keywordOnlyTop > everySignalTop, true, 'all else equal, the keyword-only entry wins');
-const kwAtRank = r => { const rows = [{ key: 0, keywordScore: 100, vectorEligible: false, keysEligible: true }]; for (let i = 1; i < r; i++) rows.unshift({ key: -i, keywordScore: 100 + i, vectorEligible: false, keysEligible: true }); fuseRanks(rows, { rrfK: 20, weightByOrder: false, lexicalWeight: 1.5, keywordWeight: 1.5 }); return rows.find(x => x.key === 0).fused; };
-eq(kwAtRank(6) > everySignalTop, true, 'a keyword entry at rank 6 still clears the best vector entry');
-eq(kwAtRank(7) < everySignalTop, true, '...and at rank 7 it does not: a strong vector entry beats a mid keyword one');
-// Which is what lets it reorder: the same arithmetic, read as a ranking.
-eq(heavy[1] > heavy[0], true, 'a high keywordWeight can promote a keys-dominant entry');
-eq(keysOff[1] < keysOff[0], true, '...and suppressing keys demotes it again');
-// NaN must not reach the fusion: it is neither null nor undefined, so a `??` would pass it through and
-// every fused score becomes NaN — no throw, just a ranking silently left in input order.
-eq(JSON.stringify(fusedWith({ lexicalWeight: 1.5 })), JSON.stringify(fusedWith({ lexicalWeight: 1.5, keywordWeight: NaN })), 'a NaN keywordWeight falls back to lexicalWeight rather than NaN-ing every score');
+// --- the fusion assertions are RETIRED, with their subject ---
+// Everything here pinned RRF: how lexicalWeight and keywordWeight combined, the keyword-only tilt, what
+// rank a keyword entry could clear a vector entry from. E[credit] replaced all of it — the model reads
+// the signals directly and the layout is ordered by the same number the cut thresholds — so these
+// assertions had nothing left to be about. What replaces them is relevance-model-check.
 
 // --- SET METRICS. The half-credit rule and the exchange rate are two separate judgements (metrics.mjs), and
 // the failure worth catching is the one that inverts an incentive rather than one that throws.

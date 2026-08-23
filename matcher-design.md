@@ -598,7 +598,7 @@ on restores the author's own operator.
 ## Stage 3: Scoring
 
 `rankActivated`, on `WORLDINFO_SCAN_DONE`. Vector and chunk-text scores are looked up from what
-retrieval stored, keyword score is computed over the scan window, and `fuseRanks` produces the
+retrieval stored, keyword score is computed over the scan window, and the fitted model produces the
 **layout order** — the quantity stage 4 cuts on, which every cap then takes a prefix of.
 
 **A key's score is the sum over the things it is about.** `AND` joins distinct things and their scores
@@ -654,7 +654,7 @@ to say it was meant.
 LAYOUT ORDER is by predicted score: `applyBudget` walks it, so `maxVectorEntries`, the per-book cap and
 the token budget each take a PREFIX and drop the tail. PROMPT ORDER is what the surviving set is
 sequenced by in the prompt — a user setting, defaulting to `entry.order`, and downstream of every cut.
-The LAYOUT is the set that comes out. `F2@layout` scores that set and reads no order at all. **A change to `fuseRanks` can never surface an entry retrieval did not
+The LAYOUT is the set that comes out. `F2@layout` scores that set and reads no order at all. **A change to the layout score can never surface an entry retrieval did not
 return** — so no keyword weight, tilt or fusion change is a recall lever, only a precision one.
 
 **`scoreVectorKeys` is stage 3 and does not reopen stage 2.** Keys re-rank vector entries; they never

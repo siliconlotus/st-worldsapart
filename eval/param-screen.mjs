@@ -66,8 +66,6 @@ const ARMS = {
     // the other is a silent no-op. Check the printed baseline before reading a flat result as a finding.
     // Only means anything on a book whose keys have been curated — on an uncurated one it measures the
     // generator, not the hypothesis.
-    'scoreVectorKeys=on': { scoreVectorKeys: true },
-    'scoreVectorKeys=off': { scoreVectorKeys: false },
     // THESE NO LONGER MOVE THE POPULATION. Measured at the current architecture, 70 scenes: every arm below
     // returns a BYTE-IDENTICAL candidate set — 10103 vector rows, 353 keyword rows, 670 of 672 retrievable
     // relevant — and only the query-term count differs (6130 shipped, 9839 keys-live). The old figure here
@@ -151,8 +149,6 @@ const ARMS = {
     // 0.75-3, 70 scenes, unimodal on both metrics, joint plateau [1.25, 1.3]). These two are TRIPWIRES,
     // one per cliff edge: tilt=1 must read ~-0.02 F@R and tilt=1.5 ~-0.02 nDCG, and a flat cell means the
     // fusion or the population changed shape and the ladder wants re-running, not that the tilt is free.
-    'tilt=1': { keywordTilt: 1 },
-    'tilt=1.5': { keywordTilt: 1.5 },
 
     // Mean-centering off: rank on RAW cosine. The contrast is end-to-end — it moves the retrieval ranking,
     // the top-K, the admission gate and the fused layout order together, which is what makes it different

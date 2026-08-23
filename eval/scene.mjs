@@ -11,7 +11,7 @@
 // Nothing here parses argv or prints a report — callers own their own CLI and output. Nothing here reads a
 // live lorebook either: entries come from the sample's embedded copies, which is what makes a graded scene
 // re-runnable after the books have been edited.
-import { readFileSync, existsSync } from 'node:fs';
+import fs, { readFileSync, existsSync } from 'node:fs';
 import { dirname, resolve as resolvePath } from 'node:path';
 import { scoreCollection, poolEntries, selectTopK, admitCeiling } from '../plugin/scoring.mjs';
 import { corpusMean, centeredCosineScores } from '../plugin/vector.mjs';
@@ -281,10 +281,6 @@ export const sceneParams = (S, overrides = {}) => ({
     // KEYW null mirrors LEXW, exactly as the extension does — so a sample captured before the split scores
     // identically, and an arm that sets KEYW is testing the split rather than a silent default change.
     K: 20, K1: 2, B: 0.75, LEXW: 1.5, KEYW: null, boost: 3, stopwordDf: 0.25,
-    // The keyword-only tie-break (ranking.mjs KEYWORD_ONLY_TILT). Sweepable because denseAllEntries removes
-    // it as a side effect — an entry with a cosine is not keyword-only — so its own cost has to be
-    // measurable separately or that arm reports one number for two changes.
-    keywordTilt: ranking.KEYWORD_ONLY_TILT,
     caseSensitive: false, wholeWords: false, includeNames: true,
     // How the haystack is SEGMENTED, which decides what `scan` means to countKey. Captured in `params`
     // (worldsapart.js captureParams), so a document that records it overrides this; 'scan' is what
@@ -549,7 +545,7 @@ export function makeGradeOf(grades, isExcluded) {
 // and the fit would end up scoring different populations.
 // Imported AND re-exported: a bare `export ... from` forwards the name without binding it in this
 // module, and scene.mjs calls isMemory itself (tierRecall, the STMB_start audit).
-import { isMemory } from '../extension/relevance.mjs';
+import { isMemory, buildNameDf, properNames, properShared, properDensity, scoreRelevance } from '../extension/relevance.mjs';
 export { isMemory };
 export const isReference = e => !isMemory(e);
 export const isDurableEntry = e => Boolean(e?.constant);
@@ -715,14 +711,54 @@ export function makeCandidateSet({ loaded, byUid, entries, params: P, chunkCfg, 
     };
 }
 
-/** Fusion via the SHARED ranking.fuseRanks (the layout ranking, not the retrieval one). Keys on item.key,
- *  so uid is aliased in. Mutates the rows it is handed and returns a sorted copy. */
-export const makeFuse = P => (rows, lexW) => {
-    rows.forEach(r => { r.key = r.uid; });
-    // fuseRanks fuses every signal an entry is eligible for. A bundle captured under the old modes carries
-    // a retrievalMode in `params`; it is read and ignored, like `threshold`.
-    ranking.fuseRanks(rows, { rrfK: P.K, weightByOrder: false, lexicalWeight: lexW, keywordWeight: P.KEYW, keywordOnlyTilt: P.keywordTilt, sparseWeight: P.denseColumn ? P.denseWeight : 0 });
-    return [...rows].sort((a, b) => b.fused - a.fused);
+/** The fitted models, read once. `extension/` is the shipped location; the harness reads the same files
+ *  the runtime fetches, so a refit reaches both without a second copy. */
+const MODELS = (() => {
+    const out = {};
+    for (const tier of ['memory', 'reference']) {
+        try { out[tier] = JSON.parse(fs.readFileSync(new URL(`../extension/relevance-model-${tier}.json`, import.meta.url), 'utf8')); }
+        catch { out[tier] = null; }
+    }
+    return out;
+})();
+
+/**
+ * The LAYOUT ORDER: rows sorted by predicted relevance, the quantity stage 4 selects on.
+ *
+ * NOT A FUSION. RRF is gone from the product — E[credit] reads the signals directly and orders the
+ * dynamic block by the same number the cut thresholds, which is what makes every cap below it a prefix.
+ * A harness ordering rows any other way would be scoring a pipeline that no longer exists.
+ *
+ * THE TWO EXTRA SIGNALS ARE COMPUTED HERE, through relevance.mjs — the same functions the runtime calls,
+ * never a copy. df is per book with the ENTRY as the document and disabled entries included; the window
+ * names come from a plain entry's haystack, because proper-noun overlap is a property of the SCENE.
+ *
+ * PER TIER, each standardised among its own rows, as each fit was built.
+ */
+export const makeFuse = ({ scene, haystack }) => {
+    const df = buildNameDf(scene.entries ?? []);
+    const windowNames = properNames(haystack({}).join('\n'));
+    return (rows) => {
+        for (const r of rows) {
+            const names = df.names.get(entryKey(r.entry)) ?? properNames(r.entry?.content);
+            r.properNouns = properShared(names, windowNames, df);
+            r.density = properDensity(r.entry?.content);
+        }
+        for (const [tier, model] of Object.entries(MODELS)) {
+            if (!model) continue;
+            const mine = rows.filter(r => (isMemory(r.entry) ? 'memory' : 'reference') === tier);
+            if (!mine.length) continue;
+            const e = scoreRelevance(model, mine.map(r => ({
+                cosine: Number.isFinite(r.score) ? r.score : 0,
+                text: Number(r.textScore) || 0,
+                keys: Number(r.keywordScore) || 0,
+                properNouns: Number(r.properNouns) || 0,
+                density: Number(r.density) || 0,
+            })));
+            mine.forEach((r, i) => { r.eCredit = e[i]; r.cutoff = model.cutoff; });
+        }
+        return [...rows].sort((a, b) => (b.eCredit ?? -1) - (a.eCredit ?? -1));
+    };
 };
 
 /**
@@ -755,7 +791,7 @@ export async function scoreScene({ sample: S, overrides = {}, k = 10, vectors, m
     }
     const scene = preloaded ?? loadScene(S, { indexFile: indexPath(S, { vectors, model, index }), params: P });
     const scoreAll = makeCandidateSet({ ...scene, params: P, topK });
-    const fuse = makeFuse(P);
+    const fuse = makeFuse({ scene, haystack: haystackFor(S, P) });
     const gradeOf = makeGradeOf(S.entries, scene.isExcluded);
 
     const query = S.query;
@@ -788,7 +824,7 @@ export async function scoreScene({ sample: S, overrides = {}, k = 10, vectors, m
     // block beside the retrieved ones.
     const rankable = all.filter(r => !r.entry?.constant);
 
-    const top = fuse(rankable, P.LEXW).slice(0, k);
+    const top = fuse(rankable).slice(0, k);
     const unjudged = top.filter(r => !scene.POOL.has(Number(r.uid)));
     // Read the DEPLOYED slice's grades before the pooled re-fuse below mutates shared rows.
     const topGrades = top.map(r => gradeOf(r) ?? 0);
@@ -798,7 +834,7 @@ export async function scoreScene({ sample: S, overrides = {}, k = 10, vectors, m
     // ranked the reference tier, and a reference-only book reported `judged 0/0` beside a healthy nDCG.
     // `?? 0` is the standard partial-label rule: an unjudged row occupies its rank and contributes
     // nothing. Explicit here because gradeOf now returns null for it — see makeGradeOf.
-    const g = fuse(rankable.filter(r => scene.POOL.has(Number(r.uid))), P.LEXW).map(r => gradeOf(r) ?? 0);
+    const g = fuse(rankable.filter(r => scene.POOL.has(Number(r.uid)))).map(r => gradeOf(r) ?? 0);
 
     // SET METRICS, on the ASYMMETRIC bars: recall counts only grade >= 3 (did the must-deliver material
     // arrive), while precision credits a 3 or 4 in full and a 2 at half (metrics.mjs gradeCredit). Both read
@@ -834,7 +870,7 @@ export async function scoreScene({ sample: S, overrides = {}, k = 10, vectors, m
         const rc = relevant ? gr.filter(x => x >= 3).length / relevant : 0;
         return { precision: p, recall: rc, f: fbeta(p, rc, RECALL_WEIGHT), n: rows.length };
     };
-    const ranked = fuse(rankable, P.LEXW);
+    const ranked = fuse(rankable);
     const atR = scoreWindow(ranked.slice(0, relevant));
 
     return {
