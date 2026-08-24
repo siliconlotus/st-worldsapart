@@ -795,12 +795,28 @@ async function scoreEntriesUnsafe(searchText) {
         synced.owners.forEach((v, k) => owners.set(`${synced.collectionId}${US}${k}`, v));
     }
 
-    // THE CENTROID IS THE ADMITTED CORPUS, named per collection. Widening what is stored must not widen
-    // what mean-centering subtracts: the mean carries most of an embedding's mass, so moving it moves
-    // every cosine — including the memory tier's, whose fitted coefficient was measured against this one.
+    // THE CENTROID IS THE MEMORY TIER, named per collection. Widening what is STORED must not widen what
+    // mean-centering subtracts — the mean carries most of an embedding's mass — so the population is named
+    // here rather than inherited from whatever the collection happens to hold.
+    //
+    // MEMORY, NOT `vectorized`. Centering removes a corpus's shared direction, which only means something
+    // over one REGISTER: memory entries are narrative summaries and reference entries are encyclopedic, and
+    // a blend of the two fully removes neither, leaving each tilted toward the other. `vectorized` is a
+    // retrievability flag, so it selected a register-mixed population for reasons unrelated to centering —
+    // it was the pre-backfill comparison set, frozen, from before scoreEntriesUnsafe scored every entry.
+    // Reading the tier makes this consistent with every other per-tier thing downstream (relevance.mjs's
+    // two fits, its within-tier standardisation, stage 4's per-tier cutoff).
+    //
+    // CHOSEN ON CONSISTENCY, MEASURED FLAT — the two populations produce near-identical means, so this is
+    // not a performance change and should not be reported as one. Measured over 104 graded scenes on 4
+    // lineages, paired: -0.0003 n@10 and -0.0016 F2, neither significant. The centroids themselves sit at
+    // cosine 0.99873-1.00000 of each other across 6 books (eval/scene.mjs centroidPopulation runs the
+    // contrast; 'vectorized' restores this line's old behaviour). That closeness is also why the memory
+    // tier's fitted cosine coefficient needs no refit: 0.002 of centroid movement is far below what it
+    // could read.
     const centroidUids = {};
     for (const [world, entries] of Object.entries(byWorld)) {
-        centroidUids[`wa_${getStringHash(world)}`] = entries.filter(e => e.vectorized).map(e => Number(e.uid));
+        centroidUids[`wa_${getStringHash(world)}`] = entries.filter(isMemory).map(e => Number(e.uid));
     }
 
     const results = await queryCollections({

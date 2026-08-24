@@ -261,6 +261,17 @@ eq(Object.keys(booked.books.W).length, 2, 'a post-dating entry leaves the BOOK, 
 eq(booked.books.W['2'], undefined, '...and it is the post-dating uid that goes');
 eq(Object.keys(dropUnavailable(mkSample(500)).books.W).length, 3, 'nothing leaves the book when the scene is past every range');
 eq(Object.keys(dropUnavailable(mkSample(null)).books.W).length, 3, 'no scene index -> the book is untouched');
+// THE PRISTINE COPY, which is what reindex.mjs ensureIndex builds a collection from. Without it the index
+// carries one scene's message cutoff and every other scene of that book reads the shortfall as its own
+// collection — silently, because a smaller book scores fine.
+eq(Object.keys(booked.pristineBooks.W).length, 3, 'the post-dating entry survives in pristineBooks');
+eq(booked.pristineBooks.W['2'].uid, 2, '...as the whole entry, not a marker');
+eq(booked.books.W['2'], undefined, '...while the filtered view still drops it');
+// Stashed BEFORE the first delete and never re-taken, or the second pass would overwrite the pristine copy
+// with the already-stripped one and the collection would shrink to the cutoff after all.
+const stashed = mkSample(100);
+dropUnavailable(stashed); dropUnavailable(stashed);
+eq(Object.keys(stashed.pristineBooks.W).length, 3, 'a second pass does not overwrite the stash with the filtered book');
 // Idempotent, because a sweep calls loadScene repeatedly on the SAME sample object and the filter mutates
 // it. Without the guard skip, pass two compares the stripped book against the pristine fingerprint and
 // throws on a bundle nobody edited — measured: relevance-regress died on fold 1 of a gazetteerSource sweep.

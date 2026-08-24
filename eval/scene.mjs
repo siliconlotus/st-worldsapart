@@ -71,6 +71,13 @@ export const dropUnavailable = (S, label = "sample") => {
     const keep = list => (list ?? []).filter(r => (future(r) ? (cut++, false) : true));
     S.entries = keep(S.entries);
     S.candidates = keep(S.candidates);
+    // THE PRISTINE BOOKS SURVIVE THE FILTER, because a COLLECTION is not scene-scoped and the index cache
+    // is keyed as though it were not (reindex.mjs cachePath: book + model + chunk settings). Building from
+    // the stripped book bakes ONE scene's message cutoff into a file every other scene of that book then
+    // reads — silently, since a smaller collection scores fine. Measured on Time Whore: an index built
+    // inside a param-screen run held 207 of the book's 243 entries, and the 36 missing ones were whatever
+    // post-dated the scene that happened to build it first.
+    S.pristineBooks ??= structuredClone(S.books ?? {});
     for (const [book, bk] of Object.entries(S.books ?? {})) {
         for (const [k, e] of Object.entries(bk ?? {})) {
             if (future({ book, uid: e.uid })) { delete bk[k]; gone++; }
@@ -345,6 +352,26 @@ export const sceneParams = (S, overrides = {}) => ({
     // 'all' and 'cos' are degenerate for dense in a way they were not for sparse: sparse was a second
     // opinion from a different head, while duplicating the vector column is the same number twice and can
     // only reweight the vector signal. They are run as controls, not as candidates.
+    // WHICH ENTRIES DEFINE THE CORPUS MEAN — the vector centering subtracts (plugin/vector.mjs). Production
+    // names the vectorized uids (worldsapart.js centroidUids) and the plugin means over those, so
+    // 'vectorized' is what every stored capture ran under and stays the default.
+    //
+    //   'vectorized'      production: enabled + vectorized. Neither "the book" nor "what gets compared" —
+    //                     a frozen snapshot of the comparison set from before every entry became scorable.
+    //   'memory'          enabled memory-tier entries. Register-homogeneous, which is what makes a centroid
+    //                     mean anything: a blend of narrative summaries and encyclopedic reference removes
+    //                     neither cluster's shared direction and leaves each tilted toward the other.
+    //   'memoryArchived'  the above plus DISABLED memory entries, which requires an index built with
+    //                     reindex.mjs --archived. Treats the centroid as a property of the BOOK rather than
+    //                     of the current playthrough, so archiving an arc stops moving every other cosine.
+    //
+    // The two are one step apart and worth running separately: dropping `vectorized` moves only books whose
+    // memory entries are not all flagged, while adding archived mass moves whatever the author retired.
+    // 'memory' IS PRODUCTION (worldsapart.js centroidUids), so it defaults on for the same reason
+    // denseAllEntries does: a harness run at 'vectorized' scores the pipeline as it was before that change,
+    // which is an arm rather than a baseline. No stored capture records this field, and the populations
+    // measured at cosine 0.99873-1.00000 of each other, so no recorded number is invalidated by the switch.
+    centroidPopulation: 'memory',
     denseColumn: null,
     denseWeight: 0.5,
     maxVectorEntries: 20, entityFilter: true,
@@ -419,15 +446,25 @@ export function loadScene(S, { indexFile, params: P }) {
     // contributes nothing, every entry arrives by the keyword route, and the scene is deterministic: no
     // index, no embedding call, no ollama. corpusMean is the only thing that cannot take an empty list,
     // and it is guarded here rather than in plugin/ so this needs no redeploy.
-    const raw = existsSync(indexFile) ? JSON.parse(readFileSync(indexFile, 'utf8')).items : [];
+    // AVAILABILITY IS ENFORCED HERE, NOT IN THE COLLECTION. The index is built from the pristine book
+    // (reindex.mjs ensureIndex), so it may carry chunks of entries this scene post-dates; `byUid` is the
+    // filtered view, and dropping what it does not hold is the whole enforcement. Doing it this way is what
+    // lets one cached collection serve every scene of a book without any of them seeing another's cutoff.
+    const rawAll = existsSync(indexFile) ? JSON.parse(readFileSync(indexFile, 'utf8')).items : [];
+    const raw = rawAll.filter(it => byUid.has(Number(it.metadata?.index)));
     // DENSE-ALL SPLITS THE COLLECTION BY STAGE. An --all index (reindex.mjs) holds every entry's chunks; the
     // vectorized ones are item-for-item what the ordinary build produces, so keeping them as `items` leaves
     // stage 1 — admission, the top-K, the corpus mean, every baseline cosine — byte-identical to a run
     // against the ordinary index. The rest go to `extra`, scored at stage 3 only.
+    // CENTROID-ONLY CHUNKS ARE NOT A COLLECTION. An --archived index (reindex.mjs) carries disabled memory
+    // entries so they can weigh in the mean; they must reach neither `items` nor `extra`, because an entry
+    // the author disabled is one core would never activate and one no ST install stores a vector for.
+    const archived = raw.filter(it => it.metadata?.centroidOnly);
+    const live = raw.filter(it => !it.metadata?.centroidOnly);
     const vectorUids = new Set(entries.filter(e => e.vectorized).map(e => Number(e.uid)));
     const ofVectorized = it => vectorUids.has(Number(it.metadata?.index));
-    const items = P.denseAllEntries ? raw.filter(ofVectorized) : raw;
-    const extra = P.denseAllEntries ? raw.filter(it => !ofVectorized(it)) : [];
+    const items = P.denseAllEntries ? live.filter(ofVectorized) : live;
+    const extra = P.denseAllEntries ? live.filter(it => !ofVectorized(it)) : [];
     // An ordinary index under this param would score every entry at its production value and report the arm
     // as flat, which is the one failure that looks like a result.
     if (P.denseAllEntries && !extra.length) throw new Error(`denseAllEntries is on but ${indexFile} holds no non-vectorized chunks — build that collection with: node eval/reindex.mjs <sample.json> --all`);
@@ -443,10 +480,41 @@ export function loadScene(S, { indexFile, params: P }) {
     if (!items.length && entries.some(e => e.vectorized && !e.disable && e.content)) {
         throw new Error(`no vector collection for "${primary}" at ${indexFile} — the book has vectorized entries, so scoring without one would silently drop cosine. Build it with: node eval/reindex.mjs <sample.json>`);
     }
-    // The mean is PRODUCTION'S — the vectorized corpus's centroid — so a dense-all entry is centered by the
-    // same vector its competitors are. A book with nothing vectorized has no such centroid, and there the
-    // arm's own corpus is the only one there is; that book has no baseline cosine to preserve anyway.
-    const meanSource = items.length ? items : extra;
+    // The mean is PRODUCTION'S by default — the vectorized corpus's centroid — so a dense-all entry is
+    // centered by the same vector its competitors are. centroidPopulation is the arm that changes it.
+    // A book with nothing vectorized has no production centroid, and there the arm's own corpus is the only
+    // one there is; that book has no baseline cosine to preserve anyway.
+    const memoryUids = new Set(entries.filter(isMemory).map(e => Number(e.uid)));
+    const ofMemory = it => memoryUids.has(Number(it.metadata?.index));
+    // An ordinary or --all index under 'memoryArchived' has no archived mass to add, so it would score the
+    // 'memory' population and report it as this arm — the one failure that looks like a result.
+    //
+    // ASKED OF THE BOOK, NOT THE INDEX ALONE. A book with nothing retired legitimately has no archived
+    // chunks, and it is the most valuable scene in the arm rather than a misconfiguration: its delta MUST
+    // come back exactly 0, which is the only check that the arm is wired to what it claims. Throwing on it
+    // would remove the control and leave only scenes that cannot disconfirm anything.
+    const archivable = entries.filter(e => e.disable && isMemory(e) && e.content).length;
+    if (P.centroidPopulation === 'memoryArchived' && archivable && !archived.length) {
+        throw new Error(`centroidPopulation 'memoryArchived': "${primary}" has ${archivable} archived memory entries but ${indexFile} holds no centroid-only chunks — build that collection with: node eval/reindex.mjs <sample.json> --all --archived`);
+    }
+    const centroidSources = {
+        vectorized: () => (items.length ? items : extra),
+        memory: () => live.filter(ofMemory),
+        memoryArchived: () => [...live.filter(ofMemory), ...archived],
+    };
+    if (!centroidSources[P.centroidPopulation]) throw new Error(`unknown centroidPopulation "${P.centroidPopulation}" — one of ${Object.keys(centroidSources).join(', ')}`);
+    let meanSource = centroidSources[P.centroidPopulation]();
+    // A ZERO-LENGTH MEAN IS NOT A CENTROID. centeredCosineScores dimensions its work off mean.length, so an
+    // empty one returns all-zero scores for every chunk rather than throwing — a whole book scored at cosine
+    // 0, which is the failure that looks like a result rather than an error.
+    //
+    // FALLING BACK TO THE WHOLE COLLECTION IS WHAT PRODUCTION DOES, not a harness convenience: the client
+    // names uids and the plugin means over them, and `centroidFor` (plugin/server.js) returns the full
+    // corpus mean for an absent or empty list. So a reference-only book — no memory entries to name — is
+    // centered on everything it has, in the runtime and here alike. Diverging would make this harness score
+    // a pipeline nobody runs.
+    const emptySelection = !meanSource.length && live.length;
+    if (emptySelection) meanSource = live;
     // No `lexical`: scoreCollection is cosine-only, and stage 3's text index is content-lexical's.
     const loaded = { items, extra, mean: meanSource.length ? corpusMean(meanSource) : [] };
 

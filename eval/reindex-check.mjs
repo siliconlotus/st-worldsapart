@@ -34,6 +34,22 @@ eq(withAll.some(i => i.index === 3), false, 'a disabled entry stays out under --
 eq(withAll.some(i => i.index === 4), false, 'a contentless entry stays out under --all too');
 eq(JSON.stringify(withAll.filter(i => i.index === 1)), JSON.stringify(vecOnly), 'the vectorized half of an --all build is item-for-item the ordinary build');
 
+// --- `archived`: disabled MEMORY entries, as centroid mass and nothing else (the centroidPopulation arm) ---
+// The marker is load-bearing rather than descriptive: scene.mjs keeps these out of `items` and `extra` by
+// reading it, so an unmarked archived chunk becomes a retrievable entry in a collection no ST install holds.
+// Reference is excluded at build time because the tier split is the whole point of the arm — a memory-tier
+// centroid that quietly carried reference chunks would measure the register blend it exists to avoid.
+const M = (uid, content, extra = {}) => ({ uid, content, vectorized: true, stmemorybooks: {}, ...extra });
+const archivable = { 1: V(1, 'alpha'), 2: M(2, 'beta', { disable: true }), 3: V(3, 'gamma', { disable: true }) };
+const noArch = buildItems(archivable, CFG, true);
+const withArch = buildItems(archivable, CFG, true, true);
+eq(noArch.length, 1, 'without --archived a disabled memory entry stays out');
+eq(withArch.length, 2, 'with --archived the disabled MEMORY entry is indexed');
+eq(withArch.some(i => i.index === 3), false, 'a disabled REFERENCE entry stays out under --archived');
+eq(withArch.find(i => i.index === 2).centroidOnly, true, 'an archived entry is marked centroidOnly');
+eq(withArch.find(i => i.index === 1).centroidOnly, undefined, 'a live entry carries no marker');
+eq(JSON.stringify(withArch.filter(i => i.index === 1)), JSON.stringify(noArch), 'the live half of an --archived build is item-for-item the --all build');
+
 // --- post-chunking: trim, drop blanks ---
 const trimmed = buildItems({ 1: V(1, 'alpha\n\n   \n\nbeta') }, CFG);
 eq(trimmed.length, 2, 'blank paragraphs are dropped, not embedded');
@@ -81,6 +97,10 @@ eq(cp({}) === cp({}, 'other-model'), false, 'a different embedding model is a di
 // with the ordinary one — and the ordinary one must keep the path it already has on disk.
 eq(cachePath({ primaryBook: 'Book' }, chunkConfig(S), 'bge-m3', 'Book', true) === cp({}), false, 'an --all collection is a different collection');
 eq(cachePath({ primaryBook: 'Book' }, chunkConfig(S), 'bge-m3', 'Book', false), cp({}), 'not asking for --all leaves the existing path untouched');
+eq(cachePath({ primaryBook: 'Book' }, chunkConfig(S), 'bge-m3', 'Book', true, true)
+    === cachePath({ primaryBook: 'Book' }, chunkConfig(S), 'bge-m3', 'Book', true), false, 'an --archived collection is a different collection');
+eq(cachePath({ primaryBook: 'Book' }, chunkConfig(S), 'bge-m3', 'Book', true, false)
+    === cachePath({ primaryBook: 'Book' }, chunkConfig(S), 'bge-m3', 'Book', true), true, 'not asking for --archived leaves the --all path untouched');
 
 // --- ORACLE: rebuild a real sample at its own settings and match what ST actually wrote ---
 // stInstall() walks to the live ST install, so this works from git worktrees too. eval-data/ is

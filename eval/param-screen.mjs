@@ -141,6 +141,17 @@ const ARMS = {
     // nothing still costs a comparison in every later run's multiplicity count. scene.mjs still implements
     // both; call scoreScene with the override to run them.
     'denseCol=nocos': { __dense: true, denseAllEntries: true, denseColumn: 'nocos' },
+    // WHAT THE CORPUS MEAN IS TAKEN OVER (scene.mjs centroidPopulation). Two doses of one question, run
+    // separately because they are two independent changes: 'memory' only drops the `vectorized` filter, and
+    // moves nothing on a book whose memory entries are all flagged; 'memoryArchived' adds the disabled ones,
+    // and moves nothing on a book with no retired arcs.
+    //
+    // READ PER BOOK, NOT POOLED. Treatment intensity is a property of the lorebook — the archived fraction
+    // — so a pooled sign test averages a no-op book with a large-move one and reports a middle that
+    // describes neither. Time Whore has zero archived memory entries and its delta must come back exactly 0;
+    // that is the arm's own correctness check, not a data point.
+    'centroid=vectorized': { __dense: true, denseAllEntries: true, centroidPopulation: 'vectorized' },
+    'centroid=memoryArchived': { __dense: true, __archived: true, denseAllEntries: true, centroidPopulation: 'memoryArchived' },
     // THE OTHER HALF OF THAT ARM, on its own: denseAll=on both adds the cosine and removes the keyword-only
     // tie-break from the entries that get one, so tilt=1 is what splits the pair (the cosine's own
     // contribution reads as denseAllΔ - tiltΔ).
@@ -307,15 +318,16 @@ const fx = n => (n >= 0 ? '+' : '') + n.toFixed(4);
 
     const results = [];
     for (const armName of picked) {
-        const { __chunk: chunkCfg, __reload: needsReload, __dense: denseAll, ...scoring } = ARMS[armName];
+        const { __chunk: chunkCfg, __reload: needsReload, __dense: denseAll, __archived: archived, ...scoring } = ARMS[armName];
         const cells = [];
         for (const sc of scenes) {
             let r;
-            if (chunkCfg || denseAll) {
+            if (chunkCfg || denseAll || archived) {
                 // A chunk arm needs its OWN collection, so the preloaded scene can't be reused — the index is
                 // exactly what changed. The query embedding still can: the query text is untouched.
                 // A dense-all arm is the same shape: same chunk settings, a collection covering every entry.
-                const built = await ensureIndex(sc.S, { overrides: chunkCfg ?? {}, all: !!denseAll, model: MODEL, ollama: OLLAMA, log: () => {} });
+                // A centroid arm likewise, and --archived adds disabled memory chunks that only weigh in the mean.
+                const built = await ensureIndex(sc.S, { overrides: chunkCfg ?? {}, all: !!denseAll, archived: !!archived, model: MODEL, ollama: OLLAMA, log: () => {} });
                 r = await scoreScene({ sample: sc.S, overrides: scoring, k: K, index: built.path, model: MODEL, ollama: OLLAMA, qv: sc.qv });
             } else if (needsReload) {
                 // Same collection, but the gazetteer is baked at load time, so the preloaded scene is stale

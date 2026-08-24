@@ -51,7 +51,14 @@ const QV = [0.7, 0.7, 0.1];
 const rowsOf = (indexFile, overrides) => {
     // The ORDINARY form has to be asked for now that production's split is the default — this check
     // contrasts the two, so neither may come from a default.
-    const P = sceneParams(S, { denseAllEntries: false, ...overrides });
+    //
+    // centroidPopulation IS PINNED, because this file's whole claim is that the vectorized half of an --all
+    // build leaves every baseline cosine byte-identical, and that claim is stated against the VECTORIZED
+    // centroid. This fixture's book carries no STMB markers, so under production's 'memory' default it is a
+    // reference-only book and falls back to the whole collection (scene.mjs, mirroring the plugin's
+    // centroidFor) — a different mean for the --all form than for the ordinary one, which would break the
+    // comparison through a parameter this file does not test. Pin it here rather than weaken the claim.
+    const P = sceneParams(S, { denseAllEntries: false, centroidPopulation: 'vectorized', ...overrides });
     const scene = loadScene(S, { indexFile, params: P });
     const rows = makeCandidateSet({ ...scene, params: P })(2, 0.75, null, QV, 'text of entry', () => ['the spire looms over the quarter']);
     return { scene, byUid: new Map(rows.map(r => [r.uid, r])) };

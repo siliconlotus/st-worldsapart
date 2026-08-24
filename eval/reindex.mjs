@@ -26,6 +26,7 @@ import { dirname } from 'node:path';
 import { chunkEntry } from '../extension/chunking.mjs';
 import { getStringHash } from './scene.mjs';
 import { openBundle } from '../extension/grading.mjs';
+import { isMemory } from '../extension/relevance.mjs';
 
 /** Chunk settings, sample's own unless overridden. Field names match `settings()` and paramSnapshot.vectors. */
 export const chunkConfig = (S, overrides = {}) => {
@@ -58,6 +59,11 @@ export const chunkConfig = (S, overrides = {}) => {
  * Any drift from this is drift from what the extension actually indexes, which would make every offline
  * number describe a collection production would never build.
  *
+ * `archived` BREAKS IT FURTHER, in the opposite direction: it indexes DISABLED memory entries, which no ST
+ * install stores at all. They are marked `centroidOnly` and exist for one purpose — contributing to the
+ * corpus mean (scene.mjs centroidPopulation). Nothing scores them and nothing retrieves them, and an index
+ * built without the flag is unchanged, since its items carry no such marker.
+ *
  * `all` DELIBERATELY BREAKS THAT MIRROR, and is the only thing here that may: it drops the `vectorized`
  * gate so every entry with content is embedded, which is a collection no ST install holds. It exists for
  * the dense-all arm (scene.mjs denseAllEntries), which reads the two halves at different stages — the
@@ -68,19 +74,24 @@ export const chunkConfig = (S, overrides = {}) => {
  * @param {Record<string, object>} book uid-keyed entries
  * @param {object} cfg chunkConfig() output
  * @param {boolean} [all] Index every entry with content, not only the vectorized ones
- * @returns {Array<{hash: number, text: string, index: number}>} Items, ready to embed
+ * @param {boolean} [archived] Also index DISABLED memory entries, marked centroidOnly
+ * @returns {Array<{hash: number, text: string, index: number, centroidOnly?: boolean}>} Items, ready to embed
  */
-export function buildItems(book, cfg, all = false) {
+export function buildItems(book, cfg, all = false, archived = false) {
     const items = [];
     for (const entry of Object.values(book)) {
-        if ((!all && !entry.vectorized) || entry.disable || typeof entry.content !== 'string' || !entry.content) continue;
+        if (typeof entry.content !== 'string' || !entry.content) continue;
+        // A disabled entry is indexed ONLY under `archived`, only when it is memory-tier, and only ever as
+        // centroid mass. The branches are exclusive: an entry is live collection or centroid-only, never both.
+        const centroidOnly = Boolean(entry.disable);
+        if (centroidOnly ? !(archived && isMemory(entry)) : (!all && !entry.vectorized)) continue;
         for (const chunk of chunkEntry(entry.content, cfg)) {
             const text = chunk.trim();
             if (!text) continue;
             // Identity is (text, uid), not text alone — the uid lives IN the hash, mirroring syncWorld
             // (worldsapart.js), because ST core lists and deletes by hash only.
             const uid = Number(entry.uid);
-            items.push({ hash: getStringHash(`${text}${uid}`), text, index: uid });
+            items.push({ hash: getStringHash(`${text}${uid}`), text, index: uid, ...(centroidOnly ? { centroidOnly: true } : {}) });
         }
     }
     return items;
@@ -89,13 +100,14 @@ export function buildItems(book, cfg, all = false) {
 /** Deterministic cache location: same book + model + chunk settings always resolves to the same file, so a
  *  sweep re-running an arm costs nothing and two arms can never collide.
  *
- *  `all` is in the key AND in the directory name, because the two builds differ only in which entries are
+ *  `all` and `archived` are in the key AND in the directory name, because the builds differ only in which
+ *  entries are
  *  present, and one silently standing in for the other would read as a parameter effect. It contributes
  *  nothing to either when false, so every existing cache path stays where it is. */
-export function cachePath(S, cfg, model, book = S.primaryBook, all = false) {
+export function cachePath(S, cfg, model, book = S.primaryBook, all = false, archived = false) {
     const slug = String(book).replace(/[^\w.-]+/g, '-').slice(0, 40);
-    const key = getStringHash(`${book}${model}${cfg.chunkMode}${cfg.chunkSize}${cfg.minChunkSize}${all ? `all` : ``}`);
-    return new URL(`./eval-data/indexes/${slug}__${model}${all ? `__all` : ``}__${key}/index.json`, import.meta.url).pathname;
+    const key = getStringHash(`${book}${model}${cfg.chunkMode}${cfg.chunkSize}${cfg.minChunkSize}${all ? `all` : ``}${archived ? `archived` : ``}`);
+    return new URL(`./eval-data/indexes/${slug}__${model}${all ? `__all` : ``}${archived ? `__archived` : ``}__${key}/index.json`, import.meta.url).pathname;
 }
 
 /** How a model is CALLED and how its collection is NAMED.
@@ -204,17 +216,21 @@ const l2 = v => { let s = 0; for (const x of v) s += x * x; return Math.sqrt(s);
  *
  * @returns {Promise<{path: string, built: boolean, items: number}>}
  */
-export async function ensureIndex(S, { overrides = {}, model = 'bge-m3', prefix = '', label = model, endpoint = 'ollama', ollama = 'http://localhost:11434', url = ollama, book = S.primaryBook, out = null, batch = 64, force = false, all = false, log = () => {} } = {}) {
+export async function ensureIndex(S, { overrides = {}, model = 'bge-m3', prefix = '', label = model, endpoint = 'ollama', ollama = 'http://localhost:11434', url = ollama, book = S.primaryBook, out = null, batch = 64, force = false, all = false, archived = false, log = () => {} } = {}) {
     const cfg = chunkConfig(S, overrides);
     // `label` names the cache, `model` names what ollama is asked for: a model embedded WITH its documented
     // document prefix is a different collection from the same model without one, and the two must not share
     // a file. Defaults to the model, so every existing cache path stays where it is.
-    const path = out ?? cachePath(S, cfg, label, book, all);
+    const path = out ?? cachePath(S, cfg, label, book, all, archived);
     if (!force && existsSync(path)) return { path, built: false, items: JSON.parse(readFileSync(path, 'utf8')).items.length };
 
-    const entries = S.books?.[book];
+    // THE PRISTINE BOOK, never the availability-filtered one (scene.mjs dropUnavailable). A collection is
+    // a property of the book; which of its entries a given scene may see is a property of the scene, and
+    // loadScene applies that. Falls back to S.books for a sample no loadScene has touched, which is what a
+    // bare reindex.mjs run is.
+    const entries = S.pristineBooks?.[book] ?? S.books?.[book];
     if (!entries || !Object.keys(entries).length) throw new Error(`sample embeds no entries for book "${book}" — a bundle that does not embed its books is malformed`);
-    const items = buildItems(entries, cfg, all);
+    const items = buildItems(entries, cfg, all, archived);
     if (!items.length) throw new Error(`no ${all ? '' : 'vectorized '}entries with content in "${book}" — nothing to index`);
 
     log(`building ${items.length} chunks for "${book}"${all ? ' (EVERY entry, not just vectorized)' : ''} at ${cfg.chunkMode}/${cfg.chunkSize}/${cfg.minChunkSize} -> ${path}`);
@@ -224,7 +240,7 @@ export async function ensureIndex(S, { overrides = {}, model = 'bge-m3', prefix 
         const vectors = await embedTexts(slice.map(x => x.text), { model, endpoint, url, prefix });
         slice.forEach((it, k) => out_.push({
             id: crypto.randomUUID(),
-            metadata: { hash: it.hash, text: it.text, index: it.index },
+            metadata: { hash: it.hash, text: it.text, index: it.index, ...(it.centroidOnly ? { centroidOnly: true } : {}) },
             vector: vectors[k],
             norm: l2(vectors[k]),
         }));
@@ -242,8 +258,9 @@ if (process.argv[1] && import.meta.url.endsWith(process.argv[1].split('/').pop()
     const arg = k => { const i = argv.indexOf(k); return i >= 0 ? argv[i + 1] : null; };
     const sample = argv.find(a => a.endsWith('.json') && !a.startsWith('--'));
     if (!sample) {
-        console.error('usage: node reindex.mjs <sample.json> [--chunkSize N] [--chunkMode paragraph|length] [--minChunkSize N] [--book <name>] [--out <index.json>] [--batch 64] [--force] [--all]');
+        console.error('usage: node reindex.mjs <sample.json> [--chunkSize N] [--chunkMode paragraph|length] [--minChunkSize N] [--book <name>] [--out <index.json>] [--batch 64] [--force] [--all] [--archived]');
         console.error('--all embeds EVERY entry with content, not just the vectorized ones — the collection the denseAllEntries arm reads (scene.mjs)');
+        console.error('--archived ALSO embeds disabled memory entries as centroid-only mass — the collection the centroidPopulation arm reads (scene.mjs)');
         console.error('rebuilds a vector collection from the sample\'s embedded books into eval-data/indexes/ (never into SillyTavern\'s live vectors unless --out says so)');
         process.exit(2);
     }
@@ -257,7 +274,7 @@ if (process.argv[1] && import.meta.url.endsWith(process.argv[1].split('/').pop()
     ensureIndex(S, {
         overrides, model, book: arg('--book') ?? S.primaryBook, out: arg('--out'),
         ollama: process.env.OLLAMA_URL ?? 'http://localhost:11434',
-        batch: Number(arg('--batch')) || 64, force: argv.includes('--force'), all: argv.includes('--all'), log: m => console.log(m),
+        batch: Number(arg('--batch')) || 64, force: argv.includes('--force'), all: argv.includes('--all'), archived: argv.includes('--archived'), log: m => console.log(m),
     }).then(r => {
         console.log(r.built ? `wrote ${r.items} items -> ${r.path}` : `already built (${r.items} items) -> ${r.path}  [--force to rebuild]`);
         console.log(argv.includes('--all')
