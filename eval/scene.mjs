@@ -277,6 +277,8 @@ export const sceneParams = (S, overrides = {}) => ({
     // KEYW null mirrors LEXW, exactly as the extension does — so a sample captured before the split scores
     // identically, and an arm that sets KEYW is testing the split rather than a silent default change.
     K: 20, K1: 2, B: 0.75, LEXW: 1.5, KEYW: null, boost: 3, stopwordDf: 0.25,
+    // null = whatever the shipped memory fit carries. Set only by a cutoff arm; see makeFuse.
+    memoryCutoff: null,
     caseSensitive: false, wholeWords: false, includeNames: true,
     // How the haystack is SEGMENTED, which decides what `scan` means to countKey. Captured in `params`
     // (worldsapart.js captureParams), so a document that records it overrides this; 'scan' is what
@@ -735,7 +737,7 @@ const MODELS = (() => {
  *
  * PER TIER, each standardised among its own rows, as each fit was built.
  */
-export const makeFuse = ({ scene, haystack }) => {
+export const makeFuse = ({ scene, haystack, memoryCutoff = null }) => {
     const df = buildNameDf(scene.entries ?? []);
     const windowNames = properNames(haystack({}).join('\n'));
     return (rows) => {
@@ -755,7 +757,10 @@ export const makeFuse = ({ scene, haystack }) => {
                 properNouns: Number(r.properNouns) || 0,
                 density: Number(r.density) || 0,
             })));
-            mine.forEach((r, i) => { r.eCredit = e[i]; r.cutoff = model.cutoff; });
+            // The memory cutoff is OVERRIDABLE, because it is the one number stage 4 cuts on and screening
+            // it is what the @cut window exists for. Reference has no override: it is never cut.
+            const cut = (tier === 'memory' && Number.isFinite(memoryCutoff)) ? memoryCutoff : model.cutoff;
+            mine.forEach((r, i) => { r.eCredit = e[i]; r.cutoff = cut; });
         }
         return [...rows].sort((a, b) => (b.eCredit ?? -1) - (a.eCredit ?? -1));
     };
@@ -791,7 +796,7 @@ export async function scoreScene({ sample: S, overrides = {}, k = 10, vectors, m
     }
     const scene = preloaded ?? loadScene(S, { indexFile: indexPath(S, { vectors, model, index }), params: P });
     const scoreAll = makeCandidateSet({ ...scene, params: P, topK });
-    const fuse = makeFuse({ scene, haystack: haystackFor(S, P) });
+    const fuse = makeFuse({ scene, haystack: haystackFor(S, P), memoryCutoff: P.memoryCutoff });
     const gradeOf = makeGradeOf(S.entries, scene.isExcluded);
 
     const query = S.query;
@@ -873,6 +878,17 @@ export async function scoreScene({ sample: S, overrides = {}, k = 10, vectors, m
     const ranked = fuse(rankable);
     const atR = scoreWindow(ranked.slice(0, relevant));
 
+    //   @cut        everything the relevance cut admits. THE ONLY WINDOW THE SYSTEM CHOOSES FOR ITSELF —
+    //               @R is handed the answer and k is handed a number, so neither can be wrong about HOW
+    //               MANY, which is half of what stage 4 decides. Reading it is how a cutoff is screened:
+    //               move the cutoff, and this is the set that moves.
+    //
+    // MEMORY ONLY, mirroring the runtime — a reference entry that fires is included and answers only to
+    // the budget (worldsapart.js `rankActivated`), so it is never cut here either. A row the model could
+    // not score is kept for the same reason it is kept live: an absent verdict is not a negative one.
+    const admits = r => !isMemory(r.entry) || !Number.isFinite(r.cutoff) || !Number.isFinite(r.eCredit) || r.eCredit >= r.cutoff;
+    const atCut = scoreWindow(ranked.filter(admits));
+
     return {
         n: ndcg(g, k),
         nAt5: ndcg(g, 5),
@@ -880,6 +896,7 @@ export async function scoreScene({ sample: S, overrides = {}, k = 10, vectors, m
         recall,
         f2,
         atR,
+        atCut,
         relevant,
         judged: top.length - unjudged.length,
         of: top.length,

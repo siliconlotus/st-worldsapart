@@ -178,6 +178,15 @@ const ARMS = {
     // reproducibility, so this arm is the tripwire: it must stay ~0.0000 on every real scene — the gate's
     // whole contract is "free on the right book" — and a nonzero Δ here means the calibration broke.
     'gate=0.5': { uncenteredGate: 0.5 },
+    // THE CUT ITSELF, read with --metric fAtCut. The shipped memory fit's own cutoff is the baseline, so
+    // these are absolute doses around it; the window they move is the only one the system sizes for
+    // itself (scene.mjs, @cut). Screening it against a fixed-k metric measures nothing — k is handed the
+    // count the cutoff is supposed to decide.
+    'cutoff=0.04': { memoryCutoff: 0.04 },
+    'cutoff=0.12': { memoryCutoff: 0.12 },
+    'cutoff=0.16': { memoryCutoff: 0.16 },
+    'cutoff=0.22': { memoryCutoff: 0.22 },
+    'cutoff=0.30': { memoryCutoff: 0.30 },
 };
 
 /** Arms that answer the SAME question at different doses. Derived from the name, so adding a dose needs no
@@ -204,7 +213,7 @@ const K = Number(arg('--k') ?? 10);
 // `fAtR` is the window scoreScene reports (see its SET METRICS block); it ignores --k, being sized by the
 // scene's relevant count rather than by a fixed depth.
 const METRIC = arg('--metric') ?? 'n';
-const WINDOWED = { fAtR: r => r.atR.f };
+const WINDOWED = { fAtR: r => r.atR.f, fAtCut: r => r.atCut.f, nAtCut: r => r.atCut.n };
 if (!['n', 'nAt5', 'f2', 'recall', 'precision', ...Object.keys(WINDOWED)].includes(METRIC)) { console.error(`unknown --metric ${METRIC}`); process.exit(2); }
 const mOf = r => (WINDOWED[METRIC] ? WINDOWED[METRIC](r) : r[METRIC]);
 const MODEL = process.env.WA_EMBED_MODEL ?? 'bge-m3';
