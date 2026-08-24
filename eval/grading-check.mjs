@@ -531,3 +531,32 @@ eq(Object.keys(twoDepths.sceneChats).length, 1, '...sharing one stored set of me
     eq(withPaths.index, 'public/scripts/x/index.json', '...the index path');
     eq(withPaths.book, 'data/default-user/worlds/B.json', '...and the book path, so no writer has to remember');
 }
+
+// --- the writer against the schema: STRUCTURAL keys are closed ---------------------------------------
+// bundle-schema.md lists every document, scene, arm and cell key, and the open maps (`scores`, `params`,
+// `paramSnapshot.settings`, `books`, `bookHashes`, the `scene*` maps) are excluded from that by name. So a
+// structural key the schema does not carry is a writer the document has not caught up with, and the only
+// way that stays true is if adding one fails here. It has drifted once already: paramSnapshot was written
+// per SCENE while the schema said per ARM, which sent two readers looking in the wrong place.
+const { bundleSamples: bundleForSchema } = await import('../extension/grading.mjs');
+const schemaFixture = {
+    name: 'n', notes: 'x', createdAt: '2026-08-24', createdBy: 'me', bookPriority: [], gradeScale: {},
+    embedModel: 'bge-m3', budget: { maxTokens: '—' }, pluginFP: 'a', sourceFP: 'b',
+    chat: 'c.jsonl', scanChat: [], injects: [], sources: {},
+    params: { k: 1 }, paramSnapshot: { settings: { chunkSize: 1750 } }, scoredBy: 'x',
+    waVersion: '1', stVersion: '2', depth: 4,
+    primaryBook: 'B', book: 'p', index: 'i', books: { B: {} },
+    grades: [], excludeTitles: [], cutoff: {}, gradedCandidates: 5,
+    candidates: [{ book: 'B', uid: 1, tokens: 10 }],
+    query: 'q', queryChat: [], invalidConfiguration: null,
+};
+const built = await bundleForSchema([{ arm: 'shipped', sample: schemaFixture }], { start: 0, end: 10, user: 'u' });
+const keys = o => Object.keys(o).sort().join(',');
+eq(keys(built),
+    'arms,bookHashes,bookPriority,books,budget,createdAt,createdBy,embedModel,gradeScale,name,notes,pluginFP,sceneChats,scenes,schemaVersion,sourceFP',
+    'document keys are the schema\'s');
+eq(keys(built.scenes[0]), 'entries,id,sceneChat,sceneEnd', 'scene keys are the schema\'s');
+eq(keys(built.arms[0]), 'name,paramSnapshot,params,scenes,stVersion,waVersion', 'arm keys are the schema\'s — paramSnapshot among them, not in the cell');
+eq(keys(Object.values(built.arms[0].scenes)[0]),
+    'book,candidates,cutoff,depth,excludeTitles,gradedCandidates,index,invalidConfiguration,primaryBook,query,queryChat,sceneStart',
+    'cell keys are the schema\'s');

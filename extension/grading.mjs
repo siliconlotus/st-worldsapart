@@ -851,13 +851,18 @@ export async function bundleSamples(arms, scene = {}, extra = {}) {
         if (sample.waVersion !== undefined) per.waVersion = sample.waVersion;
         if (sample.stVersion !== undefined) per.stVersion = sample.stVersion;
         per.params = { ...(sample.params ?? {}), ...(sample.scoredBy ? { scoredBy: sample.scoredBy } : {}) };
+        // ON THE ARM, by the same rule as `params` right above it: a snapshot is the settings the
+        // CONFIGURATION ran under, and a configuration spans scenes. Left to fall into the cell it was
+        // written once per scene per arm, which the schema does not describe and which cannot ever differ —
+        // one capture reads one settings object, so every scene of an arm sees the same values.
+        if (sample.paramSnapshot !== undefined) per.paramSnapshot = sample.paramSnapshot;
         // THE CELL: this arm's capture of that scene. Everything varying with BOTH coordinates lives here
         // — the span it read, the query it built, the rows it surfaced. What varies with the
         // configuration alone stays on the arm; what varies with the moment alone stays on the scene.
         const cell = { sceneStart: scene.start, depth: sample.depth };
         for (const [k, v] of Object.entries(sample)) {
             if (SHARED_FIELDS.includes(k) || SCENE_FIELDS.includes(k) || k in extra) continue;
-            if (['arm', 'grades', 'candidates', 'params', 'depth', 'waVersion', 'stVersion', 'scoredBy', 'books'].includes(k)) continue;
+            if (['arm', 'grades', 'candidates', 'params', 'paramSnapshot', 'depth', 'waVersion', 'stVersion', 'scoredBy', 'books'].includes(k)) continue;
             if (v === undefined) continue;
             cell[k] = v;
         }

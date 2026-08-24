@@ -109,6 +109,10 @@ carry.
       // `scoredBy` is the fitted model's identity — a knob like any other, and the one thing
       // waVersion/stVersion cannot carry, since the model ships as data rather than as code.
       "params": { "lexicalWeight": 1, "chunk": "paragraph", "scoredBy": "relevance-model-memory@a1b2c3d4" },
+      // THE SETTINGS THE CONFIGURATION RAN UNDER — on the arm, by the same rule as `params`: a
+      // configuration spans scenes, so this cannot vary between them (one capture reads one settings
+      // object). `settings` is every scalar setting by name, an OPEN MAP that grows with the app.
+      "paramSnapshot": { "settings": { "chunkSize": 1750, "…": "…" }, "derived": { "maxTokensEffective": 29036 } },
 
       // THE CELL: this arm's capture of that scene, keyed by scene id. Everything varying with BOTH
       // coordinates is here — the span it read, the query it built, the rows it surfaced.
@@ -118,6 +122,14 @@ carry.
           "sceneStart": 1035,
           "depth": 10,
           "query": "…", "queryChat": [ /* … */ ], "primaryBook": "Sommers_Pack__v22",
+          // WHAT THE GRADER WAS SHOWN, which a later run needs to know what it may believe. `cutoff` is
+          // the depth this capture graded at; `gradedCandidates` is how many rows actually reached a
+          // grader, so rows past it are UNGRADED rather than irrelevant, and a deep-cutoff arm scored
+          // past it is reporting a lower bound. `excludeTitles` names graded titles this harness cannot
+          // rank — in practice entries from a second attached book — so they are dropped rather than
+          // counted as misses.
+          "cutoff": { "live": { "maxVectorEntries": 20 } }, "gradedCandidates": 20,
+          "excludeTitles": [ "Intimacy & Mechanics" ],
           // IN LAYOUT ORDER — see below. `index` and `tokens` are the fields a reader can count on;
           // `scores` is WHATEVER THE CAPTURE RECORDED, keyed by the feature's own name.
           "candidates": [
@@ -205,6 +217,12 @@ ranking that is already recorded, so it is swept OFFLINE through `selection.mjs`
 costing a capture. `tokenizer` could not vary in any case — it is ST's `getTokenizerModel()`, an environment
 fact WA does not set, which is why it sits beside `embedModel` rather than inside `paramSnapshot`. **Measured**
 across the corpus: 0 of 106 multi-arm documents varied any field of it.
+
+**SOME OBJECTS HERE ARE OPEN MAPS AND ARE MEANT TO GROW.** `candidates[].scores`, `params`,
+`paramSnapshot.settings`, `books`, `bookHashes` and the `scene*` maps are keyed by whatever the capturing
+version computed or attached, so a key this file does not list is expected rather than a drift. Every
+STRUCTURAL field — the document, scene, arm and cell keys — is closed and listed: one absent from here is a
+writer this document has not caught up with, and that is the failure this section exists to make visible.
 
 `paramSnapshot` stays per-arm and does vary — `scoring`, `matchText`, `vectors` and `nonDefaults` all differ
 between arms in 9 documents. It is the settings the arm ran under; `budget` is what the whole capture was
