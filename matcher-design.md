@@ -1271,18 +1271,17 @@ AGREEMENT OF MAGNITUDES across books, not the count — which is what separates 
 curves, so `--cutoff` reports the per-scene F2 vector and the sign test against the first arm. Every
 contrast between arms reads that, never the peak — the same rule `param-screen` follows and for the
 same reason.
-
+ A pooled fit reads one slope across two tiers holding different columns, and it is also blind to any
+change confined to the smaller one — computing a cosine for every reference entry (`denseAllEntries`)
+moves that tier's AUC from 0.7387 to 0.7851 and its log-loss from 0.5539 to 0.5163, while the memory tier
+and the pooled model do not move at all. Reference cosine then carries the tier's largest slope
+(+0.806 standardised, against text's +0.419), where without it the tier runs on keys.
 **The shipped memory cutoff is measured flat: n=4 scenes across 3 books, paired, F over the ADMITTED
 set** (`param-screen --arms cutoff=... --metric fAtCut`, the `@cut` window in `scene.mjs` — the only
 window the system sizes for itself, since `@R` is handed the count and `k` is handed a number). Doses
 0.04/0.12/0.16/0.22/0.30 against each scene's own baseline: no dose helps more than 2 of 4, every mean
 delta is negative, and the four scenes peak at four different doses (0.30 / 0.12 / base / 0.04). Leave
-0.08 alone. **One scene reaching F2 1.000 at 0.219 is what motivated the sweep and is exactly what it
-refutes** — the same dose is +0.168 on one scene and -0.481 on another. A pooled fit reads one slope across two tiers holding different columns, and it is also blind to any
-change confined to the smaller one — computing a cosine for every reference entry (`denseAllEntries`)
-moves that tier's AUC from 0.7387 to 0.7851 and its log-loss from 0.5539 to 0.5163, while the memory tier
-and the pooled model do not move at all. Reference cosine then carries the tier's largest slope
-(+0.806 standardised, against text's +0.419), where without it the tier runs on keys.
+0.08 alone.
 
 **The base-rate argument for the split does NOT hold, and was measured wrong.** Pooled over all judged
 rows the tiers look 3.7x apart, but base rate correlates -0.63 with how deep a capture was graded, and

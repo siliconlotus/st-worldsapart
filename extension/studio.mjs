@@ -465,9 +465,9 @@ export async function lorebookStudio(preferredBook = null) {
             ? 'Advanced reorder: renumber the selected entries into a contiguous block, setting <b>both order and UID</b>, top to bottom.'
             : 'Renumber the selected entries into a contiguous <b>order</b> block, top to bottom.')
             + '<div style="margin-top:8px;">Start at <input type="number" class="wa-bo-start text_pole" style="width:6em;margin:0 6px;" value="1"></div>'
-            // WHICH SEQUENCE THE NUMBERS FOLLOW. The default is what is on screen, which is what this
-            // always did; picking a sort here renumbers into THAT sequence instead, so `order` can be
-            // made to encode something other than however the book happened to be written.
+            // WHICH SEQUENCE THE NUMBERS FOLLOW. On screen is the default; picking a sort renumbers
+            // into THAT sequence instead, so `order` can be made to encode something other than however
+            // the book happened to be written.
             + '<div style="margin-top:8px;">In order of <select class="wa-bo-sort text_pole" style="width:auto;margin-left:6px;">'
             + '<option value="">On screen</option>'
             + Object.entries(SORT_LABELS).map(([k, v]) => `<option value="${escapeHtml(k)}">${escapeHtml(v)}</option>`).join('')

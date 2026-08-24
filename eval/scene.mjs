@@ -249,8 +249,7 @@ export const indexPath = (S, { vectors = 'data/default-user/vectors/ollama', mod
     // THE ALL-ENTRIES COLLECTION IS A DIFFERENT FILE, and stage 1 embeds everything now, so this is the
     // ordinary case rather than an arm's. The live collection and S.index below hold vectorized entries
     // only, so neither can answer for a scene scored with denseAllEntries on; go straight to the cache
-    // reindex.mjs --all writes. Without this the baseline load throws on every sample captured under the
-    // shipped default, which is all of them.
+    // reindex.mjs --all writes.
     if (all) return cachePath(S, chunkConfig(S), model, S.primaryBook, true);
     // THROUGH stInstall, NOT THE CWD. Both local candidates are recorded with ST's `data/` prefix, so testing
     // them raw asks whether the collection exists *relative to wherever the tool was launched from* — and the

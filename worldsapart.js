@@ -1878,9 +1878,8 @@ async function versusCore() {
         in: coreKeys.has(k) && waKeys.has(k) ? 'both' : coreKeys.has(k) ? 'core' : 'WA',
         tokens: x.tokens, order: x.entry.waOriginalOrder ?? x.entry.order ?? 0,
         eCredit: Number.isFinite(x.eCredit) ? Number(x.eCredit.toFixed(4)) : null,
-        // EVERY SIGNAL THE SCORE IS MADE OF, or a disagreement cannot be diagnosed from the export.
-        // Two rows here had the highest cosine and keyword score in their group and the lowest
-        // E[credit], and nothing in the capture could say why.
+        // EVERY SIGNAL THE SCORE IS MADE OF, or a disagreement cannot be diagnosed from the export:
+        // cosine and keys alone cannot say why a row carrying the highest of both ranks last.
         cosine: Number.isFinite(x.score) ? Number(x.score.toFixed(4)) : null,
         text: Number.isFinite(x.textScore) ? Number(x.textScore.toFixed(3)) : null,
         keys: Number(x.keywordScore) ? Number(x.keywordScore.toFixed(2)) : null,
@@ -2021,8 +2020,8 @@ async function rankActivated(args) {
 
     // Silent returns, EXCEPT under /wa-dry: every one of them leaves lastLayout untouched, so the
     // user's own dry run reports "nothing activated" with no way to tell a real empty selection from
-    // a scan WA declined to rank. Cost a whole session once. `enabled` is not among them — dryRun
-    // refuses outright when WA is off, so that branch cannot be reached from a dry run at all.
+    // a scan WA declined to rank. `enabled` is not among them — dryRun refuses outright when WA is
+    // off, so that branch cannot be reached from a dry run at all.
     const skip = reason => { if (runState.dryRunInProgress) console.warn(`Worlds Apart: did not rank this scan — ${reason}.`); };
 
     if (!(activated instanceof Map)) {
@@ -2573,9 +2572,9 @@ async function dryRun(verbose = false) {
     const rawChat = context.chat ?? [];
     const chat = rawChat.filter(x => x && !x.is_system);
 
-    // `intercept` gates on this and dryRun calls selectAndActivate directly, so without it a dry run
-    // with WA off did half the work: retrieval ran and force-activated its winners into core's map,
-    // then onEntriesLoaded and rankActivated both declined to touch a scan WA does not own.
+    // `intercept` gates on this and dryRun calls selectAndActivate directly, so this is the only gate
+    // on that path. Without it a dry run with WA off half-runs: retrieval force-activates its winners
+    // into core's map, and onEntriesLoaded and rankActivated then decline to touch a scan WA does not own.
     if (!settings().enabled) {
         toastr.warning('Worlds Apart is disabled — turn it on to run a dry run.', 'Worlds Apart');
         return '';
@@ -2591,8 +2590,8 @@ async function dryRun(verbose = false) {
     runState.verboseRun = Boolean(verbose);
     runState.dryRunInProgress = true;
     // THIS SCAN IS NOT ST'S. The flag means "the scan now running belongs to an ST dry generation",
-    // and /wa-dry drives its own — so a value left over from one is simply wrong here, and it reads
-    // as `rankActivated` returning early into an empty layout and "nothing activated".
+    // and /wa-dry drives its own, so a value left over from one is wrong here. Nothing clears it
+    // otherwise: GENERATION_ENDED comes from hideStopButton, which a dry Generate never reaches.
     runState.generationIsDryRun = false;
 
     // Cleared so a scan that activates nothing reports nothing, rather than last run's. The /wa-grade

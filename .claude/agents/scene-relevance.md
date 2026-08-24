@@ -63,13 +63,10 @@ as a general demotion it costs more than it buys — two sibling entries the hum
   the way they watched him at the earlier event, someone acting on what they learned there — the entry
   is referenced substance. This outranks the setting-level discount below, which is about the whole
   book's cast, not the handful of people actually present.
-- **An arc entry earns its grade the way every other entry does** — on whether the scene reaches back
-  for its substance. There is no credit for horizon. An arc summary is written when its arc ENDS, so
-  no scene is ever inside a written one, and every arc that exists is downstream of every scene;
-  crediting either case credits all of them, which is the setting-level over-credit below. What does
-  hold is the direction of the check: **"unreferenced" is a claim you test against the scene text**,
-  not a conclusion you draw from the arc being old. Search the scene for its people, places and events
-  before you write it off.
+- **An arc long finished and not referenced is 0-1** — but **"unreferenced" is a claim you check
+  against the scene text**, not a conclusion you draw from the arc being old. Search the scene for its
+  people, places and events before you write it off; a single clause naming what someone learned there
+  is a reference.
 
 ## What does not earn one
 
