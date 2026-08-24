@@ -903,9 +903,22 @@ explainability. Unless a paragraph says otherwise, everything below is measured 
 
 **LOGISTIC regression**, on the project's own relevance line (grade >= 3). Linear would put predictions
 outside [0,1] on a bounded target and would weight a 0-vs-1 error the same as a 0.4-vs-0.5 one. Each
-entry gets p, and ships if it clears the cutoff. The count falls out — a scene with three relevant entries
-delivers three — so "how many entries does this scene need" is not a separate question and takes no
-parameter of its own.
+entry gets p, and ships if it clears the cutoff.
+
+**THE COUNT DOES NOT FALL OUT. IT IS A FIXED SHARE OF WHAT ACTIVATION PRODUCED.** The intent was that a
+scene with three relevant entries delivers three, so that "how many" took no parameter of its own. The
+design cannot do that: the signals are standardised WITHIN THE SCENE, so `E[credit]` encodes a row's
+position among its neighbours and carries nothing about how much relevant material exists. A fixed
+threshold on it is a quantile wearing a probability's clothes. **Measured**, 100 scenes at the shipped
+memory cutoff: mean delivered share is 23.2% / 21.6% / 20.4% / 21.0% across scenes of under 40, 40-80,
+80-150 and over 150 candidates, and delivered count correlates with CANDIDATE count at r 0.946. One
+Time Whore turn offered 208 activated memory entries and passed 51.
+
+**The macro-average hides it, which is why it survived the fit.** F2 is averaged over scenes, so 40
+small scenes delivering 4.6 outvote 17 large ones delivering 38.7 and the corpus mean reads 16.4. The
+scenes that dominate the token bill are exactly the ones the average buries — and on a large book the
+token budget is still doing the real selecting, which makes stage 4's relevance decision decorative
+there.
 
 **The three shipped signals never compare entry CONTENT to the scan WINDOW, and that cell is where a
 new signal was found.** Cosine is query against chunk, `text` is query against content, `keys` is the
