@@ -1384,14 +1384,19 @@ The two were one filter because they had always named the same set. Computing a 
 vectorizing an entry — `vectorized` decides what stage 1 RETRIEVES, and a cosine is a column stage 3
 reads — so a keyword-activated entry now carries one.
 
-**THE CENTROID STAYS THE ADMITTED CORPUS**, named per collection in the query (`centroidUids`) rather
-than stored, since `metadata.index` already carries the uid and ST's insert drops unknown fields.
-Mean-centering subtracts a vector holding most of an embedding's mass, so widening it moves every
-cosine, including the memory tier's, whose coefficient was fitted against this one. An absent set means
-every item counts, which is the old behaviour and what an older client sends.
+**THE CENTROID IS THE MEMORY TIER**, named per collection in the query (`centroidUids`) rather than
+stored, since `metadata.index` already carries the uid and ST's insert drops unknown fields.
+Mean-centering subtracts a vector holding most of an embedding's mass, so widening it moves every cosine,
+and the population is therefore named rather than inherited from whatever the collection holds. An absent
+set means every item counts, which is what an older client sends and what a book with no memory entries
+falls back to.
 
-The reference fit does not read the new column — it has no cosine feature — so nothing about it moves
-until it is refitted. That refit is what the measurement above argues for, and it is now possible.
+It was `vectorized` — a retrievability flag, and the comparison set from before every entry with content
+became scorable. **Measured** over 103 graded scenes on 4 lineages, paired: the switch is -0.0003 n@10 and
+-0.0016 F2, neither significant, and the two centroids sit at cosine 0.99873-1.00000 across 6 books. So it
+is a consistency change, not a performance one, and the memory fit's cosine coefficient needs no refit.
+
+The reference fit reads cosine and weights it highest of its four features (0.717).
 
 **REFERENCE IS SCORED AND NOT CUT, because a key on a reference entry IS the authorial decision.** The
 column orders reference rows for the budget walk; no threshold is applied to them. An author writing keys
@@ -1626,6 +1631,20 @@ instances the books on disk hold.
     holds the corpus's lowest cosine AUC (0.676) and its highest positive rate (18%). No use proposed
     yet. What makes it worth keeping is that it is a property a book can be MEASURED for, where curation
     is a label someone applies.
+
+15. **Reference is centred on the memory tier's centroid, and nothing has asked whether it should be.**
+    Stage 1 subtracts one mean per collection and that mean is the memory tier's, so reference entries are
+    displaced by a vector built from a different register — narrative summaries against encyclopedic
+    sheets. **Measured** across 7 books: the memory centroid sits at cosine 0.99106-0.99896 of the whole
+    collection's mean while the reference centroid sits at 0.81806-0.97998, because memory is 59-93% of the
+    chunks — the pooled mean is nearly memory's own, and reference is the tier it displaces. The distortion
+    scales with how small the tier is, worst on the book with 7.3% reference. Cosine is the reference fit's
+    largest coefficient, so those scores are load-bearing. Three candidates, none screened: a per-tier
+    centroid, which would make centering the last stage to stop pooling tiers (the fits, the within-scene
+    standardisation and the stage-4 cutoff are already per tier); reference on raw cosine, on the argument
+    that a centroid over structurally unlike entries means little; or leaving it. DEFERRED DELIBERATELY —
+    the tiers are independent by design and stage-4 work is memory-tier only, so nothing currently open
+    depends on this.
 
 ---
 

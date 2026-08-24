@@ -116,7 +116,7 @@ const ARMS = {
     //
     // Cheaper than it looks: the index cache is keyed on book + model + chunk settings, NOT on scene, so every
     // scene graded against the same lorebook reuses one build per dose. Cost scales with BOOKS x doses.
-    ...Object.fromEntries([200, 300, 400, 600, 1200, 1600, 2400].map(v => [`chunkSize=${v}`, { __chunk: { chunkSize: v } }])),
+    ...Object.fromEntries([200, 300, 400, 600, 1200, 1600, 1750, 2400].map(v => [`chunkSize=${v}`, { __chunk: { chunkSize: v } }])),
     ...Object.fromEntries([0, 60, 120, 200, 300, 500].map(v => [`minChunk=${v}`, { __chunk: { minChunkSize: v } }])),
     'chunkMode=length': { __chunk: { chunkMode: 'length' } },
 
@@ -160,6 +160,23 @@ const ARMS = {
     // which means it helps the small thematic reference books and goes slightly negative on the long
     // narrative ones — but it cannot see the delivered set, which is what the answer is about.
     'pc=1': { __reload: true, pcRemove: 1 },
+    // TWO-STAGE (scene.mjs globalBasis + pcRemove). Stage A removes the mean and top-m directions shared
+    // with other LINEAGES' memory chunks; stage B then centres on what is left and removes k of ITS leading
+    // directions, which are the book's own by construction rather than by hope.
+    //
+    // `shared=N` alone is the control that separates the halves: it strips the shared part and keeps ordinary
+    // centring on the residual, so a gain there is stage A's and a gain only in gb=4+pcN is stage B's.
+    // Needs `node eval/global-basis.mjs <samples...>` first; loadScene throws with that line if absent.
+    ...Object.fromEntries([1, 2, 4, 8].map(v => [`shared=${v}`, { __reload: true, sharedComponents: v }])),
+    // WHITENING (scene.mjs whitenR/whitenAlpha) — the only lever in this family that changes the cloud's
+    // SHAPE rather than its position. Centring is a translation and provably cannot remove book identity
+    // (measured: 1-NN same-book purity 99.4% -> 98.2%); rescaling the directions a book spreads along is
+    // the operation that can. alpha 0 is the control and must reproduce the baseline exactly.
+    ...Object.fromEntries([0.25, 0.5, 1].map(a => [`whiten=${a}`, { __reload: true, whitenR: 16, whitenAlpha: a }])),
+    'whiten=1r64': { __reload: true, whitenR: 64, whitenAlpha: 1 },
+    'whiten=0': { __reload: true, whitenR: 16, whitenAlpha: 0 },
+    'shared=4+pc1': { __reload: true, sharedComponents: 4, pcRemove: 1 },
+    'shared=4+pc2': { __reload: true, sharedComponents: 4, pcRemove: 2 },
     'pc=2': { __reload: true, pcRemove: 2 },
     'pc=4': { __reload: true, pcRemove: 4 },
     'centroid=memoryArchived': { __dense: true, __archived: true, denseAllEntries: true, centroidPopulation: 'memoryArchived' },
@@ -218,7 +235,7 @@ const familyOf = arm => arm.split('=')[0];
 
 if (argv.includes('--list')) { console.log(Object.keys(ARMS).join('\n')); process.exit(0); }
 if (!samples.length) {
-    console.error('need at least one sample: node param-screen.mjs <sample.json> [more.json ...] [--arms a,b] [--k 10] [--list]');
+    console.error('need at least one sample: node param-screen.mjs <sample.json> [more.json ...] [--arms a,b] [--k 10] [--metric fAtCut|f2|n|fAtR] [--list]');
     console.error('one sample runs, but reports no sign test — pairing needs scenes to pair.');
     process.exit(2);
 }
@@ -228,13 +245,23 @@ const unknown = picked.filter(a => !ARMS[a]);
 if (unknown.length) { console.error(`unknown arm(s): ${unknown.join(', ')} — see --list`); process.exit(2); }
 
 const K = Number(arg('--k') ?? 10);
-// WHICH METRIC THE SIGN TEST READS. nDCG is a ranking metric and cannot see an entry that lands outside k,
-// so an arm whose action is ADMISSION is measured by the half it does not move. `--metric f2` switches the
-// delta to F-beta(2) on the asymmetric bars (scene.mjs), which weights recall twice. Baseline and arm are
-// always scored on the same one, so a run mixing them is impossible.
-// `fAtR` is the window scoreScene reports (see its SET METRICS block); it ignores --k, being sized by the
-// scene's relevant count rather than by a fixed depth.
-const METRIC = arg('--metric') ?? 'n';
+// WHICH METRIC THE SIGN TEST READS, and the default is the VALIDITY SCORE rather than a diagnostic.
+//
+// `fAtCut` is F-beta(2) on the asymmetric bars over the set the relevance cut admits — the only window the
+// system chooses for itself, so it is the one that can see an arm change HOW MANY entries survive, which is
+// half of what stage 4 decides. It was `n`, and that is a ranking metric read at a fixed k: it cannot see an
+// entry that lands outside the window, and it cannot see a count change at all.
+//
+// THE DEFAULT IS LOAD-BEARING, which is why it is not left at the diagnostic. Measured across five arms on
+// 103 scenes, moving the window from top-10 to the admitted set roughly halved every tie column — 82 to 52
+// on a chunkSize dose, 84 to 47 on a two-stage PCA arm — and reversed the sign of the largest per-lineage
+// effect in the set. A screen reporting `n` therefore says "flat" about arms that move the delivered set,
+// and it says it in the same words as a real null.
+//
+// The others stay available and are diagnostics on the ORDERING: `n`/`nAt5` are nDCG at a fixed depth, `f2`
+// is F-beta(2) at a fixed k, and `fAtR` is sized by the scene's relevant count rather than by --k. Baseline
+// and arm are always scored on the same one, so a run mixing them is impossible.
+const METRIC = arg('--metric') ?? 'fAtCut';
 const WINDOWED = { fAtR: r => r.atR.f, fAtCut: r => r.atCut.f, nAtCut: r => r.atCut.n };
 if (!['n', 'nAt5', 'f2', 'recall', 'precision', ...Object.keys(WINDOWED)].includes(METRIC)) { console.error(`unknown --metric ${METRIC}`); process.exit(2); }
 const mOf = r => (WINDOWED[METRIC] ? WINDOWED[METRIC](r) : r[METRIC]);
@@ -347,7 +374,11 @@ const fx = n => (n >= 0 ? '+' : '') + n.toFixed(4);
                 // exactly what changed. The query embedding still can: the query text is untouched.
                 // A dense-all arm is the same shape: same chunk settings, a collection covering every entry.
                 // A centroid arm likewise, and --archived adds disabled memory chunks that only weigh in the mean.
-                const built = await ensureIndex(sc.S, { overrides: chunkCfg ?? {}, all: !!denseAll, archived: !!archived, model: MODEL, ollama: OLLAMA, log: () => {} });
+                // `all` FROM THE SCENE'S PARAMS when the arm does not force it, for the same reason the
+                // reload branch needs it: a chunk arm builds its own collection, and a vectorized-only one
+                // cannot be scored under denseAllEntries — which is the default, so every chunk arm was
+                // building a collection loadScene then refused.
+                const built = await ensureIndex(sc.S, { overrides: chunkCfg ?? {}, all: !!denseAll || !!sc.P.denseAllEntries, archived: !!archived, model: MODEL, ollama: OLLAMA, log: () => {} });
                 r = await scoreScene({ sample: sc.S, overrides: scoring, k: K, index: built.path, model: MODEL, ollama: OLLAMA, qv: sc.qv });
             } else if (needsReload) {
                 // Same collection, but the gazetteer is baked at load time, so the preloaded scene is stale

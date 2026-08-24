@@ -271,15 +271,40 @@ export const topComponents = (items, k, mean, iters = 40) => {
     return out;
 };
 
-/** `vector` with `mean` subtracted and each of `comps` projected out. The transform applied to the query
- *  and to every document alike — doing it to one side only would compare vectors in different spaces. */
-export const projectOut = (vector, mean, comps) => {
+/** The standard deviation of `vectors` along each of `comps`, about `mean` — the eigenvalue's square root,
+ *  by the Rayleigh quotient. topComponents finds the directions and discards these, but a direction without
+ *  its scale cannot say how much a corpus VARIES along it, which is what whitening rescales by. */
+export const componentScales = (vectors, comps, mean) => comps.map(c => {
+    const D = mean.length;
+    let s2 = 0;
+    for (const it of vectors) {
+        let p = 0;
+        for (let i = 0; i < D; i++) p += (it.vector[i] - mean[i]) * c[i];
+        s2 += p * p;
+    }
+    return Math.sqrt(s2 / (vectors.length || 1));
+});
+
+/** `vector` with `mean` subtracted and each of `comps` scaled by its `weights` entry — 0 removes the
+ *  direction outright, 1 leaves it alone, and the interior shrinks it. Applied to the query and to every
+ *  document alike; doing it to one side only would compare vectors in different spaces.
+ *
+ *  WHITENING AND TOP-K REMOVAL ARE THE SAME OPERATION at different weights, which is the reason for one
+ *  function rather than two. Removing a component is weight 0 — it deletes the direction along with
+ *  whatever real signal sits on it, and is violently sensitive to how many you take. Whitening instead
+ *  down-weights a direction in proportion to how much the corpus spreads along it, on the argument that a
+ *  direction a book varies along is by construction not discriminating WITHIN that book. Weights default to
+ *  0, so an omitted argument is the removal behaviour every earlier caller expects. */
+export const projectOut = (vector, mean, comps, weights = null) => {
     const D = mean.length;
     const v = Float64Array.from({ length: D }, (_, i) => vector[i] - mean[i]);
-    for (const c of comps) {
+    comps.forEach((c, j) => {
+        const w = weights ? weights[j] : 0;
+        if (w === 1) return;
         let p = 0;
         for (let i = 0; i < D; i++) p += v[i] * c[i];
-        for (let i = 0; i < D; i++) v[i] -= p * c[i];
-    }
+        const k = p * (1 - w);
+        for (let i = 0; i < D; i++) v[i] -= k * c[i];
+    });
     return v;
 };

@@ -23,7 +23,8 @@ import { buildContentIndex, scoreContent, entryKey } from '../extension/content-
 // scope — both references live inside function bodies, so whichever module loads first finishes evaluating
 // before the other needs a binding.
 import { cachePath, chunkConfig, embedTexts } from './reindex.mjs';
-import { gradeCredit, fbeta, RECALL_WEIGHT, gradeValue, topComponents, projectOut } from './metrics.mjs';
+import { gradeCredit, fbeta, RECALL_WEIGHT, gradeValue, topComponents, projectOut, componentScales } from './metrics.mjs';
+import { loadBasis } from './global-basis.mjs';
 export { inVectorIndex } from '../extension/ranking.mjs';
 
 /** Unit Separator — see CLAUDE.md. Never NUL: that makes git treat the file as binary. */
@@ -450,6 +451,33 @@ export const sceneParams = (S, overrides = {}) => ({
     // no selection stage, so every metric it emits is read at a window nobody chooses. This param is what
     // asks it against the delivered set instead.
     pcRemove: 0,
+    // WHITENING: how many of the book's own directions to RESCALE, and by how much.
+    //
+    // The argument, and it is the one thing in this family that is not a translation: centering moves the
+    // cloud and provably leaves its geometry intact — **measured**, per-book centring takes 1-NN
+    // same-book purity from 99.4% to 98.2%, so book identity survives it entirely. A direction the book
+    // SPREADS OUT along is not discriminating within that book, so it should count less rather than be
+    // shifted. whitenAlpha 0 is production (nothing rescaled); 1 flattens the top `whitenR` directions to
+    // the scale of the smallest retained one; the interior is the tunable version of what pcRemove does
+    // discontinuously, since removal is this at weight 0.
+    //
+    // SCALED RELATIVE TO THE r-TH RETAINED DIRECTION, so the transform is continuous at the boundary — the
+    // last kept component is unchanged and the untouched tail below it needs no adjustment. Scaling by an
+    // absolute sigma instead would put a step between component r and component r+1.
+    whitenR: 0,
+    whitenAlpha: 1,
+    // HOW MANY SHARED COMPONENTS COME OFF FIRST (global-basis.mjs). 0 is production: no first stage.
+    //
+    // WITHOUT IT pcRemove DOES NOT TEST WHAT IT CLAIMS. A book's leading component is not its own —
+    // **measured**, memory-tier PC1 sits 0.55-0.77 inside a subspace built from other lineages' memory
+    // chunks, and the book mean carries only 8-16% of its mass orthogonal to the shared direction on the
+    // long narrative books. So single-stage pcRemove takes mostly common structure, which is what its
+    // negative F2 says. Strip the shared mean and its top m directions first, and whatever leads the
+    // residual is the book's own by construction.
+    //
+    // The basis is per book, leave-one-LINEAGE-out, memory tier only; build it with
+    // `node eval/global-basis.mjs <samples...>`.
+    sharedComponents: 0,
     denseColumn: null,
     denseWeight: 0.5,
     maxVectorEntries: 20, entityFilter: true,
@@ -604,19 +632,49 @@ export function loadScene(S, { indexFile, params: P }) {
     //
     // COMPONENTS OF THE CENTROID POPULATION, the same rows that define the mean. Taking them over a wider
     // set would remove directions the mean was never built from.
-    if (P.pcRemove > 0) {
-        // Both of these would silently produce a number. Uncentered, `mean` is not subtracted at all and
-        // the components — computed about it — describe a space the scoring never enters. The gate's pass
-        // is RAW cosine by definition (plugin/scoring.mjs) and reads item.vector directly, so transformed
-        // vectors would put a wrong-book failsafe on a quantity that is no longer raw.
-        if (!P.meanCentered) throw new Error('pcRemove needs meanCentered: the components are of the CENTRED corpus, so uncentered scoring never enters the space they describe');
-        if (P.uncenteredGate > 0) throw new Error('pcRemove with uncenteredGate is not modelled: the gate reads RAW cosine off item.vector, which projection has already changed');
-        if (!loaded.mean.length) throw new Error(`pcRemove needs a centroid and "${primary}" has no collection to build one from`);
-        const comps = topComponents(meanSource, P.pcRemove, loaded.mean);
-        const shift = xs => xs.map(it => ({ ...it, vector: projectOut(it.vector, loaded.mean, comps) }));
-        loaded.pc = { comps, mean: loaded.mean, asked: P.pcRemove, got: comps.length };
-        loaded.items = shift(loaded.items);
-        loaded.extra = shift(loaded.extra);
+    // TWO STAGES, SHARED THEN OWN, and every centring moves into them once either is on — loaded.mean
+    // becomes zero and the shipped centeredCosineScores subtracts it, so there is exactly one place that
+    // decides what comes off. Stage B's mean is the book's centroid OF THE RESIDUAL, which is what the
+    // book-specific direction is once the shared part is gone; with sharedComponents off it is the ordinary
+    // centroid and the arm reduces to single-stage.
+    if (P.sharedComponents > 0 || P.pcRemove > 0 || P.whitenR > 0) {
+        if (!P.meanCentered) throw new Error('sharedComponents/pcRemove need meanCentered: both are defined as what comes off BEFORE the cosine, and uncentered scoring subtracts nothing');
+        if (P.uncenteredGate > 0) throw new Error('sharedComponents/pcRemove with uncenteredGate is not modelled: the gate reads RAW cosine off item.vector, which projection has already changed');
+        const stages = [];
+        if (P.sharedComponents > 0) {
+            const basis = loadBasis(primary, P.embedModel ?? 'bge-m3');
+            if (!basis) throw new Error(`sharedComponents needs a basis for "${primary}" — build it with: node eval/global-basis.mjs <samples...>`);
+            if (basis.comps.length < P.sharedComponents) throw new Error(`sharedComponents ${P.sharedComponents} but "${primary}"'s basis holds ${basis.comps.length} components — rebuild with --m ${P.sharedComponents} --force`);
+            stages.push({ mean: basis.mean, comps: basis.comps.slice(0, P.sharedComponents) });
+        }
+        const applyAll = (v, upto) => stages.slice(0, upto).reduce((acc, st) => projectOut(acc, st.mean, st.comps), v);
+        // Stage A first, over everything the mean or the components could be taken from, so stage B sees
+        // the residual and nothing else.
+        const shiftA = xs => xs.map(it => ({ ...it, vector: applyAll(it.vector, stages.length) }));
+        loaded.items = shiftA(loaded.items);
+        loaded.extra = shiftA(loaded.extra);
+        // meanSource holds the PRE-transform objects, so re-resolve each through the transformed arrays by
+        // hash; anything it names that is not in the live collection (archived centroid mass) is transformed
+        // on the spot.
+        const byHash = new Map([...loaded.items, ...loaded.extra].map(it => [it.metadata?.hash, it]));
+        const srcA = meanSource.map(it => byHash.get(it.metadata?.hash) ?? { ...it, vector: applyAll(it.vector, stages.length) });
+        const bookMean = srcA.length ? corpusMean(srcA) : loaded.mean;
+        // Removal and whitening share one component list: asking for both takes the union, with the removed
+        // ones at weight 0 and the rest at their whitened weight, so they compose instead of fighting.
+        const nComps = Math.max(P.pcRemove, P.whitenR);
+        const bookComps = nComps > 0 ? topComponents(srcA, nComps, bookMean) : [];
+        let weights = null;
+        if (P.whitenR > 0 && bookComps.length) {
+            const sd = componentScales(srcA, bookComps, bookMean);
+            const floor = sd[Math.min(P.whitenR, sd.length) - 1] || 1;
+            weights = bookComps.map((_, j) => (j < P.pcRemove ? 0 : (j < P.whitenR ? Math.min(1, (sd[j] / floor) ** -P.whitenAlpha) : 1)));
+        }
+        stages.push({ mean: bookMean, comps: bookComps, weights });
+        const shiftB = xs => xs.map(it => ({ ...it, vector: projectOut(it.vector, bookMean, bookComps, weights) }));
+        loaded.items = shiftB(loaded.items);
+        loaded.extra = shiftB(loaded.extra);
+        loaded.pc = { stages, sharedComponents: P.sharedComponents, pcRemove: P.pcRemove, whitenR: P.whitenR, whitenAlpha: P.whitenAlpha, gotBookComps: bookComps.length };
+        if (!loaded.mean.length) throw new Error(`sharedComponents/pcRemove need a centroid and "${primary}" has no collection to build one from`);
         loaded.mean = new Float64Array(loaded.mean.length);
     }
 
@@ -778,7 +836,9 @@ const mentions = (name, content) => {
 /** The query under the same transform the collection took (loadScene pcRemove), or unchanged when none.
  *  Applied at every call site rather than once by the caller, because a query that reached only one of the
  *  two scoring paths would leave the dense-all extras compared in a different space from the collection. */
-export const pcQuery = (loaded, qvec) => (loaded?.pc ? projectOut(qvec, loaded.pc.mean, loaded.pc.comps) : qvec);
+export const pcQuery = (loaded, qvec) => (loaded?.pc
+    ? loaded.pc.stages.reduce((v, st) => projectOut(v, st.mean, st.comps, st.weights ?? null), qvec)
+    : qvec);
 
 export const scoringKeys = (e, P) => {
     let base = e.key ?? [];

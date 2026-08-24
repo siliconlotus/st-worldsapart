@@ -384,3 +384,20 @@ eq(new Set(chain.values()).size, 1, 'a chain of partial revisions is one lineage
 const rev = lineagesOf({ Other: bk('zeta', 'eta', 'theta'), Revised: bk('alpha', 'beta', 'epsilon'), Renamed: bk('alpha', 'beta', 'gamma', 'delta'), Big: bk('alpha', 'beta', 'gamma', 'delta') });
 eq(rev.get('Renamed'), L.get('Renamed'), 'the same books group the same way whatever order they arrive in');
 eq(lineagesOf({ Empty: {}, Solo: bk('x') }).get('Empty'), 'Empty', 'a book with no bodies is its own lineage rather than joining everything');
+
+// --- the two-mean decomposition is a no-op, which is why it cannot be an arm -------------------------
+// "Extract the pooled centroid, THEN the book centroid" sounds like two removals and is one: the book's
+// centroid OF THE RESIDUAL is (bookMean - globalMean), so subtracting both leaves v - bookMean, exactly
+// what one subtraction of the book mean gives. Only component removal can make the stages differ. Asserted
+// rather than argued, because the whole two-stage design was built on the assumption it was not true.
+const G = [0.3, -0.1, 0.5];
+const vs = [[1, 2, 3], [2, 0, 1], [-1, 4, 0]];
+const bookMean = [0, 1, 2].map(i => vs.reduce((a, v) => a + v[i], 0) / vs.length);
+const oneStep = vs.map(v => v.map((x, i) => x - bookMean[i]));
+const afterG = vs.map(v => v.map((x, i) => x - G[i]));
+const residualMean = [0, 1, 2].map(i => afterG.reduce((a, v) => a + v[i], 0) / afterG.length);
+const twoStep = afterG.map(v => v.map((x, i) => x - residualMean[i]));
+eq(JSON.stringify(oneStep.map(r => r.map(x => x.toFixed(9)))), JSON.stringify(twoStep.map(r => r.map(x => x.toFixed(9)))),
+    'global mean then book-residual mean equals book mean in one step');
+eq(residualMean.map((x, i) => (x - (bookMean[i] - G[i])).toFixed(9)).join(), '0.000000000,0.000000000,0.000000000',
+    '...because the residual mean IS bookMean minus globalMean');
