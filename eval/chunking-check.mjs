@@ -17,7 +17,10 @@
 import { readFileSync, readdirSync, existsSync } from 'node:fs';
 import { chunkEntry, splitRecursive } from '../extension/chunking.mjs';
 import { eq } from './metrics.mjs';
-import { stInstall } from './scene.mjs';
+import { stInstall, openSample, indexPath, sceneLabel } from './scene.mjs';
+import { chunkConfig } from './reindex.mjs';
+
+const MODEL = process.env.WA_EMBED_MODEL ?? 'bge-m3';
 
 const PARA = { chunkMode: 'paragraph', chunkSize: 800, minChunkSize: 120 };
 
@@ -63,32 +66,35 @@ eq(JSON.stringify(chunkEntry('a\n\nb', { chunkMode: 'length', chunkSize: 800, mi
 const ST = stInstall();
 const LOCAL = new URL('./eval-data/', import.meta.url).pathname;
 const DATA = existsSync(LOCAL) || !ST ? LOCAL : `${ST.root}/public/scripts/extensions/third-party/WorldsApart/eval/eval-data/`;
-const resolve = p => ST ? ST.resolve(p) : p;
 const samples = existsSync(DATA) ? readdirSync(DATA).filter(f => f.endsWith('.json')) : [];
-let compared = 0;
+let compared = 0, openable = 0;
 for (const file of samples) {
+    // THROUGH THE READER AND THE RESOLVER, not through field names of its own. This read `S.index` and
+    // `S.paramSnapshot.vectors` and `S.books[S.primaryBook]` directly — all three are v1/v2 names that
+    // bundle v3 does not carry, so from the migration onward every sample failed the reachability test,
+    // `compared` stayed 0, and the oracle printed a cheerful `ok ... skipped` on every run. It did not
+    // fire on the chunker change that added this note.
     let S;
-    try { S = JSON.parse(readFileSync(DATA + file, 'utf8')); } catch { continue; }
-    const chunkCfg = S.paramSnapshot?.vectors;
-    if (!S.index || !existsSync(resolve(S.index)) || !chunkCfg || !S.books?.[S.primaryBook]) continue;
+    try { S = openSample(DATA + file); } catch { continue; }
+    if (!S?.books?.[S.primaryBook]) continue;
+    openable++;
+    const indexFile = indexPath(S, { model: MODEL });
+    if (!existsSync(indexFile)) continue;
+    const chunkCfg = chunkConfig(S);
 
     const book = S.books[S.primaryBook];
-    const stored = new Set(JSON.parse(readFileSync(resolve(S.index), 'utf8')).items.map(it => it.metadata.text));
+    const stored = new Set(JSON.parse(readFileSync(indexFile, 'utf8')).items.map(it => it.metadata.text));
 
-    // MIRROR syncWorld EXACTLY, INCLUDING WHAT IT DOES *AFTER* CHUNKING. Two properties of the real indexer
-    // are invisible in chunkEntry's output and both were, in turn, mistaken for data corruption here:
+    // MIRROR syncWorld EXACTLY, INCLUDING WHAT IT DOES *AFTER* CHUNKING. Two properties of the real
+    // indexer are invisible in chunkEntry's output and both were, in turn, mistaken for data corruption:
     //
-    //   trim + drop empties — syncWorld re-trims every chunk and skips blanks. splitRecursive splitting an
-    //                         oversized paragraph on '. ' leaves pieces with edge whitespace, so raw output
-    //                         and stored text legitimately differ.
-    //   keyed by hash       — identical text is ONE collection item however many entries produce it, so
-    //                         boilerplate repeated across entries is stored once, attributed to whichever
-    //                         entry got there first.
+    //   trim + drop empties — syncWorld re-trims every chunk and skips blanks. splitRecursive splitting
+    //                         an oversized paragraph on '. ' leaves pieces with edge whitespace.
+    //   keyed by hash       — identical text is ONE collection item however many entries produce it.
     //
     // Comparing per-entry and positionally against a hash-keyed, insertion-ordered store reported a
-    // perfectly-synced 1050-chunk collection as 70% stale. Condemning good graded data is a far more
-    // expensive failure than the drift this is meant to catch, so the comparison is now set-to-set over the
-    // whole collection, exactly the granularity syncWorld itself works at.
+    // perfectly-synced 1050-chunk collection as 70% stale, so the comparison is set-to-set over the whole
+    // collection, exactly the granularity syncWorld itself works at.
     const vectorized = Object.values(book).filter(e => e.vectorized && !e.disable && typeof e.content === 'string' && e.content);
     const expected = new Set();
     for (const e of vectorized) for (const c of chunkEntry(e.content, chunkCfg)) { const t = c.trim(); if (t) expected.add(t); }
@@ -101,17 +107,24 @@ for (const file of samples) {
     // A collection fully in sync is the port's proof. A residue is the DATA drifting, so it reports loudly
     // and passes — the suite must stay green on a machine whose lorebooks have moved on.
     if (!missing.length && !unindexed.length) {
-        eq(true, true, `index oracle: ${S.name ?? file} reproduces all ${stored.size} stored chunks byte-for-byte (${vectorized.length} vectorized entries)`);
+        eq(true, true, `index oracle: ${sceneLabel(S) || file} reproduces all ${stored.size} stored chunks byte-for-byte (${vectorized.length} vectorized entries)`);
     } else {
-        console.log(`ok   index oracle: ${S.name ?? file} ${stored.size - missing.length}/${stored.size} stored chunks reproduced from ${vectorized.length} vectorized entries`);
-        if (missing.length) console.log(`     !! ${missing.length} indexed chunk(s) this book no longer produces — content edited since they were embedded.`);
+        console.log(`ok   index oracle: ${sceneLabel(S) || file} ${stored.size - missing.length}/${stored.size} stored chunks reproduced from ${vectorized.length} vectorized entries`);
+        if (missing.length) console.log(`     !! ${missing.length} indexed chunk(s) this book no longer produces — content edited or re-chunked since they were embedded.`);
         if (unindexed.length) console.log(`     !! ${unindexed.length} chunk(s) the book produces are NOT indexed — that text is unsearchable until re-vectorized.`);
         console.log('        Re-vectorize before using this sample in a retuning corpus. (Not a code failure: the chunker is');
         console.log('        pinned by any fully-clean sample above.)');
     }
 }
-if (!compared) console.log('ok   index oracle: skipped — no sample with a reachable index in eval-data/');
-else eq(compared > 0, true, `index oracle ran against ${compared} live index/book pair(s)`);
+
+// A SKIP IS NOT AN OK. No corpus is a legitimate reason to have nothing to compare — eval-data/ is
+// gitignored, so a fresh checkout has none. Openable bundles with no reachable index is a BROKEN oracle,
+// and it reported success for every run between bundle v3 and this line existing.
+if (!samples.length) {
+    console.log('WARN index oracle: no eval-data/ in this checkout, so the chunker is pinned by the unit cases above alone.');
+} else {
+    eq(compared > 0, true, `index oracle ran against ${compared} live index/book pair(s) (${openable} bundle(s) openable of ${samples.length} file(s))`);
+}
 
 // ---- the merge floor applies to split fragments too ----------------------------------------------
 //

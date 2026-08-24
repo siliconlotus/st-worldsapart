@@ -912,7 +912,10 @@ position among its neighbours and carries nothing about how much relevant materi
 threshold on it is a quantile wearing a probability's clothes. **Measured**, 100 scenes at the shipped
 memory cutoff: mean delivered share is 23.2% / 21.6% / 20.4% / 21.0% across scenes of under 40, 40-80,
 80-150 and over 150 candidates, and delivered count correlates with CANDIDATE count at r 0.946. One
-Time Whore turn offered 208 activated memory entries and passed 51.
+Time Whore turn offered 208 activated memory entries and passed 51 — though that capture is a FROZEN
+scene whose book has since grown, so 105 of its 213 rows post-date the turn and a live playthrough at
+that point would have offered about 108 and passed about 23. The share is what generalises; the count
+from a frozen capture is roughly doubled.
 
 **A SCENE-LEVEL COVARIATE CANNOT FIX IT, because candidate count is not a property of the scene.**
 Stage 1 admits every vectorized entry, so the count is the book's size minus whatever post-dates the
