@@ -141,12 +141,38 @@ export function chunkEntry(content, { chunkMode, chunkSize, minChunkSize }) {
         if (merged.length <= maxLength) {
             chunks.push(merged);
         } else {
-            chunks.push(...splitRecursive(merged, maxLength, ['\n', '. ', ' ', '']));
+            const parts = splitRecursive(merged, maxLength, ['\n', '. ', ' ', '']);
+            // THE FLOOR APPLIES TO SPLIT FRAGMENTS TOO. splitRecursive packs greedily from the left, so
+            // every run it emits ends in whatever did not fit — measured on a real collection, 144 of
+            // 3332 chunks (4.3%) came out under the floor that way, including five bare `---` rules, an
+            // 11-character `production.` and a title cut mid-word at `[Past Event: Aldric`. Those get
+            // embedded, they enter the corpus mean every centred cosine subtracts, they count toward
+            // BM25's document total, and a 3-character chunk's direction is arbitrary enough to win an
+            // entry's max-pool against anything.
+            //
+            // The tail carries into `pending` rather than being glued on here, because that is the
+            // faithful join: the tail ENDS a paragraph, so the text following it in the source is a
+            // blank line and the next paragraph — exactly what the loop's `\n\n` merge reconstructs.
+            // Re-joining fragments here would have to guess which delimiter split them.
+            const tail = parts[parts.length - 1];
+            if (parts.length > 1 && tail.length < minChunkSize) {
+                parts.pop();
+                pending = tail;
+            }
+            chunks.push(...parts);
         }
     }
 
     if (pending) {
-        chunks.push(pending);
+        // Nothing follows it, so the only join left is backwards. Onto the previous chunk when it fits,
+        // with the blank line that separated them; alone otherwise, since dropping content is worse than
+        // a short chunk.
+        const previous = chunks[chunks.length - 1];
+        if (pending.length < minChunkSize && previous && previous.length + pending.length + 2 <= maxLength) {
+            chunks[chunks.length - 1] = `${previous}\n\n${pending}`;
+        } else {
+            chunks.push(pending);
+        }
     }
 
     return chunks;

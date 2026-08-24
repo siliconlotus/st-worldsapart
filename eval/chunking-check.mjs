@@ -112,3 +112,30 @@ for (const file of samples) {
 }
 if (!compared) console.log('ok   index oracle: skipped — no sample with a reachable index in eval-data/');
 else eq(compared > 0, true, `index oracle ran against ${compared} live index/book pair(s)`);
+
+// ---- the merge floor applies to split fragments too ----------------------------------------------
+//
+// splitRecursive packs greedily from the left, so every run it emits ends in whatever did not fit.
+// Those tails used to be emitted as chunks: measured on a live collection, 144 of 3332 (4.3%) came out
+// under the floor, including five bare `---` rules, an 11-character `production.` and a title cut
+// mid-word. They are embedded, they enter the corpus mean every centred cosine subtracts, they count
+// toward BM25's document total, and a 3-character chunk's direction is arbitrary enough to win an
+// entry's max-pool against anything.
+const CFG = { chunkMode: 'paragraph', chunkSize: 800, minChunkSize: 120 };
+const words = n => Array.from({ length: n }, () => 'word').join(' ');
+const floorCases = [
+    ['an interior rule inside an oversized block', `${words(200)}\n---\n${words(200)}\n\n${words(30)}`],
+    ['a short tail left by a sentence split', `${words(190)}. production.`],
+    ['a short trailing paragraph', `${words(200)}\n\nstray`],
+    ['a short paragraph before a real one', `stray\n\n${words(60)}`],
+];
+for (const [name, text] of floorCases) {
+    const out = chunkEntry(text, CFG);
+    eq(out.filter(c => c.length < CFG.minChunkSize).length, 0, `no chunk under the floor: ${name}`);
+    // AND NOTHING IS LOST. Whitespace-insensitive, because the merge re-joins with a blank line where
+    // the source had one; every non-space character must survive.
+    eq(out.join('').replace(/\s+/g, ''), text.replace(/\s+/g, ''), `content preserved: ${name}`);
+}
+// A short entry that cannot reach the floor at all is still emitted rather than dropped — losing
+// content is worse than a short chunk, which is the one case the floor yields to.
+eq(chunkEntry('tiny', CFG).join(''), 'tiny', 'an entry shorter than the floor is still chunked, not dropped');
