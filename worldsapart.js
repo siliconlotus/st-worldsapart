@@ -1880,6 +1880,14 @@ async function versusCore() {
         at: (getContext().chat ?? []).length,
         waBudget: effectiveTokenBudget(), coreBudgetPercent: Number(world_info_budget) || 25,
         vectorRouteEnabled: Boolean(viaVectors),
+        // THE SCENE, or none of this is gradeable. A judge scores an entry AGAINST something, and
+        // rows plus content is only half of that pair. Same field names as the /wa-grade capture so
+        // an offline reader treats the two the same way.
+        query: runState.lastQuery,
+        scanChat: runState.lastScanChat,
+        injects: runState.lastInjects,
+        sources: runState.lastSources,
+        depth: settings().messageDepth,
         rows: union.map(([k, x]) => ({ ...row([k, x]), core: coreKeys.has(k), wa: waKeys.has(k), content: x.entry.content })),
     });
     toastr.success(`core ${coreKeys.size} / WA ${waKeys.size}, ${coreKeys.size - both} core-only \u2014 see console`, 'WA vs core');
