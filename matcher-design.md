@@ -994,6 +994,21 @@ positives. A Fenwood validation fold was graded for it and is NOT quotable: on `
 yields 20 rows and 9 positives, its 149 judged rows being almost entirely reference, so its AP moved on a
 population this model is not fitted for.
 
+**LENGTH IS EARNED BUT OVER-READ, which is what `length` was correcting.** **Measured**, 6107 graded
+rows: P(grade >= 3) rises 5.6% -> 6.3% -> 9.6% -> 13.0% across entry-length quartiles, so a long entry
+genuinely is likelier to be relevant and preferring one is not an error. But the SIGNALS track length
+about three times harder than relevance does — r(log length, grade) 0.100 against r(log length, text)
+0.308, properNouns 0.284, cosine 0.349. Two mechanisms produce that: `text` and `cosine` pool MAX over
+chunks, so a longer entry gets more draws, and `properNouns` is an un-normalised idf SUM, so a longer
+entry shares more names.
+
+**The score of record cannot see what that costs**, which is why dropping `length` reads as free: F2 is
+over the delivered SET with no token term, so a model that prefers 2000-token entries to 700-token ones
+scores the same either way. Under a budget it is not the same — measured on one turn, 25,083 tokens
+bought 13 entries averaging 1945 tokens against a population mean of 1385. What is NOT established is
+that more smaller entries would be better: relevance-per-token assumes a currency the grades do not
+use, since a long entry graded 4 may be 2000 tokens genuinely about the scene.
+
 **Of the two ENTRY-INTRINSIC columns, `density` earns and `length` costs.** Neither reads the query —
 entry length (log tokens) and proper-noun density (names per 100 tokens, `ranking.properNounsOf`) are
 priors rather than signals. **Measured** over the full lattice on `properNouns`, `length` and `density`, held out by book: `length`
