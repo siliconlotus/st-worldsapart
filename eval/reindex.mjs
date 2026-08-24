@@ -9,7 +9,7 @@
 //
 // 2. OTHER PEOPLE'S GRADES BECOME USABLE. A sample records the path to its author's index; that path means
 //    nothing on your machine. But a 'full' sample carries entry content, the chunk settings in
-//    `paramSnapshot.vectors`, and `embedModel` — everything needed to reconstruct the collection locally.
+//    `paramSnapshot.settings`, and `embedModel` — everything needed to reconstruct the collection locally.
 //    Rebuild it and a stranger's graded scene scores like one of your own.
 //
 // WRITES TO A CACHE, NEVER TO SillyTavern's LIVE VECTORS. The output path is derived from book + model +
@@ -28,15 +28,27 @@ import { getStringHash } from './scene.mjs';
 import { openBundle } from '../extension/grading.mjs';
 import { isMemory } from '../extension/relevance.mjs';
 
-/** Chunk settings, sample's own unless overridden. Field names match `settings()` and paramSnapshot.vectors. */
+/** Chunk settings, sample's own unless overridden. Field names match `settings()` and paramSnapshot.settings. */
 export const chunkConfig = (S, overrides = {}) => {
-    // FROM THE ARM'S OWN PARAMS. This read `S.paramSnapshot.vectors`, a v2 field that bundle v3 does not
-    // carry — measured, 0 of 107 bundles have it — so every sample in the corpus silently took the
-    // defaults. That is only harmless while the defaults happen to be what the capture ran at.
+    // FROM THE ARM'S OWN PARAMS — `paramSnapshot.settings`, the current writer's full scalar dump, and
+    // nothing else. An older writer emitted grouped blocks (`vectors`, `cutoff`, `layout`) and that shape is
+    // NOT read: it names knobs the pipeline no longer has (`vectorCutoff`, `elbowSensitivity`,
+    // `scoreThreshold`), and reading it would let a stored capture resurrect a parameter there is no code
+    // for. Prerelease, so nothing is owed to it.
+    //
+    // THE COST IS EXPLICIT: measured, 363 of 491 scene-arms carry only the grouped shape, so every capture
+    // in the corpus now re-derives at today's defaults rather than at what it ran under — Ascensus moves
+    // from paragraph/800/20 to paragraph/1750/120. Every cached index path changes with it, and no number
+    // measured before this is comparable to one measured after.
     const p = S?.params ?? {};
     const recorded = {};
     for (const k of ['chunkMode', 'chunkSize', 'minChunkSize']) if (p[k] !== undefined) recorded[k] = p[k];
-    return { chunkMode: 'paragraph', chunkSize: 800, minChunkSize: 120, ...(S.paramSnapshot?.vectors ?? {}), ...recorded, ...overrides };
+    // PRODUCTION'S VALUES (state.mjs), so a sample with no recorded vectors block is re-derived the way the
+    // app would chunk it today. chunkSize=800 is an ARM in param-screen for reproducing the old default.
+    const dumped = S.paramSnapshot?.settings ?? {};
+    const fromDump = Object.fromEntries(['chunkMode', 'chunkSize', 'minChunkSize']
+        .filter(k => dumped[k] !== undefined).map(k => [k, dumped[k]]));
+    return { chunkMode: 'paragraph', chunkSize: 1750, minChunkSize: 120, ...fromDump, ...recorded, ...overrides };
 };
 
 /**

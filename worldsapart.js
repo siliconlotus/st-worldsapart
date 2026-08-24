@@ -2739,6 +2739,16 @@ function paramSnapshot() {
         // the books this chat actually has.
         derived: {
             maxTokens: tokenBudgetLabel(),
+            // THE CEILING AS A NUMBER, because `maxTokens` above is a label for a human ("40%* = 29036")
+            // and an offline harness replaying the budget walk needs the value. It belongs here by this
+            // block's own rule: a percentage resolved against a live context size has no single backing
+            // setting, so the dump above cannot carry it.
+            //
+            // The entry maxes are NOT repeated here — maxTotalEntries, maxDynamicEntries and
+            // maxVectorEntries are scalars and are already in that dump — and the per-book caps ride in
+            // `priority`, whose `cap` field is what applyBudget's capOf reads. Recording either twice
+            // would let the two disagree.
+            maxTokensEffective: effectiveTokenBudget(),
             tokenizer: getTokenizerModel(),
             insertionOrder: presentationBaseLabel(s.presentationOrder),
             attached,

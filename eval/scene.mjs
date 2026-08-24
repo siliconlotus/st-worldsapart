@@ -18,6 +18,7 @@ import { corpusMean, centeredCosineScores } from '../plugin/vector.mjs';
 import * as ranking from '../extension/ranking.mjs';
 import * as matcher from '../extension/matcher.mjs';
 import { isDurable, openBundle } from '../extension/grading.mjs';
+import * as selection from '../extension/selection.mjs';
 import { buildContentIndex, scoreContent, entryKey } from '../extension/content-lexical.mjs';
 // Cycle: reindex.mjs imports getStringHash from here. Safe because neither side calls across at module
 // scope — both references live inside function bodies, so whichever module loads first finishes evaluating
@@ -307,7 +308,7 @@ export function stInstall() {
  * THE SAMPLE'S OWN `index` IS SKIPPED WHEN IT DOESN'T EXIST HERE, which is the normal case for a graded scene
  * somebody else captured: it records an absolute-ish path on THEIR machine. So does the derived path — it
  * hashes the book name into THIS machine's vectors dir, which a stranger's book will not occupy. Both are
- * author-machine concepts, and a bundle that carries its books, `paramSnapshot.vectors` and
+ * author-machine concepts, and a bundle that carries its books, `paramSnapshot.settings` and
  * `embedModel` needs neither: cachePath keys on (book, model, chunk settings), so it names the same file on
  * every machine and ensureIndex can fill it. That cache is the last resort rather than the first so no run
  * that resolves today resolves anywhere else — it is reached only when the two local paths are both absent.
@@ -466,6 +467,19 @@ export const sceneParams = (S, overrides = {}) => ({
     // absolute sigma instead would put a step between component r and component r+1.
     whitenR: 0,
     whitenAlpha: 1,
+    // THE TOKEN CEILING stage 4 walks the layout under. 0 leaves the budget unmodelled, which is what every
+    // measurement before this one did — @cut is stage 4's FIRST decision and three more follow it.
+    //
+    // WHAT THIS CANNOT MODEL, stated because the gap is in the captures rather than the code. Constants and
+    // armed stickies are hoisted ahead of the dynamic block and spend the budget first (selection.mjs
+    // walkOrder), and no capture records them: every candidate row in this corpus is `block: dynamic`. So
+    // the dynamic block is given MORE room here than production would give it, by whatever the constants
+    // cost. maxTotalEntries and the per-book cap are not recorded either and come from the caller.
+    //
+    // The ceiling itself is not a property of the scene — it is a user's cost decision — so it is passed in
+    // rather than read off the bundle, and the 52 of 107 bundles that do record one write it as a display
+    // string ("40%* = 29036") rather than a number.
+    budgetTokens: 0,
     // HOW MANY SHARED COMPONENTS COME OFF FIRST (global-basis.mjs). 0 is production: no first stage.
     //
     // WITHOUT IT pcRemove DOES NOT TEST WHAT IT CLAIMS. A book's leading component is not its own —
@@ -1129,6 +1143,33 @@ export async function scoreScene({ sample: S, overrides = {}, k = 10, vectors, m
     const admits = r => !isMemory(r.entry) || !Number.isFinite(r.cutoff) || !Number.isFinite(r.eCredit) || r.eCredit >= r.cutoff;
     const atCut = scoreWindow(ranked.filter(admits));
 
+    //   @budget     what the token ceiling actually leaves — stage 4 end to end, so the only window here
+    //               that is the DELIVERED set rather than a stage of it. Off by default; see budgetTokens
+    //               for what the captures cannot supply.
+    let atBudget = null;
+    if (P.budgetTokens > 0) {
+        // Recorded token counts where the capture has them, since they came from the real tokenizer; the
+        // fallback is content length over 4.91, which is this corpus's MEASURED chars-per-token for entry
+        // bodies (median over 1297 rows, p5 4.46 / p95 5.33). A flat /4 would be 23% out.
+        const recorded = new Map((S.candidates ?? []).map(c => [`${c.book}.${c.uid}`, c.tokens]).filter(([, t]) => typeof t === 'number'));
+        const tokensOf = r => recorded.get(`${r.entry?.world ?? S.primaryBook}.${r.uid}`) ?? Math.round(String(r.entry?.content ?? '').length / 4.91);
+        const kept = await selection.applyBudget({
+            ranked: selection.walkOrder({ results: ranked.filter(admits) }),
+            isDynamic: () => true,
+            maxTokens: P.budgetTokens,
+            maxTotal: P.maxTotalEntries ?? 0,
+            maxDynamic: 0,
+            maxVectorEntries: P.maxVectorEntries ?? 0,
+            isVector: r => Boolean(r.entry?.vectorized),
+            tokensOf,
+        });
+        // `survivors` is a Set built by walking `ranked` in order, so spreading it keeps the layout order
+        // the caps took a prefix of — which scoreWindow needs, since it reads rows positionally.
+        atBudget = scoreWindow([...kept.survivors]);
+        atBudget.dropped = kept.dropped;
+        atBudget.tokens = kept.budgeted;
+    }
+
     return {
         n: ndcg(g, k),
         nAt5: ndcg(g, 5),
@@ -1137,6 +1178,7 @@ export async function scoreScene({ sample: S, overrides = {}, k = 10, vectors, m
         f2,
         atR,
         atCut,
+        atBudget,
         relevant,
         judged: top.length - unjudged.length,
         of: top.length,

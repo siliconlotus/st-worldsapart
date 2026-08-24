@@ -116,7 +116,7 @@ const ARMS = {
     //
     // Cheaper than it looks: the index cache is keyed on book + model + chunk settings, NOT on scene, so every
     // scene graded against the same lorebook reuses one build per dose. Cost scales with BOOKS x doses.
-    ...Object.fromEntries([200, 300, 400, 600, 1200, 1600, 1750, 2400].map(v => [`chunkSize=${v}`, { __chunk: { chunkSize: v } }])),
+    ...Object.fromEntries([200, 300, 400, 600, 800, 1200, 1600, 2400].map(v => [`chunkSize=${v}`, { __chunk: { chunkSize: v } }])),
     ...Object.fromEntries([0, 60, 120, 200, 300, 500].map(v => [`minChunk=${v}`, { __chunk: { minChunkSize: v } }])),
     'chunkMode=length': { __chunk: { chunkMode: 'length' } },
 
@@ -245,6 +245,9 @@ const unknown = picked.filter(a => !ARMS[a]);
 if (unknown.length) { console.error(`unknown arm(s): ${unknown.join(', ')} — see --list`); process.exit(2); }
 
 const K = Number(arg('--k') ?? 10);
+// The token ceiling every scene is walked under, baseline and arms alike — it is a user's cost decision,
+// not a property of a scene, so it cannot come off the bundle. Required by --metric fAtBudget.
+const BUDGET = Number(arg('--budget') ?? 0);
 // WHICH METRIC THE SIGN TEST READS, and the default is the VALIDITY SCORE rather than a diagnostic.
 //
 // `fAtCut` is F-beta(2) on the asymmetric bars over the set the relevance cut admits — the only window the
@@ -262,7 +265,7 @@ const K = Number(arg('--k') ?? 10);
 // is F-beta(2) at a fixed k, and `fAtR` is sized by the scene's relevant count rather than by --k. Baseline
 // and arm are always scored on the same one, so a run mixing them is impossible.
 const METRIC = arg('--metric') ?? 'fAtCut';
-const WINDOWED = { fAtR: r => r.atR.f, fAtCut: r => r.atCut.f, nAtCut: r => r.atCut.n };
+const WINDOWED = { fAtR: r => r.atR.f, fAtCut: r => r.atCut.f, nAtCut: r => r.atCut.n, fAtBudget: r => r.atBudget?.f ?? NaN, nAtBudget: r => r.atBudget?.n ?? NaN };
 if (!['n', 'nAt5', 'f2', 'recall', 'precision', ...Object.keys(WINDOWED)].includes(METRIC)) { console.error(`unknown --metric ${METRIC}`); process.exit(2); }
 const mOf = r => (WINDOWED[METRIC] ? WINDOWED[METRIC](r) : r[METRIC]);
 const MODEL = process.env.WA_EMBED_MODEL ?? 'bge-m3';
@@ -278,10 +281,10 @@ const fx = n => (n >= 0 ? '+' : '') + n.toFixed(4);
         const S = openSample(path, arg('--arm'));
         if (!Object.keys(S.books?.[S.primaryBook] ?? {}).length) { console.error(`${path}: embeds no entries for primary book "${S.primaryBook ?? '?'}" — re-grade with books=full|meta`); process.exit(2); }
         if (!S.candidates?.length) { console.error(`${path}: logs no candidates`); process.exit(2); }
-        const P = sceneParams(S);
+        const P = sceneParams(S, BUDGET ? { budgetTokens: BUDGET } : {});
         const scene = loadScene(S, { indexFile: indexPath(S, { model: MODEL, all: P.denseAllEntries }), params: P });
         const qv = await embed(S.query, { ollama: OLLAMA, model: MODEL });
-        const base = await scoreScene({ sample: S, k: K, scene, qv });
+        const base = await scoreScene({ sample: S, overrides: BUDGET ? { budgetTokens: BUDGET } : {}, k: K, scene, qv });
         // EXCLUDED, NOT WARNED ABOUT. A warning in a 250-line log is not a guard: this corpus holds a
         // deliberate WRONG-BOOK null fixture — a scene paired with a book from another story, composed to
         // measure what retrieval does when the corpus cannot answer — and it sat in every screen this file
@@ -365,7 +368,10 @@ const fx = n => (n >= 0 ? '+' : '') + n.toFixed(4);
 
     const results = [];
     for (const armName of picked) {
-        const { __chunk: chunkCfg, __reload: needsReload, __dense: denseAll, __archived: archived, ...scoring } = ARMS[armName];
+        const { __chunk: chunkCfg, __reload: needsReload, __dense: denseAll, __archived: archived, ...armParams } = ARMS[armName];
+        // The ceiling rides on every arm as well as the baseline, or the two are scored under different
+        // stage-4 conditions and the delta is that difference rather than the parameter's.
+        const scoring = BUDGET ? { ...armParams, budgetTokens: BUDGET } : armParams;
         const cells = [];
         for (const sc of scenes) {
             let r;

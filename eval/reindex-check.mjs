@@ -80,11 +80,17 @@ eq(buildItems(many, { ...CFG, minChunkSize: 0 }).length, 3, 'floor 0: one chunk 
 eq(buildItems(many, { ...CFG, minChunkSize: 200 }).length, 1, 'floor 200: all three merge forward into one');
 
 // --- chunkConfig layering: harness default < sample snapshot < explicit override ---
-const S = { paramSnapshot: { vectors: { chunkMode: 'paragraph', chunkSize: 800, minChunkSize: 20 } } };
+const S = { paramSnapshot: { settings: { chunkMode: 'paragraph', chunkSize: 800, minChunkSize: 20 } } };
 eq(chunkConfig(S).minChunkSize, 20, "the sample's own chunk settings win over the defaults");
 eq(chunkConfig(S, { minChunkSize: 120 }).minChunkSize, 120, 'an arm override wins over the sample');
 eq(chunkConfig(S, { minChunkSize: 120 }).chunkSize, 800, 'an override leaves the other settings alone');
-eq(chunkConfig({}).chunkSize, 800, 'a sample with no snapshot still gets a full config');
+eq(chunkConfig({}).chunkSize, 1750, 'a sample with no snapshot still gets a full config');
+// ONE SNAPSHOT SHAPE. The current writer's scalar dump is read; the older grouped blocks are not, because
+// they name knobs the pipeline no longer has and reading them would resurrect a parameter with no code.
+eq(chunkConfig({ paramSnapshot: { settings: { chunkSize: 900, minChunkSize: 30 } } }).chunkSize, 900, 'the settings dump is read');
+eq(chunkConfig({ paramSnapshot: { settings: { chunkSize: 900 } } }).minChunkSize, 120, '...and a field it omits falls to the default rather than to undefined');
+eq(chunkConfig({ paramSnapshot: { vectors: { chunkSize: 800, minChunkSize: 20 } } }).chunkSize, 1750, 'a pre-v3 grouped snapshot is IGNORED, not read');
+eq(chunkConfig({ paramSnapshot: { vectors: { chunkSize: 800 }, settings: { chunkSize: 900 } } }).chunkSize, 900, '...and does not win when both are present');
 
 // --- cache identity: same inputs -> same path, any difference -> a different one ---
 const cp = (o, m = 'bge-m3') => cachePath({ primaryBook: 'Book' }, chunkConfig(S, o), m);
@@ -113,7 +119,7 @@ let ran = 0;
 for (const file of existsSync(DATA) ? readdirSync(DATA).filter(f => f.endsWith('.json')) : []) {
     let sample;
     try { sample = JSON.parse(readFileSync(DATA + file, 'utf8')); } catch { continue; }
-    if (!sample.index || !existsSync(resolve(sample.index)) || !sample.paramSnapshot?.vectors || !sample.books?.[sample.primaryBook]) continue;
+    if (!sample.index || !existsSync(resolve(sample.index)) || !sample.paramSnapshot?.settings || !sample.books?.[sample.primaryBook]) continue;
     const stored = JSON.parse(readFileSync(resolve(sample.index), 'utf8')).items.map(i => `${i.metadata.hash}|${i.metadata.index}`).sort();
     const mine = buildItems(sample.books[sample.primaryBook], chunkConfig(sample)).map(i => `${i.hash}|${i.index}`).sort();
     ran++;

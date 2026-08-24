@@ -358,7 +358,9 @@ const tokens = offlineTokenCounter(TOKENIZER);
 const budgetFor = () => ({ ...(src?.budget ?? {}), maxTokens: null, tokenizer: TOKENIZER });
 
 // The collection, built once from the live world and shared by every scene — same book, same chunking.
-const chunkOverrides = src?.paramSnapshot?.vectors ?? {};
+// The current writer's scalar dump; the pre-v3 grouped `vectors` block is not read (reindex.mjs
+// chunkConfig), so a synthesised scene chunks the way the app would chunk it today.
+const chunkOverrides = src?.paramSnapshot?.settings ?? {};
 const shell = { primaryBook: BOOK, books: allBooks, paramSnapshot: src?.paramSnapshot };
 const built = await ensureIndex(shell, { overrides: chunkOverrides, model: MODEL, ollama: OLLAMA, log: m => console.log(`  ${m}`) });
 console.log(`collection: ${built.items} chunks${built.built ? ' (built)' : ' (cached)'}\n`);

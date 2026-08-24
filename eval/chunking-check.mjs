@@ -69,11 +69,9 @@ const DATA = existsSync(LOCAL) || !ST ? LOCAL : `${ST.root}/public/scripts/exten
 const samples = existsSync(DATA) ? readdirSync(DATA).filter(f => f.endsWith('.json')) : [];
 let compared = 0, openable = 0;
 for (const file of samples) {
-    // THROUGH THE READER AND THE RESOLVER, not through field names of its own. This read `S.index` and
-    // `S.paramSnapshot.vectors` and `S.books[S.primaryBook]` directly — all three are v1/v2 names that
-    // bundle v3 does not carry, so from the migration onward every sample failed the reachability test,
-    // `compared` stayed 0, and the oracle printed a cheerful `ok ... skipped` on every run. It did not
-    // fire on the chunker change that added this note.
+    // THROUGH THE READER AND THE RESOLVER, never through field names of its own. A name spelled here goes
+    // stale without failing: the reachability test just stops matching, `compared` stays 0, and the oracle
+    // prints a cheerful `ok ... skipped` on every run forever.
     let S;
     try { S = openSample(DATA + file); } catch { continue; }
     if (!S?.books?.[S.primaryBook]) continue;

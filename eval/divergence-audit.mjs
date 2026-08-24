@@ -72,7 +72,9 @@ for (const file of files) {
     // Same stage-2 guard as scene.mjs makeCandidateSet: a vectorized entry under suppressVectorKeys
     // has blanked keys, so core could never keyword-fire it — it is not a window miss, it has no
     // keyword door at all. Matters only when this tool is pointed at a mixed book.
-    const suppress = j.params?.suppressVectorKeys ?? j.paramSnapshot?.suppressVectorKeys;
+    // paramSnapshot's current shape is a scalar dump under `settings`; the flat read beside it was the
+    // pre-v3 layout and is gone.
+    const suppress = j.params?.suppressVectorKeys ?? j.paramSnapshot?.settings?.suppressVectorKeys;
     let eligible = 0, misses = 0;
     for (const e of entries) {
         if (fired.has(Number(e.uid)) || e.disable || e.constant || (e.vectorized && suppress)) continue;

@@ -7,8 +7,26 @@ export const MODULE_NAME = 'worldsApart';
 
 export const defaultSettings = {
     enabled: true,
-    /** Characters per chunk. Entries are chunked for MATCHING only; the whole entry is still inserted. */
-    chunkSize: 800,
+    /**
+     * CHARACTERS per chunk — not tokens. Entries are chunked for MATCHING only; the whole entry is still
+     * inserted.
+     *
+     * IT SITS ABOVE THE PARAGRAPH DISTRIBUTION, which is the point: paragraph mode exists to make the
+     * paragraph the unit, and at the old 800 the cap fired on 36.5% of them. **Measured** over 3642
+     * paragraphs of 604 memory entries: mean 881, median 650, p90 1735, p99 4934. The mean paragraph was
+     * LONGER than the cap. 1750 is that p90, so the cap now fires on the tail rather than the body.
+     *
+     * NOT A CAPACITY LIMIT. bge-m3 takes ~32,800 characters and the longest paragraph in the corpus is
+     * 17,115, so nothing here ever truncated; 800 was 2.4% of what the model accepts.
+     *
+     * MEASURED ~FLAT, and moved on that basis rather than on a gain: F-beta(2) over the delivered set
+     * (walkOrder + applyBudget) at three ceilings, 103 scenes on 5 lineages, paired — +0.0045 at 4k,
+     * +0.0063 at 12k, +0.0017 at 32k, none significant, four of five lineages positive. It also halves the
+     * sub-floor chunk leak on some books without fixing it: Sommers still holds a 3-character chunk.
+     *
+     * CHANGING IT RE-EMBEDS EVERY COLLECTION, since the chunk text and therefore every hash changes.
+     */
+    chunkSize: 1750,
     /** 'paragraph' keeps semantic boundaries; 'length' fills to chunkSize (chunking.mjs splitRecursive). */
     chunkMode: 'paragraph',
     /**
