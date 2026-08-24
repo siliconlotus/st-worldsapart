@@ -41,28 +41,28 @@ const scoreArm = rows => {
 const per = [];
 for (const file of files) {
     const doc = JSON.parse(readFileSync(file, 'utf8'));
-    // A reviewer export carries `reviewed`; a bundle carries `arms` directly. Both name the same rows, so
-    // the join is (book, uid) either way — the title is truncated in some captures and cannot be the key.
-    const caps = doc.reviewed?.length ? doc.reviewed : [doc];
-    for (const cap of caps) {
-        const grades = new Map((cap.grades ?? []).map(g => [`${g.book}${US}${g.uid}`, gradeOf(g)]));
-        const arms = cap.arms ?? doc.arms ?? [];
-        if (!arms.length) {
-            console.error(`${file}: "${cap.name ?? '?'}" carries no arms. The reviewer's grade export holds verdicts only — pass it AND the bundle it read, or a bundle the grades were merged back into.`);
-            continue;
-        }
-        if (!grades.size) { console.error(`${file}: "${cap.name ?? '?'}" carries no grades`); continue; }
+    if (doc.reviewed) {
+        console.error(`${file} is a review export: it carries verdicts and no arm membership, so no arm's delivered set can be recovered from it. Score the GRADED BUNDLE the reviewer drops beside it.`);
+        continue;
+    }
+    const arms = doc.arms ?? [];
+    if (!arms.length) { console.error(`${file}: no arms`); continue; }
+    for (const scene of doc.scenes ?? []) {
+        // Grades live on the SCENE and the delivered sets on the arms, which is what makes one file
+        // scoreable: every arm is judged against the same verdicts.
+        const grades = new Map((scene.entries ?? []).map(e => [`${e.book}${US}${e.uid}`, gradeOf(e)]));
+        if (!grades.size) { console.error(`${file}: scene "${scene.id ?? '?'}" is ungraded`); continue; }
         const rel = new Set([...grades].filter(([, g]) => g >= 3).map(([k]) => k));
         const row = [];
         for (const arm of arms) {
-            for (const sc of Object.values(arm.scenes ?? {})) {
-                const rows = (sc.candidates ?? []).map(c => ({ ...c, grade: grades.get(`${c.book}${US}${c.uid}`) }));
-                const s = scoreArm(rows);
-                const recall = rel.size ? rows.filter(r => r.grade >= 3).length / rel.size : 0;
-                row.push({ arm: arm.name, ...s, recall, f2: fbeta(s.precision, recall, RECALL_WEIGHT) });
-            }
+            const sc = arm.scenes?.[scene.id];
+            if (!sc) continue;
+            const rows = (sc.candidates ?? []).map(c => ({ ...c, grade: grades.get(`${c.book}${US}${c.uid}`) }));
+            const s = scoreArm(rows);
+            const recall = rel.size ? rows.filter(r => r.grade >= 3).length / rel.size : 0;
+            row.push({ arm: arm.name, ...s, recall, f2: fbeta(s.precision, recall, RECALL_WEIGHT) });
         }
-        if (row.length) per.push({ name: cap.name ?? file, rel: rel.size, arms: row });
+        if (row.length) per.push({ name: scene.id ?? doc.name ?? file, rel: rel.size, arms: row });
     }
 }
 
@@ -86,9 +86,8 @@ for (const other of names) {
         return w && o ? w.f2 - o.f2 : null;
     }).filter(x => x != null);
     if (!d.length) continue;
-    const mean = d.reduce((a, b) => a + b, 0) / d.length;
-    const up = d.filter(x => x > 0).length, dn = d.filter(x => x < 0).length;
-    console.log(`  wa - ${other}: mean dF2 ${(mean >= 0 ? '+' : '') + mean.toFixed(4)}   ${up}/${dn}/${d.length - up - dn} up/down/tie   sign p ${signTest(up, dn).toFixed(3)}`);
+    const t = signTest(d);
+    console.log(`  wa - ${other}: mean dF2 ${(t.mean >= 0 ? '+' : '') + t.mean.toFixed(4)}   ${t.plus}/${t.minus}/${t.ties} up/down/tie   sign p ${t.p.toFixed(3)}`);
     console.log(`    per scene: ${d.map(x => (x >= 0 ? '+' : '') + x.toFixed(3)).join('  ')}`);
 }
 if (per.length < 6) console.log(`  n=${per.length}: the best two-sided p reachable is ${(1 / 2 ** (per.length - 1)).toFixed(3)}. Read the direction and the mean.`);

@@ -3937,6 +3937,26 @@ async function superEvalScene() {
     // to be told by hand, and its `--user` defaulted to empty — which signed every verdict as nobody and,
     // since a pass key is rater + instant, matched nothing on a re-run and appended the whole review again.
     download(JSON.stringify({ reviewed, gradeScale: GRADE_SCALE, createdBy: 'wa-super-eval', user: raterId(), reviewedAt }, null, 1), filename, 'application/json');
+
+    // A GRADED BUNDLE BESIDE THE REVIEW: the same merge apply-review does, done here so a capture graded
+    // in one sitting is scoreable without a round trip through eval-data — apply-review resolves a
+    // section's bundle BY CAPTURE ID over eval-data alone, so a bundle held anywhere else has to be moved
+    // there first. The review cannot substitute: it carries verdicts and no arm membership, so nothing
+    // offline can tell which arm delivered a row.
+    //
+    // ONE SCENE PER DOCUMENT ONLY. A section names a scene by position and a multi-scene bundle needs the
+    // id resolution apply-review does — and a mis-landed verdict looks native once written, so this
+    // declines rather than guesses.
+    let dropped = 0;
+    for (const [si, sec] of done.sections.entries()) {
+        const doc = secs[si]?.manifest;
+        const scene = (doc?.scenes ?? []).length === 1 ? doc.scenes[0] : null;
+        if (!scene) continue;
+        const merged = { ...doc, scenes: [{ ...scene, entries: mergeGrades(scene.entries, sec.grades, { user: raterId(), now: reviewedAt }) }] };
+        const slug = String(secs[si].name ?? sec.file ?? 'scene').replace(/\.json$/, '').replace(/[^\w.-]+/g, '-').replace(/^-+|-+$/g, '') || 'scene';
+        download(JSON.stringify(merged, null, 1), `${slug}-graded.json`, 'application/json');
+        dropped++;
+    }
     // Agreement is over the rows a human actually reviewed — those carrying BOTH kinds of verdict.
     // Filtering on the judge's alone would drag in every untouched judge row and report it as a
     // disagreement, since it has no human verdict rather than a matching one.
@@ -3949,7 +3969,7 @@ async function superEvalScene() {
     const irr = pairs.length
         ? ` LLM agreement: ${pairs.filter(([h, j]) => h === j).length}/${pairs.length} exact, ${pairs.filter(([h, j]) => Math.abs(h - j) <= 1).length}/${pairs.length} within 1.`
         : '';
-    toastr.success(`Saved ${filename} — ${done.edited} row(s) edited across ${reviewed.length} scene(s), ${rel} relevant (>=3).${irr} Apply with: node eval/synthetic-data/apply-review.mjs --write`, 'Worlds Apart', { timeOut: 15000 });
+    toastr.success(`Saved ${filename}${dropped ? ` and ${dropped} graded bundle(s)` : ''} — ${done.edited} row(s) edited across ${reviewed.length} scene(s), ${rel} relevant (>=3).${irr} Apply the review with: node eval/synthetic-data/apply-review.mjs --write`, 'Worlds Apart', { timeOut: 15000 });
     return '';
 }
 
