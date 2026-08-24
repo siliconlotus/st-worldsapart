@@ -1276,13 +1276,6 @@ change confined to the smaller one — computing a cosine for every reference en
 moves that tier's AUC from 0.7387 to 0.7851 and its log-loss from 0.5539 to 0.5163, while the memory tier
 and the pooled model do not move at all. Reference cosine then carries the tier's largest slope
 (+0.806 standardised, against text's +0.419), where without it the tier runs on keys.
-**The shipped memory cutoff is measured flat: n=4 scenes across 3 books, paired, F over the ADMITTED
-set** (`param-screen --arms cutoff=... --metric fAtCut`, the `@cut` window in `scene.mjs` — the only
-window the system sizes for itself, since `@R` is handed the count and `k` is handed a number). Doses
-0.04/0.12/0.16/0.22/0.30 against each scene's own baseline: no dose helps more than 2 of 4, every mean
-delta is negative, and the four scenes peak at four different doses (0.30 / 0.12 / base / 0.04). Leave
-0.08 alone.
-
 **The base-rate argument for the split does NOT hold, and was measured wrong.** Pooled over all judged
 rows the tiers look 3.7x apart, but base rate correlates -0.63 with how deep a capture was graded, and
 memory is admitted wholesale while reference only enters when a key fires — so a pooled comparison puts
