@@ -1823,14 +1823,17 @@ function recordCoreSet(activated, args, how) {
  *   ignoreBudget — `onEntriesLoaded` marks every entry exempt so WA's budget can supersede core's, which
  *                  would leave core's walk cutting nothing. The author's value is stashed in
  *                  `waIgnoreBudget`, so it is restored for the call and re-taken after.
- *   re-entry     — core emits WORLDINFO_FORCE_ACTIVATE and WORLDINFO_SCAN_DONE, which WA listens to.
- *                  `inCoreProbe` makes those handlers no-op so retrieval does not run again and the
- *                  panel is not overwritten with core's answer.
+ *   re-entry     — core's scan emits WORLDINFO_SCAN_DONE, which WA ranks on. `inCoreProbe` makes that
+ *                  handler no-op so retrieval does not run again and the panel is not overwritten with
+ *                  core's answer.
  *
- * WHAT IT CANNOT SEE is Vector Storage's contribution unless it has already fired: that extension
- * activates World Info from inside a generate_interceptor, so its picks reach core as external
- * activations during a real generation. Run this after one and they are included; run it cold and core
- * answers on its keyword route alone. The output says which happened.
+ * VECTOR STORAGE IS CALLED TOO, so the comparison is against what a user actually has rather than
+ * against core's keyword route alone. That extension activates World Info from inside its
+ * generate_interceptor, which ST exposes as `globalThis.vectors_rearrangeChat` — so the probe invokes it
+ * directly. It emits WORLDINFO_FORCE_ACTIVATE, core stores those in `WorldInfoBuffer.externalActivations`,
+ * and `checkWorldInfo` consumes and clears them, so nothing leaks into the next real generation. The
+ * interceptor clears and re-sets its own extension prompts at entry, which is what the next generation
+ * would have done anyway. Skipped when the user has that route off.
  *
  * EMITS A GRADEABLE UNION, which is the point rather than the diff. Both systems' picks pooled, graded
  * once, scored twice — the same "pool first, then pair" rule the graded corpus rests on. A diff says
@@ -1843,10 +1846,18 @@ async function versusCore() {
     const chat = (runState.scanChat ?? getContext().chat ?? []).filter(x => x && !x.is_system);
     const entries = await getSortedEntries();
     let core;
+    const viaVectors = Boolean(extension_settings.vectors?.enabled_world_info);
+    let vectorsRan = false;
     runState.inCoreProbe = true;
     try {
         // Hand core back its own budget for the duration.
         for (const e of entries) if (e.waIgnoreBudget !== undefined) e.ignoreBudget = e.waIgnoreBudget;
+        // Vector Storage first, so its force-activations are waiting when core scans. A COPY of the chat:
+        // the interceptor is free to rearrange what it is handed and this one is not the real prompt.
+        if (viaVectors && typeof globalThis.vectors_rearrangeChat === 'function') {
+            try { await globalThis.vectors_rearrangeChat([...chat], getMaxPromptTokens(), null, 'normal'); vectorsRan = true; }
+            catch (error) { console.warn('Worlds Apart: Vector Storage declined the probe, core will answer on keywords alone —', error); }
+        }
         core = await checkWorldInfo(chat, getMaxPromptTokens(), true);
     } finally {
         for (const e of entries) if (e.waIgnoreBudget !== undefined) e.ignoreBudget = true;
@@ -1881,8 +1892,7 @@ async function versusCore() {
     console.log(`  WA:   ${waKeys.size} entries, ${spend(waKeys)} tokens (budget ${effectiveTokenBudget()})`);
     console.log(`  shared ${both}, core only ${coreKeys.size - both}, WA only ${waKeys.size - both}`);
     console.table(union.map(row));
-    const viaVectors = extension_settings.vectors?.enabled_world_info;
-    console.log(`  Vector Storage's WI route is ${viaVectors ? 'ON' : 'OFF'} in your settings; its picks reach core as external activations from a generate_interceptor, so they are included here only if a real generation has already run this turn.`);
+    console.log(`  Vector Storage's WI route is ${viaVectors ? 'ON' : 'OFF'}${viaVectors ? (vectorsRan ? ' and was invoked for this comparison' : ' but did not run \u2014 core answered on keywords alone') : ' \u2014 core is its keyword route'}.`);
     console.log('%cgradeable union \u2014 right-click \u2192 Copy object', 'font-weight: bold');
     console.log({
         at: (getContext().chat ?? []).length,
