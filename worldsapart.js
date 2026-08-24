@@ -1863,8 +1863,14 @@ async function versusCore() {
         in: coreKeys.has(k) && waKeys.has(k) ? 'both' : coreKeys.has(k) ? 'core' : 'WA',
         tokens: x.tokens, order: x.entry.waOriginalOrder ?? x.entry.order ?? 0,
         eCredit: Number.isFinite(x.eCredit) ? Number(x.eCredit.toFixed(4)) : null,
+        // EVERY SIGNAL THE SCORE IS MADE OF, or a disagreement cannot be diagnosed from the export.
+        // Two rows here had the highest cosine and keyword score in their group and the lowest
+        // E[credit], and nothing in the capture could say why.
         cosine: Number.isFinite(x.score) ? Number(x.score.toFixed(4)) : null,
+        text: Number.isFinite(x.textScore) ? Number(x.textScore.toFixed(3)) : null,
         keys: Number(x.keywordScore) ? Number(x.keywordScore.toFixed(2)) : null,
+        properNouns: Number.isFinite(x.properNouns) ? Number(x.properNouns.toFixed(3)) : null,
+        density: Number.isFinite(x.density) ? Number(x.density.toFixed(2)) : null,
     });
     const spend = keys => [...byKey.entries()].filter(([k]) => keys.has(k)).reduce((t, [, x]) => t + (x.tokens || 0), 0);
     const both = [...coreKeys].filter(k => waKeys.has(k)).length;
