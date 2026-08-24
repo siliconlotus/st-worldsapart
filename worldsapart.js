@@ -61,7 +61,7 @@ const gradeAnchorLine = () => `Grade 0–4: ${GRADE_ANCHORS.map((a, g) => `${g} 
 // upstream edit would silently invalidate existing indexes. See extension/chunking.mjs.
 import { chunkEntry } from './extension/chunking.mjs';
 import { buildContentIndex, scoreContent, indexFingerprint, entryKey } from './extension/content-lexical.mjs';
-import { buildNameDf, properNames, properShared, properDensity, scoreRelevance, isMemory } from './extension/relevance.mjs';
+import { buildNameDf, properNames, properShared, properDensity, scoreRelevance, isMemory, postDates } from './extension/relevance.mjs';
 
 /** Base value for the rewritten `order` sequence. WA rewrites every activated entry's order, so only
  * the relative index matters and the base is free. It is parked far above any plausible authored value
@@ -1814,6 +1814,20 @@ async function rankActivated(args) {
     // have supplied 0 while looking like a safety net. An empty index means no entry has content, and
     // there is nothing for either source to score.
     const contentText = await contentTextScores(runState.lastQuery);
+
+    // ENTRIES THAT HAVE NOT BEEN WRITTEN YET, at this point in the chat. Inert at the latest turn and
+    // load-bearing on a branch: the book still holds every summary written later, so without this WA
+    // ranks descriptions of events the character has not lived through. Applied HERE because
+    // `rankActivated` owns what survives into the prompt — it deletes the rest from core's `activated`
+    // map — so one filter covers both the retrieval route and the keyword one.
+    const at = settings().dropUnavailable ? (getContext().chat?.length ?? NaN) : NaN;
+    let postDated = 0;
+    for (const [key, entry] of [...activated.entries()]) {
+        if (postDates(entry, at)) { activated.delete(key); postDated++; }
+    }
+    if (postDated) {
+        console.log(`Worlds Apart: hid ${postDated} entr(ies) summarising messages after this point in the chat (dropUnavailable)`);
+    }
 
     const items = [...activated.entries()].map(([key, entry]) => {
         // We overwrite `order` below, and this fires once per scan loop — stash the
@@ -3864,6 +3878,11 @@ const SETTINGS_HTML = `
                         <option value="all">All — every entry may use the slack</option>
                     </select>
 
+                    <label class="checkbox_label" for="wa_drop_unavailable">
+                        <input id="wa_drop_unavailable" type="checkbox"><span>Hide entries from later in the chat</span>
+                    </label>
+                    <small class="opacity50p">On a branch back to an earlier point, the book still holds every scene summary written after it. This hides them, so WA cannot surface descriptions of events that have not happened yet. Does nothing at the latest turn — turn it off if you are using an old branch to write a story you have already told.</small>
+
                     <label class="checkbox_label" for="wa_tokens_include_exempt">
                         <input id="wa_tokens_include_exempt" type="checkbox"><span>Token budget caps "ignore budget" entries (i.e., tokens never exceeds cap)</span>
                     </label>
@@ -4125,6 +4144,7 @@ export async function init() {
     bind('#wa_slack_mode', 'budgetSlackMode', 'string');
     bind('#wa_max_dynamic', 'maxDynamicEntries', 'number');
     bind('#wa_max_total', 'maxTotalEntries', 'number');
+    bind('#wa_drop_unavailable', 'dropUnavailable', 'checked');
     bind('#wa_tokens_include_exempt', 'maxTokensIncludesExempt', 'checked');
 
     bind('#wa_world_priority_mode', 'worldPriorityMode', 'string');

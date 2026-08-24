@@ -86,6 +86,13 @@ export function captureParams(s, { caseSensitive, wholeWords, includeNames, allo
     // and ignores what it no longer has a use for, the same way it treats the retired `threshold`.
     return {
         K1: s.bm25K1,
+        // THE CHUNKER DETERMINES THE INDEX, so a sample that does not record it cannot be re-chunked
+        // faithfully — `chunkConfig` falls back to the shipped defaults and a capture taken at other
+        // settings is silently re-chunked wrong. Bundle v3 recorded none of these; the harness had been
+        // defaulting for every sample in the corpus.
+        chunkMode: s.chunkMode,
+        chunkSize: s.chunkSize,
+        minChunkSize: s.minChunkSize,
         B: s.bm25B,
         // Recorded so a sample scores under the curve it was captured under. A bundle taken before
         // this existed has no field and falls back to sceneParams' 'bm25', which is what it ran under.

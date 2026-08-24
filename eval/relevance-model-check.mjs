@@ -4,7 +4,7 @@
 // is worth, what corpus df counts, and how a fitted model file becomes one number per entry. The
 // arithmetic is pinned against closed forms computed by hand rather than against a second implementation,
 // because a second implementation is the drift this codebase keeps paying for.
-import { properNames, buildNameDf, properShared, properDensity, scoreRelevance } from '../extension/relevance.mjs';
+import { properNames, buildNameDf, properShared, properDensity, scoreRelevance, postDates } from '../extension/relevance.mjs';
 import { relevanceCut } from '../extension/selection.mjs';
 import { eq } from './metrics.mjs';
 import fs from 'node:fs';
@@ -168,5 +168,24 @@ eq(tiered.kept.map(r => r.t).join(','), 'm', 'the same score is delivered on one
 
 // THE SET IS THE POINT: nothing is reordered, and every row lands in exactly one of the two lists.
 eq(cutKept.length + cutOut.length, cutRows.length, 'every row is either kept or cut, never both or neither');
+
+
+// ---- postDates: what the book had not written yet ------------------------------------------------
+//
+// Shared by the harness's dropUnavailable and the runtime's setting, so the two cannot drift on what
+// "not yet written" means. THE BOUNDARY IS THE END: a summary exists once the messages it covers have
+// happened, so an entry spanning the turn could not be in the book either, and a start-only test keeps
+// every one of them — measured, 66 of 446 memory positives straddle their scene and rank first in 53%
+// of them against 7% for clean positives.
+eq(postDates({ STMB_start: 90, STMB_end: 110 }, 100), true, 'an entry straddling the turn had not been written');
+eq(postDates({ STMB_start: 80, STMB_end: 100 }, 100), true, '...including one ending exactly at it, which needs the turn to have happened');
+eq(postDates({ STMB_start: 80, STMB_end: 99 }, 100), false, '...but not one that ends the message before');
+eq(postDates({ STMB_start: 10, STMB_end: 40 }, 100), false, 'an entry entirely earlier is available');
+eq(postDates({ STMB_start: 150 }, 100), true, 'with no end, a later start still post-dates');
+eq(postDates({ STMB_start: 50 }, 100), false, '...and an earlier one does not');
+// A missing range reads as AVAILABLE. Right for a reference sheet, silently inert on a memory entry
+// that lost the field — the predicate cannot tell those apart and does not pretend to.
+eq(postDates({}, 100), false, 'an entry with no range is available, which is what a reference sheet is');
+eq(postDates({ STMB_start: 150 }, NaN), false, 'with no current position nothing is post-dated, so the filter is off rather than total');
 
 console.log('ok');

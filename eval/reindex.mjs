@@ -28,10 +28,15 @@ import { getStringHash } from './scene.mjs';
 import { openBundle } from '../extension/grading.mjs';
 
 /** Chunk settings, sample's own unless overridden. Field names match `settings()` and paramSnapshot.vectors. */
-export const chunkConfig = (S, overrides = {}) => ({
-    chunkMode: 'paragraph', chunkSize: 800, minChunkSize: 120,
-    ...(S.paramSnapshot?.vectors ?? {}), ...overrides,
-});
+export const chunkConfig = (S, overrides = {}) => {
+    // FROM THE ARM'S OWN PARAMS. This read `S.paramSnapshot.vectors`, a v2 field that bundle v3 does not
+    // carry — measured, 0 of 107 bundles have it — so every sample in the corpus silently took the
+    // defaults. That is only harmless while the defaults happen to be what the capture ran at.
+    const p = S?.params ?? {};
+    const recorded = {};
+    for (const k of ['chunkMode', 'chunkSize', 'minChunkSize']) if (p[k] !== undefined) recorded[k] = p[k];
+    return { chunkMode: 'paragraph', chunkSize: 800, minChunkSize: 120, ...(S.paramSnapshot?.vectors ?? {}), ...recorded, ...overrides };
+};
 
 /**
  * Chunks a book into the exact item set syncWorld would store.

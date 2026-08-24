@@ -36,6 +36,29 @@ import { COMMON_WORDS } from '../plugin/commonwords.js';
 export const isMemory = e => Boolean(e) && ('stmemorybooks' in e || 'STMB_start' in e);
 
 /**
+ * Whether an entry POST-DATES a point in the chat — a summary of messages that have not happened yet.
+ *
+ * THE BOUNDARY IS THE END, NOT THE START. A summary exists once the messages it covers have happened, so
+ * an entry spanning the point (`start <= at < end`) could not be in the book either, and a start-only
+ * test keeps every one of them. Measured on the graded corpus, those straddling entries are the scene's
+ * own haystack paraphrased: 66 of 446 memory positives, within-scene z 2.795 against clean positives'
+ * 0.800, ranking FIRST in 53% of their scenes against 7%.
+ *
+ * A MISSING RANGE READS AS AVAILABLE, which is right for a reference sheet and wrong for a memory entry
+ * that lost the field — the check is silently inert on exactly those, and cannot tell the two apart.
+ *
+ * Shared so the harness's `dropUnavailable` and the runtime's setting cannot drift on what "not yet
+ * written" means.
+ */
+export const postDates = (entry, at) => {
+    if (!Number.isFinite(at)) return false;
+    const end = Number(entry?.STMB_end);
+    if (Number.isFinite(end)) return end >= at;
+    const start = Number(entry?.STMB_start);
+    return Number.isFinite(start) && start > at;
+};
+
+/**
  * The names a text uses, as the relevance model counts them.
  *
  * `ranking.properNounsOf` decides what a name IS — capitalisation somewhere that is not sentence-initial

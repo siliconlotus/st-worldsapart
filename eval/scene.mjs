@@ -64,13 +64,9 @@ export const dropUnavailable = (S, label = "sample") => {
     // scoring within-scene z 2.795 against clean positives' 0.800 and ranking FIRST in 53% of their scenes
     // against 7%. A grade of 4 on such a row is correct and the retrieval is correct; the SCENE is
     // impossible, and both the score and the fitted coefficients were reading it.
-    const future = r => {
-        const k = `${r.book}${US}${r.uid}`;
-        const e = end.get(k);
-        if (Number.isFinite(e)) return e >= at;
-        const s = start.get(k);
-        return Number.isFinite(s) && s > at;
-    };
+    // The rule itself is relevance.mjs's, so the runtime's `dropUnavailable` setting and this cannot
+    // drift on what "not yet written" means.
+    const future = r => postDates({ STMB_end: end.get(`${r.book}${US}${r.uid}`), STMB_start: start.get(`${r.book}${US}${r.uid}`) }, at);
     let cut = 0, gone = 0;
     const keep = list => (list ?? []).filter(r => (future(r) ? (cut++, false) : true));
     S.entries = keep(S.entries);
@@ -549,7 +545,7 @@ export function makeGradeOf(grades, isExcluded) {
 // and the fit would end up scoring different populations.
 // Imported AND re-exported: a bare `export ... from` forwards the name without binding it in this
 // module, and scene.mjs calls isMemory itself (tierRecall, the STMB_start audit).
-import { isMemory, buildNameDf, properNames, properShared, properDensity, scoreRelevance } from '../extension/relevance.mjs';
+import { isMemory, buildNameDf, properNames, properShared, properDensity, scoreRelevance, postDates } from '../extension/relevance.mjs';
 export { isMemory };
 export const isReference = e => !isMemory(e);
 export const isDurableEntry = e => Boolean(e?.constant);

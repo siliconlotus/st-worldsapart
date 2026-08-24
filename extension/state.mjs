@@ -194,6 +194,22 @@ export const defaultSettings = {
     /** Score normal entries by keyword match quality and fuse them with the vector ranking. */
     keywordScoring: true,
     /**
+     * Hide memory entries that summarise messages which have not happened yet at this point in the chat.
+     *
+     * INERT AT THE LATEST TURN, where nothing post-dates it. It bites when you BRANCH BACK: the book
+     * still holds every summary written later, so without this WA ranks descriptions of events the
+     * character has not lived through — a spoiler rather than a ranking error. Measured on one frozen
+     * capture, 105 of 213 candidates post-dated the turn and 18 of them cleared the relevance cut.
+     *
+     * A SETTING RATHER THAN A RULE, because the two readings are both legitimate: replaying a branch as
+     * it was played wants them gone, and using an old branch as a writing surface for a story you have
+     * already told may want them.
+     *
+     * `STMB_end` is the boundary (relevance.mjs `postDates`), and an entry with no range reads as
+     * available — right for a reference sheet, silently inert on a memory entry that lost the field.
+     */
+    dropUnavailable: true,
+    /**
      * The unit a key has to match WITHIN — `scan` | `message` | `paragraph`.
      *
      * A conjunction over the whole window matches terms a dozen messages apart, and the same
