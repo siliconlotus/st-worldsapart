@@ -917,6 +917,15 @@ scene whose book has since grown, so 105 of its 213 rows post-date the turn and 
 that point would have offered about 108 and passed about 23. The share is what generalises; the count
 from a frozen capture is roughly doubled.
 
+**WHAT THE COUNT DOES TRACK IS DISTRIBUTION SHAPE, AND THE SIGN IS BACKWARDS.** **Measured**, 100
+scenes at the shipped memory cutoff, delivered share mean 22.0% (sd 5.8 points): it correlates with the
+SKEW of the signals — text -0.584, properNouns -0.509, `E[credit]` itself -0.486 — and with the scene's
+relevant share at only 0.150. So a scene where one or two entries stand out sharply delivers FEWER, and
+a scene where everything looks alike delivers MORE, which is the opposite of what either should do. The
+mechanism is the z-score: a long right tail inflates the scene's sd and compresses every z, while a flat
+distribution has a small sd and standardisation manufactures spread out of noise. It is also why a large
+scene over-delivers — more candidates put more mass in the middle and flatten the relative shape.
+
 **A SCENE-LEVEL COVARIATE CANNOT FIX IT, because candidate count is not a property of the scene.**
 Stage 1 admits every vectorized entry, so the count is the book's size minus whatever post-dates the
 turn, plus a handful of keyword hits. **Measured**, within each book, r between message index and
