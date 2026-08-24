@@ -31,7 +31,7 @@ import {
 } from '../../../../script.js';
 import { extension_settings, getContext } from '../../../extensions.js';
 
-import { checkWorldInfo, getSortedEntries, getWorldInfoPrompt, loadWorldInfo, saveWorldInfo, reloadEditor, world_names, world_info_include_names, world_info_depth, world_info_budget, world_info_budget_cap, world_info_min_activations, world_info_match_whole_words, world_info_case_sensitive, world_info_recursive, selected_world_info, world_info, METADATA_KEY, scan_state } from '../../../world-info.js';
+import { getSortedEntries, getWorldInfoPrompt, loadWorldInfo, saveWorldInfo, reloadEditor, world_names, world_info_include_names, world_info_depth, world_info_min_activations, world_info_match_whole_words, world_info_case_sensitive, world_info_recursive, selected_world_info, world_info, METADATA_KEY, scan_state } from '../../../world-info.js';
 import { power_user } from '../../../power-user.js';
 import { SlashCommandParser } from '../../../slash-commands/SlashCommandParser.js';
 import { SlashCommand } from '../../../slash-commands/SlashCommand.js';
@@ -1288,7 +1288,6 @@ async function intercept(chat, _maxContext, _type) {
  * @param {object} loaded Lore buckets
  */
 function onEntriesLoaded(loaded) {
-    if (runState.inCoreProbe) return;   // the exemption is lifted on purpose mid-probe
     const entries = Object.values(loaded ?? {}).filter(Array.isArray).flat();
 
     // Free ride: this hook already sees every entry in scope, so count the exempt ones
@@ -1783,112 +1782,10 @@ async function feedScanLoop(args) {
     }
 }
 
-/**
- * What core selected while WA stood down — recorded, never acted on.
- *
- * WA disabled captures the full counterfactual (every interceptor runs); a dry run is free but
- * keyword-only, since ST skips interceptors. Either way it is core's SHIPPED set: WORLDINFO_SCAN_DONE
- * fires after core's budget loop and neither path lets WA mark entries `ignoreBudget`.
- */
-function recordCoreSet(activated, args, how) {
-    runState.lastCoreSet = {
-        at: (getContext().chat ?? []).length,
-        how,
-        budget: args?.budget?.current ?? null,
-        entries: [...activated.entries()].map(([key, entry]) => ({
-            key, uid: entry.uid, world: entry.world,
-            title: entry.comment || entry.key?.[0] || `uid ${entry.uid}`,
-            order: entry.waOriginalOrder ?? entry.order ?? 0,
-            constant: Boolean(entry.constant),
-        })),
-    };
-}
-
-/**
- * WA against ST core on this turn: core selects for itself and WA diffs the two.
- *
- * `checkWorldInfo` is core's whole selection — inclusion groups, probability, timed effects, its own
- * budget — so nothing here models it. Two things must be undone for the call and are restored after:
- * the `ignoreBudget` takeover WA applies in `onEntriesLoaded` (or core's walk cuts nothing), and
- * re-entry via WORLDINFO_SCAN_DONE, which `inCoreProbe` suppresses.
- *
- * Vector Storage activates World Info from its generate_interceptor, exposed as
- * `globalThis.vectors_rearrangeChat`; calling it leaves force-activations that `checkWorldInfo` then
- * consumes and clears.
- *
- * Emits the union of both sets with content, so a turn can be graded once and scored twice.
- */
-async function versusCore() {
-    const population = runState.lastRanked;
-    if (!population?.length) { toastr.info('Nothing ranked yet \u2014 generate, or run /wa-dry first.', 'Worlds Apart'); return; }
-
-    const chat = (runState.scanChat ?? getContext().chat ?? []).filter(x => x && !x.is_system);
-    const entries = await getSortedEntries();
-    let core;
-    const viaVectors = Boolean(extension_settings.vectors?.enabled_world_info);
-    let vectorsRan = false;
-    runState.inCoreProbe = true;
-    try {
-        for (const e of entries) if (e.waIgnoreBudget !== undefined) e.ignoreBudget = e.waIgnoreBudget;
-        // A copy: an interceptor may rearrange what it is handed, and this is not the real prompt.
-        if (viaVectors && typeof globalThis.vectors_rearrangeChat === 'function') {
-            try { await globalThis.vectors_rearrangeChat([...chat], getMaxPromptTokens(), null, 'normal'); vectorsRan = true; }
-            catch (error) { console.warn('Worlds Apart: Vector Storage declined the probe, core will answer on keywords alone —', error); }
-        }
-        core = await checkWorldInfo(chat, getMaxPromptTokens(), true);
-    } finally {
-        for (const e of entries) if (e.waIgnoreBudget !== undefined) e.ignoreBudget = true;
-        runState.inCoreProbe = false;
-    }
-
-    const keyOf = e => `${e.world}.${e.uid}`;
-    const coreKeys = new Set([...(core?.allActivatedEntries ?? [])].map(keyOf));
-    const waKeys = new Set((runState.lastLayout ?? []).map(x => keyOf(x.item.entry)));
-    const byKey = new Map(population.map(x => [keyOf(x.entry), x]));
-    for (const e of core?.allActivatedEntries ?? []) if (!byKey.has(keyOf(e))) byKey.set(keyOf(e), { entry: e });
-
-    const tokens = await Promise.all([...byKey.values()].map(x => getTokenCountAsync(x.entry.content ?? '')));
-    [...byKey.values()].forEach((x, i) => { x.tokens = tokens[i]; });
-
-    const union = [...byKey.entries()].filter(([k]) => coreKeys.has(k) || waKeys.has(k))
-        .sort((a, b) => (b[1].eCredit ?? -1) - (a[1].eCredit ?? -1));
-    const row = ([k, x]) => ({
-        uid: x.entry.uid, entry: String(x.entry.comment || x.entry.key?.[0] || `uid ${x.entry.uid}`).slice(0, 44),
-        book: x.entry.world,
-        in: coreKeys.has(k) && waKeys.has(k) ? 'both' : coreKeys.has(k) ? 'core' : 'WA',
-        tokens: x.tokens, order: x.entry.waOriginalOrder ?? x.entry.order ?? 0,
-        eCredit: Number.isFinite(x.eCredit) ? Number(x.eCredit.toFixed(4)) : null,
-        cosine: Number.isFinite(x.score) ? Number(x.score.toFixed(4)) : null,
-        keys: Number(x.keywordScore) ? Number(x.keywordScore.toFixed(2)) : null,
-    });
-    const spend = keys => [...byKey.entries()].filter(([k]) => keys.has(k)).reduce((t, [, x]) => t + (x.tokens || 0), 0);
-    const both = [...coreKeys].filter(k => waKeys.has(k)).length;
-
-    console.log(`%cWorlds Apart \u00b7 WA vs ST core, message ${(getContext().chat ?? []).length}`, 'font-weight: bold');
-    console.log(`  core: ${coreKeys.size} entries, ${spend(coreKeys)} tokens (its own budget: world_info_budget ${world_info_budget}%${Number(world_info_budget_cap) > 0 ? `, cap ${world_info_budget_cap}` : ''})`);
-    console.log(`  WA:   ${waKeys.size} entries, ${spend(waKeys)} tokens (budget ${effectiveTokenBudget()})`);
-    console.log(`  shared ${both}, core only ${coreKeys.size - both}, WA only ${waKeys.size - both}`);
-    console.table(union.map(row));
-    console.log(`  Vector Storage's WI route is ${viaVectors ? 'ON' : 'OFF'}${viaVectors ? (vectorsRan ? ' and was invoked for this comparison' : ' but did not run \u2014 core answered on keywords alone') : ' \u2014 core is its keyword route'}.`);
-    console.log('%cgradeable union \u2014 right-click \u2192 Copy object', 'font-weight: bold');
-    console.log({
-        at: (getContext().chat ?? []).length,
-        waBudget: effectiveTokenBudget(), coreBudgetPercent: Number(world_info_budget) || 25,
-        vectorRouteEnabled: Boolean(viaVectors),
-        rows: union.map(([k, x]) => ({ ...row([k, x]), core: coreKeys.has(k), wa: waKeys.has(k), content: x.entry.content })),
-    });
-    toastr.success(`core ${coreKeys.size} / WA ${waKeys.size}, ${coreKeys.size - both} core-only \u2014 see console`, 'WA vs core');
-}
-
 async function rankActivated(args) {
     const activated = args?.activated?.entries;
 
-    if (!(activated instanceof Map)) return;
-    if (runState.inCoreProbe) return;   // core is answering for /wa-versus; ranking it would re-enter
-    if (!settings().enabled) {
-        // WA off is the honest stand-down: core did everything, including its own budget, with every
-        // interceptor live. This is the comparison baseline `/wa-core` exists to capture.
-        recordCoreSet(activated, args, 'WA disabled — core in full, interceptors live');
+    if (!settings().enabled || !(activated instanceof Map)) {
         return;
     }
     // ST's dry-run generations (PromptManager token counts after every received message,
@@ -1896,20 +1793,6 @@ async function rankActivated(args) {
     // keyword activations only. Ranking it would overwrite the panel and the /wa-dry//wa-grade
     // state with that keyword-only selection — leave the last real scan's state alone.
     if (runState.generationIsDryRun) {
-        // CORE'S OWN ANSWER, FREE, ON EVERY GENERATION. A dry run is the one path where WA stands down
-        // completely: interceptors are skipped so retrieval never force-activates, `onEntriesLoaded`
-        // gates its budget takeover on the same flag so core's own budget walk runs, and this returns
-        // before anything is deleted. `WORLDINFO_SCAN_DONE` fires AFTER core's budget loop
-        // (world-info.js), so the map is core's SHIPPED set rather than what it nominated.
-        //
-        // KEYWORD ROUTE ONLY, and that is the whole of core for a default install: Vector Storage
-        // activates World Info from inside `vectors_rearrangeChat`, a generate_interceptor, which a dry
-        // run skips — and `enabled_world_info` is false out of the box regardless. A vectors-enabled
-        // baseline needs a real generation with WA told to stand down; this is not that.
-        //
-        // RECORDED, NEVER ACTED ON. Ranking it would overwrite the panel and the /wa-dry state with a
-        // keyword-only selection; the last real scan's state is left alone.
-        recordCoreSet(activated, args, 'ST dry run — keyword route only, interceptors skipped');
         return;
     }
 
@@ -4330,28 +4213,6 @@ export async function init() {
 
     // Show the active-entries icon right away; it fills in on the next scan.
     if (settings().enabled) renderWiPanel(runState.lastLayout);
-
-    SlashCommandParser.addCommandObject(SlashCommand.fromProps({
-        name: 'wa-versus',
-        callback: async () => { await versusCore(); return ''; },
-        helpString: 'Worlds Apart: what WA delivered on this turn against what ST core + Vector Storage would have, at their own budgets. Prints the difference and a gradeable union (right-click \u2192 Copy object). Console.',
-        returns: 'nothing',
-    }));
-
-    SlashCommandParser.addCommandObject(SlashCommand.fromProps({
-        name: 'wa-core',
-        callback: () => {
-            const c = runState.lastCoreSet;
-            if (!c) { toastr.info('No core selection recorded yet — it is captured on ST\u2019s own dry runs, so send or receive a message first.', 'Worlds Apart'); return ''; }
-            console.log(`%cWorlds Apart \u00b7 ST core's own selection at message ${c.at} \u2014 ${c.entries.length} entries, core budget ${c.budget ?? 'unknown'}`, 'font-weight: bold');
-            console.table(c.entries.map(e => ({ uid: e.uid, order: e.order, constant: e.constant, book: e.world, entry: e.title })));
-            console.log(`uids for eval/core-compare.mjs --core-uids:\n${c.entries.map(e => e.uid).join(',')}`);
-            toastr.success(`${c.entries.length} entries \u2014 see console`, 'ST core selection');
-            return '';
-        },
-        helpString: 'Worlds Apart: what ST core selected on its own, with WA standing down. Captured from ST\u2019s dry runs, where interceptors are skipped and core runs its own budget \u2014 so it is core\u2019s shipped set, keyword route only. Console.',
-        returns: 'nothing',
-    }));
 
     SlashCommandParser.addCommandObject(SlashCommand.fromProps({
         name: 'wa-dry',
