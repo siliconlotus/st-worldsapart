@@ -1835,7 +1835,12 @@ async function versusCore() {
             try { await globalThis.vectors_rearrangeChat([...chat], getMaxPromptTokens(), null, 'normal'); vectorsRan = true; }
             catch (error) { console.warn('Worlds Apart: Vector Storage declined the probe, core will answer on keywords alone —', error); }
         }
-        core = await checkWorldInfo(chat, getMaxPromptTokens(), true);
+        // ST'S HAYSTACK SHAPE, NOT THE INTERCEPTOR'S. `vectors_rearrangeChat` above is a generate
+        // interceptor and reads message objects; `checkWorldInfo` takes `chatForWI` — the same strings
+        // core builds at script.js's scan site, most-recent-first — and calls .trim() on them. Sources
+        // ride along so the probe scans what WA's own dry run scans rather than core's empty default.
+        const chatForWI = chat.map(x => (world_info_include_names ? `${x.name}: ${x.mes}` : x.mes)).reverse();
+        core = await checkWorldInfo(chatForWI, getMaxPromptTokens(), true, { ...scanSources(), trigger: 'normal' });
     } finally {
         for (const e of entries) if (e.waIgnoreBudget !== undefined) e.ignoreBudget = true;
         runState.inCoreProbe = false;
