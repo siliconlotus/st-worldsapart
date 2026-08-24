@@ -1080,6 +1080,14 @@ grade belongs to one scene. **Measured**: of the 594 entries graded in two or mo
 grade that varies and 54.5% cross the relevance line — the same entry, the same book, relevant here and
 not there. Anything that caches a verdict per entry is wrong by construction.
 
+**AN UNGRADED ROW IS NOT A NEGATIVE, even where the pool was built to surface everything relevant.**
+`--ungraded-negative` fits on it as a 0. **Measured**, memory tier held out by book, against the graded
+design: rows 6051 -> 7088 and prevalence 6.26% -> 5.35%, AUC 0.8015 -> **0.8185** while AP 0.342 ->
+0.321, precision at 50/75/90% recall 27.6/14.3/8.8% -> 26.0/13.6/8.6%, and F2 over the delivered set
+0.5081 -> 0.5021 delivering 18.9 against 17.9. Every readout that pays for precision falls and only AUC
+rises — the signature of adding EASY negatives, which a prevalence-independent statistic rewards for
+being easy to rank low. The rule below is what predicts it.
+
 **JUDGE THE PREDICTOR BY AP AND PRECISION-AT-RECALL, NOT AUC.** AUC is prevalence-independent, which
 makes it the right thing for comparing signals and the wrong thing for asking what clears a cutoff — at
 grade >= 4 it reads 0.975 while 90% recall costs 17.5% precision. `logistic.mjs` `prCurve` prints both.

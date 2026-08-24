@@ -119,6 +119,12 @@ const HALF_RECALL = argv.includes('--half-recall');
 // the class is "anything a delivery would not be unequivocally wrong about": full credit >= 2, nothing
 // below, recall over >= 2, and the score cut on becomes P(>=2) rather than E[credit], since a half band
 // no longer exists to take an expectation over.
+// EXPERIMENT: treat an UNGRADED row as a graded 0 and fit on it. The pool is built to surface
+// everything relevant, so an entry no arm ever surfaced is very likely irrelevant — but "very likely"
+// is an assertion about the CORPUS, not a label, which is why this is a flag and not the default. It
+// roughly doubles the negative class on poorly-covered scenes and moves the base rate, so it changes
+// what the coefficients mean rather than only their scale.
+const UNGRADED_NEGATIVE = argv.includes('--ungraded-negative');
 const RELEVANT_AT = Number(arg('--relevant-at') ?? 3);
 const creditOf = g => (RELEVANT_AT === 2 ? (g >= 2 ? 1 : 0) : gradeCredit(g));
 const AT = arg('--at') === null ? null : Number(arg('--at'));
@@ -560,7 +566,15 @@ const queryVec = async (S, name, value, em) => {
                 // should pay precision for it, which is the `?? 0` convention scene.mjs already uses.
                 // Dropping them from both would score every bar on the rows some arm already surfaced,
                 // and so would reward a bar for reaching deeper than the pool.
-                if (g === null || g === undefined || Number.isNaN(g)) { dropped++; ungraded.push({ r, g: 0 }); continue; }
+                if (g === null || g === undefined || Number.isNaN(g)) {
+                    dropped++;
+                    // Under --ungraded-negative it MOVES from `ungraded` to `kept` as a labelled 0
+                    // rather than appearing in both: the cutoff sweep reads the two lists separately and
+                    // would otherwise count the row twice in precision.
+                    if (UNGRADED_NEGATIVE) kept.push({ r, y: 0, g: 0, wasUngraded: true });
+                    else ungraded.push({ r, g: 0 });
+                    continue;
+                }
                 kept.push({ r, y: g >= CUT ? 1 : 0, g });
             }
             // A ROW FLOOR, and nothing about the labels. The features are standardised within scene, so a
