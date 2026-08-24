@@ -1855,13 +1855,21 @@ async function coreSelection() {
     return { entries: [...(core?.allActivatedEntries ?? [])], viaVectors, vectorsRan };
 }
 
-async function versusCore() {
-    // THE CAPTURE ROWS, not the raw ranked items: these are what /wa-grade freezes, carrying `cut`,
-    // `cutBy`, tokens and every signal. Building a second row shape here is what made the first version of
-    // this an artifact nothing else could read.
+async function versusCore(named) {
+    // RUNS THE DEBUG PIPELINE ITSELF, as /wa-grade does, so the rows this freezes are the selection that
+    // actually happened rather than whatever a previous command left behind. `candidates` bounds the
+    // captured population the same way and for the same reason; shipped rows are never dropped by it
+    // (see the gradeDepth filter in rankActivated), so the comparison itself cannot be truncated.
+    const wanted = Math.max(1, Number(named?.candidates ?? 30));
+    runState.gradeCutoff = { maxVectorEntries: wanted };
+    try {
+        await dryRun(true);
+    } finally {
+        runState.gradeCutoff = null;
+    }
+
     const population = runState.lastRanked;
-    if (!runState.lastCandidates?.length) { toastr.info('Run /wa-debug first \u2014 the comparison freezes the same rows /wa-grade does, and only a debug run builds them.', 'Worlds Apart'); return; }
-    if (!population?.length) { toastr.info('Nothing ranked yet \u2014 generate, or run /wa-debug first.', 'Worlds Apart'); return; }
+    if (!runState.lastCandidates?.length || !population?.length) { toastr.info('Nothing ranked \u2014 the scan activated no entries.', 'Worlds Apart'); return; }
 
     const { entries: coreEntries, viaVectors, vectorsRan } = await coreSelection();
 
@@ -4525,8 +4533,11 @@ export async function init() {
 
     SlashCommandParser.addCommandObject(SlashCommand.fromProps({
         name: 'wa-versus',
-        callback: async () => { await versusCore(); return ''; },
-        helpString: 'Worlds Apart: what WA delivered on this turn against what ST core + Vector Storage would have, at their own budgets. Prints the difference and a gradeable union (right-click \u2192 Copy object). Console.',
+        callback: async (named) => { await versusCore(named); return ''; },
+        namedArgumentList: [
+            SlashCommandNamedArgument.fromProps({ name: 'candidates', description: 'how many of WA\u2019s ranked entries to carry beyond the two delivered sets, for grading depth', typeList: [ARGUMENT_TYPE.NUMBER], defaultValue: '30' }),
+        ],
+        helpString: 'Worlds Apart: what WA delivered on this turn against what ST core + Vector Storage would have, at their own budgets. Runs /wa-debug first, prints the difference, and downloads an ordinary two-arm capture bundle \u2014 grade it with Review bundles, apply with eval/synthetic-data/apply-review.mjs, then score with eval/versus-score.mjs.',
         returns: 'nothing',
     }));
 
