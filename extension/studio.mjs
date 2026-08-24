@@ -16,7 +16,7 @@ import { escapeHtml } from '../../../../utils.js';
 import { Popup, POPUP_TYPE, POPUP_RESULT } from '../../../../popup.js';
 import { runState, settings } from './state.mjs';
 import { ensureStudioStyle, makeSortControl, showCtxMenu, showEntryText, wiGlyph } from './ui-widgets.mjs';
-import { SORT_FNS, normPresentation, reconcileTiers, tierRank, wiTitleOf } from './sort.mjs';
+import { SORT_FNS, SORT_LABELS, normPresentation, reconcileTiers, tierRank, wiTitleOf } from './sort.mjs';
 import { buildKeyPruneScan, llmKeyCandidates, STUDIO_PRUNE_OPTS, STUDIO_SUGGEST_OPTS } from './keyword-tools.mjs';
 import { buildKeySuggest, classifyLlmCand } from './keyword-core.mjs';
 import { buildAutomaton, addMessageHits, fold, validateSmartKey } from './smartkeys.mjs';
@@ -443,6 +443,11 @@ export async function lorebookStudio(preferredBook = null) {
     const bulkDelay = async () => { const v = await numberPrompt('Delay — selected entries', 'Messages before first activation (0 = none):', 0, 0); if (v != null) applyBulk(e => e.delay = Math.floor(v) || null); };
     const bulkCooldown = async () => { const v = await numberPrompt('Cooldown — selected entries', 'Messages before it can re-activate (0 = none):', 0, 0); if (v != null) applyBulk(e => e.cooldown = Math.floor(v) || null); };
     const bulkScanDepth = async () => { const v = await numberPrompt('Scan depth — selected entries', 'Messages to scan (0 = global default):', 0, 0); if (v != null) applyBulk(e => e.scanDepth = Math.floor(v) > 0 ? Math.floor(v) : null); };
+    // ONE VALUE ON EVERY SELECTED ENTRY, which Renumber… cannot do — it lays down a gradient, and a
+    // gradient is the thing worth removing. Core sorts descending by order and its budget walk breaks
+    // at overflow, so on a book whose order encodes sequence core's selection is a prefix of that
+    // sequence and says nothing about the scene. Flattening order is how that confound is taken out.
+    const bulkOrderSet = async () => { const v = await numberPrompt('Order — selected entries', 'Order value for every selected entry:', 100); if (v != null) applyBulk(e => e.order = Math.floor(v)); };
     const bulkRecLevel = async () => { const v = await numberPrompt('Delay until recursion — selected entries', 'Recursion level (0 = any; turns the flag on):', 0, 0); if (v != null) applyBulk(e => e.delayUntilRecursion = Math.floor(v) > 0 ? Math.floor(v) : true); };
     // entriesToBook is shared with the single-entry Copy to… / Move to…, so the selection is spent here
     // rather than inside it.
@@ -460,6 +465,13 @@ export async function lorebookStudio(preferredBook = null) {
             ? 'Advanced reorder: renumber the selected entries into a contiguous block, setting <b>both order and UID</b>, top to bottom.'
             : 'Renumber the selected entries into a contiguous <b>order</b> block, top to bottom.')
             + '<div style="margin-top:8px;">Start at <input type="number" class="wa-bo-start text_pole" style="width:6em;margin:0 6px;" value="1"></div>'
+            // WHICH SEQUENCE THE NUMBERS FOLLOW. The default is what is on screen, which is what this
+            // always did; picking a sort here renumbers into THAT sequence instead, so `order` can be
+            // made to encode something other than however the book happened to be written.
+            + '<div style="margin-top:8px;">In order of <select class="wa-bo-sort text_pole" style="width:auto;margin-left:6px;">'
+            + '<option value="">On screen</option>'
+            + Object.entries(SORT_LABELS).map(([k, v]) => `<option value="${escapeHtml(k)}">${escapeHtml(v)}</option>`).join('')
+            + '</select></div>'
             + '<label class="checkbox_label" style="margin-top:6px;"><input type="radio" name="wa-bo-dir" class="wa-bo-asc" checked><span>Ascending — top gets the start value</span></label>'
             + '<label class="checkbox_label"><input type="radio" name="wa-bo-dir" class="wa-bo-desc"><span>Descending — top gets the highest value</span></label>'
             + (advanced ? '<small style="opacity:0.6;display:block;margin-top:6px;">Sets UID = order per entry. Aborts if the target UID range overlaps an unselected entry.</small>' : '')
@@ -469,6 +481,8 @@ export async function lorebookStudio(preferredBook = null) {
         const startRaw = Number(w.querySelector('.wa-bo-start').value); const start = Number.isFinite(startRaw) ? Math.round(startRaw) : 1;
         const desc = w.querySelector('.wa-bo-desc').checked;
         const ordered = visibleUids.filter(u => selectedEntries.has(u)).map(u => data.entries[u]).filter(Boolean);   // selected, in on-screen (sorted) order
+        const sortKey = w.querySelector('.wa-bo-sort').value;
+        if (SORT_FNS[sortKey]) ordered.sort(SORT_FNS[sortKey]);
         const n = ordered.length;
         const targetOf = i => start + (desc ? n - 1 - i : i);   // block occupies [start, start+N-1]
 
@@ -584,6 +598,7 @@ export async function lorebookStudio(preferredBook = null) {
                     { label: 'Delay until: level…', fn: bulkRecLevel },
                 ] },
                 { label: 'Ignore budget', children: onOff('ignoreBudget') },
+                { label: 'Order…', fn: bulkOrderSet },
                 { label: 'Scan depth…', fn: bulkScanDepth },
             ];
         };
