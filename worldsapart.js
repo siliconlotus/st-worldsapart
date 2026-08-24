@@ -1288,9 +1288,7 @@ async function intercept(chat, _maxContext, _type) {
  * @param {object} loaded Lore buckets
  */
 function onEntriesLoaded(loaded) {
-    // Mid-probe the exemption is deliberately lifted so core's own budget walk runs; re-taking it here
-    // would undo that halfway through core's own call.
-    if (runState.inCoreProbe) return;
+    if (runState.inCoreProbe) return;   // the exemption is lifted on purpose mid-probe
     const entries = Object.values(loaded ?? {}).filter(Array.isArray).flat();
 
     // Free ride: this hook already sees every entry in scope, so count the exempt ones
@@ -1786,16 +1784,11 @@ async function feedScanLoop(args) {
 }
 
 /**
- * What core selected while WA was standing down — recorded, never acted on.
+ * What core selected while WA stood down — recorded, never acted on.
  *
- * TWO PATHS REACH IT, and they capture different things. WA DISABLED is the full counterfactual: every
- * interceptor runs, so Vector Storage activates World Info too if it is enabled, and core walks its own
- * budget because `onEntriesLoaded` returns before the takeover. A DRY RUN is free and automatic but
- * keyword-only, since ST skips generate interceptors and Vector Storage does its WI activation from
- * inside one (`vectors_rearrangeChat`).
- *
- * Either way the map is core's SHIPPED set rather than what it nominated: `WORLDINFO_SCAN_DONE` fires
- * after core's budget loop (world-info.js), and neither path lets WA mark entries `ignoreBudget`.
+ * WA disabled captures the full counterfactual (every interceptor runs); a dry run is free but
+ * keyword-only, since ST skips interceptors. Either way it is core's SHIPPED set: WORLDINFO_SCAN_DONE
+ * fires after core's budget loop and neither path lets WA mark entries `ignoreBudget`.
  */
 function recordCoreSet(activated, args, how) {
     runState.lastCoreSet = {
@@ -1812,32 +1805,18 @@ function recordCoreSet(activated, args, how) {
 }
 
 /**
- * WA against ST core on THIS turn: core adjudicates for itself and WA reads back what it returned.
+ * WA against ST core on this turn: core selects for itself and WA diffs the two.
  *
- * NOT A SIMULATION. `checkWorldInfo` is core's whole selection — keyword matching, inclusion groups,
- * probability rolls, timed effects, decorators and its own budget walk — and it returns
- * `allActivatedEntries`, the set it would insert. Modelling that offline meant guessing at four
- * settings and getting three of them wrong; asking core is exact and shorter.
+ * `checkWorldInfo` is core's whole selection — inclusion groups, probability, timed effects, its own
+ * budget — so nothing here models it. Two things must be undone for the call and are restored after:
+ * the `ignoreBudget` takeover WA applies in `onEntriesLoaded` (or core's walk cuts nothing), and
+ * re-entry via WORLDINFO_SCAN_DONE, which `inCoreProbe` suppresses.
  *
- * TWO THINGS HAVE TO BE UNDONE FIRST, both reversible and both WA's own doing:
- *   ignoreBudget — `onEntriesLoaded` marks every entry exempt so WA's budget can supersede core's, which
- *                  would leave core's walk cutting nothing. The author's value is stashed in
- *                  `waIgnoreBudget`, so it is restored for the call and re-taken after.
- *   re-entry     — core's scan emits WORLDINFO_SCAN_DONE, which WA ranks on. `inCoreProbe` makes that
- *                  handler no-op so retrieval does not run again and the panel is not overwritten with
- *                  core's answer.
+ * Vector Storage activates World Info from its generate_interceptor, exposed as
+ * `globalThis.vectors_rearrangeChat`; calling it leaves force-activations that `checkWorldInfo` then
+ * consumes and clears.
  *
- * VECTOR STORAGE IS CALLED TOO, so the comparison is against what a user actually has rather than
- * against core's keyword route alone. That extension activates World Info from inside its
- * generate_interceptor, which ST exposes as `globalThis.vectors_rearrangeChat` — so the probe invokes it
- * directly. It emits WORLDINFO_FORCE_ACTIVATE, core stores those in `WorldInfoBuffer.externalActivations`,
- * and `checkWorldInfo` consumes and clears them, so nothing leaks into the next real generation. The
- * interceptor clears and re-sets its own extension prompts at entry, which is what the next generation
- * would have done anyway. Skipped when the user has that route off.
- *
- * EMITS A GRADEABLE UNION, which is the point rather than the diff. Both systems' picks pooled, graded
- * once, scored twice — the same "pool first, then pair" rule the graded corpus rests on. A diff says
- * what differs; only grades say which is better.
+ * Emits the union of both sets with content, so a turn can be graded once and scored twice.
  */
 async function versusCore() {
     const population = runState.lastRanked;
@@ -1850,10 +1829,8 @@ async function versusCore() {
     let vectorsRan = false;
     runState.inCoreProbe = true;
     try {
-        // Hand core back its own budget for the duration.
         for (const e of entries) if (e.waIgnoreBudget !== undefined) e.ignoreBudget = e.waIgnoreBudget;
-        // Vector Storage first, so its force-activations are waiting when core scans. A COPY of the chat:
-        // the interceptor is free to rearrange what it is handed and this one is not the real prompt.
+        // A copy: an interceptor may rearrange what it is handed, and this is not the real prompt.
         if (viaVectors && typeof globalThis.vectors_rearrangeChat === 'function') {
             try { await globalThis.vectors_rearrangeChat([...chat], getMaxPromptTokens(), null, 'normal'); vectorsRan = true; }
             catch (error) { console.warn('Worlds Apart: Vector Storage declined the probe, core will answer on keywords alone —', error); }
@@ -1907,9 +1884,7 @@ async function rankActivated(args) {
     const activated = args?.activated?.entries;
 
     if (!(activated instanceof Map)) return;
-    // `/wa-versus` is asking core what IT would select. Ranking that answer would overwrite the panel
-    // and the /wa-dry state with core's selection and re-enter retrieval.
-    if (runState.inCoreProbe) return;
+    if (runState.inCoreProbe) return;   // core is answering for /wa-versus; ranking it would re-enter
     if (!settings().enabled) {
         // WA off is the honest stand-down: core did everything, including its own budget, with every
         // interceptor live. This is the comparison baseline `/wa-core` exists to capture.
