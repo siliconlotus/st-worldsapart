@@ -816,6 +816,10 @@ async function scoreEntriesUnsafe(searchText) {
     // we fall back to rank position, which is still correctly ordered within a collection.
     // ENTRIES, not values: the collectionId is the key, and it is half the owner lookup — a chunk's score is
     // only meaningful against the corpus it was computed in (see `owners`).
+    // Chunks the backend returned with no score at all. Counted rather than ignored: it means the
+    // no-plugin path answered, so stage 1 has no cosine to give stage 3 and the relevance model is
+    // running on its other three signals.
+    let rankOnly = 0;
     for (const [collectionId, group] of Object.entries(results)) {
         const metadata = group?.metadata ?? [];
         metadata.forEach((item, index) => {
@@ -829,7 +833,18 @@ async function scoreEntriesUnsafe(searchText) {
                 return;
             }
 
-            const score = typeof item?.score === 'number' ? item.score : 1 - (index / Math.max(1, metadata.length));
+            // NO INVENTED SCORE. This used to fall back to `1 - index/metadata.length` when the backend
+            // returned none, which was harmless while the value only had to ORDER things — and is not
+            // harmless now that a fitted coefficient multiplies it. ST's own endpoint drops the score
+            // (`src/endpoints/vectors.js` maps `x.item.metadata`), so on the no-plugin path every
+            // "cosine" became a rank position in [0,1] fed to a model expecting a centred cosine around
+            // [-0.01, 0.42]. Observed: a whole capture where the column was 1 - rank/3332, exact to the
+            // rounding, and the relevance cut ran on it.
+            //
+            // Absent is the honest value. A row with no cosine is a row the model scores on its other
+            // signals, which is a claim it can make; a rank wearing a cosine's units is not.
+            const score = typeof item?.score === 'number' ? item.score : null;
+            if (score === null) { rankOnly++; return; }
 
             for (const owner of chunkOwners) {
                 const previous = scores.get(owner);
@@ -842,6 +857,14 @@ async function scoreEntriesUnsafe(searchText) {
                 }
             }
         });
+    }
+
+    // LOUD, because the failure is silent by nature: the stock endpoint answers, the rows come back in
+    // the right ORDER, and nothing looks wrong until a fitted coefficient multiplies a score that was
+    // never computed. `reportFailure` (matcher-design.md, *Open work*) is the general form of this.
+    if (rankOnly) {
+        console.warn(`Worlds Apart: ${rankOnly} chunk(s) came back with no score — the no-plugin path answered, so stage 1 has no cosine. `
+            + 'The relevance model is running on text, proper nouns and density alone. Check that the server plugin is loaded and that its query is not failing.');
     }
 
     return { targets, scores };

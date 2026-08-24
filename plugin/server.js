@@ -33,6 +33,7 @@ import { fileURLToPath } from 'node:url';
 import sanitize from 'sanitize-filename';
 import { LocalIndex } from 'vectra';
 import { getOllamaVector } from '../../src/vectors/ollama-vectors.js';
+import { getVllmVector } from '../../src/vectors/vllm-vectors.js';
 import { scoreCollection, poolEntries, selectTopK } from './scoring.mjs';
 // Same matcher and text fold the extension uses for keyword hits — shared, not copied, so a chat scan and a
 // live keyword match can never disagree about what a key matches.
@@ -73,6 +74,10 @@ const meanCache = new Map();
  * @returns {Promise<number[]>} Embedding
  */
 async function embed(source, sourceSettings, text, directories) {
+    // ONE CASE PER SOURCE, and an unsupported one must FAIL LOUDLY rather than degrade: the client falls
+    // back to ST's stock endpoint, which drops the score entirely, and stage 1 then has no cosine at all.
+    // That was silent for as long as a missing score could be replaced by a rank — measured on a live
+    // capture, every "cosine" was 1 - rank/3332 and the relevance model multiplied its coefficient by it.
     switch (source) {
         case 'ollama':
             return await getOllamaVector(
@@ -82,8 +87,16 @@ async function embed(source, sourceSettings, text, directories) {
                 Boolean(sourceSettings.keep),
                 directories,
             );
+        case 'vllm':
+            return await getVllmVector(
+                text,
+                sourceSettings.apiUrl,
+                sourceSettings.model,
+                directories,
+            );
         default:
-            throw new Error(`Worlds Apart: centered search does not support source "${source}"`);
+            throw new Error(`Worlds Apart: centered search does not support source "${source}" — `
+                + 'the extension will fall back to stock vector search, which returns no scores, so stage 1 will have no cosine.');
     }
 }
 
