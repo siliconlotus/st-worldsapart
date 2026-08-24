@@ -1818,10 +1818,17 @@ function recordCoreSet(activated, args, how) {
  *
  * Emits the union of both sets with content, so a turn can be graded once and scored twice.
  */
-async function versusCore() {
-    const population = runState.lastRanked;
-    if (!population?.length) { toastr.info('Nothing ranked yet \u2014 generate, or run /wa-dry first.', 'Worlds Apart'); return; }
-
+/**
+ * What ST core selects for this turn, with WA standing down for the call.
+ *
+ * `checkWorldInfo` is core's whole selection — inclusion groups, probability, timed effects, its own
+ * budget — so nothing here models it. Two things must be undone for the call and are restored after:
+ * the `ignoreBudget` takeover WA applies in `onEntriesLoaded`, and re-entry via WORLDINFO_SCAN_DONE,
+ * which `inCoreProbe` suppresses.
+ *
+ * @returns {Promise<{entries: object[], viaVectors: boolean, vectorsRan: boolean}>}
+ */
+async function coreSelection() {
     const chat = (runState.scanChat ?? getContext().chat ?? []).filter(x => x && !x.is_system);
     const entries = await getSortedEntries();
     let core;
@@ -1845,12 +1852,20 @@ async function versusCore() {
         for (const e of entries) if (e.waIgnoreBudget !== undefined) e.ignoreBudget = true;
         runState.inCoreProbe = false;
     }
+    return { entries: [...(core?.allActivatedEntries ?? [])], viaVectors, vectorsRan };
+}
+
+async function versusCore() {
+    const population = runState.lastRanked;
+    if (!population?.length) { toastr.info('Nothing ranked yet \u2014 generate, or run /wa-dry first.', 'Worlds Apart'); return; }
+
+    const { entries: coreEntries, viaVectors, vectorsRan } = await coreSelection();
 
     const keyOf = e => `${e.world}.${e.uid}`;
-    const coreKeys = new Set([...(core?.allActivatedEntries ?? [])].map(keyOf));
+    const coreKeys = new Set(coreEntries.map(keyOf));
     const waKeys = new Set((runState.lastLayout ?? []).map(x => keyOf(x.item.entry)));
     const byKey = new Map(population.map(x => [keyOf(x.entry), x]));
-    for (const e of core?.allActivatedEntries ?? []) if (!byKey.has(keyOf(e))) byKey.set(keyOf(e), { entry: e });
+    for (const e of coreEntries) if (!byKey.has(keyOf(e))) byKey.set(keyOf(e), { entry: e });
 
     const tokens = await Promise.all([...byKey.values()].map(x => getTokenCountAsync(x.entry.content ?? '')));
     [...byKey.values()].forEach((x, i) => { x.tokens = tokens[i]; });
@@ -1909,7 +1924,96 @@ async function versusCore() {
         depth: settings().messageDepth,
         rows: union.map(([k, x]) => ({ ...row([k, x]), core: coreKeys.has(k), wa: waKeys.has(k), content: x.entry.content })),
     });
+    await versusBundle(union, coreKeys, waKeys, viaVectors);
     toastr.success(`core ${coreKeys.size} / WA ${waKeys.size}, ${coreKeys.size - both} core-only \u2014 see console`, 'WA vs core');
+}
+
+/**
+ * Writes the comparison as a two-arm bundle, so it opens in the bundle reviewer and is graded there.
+ *
+ * ONE ARM PER SELECTOR, and each arm's candidates are the set THAT SELECTOR SHIPPED — not a pool. The
+ * reviewer grades the union, which is exactly the rows the two disagree about plus the ones they share,
+ * and nothing else. That is the whole point of grading a versus capture rather than a /wa-super-grade
+ * pool: the question is which of these two sets is better, and a row neither selector shipped cannot
+ * answer it.
+ *
+ * Signals ride on the WA arm's rows and are absent on core-only ones, which is honest — core computes
+ * none of them. `unionArms` fills an absent signal rather than reading it as a measured zero.
+ *
+ * @param {Array<[string, object]>} union Rows keyed `world.uid`, already ordered by E[credit]
+ * @param {Set<string>} coreKeys What core shipped
+ * @param {Set<string>} waKeys What WA shipped
+ * @param {boolean} viaVectors Whether Vector Storage's WI route was on for core
+ */
+async function versusBundle(union, coreKeys, waKeys, viaVectors) {
+    const books = {};
+    for (const world of runState.attachedWorlds) {
+        const data = await loadWorldInfo(world);
+        if (data?.entries) books[world] = keyByUid(data.entries);
+    }
+
+    // Sticky needs the scan's timedEffects, which the probe does not carry; constant is the half that can
+    // be read off the entry. A misfiled sticky is LISTED rather than graded, so the cost is one row the
+    // reviewer is not asked about, never a wrong verdict.
+    const rowsFor = keys => union.filter(([k]) => keys.has(k)).map(([, x], i) => toCandidate({
+        book: x.entry.world,
+        uid: x.entry.uid,
+        title: x.entry.comment || x.entry.key?.[0] || `uid ${x.entry.uid}`,
+        block: x.entry.constant ? 'constant' : 'dynamic',
+        tokens: x.tokens,
+        score: Number.isFinite(x.eCredit) ? x.eCredit : null,
+        cosine: Number.isFinite(x.score) ? x.score : null,
+        text: Number.isFinite(x.textScore) ? x.textScore : null,
+        keys: Number(x.keywordScore) || null,
+        properNouns: Number.isFinite(x.properNouns) ? x.properNouns : null,
+    }, i));
+
+    const primaryBook = searchedBook(rowsFor(waKeys)) ?? chatBook() ?? Object.keys(books)[0] ?? '';
+    const common = {
+        query: runState.lastQuery,
+        queryChat: runState.lastQueryChat,
+        scanChat: runState.lastScanChat,
+        injects: runState.lastInjects,
+        sources: matcher.usedMatchSources(runState.lastSources, Object.values(books).flatMap(b => Object.values(b))),
+        depth: settings().messageDepth,
+        pluginFP: runState.pluginFP,
+        sourceFP: runState.sourceFP,
+        stVersion: await stVersion(),
+        chat: chatFilePath(),
+        book: primaryBook ? `data/default-user/worlds/${primaryBook}.json` : '',
+        index: primaryBook ? vectorIndexPath(primaryBook) : '',
+        primaryBook,
+        embedModel: vectorRequestBody().model || '',
+        params: captureParams(settings(), {
+            caseSensitive: world_info_case_sensitive,
+            wholeWords: world_info_match_whole_words,
+            includeNames: world_info_include_names,
+            allowWIScan: Boolean(extension_settings.note?.allowWIScan),
+        }),
+        snapshot: paramSnapshot(),
+        books,
+        priority: (scopedPriority() ?? []).map(x => x.cfg),
+        grades: [],
+        // No grading depth was imposed: the shipped sets ARE the candidates, so nothing was truncated.
+        cutoff: { live: { maxVectorEntries: settings().maxVectorEntries } },
+        now: new Date().toISOString(),
+    };
+
+    const arms = [
+        { arm: 'wa', rows: rowsFor(waKeys) },
+        { arm: viaVectors ? 'core+vectors' : 'core', rows: rowsFor(coreKeys) },
+    ].map(({ arm, rows }) => ({ arm, sample: buildSample({
+        ...common,
+        name: `${defaultSampleName()}-versus`,
+        notes: `WA against ST core on one turn; each arm's candidates are the set it shipped. Core's vector route was ${viaVectors ? 'ON' : 'OFF'}.`,
+        candidates: rows,
+        gradedCandidates: rows.filter(r => r.block === 'dynamic').length,
+    }) }));
+
+    const bundle = await bundleSamples(arms, { ...sceneRange(), user: raterId(), captureId: uuidv4() });
+    const { filename, content } = sampleFile(bundle);
+    download(content, filename, 'application/json');
+    toastr.info(`Saved ${filename} — open it with Review bundles to grade these ${union.length} rows.`, 'Worlds Apart', { timeOut: 8000 });
 }
 
 async function rankActivated(args) {
