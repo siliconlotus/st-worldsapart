@@ -914,6 +914,20 @@ memory cutoff: mean delivered share is 23.2% / 21.6% / 20.4% / 21.0% across scen
 80-150 and over 150 candidates, and delivered count correlates with CANDIDATE count at r 0.946. One
 Time Whore turn offered 208 activated memory entries and passed 51.
 
+**A SCENE-LEVEL COVARIATE CANNOT FIX IT, because candidate count is not a property of the scene.**
+Stage 1 admits every vectorized entry, so the count is the book's size minus whatever post-dates the
+turn, plus a handful of keyword hits. **Measured**, within each book, r between message index and
+candidate count: Ascensus 0.964, Sommers 0.940, Time Whore 0.988, Richard 0.660 — it is how far into
+the story the turn sits, and across books it is 57% book identity. In a live chat it grows by about one
+per summarised scene and is otherwise flat, so it cannot tell a turn needing three entries from one
+needing fifteen. The corpus-level correlation between candidate count and relevant SHARE (r -0.422)
+is those two things and not a signal any turn could act on.
+
+**So the count can only come from the per-entry scores**, which is what makes the standardisation the
+thing to change rather than something to compensate for. Raw signal LEVEL does not carry it either:
+mean text against relevant COUNT reads r 0.367 but against relevant SHARE r 0.010 — a hotter scene
+holds more because it is larger, not because it is denser.
+
 **The macro-average hides it, which is why it survived the fit.** F2 is averaged over scenes, so 40
 small scenes delivering 4.6 outvote 17 large ones delivering 38.7 and the corpus mean reads 16.4. The
 scenes that dominate the token bill are exactly the ones the average buries — and on a large book the
