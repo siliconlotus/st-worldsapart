@@ -1879,6 +1879,19 @@ async function versusCore() {
     console.log(`  core: ${coreKeys.size} entries, ${spend(coreKeys)} tokens (its own budget: world_info_budget ${world_info_budget}%${Number(world_info_budget_cap) > 0 ? `, cap ${world_info_budget_cap}` : ''})`);
     console.log(`  WA:   ${waKeys.size} entries, ${spend(waKeys)} tokens (budget ${effectiveTokenBudget()})`);
     console.log(`  shared ${both}, core only ${coreKeys.size - both}, WA only ${waKeys.size - both}`);
+
+    // CORE'S CUT IS A SORT, and saying so is the difference between reading this table as two
+    // rankings disagreeing and reading it as one ranking against `order`. getSortedEntries sorts
+    // descending by order (world-info.js sortFn) and the budget loop breaks at overflow, so under a
+    // filled budget core ships a PREFIX of that walk. When the two sets separate cleanly by order,
+    // the comparison measured the book's authored sequence and not core's judgement of the scene.
+    const spanOf = keys => { const o = [...byKey.entries()].filter(([k]) => keys.has(k)).map(([, x]) => x.entry.waOriginalOrder ?? x.entry.order ?? 0); return o.length ? [Math.min(...o), Math.max(...o)] : null; };
+    const waOnlySpan = spanOf(new Set([...waKeys].filter(k => !coreKeys.has(k))));
+    const coreOnlySpan = spanOf(new Set([...coreKeys].filter(k => !waKeys.has(k))));
+    if (waOnlySpan && coreOnlySpan) {
+        console.log(`  order: core-only ${coreOnlySpan[0]}-${coreOnlySpan[1]}, WA-only ${waOnlySpan[0]}-${waOnlySpan[1]}`
+            + (coreOnlySpan[0] > waOnlySpan[1] ? ' — disjoint, so core’s cut was its descending-order walk running out of budget, not a verdict on the scene' : ''));
+    }
     console.table(union.map(row));
     console.log(`  Vector Storage's WI route is ${viaVectors ? 'ON' : 'OFF'}${viaVectors ? (vectorsRan ? ' and was invoked for this comparison' : ' but did not run \u2014 core answered on keywords alone') : ' \u2014 core is its keyword route'}.`);
     console.log('%cgradeable union \u2014 right-click \u2192 Copy object', 'font-weight: bold');
