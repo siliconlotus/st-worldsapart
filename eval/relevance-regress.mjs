@@ -61,7 +61,7 @@ const arg = k => { const i = argv.indexOf(k); return i >= 0 ? argv[i + 1] : null
 // is about to write is opened as an input bundle. Named flags rather than "anything after a --", or
 // `--lobo scene.json` would silently DROP that scene, which is the worse failure: a wrong sample set
 // prints a clean table and says nothing about what it left out.
-const VALUED = new Set(['--arm', '--sweep', '--tier', '--cut', '--degree', '--square', '--with', '--without', '--emit', '--emit-rows', '--emit-model', '--drop-keys', '--proper-nouns', '--proper-nouns-extract']);
+const VALUED = new Set(['--arm', '--sweep', '--tier', '--cut', '--degree', '--square', '--with', '--without', '--emit', '--emit-rows', '--emit-model', '--drop-keys', '--proper-nouns', '--proper-nouns-extract', '--standardise', '--beta']);
 const samples = argv.filter((a, i) => a.endsWith('.json') && !a.startsWith('--') && !VALUED.has(argv[i - 1]));
 if (!samples.length) {
     console.error('need at least one sample: node relevance-regress.mjs <sample.json> [more.json ...] [--sweep param=v1,v2]');
@@ -125,6 +125,21 @@ const HALF_RECALL = argv.includes('--half-recall');
 // roughly doubles the negative class on poorly-covered scenes and moves the base rate, so it changes
 // what the coefficients mean rather than only their scale.
 const UNGRADED_NEGATIVE = argv.includes('--ungraded-negative');
+// WHICH POPULATION THE STANDARDISATION IS COMPUTED OVER. `scene` is the shipped design: each row is
+// centred among the rows it competes with. `book` pools every scene of the same book, which is the
+// same statistic a runtime could accumulate across turns rather than recompute per scan.
+//
+// The scene version has a measured pathology: one confident match inflates its scene's sd and
+// compresses every other row, so the delivered count moves inversely to confidence (matcher-design.md).
+// A book-level scale cannot do that — no single row can move it.
+const STD_BY = arg('--standardise') ?? 'scene';
+// THE BETA OF THE SCORE OF RECORD. RECALL_WEIGHT (2) is the shipped definition — recall counts twice,
+// because the cost of missing must-deliver material is higher than the cost of carrying a spare entry.
+// Overridable so the arms can be read at another trade: a design that delivers FEWER is penalised by a
+// high beta whether or not its ordering is worse, and separating those needs the curve, not one number.
+const BETA = Number(arg('--beta') ?? RECALL_WEIGHT);
+if (!Number.isFinite(BETA) || BETA <= 0) { console.error(`--beta must be a positive number, got ${arg('--beta')}`); process.exit(2); }
+if (!['scene', 'book'].includes(STD_BY)) { console.error(`--standardise must be scene|book, got ${STD_BY}`); process.exit(2); }
 const RELEVANT_AT = Number(arg('--relevant-at') ?? 3);
 const creditOf = g => (RELEVANT_AT === 2 ? (g >= 2 ? 1 : 0) : gradeCredit(g));
 const AT = arg('--at') === null ? null : Number(arg('--at'));
@@ -651,11 +666,23 @@ const queryVec = async (S, name, value, em) => {
         const X = [], y = [], rawCols = FEATURES.map(() => []), stats = FEATURES.map(() => ({ sd: [], mean: [] }));
         const perSignal = FEATURES.map(() => ({ s: [], y: [] }));
         const sceneCols = [];
-        for (const [si, { kept, ungraded }] of perScene.entries()) {
+        // Under --standardise book, the statistics pool every candidate of every scene on that book. Built
+        // up front because a scene needs its BOOK's rows, which it does not hold.
+        const bookPopulation = new Map();
+        if (STD_BY === 'book') {
+            for (const { kept, ungraded, book } of perScene) {
+                if (!bookPopulation.has(book)) bookPopulation.set(book, []);
+                bookPopulation.get(book).push(...kept.map(k => k.r), ...ungraded.map(u => u.r));
+            }
+        }
+        const bookCols = new Map();
+        for (const [b, rows] of bookPopulation) bookCols.set(b, FEATURES.map(([, get]) => rows.map(get)));
+
+        for (const [si, { kept, ungraded, book }] of perScene.entries()) {
             // Every candidate the scene offered, in the order the runtime would see them: what the
             // standardisation is computed over.
             const population = [...kept.map(k => k.r), ...ungraded.map(u => u.r)];
-            const statCols = FEATURES.map(([, get]) => population.map(get));
+            const statCols = STD_BY === 'book' ? bookCols.get(book) : FEATURES.map(([, get]) => population.map(get));
             const cols = FEATURES.map(([, get]) => kept.map(k => get(k.r)));
             sceneCols[si] = statCols;
             statCols.forEach((c, fi) => { stats[fi].sd.push(sd(c)); stats[fi].mean.push(mean(c)); });
@@ -853,7 +880,7 @@ const queryVec = async (S, name, value, em) => {
                             const got = sc.rows.filter(r => r.e >= cut);
                             const precision = got.length ? mean(got.map(r => creditOf(r.g))) : 0;
                             const recall = (HALF_RECALL ? got.reduce((a, r) => a + creditOf(r.g), 0) : got.filter(r => r.g >= RELEVANT_AT).length) / sc.relevant;
-                            return { f: fbeta(precision, recall, RECALL_WEIGHT), precision, recall, n: got.length };
+                            return { f: fbeta(precision, recall, BETA), precision, recall, n: got.length };
                         });
                         return {
                             cut, f: mean(per.map(x => x.f)), precision: mean(per.map(x => x.precision)),
