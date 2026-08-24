@@ -624,19 +624,33 @@ const queryVec = async (S, name, value, em) => {
 
         // Design matrix: one intercept, then each signal's standardised value. Standardising within scene
         // is what makes one slope mean one thing across corpora whose BM25 lives on different scales.
+        //
+        // THE STATISTICS COME FROM EVERY CANDIDATE, THE ROWS ONLY FROM THE GRADED ONES. A label exists
+        // only where somebody graded, but the mean and sd a coefficient is expressed in must be the ones
+        // the RUNTIME computes, and the runtime has no notion of "graded" — `scoreRelevance` centres over
+        // every activated row. Taking them from the pooled subset instead was a train/serve skew: the
+        // ungraded tail sits low, so leaving it out lifts the mean and shrinks the sd, and every z at
+        // serving time comes out larger than the fit ever saw. **Measured** at 73% pool coverage (the
+        // Time Whore turn, the corpus's worst) it delivered 49 entries where the fit's own statistics
+        // gave 35 — and coverage falls as a scene grows (r -0.661), so the inflation was worst exactly
+        // where over-delivery already hurt. Well-covered scenes are unaffected: 3 against 3 at 93%.
         const X = [], y = [], rawCols = FEATURES.map(() => []), stats = FEATURES.map(() => ({ sd: [], mean: [] }));
         const perSignal = FEATURES.map(() => ({ s: [], y: [] }));
         const sceneCols = [];
-        for (const [si, { kept }] of perScene.entries()) {
+        for (const [si, { kept, ungraded }] of perScene.entries()) {
+            // Every candidate the scene offered, in the order the runtime would see them: what the
+            // standardisation is computed over.
+            const population = [...kept.map(k => k.r), ...ungraded.map(u => u.r)];
+            const statCols = FEATURES.map(([, get]) => population.map(get));
             const cols = FEATURES.map(([, get]) => kept.map(k => get(k.r)));
-            sceneCols[si] = cols;
-            cols.forEach((c, fi) => { stats[fi].sd.push(sd(c)); stats[fi].mean.push(mean(c)); });
+            sceneCols[si] = statCols;
+            statCols.forEach((c, fi) => { stats[fi].sd.push(sd(c)); stats[fi].mean.push(mean(c)); });
             kept.forEach((k, i) => {
                 const scene = [1];
                 const feats = [];
                 cols.forEach((c, fi) => {
-                    const s = sd(c) || 1;   // a signal constant within a scene carries no information there; 1 keeps it finite and its column stays flat
-                    feats.push((c[i] - mean(c)) / s);
+                    const s = sd(statCols[fi]) || 1;   // a signal constant within a scene carries no information there; 1 keeps it finite and its column stays flat
+                    feats.push((c[i] - mean(statCols[fi])) / s);
                     rawCols[fi].push(c[i]);
                     perSignal[fi].s.push(c[i]);
                     perSignal[fi].y.push(k.y);
