@@ -630,7 +630,8 @@ async function scoreRelevanceColumn(items, windowFor) {
 
     if (runState.verboseRun) {
         const scored = items.filter(it => Number.isFinite(it.eCredit));
-        console.log(`%cWorlds Apart · E[credit] over ${scored.length} entries (nothing cut)`, 'font-weight: bold');
+        const cuts = Object.entries(models).filter(([, m]) => m).map(([t, m]) => `${t} ${t === 'memory' ? `>= ${m.cutoff}` : 'uncut'}`).join(', ');
+        console.log(`%cWorlds Apart · E[credit] over ${scored.length} entries — ${cuts}; the cut runs at selection`, 'font-weight: bold');
         console.table([...scored]
             .sort((a, b) => b.eCredit - a.eCredit)
             .map(it => ({
@@ -2198,6 +2199,10 @@ async function rankActivated(args) {
             uid: x.entry.uid,
             wiOrder: x.entry.waOriginalOrder,
             cosine: x.score !== undefined ? Number(x.score.toFixed(5)) : null,
+            // The two signals the model reads that nothing else computes, and the number it produces.
+            // `score` above IS eCredit — this repeats it only where a reader is comparing signals.
+            pn: Number.isFinite(x.properNouns) ? Number(x.properNouns.toFixed(3)) : null,
+            dens: Number.isFinite(x.density) ? Number(x.density.toFixed(2)) : null,
             // BM25 over chunk text. Gated on the same condition as cosine, because both come from the
             // retrieval path: an entry with no chunks in the collection has no text score to report, and
             // the scorer returning 0 for it is a default, not a measurement.
@@ -2225,7 +2230,7 @@ async function rankActivated(args) {
         runState.lastCandidates = rows.map((row, i) => ({ ...row, book: population[i].entry.world, why: population[i].keywordWhy }));
         runState.lastCandidateEntries = population.map(x => x.entry);
 
-        console.log('%cWorlds Apart · selection candidates — every activated entry with its per-signal scores, before caps or layout', 'font-weight: bold');
+        console.log('%cWorlds Apart · selection candidates — every activated entry, its signals and what cut it. `score` is E[credit]; a cut row with no cap named lost the relevance cut', 'font-weight: bold');
         console.table(rows);
     }
 
