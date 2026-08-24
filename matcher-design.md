@@ -926,6 +926,15 @@ mechanism is the z-score: a long right tail inflates the scene's sd and compress
 distribution has a small sd and standardisation manufactures spread out of noise. It is also why a large
 scene over-delivers — more candidates put more mass in the middle and flatten the relative shape.
 
+**IN THE EXTREMES IT IS ONE THING: WHETHER THE SCENE HAS A STANDOUT.** The MEDIAN `E[credit]` is ~0.03
+in every scene measured; what moves is the top. **Measured**, the eight lowest-delivering scenes carry a
+maximum of 0.70-0.98 and the eight highest carry 0.16-0.41. Richard supplies a controlled comparison,
+five scenes at exactly 15 candidates each: maxima 0.747 and 0.695 deliver ONE entry, maxima 0.265, 0.186
+and 0.160 deliver FIVE. Same book, same count, fivefold difference, and the only thing separating them
+is whether a confident match exists. **The model delivers most where it is least confident**, and against
+need in both directions — a Time Whore scene with 3 relevant of 155 delivers 14, while the corpus's
+densest scene (Foxbridge, 9 relevant of 13) delivers 5.
+
 **A SCENE-LEVEL COVARIATE CANNOT FIX IT, because candidate count is not a property of the scene.**
 Stage 1 admits every vectorized entry, so the count is the book's size minus whatever post-dates the
 turn, plus a handful of keyword hits. **Measured**, within each book, r between message index and
