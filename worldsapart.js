@@ -3944,15 +3944,16 @@ async function superEvalScene() {
     // there first. The review cannot substitute: it carries verdicts and no arm membership, so nothing
     // offline can tell which arm delivered a row.
     //
-    // ONE SCENE PER DOCUMENT ONLY. A section names a scene by position and a multi-scene bundle needs the
-    // id resolution apply-review does — and a mis-landed verdict looks native once written, so this
-    // declines rather than guesses.
+    // INTO scenes[0], WHICH IS THE SCENE THAT WAS GRADED. `openBundle` reads a section at its document's
+    // first scene, and a multi-scene document reaches the reviewer as a PACK — one section per element —
+    // so every section's verdicts belong to its own scenes[0]. Any later scene in the same document was
+    // never shown and is carried through untouched.
     let dropped = 0;
     for (const [si, sec] of done.sections.entries()) {
         const doc = secs[si]?.manifest;
-        const scene = (doc?.scenes ?? []).length === 1 ? doc.scenes[0] : null;
+        const [scene, ...rest] = doc?.scenes ?? [];
         if (!scene) continue;
-        const merged = { ...doc, scenes: [{ ...scene, entries: mergeGrades(scene.entries, sec.grades, { user: raterId(), now: reviewedAt }) }] };
+        const merged = { ...doc, scenes: [{ ...scene, entries: mergeGrades(scene.entries, sec.grades, { user: raterId(), now: reviewedAt }) }, ...rest] };
         const slug = String(secs[si].name ?? sec.file ?? 'scene').replace(/\.json$/, '').replace(/[^\w.-]+/g, '-').replace(/^-+|-+$/g, '') || 'scene';
         download(JSON.stringify(merged, null, 1), `${slug}-graded.json`, 'application/json');
         dropped++;
