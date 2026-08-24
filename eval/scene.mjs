@@ -23,7 +23,7 @@ import { buildContentIndex, scoreContent, entryKey } from '../extension/content-
 // scope — both references live inside function bodies, so whichever module loads first finishes evaluating
 // before the other needs a binding.
 import { cachePath, chunkConfig, embedTexts } from './reindex.mjs';
-import { gradeCredit, fbeta, RECALL_WEIGHT, gradeValue } from './metrics.mjs';
+import { gradeCredit, fbeta, RECALL_WEIGHT, gradeValue, topComponents, projectOut } from './metrics.mjs';
 export { inVectorIndex } from '../extension/ranking.mjs';
 
 /** Unit Separator — see CLAUDE.md. Never NUL: that makes git treat the file as binary. */
@@ -97,6 +97,69 @@ export const dropUnavailable = (S, label = "sample") => {
         .filter(e => isMemory(e) && !Number.isFinite(Number(e.STMB_start))).length;
     if (unverified) console.error(`  ${label}: ${unverified} MEMORY entr(ies) carry no STMB_start — availability unchecked, not verified as available`);
     return S;
+};
+
+/**
+ * Groups book names into LINEAGES by shared entry bodies — the unit CLAUDE.md says to count, because a
+ * book is versioned in place and two versions of one book are not two books.
+ *
+ * NAMES CANNOT DO THIS. An LTM file is named after the CHARACTER CARD, and a card carries many stories:
+ * measured on the graded corpus, `LTM - Isekai Adventure - ...@14h45` is byte-identical to `LTM - Ascensus`
+ * in all 145 entries and shares under 5% with Time Whore, which is the other story on that same card. So
+ * the name says nothing about which corpus a book is, in either direction.
+ *
+ * IT MATTERS WHEREVER INDEPENDENCE DOES. A sign test over scenes treats each as a draw, and three files of
+ * one book are one draw wearing three hats; a leave-one-book-out basis that leaves out only the FILE puts
+ * two near-identical copies of a book into its own "everyone else", which is how an alignment of 0.83 came
+ * back as 0.77 once the siblings left.
+ *
+ * 30% of the smaller book's bodies, the threshold CLAUDE.md records for 43 files collapsing to 34 lineages.
+ * Transitive, so a chain of partial revisions lands in one group.
+ *
+ * THE GROUP TAKES THE MOST RECENTLY USED NAME, since that is the one the author is currently calling it and
+ * the one that will match what they say. `recency` maps a book name to any comparable stamp — bundle
+ * createdAt is what the callers have.
+ *
+ * TIES BREAK TO THE SHORTEST NAME, which matters because those stamps are day-granular and tie constantly:
+ * `LTM - Ascensus` and `LTM - Isekai Adventure - Isekai Adventure - 2026-03-04@14h45` are the same 145
+ * entries and were last written the same day. Version and card decoration only ever makes a name longer, so
+ * shortest recovers the base name. Then by name, so the answer never depends on iteration order.
+ *
+ * @param {Record<string, object>} booksByName name -> uid-keyed entries
+ * @param {Map<string, string|number>} [recency] name -> last-used stamp; absent names sort oldest
+ * @returns {Map<string, string>} book name -> lineage name
+ */
+export const lineagesOf = (booksByName, recency = new Map()) => {
+    const norm = t => String(t ?? '').replace(/\s+/g, ' ').trim().toLowerCase();
+    const sigs = new Map(Object.entries(booksByName).map(([b, bk]) =>
+        [b, new Set(Object.values(bk ?? {}).filter(e => e.content).map(e => norm(e.content)))]));
+    const names = [...sigs.keys()];
+    const parent = new Map(names.map(n => [n, n]));
+    const find = x => (parent.get(x) === x ? x : (parent.set(x, find(parent.get(x))), parent.get(x)));
+    for (let i = 0; i < names.length; i++) {
+        for (let j = i + 1; j < names.length; j++) {
+            const A = sigs.get(names[i]), B = sigs.get(names[j]);
+            const smaller = Math.min(A.size, B.size);
+            if (!smaller) continue;
+            let shared = 0;
+            for (const x of A) if (B.has(x)) shared++;
+            if (shared / smaller >= 0.3) parent.set(find(names[i]), find(names[j]));
+        }
+    }
+    const members = new Map();
+    for (const b of names) {
+        const r = find(b);
+        if (!members.has(r)) members.set(r, []);
+        members.get(r).push(b);
+    }
+    const out = new Map();
+    for (const group of members.values()) {
+        const stamp = x => String(recency.get(x) ?? '');
+        const label = [...group].sort((a, b) =>
+            stamp(b).localeCompare(stamp(a)) || (a.length - b.length) || a.localeCompare(b))[0];
+        for (const b of group) out.set(b, label);
+    }
+    return out;
 };
 
 /** Reads a graded-scene document from disk as one arm's view. Every tool goes through this, so `--arm`
@@ -372,6 +435,21 @@ export const sceneParams = (S, overrides = {}) => ({
     // which is an arm rather than a baseline. No stored capture records this field, and the populations
     // measured at cosine 0.99873-1.00000 of each other, so no recorded number is invalidated by the switch.
     centroidPopulation: 'memory',
+    // HOW MANY LEADING COMPONENTS OF THE CENTRED CORPUS ARE PROJECTED OUT, on top of the mean. 0 is
+    // production: mean-centering only.
+    //
+    // The mean is one direction, and measured across 10 books only 8-16% of it is the book's own — the
+    // rest is shared with every other book (metrics.mjs topComponents). So the operation meant to make
+    // "magic is unremarkable in a fantasy book" cheap spends most of its effect on something no book is
+    // distinguished by, and least of it on the long memory books that most need it. What is unremarkable
+    // in a book is plausibly several directions, which one vector cannot carry; this removes k of them.
+    //
+    // SCREENED ON THE LOO CHUNK-TO-SIBLING TASK AND NOT PROMISING THERE: helps in proportion to a book's
+    // own-direction share (Spearman 0.94, n=6) and so helps small thematic reference books while going
+    // slightly negative on the long narrative ones. That task cannot answer the question, though — it has
+    // no selection stage, so every metric it emits is read at a window nobody chooses. This param is what
+    // asks it against the delivered set instead.
+    pcRemove: 0,
     denseColumn: null,
     denseWeight: 0.5,
     maxVectorEntries: 20, entityFilter: true,
@@ -517,6 +595,30 @@ export function loadScene(S, { indexFile, params: P }) {
     if (emptySelection) meanSource = live;
     // No `lexical`: scoreCollection is cosine-only, and stage 3's text index is content-lexical's.
     const loaded = { items, extra, mean: meanSource.length ? corpusMean(meanSource) : [] };
+
+    // PROJECTING THE COMPONENTS OUT AT LOAD, not at scoring, because they are a property of the corpus and
+    // recomputing them per query would be the same vectors and the same answer at N times the cost. The
+    // vectors are transformed and the mean becomes zero, so the shipped centeredCosineScores still does the
+    // arithmetic — subtracting a zero mean from an already-centred vector. The QUERY has to take the same
+    // transform at each call site or the two sides are compared in different spaces.
+    //
+    // COMPONENTS OF THE CENTROID POPULATION, the same rows that define the mean. Taking them over a wider
+    // set would remove directions the mean was never built from.
+    if (P.pcRemove > 0) {
+        // Both of these would silently produce a number. Uncentered, `mean` is not subtracted at all and
+        // the components — computed about it — describe a space the scoring never enters. The gate's pass
+        // is RAW cosine by definition (plugin/scoring.mjs) and reads item.vector directly, so transformed
+        // vectors would put a wrong-book failsafe on a quantity that is no longer raw.
+        if (!P.meanCentered) throw new Error('pcRemove needs meanCentered: the components are of the CENTRED corpus, so uncentered scoring never enters the space they describe');
+        if (P.uncenteredGate > 0) throw new Error('pcRemove with uncenteredGate is not modelled: the gate reads RAW cosine off item.vector, which projection has already changed');
+        if (!loaded.mean.length) throw new Error(`pcRemove needs a centroid and "${primary}" has no collection to build one from`);
+        const comps = topComponents(meanSource, P.pcRemove, loaded.mean);
+        const shift = xs => xs.map(it => ({ ...it, vector: projectOut(it.vector, loaded.mean, comps) }));
+        loaded.pc = { comps, mean: loaded.mean, asked: P.pcRemove, got: comps.length };
+        loaded.items = shift(loaded.items);
+        loaded.extra = shift(loaded.extra);
+        loaded.mean = new Float64Array(loaded.mean.length);
+    }
 
     // Out-of-scope graded titles: entries from a second attached book, which this harness cannot rank
     // because only one collection is loaded. Token-subset match, same rule as grade matching.
@@ -673,6 +775,11 @@ const mentions = (name, content) => {
     return re.test((content ?? '').toLowerCase());
 };
 
+/** The query under the same transform the collection took (loadScene pcRemove), or unchanged when none.
+ *  Applied at every call site rather than once by the caller, because a query that reached only one of the
+ *  two scoring paths would leave the dense-all extras compared in a different space from the collection. */
+export const pcQuery = (loaded, qvec) => (loaded?.pc ? projectOut(qvec, loaded.pc.mean, loaded.pc.comps) : qvec);
+
 export const scoringKeys = (e, P) => {
     let base = e.key ?? [];
     // P.addCastKeys (array of bare names) simulates uniform placement: each name is appended wherever the
@@ -731,7 +838,7 @@ export function makeCandidateSet({ loaded, byUid, entries, params: P, chunkCfg, 
     const denseExtra = (qvec) => {
         const out = new Map();
         if (!loaded.extra?.length || !qvec?.length) return out;
-        const scores = centeredCosineScores(loaded.extra, qvec, loaded.mean, P.meanCentered);
+        const scores = centeredCosineScores(loaded.extra, pcQuery(loaded, qvec), loaded.mean, P.meanCentered);
         loaded.extra.forEach((it, i) => {
             const uid = Number(it.metadata?.index);
             out.set(uid, Math.max(out.get(uid) ?? -Infinity, scores[i]));
@@ -751,7 +858,7 @@ export function makeCandidateSet({ loaded, byUid, entries, params: P, chunkCfg, 
         // why the threshold and the lexical clause left this stage. `contentText` is stage 3's text signal
         // and is computed here only because this pass collapses the stages; it admits nothing.
         const contentText = scoreContent(contentIndex, qtext, { k1, b, termWeights: tw, stopwordDf: P.stopwordDf });
-        const scored = scoreCollection(CID, loaded, qvec, { centered: P.meanCentered, uncenteredGate: P.uncenteredGate });
+        const scored = scoreCollection(CID, loaded, pcQuery(loaded, qvec), { centered: P.meanCentered, uncenteredGate: P.uncenteredGate });
         const grouped = selectTopK(poolEntries(scored), topK);
         const per = new Map();
         for (const m of grouped[CID]?.metadata ?? []) { const uid = Number(m.index); per.set(uid, { score: Math.max(per.get(uid)?.score ?? -Infinity, m.score) }); }

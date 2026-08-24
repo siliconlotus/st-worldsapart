@@ -200,3 +200,86 @@ export const qwk = (pairs, k = 5) => {
     }
     return den ? 1 - num / den : NaN;
 };
+
+/**
+ * The leading principal components of a set of vectors, about `mean`.
+ *
+ * WHY THIS EXISTS. Mean-centering subtracts ONE direction, and measured across 10 books only 8-16% of
+ * that direction is the book's own — the rest is the component every book shares (model plus narrative-
+ * domain anisotropy, equal-weight global mean norm 0.6440). So the operation that is supposed to make
+ * "magic is unremarkable in a fantasy book" cheap spends most of its effect on something no book is
+ * distinguished by, and it spends the LEAST book-specific effort on the long memory books that most need
+ * it (Ascensus 7.9%, Time Whore 8.5% against Foxbridge's 22.9%). A mean is only the first moment, and
+ * what is unremarkable in a book is plausibly several directions — the setting, the recurring cast, the
+ * genre furniture — which one vector cannot carry. This is the standard treatment for that (all-but-the-
+ * top): remove the mean, then project out the leading components.
+ *
+ * Power iteration with deflation, because k is small (1-8 against dim 1024) and a full SVD would pull in
+ * a dependency to compute 1016 components nobody reads.
+ *
+ * DETERMINISTIC, and it has to be: an arm whose result moves between runs cannot be paired against a
+ * baseline. The seed vector is a fixed pattern rather than anything random, so the same corpus always
+ * yields the same components down to sign — and sign does not matter, since only the projection is used.
+ *
+ * @param {Array<{vector: number[]}>} items Vectors to decompose
+ * @param {number} k How many components
+ * @param {ArrayLike<number>} mean Subtracted first; pass zeros for uncentered
+ * @param {number} [iters] Power iterations per component
+ * @returns {Float64Array[]} k orthonormal components, strongest first
+ */
+export const topComponents = (items, k, mean, iters = 40) => {
+    if (k <= 0 || !items.length) return [];
+    const D = mean.length, N = items.length;
+    const X = items.map(it => Float64Array.from({ length: D }, (_, i) => it.vector[i] - mean[i]));
+    const nrm = v => { let s = 0; for (const x of v) s += x * x; return Math.sqrt(s); };
+    const energy = () => { let s = 0; for (const x of X) for (const v of x) s += v * v; return s; };
+    const start = energy();
+    const out = [];
+    for (let c = 0; c < k; c++) {
+        // FEWER THAN k WHEN THE RESIDUAL IS DEAD, never a made-up direction. Deflation can exhaust the
+        // data's actual rank, and power iteration on a zero residual converges to nothing and leaves the
+        // SEED vector — a unit vector pointing wherever the seed pattern happened to point. Returning it
+        // would project an arbitrary direction out of every document and query, silently deleting real
+        // signal, and it would still look like a component. Callers read the length.
+        if (energy() <= start * 1e-12) break;
+        // Fixed seed pattern, varied by component so a deflated residual is not seeded orthogonally to
+        // its own leading direction by coincidence.
+        let v = Float64Array.from({ length: D }, (_, i) => Math.sin(i + 1 + c * 0.5));
+        let vn = nrm(v);
+        for (let i = 0; i < D; i++) v[i] /= vn;
+        for (let t = 0; t < iters; t++) {
+            const w = new Float64Array(D);
+            for (let d = 0; d < N; d++) {
+                const x = X[d];
+                let p = 0;
+                for (let i = 0; i < D; i++) p += x[i] * v[i];
+                for (let i = 0; i < D; i++) w[i] += p * x[i];
+            }
+            vn = nrm(w);
+            if (!vn) break;   // unreachable given the energy guard above; kept so the divide is total
+            for (let i = 0; i < D; i++) w[i] /= vn;
+            v = w;
+        }
+        out.push(v);
+        // Deflate, so the next iteration sees the residual rather than re-finding this direction.
+        for (const x of X) {
+            let p = 0;
+            for (let i = 0; i < D; i++) p += x[i] * v[i];
+            for (let i = 0; i < D; i++) x[i] -= p * v[i];
+        }
+    }
+    return out;
+};
+
+/** `vector` with `mean` subtracted and each of `comps` projected out. The transform applied to the query
+ *  and to every document alike — doing it to one side only would compare vectors in different spaces. */
+export const projectOut = (vector, mean, comps) => {
+    const D = mean.length;
+    const v = Float64Array.from({ length: D }, (_, i) => vector[i] - mean[i]);
+    for (const c of comps) {
+        let p = 0;
+        for (let i = 0; i < D; i++) p += v[i] * c[i];
+        for (let i = 0; i < D; i++) v[i] -= p * c[i];
+    }
+    return v;
+};

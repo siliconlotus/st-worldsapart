@@ -28,7 +28,7 @@
 // an arm that surfaces unjudged entries scores them 0 and looks worse than it is, so judged coverage is
 // reported per cell and a run with gaps is flagged. Pool first with /wa-super-grade, then screen here.
 import { readFileSync } from 'node:fs';
-import { indexPath, loadScene, openSample, sceneParams, scoreScene, embed, sceneLabel } from './scene.mjs';
+import { indexPath, loadScene, openSample, sceneParams, scoreScene, embed, sceneLabel, lineagesOf } from './scene.mjs';
 import { jaccard, signTest, spearman, gradeValue } from './metrics.mjs';
 import { isDurable, rowKey } from '../extension/grading.mjs';
 import { ensureIndex } from './reindex.mjs';
@@ -151,6 +151,17 @@ const ARMS = {
     // describes neither. Time Whore has zero archived memory entries and its delta must come back exactly 0;
     // that is the arm's own correctness check, not a data point.
     'centroid=vectorized': { __dense: true, denseAllEntries: true, centroidPopulation: 'vectorized' },
+    // ALL-BUT-THE-TOP (scene.mjs pcRemove). Same collection as the baseline — the components come off the
+    // vectors already on disk — so these need only a reload, not a build.
+    //
+    // WHY IT IS ASKED HERE AND NOT ON centering-grid'S LOO TASK, where it was screened first: that task has
+    // no selection stage, so nDCG@10 and recall@5 are read at windows nothing chooses, while a real layout
+    // runs past 200 entries. It screened unpromising — helps in proportion to a book's own-direction share,
+    // which means it helps the small thematic reference books and goes slightly negative on the long
+    // narrative ones — but it cannot see the delivered set, which is what the answer is about.
+    'pc=1': { __reload: true, pcRemove: 1 },
+    'pc=2': { __reload: true, pcRemove: 2 },
+    'pc=4': { __reload: true, pcRemove: 4 },
     'centroid=memoryArchived': { __dense: true, __archived: true, denseAllEntries: true, centroidPopulation: 'memoryArchived' },
     // THE OTHER HALF OF THAT ARM, on its own: denseAll=on both adds the cosine and removes the keyword-only
     // tie-break from the entries that get one, so tilt=1 is what splits the pair (the cosine's own
@@ -244,7 +255,16 @@ const fx = n => (n >= 0 ? '+' : '') + n.toFixed(4);
         const scene = loadScene(S, { indexFile: indexPath(S, { model: MODEL, all: P.denseAllEntries }), params: P });
         const qv = await embed(S.query, { ollama: OLLAMA, model: MODEL });
         const base = await scoreScene({ sample: S, k: K, scene, qv });
-        if (S.invalidConfiguration) console.log(`!! ${sceneLabel(S) || path} IS NOT A REAL CONFIGURATION — ${S.invalidConfiguration}; it must not be pooled with the rest`);
+        // EXCLUDED, NOT WARNED ABOUT. A warning in a 250-line log is not a guard: this corpus holds a
+        // deliberate WRONG-BOOK null fixture — a scene paired with a book from another story, composed to
+        // measure what retrieval does when the corpus cannot answer — and it sat in every screen this file
+        // ran, contributing a tie to every arm, because the only thing that said so was its FILENAME.
+        // --include-invalid puts it back for the one question it is evidence about.
+        if (S.invalidConfiguration) {
+            console.log(`!! ${sceneLabel(S) || path} IS NOT A REAL CONFIGURATION — ${S.invalidConfiguration}`);
+            if (!argv.includes('--include-invalid')) { console.log('   excluded; pass --include-invalid to pool it anyway'); continue; }
+            console.log('   POOLED ANYWAY (--include-invalid): every number below mixes it with real scenes');
+        }
         scenes.push({ path, name: sceneLabel(S) || path, S, scene, qv, P, base });
         console.log(`scene "${sceneLabel(S) || path}": baseline ${METRIC}@${K} ${mOf(base).toFixed(4)} (nDCG ${base.n.toFixed(4)}, P ${base.precision.toFixed(3)}, R ${base.recall.toFixed(3)}, rel ${base.relevant}), judged ${base.judged}/${base.of}${base.judged < base.of ? ' !!' : ''}`);
         console.log(`    F@R ${base.atR.f.toFixed(4)} (P ${base.atR.precision.toFixed(3)} R ${base.atR.recall.toFixed(3)}, n ${base.atR.n})`);
@@ -333,7 +353,10 @@ const fx = n => (n >= 0 ? '+' : '') + n.toFixed(4);
                 // Same collection, but the gazetteer is baked at load time, so the preloaded scene is stale
                 // for this arm (scoreScene throws rather than let it pass). Reload; the query embedding still
                 // holds, since the query text is what did not change.
-                r = await scoreScene({ sample: sc.S, overrides: scoring, k: K, index: indexPath(sc.S, { model: MODEL }), model: MODEL, ollama: OLLAMA, qv: sc.qv });
+                // `all` FROM THE SCENE'S OWN PARAMS. indexPath resolves the live vectorized-only collection
+                // without it, which a denseAllEntries scene cannot be scored against — and denseAllEntries is
+                // the default now, so every reload arm was resolving a collection loadScene then refused.
+                r = await scoreScene({ sample: sc.S, overrides: scoring, k: K, index: indexPath(sc.S, { model: MODEL, all: sc.P.denseAllEntries }), model: MODEL, ollama: OLLAMA, qv: sc.qv });
             } else {
                 r = await scoreScene({ sample: sc.S, overrides: scoring, k: K, scene: sc.scene, qv: sc.qv });
             }
@@ -368,6 +391,43 @@ const fx = n => (n >= 0 ? '+' : '') + n.toFixed(4);
     console.log('\n^ = helps on every scene, v = hurts on every scene, ? = that cell kept unjudged rows so its Δ is a lower bound.');
     console.log(`comparisons made: ${results.length} across ${byFamily.size} parameter famil${byFamily.size === 1 ? 'y' : 'ies'} (holm corrected within family).`);
     console.log(`At n=${scenes.length} the best achievable two-sided p is ${signTest(Array(scenes.length).fill(1)).p.toFixed(3)}.`);
+
+    // --- PER LINEAGE, which is the unit the sign test above is NOT using ---------------------------------
+    // Scenes of one book are not independent draws, and books are not either: a book is versioned in place
+    // and renamed by whatever card it hung off, so file names split one corpus into several. Measured here:
+    // three of this corpus's file names are the same Ascensus at 92-100% identical bodies. Grouping by
+    // content (scene.mjs lineagesOf) is the only thing that recovers the real n.
+    //
+    // BOTH ROWS ARE REPORTED, and neither replaces the other. The scene-level sign test above has power and
+    // pseudo-replication; the lineage means below have neither. What the lineage view is FOR is showing
+    // whether the books agree in DIRECTION — an arm that helps one corpus and hurts another is not a flat
+    // arm, and the pooled row cannot tell those apart.
+    const recency = new Map();
+    for (const sc of scenes) {
+        const at = String(sc.S.createdAt ?? '');
+        if (at > (recency.get(sc.S.primaryBook) ?? '')) recency.set(sc.S.primaryBook, at);
+    }
+    const lin = lineagesOf(Object.fromEntries(scenes.map(sc => [sc.S.primaryBook, sc.S.books[sc.S.primaryBook]])), recency);
+    const order = [...new Set(scenes.map(sc => lin.get(sc.S.primaryBook)))]
+        .sort((a, b) => scenes.filter(s2 => lin.get(s2.S.primaryBook) === b).length - scenes.filter(s2 => lin.get(s2.S.primaryBook) === a).length);
+    const lw = Math.min(Math.max(...order.map(l => l.length), 7), 22);
+    console.log(`\nper LINEAGE — ${order.length} corpus(es) behind ${scenes.length} scenes, so the row above is ${scenes.length} draws only if books do not repeat`);
+    console.log(` arm${' '.repeat(w - 3)} | ${order.map(l => l.slice(0, lw).padEnd(lw)).join(' | ')}`);
+    for (const r of results) {
+        const cell = l => {
+            const ds = r.cells.filter((_, i) => lin.get(scenes[i].S.primaryBook) === l).map(c => c.delta);
+            const up = ds.filter(d => d > 0).length, dn = ds.filter(d => d < 0).length;
+            return `${fx(ds.reduce((a, b) => a + b, 0) / ds.length)} ${up}/${dn}/${ds.length - up - dn}`.padEnd(lw);
+        };
+        console.log(` ${r.arm.padEnd(w)} | ${order.map(cell).join(' | ')}`);
+    }
+    const byLin = new Map(order.map(l => [l, scenes.filter(sc => lin.get(sc.S.primaryBook) === l).length]));
+    const split = [...byLin].filter(([, c]) => c > 0).map(([l, c]) => `${l.slice(0, 18)} ${c}`).join(', ');
+    console.log(` (mean Δ and up/down/tie per lineage; scenes per lineage: ${split})`);
+    const files = new Set(scenes.map(sc => sc.S.primaryBook));
+    if (files.size !== order.length) {
+        console.log(` !! ${files.size} book NAMES collapse to ${order.length} lineage(s) — those names are the same corpus and must not be read as separate books.`);
+    }
 
     // --- DOSE-RESPONSE, for any family swept at 3+ values. This is what carries the information at small n:
     // a sign test per dose only says "differs from baseline", while the per-scene PEAK says where the optimum

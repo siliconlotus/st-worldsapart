@@ -320,3 +320,67 @@ eq(twice.entries.length, 2, '...and the grade list is stable across a second pas
     const bare = haystackFor({ scanChat: S.scanChat, depth: 2 }, sceneParams({}));
     eq(bare({ uid: 1 }).join('\n'), 'A: first\nB: second', 'no injects and no sources composes to the chat window alone');
 }
+
+// --- principal components: the all-but-the-top arm for centering (metrics.mjs topComponents) ---------
+// Mean-centering removes one direction and, measured, 8-16% of it is the book's own. This is the machinery
+// for removing several. Checked on a synthetic corpus with KNOWN axes, because a power iteration that has
+// silently converged to the wrong direction still returns a unit vector and still scores.
+const { topComponents, projectOut } = await import('./metrics.mjs');
+const V = (...xs) => ({ vector: xs });
+// Spread along axis 0 dominates, axis 1 is second, axis 2 is flat. Mean is deliberately non-zero so the
+// components are of the CENTERED data, which is what the arm subtracts.
+const pts = [];
+for (let i = -5; i <= 5; i++) for (let j = -1; j <= 1; j++) pts.push(V(10 + 8 * i, 3 + 1.5 * j, 7));
+const MU = [10, 3, 7];
+const [p1, p2] = topComponents(pts, 2, MU);
+const near = (a, b, tol = 1e-6) => Math.abs(a - b) < tol;
+eq(near(Math.abs(p1[0]), 1) && near(p1[1], 0, 1e-4) && near(p1[2], 0, 1e-4), true, 'the first component is the axis the data spreads along');
+eq(near(Math.abs(p2[1]), 1, 1e-4) && near(p2[0], 0, 1e-4), true, '...and the second is the next one, not the first again');
+eq(near(p1[0] * p2[0] + p1[1] * p2[1] + p1[2] * p2[2], 0, 1e-6), true, 'components come out orthogonal, or deflation did not happen');
+eq(near(Math.hypot(p1[0], p1[1], p1[2]), 1), true, 'and unit length');
+eq(topComponents(pts, 0, MU).length, 0, 'k=0 is no components, which is plain mean-centering');
+// A flat axis has no variance to find; asking for more components than the data has directions must not
+// invent one, since a spurious component would be projected out of every vector for free.
+eq(topComponents(pts, 3, MU).length, 2, 'k beyond the data\'s rank returns fewer, not a seed vector wearing a component\'s clothes');
+eq(topComponents(pts, 8, MU).length, 2, '...however far past it you ask');
+// The transform itself: after removing the mean and the first component, nothing is left along it.
+const r = projectOut(pts[0].vector, MU, [p1]);
+eq(near(r[0] * p1[0] + r[1] * p1[1] + r[2] * p1[2], 0, 1e-6), true, 'projectOut leaves no residue along the component');
+eq(near(r[2], 0), true, '...and still subtracts the mean on the axes it does not touch');
+eq(near(projectOut(pts[0].vector, MU, [])[0], pts[0].vector[0] - MU[0]), true, 'no components is exactly mean subtraction');
+// Determinism is what makes it pairable against a baseline at all.
+eq(JSON.stringify([...topComponents(pts, 2, MU)[0]]), JSON.stringify([...topComponents(pts, 2, MU)[0]]), 'the same corpus yields the same component every run');
+
+// --- lineages: two versions of one book are one book (scene.mjs lineagesOf) ------------------------
+// The real instance this exists for: an LTM file is named after the CHARACTER CARD, and one card carries
+// several stories, so "Isekai Adventure" was byte-identical to Ascensus while sharing under 5% with Time
+// Whore — the other story on that same card. Names are not evidence in either direction.
+const { lineagesOf } = await import('./scene.mjs');
+const bk = (...bodies) => Object.fromEntries(bodies.map((c, i) => [i, { uid: i, content: c }]));
+const L = lineagesOf({
+    Big: bk('alpha', 'beta', 'gamma', 'delta'),
+    Renamed: bk('alpha', 'beta', 'gamma', 'delta'),   // identical copy under another name
+    Revised: bk('alpha', 'beta', 'epsilon'),          // 2/3 shared with Big -> same lineage
+    Other: bk('zeta', 'eta', 'theta'),                // shares nothing
+});
+eq(L.get('Renamed'), L.get('Big'), 'an identical copy under another name is the same lineage');
+eq(L.get('Revised'), L.get('Big'), 'a revision sharing most bodies joins it');
+eq(L.get('Other') === L.get('Big'), false, '...and a book sharing nothing does not');
+eq(L.get('Big'), 'Big', 'with no stamps the group takes the shortest name, not whichever was seen first');
+const two = { 'LTM - Ascensus': bk('a', 'b'), 'LTM - Isekai Adventure - Isekai Adventure - 2026-03-04': bk('a', 'b') };
+eq(lineagesOf(two).get('LTM - Ascensus'), 'LTM - Ascensus', '...so a card-decorated duplicate does not become the label for the book it duplicates');
+// Recency wins over brevity: the name in current use is the one that will match what the author says.
+eq(lineagesOf(two, new Map([['LTM - Isekai Adventure - Isekai Adventure - 2026-03-04', '2026-08-14'], ['LTM - Ascensus', '2026-08-13']])).get('LTM - Ascensus'),
+    'LTM - Isekai Adventure - Isekai Adventure - 2026-03-04', 'a more recently used name wins even when it is longer');
+// Day-granular stamps tie constantly, which is the real case here — both were last written 2026-08-13.
+eq(lineagesOf(two, new Map([['LTM - Isekai Adventure - Isekai Adventure - 2026-03-04', '2026-08-13'], ['LTM - Ascensus', '2026-08-13']])).get('LTM - Ascensus'),
+    'LTM - Ascensus', '...and a tied stamp falls back to the shorter, undecorated name');
+eq(lineagesOf(two, new Map([['LTM - Ascensus', '2026-08-13']])).get('LTM - Ascensus'), 'LTM - Ascensus', 'a name with no stamp at all sorts oldest rather than throwing');
+eq(new Set(L.values()).size, 2, 'four files, two lineages');
+// Transitive, or a chain of partial revisions splits into groups that each overlap the next.
+const chain = lineagesOf({ A: bk('a', 'b', 'c'), B: bk('b', 'c', 'd'), C: bk('c', 'd', 'e') });
+eq(new Set(chain.values()).size, 1, 'a chain of partial revisions is one lineage, not three');
+// Independent of iteration order, since the answer feeds a sign test's notion of a draw.
+const rev = lineagesOf({ Other: bk('zeta', 'eta', 'theta'), Revised: bk('alpha', 'beta', 'epsilon'), Renamed: bk('alpha', 'beta', 'gamma', 'delta'), Big: bk('alpha', 'beta', 'gamma', 'delta') });
+eq(rev.get('Renamed'), L.get('Renamed'), 'the same books group the same way whatever order they arrive in');
+eq(lineagesOf({ Empty: {}, Solo: bk('x') }).get('Empty'), 'Empty', 'a book with no bodies is its own lineage rather than joining everything');
