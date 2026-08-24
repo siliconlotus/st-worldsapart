@@ -230,7 +230,7 @@ const fx = n => (n >= 0 ? '+' : '') + n.toFixed(4);
         if (!Object.keys(S.books?.[S.primaryBook] ?? {}).length) { console.error(`${path}: embeds no entries for primary book "${S.primaryBook ?? '?'}" — re-grade with books=full|meta`); process.exit(2); }
         if (!S.candidates?.length) { console.error(`${path}: logs no candidates`); process.exit(2); }
         const P = sceneParams(S);
-        const scene = loadScene(S, { indexFile: indexPath(S, { model: MODEL }), params: P });
+        const scene = loadScene(S, { indexFile: indexPath(S, { model: MODEL, all: P.denseAllEntries }), params: P });
         const qv = await embed(S.query, { ollama: OLLAMA, model: MODEL });
         const base = await scoreScene({ sample: S, k: K, scene, qv });
         if (S.invalidConfiguration) console.log(`!! ${sceneLabel(S) || path} IS NOT A REAL CONFIGURATION — ${S.invalidConfiguration}; it must not be pooled with the rest`);
