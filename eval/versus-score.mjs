@@ -1,19 +1,23 @@
-// WA against ST core on the set each one SHIPPED, over graded /wa-versus captures.
+// Delivered-set F over the arms of a graded capture bundle.
 //
-// One question, asked the way stage 4 is judged: F-beta over the DELIVERED SET, recall at grade >= 3 and
-// precision crediting a 2 at half (metrics.mjs gradeCredit, RECALL_WEIGHT). No window is imposed, because
-// choosing the set is what is being compared — a fixed k would hand both arms the count that is half of
-// what they disagree about.
+// AN ARM'S DELIVERED SET IS `!cut`, which is how every v3 capture records what reached the prompt. Nothing
+// here is specific to a WA-against-core capture — that is just two arms whose `params` differ, and the
+// selector one of them used is a field in there like any other.
 //
-// NOT param-screen's job. That tool contrasts WA against itself with one parameter moved, scored offline
-// from a frozen query. Core cannot be re-derived offline — inclusion groups, probability rolls, timed
-// effects and its own budget walk are only what `checkWorldInfo` did on the turn — so the capture IS the
-// measurement and this only reads it.
+// The bars are stage 4's: recall counts grade >= 3, precision credits a 3 or 4 in full and a 2 at half
+// (metrics.mjs gradeCredit), F at RECALL_WEIGHT. NO WINDOW IS IMPOSED — choosing the set is what is being
+// scored, so a fixed k would hand every arm the count that is half of what they disagree about.
 //
-// Tokens are reported beside F2 and never folded into it. A cheaper set that scores the same is better and
-// no F-beta says so.
+// WHY NOT param-screen OR graded-scene-grid. Both RE-DERIVE a ranking offline from the frozen query, which
+// is what makes them able to sweep parameters. An arm whose selector is ST core cannot be re-derived —
+// inclusion groups, probability rolls, timed effects and its own budget walk are only what checkWorldInfo
+// did on the turn — so for that arm the capture IS the measurement, and this reads it rather than redoing it.
 //
-// Usage:  node eval/versus-score.mjs <graded-versus.json> [more.json ...]
+// Tokens sit beside F and are never folded into it. A cheaper set that scores the same is better, and no
+// F-beta says so.
+//
+// Usage (any cwd):
+//   node eval/versus-score.mjs <graded-bundle.json> [more.json ...]
 import { readFileSync } from 'node:fs';
 import { gradeCredit, fbeta, RECALL_WEIGHT, signTest } from './metrics.mjs';
 
@@ -42,25 +46,25 @@ const per = [];
 for (const file of files) {
     const doc = JSON.parse(readFileSync(file, 'utf8'));
     if (doc.reviewed) {
-        console.error(`${file} is a review export: it carries verdicts and no arm membership, so no arm's delivered set can be recovered from it. Score the GRADED BUNDLE the reviewer drops beside it.`);
+        console.error(`${file} is a review export, which carries verdicts and no arms. Apply it first: node eval/synthetic-data/apply-review.mjs --write`);
         continue;
     }
-    const arms = doc.arms ?? [];
-    if (!arms.length) { console.error(`${file}: no arms`); continue; }
-    for (const scene of doc.scenes ?? []) {
-        // Grades live on the SCENE and the delivered sets on the arms, which is what makes one file
-        // scoreable: every arm is judged against the same verdicts.
+    if (!Array.isArray(doc.scenes) || !(doc.arms ?? []).length) { console.error(`${file}: not a v3 capture bundle`); continue; }
+    for (const scene of doc.scenes) {
+        // Verdicts live on the SCENE and delivered sets on the arms, which is what lets every arm be judged
+        // against the same grades.
         const grades = new Map((scene.entries ?? []).map(e => [`${e.book}${US}${e.uid}`, gradeOf(e)]));
-        if (!grades.size) { console.error(`${file}: scene "${scene.id ?? '?'}" is ungraded`); continue; }
+        if (!grades.size) { console.error(`${file}: scene "${scene.id ?? '?'}" is ungraded — skipped`); continue; }
         const rel = new Set([...grades].filter(([, g]) => g >= 3).map(([k]) => k));
         const row = [];
-        for (const arm of arms) {
-            const sc = arm.scenes?.[scene.id];
-            if (!sc) continue;
-            const rows = (sc.candidates ?? []).map(c => ({ ...c, grade: grades.get(`${c.book}${US}${c.uid}`) }));
-            const s = scoreArm(rows);
-            const recall = rel.size ? rows.filter(r => r.grade >= 3).length / rel.size : 0;
-            row.push({ arm: arm.name, ...s, recall, f2: fbeta(s.precision, recall, RECALL_WEIGHT) });
+        for (const arm of doc.arms) {
+            const cell = arm.scenes?.[scene.id];
+            if (!cell) continue;   // arms need not be rectangular over scenes
+            const delivered = (cell.candidates ?? []).filter(c => !c.cut).map(c => ({ ...c, grade: grades.get(`${c.book}${US}${c.uid}`) }));
+            if (!delivered.length) continue;
+            const s = scoreArm(delivered);
+            const recall = rel.size ? delivered.filter(r => r.grade >= 3).length / rel.size : 0;
+            row.push({ arm: arm.name, ...s, recall, f2: fbeta(s.precision, recall, RECALL_WEIGHT), selector: arm.params?.selector ?? 'wa' });
         }
         if (row.length) per.push({ name: scene.id ?? doc.name ?? file, rel: rel.size, arms: row });
     }
@@ -78,16 +82,19 @@ for (const scene of per) {
 
 // PAIRED, for the reason param-screen is: between-scene variance swamps between-arm variance, so each
 // scene has to be its own control or four scenes say nothing.
-const names = [...new Set(per.flatMap(s => s.arms.map(a => a.arm)))].filter(n => n !== 'wa');
-console.log(`\n${per.length} scene(s), paired against arm "wa"`);
+// PAIRED AGAINST THE FIRST ARM IN THE FILE, which is the one the bundle writer put first — no name is
+// privileged, because an arm is only ever "the baseline" by the writer's ordering.
+const baseName = per[0].arms[0].arm;
+const names = [...new Set(per.flatMap(s => s.arms.map(a => a.arm)))].filter(n => n !== baseName);
+console.log(`\n${per.length} scene(s), paired against arm "${baseName}"`);
 for (const other of names) {
     const d = per.map(s => {
-        const w = s.arms.find(a => a.arm === 'wa'), o = s.arms.find(a => a.arm === other);
+        const w = s.arms.find(a => a.arm === baseName), o = s.arms.find(a => a.arm === other);
         return w && o ? w.f2 - o.f2 : null;
     }).filter(x => x != null);
     if (!d.length) continue;
     const t = signTest(d);
-    console.log(`  wa - ${other}: mean dF2 ${(t.mean >= 0 ? '+' : '') + t.mean.toFixed(4)}   ${t.plus}/${t.minus}/${t.ties} up/down/tie   sign p ${t.p.toFixed(3)}`);
+    console.log(`  ${baseName} - ${other}: mean dF2 ${(t.mean >= 0 ? '+' : '') + t.mean.toFixed(4)}   ${t.plus}/${t.minus}/${t.ties} up/down/tie   sign p ${t.p.toFixed(3)}`);
     console.log(`    per scene: ${d.map(x => (x >= 0 ? '+' : '') + x.toFixed(3)).join('  ')}`);
 }
 if (per.length < 6) console.log(`  n=${per.length}: the best two-sided p reachable is ${(1 / 2 ** (per.length - 1)).toFixed(3)}. Read the direction and the mean.`);

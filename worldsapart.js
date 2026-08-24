@@ -1856,8 +1856,12 @@ async function coreSelection() {
 }
 
 async function versusCore() {
+    // THE CAPTURE ROWS, not the raw ranked items: these are what /wa-grade freezes, carrying `cut`,
+    // `cutBy`, tokens and every signal. Building a second row shape here is what made the first version of
+    // this an artifact nothing else could read.
     const population = runState.lastRanked;
-    if (!population?.length) { toastr.info('Nothing ranked yet \u2014 generate, or run /wa-dry first.', 'Worlds Apart'); return; }
+    if (!runState.lastCandidates?.length) { toastr.info('Run /wa-debug first \u2014 the comparison freezes the same rows /wa-grade does, and only a debug run builds them.', 'Worlds Apart'); return; }
+    if (!population?.length) { toastr.info('Nothing ranked yet \u2014 generate, or run /wa-debug first.', 'Worlds Apart'); return; }
 
     const { entries: coreEntries, viaVectors, vectorsRan } = await coreSelection();
 
@@ -1928,18 +1932,19 @@ async function versusCore() {
 }
 
 /**
- * Writes the comparison as a two-arm bundle, so it opens in the bundle reviewer and is graded there.
+ * Writes the comparison as an ordinary two-arm capture bundle.
  *
- * ONE ARM PER SELECTOR, and each arm's candidates are the set THAT SELECTOR SHIPPED — not a pool. The
- * reviewer grades the union, which is exactly the rows the two disagree about plus the ones they share,
- * and nothing else. That is the whole point of grading a versus capture rather than a /wa-super-grade
- * pool: the question is which of these two sets is better, and a row neither selector shipped cannot
- * answer it.
+ * NOTHING ABOUT IT IS SPECIAL. An arm is a configuration and its `candidates` are the population it
+ * ranked, each row carrying `cut` — so the DELIVERED SET is `!cut`, exactly as in a /wa-grade capture, and
+ * the reviewer, apply-review and any reader of a v3 bundle need no case for it. What distinguishes core
+ * from WA is its `params`, which is what params are for.
  *
- * Signals ride on the WA arm's rows and are absent on core-only ones, which is honest — core computes
- * none of them. `unionArms` fills an absent signal rather than reading it as a measured zero.
+ * The one asymmetry is real and recorded rather than papered over: `checkWorldInfo` returns the map that
+ * SURVIVED its budget walk, so core's activated-but-cut rows do not exist to capture. Core's arm therefore
+ * carries its delivered set with every row uncut, and WA's carries its whole ranked population. `unionArms`
+ * is built for arms that surfaced different things.
  *
- * @param {Array<[string, object]>} union Rows keyed `world.uid`, already ordered by E[credit]
+ * @param {Array<[string, object]>} union Rows keyed `world.uid` — the two shipped sets, for the diff
  * @param {Set<string>} coreKeys What core shipped
  * @param {Set<string>} waKeys What WA shipped
  * @param {boolean} viaVectors Whether Vector Storage's WI route was on for core
@@ -1951,23 +1956,32 @@ async function versusBundle(union, coreKeys, waKeys, viaVectors) {
         if (data?.entries) books[world] = keyByUid(data.entries);
     }
 
-    // Sticky needs the scan's timedEffects, which the probe does not carry; constant is the half that can
-    // be read off the entry. A misfiled sticky is LISTED rather than graded, so the cost is one row the
-    // reviewer is not asked about, never a wrong verdict.
-    const rowsFor = keys => union.filter(([k]) => keys.has(k)).map(([, x], i) => toCandidate({
-        book: x.entry.world,
-        uid: x.entry.uid,
-        title: x.entry.comment || x.entry.key?.[0] || `uid ${x.entry.uid}`,
-        block: x.entry.constant ? 'constant' : 'dynamic',
-        tokens: x.tokens,
-        score: Number.isFinite(x.eCredit) ? x.eCredit : null,
-        cosine: Number.isFinite(x.score) ? x.score : null,
-        text: Number.isFinite(x.textScore) ? x.textScore : null,
-        keys: Number(x.keywordScore) || null,
-        properNouns: Number.isFinite(x.properNouns) ? x.properNouns : null,
-    }, i));
+    // WA's arm IS the /wa-grade capture, untouched — same rows, same cut flags, same signals.
+    const waRows = runState.lastCandidates;
 
-    const primaryBook = searchedBook(rowsFor(waKeys)) ?? chatBook() ?? Object.keys(books)[0] ?? '';
+    // Core's rows reuse WA's where the entry is in both populations, so the signals are the measured ones
+    // rather than a second derivation; a row only core activated has none, and an absent signal is not a
+    // zero (unionArms fills it).
+    const byKey = new Map(waRows.map(r => [`${r.book}\u001f${r.uid}`, r]));
+    const coreRows = [...union].filter(([k]) => coreKeys.has(k)).map(([, x], i) => {
+        const key = `${x.entry.world}\u001f${x.entry.uid}`;
+        const base = byKey.get(key);
+        return {
+            ...(base ?? {
+                book: x.entry.world,
+                uid: x.entry.uid,
+                title: x.entry.comment || x.entry.key?.[0] || `uid ${x.entry.uid}`,
+                block: x.entry.constant ? 'constant' : 'dynamic',
+                tokens: x.tokens,
+            }),
+            index: i,
+            // EVERY ROW CORE SHIPPED IS UNCUT, because its budget walk already ran — see the docblock.
+            cut: false,
+            cutBy: null,
+        };
+    });
+
+    const primaryBook = searchedBook(waRows) ?? chatBook() ?? Object.keys(books)[0] ?? '';
     const common = {
         query: runState.lastQuery,
         queryChat: runState.lastQueryChat,
@@ -1983,28 +1997,41 @@ async function versusBundle(union, coreKeys, waKeys, viaVectors) {
         index: primaryBook ? vectorIndexPath(primaryBook) : '',
         primaryBook,
         embedModel: vectorRequestBody().model || '',
-        params: captureParams(settings(), {
-            caseSensitive: world_info_case_sensitive,
-            wholeWords: world_info_match_whole_words,
-            includeNames: world_info_include_names,
-            allowWIScan: Boolean(extension_settings.note?.allowWIScan),
-        }),
         snapshot: paramSnapshot(),
         books,
         priority: (scopedPriority() ?? []).map(x => x.cfg),
         grades: [],
-        // No grading depth was imposed: the shipped sets ARE the candidates, so nothing was truncated.
         cutoff: { live: { maxVectorEntries: settings().maxVectorEntries } },
         now: new Date().toISOString(),
     };
+    const stParams = {
+        caseSensitive: world_info_case_sensitive,
+        wholeWords: world_info_match_whole_words,
+        includeNames: world_info_include_names,
+        allowWIScan: Boolean(extension_settings.note?.allowWIScan),
+    };
 
     const arms = [
-        { arm: 'wa', rows: rowsFor(waKeys) },
-        { arm: viaVectors ? 'core+vectors' : 'core', rows: rowsFor(coreKeys) },
-    ].map(({ arm, rows }) => ({ arm, sample: buildSample({
+        { arm: 'wa', rows: waRows, params: captureParams(settings(), stParams) },
+        // WHAT MADE THIS ARM DIFFERENT, in its params and nowhere else: core's own budget percentage and
+        // scan depth, and whether Vector Storage's World Info route ran. A reader comparing the two arms
+        // reads these rather than inferring from the arm's name.
+        { arm: viaVectors ? 'core+vectors' : 'core', rows: coreRows, params: {
+            ...captureParams(settings(), stParams),
+            selector: 'st-core',
+            coreBudgetPercent: Number(world_info_budget) || 25,
+            coreBudgetCap: Number(world_info_budget_cap) || 0,
+            coreScanDepth: Number(world_info_depth) || 0,
+            vectorRouteEnabled: Boolean(viaVectors),
+            vectorQueryDepth: Number(extension_settings.vectors?.query) || 0,
+            vectorMaxEntries: Number(extension_settings.vectors?.max_entries) || 0,
+            vectorScoreThreshold: Number(extension_settings.vectors?.score_threshold) || 0,
+        } },
+    ].map(({ arm, rows, params }) => ({ arm, sample: buildSample({
         ...common,
+        params,
         name: `${defaultSampleName()}-versus`,
-        notes: `WA against ST core on one turn; each arm's candidates are the set it shipped. Core's vector route was ${viaVectors ? 'ON' : 'OFF'}.`,
+        notes: `WA against ST core on one turn. Each arm's candidates are the population it ranked; delivered is !cut. Core's vector route was ${viaVectors ? 'ON' : 'OFF'}.`,
         candidates: rows,
         gradedCandidates: rows.filter(r => r.block === 'dynamic').length,
     }) }));
@@ -3944,20 +3971,6 @@ async function superEvalScene() {
     // there first. The review cannot substitute: it carries verdicts and no arm membership, so nothing
     // offline can tell which arm delivered a row.
     //
-    // INTO scenes[0], WHICH IS THE SCENE THAT WAS GRADED. `openBundle` reads a section at its document's
-    // first scene, and a multi-scene document reaches the reviewer as a PACK — one section per element —
-    // so every section's verdicts belong to its own scenes[0]. Any later scene in the same document was
-    // never shown and is carried through untouched.
-    let dropped = 0;
-    for (const [si, sec] of done.sections.entries()) {
-        const doc = secs[si]?.manifest;
-        const [scene, ...rest] = doc?.scenes ?? [];
-        if (!scene) continue;
-        const merged = { ...doc, scenes: [{ ...scene, entries: mergeGrades(scene.entries, sec.grades, { user: raterId(), now: reviewedAt }) }, ...rest] };
-        const slug = String(secs[si].name ?? sec.file ?? 'scene').replace(/\.json$/, '').replace(/[^\w.-]+/g, '-').replace(/^-+|-+$/g, '') || 'scene';
-        download(JSON.stringify(merged, null, 1), `${slug}-graded.json`, 'application/json');
-        dropped++;
-    }
     // Agreement is over the rows a human actually reviewed — those carrying BOTH kinds of verdict.
     // Filtering on the judge's alone would drag in every untouched judge row and report it as a
     // disagreement, since it has no human verdict rather than a matching one.
@@ -3970,7 +3983,7 @@ async function superEvalScene() {
     const irr = pairs.length
         ? ` LLM agreement: ${pairs.filter(([h, j]) => h === j).length}/${pairs.length} exact, ${pairs.filter(([h, j]) => Math.abs(h - j) <= 1).length}/${pairs.length} within 1.`
         : '';
-    toastr.success(`Saved ${filename}${dropped ? ` and ${dropped} graded bundle(s)` : ''} — ${done.edited} row(s) edited across ${reviewed.length} scene(s), ${rel} relevant (>=3).${irr} Apply the review with: node eval/synthetic-data/apply-review.mjs --write`, 'Worlds Apart', { timeOut: 15000 });
+    toastr.success(`Saved ${filename} — ${done.edited} row(s) edited across ${reviewed.length} scene(s), ${rel} relevant (>=3).${irr} Apply with: node eval/synthetic-data/apply-review.mjs --write`, 'Worlds Apart', { timeOut: 15000 });
     return '';
 }
 
