@@ -935,6 +935,29 @@ is whether a confident match exists. **The model delivers most where it is least
 need in both directions — a Time Whore scene with 3 relevant of 155 delivers 14, while the corpus's
 densest scene (Foxbridge, 9 relevant of 13) delivers 5.
 
+**PER-BOOK STANDARDISATION REVERSES THE PATHOLOGY, and is the only thing measured that does.**
+`--standardise book` pools every scene of a book for the mean and sd, so no single row can move the
+scale. **Measured**, memory tier held out by book, 94 scenes, against the per-scene design: the
+share-versus-scene-maximum correlation goes -0.158 -> **+0.486** (a confident scene now delivers MORE),
+size-dependence 0.928 -> 0.652, spread of delivered share 7.1 -> 11.9 points, mean delivered 17.8 -> 9.4.
+A count that falls out of the prediction has to VARY, and under per-scene it barely did.
+
+**It loses on the score of record and that cannot settle it.** F2 0.5102 -> 0.4671, with held-out AUC
+0.8076 against 0.8198, so the ordering is genuinely a little worse. `--beta 1.5` halves the gap (0.4594
+against 0.4396), which localises most of it to the smaller delivered set rather than to worse ordering —
+but no beta closes it, and none can: F-beta scores one scene's delivered set and averages over scenes, so
+it is blind by construction to whether the COUNT is calibrated ACROSS scenes, which is the whole of what
+per-book buys. Deciding this needs a token-aware score, which does not exist here; per-book halves the
+bill and the budget is what binds.
+
+**THE COLD START IS EMPTY ON BOTH SIDES.** A runtime would accumulate these statistics across turns
+rather than hold them per scan, and a story has no memory entries at turn one by definition — the tier
+gains an entry as the statistics gain a turn, so the scale is never less mature than the population it
+scales. Two cases do not self-solve: reference entries exist from the start with no history, which costs
+ordering only since that tier is not cut and `promote` hoists what must be present; and an established
+book attached to a fresh chat, where a per-scene fallback is right anyway because nothing about that
+book's behaviour in THIS story is known yet.
+
 **A SCENE-LEVEL COVARIATE CANNOT FIX IT, because candidate count is not a property of the scene.**
 Stage 1 admits every vectorized entry, so the count is the book's size minus whatever post-dates the
 turn, plus a handful of keyword hits. **Measured**, within each book, r between message index and
