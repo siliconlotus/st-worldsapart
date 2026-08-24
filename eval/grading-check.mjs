@@ -557,6 +557,15 @@ eq(keys(built),
     'document keys are the schema\'s');
 eq(keys(built.scenes[0]), 'entries,id,sceneChat,sceneEnd', 'scene keys are the schema\'s');
 eq(keys(built.arms[0]), 'name,paramSnapshot,params,scenes,stVersion,waVersion', 'arm keys are the schema\'s — paramSnapshot among them, not in the cell');
+// The fixture above sets everything, so the sets are exact. A capture that omits an EMITTED-WHEN-PRESENT
+// field is still conformant — measured, 491 arms on disk carry no version pair and 436 cells no `book`,
+// because those runs predate them and nothing can recover it. What must never appear is a key outside
+// these four lists.
+const bare = { ...schemaFixture };
+for (const k of ['waVersion', 'stVersion', 'paramSnapshot', 'book', 'gradedCandidates', 'queryChat', 'gradeScale', 'invalidConfiguration']) delete bare[k];
+const thin = await bundleForSchema([{ arm: 'shipped', sample: bare }], { start: 0, end: 10, user: 'u' });
+eq(keys(thin.arms[0]), 'name,params,scenes', 'an arm omitting every optional field carries no stray key');
+eq(keys(Object.values(thin.arms[0].scenes)[0]), 'candidates,cutoff,depth,excludeTitles,index,primaryBook,query,sceneStart', '...and neither does its cell');
 eq(keys(Object.values(built.arms[0].scenes)[0]),
     'book,candidates,cutoff,depth,excludeTitles,gradedCandidates,index,invalidConfiguration,primaryBook,query,queryChat,sceneStart',
     'cell keys are the schema\'s');

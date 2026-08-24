@@ -439,12 +439,15 @@ for (const idx of picks) {
         });
         armsOut.push({
             arm: armName, query, queryChat, scanChat, depth: DEPTH,
-            primaryBook: BOOK, index: built.path, params: capture,
+            primaryBook: BOOK, index: built.path,
+            // INSIDE `params`, not beside it: whether hidden messages were kept is a capture-time knob of
+            // the CONFIGURATION, and `params` is the open map the schema keeps arm knobs in — so recording
+            // it there needs no structural field and cannot drift from the schema.
+            params: { ...capture, ...(INCLUDE_HIDDEN ? { includedHidden: true } : {}) },
             paramSnapshot: src?.paramSnapshot, budget: budgetFor(), excludeTitles: [],
             // No grading depth was applied, recorded explicitly rather than omitted. (The field is named
             // for the stage-4 cliff it also used to carry; that cut no longer exists.)
             cutoff: { gradingOverride: null, note: 'offline derivation records the full activated population' },
-            ...(INCLUDE_HIDDEN ? { includedHidden: true } : {}),
             candidates: out,
         });
     }

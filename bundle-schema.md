@@ -218,6 +218,16 @@ costing a capture. `tokenizer` could not vary in any case — it is ST's `getTok
 fact WA does not set, which is why it sits beside `embedModel` rather than inside `paramSnapshot`. **Measured**
 across the corpus: 0 of 106 multi-arm documents varied any field of it.
 
+**REQUIRED VERSUS EMITTED-WHEN-PRESENT.** A structural field is one of two things, and the difference is
+what makes conformance checkable at all. REQUIRED fields are written by every capture and their absence is a
+defect. The rest are emitted only when they have a value, and their absence is silence rather than damage —
+`waVersion` and `stVersion` (older captures recorded neither), `book` and `gradedCandidates`, `gradeScale`,
+`queryChat`, `paramSnapshot`, and `invalidConfiguration`, which by construction appears only on a
+configuration that is not real. **Measured** over the 107 bundles on disk: every one is structurally clean,
+and every remaining gap is an optional field an older capture never had — 491 arms carry no version pair,
+436 cells no `book` or `gradedCandidates`, 37 documents no `gradeScale`. None of that is recoverable and
+none of it is a defect.
+
 **SOME OBJECTS HERE ARE OPEN MAPS AND ARE MEANT TO GROW.** `candidates[].scores`, `params`,
 `paramSnapshot.settings`, `books`, `bookHashes` and the `scene*` maps are keyed by whatever the capturing
 version computed or attached, so a key this file does not list is expected rather than a drift. Every

@@ -279,22 +279,26 @@ const fx = n => (n >= 0 ? '+' : '') + n.toFixed(4);
         // A bundle contributes ONE arm, never all of them: its arms are the same scene scored differently,
         // so expanding them would be textbook pseudo-replication in the sign test.
         const S = openSample(path, arg('--arm'));
+        // EXCLUDED, NOT WARNED ABOUT, AND BEFORE ANYTHING ELSE TOUCHES IT. A warning in a 250-line log is
+        // not a guard: this corpus holds a deliberate WRONG-BOOK null fixture — a scene paired with a book
+        // from another story, composed to measure what retrieval does when the corpus cannot answer — and
+        // it sat in every screen this file ran, contributing a tie to every arm, because the only thing
+        // that said so was its FILENAME.
+        //
+        // FIRST, not after loadScene: a configuration that is not real has no reason to have a usable
+        // collection either, and checking it late means the run dies on the index of a bundle it was about
+        // to skip. --include-invalid puts it back for the one question it is evidence about.
+        if (S.invalidConfiguration) {
+            console.log(`!! ${sceneLabel(S) || path} IS NOT A REAL CONFIGURATION — ${S.invalidConfiguration}`);
+            if (!argv.includes('--include-invalid')) { console.log('   excluded; pass --include-invalid to pool it anyway'); continue; }
+            console.log('   POOLED ANYWAY (--include-invalid): every number below mixes it with real scenes');
+        }
         if (!Object.keys(S.books?.[S.primaryBook] ?? {}).length) { console.error(`${path}: embeds no entries for primary book "${S.primaryBook ?? '?'}" — re-grade with books=full|meta`); process.exit(2); }
         if (!S.candidates?.length) { console.error(`${path}: logs no candidates`); process.exit(2); }
         const P = sceneParams(S, BUDGET ? { budgetTokens: BUDGET } : {});
         const scene = loadScene(S, { indexFile: indexPath(S, { model: MODEL, all: P.denseAllEntries }), params: P });
         const qv = await embed(S.query, { ollama: OLLAMA, model: MODEL });
         const base = await scoreScene({ sample: S, overrides: BUDGET ? { budgetTokens: BUDGET } : {}, k: K, scene, qv });
-        // EXCLUDED, NOT WARNED ABOUT. A warning in a 250-line log is not a guard: this corpus holds a
-        // deliberate WRONG-BOOK null fixture — a scene paired with a book from another story, composed to
-        // measure what retrieval does when the corpus cannot answer — and it sat in every screen this file
-        // ran, contributing a tie to every arm, because the only thing that said so was its FILENAME.
-        // --include-invalid puts it back for the one question it is evidence about.
-        if (S.invalidConfiguration) {
-            console.log(`!! ${sceneLabel(S) || path} IS NOT A REAL CONFIGURATION — ${S.invalidConfiguration}`);
-            if (!argv.includes('--include-invalid')) { console.log('   excluded; pass --include-invalid to pool it anyway'); continue; }
-            console.log('   POOLED ANYWAY (--include-invalid): every number below mixes it with real scenes');
-        }
         scenes.push({ path, name: sceneLabel(S) || path, S, scene, qv, P, base });
         console.log(`scene "${sceneLabel(S) || path}": baseline ${METRIC}@${K} ${mOf(base).toFixed(4)} (nDCG ${base.n.toFixed(4)}, P ${base.precision.toFixed(3)}, R ${base.recall.toFixed(3)}, rel ${base.relevant}), judged ${base.judged}/${base.of}${base.judged < base.of ? ' !!' : ''}`);
         console.log(`    F@R ${base.atR.f.toFixed(4)} (P ${base.atR.precision.toFixed(3)} R ${base.atR.recall.toFixed(3)}, n ${base.atR.n})`);
