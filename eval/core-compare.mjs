@@ -34,6 +34,15 @@
 //                     as "core" understates a stock install and quoting the default overstates a tuned
 //                     one. Say which.
 //
+// SCAN DEPTH IS CORE'S ALONE HERE, and shallower is better for core for a reason that is not a
+// recommendation. **Measured**, 89 scenes: at depth 2 only 11 of 28 grade-4 entries have their keys fire
+// at all, against 21 of 28 at depth 10 — depth 2 misses 61% of the material graded as the scene's
+// CURRENT SUBJECT. Core still scores higher there because its delivered recall is carried by the vector
+// route, which does not read the scan window: at depth 10 the keyword flood (40.4% of vectorized rows
+// fire) fills the budget and displaces the vector picks, and an insertion-order walk cannot protect
+// them. So depth 2 helps core by suppressing core's own worst behaviour, and says nothing about what
+// depth suits a system that can RANK what it activates. WA's window is not varied here.
+//
 // THE THRESHOLD IS NOT MODELLED, top-K is. `score_threshold` is a single global applied to RAW cosine,
 // and raw similarity on a single-story corpus sits compressed near 0.6 — which is why WA mean-centres at
 // all. At 0.25 almost everything passes and max_entries is the only real constraint, so top-K is the
@@ -113,6 +122,13 @@ for (const file of samples) {
     const build = makeCandidateSet({ ...scene, params: P });
     const rows = build(P.K1, P.B, null, [], S.query, haystackFor(S, P));
     if (!rows.length) continue;
+    // A DEPTH DEEPER THAN THE CAPTURE IS NOT REACHABLE. The document stores the scan MESSAGES, so any
+    // depth up to the captured one re-segments honestly and anything beyond it silently returns the
+    // captured window — which would report a deeper scan's result under a shallower scan's window.
+    if (Number.isFinite(CORE_DEPTH) && CORE_DEPTH > Number(S.depth)) {
+        console.error(`  ${sceneLabel(S) || file}: --core-depth ${CORE_DEPTH} exceeds the ${S.depth} messages this capture stored; skipped rather than scored at ${S.depth}`);
+        continue;
+    }
     // Core's keyword route, re-scored at ITS scan depth. Same candidate builder, shallower haystack.
     const coreKeyed = Number.isFinite(CORE_DEPTH) && CORE_DEPTH !== P.depth
         ? new Set(build(P.K1, P.B, null, [], S.query, haystackFor(S, P, { depth: CORE_DEPTH }))
