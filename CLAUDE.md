@@ -134,7 +134,7 @@ verdict sits in: a non-empty `humanGrades` means a person set it, judge verdicts
 looked. Nothing else can recover this — a judge's bundle and a human's are structurally identical, and a
 filename convention is enforced by nothing. The two were once ONE column written at the same value, which
 made an unreviewed row indistinguishable from a reviewed-and-agreed one. **Measured** on the migrated
-corpus: 648 human verdicts, 16,962 judge verdicts, 12,569 rows across 107 bundles.
+corpus: 598 human verdicts, 16,962 judge verdicts, 12,519 rows across 107 bundles.
 
 **No verdict is ever overwritten** (`bundle-schema.md`, *Verdict elements*). A re-grade appends beside the
 one it disagrees with — that comparison is the only thing that says whether a rater or a rubric moved. The
