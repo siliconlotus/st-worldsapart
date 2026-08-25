@@ -697,16 +697,31 @@ export function loadScene(S, { indexFile, indexOpts = {}, params: P }) {
             if (!P.meanCentered) throw new Error('sharedComponents/pcRemove need meanCentered: both are defined as what comes off BEFORE the cosine, and uncentered scoring subtracts nothing');
             if (P.uncenteredGate > 0) throw new Error('sharedComponents/pcRemove with uncenteredGate is not modelled: the gate reads RAW cosine off item.vector, which projection has already changed');
             const stages = [];
-            if (P.sharedComponents > 0) {
+            // STAGE A IS THE MEMORY REGISTER, so it comes off MEMORY CHUNKS AND NOTHING ELSE. Reference and
+            // memory are parallel processes: the register is one direction across all memories on disk
+            // (global-basis.mjs memoryChunks), and a reference sheet is not in the population it was
+            // estimated over. Subtracting it from every chunk of the book applied a correction fitted on
+            // one process to the other — 46 of Sommers' 327 entries, and the whole of a reference-only
+            // book. The build side has always been memory-only; this is the apply side agreeing with it.
+            //
+            // A BOOK WITH NO MEMORIES HAS NOTHING FOR STAGE A TO ACT ON, so it needs no basis at all. That
+            // is not a special case for a second book: it falls out of the tier gate, and it is why
+            // `grounded omegaverse` (17 entries, 0 memory) does not need one built for the sommers scenes.
+            const hasMemory = live.some(ofMemory);
+            if (P.sharedComponents > 0 && hasMemory) {
+                // Stage B's mean has to be taken over chunks in the SAME transform state, or it averages
+                // projected memory vectors with unprojected reference ones. 'memory' and 'memoryArchived'
+                // are exactly the gated set; 'vectorized' is not.
+                if (P.centroidPopulation === 'vectorized') throw new Error(`sharedComponents with centroidPopulation 'vectorized' would average stage-A-projected memory chunks with unprojected reference ones in one centroid — use 'memory' or 'memoryArchived'`);
                 const basis = loadBasis(book, P.embedModel ?? 'bge-m3');
                 if (!basis) throw new Error(`sharedComponents needs a basis for "${book}" — build it with: node eval/global-basis.mjs <samples...>`);
                 if (basis.comps.length < P.sharedComponents) throw new Error(`sharedComponents ${P.sharedComponents} but "${book}"'s basis holds ${basis.comps.length} components — rebuild with --m ${P.sharedComponents} --force`);
                 stages.push({ mean: basis.mean, comps: basis.comps.slice(0, P.sharedComponents) });
             }
             const applyAll = (v, upto) => stages.slice(0, upto).reduce((acc, st) => projectOut(acc, st.mean, st.comps), v);
-            // Stage A first, over everything the mean or the components could be taken from, so stage B sees
-            // the residual and nothing else.
-            const shiftA = xs => xs.map(it => ({ ...it, vector: applyAll(it.vector, stages.length) }));
+            // Stage A first, so stage B sees the residual and nothing else — over the memory chunks it is
+            // defined on; a reference chunk passes through untouched.
+            const shiftA = xs => xs.map(it => (ofMemory(it) ? { ...it, vector: applyAll(it.vector, stages.length) } : it));
             loaded.items = shiftA(loaded.items);
             loaded.extra = shiftA(loaded.extra);
             // meanSource holds the PRE-transform objects, so re-resolve each through the transformed arrays by
