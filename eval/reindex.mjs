@@ -274,18 +274,26 @@ if (process.argv[1] && import.meta.url.endsWith(process.argv[1].split('/').pop()
         console.error('--all embeds EVERY entry with content, not just the vectorized ones — the collection the denseAllEntries arm reads (scene.mjs)');
         console.error('--archived ALSO embeds disabled memory entries as centroid-only mass — the collection the centroidPopulation arm reads (scene.mjs)');
         console.error('rebuilds a vector collection from the sample\'s embedded books into eval-data/indexes/ (never into SillyTavern\'s live vectors unless --out says so)');
+        console.error('  --model <spec>  a modelSpec, so a server stem and a task prefix are honoured: omlx:Qwen3-Embedding-8B-4bit-DWQ');
         process.exit(2);
     }
     const S = openBundle(JSON.parse(readFileSync(sample, 'utf8')), arg('--arm'));
     const overrides = {};
     for (const k of ['chunkSize', 'minChunkSize']) if (arg(`--${k}`) !== null) overrides[k] = Number(arg(`--${k}`));
     if (arg('--chunkMode')) overrides.chunkMode = arg('--chunkMode');
-    const model = process.env.WA_EMBED_MODEL ?? S.embedModel ?? 'bge-m3';
-    if (S.embedModel && S.embedModel !== model) console.error(`!! rebuilding under "${model}" but the sample was captured under "${S.embedModel}" — its recorded cosines will not be comparable`);
+    // THROUGH resolveModel, like every other tool that takes a model. It took the spec as a bare ollama
+    // model name, so `omlx:Qwen3-Embedding-8B-4bit-DWQ` was sent to ollama as a literal name and a
+    // prefix-trained family silently lost its instruction — the two failures modelSpec exists to prevent,
+    // in the one tool that actually writes the vectors.
+    const spec = arg('--model') ?? process.env.WA_EMBED_MODEL ?? S.embedModel ?? 'bge-m3';
+    const em = resolveModel(spec);
+    if (S.embedModel && em.label !== S.embedModel) console.error(`!! rebuilding under "${em.label}" but the sample was captured under "${S.embedModel}" — its recorded cosines will not be comparable`);
 
     ensureIndex(S, {
-        overrides, model, book: arg('--book') ?? S.primaryBook, out: arg('--out'),
+        overrides, model: em.model, prefix: em.doc, label: em.label, endpoint: em.endpoint,
+        book: arg('--book') ?? S.primaryBook, out: arg('--out'),
         ollama: process.env.OLLAMA_URL ?? 'http://localhost:11434',
+        url: em.endpoint === 'ollama' ? (process.env.OLLAMA_URL ?? 'http://localhost:11434') : em.url,
         batch: Number(arg('--batch')) || 64, force: argv.includes('--force'), all: argv.includes('--all'), archived: argv.includes('--archived'), log: m => console.log(m),
     }).then(r => {
         console.log(r.built ? `wrote ${r.items} items -> ${r.path}` : `already built (${r.items} items) -> ${r.path}  [--force to rebuild]`);
