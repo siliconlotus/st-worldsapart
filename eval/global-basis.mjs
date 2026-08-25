@@ -17,6 +17,18 @@
 // identical bodies; leaving out only the file puts two near-copies of a book into its own "everyone else",
 // which moved one alignment from 0.83 to 0.77 when fixed. scene.mjs lineagesOf does the grouping.
 //
+// COMPONENTS ARE RANKED BY VARIANCE, WHICH IS NOT SHAREDNESS, so each one's eta^2 is recorded beside it:
+// the between-lineage share of its projection's variance over the books the basis was built from. Low is
+// shared across books, high separates them. **Measured** on this corpus, the two orderings disagree at the
+// top — PC1 sits at 0.81-0.86 in four of the five bases while PC2 sits at 0.003-0.026, because whenever
+// Sommers is in the pool PC1 becomes the Sommers axis (its mean projection +0.18 to +0.25 against every
+// LTM book's -0.18 to +0.15). Not mass: Sommers is 910 of 3899 memory chunks, and Time Whore, at 1879,
+// owns no component. So a variance-ranked prefix removes the MOST book-specific direction first, which is
+// the opposite of stage A's job; scene.mjs `sharedSelect` reads this to select by sharedness instead.
+//
+// WEAK AT THIS n, and recorded rather than acted on for that reason: four lineage groups, two of them
+// vestigial (Richard 81 chunks, Panopticon 58), so the estimate rests on three books.
+//
 // POOLED, NOT EQUAL-WEIGHTED PER BOOK. The shared component is a property of the model and of narrative
 // prose, not of any book, so a bigger book is a better estimate of the same thing rather than a louder
 // opinion. Equal-weighting hands the most influence to the least reliable means: **measured** split-half
@@ -31,6 +43,7 @@ import { dirname } from 'node:path';
 import { corpusMean, norm } from '../plugin/vector.mjs';
 import { topComponents } from './metrics.mjs';
 import { openSample, lineagesOf, indexPath, sceneParams, getStringHash } from './scene.mjs';
+import { chunkConfig } from './reindex.mjs';
 import { isMemory } from '../extension/relevance.mjs';
 
 /** Where a book's basis lives. Keyed by the BOOK being scored, since that is all scene.mjs knows — the
@@ -48,7 +61,10 @@ export const loadBasis = (book, model = 'bge-m3') => {
     const p = basisPath(book, model);
     if (!existsSync(p)) return null;
     const j = JSON.parse(readFileSync(p, 'utf8'));
-    return { mean: Float64Array.from(j.mean), comps: j.comps.map(c => Float64Array.from(c)), meta: j.meta };
+    // `eta` rides along because it is what `sharedSelect: 'shared'` orders on; absent on a basis built
+    // before it was recorded, which scene.mjs reports as a rebuild rather than silently falling back to
+    // the variance order — the two orders disagree, so a quiet fallback would run the wrong arm.
+    return { mean: Float64Array.from(j.mean), comps: j.comps.map(c => Float64Array.from(c)), eta: j.eta ?? null, meta: j.meta };
 };
 
 /** Memory-tier chunks of one sample's primary book, from the collection already on disk. */
@@ -60,6 +76,26 @@ const memoryChunks = (S, model) => {
         .filter(e => isMemory(e) && !e.disable && e.content).map(e => Number(e.uid)));
     return items.filter(i => mem.has(Number(i.metadata?.index)));
 };
+
+/**
+ * Per component, the BETWEEN-LINEAGE share of its projection's variance (eta^2) over the groups the basis
+ * was built from. It is the sharedness statistic the variance ranking is not: a component every book
+ * varies along scores near 0, one that offsets whole books scores near 1.
+ *
+ * @param {Array<Array<{vector: number[]}>>} groups Chunks, one array per lineage
+ * @param {number[]} mean The basis mean, already subtracted conceptually
+ * @param {number[][]} comps The components, in variance order
+ * @returns {number[]} eta^2 per component, same order
+ */
+export const etaSquared = (groups, mean, comps) => comps.map((c) => {
+    const proj = groups.map(g => g.map(it => { let p = 0; for (let i = 0; i < mean.length; i++) p += (it.vector[i] - mean[i]) * c[i]; return p; }));
+    const all = proj.flat();
+    const avg = xs => xs.reduce((s, x) => s + x, 0) / xs.length;
+    const gm = avg(all);
+    const ssTot = all.reduce((s, x) => s + (x - gm) ** 2, 0);
+    const ssBet = proj.reduce((s, g) => s + g.length * (avg(g) - gm) ** 2, 0);
+    return ssTot > 0 ? ssBet / ssTot : 0;
+});
 
 export const buildBases = (samplePaths, { m = 8, model = 'bge-m3', force = false, log = () => {} } = {}) => {
     const byBook = new Map();
@@ -76,15 +112,32 @@ export const buildBases = (samplePaths, { m = 8, model = 'bge-m3', force = false
     for (const [book, v] of byBook) {
         const out = basisPath(book, model);
         if (!force && existsSync(out)) { written.push([book, 'cached']); continue; }
-        const rest = [...byBook].filter(([o]) => lin.get(o) !== lin.get(book)).flatMap(([, x]) => x.chunks);
+        // GROUPED as well as pooled: the mean and the components come off the pooled chunks, eta^2 needs
+        // them back in their lineages.
+        const restByLin = new Map();
+        for (const [o, x] of byBook) {
+            if (lin.get(o) === lin.get(book)) continue;
+            const L = lin.get(o);
+            if (!restByLin.has(L)) restByLin.set(L, []);
+            restByLin.get(L).push(...x.chunks);
+        }
+        const rest = [...restByLin.values()].flat();
         if (!rest.length) { log(`  "${book}" is the only book in its lineage group — no basis possible, skipped`); continue; }
         const mean = corpusMean(rest);
         const comps = topComponents(rest, m, mean);
+        const eta = etaSquared([...restByLin.values()], mean, comps);
         mkdirSync(dirname(out), { recursive: true });
         writeFileSync(out, JSON.stringify({
             mean: [...mean],
             comps: comps.map(c => [...c]),
-            meta: { model, m: comps.length, askedM: m, chunks: rest.length,
+            eta,
+            // WHAT IT WAS BUILT FROM, because a basis is only comparable to collections chunked the same
+            // way and nothing recorded it before: the bases on disk turned out to predate the 800 -> 1750
+            // migration, and the only tell was their chunk counts running a uniform ~1.5x over what the
+            // indexes hold. `fromSamples` names the bundles because which snapshot of a book a bundle
+            // embeds decides which memory uids are in the pool.
+            meta: { model, chunkCfg: chunkConfig(v.S), fromSamples: samplePaths.map(x => x.split('/').pop()),
+                m: comps.length, askedM: m, chunks: rest.length,
                 excludedLineage: lin.get(book), fromLineages: [...new Set([...byBook.keys()].map(b => lin.get(b)))].filter(l => l !== lin.get(book)),
                 meanNorm: norm(mean) },
         }));

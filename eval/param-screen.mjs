@@ -168,6 +168,9 @@ const ARMS = {
     // centring on the residual, so a gain there is stage A's and a gain only in gb=4+pcN is stage B's.
     // Needs `node eval/global-basis.mjs <samples...>` first; loadScene throws with that line if absent.
     ...Object.fromEntries([1, 2, 4, 8].map(v => [`shared=${v}`, { __reload: true, sharedComponents: v }])),
+    // THE SAME DOSES, PICKED BY SHAREDNESS instead of by explained variance — one family with the arms
+    // above, so the two selection rules are contrasted at matched N rather than against each other's best.
+    ...Object.fromEntries([1, 2, 4, 8].map(v => [`sharedEta=${v}`, { __reload: true, sharedComponents: v, sharedSelect: 'shared' }])),
     // WHITENING (scene.mjs whitenR/whitenAlpha) — the only lever in this family that changes the cloud's
     // SHAPE rather than its position. Centring is a translation and provably cannot remove book identity
     // (measured: 1-NN same-book purity 99.4% -> 98.2%); rescaling the directions a book spreads along is

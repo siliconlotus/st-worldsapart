@@ -367,6 +367,26 @@ eq(JSON.stringify([...topComponents(pts, 2, MU)[0]]), JSON.stringify([...topComp
 // The real instance this exists for: an LTM file is named after the CHARACTER CARD, and one card carries
 // several stories, so "Isekai Adventure" was byte-identical to Ascensus while sharing under 5% with Time
 // Whore — the other story on that same card. Names are not evidence in either direction.
+// --- etaSquared: the sharedness statistic stage A selects on ------------------------------------------
+// Components come back in VARIANCE order, which is not sharedness order — measured on this corpus the two
+// disagree at the top. So the selection rule needs a statistic that separates "every book varies along
+// this" from "this offsets whole books", and it has to be the second that scores high.
+const { etaSquared } = await import('./global-basis.mjs');
+{
+    const MEAN = [0, 0];
+    // x: both groups straddle 0 identically — shared. y: group A sits at +1, group B at -1 — separating.
+    const A = [[1, 1], [-1, 1], [1, 1], [-1, 1]].map(v => ({ vector: v }));
+    const B = [[1, -1], [-1, -1], [1, -1], [-1, -1]].map(v => ({ vector: v }));
+    const eta = etaSquared([A, B], MEAN, [[1, 0], [0, 1]]);
+    eq(eta[0].toFixed(3), '0.000', 'a direction both groups vary along identically is SHARED, eta^2 0');
+    eq(eta[1].toFixed(3), '1.000', 'a direction that offsets whole groups SEPARATES them, eta^2 1');
+    // The ordering the selection rule applies: lowest eta^2 first, whatever the variance rank was.
+    const picked = [[1, 0], [0, 1]].map((c, j) => [c, eta[j]]).sort((x, y) => x[1] - y[1]).map(([c]) => c);
+    eq(JSON.stringify(picked[0]), '[1,0]', "'shared' selection takes the shared direction first, not the leading one");
+    // A group of one contributes no within-group variance, so a lone group cannot separate anything.
+    eq(etaSquared([A], MEAN, [[0, 1]])[0].toFixed(3), '0.000', 'one group alone separates nothing, rather than dividing by zero');
+}
+
 const { lineagesOf } = await import('./scene.mjs');
 const bk = (...bodies) => Object.fromEntries(bodies.map((c, i) => [i, { uid: i, content: c }]));
 const L = lineagesOf({

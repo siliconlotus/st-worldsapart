@@ -507,6 +507,15 @@ export const sceneParams = (S, overrides = {}) => ({
     //   'bodies'       shipped plus every entry's content
     //   'none'         empty gazetteer: the proper-noun boost alone
     gazetteerSource: 'keys+titles',
+    // HOW STAGE A PICKS ITS COMPONENTS, which is a separate question from how they were estimated.
+    //   'rank'    the first N by explained variance — what a PCA hands back, and the default so every
+    //             stored measurement reproduces.
+    //   'shared'  the N with the LOWEST eta^2, the between-lineage share of their projection's variance
+    //             (global-basis.mjs). Stage A's job is to remove what the books SHARE, and variance rank
+    //             is not sharedness rank: **measured** on this corpus the two disagree at the very top —
+    //             PC1 scores 0.82-0.86 in four of the five bases against PC2's 0.005-0.049, so 'rank'
+    //             removes the most book-specific direction available first. Needs a basis carrying `eta`.
+    sharedSelect: 'rank',
     // Exact key strings to treat as removed from the book (see scoringKeys). Null = none.
     dropKeys: null,
     queryMode: 'messages',
@@ -716,7 +725,16 @@ export function loadScene(S, { indexFile, indexOpts = {}, params: P }) {
                 const basis = loadBasis(book, P.embedModel ?? 'bge-m3');
                 if (!basis) throw new Error(`sharedComponents needs a basis for "${book}" — build it with: node eval/global-basis.mjs <samples...>`);
                 if (basis.comps.length < P.sharedComponents) throw new Error(`sharedComponents ${P.sharedComponents} but "${book}"'s basis holds ${basis.comps.length} components — rebuild with --m ${P.sharedComponents} --force`);
-                stages.push({ mean: basis.mean, comps: basis.comps.slice(0, P.sharedComponents) });
+                // SELECTION IS NOT ESTIMATION. The components arrive in variance order; sharedness is a
+                // different order, and taking a prefix of the first conflates them.
+                let comps = basis.comps;
+                if (P.sharedSelect === 'shared') {
+                    if (!basis.eta?.length) throw new Error(`sharedSelect 'shared' ranks components by eta^2 and "${book}"'s basis carries none — rebuild with: node eval/global-basis.mjs <samples...> --force`);
+                    comps = basis.comps.map((c, j) => [c, basis.eta[j]]).sort((x, y) => x[1] - y[1]).map(([c]) => c);
+                } else if (P.sharedSelect !== 'rank') {
+                    throw new Error(`unknown sharedSelect "${P.sharedSelect}" — one of rank, shared`);
+                }
+                stages.push({ mean: basis.mean, comps: comps.slice(0, P.sharedComponents) });
             }
             const applyAll = (v, upto) => stages.slice(0, upto).reduce((acc, st) => projectOut(acc, st.mean, st.comps), v);
             // Stage A first, so stage B sees the residual and nothing else — over the memory chunks it is
