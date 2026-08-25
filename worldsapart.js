@@ -1577,6 +1577,25 @@ function sceneRange() {
  *
  * Cached: it cannot change without a page reload.
  */
+/** WHAT WA WAS, from its own manifest. The extension cannot read git — it runs in the browser — so the
+ *  declared version is what there is, and a declared one is at least honest about being declared.
+ *
+ *  THROUGH import.meta.url, not a fixed path: ST clones into third-party/<repo-name> and that name varies
+ *  with whatever the clone was called, so a hard-coded folder reads nothing on half the installs.
+ *
+ *  Cached, and an empty string on failure rather than a guess: a capture naming no version is readable as
+ *  "unknown", while one naming the wrong version is not readable as anything. */
+let waVersionCache = null;
+async function waVersion() {
+    if (waVersionCache !== null) return waVersionCache;
+    try {
+        const r = await fetch(new URL('./manifest.json', import.meta.url));
+        const d = r.ok ? await r.json() : null;
+        waVersionCache = d?.version ? String(d.version) : '';
+    } catch { waVersionCache = ''; }
+    return waVersionCache;
+}
+
 let stVersionCache = null;
 async function stVersion() {
     if (stVersionCache !== null) return stVersionCache;
@@ -2015,6 +2034,7 @@ async function versusBundle(union, coreKeys, waKeys, viaVectors) {
         depth: settings().messageDepth,
         pluginFP: runState.pluginFP,
         sourceFP: runState.sourceFP,
+        waVersion: await waVersion(),
         stVersion: await stVersion(),
         chat: chatFilePath(),
         book: primaryBook ? `data/default-user/worlds/${primaryBook}.json` : '',
@@ -3270,6 +3290,7 @@ async function gradeScene(named) {
         depth: settings().messageDepth,
         pluginFP: runState.pluginFP,
         sourceFP: runState.sourceFP,
+        waVersion: await waVersion(),
         stVersion: await stVersion(),
         chat: chatFilePath(),
         book: primaryBook ? `data/default-user/worlds/${primaryBook}.json` : '',
@@ -3764,6 +3785,7 @@ async function superGradeScene(named) {
     const { grades, prior } = done;
 
     const base = named?.name || defaultSampleName();
+    const wav = await waVersion();
     const stv = await stVersion();
     const built = [];
     for (const cap of captures) {
@@ -3782,6 +3804,7 @@ async function superGradeScene(named) {
             depth: cap.depth,
             pluginFP: runState.pluginFP,
             sourceFP: runState.sourceFP,
+            waVersion: wav,
             stVersion: stv,
             chat: chatFilePath(),
             book: primaryBook ? `data/default-user/worlds/${primaryBook}.json` : '',
