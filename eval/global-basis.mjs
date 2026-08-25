@@ -9,7 +9,7 @@
 // common structure, and it scored NEGATIVE on the delivered set for exactly that reason (F2 -0.0038 at
 // k=1 over 103 scenes). Strip the shared part first and whatever leads the residual is the book's own.
 //
-// MEMORY TIER ONLY. Whole-book PC1 is largely the memory-versus-reference axis — **measured** at 0.89 on
+// MEMORY TIER ONLY, ARCHIVED INCLUDED. Whole-book PC1 is largely the memory-versus-reference axis — **measured** at 0.89 on
 // Time Whore, 0.94 on one Ascensus file — which every book has, so a mixed basis would make "generic" mean
 // "register" and remove the tier distinction as its first act.
 //
@@ -43,7 +43,7 @@ import { dirname } from 'node:path';
 import { corpusMean, norm } from '../plugin/vector.mjs';
 import { topComponents } from './metrics.mjs';
 import { openSample, lineagesOf, indexPath, sceneParams, getStringHash } from './scene.mjs';
-import { chunkConfig } from './reindex.mjs';
+import { cachePath, chunkConfig } from './reindex.mjs';
 import { isMemory } from '../extension/relevance.mjs';
 
 /** Where a book's basis lives. Keyed by the BOOK being scored, since that is all scene.mjs knows — the
@@ -69,12 +69,33 @@ export const loadBasis = (book, model = 'bge-m3') => {
 
 /** Memory-tier chunks of one sample's primary book, from the collection already on disk. */
 const memoryChunks = (S, model) => {
-    const file = indexPath(S, { model, all: sceneParams(S).denseAllEntries });
+    // ARCHIVED MEMORY COUNTS. This is modelling what narrative prose LOOKS LIKE, not what can be
+    // retrieved, and a summary the author retired is the same prose it was the day before. Excluding it
+    // was `!e.disable` inherited from the retrieval path, where the flag genuinely decides something; here
+    // it only shrinks the sample, and unevenly — **measured**, the live-only pool is 604 memory entries
+    // against 914 with archived, and the 51% it was discarding falls hardest on the books that are
+    // already thin (Ascensus +88%, the Isekai pair +102%, Sommers +70%, Panopticon +59%).
+    //
+    // So the collection wanted is the `--archived` build, whose centroidOnly chunks ARE the disabled
+    // entries (reindex.mjs buildItems). A book with nothing retired has none and reads the same either
+    // way; a book with no archived build falls back to the live collection rather than failing, and
+    // contributes its live half.
+    // THE FALLBACK IS REPORTED, NOT SILENT. Missing the archived build costs half the sample on some
+    // books and none on others, and it produces a perfectly ordinary-looking basis either way — which is
+    // how the first attempt at this rebuilt the register from live-only and printed success. The caller
+    // logs `archived`, and it goes in the meta so a stored basis says which pool estimated it.
+    const cfg = chunkConfig(S);
+    const archived = cachePath(S, cfg, model, S.primaryBook, true, true);
+    const usingArchived = existsSync(archived);
+    const file = usingArchived ? archived : indexPath(S, { model, all: sceneParams(S).denseAllEntries });
     if (!existsSync(file)) return null;
-    const items = JSON.parse(readFileSync(file, 'utf8')).items.filter(i => !i.metadata?.centroidOnly);
+    const items = JSON.parse(readFileSync(file, 'utf8')).items;
     const mem = new Set(Object.values(S.books[S.primaryBook] ?? {})
-        .filter(e => isMemory(e) && !e.disable && e.content).map(e => Number(e.uid)));
-    return items.filter(i => mem.has(Number(i.metadata?.index)));
+        .filter(e => isMemory(e) && e.content).map(e => Number(e.uid)));
+    const out = items.filter(i => mem.has(Number(i.metadata?.index)));
+    out.archived = usingArchived;
+    out.retired = Object.values(S.books[S.primaryBook] ?? {}).filter(e => isMemory(e) && e.content && e.disable).length;
+    return out;
 };
 
 /**
@@ -104,6 +125,7 @@ export const buildBases = (samplePaths, { m = 8, model = 'bge-m3', force = false
         if (byBook.has(S.primaryBook)) continue;
         const chunks = memoryChunks(S, model);
         if (!chunks?.length) { log(`  no collection for "${S.primaryBook}" — skipped`); continue; }
+        if (!chunks.archived && chunks.retired) log(`  !! "${S.primaryBook}": no --archived collection at these chunk settings, so its ${chunks.retired} retired memory entr(ies) are NOT in the pool`);
         byBook.set(S.primaryBook, { S, chunks });
     }
     if (byBook.size < 2) throw new Error(`a leave-one-out basis needs at least 2 books with collections; got ${byBook.size}`);
@@ -137,6 +159,7 @@ export const buildBases = (samplePaths, { m = 8, model = 'bge-m3', force = false
             // indexes hold. `fromSamples` names the bundles because which snapshot of a book a bundle
             // embeds decides which memory uids are in the pool.
             meta: { model, chunkCfg: chunkConfig(v.S), fromSamples: samplePaths.map(x => x.split('/').pop()),
+                archivedPool: [...byBook].filter(([o]) => lin.get(o) !== lin.get(book)).every(([, x]) => x.chunks.archived),
                 m: comps.length, askedM: m, chunks: rest.length,
                 excludedLineage: lin.get(book), fromLineages: [...new Set([...byBook.keys()].map(b => lin.get(b)))].filter(l => l !== lin.get(book)),
                 meanNorm: norm(mean) },
