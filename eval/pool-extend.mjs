@@ -24,6 +24,7 @@
 // is the slow step; they are cached by book + model + chunk settings, so a second run is nearly free.
 import { readFileSync, writeFileSync, mkdirSync } from 'node:fs';
 import { dirname, basename } from 'node:path';
+import { entryKey } from '../extension/content-lexical.mjs';
 import { scoreScene, loadScene, indexPath, openSample, sceneParams, embed, sceneLabel } from './scene.mjs';
 import { ensureIndex } from './reindex.mjs';
 
@@ -67,18 +68,23 @@ const DRY = argv.includes('--dry');
     for (const path of samples) {
         const S = openSample(path, arg('--arm'));
         if (!Object.keys(S.books?.[S.primaryBook] ?? {}).length) { console.error(`${path}: no embedded entries for "${S.primaryBook}" — a bundle that does not embed its books is malformed`); continue; }
-        const scene = loadScene(S, { indexFile: indexPath(S, { model: MODEL }), params: sceneParams(S) });
+        // `all` FROM THE SCENE'S OWN PARAMS, which default it on: a denseAllEntries scene cannot be
+        // scored against a vectorized-only build, so resolving without it named a file loadScene refused.
+        const P = sceneParams(S);
+        const scene = loadScene(S, { indexFile: indexPath(S, { model: MODEL, all: P.denseAllEntries }), indexOpts: { model: MODEL }, params: P });
         const qv = await embed(S.query, { ollama: OLLAMA, model: MODEL });
 
-        // uid -> { title, doses[], bestRank }. Keyed by uid because that is what a grade is keyed by; the
-        // title is carried for the human and is NOT the identity (titles get edited).
+        // (book, uid) -> { title, doses[], bestRank }. Keyed the way a grade is keyed — every attached book
+        // is ranked, and two books number their uids from 0, so a bare-uid map merges two entries into one
+        // pending row. The title is carried for the human and is NOT the identity (titles get edited).
         const wanted = new Map();
         const note = (rows, arm) => {
             for (const r of rows) {
-                const hit = wanted.get(r.uid) ?? { uid: r.uid, title: r.title, doses: [], bestRank: Infinity };
+                const key = entryKey({ world: r.book ?? S.primaryBook, uid: r.uid });
+                const hit = wanted.get(key) ?? { uid: r.uid, book: r.book ?? S.primaryBook, title: r.title, doses: [], bestRank: Infinity };
                 hit.doses.push(arm);
                 hit.bestRank = Math.min(hit.bestRank, r.rank);
-                wanted.set(r.uid, hit);
+                wanted.set(key, hit);
             }
         };
 
@@ -101,7 +107,7 @@ const DRY = argv.includes('--dry');
         const rows = [...wanted.values()].sort((a, b) => a.bestRank - b.bestRank);
         grandTotal += rows.length;
         console.log(`${sceneLabel(S) || basename(path)}: ${rows.length} ungraded entr${rows.length === 1 ? 'y' : 'ies'} surfaced by ${picked.length} dose(s) + baseline, over top-${K}`);
-        for (const r of rows.slice(0, 12)) console.log(`  uid ${String(r.uid).padStart(5)}  #${String(r.bestRank).padStart(2)}  ${r.title.slice(0, 44).padEnd(44)} ${r.doses.length > 3 ? `${r.doses.length} doses` : r.doses.join(', ')}`);
+        for (const r of rows.slice(0, 12)) console.log(`  ${r.book === S.primaryBook ? '' : `${r.book} `}uid ${String(r.uid).padStart(5)}  #${String(r.bestRank).padStart(2)}  ${r.title.slice(0, 44).padEnd(44)} ${r.doses.length > 3 ? `${r.doses.length} doses` : r.doses.join(', ')}`);
         if (rows.length > 12) console.log(`  … and ${rows.length - 12} more`);
         if (!rows.length) { console.log('  pool already covers every dose — chunk arms on this scene are measurements, not lower bounds.'); continue; }
 
@@ -111,7 +117,7 @@ const DRY = argv.includes('--dry');
         mkdirSync(outDir, { recursive: true });
         writeFileSync(out, `${JSON.stringify({
             // `pending` is what /wa-super-grade's file picker keys on to tell this from a prior sample.
-            pending: rows.map(r => ({ book: S.primaryBook, uid: r.uid, title: r.title, bestRank: r.bestRank, doses: r.doses })),
+            pending: rows.map(r => ({ book: r.book, uid: r.uid, title: r.title, bestRank: r.bestRank, doses: r.doses })),
             forScene: sceneLabel(S) || basename(path),
             primaryBook: S.primaryBook,
             k: K,

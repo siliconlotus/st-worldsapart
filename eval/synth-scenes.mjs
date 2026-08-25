@@ -395,12 +395,12 @@ for (const idx of picks) {
         const S = {
             primaryBook: BOOK, books: allBooks, chat: CHAT,
             query, queryChat, scanChat, depth: DEPTH, params: capture,
-            paramSnapshot: src?.paramSnapshot, excludeTitles: [], index: built.path,
+            paramSnapshot: src?.paramSnapshot, index: built.path,
         };
         const P = sceneParams(S);
         // Loaded per arm, not once: the gazetteer is baked in at load time and an arm
         // moves it. scoreScene throws rather than reuse a scene across that change, for the same reason.
-        const scene = loadScene(S, { indexFile: indexPath(S, { model: MODEL }), params: P });
+        const scene = loadScene(S, { indexFile: indexPath(S, { model: MODEL }), indexOpts: { model: MODEL }, params: P });
         const haystack = haystackFor(S, P);
         // Term weights exactly as scoreScene derives them. Passing null instead runs every arm with the
         // entity filter off — the gazetteer path that admitted 2.3x the query terms and moved BM25 by up
@@ -444,7 +444,7 @@ for (const idx of picks) {
             // the CONFIGURATION, and `params` is the open map the schema keeps arm knobs in — so recording
             // it there needs no structural field and cannot drift from the schema.
             params: { ...capture, ...(INCLUDE_HIDDEN ? { includedHidden: true } : {}) },
-            paramSnapshot: src?.paramSnapshot, budget: budgetFor(), excludeTitles: [],
+            paramSnapshot: src?.paramSnapshot, budget: budgetFor(),
             // No grading depth was applied, recorded explicitly rather than omitted. (The field is named
             // for the stage-4 cliff it also used to carry; that cut no longer exists.)
             cutoff: { gradingOverride: null, note: 'offline derivation records the full activated population' },

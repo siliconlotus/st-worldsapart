@@ -29,21 +29,23 @@
 //     "book":  "data/default-user/worlds/<book>.json",          // provenance only; entries come from "books"
 //     "grades": [{ "title": "…", "grade": 4 }, ...],
 //     "candidates": [ ...selection-candidate rows... ],         // the population; REQUIRED, see POOL below
-//     "primaryBook": "<book name>",                             // the book whose collection was searched
+//     "primaryBook": "<book name>",                             // the book the scene is keyed to
 //     "books": { "<book name>": { "<uid>": {entry}, ... } },     // embedded copies of every attached book
 //     "capture": ".../sceneN_off.json",                         // /wa-debug capture, for --validate
 //     "depth": 5,                                               // messageDepth the query was built at
 //     "params": { "K1": 2, ... },                                // overrides P below, per arm
-//     "excludeTitles": ["Intimacy & Mechanics"],                 // graded, but out of THIS harness's scope
 //     "notes": "free text"
 //   }
 //
-// excludeTitles drops graded titles this harness cannot rank — in practice, entries from a second attached
-// book, since only one book/collection is loaded here while the live chat scanned several. Declared in the
-// sample rather than dropped from `grades`, because relevance-eval.mjs scores the real captures,
-// where those entries ARE present and a missing grade would silently score them as irrelevant. Excluding
-// changes no nDCG: the ideal DCG is built from the ranked grade vector, so a title that never gets ranked
-// was already contributing to neither DCG nor ideal. It only stops the row reading as a repro failure.
+// EVERY EMBEDDED BOOK IS RANKED, one collection each, pooled into one top-K — what production does. So a
+// graded row is out of scope only when its book was NOT embedded, and nothing about the ranking is
+// per-book except the centroid, the BM25 IDF and the name df, each of which production also keeps per
+// book. A grade the harness cannot rank changes no nDCG: the ideal DCG is built from the ranked grade
+// vector, so a title that never gets ranked was already contributing to neither DCG nor ideal. It only
+// stops the row reading as a repro failure.
+//
+// `excludeTitles`, which used to name those rows, is no longer read: its predicate was "not the primary
+// book", and that stopped being the scope boundary once every book got loaded.
 //
 // FREEZE THE QUERY, NOT THE CHAT. A graded scene is a fixed pair of (query text, grades), so the sample
 // stores the text itself. Re-deriving it from the chat each run would make every number depend on a live
@@ -64,7 +66,8 @@ import * as matcher from '../extension/matcher.mjs';
 import { gradeValue } from './metrics.mjs';
 // Scene loading, the gazetteer, the scorers, the pool and the nDCG math all live in scene.mjs, shared with
 // param-screen.mjs — there must be exactly one copy of them (see that module's header).
-import { CID, dcg, embed as embedWith, haystackFor, indexPath, isDurableEntry, loadScene, makeFuse, makeGradeOf, makeKeywordScore, makeCandidateSet, ndcg, nrm, openSample, sceneParams, inVectorIndex, wiTitle, sceneLabel } from './scene.mjs';
+import { entryKey } from '../extension/content-lexical.mjs';
+import { dcg, embed as embedWith, haystackFor, indexPath, isDurableEntry, loadScene, makeFuse, makeGradeOf, makeKeywordScore, makeCandidateSet, ndcg, nrm, openSample, sceneParams, inVectorIndex, wiTitle, sceneLabel } from './scene.mjs';
 
 const arg = k => { const i = process.argv.indexOf(k); return i >= 0 ? process.argv[i + 1] : null; };
 if (!arg('--sample')) { console.error('need --sample <sample.json> (write one with /wa-grade)'); process.exit(2); }
@@ -106,14 +109,21 @@ if (!S.candidates?.length) { console.error('sample logs no `candidates` — noth
 if (!CHAT && !S.sceneChat && (S.query === undefined || (DEPTHS && !S.queryChat?.length))) { console.error(DEPTHS ? '--depths needs the original chat or an embedded "queryChat": pass --chat, or record "sceneChat" on the scene' : 'sample has no frozen "query" — pass --chat (with --freeze to snapshot it into the sample)'); process.exit(2); }
 if (S.name) console.log(`scene: ${sceneLabel(S)}${S.notes ? ` — ${S.notes}` : ''}`);
 const VECTORS = arg('--vectors') ?? 'data/default-user/vectors/ollama';
-const INDEX = indexPath(S, { vectors: VECTORS, model: MODEL, index: arg('--index') });
+// `all` FROM THE SCENE'S OWN PARAMS, which default it on: denseAllEntries splits the collection by stage
+// and cannot be scored against a vectorized-only build, so resolving without it named a file loadScene
+// then refused. Same resolution param-screen's reload arms take.
+const INDEX = indexPath(S, { vectors: VECTORS, model: MODEL, index: arg('--index'), all: P.denseAllEntries });
 const TOPK = Number(arg('--topk')) || undefined;   // unset = stage 1's own bound (scene.mjs makeCandidateSet); --topk probes the elbow's window sensitivity.
 
 // --- inputs ---
 // A /wa-grade sample carries copies of every attached book, so it re-runs identically after the live
 // lorebooks have been edited. Nothing here reads a live book.
-const { primary, entries, byUid, items, loaded, gaz, gazSource, isExcluded, POOL, OWN } = loadScene(S, { indexFile: INDEX, params: P });
-console.log(`books: ${Object.keys(S.books).length} embedded (primary "${primary}")`);
+// Bound whole AND destructured: `makeFuse` takes the scene object (it reads `entries` for the per-book
+// name df), and referencing an undefined `scene` there was a latent ReferenceError this file could not
+// reach while its index resolution was also wrong.
+const scene = loadScene(S, { indexFile: INDEX, indexOpts: { vectors: VECTORS, model: MODEL }, params: P });
+const { primary, books, entries, byKey, items, loaded, gaz, gazSource, outOfScope, POOL, OWN } = scene;
+console.log(`books: ${books.length} ranked (primary "${primary}"), ${entries.length} entries`);
 
 // --- query (shared buildQuery; macros left literal via identity substituteParams) + keyword scan window.
 // Read from the sample's snapshot; the chat is opened only to mint one (--freeze) or re-derive one (--requery).
@@ -188,15 +198,15 @@ const fmt = n => (n == null ? '·' : (+n).toFixed(3));
 (async () => {
     const qv = await embed(query);
     // self-check: re-embed a stored chunk → mean-centered cosine ~1
-    const c0 = (v => { const o = v.map((x, i) => x - loaded.mean[i]); const n = norm(o) || 1; return o.map(x => x / n); })(items[0].vector);
-    const r0 = (v => { const o = v.map((x, i) => x - loaded.mean[i]); const n = norm(o) || 1; return o.map(x => x / n); })(await embed(items[0].metadata.text));
+    const c0 = (v => { const o = v.map((x, i) => x - loaded[0].mean[i]); const n = norm(o) || 1; return o.map(x => x / n); })(items[0].vector);
+    const r0 = (v => { const o = v.map((x, i) => x - loaded[0].mean[i]); const n = norm(o) || 1; return o.map(x => x / n); })(await embed(items[0].metadata.text));
     console.log(`query (${DEPTH} msgs, ${query.length} chars): "${query.slice(0, 80).replace(/\n/g, ' ')}…"`);
     console.log(`self-check cosine: ${r0.reduce((s, x, i) => s + x * c0[i], 0).toFixed(4)} | entities kept: ${termWeights ? Object.keys(termWeights).length : 'all (filter off)'}\n`);
 
     // Per-entry signals via the SHARED scorer in scene.mjs (exact plugin vector + BM25 + selection, then
     // keyword). Wrapped only to keep this file's defaults — the report code below sweeps k1/b/tw and leaves
     // the query and scan window alone.
-    const score = makeCandidateSet({ loaded, byUid, entries, params: P, topK: TOPK });
+    const score = makeCandidateSet({ loaded, byKey, entries, params: P, topK: TOPK });
     const scoreAll = (k1, b, tw = termWeights, qvec = qv, qtext = query, st = scanText) => score(k1, b, tw, qvec, qtext, st);
     // POPULATION COMES FROM THE LOG, NOT FROM RE-DERIVATION. /wa-grade records the entries production
     // actually activated (`candidates`), which is the one thing offline code cannot recompute: half that set
@@ -224,7 +234,7 @@ const fmt = n => (n == null ? '·' : (+n).toFixed(3));
     // ponytail: the union is over the arms actually run, not over the whole parameter space, so a param swept
     // far outside those arms is still ranking against a pool that never saw its population. Widen the arm set
     // (or grade a fresh super-sample) rather than trusting a lone distant arm.
-    const ownJudged = [...OWN].filter(u => POOL.has(u)).length;
+    const ownJudged = [...OWN].filter(k => POOL.has(k)).length;
     console.log(`pool: ${POOL.size} judged entries; this capture logged ${S.candidates.length} rows, ${ownJudged} of them judged`
         + `${POOL.size > ownJudged ? ` (+${POOL.size - ownJudged} judged under a sibling arm)` : ''}`
         + `${OWN.size > ownJudged ? ` — ${OWN.size - ownJudged} logged rows are UNJUDGED and score as 0` : ''}`);
@@ -267,12 +277,12 @@ const fmt = n => (n == null ? '·' : (+n).toFixed(3));
         // restores that resolution at the cost of assuming nothing relevant sits outside the pool; see the
         // grade profiles in eval-data (relevance is sparse and the pools bottom out around rank 24-28).
         if (UNJUDGED_ZERO) return rows;
-        const kept = rows.filter(r => POOL.has(Number(r.uid)));
+        const kept = rows.filter(r => POOL.has(entryKey(r.entry)));
         // Coverage is measured against THIS capture's own rows, not the union. A sibling arm's entry that
         // fails to re-derive here is the arms disagreeing about population — the thing a super-sample exists
         // to measure — not a swept param drifting off the graded reality, which is the thing being warned
         // about. Comparing against the union would fire on every super-sample and mean nothing.
-        const own = kept.filter(r => OWN.has(Number(r.uid))).length;
+        const own = kept.filter(r => OWN.has(entryKey(r.entry))).length;
         if (!poolWarned && own < OWN.size) {
             poolWarned = true;
             console.log(`   pool coverage: re-derivation produced ${own}/${OWN.size} of this capture's own entries at these params (missing ones score no signals and drop out of the ranking)`);
@@ -284,8 +294,8 @@ const fmt = n => (n == null ? '·' : (+n).toFixed(3));
 
     if (VALIDATE) {
         const capAll = JSON.parse(readFileSync(VALIDATE, 'utf8')).filter(r => (r.block === undefined || r.block === 'dynamic') && !(Number(r.sticky) > 0));
-        const cap = capAll.filter(r => !isExcluded(r.title));
-        if (cap.length < capAll.length) console.log(`(skipping ${capAll.length - cap.length} out-of-scope row(s): ${capAll.filter(r => isExcluded(r.title)).map(r => r.title).join(', ')})`);
+        const cap = capAll.filter(r => !outOfScope(r));
+        if (cap.length < capAll.length) console.log(`(skipping ${capAll.length - cap.length} out-of-scope row(s): ${capAll.filter(r => outOfScope(r)).map(r => r.title).join(', ')})`);
         const mine = fuse(scoreAll(P.K1, P.B));
         const find = title => { const gt = nrm(title); return mine.find(m => { const mt = new Set(nrm(m.title)); return gt.length && gt.every(t => mt.has(t)); }); };
         console.log('validation vs capture (dynamic) — cosine / text / keys, then ranks:');
@@ -318,9 +328,9 @@ const fmt = n => (n == null ? '·' : (+n).toFixed(3));
 
     // Grades come inline from the sample: an array of {title, grade}, matched to a ranked row by token subset.
     const gradesAll = GRADES.filter(x => x && x.title && Number.isFinite(gradeValue(x))).map(x => ({ tk: nrm(x.title), g: gradeValue(x), title: x.title }));
-    const grades = gradesAll.filter(g => !isExcluded(g.title));
-    if (grades.length < gradesAll.length) console.log(`excluded ${gradesAll.length - grades.length} out-of-scope grade(s) — not rankable from this book: ${gradesAll.filter(g => isExcluded(g.title)).map(g => `"${g.title}"`).join(', ')}\n`);
-    const gradeOf = makeGradeOf(S.entries, isExcluded);
+    const grades = gradesAll.filter(g => !outOfScope(g));
+    if (grades.length < gradesAll.length) console.log(`excluded ${gradesAll.length - grades.length} out-of-scope grade(s) — their book is not embedded, so nothing here can rank them: ${gradesAll.filter(g => outOfScope(g)).map(g => `"${g.title}"`).join(', ')}\n`);
+    const gradeOf = makeGradeOf(S.entries, { outOfScope, primary });
     const DEF = { k1: 1.2, b: 0.75 };   // shipped defaults (extension/state.mjs)
     const relCount = grades.filter(x => x.g >= 3).length;
 
@@ -349,13 +359,13 @@ const fmt = n => (n == null ? '·' : (+n).toFixed(3));
             const st = haystackOf(chat, d);
             const tw = P.entityFilter && P.queryMode !== 'summary' ? ranking.buildTermWeights(q, gaz, P.boost) : null;
             const v = await embed(q);
-            const rows = scoreAll(DEF.k1, DEF.b, tw, v, q).map(r => ({ ...r, keywordScore: (e => keywordScore(e, st(e), DEF.k1))(byUid.get(Number(r.uid)) ?? { key: [] }) }));
+            const rows = scoreAll(DEF.k1, DEF.b, tw, v, q).map(r => ({ ...r, keywordScore: (e => keywordScore(e, st(e), DEF.k1))(byKey.get(entryKey(r.entry)) ?? { key: [] }) }));
             const fused = fuse(layoutOf(rows));
             const gVec = fuse(vectorOf(rows)).map(r => gradeOf(r) ?? 0);
             const g = fused.map(r => gradeOf(r) ?? 0);   // unjudged occupies its rank and contributes nothing (makeGradeOf returns null)
             const hits = fused.map((r, i) => [gradeOf(r), i + 1]).filter(([gr]) => gr >= 3).map(([, i]) => i);
             const mean = hits.length ? hits.reduce((a, b) => a + b, 0) / hits.length : NaN;
-            const blind = fused.filter(r => !POOL.has(Number(r.uid))).length;
+            const blind = fused.filter(r => !POOL.has(entryKey(r.entry))).length;
             const tag = d === DEPTH ? '  <- as graded' : '';
             console.log(`${String(d).padStart(6)} | ${String(q.length).padStart(6)}  ${String(Math.min(d, chat.length)).padStart(4)}  ${String(tw ? Object.keys(tw).length : 'all').padStart(5)} | ${ndcg(g, 10).toFixed(4)}   ${fmtR(ndcgAtR(g))}   ${fmtR(ndcgAtR(gVec))}  ${mean.toFixed(1).padStart(8)}  ${String(blind).padStart(4)}/${fused.length}${tag}`);
         }
@@ -398,7 +408,7 @@ const fmt = n => (n == null ? '·' : (+n).toFixed(3));
         // shows up in a live /wa-super-grade run, grade it; if no arm ever surfaces it, it is a phantom of
         // offline re-derivation and the honest ceiling for this cell is below 10/10.
         const top = fuse(all).slice(0, 10);
-        const unjudged = top.filter(r => !POOL.has(Number(r.uid)));
+        const unjudged = top.filter(r => !POOL.has(entryKey(r.entry)));
         const j10 = top.length - unjudged.length;
         const g = fuse(layoutOf(rows)).map(r => gradeOf(r) ?? 0);   // unjudged occupies its rank and contributes nothing (makeGradeOf returns null)
         const gVec = fuse(vectorOf(rows)).map(r => gradeOf(r) ?? 0);
@@ -427,7 +437,7 @@ const fmt = n => (n == null ? '·' : (+n).toFixed(3));
         // Coverage before the pool filter, same reasoning as the grid above. These arms need it most: turning
         // the entity filter off is exactly the kind of population change a defaults-shaped pool never saw.
         const top = fuse(all).slice(0, 10);
-        const j10 = top.filter(r => POOL.has(Number(r.uid))).length;
+        const j10 = top.filter(r => POOL.has(entryKey(r.entry))).length;
         const rows = fuse(layoutOf(activated(all)));
         const gVec = fuse(vectorOf(activated(all))).map(r => gradeOf(r) ?? 0);
         const hits = rows.map((r, i) => [gradeOf(r), i + 1]).filter(([g]) => g >= 3).map(([, i]) => i);

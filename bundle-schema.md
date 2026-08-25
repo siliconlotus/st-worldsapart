@@ -125,11 +125,10 @@ carry.
           // WHAT THE GRADER WAS SHOWN, which a later run needs to know what it may believe. `cutoff` is
           // the depth this capture graded at; `gradedCandidates` is how many rows actually reached a
           // grader, so rows past it are UNGRADED rather than irrelevant, and a deep-cutoff arm scored
-          // past it is reporting a lower bound. `excludeTitles` names graded titles this harness cannot
-          // rank — in practice entries from a second attached book — so they are dropped rather than
-          // counted as misses.
+          // past it is reporting a lower bound. NOTHING declares a grade out of scope: the harness ranks
+          // every book in `books`, so scope is membership there (eval/scene.mjs `outOfScope`). Bundles
+          // written before 2026-08-25 carry an `excludeTitles` list here; it is not read.
           "cutoff": { "live": { "maxVectorEntries": 20 } }, "gradedCandidates": 20,
-          "excludeTitles": [ "Intimacy & Mechanics" ],
           // IN LAYOUT ORDER — see below. `index` and `tokens` are the fields a reader can count on;
           // `scores` is WHATEVER THE CAPTURE RECORDED, keyed by the feature's own name.
           "candidates": [

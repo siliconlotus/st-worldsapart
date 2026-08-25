@@ -467,10 +467,14 @@ const queryVec = async (S, name, value, em) => {
             // stale qv here returns plausible cosines that mean nothing, which is the one failure mode of
             // this sweep that produces a number rather than an error. Memoised per (scene, arm).
             const qvec = EMBED_SWEEP ? await queryVec(S, name, value, em) : qv;
-            const scene = loadScene(S, { indexFile, params: P });
+            const scene = loadScene(S, { indexFile, indexOpts: { model: EMBED_SWEEP ? value : MODEL }, params: P });
+            // THIS BOOK'S ENTRIES, not the scene's — `scene.entries` spans every attached book now, and
+            // this set feeds the leave-one-book-out lineage guard, which compares two books by the share
+            // of the SMALLER one they hold in common. Pooling a second book in grows the denominator and
+            // silently pushes a real lineage under the 30% bar.
             if (!bookContents.has(book)) {
                 bookContents.set(book, new Set((scene.entries ?? [])
-                    .filter(e => typeof e.content === 'string' && e.content.trim())
+                    .filter(e => e.world === book && typeof e.content === 'string' && e.content.trim())
                     .map(e => e.content.trim())));
             }
             const tw = (P.entityFilter && P.queryMode !== 'summary') ? ranking.buildTermWeights(S.query, scene.gaz, P.boost) : null;
@@ -539,22 +543,29 @@ const queryVec = async (S, name, value, em) => {
             // Book term-frequency is CACHED PER BOOK: it reads scene.entries, which is the same corpus for
             // every scene of a book, and recomputing it per scene would tokenize the book 14 times over on
             // the larger lines for an identical answer.
+            //
+            // KEYED BY THE ROW'S OWN BOOK, as the name df is: rarity asks how unusual a term is in the
+            // book the entry came from, and a scene now ranks every attached book. Keying the cache on
+            // the scene's primary would give a second book's entries the primary's vocabulary.
             if (PRIORS.some(p => WITH.includes(p))) {
-                let bk = bookTf.get(book);
-                if (!bk) {
+                const tfFor = (bookName) => {
+                    let bk = bookTf.get(bookName);
+                    if (bk) return bk;
                     const tf = new Map();
                     let total = 0;
                     // Same corpus definition as the df map above: disabled entries in, contentless ones out.
                     for (const e of scene.entries ?? []) {
-                        if (typeof e.content !== 'string' || !e.content.trim()) continue;
+                        if (e.world !== bookName || typeof e.content !== 'string' || !e.content.trim()) continue;
                         for (const t of tokenize(e.content)) { tf.set(t, (tf.get(t) ?? 0) + 1); total++; }
                     }
                     // An unseen term would divide by a zero count; the book's own vocabulary cannot
                     // contain one, but an entry excluded from scene.entries can, so it floors at 1.
                     bk = { rarity: t => -Math.log10((tf.get(t) ?? 1) / Math.max(1, total)) };
-                    bookTf.set(book, bk);
-                }
+                    bookTf.set(bookName, bk);
+                    return bk;
+                };
                 for (const r of rows) {
+                    const bk = tfFor(r.entry?.world ?? book);
                     const toks = tokenize(r.entry?.content);
                     r.entryTokens = toks.length;
                     const names = ranking.properNounsOf(normalizeOrthography(String(r.entry?.content ?? '')));
@@ -568,7 +579,7 @@ const queryVec = async (S, name, value, em) => {
                     r.bookRarity = toks.length ? toks.reduce((a, t) => a + bk.rarity(t), 0) / toks.length : 0;
                 }
             }
-            const gradeOf = makeGradeOf(S.entries, scene.isExcluded);
+            const gradeOf = makeGradeOf(S.entries, scene);
             // Same population scoreScene ranks: constants are out, because relevance is not a concept that
             // applies to them. Ungraded rows are out because they carry no label.
             const kept = [], ungraded = [];

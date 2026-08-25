@@ -103,8 +103,8 @@ eq(threw.includes('cannot be swept against a preloaded scene'), true, 'sweeping 
 eq(ndcg([3, 2, 1], 3).toFixed(4), '1.0000', 'a perfectly ordered grade vector is nDCG 1');
 eq(ndcg([1, 2, 3], 1) < 1, true, 'a badly ordered vector scores below 1');
 eq(ndcg([0, 0, 0], 5), 0, 'no relevance -> 0, not NaN');
-// The property that makes excludeTitles free: the ideal comes from the RANKED vector, so a title that never
-// gets ranked changes neither DCG nor the ideal.
+// The property that makes an out-of-scope grade free: the ideal comes from the RANKED vector, so a title
+// that never gets ranked changes neither DCG nor the ideal.
 eq(ndcg([3, 0], 2), ndcg([3, 0], 2), 'ideal DCG is built from the ranked vector');
 eq(dcg([1, 1], 1), 1, 'dcg respects k');
 eq(nrm('176 - Villa Victory Party!').join(','), '176,villa,victory,party', 'nrm keeps alphanumeric tokens, drops singles');
@@ -112,30 +112,42 @@ eq(wiTitle({ comment: ' Villa ', uid: 1 }), 'Villa', 'title prefers the trimmed 
 eq(wiTitle({ comment: '', key: ['a', 'b'], uid: 1 }), 'a, b', 'title falls back to keys');
 eq(wiTitle({ comment: '', key: [], uid: 7 }), 'UID 7', 'title falls back to uid');
 
-// Grade matching is token-subset, and out-of-scope titles resolve to null rather than their grade.
+// Grade matching is token-subset, and out-of-scope rows resolve to null rather than their grade.
 // null, not 0, is the whole point: a judged 0 is a verdict and an absent grade is a hole in the pool,
 // and callers treat them differently (nDCG coerces with `?? 0`; a delivery rule must not).
+const inScope = { outOfScope: () => false, primary: 'B' };
 const gradeOf = makeGradeOf(
-    [{ title: 'Villa Victory Party', grade: 5 }, { title: 'Intimacy & Mechanics', grade: 4 }],
-    title => nrm(title).includes('mechanics'),
+    [{ title: 'Villa Victory Party', grade: 5 }, { title: 'Intimacy & Mechanics', grade: 4, book: 'Elsewhere' }],
+    { outOfScope: r => r.book === 'Elsewhere', primary: 'B' },
 );
 eq(gradeOf('176 - Villa Victory Party'), 5, 'a graded title matches by token subset');
-eq(gradeOf('Intimacy & Mechanics'), null, 'an excluded title has no usable verdict, not its grade');
+eq(gradeOf('Intimacy & Mechanics'), null, 'a grade from an unloaded book has no usable verdict, not its grade');
 eq(gradeOf('Something Else'), null, 'an ungraded title is null, distinct from a judged 0');
-eq(makeGradeOf([{ title: 'Villa', grade: 0 }], () => false)('Villa'), 0, 'a judged 0 stays 0 and is not confused with unjudged');
+eq(makeGradeOf([{ title: 'Villa', grade: 0 }], inScope)('Villa'), 0, 'a judged 0 stays 0 and is not confused with unjudged');
 
 // uid is authoritative when every grade carries one (every /wa-grade sample does) — the misattribution the
 // title heuristic allows is "Villa" also matching "Villa Party", first-found wins.
 const byUid = makeGradeOf(
     [{ title: 'Villa', grade: 5, uid: 1 }, { title: 'Villa Party', grade: 2, uid: 2 }],
-    () => false,
+    inScope,
 );
 eq(byUid({ uid: 2, title: 'Villa Party' }), 2, 'uid match beats the token-subset title match');
 eq(byUid({ uid: 9, title: 'Villa Party Annex' }), null, 'uid-complete grades: an unknown uid is ungraded, never title-guessed');
 eq(byUid({ key: 1, title: 'anything' }), 5, 'retrieval rows keyed by `key` resolve by uid too');
 // A mixed set (some grades lack uids) falls back to titles wholesale rather than half-and-half.
-eq(makeGradeOf([{ title: 'Villa', grade: 5, uid: 1 }, { title: 'Other', grade: 3 }], () => false)({ uid: 9, title: 'Other Thing' }), 3,
+eq(makeGradeOf([{ title: 'Villa', grade: 5, uid: 1 }, { title: 'Other', grade: 3 }], inScope)({ uid: 9, title: 'Other Thing' }), 3,
     'a grade set missing uids resolves every row by title');
+
+// (book, uid) IS THE KEY, not uid. Two books number their entries from 0, so a bare-uid map hands one
+// book's row the other book's grade — which is the whole reason the pool and the join changed shape.
+const twoBooks = makeGradeOf(
+    [{ title: 'Alpha Biology', grade: 4, uid: 1, book: 'omegaverse' }, { title: 'Sommers Pack Rules', grade: 0, uid: 1, book: 'B' }],
+    inScope,
+);
+eq(twoBooks({ uid: 1, book: 'omegaverse', title: 'Alpha Biology' }), 4, 'a second book\'s row resolves against its own grade');
+eq(twoBooks({ uid: 1, book: 'B', title: 'Sommers Pack Rules' }), 0, '...and the primary\'s uid 1 keeps its own');
+eq(twoBooks({ uid: 1, entry: { world: 'omegaverse' }, title: 'x' }), 4, 'a scored row carries its book on entry.world');
+eq(twoBooks({ uid: 1, title: 'x' }), 0, 'a row naming no book is the primary\'s, as every reader here assumes');
 
 // --- keyword scoring honours production's key suppression (worldsapart.js suppressKeys) ---
 // Samples embed books raw, so vectorized entries still carry keys the live scan would have blanked; scoring

@@ -53,7 +53,7 @@ import { runState, defaultSettings, settings, ensureSettings } from './extension
 import { ensureStudioStyle, entryFoldHtml, keyHitsHtml, makeSortControl, makeTierEditor, showEntryText, wiGlyph, wiTooltip } from './extension/ui-widgets.mjs';
 import { PRESENTATION_ALIAS, SORT_FNS, gradeOrder, normPresentation, presentationBaseLabel, presentationLabel, reconcileTiers, tierRank, wiTitleOf } from './extension/sort.mjs';
 import { lorebookStudio } from './extension/studio.mjs';
-import { armNames, buildSample, bundleSamples, captureParams, GRADE_ANCHORS, GRADE_SCALE, gradeValue, keyByUid, mergeGrades, openBundle, rowKey, sampleFile, searchedBook, splitGraded, toCandidate, unionArms } from './extension/grading.mjs';
+import { armNames, buildSample, bundleSamples, captureParams, GRADE_ANCHORS, GRADE_SCALE, gradeValue, keyByUid, mergeGrades, openBundle, rowKey, sampleFile, sceneDiff, searchedBook, splitGraded, toCandidate, unionArms } from './extension/grading.mjs';
 
 /** The grading scale in one caption line, shared by both grading popups. */
 const gradeAnchorLine = () => `Grade 0–4: ${GRADE_ANCHORS.map((a, g) => `${g} = ${a.split(';')[0].toLowerCase()}`).join(' · ')}.`;
@@ -3653,7 +3653,23 @@ async function superGradePopup({ captures, union, entryOf, prior: prior0 = [], s
                 } else if (Array.isArray(parsed?.scenes)) {
                     // openBundle, not `parsed.grades`: v3 keeps verdicts on the scene's entries, and this
                     // is the one place a previous round's file is read back in the browser.
-                    loaded.push(...(openBundle(parsed).entries ?? []));
+                    const priorSample = openBundle(parsed);
+                    // THE SCENE GUARD. Prior grades are pooled by `rowKey`, which is book + uid — so
+                    // without this, loading ANY graded bundle attaches its verdicts to whatever scene is
+                    // being graded, and they are written straight through to the new sample. That is not
+                    // hypothetical: it is how 50 rows of a Time Whore scene ended up on an Ascensus scene
+                    // captured 15 minutes later, at their original values. A book test would have missed
+                    // the commoner case, two scenes of one book, since those rows name the same books.
+                    //
+                    // ANY ARM, because the arms of one capture differ in `query` (the summary arm builds
+                    // its own) while sharing the scene. Skipped rather than thrown: one wrong file in a
+                    // multi-select should not lose the rest of the load.
+                    const off = captures.map(c => sceneDiff(c, priorSample)).sort((x, y) => x.length - y.length)[0] ?? ['query'];
+                    if (off.length) {
+                        toastr.warning(`${file.name} was graded against a different scene (${off.join(', ')} differ) — ignored, or its verdicts would be attached to this one`, 'Worlds Apart', { timeOut: 8000 });
+                        continue;
+                    }
+                    loaded.push(...(priorSample.entries ?? []));
                 } else {
                     toastr.warning(`${file.name} has neither graded scenes nor "pending" — ignored`, 'Worlds Apart');
                     continue;

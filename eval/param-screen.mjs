@@ -296,7 +296,7 @@ const fx = n => (n >= 0 ? '+' : '') + n.toFixed(4);
         if (!Object.keys(S.books?.[S.primaryBook] ?? {}).length) { console.error(`${path}: embeds no entries for primary book "${S.primaryBook ?? '?'}" — re-grade with books=full|meta`); process.exit(2); }
         if (!S.candidates?.length) { console.error(`${path}: logs no candidates`); process.exit(2); }
         const P = sceneParams(S, BUDGET ? { budgetTokens: BUDGET } : {});
-        const scene = loadScene(S, { indexFile: indexPath(S, { model: MODEL, all: P.denseAllEntries }), params: P });
+        const scene = loadScene(S, { indexFile: indexPath(S, { model: MODEL, all: P.denseAllEntries }), indexOpts: { model: MODEL }, params: P });
         const qv = await embed(S.query, { ollama: OLLAMA, model: MODEL });
         const base = await scoreScene({ sample: S, overrides: BUDGET ? { budgetTokens: BUDGET } : {}, k: K, scene, qv });
         scenes.push({ path, name: sceneLabel(S) || path, S, scene, qv, P, base });

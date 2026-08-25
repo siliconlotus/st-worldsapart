@@ -118,7 +118,7 @@ for (const file of samples) {
             ? (await ensureIndex(S, { all: true, model: em.model, prefix: em.doc, label: em.label, endpoint: em.endpoint, url: em.url, log: () => {} })).path
             : indexPath(S, { model: MODEL });
     } catch (e) { console.error(`  ${sceneLabel(S) || file}: ${e.message}`); continue; }
-    let scene; try { scene = loadScene(S, { indexFile, params: P }); } catch (e) { console.error(`  ${sceneLabel(S) || file}: ${e.message}`); continue; }
+    let scene; try { scene = loadScene(S, { indexFile, indexOpts: { model: MODEL }, params: P }); } catch (e) { console.error(`  ${sceneLabel(S) || file}: ${e.message}`); continue; }
     const build = makeCandidateSet({ ...scene, params: P });
     const rows = build(P.K1, P.B, null, [], S.query, haystackFor(S, P));
     if (!rows.length) continue;
@@ -136,7 +136,7 @@ for (const file of samples) {
         : null;
     // makeFuse is what stage 4 orders by, so this reads WA's own layout rather than a second copy of it.
     const ranked = makeFuse({ scene, haystack: haystackFor(S, P) })(rows);
-    const gradeOf = makeGradeOf(S.entries, scene.isExcluded);
+    const gradeOf = makeGradeOf(S.entries, scene);
     const enriched = ranked
         .filter(r => TIER === 'all' || (isMemory(r.entry) ? 'memory' : 'reference') === TIER)
         .map(r => {

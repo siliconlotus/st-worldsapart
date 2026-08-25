@@ -2,7 +2,7 @@
 // this pins the part that decides what a sample CONTAINS: book fidelity, the settings mapping, the
 // reference tier, and the foreign-book exclusion. A sample that silently loses a field is a graded scene
 // that can't be re-run, which is the whole failure this feature exists to prevent.
-import { buildSample, bundleSamples, captureParams, hashBooks, keyByUid, stRelative, isDurable, mergeGrades, openBundle, passKey, rowKey, sampleFile, searchedBook, splitGraded, unionArms } from '../extension/grading.mjs';
+import { buildSample, bundleSamples, captureParams, hashBooks, keyByUid, stRelative, isDurable, mergeGrades, openBundle, passKey, rowKey, sampleFile, sceneDiff, searchedBook, setGrades, splitGraded, unionArms } from '../extension/grading.mjs';
 import { eq, gradeValue } from './metrics.mjs';
 import * as ranking from '../extension/ranking.mjs';
 
@@ -52,7 +52,8 @@ eq(isDurable({ block: 'dynamic', sticky: 0 }), false, 'a plain dynamic row is gr
 
 // --- searchedBook: which collection the harness must load ---
 // The case that motivated it: the chat's bound book contributed ONE retrieved row, another book contributed
-// three. Keying the sample to the chat book would declare those three out of scope (excludeTitles).
+// three. Keying the sample to the chat book would point the harness at a collection that contributed almost
+// nothing, and rank the three against the wrong centroid.
 const rows = [
     { book: 'Chat', cosine: 0.9, block: 'dynamic' },
     { book: 'Lore', cosine: 0.8, block: 'dynamic' },
@@ -85,10 +86,11 @@ eq(sample.scanChat[0].mes, 'w', 'the scan MESSAGES are frozen into the sample, a
 // Without the chat path a sample cannot re-derive its query at another depth, so --depths is impossible.
 eq(sample.chat, 'chats/c.jsonl', 'chat provenance is carried (needed by --depths)');
 eq(sample.grades.length, 2, 'all grades kept');
-// The interleaved-books confound: a graded entry from a book the harness cannot rank must be DECLARED,
-// not dropped, or the eval scores a relevant entry as irrelevant.
-eq(JSON.stringify(sample.excludeTitles), '["Mechanics"]', 'grades from a non-primary book are auto-excluded');
-eq(sample.excludeTitles.includes('Villa Party'), false, 'primary-book grades are not excluded');
+// The interleaved-books case: a graded entry from a second attached book is kept as an ordinary grade and
+// nothing is declared about it. The harness ranks every book the document embeds, so scope is `books`
+// membership — which is why the sample must record every attached book and not only the primary.
+eq(sample.grades.some(g => g.book === 'Other'), true, 'a second book\'s grade is an ordinary grade, not an excluded one');
+eq('excludeTitles' in sample, false, 'nothing is declared out of scope by title');
 eq(Object.keys(sample.books).length, 2, 'every attached book is recorded');
 
 const { filename, content } = sampleFile(sample);
@@ -146,6 +148,23 @@ for (const d of [1, 2, 3]) {
 // The failure this guards: uid alone is ambiguous across books, so a same-uid entry in a DIFFERENT book must
 // not be mistaken for an already-graded one and skipped.
 eq(rowKey({ book: 'A', uid: 7 }) === rowKey({ book: 'B', uid: 7 }), false, 'rowKey separates same uid in different books');
+
+// --- the scene guard (sceneDiff) -------------------------------------------------------------------
+// rowKey is book + uid, so pooling prior grades WITHOUT this attaches one scene's verdicts to another —
+// which is what put 50 rows of a Time Whore scene onto an Ascensus scene captured 15 minutes later. The
+// same-book case is the one a book test misses, so it is the case asserted first.
+const SCENE = { query: 'q', scanChat: [{ name: 'N', mes: 'Ketheric raised his glass' }], depth: 2 };
+eq(sceneDiff(SCENE, { ...SCENE }).join(','), '', 'the same scene differs in nothing');
+eq(sceneDiff(SCENE, { ...SCENE, scanChat: [{ name: 'N', mes: 'a different turn entirely' }] }).join(','), 'scanChat',
+    'two scenes of ONE book are told apart by their messages — the case book+uid cannot see');
+eq(sceneDiff(SCENE, { ...SCENE, query: 'other' }).join(','), 'query', 'a different query is a different scene');
+// Depth is part of the scene, not metadata beside it: relevance is a property of the (entry, WINDOW)
+// pair, so ablating turns can remove the reference that earned the grade.
+eq(sceneDiff(SCENE, { ...SCENE, depth: 5 }).join(','), 'depth', 'the same messages read at another depth are another window, so another scene');
+// Trailing whitespace: refused by default, accepted only when asked for (graft-grades --allow-whitespace-drift).
+const WS = { ...SCENE, scanChat: [{ name: 'N', mes: 'Ketheric raised his glass   ' }] };
+eq(sceneDiff(SCENE, WS).join(','), 'scanChat', 'trailing whitespace is a difference by default');
+eq(sceneDiff(SCENE, WS, { ignoreTrailingWhitespace: true }).join(','), '', '...and only the explicit escape forgives it');
 
 const armA = {
     arm: 'shipped',
@@ -546,7 +565,7 @@ const schemaFixture = {
     params: { k: 1 }, paramSnapshot: { settings: { chunkSize: 1750 } }, scoredBy: 'x',
     waVersion: '1', stVersion: '2', depth: 4,
     primaryBook: 'B', book: 'p', index: 'i', books: { B: {} },
-    grades: [], excludeTitles: [], cutoff: {}, gradedCandidates: 5,
+    grades: [], cutoff: {}, gradedCandidates: 5,
     candidates: [{ book: 'B', uid: 1, tokens: 10 }],
     query: 'q', queryChat: [], invalidConfiguration: null,
 };
@@ -565,7 +584,38 @@ const bare = { ...schemaFixture };
 for (const k of ['waVersion', 'stVersion', 'paramSnapshot', 'book', 'gradedCandidates', 'queryChat', 'gradeScale', 'invalidConfiguration']) delete bare[k];
 const thin = await bundleForSchema([{ arm: 'shipped', sample: bare }], { start: 0, end: 10, user: 'u' });
 eq(keys(thin.arms[0]), 'name,params,scenes', 'an arm omitting every optional field carries no stray key');
-eq(keys(Object.values(thin.arms[0].scenes)[0]), 'candidates,cutoff,depth,excludeTitles,index,primaryBook,query,sceneStart', '...and neither does its cell');
+eq(keys(Object.values(thin.arms[0].scenes)[0]), 'candidates,cutoff,depth,index,primaryBook,query,sceneStart', '...and neither does its cell');
+
+// --- THE ROUND-TRIP INVARIANT: openBundle -> setGrades must reproduce the rater table -----------------
+// The assertion above is on a HUMAN rater, whose id IS raterKey's whole output, so it cannot fail. An
+// llm's id is JOINED from the model half and the rubric, and only the join is stored — so a deref that
+// hands back `{id, modelName}` lets re-indexing recompose `modelName + <empty rubric>` and drop the
+// rubric. Observed on a real bundle: `claude-sonnet-5<US>scene-relevance@b49449ef` came back as
+// `claude-sonnet-5<US>`. graft-grades.mjs and grade-pending.mjs are both exactly this round trip, so the
+// loss reached every bundle either one wrote. Asserted on the TABLE, not on a field, because the failure
+// is a changed identity and nothing downstream can tell one rater from another once it has moved.
+{
+    const withLlm = await bundleForSchema([{
+        arm: 'shipped',
+        sample: {
+            ...schemaFixture,
+            grades: [{ book: 'B', uid: 1, title: 'T', grades: [
+                { kind: 'llm', modelName: 'claude-sonnet-5', rubric: 'scene-relevance@b49449ef', grade: 3, gradedAt: '2026-08-15' },
+                { kind: 'human', id: 'u1', grade: 4, gradedAt: '2026-08-15' },
+            ] }],
+        },
+    }], { start: 0, end: 10, user: 'u' });
+    const table = JSON.stringify(withLlm.raters);
+    eq(table.includes('scene-relevance@b49449ef'), true, 'an llm rater\'s id carries the rubric it graded under');
+    // The round trip a tool actually performs.
+    const reread = openBundle(structuredClone(withLlm));
+    const rewritten = setGrades(structuredClone(withLlm), reread.entries);
+    eq(JSON.stringify(rewritten.raters), table, 'reading a document and writing it back reproduces the rater table exactly');
+    // And the decomposed half survives to a reader, which is what grade-pending.mjs labels a pass by.
+    const llmVerdict = reread.entries[0].grades.find(v => v.kind === 'llm');
+    eq(llmVerdict.rubric, 'scene-relevance@b49449ef', 'a reader gets the rubric back as a field, not only inside the id');
+    eq(llmVerdict.modelDigest, undefined, '...and a model NAME is not handed back as a digest');
+}
 eq(keys(Object.values(built.arms[0].scenes)[0]),
-    'book,candidates,cutoff,depth,excludeTitles,gradedCandidates,index,invalidConfiguration,primaryBook,query,queryChat,sceneStart',
+    'book,candidates,cutoff,depth,gradedCandidates,index,invalidConfiguration,primaryBook,query,queryChat,sceneStart',
     'cell keys are the schema\'s');

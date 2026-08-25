@@ -12,6 +12,11 @@
 // answering after the embedding model changed. The index path is recorded; the harness self-checks it by
 // re-embedding a stored chunk and comparing cosine.
 
+// The scene guard below compares scan MESSAGES through the shipped window builder rather than a second
+// copy of the segmentation rule. matcher.mjs is ST-free and imports nothing from here, so this stays
+// node-importable and acyclic.
+import * as matcher from './matcher.mjs';
+
 /** ST's own top-level directories. A stored path is cut at the FIRST of these, which is what makes it
  *  relative to the install root without having to know where that root is — the writer is the browser and
  *  cannot look for `config.yaml`. First rather than last, because a chat or a book may itself be named
@@ -218,6 +223,47 @@ export const isDurable = row => row.block === 'constant' || row.block === 'stick
 
 /** Unit Separator — see CLAUDE.md. A composite key git diffs, grep matches and awk doesn't truncate. */
 const US = '';
+
+/**
+ * Whether two captures hold the SAME SCENE, by the three fields that define one: the query text, the scan
+ * MESSAGES, and the depth they were read at. Returns the fields that differ; empty means the same scene.
+ *
+ * A GRADE IS A VERDICT ABOUT A (SCENE, ENTRY) PAIR, so a row may only be carried between two documents
+ * that hold the same scene — and neither half is checkable by name. The scene id is a position in a file
+ * that gets branched, edited and replayed, and `rowKey` is book + uid, which two scenes of ONE book share
+ * for almost every row. **Measured**: 50 rows of a Time Whore scene were carried onto an Ascensus scene
+ * captured 15 minutes later in the same sitting, at their original values including two half-grades,
+ * because the loader compared nothing. A book test would not have caught the same-book case, which is the
+ * commoner one.
+ *
+ * DEPTH IS PART OF THE SCENE, NOT METADATA BESIDE IT. Relevance is a property of the (entry, WINDOW) pair:
+ * an entry is relevant because something in the window refers to it, so ablating turns can remove the very
+ * reference that earned the grade, and the same entry against the same scene at a narrower depth is a
+ * different question. That is reasoning about the construct, not a measurement — but it is why two
+ * captures agreeing on query and messages while disagreeing on depth are still two scenes here.
+ *
+ * ON THE SCAN MESSAGES, never a joined window: the messages are what a document stores, so comparing
+ * windows would compare two derivations of the input rather than the input. The window each arm actually
+ * builds also depends on `matchWindow` and `includeNames`, which are the ARM's knobs and belong to a
+ * configuration rather than to the scene; a caller sweeping those is re-deriving a window over the same
+ * frozen input, which is what `graded-scene-grid --depths` does deliberately.
+ *
+ * ARMS OF ONE CAPTURE DIFFER IN `query` (the summary arm builds its own), so a caller holding several
+ * arms of one scene asks whether ANY of them matches rather than picking one.
+ *
+ * @param {{query?: string, scanChat?: object[], depth?: number}} a
+ * @param {{query?: string, scanChat?: object[], depth?: number}} b
+ * @param {{ignoreTrailingWhitespace?: boolean}} [opts] See graft-grades.mjs for why that escape exists
+ * @returns {string[]} Differing field names
+ */
+export function sceneDiff(a, b, { ignoreTrailingWhitespace = false } = {}) {
+    const scanOf = v => matcher.scanWindow(v?.scanChat ?? [], { depth: v?.depth, includeNames: true });
+    const read = (v, f) => (f === 'scanChat' ? scanOf(v) : f === 'depth' ? Number(v?.depth) : v?.[f]);
+    // Trailing whitespace per LINE, matching what the capture/rebuild drift actually is.
+    const flat = x => (typeof x === 'string' ? x.split('\n').map(l => l.replace(/[ \t]+$/, '')).join('\n') : x);
+    const norm = ignoreTrailingWhitespace ? flat : (x => x);
+    return ['query', 'scanChat', 'depth'].filter(f => norm(read(a, f)) !== norm(read(b, f)));
+}
 
 /**
  * A row's identity. uid alone is ambiguous across books, so it is book + uid.
@@ -436,12 +482,6 @@ export function searchedBook(rows) {
 export function buildSample({ name, notes, query, queryChat, scanChat, injects, sources, depth, chat, book, index, primaryBook, embedModel, params, snapshot, candidates, books, priority, grades, cutoff, gradedCandidates, pluginFP, sourceFP, waVersion, stVersion, now }) {
     // `budget` leaves the snapshot and becomes a field of its own, so the document-level hoist carries it.
     const { budget, ...rest } = snapshot ?? {};
-    // Grades for entries outside the searched collection can't be ranked offline: the harness loads one
-    // vector collection, so a second book's entries have no cosine and never enter the ranking. Declaring
-    // them here means the harness reports "excluded" instead of scoring them as irrelevant — the exact
-    // confound the interleaved-books case introduces.
-    const foreign = grades.filter(g => g.book && g.book !== primaryBook);
-
     return {
         name,
         notes: notes || `Graded ${now} from a live /wa-grade run.`,
@@ -513,7 +553,11 @@ export function buildSample({ name, notes, query, queryChat, scanChat, injects, 
 
         grades,
         gradeScale: GRADE_SCALE,
-        excludeTitles: foreign.map(g => g.title),
+        // NO `excludeTitles`. It named the graded rows from a non-primary book, back when the harness
+        // loaded ONE collection and so could not rank them. It ranks every embedded book now
+        // (eval/scene.mjs loadScene), which made the predicate wrong rather than merely stale: those rows
+        // are in scope, and a reader honouring the list would discard valid verdicts. Scope is a fact
+        // about the document — is the row's book in `books` — so nothing needs to be declared.
 
         // The grading depth, under its historical name — samples on disk predate the cliff's removal and
         // carry its settings here too. A later run diffs against what was actually graded.
@@ -677,10 +721,37 @@ function indexVerdicts(entries) {
     return { entries: out, raters };
 }
 
+/**
+ * One stored rater record, expanded back into the fields `raterKey` composed it from.
+ *
+ * WITHOUT THIS THE ROUND TRIP IS LOSSY, AND SILENTLY. The record keeps the joined `id` plus the
+ * descriptive fields a person reads (RATER_DESC); the COMPONENTS of an llm's id — the model half and the
+ * RUBRIC — live only inside the string. Handing a reader `{id, modelName}` and no rubric meant that
+ * re-indexing recomposed a different id (`modelName` + an empty rubric), deleting the pass identity from
+ * every document that went through openBundle -> setGrades: graft-grades.mjs and grade-pending.mjs both,
+ * and observed on a real bundle, where `claude-sonnet-5<US>scene-relevance@b49449ef` came back as
+ * `claude-sonnet-5<US>`.
+ *
+ * THROUGH raterParts, which is the inverse raterKey already documents, so this is that split rather than
+ * a second rule about how an id decomposes. The invariant it buys is asserted in grading-check.mjs:
+ * indexVerdicts(deref(entries, raters)) reproduces `raters`.
+ */
+const expandRater = (who) => {
+    if (who?.kind !== 'llm') return who;
+    const { modelId, rubric, isDigest } = raterParts(who);
+    return {
+        ...who,
+        // Under the right name: raterKey reads `modelDigest || modelName`, so restoring a NAME as a digest
+        // would recompose correctly and lie to every reader of the verdict.
+        ...(isDigest ? { modelDigest: modelId } : { modelName: who.modelName ?? modelId }),
+        ...(rubric ? { rubric } : {}),
+    };
+};
+
 /** The inverse: an index back to the rater it names, so a reader never handles indices. */
 const deref = (entries, raters = []) => (entries ?? []).map(e => ({
     ...e,
-    ...(e.grades ? { grades: e.grades.map(({ rater, ...v }) => { const { rater: _i, ...who } = raters[rater] ?? {}; return { ...who, ...v }; }) } : {}),
+    ...(e.grades ? { grades: e.grades.map(({ rater, ...v }) => { const { rater: _i, ...who } = raters[rater] ?? {}; return { ...expandRater(who), ...v }; }) } : {}),
 }));
 
 /**

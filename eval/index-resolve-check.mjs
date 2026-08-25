@@ -25,7 +25,7 @@ const throws = (fn, match, msg) => {
 const sample = (vectorized, extra = {}) => ({
     primaryBook: 'Check Book',
     books: { 'Check Book': { 1: { uid: 1, comment: 'One', content: 'alpha beta', key: ['alpha'], vectorized } } },
-    entries: [], excludeTitles: [], params: {},
+    entries: [], params: {},
     query: 'alpha', scanText: 'alpha',
     ...extra,
 });

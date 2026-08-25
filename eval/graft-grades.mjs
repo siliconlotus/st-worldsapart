@@ -24,7 +24,7 @@
 // ({bundle, book, uid}) and that shape says everything this one did, plus spanning scenes.
 import { readFileSync, writeFileSync, existsSync } from 'node:fs';
 import { basename, resolve as resolvePath } from 'node:path';
-import { armNames, openBundle, rowKey, setGrades } from '../extension/grading.mjs';
+import { armNames, openBundle, rowKey, sceneDiff, setGrades } from '../extension/grading.mjs';
 import * as matcher from '../extension/matcher.mjs';
 import { gradeValue } from './metrics.mjs';
 
@@ -71,13 +71,10 @@ for (const path of files) {
     const src = JSON.parse(readFileSync(srcPath, 'utf8'));
 
     // --- the scene guard, before anything is read out of the source -----------------------------------
+    // THE RULE LIVES IN grading.mjs, because the browser's prior-sample loader needs the same one — and
+    // that loader having no guard at all is what put one scene's 50 rows onto another's bundle.
     const a = armOf(fresh), b = armOf(src);
-    // Compared on the scan MESSAGES rather than a joined window: that is what the document stores, and a
-    // window would compare two derivations rather than the frozen input.
-    const scanOf = v => matcher.scanWindow(v.scanChat ?? [], { depth: v.depth, includeNames: true });
-    let diff = ['query'].filter(f => a[f] !== b[f])
-        .concat(scanOf(a) !== scanOf(b) ? ['scanChat'] : [])
-        .concat(Number(a.depth) !== Number(b.depth) ? ['depth'] : []);
+    let diff = sceneDiff(a, b);
     // TRAILING WHITESPACE ONLY, and only when asked for. Measured on 4 of 56 scenes across 3 chats: the
     // capture's scanText is one character shorter than the window rebuilt from the same turn, because a
     // message in the chat file ends with a space that the capture did not record. Production reads `mes`
@@ -87,13 +84,14 @@ for (const path of files) {
     // its input stops being able to tell you the scene changed.
     let drifted = false;
     if (diff.length && WS_DRIFT) {
-        const flat = s => String(s).split('\n').map(l => l.replace(/[ \t]+$/, '')).join('\n');
-        const still = diff.filter(f => (f === 'depth' ? Number(a.depth) !== Number(b.depth) : flat(f === 'scanChat' ? scanOf(a) : a[f]) !== flat(f === 'scanChat' ? scanOf(b) : b[f])));
+        const still = sceneDiff(a, b, { ignoreTrailingWhitespace: true });
         if (!still.length) { drifted = true; console.error(`   ${basename(path)}: ${diff.join(', ')} differ by trailing whitespace only — accepted under --allow-whitespace-drift`); }
         diff = still;
     }
     if (diff.length) {
         console.error(`!! ${basename(path)}: REFUSED — ${diff.join(', ')} differ from ${basename(srcPath)}, so these grades were not made about this scene`);
+        // Sizes only, for the reader — the verdict was `sceneDiff`'s.
+        const scanOf = v => matcher.scanWindow(v.scanChat ?? [], { depth: v.depth, includeNames: true });
         for (const f of diff) {
             const [x, y] = (f === 'scanChat' ? [scanOf(a), scanOf(b)] : [a[f], b[f]])
                 .map(v => (typeof v === 'string' ? `${v.length}ch` : String(v)));

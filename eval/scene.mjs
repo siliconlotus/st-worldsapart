@@ -222,8 +222,6 @@ export function whyFor(entry, scanText, P) {
     });
 }
 
-export const CID = 'wa';
-
 /** ST's string hash. WA stores each book's vectors under wa_${hash(bookName)}, so the collection path is
  *  derivable rather than configured. Must stay bit-identical to ST's or the index is simply not found. */
 export const getStringHash = (str, seed = 0) => { let h1 = 0xdeadbeef ^ seed, h2 = 0x41c6ce57 ^ seed; for (let i = 0, ch; i < str.length; i++) { ch = str.charCodeAt(i); h1 = Math.imul(h1 ^ ch, 2654435761); h2 = Math.imul(h2 ^ ch, 1597334677); } h1 = Math.imul(h1 ^ (h1 >>> 16), 2246822507) ^ Math.imul(h2 ^ (h2 >>> 13), 3266489909); h2 = Math.imul(h2 ^ (h2 >>> 16), 2246822507) ^ Math.imul(h1 ^ (h1 >>> 13), 3266489909); return 4294967296 * (2097151 & h2) + (h1 >>> 0); };
@@ -272,7 +270,7 @@ export const nrm = s => (String(s ?? '').toLowerCase().match(/[a-z0-9]+/g) ?? []
 
 export const dcg = (v, k) => v.slice(0, k).reduce((s, x, i) => s + x / Math.log2(i + 2), 0);
 /** Graded nDCG. The ideal is built from the RANKED vector, so a graded title that never gets ranked
- *  contributes to neither DCG nor the ideal — which is what makes excludeTitles free. */
+ *  contributes to neither DCG nor the ideal — which is what makes an out-of-scope grade free. */
 export const ndcg = (vec, k) => { const ideal = [...vec].sort((a, b) => b - a); return dcg(ideal, k) ? dcg(vec, k) / dcg(ideal, k) : 0; };
 
 /**
@@ -315,14 +313,19 @@ export function stInstall() {
  *
  * The returned path may not exist. Naming the rebuildable one in that case is what lets loadScene say which
  * file to build instead of scoring on an empty collection.
+ *
+ * PER BOOK, because a scene ranks every book the chat had attached and each has its own collection. Only
+ * the primary's may come from `index` or the bundle's recorded `S.index` — both name ONE file, and handing
+ * a second book the primary's collection would score it against another book's chunks.
  */
-export const indexPath = (S, { vectors = 'data/default-user/vectors/ollama', model = 'bge-m3', index = null, all = false } = {}) => {
-    if (index) return index;
+export const indexPath = (S, { vectors = 'data/default-user/vectors/ollama', model = 'bge-m3', index = null, all = false, book = S.primaryBook } = {}) => {
+    const own = book === S.primaryBook;
+    if (index && own) return index;
     // THE ALL-ENTRIES COLLECTION IS A DIFFERENT FILE, and stage 1 embeds everything now, so this is the
     // ordinary case rather than an arm's. The live collection and S.index below hold vectorized entries
     // only, so neither can answer for a scene scored with denseAllEntries on; go straight to the cache
     // reindex.mjs --all writes.
-    if (all) return cachePath(S, chunkConfig(S), model, S.primaryBook, true);
+    if (all) return cachePath(S, chunkConfig(S), model, book, true);
     // THROUGH stInstall, NOT THE CWD. Both local candidates are recorded with ST's `data/` prefix, so testing
     // them raw asks whether the collection exists *relative to wherever the tool was launched from* — and the
     // answer changes with the directory while the scene does not. That is not hypothetical: the same sample
@@ -331,10 +334,10 @@ export const indexPath = (S, { vectors = 'data/default-user/vectors/ollama', mod
     // anyway and the rebuild cache is the answer.
     const st = stInstall();
     const local = p => (st ? st.resolve(p) : p);
-    if (S.index && existsSync(local(S.index))) return local(S.index);
-    const derived = local(`${vectors}/wa_${getStringHash(S.primaryBook)}/${model}/index.json`);
+    if (own && S.index && existsSync(local(S.index))) return local(S.index);
+    const derived = local(`${vectors}/wa_${getStringHash(book)}/${model}/index.json`);
     if (existsSync(derived)) return derived;
-    return cachePath(S, chunkConfig(S), model);
+    return cachePath(S, chunkConfig(S), model, book);
 };
 
 /** One local embed call. Deliberately not cached to disk: a stored vector would keep answering after the
@@ -507,6 +510,10 @@ export const sceneParams = (S, overrides = {}) => ({
     // Exact key strings to treat as removed from the book (see scoringKeys). Null = none.
     dropKeys: null,
     queryMode: 'messages',
+    // PER-BOOK QUOTA for stage 4 (applyBudget capOf), as {book: cap}. Null = no cap, which is what every
+    // capture in the corpus ran under — the live setting lives on the world priority list and no bundle
+    // records it, so this is an arm's knob rather than a replayed value.
+    bookCaps: null,
     // NO ADMISSION PARAMS. `admit`, `bm25Floor`, `bm25FloorPct` and `threshold` are gone with the gates
     // they simulated — stage 1 now scores by cosine and returns everything (plugin/scoring.mjs). Bundles
     // captured before that carry `threshold` in `params`; it is READ AND IGNORED rather than rejected,
@@ -517,13 +524,29 @@ export const sceneParams = (S, overrides = {}) => ({
 /**
  * Loads a sample into everything needed to score it.
  *
+ * EVERY ATTACHED BOOK, one ranking. Production pools them: `scoreEntriesUnsafe` syncs a collection per
+ * world and the plugin's /query-multi scores them all, each against its OWN centroid, before one top-K
+ * across the lot. Loading only `primaryBook` made cross-book competition and `applyBudget`'s per-book cap
+ * unmeasurable, and discarded every graded row from a second book — 336 of them across 12 cells here.
+ *
+ * PER-BOOK CENTROIDS, POOLED COSINES, deliberately: it is what production does, and the harness models
+ * the pipeline rather than an argument about it. It does mean two books' cosines come from different
+ * corpus means and are compared anyway — the raw-vs-centred question `uncenteredGate` exists for. Nothing
+ * here is evidence either way; a divergence would have to be measured before it could be justified.
+ *
+ * A ROW'S IDENTITY IS (book, uid), never uid: uids are per book and number from 0, so two books collide on
+ * almost every one. The key is content-lexical's `entryKey` — the same `${world}.${uid}` ST core uses for
+ * an activated entry, and the same string the content index, the name df, the pool and the grade join all
+ * read, so there is one of it.
+ *
  * @param {object} S The parsed sample
  * @param {object} opts
- * @param {string} opts.indexFile Vector index path
+ * @param {string} opts.indexFile Vector index path for the PRIMARY book; other books resolve their own
+ * @param {object} [opts.indexOpts] Extra indexPath options (vectors, model) for the other books
  * @param {object} opts.params sceneParams() output
- * @returns {object} entries, byUid, loaded index, gazetteer, pool sets, and the grade/exclusion matchers
+ * @returns {object} entries, byKey, loaded indexes, gazetteer, pool sets, and the grade/scope matchers
  */
-export function loadScene(S, { indexFile, params: P }) {
+export function loadScene(S, { indexFile, indexOpts = {}, params: P }) {
     const primary = S.primaryBook;
     // `primaryBook` names a key of `books`, and a bundle whose book was renamed after capture no longer
     // satisfies that. Says so, rather than dying inside Object.values with nothing naming the book.
@@ -553,160 +576,202 @@ export function loadScene(S, { indexFile, params: P }) {
         }
     }
     // AFTER the fingerprint guard — which asks whether these are the books the bundle was derived from, a
-    // question about the PRISTINE bundle — and BEFORE `entries`, `byUid`, the gazetteer and POOL are built
+    // question about the PRISTINE bundle — and BEFORE `entries`, `byKey`, the gazetteer and POOL are built
     // from them.
     if (!S.availabilityFiltered) { dropUnavailable(S, S.name ?? 'sample'); S.availabilityFiltered = true; }
-    const entries = Object.values(S.books[primary]);
-    const byUid = new Map(entries.map(e => [Number(e.uid), e]));
-    // A KEYWORD-ONLY BOOK HAS NO COLLECTION, and that is a configuration rather than a failure: indexing
-    // gates on `vectorized` (reindex.mjs buildItems), so a book with no vectorized entry yields no items
-    // and ensureIndex refuses to build one. Foxbridge is exactly that — 38 hand-keyed reference entries,
-    // 0 vectorized — and until this branch existed its two clean captures could not be scored at all,
-    // while the 8 that could embedded a reverted, partly-vectorized copy of the same book. Retrieval then
-    // contributes nothing, every entry arrives by the keyword route, and the scene is deterministic: no
-    // index, no embedding call, no ollama. corpusMean is the only thing that cannot take an empty list,
-    // and it is guarded here rather than in plugin/ so this needs no redeploy.
-    // AVAILABILITY IS ENFORCED HERE, NOT IN THE COLLECTION. The index is built from the pristine book
-    // (reindex.mjs ensureIndex), so it may carry chunks of entries this scene post-dates; `byUid` is the
-    // filtered view, and dropping what it does not hold is the whole enforcement. Doing it this way is what
-    // lets one cached collection serve every scene of a book without any of them seeing another's cutoff.
-    const rawAll = existsSync(indexFile) ? JSON.parse(readFileSync(indexFile, 'utf8')).items : [];
-    const raw = rawAll.filter(it => byUid.has(Number(it.metadata?.index)));
-    // DENSE-ALL SPLITS THE COLLECTION BY STAGE. An --all index (reindex.mjs) holds every entry's chunks; the
-    // vectorized ones are item-for-item what the ordinary build produces, so keeping them as `items` leaves
-    // stage 1 — admission, the top-K, the corpus mean, every baseline cosine — byte-identical to a run
-    // against the ordinary index. The rest go to `extra`, scored at stage 3 only.
-    // CENTROID-ONLY CHUNKS ARE NOT A COLLECTION. An --archived index (reindex.mjs) carries disabled memory
-    // entries so they can weigh in the mean; they must reach neither `items` nor `extra`, because an entry
-    // the author disabled is one core would never activate and one no ST install stores a vector for.
-    const archived = raw.filter(it => it.metadata?.centroidOnly);
-    const live = raw.filter(it => !it.metadata?.centroidOnly);
-    const vectorUids = new Set(entries.filter(e => e.vectorized).map(e => Number(e.uid)));
-    const ofVectorized = it => vectorUids.has(Number(it.metadata?.index));
-    const items = P.denseAllEntries ? live.filter(ofVectorized) : live;
-    const extra = P.denseAllEntries ? live.filter(it => !ofVectorized(it)) : [];
-    // An ordinary index under this param would score every entry at its production value and report the arm
-    // as flat, which is the one failure that looks like a result.
-    if (P.denseAllEntries && !extra.length) throw new Error(`denseAllEntries is on but ${indexFile} holds no non-vectorized chunks — build that collection with: node eval/reindex.mjs <sample.json> --all`);
-    // A column population that includes the extras has nothing to put in the column without them, and would
-    // report as a weight change on the vectorized half alone.
-    if (!P.denseAllEntries && (P.denseColumn === 'nocos' || P.denseColumn === 'all')) throw new Error(`denseColumn '${P.denseColumn}' scores entries the ordinary collection has no vectors for — set denseAllEntries too`);
-    // AN EMPTY COLLECTION IS ONLY LEGITIMATE WHEN THE BOOK HAS NOTHING TO INDEX. Same gate reindex.mjs
-    // buildItems applies, so the two agree on what "nothing to index" means. Without this the two cases are
-    // indistinguishable at runtime: a missing collection scores keyword-and-BM25-only and returns a
-    // plausible number rather than an error, which is what a bundle opened on a machine that never held the
-    // author's vectors does. Measured on this corpus: the same scene read 10/10 judged with the index and
-    // 0/0 without, and only the second one looked like a result.
-    if (!items.length && entries.some(e => e.vectorized && !e.disable && e.content)) {
-        throw new Error(`no vector collection for "${primary}" at ${indexFile} — the book has vectorized entries, so scoring without one would silently drop cosine. Build it with: node eval/reindex.mjs <sample.json>`);
-    }
-    // The mean is PRODUCTION'S by default — the vectorized corpus's centroid — so a dense-all entry is
-    // centered by the same vector its competitors are. centroidPopulation is the arm that changes it.
-    // A book with nothing vectorized has no production centroid, and there the arm's own corpus is the only
-    // one there is; that book has no baseline cosine to preserve anyway.
-    const memoryUids = new Set(entries.filter(isMemory).map(e => Number(e.uid)));
-    const ofMemory = it => memoryUids.has(Number(it.metadata?.index));
-    // An ordinary or --all index under 'memoryArchived' has no archived mass to add, so it would score the
-    // 'memory' population and report it as this arm — the one failure that looks like a result.
-    //
-    // ASKED OF THE BOOK, NOT THE INDEX ALONE. A book with nothing retired legitimately has no archived
-    // chunks, and it is the most valuable scene in the arm rather than a misconfiguration: its delta MUST
-    // come back exactly 0, which is the only check that the arm is wired to what it claims. Throwing on it
-    // would remove the control and leave only scenes that cannot disconfirm anything.
-    const archivable = entries.filter(e => e.disable && isMemory(e) && e.content).length;
-    if (P.centroidPopulation === 'memoryArchived' && archivable && !archived.length) {
-        throw new Error(`centroidPopulation 'memoryArchived': "${primary}" has ${archivable} archived memory entries but ${indexFile} holds no centroid-only chunks — build that collection with: node eval/reindex.mjs <sample.json> --all --archived`);
-    }
-    const centroidSources = {
-        vectorized: () => (items.length ? items : extra),
-        memory: () => live.filter(ofMemory),
-        memoryArchived: () => [...live.filter(ofMemory), ...archived],
+    // EVERY EMBEDDED BOOK, primary first. `Object.keys` is insertion order and a bundle does not promise
+    // its primary is first, so it is hoisted: `loaded[0]` and `items` are the primary's, which is what the
+    // callers' diagnostics read.
+    const books = [primary, ...Object.keys(S.books).filter(b => b !== primary)];
+    // STAMPED, because `world` is what identifies an entry across books and 1295 of the corpus's embedded
+    // entries carry none — a bundle copies whatever the world file held, and the field is optional there.
+    // entryKey, the content index, the name df and applyBudget's per-book cap all read it. Idempotent, and
+    // `??=` rather than `=` because a copy that HAS a world is the authority: measured over all 107
+    // bundles, none disagrees with the key it sits under.
+    for (const b of books) for (const e of Object.values(S.books[b])) e.world ??= b;
+    const entries = books.flatMap(b => Object.values(S.books[b]));
+    const byKey = new Map(entries.map(e => [entryKey(e), e]));
+
+    /**
+     * One book's collection, split into the two stages and centered on its OWN corpus mean — which is what
+     * the plugin does per collection, and why this is a loop rather than one concatenated index.
+     */
+    const loadBook = (book, indexFile) => {
+        const own = Object.values(S.books[book]);
+        const uids = new Set(own.map(e => Number(e.uid)));
+        // A KEYWORD-ONLY BOOK HAS NO COLLECTION, and that is a configuration rather than a failure: indexing
+        // gates on `vectorized` (reindex.mjs buildItems), so a book with no vectorized entry yields no items
+        // and ensureIndex refuses to build one. Foxbridge is exactly that — 38 hand-keyed reference entries,
+        // 0 vectorized — and until this branch existed its two clean captures could not be scored at all,
+        // while the 8 that could embedded a reverted, partly-vectorized copy of the same book. Retrieval then
+        // contributes nothing, every entry arrives by the keyword route, and the scene is deterministic: no
+        // index, no embedding call, no ollama. corpusMean is the only thing that cannot take an empty list,
+        // and it is guarded here rather than in plugin/ so this needs no redeploy.
+        // AVAILABILITY IS ENFORCED HERE, NOT IN THE COLLECTION. The index is built from the pristine book
+        // (reindex.mjs ensureIndex), so it may carry chunks of entries this scene post-dates; the book is the
+        // filtered view, and dropping what it does not hold is the whole enforcement. Doing it this way is what
+        // lets one cached collection serve every scene of a book without any of them seeing another's cutoff.
+        const rawAll = existsSync(indexFile) ? JSON.parse(readFileSync(indexFile, 'utf8')).items : [];
+        const raw = rawAll.filter(it => uids.has(Number(it.metadata?.index)));
+        // DENSE-ALL SPLITS THE COLLECTION BY STAGE. An --all index (reindex.mjs) holds every entry's chunks; the
+        // vectorized ones are item-for-item what the ordinary build produces, so keeping them as `items` leaves
+        // stage 1 — admission, the top-K, the corpus mean, every baseline cosine — byte-identical to a run
+        // against the ordinary index. The rest go to `extra`, scored at stage 3 only.
+        // CENTROID-ONLY CHUNKS ARE NOT A COLLECTION. An --archived index (reindex.mjs) carries disabled memory
+        // entries so they can weigh in the mean; they must reach neither `items` nor `extra`, because an entry
+        // the author disabled is one core would never activate and one no ST install stores a vector for.
+        const archived = raw.filter(it => it.metadata?.centroidOnly);
+        const live = raw.filter(it => !it.metadata?.centroidOnly);
+        const vectorUids = new Set(own.filter(e => e.vectorized).map(e => Number(e.uid)));
+        const ofVectorized = it => vectorUids.has(Number(it.metadata?.index));
+        const items = P.denseAllEntries ? live.filter(ofVectorized) : live;
+        const extra = P.denseAllEntries ? live.filter(it => !ofVectorized(it)) : [];
+        // An ordinary index under this param would score every entry at its production value and report the arm
+        // as flat, which is the one failure that looks like a result. A book whose every entry is vectorized
+        // legitimately has no extras, so the demand is on the BOOK rather than on the file.
+        if (P.denseAllEntries && !extra.length && own.some(e => !e.vectorized && !e.disable && e.content)) throw new Error(`denseAllEntries is on but ${indexFile} holds no non-vectorized chunks for "${book}" — build that collection with: node eval/reindex.mjs <sample.json> --all --book ${JSON.stringify(book)}`);
+        // A column population that includes the extras has nothing to put in the column without them, and would
+        // report as a weight change on the vectorized half alone.
+        if (!P.denseAllEntries && (P.denseColumn === 'nocos' || P.denseColumn === 'all')) throw new Error(`denseColumn '${P.denseColumn}' scores entries the ordinary collection has no vectors for — set denseAllEntries too`);
+        // AN EMPTY COLLECTION IS ONLY LEGITIMATE WHEN THE BOOK HAS NOTHING TO INDEX. Same gate reindex.mjs
+        // buildItems applies, so the two agree on what "nothing to index" means. Without this the two cases are
+        // indistinguishable at runtime: a missing collection scores keyword-and-BM25-only and returns a
+        // plausible number rather than an error, which is what a bundle opened on a machine that never held the
+        // author's vectors does. Measured on this corpus: the same scene read 10/10 judged with the index and
+        // 0/0 without, and only the second one looked like a result.
+        if (!items.length && own.some(e => e.vectorized && !e.disable && e.content)) {
+            throw new Error(`no vector collection for "${book}" at ${indexFile} — the book has vectorized entries, so scoring without one would silently drop cosine. Build it with: node eval/reindex.mjs <sample.json> --book ${JSON.stringify(book)}`);
+        }
+        // The mean is PRODUCTION'S by default — the vectorized corpus's centroid — so a dense-all entry is
+        // centered by the same vector its competitors are. centroidPopulation is the arm that changes it.
+        // A book with nothing vectorized has no production centroid, and there the arm's own corpus is the only
+        // one there is; that book has no baseline cosine to preserve anyway.
+        const memoryUids = new Set(own.filter(isMemory).map(e => Number(e.uid)));
+        const ofMemory = it => memoryUids.has(Number(it.metadata?.index));
+        // An ordinary or --all index under 'memoryArchived' has no archived mass to add, so it would score the
+        // 'memory' population and report it as this arm — the one failure that looks like a result.
+        //
+        // ASKED OF THE BOOK, NOT THE INDEX ALONE. A book with nothing retired legitimately has no archived
+        // chunks, and it is the most valuable scene in the arm rather than a misconfiguration: its delta MUST
+        // come back exactly 0, which is the only check that the arm is wired to what it claims. Throwing on it
+        // would remove the control and leave only scenes that cannot disconfirm anything.
+        const archivable = own.filter(e => e.disable && isMemory(e) && e.content).length;
+        if (P.centroidPopulation === 'memoryArchived' && archivable && !archived.length) {
+            throw new Error(`centroidPopulation 'memoryArchived': "${book}" has ${archivable} archived memory entries but ${indexFile} holds no centroid-only chunks — build that collection with: node eval/reindex.mjs <sample.json> --all --archived --book ${JSON.stringify(book)}`);
+        }
+        const centroidSources = {
+            vectorized: () => (items.length ? items : extra),
+            memory: () => live.filter(ofMemory),
+            memoryArchived: () => [...live.filter(ofMemory), ...archived],
+        };
+        if (!centroidSources[P.centroidPopulation]) throw new Error(`unknown centroidPopulation "${P.centroidPopulation}" — one of ${Object.keys(centroidSources).join(', ')}`);
+        let meanSource = centroidSources[P.centroidPopulation]();
+        // A ZERO-LENGTH MEAN IS NOT A CENTROID. centeredCosineScores dimensions its work off mean.length, so an
+        // empty one returns all-zero scores for every chunk rather than throwing — a whole book scored at cosine
+        // 0, which is the failure that looks like a result rather than an error.
+        //
+        // FALLING BACK TO THE WHOLE COLLECTION IS WHAT PRODUCTION DOES, not a harness convenience: the client
+        // names uids and the plugin means over them, and `centroidFor` (plugin/server.js) returns the full
+        // corpus mean for an absent or empty list. So a reference-only book — no memory entries to name — is
+        // centered on everything it has, in the runtime and here alike. Diverging would make this harness score
+        // a pipeline nobody runs.
+        const emptySelection = !meanSource.length && live.length;
+        if (emptySelection) meanSource = live;
+        // No `lexical`: scoreCollection is cosine-only, and stage 3's text index is content-lexical's.
+        const loaded = { book, items, extra, mean: meanSource.length ? corpusMean(meanSource) : [] };
+
+        // PROJECTING THE COMPONENTS OUT AT LOAD, not at scoring, because they are a property of the corpus and
+        // recomputing them per query would be the same vectors and the same answer at N times the cost. The
+        // vectors are transformed and the mean becomes zero, so the shipped centeredCosineScores still does the
+        // arithmetic — subtracting a zero mean from an already-centred vector. The QUERY has to take the same
+        // transform at each call site or the two sides are compared in different spaces.
+        //
+        // COMPONENTS OF THE CENTROID POPULATION, the same rows that define the mean. Taking them over a wider
+        // set would remove directions the mean was never built from.
+        // TWO STAGES, SHARED THEN OWN, and every centring moves into them once either is on — loaded.mean
+        // becomes zero and the shipped centeredCosineScores subtracts it, so there is exactly one place that
+        // decides what comes off. Stage B's mean is the book's centroid OF THE RESIDUAL, which is what the
+        // book-specific direction is once the shared part is gone; with sharedComponents off it is the ordinary
+        // centroid and the arm reduces to single-stage.
+        if (P.sharedComponents > 0 || P.pcRemove > 0 || P.whitenR > 0) {
+            if (!P.meanCentered) throw new Error('sharedComponents/pcRemove need meanCentered: both are defined as what comes off BEFORE the cosine, and uncentered scoring subtracts nothing');
+            if (P.uncenteredGate > 0) throw new Error('sharedComponents/pcRemove with uncenteredGate is not modelled: the gate reads RAW cosine off item.vector, which projection has already changed');
+            const stages = [];
+            if (P.sharedComponents > 0) {
+                const basis = loadBasis(book, P.embedModel ?? 'bge-m3');
+                if (!basis) throw new Error(`sharedComponents needs a basis for "${book}" — build it with: node eval/global-basis.mjs <samples...>`);
+                if (basis.comps.length < P.sharedComponents) throw new Error(`sharedComponents ${P.sharedComponents} but "${book}"'s basis holds ${basis.comps.length} components — rebuild with --m ${P.sharedComponents} --force`);
+                stages.push({ mean: basis.mean, comps: basis.comps.slice(0, P.sharedComponents) });
+            }
+            const applyAll = (v, upto) => stages.slice(0, upto).reduce((acc, st) => projectOut(acc, st.mean, st.comps), v);
+            // Stage A first, over everything the mean or the components could be taken from, so stage B sees
+            // the residual and nothing else.
+            const shiftA = xs => xs.map(it => ({ ...it, vector: applyAll(it.vector, stages.length) }));
+            loaded.items = shiftA(loaded.items);
+            loaded.extra = shiftA(loaded.extra);
+            // meanSource holds the PRE-transform objects, so re-resolve each through the transformed arrays by
+            // hash; anything it names that is not in the live collection (archived centroid mass) is transformed
+            // on the spot.
+            const byHash = new Map([...loaded.items, ...loaded.extra].map(it => [it.metadata?.hash, it]));
+            const srcA = meanSource.map(it => byHash.get(it.metadata?.hash) ?? { ...it, vector: applyAll(it.vector, stages.length) });
+            const bookMean = srcA.length ? corpusMean(srcA) : loaded.mean;
+            // Removal and whitening share one component list: asking for both takes the union, with the removed
+            // ones at weight 0 and the rest at their whitened weight, so they compose instead of fighting.
+            const nComps = Math.max(P.pcRemove, P.whitenR);
+            const bookComps = nComps > 0 ? topComponents(srcA, nComps, bookMean) : [];
+            let weights = null;
+            if (P.whitenR > 0 && bookComps.length) {
+                const sd = componentScales(srcA, bookComps, bookMean);
+                const floor = sd[Math.min(P.whitenR, sd.length) - 1] || 1;
+                weights = bookComps.map((_, j) => (j < P.pcRemove ? 0 : (j < P.whitenR ? Math.min(1, (sd[j] / floor) ** -P.whitenAlpha) : 1)));
+            }
+            stages.push({ mean: bookMean, comps: bookComps, weights });
+            const shiftB = xs => xs.map(it => ({ ...it, vector: projectOut(it.vector, bookMean, bookComps, weights) }));
+            loaded.items = shiftB(loaded.items);
+            loaded.extra = shiftB(loaded.extra);
+            loaded.pc = { stages, sharedComponents: P.sharedComponents, pcRemove: P.pcRemove, whitenR: P.whitenR, whitenAlpha: P.whitenAlpha, gotBookComps: bookComps.length };
+            if (!loaded.mean.length) throw new Error(`sharedComponents/pcRemove need a centroid and "${book}" has no collection to build one from`);
+            loaded.mean = new Float64Array(loaded.mean.length);
+        }
+        return loaded;
     };
-    if (!centroidSources[P.centroidPopulation]) throw new Error(`unknown centroidPopulation "${P.centroidPopulation}" — one of ${Object.keys(centroidSources).join(', ')}`);
-    let meanSource = centroidSources[P.centroidPopulation]();
-    // A ZERO-LENGTH MEAN IS NOT A CENTROID. centeredCosineScores dimensions its work off mean.length, so an
-    // empty one returns all-zero scores for every chunk rather than throwing — a whole book scored at cosine
-    // 0, which is the failure that looks like a result rather than an error.
-    //
-    // FALLING BACK TO THE WHOLE COLLECTION IS WHAT PRODUCTION DOES, not a harness convenience: the client
-    // names uids and the plugin means over them, and `centroidFor` (plugin/server.js) returns the full
-    // corpus mean for an absent or empty list. So a reference-only book — no memory entries to name — is
-    // centered on everything it has, in the runtime and here alike. Diverging would make this harness score
-    // a pipeline nobody runs.
-    const emptySelection = !meanSource.length && live.length;
-    if (emptySelection) meanSource = live;
-    // No `lexical`: scoreCollection is cosine-only, and stage 3's text index is content-lexical's.
-    const loaded = { items, extra, mean: meanSource.length ? corpusMean(meanSource) : [] };
 
-    // PROJECTING THE COMPONENTS OUT AT LOAD, not at scoring, because they are a property of the corpus and
-    // recomputing them per query would be the same vectors and the same answer at N times the cost. The
-    // vectors are transformed and the mean becomes zero, so the shipped centeredCosineScores still does the
-    // arithmetic — subtracting a zero mean from an already-centred vector. The QUERY has to take the same
-    // transform at each call site or the two sides are compared in different spaces.
-    //
-    // COMPONENTS OF THE CENTROID POPULATION, the same rows that define the mean. Taking them over a wider
-    // set would remove directions the mean was never built from.
-    // TWO STAGES, SHARED THEN OWN, and every centring moves into them once either is on — loaded.mean
-    // becomes zero and the shipped centeredCosineScores subtracts it, so there is exactly one place that
-    // decides what comes off. Stage B's mean is the book's centroid OF THE RESIDUAL, which is what the
-    // book-specific direction is once the shared part is gone; with sharedComponents off it is the ordinary
-    // centroid and the arm reduces to single-stage.
-    if (P.sharedComponents > 0 || P.pcRemove > 0 || P.whitenR > 0) {
-        if (!P.meanCentered) throw new Error('sharedComponents/pcRemove need meanCentered: both are defined as what comes off BEFORE the cosine, and uncentered scoring subtracts nothing');
-        if (P.uncenteredGate > 0) throw new Error('sharedComponents/pcRemove with uncenteredGate is not modelled: the gate reads RAW cosine off item.vector, which projection has already changed');
-        const stages = [];
-        if (P.sharedComponents > 0) {
-            const basis = loadBasis(primary, P.embedModel ?? 'bge-m3');
-            if (!basis) throw new Error(`sharedComponents needs a basis for "${primary}" — build it with: node eval/global-basis.mjs <samples...>`);
-            if (basis.comps.length < P.sharedComponents) throw new Error(`sharedComponents ${P.sharedComponents} but "${primary}"'s basis holds ${basis.comps.length} components — rebuild with --m ${P.sharedComponents} --force`);
-            stages.push({ mean: basis.mean, comps: basis.comps.slice(0, P.sharedComponents) });
-        }
-        const applyAll = (v, upto) => stages.slice(0, upto).reduce((acc, st) => projectOut(acc, st.mean, st.comps), v);
-        // Stage A first, over everything the mean or the components could be taken from, so stage B sees
-        // the residual and nothing else.
-        const shiftA = xs => xs.map(it => ({ ...it, vector: applyAll(it.vector, stages.length) }));
-        loaded.items = shiftA(loaded.items);
-        loaded.extra = shiftA(loaded.extra);
-        // meanSource holds the PRE-transform objects, so re-resolve each through the transformed arrays by
-        // hash; anything it names that is not in the live collection (archived centroid mass) is transformed
-        // on the spot.
-        const byHash = new Map([...loaded.items, ...loaded.extra].map(it => [it.metadata?.hash, it]));
-        const srcA = meanSource.map(it => byHash.get(it.metadata?.hash) ?? { ...it, vector: applyAll(it.vector, stages.length) });
-        const bookMean = srcA.length ? corpusMean(srcA) : loaded.mean;
-        // Removal and whitening share one component list: asking for both takes the union, with the removed
-        // ones at weight 0 and the rest at their whitened weight, so they compose instead of fighting.
-        const nComps = Math.max(P.pcRemove, P.whitenR);
-        const bookComps = nComps > 0 ? topComponents(srcA, nComps, bookMean) : [];
-        let weights = null;
-        if (P.whitenR > 0 && bookComps.length) {
-            const sd = componentScales(srcA, bookComps, bookMean);
-            const floor = sd[Math.min(P.whitenR, sd.length) - 1] || 1;
-            weights = bookComps.map((_, j) => (j < P.pcRemove ? 0 : (j < P.whitenR ? Math.min(1, (sd[j] / floor) ** -P.whitenAlpha) : 1)));
-        }
-        stages.push({ mean: bookMean, comps: bookComps, weights });
-        const shiftB = xs => xs.map(it => ({ ...it, vector: projectOut(it.vector, bookMean, bookComps, weights) }));
-        loaded.items = shiftB(loaded.items);
-        loaded.extra = shiftB(loaded.extra);
-        loaded.pc = { stages, sharedComponents: P.sharedComponents, pcRemove: P.pcRemove, whitenR: P.whitenR, whitenAlpha: P.whitenAlpha, gotBookComps: bookComps.length };
-        if (!loaded.mean.length) throw new Error(`sharedComponents/pcRemove need a centroid and "${primary}" has no collection to build one from`);
-        loaded.mean = new Float64Array(loaded.mean.length);
-    }
+    // ONE EMBEDDING MODEL ACROSS EVERY BOOK, or the pooled top-K orders cosines taken in two different
+    // spaces — a ranking that looks entirely normal and means nothing. NOT ASSERTED HERE, deliberately:
+    // the primary's path arrives already resolved (an --index, an ensureIndex build) and `label` may
+    // differ from `model` for a prefixed family (reindex.mjs modelSpec), so nothing this file can read off
+    // that path distinguishes a mismatch from a naming convention. What prevents it is that every caller
+    // threads the SAME `MODEL` it resolved the primary with into indexOpts; a caller passing neither gets
+    // the bundle's own `embedModel` for every book, which is consistent by construction. It is worth
+    // saying out loud now that the install has moved off bge-m3 while all 107 stored bundles record it.
+    // The primary's path is the caller's — an explicit --index, an ensureIndex build, or indexPath's own
+    // resolution. Every other book resolves its own, because there is one indexFile and N collections.
+    // ponytail: a chunk arm's rebuild reaches the primary only (its `index` is one ensureIndex build and
+    // cachePath keys the others off the SCENE's chunkConfig), so a chunkSize sweep re-chunks one book of
+    // two. Thread the arm's overrides through indexOpts if a chunk finding ever turns on a second book.
+    const loaded = books.map(b => loadBook(b, b === primary
+        ? indexFile
+        : indexPath(S, { model: S.embedModel ?? 'bge-m3', ...indexOpts, book: b, all: P.denseAllEntries })));
+    const items = loaded[0].items;
 
-    // Out-of-scope graded titles: entries from a second attached book, which this harness cannot rank
-    // because only one collection is loaded. Token-subset match, same rule as grade matching.
-    const EXCLUDED = (S.excludeTitles ?? []).map(nrm).filter(x => x.length);
-    const isExcluded = title => { const t = new Set(nrm(title)); return EXCLUDED.some(x => x.every(w => t.has(w))); };
+    // OUT OF SCOPE IS A BOOK THAT IS NOT HERE, and nothing else. A graded row can only be ranked if its
+    // book was embedded; every embedded one now is. This replaces `excludeTitles`, a capture-time list of
+    // titles from a non-primary book — that predicate was "not the primary book", which stopped being the
+    // scope boundary the moment every book got loaded, and went from correct to WRONG rather than merely
+    // stale: a reader honouring it would discard valid verdicts about a second book that is right here.
+    // The field is gone from the writer (grading.mjs) and from every stored bundle; a copy from elsewhere
+    // that still carries one is simply not read.
+    // A row with no `book` is the primary's, which is what every reader here has always assumed.
+    const outOfScope = r => !S.books[r?.book ?? primary];
 
     // THE AUTHORED VOCABULARY, which is what production builds from: queryTermWeights restores the
     // takeover's stash into a local view before calling buildGazetteer, so the gazetteer does not depend
     // on when in the scan it is asked. Offline the authored keys ARE e.key, since samples embed the book
     // raw — so the raw book is the faithful model and no blanking is applied here.
     //
-    // The gazetteer spans every book the live chat had attached, as production's does: those extra terms
-    // change which query terms survive the filter, so they move BM25 on THIS book's entries even though
-    // their own entries are out of scope here. Gazetteer-only — no index, no candidates.
-    const embeddedOthers = Object.keys(S.books).filter(w => w !== primary).flatMap(w => Object.values(S.books[w]));
-    const gazSource = [...entries, ...embeddedOthers];
+    // The gazetteer spans every book the live chat had attached, as production's does: `entries` is now
+    // that whole set, so the union it used to be assembled from is the list itself.
+    const gazSource = entries;
     const gazEntries = gazSource;
     // Field selection rides on buildGazetteer rather than re-deriving its tokenization — a second tokenizer
     // is the seam the single-gazetteer rule exists to prevent. `comment` is the title slot, so 'bodies'
@@ -731,12 +796,16 @@ export function loadScene(S, { indexFile, params: P }) {
     // population wider than the graded set. A re-derived bundle logging 144 rows against 47 grades then
     // reported judged@10 of 100% on a scene that was 18% judged, so the stopping rule said "pool is
     // adequate" precisely where it was not. An ungraded row is unjudged no matter who logged it.
-    const OWN = new Set((S.candidates ?? []).filter(c => !isDurable(c) && (!c.book || c.book === primary)).map(c => Number(c.uid)));
+    //
+    // KEYED BY (book, uid), which is the only identity that survives a second book: uids are per book and
+    // number from 0, so a bare-uid pool silently declares one book's row judged on the strength of the
+    // other's grade.
+    const OWN = new Set((S.candidates ?? []).filter(c => !isDurable(c) && !outOfScope(c)).map(c => entryKey({ world: c.book ?? primary, uid: c.uid })));
     const POOL = new Set((S.entries ?? [])
-        .filter(g => Number.isFinite(Number(g.uid)) && (!g.book || g.book === primary) && !isExcluded(g.title))
-        .map(g => Number(g.uid)));
+        .filter(g => Number.isFinite(Number(g.uid)) && !outOfScope(g))
+        .map(g => entryKey({ world: g.book ?? primary, uid: g.uid })));
 
-    return { primary, entries, byUid, items, loaded, gaz, gazSource, isExcluded, POOL, OWN, chunkCfg: chunkConfig(S) };
+    return { primary, books, entries, byKey, items, loaded, gaz, gazSource, outOfScope, POOL, OWN, chunkCfg: chunkConfig(S) };
 }
 
 /**
@@ -750,25 +819,32 @@ export function loadScene(S, { indexFile, params: P }) {
  * treatment: the first is evidence, the second is a hole. Collapsing them to 0 hid both. It made the
  * reference tier's grade distribution unreadable (its g0 bucket was mostly unjudged rows), and under
  * "activation supplies delivery" it would silently score a correctly-fired, never-judged reference
- * entry as a miss. Out-of-scope titles also return null: the harness has no usable verdict for them.
+ * entry as a miss. Out-of-scope rows also return null: the harness has no usable verdict for them.
+ *
+ * BY (book, uid), not by uid — the scene ranks every attached book and uids number from 0 in each, so a
+ * bare-uid map hands one book's row the other's grade. Rows carry their book on `book` (grades,
+ * candidates) or on `entry.world` (scored rows); both resolve through content-lexical's `entryKey`.
  *
  * Callers that need a number say so. For nDCG that is `?? 0`, which is the standard partial-label
  * rule and is now written where it applies rather than assumed everywhere.
+ *
+ * @param {object[]} grades The scene's graded rows
+ * @param {{outOfScope: (row: object) => boolean, primary: string}} scene A loadScene result
  */
-export function makeGradeOf(grades, isExcluded) {
+export function makeGradeOf(grades, { outOfScope, primary }) {
     const list = (grades ?? [])
         .filter(x => x && x.title && Number.isFinite(gradeValue(x)))
-        .map(x => ({ tk: nrm(x.title), g: gradeValue(x), title: x.title, uid: x.uid }));
-    const kept = list.filter(g => !isExcluded(g.title));
+        .map(x => ({ tk: nrm(x.title), g: gradeValue(x), title: x.title, uid: x.uid, book: x.book ?? primary, scoped: !outOfScope(x) }));
+    const kept = list.filter(g => g.scoped);
     // uid is authoritative only when the grade set is uid-complete; a mixed set falls back to titles
     // wholesale rather than resolving half the rows by a different rule.
-    const byUid = list.length && list.every(g => Number.isFinite(Number(g.uid)))
-        ? new Map(kept.map(g => [Number(g.uid), g.g]))
+    const byKey = list.length && list.every(g => Number.isFinite(Number(g.uid)))
+        ? new Map(kept.map(g => [entryKey({ world: g.book, uid: g.uid }), g.g]))
         : null;
     const byTitle = title => { const mt = new Set(nrm(title)); const h = kept.find(x => x.tk.length && x.tk.every(t => mt.has(t))); return h ? h.g : null; };
     return r => {
         const uid = Number(r?.uid ?? r?.key);
-        if (byUid && Number.isFinite(uid)) return byUid.get(uid) ?? null;
+        if (byKey && Number.isFinite(uid)) return byKey.get(entryKey({ world: r?.book ?? r?.entry?.world ?? primary, uid })) ?? null;
         return byTitle(typeof r === 'string' ? r : String(r?.title ?? ''));
     };
 }
@@ -847,7 +923,9 @@ const mentions = (name, content) => {
     return re.test((content ?? '').toLowerCase());
 };
 
-/** The query under the same transform the collection took (loadScene pcRemove), or unchanged when none.
+/** The query under the same transform ONE BOOK'S collection took (loadScene pcRemove), or unchanged when
+ *  none. Per book: each takes its own basis and its own centroid, so a query transformed by another book's
+ *  stages is compared in the wrong space.
  *  Applied at every call site rather than once by the caller, because a query that reached only one of the
  *  two scoring paths would leave the dense-all extras compared in a different space from the collection. */
 export const pcQuery = (loaded, qvec) => (loaded?.pc
@@ -896,27 +974,37 @@ export const makeKeywordScore = P => (e, text, k1) => {
  *
  * @returns {(k1: number, b: number, tw: object|null, qvec: number[], qtext: string, haystackFor: (entry: object) => string[]) => object[]}
  */
-export function makeCandidateSet({ loaded, byUid, entries, params: P, chunkCfg, topK = admitCeiling(true) }) {
+export function makeCandidateSet({ loaded, byKey, entries, params: P, chunkCfg, topK = admitCeiling(true) }) {
     const keywordScore = makeKeywordScore(P);
     // CONTENT-LEXICAL, the stage-3 text signal for every entry — built once here because it depends only
     // on the book and the chunk settings, not on the query. The runtime builds it per book at the same
     // point in the pipeline (worldsapart.js contentTextScores); a second copy of the pooling or the
     // chunking rule would be the drift the single-scorer rule exists to prevent, so both go through
     // content-lexical.mjs.
-    const contentIndex = buildContentIndex(entries, chunkCfg ?? { chunkMode: 'paragraph', chunkSize: 800, minChunkSize: 120 });
+    //
+    // ONE INDEX PER BOOK, because that is what `bookIndexes` keys and caches. Pooling the books into one
+    // index would pool their IDF, so a term common in one book would read as rare in the other's entries —
+    // a lexical signal this harness computed and production never does.
+    const cfg = chunkCfg ?? { chunkMode: 'paragraph', chunkSize: 800, minChunkSize: 120 };
+    const byBook = new Map();
+    for (const e of entries) { const b = e.world; if (!byBook.has(b)) byBook.set(b, []); byBook.get(b).push(e); }
+    const contentIndexes = [...byBook].map(([, own]) => buildContentIndex(own, cfg));
     const hasContent = e => Boolean(String(e?.content ?? '').trim());
     // DENSE-ALL, the stage-3 cosine for entries the collection has no row for (loadScene splits them out).
-    // Pooled by MAX per entry, the same rule poolEntries applies to the vectorized half, and against
-    // loaded.mean so both classes are centered by the same vector. Filled onto the keyword route below, so
-    // it re-ranks entries a key already activated and admits nothing — the dense twin of content-lexical.
+    // Pooled by MAX per entry, the same rule poolEntries applies to the vectorized half, and against the
+    // BOOK'S OWN mean so both classes are centered by the same vector. Filled onto the keyword route below,
+    // so it re-ranks entries a key already activated and admits nothing — the dense twin of content-lexical.
     const denseExtra = (qvec) => {
         const out = new Map();
-        if (!loaded.extra?.length || !qvec?.length) return out;
-        const scores = centeredCosineScores(loaded.extra, pcQuery(loaded, qvec), loaded.mean, P.meanCentered);
-        loaded.extra.forEach((it, i) => {
-            const uid = Number(it.metadata?.index);
-            out.set(uid, Math.max(out.get(uid) ?? -Infinity, scores[i]));
-        });
+        if (!qvec?.length) return out;
+        for (const L of loaded) {
+            if (!L.extra?.length) continue;
+            const scores = centeredCosineScores(L.extra, pcQuery(L, qvec), L.mean, P.meanCentered);
+            L.extra.forEach((it, i) => {
+                const key = entryKey({ world: L.book, uid: it.metadata?.index });
+                out.set(key, Math.max(out.get(key) ?? -Infinity, scores[i]));
+            });
+        }
         return out;
     };
     // Which rows carry the dense cosine in the fourth column rather than in `score` (see denseColumn).
@@ -931,11 +1019,17 @@ export function makeCandidateSet({ loaded, byUid, entries, params: P, chunkCfg, 
         // --- STAGE 1: RETRIEVAL. Cosine over every chunk, no admission test — plugin/scoring.mjs carries
         // why the threshold and the lexical clause left this stage. `contentText` is stage 3's text signal
         // and is computed here only because this pass collapses the stages; it admits nothing.
-        const contentText = scoreContent(contentIndex, qtext, { k1, b, termWeights: tw, stopwordDf: P.stopwordDf });
-        const scored = scoreCollection(CID, loaded, pcQuery(loaded, qvec), { centered: P.meanCentered, uncenteredGate: P.uncenteredGate });
+        //
+        // ONE TOP-K ACROSS EVERY BOOK, each scored against its own centroid — the plugin's /query-multi
+        // loop exactly, which is why `scoreCollection` takes a collection id at all. The books compete:
+        // `poolEntries` keys on (collection, uid) so their uids cannot collide, and `selectTopK` sorts the
+        // pooled records across collections before grouping them back.
+        const contentText = new Map();
+        for (const ix of contentIndexes) for (const [k, v] of scoreContent(ix, qtext, { k1, b, termWeights: tw, stopwordDf: P.stopwordDf })) contentText.set(k, v);
+        const scored = loaded.flatMap(L => scoreCollection(L.book, L, pcQuery(L, qvec), { centered: P.meanCentered, uncenteredGate: P.uncenteredGate }));
         const grouped = selectTopK(poolEntries(scored), topK);
         const per = new Map();
-        for (const m of grouped[CID]?.metadata ?? []) { const uid = Number(m.index); per.set(uid, { score: Math.max(per.get(uid)?.score ?? -Infinity, m.score) }); }
+        for (const [book, g] of Object.entries(grouped)) for (const m of g.metadata ?? []) { const key = entryKey({ world: book, uid: m.index }); per.set(key, { score: Math.max(per.get(key)?.score ?? -Infinity, m.score) }); }
         const rows = [];
         // --- STAGE 2: ACTIVATION (retrieval route). Whatever the pooled top-K returned is in the ranking.
         // `entry` is carried so fuseRanks can read eligibility (and authored order) the way production does.
@@ -951,7 +1045,7 @@ export function makeCandidateSet({ loaded, byUid, entries, params: P, chunkCfg, 
         //
         // Dropped at admission rather than filtered from `entries`: the gazetteer and the BM25 corpus must
         // still see every entry, or the term weights move and the comparison measures the wrong thing.
-        for (const [uid, s] of per) { const e = byUid.get(uid); if (e && !e.disable) rows.push({ uid, entry: e, title: wiTitle(e), score: s.score, sparseScore: colVectorized ? s.score : undefined, textScore: contentText.get(entryKey(e)) ?? 0, keywordScore: keywordScore(e, haystackFor(e), k1), vectorEligible: !!e.vectorized, textEligible: hasContent(e), keysEligible: scoringKeys(e, P).length > 0 }); }
+        for (const [key, s] of per) { const e = byKey.get(key); if (e && !e.disable) rows.push({ uid: Number(e.uid), book: e.world, entry: e, title: wiTitle(e), score: s.score, sparseScore: colVectorized ? s.score : undefined, textScore: contentText.get(entryKey(e)) ?? 0, keywordScore: keywordScore(e, haystackFor(e), k1), vectorEligible: !!e.vectorized, textEligible: hasContent(e), keysEligible: scoringKeys(e, P).length > 0 }); }
         // --- STAGE 2: ACTIVATION (keyword route). Stands in for ST core's keyword match, so it may only
         // admit an entry core could actually have activated. One exclusion, a stage-2 fact:
         //
@@ -962,7 +1056,7 @@ export function makeCandidateSet({ loaded, byUid, entries, params: P, chunkCfg, 
         //
         // A vectorized entry is not excluded: WA judges it like any other candidate, and stage 1 has
         // usually admitted it already through `per`.
-        for (const e of entries) { const uid = Number(e.uid); if (per.has(uid) || e.disable) continue; const kw = keywordScore(e, haystackFor(e), k1); if (kw > 0) rows.push({ uid, entry: e, title: wiTitle(e), score: P.denseColumn ? undefined : dense.get(uid), sparseScore: colExtras ? dense.get(uid) : undefined, textScore: contentText.get(entryKey(e)) ?? 0, keywordScore: kw, vectorEligible: (!P.denseColumn && dense.has(uid)) || !!e.vectorized, textEligible: hasContent(e), keysEligible: true }); }
+        for (const e of entries) { const key = entryKey(e); if (per.has(key) || e.disable) continue; const kw = keywordScore(e, haystackFor(e), k1); if (kw > 0) rows.push({ uid: Number(e.uid), book: e.world, entry: e, title: wiTitle(e), score: P.denseColumn ? undefined : dense.get(key), sparseScore: colExtras ? dense.get(key) : undefined, textScore: contentText.get(key) ?? 0, keywordScore: kw, vectorEligible: (!P.denseColumn && dense.has(key)) || !!e.vectorized, textEligible: hasContent(e), keysEligible: true }); }
         return rows;
     };
 }
@@ -992,10 +1086,15 @@ const MODELS = (() => {
  * PER TIER, each standardised among its own rows, as each fit was built.
  */
 export const makeFuse = ({ scene, haystack, memoryCutoff = null }) => {
-    const df = buildNameDf(scene.entries ?? []);
+    // PER BOOK, as `bookIndexes` builds it — df asks how distinctive a name is IN ITS BOOK'S vocabulary,
+    // and a name common in one book and unique in another has two answers, not one.
+    const dfs = new Map();
+    for (const e of scene.entries ?? []) { const b = e.world; if (!dfs.has(b)) dfs.set(b, []); dfs.get(b).push(e); }
+    for (const [b, own] of dfs) dfs.set(b, buildNameDf(own));
     const windowNames = properNames(haystack({}).join('\n'));
     return (rows) => {
         for (const r of rows) {
+            const df = dfs.get(r.entry?.world) ?? buildNameDf([]);
             const names = df.names.get(entryKey(r.entry)) ?? properNames(r.entry?.content);
             r.properNouns = properShared(names, windowNames, df);
             r.density = properDensity(r.entry?.content);
@@ -1048,17 +1147,17 @@ export async function scoreScene({ sample: S, overrides = {}, k = 10, vectors, m
     if (preloaded && (overrides.denseAllEntries !== undefined || overrides.gazetteerSource !== undefined)) {
         throw new Error('gazetteerSource/denseAllEntries are read at load time, so they cannot be swept against a preloaded scene — load per arm');
     }
-    const scene = preloaded ?? loadScene(S, { indexFile: indexPath(S, { vectors, model, index }), params: P });
+    const scene = preloaded ?? loadScene(S, { indexFile: indexPath(S, { vectors, model, index }), indexOpts: { vectors, model }, params: P });
     const scoreAll = makeCandidateSet({ ...scene, params: P, topK });
     const fuse = makeFuse({ scene, haystack: haystackFor(S, P), memoryCutoff: P.memoryCutoff });
-    const gradeOf = makeGradeOf(S.entries, scene.isExcluded);
+    const gradeOf = makeGradeOf(S.entries, scene);
 
     const query = S.query;
     const tw = (P.entityFilter && P.queryMode !== 'summary') ? ranking.buildTermWeights(query, scene.gaz, P.boost) : null;
     // No collection means no cosine to compute, so the embed call is skipped rather than made and ignored.
     // Under denseAllEntries a keyword-only book has an empty stage-1 collection and still has vectors to
     // score against, which is the whole point of the arm there.
-    const qv = cachedQv ?? ((scene.items.length || scene.loaded?.extra?.length) ? await embed(query, { ollama, model }) : []);
+    const qv = cachedQv ?? (scene.loaded.some(L => L.items.length || L.extra?.length) ? await embed(query, { ollama, model }) : []);
     // REBUILT, not read: the document stores the scan MESSAGES, the injects and the opted-in sources
     // SEPARATELY, so the haystack is composed here at this arm's depth, matchWindow and includeNames
     // rather than baked in at capture.
@@ -1084,7 +1183,7 @@ export async function scoreScene({ sample: S, overrides = {}, k = 10, vectors, m
     const rankable = all.filter(r => !r.entry?.constant);
 
     const top = fuse(rankable).slice(0, k);
-    const unjudged = top.filter(r => !scene.POOL.has(Number(r.uid)));
+    const unjudged = top.filter(r => !scene.POOL.has(entryKey(r.entry)));
     // Read the DEPLOYED slice's grades before the pooled re-fuse below mutates shared rows.
     const topGrades = top.map(r => gradeOf(r) ?? 0);
     // Re-fuse the pooled subset AFTER reading the slice above: fuse mutates, and the subset shares references.
@@ -1093,7 +1192,7 @@ export async function scoreScene({ sample: S, overrides = {}, k = 10, vectors, m
     // ranked the reference tier, and a reference-only book reported `judged 0/0` beside a healthy nDCG.
     // `?? 0` is the standard partial-label rule: an unjudged row occupies its rank and contributes
     // nothing. Explicit here because gradeOf now returns null for it — see makeGradeOf.
-    const g = fuse(rankable.filter(r => scene.POOL.has(Number(r.uid)))).map(r => gradeOf(r) ?? 0);
+    const g = fuse(rankable.filter(r => scene.POOL.has(entryKey(r.entry)))).map(r => gradeOf(r) ?? 0);
 
     // SET METRICS, on the ASYMMETRIC bars: recall counts only grade >= 3 (did the must-deliver material
     // arrive), while precision credits a 3 or 4 in full and a 2 at half (metrics.mjs gradeCredit). Both read
@@ -1151,8 +1250,8 @@ export async function scoreScene({ sample: S, overrides = {}, k = 10, vectors, m
         // Recorded token counts where the capture has them, since they came from the real tokenizer; the
         // fallback is content length over 4.91, which is this corpus's MEASURED chars-per-token for entry
         // bodies (median over 1297 rows, p5 4.46 / p95 5.33). A flat /4 would be 23% out.
-        const recorded = new Map((S.candidates ?? []).map(c => [`${c.book}.${c.uid}`, c.tokens]).filter(([, t]) => typeof t === 'number'));
-        const tokensOf = r => recorded.get(`${r.entry?.world ?? S.primaryBook}.${r.uid}`) ?? Math.round(String(r.entry?.content ?? '').length / 4.91);
+        const recorded = new Map((S.candidates ?? []).map(c => [entryKey({ world: c.book ?? S.primaryBook, uid: c.uid }), c.tokens]).filter(([, t]) => typeof t === 'number'));
+        const tokensOf = r => recorded.get(entryKey(r.entry)) ?? Math.round(String(r.entry?.content ?? '').length / 4.91);
         const kept = await selection.applyBudget({
             ranked: selection.walkOrder({ results: ranked.filter(admits) }),
             isDynamic: () => true,
@@ -1161,6 +1260,10 @@ export async function scoreScene({ sample: S, overrides = {}, k = 10, vectors, m
             maxDynamic: 0,
             maxVectorEntries: P.maxVectorEntries ?? 0,
             isVector: r => Boolean(r.entry?.vectorized),
+            // THE PER-BOOK QUOTA, which nothing offline could exercise while only one book was ranked.
+            // No capture records it — the live setting is `priorityList[].cap` (worldsapart.js) and
+            // paramSnapshot does not carry it — so it is an arm's to set and defaults to no cap.
+            capOf: r => Number(P.bookCaps?.[r.entry?.world]) || 0,
             tokensOf,
         });
         // `survivors` is a Set built by walking `ranked` in order, so spreading it keeps the layout order
@@ -1185,7 +1288,7 @@ export async function scoreScene({ sample: S, overrides = {}, k = 10, vectors, m
         unjudged: unjudged.map(r => r.title),
         // The unjudged rows with their identity, which is what an offline pool extension needs: these are
         // exactly the entries this configuration would put in front of a user and nobody has judged.
-        unjudgedRows: unjudged.map(r => ({ uid: Number(r.uid), title: r.title, rank: top.indexOf(r) + 1 })),
+        unjudgedRows: unjudged.map(r => ({ uid: Number(r.uid), book: r.entry?.world, title: r.title, rank: top.indexOf(r) + 1 })),
         terms: tw ? Object.keys(tw).length : null,
     };
 }
