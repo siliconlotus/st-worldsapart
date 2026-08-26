@@ -32,6 +32,7 @@ import readline from 'node:readline';
 import { fileURLToPath } from 'node:url';
 import sanitize from 'sanitize-filename';
 import { LocalIndex } from 'vectra';
+import { getTransformersVector } from '../../src/vectors/embedding.js';
 import { getOllamaVector } from '../../src/vectors/ollama-vectors.js';
 import { getVllmVector } from '../../src/vectors/vllm-vectors.js';
 import { scoreCollection, poolEntries, selectTopK } from './scoring.mjs';
@@ -94,6 +95,20 @@ async function embed(source, sourceSettings, text, directories) {
                 sourceSettings.model,
                 directories,
             );
+        case 'transformers':
+            // ST'S OWN IN-PROCESS EMBEDDER, and it takes no sourceSettings because there is nothing to
+            // pass: the model is server config (`extensions.models.embedding`), not a client setting, and
+            // the Vector Storage UI offers no way to choose one. Reusing ST's function rather than driving
+            // the pipeline here keeps the pooling and normalization identical to what indexed the
+            // collection.
+            //
+            // IT COSTS NOTHING EXTRA. This source was refused before, which sent the client to the
+            // no-plugin path — where ST embeds the very same text through the very same pipeline and then
+            // discards the score (multiQueryCollection returns hashes and metadata only). So these users
+            // were already paying the embed and getting no cosine for it. Measured on an M-series Mac, the
+            // embed is ~5.5s for a scan window of the length this corpus runs, because transformers.js is
+            // quantized ONNX on one CPU thread; that is the source's cost, not this case's.
+            return await getTransformersVector(text);
         default:
             throw new Error(`Worlds Apart: centered search does not support source "${source}" — `
                 + 'the extension will fall back to stock vector search, which returns no scores, so stage 1 will have no cosine.');

@@ -113,6 +113,21 @@ export function properNames(text) {
 export const modelKey = name => String(name ?? '').trim().toLowerCase().replace(/:latest$/, '');
 
 /**
+ * The key to look a fit up under, from `vectorRequestBody()`'s `{source, model}`.
+ *
+ * THE `transformers` SOURCE CARRIES NO MODEL. ST resolves it server-side from config.yaml
+ * (`extensions.models.embedding`, read at src/endpoints/vectors.js) and its Vector Storage UI offers no
+ * way to choose one, so the source names the model: a stock install embeds with the jina it ships. Without
+ * this the key is the empty string, no fit is found, and every default install runs with no relevance
+ * model at all.
+ *
+ * The residual risk is a hand-edited config.yaml naming some other transformers model, which would take
+ * jina's fit. There is no UI that produces that state, and nothing the client can read to detect it.
+ */
+export const fitKey = ({ source, model } = {}) =>
+    modelKey(model || (source === 'transformers' ? 'Cohee/jina-embeddings-v2-base-en' : ''));
+
+/**
  * How a model wants to be ASKED. Qwen3-Embedding and mxbai are trained with a task instruction on the
  * query and ollama's template is a bare `{{ .Prompt }}`, so applying it is the caller's job.
  *

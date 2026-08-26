@@ -324,5 +324,46 @@
    },
    "embedModel": "qwen3-embedding:4b"
   }
+ },
+ "noCosine": {
+  "tier": "memory",
+  "cutoff": 0.07,
+  "f2": 0.5009816804141112,
+  "target": "E[credit] = 0.5*P(>=2) + 0.5*min(P(>=3), P(>=2))",
+  "features": [
+   "text",
+   "properNouns",
+   "density"
+  ],
+  "properNounsMode": "idf",
+  "properNounsExtract": "entity",
+  "layout": [
+   "intercept",
+   "text.z",
+   "properNouns.z",
+   "density.z"
+  ],
+  "beta": {
+   "ge2": [
+    -2.8318027775887162,
+    0.7115463385119456,
+    0.4754866934895167,
+    0.15522131732702668
+   ],
+   "ge3": [
+    -3.2881962637329964,
+    0.6084435279485387,
+    0.4862527041772933,
+    0.1839703680800316
+   ]
+  },
+  "aucAt": 3,
+  "auc": 0.8191792270701347,
+  "heldOutAuc": 0.7978843728646248,
+  "fittedOn": {
+   "scenes": 91,
+   "rows": 5585,
+   "books": 5
+  }
  }
 }

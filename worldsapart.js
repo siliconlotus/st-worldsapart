@@ -61,7 +61,7 @@ const gradeAnchorLine = () => `Grade 0–4: ${GRADE_ANCHORS.map((a, g) => `${g} 
 // upstream edit would silently invalidate existing indexes. See extension/chunking.mjs.
 import { chunkEntry } from './extension/chunking.mjs';
 import { buildContentIndex, scoreContent, indexFingerprint, entryKey } from './extension/content-lexical.mjs';
-import { buildNameDf, properNames, properShared, properDensity, scoreRelevance, isMemory, modelKey, queryPrefix, postDates } from './extension/relevance.mjs';
+import { buildNameDf, properNames, properShared, properDensity, scoreRelevance, isMemory, fitKey, queryPrefix, postDates } from './extension/relevance.mjs';
 
 /** Base value for the rewritten `order` sequence. WA rewrites every activated entry's order, so only
  * the relative index matters and the base is free. It is parked far above any plausible authored value
@@ -560,8 +560,24 @@ function loadRelevanceModel() {
                 // is a map keyed by relevance.mjs `modelKey`, and a model with no fit gets NO fit rather
                 // than another model's: stage 4 then makes no relevance cut for that tier, which is the
                 // documented behaviour for an unscored row, instead of cutting on numbers from elsewhere.
-                const key = modelKey(vectorRequestBody().model);
-                const m = file?.byModel?.[key] ?? null;
+                const key = fitKey(vectorRequestBody());
+                // TWO FITS PER TIER, and the second is not a model's. `noCosine` drops the one feature
+                // the embedder produces, so `text`, `properNouns` and `density` are computed from entry
+                // text and the scan window alone and carry across every model — which is what a user with
+                // no WA plugin actually has, since ST's own endpoint sorts by score and then returns only
+                // hashes and metadata (multiQueryCollection). Stage 1 hands stage 3 no cosine at all.
+                //
+                // It is the fallback in BOTH directions: an embedding model with no fit of its own gets it
+                // rather than nothing, and a model that HAS one falls back to it on a turn that came back
+                // scoreless. Applying a cosine-bearing fit to rows with no cosine is not graceful
+                // degradation — the column standardises to zeros, so cosine drops out while the intercept
+                // and the other coefficients stay fitted around a feature that is no longer there.
+                //
+                // Its FEATURES are model-independent; its training rows are not, having been drawn through
+                // one model's retrieval. So it is the right fit for a scoreless turn, not a second opinion
+                // about the corpus.
+                const m = file?.byModel?.[key] ?? file?.noCosine ?? null;
+                if (m) m.noCosine = file?.noCosine ?? null;
                 if (!m) {
                     console.warn(`Worlds Apart: no ${tier} relevance model for embedding model "${key}" `
                         + `(have: ${Object.keys(file?.byModel ?? {}).join(', ') || 'none'}) — that tier's E[credit] will not be scored, `
@@ -640,7 +656,10 @@ async function scoreRelevanceColumn(items, windowFor) {
         if (!model) continue;
         const rows = items.filter(it => (isMemory(it.entry) ? 'memory' : 'reference') === tier);
         if (!rows.length) continue;
-        const eCredit = scoreRelevance(model, rows.map(it => ({
+        // Chosen against the ROWS, not predicted from settings: the plugin can be present and still fall
+        // back mid-request, and it is the presence of a score that decides which fit is valid.
+        const fit = rows.some(it => Number.isFinite(it.score)) ? model : (model.noCosine ?? model);
+        const eCredit = scoreRelevance(fit, rows.map(it => ({
             cosine: Number.isFinite(it.score) ? it.score : 0,
             text: Number(it.textScore) || 0,
             keys: Number(it.keywordScore) || 0,
