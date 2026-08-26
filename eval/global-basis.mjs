@@ -43,7 +43,7 @@ import { dirname } from 'node:path';
 import { corpusMean, norm } from '../plugin/vector.mjs';
 import { topComponents } from './metrics.mjs';
 import { openSample, lineagesOf, indexPath, sceneParams, getStringHash } from './scene.mjs';
-import { cachePath, chunkConfig } from './reindex.mjs';
+import { cachePath, chunkConfig, resolveModel } from './reindex.mjs';
 import { isMemory } from '../extension/relevance.mjs';
 
 /** Where a book's basis lives. Keyed by the BOOK being scored, since that is all scene.mjs knows — the
@@ -174,13 +174,21 @@ if (process.argv[1] && import.meta.url.endsWith(process.argv[1].split('/').pop()
     const argv = process.argv.slice(2);
     const samples = argv.filter(a => a.endsWith('.json') && !a.startsWith('--'));
     if (!samples.length) {
-        console.error('usage: node global-basis.mjs <sample.json ...> [--m 8] [--force]');
+        console.error('usage: node global-basis.mjs <sample.json ...> [--m 8] [--model <spec>] [--force]');
         console.error('builds one leave-one-LINEAGE-out basis per book, from memory-tier chunks of the collections already on disk');
+        console.error('  --model takes a modelSpec, so a server stem is honoured: omlx:Qwen3-Embedding-8B-4bit-DWQ');
         process.exit(2);
     }
     const m = Number(argv[argv.indexOf('--m') + 1]) || 8;
-    console.log(`building bases at m=${m} from ${samples.length} sample(s)`);
-    const w = buildBases(samples, { m, force: argv.includes('--force'), log: s => console.log(s) });
+    // THE LABEL, not the spec. It is what names a collection (cachePath) and so what has to name the basis
+    // built from one: the same weights at another quantization are other vectors, and a basis is only
+    // meaningful against the collection it was estimated on. A register is per model in the strongest
+    // sense — bge-m3 is 1024-dimensional and Qwen3-Embedding-8B is 4096, so one is not even applicable
+    // to the other's vectors.
+    const spec = argv[argv.indexOf('--model') + 1] ?? process.env.WA_EMBED_MODEL ?? 'bge-m3';
+    const model = argv.includes('--model') || process.env.WA_EMBED_MODEL ? resolveModel(spec).label : 'bge-m3';
+    console.log(`building bases at m=${m} under "${model}" from ${samples.length} sample(s)`);
+    const w = buildBases(samples, { m, model, force: argv.includes('--force'), log: s => console.log(s) });
     console.log(`\n${w.length} basis file(s):`);
     for (const [b, note] of w) console.log(`  ${b.slice(0, 44).padEnd(46)} ${note}`);
 }
