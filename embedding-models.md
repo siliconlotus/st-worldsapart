@@ -15,31 +15,82 @@ chat model is not a valid vectorization source.
 
 | | when |
 |---|---|
-| **Qwen3-Embedding-8B** | Best measured. Needs an engine that can serve it fast — see *Speed*. |
-| **qwen3-embedding:4b** | Delivers the smallest set for its score (21 entries against 32), so it is the pick when the token budget binds harder than recall. |
-| **embeddinggemma** | 621MB and the smallest index. Second on quality. The floor of the ladder, not a consolation prize. |
+| **Qwen3-Embedding-8B** | Best at every cutoff, and on 4 of 5 books. Needs an engine that can serve it fast — see *Speed*. |
+| **qwen3-embedding:0.6b** | Closest of the small models, at 1/13 the parameters. |
+| **embeddinggemma** | Indistinguishable from 0.6b here, and the smallest index at 768 dimensions. |
+| **bge-m3** | Lowest at every cutoff. Fine, and beaten by everything newer. |
+
+## Two knobs, and they are independent
+
+**The cutoff is a token budget. The model is how much recall that budget buys.**
+
+`E[credit]` is calibrated — every model is fitted to the same target on the same rows — so a threshold on
+it selects by predicted relevance, and how many entries clear a given value is a property of the CORPUS,
+not the embedder. **Measured** over 105 scenes, memory tier: at cutoff 0.10 the four models deliver
+between 10.4 and 11.0 entries and spend between 18,824 and 19,728 tokens per scene. The model moves WHICH
+entries clear the bar, not how many.
+
+So the two choices do not interact, and neither has to be made in terms of the other.
+
+| cutoff | tokens/scene | precision | recall |
+|---|---|---|---|
+| 0.05 | ~34k | ~27% | ~82% |
+| 0.10 | ~19k | ~38% | ~67% |
+| 0.15 | ~13k | ~43% | ~58% |
+| 0.20 | ~10k | ~45% | ~52% |
+| 0.30 | ~6k | ~48% | ~41% |
+
+Memory tier only: reference entries and constants sit on top of every figure, so this is retrieval's
+marginal cost rather than the whole World Info budget.
+
+**The usable range is 0.05 to about 0.35.** Precision peaks near 48-53% and then falls, so past there the
+dial stops trading and simply loses both — above 0.50 it is strictly dominated. **Precision never exceeds
+~53% at any cutoff for any model**, which is a property of the ranking rather than of the dial, and the
+number a better model would have to move.
+
+The shipped defaults sit at the recall-favouring end deliberately. F2 weights recall, and the cutoff is
+chosen on F2, so that preference is expressed twice; a user who wants the other end should say so with
+this knob rather than expect the default to.
 
 ## The measurement
 
-`relevance-regress.mjs --tier memory --lobo --cutoff` over 97 graded scenes, 10342 judged rows. The score
-is F2 over the delivered set at each model's own best cutoff, held out by book.
+`relevance-regress.mjs --tier memory --lobo --cutoff` with the shipped feature set, over 105 scenes on a
+lineage-disjoint set of 5 books. Each model gets its OWN fit — applying one model's coefficients to
+another's cosines would favour whichever model the fit came from.
 
-| model | params | vector length | F2 | entries delivered | AUC |
+**Compared at a matched budget**, because a model allowed to pick its own cutoff answers a different
+question. At F2's own optimum bge-m3 scores 80.3% recall — the highest of the four — by delivering 23.8
+entries against Qwen3-8B's 13.5. That is not a better model, it is a looser dial.
+
+| model | params | dims | recall @ ~13.5 entries | precision | AUC |
 |---|---|---|---|---|---|
-| bge-m3 | 568M | 1024 | 0.4894 | 40.5 | 0.770 |
-| mxbai-embed-large | 334M | 1024 | 0.5002 | 40.9 | 0.785 |
-| qwen3-embedding:0.6b | 596M | 1024 | 0.5194 | 46.1 | 0.799 |
-| embeddinggemma | 308M | 768 | 0.5273 | 29.5 | 0.804 |
-| qwen3-embedding:4b | 4.0B | 2560 | 0.5386 | 21.2 | 0.811 |
-| Qwen3-Embedding-8B (4-bit DWQ) | 8B | 4096 | **0.5457** | 32.3 | **0.826** |
+| bge-m3 | 568M | 1024 | 63.3% | 36.8% | 0.8037 |
+| embeddinggemma | 308M | 768 | 65.4% | 37.4% | 0.8116 |
+| qwen3-embedding:0.6b | 596M | 1024 | 67.8% | 38.0% | 0.8210 |
+| Qwen3-Embedding-8B (4-bit DWQ) | 8B | 4096 | **69.9%** | 38.9% | **0.8408** |
 
-Scenes average 6.5 relevant entries, so "delivered" is how much the model asks for to catch them.
+Held-out AUC per book, which is what says whether an ordering is real:
 
-Parameter count is not the axis: embeddinggemma at 308M beats qwen 0.6b at 596M on every column.
+| model | Ascensus | Time Whore | Richard | Sommers | Panopticon |
+|---|---|---|---|---|---|
+| bge-m3 | 0.8056 | 0.8263 | 0.7746 | 0.8377 | 0.8014 |
+| embeddinggemma | 0.7973 | 0.8474 | 0.7906 | 0.8350 | 0.7528 |
+| qwen3-embedding:0.6b | 0.8321 | 0.8442 | 0.7685 | 0.8590 | 0.7472 |
+| Qwen3-Embedding-8B | 0.8329 | 0.8592 | 0.8133 | 0.8784 | 0.7875 |
 
-**Caveat.** 5 books, one person's chats. The ordering held on all five, but how *much* better varied
-sharply — the 8B model's gain on one book was ten times its gain on another, and every regression any
-model showed fell on one of the two books under 150 rows.
+**Qwen3-8B wins 4 of 5, losing only Panopticon.** That is the one ordering here worth acting on.
+
+**The middle two are not separable.** embeddinggemma and qwen3-embedding:0.6b trade places by book, and
+swap again on a wider row population — 0.6b leads on the fit's held-out rows, embeddinggemma leads when
+every memory row in the scene is ranked. Do not read a ranking between them.
+
+Panopticon is 63 rows, and every model except bge-m3 does worse there than on any other book. Regressions
+still land on the small books.
+
+**Not re-measured: `mxbai-embed-large` and `qwen3-embedding:4b`.** Their earlier numbers were taken at
+chunkSize 800 and through a query path that never applied a model's task prefix, so they are not
+comparable to the table above; their collections were purged with the rest of the legacy set. `:4b` had
+been the second pick and may well be again.
 
 ## Context length: check it against your scan window
 
@@ -77,7 +128,8 @@ for 4-bit quantization of any kind.
 **These figures are Apple Silicon and say nothing about Nvidia hardware.** On CUDA, llama.cpp is not the
 outlier it is here.
 
-Per 800-character chunk, measured on an M-series Mac:
+Per 800-character chunk, measured on an M-series Mac. Chunks are 1750 characters now, so a real chunk
+costs roughly twice these figures — the ratios between engines are what the table is for:
 
 | engine | ms/chunk |
 |---|---|
