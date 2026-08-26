@@ -171,6 +171,9 @@ const ARMS = {
     // THE SAME DOSES, PICKED BY SHAREDNESS instead of by explained variance — one family with the arms
     // above, so the two selection rules are contrasted at matched N rather than against each other's best.
     ...Object.fromEntries([1, 2, 4, 8].map(v => [`sharedEta=${v}`, { __reload: true, sharedComponents: v, sharedSelect: 'shared' }])),
+    // The same doses off the WITHIN-book scatter, one family with the two above so the estimator and the
+    // selection rule are each contrasted at matched N rather than against the other's best.
+    ...Object.fromEntries([1, 2, 4, 8].map(v => [`sharedWithin=${v}`, { __reload: true, sharedComponents: v, sharedScatter: 'within' }])),
     // WHITENING (scene.mjs whitenR/whitenAlpha) — the only lever in this family that changes the cloud's
     // SHAPE rather than its position. Centring is a translation and provably cannot remove book identity
     // (measured: 1-NN same-book purity 99.4% -> 98.2%); rescaling the directions a book spreads along is

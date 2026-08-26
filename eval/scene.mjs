@@ -516,6 +516,11 @@ export const sceneParams = (S, overrides = {}) => ({
     //             PC1 scores 0.82-0.86 in four of the five bases against PC2's 0.005-0.049, so 'rank'
     //             removes the most book-specific direction available first. Needs a basis carrying `eta`.
     sharedSelect: 'rank',
+    // WHICH SCATTER stage A's directions come off. 'pooled' is PCA on the raw corpus — what a basis has
+    // always been. 'within' takes them off the pooled WITHIN-book scatter, so a direction that only
+    // separates books cannot lead; see global-basis.mjs for the measurement and for why this is not LDA.
+    // Reads a basis built with --within, which is a separate file.
+    sharedScatter: 'pooled',
     // Exact key strings to treat as removed from the book (see scoringKeys). Null = none.
     dropKeys: null,
     queryMode: 'messages',
@@ -722,8 +727,10 @@ export function loadScene(S, { indexFile, indexOpts = {}, params: P }) {
                 // projected memory vectors with unprojected reference ones. 'memory' and 'memoryArchived'
                 // are exactly the gated set; 'vectorized' is not.
                 if (P.centroidPopulation === 'vectorized') throw new Error(`sharedComponents with centroidPopulation 'vectorized' would average stage-A-projected memory chunks with unprojected reference ones in one centroid — use 'memory' or 'memoryArchived'`);
-                const basis = loadBasis(book, P.embedModel ?? 'bge-m3');
-                if (!basis) throw new Error(`sharedComponents needs a basis for "${book}" — build it with: node eval/global-basis.mjs <samples...>`);
+                if (P.sharedScatter !== 'pooled' && P.sharedScatter !== 'within') throw new Error(`unknown sharedScatter "${P.sharedScatter}" — one of pooled, within`);
+                const within = P.sharedScatter === 'within';
+                const basis = loadBasis(book, P.embedModel ?? 'bge-m3', within);
+                if (!basis) throw new Error(`sharedComponents needs a${within ? ' --within' : ''} basis for "${book}" — build it with: node eval/global-basis.mjs <samples...>${within ? ' --within' : ''}`);
                 if (basis.comps.length < P.sharedComponents) throw new Error(`sharedComponents ${P.sharedComponents} but "${book}"'s basis holds ${basis.comps.length} components — rebuild with --m ${P.sharedComponents} --force`);
                 // SELECTION IS NOT ESTIMATION. The components arrive in variance order; sharedness is a
                 // different order, and taking a prefix of the first conflates them.

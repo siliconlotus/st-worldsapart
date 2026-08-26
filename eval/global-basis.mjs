@@ -53,12 +53,12 @@ import { isMemory } from '../extension/relevance.mjs';
  *  character 40 (`LTM - Isekai Adventure - Isekai Adventure - 2026-03-04@14h45` and the same with ` old`),
  *  so a slug-only path silently gave one book the other's basis. Harmless while they share a lineage and a
  *  latent wrong answer the moment they do not. */
-export const basisPath = (book, model = 'bge-m3') =>
-    new URL(`./eval-data/basis/${String(book).replace(/[^\w.-]+/g, '-').slice(0, 40)}__${model}__${getStringHash(String(book))}.json`, import.meta.url).pathname;
+export const basisPath = (book, model = 'bge-m3', within = false) =>
+    new URL(`./eval-data/basis/${String(book).replace(/[^\w.-]+/g, '-').slice(0, 40)}__${model}${within ? '__within' : ''}__${getStringHash(String(book))}.json`, import.meta.url).pathname;
 
 /** Reads one book's basis. Returns null when absent — the caller decides whether that is fatal. */
-export const loadBasis = (book, model = 'bge-m3') => {
-    const p = basisPath(book, model);
+export const loadBasis = (book, model = 'bge-m3', within = false) => {
+    const p = basisPath(book, model, within);
     if (!existsSync(p)) return null;
     const j = JSON.parse(readFileSync(p, 'utf8'));
     // `eta` rides along because it is what `sharedSelect: 'shared'` orders on; absent on a basis built
@@ -108,6 +108,12 @@ const memoryChunks = (S, model) => {
  * @param {number[][]} comps The components, in variance order
  * @returns {number[]} eta^2 per component, same order
  */
+/** Each group centred on its OWN mean, pooled — the within-class scatter, as one flat list. */
+export const groupResiduals = (groups) => groups.flatMap((g) => {
+    const m = corpusMean(g);
+    return g.map(it => ({ vector: Float64Array.from({ length: m.length }, (_, i) => it.vector[i] - m[i]) }));
+});
+
 export const etaSquared = (groups, mean, comps) => comps.map((c) => {
     const proj = groups.map(g => g.map(it => { let p = 0; for (let i = 0; i < mean.length; i++) p += (it.vector[i] - mean[i]) * c[i]; return p; }));
     const all = proj.flat();
@@ -118,7 +124,7 @@ export const etaSquared = (groups, mean, comps) => comps.map((c) => {
     return ssTot > 0 ? ssBet / ssTot : 0;
 });
 
-export const buildBases = (samplePaths, { m = 8, model = 'bge-m3', force = false, log = () => {} } = {}) => {
+export const buildBases = (samplePaths, { m = 8, model = 'bge-m3', within = false, force = false, log = () => {} } = {}) => {
     const byBook = new Map();
     for (const p of samplePaths) {
         const S = openSample(p);
@@ -132,7 +138,7 @@ export const buildBases = (samplePaths, { m = 8, model = 'bge-m3', force = false
     const lin = lineagesOf(Object.fromEntries([...byBook].map(([b, v]) => [b, v.S.books[b]])));
     const written = [];
     for (const [book, v] of byBook) {
-        const out = basisPath(book, model);
+        const out = basisPath(book, model, within);
         if (!force && existsSync(out)) { written.push([book, 'cached']); continue; }
         // GROUPED as well as pooled: the mean and the components come off the pooled chunks, eta^2 needs
         // them back in their lineages.
@@ -146,7 +152,20 @@ export const buildBases = (samplePaths, { m = 8, model = 'bge-m3', force = false
         const rest = [...restByLin.values()].flat();
         if (!rest.length) { log(`  "${book}" is the only book in its lineage group — no basis possible, skipped`); continue; }
         const mean = corpusMean(rest);
-        const comps = topComponents(rest, m, mean);
+        // WHICH SCATTER THE DIRECTIONS COME OFF, which is a different question from where the corpus sits.
+        // The mean is the pooled centroid either way — that is the register's LOCATION. `within` takes the
+        // directions off the POOLED WITHIN-BOOK scatter instead of the raw pool: each lineage centred on its
+        // own mean first, so a direction that merely separates books cannot lead. **Measured** under
+        // Qwen3-Embedding-8B, PC1's eta^2 falls 0.771 -> 0.069 and its share of variance 7.33% -> 4.28%,
+        // the gap being the between-book separation PCA was ranking on.
+        //
+        // NOT LDA, which is the other half of the same decomposition: LDA maximises between-class over
+        // within-class, so its discriminants ARE the book axes, it is rank-capped at (classes - 1) — four
+        // here, short of the eight the arms sweep — and it folds the per-book directions stage B needs
+        // kept separable into one space fitted to whichever books are present.
+        const comps = within
+            ? topComponents(groupResiduals([...restByLin.values()]), m, new Float64Array(mean.length))
+            : topComponents(rest, m, mean);
         const eta = etaSquared([...restByLin.values()], mean, comps);
         mkdirSync(dirname(out), { recursive: true });
         writeFileSync(out, JSON.stringify({
@@ -159,6 +178,7 @@ export const buildBases = (samplePaths, { m = 8, model = 'bge-m3', force = false
             // indexes hold. `fromSamples` names the bundles because which snapshot of a book a bundle
             // embeds decides which memory uids are in the pool.
             meta: { model, chunkCfg: chunkConfig(v.S), fromSamples: samplePaths.map(x => x.split('/').pop()),
+                scatter: within ? 'within' : 'pooled',
                 archivedPool: [...byBook].filter(([o]) => lin.get(o) !== lin.get(book)).every(([, x]) => x.chunks.archived),
                 m: comps.length, askedM: m, chunks: rest.length,
                 excludedLineage: lin.get(book), fromLineages: [...new Set([...byBook.keys()].map(b => lin.get(b)))].filter(l => l !== lin.get(book)),
@@ -177,6 +197,7 @@ if (process.argv[1] && import.meta.url.endsWith(process.argv[1].split('/').pop()
         console.error('usage: node global-basis.mjs <sample.json ...> [--m 8] [--model <spec>] [--force]');
         console.error('builds one leave-one-LINEAGE-out basis per book, from memory-tier chunks of the collections already on disk');
         console.error('  --model takes a modelSpec, so a server stem is honoured: omlx:Qwen3-Embedding-8B-4bit-DWQ');
+        console.error('  --within takes the components off the pooled WITHIN-book scatter, so a book-separating direction cannot lead');
         process.exit(2);
     }
     const m = Number(argv[argv.indexOf('--m') + 1]) || 8;
@@ -187,8 +208,9 @@ if (process.argv[1] && import.meta.url.endsWith(process.argv[1].split('/').pop()
     // to the other's vectors.
     const spec = argv[argv.indexOf('--model') + 1] ?? process.env.WA_EMBED_MODEL ?? 'bge-m3';
     const model = argv.includes('--model') || process.env.WA_EMBED_MODEL ? resolveModel(spec).label : 'bge-m3';
-    console.log(`building bases at m=${m} under "${model}" from ${samples.length} sample(s)`);
-    const w = buildBases(samples, { m, model, force: argv.includes('--force'), log: s => console.log(s) });
+    const within = argv.includes('--within');
+    console.log(`building bases at m=${m} under "${model}"${within ? ', WITHIN-book scatter' : ''} from ${samples.length} sample(s)`);
+    const w = buildBases(samples, { m, model, within, force: argv.includes('--force'), log: s => console.log(s) });
     console.log(`\n${w.length} basis file(s):`);
     for (const [b, note] of w) console.log(`  ${b.slice(0, 44).padEnd(46)} ${note}`);
 }
