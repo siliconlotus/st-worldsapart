@@ -26,7 +26,7 @@ import { readFileSync, writeFileSync, mkdirSync } from 'node:fs';
 import { dirname, basename } from 'node:path';
 import { entryKey } from '../extension/content-lexical.mjs';
 import { scoreScene, loadScene, indexPath, openSample, sceneParams, embed, sceneLabel } from './scene.mjs';
-import { ensureIndex } from './reindex.mjs';
+import { ensureIndex, resolveModel } from './reindex.mjs';
 
 const argv = process.argv.slice(2);
 const arg = k => { const i = argv.indexOf(k); return i >= 0 ? argv[i + 1] : null; };
@@ -59,7 +59,14 @@ const unknown = picked.filter(a => !CHUNK_ARMS[a] && !PARAM_ARMS[a]);
 if (unknown.length) { console.error(`unknown arm(s): ${unknown.join(', ')} — known: ${[...Object.keys(CHUNK_ARMS), ...Object.keys(PARAM_ARMS)].join(', ')}`); process.exit(2); }
 
 const K = Number(arg('--k') ?? 10);
-const MODEL = process.env.WA_EMBED_MODEL ?? 'bge-m3';
+// THE MODEL IS A SPEC, resolved once (reindex.mjs resolveModel). The LABEL names collections and bases;
+// the rest says how to call the model, including the task prefix a prefix-trained family needs. A bare
+// name still means ollama, so `bge-m3` behaves exactly as before.
+// FALLS BACK TO THE BUNDLE'S OWN MODEL, not to a hardcoded name. A bundle records the model its
+// collections are keyed under, and hardcoding one meant a corpus that had moved on still resolved the old
+// collections — which exist, so nothing errored, it just quietly measured the previous model.
+const MODEL = process.env.WA_EMBED_MODEL ?? openSample(samples[0], arg('--arm')).embedModel ?? 'bge-m3';
+const EM = resolveModel(MODEL);
 const OLLAMA = process.env.OLLAMA_URL ?? 'http://localhost:11434';
 const DRY = argv.includes('--dry');
 
@@ -71,8 +78,8 @@ const DRY = argv.includes('--dry');
         // `all` FROM THE SCENE'S OWN PARAMS, which default it on: a denseAllEntries scene cannot be
         // scored against a vectorized-only build, so resolving without it named a file loadScene refused.
         const P = sceneParams(S);
-        const scene = loadScene(S, { indexFile: indexPath(S, { model: MODEL, all: P.denseAllEntries }), indexOpts: { model: MODEL }, params: P });
-        const qv = await embed(S.query, { ollama: OLLAMA, model: MODEL });
+        const scene = loadScene(S, { indexFile: indexPath(S, { model: EM.label, all: P.denseAllEntries }), indexOpts: { model: EM.label }, params: P });
+        const qv = await embed(EM.query + S.query, { ollama: OLLAMA, model: EM.model, label: EM.label, endpoint: EM.endpoint, url: EM.endpoint === 'ollama' ? OLLAMA : EM.url });
 
         // (book, uid) -> { title, doses[], bestRank }. Keyed the way a grade is keyed — every attached book
         // is ranked, and two books number their uids from 0, so a bare-uid map merges two entries into one
@@ -98,7 +105,7 @@ const DRY = argv.includes('--dry');
             const r = PARAM_ARMS[arm]
                 ? await scoreScene({ sample: S, overrides: PARAM_ARMS[arm], k: K, scene, qv })
                 : await scoreScene({ sample: S, overrides: {}, k: K, model: MODEL, ollama: OLLAMA, qv,
-                    index: (await ensureIndex(S, { overrides: CHUNK_ARMS[arm], model: MODEL, ollama: OLLAMA, log: () => {} })).path });
+                    index: (await ensureIndex(S, { overrides: CHUNK_ARMS[arm], model: EM.model, prefix: EM.doc, label: EM.label, endpoint: EM.endpoint, url: EM.endpoint === 'ollama' ? OLLAMA : EM.url, ollama: OLLAMA, log: () => {} })).path });
             note(r.unjudgedRows, arm);
             process.stdout.write(`\r  ${sceneLabel(S) || basename(path)}: scored ${arm}                    `);
         }

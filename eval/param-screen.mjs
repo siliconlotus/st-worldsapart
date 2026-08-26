@@ -31,7 +31,7 @@ import { readFileSync } from 'node:fs';
 import { indexPath, loadScene, openSample, sceneParams, scoreScene, embed, sceneLabel, lineagesOf } from './scene.mjs';
 import { jaccard, signTest, spearman, gradeValue } from './metrics.mjs';
 import { isDurable, rowKey } from '../extension/grading.mjs';
-import { ensureIndex } from './reindex.mjs';
+import { ensureIndex, resolveModel } from './reindex.mjs';
 
 const argv = process.argv.slice(2);
 const arg = k => { const i = argv.indexOf(k); return i >= 0 ? argv[i + 1] : null; };
@@ -274,7 +274,16 @@ const METRIC = arg('--metric') ?? 'fAtCut';
 const WINDOWED = { fAtR: r => r.atR.f, fAtCut: r => r.atCut.f, nAtCut: r => r.atCut.n, fAtBudget: r => r.atBudget?.f ?? NaN, nAtBudget: r => r.atBudget?.n ?? NaN };
 if (!['n', 'nAt5', 'f2', 'recall', 'precision', ...Object.keys(WINDOWED)].includes(METRIC)) { console.error(`unknown --metric ${METRIC}`); process.exit(2); }
 const mOf = r => (WINDOWED[METRIC] ? WINDOWED[METRIC](r) : r[METRIC]);
-const MODEL = process.env.WA_EMBED_MODEL ?? 'bge-m3';
+// THE MODEL IS A SPEC, resolved once (reindex.mjs resolveModel). The LABEL names collections and bases;
+// the rest says how to call the model, including the task prefix a prefix-trained family needs. A bare
+// name still means ollama, so `bge-m3` behaves exactly as before.
+// FALLS BACK TO THE BUNDLE'S OWN MODEL, not to a hardcoded name. A bundle records the model its
+// collections are keyed under, and hardcoding one meant a corpus that had moved on still resolved the old
+// collections — which exist, so nothing errored, it just quietly measured the previous model.
+// Read off the FIRST sample; a screen pools scenes, and pooling two models' cosines is not a
+// comparison, so a disagreement is reported below rather than silently averaged.
+const MODEL = process.env.WA_EMBED_MODEL ?? openSample(samples[0], arg('--arm')).embedModel ?? 'bge-m3';
+const EM = resolveModel(MODEL);
 const OLLAMA = process.env.OLLAMA_URL ?? 'http://localhost:11434';
 const fx = n => (n >= 0 ? '+' : '') + n.toFixed(4);
 
@@ -302,8 +311,8 @@ const fx = n => (n >= 0 ? '+' : '') + n.toFixed(4);
         if (!Object.keys(S.books?.[S.primaryBook] ?? {}).length) { console.error(`${path}: embeds no entries for primary book "${S.primaryBook ?? '?'}" — re-grade with books=full|meta`); process.exit(2); }
         if (!S.candidates?.length) { console.error(`${path}: logs no candidates`); process.exit(2); }
         const P = sceneParams(S, BUDGET ? { budgetTokens: BUDGET } : {});
-        const scene = loadScene(S, { indexFile: indexPath(S, { model: MODEL, all: P.denseAllEntries }), indexOpts: { model: MODEL }, params: P });
-        const qv = await embed(S.query, { ollama: OLLAMA, model: MODEL });
+        const scene = loadScene(S, { indexFile: indexPath(S, { model: EM.label, all: P.denseAllEntries }), indexOpts: { model: EM.label }, params: P });
+        const qv = await embed(EM.query + S.query, { ollama: OLLAMA, model: EM.model, label: EM.label, endpoint: EM.endpoint, url: EM.endpoint === 'ollama' ? OLLAMA : EM.url });
         const base = await scoreScene({ sample: S, overrides: BUDGET ? { budgetTokens: BUDGET } : {}, k: K, scene, qv });
         scenes.push({ path, name: sceneLabel(S) || path, S, scene, qv, P, base });
         console.log(`scene "${sceneLabel(S) || path}": baseline ${METRIC}@${K} ${mOf(base).toFixed(4)} (nDCG ${base.n.toFixed(4)}, P ${base.precision.toFixed(3)}, R ${base.recall.toFixed(3)}, rel ${base.relevant}), judged ${base.judged}/${base.of}${base.judged < base.of ? ' !!' : ''}`);
@@ -394,7 +403,7 @@ const fx = n => (n >= 0 ? '+' : '') + n.toFixed(4);
                 // reload branch needs it: a chunk arm builds its own collection, and a vectorized-only one
                 // cannot be scored under denseAllEntries — which is the default, so every chunk arm was
                 // building a collection loadScene then refused.
-                const built = await ensureIndex(sc.S, { overrides: chunkCfg ?? {}, all: !!denseAll || !!sc.P.denseAllEntries, archived: !!archived, model: MODEL, ollama: OLLAMA, log: () => {} });
+                const built = await ensureIndex(sc.S, { overrides: chunkCfg ?? {}, all: !!denseAll || !!sc.P.denseAllEntries, archived: !!archived, model: EM.model, prefix: EM.doc, label: EM.label, endpoint: EM.endpoint, url: EM.endpoint === 'ollama' ? OLLAMA : EM.url, ollama: OLLAMA, log: () => {} });
                 r = await scoreScene({ sample: sc.S, overrides: scoring, k: K, index: built.path, model: MODEL, ollama: OLLAMA, qv: sc.qv });
             } else if (needsReload) {
                 // Same collection, but the gazetteer is baked at load time, so the preloaded scene is stale
@@ -403,7 +412,7 @@ const fx = n => (n >= 0 ? '+' : '') + n.toFixed(4);
                 // `all` FROM THE SCENE'S OWN PARAMS. indexPath resolves the live vectorized-only collection
                 // without it, which a denseAllEntries scene cannot be scored against — and denseAllEntries is
                 // the default now, so every reload arm was resolving a collection loadScene then refused.
-                r = await scoreScene({ sample: sc.S, overrides: scoring, k: K, index: indexPath(sc.S, { model: MODEL, all: sc.P.denseAllEntries }), model: MODEL, ollama: OLLAMA, qv: sc.qv });
+                r = await scoreScene({ sample: sc.S, overrides: scoring, k: K, index: indexPath(sc.S, { model: EM.label, all: sc.P.denseAllEntries }), model: MODEL, ollama: OLLAMA, qv: sc.qv });
             } else {
                 r = await scoreScene({ sample: sc.S, overrides: scoring, k: K, scene: sc.scene, qv: sc.qv });
             }

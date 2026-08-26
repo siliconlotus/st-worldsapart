@@ -24,7 +24,7 @@ import { buildContentIndex, scoreContent, entryKey } from '../extension/content-
 // Cycle: reindex.mjs imports getStringHash from here. Safe because neither side calls across at module
 // scope — both references live inside function bodies, so whichever module loads first finishes evaluating
 // before the other needs a binding.
-import { cachePath, chunkConfig, embedTexts } from './reindex.mjs';
+import { cachePath, chunkConfig, embedTexts, resolveModel } from './reindex.mjs';
 import { gradeCredit, fbeta, RECALL_WEIGHT, gradeValue, topComponents, projectOut, componentScales } from './metrics.mjs';
 import { loadBasis } from './global-basis.mjs';
 export { inVectorIndex } from '../extension/ranking.mjs';
@@ -769,7 +769,7 @@ export function loadScene(S, { indexFile, indexOpts = {}, params: P }) {
                 if (P.centroidPopulation === 'vectorized') throw new Error(`sharedComponents with centroidPopulation 'vectorized' would average stage-A-projected memory chunks with unprojected reference ones in one centroid — use 'memory' or 'memoryArchived'`);
                 if (P.sharedScatter !== 'pooled' && P.sharedScatter !== 'within') throw new Error(`unknown sharedScatter "${P.sharedScatter}" — one of pooled, within`);
                 const within = P.sharedScatter === 'within';
-                const basis = loadBasis(book, P.embedModel ?? 'bge-m3', within);
+                const basis = loadBasis(book, resolveModel(P.embedModel ?? S.embedModel ?? 'bge-m3').label, within);
                 if (!basis) throw new Error(`sharedComponents needs a${within ? ' --within' : ''} basis for "${book}" — build it with: node eval/global-basis.mjs <samples...>${within ? ' --within' : ''}`);
                 if (basis.comps.length < P.sharedComponents) throw new Error(`sharedComponents ${P.sharedComponents} but "${book}"'s basis holds ${basis.comps.length} components — rebuild with --m ${P.sharedComponents} --force`);
                 // SELECTION IS NOT ESTIMATION. The components arrive in variance order; sharedness is a
@@ -829,9 +829,12 @@ export function loadScene(S, { indexFile, indexOpts = {}, params: P }) {
     // ponytail: a chunk arm's rebuild reaches the primary only (its `index` is one ensureIndex build and
     // cachePath keys the others off the SCENE's chunkConfig), so a chunkSize sweep re-chunks one book of
     // two. Thread the arm's overrides through indexOpts if a chunk finding ever turns on a second book.
+    // `embedModel` is a SPEC (it may carry a server stem); what names a collection is the LABEL, so it is
+    // resolved rather than used raw. indexOpts.model is already a label — the caller resolved it.
+    const modelLabel = indexOpts.model ?? resolveModel(S.embedModel ?? 'bge-m3').label;
     const loaded = books.map(b => loadBook(b, b === primary
         ? indexFile
-        : indexPath(S, { model: S.embedModel ?? 'bge-m3', ...indexOpts, book: b, all: P.denseAllEntries })));
+        : indexPath(S, { ...indexOpts, model: modelLabel, book: b, all: P.denseAllEntries })));
     const items = loaded[0].items;
 
     // OUT OF SCOPE IS A BOOK THAT IS NOT HERE, and nothing else. A graded row can only be ranked if its
@@ -1227,7 +1230,12 @@ export async function scoreScene({ sample: S, overrides = {}, k = 10, vectors, m
     if (preloaded && (overrides.denseAllEntries !== undefined || overrides.gazetteerSource !== undefined)) {
         throw new Error('gazetteerSource/denseAllEntries are read at load time, so they cannot be swept against a preloaded scene — load per arm');
     }
-    const scene = preloaded ?? loadScene(S, { indexFile: indexPath(S, { vectors, model, index }), indexOpts: { vectors, model }, params: P });
+    // `model` is a SPEC, resolved here so every caller can pass one: a bare ollama name, or a server stem
+    // (`omlx:`, `lms:`) for a model served over an OpenAI-compatible /v1/embeddings. The LABEL names the
+    // collection, the rest says how to call it, and `query` is the task prefix a prefix-trained family
+    // needs — absent it does not fail, it just scores the model worse than it is.
+    const em = resolveModel(model);
+    const scene = preloaded ?? loadScene(S, { indexFile: indexPath(S, { vectors, model: em.label, index }), indexOpts: { vectors, model: em.label }, params: P });
     const scoreAll = makeCandidateSet({ ...scene, params: P, topK });
     const fuse = makeFuse({ scene, haystack: haystackFor(S, P), memoryCutoff: P.memoryCutoff });
     const gradeOf = makeGradeOf(S.entries, scene);
@@ -1237,7 +1245,9 @@ export async function scoreScene({ sample: S, overrides = {}, k = 10, vectors, m
     // No collection means no cosine to compute, so the embed call is skipped rather than made and ignored.
     // Under denseAllEntries a keyword-only book has an empty stage-1 collection and still has vectors to
     // score against, which is the whole point of the arm there.
-    const qv = cachedQv ?? (scene.loaded.some(L => L.items.length || L.extra?.length) ? await embed(query, { ollama, model }) : []);
+    const qv = cachedQv ?? (scene.loaded.some(L => L.items.length || L.extra?.length)
+        ? await embed(em.query + query, { ollama, model: em.model, label: em.label, endpoint: em.endpoint, url: em.endpoint === 'ollama' ? ollama : em.url })
+        : []);
     // REBUILT, not read: the document stores the scan MESSAGES, the injects and the opted-in sources
     // SEPARATELY, so the haystack is composed here at this arm's depth, matchWindow and includeNames
     // rather than baked in at capture.

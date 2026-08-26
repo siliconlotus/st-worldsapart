@@ -67,6 +67,7 @@ import { gradeValue } from './metrics.mjs';
 // Scene loading, the gazetteer, the scorers, the pool and the nDCG math all live in scene.mjs, shared with
 // param-screen.mjs — there must be exactly one copy of them (see that module's header).
 import { entryKey } from '../extension/content-lexical.mjs';
+import { resolveModel } from './reindex.mjs';
 import { dcg, embed as embedWith, haystackFor, indexPath, isDurableEntry, loadScene, makeFuse, makeGradeOf, makeKeywordScore, makeCandidateSet, ndcg, nrm, openSample, sceneParams, inVectorIndex, wiTitle, sceneLabel } from './scene.mjs';
 
 const arg = k => { const i = process.argv.indexOf(k); return i >= 0 ? process.argv[i + 1] : null; };
@@ -86,7 +87,14 @@ const VALIDATE = process.argv.includes('--validate') ? ((vArg && !vArg.startsWit
 // grid run because the sample happens to record no capture (/wa-grade doesn't write one).
 if (process.argv.includes('--validate') && !VALIDATE) { console.error('--validate given but the sample records no "capture" — pass --validate <capture.json>, or add a "capture" path to the sample'); process.exit(2); }
 const DEPTH = Number(arg('--depth') ?? S.params?.depth ?? 10);
-const OLLAMA = process.env.OLLAMA_URL ?? 'http://localhost:11434', MODEL = process.env.WA_EMBED_MODEL ?? 'bge-m3';
+// THE MODEL IS A SPEC, resolved once (reindex.mjs resolveModel). The LABEL names collections and bases;
+// the rest says how to call the model, including the task prefix a prefix-trained family needs. A bare
+// name still means ollama, so `bge-m3` behaves exactly as before.
+// FALLS BACK TO THE BUNDLE'S OWN MODEL, not to a hardcoded name. A bundle records the model its
+// collections are keyed under, and hardcoding one meant a corpus that had moved on still resolved the old
+// collections — which exist, so nothing errored, it just quietly measured the previous model.
+const OLLAMA = process.env.OLLAMA_URL ?? 'http://localhost:11434', MODEL = process.env.WA_EMBED_MODEL ?? S.embedModel ?? 'bge-m3';
+const EM = resolveModel(MODEL);
 // Signals the capture was produced under. Defaults are one tuned chat's snapshot, NOT the shipped defaults
 // (extension/state.mjs ships K1 1.2) — an arm overrides them via its own `params`, which is
 // the point of putting them in the manifest: each graded scene carries the settings it was graded under.
@@ -112,7 +120,7 @@ const VECTORS = arg('--vectors') ?? 'data/default-user/vectors/ollama';
 // `all` FROM THE SCENE'S OWN PARAMS, which default it on: denseAllEntries splits the collection by stage
 // and cannot be scored against a vectorized-only build, so resolving without it named a file loadScene
 // then refused. Same resolution param-screen's reload arms take.
-const INDEX = indexPath(S, { vectors: VECTORS, model: MODEL, index: arg('--index'), all: P.denseAllEntries });
+const INDEX = indexPath(S, { vectors: VECTORS, model: EM.label, index: arg('--index'), all: P.denseAllEntries });
 const TOPK = Number(arg('--topk')) || undefined;   // unset = stage 1's own bound (scene.mjs makeCandidateSet); --topk probes the elbow's window sensitivity.
 
 // --- inputs ---
@@ -121,7 +129,7 @@ const TOPK = Number(arg('--topk')) || undefined;   // unset = stage 1's own boun
 // Bound whole AND destructured: `makeFuse` takes the scene object (it reads `entries` for the per-book
 // name df), and referencing an undefined `scene` there was a latent ReferenceError this file could not
 // reach while its index resolution was also wrong.
-const scene = loadScene(S, { indexFile: INDEX, indexOpts: { vectors: VECTORS, model: MODEL }, params: P });
+const scene = loadScene(S, { indexFile: INDEX, indexOpts: { vectors: VECTORS, model: EM.label }, params: P });
 const { primary, books, entries, byKey, items, loaded, gaz, gazSource, outOfScope, POOL, OWN } = scene;
 console.log(`books: ${books.length} ranked (primary "${primary}"), ${entries.length} entries`);
 
@@ -170,8 +178,8 @@ if (S.params?.allowWIScan && !(S.injects ?? []).length) console.log('!! captured
 // are not comparable, the derived index path would point somewhere else, and nothing downstream would look
 // wrong. Harmless to skip while every sample is your own capture at your own default; a hard stop as soon as
 // samples arrive from other people, which is the entire point of collecting grade dumps.
-if (S.embedModel && S.embedModel !== MODEL) {
-    console.error(`sample was captured under embedding model "${S.embedModel}" but this run uses "${MODEL}" — cosines are not comparable. Set WA_EMBED_MODEL=${S.embedModel}, or pass --index explicitly if you have rebuilt the index under ${MODEL}.`);
+if (S.embedModel && resolveModel(S.embedModel).label !== EM.label) {
+    console.error(`sample was captured under embedding model "${S.embedModel}" but this run uses "${EM.label}" — cosines are not comparable. Set WA_EMBED_MODEL=${S.embedModel}, or pass --index explicitly if you have rebuilt the index under ${EM.label}.`);
     if (!process.argv.includes('--force')) process.exit(2);
     console.error('(--force given: continuing anyway, numbers are not trustworthy)');
 }
@@ -192,14 +200,19 @@ if (FREEZE) {
 const termWeights = (P.entityFilter && P.queryMode !== 'summary') ? ranking.buildTermWeights(query, gaz, P.boost) : null;
 
 const keywordScore = makeKeywordScore(P);
-const embed = text => embedWith(text, { ollama: OLLAMA, model: MODEL });
+// TWO EMBEDDERS, because the prefixes differ and mixing them compares two spaces. A query takes the task
+// instruction; a DOCUMENT takes the doc prefix, which is what the self-check below re-embeds a stored
+// chunk with — prefixing that as a query would drop the self-check cosine and read as a broken index.
+const embedOpts = { ollama: OLLAMA, model: EM.model, label: EM.label, endpoint: EM.endpoint, url: EM.endpoint === 'ollama' ? OLLAMA : EM.url };
+const embed = text => embedWith(EM.query + text, embedOpts);
+const embedDoc = text => embedWith(EM.doc + text, embedOpts);
 const fmt = n => (n == null ? '·' : (+n).toFixed(3));
 
 (async () => {
     const qv = await embed(query);
     // self-check: re-embed a stored chunk → mean-centered cosine ~1
     const c0 = (v => { const o = v.map((x, i) => x - loaded[0].mean[i]); const n = norm(o) || 1; return o.map(x => x / n); })(items[0].vector);
-    const r0 = (v => { const o = v.map((x, i) => x - loaded[0].mean[i]); const n = norm(o) || 1; return o.map(x => x / n); })(await embed(items[0].metadata.text));
+    const r0 = (v => { const o = v.map((x, i) => x - loaded[0].mean[i]); const n = norm(o) || 1; return o.map(x => x / n); })(await embedDoc(items[0].metadata.text));
     console.log(`query (${DEPTH} msgs, ${query.length} chars): "${query.slice(0, 80).replace(/\n/g, ' ')}…"`);
     console.log(`self-check cosine: ${r0.reduce((s, x, i) => s + x * c0[i], 0).toFixed(4)} | entities kept: ${termWeights ? Object.keys(termWeights).length : 'all (filter off)'}\n`);
 

@@ -287,7 +287,7 @@ if (process.argv[1] && import.meta.url.endsWith(process.argv[1].split('/').pop()
     // in the one tool that actually writes the vectors.
     const spec = arg('--model') ?? process.env.WA_EMBED_MODEL ?? S.embedModel ?? 'bge-m3';
     const em = resolveModel(spec);
-    if (S.embedModel && em.label !== S.embedModel) console.error(`!! rebuilding under "${em.label}" but the sample was captured under "${S.embedModel}" — its recorded cosines will not be comparable`);
+    if (S.embedModel && em.label !== resolveModel(S.embedModel).label) console.error(`!! rebuilding under "${em.label}" but the sample was captured under "${S.embedModel}" — its recorded cosines will not be comparable`);
 
     ensureIndex(S, {
         overrides, model: em.model, prefix: em.doc, label: em.label, endpoint: em.endpoint,
