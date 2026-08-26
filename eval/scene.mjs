@@ -359,7 +359,12 @@ export const indexPath = (S, { vectors = 'data/default-user/vectors/ollama', mod
  * gitignored — it is a cache, and it rebuilds from the bundles.
  */
 const qCache = new Map();
-const qCachePath = label => new URL(`./eval-data/query-cache__${String(label).replace(/[^\w.-]+/g, '-')}.jsonl`, import.meta.url).pathname;
+/** The cache file for one model label. RAW, as cachePath writes the model half of a collection path:
+ *  only a BOOK is slugged there, because book names are arbitrary user text while a label is not — and
+ *  slugging a label is what would make two of them collide, which is the ambiguity a hash would then have
+ *  to undo. Exported so a test cannot re-derive the name and drift from it. */
+export const queryCachePath = label => new URL(`./eval-data/query-cache__${label}.jsonl`, import.meta.url).pathname;
+const qCachePath = queryCachePath;
 const qCacheLoad = (label) => {
     if (qCache.has(label)) return qCache.get(label);
     const m = new Map();

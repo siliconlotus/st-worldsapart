@@ -374,7 +374,7 @@ eq(JSON.stringify([...topComponents(pts, 2, MU)[0]]), JSON.stringify([...topComp
 {
     const { embed } = await import('./scene.mjs');
     const { appendFileSync, writeFileSync, existsSync, unlinkSync } = await import('node:fs');
-    const path = l => new URL(`./eval-data/query-cache__${l}.jsonl`, import.meta.url).pathname;
+    const { queryCachePath: path } = await import('./scene.mjs');   // the implementation's own, so this cannot drift from it
     const A = 'wa-check-model-a', B = 'wa-check-model-b';
     for (const l of [A, B]) if (existsSync(path(l))) unlinkSync(path(l));
     // A fake embedder is not reachable from here, so drive it through the cache directly: seed one label,

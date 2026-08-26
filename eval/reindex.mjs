@@ -158,8 +158,20 @@ export const PREFIXES = {
 
 /** @returns {{model: string, doc: string, query: string, label: string}} */
 export const resolveModel = (spec) => {
-    const raw = String(spec).endsWith('/raw');
-    const named = raw ? String(spec).slice(0, -4) : String(spec);
+    // IDEMPOTENT ON ITS OWN LABEL. The label names collections and bases, so it is what a bundle records
+    // and what a human retypes — and it has to resolve back to the same model, endpoint and prefixes. Two
+    // things used to stop it: the stem's colon was rewritten to a hyphen, which made `omlx-Qwen3-...` read
+    // as a bare OLLAMA model (a stable label, silently the wrong endpoint), and the `__p` marker was
+    // re-appended on every pass. Model names carry hyphens and colons themselves — `qwen3-embedding:4b` is
+    // already a label with a colon in it, on disk — so the colon was never the filesystem's problem.
+    // `__p` and `__raw` are the label's own markers for "carries the doc prefix" and "deliberately does
+    // not"; both are stripped on the way in so a label resolves to what produced it. `/raw` is the
+    // hand-written form of the same thing.
+    const marked = String(spec);
+    const rawTag = marked.endsWith('__raw');
+    const plain = rawTag ? marked.slice(0, -5) : (marked.endsWith('__p') ? marked.slice(0, -3) : marked);
+    const raw = rawTag || plain.endsWith('/raw');
+    const named = plain.endsWith('/raw') ? plain.slice(0, -4) : plain;
     const stem = Object.keys(SERVERS).find(k => named.startsWith(k)) ?? null;
     const model = stem ? named.slice(stem.length) : named;
     const endpoint = stem ? 'openai' : 'ollama';
@@ -174,7 +186,7 @@ export const resolveModel = (spec) => {
     const { doc, query } = (raw ? null : Object.entries(PREFIXES).find(([stem]) => fam.includes(stem))?.[1]) ?? { doc: '', query: '' };
     // The label carries the SERVER too: the same weights quantized differently are different vectors, and
     // the served id is what distinguishes them ('...-8B-4bit-DWQ' vs '...-8B-4bit-MLX').
-    return { model, endpoint, url, doc, query, label: (stem ? stem.replace(':', '-') : '') + model + (doc ? '__p' : '') };
+    return { model, endpoint, url, doc, query, label: (stem ?? '') + model + (doc ? '__p' : raw ? '__raw' : '') };
 };
 
 /** One embedding call, either transport. OpenAI returns its vectors in a `data` array that is documented
