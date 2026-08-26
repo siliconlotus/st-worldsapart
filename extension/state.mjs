@@ -105,8 +105,11 @@ export const defaultSettings = {
      * Centering removes the direction every chunk in a single-story corpus shares,
      * which is what compresses similarities into a narrow band. Scores come out much
      * lower in absolute terms.
-     * Internal (always true): the plugin check in queryCollections is the real gate,
-     * so centering is simply on whenever the plugin is present.
+     * Internal, and shipped on. The gate in queryCollections is the PLUGIN's presence, not this — it
+     * used to be both, which made this flag inert (the only way to reach the plugin was with it on, so
+     * the `centered` sent to the plugin was always true) and made turning it off cost every score rather
+     * than buy uncentered ones, since ST's own endpoint returns hashes and metadata with the score
+     * already discarded. The plugin has always taken it as a parameter; now it is actually passed one.
      */
     meanCentered: true,
     // Removed: baselineQuery/baselineWeight (subtract a hand-crafted "shared background" query's cosine

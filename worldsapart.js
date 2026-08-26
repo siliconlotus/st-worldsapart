@@ -278,7 +278,13 @@ async function queryCollections(args) {
     // fire mid-request, and a ceiling picked before the attempt would ask for entries and be handed
     // chunks. A safety limit on what a pathological scene may feed core's scan loop, not a verdict on
     // any entry — stage 4 makes the only relevance decision.
-    if (settings().meanCentered && await hasPlugin()) {
+    // GATED ON THE PLUGIN, NOT ON CENTERING. `meanCentered` chooses how a chunk is scored, and the plugin
+    // has always taken it as a parameter (`centered: request.body.centered !== false`, scoreCollection's
+    // `{ centered = true }`). Gating the whole path on it meant the only way to REACH the plugin was with
+    // it on, so the flag sent below was always true, the uncentered path was unreachable from the UI, and
+    // turning the setting off did not buy raw cosine — it silently cost every score, because ST's own
+    // endpoint sorts by score and returns hashes and metadata only.
+    if (await hasPlugin()) {
         try {
             const body = vectorRequestBody({ ...args, topK: admitCeiling(true) });
             // The plugin needs the provider settings under one key, as the server does.
