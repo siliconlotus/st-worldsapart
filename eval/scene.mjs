@@ -24,7 +24,7 @@ import { buildContentIndex, scoreContent, entryKey } from '../extension/content-
 // Cycle: reindex.mjs imports getStringHash from here. Safe because neither side calls across at module
 // scope — both references live inside function bodies, so whichever module loads first finishes evaluating
 // before the other needs a binding.
-import { cachePath, chunkConfig, embedTexts, resolveModel } from './reindex.mjs';
+import { cachePath, chunkConfig, embedTexts, pathSafe, resolveModel } from './reindex.mjs';
 import { gradeCredit, fbeta, RECALL_WEIGHT, gradeValue, topComponents, projectOut, componentScales } from './metrics.mjs';
 import { loadBasis } from './global-basis.mjs';
 export { inVectorIndex } from '../extension/ranking.mjs';
@@ -336,7 +336,7 @@ export const indexPath = (S, { vectors = 'data/default-user/vectors/ollama', mod
     const st = stInstall();
     const local = p => (st ? st.resolve(p) : p);
     if (own && S.index && existsSync(local(S.index))) return local(S.index);
-    const derived = local(`${vectors}/wa_${getStringHash(book)}/${model}/index.json`);
+    const derived = local(`${vectors}/wa_${getStringHash(book)}/${pathSafe(model)}/index.json`);
     if (existsSync(derived)) return derived;
     return cachePath(S, chunkConfig(S), model, book);
 };
@@ -362,8 +362,10 @@ const qCache = new Map();
 /** The cache file for one model label. RAW, as cachePath writes the model half of a collection path:
  *  only a BOOK is slugged there, because book names are arbitrary user text while a label is not — and
  *  slugging a label is what would make two of them collide, which is the ambiguity a hash would then have
- *  to undo. Exported so a test cannot re-derive the name and drift from it. */
-export const queryCachePath = label => new URL(`./eval-data/query-cache__${label}.jsonl`, import.meta.url).pathname;
+ *  to undo. `pathSafe` is not that slug: it folds the slash of a HuggingFace repo id and nothing else, so
+ *  no label that already names a file on disk changes. Exported so a test cannot re-derive the name and
+ *  drift from it. */
+export const queryCachePath = label => new URL(`./eval-data/query-cache__${pathSafe(label)}.jsonl`, import.meta.url).pathname;
 const qCachePath = queryCachePath;
 const qCacheLoad = (label) => {
     if (qCache.has(label)) return qCache.get(label);

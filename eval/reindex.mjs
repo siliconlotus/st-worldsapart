@@ -109,6 +109,13 @@ export function buildItems(book, cfg, all = false, archived = false) {
     return items;
 }
 
+/** A model label is a path component in three places — this cache, the derived vectors dir, and the query
+ *  cache — and a HuggingFace repo id carries a slash, which would silently make one collection into a
+ *  nested directory. ONLY the slash folds: every other label on disk is left exactly as it is, so nothing
+ *  already built moves. It is not a general slug, and it cannot merge two models, because every caller
+ *  still keys its hash on the RAW label. */
+export const pathSafe = (label) => String(label).replace(/\//g, '-');
+
 /** Deterministic cache location: same book + model + chunk settings always resolves to the same file, so a
  *  sweep re-running an arm costs nothing and two arms can never collide.
  *
@@ -119,7 +126,7 @@ export function buildItems(book, cfg, all = false, archived = false) {
 export function cachePath(S, cfg, model, book = S.primaryBook, all = false, archived = false) {
     const slug = String(book).replace(/[^\w.-]+/g, '-').slice(0, 40);
     const key = getStringHash(`${book}${model}${cfg.chunkMode}${cfg.chunkSize}${cfg.minChunkSize}${all ? `all` : ``}${archived ? `archived` : ``}`);
-    return new URL(`./eval-data/indexes/${slug}__${model}${all ? `__all` : ``}${archived ? `__archived` : ``}__${key}/index.json`, import.meta.url).pathname;
+    return new URL(`./eval-data/indexes/${slug}__${pathSafe(model)}${all ? `__all` : ``}${archived ? `__archived` : ``}__${key}/index.json`, import.meta.url).pathname;
 }
 
 /** How a model is CALLED and how its collection is NAMED.
@@ -150,6 +157,19 @@ export function cachePath(S, cfg, model, book = S.primaryBook, all = false, arch
  * embedTexts). oMLX is the one that does; `lms:` stays because llama.cpp GGUF embedders work there.
  */
 export const SERVERS = { 'lms:': 'http://localhost:1234', 'omlx:': 'http://localhost:8008' };
+
+/** Every stem names a model SERVICE; `SERVERS` is the subset reached over HTTP. None of them is a remote
+ *  host — oMLX and LM Studio are local processes that happen to speak /v1/embeddings — so the axis that
+ *  matters is the transport, not where the model sits.
+ *
+ *  `st:` is the in-process one: SillyTavern's own embedder, transformers.js over the ONNX weights already
+ *  in ST's `data/_cache`, with the model given as a HuggingFace repo id.
+ *
+ *  It exists because a stock ST install cannot be measured any other way. ST embeds with
+ *  `Cohee/jina-embeddings-v2-base-en` at `quantized: true`, so an ollama pull of the same weights and an
+ *  fp32 build from HuggingFace both answer a DIFFERENT question than "what do users get by default" —
+ *  and ollama could not load these anyway, since it reads GGUF and safetensors and these are ONNX. */
+const SERVICES = { ...SERVERS, 'st:': '' };
 export const PREFIXES = {
     embeddinggemma: { doc: 'title: none | text: ', query: 'task: search result | query: ' },
     'mxbai-embed-large': { doc: '', query: 'Represent this sentence for searching relevant passages: ' },
@@ -172,10 +192,10 @@ export const resolveModel = (spec) => {
     const plain = rawTag ? marked.slice(0, -5) : (marked.endsWith('__p') ? marked.slice(0, -3) : marked);
     const raw = rawTag || plain.endsWith('/raw');
     const named = plain.endsWith('/raw') ? plain.slice(0, -4) : plain;
-    const stem = Object.keys(SERVERS).find(k => named.startsWith(k)) ?? null;
+    const stem = Object.keys(SERVICES).find(k => named.startsWith(k)) ?? null;
     const model = stem ? named.slice(stem.length) : named;
-    const endpoint = stem ? 'openai' : 'ollama';
-    const url = stem ? SERVERS[stem] : 'http://localhost:11434';
+    const endpoint = stem === 'st:' ? 'st' : stem ? 'openai' : 'ollama';
+    const url = stem ? SERVICES[stem] : 'http://localhost:11434';
     // SUBSTRING, CASE-INSENSITIVE. The served id is whoever packaged the model's spelling, and every
     // server rewrites it differently: `qwen3-embedding:4b` (ollama), `Qwen3-Embedding-8B-4bit-DWQ` (oMLX),
     // `text-embedding-qwen3-embedding-8b` (LM Studio, which PREPENDS its own type tag). Anchoring the
@@ -210,8 +230,43 @@ export const embedTexts = async (texts, opts) => {
     }
 };
 
+/** SillyTavern's own embedder, in this process.
+ *
+ *  ONE TEXT PER CALL, NEVER A BATCH. Mean pooling in `sillytavern-transformers` is not attention-mask
+ *  aware, so it averages over the PADDING of every sequence shorter than the longest in the batch.
+ *  Measured: one sentence embedded alone and again beside a longer one came back at cosine 0.345 — not a
+ *  rounding difference but a different vector, which would have built a whole collection and reported
+ *  the model as far worse than it is. This loop is the correctness condition, not a simplification; it
+ *  also matches `getTransformersVector`, which ST calls one text at a time for the same reason.
+ *
+ *  The pipeline is cached per model because loading it costs ~0.2s and a book is thousands of calls. */
+const stPipes = new Map();
+const embedST = async (model, texts) => {
+    let pipe = stPipes.get(model);
+    if (!pipe) {
+        // Imported at CALL time: scene.mjs imports resolveModel from this module, so a top-level import
+        // of stInstall would close a cycle. By the time anything embeds, scene.mjs is fully loaded.
+        const { stInstall } = await import('./scene.mjs');
+        const st = stInstall();
+        if (!st) throw new Error(`"st:${model}" runs SillyTavern's own embedder and needs the install — set WA_ST_ROOT`);
+        const { pipeline, env } = await import('sillytavern-transformers');
+        // Both mirror src/transformers.js: one thread (threaded wasm needs a SharedArrayBuffer that is
+        // not available here), and the wasm binaries taken from the install rather than a CDN.
+        env.backends.onnx.wasm.numThreads = 1;
+        env.backends.onnx.wasm.wasmPaths = `${st.root}/node_modules/sillytavern-transformers/dist/`;
+        // `quantized` is ST's setting for the feature-extraction task, and is the whole point of this
+        // transport — the stock install runs the quantized weights.
+        pipe = await pipeline('feature-extraction', model, { cache_dir: `${st.dataRoot}/_cache`, quantized: true });
+        stPipes.set(model, pipe);
+    }
+    const out = [];
+    for (const text of texts) out.push(Array.from((await pipe(text, { pooling: 'mean', normalize: true })).data));
+    return out;
+};
+
 const embedOnce = async (texts, { model, endpoint = 'ollama', url = 'http://localhost:11434', prefix = '' }) => {
     const input = prefix ? texts.map(t => prefix + t) : texts;
+    if (endpoint === 'st') return embedST(model, input);
     if (endpoint === 'openai') {
         const r = await fetch(`${url}/v1/embeddings`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ model, input }) });
         const j = await r.json();
