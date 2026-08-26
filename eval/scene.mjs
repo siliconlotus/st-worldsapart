@@ -336,7 +336,7 @@ export const indexPath = (S, { vectors = 'data/default-user/vectors/ollama', mod
     const st = stInstall();
     const local = p => (st ? st.resolve(p) : p);
     if (own && S.index && existsSync(local(S.index))) return local(S.index);
-    const derived = local(`${vectors}/wa_${getStringHash(book)}/${pathSafe(model)}/index.json`);
+    const derived = local(`${vectors}/wa_${getStringHash(book)}/${pathSafe(resolveModel(model).collection)}/index.json`);
     if (existsSync(derived)) return derived;
     return cachePath(S, chunkConfig(S), model, book);
 };

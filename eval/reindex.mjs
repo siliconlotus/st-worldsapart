@@ -125,8 +125,13 @@ export const pathSafe = (label) => String(label).replace(/\//g, '-');
  *  nothing to either when false, so every existing cache path stays where it is. */
 export function cachePath(S, cfg, model, book = S.primaryBook, all = false, archived = false) {
     const slug = String(book).replace(/[^\w.-]+/g, '-').slice(0, 40);
-    const key = getStringHash(`${book}${model}${cfg.chunkMode}${cfg.chunkSize}${cfg.minChunkSize}${all ? `all` : ``}${archived ? `archived` : ``}`);
-    return new URL(`./eval-data/indexes/${slug}__${pathSafe(model)}${all ? `__all` : ``}${archived ? `__archived` : ``}__${key}/index.json`, import.meta.url).pathname;
+    // TAKES A LABEL, STORES BY COLLECTION. Callers hold `em.label` and should not have to know which
+    // half of it reaches a stored vector; resolving here is what makes two arms differing only in their
+    // query prefix share a build, which this file's header has always said they should. Idempotent on a
+    // collection name, so passing either one lands on the same file.
+    const coll = resolveModel(model).collection;
+    const key = getStringHash(`${book}${coll}${cfg.chunkMode}${cfg.chunkSize}${cfg.minChunkSize}${all ? `all` : ``}${archived ? `archived` : ``}`);
+    return new URL(`./eval-data/indexes/${slug}__${pathSafe(coll)}${all ? `__all` : ``}${archived ? `__archived` : ``}__${key}/index.json`, import.meta.url).pathname;
 }
 
 /** How a model is CALLED and how its collection is NAMED.
@@ -203,10 +208,26 @@ export const resolveModel = (spec) => {
     // does not fail — it quietly reports the model as worse than it is. This has now bitten twice, at
     // both ends of the string, which is why the match is anchored at neither.
     const fam = model.toLowerCase();
-    const { doc, query } = (raw ? null : Object.entries(PREFIXES).find(([stem]) => fam.includes(stem))?.[1]) ?? { doc: '', query: '' };
+    const family = Object.entries(PREFIXES).find(([s]) => fam.includes(s))?.[1] ?? { doc: '', query: '' };
+    const { doc, query } = raw ? { doc: '', query: '' } : family;
     // The label carries the SERVER too: the same weights quantized differently are different vectors, and
     // the served id is what distinguishes them ('...-8B-4bit-DWQ' vs '...-8B-4bit-MLX').
-    return { model, endpoint, url, doc, query, label: (stem ?? '') + model + (doc ? '__p' : raw ? '__raw' : '') };
+    // TWO IDENTITIES, because `/raw` suppresses two prefixes that reach different places.
+    //
+    // COLLECTION is what is stored, and only the DOC prefix reaches a stored vector. A family whose doc
+    // prefix is empty — qwen3-embedding, mxbai — builds the SAME collection raw or not, and must resolve
+    // to the same file: marking it `__raw` would rebuild 26 bit-identical collections per model and leave
+    // two names for one set of vectors. embeddinggemma is the only family here that prepends to documents,
+    // so it is the only one whose raw arm is a different build.
+    //
+    // LABEL additionally carries the QUERY prefix's absence, because that changes every cosine even when
+    // the collection is untouched — so it is what says which arm a bundle's numbers came from, and what
+    // keys the query cache. When a family has neither prefix, `/raw` asks for nothing and both collapse to
+    // the plain name rather than minting an arm that cannot differ.
+    const base = (stem ?? '') + model;
+    const collection = base + (doc ? '__p' : (raw && family.doc) ? '__raw' : '');
+    const label = base + (doc ? '__p' : (raw && (family.doc || family.query)) ? '__raw' : '');
+    return { model, endpoint, url, doc, query, label, collection };
 };
 
 /** One embedding call, either transport. OpenAI returns its vectors in a `data` array that is documented
