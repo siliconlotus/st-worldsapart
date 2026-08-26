@@ -40,7 +40,9 @@ not the embedder. **Measured** over 99 scenes, memory tier, all SEVEN models: at
 between 13.3 and 14.2 entries — a spread of 0.9 against a mean near 13.8 — and the spread stays under 1
 entry at every cutoff from 0.10 to 0.30. The model moves WHICH entries clear the bar, not how many.
 
-So the two choices do not interact, and neither has to be made in terms of the other.
+So the two choices do not interact, and neither has to be made in terms of the other. The cutoff is the
+**Relevance cutoff** setting — ONE value for every model, defaulting to 0.10 — and every model ships a
+fit of its own beside it. Picking a model is then only a question of how much recall that budget buys.
 
 On the shipped model, Qwen3-Embedding-8B:
 

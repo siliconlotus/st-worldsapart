@@ -114,6 +114,28 @@ export const defaultSettings = {
     // beneficial weight. It was a worse, redundant hand-rolled version of mean-centering (meanCentered),
     // which subtracts the real corpus mean vector and measurably helps (+8.8% nDCG@5, centering-grid.mjs).
     /**
+     * The E[credit] a MEMORY entry must clear at stage 4. One value for every embedding model, and the
+     * user's to set.
+     *
+     * IT IS A BUDGET DIAL, NOT A MODEL SETTING. `E[credit]` is calibrated, so how many entries clear a
+     * given value is a property of the CORPUS rather than the embedder. **Measured** over 99 scenes,
+     * memory tier, across all seven fitted models: at 0.10 they deliver between 13.3 and 14.2 entries, and
+     * the spread stays under one entry at every value from 0.10 to 0.30. The model moves WHICH entries
+     * clear the bar, not how many — so a per-model cutoff would be seven names for one number, and picking
+     * a model would silently change the budget.
+     *
+     * That is why it is a setting: it is the precision-for-recall trade, which is the user's call, and
+     * choosing an embedding model is then only a question of how much recall that budget buys.
+     *
+     * 0.10 delivers about 13.8 memory entries, roughly 24k tokens. The usable range is 0.05 to about 0.35
+     * — precision peaks at 50.8% (measured, any model, any cutoff) and past there the dial stops trading
+     * and loses both. The default sits at the recall-favouring end deliberately, matching F2.
+     *
+     * The `cutoff` a fit carries in relevance-model-<tier>.json is that MODEL's own F2 optimum, kept as
+     * provenance and never read at runtime. Reference is not cut at all (rankActivated).
+     */
+    relevanceCutoff: 0.10,
+    /**
      * Cap on VECTOR entries in the final selection — stage 4, inside applyBudget, nested as
      * vector ⊆ dynamic ⊆ all. At most this many vector entries are added to the layout during the walk;
      * it does not decide what activates. Stage 1 admits every vectorized entry up to a fixed ceiling

@@ -568,7 +568,7 @@ function loadRelevanceModel() {
                         + `so nothing is cut on relevance. Fit one with eval/relevance-regress.mjs --emit-model.`);
                     return [tier, null];
                 }
-                console.log(`Worlds Apart: relevance model — ${m.tier} tier, ${m.features?.join(', ')}, cutoff ${m.cutoff}, fitted under ${m.embedModel}`);
+                console.log(`Worlds Apart: relevance model — ${m.tier} tier, ${m.features?.join(', ')}, fitted under ${m.embedModel} (its own best cutoff was ${m.cutoff}; the cut runs at the relevanceCutoff setting)`);
                 return [tier, m];
             })
             .catch((e) => {
@@ -652,7 +652,7 @@ async function scoreRelevanceColumn(items, windowFor) {
 
     if (runState.verboseRun) {
         const scored = items.filter(it => Number.isFinite(it.eCredit));
-        const cuts = Object.entries(models).filter(([, m]) => m).map(([t, m]) => `${t} ${t === 'memory' ? `>= ${m.cutoff}` : 'uncut'}`).join(', ');
+        const cuts = Object.entries(models).filter(([, m]) => m).map(([t]) => `${t} ${t === 'memory' ? `>= ${settings().relevanceCutoff}` : 'uncut'}`).join(', ');
         console.log(`%cWorlds Apart · E[credit] over ${scored.length} entries — ${cuts}; the cut runs at selection`, 'font-weight: bold');
         console.table([...scored]
             .sort((a, b) => b.eCredit - a.eCredit)
@@ -660,7 +660,7 @@ async function scoreRelevanceColumn(items, windowFor) {
                 entry: it.entry.comment || it.entry.key?.[0] || it.entry.uid,
                 tier: it.eCreditTier,
                 eCredit: Number(it.eCredit.toFixed(4)),
-                clears: it.eCredit >= models[it.eCreditTier].cutoff,
+                clears: it.eCreditTier === 'memory' && it.eCredit >= settings().relevanceCutoff,
                 cosine: Number.isFinite(it.score) ? Number(it.score.toFixed(4)) : null,
                 text: Number((it.textScore ?? 0).toFixed(3)),
                 properNouns: Number(it.properNouns.toFixed(3)),
@@ -2428,7 +2428,7 @@ async function rankActivated(args) {
     const cutoffs = relevanceModel.value ?? {};
     const { cut: relevanceCutRows } = selection.relevanceCut(results, {
         scoreOf: it => it.eCredit,
-        cutoffOf: it => (isMemory(it.entry) ? cutoffs.memory?.cutoff ?? NaN : NaN),
+        cutoffOf: it => (isMemory(it.entry) && cutoffs.memory ? settings().relevanceCutoff : NaN),
     });
     const cutByRelevance = new Set(relevanceCutRows);
     results = results.filter(it => !cutByRelevance.has(it));
@@ -4256,6 +4256,9 @@ const SETTINGS_HTML = `
                     <div class="inline-drawer-icon fa-solid fa-circle-chevron-down down"></div>
                 </div>
                 <div class="inline-drawer-content">
+                    <label for="wa_relevance_cutoff">Relevance cutoff — memory entries must clear this (0 = no cut)</label>
+                    <input id="wa_relevance_cutoff" type="number" class="text_pole" min="0" max="1" step="0.01">
+
                     <label for="wa_max_entries">Vector entry cap — retrieved entries in the prompt</label>
                     <input id="wa_max_entries" type="number" class="text_pole" min="1" max="100" step="1">
 
@@ -4543,6 +4546,7 @@ export async function init() {
     bind('#wa_max_tokens_pct', 'maxTokensPercent', 'number');
     bind('#wa_budget_slack', 'budgetSlackPercent', 'number');
     bind('#wa_slack_mode', 'budgetSlackMode', 'string');
+    bind('#wa_relevance_cutoff', 'relevanceCutoff', 'number');
     bind('#wa_max_dynamic', 'maxDynamicEntries', 'number');
     bind('#wa_max_total', 'maxTotalEntries', 'number');
     bind('#wa_drop_unavailable', 'dropUnavailable', 'checked');
