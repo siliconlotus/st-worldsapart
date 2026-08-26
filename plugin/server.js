@@ -35,6 +35,12 @@ import { LocalIndex } from 'vectra';
 import { getTransformersVector } from '../../src/vectors/embedding.js';
 import { getOllamaVector } from '../../src/vectors/ollama-vectors.js';
 import { getVllmVector } from '../../src/vectors/vllm-vectors.js';
+import { getOpenAIVector } from '../../src/vectors/openai-vectors.js';
+import { getCohereVector } from '../../src/vectors/cohere-vectors.js';
+import { getLlamaCppVector } from '../../src/vectors/llamacpp-vectors.js';
+import { getNomicAIVector } from '../../src/vectors/nomicai-vectors.js';
+import { getExtrasVector } from '../../src/vectors/extras-vectors.js';
+import { getMakerSuiteVector, getVertexVector } from '../../src/vectors/google-vectors.js';
 import { scoreCollection, poolEntries, selectTopK } from './scoring.mjs';
 // Same matcher and text fold the extension uses for keyword hits — shared, not copied, so a chat scan and a
 // live keyword match can never disagree about what a key matches.
@@ -66,51 +72,60 @@ export const info = {
 const meanCache = new Map();
 
 /**
- * Embeds the query. Only the providers listed here are supported for centered
- * search; anything else should fall back to ST's own endpoint client-side.
+ * Embeds the query, for every source SillyTavern can address.
+ *
+ * A MIRROR OF ST'S OWN `getVector` AND `getSourceSettings`, both of which are module-private in
+ * src/endpoints/vectors.js — that file exports only `router`, and no route hands a caller a raw vector.
+ * So WA cannot route the query embedding through ST even though the collections were built through it,
+ * and the only alternative to this switch is supporting three sources out of twenty.
+ *
+ * WHAT IS COPIED IS ROUTING, NOT PLUMBING. Every per-source function here is ST's own export and reads
+ * its API key from `directories` itself, so no credential is duplicated and no provider request is
+ * reimplemented. The two `urlOverride` constructions and the model defaults are copied, because they
+ * live in `getSourceSettings` rather than in the exported functions.
+ *
+ * IT WILL DRIFT, and silently: a source ST adds or renames lands here as "that provider quietly gets no
+ * cosine", which now degrades into the noCosine fit rather than failing. `eval/embed-sources-check.mjs`
+ * reads ST's own SOURCES array and fails when this switch stops covering it, which is what turns that
+ * into a caught regression. Delete this whole function the day ST exports `getVector`
+ * (upstream-st.md).
+ *
  * @param {string} source Vector source
- * @param {object} sourceSettings Provider settings
+ * @param {object} s Provider settings, as the client sends them
  * @param {string} text Text to embed
  * @param {object} directories User directories
+ * @param {object} request The plugin's own Express request — Google's vectors read credentials off it,
+ *   which is what ST passes them as `sourceSettings.request`.
  * @returns {Promise<number[]>} Embedding
  */
-async function embed(source, sourceSettings, text, directories) {
-    // ONE CASE PER SOURCE, and an unsupported one must FAIL LOUDLY rather than degrade: the client falls
-    // back to ST's stock endpoint, which drops the score entirely, and stage 1 then has no cosine at all.
-    // That was silent for as long as a missing score could be replaced by a rank — measured on a live
-    // capture, every "cosine" was 1 - rank/3332 and the relevance model multiplied its coefficient by it.
+async function embed(source, s, text, directories, request) {
+    const openAiish = (urlOverride = null, fallback = '') =>
+        getOpenAIVector(text, source, directories, String(s.model || fallback), urlOverride);
     switch (source) {
-        case 'ollama':
-            return await getOllamaVector(
-                text,
-                sourceSettings.apiUrl,
-                sourceSettings.model,
-                Boolean(sourceSettings.keep),
-                directories,
-            );
-        case 'vllm':
-            return await getVllmVector(
-                text,
-                sourceSettings.apiUrl,
-                sourceSettings.model,
-                directories,
-            );
-        case 'transformers':
-            // ST'S OWN IN-PROCESS EMBEDDER, and it takes no sourceSettings because there is nothing to
-            // pass: the model is server config (`extensions.models.embedding`), not a client setting, and
-            // the Vector Storage UI offers no way to choose one. Reusing ST's function rather than driving
-            // the pipeline here keeps the pooling and normalization identical to what indexed the
-            // collection.
-            //
-            // IT COSTS NOTHING EXTRA. This source was refused before, which sent the client to the
-            // no-plugin path — where ST embeds the very same text through the very same pipeline and then
-            // discards the score (multiQueryCollection returns hashes and metadata only). So these users
-            // were already paying the embed and getting no cosine for it. Measured on an M-series Mac, the
-            // embed is ~5.5s for a scan window of the length this corpus runs, because transformers.js is
-            // quantized ONNX on one CPU thread; that is the source's cost, not this case's.
-            return await getTransformersVector(text);
+        case 'transformers': return await getTransformersVector(text);
+        case 'nomicai':      return await getNomicAIVector(text, source, directories);
+        case 'extras':       return await getExtrasVector(text, s.extrasUrl, s.extrasKey);
+        case 'palm':         return await getMakerSuiteVector(text, String(s.model), request);
+        case 'vertexai':     return await getVertexVector(text, String(s.model), request);
+        // isQuery is true: this function only ever embeds the QUERY, never a document.
+        case 'cohere':       return await getCohereVector(text, true, directories, String(s.model));
+        case 'llamacpp':     return await getLlamaCppVector(text, s.apiUrl, directories);
+        case 'vllm':         return await getVllmVector(text, s.apiUrl, String(s.model), directories);
+        case 'ollama':       return await getOllamaVector(text, s.apiUrl, String(s.model), Boolean(s.keep), directories);
+        case 'siliconflow':  return await openAiish(s.siliconflow_endpoint === 'cn' ? 'https://api.siliconflow.cn/v1' : null, 'Qwen/Qwen3-Embedding-0.6B');
+        case 'workers_ai': {
+            const accountId = String(s.workers_ai_account_id || '').trim();
+            return await openAiish(accountId
+                ? `https://api.cloudflare.com/client/v4/accounts/${encodeURIComponent(accountId)}/ai/v1`
+                : null, '@cf/baai/bge-m3');
+        }
+        case 'electronhub':  return await openAiish(null, 'text-embedding-3-small');
+        case 'nanogpt':      return await openAiish(null, 'text-embedding-3-small');
+        case 'openrouter':   return await openAiish(null, 'openai/text-embedding-3-large');
+        case 'openai': case 'togetherai': case 'mistral': case 'webllm': case 'koboldcpp': case 'chutes':
+            return await openAiish();
         default:
-            throw new Error(`Worlds Apart: centered search does not support source "${source}" — `
+            throw new Error(`Worlds Apart: no embedding route for source "${source}" — `
                 + 'the extension will fall back to stock vector search, which returns no scores, so stage 1 will have no cosine.');
     }
 }
@@ -236,7 +251,7 @@ export async function init(router) {
             const loading = Promise.all(collectionIds.map(collectionId =>
                 loadCentered(getIndexPath(request.user.directories, String(collectionId), String(source), settings.model))));
             loading.catch(() => {});   // surfaced by the await below; without this an embed failure leaves an unhandled rejection
-            const queryVector = await embed(String(source), settings, String(searchText), request.user.directories);
+            const queryVector = await embed(String(source), settings, String(searchText), request.user.directories, request);
             const results = [];
             const loadedAll = await loading;
 

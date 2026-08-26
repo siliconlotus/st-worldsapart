@@ -294,7 +294,13 @@ async function queryCollections(args) {
                 body: JSON.stringify({
                     ...body,
                     centered: settings().meanCentered,
-                    sourceSettings: { apiUrl: body.apiUrl, model: body.model, keep: body.keep },
+                    // EVERY PROVIDER FIELD, not the three local sources happen to need. The plugin now
+                    // routes all of ST's sources, and the rest read fields this used to drop —
+                    // extrasUrl/extrasKey, siliconflow_endpoint, workers_ai_account_id. Narrowing here is
+                    // what would make a provider fail on a missing setting rather than on a missing route.
+                    // The query fields are stripped because they are not provider settings; API keys were
+                    // never here, since ST's per-source functions read those server-side.
+                    sourceSettings: (({ collectionIds, searchText, centroidUids, topK, ...rest }) => rest)(body),
                 }),
             });
 
