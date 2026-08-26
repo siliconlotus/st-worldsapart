@@ -263,10 +263,14 @@ the entity filter's term weights; keyword score is computed over the scan window
 the PROMPT order, which is a user setting defaulting to `entry.order` and is applied to whatever
 survived.
 
-**This is where the lexical half of WA lives now.** Measured over 8924 judged rows on 69 scenes, text is
-the strongest per-entry predictor of relevance — standardised logistic beta +0.794 against cosine's
-+0.465 and keys' -0.006 (`eval/relevance-regress.mjs`). So "stage 1 dropped BM25" is not "WA dropped
-BM25"; say which stage.
+**This is where the lexical half of WA lives.** `content-lexical.mjs` computes BM25 over every entry's
+content, a superset of the vectorized chunks stage 1 sees, and `rankActivated` reads it.
+
+**Which signal predicts best is a property of the embedding model, so it is quoted with one**
+(`eval/relevance-regress.mjs`, standardised logistic betas). Under bge-m3, text led: +0.794 against
+cosine's +0.465 and keys' -0.006, over 8924 judged rows on 69 scenes. Under Qwen3-Embedding-8B-4bit-DWQ
+the order inverts: cosine +0.762, text +0.567, keys +0.137, over 6051 rows on 102 scenes. A ranking of
+the signals carried across a model change is the claim to distrust.
 
 **4. Selection** — two cuts, both here, each answering one question over the layout order. **There is
 no relevance cut, so WA makes no relevance decision anywhere** — a standing exception to the
