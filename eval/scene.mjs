@@ -417,13 +417,10 @@ export const sceneParams = (S, overrides = {}) => ({
     // at the shipped default, which is what its numbers mean today.
     wordBoundary: 'strict',
     // Occurrences -> score (matcher.mjs repeatCurveOf). 'bm25' here, NOT the shipped 'presence-log',
-    // for the reason uncenteredGate is 0 above: every sample captured before the setting existed must
+    // for the same reason: every sample captured before the setting existed must
     // reproduce byte-identically, and those all ran under bm25. New captures record their own curve in
     // `params`, which is spread over these defaults, so this fallback only ever reaches old ones.
     repeatCurve: 'bm25', repeatR: 1,
-    // Wrong-book failsafe (see state.mjs uncenteredGate). 0 here, NOT the shipped 0.5: every sample captured
-    // before the gate existed must reproduce byte-identically, and a gate arm overrides this explicitly.
-    uncenteredGate: 0,
     // Whether the cosine subtracts the corpus mean (state.mjs meanCentered, shipped on). An arm here contrasts
     // the CENTERED and RAW rankings on graded scenes; centering-grid.mjs measures the same switch on the
     // leave-one-out chunk-to-sibling task, which is a different question and can disagree without either
@@ -590,8 +587,8 @@ export const sceneParams = (S, overrides = {}) => ({
  *
  * PER-BOOK CENTROIDS, POOLED COSINES, deliberately: it is what production does, and the harness models
  * the pipeline rather than an argument about it. It does mean two books' cosines come from different
- * corpus means and are compared anyway — the raw-vs-centred question `uncenteredGate` exists for. Nothing
- * here is evidence either way; a divergence would have to be measured before it could be justified.
+ * corpus means and are compared anyway. Nothing here is evidence either way; a divergence would have to be
+ * measured before it could be justified.
  *
  * A ROW'S IDENTITY IS (book, uid), never uid: uids are per book and number from 0, so two books collide on
  * almost every one. The key is content-lexical's `entryKey` — the same `${world}.${uid}` ST core uses for
@@ -754,7 +751,6 @@ export function loadScene(S, { indexFile, indexOpts = {}, params: P }) {
         // centroid and the arm reduces to single-stage.
         if (P.sharedComponents > 0 || P.pcRemove > 0 || P.whitenR > 0) {
             if (!P.meanCentered) throw new Error('sharedComponents/pcRemove need meanCentered: both are defined as what comes off BEFORE the cosine, and uncentered scoring subtracts nothing');
-            if (P.uncenteredGate > 0) throw new Error('sharedComponents/pcRemove with uncenteredGate is not modelled: the gate reads RAW cosine off item.vector, which projection has already changed');
             const stages = [];
             // STAGE A IS THE MEMORY REGISTER, so it comes off MEMORY CHUNKS AND NOTHING ELSE. Reference and
             // memory are parallel processes: the register is one direction across all memories on disk
@@ -1114,7 +1110,7 @@ export function makeCandidateSet({ loaded, byKey, entries, params: P, chunkCfg, 
         // pooled records across collections before grouping them back.
         const contentText = new Map();
         for (const ix of contentIndexes) for (const [k, v] of scoreContent(ix, qtext, { k1, b, termWeights: tw, stopwordDf: P.stopwordDf })) contentText.set(k, v);
-        const scored = loaded.flatMap(L => scoreCollection(L.book, L, pcQuery(L, qvec), { centered: P.meanCentered, uncenteredGate: P.uncenteredGate }));
+        const scored = loaded.flatMap(L => scoreCollection(L.book, L, pcQuery(L, qvec), { centered: P.meanCentered }));
         const grouped = selectTopK(poolEntries(scored), topK);
         const per = new Map();
         for (const [book, g] of Object.entries(grouped)) for (const m of g.metadata ?? []) { const key = entryKey({ world: book, uid: m.index }); per.set(key, { score: Math.max(per.get(key)?.score ?? -Infinity, m.score) }); }

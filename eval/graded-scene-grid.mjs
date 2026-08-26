@@ -259,7 +259,7 @@ const fmt = n => (n == null ? '·' : (+n).toFixed(3));
     //   layout   every non-DURABLE row — memory and reference together. The cliff cuts a prefix of exactly
     //            this, so it is the diagnostic for cutoff and tail decisions, and the primary column.
     //   vector   vectorized rows alone. The narrow diagnostic for the cosine half — centering, chunking,
-    //            threshold, uncenteredGate, embedder.
+    //            threshold, embedder.
     //
     // Durable rows leave both: relevance never chose a constant or an armed sticky, so ranking one charges
     // the ranker for an author's declaration. Reference rows STAY in layout — they compete for the same

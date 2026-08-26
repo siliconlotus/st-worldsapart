@@ -279,7 +279,6 @@ async function queryCollections(args) {
                 body: JSON.stringify({
                     ...body,
                     centered: settings().meanCentered,
-                    uncenteredGate: Number(settings().uncenteredGate) || 0,
                     sourceSettings: { apiUrl: body.apiUrl, model: body.model, keep: body.keep },
                 }),
             });
@@ -4211,8 +4210,6 @@ const SETTINGS_HTML = `
                     <div id="wa_orphans_out" class="opacity50p" style="margin:0.4em 0;font-size:0.85em;"></div>
                     <small class="opacity50p">Nothing removes a vector collection: chunk pruning only runs for a book being synced, so a renamed, deleted or detached book leaves its whole collection on disk, as does switching embedding source or model. This reports what nothing claims — it deletes nothing, because these cost embedding time and a book you have not opened is not garbage.</small>
 
-                    <label for="wa_uncentered_gate" title="A chunk must also reach this raw (uncentered) cosine to be admitted. Catches a wrong book attached by mistake; 0.5 is calibrated for bge-m3. 0 = off.">Wrong-book gate (raw cosine)</label>
-                    <input id="wa_uncentered_gate" type="number" class="text_pole" min="0" max="1" step="0.05">
                 </div>
             </div>
 
@@ -4518,7 +4515,6 @@ export async function init() {
     // number binding would collapse it to 0 and silently switch the keys signal off.
     bind('#wa_llm_profile', 'llmProfile', 'string');
     bind('#wa_llm_temp', 'llmTemperature', 'string');
-    bind('#wa_uncentered_gate', 'uncenteredGate', 'number');
     bind('#wa_max_entries', 'maxVectorEntries', 'number');
     bind('#wa_max_tokens', 'maxTokens', 'number');
     bind('#wa_max_tokens_pct', 'maxTokensPercent', 'number');

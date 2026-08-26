@@ -233,10 +233,9 @@ inside the cliff's population and outside the graded one.
 
 **1. Retrieval** — `selectAndActivate` in `worldsapart.js`. **Stage 1 is COSINE ONLY, and it has no
 admission test at all**: the plugin scores every chunk by mean-centered cosine, `fuseRetrieval` orders
-them into the **retrieval ranking**, and `retrieve` returns all of it. The only thing that drops a chunk
-is `uncenteredGate`, a wrong-book failsafe on RAW cosine. The only thing that bounds the result is
-`admitCeiling` (`plugin/scoring.mjs`), counting entries (1000) on the pooled plugin path and chunks
-(10000) on the no-plugin path.
+them into the **retrieval ranking**, and `retrieve` returns all of it. NOTHING drops a chunk. The only
+thing that bounds the result is `admitCeiling` (`plugin/scoring.mjs`), counting entries (1000) on the
+pooled plugin path and chunks (10000) on the no-plugin path.
 
 **Call the non-plugin route the NO-PLUGIN PATH, not "the fallback".** It is ST's own `/api/vector`
 endpoint, taken when the WA server plugin is absent or errors (`queryCollections`). It does not

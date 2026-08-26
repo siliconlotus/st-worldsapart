@@ -219,10 +219,6 @@ const ARMS = {
     // placement is uniform.
     'addKeys=cast': { addCastKeys: ['Jeffrey', 'Shane', 'Brad', 'Micah', 'Teddy', 'Alex', 'Dylan', 'Liam', 'Marjorie', 'Valentina', 'Arthur'] },
     'addKeys=cast+dropHi': { addCastKeys: ['Jeffrey', 'Shane', 'Brad', 'Micah', 'Teddy', 'Alex', 'Dylan', 'Liam', 'Marjorie', 'Valentina', 'Arthur'], dropKeys: ['Jeffrey', 'Liam', 'Brad', 'Arthur', 'Shane'] },
-    // The shipped wrong-book failsafe (state.mjs uncenteredGate). Samples score at gate 0 for
-    // reproducibility, so this arm is the tripwire: it must stay ~0.0000 on every real scene — the gate's
-    // whole contract is "free on the right book" — and a nonzero Δ here means the calibration broke.
-    'gate=0.5': { uncenteredGate: 0.5 },
     // THE CUT ITSELF, read with --metric fAtCut. The shipped memory fit's own cutoff is the baseline, so
     // these are absolute doses around it; the window they move is the only one the system sizes for
     // itself (scene.mjs, @cut). Screening it against a fixed-k metric measures nothing — k is handed the

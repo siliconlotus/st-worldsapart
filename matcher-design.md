@@ -327,8 +327,8 @@ every compound key.
 `fuseRetrieval` orders them into the **retrieval ranking**, and `retrieve` returns all of it.
 
 **Stage 1 is cosine only, and admits everything it scores.** No lexical signal, no entity filter, no
-relevance test. The one thing that drops a chunk is `uncenteredGate`, the wrong-book failsafe on RAW
-cosine; the one thing that bounds the result is `admitCeiling`. Keys are not in this ranking either.
+relevance test, and nothing that drops a chunk. The one thing that bounds the result is `admitCeiling`.
+Keys are not in this ranking either.
 
 Everything else that used to gate here was removed against measurement, and `plugin/scoring.mjs`'s header
 is the record — read it before proposing any of it back. In short: `scoreThreshold` resolved to a p90

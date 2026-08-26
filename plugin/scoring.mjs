@@ -38,36 +38,20 @@ export function quantile(xs, q) {
 /** Score one collection's chunks against a query vector by mean-centered cosine, and return them ALL.
  *  This is the plugin's /query-multi per-collection loop.
  *
- *  uncenteredGate is a wrong-book failsafe and the only thing here that drops a chunk — not a ranking
- *  signal: a chunk must reach `uncenteredGate` RAW cosine (no mean subtraction) or it goes. Centered scores
- *  cannot do this job — centering subtracts the book's shared direction, so they only say "more like the
- *  query than this book's average chunk", and every book, including a wrong one, has above-average chunks.
- *  Raw cosine keeps absolute similarity: measured on 4 graded scenes x 3 unrelated books (bge-m3), relevant
- *  entries sit at >= 0.538 while wrong-genre books top out at 0.47-0.54, so a 0.5 gate zeroed 7/9 null cells
- *  at zero cost to any real scene. Known blind spot: a same-genre wrong book clears any raw-cosine gate. */
-export function scoreCollection(collectionId, loaded, queryVector, { centered = true, uncenteredGate = 0 } = {}) {
+ *  NOTHING HERE DROPS A CHUNK. `uncenteredGate` used to — a raw-cosine floor meant as a wrong-book
+ *  failsafe — and it is gone. It worked on the case it claimed (measured under Qwen3-Embedding-8B, a
+ *  different-genre book delivered 9 entries at gate 0 and 1 at 0.5), but a wrong book attached to a chat
+ *  is a CONFIGURATION ERROR rather than something to defend against, and the mistake anyone actually
+ *  makes is attaching a SIBLING book — same story, same author — which no raw-cosine floor separates:
+ *  same-genre went 15 to 9 on the same measurement. So it was strongest exactly where the output is
+ *  already obviously wrong, and weakest where a reader might be fooled. Against that it cost a shipped
+ *  constant that needed per-model recalibration, the only unrecoverable drop in the pipeline, and a
+ *  scoring side effect — removing rows changes the within-scene standardisation, so gating could promote
+ *  a surviving entry past the cut. */
+export function scoreCollection(collectionId, loaded, queryVector, { centered = true } = {}) {
     const { items, mean } = loaded;
     const vectorScores = centeredCosineScores(items, queryVector, mean, centered);
-    // The gate is PER ENTRY (best chunk vouches for its siblings), not per chunk. Kept entry-level from
-    // when a chunk-level AND could drop an entry's best-lexical chunk and lower its pooled score; with
-    // one signal left the two forms coincide, and the entry-level reading is still the right one — the
-    // question "is this the wrong book?" is about the entry, not about one of its paragraphs.
-    let gatedOut = null;
-    if (uncenteredGate > 0) {
-        const rawScores = centered ? centeredCosineScores(items, queryVector, mean, false) : vectorScores;
-        const bestRaw = new Map();
-        items.forEach((item, docIndex) => {
-            const key = item.metadata?.index ?? `#${item.metadata?.hash}`;
-            bestRaw.set(key, Math.max(bestRaw.get(key) ?? -Infinity, rawScores[docIndex]));
-        });
-        gatedOut = key => (bestRaw.get(key) ?? -Infinity) < uncenteredGate;
-    }
-    const out = [];
-    items.forEach((item, docIndex) => {
-        if (gatedOut && gatedOut(item.metadata?.index ?? `#${item.metadata?.hash}`)) return;
-        out.push({ collectionId, score: vectorScores[docIndex], metadata: item.metadata });
-    });
-    return out;
+    return items.map((item, docIndex) => ({ collectionId, score: vectorScores[docIndex], metadata: item.metadata }));
 }
 
 /**

@@ -83,7 +83,9 @@ assert.ok(all.every(r => r.bm25 === undefined), 'no chunk carries a lexical scor
 
 // The wrong-book gate is the ONE thing that still drops a chunk, and it reads RAW cosine per entry.
 // Cosines here run 0.510 down to 0.051, so a 0.35 bar keeps the top four and drops the rest.
-const gated = scoreCollection('c1', autoLoaded, q, { centered: false, uncenteredGate: 0.35 });
-assert.strictEqual(gated.length, 4, 'uncenteredGate still drops chunks below the raw bar');
+// NOTHING DROPS A CHUNK. The raw-cosine wrong-book gate that used to live here is gone (plugin/scoring.mjs
+// carries why), so stage 1 returns every chunk it scored and admission is unconditional.
+assert.strictEqual(scoreCollection('c1', autoLoaded, q, { centered: false }).length, autoLoaded.items.length,
+    'scoreCollection returns every chunk it scored');
 
 console.log('ok');

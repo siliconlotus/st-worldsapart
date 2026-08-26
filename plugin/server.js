@@ -203,7 +203,6 @@ export async function init(router) {
             // stricter reading here would turn that ordinary skew into a 400 on every query.
             const opts = {
                 centered: request.body.centered !== false,
-                uncenteredGate: Number(request.body.uncenteredGate) || 0,
             };
             // WHICH ENTRIES DEFINE THE CENTROID, per collection: `{ collectionId: [uid, ...] }`.
             //

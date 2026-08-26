@@ -101,26 +101,6 @@ export const defaultSettings = {
     /** Paragraphs shorter than this are joined with the next one, so stray lines don't become chunks. */
     minChunkSize: 120,
     /**
-     * Wrong-book failsafe: a chunk must also reach this RAW (uncentered) cosine to be admitted at all.
-     * 0 = off. Plugin path only — the stock-ST fallback never sees it.
-     *
-     * This is a different job from the centered cosine, which can only rank
-     * within a book — centering subtracts the book's shared direction, which is exactly the information
-     * "is this even the right book?" needs. Raw cosine keeps it: measured over 4 graded scenes and 3
-     * deliberately unrelated books (bge-m3), every relevant entry scored >= 0.538 raw while wrong-genre
-     * books topped out at 0.47-0.54. At 0.5 it cuts wrong-book contamination from 10-19 entries to 0-2 in
-     * 7 of 9 query x book pairings, and costs little on the right book: measured, 66 graded scenes over 6
-     * books, paired against the same scene at gate 0 — 5 relevant entries dropped at admission, none of them
-     * on the 10 human-graded captures.
-     *
-     * Two measured limits: a same-genre wrong book (same author, same idiom) clears any raw-cosine gate —
-     * only lexical mismatch can catch those, and this knob does not try; and 0.5 is calibrated on bge-m3,
-     * whose relevant-vs-wrong margin here was ~0.04, so a different embedder may need a different value
-     * (or 0 until measured). 0.6 is not a cautious step up from 0.5: it costs 178 relevant entries over
-     * those same scenes.
-     */
-    uncenteredGate: 0.5,
-    /**
      * Use the Worlds Apart server plugin's mean-centered search when it is loaded.
      * Centering removes the direction every chunk in a single-story corpus shares,
      * which is what compresses similarities into a narrow band. Scores come out much
