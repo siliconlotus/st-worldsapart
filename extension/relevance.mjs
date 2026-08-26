@@ -112,6 +112,47 @@ export function properNames(text) {
  */
 export const modelKey = name => String(name ?? '').trim().toLowerCase().replace(/:latest$/, '');
 
+/**
+ * How a model wants to be ASKED. Qwen3-Embedding and mxbai are trained with a task instruction on the
+ * query and ollama's template is a bare `{{ .Prompt }}`, so applying it is the caller's job.
+ *
+ * A MODEL IS HERE ONLY IF ITS PREFIX IS MEASURED TO EARN ONE. bge-m3 and ST's default jina document none.
+ * EmbeddingGemma documents a pair — an instruction on the query and `title: none | text: ` on every
+ * document — and **measured** (5585 rows, 99 scenes, memory tier, leave-one-book-out) applying the pair
+ * against applying neither is flat: 0.7976 vs 0.7982 held-out AUC. Flat is not a reason to carry a
+ * special case, and the document half would additionally have to be rebuilt into every collection, so
+ * gemma has no entry.
+ *
+ * KEYED BY FAMILY STEM, matched as a substring at neither end: the served id is whoever packaged the
+ * model's spelling — `qwen3-embedding:4b` from ollama, `Qwen3-Embedding-8B-4bit-DWQ` from oMLX,
+ * `text-embedding-qwen3-embedding-8b` from LM Studio, which prepends its own type tag. Anchoring the match
+ * at either end drops the instruction from a model that should have it, and that does not fail — it
+ * quietly makes the model look worse than it is. It has bitten at both ends, hence neither.
+ *
+ * Lives here rather than in eval/ because it is PRODUCTION behaviour that the evals verify, not a
+ * measurement setting; reindex.mjs imports this table rather than keeping a second copy of it.
+ */
+export const PREFIXES = {
+    'mxbai-embed-large': 'Represent this sentence for searching relevant passages: ',
+    'qwen3-embedding': 'Instruct: Given a roleplay scene, retrieve lorebook entries relevant to it\nQuery: ',
+};
+
+/**
+ * The prefix to put on a QUERY before it is embedded, or '' when there is none to apply.
+ *
+ * EVERY PREFIX WA APPLIES IS A QUERY PREFIX, which is why this needs no counterpart for documents and why
+ * turning one on costs no rebuild: a query prefix never reaches a stored vector.
+ *
+ * **Measured** (5585 rows, 99 scenes, memory tier, leave-one-book-out, same collections so only the query
+ * vector moves): applying Qwen3-Embedding-8B's instruction is worth +0.0131 held-out AUC and +0.0235 F2 at
+ * its best cutoff, on 4 of 5 books. It is also what the shipped coefficients were fitted against, so
+ * NOT applying it served a fit its own signal never produced.
+ */
+export const queryPrefix = (model) => {
+    const fam = modelKey(model);
+    return Object.entries(PREFIXES).find(([stem]) => fam.includes(stem))?.[1] ?? '';
+};
+
 export function buildNameDf(entries) {
     const df = new Map();
     const names = new Map();

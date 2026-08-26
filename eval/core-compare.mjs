@@ -115,7 +115,7 @@ for (const file of samples) {
     try {
         const em = resolveModel(MODEL);
         indexFile = P.denseAllEntries
-            ? (await ensureIndex(S, { all: true, model: em.model, prefix: em.doc, label: em.label, endpoint: em.endpoint, url: em.url, log: () => {} })).path
+            ? (await ensureIndex(S, { all: true, model: em.model, label: em.label, endpoint: em.endpoint, url: em.url, log: () => {} })).path
             : indexPath(S, { model: MODEL });
     } catch (e) { console.error(`  ${sceneLabel(S) || file}: ${e.message}`); continue; }
     let scene; try { scene = loadScene(S, { indexFile, indexOpts: { model: MODEL }, params: P }); } catch (e) { console.error(`  ${sceneLabel(S) || file}: ${e.message}`); continue; }

@@ -474,7 +474,7 @@ const queryVec = async (S, name, value, em) => {
             // all), so this costs an existsSync on every scene after the first.
             const em = resolveModel(EMBED_SWEEP ? value : MODEL);
             const indexFile = P.denseAllEntries || EMBED_SWEEP
-                ? (await ensureIndex(S, { all: !!P.denseAllEntries, model: em.model, prefix: em.doc, label: em.label, endpoint: em.endpoint, url: em.endpoint === 'ollama' ? OLLAMA : em.url, log: () => {} })).path
+                ? (await ensureIndex(S, { all: !!P.denseAllEntries, model: em.model, label: em.label, endpoint: em.endpoint, url: em.endpoint === 'ollama' ? OLLAMA : em.url, log: () => {} })).path
                 // THE LABEL NAMES THE FILE, not the spec: cachePath and the derived ST path are both
                 // written with `omlx-Qwen3-...`, while the spec is `omlx:Qwen3-...`. Passing the spec
                 // resolves a path nothing ever wrote.

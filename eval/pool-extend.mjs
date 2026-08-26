@@ -105,7 +105,7 @@ const DRY = argv.includes('--dry');
             const r = PARAM_ARMS[arm]
                 ? await scoreScene({ sample: S, overrides: PARAM_ARMS[arm], k: K, scene, qv })
                 : await scoreScene({ sample: S, overrides: {}, k: K, model: MODEL, ollama: OLLAMA, qv,
-                    index: (await ensureIndex(S, { overrides: CHUNK_ARMS[arm], model: EM.model, prefix: EM.doc, label: EM.label, endpoint: EM.endpoint, url: EM.endpoint === 'ollama' ? OLLAMA : EM.url, ollama: OLLAMA, log: () => {} })).path });
+                    index: (await ensureIndex(S, { overrides: CHUNK_ARMS[arm], model: EM.model, label: EM.label, endpoint: EM.endpoint, url: EM.endpoint === 'ollama' ? OLLAMA : EM.url, ollama: OLLAMA, log: () => {} })).path });
             note(r.unjudgedRows, arm);
             process.stdout.write(`\r  ${sceneLabel(S) || basename(path)}: scored ${arm}                    `);
         }

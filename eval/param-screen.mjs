@@ -399,7 +399,7 @@ const fx = n => (n >= 0 ? '+' : '') + n.toFixed(4);
                 // reload branch needs it: a chunk arm builds its own collection, and a vectorized-only one
                 // cannot be scored under denseAllEntries — which is the default, so every chunk arm was
                 // building a collection loadScene then refused.
-                const built = await ensureIndex(sc.S, { overrides: chunkCfg ?? {}, all: !!denseAll || !!sc.P.denseAllEntries, archived: !!archived, model: EM.model, prefix: EM.doc, label: EM.label, endpoint: EM.endpoint, url: EM.endpoint === 'ollama' ? OLLAMA : EM.url, ollama: OLLAMA, log: () => {} });
+                const built = await ensureIndex(sc.S, { overrides: chunkCfg ?? {}, all: !!denseAll || !!sc.P.denseAllEntries, archived: !!archived, model: EM.model, label: EM.label, endpoint: EM.endpoint, url: EM.endpoint === 'ollama' ? OLLAMA : EM.url, ollama: OLLAMA, log: () => {} });
                 r = await scoreScene({ sample: sc.S, overrides: scoring, k: K, index: built.path, model: MODEL, ollama: OLLAMA, qv: sc.qv });
             } else if (needsReload) {
                 // Same collection, but the gazetteer is baked at load time, so the preloaded scene is stale

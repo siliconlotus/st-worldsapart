@@ -61,7 +61,7 @@ const gradeAnchorLine = () => `Grade 0–4: ${GRADE_ANCHORS.map((a, g) => `${g} 
 // upstream edit would silently invalidate existing indexes. See extension/chunking.mjs.
 import { chunkEntry } from './extension/chunking.mjs';
 import { buildContentIndex, scoreContent, indexFingerprint, entryKey } from './extension/content-lexical.mjs';
-import { buildNameDf, properNames, properShared, properDensity, scoreRelevance, isMemory, modelKey, postDates } from './extension/relevance.mjs';
+import { buildNameDf, properNames, properShared, properDensity, scoreRelevance, isMemory, modelKey, queryPrefix, postDates } from './extension/relevance.mjs';
 
 /** Base value for the rewritten `order` sequence. WA rewrites every activated entry's order, so only
  * the relative index matters and the base is free. It is parked far above any plausible authored value
@@ -264,6 +264,15 @@ function renderPluginSetup() {
  * @returns {Promise<object>} Grouped results
  */
 async function queryCollections(args) {
+    // THE MODEL'S QUERY PREFIX GOES ON HERE, and only here. The caller's `searchText` also feeds
+    // queryTermWeights, where an instruction would land in the BM25 term weights and the gazetteer as if
+    // the user had written it; and applying it inside this function rather than at the call site is what
+    // gets it onto BOTH transports below, including the no-plugin path that re-asks after a failure.
+    //
+    // `queryPrefix` returns '' for any model whose contract WA cannot honour in full — see relevance.mjs.
+    const prefix = queryPrefix(vectorRequestBody().model);
+    if (prefix) args = { ...args, searchText: prefix + args.searchText };
+
     // ENTRIES or CHUNKS depending on which path answers — plugin/scoring.mjs admitCeiling carries both
     // numbers and why they differ. Chosen HERE rather than by the caller because the fallback below can
     // fire mid-request, and a ceiling picked before the attempt would ask for entries and be handed

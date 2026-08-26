@@ -205,7 +205,7 @@ const keywordScore = makeKeywordScore(P);
 // chunk with — prefixing that as a query would drop the self-check cosine and read as a broken index.
 const embedOpts = { ollama: OLLAMA, model: EM.model, label: EM.label, endpoint: EM.endpoint, url: EM.endpoint === 'ollama' ? OLLAMA : EM.url };
 const embed = text => embedWith(EM.query + text, embedOpts);
-const embedDoc = text => embedWith(EM.doc + text, embedOpts);
+const embedDoc = text => embedWith(text, embedOpts);
 const fmt = n => (n == null ? '·' : (+n).toFixed(3));
 
 (async () => {

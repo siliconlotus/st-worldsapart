@@ -26,7 +26,7 @@ import { dirname } from 'node:path';
 import { chunkEntry } from '../extension/chunking.mjs';
 import { getStringHash } from './scene.mjs';
 import { openBundle } from '../extension/grading.mjs';
-import { isMemory } from '../extension/relevance.mjs';
+import { isMemory, PREFIXES } from '../extension/relevance.mjs';
 
 /** Chunk settings, sample's own unless overridden. Field names match `settings()` and paramSnapshot.settings. */
 export const chunkConfig = (S, overrides = {}) => {
@@ -131,25 +131,14 @@ export function cachePath(S, cfg, model, book = S.primaryBook, all = false, arch
 
 /** How a model is CALLED and how its collection is NAMED.
  *
- * EmbeddingGemma and Qwen3-Embedding are trained with TASK PREFIXES and lose quality without them, and
- * ollama's template for both is a bare `{{ .Prompt }}` — so applying them is the caller's job, not the
- * server's. bge-m3 wants none, which is why it needs no entry here.
+ * THE PREFIX TABLE IS `relevance.mjs` PREFIXES — production's, imported rather than copied, because the
+ * prefix a model gets is shipped behaviour and this file only verifies it. Every prefix in it goes on the
+ * QUERY, so it never reaches a stored vector and a collection is named by its model alone.
  *
- * EACH MODEL GETS EXACTLY ONE CONFIGURATION — its own contract — so the prefixes are not a parameter and
- * there is no unprefixed arm. **Measured** over 5585 rows on 99 scenes, memory tier, leave-one-book-out,
- * against the SAME collections so that only the query vector moves: following Qwen3-Embedding-8B's
- * contract is worth +0.0131 held-out AUC and +0.0235 F2 at its best cutoff, on 4 of 5 books. On
- * embeddinggemma — the only family here that prefixes DOCUMENTS too, so that arm rebuilt its index — it is
- * flat, +0.0006 held-out AUC. Following the contract is therefore never worse and sometimes much better.
- *
- * PRODUCTION APPLIES NONE OF THEM. Nothing in the vector path prefixes anything, so the shipped Qwen path
- * runs the arm that measured worse, and the coefficients it runs were fitted on prefixed cosines
- * (standardised beta +0.827) that production never produces (+0.712). That is a WA defect, noted here
- * because this table is where the contract lives.
- *
- * KEYED BY FAMILY STEM, matched as a prefix of the model name: the contract is a property of how the
- * family was trained, not of which size you pulled, so qwen3-embedding:0.6b must not silently fall
- * through to no prefix and be reported as a worse model than its 4b sibling.
+ * EACH MODEL GETS EXACTLY ONE CONFIGURATION, so the prefix is not a parameter and there is no unprefixed
+ * arm. **Measured** over 5585 rows on 99 scenes, memory tier, leave-one-book-out, against the SAME
+ * collections so that only the query vector moves: Qwen3-Embedding-8B's instruction is worth +0.0131
+ * held-out AUC and +0.0235 F2 at its best cutoff, on 4 of 5 books.
  *
  * A SERVER STEM (`lms:`, `omlx:`) names a model served by something other than ollama, over its
  * OpenAI-compatible /v1/embeddings. The transport is in the spec rather than in a flag so that two arms in
@@ -174,13 +163,9 @@ export const SERVERS = { 'lms:': 'http://localhost:1234', 'omlx:': 'http://local
  *  fp32 build from HuggingFace both answer a DIFFERENT question than "what do users get by default" —
  *  and ollama could not load these anyway, since it reads GGUF and safetensors and these are ONNX. */
 const SERVICES = { ...SERVERS, 'st:': '' };
-export const PREFIXES = {
-    embeddinggemma: { doc: 'title: none | text: ', query: 'task: search result | query: ' },
-    'mxbai-embed-large': { doc: '', query: 'Represent this sentence for searching relevant passages: ' },
-    'qwen3-embedding': { doc: '', query: 'Instruct: Given a roleplay scene, retrieve lorebook entries relevant to it\nQuery: ' },
-};
+export { PREFIXES };
 
-/** @returns {{model: string, doc: string, query: string, label: string}} */
+/** @returns {{model: string, query: string, label: string, endpoint: string, url: string}} */
 export const resolveModel = (spec) => {
     // IDEMPOTENT ON ITS OWN LABEL. The label names collections and bases, so it is what a bundle records
     // and what a human retypes — and it has to resolve back to the same model, endpoint and prefixes. What
@@ -200,10 +185,10 @@ export const resolveModel = (spec) => {
     // does not fail — it quietly reports the model as worse than it is. This has now bitten twice, at
     // both ends of the string, which is why the match is anchored at neither.
     const fam = model.toLowerCase();
-    const { doc, query } = Object.entries(PREFIXES).find(([s]) => fam.includes(s))?.[1] ?? { doc: '', query: '' };
+    const query = Object.entries(PREFIXES).find(([s]) => fam.includes(s))?.[1] ?? '';
     // The label carries the SERVER too: the same weights quantized differently are different vectors, and
     // the served id is what distinguishes them ('...-8B-4bit-DWQ' vs '...-8B-4bit-MLX').
-    return { model, endpoint, url, doc, query, label: (stem ?? '') + model };
+    return { model, endpoint, url, query, label: (stem ?? '') + model };
 };
 
 
@@ -262,8 +247,8 @@ const embedST = async (model, texts) => {
     return out;
 };
 
-const embedOnce = async (texts, { model, endpoint = 'ollama', url = 'http://localhost:11434', prefix = '' }) => {
-    const input = prefix ? texts.map(t => prefix + t) : texts;
+const embedOnce = async (texts, { model, endpoint = 'ollama', url = 'http://localhost:11434' }) => {
+    const input = texts;
     if (endpoint === 'st') return embedST(model, input);
     if (endpoint === 'openai') {
         const r = await fetch(`${url}/v1/embeddings`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ model, input }) });
@@ -293,7 +278,7 @@ const l2 = v => { let s = 0; for (const x of v) s += x * x; return Math.sqrt(s);
  *
  * @returns {Promise<{path: string, built: boolean, items: number}>}
  */
-export async function ensureIndex(S, { overrides = {}, model = 'bge-m3', prefix = '', label = model, endpoint = 'ollama', ollama = 'http://localhost:11434', url = ollama, book = S.primaryBook, out = null, batch = 64, force = false, all = false, archived = false, log = () => {} } = {}) {
+export async function ensureIndex(S, { overrides = {}, model = 'bge-m3', label = model, endpoint = 'ollama', ollama = 'http://localhost:11434', url = ollama, book = S.primaryBook, out = null, batch = 64, force = false, all = false, archived = false, log = () => {} } = {}) {
     const cfg = chunkConfig(S, overrides);
     // `label` names the cache, `model` names what ollama is asked for: a model embedded WITH its documented
     // document prefix is a different collection from the same model without one, and the two must not share
@@ -314,7 +299,7 @@ export async function ensureIndex(S, { overrides = {}, model = 'bge-m3', prefix 
     const out_ = [];
     for (let i = 0; i < items.length; i += batch) {
         const slice = items.slice(i, i + batch);
-        const vectors = await embedTexts(slice.map(x => x.text), { model, endpoint, url, prefix });
+        const vectors = await embedTexts(slice.map(x => x.text), { model, endpoint, url });
         slice.forEach((it, k) => out_.push({
             id: crypto.randomUUID(),
             metadata: { hash: it.hash, text: it.text, index: it.index, ...(it.centroidOnly ? { centroidOnly: true } : {}) },
@@ -355,7 +340,7 @@ if (process.argv[1] && import.meta.url.endsWith(process.argv[1].split('/').pop()
     if (S.embedModel && em.label !== resolveModel(S.embedModel).label) console.error(`!! rebuilding under "${em.label}" but the sample was captured under "${S.embedModel}" — its recorded cosines will not be comparable`);
 
     ensureIndex(S, {
-        overrides, model: em.model, prefix: em.doc, label: em.label, endpoint: em.endpoint,
+        overrides, model: em.model, label: em.label, endpoint: em.endpoint,
         book: arg('--book') ?? S.primaryBook, out: arg('--out'),
         ollama: process.env.OLLAMA_URL ?? 'http://localhost:11434',
         url: em.endpoint === 'ollama' ? (process.env.OLLAMA_URL ?? 'http://localhost:11434') : em.url,
