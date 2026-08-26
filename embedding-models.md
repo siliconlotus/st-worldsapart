@@ -15,10 +15,20 @@ chat model is not a valid vectorization source.
 
 | | when |
 |---|---|
-| **Qwen3-Embedding-8B** | Best at every cutoff, and on 4 of 5 books. Needs an engine that can serve it fast — see *Speed*. |
+| **Qwen3-Embedding-8B** | Best on all 5 books. Needs an engine that can serve it fast — see *Speed*. |
+| **qwen3-embedding:4b** | Most of 8B's lead at 2560 dimensions instead of 4096. The pick if 8B does not fit. |
 | **qwen3-embedding:0.6b** | Closest of the small models, at 1/13 the parameters. |
-| **embeddinggemma** | Indistinguishable from 0.6b here, and the smallest index at 768 dimensions. |
-| **bge-m3** | Lowest at every cutoff. Fine, and beaten by everything newer. |
+| **embeddinggemma** | Not separable from 0.6b here, and the smallest index at 768 dimensions. |
+| **mxbai-embed-large** | Beaten by everything newer, and its 512-token context truncates a scan window — see *Context length*. |
+| **bge-m3** | Fine, and beaten by everything newer. |
+| **jina-embeddings-v2-base-en** | **ST's stock default, and last here.** Runs on the CPU and adds ~5.5s to every retrieving turn — see *Speed*. Switch off it. |
+
+**Set the model's task instruction? No — WA does it.** Qwen3-Embedding and mxbai want an instruction on the
+query, and WA applies it from `relevance.mjs` PREFIXES. **Measured** on Qwen3-Embedding-8B, same
+collections so only the query vector moves: +0.0131 held-out AUC and +0.0235 F2, on 4 of 5 books. Nothing
+is prefixed onto documents, so turning one on never costs a re-index. EmbeddingGemma documents a pair of
+prefixes and applying the pair against applying neither is flat (0.7976 against 0.7982), so it gets
+neither.
 
 ## Two knobs, and they are independent
 
@@ -26,27 +36,31 @@ chat model is not a valid vectorization source.
 
 `E[credit]` is calibrated — every model is fitted to the same target on the same rows — so a threshold on
 it selects by predicted relevance, and how many entries clear a given value is a property of the CORPUS,
-not the embedder. **Measured** over 105 scenes, memory tier: at cutoff 0.10 the four models deliver
-between 10.4 and 11.0 entries and spend between 18,824 and 19,728 tokens per scene. The model moves WHICH
-entries clear the bar, not how many.
+not the embedder. **Measured** over 99 scenes, memory tier, all SEVEN models: at cutoff 0.10 they deliver
+between 13.3 and 14.2 entries — a spread of 0.9 against a mean near 13.8 — and the spread stays under 1
+entry at every cutoff from 0.10 to 0.30. The model moves WHICH entries clear the bar, not how many.
 
 So the two choices do not interact, and neither has to be made in terms of the other.
 
-| cutoff | tokens/scene | precision | recall |
+On the shipped model, Qwen3-Embedding-8B:
+
+| cutoff | delivered | precision | recall |
 |---|---|---|---|
-| 0.05 | ~34k | ~27% | ~82% |
-| 0.10 | ~19k | ~38% | ~67% |
-| 0.15 | ~13k | ~43% | ~58% |
-| 0.20 | ~10k | ~45% | ~52% |
-| 0.30 | ~6k | ~48% | ~41% |
+| 0.05 | 26.8 | 27.1% | 83.9% |
+| 0.10 | 13.3 | 38.1% | 69.5% |
+| 0.15 | 9.2 | 43.6% | 59.7% |
+| 0.20 | 6.5 | 45.5% | 52.1% |
+| 0.30 | 4.1 | 47.9% | 42.0% |
+
+Roughly 1.8k tokens per delivered memory entry, so cutoff 0.10 is about 24k tokens per scene.
 
 Memory tier only: reference entries and constants sit on top of every figure, so this is retrieval's
 marginal cost rather than the whole World Info budget.
 
-**The usable range is 0.05 to about 0.35.** Precision peaks near 48-53% and then falls, so past there the
-dial stops trading and simply loses both — above 0.50 it is strictly dominated. **Precision never exceeds
-~53% at any cutoff for any model**, which is a property of the ranking rather than of the dial, and the
-number a better model would have to move.
+**The usable range is 0.05 to about 0.35.** Precision peaks and then falls, so past there the dial stops
+trading and simply loses both. **Precision never exceeds 50.8% at any cutoff for any of the seven models**
+— measured — which is a property of the ranking rather than of the dial, and the number a better model
+would have to move.
 
 The shipped defaults sit at the recall-favouring end deliberately. F2 weights recall, and the cutoff is
 chosen on F2, so that preference is expressed twice; a user who wants the other end should say so with
@@ -54,43 +68,49 @@ this knob rather than expect the default to.
 
 ## The measurement
 
-`relevance-regress.mjs --tier memory --lobo --cutoff` with the shipped feature set, over 105 scenes on a
-lineage-disjoint set of 5 books. Each model gets its OWN fit — applying one model's coefficients to
-another's cosines would favour whichever model the fit came from.
+`relevance-regress.mjs --tier memory --lobo --cutoff` with the shipped feature set, over 99 scenes and
+5585 judged rows on a lineage-disjoint set of 5 books. Each model gets its OWN fit — applying one model's
+coefficients to another's cosines would favour whichever model the fit came from.
 
 **Compared at a matched budget**, because a model allowed to pick its own cutoff answers a different
-question. At F2's own optimum bge-m3 scores 80.3% recall — the highest of the four — by delivering 23.8
-entries against Qwen3-8B's 13.5. That is not a better model, it is a looser dial.
+question. At F2's own optimum jina delivers 30.2 entries against Qwen3-8B's 15.0 and still scores lower.
+That is not a better model, it is a looser dial.
 
-| model | params | dims | recall @ ~13.5 entries | precision | AUC |
-|---|---|---|---|---|---|
-| bge-m3 | 568M | 1024 | 63.3% | 36.8% | 0.8037 |
-| embeddinggemma | 308M | 768 | 65.4% | 37.4% | 0.8116 |
-| qwen3-embedding:0.6b | 596M | 1024 | 67.8% | 38.0% | 0.8210 |
-| Qwen3-Embedding-8B (4-bit DWQ) | 8B | 4096 | **69.9%** | 38.9% | **0.8408** |
+| model | dims | recall @ 13.5 entries | precision | held-out AUC |
+|---|---|---|---|---|
+| Qwen3-Embedding-8B (4-bit DWQ) | 4096 | **69.7%** | 37.9% | **0.8332** |
+| qwen3-embedding:4b | 2560 | 68.1% | 37.8% | 0.8188 |
+| qwen3-embedding:0.6b | 1024 | 64.9% | 36.5% | 0.8100 |
+| embeddinggemma | 768 | 64.7% | 36.4% | 0.7982 |
+| mxbai-embed-large | 1024 | 63.5% | 35.8% | 0.7903 |
+| bge-m3 | 1024 | 61.9% | 33.5% | 0.7833 |
+| jina-embeddings-v2-base-en | 768 | 61.6% | 33.0% | 0.7797 |
 
 Held-out AUC per book, which is what says whether an ordering is real:
 
 | model | Ascensus | Time Whore | Richard | Sommers | Panopticon |
 |---|---|---|---|---|---|
-| bge-m3 | 0.8056 | 0.8263 | 0.7746 | 0.8377 | 0.8014 |
-| embeddinggemma | 0.7973 | 0.8474 | 0.7906 | 0.8350 | 0.7528 |
-| qwen3-embedding:0.6b | 0.8321 | 0.8442 | 0.7685 | 0.8590 | 0.7472 |
-| Qwen3-Embedding-8B | 0.8329 | 0.8592 | 0.8133 | 0.8784 | 0.7875 |
+| Qwen3-Embedding-8B | 0.7987 | 0.8677 | 0.8119 | 0.8694 | 0.7792 |
+| qwen3-embedding:4b | 0.7928 | 0.8585 | 0.8011 | 0.8537 | 0.7333 |
+| qwen3-embedding:0.6b | 0.7923 | 0.8513 | 0.7678 | 0.8457 | 0.7194 |
+| embeddinggemma | 0.7486 | 0.8561 | 0.7848 | 0.8132 | 0.7347 |
+| mxbai-embed-large | 0.7523 | 0.8335 | 0.7772 | 0.8252 | 0.7278 |
+| bge-m3 | 0.7341 | 0.8271 | 0.7805 | 0.8097 | 0.7431 |
+| jina-embeddings-v2-base-en | 0.7335 | 0.8189 | 0.7686 | 0.8242 | 0.7250 |
 
-**Qwen3-8B wins 4 of 5, losing only Panopticon.** That is the one ordering here worth acting on.
+**Qwen3-8B wins all 5.** That is the one ordering here worth acting on. The Qwen family takes the top
+three places, and `:4b` keeps most of 8B's lead at 2560 dimensions rather than 4096.
 
-**The middle two are not separable.** embeddinggemma and qwen3-embedding:0.6b trade places by book, and
-swap again on a wider row population — 0.6b leads on the fit's held-out rows, embeddinggemma leads when
-every memory row in the scene is ranked. Do not read a ranking between them.
+**The middle two are not separable.** embeddinggemma and qwen3-embedding:0.6b differ by 0.012 held-out AUC
+and trade places by book — 0.6b takes Ascensus and Sommers, gemma takes Richard, Time Whore and
+Panopticon. Do not read a ranking between them.
 
-Panopticon is 63 rows, and every model except bge-m3 does worse there than on any other book. Regressions
-still land on the small books.
+**ST's default is last.** jina-embeddings-v2-base-en is what a stock install embeds with, and it places
+seventh of seven on held-out AUC and on recall at matched budget. The gap to Qwen3-8B is 8.1 points of
+recall at the same delivered count.
 
-**Not re-measured: `mxbai-embed-large` and `qwen3-embedding:4b`.** Their earlier numbers were taken at
-chunkSize 800 and through a query path that never applied a model's task prefix, so they are not
-comparable to the table above; their collections were purged with the rest of the legacy set. `:4b` had
-been the second pick and may well be again.
+Panopticon is 63 rows, and every model does worse there than on any other book. Regressions still land on
+the small books.
 
 ## Context length: check it against your scan window
 
@@ -136,6 +156,14 @@ costs roughly twice these figures — the ratios between engines are what the ta
 | MLX (oMLX) — 8B | 110 |
 | llama.cpp (ollama) — 4b | 277 |
 | llama.cpp — 8B | 910 |
+| **transformers.js (CPU) — jina, ST's default** | **553** |
+
+**ST's default embedder runs on the CPU, and the cost lands on every turn.** `transformers.js` runs
+quantized ONNX on ONE thread — threaded wasm needs a SharedArrayBuffer that is not available — and cost
+climbs faster than linearly with input length. Measured on the same Mac: 553ms at 800 characters, 1.18s at
+1750, and **5.49s at 6595 — the scan-window length measured above**, which is what a query actually costs.
+Indexing is a one-off; embedding the query is not, so that is roughly five and a half seconds added to
+every turn that retrieves.
 
 So on a Mac, the 8B rung means MLX or hosted; ollama at 910ms/chunk is 80 minutes to index a mid-sized
 library. On a discrete GPU that constraint does not apply and ollama is fine.
