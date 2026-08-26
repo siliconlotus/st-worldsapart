@@ -1216,6 +1216,11 @@ export const makeFuse = ({ scene, haystack, memoryCutoff = null }) => {
             })));
             // The memory cutoff is OVERRIDABLE, because it is the one number stage 4 cuts on and screening
             // it is what the @cut window exists for. Reference has no override: it is never cut.
+            // DIVERGES FROM PRODUCTION WHEN NO ARM SETS ONE. `model.cutoff` is the fit's own F2 optimum,
+            // which the runtime stopped reading when the cutoff became the `relevanceCutoff` setting — one
+            // value for every model. So a run that passes no cutoff measures a cut production does not
+            // make. Left as it is because changing the fallback to `defaultSettings.relevanceCutoff` moves
+            // every number measured at the default, which is a decision about the corpus rather than a fix.
             const cut = (tier === 'memory' && Number.isFinite(memoryCutoff)) ? memoryCutoff : model.cutoff;
             mine.forEach((r, i) => { r.eCredit = e[i]; r.cutoff = cut; });
         }
