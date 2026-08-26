@@ -12,6 +12,7 @@
 // live lorebook either: entries come from the sample's embedded copies, which is what makes a graded scene
 // re-runnable after the books have been edited.
 import fs, { readFileSync, existsSync } from 'node:fs';
+import { createHash } from 'node:crypto';
 import { dirname, resolve as resolvePath } from 'node:path';
 import { scoreCollection, poolEntries, selectTopK, admitCeiling } from '../plugin/scoring.mjs';
 import { corpusMean, centeredCosineScores } from '../plugin/vector.mjs';
@@ -340,10 +341,49 @@ export const indexPath = (S, { vectors = 'data/default-user/vectors/ollama', mod
     return cachePath(S, chunkConfig(S), model, book);
 };
 
-/** One local embed call. Deliberately not cached to disk: a stored vector would keep answering after the
- *  embedding model underneath it changed. */
-export const embed = async (text, { ollama = 'http://localhost:11434', model = 'bge-m3', endpoint = 'ollama', url = ollama } = {}) =>
-    (await embedTexts([text], { model, endpoint, url }))[0];
+/**
+ * One embed call, memoised on disk by (model LABEL, exact input text).
+ *
+ * IT USED TO REFUSE TO CACHE, and the reason was right at the time: a stored vector goes on answering
+ * after the embedding model underneath it changes. What makes it safe is the LABEL being in the key.
+ * `resolveModel`'s label is what names a collection too, so a different quantization, a different server
+ * serving the same weights, or a doc prefix appearing are all a different cache rather than a stale hit —
+ * the same identity rule the index cache already relies on.
+ *
+ * KEYED ON THE TEXT AS SENT, prefix included, under SHA-256. The query prefix is part of what was
+ * embedded, so it has to be part of what is keyed; and a weak hash risks handing back another query's
+ * vector, which is the kind of wrong number nothing downstream could catch.
+ *
+ * APPENDED, one JSONL line per call, per the harness rule: retraining re-embeds the same 105 scene
+ * queries every run, and a killed run keeps every embed it already paid for. Lives in eval-data, which is
+ * gitignored — it is a cache, and it rebuilds from the bundles.
+ */
+const qCache = new Map();
+const qCachePath = label => new URL(`./eval-data/query-cache__${String(label).replace(/[^\w.-]+/g, '-')}.jsonl`, import.meta.url).pathname;
+const qCacheLoad = (label) => {
+    if (qCache.has(label)) return qCache.get(label);
+    const m = new Map();
+    const p = qCachePath(label);
+    if (existsSync(p)) {
+        for (const line of readFileSync(p, 'utf8').split('\n')) {
+            if (!line) continue;
+            try { const r = JSON.parse(line); if (r?.h && Array.isArray(r.v)) m.set(r.h, r.v); } catch { /* a torn last line from a killed append */ }
+        }
+    }
+    qCache.set(label, m);
+    return m;
+};
+export const embed = async (text, { ollama = 'http://localhost:11434', model = 'bge-m3', endpoint = 'ollama', url = ollama, label = model, cache = true } = {}) => {
+    if (!cache) return (await embedTexts([text], { model, endpoint, url }))[0];
+    const store = qCacheLoad(label);
+    const h = createHash('sha256').update(text).digest('hex');
+    const hit = store.get(h);
+    if (hit) return hit;
+    const v = (await embedTexts([text], { model, endpoint, url }))[0];
+    store.set(h, v);
+    fs.appendFileSync(qCachePath(label), `${JSON.stringify({ h, v })}\n`);
+    return v;
+};
 
 /**
  * The parameter set a sample was captured under, layered over the harness defaults.

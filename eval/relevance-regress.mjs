@@ -431,8 +431,14 @@ const fx = n => (Number.isFinite(n) ? (n >= 0 ? '+' : '') + n.toFixed(3) : '  n/
 // sweep cannot, since the model is what varies.
 const QV = new Map();
 const queryVec = async (S, name, value, em) => {
-    const k = `${name}\u001f${value}`;
-    if (!QV.has(k)) QV.set(k, await embed(em.query + S.query, { model: em.model, endpoint: em.endpoint, url: em.endpoint === 'ollama' ? OLLAMA : em.url }));
+    // THE SCENE IS IN THE KEY. It was (name, value) only, so every scene of an embedModel sweep was
+    // handed the FIRST scene's query vector — one query scored against every scene's collection, which
+    // produces a full table of plausible numbers and compares nothing. Keyed on the query TEXT rather
+    // than a label, because the text is what the embedding is of.
+    const k = `${name}\u001f${value}\u001f${S.query}`;
+    // `label`, not `model`: the disk cache is keyed by it, and two stems can serve the same `model` id
+    // while producing different vectors. The in-memory QV map stays as the within-run hit.
+    if (!QV.has(k)) QV.set(k, await embed(em.query + S.query, { model: em.model, label: em.label, endpoint: em.endpoint, url: em.endpoint === 'ollama' ? OLLAMA : em.url }));
     return QV.get(k);
 };
 
@@ -443,7 +449,11 @@ const queryVec = async (S, name, value, em) => {
     for (const path of samples) {
         const S = openSample(path, arg('--arm'));
         if (!S.candidates?.length) { console.error(`${path}: logs no candidates`); process.exit(2); }
-        const qv = await embed(S.query, { ollama: OLLAMA, model: MODEL });
+        // THROUGH resolveModel, like the sweep's own queryVec above. It sent the raw spec to ollama and
+        // applied no task prefix, so a server-stemmed model was an unknown ollama name and a
+        // prefix-trained one was silently embedded without its instruction — which does not fail, it
+        // just scores the model worse than it is.
+        const qv = await queryVec(S, 'baseline', MODEL, resolveModel(MODEL));
         loaded.push({ path, name: sceneLabel(S) || path, book: S.primaryBook ?? path, S, qv });
     }
     console.log(`${loaded.length} scene(s); ${sweep ? `sweeping ${SWEPT} over ${VALUES.join(', ')}` : 'shipped configuration'}${TIER === 'all' ? '' : `; ${TIER} tier only`}${CUT === 3 ? '' : `; target grade >= ${CUT}`}`);
@@ -462,12 +472,15 @@ const queryVec = async (S, name, value, em) => {
             const em = resolveModel(EMBED_SWEEP ? value : MODEL);
             const indexFile = P.denseAllEntries || EMBED_SWEEP
                 ? (await ensureIndex(S, { all: !!P.denseAllEntries, model: em.model, prefix: em.doc, label: em.label, endpoint: em.endpoint, url: em.endpoint === 'ollama' ? OLLAMA : em.url, log: () => {} })).path
-                : indexPath(S, { model: MODEL });
+                // THE LABEL NAMES THE FILE, not the spec: cachePath and the derived ST path are both
+                // written with `omlx-Qwen3-...`, while the spec is `omlx:Qwen3-...`. Passing the spec
+                // resolves a path nothing ever wrote.
+                : indexPath(S, { model: em.label });
             // The query has to be embedded by the same model as the collection it is scored against. A
             // stale qv here returns plausible cosines that mean nothing, which is the one failure mode of
             // this sweep that produces a number rather than an error. Memoised per (scene, arm).
             const qvec = EMBED_SWEEP ? await queryVec(S, name, value, em) : qv;
-            const scene = loadScene(S, { indexFile, indexOpts: { model: EMBED_SWEEP ? value : MODEL }, params: P });
+            const scene = loadScene(S, { indexFile, indexOpts: { model: em.label }, params: P });
             // THIS BOOK'S ENTRIES, not the scene's — `scene.entries` spans every attached book now, and
             // this set feeds the leave-one-book-out lineage guard, which compares two books by the share
             // of the SMALLER one they hold in common. Pooling a second book in grows the denominator and

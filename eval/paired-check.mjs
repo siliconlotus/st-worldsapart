@@ -367,6 +367,41 @@ eq(JSON.stringify([...topComponents(pts, 2, MU)[0]]), JSON.stringify([...topComp
 // The real instance this exists for: an LTM file is named after the CHARACTER CARD, and one card carries
 // several stories, so "Isekai Adventure" was byte-identical to Ascensus while sharing under 5% with Time
 // Whore — the other story on that same card. Names are not evidence in either direction.
+// --- the query embedding cache: keyed by (label, exact text), tolerant of a torn append ------------
+// Retraining re-embeds the same scene queries every run, so they are memoised to disk. Two ways that goes
+// wrong silently: a hit across MODELS hands back a vector from another embedding space, and a torn last
+// line from a killed append takes the whole cache down with it on the next read.
+{
+    const { embed } = await import('./scene.mjs');
+    const { appendFileSync, writeFileSync, existsSync, unlinkSync } = await import('node:fs');
+    const path = l => new URL(`./eval-data/query-cache__${l}.jsonl`, import.meta.url).pathname;
+    const A = 'wa-check-model-a', B = 'wa-check-model-b';
+    for (const l of [A, B]) if (existsSync(path(l))) unlinkSync(path(l));
+    // A fake embedder is not reachable from here, so drive it through the cache directly: seed one label,
+    // then assert the other label does not see it.
+    writeFileSync(path(A), '');
+    let calls = 0;
+    const fake = { model: 'x', endpoint: 'ollama', url: 'http://127.0.0.1:1' };   // unreachable on purpose
+    // seed A by hand, exactly as embed appends
+    const { createHash } = await import('node:crypto');
+    const text = 'the same query text';
+    const h = createHash('sha256').update(text).digest('hex');
+    appendFileSync(path(A), `${JSON.stringify({ h, v: [1, 2, 3] })}\n`);
+    const hit = await embed(text, { ...fake, label: A });
+    eq(JSON.stringify(hit), '[1,2,3]', 'a cached query is returned without an embed call');
+    // A torn line — a killed append — must not lose the entries before it.
+    appendFileSync(path(A), '{"h":"deadbeef","v":[9,9');
+    const { embed: embed2 } = await import(`./scene.mjs?bust=${Date.now()}`);
+    const stillHit = await embed2(text, { ...fake, label: A });
+    eq(JSON.stringify(stillHit), '[1,2,3]', '...and a torn final line does not take the cache down with it');
+    // The other label must miss, not borrow A's vector — this is what makes caching safe at all.
+    let threw = false;
+    try { await embed2(text, { ...fake, label: B }); } catch { threw = true; }
+    eq(threw, true, 'another model LABEL misses rather than reusing a vector from a different space');
+    for (const l of [A, B]) if (existsSync(path(l))) unlinkSync(path(l));
+    void calls;
+}
+
 // --- etaSquared: the sharedness statistic stage A selects on ------------------------------------------
 // Components come back in VARIANCE order, which is not sharedness order — measured on this corpus the two
 // disagree at the top. So the selection rule needs a statistic that separates "every book varies along
