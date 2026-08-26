@@ -331,6 +331,23 @@ ST-free and node-importable, so the evals exercise the real shipped code instead
 Settings and ST globals are injected by the caller, never imported. The ST/DOM half is
 `worldsapart.js`, `keyword-tools.mjs`, `studio.mjs`, `ui-widgets.mjs`.
 
+`state.mjs` BINDS ST's store rather than importing it, for the same reason: it holds the shipped value of
+every knob, so the harness has to read them, and while it imported `extension_settings` it could not be
+loaded from node at all. That is why `chunkConfig` carried its own copy of the chunk settings — a copy
+that would have gone on chunking at 1750 the day production moved.
+
+**A harness may contain no literal that has an authoritative home.** Where the authority is a file, import
+it; where the authority is the user, require it. Four kinds, and they do not behave alike:
+
+- a CONSTANT — the chunk settings, the BM25 k1/b, everything in `INTERNAL_KEYS`, reset every init and
+  unreachable from the UI — is one value everywhere. Import it.
+- a USER SETTING — the embedding model, `relevanceCutoff` — has no knowable value, so the harness must be
+  TOLD. `'bge-m3'` as a fallback is a fossil of one user's choice, and it is still scattered through eval/.
+- a DERIVED constant — the fitted feature set — comes off the artifact it derives from. Read `features`
+  out of the fit; a restated list is how a refit shipped `cosine,text,keys` against a model fitted on
+  `cosine,text,properNouns,density`.
+- a DETERMINISTIC value — the tier — is computed, and is never a parameter at all.
+
 One exception survives: `eval/bulk-reorder-check.mjs` string-slices `planUidReindex` out of
 `studio.mjs`, which imports ST and so can't be loaded under node.
 

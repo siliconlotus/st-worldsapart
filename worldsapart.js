@@ -4513,7 +4513,7 @@ export async function init() {
     }
     initialized = true;
 
-    ensureSettings();
+    ensureSettings(extension_settings);
     // 'off' folded into 'interleaved' (identical at weight 1/offset 0); drop the stale value.
     if (settings().worldPriorityMode === 'off') settings().worldPriorityMode = 'interleaved';
     // Legacy presentationOrder ('authored'/'authored-inverse') → shared sort keys; studioTierCfg → shared tierCfg.

@@ -1,7 +1,6 @@
 // state.mjs — the settings seam shared by every WA module: the settings key, the defaults, and the
 // settings() accessor. Feature modules import this instead of reaching into ST's extension_settings, so
 // there is one owner of what a setting means and one place to read it.
-import { extension_settings } from '../../../../extensions.js';
 
 export const MODULE_NAME = 'worldsApart';
 
@@ -415,15 +414,29 @@ const INTERNAL_KEYS = [
     'queryMode', 'summaryPrompt', 'summaryLength',
 ];
 
-/** The live WA settings object (extension_settings[MODULE_NAME]). */
+/**
+ * ST'S SETTINGS STORE, BOUND RATHER THAN IMPORTED. This module holds the shipped value of every knob, so
+ * the eval harness has to be able to read it — and importing `extension_settings` made that impossible,
+ * which is why `chunkConfig` carried its own copy of chunkSize/chunkMode/minChunkSize and would have gone
+ * on chunking at 1750 after production changed. Injecting the store is the same rule the pure modules
+ * already follow (CLAUDE.md, *Pure vs ST-coupled*); this module was the one stating it and not obeying it.
+ */
+let store = null;
+
+/** The live WA settings object (ST's `extension_settings[MODULE_NAME]`). */
 export function settings() {
-    return extension_settings[MODULE_NAME];
+    // LOUD, because returning undefined here yields `settings().anything` as a TypeError somewhere far
+    // away, or worse a falsy read that looks like a user's choice.
+    if (!store) throw new Error('Worlds Apart: settings() read before ensureSettings() bound ST\'s store');
+    return store[MODULE_NAME];
 }
 
-/** Merge defaults under any stored settings. Call once at init before reading settings(). */
-export function ensureSettings() {
-    extension_settings[MODULE_NAME] = Object.assign({}, defaultSettings, extension_settings[MODULE_NAME]);
-    for (const k of INTERNAL_KEYS) extension_settings[MODULE_NAME][k] = defaultSettings[k];
+/** Merge defaults under any stored settings and bind ST's store. Call once at init, before reading
+ *  settings(), passing ST's `extension_settings`. */
+export function ensureSettings(extensionSettings) {
+    store = extensionSettings;
+    store[MODULE_NAME] = Object.assign({}, defaultSettings, store[MODULE_NAME]);
+    for (const k of INTERNAL_KEYS) store[MODULE_NAME][k] = defaultSettings[k];
 }
 
 /**

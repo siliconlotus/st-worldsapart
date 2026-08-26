@@ -27,6 +27,7 @@ import { chunkEntry } from '../extension/chunking.mjs';
 import { getStringHash } from './scene.mjs';
 import { openBundle } from '../extension/grading.mjs';
 import { isMemory, PREFIXES } from '../extension/relevance.mjs';
+import { defaultSettings } from '../extension/state.mjs';
 
 /** Chunk settings, sample's own unless overridden. Field names match `settings()` and paramSnapshot.settings. */
 export const chunkConfig = (S, overrides = {}) => {
@@ -48,7 +49,12 @@ export const chunkConfig = (S, overrides = {}) => {
     const dumped = S.paramSnapshot?.settings ?? {};
     const fromDump = Object.fromEntries(['chunkMode', 'chunkSize', 'minChunkSize']
         .filter(k => dumped[k] !== undefined).map(k => [k, dumped[k]]));
-    return { chunkMode: 'paragraph', chunkSize: 1750, minChunkSize: 120, ...fromDump, ...recorded, ...overrides };
+    // PRODUCTION'S VALUES, READ RATHER THAN RESTATED. These were three literals under a comment saying
+    // they were state.mjs's — which is not the same thing, and would have gone on chunking at 1750 the day
+    // production moved. state.mjs binds ST's store instead of importing it, so it is readable from node and
+    // there is one authority for the number.
+    const shipped = { chunkMode: defaultSettings.chunkMode, chunkSize: defaultSettings.chunkSize, minChunkSize: defaultSettings.minChunkSize };
+    return { ...shipped, ...fromDump, ...recorded, ...overrides };
 };
 
 /**
