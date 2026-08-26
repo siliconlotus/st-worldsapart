@@ -125,13 +125,8 @@ export const pathSafe = (label) => String(label).replace(/\//g, '-');
  *  nothing to either when false, so every existing cache path stays where it is. */
 export function cachePath(S, cfg, model, book = S.primaryBook, all = false, archived = false) {
     const slug = String(book).replace(/[^\w.-]+/g, '-').slice(0, 40);
-    // TAKES A LABEL, STORES BY COLLECTION. Callers hold `em.label` and should not have to know which
-    // half of it reaches a stored vector; resolving here is what makes two arms differing only in their
-    // query prefix share a build, which this file's header has always said they should. Idempotent on a
-    // collection name, so passing either one lands on the same file.
-    const coll = resolveModel(model).collection;
-    const key = getStringHash(`${book}${coll}${cfg.chunkMode}${cfg.chunkSize}${cfg.minChunkSize}${all ? `all` : ``}${archived ? `archived` : ``}`);
-    return new URL(`./eval-data/indexes/${slug}__${pathSafe(coll)}${all ? `__all` : ``}${archived ? `__archived` : ``}__${key}/index.json`, import.meta.url).pathname;
+    const key = getStringHash(`${book}${model}${cfg.chunkMode}${cfg.chunkSize}${cfg.minChunkSize}${all ? `all` : ``}${archived ? `archived` : ``}`);
+    return new URL(`./eval-data/indexes/${slug}__${pathSafe(model)}${all ? `__all` : ``}${archived ? `__archived` : ``}__${key}/index.json`, import.meta.url).pathname;
 }
 
 /** How a model is CALLED and how its collection is NAMED.
@@ -140,13 +135,17 @@ export function cachePath(S, cfg, model, book = S.primaryBook, all = false, arch
  * ollama's template for both is a bare `{{ .Prompt }}` — so applying them is the caller's job, not the
  * server's. bge-m3 wants none, which is why it needs no entry here.
  *
- * `<model>/raw` is the same model called with no prefix. It is a separate arm rather than a correction
- * because it answers a separate question: prefixed asks whether the model is better, raw asks whether it
- * is better AS ST WOULD CALL IT, since nothing in the vector path prefixes anything today.
+ * EACH MODEL GETS EXACTLY ONE CONFIGURATION — its own contract — so the prefixes are not a parameter and
+ * there is no unprefixed arm. **Measured** over 5585 rows on 99 scenes, memory tier, leave-one-book-out,
+ * against the SAME collections so that only the query vector moves: following Qwen3-Embedding-8B's
+ * contract is worth +0.0131 held-out AUC and +0.0235 F2 at its best cutoff, on 4 of 5 books. On
+ * embeddinggemma — the only family here that prefixes DOCUMENTS too, so that arm rebuilt its index — it is
+ * flat, +0.0006 held-out AUC. Following the contract is therefore never worse and sometimes much better.
  *
- * The DOC prefix is in the cache label — a collection embedded with one is a different collection. The
- * QUERY prefix is not, since it never reaches a stored vector: two arms differing only there share a
- * build, and should.
+ * PRODUCTION APPLIES NONE OF THEM. Nothing in the vector path prefixes anything, so the shipped Qwen path
+ * runs the arm that measured worse, and the coefficients it runs were fitted on prefixed cosines
+ * (standardised beta +0.827) that production never produces (+0.712). That is a WA defect, noted here
+ * because this table is where the contract lives.
  *
  * KEYED BY FAMILY STEM, matched as a prefix of the model name: the contract is a property of how the
  * family was trained, not of which size you pulled, so qwen3-embedding:0.6b must not silently fall
@@ -184,19 +183,12 @@ export const PREFIXES = {
 /** @returns {{model: string, doc: string, query: string, label: string}} */
 export const resolveModel = (spec) => {
     // IDEMPOTENT ON ITS OWN LABEL. The label names collections and bases, so it is what a bundle records
-    // and what a human retypes — and it has to resolve back to the same model, endpoint and prefixes. Two
-    // things used to stop it: the stem's colon was rewritten to a hyphen, which made `omlx-Qwen3-...` read
-    // as a bare OLLAMA model (a stable label, silently the wrong endpoint), and the `__p` marker was
-    // re-appended on every pass. Model names carry hyphens and colons themselves — `qwen3-embedding:4b` is
-    // already a label with a colon in it, on disk — so the colon was never the filesystem's problem.
-    // `__p` and `__raw` are the label's own markers for "carries the doc prefix" and "deliberately does
-    // not"; both are stripped on the way in so a label resolves to what produced it. `/raw` is the
-    // hand-written form of the same thing.
-    const marked = String(spec);
-    const rawTag = marked.endsWith('__raw');
-    const plain = rawTag ? marked.slice(0, -5) : (marked.endsWith('__p') ? marked.slice(0, -3) : marked);
-    const raw = rawTag || plain.endsWith('/raw');
-    const named = plain.endsWith('/raw') ? plain.slice(0, -4) : plain;
+    // and what a human retypes — and it has to resolve back to the same model, endpoint and prefixes. What
+    // used to stop it was the stem's colon being rewritten to a hyphen, which made `omlx-Qwen3-...` read as
+    // a bare OLLAMA model: a stable label, silently pointing at the wrong endpoint. Model names carry
+    // hyphens and colons themselves — `qwen3-embedding:4b` is already a label with a colon in it, on disk —
+    // so the colon was never the filesystem's problem.
+    const named = String(spec);
     const stem = Object.keys(SERVICES).find(k => named.startsWith(k)) ?? null;
     const model = stem ? named.slice(stem.length) : named;
     const endpoint = stem === 'st:' ? 'st' : stem ? 'openai' : 'ollama';
@@ -204,31 +196,16 @@ export const resolveModel = (spec) => {
     // SUBSTRING, CASE-INSENSITIVE. The served id is whoever packaged the model's spelling, and every
     // server rewrites it differently: `qwen3-embedding:4b` (ollama), `Qwen3-Embedding-8B-4bit-DWQ` (oMLX),
     // `text-embedding-qwen3-embedding-8b` (LM Studio, which PREPENDS its own type tag). Anchoring the
-    // match at either end drops the instruction from an arm that should have it, and a missing prefix
+    // match at either end drops the instruction from a model that should have it, and a missing prefix
     // does not fail — it quietly reports the model as worse than it is. This has now bitten twice, at
     // both ends of the string, which is why the match is anchored at neither.
     const fam = model.toLowerCase();
-    const family = Object.entries(PREFIXES).find(([s]) => fam.includes(s))?.[1] ?? { doc: '', query: '' };
-    const { doc, query } = raw ? { doc: '', query: '' } : family;
+    const { doc, query } = Object.entries(PREFIXES).find(([s]) => fam.includes(s))?.[1] ?? { doc: '', query: '' };
     // The label carries the SERVER too: the same weights quantized differently are different vectors, and
     // the served id is what distinguishes them ('...-8B-4bit-DWQ' vs '...-8B-4bit-MLX').
-    // TWO IDENTITIES, because `/raw` suppresses two prefixes that reach different places.
-    //
-    // COLLECTION is what is stored, and only the DOC prefix reaches a stored vector. A family whose doc
-    // prefix is empty — qwen3-embedding, mxbai — builds the SAME collection raw or not, and must resolve
-    // to the same file: marking it `__raw` would rebuild 26 bit-identical collections per model and leave
-    // two names for one set of vectors. embeddinggemma is the only family here that prepends to documents,
-    // so it is the only one whose raw arm is a different build.
-    //
-    // LABEL additionally carries the QUERY prefix's absence, because that changes every cosine even when
-    // the collection is untouched — so it is what says which arm a bundle's numbers came from, and what
-    // keys the query cache. When a family has neither prefix, `/raw` asks for nothing and both collapse to
-    // the plain name rather than minting an arm that cannot differ.
-    const base = (stem ?? '') + model;
-    const collection = base + (doc ? '__p' : (raw && family.doc) ? '__raw' : '');
-    const label = base + (doc ? '__p' : (raw && (family.doc || family.query)) ? '__raw' : '');
-    return { model, endpoint, url, doc, query, label, collection };
+    return { model, endpoint, url, doc, query, label: (stem ?? '') + model };
 };
+
 
 /** One embedding call, either transport. OpenAI returns its vectors in a `data` array that is documented
  *  as index-ordered and is sorted here anyway — a silently permuted batch would attach every vector to the
