@@ -4,7 +4,7 @@
 // is worth, what corpus df counts, and how a fitted model file becomes one number per entry. The
 // arithmetic is pinned against closed forms computed by hand rather than against a second implementation,
 // because a second implementation is the drift this codebase keeps paying for.
-import { properNames, buildNameDf, properShared, properDensity, scoreRelevance, postDates } from '../extension/relevance.mjs';
+import { properNames, buildNameDf, properShared, properDensity, scoreRelevance, postDates, modelKey } from '../extension/relevance.mjs';
 import { relevanceCut } from '../extension/selection.mjs';
 import { eq } from './metrics.mjs';
 import fs from 'node:fs';
@@ -113,27 +113,39 @@ eq(threw, true, 'a model whose beta does not match its feature count throws');
 // THE CHECKED-IN FILE IS THE CONTRACT the consumer reads, so its shape is pinned here rather than
 // trusted: a file emitted by an older harness carried ONE beta vector at a boundary the cutoff was not
 // chosen on, and nothing would have noticed at runtime.
-const shipped = JSON.parse(fs.readFileSync(new URL('../extension/relevance-model-memory.json', import.meta.url), 'utf8'));
-eq(shipped.tier, 'memory', 'the shipped fit is the memory tier');
-eq(Array.isArray(shipped.beta?.ge2) && Array.isArray(shipped.beta?.ge3), true,
-    'the model carries one coefficient vector per boundary E[credit] is built from');
-eq(shipped.beta.ge2.length, shipped.features.length + 1, 'ge2 has an intercept plus one slope per feature');
-eq(shipped.beta.ge3.length, shipped.features.length + 1, 'ge3 has an intercept plus one slope per feature');
-eq(shipped.layout.join(','), ['intercept', ...shipped.features.map(f => `${f}.z`)].join(','),
-    'layout names the design the coefficients are in, intercept first');
-eq(shipped.cutoff > 0 && shipped.cutoff < 1, true, 'the operating point ships with the coefficients');
-// The two features this module exists to compute must actually be in the shipped design, or the runtime
-// would be building signals nothing reads.
-eq(shipped.features.includes('properNouns') && shipped.features.includes('density'), true,
-    'the shipped design carries the two signals relevance.mjs computes');
-// It scores end to end through the real file, which is the only assertion here that would catch a
-// coefficient layout change the shape checks above accept.
-const live = scoreRelevance(shipped, [
-    Object.fromEntries(shipped.features.map(f => [f, 0])),
-    Object.fromEntries(shipped.features.map(f => [f, 1])),
-]);
-eq(live.every(v => v > 0 && v < 1), true, 'the shipped model returns a probability for every row');
-eq(live[1] > live[0], true, 'a row stronger on every signal scores higher, so no sign is inverted');
+// ONE FIT PER EMBEDDING MODEL, keyed by relevance.mjs `modelKey`. Coefficients are fitted against one
+// embedder's cosines and do not transfer — measured, memory-tier cosine ran +0.3113 under bge-m3 and
+// +0.7460 under Qwen3-Embedding-8B — so the artifact is a map and the contract below has to hold for
+// EVERY entry in it, not for whichever one a reader happens to open.
+const file = JSON.parse(fs.readFileSync(new URL('../extension/relevance-model-memory.json', import.meta.url), 'utf8'));
+eq(file.tier, 'memory', 'the shipped artifact is the memory tier');
+eq(Object.keys(file.byModel ?? {}).length > 0, true, 'it carries at least one fit, keyed by embedding model');
+eq(Object.keys(file.byModel).every(k => k === modelKey(k)), true,
+    'every key is already normalised, so a runtime lookup by modelKey cannot miss on case or a :latest tag');
+for (const [key, shipped] of Object.entries(file.byModel)) {
+    eq(shipped.tier, 'memory', `${key}: the fit is the memory tier`);
+    eq(typeof shipped.embedModel === 'string' && shipped.embedModel.length > 0, true,
+        `${key}: the fit names the model spec it was fitted under, so a stray file is self-describing`);
+    eq(Array.isArray(shipped.beta?.ge2) && Array.isArray(shipped.beta?.ge3), true,
+        `${key}: one coefficient vector per boundary E[credit] is built from`);
+    eq(shipped.beta.ge2.length, shipped.features.length + 1, `${key}: ge2 has an intercept plus one slope per feature`);
+    eq(shipped.beta.ge3.length, shipped.features.length + 1, `${key}: ge3 has an intercept plus one slope per feature`);
+    eq(shipped.layout.join(','), ['intercept', ...shipped.features.map(f => `${f}.z`)].join(','),
+        `${key}: layout names the design the coefficients are in, intercept first`);
+    eq(shipped.cutoff > 0 && shipped.cutoff < 1, true, `${key}: the operating point ships with the coefficients`);
+    // The two features this module exists to compute must actually be in the design, or the runtime
+    // would be building signals nothing reads.
+    eq(shipped.features.includes('properNouns') && shipped.features.includes('density'), true,
+        `${key}: the design carries the two signals relevance.mjs computes`);
+    // Scores end to end through the real file, which is the only assertion here that would catch a
+    // coefficient layout change the shape checks above accept.
+    const live = scoreRelevance(shipped, [
+        Object.fromEntries(shipped.features.map(f => [f, 0])),
+        Object.fromEntries(shipped.features.map(f => [f, 1])),
+    ]);
+    eq(live.every(v => v > 0 && v < 1), true, `${key}: returns a probability for every row`);
+    eq(live[1] > live[0], true, `${key}: a row stronger on every signal scores higher, so no sign is inverted`);
+}
 
 
 // ---- the relevance cut -------------------------------------------------------------------------

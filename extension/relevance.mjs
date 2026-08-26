@@ -97,6 +97,21 @@ export function properNames(text) {
  * @param {object[]} entries Every entry of ONE book
  * @returns {{df: Map<string, number>, ndoc: number, names: Map<string, Set<string>>}} keyed `world.uid`
  */
+/**
+ * The key a fitted relevance model is stored and recalled under: the SERVED MODEL ID, normalised.
+ *
+ * NOT the eval-side label. That carries a server stem (`omlx:`, `lms:`) because two servers of the same
+ * weights store different vectors, which a COLLECTION must distinguish — it compares stored vectors
+ * against a query bit for bit. A FIT is coefficients over signals standardised within scene, far less
+ * sensitive to that, and the runtime has no notion of a server at all: `vectorRequestBody()` yields
+ * `{source, model}`. Keying on the label would make every fit unfindable at runtime, which is the one
+ * thing the key exists to prevent. The full label rides inside the fit as provenance instead.
+ *
+ * `:latest` goes because ollama appends it to an untagged pull, so the same model reads as `bge-m3` from
+ * a spec and `bge-m3:latest` from the settings — one model, two keys, and a silent miss.
+ */
+export const modelKey = name => String(name ?? '').trim().toLowerCase().replace(/:latest$/, '');
+
 export function buildNameDf(entries) {
     const df = new Map();
     const names = new Map();

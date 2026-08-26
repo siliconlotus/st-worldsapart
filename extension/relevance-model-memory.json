@@ -1,45 +1,98 @@
 {
+ "schema": 2,
  "tier": "memory",
- "cutoff": 0.1,
- "f2": 0.5291145171208089,
- "target": "E[credit] = 0.5*P(>=2) + 0.5*min(P(>=3), P(>=2))",
- "features": [
-  "cosine",
-  "text",
-  "properNouns",
-  "density"
- ],
- "properNounsMode": "idf",
- "properNounsExtract": "entity",
- "layout": [
-  "intercept",
-  "cosine.z",
-  "text.z",
-  "properNouns.z",
-  "density.z"
- ],
- "beta": {
-  "ge2": [
-   -3.050613821011037,
-   0.7197883505810587,
-   0.5045545276785581,
-   0.31370913573135584,
-   0.1949251178434746
-  ],
-  "ge3": [
-   -3.5641579933257224,
-   0.7460368724541488,
-   0.37905269509289197,
-   0.3254228243694699,
-   0.2218135736609914
-  ]
- },
- "aucAt": 3,
- "auc": 0.8541146436133987,
- "heldOutAuc": 0.840837833211145,
- "fittedOn": {
-  "scenes": 94,
-  "rows": 6051,
-  "books": 5
+ "byModel": {
+  "bge-m3": {
+   "tier": "memory",
+   "cutoff": 0.08,
+   "f2": 0.5080683786132724,
+   "target": "E[credit] = 0.5*P(>=2) + 0.5*min(P(>=3), P(>=2))",
+   "features": [
+    "cosine",
+    "text",
+    "properNouns",
+    "density"
+   ],
+   "properNounsMode": "idf",
+   "properNounsExtract": "entity",
+   "layout": [
+    "intercept",
+    "cosine.z",
+    "text.z",
+    "properNouns.z",
+    "density.z"
+   ],
+   "beta": {
+    "ge2": [
+     -2.9421923412166757,
+     0.4092438350230533,
+     0.5843889017456807,
+     0.4441832587434716,
+     0.232017873783851
+    ],
+    "ge3": [
+     -3.380951952844278,
+     0.31125109506923615,
+     0.4682252805236123,
+     0.4860542338994323,
+     0.2324371060506637
+    ]
+   },
+   "aucAt": 3,
+   "auc": 0.8197677988619744,
+   "heldOutAuc": 0.8015116612271176,
+   "fittedOn": {
+    "scenes": 94,
+    "rows": 6051,
+    "books": 5
+   },
+   "embedModel": "bge-m3"
+  },
+  "qwen3-embedding-8b-4bit-dwq": {
+   "tier": "memory",
+   "cutoff": 0.1,
+   "f2": 0.5291145171208089,
+   "target": "E[credit] = 0.5*P(>=2) + 0.5*min(P(>=3), P(>=2))",
+   "features": [
+    "cosine",
+    "text",
+    "properNouns",
+    "density"
+   ],
+   "properNounsMode": "idf",
+   "properNounsExtract": "entity",
+   "layout": [
+    "intercept",
+    "cosine.z",
+    "text.z",
+    "properNouns.z",
+    "density.z"
+   ],
+   "beta": {
+    "ge2": [
+     -3.050613821011037,
+     0.7197883505810587,
+     0.5045545276785581,
+     0.31370913573135584,
+     0.1949251178434746
+    ],
+    "ge3": [
+     -3.5641579933257224,
+     0.7460368724541488,
+     0.37905269509289197,
+     0.3254228243694699,
+     0.2218135736609914
+    ]
+   },
+   "aucAt": 3,
+   "auc": 0.8541146436133987,
+   "heldOutAuc": 0.840837833211145,
+   "fittedOn": {
+    "scenes": 94,
+    "rows": 6051,
+    "books": 5
+   },
+   "embedModel": "omlx:Qwen3-Embedding-8B-4bit-DWQ"
+  }
  }
 }

@@ -50,7 +50,7 @@ import { gradeValue, gradeCredit, fbeta, RECALL_WEIGHT, signTest } from './metri
 import { COMMON_WORDS } from '../plugin/commonwords.js';
 import { logisticFit, auc, cumulativeFit, prCurve, reliability, sigmoid } from './logistic.mjs';
 import * as ranking from '../extension/ranking.mjs';
-import { properNames } from '../extension/relevance.mjs';
+import { properNames, modelKey } from '../extension/relevance.mjs';
 import { fold, normalizeOrthography } from '../extension/smartkeys.mjs';
 import { tokenize } from '../extension/lexical.mjs';
 import { chunkEntry } from '../extension/chunking.mjs';
@@ -226,7 +226,10 @@ if (EMIT_MODEL && !(CUTOFF && LOBO)) {
     console.error('--emit-model needs --cutoff --lobo: the cutoff is read off the held-out delivered set, and a model shipped without its operating point is not a selection rule.');
     process.exit(2);
 }
-const MODEL = process.env.WA_EMBED_MODEL ?? 'bge-m3';
+// FALLS BACK TO THE BUNDLE'S OWN MODEL, as the other harness CLIs do. Hardcoding one meant a refit
+// silently fitted, and EMITTED, under the wrong embedder — which with a per-model artifact overwrites
+// that model's fit rather than adding one.
+const MODEL = process.env.WA_EMBED_MODEL ?? openSample(samples[0], arg('--arm')).embedModel ?? 'bge-m3';
 const OLLAMA = process.env.OLLAMA_URL ?? 'http://localhost:11434';
 
 // THE FEATURE SET. One standardised column per signal and NO ELIGIBILITY INDICATORS: whether a signal is
@@ -1044,7 +1047,7 @@ const queryVec = async (S, name, value, em) => {
             // SEPARATELY (proportional odds does not hold here), so neither vector can be derived from
             // the other and both have to travel.
             if (EMIT_MODEL) {
-                fs.writeFileSync(EMIT_MODEL, JSON.stringify({
+                const fit = {
                     tier: TIER, cutoff: best.cut, f2: best.f,
                     // The rule the two vectors combine under, stated where a consumer reads them. The
                     // clamp is not optional for being small: 39 of 8975 rows invert, by at most 0.0002,
@@ -1073,8 +1076,21 @@ const queryVec = async (S, name, value, em) => {
                         scenes: b.scenes, rows: t.nRows ?? null,
                         books: Array.isArray(t.books) ? t.books.length : (Number(t.books) || null),
                     },
-                }, null, 1));
-                console.log(`  pooled model written to ${EMIT_MODEL}`);
+                };
+                // MERGED INTO THE MAP, never over it. The artifact holds one fit per embedding model
+                // (extension/relevance.mjs modelKey), because coefficients fitted against one embedder's
+                // cosines do not carry to another — so writing the whole file would delete every other
+                // model's fit, which is what happens the first time someone refits under a new embedder
+                // and is exactly what this shape exists to stop.
+                const key = modelKey(resolveModel(MODEL).model);
+                let file = { schema: 2, tier: TIER, byModel: {} };
+                try { const prev = JSON.parse(fs.readFileSync(EMIT_MODEL, 'utf8')); if (prev?.byModel) file = prev; } catch { /* first write */ }
+                const had = Object.keys(file.byModel);
+                file.tier = TIER;
+                file.byModel[key] = { ...fit, embedModel: resolveModel(MODEL).label };
+                fs.writeFileSync(EMIT_MODEL, JSON.stringify(file, null, 1));
+                console.log(`  ${had.includes(key) ? 'replaced' : 'added'} the "${key}" fit in ${EMIT_MODEL}`
+                    + ` (now: ${Object.keys(file.byModel).join(', ')})`);
             }
             if (EMIT_ROWS) {
                 fs.writeFileSync(EMIT_ROWS, JSON.stringify({

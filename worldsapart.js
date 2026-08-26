@@ -61,7 +61,7 @@ const gradeAnchorLine = () => `Grade 0–4: ${GRADE_ANCHORS.map((a, g) => `${g} 
 // upstream edit would silently invalidate existing indexes. See extension/chunking.mjs.
 import { chunkEntry } from './extension/chunking.mjs';
 import { buildContentIndex, scoreContent, indexFingerprint, entryKey } from './extension/content-lexical.mjs';
-import { buildNameDf, properNames, properShared, properDensity, scoreRelevance, isMemory, postDates } from './extension/relevance.mjs';
+import { buildNameDf, properNames, properShared, properDensity, scoreRelevance, isMemory, modelKey, postDates } from './extension/relevance.mjs';
 
 /** Base value for the rewritten `order` sequence. WA rewrites every activated entry's order, so only
  * the relative index matters and the base is free. It is parked far above any plausible authored value
@@ -544,8 +544,22 @@ function loadRelevanceModel() {
     relevanceModel.promise ??= Promise.all(['memory', 'reference'].map(tier =>
         fetch(new URL(`./extension/relevance-model-${tier}.json`, import.meta.url))
             .then(r => (r.ok ? r.json() : Promise.reject(new Error(`HTTP ${r.status}`))))
-            .then((m) => {
-                console.log(`Worlds Apart: relevance model — ${m.tier} tier, ${m.features?.join(', ')}, cutoff ${m.cutoff}`);
+            .then((file) => {
+                // PER EMBEDDING MODEL. Coefficients are fitted against one embedder's cosines and do not
+                // carry to another — measured, memory-tier cosine ran +0.3113 under bge-m3 and +0.7460
+                // under Qwen3-Embedding-8B, with text and properNouns falling to compensate. So the file
+                // is a map keyed by relevance.mjs `modelKey`, and a model with no fit gets NO fit rather
+                // than another model's: stage 4 then makes no relevance cut for that tier, which is the
+                // documented behaviour for an unscored row, instead of cutting on numbers from elsewhere.
+                const key = modelKey(vectorRequestBody().model);
+                const m = file?.byModel?.[key] ?? null;
+                if (!m) {
+                    console.warn(`Worlds Apart: no ${tier} relevance model for embedding model "${key}" `
+                        + `(have: ${Object.keys(file?.byModel ?? {}).join(', ') || 'none'}) — that tier's E[credit] will not be scored, `
+                        + `so nothing is cut on relevance. Fit one with eval/relevance-regress.mjs --emit-model.`);
+                    return [tier, null];
+                }
+                console.log(`Worlds Apart: relevance model — ${m.tier} tier, ${m.features?.join(', ')}, cutoff ${m.cutoff}, fitted under ${m.embedModel}`);
                 return [tier, m];
             })
             .catch((e) => {

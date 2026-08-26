@@ -889,7 +889,7 @@ export function loadScene(S, { indexFile, indexOpts = {}, params: P }) {
         .filter(g => Number.isFinite(Number(g.uid)) && !outOfScope(g))
         .map(g => entryKey({ world: g.book ?? primary, uid: g.uid })));
 
-    return { primary, books, entries, byKey, items, loaded, gaz, gazSource, outOfScope, POOL, OWN, chunkCfg: chunkConfig(S) };
+    return { primary, books, entries, byKey, items, loaded, gaz, gazSource, outOfScope, POOL, OWN, embedModel: S.embedModel ?? 'bge-m3', modelLabel, chunkCfg: chunkConfig(S) };
 }
 
 /**
@@ -954,7 +954,7 @@ export function makeGradeOf(grades, { outOfScope, primary }) {
 // and the fit would end up scoring different populations.
 // Imported AND re-exported: a bare `export ... from` forwards the name without binding it in this
 // module, and scene.mjs calls isMemory itself (tierRecall, the STMB_start audit).
-import { isMemory, buildNameDf, properNames, properShared, properDensity, scoreRelevance, postDates } from '../extension/relevance.mjs';
+import { isMemory, buildNameDf, properNames, properShared, properDensity, scoreRelevance, modelKey, postDates } from '../extension/relevance.mjs';
 export { isMemory };
 export const isReference = e => !isMemory(e);
 export const isDurableEntry = e => Boolean(e?.constant);
@@ -1147,7 +1147,7 @@ export function makeCandidateSet({ loaded, byKey, entries, params: P, chunkCfg, 
 
 /** The fitted models, read once. `extension/` is the shipped location; the harness reads the same files
  *  the runtime fetches, so a refit reaches both without a second copy. */
-const MODELS = (() => {
+const MODEL_FILES = (() => {
     const out = {};
     for (const tier of ['memory', 'reference']) {
         try { out[tier] = JSON.parse(fs.readFileSync(new URL(`../extension/relevance-model-${tier}.json`, import.meta.url), 'utf8')); }
@@ -1155,6 +1155,20 @@ const MODELS = (() => {
     }
     return out;
 })();
+
+/** The fits for one embedding model, by tier. A model with no fit gets null for that tier, which makes
+ *  `makeFuse` leave its rows unscored and stage 4 cut nothing on relevance — the same path an outage
+ *  takes, and the only honest one: another embedder's coefficients are not a fallback. */
+export const modelsFor = (embedModel) => {
+    // Through resolveModel, because a bundle records a SPEC: `omlx:Qwen3-...` keys as the served id
+    // `qwen3-...`, which is what the runtime can compute for itself. A bare name resolves to itself.
+    const key = modelKey(resolveModel(embedModel).model);
+    const out = {};
+    for (const tier of ['memory', 'reference']) out[tier] = MODEL_FILES[tier]?.byModel?.[key] ?? null;
+    return out;
+};
+/** Which models the shipped artifact carries a fit for, for a caller that wants to say so. */
+export const fittedModels = () => [...new Set(Object.values(MODEL_FILES).flatMap(f => Object.keys(f?.byModel ?? {})))];
 
 /**
  * The LAYOUT ORDER: rows sorted by predicted relevance, the quantity stage 4 selects on.
@@ -1170,6 +1184,9 @@ const MODELS = (() => {
  * PER TIER, each standardised among its own rows, as each fit was built.
  */
 export const makeFuse = ({ scene, haystack, memoryCutoff = null }) => {
+    // The fits are per embedding model, resolved from the scene's own record — a bundle names the model
+    // its collections are keyed under, so the fit follows the vectors rather than whatever shipped last.
+    const MODELS = modelsFor(scene?.embedModel ?? 'bge-m3');
     // PER BOOK, as `bookIndexes` builds it — df asks how distinctive a name is IN ITS BOOK'S vocabulary,
     // and a name common in one book and unique in another has two answers, not one.
     const dfs = new Map();
