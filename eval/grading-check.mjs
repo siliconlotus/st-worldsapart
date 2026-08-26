@@ -28,7 +28,7 @@ eq('K' in p || 'LEXW' in p || 'KEYW' in p || 'weightByOrder' in p, false,
     'a capture records no fusion parameters, because there is no fusion');
 eq(p.stopwordDf, 0.25, 'stopwordDocFreq -> stopwordDf');
 eq('threshold' in p, false, 'no admission threshold is captured — stage 1 has no gate to reproduce');
-eq('vectorCutoff' in p, false, 'no cliff mode is captured — stage 4 has no relevance cut to reproduce');
+eq('vectorCutoff' in p, false, 'no cliff mode is captured — the relevance cut reads the relevanceCutoff setting, which the settings dump already carries');
 eq(p.includeNames, true, 'ST world-info globals are carried, not guessed');
 eq('retrievalMode' in captureParams(s, {}), false, 'the capture records no retrieval mode');
 // "Include in World Info Scanning" changes what the haystack CONTAINS — with it on, the Author's Note and

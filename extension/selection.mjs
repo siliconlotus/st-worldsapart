@@ -1,8 +1,11 @@
 // selection.mjs — entry selection: which activated entries survive, and in what order the budget walks
 // them. Pure; every setting is injected, so the extension and the harnesses run the identical code.
 //
-// STAGE 4 MAKES TWO DECISIONS: how many (the entry maxes) and how much (the token budget). It makes no
-// relevance decision — see matcher-design.md, Stage 4, for why there is none and what it waits on.
+// BOTH SELECTION STAGES LIVE HERE. `relevanceCut` is STAGE 4: does an entry belong, on `E[credit]`
+// against the cutoff, over the dynamic block alone. Everything else is STAGE 5 — how many (the entry
+// maxes), how much (the token budget), and the order the budget walks. Stage 5 judges nothing: a row it
+// drops cleared stage 4 and lost to space, which is why its cuts are prefixes of the layout order rather
+// than tests against a threshold.
 
 /**
  * The order the budget walks: constants, then armed stickies, then the dynamic block in retention order.

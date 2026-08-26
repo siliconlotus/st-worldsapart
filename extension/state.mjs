@@ -139,7 +139,7 @@ export const defaultSettings = {
      */
     relevanceCutoff: 0.10,
     /**
-     * Cap on VECTOR entries in the final selection — stage 4, inside applyBudget, nested as
+     * Cap on VECTOR entries in the final selection — stage 5, inside applyBudget, nested as
      * vector ⊆ dynamic ⊆ all. At most this many vector entries are added to the layout during the walk;
      * it does not decide what activates. Stage 1 admits every vectorized entry up to a fixed ceiling
      * (plugin/scoring.mjs admitCeiling) and makes no relevance decision at all.
@@ -155,8 +155,8 @@ export const defaultSettings = {
      * tighter it is set, the more it is doing a relevance job it has no signal for, since it cuts by rank
      * position and knows nothing about the gap it cuts across.
      *
-     * It and the token budget are the only things bounding the dynamic block: stage 4 makes no relevance
-     * decision (selection.mjs).
+     * It and the token budget are the only things bounding the dynamic block once stage 4's relevance
+     * cut has run, and neither of them judges an entry (selection.mjs).
      *
      * The failure it does not guard against: a prompt can be well within every cap and still dilute the
      * model's attention across too much material. No metric here sees that — the layout score reads the
@@ -164,7 +164,7 @@ export const defaultSettings = {
      *
      * Counted off the `vectorized` flag, because the cap is about what an entry IS. It read retrieval
      * provenance before — a stage-1 framing from when this WAS the count retrieval cut to, carried onto
-     * a stage-4 cap. The two now differ only for an entry the wrong-book gate zeroed.
+     * a stage-5 cap. The two now differ only for an entry the wrong-book gate zeroed.
      *
      * THE VALUE IS A JUDGEMENT, NOT A MEASUREMENT: 20 is where a deliberately generous cap was put.
      * Nothing grades stage 4 yet, so no measurement chose it and none endorses any other value either.

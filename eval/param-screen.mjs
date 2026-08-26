@@ -510,7 +510,7 @@ const fx = n => (n >= 0 ? '+' : '') + n.toFixed(4);
     // EXACTLY zero everywhere is invariance, not a null result, and the two want opposite conclusions:
     // "flat, leave the defaults alone" versus "this metric cannot see this parameter at all". A set
     // metric read over a population no arm can change reads 0.0000 for every cell — which is what a
-    // whole-population window does while stage 4 makes no relevance decision.
+    // whole-population window does when no arm can change the delivered set.
     const allZero = results.length && results.every(r => r.cells.every(c => c.delta === 0));
     if (allZero) {
         console.log(`\nEVERY DELTA IS EXACTLY ZERO across ${results.length} arm(s) and ${scenes.length} scene(s). That is not a`);

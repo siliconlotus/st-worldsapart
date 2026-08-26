@@ -585,9 +585,10 @@ function loadRelevanceModel() {
                 // degradation — the column standardises to zeros, so cosine drops out while the intercept
                 // and the other coefficients stay fitted around a feature that is no longer there.
                 //
-                // Its FEATURES are model-independent; its training rows are not, having been drawn through
-                // one model's retrieval. So it is the right fit for a scoreless turn, not a second opinion
-                // about the corpus.
+                // Both its features and its ROWS are model-independent: stage 1 admits every vectorized
+                // entry, so the candidate set is identical under every embedder — measured, 5585 rows and
+                // 359 relevant on 99 scenes, the same under all seven model fits and under this one. It is
+                // therefore comparable to them directly rather than only a fallback.
                 const m = file?.byModel?.[key] ?? file?.noCosine ?? null;
                 if (m) m.noCosine = file?.noCosine ?? null;
                 if (!m) {
@@ -2484,7 +2485,7 @@ async function rankActivated(args) {
             // THE TAG, not retrieval provenance. maxVectorEntries exists so that at most N vector
             // entries are added to the layout during the walk, which is a question about what an entry
             // IS — and that is what the flag records. It read runState.lastScores before: a stage-1
-            // framing ("how much did retrieval contribute") carried onto a stage-4 cap, from when
+            // framing ("how much did retrieval contribute") carried onto a stage-5 cap, from when
             // maxVectorEntries WAS the count retrieval cut to. Since stage 1 stopped cutting, the two
             // differ only for a vectorized entry that keyword-activated without being admitted — the
             // wrong-book gate's residue — which is not worth an answer living in per-generation mutable

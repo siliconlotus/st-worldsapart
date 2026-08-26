@@ -514,7 +514,7 @@ export const sceneParams = (S, overrides = {}) => ({
     // absolute sigma instead would put a step between component r and component r+1.
     whitenR: 0,
     whitenAlpha: 1,
-    // THE TOKEN CEILING stage 4 walks the layout under. 0 leaves the budget unmodelled, which is what every
+    // THE TOKEN CEILING stage 5 walks the layout under. 0 leaves the budget unmodelled, which is what every
     // measurement before this one did — @cut is stage 4's FIRST decision and three more follow it.
     //
     // WHAT THIS CANNOT MODEL, stated because the gap is in the captures rather than the code. Constants and
@@ -568,7 +568,7 @@ export const sceneParams = (S, overrides = {}) => ({
     // Exact key strings to treat as removed from the book (see scoringKeys). Null = none.
     dropKeys: null,
     queryMode: 'messages',
-    // PER-BOOK QUOTA for stage 4 (applyBudget capOf), as {book: cap}. Null = no cap, which is what every
+    // PER-BOOK QUOTA for stage 5 (applyBudget capOf), as {book: cap}. Null = no cap, which is what every
     // capture in the corpus ran under — the live setting lives on the world priority list and no bundle
     // records it, so this is an arm's knob rather than a replayed value.
     bookCaps: null,
@@ -974,8 +974,9 @@ export const isDurableEntry = e => Boolean(e?.constant);
  * Identity comparison, not uid: `kept` holds the same row objects the population does (fuse sorts a copy
  * of the same references), so a uid join would be a second way to say the same thing and a place to drift.
  *
- * NO CALLER: stage 4 makes no relevance cut, so nothing here produces a kept set to split. Checked by
- * paired-check.mjs and kept for the cut that will.
+ * NO SCORING CALLER: nothing in this module splits a kept set, so it is exercised only by
+ * paired-check.mjs. Stage 4's relevance cut now produces such a set at runtime, which is what this was
+ * kept for.
  *
  * @param {Array<object>} population Rows the selection chose from, durable already excluded by the caller
  * @param {Array<object>} kept The rows it chose
@@ -1055,7 +1056,7 @@ export const makeKeywordScore = P => (e, text, k1) => {
  * activation. Core has the same dependency — matching serves both — so this is faithful, not a shortcut.
  *
  * `topK` defaults to stage 1's own bound, and pooling happens before the cut here as it does in the
- * plugin, so K counts ENTRIES. It is not a function of any stage-4 cap: admission depth and how many
+ * plugin, so K counts ENTRIES. It is not a function of any stage-5 cap: admission depth and how many
  * entries may reach the prompt are separate questions. Pass it only to probe window sensitivity.
  *
  * @returns {(k1: number, b: number, tw: object|null, qvec: number[], qtext: string, haystackFor: (entry: object) => string[]) => object[]}
@@ -1352,7 +1353,7 @@ export async function scoreScene({ sample: S, overrides = {}, k = 10, vectors, m
     const admits = r => !isMemory(r.entry) || !Number.isFinite(r.cutoff) || !Number.isFinite(r.eCredit) || r.eCredit >= r.cutoff;
     const atCut = scoreWindow(ranked.filter(admits));
 
-    //   @budget     what the token ceiling actually leaves — stage 4 end to end, so the only window here
+    //   @budget     what the token ceiling actually leaves — stages 4 and 5 end to end, so the only window here
     //               that is the DELIVERED set rather than a stage of it. Off by default; see budgetTokens
     //               for what the captures cannot supply.
     let atBudget = null;

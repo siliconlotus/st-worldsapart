@@ -202,14 +202,14 @@ order a scene's own fields are in.
 ## Candidate order is the layout order
 
 `arms[].candidates` is written in the order the arm laid the entries out, and that is load-bearing rather
-than incidental. Every stage-4 cap is a prefix cut, so a reader can replay the budget walk over the array
+than incidental. Every stage-5 cap is a prefix cut, so a reader can replay the budget walk over the array
 as it stands — take entries until a cap or the token budget is spent — and see exactly what would have
 shipped under a different budget without re-running retrieval.
 
 That is what `tokens` on each candidate is for: without it the walk cannot be simulated at all, only
 described, and re-tokenizing offline gives a different answer than the tokenizer that made the decision.
 
-**`budget` is DOCUMENT-LEVEL, and that is a consequence of the above.** It holds stage 4's caps — the entry
+**`budget` is DOCUMENT-LEVEL, and that is a consequence of the above.** It holds stage 5's caps — the entry
 maxes, the token budget, the slack mode — and `tokenizer`, the name those per-candidate counts were produced
 under. No arm carries a variant, because none is ever captured: a budget arm is a prefix cut over a layout
 ranking that is already recorded, so it is swept OFFLINE through `selection.mjs` `applyBudget` instead of

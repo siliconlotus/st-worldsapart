@@ -11,6 +11,21 @@ Storage's UI, and it invalidates both sets of collections — WA's per-book ones
 **Point it at a connection profile for an embedding model.** Profiles are model-specific; a profile for a
 chat model is not a valid vectorization source.
 
+## The plugin decides whether the model matters
+
+WA's server plugin is what returns a cosine similarity score at all.
+
+**Without it**, ST's own endpoint sorts by score and returns hashes and metadata only, so stage 1 has no
+cosine to pass on. WA scores those turns with a fit over `text`, `properNouns` and `density` — none of
+which touches an embedding — so every model behaves identically. **Measured**, memory tier, 99 scenes and
+5585 rows: held-out AUC 0.7979.
+
+**With it**, the model's cosine reaches the ranker and the tables below apply. The Qwen family is clearly
+ahead of the no-plugin fit — Qwen3-8B wins 4 of the 5 book folds against it. The weaker models are not:
+bge-m3 and jina each lose 4 of 5 to it. Read that as "a weak embedder adds little", not as a ranking — the
+margin comes mostly from one book (Ascensus, where the no-cosine fit beats every model including
+Qwen3-8B) and from Panopticon's 63 rows.
+
 ## What to use
 
 | | when |

@@ -224,8 +224,9 @@ intent rather than because relevance chose it. It is how a row got there, not wh
 a keyword-activated reference entry is not durable and a durable entry may be either tier.
 
 **Sticky is read at two moments and they do not coincide, so say which durable you mean.** The runtime
-reads the ARMED effect (`isEffectActive`, `worldsapart.js` `rankActivated`) — stage 4's cliff exempts an
-entry that is in the prompt because an earlier turn put it there. The eval side reads the CONFIGURED
+reads the ARMED effect (`isEffectActive`, `worldsapart.js` `rankActivated`) — `walkOrder` hoists an armed
+sticky into stage 5's population, so an entry that is in the prompt because an earlier turn put it there
+never reaches stage 4's cut. The eval side reads the CONFIGURED
 sticky value (`grading.mjs` `isDurable` of a capture row, `eval/scene.mjs` `isDurableEntry` of a raw
 entry), because grading asks whether ranking would have chosen the entry and the runtime state cannot
 answer that: a dry run arms nothing. So a configured sticky entry on the turn it keyword-activates is
@@ -258,7 +259,7 @@ retrieval stored; the TEXT score is BM25 over entry content, computed in the bro
 `content-lexical.mjs` over every entry (a superset of the vectorized chunks stage 1 sees) and filtered by
 the entity filter's term weights; keyword score is computed over the scan window. Those signals plus
 `properNouns` and `density` feed the fitted per-tier model (`relevance.mjs` `scoreRelevance`), whose
-`E[credit]` is the **layout order** — the quantity stage 4 cuts on, which every cap then takes a prefix of. It is not
+`E[credit]` is the **layout order** — the quantity stage 4 cuts on, and which stage 5's caps then take a prefix of. It is not
 the PROMPT order, which is a user setting defaulting to `entry.order` and is applied to whatever
 survived.
 
@@ -271,9 +272,18 @@ cosine's +0.465 and keys' -0.006, over 8924 judged rows on 69 scenes. Under Qwen
 the order inverts: cosine +0.762, text +0.567, keys +0.137, over 6051 rows on 102 scenes. A ranking of
 the signals carried across a model change is the claim to distrust.
 
-**4. Selection** — two cuts, both here, each answering one question over the layout order. **There is
-no relevance cut, so WA makes no relevance decision anywhere** — a standing exception to the
-one-decision rule, waiting on the layout score (`matcher-design.md`, *Stage 4*). `selection.mjs`
+**4. Selection** — DOES THIS ENTRY BELONG. The RELEVANCE CUT drops a memory row whose `E[credit]` is
+below the `relevanceCutoff` setting (`selection.mjs` `relevanceCut`, from `rankActivated`), and it is the
+one relevance decision *Principles* rules for. Three conditions: MEMORY ONLY, because a key on a reference
+entry is the author declaring when it should be present, so reference rows are ordered and never cut; it
+NEEDS A FIT, and a row the model could not score is kept — an absent verdict, not a negative one; and THE
+CUTOFF IS ONE SETTING for every model, not a property of the fit, whose own `cutoff` is provenance. It
+sees the DYNAMIC BLOCK only: constants and armed stickies are separate arrays that reach `walkOrder`
+directly, so they are never scored for relevance.
+
+**5. Delivery** — WHAT FITS, AND IN WHAT ORDER. Nothing here judges an entry: a row it drops cleared
+stage 4 and lost to space, which is why every cut is a prefix of the layout order rather than a test
+against a threshold. `selection.mjs`
 `walkOrder` hoists constants then armed stickies ahead of the dynamic block, which is what makes every
 cap below a prefix cut; it cuts nothing. The ENTRY MAXES decide how many, on nested populations — vector ⊆ dynamic ⊆ all, plus the
 per-book cap — with `maxVectorEntries` counted off the `vectorized` flag — the cap exists so that at most N vector

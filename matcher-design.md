@@ -599,7 +599,7 @@ on restores the author's own operator.
 
 `rankActivated`, on `WORLDINFO_SCAN_DONE`. Vector and chunk-text scores are looked up from what
 retrieval stored, keyword score is computed over the scan window, and the fitted model produces the
-**layout order** — the quantity stage 4 cuts on, which every cap then takes a prefix of.
+**layout order** — the quantity stage 4 cuts on, and which stage 5's caps then take a prefix of.
 
 **A key's score is the sum over the things it is about.** `AND` joins distinct things and their scores
 add; `OR` names one thing several ways and its mentions pool into one saturation; a weight multiplies
@@ -685,12 +685,22 @@ the weight, buffer scoring admits a depth-3 entry at full strength on text WA it
 
 ## Stage 4: Selection
 
-Two cuts, both here, each answering one question over the same layout order.
+Stage 4 does one thing, and stage 5 does the rest.
 
-**THERE IS NO RELEVANCE CUT, so the system makes no relevance decision at all** — a standing exception to
-*Principles*, which rules for exactly one and puts it here. The dynamic block reaches the prompt whole,
-bounded only by the two cuts below. Designing the cut waits on the layout score (*Open work* #2).
-`selection.mjs` `walkOrder` orders the classes and cuts nothing.
+**The relevance cut** decides whether an entry belongs in the prompt at all: a memory row whose
+`E[credit]` falls below the cutoff is dropped (`selection.mjs` `relevanceCut`). Reference rows are ordered
+and never cut — a key on a reference entry is the author declaring when that entry should be present. A
+row the model could not score is kept: an absent verdict, not a negative one. It sees the dynamic block
+only; constants and armed stickies reach `walkOrder` directly and are never scored for relevance.
+
+The cutoff is a setting, one value for every embedding model. `E[credit]` is calibrated, so how many rows
+clear a given value is a property of the corpus rather than the embedder — **measured**, at 0.10 eight
+fits deliver between 13.2 and 14.2 entries.
+
+**Stage 5 — the entry maxes and the token budget** then decide how much of what survived actually fits.
+Neither is a relevance judgement: a row they remove cleared the cut and lost to space, which is why they
+are prefix cuts over the layout order rather than tests against a threshold. `walkOrder` orders the
+classes and cuts nothing.
 
 **The entry maxes** decide how many, on nested populations: vector ⊆ dynamic ⊆ all, plus the
 per-book quota. `maxVectorEntries` is counted off the `vectorized` FLAG, not off retrieval provenance:
@@ -806,9 +816,9 @@ the trigger deserved to fire; a memory entry is relevant because ranking chose i
 keyword-activated reference entry is not durable and is graded like anything else. Grading reads it off
 the CONFIGURED sticky value (`grading.mjs` `isDurable`, `eval/scene.mjs` `isDurableEntry`), because the
 question is whether ranking would have chosen the entry and the runtime state cannot answer it — a dry
-run arms nothing. Stage 4 reads the ARMED effect instead — `walkOrder` hoists an armed sticky out of the
-dynamic block — so a configured sticky entry on the turn it keyword-activates is inside the runtime's
-dynamic population and outside the graded one.
+run arms nothing. The runtime reads the ARMED effect instead — `walkOrder` hoists an armed sticky out of
+the dynamic block at stage 5, so it is never in stage 4's population — and a configured sticky entry on
+the turn it keyword-activates is inside the runtime's dynamic population and outside the graded one.
 
 **Set metrics on a reference-heavy book are JOINT** and cannot tune routing alone: a reference entry
 reaches the prompt because its key fired, so a key miss and a routing miss land in the same recall
@@ -864,7 +874,7 @@ at the top. The evaluation score asks whether the system delivers the right set.
 cut moves nDCG and cannot move the set, so the two correlate without being the same measurement, and an
 nDCG figure is never evidence that the system works.
 
-It is kept because every cut at stage 4 takes a PREFIX of the layout order, so the ordering bounds
+It is kept because every cut at stage 5 takes a PREFIX of the layout order, so the ordering bounds
 what any cut placed on it can achieve — a well-placed cut cannot rescue a badly ordered list. The
 diagnostic is what tells a cut that fell in the wrong place from a ranking where no cut position was
 good.
@@ -975,7 +985,7 @@ holds more because it is larger, not because it is denser.
 **The macro-average hides it, which is why it survived the fit.** F2 is averaged over scenes, so 40
 small scenes delivering 4.6 outvote 17 large ones delivering 38.7 and the corpus mean reads 16.4. The
 scenes that dominate the token bill are exactly the ones the average buries — and on a large book the
-token budget is still doing the real selecting, which makes stage 4's relevance decision decorative
+stage-5 token budget is still doing the real selecting, which makes stage 4's relevance decision decorative
 there.
 
 **The three shipped signals never compare entry CONTENT to the scan WINDOW, and that cell is where a

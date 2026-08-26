@@ -2,11 +2,10 @@
 // that nothing else in the pipeline computes, and the consumer that turns a fitted model file into one
 // number per entry.
 //
-// WHAT THIS IS FOR. Stage 4 has two cuts (entry maxes, token budget) and no relevance decision, so the
-// delivered set is everything activated and the score of record is invariant to every layout parameter
-// (matcher-design.md, *Evidence → Two scores*). This is the missing decision: each entry gets
-// `E[credit]` and ships if it clears the tier's cutoff, so "how many entries does this scene need" falls
-// out of the prediction rather than taking a parameter of its own.
+// WHAT THIS IS FOR. Stage 4's relevance cut needs a per-entry prediction, and this is where it comes
+// from: each entry gets `E[credit]` and ships if it clears the cutoff, so "how many entries does this
+// scene need" falls out of the prediction rather than taking a parameter of its own. Stage 5's entry
+// maxes and token budget then decide what fits, and judge nothing (matcher-design.md, *Stage 4*).
 //
 // THE TARGET IS EXPECTED gradeCredit, NOT P(>=3). The layout score's precision numerator is a sum of
 // credits — a delivered 2 scores half — so the quantity to threshold is the one that sum is built from:

@@ -527,7 +527,7 @@ export function buildSample({ name, notes, query, queryChat, scanChat, injects, 
         waVersion,
         stVersion,
         embedModel,
-        // STAGE 4'S CAPS, DOCUMENT-LEVEL, split out of the snapshot beside `embedModel` for the same
+        // STAGE 5'S CAPS, DOCUMENT-LEVEL, split out of the snapshot beside `embedModel` for the same
         // reason that one is: an arm never varies them. `tokenizer` is ST's `getTokenizerModel()`, an
         // environment fact WA cannot change. The maxes and the token budget are WA's own, but a budget
         // arm is never CAPTURED — every cap is a prefix cut over the layout ranking, and the per-entry
@@ -572,7 +572,7 @@ export function buildSample({ name, notes, query, queryChat, scanChat, injects, 
 /** Fields that are identical across every arm of one graded scene, so they are stored ONCE at the top of
  *  the document. Everything else — query, candidates, params, cutoff, primaryBook — is per-arm and must
  *  not be hoisted: the summary arm has a different query, and a lexical-only arm can retrieve from a
- *  different book. `budget` is here rather than in `paramSnapshot` because stage 4's caps are replayed
+ *  different book. `budget` is here rather than in `paramSnapshot` because stage 5's caps are replayed
  *  OFFLINE from the recorded layout order and per-entry token counts, so no arm ever captures a variant. `books` and the haystacks are shared too but are NOT here: they are the bulk, and the
  *  schema puts them last (bundle-schema.md, *Field order is part of the schema*). */
 const SHARED_FIELDS = ['name', 'notes', 'createdAt', 'createdBy', 'bookPriority', 'gradeScale', 'embedModel', 'budget', 'pluginFP', 'sourceFP'];
@@ -937,7 +937,7 @@ export async function bundleSamples(arms, scene = {}, extra = {}) {
             if (v === undefined) continue;
             cell[k] = v;
         }
-        // IN LAYOUT ORDER, which is load-bearing: every stage-4 cap is a prefix cut, so a reader can
+        // IN LAYOUT ORDER, which is load-bearing: every stage-5 cap is a prefix cut, so a reader can
         // replay the budget walk over the array as it stands.
         cell.candidates = (sample.candidates ?? []).map(toCandidate);
         per.scenes = { [id]: cell };
