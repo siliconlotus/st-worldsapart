@@ -1043,8 +1043,10 @@ solo and -> 0.139 in the full swap, solo AUC 0.556 -> 0.543, per-scene F2 -0.003
 0.896), with Richard the most negative book in both cells — the corpus test certifies that book's
 summary-template tokens as names (`dynamics` via the mid-capital ratio with no lowercase attestation;
 `summary`, `contextual` via the never-lowercase branch, whose ZIPF_EN backstop is a speech-register
-table that lacks template vocabulary). The only unmeasured cell left is a span arm on the `book`
-detector, which nothing now motivates.
+table that lacks template vocabulary). The decline is not Richard's: dropping his 25 scenes leaves it
+the same size (solo AUC -0.014 over the remaining 4 books, per-scene F2 flat at p 1.000), so it is the
+detector corpus-wide, with Richard only its loudest illustration. The only unmeasured cell left is a
+span arm on the `book` detector, which nothing now motivates.
 
 `--proper-nouns-extract book` replaces `properNounsOf`'s per-text sentence-position rule with the
 suggester's corpus name test (`keyword-core.mjs` `nameEvidence`, one properness test for both
