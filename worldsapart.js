@@ -40,7 +40,8 @@ import { ConnectionManagerRequestService } from '../../shared.js';
 import { getStringHash, escapeHtml, getCharaFilename, download, uuidv4 } from '../../../utils.js';
 import { pluginFingerprint, PLUGIN_FILES } from './plugin/fingerprint.mjs';
 import { admitCeiling } from './plugin/scoring.mjs';
-import * as ranking from './extension/ranking.mjs';
+import * as query from './extension/query.mjs';
+import * as entity from './extension/entity.mjs';
 import * as matcher from './extension/matcher.mjs';
 import { registerKeys, resetSmartKeys } from './extension/smartkeys.mjs';
 import * as selection from './extension/selection.mjs';
@@ -409,11 +410,11 @@ async function syncWorld(world, entries) {
     return { collectionId, owners };
 }
 
-// Entity filter (gazetteer + proper-noun-weighted term filter) lives in ranking.mjs — the tuning
+// Entity filter (gazetteer + proper-noun-weighted term filter) lives in entity.mjs — the tuning
 // layer, so it stays out of the plugin and its fingerprint. buildGazetteer is pure; buildTermWeights
-// takes the proper-noun boost from settings. Rationale/benchmarks are documented in ranking.mjs.
-const buildGazetteer = ranking.buildGazetteer;
-const buildTermWeights = (queryText, gazetteer) => ranking.buildTermWeights(queryText, gazetteer, settings().properNounBoost);
+// takes the proper-noun boost from settings. Rationale/benchmarks are documented in entity.mjs.
+const buildGazetteer = entity.buildGazetteer;
+const buildTermWeights = (queryText, gazetteer) => entity.buildTermWeights(queryText, gazetteer, settings().properNounBoost);
 
 /**
  * Builds the entity-filter term weights for a query — or null when the filter is off, or when the
@@ -766,8 +767,8 @@ async function queryTermWeights(searchText, { log = true } = {}) {
     return termWeights;
 }
 
-// Query building lives in ranking.mjs; inject depth + ST's substituteParams.
-const buildQuery = (chat) => ranking.buildQuery(chat, { depth: settings().messageDepth, substituteParams });
+// Query building lives in query.mjs; inject depth + ST's substituteParams.
+const buildQuery = (chat) => query.buildQuery(chat, { depth: settings().messageDepth, substituteParams });
 
 /**
  * Runs chunked retrieval and force-activates the winning entries.
@@ -983,8 +984,8 @@ async function retrieve(chat) {
 
     // One substitution pass over the chat serves both the query string and the /wa-grade stash below —
     // queryMessages runs ST's macro engine over every message, so it must not run twice per generation.
-    const queryChat = ranking.queryMessages(chat, { depth: settings().messageDepth, substituteParams });
-    const rawText = ranking.joinQueryMessages(queryChat);
+    const queryChat = query.queryMessages(chat, { depth: settings().messageDepth, substituteParams });
+    const rawText = query.joinQueryMessages(queryChat);
 
     if (!rawText) {
         console.log('Worlds Apart: no query text, skipping retrieval');
@@ -1001,7 +1002,7 @@ async function retrieve(chat) {
     // keyword route had activated rows to grade.
     runState.lastQuery = searchText;
     // The MESSAGES the query was built from, macros already resolved, in ST's own {name, mes} shape so
-    // ranking.buildQuery can be re-run over them offline at any depth <= this one. This is what makes a
+    // query.buildQuery can be re-run over them offline at any depth <= this one. This is what makes a
     // depth ablation possible from a single capture: capture wide, then narrow. It cannot be recovered by
     // splitting `lastQuery`, because messages contain blank lines and the join separator is '\n\n'.
     runState.lastQueryChat = queryChat;
@@ -1402,7 +1403,7 @@ function renderWorldPriority() {
 // Keyword scoring (BM25-style) and rank fusion
 // ---------------------------------------------------------------------------
 
-// Keyword occurrence counting lives in ranking.mjs (same signature, no injection).
+// Keyword occurrence counting lives in matcher.mjs (same signature, no injection).
 const countKey = matcher.countKey;
 
 /**
@@ -1466,12 +1467,12 @@ async function scanInjects() {
     return out;
 }
 
-// withMatchSources and MATCH_SOURCE_FIELDS live in ranking.mjs now (pure window assembly, shared
+// withMatchSources and MATCH_SOURCE_FIELDS live in matcher.mjs (pure window assembly, shared
 // by activation and scoring); callers pass settings().matchWindow.
 const withMatchSources = (chatWindow, entry, sources) =>
     matcher.withMatchSources(chatWindow, entry, sources, settings().matchWindow);
 
-// Keyword scoring lives in matcher.mjs (match semantics), RRF fusion in ranking.mjs (the tuning
+// Keyword scoring lives in matcher.mjs (match semantics), and the layout score in relevance.mjs (the
 // layer). Inject the BM25 k1 + the world-info match defaults for scoring, and the fusion weights
 // for fusion — all from settings.
 const keywordScore = (entry, text, keys = entry.key) => matcher.keywordScore(entry, text, keys, {

@@ -1,7 +1,7 @@
 // matcher.mjs — THE matcher: does this key match this text, and where. countKey and everything a
 // match verdict rests on — the fold, word boundaries, regex keys, SmartKeys dispatch, secondary-key
 // logic, the scan window and its segmentation, and the stage-2 activation verdicts built on them.
-// Split from ranking.mjs, which keeps the ORDERING half (gazetteer, query building, RRF fusion):
+// Split from what is now entity.mjs and query.mjs, which keep the gazetteer and the query:
 // "which entries win" is tuning, "did this key match" is semantics, and the two change for
 // different reasons.
 //

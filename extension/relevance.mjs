@@ -16,7 +16,6 @@
 //
 // ST-FREE AND NODE-IMPORTABLE, like the rest of the pure half — the model file is data, the settings and
 // the entries are the caller's. `worldsapart.js` wires it; nothing here reads a global.
-import { properNounsOf } from './ranking.mjs';
 import { normalizeOrthography } from '../plugin/automaton.mjs';
 import { entryKey } from './content-lexical.mjs';
 import { tokenize } from './lexical.mjs';
@@ -56,6 +55,50 @@ export const postDates = (entry, at) => {
     const start = Number(entry?.STMB_start);
     return Number.isFinite(start) && start > at;
 };
+
+/**
+ * A line that is ENTIRELY a label — an ATX heading, a `**Bold:**` field name, or a bare `Label:` —
+ * with nothing after it.
+ *
+ * Its tokens are layout, not spelling, and the sentence-position rule cannot see that: a label alone
+ * on a line makes its FIRST word position 0 and every later word a mid-sentence capital, so
+ * `**Key Dynamics:**` yields `dynamics` (measured: 51% of Richard's entries) and `## The Guest List`
+ * yields `guest`. Single-word labels were always harmless — the one token is position 0.
+ *
+ * ONLY WHEN THE LABEL IS THE WHOLE LINE. A label with content after it is already correct and must not
+ * be touched: `**Location:** Big Sur` works BECAUSE `Location` absorbs position 0, and stripping the
+ * line takes `Sur` with it.
+ */
+const LABEL_ONLY = /^(?:#{1,6}\s+\S.*|\*\*[^*]+:?\*\*|\p{Lu}[\p{L}' ]{0,30}:)$/u;
+
+/**
+ * The lowercased tokens a text uses as NAMES.
+ *
+ * A capital letter at the start of a sentence says nothing about the word — "Not", "It", "Then", "The"
+ * all get capitalised there — so a token counts only where it appears capitalised somewhere that is NOT
+ * sentence-initial. `\p{Lu}` rather than `[A-Z]`, or an accented-initial name ("Étienne") is never an
+ * entity.
+ *
+ * Exported because it is the project's definition of a name and more than one thing asks: the entity
+ * filter weights query terms with it, and stage 4's proper-noun overlap feature reads entries and the
+ * scan window with it. A second regex somewhere else is the drift this exists to prevent — the private
+ * one it replaced was ASCII-only, counted sentence-initial capitals, and missed any name under three
+ * letters.
+ *
+ * ORTHOGRAPHY IS THE CALLER'S. buildTermWeights normalises once and hands the result to both loops;
+ * a caller comparing two texts must normalise both the same way or the sets cannot intersect.
+ */
+export function properNounsOf(text) {
+    const out = new Set();
+    for (const sentence of String(text ?? '').split(/(?<=[.!?])\s+|\n+/)) {
+        if (LABEL_ONLY.test(sentence.trim())) continue;
+        const tokens = sentence.trim().split(/[^\p{L}\p{N}\p{M}']+/u).filter(x => x.length > 1);
+        for (let i = 1; i < tokens.length; i++) {
+            if (/^\p{Lu}/u.test(tokens[i])) out.add(tokens[i].toLowerCase());
+        }
+    }
+    return out;
+}
 
 /**
  * The names a text uses, as the relevance model counts them.

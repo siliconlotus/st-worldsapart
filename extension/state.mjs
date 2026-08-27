@@ -139,7 +139,7 @@ export const defaultSettings = {
      * keep capitalised tokens and anything in the lorebook's own vocabulary, drop
      * the rest. Re-measured over three graded scenes: mean nDCG@5 0.896 filtered vs
      * 0.808 unfiltered — a real win, but far smaller than the old note claimed, and it
-     * lands on top-of-list quality rather than mean target rank. See ranking.mjs
+     * lands on top-of-list quality rather than mean target rank. See entity.mjs
      * buildTermWeights for the per-scene table and which old figures did not reproduce.
      * Ignored in summary mode.
      */

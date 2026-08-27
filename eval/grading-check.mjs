@@ -4,7 +4,7 @@
 // that can't be re-run, which is the whole failure this feature exists to prevent.
 import { buildSample, bundleSamples, captureParams, hashBooks, keyByUid, stRelative, isDurable, mergeGrades, openBundle, passKey, rowKey, sampleFile, sceneDiff, searchedBook, setGrades, splitGraded, unionArms } from '../extension/grading.mjs';
 import { eq, gradeValue } from './metrics.mjs';
-import * as ranking from '../extension/ranking.mjs';
+import * as query from '../extension/query.mjs';
 
 const book = {
     1: { uid: 1, comment: 'Villa Party', key: ['villa', 'party'], keysecondary: [], vectorized: true, content: 'A'.repeat(3000), order: 100 },
@@ -130,17 +130,17 @@ const CHAT = [
     { name: 'B', mes: 'two\n\nstill two' },                      // blank line inside a message
     { name: 'A', mes: 'SKIPthree', extra: { fileLength: 4 } },    // attachment prefix stripped
 ];
-eq(JSON.stringify(ranking.queryMessages(CHAT, { depth: 99 }).map(x => x.mes)),
+eq(JSON.stringify(query.queryMessages(CHAT, { depth: 99 }).map(x => x.mes)),
     '["one","two\\n\\nstill two","three"]', 'queryMessages drops empties and strips attachments');
-eq(ranking.queryMessages(CHAT, { depth: 2 }).map(x => x.mes).join('|'), 'two\n\nstill two|three',
+eq(query.queryMessages(CHAT, { depth: 2 }).map(x => x.mes).join('|'), 'two\n\nstill two|three',
     'depth takes the NEWEST n, chronologically ordered');
-eq(ranking.buildQuery(CHAT, { depth: 2 }),
-    ranking.queryMessages(CHAT, { depth: 2 }).map(x => (x.name ? `${x.name}: ${x.mes}` : x.mes)).join('\n\n'),
+eq(query.buildQuery(CHAT, { depth: 2 }),
+    query.queryMessages(CHAT, { depth: 2 }).map(x => (x.name ? `${x.name}: ${x.mes}` : x.mes)).join('\n\n'),
     'buildQuery is exactly the join of queryMessages');
 // THE ABLATION PROPERTY: re-running buildQuery over a frozen capture reproduces any narrower depth exactly.
-const frozen = ranking.queryMessages(CHAT, { depth: 99 });
+const frozen = query.queryMessages(CHAT, { depth: 99 });
 for (const d of [1, 2, 3]) {
-    eq(ranking.buildQuery(frozen, { depth: d }), ranking.buildQuery(CHAT, { depth: d }),
+    eq(query.buildQuery(frozen, { depth: d }), query.buildQuery(CHAT, { depth: d }),
         `depth ${d} is reproducible from a wider frozen capture`);
 }
 

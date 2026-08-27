@@ -3,7 +3,7 @@
 //
 // Vector + BM25 + chunk-selection come from the SHARED scoring module (scoring.mjs), the exact code the
 // server plugin runs; query construction, the entity filter, keyword scoring and RRF fusion come from the
-// SHARED ranking module (ranking.mjs), the exact code the extension runs. Nothing here is reimplemented,
+// SHARED modules (entity.mjs, query.mjs), the exact code the extension runs. Nothing here is reimplemented,
 // so no signal can drift. The query embedding is the same model via ollama (validated: re-embedding a
 // stored chunk → cosine ~1).
 //
@@ -61,7 +61,8 @@
 import { readFileSync, writeFileSync, statSync, openSync, readSync } from 'node:fs';
 import { tokenize } from '../extension/lexical.mjs';
 import { norm } from '../plugin/vector.mjs';
-import * as ranking from '../extension/ranking.mjs';   // shared client tuning layer — same code the extension runs
+import * as queryBuild from '../extension/query.mjs';
+import * as entity from '../extension/entity.mjs';
 import * as matcher from '../extension/matcher.mjs';
 import { gradeValue } from './metrics.mjs';
 // Scene loading, the gazetteer, the scorers, the pool and the nDCG math all live in scene.mjs, shared with
@@ -164,7 +165,7 @@ if (DEPTHS && chat === S.queryChat) {
     const over = DEPTHS.filter(d => d > S.queryChat.length);
     if (over.length) console.log(`!! depths ${over.join(',')} exceed the ${S.queryChat.length} captured messages — those rows repeat the widest window; pass --chat to actually widen it`);
 }
-const query = chat ? ranking.buildQuery(chat, { depth: DEPTH }) : S.query;
+const query = chat ? queryBuild.buildQuery(chat, { depth: DEPTH }) : S.query;
 const scanText = haystackOf(chat ?? S.scanChat ?? [], DEPTH);
 // The retrieval math lives in the deployed plugin, so a redeploy can move every per-entry signal without a
 // settings change (server-side entry pooling did). Grades collected under different arithmetic are still
@@ -198,7 +199,7 @@ if (FREEZE) {
 // --- entity filter: the gazetteer is built in loadScene (see scene.mjs for what it reads
 // here — reading raw book keys admitted 2.3x the terms and moved BM25 by up to 74%). Only the query-
 // dependent term weights are derived per run, since --depths rebuilds the query.
-const termWeights = P.entityFilter ? ranking.buildTermWeights(query, gaz, P.boost) : null;
+const termWeights = P.entityFilter ? entity.buildTermWeights(query, gaz, P.boost) : null;
 
 const keywordScore = makeKeywordScore(P);
 // TWO EMBEDDERS, because the prefixes differ and mixing them compares two spaces. A query takes the task
@@ -356,7 +357,7 @@ const fmt = n => (n == null ? '·' : (+n).toFixed(3));
     if (DEPTHS) {
         // Trust check first: does the chat still reproduce this sample's own query at its own depth? If not,
         // it has been played on since grading and every wider depth would describe a different scene.
-        const own = ranking.buildQuery(chat, { depth: DEPTH });
+        const own = queryBuild.buildQuery(chat, { depth: DEPTH });
         const faithful = own === S.query;
         console.log(`chat check: rebuilding at the sample's own depth ${DEPTH} ${faithful ? 'reproduces its frozen query exactly' : `DIFFERS (${own.length} vs ${S.query?.length ?? 0} chars) — chat played on since grading; wider depths describe a different scene`}`);
         if (!faithful && !process.argv.includes('--force')) { console.error('refusing to sweep an unfaithful chat; pass --force to override'); process.exit(1); }
@@ -369,9 +370,9 @@ const fmt = n => (n == null ? '·' : (+n).toFixed(3));
         // If it stays at 0, one wide capture ablates down cleanly and no extra grading is needed.
         console.log(' depth | qChars  msgs  terms | layout@10 layout@R vector@R  meanRank  blind');
         for (const d of DEPTHS) {
-            const q = ranking.buildQuery(chat, { depth: d });
+            const q = queryBuild.buildQuery(chat, { depth: d });
             const st = haystackOf(chat, d);
-            const tw = P.entityFilter ? ranking.buildTermWeights(q, gaz, P.boost) : null;
+            const tw = P.entityFilter ? entity.buildTermWeights(q, gaz, P.boost) : null;
             const v = await embed(q);
             const rows = scoreAll(DEF.k1, DEF.b, tw, v, q).map(r => ({ ...r, keywordScore: (e => keywordScore(e, st(e), DEF.k1))(byKey.get(entryKey(r.entry)) ?? { key: [] }) }));
             const fused = layoutOrder(layoutOf(rows));
@@ -444,7 +445,7 @@ const fmt = n => (n == null ? '·' : (+n).toFixed(3));
     else console.log('pool is reusable across this grid: every cell\'s top-10 is fully judged.');
 
     // --- entity filter: mean rank of the graded targets, at production's suppressed gazetteer. This is
-    // the arm that re-measures ranking.mjs buildTermWeights, whose own tuning was done at stage 1 against
+    // the arm that re-measures entity.mjs buildTermWeights, whose own tuning was done at stage 1 against
     // a gazetteer built from raw book keys — 2.3x the terms production admits.
     const rankMetrics = tw => {
         const all = scoreAll(DEF.k1, DEF.b, tw);
@@ -461,12 +462,12 @@ const fmt = n => (n == null ? '·' : (+n).toFixed(3));
     const filterArms = [
         ['production (gaz + boost 3)', termWeights],
         ['NO entity filter (raw query)', null],
-        ['no gazetteer (boost only)', ranking.buildTermWeights(query, new Set(), P.boost)],
-        ...[1, 2, 5, 8].map(bo => [`boost=${bo} (with gazetteer)`, ranking.buildTermWeights(query, gaz, bo)]),
+        ['no gazetteer (boost only)', entity.buildTermWeights(query, new Set(), P.boost)],
+        ...[1, 2, 5, 8].map(bo => [`boost=${bo} (with gazetteer)`, entity.buildTermWeights(query, gaz, bo)]),
         // Gazetteer widened with every entry BODY, not just keys+titles. Term count alone can't judge this
         // (it still keeps the proper-noun boost, and stopwordDf still strips corpus-common terms), so it
         // gets measured like any other arm rather than argued about.
-        ['+ entry content in gaz', ranking.buildTermWeights(query, new Set([...gaz, ...gazSource.flatMap(e => tokenize(e.content ?? ''))]), P.boost)],
+        ['+ entry content in gaz', entity.buildTermWeights(query, new Set([...gaz, ...gazSource.flatMap(e => tokenize(e.content ?? ''))]), P.boost)],
     ];
     console.log(`\nentity filter — mean rank of the ${relCount} graded targets (grade>=3), lower is better`);
     console.log('  arm                          | terms  found  mean rank  in top10  layout@10 layout@R vector@10 vector@R  judged@10');

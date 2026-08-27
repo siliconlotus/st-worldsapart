@@ -187,7 +187,7 @@ whole-word, does it occur as a word. `wolf` does not occur in `wolves`, so `wolv
 occurs in `ruts`, so `ruts` is not. Deriving rather than storing is what lets the gold survive a regime
 change or a SmartKeys decision.
 
-Core's boundary is `(?<!\w)…(?!\w)` (`extension/ranking.mjs:323`), so hyphens do not block: "rut"
+Core's boundary is `(?<!\w)…(?!\w)` (`extension/matcher.mjs`), so hyphens do not block: "rut"
 reaches "pre-rut" under *both* regimes and reaches "ruts" only under substring. Prefixed and hyphenated
 compounds are free almost everywhere; suffixed forms are the regime-sensitive ones.
 
@@ -307,14 +307,14 @@ nobody runs.
 
 - The Aho-Corasick trie is flag-blind: it always yields the folded substring count, and exact is
   computed afterward only where the flags demand it — **on the primed path**. Unprimed *and* whole-word
-  goes straight to a lookaround regex (`ranking.mjs:323`) that produces no substring count at all.
-- Production always primes (`ranking.mjs:365`, `keyword-core.mjs:143,154`). `cachedCount`'s three
+  goes straight to a lookaround regex (`matcher.mjs`) that produces no substring count at all.
+- Production always primes (`matcher.mjs`, `keyword-core.mjs:143,154`). `cachedCount`'s three
   undefined branches are for out-of-band callers, never live matching.
 - The exact/substring ratio already exists: `keyword-core.mjs:225` computes `strictClean` against
   `scan(k, cs, false).total`, read by `severityOf` — currently gated to short keys only. Generalizing
   it is caller-side work, no `countKey` surgery.
 - The case for changing `countKey`'s signature to `(exactCount, substringCount, weight)` is uniformity
-  across key *types*, not the ratio: SmartKeys return a weight and no counts (`ranking.mjs:286`), regex
+  across key *types*, not the ratio: SmartKeys return a weight and no counts (`matcher.mjs`), regex
   returns a raw match count (`:295`). That is the blind spot that makes SmartKeys unmeasurable.
 - `eval/suggest-firing.mjs` uses the real matcher but enters on the unprimed branch, which production
   never takes. Same function, different branch — the "countKey is the only matcher" rule catches the

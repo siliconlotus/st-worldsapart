@@ -130,7 +130,7 @@ const ARMS = {
     // cannot surface an unjudged row and its delta is not a pool-biased lower bound. It does move two things
     // at once — see denseAllEntries in scene.mjs for the tilt that stops applying.
     'denseAll=on': { __dense: true, denseAllEntries: true },
-    // THE SAME COSINE THROUGH THE COLUMN THE LEARNED-SPARSE SCORES WERE MEASURED IN (ranking.mjs
+    // THE SAME COSINE THROUGH THE COLUMN THE LEARNED-SPARSE SCORES WERE MEASURED IN (entity.mjs
     // sparseWeight, scene.mjs denseColumn). Weight 0.5, same eligibility rule, `score` and the keyword-only
     // tilt untouched — so denseCol=nocos against the sparse run's own nocos arm differs in the number the
     // column holds and nothing else, which denseAll=on does not.
@@ -190,7 +190,7 @@ const ARMS = {
     // tie-break from the entries that get one, so tilt=1 is what splits the pair (the cosine's own
     // contribution reads as denseAllΔ - tiltΔ).
     //
-    // THE DOSE QUESTION IS CLOSED — the ladder finding lives at ranking.mjs KEYWORD_ONLY_TILT (13 doses
+    // THE DOSE QUESTION IS CLOSED — the ladder finding lives at KEYWORD_ONLY_TILT (13 doses
     // 0.75-3, 70 scenes, unimodal on both metrics, joint plateau [1.25, 1.3]). These two are TRIPWIRES,
     // one per cliff edge: tilt=1 must read ~-0.02 F@R and tilt=1.5 ~-0.02 nDCG, and a flat cell means the
     // fusion or the population changed shape and the ladder wants re-running, not that the tilt is free.

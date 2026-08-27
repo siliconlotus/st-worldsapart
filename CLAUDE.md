@@ -328,7 +328,7 @@ expression is WORTH goes in the second.
 
 ## Pure vs ST-coupled
 
-`matcher.mjs`, `ranking.mjs`, `keyword-core.mjs`, `selection.mjs`, `smartkeys.mjs`, `sort.mjs`, `lexical.mjs`, `relevance.mjs` and `plugin/*.mjs` are
+`matcher.mjs`, `entity.mjs`, `query.mjs`, `keyword-core.mjs`, `selection.mjs`, `smartkeys.mjs`, `sort.mjs`, `lexical.mjs`, `relevance.mjs` and `plugin/*.mjs` are
 ST-free and node-importable, so the evals exercise the real shipped code instead of string-slicing it.
 Settings and ST globals are injected by the caller, never imported. The ST/DOM half is
 `worldsapart.js`, `keyword-tools.mjs`, `studio.mjs`, `ui-widgets.mjs`.

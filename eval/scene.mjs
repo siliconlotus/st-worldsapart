@@ -16,7 +16,7 @@ import { createHash } from 'node:crypto';
 import { dirname, resolve as resolvePath } from 'node:path';
 import { scoreCollection, poolEntries, selectTopK, admitCeiling } from '../plugin/scoring.mjs';
 import { corpusMean, centeredCosineScores } from '../plugin/vector.mjs';
-import * as ranking from '../extension/ranking.mjs';
+import * as entity from '../extension/entity.mjs';
 import * as matcher from '../extension/matcher.mjs';
 import { isDurable, openBundle } from '../extension/grading.mjs';
 import * as selection from '../extension/selection.mjs';
@@ -27,7 +27,19 @@ import { buildContentIndex, scoreContent, entryKey } from '../extension/content-
 import { cachePath, chunkConfig, embedTexts, pathSafe, resolveModel } from './reindex.mjs';
 import { gradeCredit, fbeta, RECALL_WEIGHT, gradeValue, topComponents, projectOut, componentScales } from './metrics.mjs';
 import { loadBasis } from './global-basis.mjs';
-export { inVectorIndex } from '../extension/ranking.mjs';
+
+/**
+ * Whether an item is IN THE VECTOR COLLECTION — not whether it could be embedded, which is true of all
+ * text, and not whether it earned a cosine. A vectorized entry that failed to rank is still in, because
+ * it competed and lost. Callers may declare it explicitly, since only they know how the scan
+ * resolved; absent flags fall back to presence.
+ *
+ * Named for membership because that is the only question it answers. It used to gate the TEXT signal
+ * too, which read as "is a non-vector entry in the vector collection" — a question worth asking of
+ * nothing. That was parasitic: text scores could only come from the vector index, so membership stood in
+ * for text eligibility. content-lexical.mjs indexes every entry's content, so text no longer asks.
+ */
+export const inVectorIndex = it => it.vectorEligible ?? it.entry?.vectorized ?? Number.isFinite(it.score);
 
 /** Unit Separator — see CLAUDE.md. Never NUL: that makes git treat the file as binary. */
 const US = String.fromCharCode(31);
@@ -878,7 +890,7 @@ export function loadScene(S, { indexFile, indexOpts = {}, params: P }) {
     };
     const pick = GAZ_FIELDS[P.gazetteerSource];
     if (!pick) throw new Error(`unknown gazetteerSource "${P.gazetteerSource}" — one of ${Object.keys(GAZ_FIELDS).join(', ')}`);
-    const gaz = ranking.buildGazetteer(gazEntries.flatMap(e => pick(e)));
+    const gaz = entity.buildGazetteer(gazEntries.flatMap(e => pick(e)));
 
     // THE POOL IS WHAT WAS JUDGED, and ONLY that — see graded-scene-grid.mjs. OWN is this capture's own
     // non-durable rows, kept separately so coverage warnings stay about re-derivation failing rather than
@@ -1271,7 +1283,7 @@ export async function scoreScene({ sample: S, overrides = {}, k = 10, vectors, m
     const gradeOf = makeGradeOf(S.entries, scene);
 
     const query = S.query;
-    const tw = P.entityFilter ? ranking.buildTermWeights(query, scene.gaz, P.boost) : null;
+    const tw = P.entityFilter ? entity.buildTermWeights(query, scene.gaz, P.boost) : null;
     // No collection means no cosine to compute, so the embed call is skipped rather than made and ignored.
     // Under denseAllEntries a keyword-only book has an empty stage-1 collection and still has vectors to
     // score against, which is the whole point of the arm there.

@@ -51,8 +51,8 @@ import fs from 'node:fs';
 import { gradeValue, gradeCredit, fbeta, RECALL_WEIGHT, signTest } from './metrics.mjs';
 import { COMMON_WORDS } from '../plugin/commonwords.js';
 import { logisticFit, auc, cumulativeFit, prCurve, reliability, sigmoid } from './logistic.mjs';
-import * as ranking from '../extension/ranking.mjs';
-import { properNames, properDensity, modelKey } from '../extension/relevance.mjs';
+import * as entity from '../extension/entity.mjs';
+import { properNames, properDensity, modelKey, properNounsOf } from '../extension/relevance.mjs';
 import { nameEvidence, NAME_PARTICLES } from '../extension/keyword-core.mjs';
 import { fold, normalizeOrthography } from '../extension/smartkeys.mjs';
 import { tokenize } from '../extension/lexical.mjs';
@@ -195,10 +195,10 @@ const DROP_KEYS = arg('--drop-keys') ? JSON.parse(fs.readFileSync(arg('--drop-ke
 // of the number, and the harness does not choose it.
 const PROPER_MODE = arg('--proper-nouns');
 // HOW a name is recognised, orthogonal to how a shared one is scored. `regex` is the private ASCII
-// pattern this feature was found with; `entity` is ranking.mjs's own rule, which the entity filter
+// pattern this feature was found with; `entity` is relevance.mjs's own rule, which the entity filter
 // already uses; `span` takes maximal runs of capitalised tokens as one term, so "Brackenmoor Patrol"
 // is a name rather than two.
-// REQUIRED under the same rule. `entity` is ranking.properNounsOf via relevance.properNames — the
+// REQUIRED under the same rule. `entity` is properNounsOf via relevance.properNames — the
 // shipped extractor; `entity` beat `regex` at p 0.0002 paired over 88 scenes.
 const PROPER_EXTRACT = arg('--proper-nouns-extract');
 // WHICH DETECTOR feeds the density column — 'entity' is the shipped properDensity (properNounsOf, no
@@ -285,7 +285,7 @@ const PROPER_RE = /\b[A-Z][a-z]{2,}\b/g;
 // simply break at the first uncapitalised token. Particles join a run only between name tokens, and a
 // trailing one is trimmed, so "Sun of" never forms.
 //
-// Built on ranking.properNounsOf rather than on capitalisation directly: the first span arm started runs
+// Built on properNounsOf rather than on capitalisation directly: the first span arm started runs
 // at sentence-initial capitals, which is how "The" became the head of a name, and it lost to plain
 // unigrams because of it.
 //
@@ -298,7 +298,7 @@ const PROPER_RE = /\b[A-Z][a-z]{2,}\b/g;
 const PARTICLES = new Set([...NAME_PARTICLES].filter(w => w !== 'and'));
 const properSpans = (text) => {
     const norm = normalizeOrthography(String(text ?? ''));
-    const names = ranking.properNounsOf(norm);
+    const names = properNounsOf(norm);
     const out = new Set();
     const runs = [];
     for (const sentence of norm.split(/(?<=[.!?])\s+|\n+/)) {
@@ -346,7 +346,7 @@ const makeExtract = (mode, entries) => {
     const ev = nameEvidence();
     for (const e of entries ?? []) if (typeof e?.content === 'string') ev.wordSeq(normalizeOrthography(e.content));
     if (mode === 'named') return text => {
-        const out = ranking.properNounsOf(normalizeOrthography(String(text ?? '')));
+        const out = properNounsOf(normalizeOrthography(String(text ?? '')));
         for (const w of [...out]) if (COMMON_WORDS.has(w) && !ev.isName(ev.fold(w))) out.delete(w);
         return out;
     };
@@ -400,7 +400,7 @@ featureDef.oracle = r => Number(r.entryBase) || 0;
 // `text`, which is a different claim — that a long document should not out-score a short one on the same
 // query — and says nothing about whether long entries are likelier to be relevant at all.
 featureDef.length = r => Math.log(Math.max(1, Number(r.entryTokens) || 0));
-// NAMES PER 100 TOKENS, on ranking.properNounsOf — the same detector `proper` settled on. A DENSITY, not
+// NAMES PER 100 TOKENS, on properNounsOf — the same detector `proper` settled on. A DENSITY, not
 // the count: the count is length wearing another name, and the two would be one column.
 featureDef.density = r => Number(r.properDensity) || 0;
 // MEAN -log10(tf/total) over the entry's tokens, the book as the corpus. "How rare is this entry's
@@ -539,7 +539,7 @@ const queryVec = async (S, name, value, em) => {
                     .filter(e => e.world === book && typeof e.content === 'string' && e.content.trim())
                     .map(e => e.content.trim())));
             }
-            const tw = P.entityFilter ? ranking.buildTermWeights(S.query, scene.gaz, P.boost) : null;
+            const tw = P.entityFilter ? entity.buildTermWeights(S.query, scene.gaz, P.boost) : null;
             const haystack = haystackFor(S, P);
             const rows = makeCandidateSet({ ...scene, params: P })(P.K1, P.B, tw, qvec, S.query, haystack);
             // Detector per column, arm-overridable; sweeping `detector` swaps both at once.
@@ -637,7 +637,7 @@ const queryVec = async (S, name, value, em) => {
                     const bk = tfFor(r.entry?.world ?? book);
                     const toks = tokenize(r.entry?.content);
                     r.entryTokens = toks.length;
-                    const names = ranking.properNounsOf(normalizeOrthography(String(r.entry?.content ?? '')));
+                    const names = properNounsOf(normalizeOrthography(String(r.entry?.content ?? '')));
                     // THE SHIPPED FUNCTION, so the fit and the runtime cannot drift on what density is —
                     // the same rule the overlap follows through properNames. `names` stays for chunkdens.
                     r.properDensity = dMode === 'book'

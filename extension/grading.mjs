@@ -56,7 +56,7 @@ export function stRelative(path) {
  *
  * There is deliberately no "only the candidate entries" mode. It looks like the thrifty choice and is a
  * trap: the entity filter's gazetteer is built from every entry's keys and title, and admitting 2.3x too
- * many query terms moves content-lexical's BM25 at stage 3 (see ranking.mjs buildGazetteer; the 74%
+ * many query terms moves content-lexical's BM25 at stage 3 (see entity.mjs buildGazetteer; the 74%
  * figure that used to sit here was stage-1 BM25, which no longer exists).
  *
  * @param {Record<string, object>|object[]} entries A book's entries (ST stores a uid-keyed object)

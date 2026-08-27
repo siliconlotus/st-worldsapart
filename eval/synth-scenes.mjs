@@ -13,7 +13,7 @@
 //
 // MESSAGE IDS ARE RAW RECORD INDICES — line N of the .jsonl, counting hidden messages. Verified against the
 // existing set: sommers-syn-msg5347 sits at raw 5347 and usable 5340 in a chat with 7 hidden records. The
-// query and scan window are built from is_system-filtered messages, because ranking.queryMessages and
+// query and scan window are built from is_system-filtered messages, because query.queryMessages and
 // matcher.scanWindow both expect the caller to have dropped them (matcher.scanWindow's own docstring says
 // so), but the id that names the scene stays the raw one so it can be found in the file by line.
 //
@@ -52,7 +52,8 @@ import { haystackFor, loadScene, makeCandidateSet, makeLayoutOrder, sceneParams,
 import { ensureIndex } from './reindex.mjs';
 
 import { offlineTokenCounter } from './tokens.mjs';
-import * as ranking from '../extension/ranking.mjs';
+import * as query from '../extension/query.mjs';
+import * as entity from '../extension/entity.mjs';
 import * as matcher from '../extension/matcher.mjs';
 import { bundleSamples, openBundle, stRelative } from '../extension/grading.mjs';
 import { execFileSync } from 'node:child_process';
@@ -376,8 +377,8 @@ for (const idx of picks) {
         if (i > idx || !isMessage(r) || (!INCLUDE_HIDDEN && r.is_system)) return;
         visible.push(r); srcIndex.push(i);
     });
-    const query = ranking.buildQuery(visible, { depth: DEPTH });
-    const queryChat = ranking.queryMessages(visible, { depth: DEPTH });
+    const query = query.buildQuery(visible, { depth: DEPTH });
+    const queryChat = query.queryMessages(visible, { depth: DEPTH });
     const sceneStart = srcIndex[queryChat[0].i];
     const sceneEnd = srcIndex[queryChat[queryChat.length - 1].i];
     // The donor's knobs, minus `depth` — that is the scene's span, and this derivation sets its own.
@@ -406,7 +407,7 @@ for (const idx of picks) {
         // Term weights exactly as scoreScene derives them. Passing null instead runs every arm with the
         // entity filter off — the gazetteer path that admitted 2.3x the query terms and moved BM25 by up
         // to 74%, which is a difference no arm label would have shown.
-        const tw = P.entityFilter ? ranking.buildTermWeights(query, scene.gaz, P.boost) : null;
+        const tw = P.entityFilter ? entity.buildTermWeights(query, scene.gaz, P.boost) : null;
         const rows = makeCandidateSet({ ...scene, params: P })(
             P.K1, P.B, tw, qv, query, haystack,
         );

@@ -1,6 +1,6 @@
 // keyword-core.mjs — the pure half of the keyword tools: the prune classifier (buildKeyPruneScan),
 // the TF-IDF suggester (buildKeySuggest), the LLM candidate prompt/parser/filter, and their tuning
-// constants. ST-free and node-importable (the ranking.mjs pattern) so eval/keyword-extract-check.mjs
+// constants. ST-free and node-importable (the matcher.mjs pattern) so eval/keyword-extract-check.mjs
 // runs the real shipped code instead of string-slicing it; keyword-tools.mjs layers the ST plumbing
 // (popups, saving, generation) on top and injects the world-info match flags.
 import { COMMON_WORDS } from '../plugin/commonwords.js';
