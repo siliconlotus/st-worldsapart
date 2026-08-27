@@ -56,6 +56,14 @@ export const postDates = (entry, at) => {
     return Number.isFinite(start) && start > at;
 };
 
+/** Words that live INSIDE a constructed proper noun — "Church of the Sun", "van der Berg", "War and
+ *  Peace" — genitive and article particles plus `and`. The authoritative list; the harness's prose-side
+ *  span arm derives from it MINUS `and`, which in running text joins two entities rather than living
+ *  inside one. A key is different: its author chose the span, so `and` is part of the name.
+ *  ponytail: prepositional titles ("Nightmare on Elm Street") still read as fragments; widen when a
+ *  real key hits it. */
+export const NAME_PARTICLES = new Set(['of', 'the', 'and', 'de', 'del', 'della', 'di', 'da', 'van', 'von', 'der', 'den', 'du', 'la', 'le', 'el', 'bin', 'ibn']);
+
 /**
  * A line that is ENTIRELY a label — an ATX heading, a `**Bold:**` field name, or a bare `Label:` —
  * with nothing after it.

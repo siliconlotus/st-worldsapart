@@ -4,6 +4,8 @@
 // runs the real shipped code instead of string-slicing it; keyword-tools.mjs layers the ST plumbing
 // (popups, saving, generation) on top and injects the world-info match flags.
 import { COMMON_WORDS } from '../plugin/commonwords.js';
+// The name primitives live with the other name rules; the audit reads them, it does not own them.
+import { NAME_PARTICLES } from './relevance.mjs';
 import { ZIPF_EN, POS_VA, POS_VA_STRICT, POS_ADJ } from './zipf-en.js';
 import { countKey, escapeRegex, isRegexKey, secondaryKeys, segment, usableKeys } from './matcher.mjs';
 import { buildAutomaton, scanAutomaton, createScanScope, parse, primeScan, tokenize, validateSmartKey } from './smartkeys.mjs';
@@ -58,14 +60,6 @@ export const KEY_DUPE_MIN = 0.35;
  *  and the prune classifier (which flags existing keys that do) — one list, so the two tools cannot disagree
  *  about what junk looks like. */
 export const FUNCTION_WORDS = new Set('a an the and or but if then else for to of in on at by with from as is are was were be been being this that these those it its he she they them his her their you your i we our my me not no do does did has have had will would can could should'.split(' '));
-
-/** Words that live INSIDE a constructed proper noun — "Church of the Sun", "van der Berg", "War and
- *  Peace" — genitive and article particles plus `and`. The authoritative list; the harness's prose-side
- *  span arm derives from it MINUS `and`, which in running text joins two entities rather than living
- *  inside one. A key is different: its author chose the span, so `and` is part of the name.
- *  ponytail: prepositional titles ("Nightmare on Elm Street") still read as fragments; widen when a
- *  real key hits it. */
-export const NAME_PARTICLES = new Set(['of', 'the', 'and', 'de', 'del', 'della', 'di', 'da', 'van', 'von', 'der', 'den', 'du', 'la', 'le', 'el', 'bin', 'ibn']);
 
 /**
  * A key that reads as a CLAUSE FRAGMENT rather than a name for something.

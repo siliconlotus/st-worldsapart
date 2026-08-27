@@ -53,7 +53,7 @@ import { COMMON_WORDS } from '../plugin/commonwords.js';
 import { logisticFit, auc, cumulativeFit, prCurve, reliability, sigmoid } from './logistic.mjs';
 import * as entity from '../extension/entity.mjs';
 import { properNames, properDensity, modelKey, properNounsOf } from '../extension/relevance.mjs';
-import { nameEvidence, NAME_PARTICLES } from '../extension/keyword-core.mjs';
+import { nameEvidence } from '../extension/keyword-core.mjs';
 import { fold, normalizeOrthography } from '../extension/smartkeys.mjs';
 import { tokenize } from '../extension/lexical.mjs';
 import { chunkEntry } from '../extension/chunking.mjs';
