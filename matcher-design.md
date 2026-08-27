@@ -1108,7 +1108,7 @@ shipped model is now what a run reproduces passing NEITHER flag, which is the pr
 trap impossible rather than merely documented.
 
 **An entry's own relevance rate in its other scenes adds nothing**, which is what bounds any entry-level
-prior: `--with oracle` reads grades the runtime cannot have and still fails, held out by book, raising
+prior: `oracle` in `--features` reads grades the runtime cannot have and still fails, held out by book, raising
 AUC while losing the delivered set. A better ordering read at a looser cutoff is not a better chosen set.
 
 **Nor does its embedding profile, which is the grade-FREE form of the same idea and the reason to record
@@ -1212,10 +1212,10 @@ directly.
 
 **ASK IT AS A FEATURE CONTRAST, not as a parameter sweep.** Turning the setting off does not remove the
 column — it leaves a DEGENERATE one on a tier that is all but entirely vectorized, still consuming a
-coefficient. `--without keys` drops it, which is the honest counterfactual.
+coefficient. Leaving `keys` out of `--features` drops it, which is the honest counterfactual.
 On the current corpus the two coincide exactly: the blanked column is constant in every one of the 103
 scenes, so its SD is 0, the fit returns +0.000 at SE 1000, and `scoreVectorKeys=false` reproduces
-`--without keys` to the bit on all 97 scored scenes. They stop coinciding at the first scene holding an
+the keys-free feature set to the bit on all 97 scored scenes. They stop coinciding at the first scene holding an
 unvectorized memory entry whose keys score, where the one row breaking the constant meets a fitted slope.
 
 **Measured** on the shipped design, 102 scenes, 6051 rows, 379 relevant, held out by book. **The score of
@@ -1235,7 +1235,7 @@ redundant reading of an entry's own content, priced.
 
 **WHETHER A SIGNAL IS IN THE MODEL IS A QUESTION ABOUT THE FEATURE SET, never about a row.** The fit
 carries one standardised column per signal and nothing else, so a signal is either fitted for the whole
-tier or dropped from it (`--without`). On the memory tier every entry is vectorized and 4 of 496 have no
+tier or left out of `--features`. On the memory tier every entry is vectorized and 4 of 496 have no
 keys, so nothing varies. On reference, `cosine` is missing on 124 of 135 entries — missing because nobody
 computed one, not because the quantity does not exist, since `reindex --all` builds a collection over
 every entry with content and `denseAllEntries` scores it. So the reference model is one of two designs:

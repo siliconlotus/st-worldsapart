@@ -35,15 +35,15 @@
 //
 // Usage (from SillyTavern root):
 //   node .../relevance-regress.mjs <sample.json> [...] [--sweep gazetteerSource=keys,titles]
-//        --tier all|memory|reference [--cut 4] [--ordinal] [--loso] [--lobo] [--calibration] [--cutoff] [--at 0.10] [--degree 2] [--interactions] [--with properNouns,time,oracle,length,density,rarity,chunkdens] [--without keys] [--drop-keys flagged.json] [--emit-rows rows.json] [--emit-model relevance-model-<tier>.json] [--proper-nouns count|idf|idf-len|jaccard|gaz] [--proper-nouns-extract regex|entity|span]
-//   --tier is required. With properNouns in --with, --proper-nouns and --proper-nouns-extract are
+//        --tier all|memory|reference [--cut 4] [--ordinal] [--loso] [--lobo] [--calibration] [--cutoff] [--at 0.10] [--degree 2] [--interactions] --features cosine,text,properNouns,density [--drop-keys flagged.json] [--emit-rows rows.json] [--emit-model relevance-model-<tier>.json] [--proper-nouns count|idf|idf-len|jaccard|gaz] [--proper-nouns-extract regex|entity|span]
+//   --tier and --features are required. With properNouns in --features, --proper-nouns and --proper-nouns-extract are
 //   required. A --sweep read with --cutoff requires --at: arms compare at one set cutoff.
 //
 // THE SHIPPED MEMORY FIT, which is what `relevance-model-memory.json` was emitted by — the four columns
 // the doc rules (keys is computed and recorded, and deliberately not fitted), the entity name detector,
 // held out by book:
 //   node .../relevance-regress.mjs eval-data/*-syn-msg*.json <the rest of the graded corpus>
-//        --tier memory --with properNouns,density --without keys --proper-nouns idf --proper-nouns-extract entity
+//        --tier memory --features cosine,text,properNouns,density --proper-nouns idf --proper-nouns-extract entity
 //        --lobo --cutoff --emit-model extension/relevance-model-memory.json
 import { haystackFor, indexPath, isMemory, loadScene, openSample, sceneParams, makeCandidateSet, makeGradeOf, embed, sceneLabel } from './scene.mjs';
 import { ensureIndex, resolveModel } from './reindex.mjs';
@@ -63,7 +63,7 @@ const arg = k => { const i = argv.indexOf(k); return i >= 0 ? argv[i + 1] : null
 // is about to write is opened as an input bundle. Named flags rather than "anything after a --", or
 // `--lobo scene.json` would silently DROP that scene, which is the worse failure: a wrong sample set
 // prints a clean table and says nothing about what it left out.
-const VALUED = new Set(['--arm', '--sweep', '--tier', '--cut', '--degree', '--square', '--with', '--without', '--emit', '--emit-rows', '--emit-model', '--drop-keys', '--proper-nouns', '--proper-nouns-extract', '--standardise', '--beta']);
+const VALUED = new Set(['--arm', '--sweep', '--tier', '--cut', '--degree', '--square', '--features', '--emit', '--emit-rows', '--emit-model', '--drop-keys', '--proper-nouns', '--proper-nouns-extract', '--standardise', '--beta']);
 const samples = argv.filter((a, i) => a.endsWith('.json') && !a.startsWith('--') && !VALUED.has(argv[i - 1]));
 if (!samples.length) {
     console.error('need at least one sample: node relevance-regress.mjs <sample.json> [more.json ...] [--sweep param=v1,v2]');
@@ -152,17 +152,16 @@ const DEGREE = Number(arg('--degree') ?? 1);
 const SQUARE = String(arg('--square') ?? '').split(',').filter(Boolean);
 const INTERACT = argv.includes('--interactions');
 // Extra candidate features, off by default: `proper` = shared proper nouns with the scan window,
-// `time` = the entry's story-time position, `oracle` = the entry's own relevance rate in its OTHER
-// scenes, a CEILING on any entry-level prior rather than a shippable column. All are ADDITIONS to the
-// three shipped signals, never replacements, and all are here to be measured rather than to ship.
-const WITH = String(arg('--with') ?? '').split(',').filter(Boolean);
-// DROPS A SHIPPED SIGNAL from the design, which a parameter sweep sometimes needs and cannot express.
-// A column that is CONSTANT within a scene is not the same as an absent one: standardisation divides by
-// the scene's own SD, so a scene where one row breaks an otherwise-constant column sends that row to a
-// large z where a fitted slope meets it. `scoreVectorKeys=false` on the memory tier is exactly that shape
-// — 99.8% vectorized, keys blanked, and the remainder fitted at +0.765 (SE 0.580). Contrasting the two
-// settings with the column present measures the parameter PLUS that nuisance term.
-const WITHOUT = String(arg('--without') ?? '').split(',').filter(Boolean);
+// THE FEATURE SET, stated in full. `--features` names every fitted column, in order — there is no base
+// set to add to or subtract from, so the flag IS the design matrix and two runs differing in one name
+// differ in exactly that column. `time` = the entry's story-time position; `oracle` = the entry's own
+// relevance rate in its OTHER scenes, a CEILING on any entry-level prior rather than a shippable column.
+const KNOWN_FEATURES = ['cosine', 'text', 'keys', 'properNouns', 'time', 'oracle', 'length', 'density', 'rarity', 'chunkdens'];
+const FEATURE_LIST = String(arg('--features') ?? '').split(',').filter(Boolean);
+if (!FEATURE_LIST.length) { console.error(`--features is required: a comma list of fitted columns, from ${KNOWN_FEATURES.join(',')}`); process.exit(2); }
+for (const f of FEATURE_LIST) if (!KNOWN_FEATURES.includes(f)) { console.error(`--features: unknown feature "${f}" — one of ${KNOWN_FEATURES.join(',')}`); process.exit(2); }
+if (new Set(FEATURE_LIST).size !== FEATURE_LIST.length) { console.error('--features names a column twice'); process.exit(2); }
+const has = f => FEATURE_LIST.includes(f);
 // Where to write the per-scene F2 vector. Two feature sets cannot be swept in one process — the design
 // matrix is built once — so the paired contrast is made between two RUNS, and this is what carries the
 // per-scene numbers between them. Scene names go with it: pairing by index is only safe if both runs
@@ -202,10 +201,10 @@ const PROPER_MODE = arg('--proper-nouns');
 // shipped extractor; `entity` beat `regex` at p 0.0002 paired over 88 scenes.
 const PROPER_EXTRACT = arg('--proper-nouns-extract');
 const CALIB = argv.includes('--calibration');
-if ((WITH.includes('properNouns')) && !['count', 'idf', 'idf-len', 'jaccard', 'gaz'].includes(PROPER_MODE)) {
+if (has('properNouns') && !['count', 'idf', 'idf-len', 'jaccard', 'gaz'].includes(PROPER_MODE)) {
     console.error(`--proper-nouns is required with the properNouns feature: count|idf|idf-len|jaccard|gaz (got ${PROPER_MODE})`); process.exit(2);
 }
-if ((WITH.includes('properNouns')) && !['regex', 'entity', 'span'].includes(PROPER_EXTRACT)) {
+if (has('properNouns') && !['regex', 'entity', 'span'].includes(PROPER_EXTRACT)) {
     console.error(`--proper-nouns-extract is required with the properNouns feature: regex|entity|span (got ${PROPER_EXTRACT})`); process.exit(2);
 }
 // ARMS COMPARE AT ONE CUTOFF. The cutoff is a user setting, not a property of an arm, so a paired
@@ -226,7 +225,7 @@ if (!['all', 'memory', 'reference'].includes(TIER)) { console.error(`--tier is r
 // beside them, --relevant-at 2 replaces the target with P(>=2) outright, and --half-recall changes the
 // bars the cutoff was chosen on. Each would produce a file that reads as the shipping artefact and is not.
 if (EMIT_MODEL && (CUT !== 3 || RELEVANT_AT !== 3 || HALF_RECALL
-    || (WITH.includes('properNouns') && (PROPER_MODE !== 'idf' || PROPER_EXTRACT !== 'entity')))) {
+    || (has('properNouns') && (PROPER_MODE !== 'idf' || PROPER_EXTRACT !== 'entity')))) {
     console.error('--emit-model writes the shipping artefact, so it runs at the shipped definition: --cut 3, --relevant-at 3, no --half-recall, '
         + 'and with properNouns, --proper-nouns idf --proper-nouns-extract entity. Drop --emit-model to explore another target.');
     process.exit(2);
@@ -244,8 +243,8 @@ if (!MODEL) { console.error(`${samples[0]} records no embedModel — set WA_EMBE
 const OLLAMA = process.env.OLLAMA_URL ?? 'http://localhost:11434';
 
 // THE FEATURE SET. One standardised column per signal and NO ELIGIBILITY INDICATORS: whether a signal is
-// absent is a question about the FEATURE SET, not about a row, and it is answered by dropping the column
-// (`--without`). Every memory entry carries cosine and text, and 4 of 496 have no keys; on reference the
+// absent is a question about the FEATURE SET, not about a row, and it is answered by leaving the column
+// out of `--features`. Every memory entry carries cosine and text, and 4 of 496 have no keys; on reference the
 // only signal that varies is cosine, missing because nobody computed one, which `reindex --all` plus
 // `denseAllEntries` closes. So the model is either fitted on a signal or it is not, and a mixed state is
 // an author's vectorization choices rather than something to model.
@@ -257,11 +256,12 @@ const OLLAMA = process.env.OLLAMA_URL ?? 'http://localhost:11434';
 // 0.5416 -> 0.5514, and moved Ascensus — which holds 2 of the 4 keyless entries — from -0.067 to -0.007,
 // the whole of what had read as one book rejecting keys. Arms whose indicators were already constant do
 // not move at all.
-const FEATURES = [
-    ['cosine', r => (Number.isFinite(r.score) ? r.score : 0)],
-    ['text', r => Number(r.textScore) || 0],
-    ['keys', r => Number(r.keywordScore) || 0],
-].filter(([n]) => !WITHOUT.includes(n));
+const FEATURES = [];
+const featureDef = {
+    cosine: r => (Number.isFinite(r.score) ? r.score : 0),
+    text: r => Number(r.textScore) || 0,
+    keys: r => Number(r.keywordScore) || 0,
+};
 // PROPER NOUNS shared between the entry and the scan window. NOT a reweighting of `text`: BM25 spreads
 // its mass over every term the two share, so a character name arrives diluted among hundreds of ordinary
 // words. Restricting the vocabulary to names asks a different question — is this entry about someone who
@@ -352,11 +352,11 @@ const properNouns = (text, mode = PROPER_EXTRACT) => {
 // transfer rather than as two features sharing a column.
 const storyTime = r => Number(r.entry?.uid ?? 0);
 
-if (WITH.includes('properNouns')) FEATURES.push(['properNouns', r => Number(r.properShared) || 0]);
-if (WITH.includes('time')) FEATURES.push(['time', storyTime]);
+featureDef.properNouns = r => Number(r.properShared) || 0;
+featureDef.time = storyTime;
 // Built below, once every scene is loaded — an entry's prior is read off its OTHER scenes and so cannot
 // be computed inside the per-scene loop the way properShared is.
-if (WITH.includes('oracle')) FEATURES.push(['oracle', r => Number(r.entryBase) || 0]);
+featureDef.oracle = r => Number(r.entryBase) || 0;
 // THE THREE COMPUTABLE PRIORS, each an attempt at part of what `oracle` bounds. All are entry-intrinsic
 // — they never read the query — so they are priors rather than signals, and within-scene standardisation
 // still works on them because they vary between the entries of one scene.
@@ -365,23 +365,24 @@ if (WITH.includes('oracle')) FEATURES.push(['oracle', r => Number(r.entryBase) |
 // 15k-token entry set the scene's SD. It is not already in the model: BM25 length-normalises INSIDE
 // `text`, which is a different claim — that a long document should not out-score a short one on the same
 // query — and says nothing about whether long entries are likelier to be relevant at all.
-if (WITH.includes('length')) FEATURES.push(['length', r => Math.log(Math.max(1, Number(r.entryTokens) || 0))]);
+featureDef.length = r => Math.log(Math.max(1, Number(r.entryTokens) || 0));
 // NAMES PER 100 TOKENS, on ranking.properNounsOf — the same detector `proper` settled on. A DENSITY, not
 // the count: the count is length wearing another name, and the two would be one column.
-if (WITH.includes('density')) FEATURES.push(['density', r => Number(r.properDensity) || 0]);
+featureDef.density = r => Number(r.properDensity) || 0;
 // MEAN -log10(tf/total) over the entry's tokens, the book as the corpus. "How rare is this entry's
 // vocabulary among its siblings" — the surviving half of a mean-TF-IDF prior. The English-frequency half
 // is deliberately absent: ZIPF_EN scores a name maximally rare and a book's own coinages with it, so the
 // two axes disagree on a tenth of a book's token mass and a min-of-percentiles combination measured
 // WORSE than this column alone.
-if (WITH.includes('rarity')) FEATURES.push(['rarity', r => Number(r.bookRarity) || 0]);
+featureDef.rarity = r => Number(r.bookRarity) || 0;
 // NAMES PER CHUNK, the same construct as `density` at the unit the system retrieves in. Proposed off the
 // DISABLED-entry population, where length-controlled it agreed with the author's keep/drop call in 7
 // books of 7 — and that finding is an ARTIFACT: disabled entries sit earlier in the story (mean position
 // 0.33 against 0.60), early entries name fewer distinct people because the cast has not accumulated, and
 // controlling position as well as length takes it to 3 of 7 and mean AUC 0.489. It measures nothing on
 // grades either. Kept because the unit is an obvious thing to try and this answers it both ways.
-if (WITH.includes('chunkdens')) FEATURES.push(['chunkdens', r => Number(r.chunkDensity) || 0]);
+featureDef.chunkdens = r => Number(r.chunkDensity) || 0;
+for (const f of FEATURE_LIST) FEATURES.push([f, featureDef[f]]);
 
 
 // Feature indices carrying a squared term: none at degree 1, the named subset if --square was given,
@@ -507,7 +508,7 @@ const queryVec = async (S, name, value, em) => {
             const tw = P.entityFilter ? ranking.buildTermWeights(S.query, scene.gaz, P.boost) : null;
             const haystack = haystackFor(S, P);
             const rows = makeCandidateSet({ ...scene, params: P })(P.K1, P.B, tw, qvec, S.query, haystack);
-            if (WITH.includes('properNouns')) {
+            if (has('properNouns')) {
                 // Proper nouns are a property of the SCENE, so read off a plain entry's window: an entry's
                 // own sources are its, not the scene's.
                 // SWEEPABLE, so two detectors can be compared paired per scene AND per book rather than
@@ -577,7 +578,7 @@ const queryVec = async (S, name, value, em) => {
             // KEYED BY THE ROW'S OWN BOOK, as the name df is: rarity asks how unusual a term is in the
             // book the entry came from, and a scene now ranks every attached book. Keying the cache on
             // the scene's primary would give a second book's entries the primary's vocabulary.
-            if (PRIORS.some(p => WITH.includes(p))) {
+            if (PRIORS.some(has)) {
                 const tfFor = (bookName) => {
                     let bk = bookTf.get(bookName);
                     if (bk) return bk;
@@ -665,7 +666,7 @@ const queryVec = async (S, name, value, em) => {
         // the neutral value, which keeps the row population identical to the run without the column and so
         // keeps the two runs paired. The count is printed because a column mostly made of imputed rows is
         // measuring the imputation.
-        if (WITH.includes('oracle')) {
+        if (has('oracle')) {
             const tally = new Map();
             const idOf = r => `${r.entry?.world ?? ''}${r.entry?.uid ?? ''}`;
             for (const { kept } of perScene) for (const k of kept) {
@@ -1108,7 +1109,7 @@ const queryVec = async (S, name, value, em) => {
             }
             if (EMIT_ROWS) {
                 fs.writeFileSync(EMIT_ROWS, JSON.stringify({
-                    swept: SWEPT, value: t.value, tier: TIER, with: WITH, without: WITHOUT,
+                    swept: SWEPT, value: t.value, tier: TIER, features: FEATURE_LIST,
                     interactions: INTERACT, properNounsMode: PROPER_MODE, properNounsExtract: PROPER_EXTRACT,
                     cut: best.cut, f2: best.f,
                     features: FEATURES.map(([n]) => n),
@@ -1122,14 +1123,14 @@ const queryVec = async (S, name, value, em) => {
             }
             if (EMIT) {
                 fs.writeFileSync(EMIT, JSON.stringify({
-                    swept: SWEPT, value: t.value, tier: TIER, with: WITH, without: WITHOUT, interactions: INTERACT, properNounsMode: PROPER_MODE, properNounsExtract: PROPER_EXTRACT,
+                    swept: SWEPT, value: t.value, tier: TIER, features: FEATURE_LIST, interactions: INTERACT, properNounsMode: PROPER_MODE, properNounsExtract: PROPER_EXTRACT,
                     cut: best.cut, f2: best.f, scenes: b.sceneNames, perScene: best.perScene,
                     grid: b.grid.map(g => ({ cut: g.cut, f2: g.f, precision: g.precision, recall: g.recall, delivered: g.delivered })),
                 }, null, 1));
                 console.log(`  per-scene F2 written to ${EMIT}`);
             }
         }
-        // PAIRED against the first arm, each at its own best cutoff — the contrast param-screen makes,
+        // PAIRED against the first arm, every arm at the --at cutoff — the contrast param-screen makes,
         // and the only one that can tell a real gain from the flatness of the cutoff curve.
         const bases = table.filter(t => t.best);
         if (bases.length > 1) {
