@@ -9,6 +9,7 @@ import { eq } from './metrics.mjs';
 const entry = (uid, extra) => ({ world: 'B', uid, comment: `titleword${uid}`, content: `bodyword${uid}`, key: [`keyword${uid}`], ...extra });
 const S = {
     primaryBook: 'B',
+    embedModel: 'check-embed',
     // Entry 2 is vectorized. That no longer changes what the gazetteer reads: production restores the
     // takeover's stash before building it, so the vocabulary is the AUTHORED one either way.
     books: { B: { 1: entry(1), 2: entry(2, { vectorized: true }) } },

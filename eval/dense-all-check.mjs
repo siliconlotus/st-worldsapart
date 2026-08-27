@@ -32,6 +32,7 @@ const write = (name, uids) => {
 const entry = (uid, extra) => ({ world: 'B', uid, comment: `E${uid}`, content: `text of entry ${uid}`, key: [], ...extra });
 const S = {
     primaryBook: 'B',
+    embedModel: 'check-embed',
     books: {
         B: {
             1: entry(1, { vectorized: true }),

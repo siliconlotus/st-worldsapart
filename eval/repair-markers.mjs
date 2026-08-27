@@ -98,7 +98,8 @@ for (const path of files) {
     // repair had not happened, silently. Repoint at the rebuild cache, which keys on book + model + chunk
     // settings and so names the same file on any machine (absent there, indexPath falls through to it anyway).
     if (!isWorld && vectorized.has(path)) {
-        const target = cachePath(view, chunkConfig(view), m.embedModel ?? 'bge-m3');
+        if (!m.embedModel) throw new Error(`${path}: marker records no embedModel — cannot name its rebuild cache`);
+        const target = cachePath(view, chunkConfig(view), m.embedModel);
         // EVERY arm, whichever schema: the repair changed the book, so no arm's recorded collection is
         // current any more.
         for (const a of (m.scenes?.[0]?.arms ?? (Array.isArray(m.arms) ? m.arms : [m]))) a.index = target;

@@ -160,13 +160,13 @@ writeFileSync(join(ROOT, 'data/default-user/worlds', `${WORLD}.json`), JSON.stri
 const msgs = [{ user_name: 'A', character_name: 'B' }, ...Array.from({ length: 80 }, (_, i) => ({ name: 'X', mes: `message ${i}`, is_system: i === 40 }))];
 writeFileSync(join(ROOT, 'data/default-user/chats/C/c.jsonl'), msgs.map(m => JSON.stringify(m)).join('\n'));
 const ENV = { WA_ST_ROOT: ROOT };
-const synth = ['--chat', 'data/default-user/chats/C/c.jsonl', '--book', WORLD];
+const synth = ['--chat', 'data/default-user/chats/C/c.jsonl', '--book', WORLD, '--model', 'check-embed'];
 
 r = run('synth-scenes.mjs', [...synth, '--msgs', '41'], ENV);
 ok(r.code !== 0 && /hidden/.test(r.out), 'a hidden message cannot be a scene, and the refusal says why');
 r = run('synth-scenes.mjs', [...synth, '--msgs', '9999'], ENV);
 ok(r.code !== 0, 'a message id past the end of the chat is refused');
-r = run('synth-scenes.mjs', ['--chat', 'data/default-user/chats/C/c.jsonl', '--book', 'No Such Book', '--msgs', '60'], ENV);
+r = run('synth-scenes.mjs', ['--chat', 'data/default-user/chats/C/c.jsonl', '--book', 'No Such Book', '--msgs', '60', '--model', 'check-embed'], ENV);
 ok(r.code !== 0 && /no world file/.test(r.out), 'a book with no world file is refused by name');
 
 // Sampling is seeded, so a set can be reproduced. Read off the plan line, which prints before any embedding.

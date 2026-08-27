@@ -89,11 +89,12 @@ if (process.argv.includes('--validate') && !VALIDATE) { console.error('--validat
 const DEPTH = Number(arg('--depth') ?? S.params?.depth ?? 10);
 // THE MODEL IS A SPEC, resolved once (reindex.mjs resolveModel). The LABEL names collections and bases;
 // the rest says how to call the model, including the task prefix a prefix-trained family needs. A bare
-// name still means ollama, so `bge-m3` behaves exactly as before.
+// name is an ollama model.
 // FALLS BACK TO THE BUNDLE'S OWN MODEL, not to a hardcoded name. A bundle records the model its
 // collections are keyed under, and hardcoding one meant a corpus that had moved on still resolved the old
 // collections — which exist, so nothing errored, it just quietly measured the previous model.
-const OLLAMA = process.env.OLLAMA_URL ?? 'http://localhost:11434', MODEL = process.env.WA_EMBED_MODEL ?? S.embedModel ?? 'bge-m3';
+const OLLAMA = process.env.OLLAMA_URL ?? 'http://localhost:11434', MODEL = process.env.WA_EMBED_MODEL ?? S.embedModel;
+if (!MODEL) { console.error('sample records no embedModel — set WA_EMBED_MODEL'); process.exit(2); }
 const EM = resolveModel(MODEL);
 // Signals the capture was produced under. Defaults are one tuned chat's snapshot, NOT the shipped defaults
 // (extension/state.mjs ships K1 1.2) — an arm overrides them via its own `params`, which is

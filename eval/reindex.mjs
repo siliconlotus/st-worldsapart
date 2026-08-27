@@ -284,7 +284,8 @@ const l2 = v => { let s = 0; for (const x of v) s += x * x; return Math.sqrt(s);
  *
  * @returns {Promise<{path: string, built: boolean, items: number}>}
  */
-export async function ensureIndex(S, { overrides = {}, model = 'bge-m3', label = model, endpoint = 'ollama', ollama = 'http://localhost:11434', url = ollama, book = S.primaryBook, out = null, batch = 64, force = false, all = false, archived = false, log = () => {} } = {}) {
+export async function ensureIndex(S, { overrides = {}, model, label = model, endpoint = 'ollama', ollama = 'http://localhost:11434', url = ollama, book = S.primaryBook, out = null, batch = 64, force = false, all = false, archived = false, log = () => {} } = {}) {
+    if (!model) throw new Error('ensureIndex needs a model — resolve one with resolveModel and pass model/label/endpoint');
     const cfg = chunkConfig(S, overrides);
     // `label` names the cache, `model` names what ollama is asked for: a model embedded WITH its documented
     // document prefix is a different collection from the same model without one, and the two must not share
@@ -341,7 +342,8 @@ if (process.argv[1] && import.meta.url.endsWith(process.argv[1].split('/').pop()
     // model name, so `omlx:Qwen3-Embedding-8B-4bit-DWQ` was sent to ollama as a literal name and a
     // prefix-trained family silently lost its instruction — the two failures modelSpec exists to prevent,
     // in the one tool that actually writes the vectors.
-    const spec = arg('--model') ?? process.env.WA_EMBED_MODEL ?? S.embedModel ?? 'bge-m3';
+    const spec = arg('--model') ?? process.env.WA_EMBED_MODEL ?? S.embedModel;
+    if (!spec) { console.error('no model: pass --model, set WA_EMBED_MODEL, or use a sample that records embedModel'); process.exit(2); }
     const em = resolveModel(spec);
     if (S.embedModel && em.label !== resolveModel(S.embedModel).label) console.error(`!! rebuilding under "${em.label}" but the sample was captured under "${S.embedModel}" — its recorded cosines will not be comparable`);
 

@@ -87,7 +87,7 @@ if (!ORDERS[CORE_ORDER]) { console.error(`--core-order must be order|newest|olde
 // one. Scoring core's keyword route on WA's window would hand it activations it never had.
 const CORE_DEPTH = arg('--core-depth') === null ? 2 : Number(arg('--core-depth'));
 const CORE_UIDS = arg('--core-uids') ? new Set(String(arg('--core-uids')).split(',').map(Number)) : null;
-const MODEL = process.env.WA_EMBED_MODEL ?? 'bge-m3';
+const MODEL = process.env.WA_EMBED_MODEL ?? null;   // per-sample: the bundle's own record unless overridden
 const tk = offlineTokenCounter(arg('--tokenizer') ?? 'gpt-3.5-turbo');
 
 const mean = a => a.reduce((x, y) => x + y, 0) / (a.length || 1);
@@ -113,10 +113,10 @@ for (const file of samples) {
     // so and names the command, which is better than silently scoring the ordinary collection.
     let indexFile;
     try {
-        const em = resolveModel(MODEL);
+        const em = resolveModel(MODEL ?? S.embedModel);
         indexFile = P.denseAllEntries
             ? (await ensureIndex(S, { all: true, model: em.model, label: em.label, endpoint: em.endpoint, url: em.url, log: () => {} })).path
-            : indexPath(S, { model: MODEL });
+            : indexPath(S, { model: em.label });
     } catch (e) { console.error(`  ${sceneLabel(S) || file}: ${e.message}`); continue; }
     let scene; try { scene = loadScene(S, { indexFile, indexOpts: { model: MODEL }, params: P }); } catch (e) { console.error(`  ${sceneLabel(S) || file}: ${e.message}`); continue; }
     const build = makeCandidateSet({ ...scene, params: P });

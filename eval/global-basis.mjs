@@ -53,11 +53,13 @@ import { isMemory } from '../extension/relevance.mjs';
  *  character 40 (`LTM - Isekai Adventure - Isekai Adventure - 2026-03-04@14h45` and the same with ` old`),
  *  so a slug-only path silently gave one book the other's basis. Harmless while they share a lineage and a
  *  latent wrong answer the moment they do not. */
-export const basisPath = (book, model = 'bge-m3', within = false) =>
-    new URL(`./eval-data/basis/${String(book).replace(/[^\w.-]+/g, '-').slice(0, 40)}__${model}${within ? '__within' : ''}__${getStringHash(String(book))}.json`, import.meta.url).pathname;
+export const basisPath = (book, model, within = false) => {
+    if (!model) throw new Error('basisPath needs the model label — a basis is per model');
+    return new URL(`./eval-data/basis/${String(book).replace(/[^\w.-]+/g, '-').slice(0, 40)}__${model}${within ? '__within' : ''}__${getStringHash(String(book))}.json`, import.meta.url).pathname;
+};
 
 /** Reads one book's basis. Returns null when absent — the caller decides whether that is fatal. */
-export const loadBasis = (book, model = 'bge-m3', within = false) => {
+export const loadBasis = (book, model, within = false) => {
     const p = basisPath(book, model, within);
     if (!existsSync(p)) return null;
     const j = JSON.parse(readFileSync(p, 'utf8'));
@@ -124,7 +126,7 @@ export const etaSquared = (groups, mean, comps) => comps.map((c) => {
     return ssTot > 0 ? ssBet / ssTot : 0;
 });
 
-export const buildBases = (samplePaths, { m = 8, model = 'bge-m3', within = false, force = false, log = () => {} } = {}) => {
+export const buildBases = (samplePaths, { m = 8, model, within = false, force = false, log = () => {} } = {}) => {
     const byBook = new Map();
     for (const p of samplePaths) {
         const S = openSample(p);
@@ -206,8 +208,9 @@ if (process.argv[1] && import.meta.url.endsWith(process.argv[1].split('/').pop()
     // meaningful against the collection it was estimated on. A register is per model in the strongest
     // sense — bge-m3 is 1024-dimensional and Qwen3-Embedding-8B is 4096, so one is not even applicable
     // to the other's vectors.
-    const spec = argv[argv.indexOf('--model') + 1] ?? process.env.WA_EMBED_MODEL ?? 'bge-m3';
-    const model = argv.includes('--model') || process.env.WA_EMBED_MODEL ? resolveModel(spec).label : 'bge-m3';
+    const spec = (argv.includes('--model') ? argv[argv.indexOf('--model') + 1] : null) ?? process.env.WA_EMBED_MODEL;
+    if (!spec) { console.error('no model: pass --model or set WA_EMBED_MODEL — a basis is per model'); process.exit(2); }
+    const model = resolveModel(spec).label;
     const within = argv.includes('--within');
     console.log(`building bases at m=${m} under "${model}"${within ? ', WITHIN-book scatter' : ''} from ${samples.length} sample(s)`);
     const w = buildBases(samples, { m, model, within, force: argv.includes('--force'), log: s => console.log(s) });

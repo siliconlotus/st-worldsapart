@@ -9,13 +9,14 @@
 //
 // Usage (from the SillyTavern root):
 //   node public/scripts/extensions/third-party/WorldsApart/eval/bm25-grid.mjs [path/to/index.json]
-// Default corpus path is a personal collection; pass your own vectra index.json to retune.
+// Pass a vectra index.json to retune against.
 import { readFileSync } from 'node:fs';
 import { buildLexical, bm25Scores } from '../extension/lexical.mjs';
 import { corpusMean, centeredCosineScores } from '../plugin/vector.mjs';
 import { rankMap, hit } from './metrics.mjs';
 
-const INDEX = process.argv.find(a => a.endsWith('.json')) ?? 'data/default-user/vectors/ollama/wa_3810524038950542/bge-m3/worldsapart.json';
+const INDEX = process.argv.find(a => a.endsWith('.json'));
+if (!INDEX) { console.error('pass a vectra index.json path'); process.exit(2); }
 // Mean-centering removes the corpus's shared direction before comparing (see the plugin).
 // On by default; pass --uncentered to measure without it — the switch is here so a future
 // embedding model that already spreads its space can be checked for whether centering has

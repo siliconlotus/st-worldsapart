@@ -61,11 +61,12 @@ if (unknown.length) { console.error(`unknown arm(s): ${unknown.join(', ')} — k
 const K = Number(arg('--k') ?? 10);
 // THE MODEL IS A SPEC, resolved once (reindex.mjs resolveModel). The LABEL names collections and bases;
 // the rest says how to call the model, including the task prefix a prefix-trained family needs. A bare
-// name still means ollama, so `bge-m3` behaves exactly as before.
+// name is an ollama model.
 // FALLS BACK TO THE BUNDLE'S OWN MODEL, not to a hardcoded name. A bundle records the model its
 // collections are keyed under, and hardcoding one meant a corpus that had moved on still resolved the old
 // collections — which exist, so nothing errored, it just quietly measured the previous model.
-const MODEL = process.env.WA_EMBED_MODEL ?? openSample(samples[0], arg('--arm')).embedModel ?? 'bge-m3';
+const MODEL = process.env.WA_EMBED_MODEL ?? openSample(samples[0], arg('--arm')).embedModel;
+if (!MODEL) { console.error(`${samples[0]} records no embedModel — set WA_EMBED_MODEL`); process.exit(2); }
 const EM = resolveModel(MODEL);
 const OLLAMA = process.env.OLLAMA_URL ?? 'http://localhost:11434';
 const DRY = argv.includes('--dry');

@@ -24,6 +24,7 @@ const throws = (fn, match, msg) => {
 /** Smallest sample loadScene will accept. `vectorized` is the only field these cases turn on. */
 const sample = (vectorized, extra = {}) => ({
     primaryBook: 'Check Book',
+    embedModel: 'check-embed',
     books: { 'Check Book': { 1: { uid: 1, comment: 'One', content: 'alpha beta', key: ['alpha'], vectorized } } },
     entries: [], params: {},
     query: 'alpha', scanText: 'alpha',

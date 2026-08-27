@@ -344,7 +344,8 @@ it; where the authority is the user, require it. Four kinds, and they do not beh
 - a CONSTANT — the chunk settings, the BM25 k1/b, everything in `INTERNAL_KEYS`, reset every init and
   unreachable from the UI — is one value everywhere. Import it.
 - a USER SETTING — the embedding model, `relevanceCutoff` — has no knowable value, so the harness must be
-  TOLD. `'bge-m3'` as a fallback is a fossil of one user's choice, and it is still scattered through eval/.
+  TOLD: a flag, the env, or the bundle's own record, and REFUSE when none supplies it. No eval harness
+  carries a fallback value for one.
 - a DERIVED constant — the fitted feature set — comes off the artifact it derives from. Read `features`
   out of the fit; a restated list is how a refit shipped `cosine,text,keys` against a model fitted on
   `cosine,text,properNouns,density`.

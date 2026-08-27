@@ -35,13 +35,15 @@
 //
 // Usage (from SillyTavern root):
 //   node .../relevance-regress.mjs <sample.json> [...] [--sweep gazetteerSource=keys,titles]
-//        [--tier memory|reference] [--cut 4] [--ordinal] [--loso] [--lobo] [--calibration] [--cutoff] [--at 0.10] [--degree 2] [--interactions] [--with properNouns,time,oracle,length,density,rarity,chunkdens] [--without keys] [--drop-keys flagged.json] [--emit-rows rows.json] [--emit-model relevance-model-<tier>.json] [--proper-nouns count|idf|idf-len|jaccard|gaz] [--proper-nouns-extract regex|entity|span]
+//        --tier all|memory|reference [--cut 4] [--ordinal] [--loso] [--lobo] [--calibration] [--cutoff] [--at 0.10] [--degree 2] [--interactions] [--with properNouns,time,oracle,length,density,rarity,chunkdens] [--without keys] [--drop-keys flagged.json] [--emit-rows rows.json] [--emit-model relevance-model-<tier>.json] [--proper-nouns count|idf|idf-len|jaccard|gaz] [--proper-nouns-extract regex|entity|span]
+//   --tier is required. With properNouns in --with, --proper-nouns and --proper-nouns-extract are
+//   required. A --sweep read with --cutoff requires --at: arms compare at one set cutoff.
 //
 // THE SHIPPED MEMORY FIT, which is what `relevance-model-memory.json` was emitted by — the four columns
 // the doc rules (keys is computed and recorded, and deliberately not fitted), the entity name detector,
 // held out by book:
 //   node .../relevance-regress.mjs eval-data/*-syn-msg*.json <the rest of the graded corpus>
-//        --tier memory --with properNouns,density --without keys --proper-nouns-extract entity
+//        --tier memory --with properNouns,density --without keys --proper-nouns idf --proper-nouns-extract entity
 //        --lobo --cutoff --emit-model extension/relevance-model-memory.json
 import { haystackFor, indexPath, isMemory, loadScene, openSample, sceneParams, makeCandidateSet, makeGradeOf, embed, sceneLabel } from './scene.mjs';
 import { ensureIndex, resolveModel } from './reindex.mjs';
@@ -188,36 +190,45 @@ const DROP_KEYS = arg('--drop-keys') ? JSON.parse(fs.readFileSync(arg('--drop-ke
 // protagonist stops dominating; `jaccard` = intersection over union, which normalises for how many
 // names an entry happens to carry; `gaz` = count restricted to the gazetteer, i.e. to names the BOOK
 // declared in a key, secondary or title rather than any capitalised token.
-// DEFAULTS TO THE RULED VARIANT. It was `count`, which the doc rejects at p 0.0001 three sections above
-// its own ruling — so every run that passed no flag measured a configuration nobody chose, and credited
-// whatever else it was testing against a handicapped `proper`. A default that disagrees with the ruling
-// is a trap, not a neutral starting point.
-const PROPER_MODE = arg('--proper-nouns') ?? 'idf';
+// REQUIRED when the properNouns feature is in the run. The variants are not interchangeable — idf beats
+// count at p 0.0001 (matcher-design, *IDF-WEIGHTED*) — so which one a number was measured under is part
+// of the number, and the harness does not choose it.
+const PROPER_MODE = arg('--proper-nouns');
 // HOW a name is recognised, orthogonal to how a shared one is scored. `regex` is the private ASCII
 // pattern this feature was found with; `entity` is ranking.mjs's own rule, which the entity filter
 // already uses; `span` takes maximal runs of capitalised tokens as one term, so "Brackenmoor Patrol"
 // is a name rather than two.
-// DEFAULTS TO THE RULED VARIANT, for the same reason --proper-nouns does: `entity` beat `regex` at
-// p 0.0002 paired over 88 scenes and is what the shipped model was emitted with, so a no-flag run under
-// the old default measured a variant the doc had already rejected and credited whatever else it was
-// testing against a handicapped `properNouns`.
-const PROPER_EXTRACT = arg('--proper-nouns-extract') ?? 'entity';
+// REQUIRED under the same rule. `entity` is ranking.properNounsOf via relevance.properNames — the
+// shipped extractor; `entity` beat `regex` at p 0.0002 paired over 88 scenes.
+const PROPER_EXTRACT = arg('--proper-nouns-extract');
 const CALIB = argv.includes('--calibration');
+if ((WITH.includes('properNouns')) && !['count', 'idf', 'idf-len', 'jaccard', 'gaz'].includes(PROPER_MODE)) {
+    console.error(`--proper-nouns is required with the properNouns feature: count|idf|idf-len|jaccard|gaz (got ${PROPER_MODE})`); process.exit(2);
+}
+if ((WITH.includes('properNouns')) && !['regex', 'entity', 'span'].includes(PROPER_EXTRACT)) {
+    console.error(`--proper-nouns-extract is required with the properNouns feature: regex|entity|span (got ${PROPER_EXTRACT})`); process.exit(2);
+}
+// ARMS COMPARE AT ONE CUTOFF. The cutoff is a user setting, not a property of an arm, so a paired
+// comparison read at each arm's own F2 peak scores two configurations neither of which ships.
+if (sweep && VALUES.length > 1 && CUTOFF && AT === null) {
+    console.error('--sweep with --cutoff needs --at <cutoff>: arms compare at one set cutoff, not each at its own optimum.'); process.exit(2);
+}
 // WHICH BOUNDARY IS THE TARGET. 3 is the project's relevance line and the default; --cut 4 fits the band
 // the anchors reserve for the scene's current subject, which separates far better and is far rarer, so it
 // is the one place AUC and AP disagree loudly enough to be worth reading side by side.
 const CUT = Number(arg('--cut') ?? 3);
 if (!Number.isFinite(CUT)) { console.error(`--cut must be a number, got ${arg('--cut')}`); process.exit(2); }
-const TIER = arg('--tier') ?? 'all';
-if (!['all', 'memory', 'reference'].includes(TIER)) { console.error(`--tier must be all|memory|reference, got ${TIER}`); process.exit(2); }
+const TIER = arg('--tier');
+if (!['all', 'memory', 'reference'].includes(TIER)) { console.error(`--tier is required: all|memory|reference (got ${arg('--tier')})`); process.exit(2); }
 // A SHIPPED MODEL IS EMITTED AT THE SHIPPED DEFINITION, or the file's two halves describe different
 // targets — which is exactly the defect this guard was added with. The emitted coefficients are the
 // boundaries E[credit] is built from (2 and 3, fixed by gradeCredit), so --cut only moves the AUC printed
 // beside them, --relevant-at 2 replaces the target with P(>=2) outright, and --half-recall changes the
 // bars the cutoff was chosen on. Each would produce a file that reads as the shipping artefact and is not.
-if (EMIT_MODEL && (CUT !== 3 || RELEVANT_AT !== 3 || HALF_RECALL)) {
-    console.error('--emit-model writes the shipping artefact, so it runs at the shipped definition: --cut 3, --relevant-at 3, no --half-recall. '
-        + 'Drop --emit-model to explore another target.');
+if (EMIT_MODEL && (CUT !== 3 || RELEVANT_AT !== 3 || HALF_RECALL
+    || (WITH.includes('properNouns') && (PROPER_MODE !== 'idf' || PROPER_EXTRACT !== 'entity')))) {
+    console.error('--emit-model writes the shipping artefact, so it runs at the shipped definition: --cut 3, --relevant-at 3, no --half-recall, '
+        + 'and with properNouns, --proper-nouns idf --proper-nouns-extract entity. Drop --emit-model to explore another target.');
     process.exit(2);
 }
 // And it is written inside the --cutoff block, since the operating point is half of what a selection rule
@@ -226,10 +237,10 @@ if (EMIT_MODEL && !(CUTOFF && LOBO)) {
     console.error('--emit-model needs --cutoff --lobo: the cutoff is read off the held-out delivered set, and a model shipped without its operating point is not a selection rule.');
     process.exit(2);
 }
-// FALLS BACK TO THE BUNDLE'S OWN MODEL, as the other harness CLIs do. Hardcoding one meant a refit
-// silently fitted, and EMITTED, under the wrong embedder — which with a per-model artifact overwrites
-// that model's fit rather than adding one.
-const MODEL = process.env.WA_EMBED_MODEL ?? openSample(samples[0], arg('--arm')).embedModel ?? 'bge-m3';
+// WA_EMBED_MODEL overrides; otherwise the model is the bundle's own record. Neither present is a
+// refusal — the fits are per embedding model, so a run that guessed one would fit, and emit, under it.
+const MODEL = process.env.WA_EMBED_MODEL ?? openSample(samples[0], arg('--arm')).embedModel;
+if (!MODEL) { console.error(`${samples[0]} records no embedModel — set WA_EMBED_MODEL`); process.exit(2); }
 const OLLAMA = process.env.OLLAMA_URL ?? 'http://localhost:11434';
 
 // THE FEATURE SET. One standardised column per signal and NO ELIGIBILITY INDICATORS: whether a signal is
@@ -315,13 +326,13 @@ const properSpans = (text) => {
     for (const w of [...out]) if (!w.includes(' ') && COMMON_WORDS.has(w)) out.delete(w);
     return out;
 };
-const properNouns = text => {
+const properNouns = (text, mode = PROPER_EXTRACT) => {
     // THE SHIPPED ONE IS THE SHIPPED FUNCTION, not a copy of its three lines. `relevance.properNames`
     // is what stage 4 calls at runtime, so the fit and the runtime cannot drift on what a name is — the
     // same rule countKey follows for matching and scene.mjs follows for the scorers. It was open-coded
     // here, identically, right up until there were two of them.
-    if (PROPER_EXTRACT === 'entity') return properNames(text);
-    if (PROPER_EXTRACT === 'span') return properSpans(text);
+    if (mode === 'entity') return properNames(text);
+    if (mode === 'span') return properSpans(text);
     const out = new Set();
     for (const m of String(text ?? '').match(PROPER_RE) ?? []) {
         const w = m.toLowerCase();
@@ -499,7 +510,10 @@ const queryVec = async (S, name, value, em) => {
             if (WITH.includes('properNouns')) {
                 // Proper nouns are a property of the SCENE, so read off a plain entry's window: an entry's
                 // own sources are its, not the scene's.
-                const win = properNouns(haystack({}).join('\n'));
+                // SWEEPABLE, so two detectors can be compared paired per scene AND per book rather than
+                // by diffing two runs. Absent a sweep this is PROPER_EXTRACT, so a bare run is unchanged.
+                const xMode = P.properNounsExtract ?? PROPER_EXTRACT;
+                const win = properNouns(haystack({}).join('\n'), xMode);
                 // df over THIS book's entries, which is the corpus the names live in — the same reason
                 // content-lexical insists on one index for both classes. Computed once per scene.
                 const df = new Map();
@@ -523,11 +537,11 @@ const queryVec = async (S, name, value, em) => {
                     for (const e of scene.entries ?? []) {
                         if (typeof e.content !== 'string' || !e.content.trim()) continue;
                         ndoc++;
-                        for (const w of properNouns(e.content)) df.set(w, (df.get(w) ?? 0) + 1);
+                        for (const w of properNouns(e.content, xMode)) df.set(w, (df.get(w) ?? 0) + 1);
                     }
                 }
                 for (const r of rows) {
-                    const ents = properNouns(r.entry?.content);
+                    const ents = properNouns(r.entry?.content, xMode);
                     let v = 0;
                     if (PROPER_MODE === 'jaccard') {
                         let inter = 0;
@@ -1120,7 +1134,7 @@ const queryVec = async (S, name, value, em) => {
         const bases = table.filter(t => t.best);
         if (bases.length > 1) {
             const b0 = bases[0];
-            console.log(`\npaired against ${SWEPT}=${b0.value}, each arm at its own best cutoff — per-scene F2, sign test`);
+            console.log(`\npaired against ${SWEPT}=${b0.value}, every arm at the ${AT} cutoff — per-scene F2, sign test`);
             // AND AGAIN PER BOOK, because the scene-level p above is not the evidence it looks like:
             // scenes on one book share its vocabulary, its entry style and its BM25 scale, so 90 scenes
             // on 5 books is nearer 5 observations than 90 and a within-book correlation is counted as

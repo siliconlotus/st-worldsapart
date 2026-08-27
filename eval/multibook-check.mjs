@@ -40,7 +40,7 @@ const VEC = {
 };
 const write = (book) => {
     // Exactly indexPath's derived layout: <vectors>/wa_<hash(book)>/<model>/index.json.
-    const path = join(DIR, `wa_${getStringHash(book)}`, 'bge-m3', 'index.json');
+    const path = join(DIR, `wa_${getStringHash(book)}`, 'check-embed', 'index.json');
     mkdirSync(dirname(path), { recursive: true });
     const items = Object.entries(VEC[book]).map(([uid, vector]) => ({ id: `${book}${uid}`, metadata: { hash: `${book}${uid}`, text: `text ${book}${uid}`, index: Number(uid) }, vector, norm: 1 }));
     writeFileSync(path, JSON.stringify({ version: 1, metadata_config: {}, items }));
@@ -53,6 +53,7 @@ write('B');
 const entry = (uid, book, extra) => ({ uid, comment: `${book}-${uid}`, content: `text ${book}${uid}`, key: [], vectorized: true, ...extra });
 const sample = () => ({
     primaryBook: 'A',
+    embedModel: 'check-embed',
     books: {
         A: { 1: entry(1, 'A'), 2: entry(2, 'A') },
         B: { 1: entry(1, 'B'), 2: entry(2, 'B') },

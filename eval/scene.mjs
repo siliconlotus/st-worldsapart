@@ -319,7 +319,13 @@ export function stInstall() {
  * the primary's may come from `index` or the bundle's recorded `S.index` — both name ONE file, and handing
  * a second book the primary's collection would score it against another book's chunks.
  */
-export const indexPath = (S, { vectors = 'data/default-user/vectors/ollama', model = 'bge-m3', index = null, all = false, book = S.primaryBook } = {}) => {
+/** The embedding model a sample was captured under. Read off the bundle; a bundle without one is
+ * refused — the harness has no model of its own. */
+export const embedModelOf = S => {
+    if (!S?.embedModel) throw new Error('sample records no embedModel — the harness reads the model off the bundle');
+    return S.embedModel;
+};
+export const indexPath = (S, { vectors = 'data/default-user/vectors/ollama', model = resolveModel(embedModelOf(S)).label, index = null, all = false, book = S.primaryBook } = {}) => {
     const own = book === S.primaryBook;
     if (index && own) return index;
     // THE ALL-ENTRIES COLLECTION IS A DIFFERENT FILE, and stage 1 embeds everything now, so this is the
@@ -380,7 +386,8 @@ const qCacheLoad = (label) => {
     qCache.set(label, m);
     return m;
 };
-export const embed = async (text, { ollama = 'http://localhost:11434', model = 'bge-m3', endpoint = 'ollama', url = ollama, label = model, cache = true } = {}) => {
+export const embed = async (text, { ollama = 'http://localhost:11434', model, endpoint = 'ollama', url = ollama, label = model, cache = true } = {}) => {
+    if (!model) throw new Error('embed needs a model — the caller resolves one; there is no default embedder');
     if (!cache) return (await embedTexts([text], { model, endpoint, url }))[0];
     const store = qCacheLoad(label);
     const h = createHash('sha256').update(text).digest('hex');
@@ -773,7 +780,7 @@ export function loadScene(S, { indexFile, indexOpts = {}, params: P }) {
                 if (P.centroidPopulation === 'vectorized') throw new Error(`sharedComponents with centroidPopulation 'vectorized' would average stage-A-projected memory chunks with unprojected reference ones in one centroid — use 'memory' or 'memoryArchived'`);
                 if (P.sharedScatter !== 'pooled' && P.sharedScatter !== 'within') throw new Error(`unknown sharedScatter "${P.sharedScatter}" — one of pooled, within`);
                 const within = P.sharedScatter === 'within';
-                const basis = loadBasis(book, resolveModel(P.embedModel ?? S.embedModel ?? 'bge-m3').label, within);
+                const basis = loadBasis(book, resolveModel(P.embedModel ?? embedModelOf(S)).label, within);
                 if (!basis) throw new Error(`sharedComponents needs a${within ? ' --within' : ''} basis for "${book}" — build it with: node eval/global-basis.mjs <samples...>${within ? ' --within' : ''}`);
                 if (basis.comps.length < P.sharedComponents) throw new Error(`sharedComponents ${P.sharedComponents} but "${book}"'s basis holds ${basis.comps.length} components — rebuild with --m ${P.sharedComponents} --force`);
                 // SELECTION IS NOT ESTIMATION. The components arrive in variance order; sharedness is a
@@ -826,8 +833,7 @@ export function loadScene(S, { indexFile, indexOpts = {}, params: P }) {
     // differ from `model` for a prefixed family (reindex.mjs modelSpec), so nothing this file can read off
     // that path distinguishes a mismatch from a naming convention. What prevents it is that every caller
     // threads the SAME `MODEL` it resolved the primary with into indexOpts; a caller passing neither gets
-    // the bundle's own `embedModel` for every book, which is consistent by construction. It is worth
-    // saying out loud now that the install has moved off bge-m3 while all 107 stored bundles record it.
+    // the bundle's own `embedModel` for every book, which is consistent by construction.
     // The primary's path is the caller's — an explicit --index, an ensureIndex build, or indexPath's own
     // resolution. Every other book resolves its own, because there is one indexFile and N collections.
     // ponytail: a chunk arm's rebuild reaches the primary only (its `index` is one ensureIndex build and
@@ -835,7 +841,7 @@ export function loadScene(S, { indexFile, indexOpts = {}, params: P }) {
     // two. Thread the arm's overrides through indexOpts if a chunk finding ever turns on a second book.
     // `embedModel` is a SPEC (it may carry a server stem); what names a collection is the LABEL, so it is
     // resolved rather than used raw. indexOpts.model is already a label — the caller resolved it.
-    const modelLabel = indexOpts.model ?? resolveModel(S.embedModel ?? 'bge-m3').label;
+    const modelLabel = indexOpts.model ?? resolveModel(embedModelOf(S)).label;
     const loaded = books.map(b => loadBook(b, b === primary
         ? indexFile
         : indexPath(S, { ...indexOpts, model: modelLabel, book: b, all: P.denseAllEntries })));
@@ -892,7 +898,7 @@ export function loadScene(S, { indexFile, indexOpts = {}, params: P }) {
         .filter(g => Number.isFinite(Number(g.uid)) && !outOfScope(g))
         .map(g => entryKey({ world: g.book ?? primary, uid: g.uid })));
 
-    return { primary, books, entries, byKey, items, loaded, gaz, gazSource, outOfScope, POOL, OWN, embedModel: S.embedModel ?? 'bge-m3', modelLabel, chunkCfg: chunkConfig(S) };
+    return { primary, books, entries, byKey, items, loaded, gaz, gazSource, outOfScope, POOL, OWN, embedModel: embedModelOf(S), modelLabel, chunkCfg: chunkConfig(S) };
 }
 
 /**
@@ -1190,7 +1196,8 @@ export const fittedModels = () => [...new Set(Object.values(MODEL_FILES).flatMap
 export const makeLayoutOrder = ({ scene, haystack }) => {
     // The fits are per embedding model, resolved from the scene's own record — a bundle names the model
     // its collections are keyed under, so the fit follows the vectors rather than whatever shipped last.
-    const MODELS = modelsFor(scene?.embedModel ?? 'bge-m3');
+    if (!scene?.embedModel) throw new Error('scene records no embedModel — the fits are per embedding model');
+    const MODELS = modelsFor(scene.embedModel);
     // PER BOOK, as `bookIndexes` builds it — df asks how distinctive a name is IN ITS BOOK'S vocabulary,
     // and a name common in one book and unique in another has two answers, not one.
     const dfs = new Map();

@@ -73,7 +73,8 @@ const FROM = arg('--from');
 const MIN_HISTORY = Number(arg('--min-history') ?? 50);
 const INCLUDE_HIDDEN = argv.includes('--include-hidden');
 const OUT_DIR = arg('--out-dir') ?? (FROM ? dirname(resolvePath(FROM)) : '.');
-const MODEL = arg('--model') ?? process.env.WA_EMBED_MODEL ?? 'bge-m3';
+const MODEL = arg('--model') ?? process.env.WA_EMBED_MODEL;
+if (!MODEL) { console.error('no model: pass --model or set WA_EMBED_MODEL — the derived bundles record it'); process.exit(2); }
 const OLLAMA = process.env.OLLAMA_URL ?? 'http://localhost:11434';
 
 // The DONOR: an existing graded scene whose chat, book, depth, params and chunking a fresh derivation

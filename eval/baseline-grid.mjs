@@ -24,7 +24,8 @@ if (!INDEX) { console.error('pass the collection index.json path'); process.exit
 const BASELINE_TEXT = process.argv.slice(2).find(a => !a.endsWith('.json')) ?? process.env.WA_BASELINE
     ?? 'Kyle, Jeffrey, Liam, Brad and Shane are at the Grove.';
 const OLLAMA = process.env.OLLAMA_URL ?? 'http://localhost:11434';
-const MODEL = process.env.WA_EMBED_MODEL ?? 'bge-m3';
+const MODEL = process.env.WA_EMBED_MODEL;
+if (!MODEL) { console.error('set WA_EMBED_MODEL — a raw index.json does not name its embedder'); process.exit(2); }
 // Production params from the tested chat's settings snapshot.
 const K = 20, K1 = 2, B = 0.75, LEXW = 1.5;
 const WEIGHTS = [0, 0.15, 0.25, 0.5, 0.75, 1.0, 1.25, 1.5, 2.0];
