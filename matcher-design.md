@@ -1018,7 +1018,7 @@ tokens shared between the entry's content and the window, minus the common-Engli
 reweighting of `text`, because BM25 spreads its mass over every shared term and a character name arrives
 diluted among hundreds of ordinary words.
 
-**A NAME IS `ranking.properNounsOf`, which the entity filter already used.** Capitalisation is the
+**A NAME IS `relevance.properNounsOf`, which the entity filter also uses.** Capitalisation is the
 detection signal and it is preserved: `normalizeOrthography` is the fold MINUS its case half, and a token
 enters the set only where it appears capitalised somewhere that is not sentence-initial — so a window
 saying "apple" the fruit never joins, and cannot match an entry's "Apple". Only the stored key is
@@ -1118,7 +1118,7 @@ that more smaller entries would be better: relevance-per-token assumes a currenc
 use, since a long entry graded 4 may be 2000 tokens genuinely about the scene.
 
 **Of the two ENTRY-INTRINSIC columns, `density` earns and `length` costs.** Neither reads the query —
-entry length (log tokens) and proper-noun density (names per 100 tokens, `ranking.properNounsOf`) are
+entry length (log tokens) and proper-noun density (names per 100 tokens, `relevance.properNounsOf`) are
 priors rather than signals. **Measured** over the full lattice on `properNouns`, `length` and `density`, held out by book: `length`
 costs wherever it sits — F2 0.4801 -> 0.4723 alone, -0.0094 mean given `properNouns`, -0.0069 given both
 on 12 scenes up against 53, and -0.5 precision points at matched 70% recall. `density` earns +0.0129 mean
