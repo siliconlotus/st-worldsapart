@@ -1933,6 +1933,10 @@ async function versusCore(named) {
         injects: runState.lastInjects,
         sources: runState.lastSources,
         depth: settings().messageDepth,
+        // The two JOINING decisions a reader needs to rebuild the window from the pieces above —
+        // scanChat stores name and text separately, so neither is recoverable from the text.
+        matchWindow: settings().matchWindow,
+        includeNames: world_info_include_names,
         rows: union.map(([k, x]) => ({ ...row([k, x]), core: coreKeys.has(k), wa: waKeys.has(k), content: x.entry.content })),
     });
     await versusBundle(union, coreKeys, waKeys, viaVectors);
