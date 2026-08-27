@@ -1565,8 +1565,11 @@ instances the books on disk hold.
    harness's**: measured on one browser capture, 16 scored rows, `properNouns` reproduces from
    `relevance.mjs` to the capture's own rounding. `density` is `properNounsOf` with no stoplist
    subtraction — the definition every fit was trained on — computed by one shipped function on both
-   sides. `E[credit]` itself is unchecked — the
-   within-scene standardisation cannot be rebuilt from a capture holding only the delivered union.
+   sides. `E[credit]` itself is unchecked, and the only
+   missing piece is a saved capture: the runtime records the PRE-CUT population with `eCredit` at full
+   precision for exactly this comparison (`lastRanked`, the verbose rows), but the only on-disk carriers
+   are `core-compare` exports, which record the delivered union — too few rows to rebuild the
+   within-scene standardisation. One `/wa-grade` capture from after the column shipped closes it.
 
 3. **`promote` — an author declaration that activation is sufficient.** A promoted entry enters the
    layout whenever its keys fire, exempt from the relevance cut. It is the per-entry form of *triggered
