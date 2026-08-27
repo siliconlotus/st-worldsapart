@@ -215,7 +215,11 @@ export function properShared(entryNames, windowNames, { df, ndoc }) {
 export function properDensity(content) {
     const text = String(content ?? '');
     const toks = tokenize(text);
-    return (properNames(text).size / Math.max(1, toks.length)) * 100;
+    // properNounsOf DIRECTLY, not properNames: the fits' density column counts every detected name with
+    // no stoplist subtraction — that filter is the overlap's, where a common word must not match across
+    // the two sets, and how name-DENSE a text is is not that question. The runtime computes the column
+    // the coefficients were trained on.
+    return (properNounsOf(normalizeOrthography(text)).size / Math.max(1, toks.length)) * 100;
 }
 
 const sigmoid = x => 1 / (1 + Math.exp(-x));

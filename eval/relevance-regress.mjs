@@ -52,7 +52,7 @@ import { gradeValue, gradeCredit, fbeta, RECALL_WEIGHT, signTest } from './metri
 import { COMMON_WORDS } from '../plugin/commonwords.js';
 import { logisticFit, auc, cumulativeFit, prCurve, reliability, sigmoid } from './logistic.mjs';
 import * as ranking from '../extension/ranking.mjs';
-import { properNames, modelKey } from '../extension/relevance.mjs';
+import { properNames, properDensity, modelKey } from '../extension/relevance.mjs';
 import { nameEvidence } from '../extension/keyword-core.mjs';
 import { fold, normalizeOrthography } from '../extension/smartkeys.mjs';
 import { tokenize } from '../extension/lexical.mjs';
@@ -628,7 +628,9 @@ const queryVec = async (S, name, value, em) => {
                     const toks = tokenize(r.entry?.content);
                     r.entryTokens = toks.length;
                     const names = ranking.properNounsOf(normalizeOrthography(String(r.entry?.content ?? '')));
-                    r.properDensity = (names?.size ?? 0) / Math.max(1, toks.length) * 100;
+                    // THE SHIPPED FUNCTION, so the fit and the runtime cannot drift on what density is —
+                    // the same rule the overlap follows through properNames. `names` stays for chunkdens.
+                    r.properDensity = properDensity(String(r.entry?.content ?? ''));
                     // reindex.chunkConfig's defaults, NOT the scene params — those carry no chunk settings
                     // at all, and passing them gives chunkEntry an undefined chunkSize, which recurses
                     // until the stack blows rather than failing. Verified against the built index: chunk

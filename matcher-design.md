@@ -1562,8 +1562,10 @@ instances the books on disk hold.
    What is still open is in *Stage 4 predicts per-entry relevance*: the delivered COUNT is a fixed share
    of what activation produced rather than of what the scene needs, and per-book standardisation reverses
    that pathology while losing on the score of record. **The runtime's entry-side signals agree with the
-   harness's**: measured on one browser capture, 16 scored rows, `properNouns` and `density` both
-   reproduce from `relevance.mjs` to the capture's own rounding. `E[credit]` itself is unchecked — the
+   harness's**: measured on one browser capture, 16 scored rows, `properNouns` reproduces from
+   `relevance.mjs` to the capture's own rounding. `density` is `properNounsOf` with no stoplist
+   subtraction — the definition every fit was trained on — computed by one shipped function on both
+   sides. `E[credit]` itself is unchecked — the
    within-scene standardisation cannot be rebuilt from a capture holding only the delivered union.
 
 3. **`promote` — an author declaration that activation is sufficient.** A promoted entry enters the
