@@ -35,7 +35,7 @@
 //
 // Usage (from SillyTavern root):
 //   node .../relevance-regress.mjs <sample.json> [...] [--sweep gazetteerSource=keys,titles]
-//        --tier all|memory|reference [--cut 4] [--ordinal] [--loso] [--lobo] [--calibration] [--cutoff] [--at 0.10] [--degree 2] [--interactions] --features cosine,text,properNouns,density [--drop-keys flagged.json] [--emit-rows rows.json] [--emit-model relevance-model-<tier>.json] [--proper-nouns count|idf|idf-len|jaccard|gaz] [--proper-nouns-extract regex|entity|span|book|named]
+//        --tier all|memory|reference [--cut 4] [--ordinal] [--loso] [--lobo] [--calibration] [--cutoff] [--at 0.10] [--degree 2] [--interactions] --features cosine,text,properNouns,density [--drop-keys flagged.json] [--emit-rows rows.json] [--emit-model relevance-model-<tier>.json] [--proper-nouns count|idf|idf-len|jaccard|gaz] [--proper-nouns-extract regex|entity|span|book|named] [--density-extract entity|book]
 //   --tier and --features are required. With properNouns in --features, --proper-nouns and --proper-nouns-extract are
 //   required. A --sweep read with --cutoff requires --at: arms compare at one set cutoff.
 //
@@ -43,7 +43,7 @@
 // the doc rules (keys is computed and recorded, and deliberately not fitted), the entity name detector,
 // held out by book:
 //   node .../relevance-regress.mjs eval-data/*-syn-msg*.json <the rest of the graded corpus>
-//        --tier memory --features cosine,text,properNouns,density --proper-nouns idf --proper-nouns-extract entity
+//        --tier memory --features cosine,text,properNouns,density --proper-nouns idf --proper-nouns-extract entity --density-extract entity
 //        --lobo --cutoff --emit-model extension/relevance-model-memory.json
 import { haystackFor, indexPath, isMemory, loadScene, openSample, sceneParams, makeCandidateSet, makeGradeOf, embed, sceneLabel } from './scene.mjs';
 import { ensureIndex, resolveModel } from './reindex.mjs';
@@ -64,7 +64,7 @@ const arg = k => { const i = argv.indexOf(k); return i >= 0 ? argv[i + 1] : null
 // is about to write is opened as an input bundle. Named flags rather than "anything after a --", or
 // `--lobo scene.json` would silently DROP that scene, which is the worse failure: a wrong sample set
 // prints a clean table and says nothing about what it left out.
-const VALUED = new Set(['--arm', '--sweep', '--tier', '--cut', '--degree', '--square', '--features', '--emit', '--emit-rows', '--emit-model', '--drop-keys', '--proper-nouns', '--proper-nouns-extract', '--standardise', '--beta']);
+const VALUED = new Set(['--arm', '--sweep', '--tier', '--cut', '--degree', '--square', '--features', '--density-extract', '--emit', '--emit-rows', '--emit-model', '--drop-keys', '--proper-nouns', '--proper-nouns-extract', '--standardise', '--beta']);
 const samples = argv.filter((a, i) => a.endsWith('.json') && !a.startsWith('--') && !VALUED.has(argv[i - 1]));
 if (!samples.length) {
     console.error('need at least one sample: node relevance-regress.mjs <sample.json> [more.json ...] [--sweep param=v1,v2]');
@@ -201,12 +201,19 @@ const PROPER_MODE = arg('--proper-nouns');
 // REQUIRED under the same rule. `entity` is ranking.properNounsOf via relevance.properNames — the
 // shipped extractor; `entity` beat `regex` at p 0.0002 paired over 88 scenes.
 const PROPER_EXTRACT = arg('--proper-nouns-extract');
+// WHICH DETECTOR feeds the density column — 'entity' is the shipped properDensity (properNounsOf, no
+// stoplist), 'book' the corpus name test. Separate from --proper-nouns-extract because the two fitted
+// columns can be swapped independently, and sweeping `detector` sets both at once for the full-swap arm.
+const DENSITY_EXTRACT = arg('--density-extract');
 const CALIB = argv.includes('--calibration');
 if (has('properNouns') && !['count', 'idf', 'idf-len', 'jaccard', 'gaz'].includes(PROPER_MODE)) {
     console.error(`--proper-nouns is required with the properNouns feature: count|idf|idf-len|jaccard|gaz (got ${PROPER_MODE})`); process.exit(2);
 }
 if (has('properNouns') && !['regex', 'entity', 'span', 'book', 'named'].includes(PROPER_EXTRACT)) {
     console.error(`--proper-nouns-extract is required with the properNouns feature: regex|entity|span|book|named (got ${PROPER_EXTRACT})`); process.exit(2);
+}
+if (has('density') && !['entity', 'book'].includes(DENSITY_EXTRACT)) {
+    console.error(`--density-extract is required with the density feature: entity|book (got ${DENSITY_EXTRACT})`); process.exit(2);
 }
 // ARMS COMPARE AT ONE CUTOFF. The cutoff is a user setting, not a property of an arm, so a paired
 // comparison read at each arm's own F2 peak scores two configurations neither of which ships.
@@ -226,7 +233,8 @@ if (!['all', 'memory', 'reference'].includes(TIER)) { console.error(`--tier is r
 // beside them, --relevant-at 2 replaces the target with P(>=2) outright, and --half-recall changes the
 // bars the cutoff was chosen on. Each would produce a file that reads as the shipping artefact and is not.
 if (EMIT_MODEL && (CUT !== 3 || RELEVANT_AT !== 3 || HALF_RECALL
-    || (has('properNouns') && (PROPER_MODE !== 'idf' || PROPER_EXTRACT !== 'entity')))) {
+    || (has('properNouns') && (PROPER_MODE !== 'idf' || PROPER_EXTRACT !== 'entity'))
+    || (has('density') && DENSITY_EXTRACT !== 'entity'))) {
     console.error('--emit-model writes the shipping artefact, so it runs at the shipped definition: --cut 3, --relevant-at 3, no --half-recall, '
         + 'and with properNouns, --proper-nouns idf --proper-nouns-extract entity. Drop --emit-model to explore another target.');
     process.exit(2);
@@ -534,13 +542,16 @@ const queryVec = async (S, name, value, em) => {
             const tw = P.entityFilter ? ranking.buildTermWeights(S.query, scene.gaz, P.boost) : null;
             const haystack = haystackFor(S, P);
             const rows = makeCandidateSet({ ...scene, params: P })(P.K1, P.B, tw, qvec, S.query, haystack);
+            // Detector per column, arm-overridable; sweeping `detector` swaps both at once.
+            const xMode = P.detector ?? P.properNounsExtract ?? PROPER_EXTRACT;
+            const dMode = P.detector ?? P.densityExtract ?? DENSITY_EXTRACT;
+            const bookX = (xMode === 'book' || dMode === 'book') ? makeExtract('book', scene.entries) : null;
             if (has('properNouns')) {
                 // Proper nouns are a property of the SCENE, so read off a plain entry's window: an entry's
                 // own sources are its, not the scene's.
                 // SWEEPABLE, so two detectors can be compared paired per scene AND per book rather than
-                // by diffing two runs. Absent a sweep this is PROPER_EXTRACT, so a bare run is unchanged.
-                const xMode = P.properNounsExtract ?? PROPER_EXTRACT;
-                const extract = makeExtract(xMode, scene.entries);
+                // by diffing two runs. Absent a sweep this is the required flags, so a bare run is unchanged.
+                const extract = xMode === 'book' ? bookX : makeExtract(xMode, scene.entries);
                 const win = extract(haystack({}).join('\n'));
                 // df over THIS book's entries, which is the corpus the names live in — the same reason
                 // content-lexical insists on one index for both classes. Computed once per scene.
@@ -629,7 +640,9 @@ const queryVec = async (S, name, value, em) => {
                     const names = ranking.properNounsOf(normalizeOrthography(String(r.entry?.content ?? '')));
                     // THE SHIPPED FUNCTION, so the fit and the runtime cannot drift on what density is —
                     // the same rule the overlap follows through properNames. `names` stays for chunkdens.
-                    r.properDensity = properDensity(String(r.entry?.content ?? ''));
+                    r.properDensity = dMode === 'book'
+                        ? (bookX(String(r.entry?.content ?? '')).size / Math.max(1, toks.length)) * 100
+                        : properDensity(String(r.entry?.content ?? ''));
                     // reindex.chunkConfig's defaults, NOT the scene params — those carry no chunk settings
                     // at all, and passing them gives chunkEntry an undefined chunkSize, which recurses
                     // until the stack blows rather than failing. Verified against the built index: chunk
