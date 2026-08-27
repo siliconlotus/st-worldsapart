@@ -126,9 +126,25 @@ export function buildGazetteer(entries) {
  * ORTHOGRAPHY IS THE CALLER'S. buildTermWeights normalises once and hands the result to both loops;
  * a caller comparing two texts must normalise both the same way or the sets cannot intersect.
  */
+/**
+ * A line that is ENTIRELY a label — an ATX heading, a `**Bold:**` field name, or a bare `Label:` —
+ * with nothing after it.
+ *
+ * Its tokens are layout, not spelling, and the sentence-position rule cannot see that: a label alone
+ * on a line makes its FIRST word position 0 and every later word a mid-sentence capital, so
+ * `**Key Dynamics:**` yields `dynamics` (measured: 51% of Richard's entries) and `## The Guest List`
+ * yields `guest`. Single-word labels were always harmless — the one token is position 0.
+ *
+ * ONLY WHEN THE LABEL IS THE WHOLE LINE. A label with content after it is already correct and must not
+ * be touched: `**Location:** Big Sur` works BECAUSE `Location` absorbs position 0, and stripping the
+ * line takes `Sur` with it.
+ */
+const LABEL_ONLY = /^(?:#{1,6}\s+\S.*|\*\*[^*]+:?\*\*|\p{Lu}[\p{L}' ]{0,30}:)$/u;
+
 export function properNounsOf(text) {
     const out = new Set();
     for (const sentence of String(text ?? '').split(/(?<=[.!?])\s+|\n+/)) {
+        if (LABEL_ONLY.test(sentence.trim())) continue;
         const tokens = sentence.trim().split(/[^\p{L}\p{N}\p{M}']+/u).filter(x => x.length > 1);
         for (let i = 1; i < tokens.length; i++) {
             if (/^\p{Lu}/u.test(tokens[i])) out.add(tokens[i].toLowerCase());
