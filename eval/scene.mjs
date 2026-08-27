@@ -404,7 +404,7 @@ export const sceneParams = (S, overrides = {}) => ({
     // KEYW null mirrors LEXW, exactly as the extension does — so a sample captured before the split scores
     // identically, and an arm that sets KEYW is testing the split rather than a silent default change.
     K: 20, K1: 2, B: 0.75, LEXW: 1.5, KEYW: null, boost: 3, stopwordDf: 0.25,
-    // null = whatever the shipped memory fit carries. Set only by a cutoff arm; see makeFuse.
+    // null = whatever the shipped memory fit carries. Set only by a cutoff arm; see scoreScene `admits`.
     memoryCutoff: null,
     caseSensitive: false, wholeWords: false, includeNames: true,
     // How the haystack is SEGMENTED, which decides what `scan` means to countKey. Captured in `params`
@@ -1162,7 +1162,7 @@ const MODEL_FILES = (() => {
 })();
 
 /** The fits for one embedding model, by tier. A model with no fit gets null for that tier, which makes
- *  `makeFuse` leave its rows unscored and stage 4 cut nothing on relevance — the same path an outage
+ *  `makeLayoutOrder` leave its rows unscored and stage 4 cut nothing on relevance — the same path an outage
  *  takes, and the only honest one: another embedder's coefficients are not a fallback. */
 export const modelsFor = (embedModel) => {
     // Through resolveModel, because a bundle records a SPEC: `omlx:Qwen3-...` keys as the served id
@@ -1188,7 +1188,7 @@ export const fittedModels = () => [...new Set(Object.values(MODEL_FILES).flatMap
  *
  * PER TIER, each standardised among its own rows, as each fit was built.
  */
-export const makeFuse = ({ scene, haystack, memoryCutoff = null }) => {
+export const makeLayoutOrder = ({ scene, haystack }) => {
     // The fits are per embedding model, resolved from the scene's own record — a bundle names the model
     // its collections are keyed under, so the fit follows the vectors rather than whatever shipped last.
     const MODELS = modelsFor(scene?.embedModel ?? 'bge-m3');
@@ -1216,15 +1216,13 @@ export const makeFuse = ({ scene, haystack, memoryCutoff = null }) => {
                 properNouns: Number(r.properNouns) || 0,
                 density: Number(r.density) || 0,
             })));
-            // The memory cutoff is OVERRIDABLE, because it is the one number stage 4 cuts on and screening
-            // it is what the @cut window exists for. Reference has no override: it is never cut.
-            // DIVERGES FROM PRODUCTION WHEN NO ARM SETS ONE. `model.cutoff` is the fit's own F2 optimum,
-            // which the runtime stopped reading when the cutoff became the `relevanceCutoff` setting — one
-            // value for every model. So a run that passes no cutoff measures a cut production does not
-            // make. Left as it is because changing the fallback to `defaultSettings.relevanceCutoff` moves
-            // every number measured at the default, which is a decision about the corpus rather than a fix.
-            const cut = (tier === 'memory' && Number.isFinite(memoryCutoff)) ? memoryCutoff : model.cutoff;
-            mine.forEach((r, i) => { r.eCredit = e[i]; r.cutoff = cut; });
+            // `tierCutoff` is the FIT'S OWN F2 optimum, carried as provenance and nothing else. STAGE 4
+            // DOES NOT HAPPEN HERE: this function produces the layout order, and whoever cuts on it owns
+            // which number it cuts at (scoreScene `admits`). Threading an overridable cutoff through the
+            // scorer is what hid the fact that the fallback is not what the runtime reads — the runtime
+            // stopped reading `model.cutoff` when the cut became the `relevanceCutoff` SETTING, one value
+            // for every model.
+            mine.forEach((r, i) => { r.eCredit = e[i]; r.tierCutoff = model.cutoff; });
         }
         return [...rows].sort((a, b) => (b.eCredit ?? -1) - (a.eCredit ?? -1));
     };
@@ -1265,7 +1263,7 @@ export async function scoreScene({ sample: S, overrides = {}, k = 10, vectors, m
     const em = resolveModel(model);
     const scene = preloaded ?? loadScene(S, { indexFile: indexPath(S, { vectors, model: em.label, index }), indexOpts: { vectors, model: em.label }, params: P });
     const scoreAll = makeCandidateSet({ ...scene, params: P, topK });
-    const fuse = makeFuse({ scene, haystack: haystackFor(S, P), memoryCutoff: P.memoryCutoff });
+    const layoutOrder = makeLayoutOrder({ scene, haystack: haystackFor(S, P) });
     const gradeOf = makeGradeOf(S.entries, scene);
 
     const query = S.query;
@@ -1300,7 +1298,7 @@ export async function scoreScene({ sample: S, overrides = {}, k = 10, vectors, m
     // block beside the retrieved ones.
     const rankable = all.filter(r => !r.entry?.constant);
 
-    const top = fuse(rankable).slice(0, k);
+    const top = layoutOrder(rankable).slice(0, k);
     const unjudged = top.filter(r => !scene.POOL.has(entryKey(r.entry)));
     // Read the DEPLOYED slice's grades before the pooled re-fuse below mutates shared rows.
     const topGrades = top.map(r => gradeOf(r) ?? 0);
@@ -1310,7 +1308,7 @@ export async function scoreScene({ sample: S, overrides = {}, k = 10, vectors, m
     // ranked the reference tier, and a reference-only book reported `judged 0/0` beside a healthy nDCG.
     // `?? 0` is the standard partial-label rule: an unjudged row occupies its rank and contributes
     // nothing. Explicit here because gradeOf now returns null for it — see makeGradeOf.
-    const g = fuse(rankable.filter(r => scene.POOL.has(entryKey(r.entry)))).map(r => gradeOf(r) ?? 0);
+    const g = layoutOrder(rankable.filter(r => scene.POOL.has(entryKey(r.entry)))).map(r => gradeOf(r) ?? 0);
 
     // SET METRICS, on the ASYMMETRIC bars: recall counts only grade >= 3 (did the must-deliver material
     // arrive), while precision credits a 3 or 4 in full and a 2 at half (metrics.mjs gradeCredit). Both read
@@ -1357,7 +1355,7 @@ export async function scoreScene({ sample: S, overrides = {}, k = 10, vectors, m
             unjudgedRows: un.map(r => ({ uid: Number(r.uid), book: r.entry?.world, title: r.title })),
         };
     };
-    const ranked = fuse(rankable);
+    const ranked = layoutOrder(rankable);
     const atR = scoreWindow(ranked.slice(0, relevant));
 
     //   @cut        everything the relevance cut admits. THE ONLY WINDOW THE SYSTEM CHOOSES FOR ITSELF —
@@ -1368,7 +1366,14 @@ export async function scoreScene({ sample: S, overrides = {}, k = 10, vectors, m
     // MEMORY ONLY, mirroring the runtime — a reference entry that fires is included and answers only to
     // the budget (worldsapart.js `rankActivated`), so it is never cut here either. A row the model could
     // not score is kept for the same reason it is kept live: an absent verdict is not a negative one.
-    const admits = r => !isMemory(r.entry) || !Number.isFinite(r.cutoff) || !Number.isFinite(r.eCredit) || r.eCredit >= r.cutoff;
+    // THE CUT IS APPLIED HERE, and the number it cuts at is chosen here too: an arm's `memoryCutoff` when
+    // it set one, otherwise the fit's own. That fallback is NOT what production reads — the runtime cuts
+    // at the `relevanceCutoff` setting, one value for every model — so a run that passes no cutoff
+    // measures a cut production does not make. Left as it is because moving it changes every number ever
+    // measured at the default, which is a decision about the corpus rather than a fix; `param-screen.mjs`
+    // and any tool that cares passes one.
+    const cutFor = r => (isMemory(r.entry) && Number.isFinite(P.memoryCutoff)) ? P.memoryCutoff : r.tierCutoff;
+    const admits = r => !isMemory(r.entry) || !Number.isFinite(cutFor(r)) || !Number.isFinite(r.eCredit) || r.eCredit >= cutFor(r);
     const atCut = scoreWindow(ranked.filter(admits));
 
     //   @budget     what the token ceiling actually leaves — stages 4 and 5 end to end, so the only window here

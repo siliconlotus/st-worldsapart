@@ -48,7 +48,7 @@ import { readFileSync, writeFileSync, mkdirSync, existsSync } from 'node:fs';
 import { basename, dirname, resolve as resolvePath } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { randomUUID } from 'node:crypto';
-import { haystackFor, loadScene, makeCandidateSet, makeFuse, sceneParams, indexPath, embed, stInstall, wiTitle, bookFingerprint, whyFor } from './scene.mjs';
+import { haystackFor, loadScene, makeCandidateSet, makeLayoutOrder, sceneParams, indexPath, embed, stInstall, wiTitle, bookFingerprint, whyFor } from './scene.mjs';
 import { ensureIndex } from './reindex.mjs';
 
 import { offlineTokenCounter } from './tokens.mjs';
@@ -411,7 +411,7 @@ for (const idx of picks) {
         );
         // EVERY ACTIVATED ROW, ordered but not truncated — a pool that is the whole population is one no
         // later re-ranking can orphan a grade out of.
-        const ranked = makeFuse({ scene, haystack: haystackFor(S, P) })(rows);
+        const ranked = makeLayoutOrder({ scene, haystack: haystackFor(S, P) })(rows);
         const out = ranked.map((r, i) => {
             const e = r.entry;
             const row = {

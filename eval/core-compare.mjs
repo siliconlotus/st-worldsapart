@@ -53,7 +53,7 @@
 //        [--core-top-k 5] [--core-order order|newest|oldest] [--core-depth 2] [--core-uids 1,2,3]
 //        [--tokenizer gpt-3.5-turbo]
 import fs from 'node:fs';
-import { haystackFor, indexPath, isMemory, loadScene, makeCandidateSet, makeGradeOf, openSample, sceneParams, makeFuse, sceneLabel } from './scene.mjs';
+import { haystackFor, indexPath, isMemory, loadScene, makeCandidateSet, makeGradeOf, openSample, sceneParams, makeLayoutOrder, sceneLabel } from './scene.mjs';
 import { gradeCredit, fbeta, RECALL_WEIGHT } from './metrics.mjs';
 import { offlineTokenCounter } from './tokens.mjs';
 import { ensureIndex, resolveModel } from './reindex.mjs';
@@ -134,8 +134,8 @@ for (const file of samples) {
         ? new Set(build(P.K1, P.B, null, [], S.query, haystackFor(S, P, { depth: CORE_DEPTH }))
             .filter(r => (Number(r.keywordScore) || 0) > 0).map(r => Number(r.uid)))
         : null;
-    // makeFuse is what stage 4 orders by, so this reads WA's own layout rather than a second copy of it.
-    const ranked = makeFuse({ scene, haystack: haystackFor(S, P) })(rows);
+    // makeLayoutOrder is what stage 4 orders by, so this reads WA's own layout rather than a second copy of it.
+    const ranked = makeLayoutOrder({ scene, haystack: haystackFor(S, P) })(rows);
     const gradeOf = makeGradeOf(S.entries, scene);
     const enriched = ranked
         .filter(r => TIER === 'all' || (isMemory(r.entry) ? 'memory' : 'reference') === TIER)

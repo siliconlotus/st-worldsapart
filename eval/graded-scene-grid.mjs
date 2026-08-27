@@ -68,7 +68,7 @@ import { gradeValue } from './metrics.mjs';
 // param-screen.mjs — there must be exactly one copy of them (see that module's header).
 import { entryKey } from '../extension/content-lexical.mjs';
 import { resolveModel } from './reindex.mjs';
-import { dcg, embed as embedWith, haystackFor, indexPath, isDurableEntry, loadScene, makeFuse, makeGradeOf, makeKeywordScore, makeCandidateSet, ndcg, nrm, openSample, sceneParams, inVectorIndex, wiTitle, sceneLabel } from './scene.mjs';
+import { dcg, embed as embedWith, haystackFor, indexPath, isDurableEntry, loadScene, makeLayoutOrder, makeGradeOf, makeKeywordScore, makeCandidateSet, ndcg, nrm, openSample, sceneParams, inVectorIndex, wiTitle, sceneLabel } from './scene.mjs';
 
 const arg = k => { const i = process.argv.indexOf(k); return i >= 0 ? process.argv[i + 1] : null; };
 if (!arg('--sample')) { console.error('need --sample <sample.json> (write one with /wa-grade)'); process.exit(2); }
@@ -126,7 +126,7 @@ const TOPK = Number(arg('--topk')) || undefined;   // unset = stage 1's own boun
 // --- inputs ---
 // A /wa-grade sample carries copies of every attached book, so it re-runs identically after the live
 // lorebooks have been edited. Nothing here reads a live book.
-// Bound whole AND destructured: `makeFuse` takes the scene object (it reads `entries` for the per-book
+// Bound whole AND destructured: `makeLayoutOrder` takes the scene object (it reads `entries` for the per-book
 // name df), and referencing an undefined `scene` there was a latent ReferenceError this file could not
 // reach while its index resolution was also wrong.
 const scene = loadScene(S, { indexFile: INDEX, indexOpts: { vectors: VECTORS, model: EM.label }, params: P });
@@ -303,13 +303,13 @@ const fmt = n => (n == null ? '·' : (+n).toFixed(3));
         return kept;
     };
 
-    const fuse = makeFuse({ scene, haystack: haystackFor(S, P) });
+    const layoutOrder = makeLayoutOrder({ scene, haystack: haystackFor(S, P) });
 
     if (VALIDATE) {
         const capAll = JSON.parse(readFileSync(VALIDATE, 'utf8')).filter(r => (r.block === undefined || r.block === 'dynamic') && !(Number(r.sticky) > 0));
         const cap = capAll.filter(r => !outOfScope(r));
         if (cap.length < capAll.length) console.log(`(skipping ${capAll.length - cap.length} out-of-scope row(s): ${capAll.filter(r => outOfScope(r)).map(r => r.title).join(', ')})`);
-        const mine = fuse(scoreAll(P.K1, P.B));
+        const mine = layoutOrder(scoreAll(P.K1, P.B));
         const find = title => { const gt = nrm(title); return mine.find(m => { const mt = new Set(nrm(m.title)); return gt.length && gt.every(t => mt.has(t)); }); };
         console.log('validation vs capture (dynamic) — cosine / text / keys, then ranks:');
         console.log('cap#  my#  | cosine(cap/mine)  text(cap/mine)  keys(cap/mine)  title');
@@ -373,8 +373,8 @@ const fmt = n => (n == null ? '·' : (+n).toFixed(3));
             const tw = P.entityFilter ? ranking.buildTermWeights(q, gaz, P.boost) : null;
             const v = await embed(q);
             const rows = scoreAll(DEF.k1, DEF.b, tw, v, q).map(r => ({ ...r, keywordScore: (e => keywordScore(e, st(e), DEF.k1))(byKey.get(entryKey(r.entry)) ?? { key: [] }) }));
-            const fused = fuse(layoutOf(rows));
-            const gVec = fuse(vectorOf(rows)).map(r => gradeOf(r) ?? 0);
+            const fused = layoutOrder(layoutOf(rows));
+            const gVec = layoutOrder(vectorOf(rows)).map(r => gradeOf(r) ?? 0);
             const g = fused.map(r => gradeOf(r) ?? 0);   // unjudged occupies its rank and contributes nothing (makeGradeOf returns null)
             const hits = fused.map((r, i) => [gradeOf(r), i + 1]).filter(([gr]) => gr >= 3).map(([, i]) => i);
             const mean = hits.length ? hits.reduce((a, b) => a + b, 0) / hits.length : NaN;
@@ -409,8 +409,8 @@ const fmt = n => (n == null ? '·' : (+n).toFixed(3));
         // until the gap is graded, which is exactly what makes a pool built from one configuration
         // useless for a zero-based defaults review. Fix by adding arms, not by reading past it.
         //
-        // fuse() mutates the row objects it is handed and `rows` shares references with `all`, so this
-        // has to read its slice before the fuse below re-ranks the subset.
+        // layoutOrder() mutates the row objects it is handed and `rows` shares references with `all`, so this
+        // has to read its slice before the re-rank below reorders the subset.
         //
         // NOT ALWAYS REACHABLE AT 10/10, and it matters that you know why before chasing it. This fused
         // layout ranking spans every entry with any signal — including keyword-only rows that scoreAll
@@ -420,11 +420,11 @@ const fmt = n => (n == null ? '·' : (+n).toFixed(3));
         // The named titles below are how you tell that case from a real pooling gap: if a missing entry
         // shows up in a live /wa-super-grade run, grade it; if no arm ever surfaces it, it is a phantom of
         // offline re-derivation and the honest ceiling for this cell is below 10/10.
-        const top = fuse(all).slice(0, 10);
+        const top = layoutOrder(all).slice(0, 10);
         const unjudged = top.filter(r => !POOL.has(entryKey(r.entry)));
         const j10 = top.length - unjudged.length;
-        const g = fuse(layoutOf(rows)).map(r => gradeOf(r) ?? 0);   // unjudged occupies its rank and contributes nothing (makeGradeOf returns null)
-        const gVec = fuse(vectorOf(rows)).map(r => gradeOf(r) ?? 0);
+        const g = layoutOrder(layoutOf(rows)).map(r => gradeOf(r) ?? 0);   // unjudged occupies its rank and contributes nothing (makeGradeOf returns null)
+        const gVec = layoutOrder(vectorOf(rows)).map(r => gradeOf(r) ?? 0);
         const n10 = ndcg(g, 10), v10 = ndcg(gVec, 10), nR = ndcgAtR(g), vR = ndcgAtR(gVec);
         if (!best || nR > best.nR || (Number.isNaN(best.nR) && n10 > best.n10)) best = { k1, b, nR, n10, j10, of: top.length, unjudged: unjudged.map(r => `${r.title} (#${top.indexOf(r) + 1})`) };
         if (!worst || j10 - top.length < worst.j10 - worst.of) worst = { k1, b, j10, of: top.length };
@@ -449,10 +449,10 @@ const fmt = n => (n == null ? '·' : (+n).toFixed(3));
         const all = scoreAll(DEF.k1, DEF.b, tw);
         // Coverage before the pool filter, same reasoning as the grid above. These arms need it most: turning
         // the entity filter off is exactly the kind of population change a defaults-shaped pool never saw.
-        const top = fuse(all).slice(0, 10);
+        const top = layoutOrder(all).slice(0, 10);
         const j10 = top.filter(r => POOL.has(entryKey(r.entry))).length;
-        const rows = fuse(layoutOf(activated(all)));
-        const gVec = fuse(vectorOf(activated(all))).map(r => gradeOf(r) ?? 0);
+        const rows = layoutOrder(layoutOf(activated(all)));
+        const gVec = layoutOrder(vectorOf(activated(all))).map(r => gradeOf(r) ?? 0);
         const hits = rows.map((r, i) => [gradeOf(r), i + 1]).filter(([g]) => g >= 3).map(([, i]) => i);
         const g = rows.map(r => gradeOf(r) ?? 0);   // unjudged occupies its rank and contributes nothing (makeGradeOf returns null)
         return { found: hits.length, mean: hits.length ? hits.reduce((a, b) => a + b, 0) / hits.length : NaN, top10: hits.filter(i => i <= 10).length, n10: ndcg(g, 10), nR: ndcgAtR(g), v10: ndcg(gVec, 10), vR: ndcgAtR(gVec), j10, of: top.length };
