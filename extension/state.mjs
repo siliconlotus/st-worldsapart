@@ -28,8 +28,8 @@ export const defaultSettings = {
     chunkSize: 1750,
     /** 'paragraph' keeps semantic boundaries; 'length' fills to chunkSize (chunking.mjs splitRecursive). */
     chunkMode: 'paragraph',
-        // WA's SHARED LLM connection. The ✨ keyword suggester (keyword-tools.mjs generateText) is
-    // their only reader; the query summarizer that once shared them is gone.
+        // WA's SHARED LLM connection. The ✨ keyword suggester (keyword-tools.mjs generateText) is its
+    // only reader.
     /**
      * Connection Manager profile id for WA's own generation calls. Empty = the current API.
      * Worth setting: a reasoning model spends its whole budget thinking and returns nothing,

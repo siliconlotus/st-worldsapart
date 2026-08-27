@@ -567,8 +567,7 @@ export const sceneParams = (S, overrides = {}) => ({
     sharedScatter: 'pooled',
     // Exact key strings to treat as removed from the book (see scoringKeys). Null = none.
     dropKeys: null,
-    // NO queryMode. The summarized-query mode is gone from production (measured: F2 over the delivered
-    // set -0.021, n=106 scenes paired), and with it the only thing that read it here. Stored bundles
+    // NO queryMode. Nothing summarizes a query any more (matcher-design.md, *Stage 1*). Stored bundles
     // still carry the field; it is read and ignored, like `threshold`.
     // PER-BOOK QUOTA for stage 5 (applyBudget capOf), as {book: cap}. Null = no cap, which is what every
     // capture in the corpus ran under — the live setting lives on the world priority list and no bundle
@@ -1216,12 +1215,10 @@ export const makeLayoutOrder = ({ scene, haystack }) => {
                 properNouns: Number(r.properNouns) || 0,
                 density: Number(r.density) || 0,
             })));
-            // `tierCutoff` is the FIT'S OWN F2 optimum, carried as provenance and nothing else. STAGE 4
-            // DOES NOT HAPPEN HERE: this function produces the layout order, and whoever cuts on it owns
-            // which number it cuts at (scoreScene `admits`). Threading an overridable cutoff through the
-            // scorer is what hid the fact that the fallback is not what the runtime reads — the runtime
-            // stopped reading `model.cutoff` when the cut became the `relevanceCutoff` SETTING, one value
-            // for every model.
+            // `tierCutoff` is the FIT'S OWN F2 optimum, carried as provenance and nothing else — the
+            // runtime does not read it, and cuts at the `relevanceCutoff` setting instead, one value for
+            // every model. STAGE 4 DOES NOT HAPPEN HERE: this produces the layout order, and whoever cuts
+            // on it owns which number it cuts at (scoreScene `admits`).
             mine.forEach((r, i) => { r.eCredit = e[i]; r.tierCutoff = model.cutoff; });
         }
         return [...rows].sort((a, b) => (b.eCredit ?? -1) - (a.eCredit ?? -1));

@@ -412,10 +412,9 @@ const fx = n => (n >= 0 ? '+' : '') + n.toFixed(4);
             } else {
                 r = await scoreScene({ sample: sc.S, overrides: scoring, k: K, scene: sc.scene, qv: sc.qv });
             }
-            // THE FLAG IS READ AT THE WINDOW THE SCORE IS TAKEN FROM. `judged`/`of` are the unfiltered
-            // top-k, and the default metric is scored at the CUT, which is not a prefix of it: reference
-            // rows and rows the model could not score are admitted wherever they sit. A cell could deliver
-            // an ungraded row and print no `?` at all.
+            // THE FLAG IS READ AT THE WINDOW THE SCORE IS TAKEN FROM — no k bounds the admitted set, so
+            // a cell scored at the cut and flagged at the top-k could deliver an ungraded row and print no
+            // `?` at all. See scoreWindow in scene.mjs.
             const win = WINDOWED[METRIC] ? { judged: r.atCut.judged, of: r.atCut.n } : { judged: r.judged, of: r.of };
             cells.push({ scene: sc.name, delta: mOf(r) - mOf(sc.base), ...win, unjudged: r.unjudged });
         }

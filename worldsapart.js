@@ -3312,9 +3312,8 @@ async function gradeScene(named) {
  *               termWeights as a parameter, so this arm now fails the criterion above. Kept until the
  *               section is resettled; it still cannot ride a preloaded sweep (scene.mjs's guard names
  *               only the gazetteer settings).
- * A SUMMARIZED QUERY is not among them and cannot be: the summarizer is gone. Measured before it went,
- * n=106 scenes paired, F2 over the delivered set -0.021 against the raw messages. Bundles captured under
- * the old `queryMode` still open by name; the field is read and ignored.
+ * A SUMMARIZED QUERY cannot be an arm: nothing summarizes one (matcher-design.md, *Stage 1*, for what
+ * that measured). Bundles captured under the old `queryMode` still open by name, field read and ignored.
  *
  * ARM COUNT IS NOT A DESIGN CONSTANT. Add an entry here whenever graded-scene-grid.mjs reports a
  * configuration whose top rows are not fully judged; that number is the stopping rule, not this list's
