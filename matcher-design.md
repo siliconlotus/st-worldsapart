@@ -1026,14 +1026,26 @@ lowercased, after detection. **Measured** against the private ASCII regex this f
 paired over 88 scenes: F2 0.5443 -> 0.5476, 47 scenes up against 17 with 24 tied, p 0.0002, and the
 validation fold's AP 0.873 -> 0.883. It is also the reading that removes the second implementation.
 
-**MULTI-TOKEN SPANS LOSE, and they lose REPAIRED.** The first attempt broke runs at lowercase particles
-and let sentence-initial capitals start them, so it was rebuilt on the same name detection: particles
-join only BETWEEN name tokens and a trailing one is trimmed ("Church of the Sun", "Maren's Gap",
-"van der Berg"), `and` is excluded because it joins entities rather than living inside one, and each run
-emits its parts as well as itself — a span alone is brittle, since an entry's "Brackenmoor Patrol" would
-share nothing with a window's "Brackenmoor". **Measured**: the repair is worth 43 scenes up against 21
-(p 0.0081) over the broken version, and the repaired arm still loses to plain unigrams 15 up against 50
-(p 0.0000). So a name is a TOKEN, and the phrase is noise on top of it rather than evidence beside it.
+**MULTI-TOKEN SPANS ADD NOTHING.** The span arm builds runs on the same name detection: particles join
+only BETWEEN name tokens and a trailing one is trimmed ("Church of the Sun", "Maren's Gap",
+"van der Berg"), `and` is excluded because it joins entities rather than living inside one, and a run
+contributes itself plus only those tokens the text also attests standalone — `gap` is a common noun
+capitalised because it sits inside a name. **Measured**, `--sweep properNounsExtract=entity,span` over
+105 bundles (102 scored scenes), held out by book, both arms at the 0.10 cutoff: per-scene F2 -0.0019
+(18 up / 28 down / 48 tied, p 0.184), 2 books up of 5, model AUC identical to the third decimal, and the
+signal alone is WEAKER (std beta 0.325 -> 0.247, solo AUC 0.755 -> 0.739). So a name is a TOKEN, and the
+phrase adds no evidence beside it.
+
+**NEITHER DOES A BETTER DETECTOR.** `--proper-nouns-extract book` replaces `properNounsOf`'s per-text
+sentence-position rule with the suggester's corpus name test (`keyword-core.mjs` `nameEvidence`, one
+properness test for both consumers), fed the scene's entries: every capitalised token is arbitrated by
+how the BOOK writes the word, sentence-initial included, with no `COMMON_WORDS` subtraction anywhere in
+the arm. Its token-level verdicts differ exactly where the shipped extractor is known wrong — stat-block
+labels counted as names, stoplisted names deleted — and none of it reaches the fitted column.
+**Measured**, same design: per-scene F2 +0.0102 (30 up / 24 down / 40 tied, p 0.497), 3 books up of 5
+(p 1.000), model AUC +0.002, signal std beta +0.325 -> +0.345 with solo AUC 0.755 -> 0.749. Within-scene
+standardisation and the idf weighting absorb the detector's mistakes, so the shipped extractor stays and
+no refit is warranted on this evidence.
 
 Restricting to the GAZETTEER loses too, 15 up against 44 (p 0.0002): the signal is a rare name shared
 with what is on screen, not an author-declared one.

@@ -690,16 +690,23 @@ export function classifyLlmCand(cand, { canon, exampleCanon, exampleWords, entry
  * @param {object} opts    { dfCeil, maxN, excludeDates, excludeShort, onlyActive, cap, bgDocs }
  * @returns {{entries:object[], N:number, perEntry:object[], canon:Function, dfSubstr:Function, avoid:string[], exampleCanon:Set<string>, exampleWords:Set<string>}}
  */
-export function buildKeySuggest(data, opts) {
-    const { dfCeil, maxN, excludeDates, excludeShort, onlyActive, cap, bgDocs = [] } = opts;
-    const STOP = FUNCTION_WORDS;
+/**
+ * Corpus name evidence: how a body of text capitalises each word, and the name test built on it.
+ *
+ * ONE properness test for everything that asks whether a word is a name — the suggester's gates and any
+ * harness arm measuring the same question call this rather than re-deriving it. `wordSeq(text)` observes
+ * a text (and returns the suggester's token sequence); `isName(w)` reads the accumulated evidence: a
+ * RATIO of mid-sentence capitals at >= 0.95, with acronyms exempt, "I" and its contractions excluded,
+ * and a never-lowercase word absent from ZIPF_EN accepted on that weaker evidence.
+ */
+export function nameEvidence() {
     const fold = w => { w = w.replace(/^['’-]+|['’-]+$/g, ''); return /['’]s$/i.test(w) ? w.slice(0, -2) : w; };
     // Acronym casing (see notes): a token seen only in ALL-CAPS (SDG) is an acronym, exempt from the
     // short-word cut and shown uppercase; one ever seen lowercase isn't. The counts below feed the
-    // same trick for proper nouns (isName, defined once the corpus pass has filled them): capitals
-    // are only counted MID-sentence, since a sentence-initial one proves nothing — "Nobody" would
-    // be a name in a small book. Proper nouns are exempt from the English-frequency gate below
-    // ("Jeffrey" is a common word by z but the right key).
+    // same trick for proper nouns (isName): capitals are only counted MID-sentence, since a
+    // sentence-initial one proves nothing — "Nobody" would be a name in a small book. Proper nouns are
+    // exempt from the suggester's English-frequency gate ("Jeffrey" is a common word by z but the right
+    // key).
     const capsSeen = new Set(), mixedSeen = new Set(), lowerCount = new Map(), capMidCount = new Map();
     const isAcr = t => t.length <= 6 && capsSeen.has(t) && !mixedSeen.has(t);
     // Sentence enders surface as a one-char '.' sentinel: ngramsOf skips any gram holding a token
@@ -736,15 +743,6 @@ export function buildKeySuggest(data, opts) {
             return /['’]s$/i.test(w.replace(/^['’-]+|['’-]+$/g, '')) ? ['.', lc, '.'] : [lc];
         });
     };
-    const canon = k => (String(k).match(/[\p{L}][\p{L}'’-]+/gu) ?? []).map(w => fold(w).toLowerCase()).join(' ');
-
-    const entries = Object.values(data.entries).filter(e => !(onlyActive && e.disable));
-    const N = entries.length;
-
-    // Corpus pre-pass (once): word sequences + derived function words + distributional head-POS.
-    const seqs = entries.map(e => wordSeq(e.content));
-    const uDF = new Map(), uCF = new Map();
-    for (const s of seqs) { for (const t of new Set(s)) uDF.set(t, (uDF.get(t) ?? 0) + 1); for (const t of s) uCF.set(t, (uCF.get(t) ?? 0) + 1); }
     // ONE properness test, used by every gate that exempts names, and a RATIO rather than "never
     // seen lowercase". That boolean was brittle in exactly one direction: "Marches" is capitalised
     // 397 times and lowercase twice ("he marches"), and those two occurrences were enough to strip
@@ -772,6 +770,22 @@ export function buildKeySuggest(data, opts) {
         // they are common words, and they appear lowercase elsewhere anyway.
         return lo === 0 && (capsSeen.has(w) || mixedSeen.has(w)) && !ZIPF_EN.has(tblKey(w));
     };
+    return { fold, wordSeq, isName, isAcr };
+}
+
+export function buildKeySuggest(data, opts) {
+    const { dfCeil, maxN, excludeDates, excludeShort, onlyActive, cap, bgDocs = [] } = opts;
+    const STOP = FUNCTION_WORDS;
+    const { fold, wordSeq, isName, isAcr } = nameEvidence();
+    const canon = k => (String(k).match(/[\p{L}][\p{L}'’-]+/gu) ?? []).map(w => fold(w).toLowerCase()).join(' ');
+
+    const entries = Object.values(data.entries).filter(e => !(onlyActive && e.disable));
+    const N = entries.length;
+
+    // Corpus pre-pass (once): word sequences + derived function words + distributional head-POS.
+    const seqs = entries.map(e => wordSeq(e.content));
+    const uDF = new Map(), uCF = new Map();
+    for (const s of seqs) { for (const t of new Set(s)) uDF.set(t, (uDF.get(t) ?? 0) + 1); for (const t of s) uCF.set(t, (uCF.get(t) ?? 0) + 1); }
     // A name is never a function word, however ubiquitous. The distributional test looks for
     // domain stopwords — common across entries, rarely repeated within one — and a place name that
     // half the book mentions has exactly that shape: "marches" (48.6% of entries, 3.0 repeats) was
