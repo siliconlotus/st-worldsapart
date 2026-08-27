@@ -1340,11 +1340,22 @@ export async function scoreScene({ sample: S, overrides = {}, k = 10, vectors, m
     //               set by cost and is not a property of the ranking, so it cannot be in the window.
     // It drops the reference tier, exactly as the block above does — grading a keyword-activated entry is
     // the same category error at any window.
+    // EVERY WINDOW CARRIES ITS OWN POOL HONESTY, not just the top-k one. `judged`/`of` below are read at
+    // the unfiltered top-k, and no k bounds the admitted set: the cut is a prefix in eCredit for scored
+    // memory rows, but reference rows and rows the model could not score are admitted wherever they sit,
+    // so a window read at k=10 can miss an ungraded row the configuration actually delivers. It scores 0
+    // and the window reads as a precision loss with nothing saying why — which is the same failure the
+    // top-k flag exists to prevent, one window over.
     const scoreWindow = (rows) => {
         const gr = rows.map(r => gradeOf(r) ?? 0);
         const p = rows.length ? gr.reduce((s, x) => s + gradeCredit(x), 0) / rows.length : 0;
         const rc = relevant ? gr.filter(x => x >= 3).length / relevant : 0;
-        return { precision: p, recall: rc, f: fbeta(p, rc, RECALL_WEIGHT), n: rows.length };
+        const un = rows.filter(r => !scene.POOL.has(entryKey(r.entry)));
+        return {
+            precision: p, recall: rc, f: fbeta(p, rc, RECALL_WEIGHT), n: rows.length,
+            judged: rows.length - un.length,
+            unjudgedRows: un.map(r => ({ uid: Number(r.uid), book: r.entry?.world, title: r.title })),
+        };
     };
     const ranked = fuse(rankable);
     const atR = scoreWindow(ranked.slice(0, relevant));

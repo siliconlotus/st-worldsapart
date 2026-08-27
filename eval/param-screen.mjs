@@ -412,7 +412,12 @@ const fx = n => (n >= 0 ? '+' : '') + n.toFixed(4);
             } else {
                 r = await scoreScene({ sample: sc.S, overrides: scoring, k: K, scene: sc.scene, qv: sc.qv });
             }
-            cells.push({ scene: sc.name, delta: mOf(r) - mOf(sc.base), judged: r.judged, of: r.of, unjudged: r.unjudged });
+            // THE FLAG IS READ AT THE WINDOW THE SCORE IS TAKEN FROM. `judged`/`of` are the unfiltered
+            // top-k, and the default metric is scored at the CUT, which is not a prefix of it: reference
+            // rows and rows the model could not score are admitted wherever they sit. A cell could deliver
+            // an ungraded row and print no `?` at all.
+            const win = WINDOWED[METRIC] ? { judged: r.atCut.judged, of: r.atCut.n } : { judged: r.judged, of: r.of };
+            cells.push({ scene: sc.name, delta: mOf(r) - mOf(sc.base), ...win, unjudged: r.unjudged });
         }
         results.push({ arm: armName, cells, stat: signTest(cells.map(c => c.delta)) });
     }
@@ -437,7 +442,7 @@ const fx = n => (n >= 0 ? '+' : '') + n.toFixed(4);
         const flag = s.consistent && s.n >= 2 ? (s.plus ? ' ^' : ' v') : '  ';
         console.log(` ${r.arm.padEnd(w)} | ${s.plus}/${s.minus}/${s.ties}     | ${fx(s.mean)}  ${s.p.toFixed(3)}  ${r.holm.toFixed(3)}${flag} | `
             + r.cells.map(c => `${fx(c.delta)}${c.judged < c.of ? '?' : ''}`).join('  ')
-            + (gaps ? `   (${gaps} scene(s) with unjudged rows in top ${K})` : ''));
+            + (gaps ? `   (${gaps} scene(s) with unjudged rows in ${WINDOWED[METRIC] ? `the ${METRIC} window` : `top ${K}`})` : ''));
     }
 
     console.log('\n^ = helps on every scene, v = hurts on every scene, ? = that cell kept unjudged rows so its Δ is a lower bound.');
