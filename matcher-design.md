@@ -1036,16 +1036,25 @@ capitalised because it sits inside a name. **Measured**, `--sweep properNounsExt
 signal alone is WEAKER (std beta 0.325 -> 0.247, solo AUC 0.755 -> 0.739). So a name is a TOKEN, and the
 phrase adds no evidence beside it.
 
-**NEITHER DOES A BETTER DETECTOR.** `--proper-nouns-extract book` replaces `properNounsOf`'s per-text
-sentence-position rule with the suggester's corpus name test (`keyword-core.mjs` `nameEvidence`, one
-properness test for both consumers), fed the scene's entries: every capitalised token is arbitrated by
-how the BOOK writes the word, sentence-initial included, with no `COMMON_WORDS` subtraction anywhere in
-the arm. Its token-level verdicts differ exactly where the shipped extractor is known wrong — stat-block
-labels counted as names, stoplisted names deleted — and none of it reaches the fitted column.
-**Measured**, same design: per-scene F2 +0.0102 (30 up / 24 down / 40 tied, p 0.497), 3 books up of 5
-(p 1.000), model AUC +0.002, signal std beta +0.325 -> +0.345 with solo AUC 0.755 -> 0.749. Within-scene
-standardisation and the idf weighting absorb the detector's mistakes, so the shipped extractor stays and
-no refit is warranted on this evidence.
+**THE OVERLAP COLUMN IS INSENSITIVE TO ITS DETECTOR.** Two arms vary it, both measured on the same
+design as the span arm, and both are flat — so the shipped extractor stays. This is a claim about the
+OVERLAP column only: `density` runs on `properNames` in every arm, and no span arm exists on the `book`
+detector, so neither cell is measured.
+
+`--proper-nouns-extract book` replaces `properNounsOf`'s per-text sentence-position rule with the
+suggester's corpus name test (`keyword-core.mjs` `nameEvidence`, one properness test for both
+consumers), fed the scene's entries: every capitalised token is arbitrated by how the BOOK writes the
+word, sentence-initial included, with no `COMMON_WORDS` subtraction anywhere in the arm. **Measured**:
+per-scene F2 +0.0102 (30 up / 24 down / 40 tied, p 0.497), 3 books up of 5 (p 1.000), model AUC +0.002,
+signal std beta +0.325 -> +0.345 with solo AUC 0.755 -> 0.749.
+
+`--proper-nouns-extract named` is the SURGICAL contrast for "the stoplist deletes character names from
+the overlap": the shipped extraction exactly, except `COMMON_WORDS` spares a word the book's own
+statistics attest as a name — `richard`, `frank`, `mike` and the other stoplisted names come back, and
+nothing else changes. **Measured**: per-scene F2 -0.0001 (10 up / 13 down / 71 tied, p 0.678), every
+per-book delta within 0.001, model AUC +0.0002, signal std beta +0.325 -> +0.317 with solo AUC
+0.755 -> 0.758. The restored names are mostly high-df, so the idf weighting had already priced their
+absence at near zero.
 
 Restricting to the GAZETTEER loses too, 15 up against 44 (p 0.0002): the signal is a rare name shared
 with what is on screen, not an author-declared one.

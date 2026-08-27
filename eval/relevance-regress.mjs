@@ -35,7 +35,7 @@
 //
 // Usage (from SillyTavern root):
 //   node .../relevance-regress.mjs <sample.json> [...] [--sweep gazetteerSource=keys,titles]
-//        --tier all|memory|reference [--cut 4] [--ordinal] [--loso] [--lobo] [--calibration] [--cutoff] [--at 0.10] [--degree 2] [--interactions] --features cosine,text,properNouns,density [--drop-keys flagged.json] [--emit-rows rows.json] [--emit-model relevance-model-<tier>.json] [--proper-nouns count|idf|idf-len|jaccard|gaz] [--proper-nouns-extract regex|entity|span|book]
+//        --tier all|memory|reference [--cut 4] [--ordinal] [--loso] [--lobo] [--calibration] [--cutoff] [--at 0.10] [--degree 2] [--interactions] --features cosine,text,properNouns,density [--drop-keys flagged.json] [--emit-rows rows.json] [--emit-model relevance-model-<tier>.json] [--proper-nouns count|idf|idf-len|jaccard|gaz] [--proper-nouns-extract regex|entity|span|book|named]
 //   --tier and --features are required. With properNouns in --features, --proper-nouns and --proper-nouns-extract are
 //   required. A --sweep read with --cutoff requires --at: arms compare at one set cutoff.
 //
@@ -205,8 +205,8 @@ const CALIB = argv.includes('--calibration');
 if (has('properNouns') && !['count', 'idf', 'idf-len', 'jaccard', 'gaz'].includes(PROPER_MODE)) {
     console.error(`--proper-nouns is required with the properNouns feature: count|idf|idf-len|jaccard|gaz (got ${PROPER_MODE})`); process.exit(2);
 }
-if (has('properNouns') && !['regex', 'entity', 'span', 'book'].includes(PROPER_EXTRACT)) {
-    console.error(`--proper-nouns-extract is required with the properNouns feature: regex|entity|span|book (got ${PROPER_EXTRACT})`); process.exit(2);
+if (has('properNouns') && !['regex', 'entity', 'span', 'book', 'named'].includes(PROPER_EXTRACT)) {
+    console.error(`--proper-nouns-extract is required with the properNouns feature: regex|entity|span|book|named (got ${PROPER_EXTRACT})`); process.exit(2);
 }
 // ARMS COMPARE AT ONE CUTOFF. The cutoff is a user setting, not a property of an arm, so a paired
 // comparison read at each arm's own F2 peak scores two configurations neither of which ships.
@@ -331,10 +331,18 @@ const properSpans = (text) => {
 // entries, arbitrating every capitalised token — sentence-initial included, which properNounsOf cannot
 // count, and with no COMMON_WORDS subtraction, since the book's own statistics are the stoplist's job
 // here. Tokens are folded and lowercased by the evidence's own fold, so entry, window and df keys agree.
+// `named` mode: the shipped extraction exactly, except the stoplist spares a word the book's own
+// statistics attest as a name — the SURGICAL contrast for "the stoplist deletes character names from
+// the overlap". One change against `entity`; `book` changes the detector wholesale and cannot isolate it.
 const makeExtract = (mode, entries) => {
-    if (mode !== 'book') return text => properNouns(text, mode);
+    if (mode !== 'book' && mode !== 'named') return text => properNouns(text, mode);
     const ev = nameEvidence();
     for (const e of entries ?? []) if (typeof e?.content === 'string') ev.wordSeq(normalizeOrthography(e.content));
+    if (mode === 'named') return text => {
+        const out = ranking.properNounsOf(normalizeOrthography(String(text ?? '')));
+        for (const w of [...out]) if (COMMON_WORDS.has(w) && !ev.isName(ev.fold(w))) out.delete(w);
+        return out;
+    };
     return text => {
         const out = new Set();
         for (const m of normalizeOrthography(String(text ?? '')).match(/[\p{L}][\p{L}'’-]*/gu) ?? []) {
