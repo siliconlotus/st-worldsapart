@@ -1036,17 +1036,21 @@ capitalised because it sits inside a name. **Measured**, `--sweep properNounsExt
 signal alone is WEAKER (std beta 0.325 -> 0.247, solo AUC 0.755 -> 0.739). So a name is a TOKEN, and the
 phrase adds no evidence beside it.
 
-**BOTH FITTED NAME COLUMNS KEEP THEIR SHIPPED DETECTOR, and the corpus test measured slightly worse.**
+**BOTH FITTED NAME COLUMNS KEEP THEIR SHIPPED DETECTOR, measured no better under the corpus test.**
 Four cells vary the detector on the same design as the span arm. The overlap column is insensitive
-(below). `density` under the corpus test (`--density-extract book`) is WEAKER: std beta 0.221 -> 0.169
-solo and -> 0.139 in the full swap, solo AUC 0.556 -> 0.543, per-scene F2 -0.003 to -0.004 (p 1.000 /
-0.896), with Richard the most negative book in both cells — the corpus test certifies that book's
-summary-template tokens as names (`dynamics` via the mid-capital ratio with no lowercase attestation;
-`summary`, `contextual` via the never-lowercase branch, whose ZIPF_EN backstop is a speech-register
-table that lacks template vocabulary). The decline is not Richard's: dropping his 25 scenes leaves it
-the same size (solo AUC -0.014 over the remaining 4 books, per-scene F2 flat at p 1.000), so it is the
-detector corpus-wide, with Richard only its loudest illustration. The only unmeasured cell left is a
-span arm on the `book` detector, which nothing now motivates.
+(below). `density` under the corpus test (`--density-extract book`) reads slightly worse — std beta
+0.221 -> 0.169 solo (-> 0.139 in the full swap, part of which is shared-detector collinearity), solo
+AUC 0.556 -> 0.543, per-scene F2 flat (p 1.000 / 0.896) — a decline small enough to sit inside the
+noise floor at this corpus size. **RETEST when the graded corpus grows**; until then the shipped
+detector stands on parsimony — no cell shows a gain — not on the decline being real. It survives
+dropping Richard's 25 scenes (solo AUC -0.014 over the remaining 4 books), so if real it is the
+detector, not one book.
+
+What is exact rather than statistical: the corpus test certifies Richard's summary-template tokens as
+names — `dynamics` via the mid-capital ratio with no lowercase attestation; `summary`, `contextual`
+via the never-lowercase branch, whose ZIPF_EN backstop is a speech-register table that lacks template
+vocabulary. A never-lowercase word is the one shape the evidence cannot arbitrate. The only unmeasured
+cell left is a span arm on the `book` detector, which nothing now motivates.
 
 `--proper-nouns-extract book` replaces `properNounsOf`'s per-text sentence-position rule with the
 suggester's corpus name test (`keyword-core.mjs` `nameEvidence`, one properness test for both
