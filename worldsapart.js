@@ -619,9 +619,9 @@ function loadRelevanceModel() {
  * Stage 4's relevance column: the two signals the fitted model needs that nothing else computes, then
  * `E[credit]` per entry.
  *
- * MEASURED AND RECORDED, NOT ACTED ON. Nothing here drops an entry. The runtime's `properNouns` and
- * `density` have to be shown to agree with the harness's before a cut placed on them means anything,
- * and the way to show that is to capture both and compare — so this fills the column and stops.
+ * IT FILLS THE COLUMN; IT DOES NOT CUT. The cut is `selection.relevanceCut`, at the walk, so the whole
+ * pre-cut population is still captured and gradeable — a harness that only saw survivors could not score
+ * the decision that produced them.
  *
  * THE SAME WINDOW THE FIT SAW, at the GLOBAL depth with a plain entry: proper-noun overlap is a property
  * of the SCENE, so an entry's own opted-in sources are its and not the scene's. `eval/scene.mjs`
@@ -632,9 +632,10 @@ function loadRelevanceModel() {
  * statistic of one book, so an entry's names are weighted against its own corpus and never against the
  * pooled attached set. That is the same one-index rule content-lexical rests on.
  *
- * MEMORY TIER ONLY. The shipped fit is memory's; reference has neither a fit nor a cutoff, and `density`
- * measured INVERTED there (-0.935 against +0.215), so scoring reference rows through these coefficients
- * would carry the wrong sign rather than merely being imprecise.
+ * ONE FIT PER TIER, never one across both. `density` measured INVERTED on reference (-0.935 against
+ * +0.215), so scoring reference rows through memory's coefficients would carry the wrong sign rather
+ * than merely being imprecise. Reference is scored — the column orders it for the budget walk — and cut
+ * nowhere.
  */
 async function scoreRelevanceColumn(items, windowFor) {
     const models = await loadRelevanceModel();

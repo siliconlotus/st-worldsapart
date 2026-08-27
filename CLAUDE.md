@@ -206,10 +206,12 @@ since it shaped which keys got examined. Removals speak to precision, never to r
 
 ## Four stages, and the two rankings
 
-**WA is a selection system that uses rank, not a ranking system.** What ships is the set that survives
-stage 4; rank is how that set gets chosen, not the product. So the validity score is F2 over the
-DELIVERED SET, set-based and asymmetric — recall at grade >= 3, precision crediting a 2 at half
-(`metrics.mjs` `gradeCredit`), recall-weighted (`matcher-design.md`, *Evidence → Two scores*). **No
+**WA is a selection system, not a ranking system.** What ships is the set that survives stage 4, and
+that set is chosen by a THRESHOLD: `relevanceCut` tests each row's `E[credit]` against the cutoff on its
+own, with no sort and no position. Rank enters only at stage 5, where the caps and the budget take a
+prefix of the layout order — so rank decides what OVERFLOWS, never what belongs. So the validity score
+is F2 over the DELIVERED SET, set-based and asymmetric — recall at grade >= 3, precision crediting a 2
+at half (`metrics.mjs` `gradeCredit`), recall-weighted (`matcher-design.md`, *Evidence → Two scores*). **No
 window is imposed on it: choosing the set is what is being graded.** nDCG and any score read at a
 window the system is not asked to choose — `@R`, the top `relevant` rows — are DIAGNOSTICS on the
 ordering, never evidence that the system works. `@R` bounds what the score can reach, since it is what

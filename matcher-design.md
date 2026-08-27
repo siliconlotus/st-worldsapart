@@ -928,7 +928,7 @@ against the runtime's own verdicts on 315 rows across 7 arms.
 
 ### Stage 4 predicts per-entry relevance
 
-**Ruled, unimplemented.** Regression was measured to be no worse than RRF + nDCG and was chosen for
+**Shipped.** Regression was measured to be no worse than RRF + nDCG and was chosen for
 explainability. Unless a paragraph says otherwise, everything below is measured by
 `eval/relevance-regress.mjs` on the memory tier, 102 graded scenes, 6051 judged rows and 379 positives on
 5 books, held out by book — the corpus with entries that STRADDLE their scene removed (`dropUnavailable`).
@@ -1514,47 +1514,22 @@ instances the books on disk hold.
    bulk sitting ahead of the hoisted blocks, `query`/`queryChat` duplicate per arm, and nothing yet fills
    `modelDigest` or a pass's `params` at capture.
 
-2. **The relevance prediction — stage 4 deciding, per entry, whether it belongs.** This is the whole of
-   the open work, not a step after tuning: F2@layout is the score of record, and until a prediction
-   exists the delivered set is everything activated, so that score is invariant to every layout
-   parameter (measured, *Evidence → Two scores*). The predicted set IS the layout, so scoring it is
-   scoring the prediction, and `tierRecall` gets its kept set back at the same moment. The model, its
-   evidence and what is still open about it are in *Stage 4 predicts per-entry relevance*.
+2. **The relevance prediction — LANDED.** Stage 4 makes a relevance decision: `rankActivated` fills the
+   `E[credit]` column every scan, `selection.relevanceCut` drops dynamic memory rows below
+   `relevanceCutoff`, and the layout is ordered by that same quantity. It takes no setting — a switch
+   would mean carrying two orderings for the dynamic block forever — and the fusion it replaced is gone
+   rather than defaulted off: `rrfK`, `lexicalWeight`, `keywordWeight` and `weightByOrder` no longer
+   exist. A row nothing scored is KEPT: an absent verdict, not a negative one.
 
-   THE MODEL IS FITTED AND THE CUTOFF WITH IT. `relevance-model-memory.json` carries TWO coefficient
-   vectors — one per boundary `E[credit]` is built from, five columns each — and the operating point its
-   held-out F2 curve peaks at, so what remains is the CONSUMER: `rankActivated` reading the file,
-   standardising each signal within the scene it is scoring as the fit did, and cutting the layout at
-   that probability. Reference has neither a fit nor a cutoff, and gets both or neither —
-   its own question is whether cosine is a feature there at all.
-
-   **The file used to carry ONE vector and it was the wrong one.** `--emit-model` wrote the single
-   `--cut` fit — P(>=3) — beside a cutoff read off the E[credit] grid, so its two halves described
-   different quantities and a consumer thresholding them together would have delivered a strictly
-   tighter set than the number was chosen on (`E[credit] >= P(>=3)` wherever the clamp holds). Both
-   vectors travel now, since the boundaries are fitted separately and neither derives from the other.
-   The emitted `ge3` is bit-identical to what the file carried before, so nothing about the fit moved.
+   **BOTH TIERS ARE FITTED; ONLY MEMORY IS CUT.** One file per tier, keyed by embedding model, each
+   carrying the two coefficient vectors `E[credit]` is built from plus a `noCosine` fit — the fallback in
+   both directions, for a model with no fit of its own and for a turn that came back scoreless.
+   Reference rows are scored, because the column orders them for the budget walk, and never cut.
 
    **`--emit-model` runs at the shipped definition or it refuses** — `--cut 3`, `--relevant-at 3`, no
-   `--half-recall`, and `--cutoff --lobo` present. Each of those otherwise produces a file that reads as
-   the shipping artefact and is not; the last was a silent no-op that printed a full table and wrote
-   nothing.
-
-   **THE PURE HALF OF THE CONSUMER LANDED** as `extension/relevance.mjs`, checked by
-   `eval/relevance-model-check.mjs`: `properNames` (what a name is, for both sides of the overlap),
-   `buildNameDf` (df over the book with the ENTRY as the document), `properShared`, `properDensity`, and
-   `scoreRelevance`, which standardises within the scene as the fit did and returns clamped `E[credit]`
-   per row. `relevance-regress` calls `properNames` rather than its own copy, so the fit and the runtime
-   cannot drift on what a name is; the model re-emits byte-identical through it.
-
-   **THE RUNTIME MEASURES THE COLUMN AND CUTS NOTHING.** `relevanceScoring` (Ranking & fusion, default
-   OFF) has `rankActivated` build both signals and record `properNouns`, `density` and `eCredit` on every
-   memory row and in the verbose capture. The order is deliberate rather than partial: a cut placed on
-   these signals means nothing until the runtime's values are shown to agree with the fit's, and
-   capturing both is what makes that comparison possible. The model file moved to
-   `extension/relevance-model-memory.json` — it is shipped data, not harness output — and is fetched
-   rather than imported, so a browser that rejects JSON modules loses one column instead of the
-   extension.
+   `--half-recall`, and `--cutoff --lobo` present. Each otherwise produces a file that reads as the
+   shipping artefact and is not. Both vectors travel because the boundaries are fitted separately and
+   neither derives from the other.
 
    The name index rides `contentIndexes`' per-book cache and fingerprint, since it is the same kind of
    corpus statistic and goes stale at the same moment. **Two walks, not one**: `buildContentIndex`
@@ -1563,9 +1538,13 @@ instances the books on disk hold.
    entry — the same builder and inputs `eval/scene.mjs` `haystackFor` uses — because a second window here
    would be a second definition of what WA searched.
 
-   What remains is the CUT: comparing a capture's `eCredit` against a harness run on the same scene, then
-   cutting the layout at the tier's cutoff and ordering the dynamic block by the same quantity. Reference
-   rows are not scored at all — the shipped fit is memory's, and `density` inverts there.
+   What is still open is in *Stage 4 predicts per-entry relevance*: the delivered COUNT is a fixed share
+   of what activation produced rather than of what the scene needs, and per-book standardisation reverses
+   that pathology while losing on the score of record. **The runtime's entry-side signals agree with the
+   harness's**: measured on one browser capture, 16 scored rows, `properNouns` and `density` both
+   reproduce from `relevance.mjs` to the capture's own rounding. `E[credit]` itself is unchecked — the
+   within-scene standardisation cannot be rebuilt from a capture holding only the delivered union.
+
 3. **`promote` — an author declaration that activation is sufficient.** A promoted entry enters the
    layout whenever its keys fire, exempt from the relevance cut. It is the per-entry form of *triggered
    == relevant*, which stage 4 broke by having the cliff arbitrate keyword-activated entries alongside
