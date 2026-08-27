@@ -1,23 +1,23 @@
 // Guards the English-commonness cut used by the keyword-prune too-common flag: the deliberated words
-// must land on the expected side of the sticky (top-1000 head) and keyword/vector (full-list) tiers.
+// must land on the expected side of the one list. ONE LIST, not two — an entry's stickiness does not
+// enter, since sticky is about an armed entry persisting and says nothing about whether a key is a
+// good trigger.
 // Run: node keyword-common-check.mjs
 import assert from 'node:assert';
 import { COMMON_WORDS } from '../plugin/commonwords.js';
 
-const STICKY_CUT = 1000;                                  // mirror ENGLISH_COMMON_STICKY_CUT
-const head = new Set([...COMMON_WORDS].slice(0, STICKY_CUT));
-const isCommon = (w, sticky) => (sticky ? head : COMMON_WORDS).has(w);
+const isCommon = w => COMMON_WORDS.has(w);
 
-// Generic even in-setting -> flagged on sticky AND keyword.
+// Generic even in-setting -> flagged.
 for (const w of ['home', 'street', 'house', 'room', 'night', 'king', 'door', 'blood', 'fire'])
-    assert(isCommon(w, true) && isCommon(w, false), `${w} should flag on sticky and keyword`);
+    assert(isCommon(w), `${w} should flag`);
 
-// Meaningful-but-common -> spared on sticky (reference sheet), flagged on keyword (full list).
+// Meaningful but still common English -> flagged. These used to be spared on sticky entries.
 for (const w of ['magic', 'spirit', 'soul', 'queen'])
-    assert(!isCommon(w, true) && isCommon(w, false), `${w} should spare on sticky, flag on keyword`);
+    assert(isCommon(w), `${w} should flag`);
 
-// Names / setting-specific -> spared everywhere (absent from the list).
+// Names / setting-specific -> spared (absent from the list).
 for (const w of ['aria', 'castle', 'dragon'])
-    assert(!isCommon(w, false), `${w} should never flag`);
+    assert(!isCommon(w), `${w} should never flag`);
 
 console.log('keyword-common-check: ok');

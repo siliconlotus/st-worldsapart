@@ -608,7 +608,8 @@ was the phrasing considered first and would have made every exemption a question
 entry can currently fire.
 
 **Exempt: `constant` and `sticky`.** Both are author declarations that the entry is meant to be
-ubiquitous, which is the ground `stickySkipCommon` already stands on for `book common`.
+ubiquitous. This stands on its own: the audit's own sticky exemptions (`stickySkipCommon`, the
+top-1000 `COMMON_HEAD`) are deleted, so there is no precedent beside it.
 
 **Not exempt: vectorized, and therefore not the memory tier.** `suppressVectorKeys` blanks those keys
 so they cannot activate — but it is a WA setting, and stock SillyTavern matches them normally, so a key

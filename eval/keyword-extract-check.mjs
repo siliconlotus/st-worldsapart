@@ -18,8 +18,7 @@ const pruneBook = { entries: {
     3: { uid: 3, key: [], content: 'Rain on the home, an ordinary night.', comment: 'Four' },
 } };
 const pruneOpts = { scanKeyword: true, scanVectorized: true, scanConstant: true, includeInactive: false,
-    pruneUnattested: true, pruneCommon: true, pruneShort: true, ignoreProper: false, stickySkipCommon: true,
-    bookCommon: KEY_BOOK_COMMON, minLength: KEY_MIN_LENGTH };
+    pruneUnattested: true, pruneCommon: true, pruneShort: true, ignoreProper: false,     bookCommon: KEY_BOOK_COMMON, minLength: KEY_MIN_LENGTH };
 const ps = buildKeyPruneScan(pruneBook, pruneOpts, new Set());
 assert.strictEqual(ps.entries.length, 4, 'all keyword entries scanned');
 const flagsOf = uid => Object.fromEntries(ps.classifyEntry(pruneBook.entries[uid]).map(r => [r.key, r.flag]));
@@ -260,7 +259,7 @@ const sharedBook = { entries: Object.fromEntries([...Array(12)].map((_, i) => [i
     key: i === 0 ? ['astronaut', 'moonwalk'] : ['astronaut'],
     content: i === 0 ? 'The astronaut walked. A moonwalk followed. Astronaut again.' : 'Unrelated prose about weather and bread.',
 }])) };
-const sharedOpts = { scanKeyword: true, scanVectorized: true, scanConstant: true, includeInactive: true, pruneUnattested: false, pruneCommon: true, pruneShort: false, pruneShared: true, ignoreProper: false, stickySkipCommon: true, bookCommon: KEY_BOOK_COMMON, minLength: KEY_MIN_LENGTH, bookShared: 0.75 };
+const sharedOpts = { scanKeyword: true, scanVectorized: true, scanConstant: true, includeInactive: true, pruneUnattested: false, pruneCommon: true, pruneShort: false, pruneShared: true, ignoreProper: false, bookCommon: KEY_BOOK_COMMON, minLength: KEY_MIN_LENGTH, bookShared: 0.75 };
 {
     const s = buildKeyPruneScan(sharedBook, sharedOpts, new Set());
     const row = s.classifyEntry(sharedBook.entries[5]).find(r => r.key === 'astronaut');
@@ -295,7 +294,7 @@ const scopeBook = { entries: {
     2: { uid: 2, key: ['zzzdead'], content: 'nothing' },
     3: { uid: 3, key: ['zzzdead'], content: 'nothing', disable: true },
 } };
-const scopeOpts = { scanKeyword: true, scanVectorized: true, scanConstant: true, includeInactive: true, pruneUnattested: true, pruneCommon: true, pruneShort: true, ignoreProper: false, stickySkipCommon: true, bookCommon: 0.5, minLength: 4 };
+const scopeOpts = { scanKeyword: true, scanVectorized: true, scanConstant: true, includeInactive: true, pruneUnattested: true, pruneCommon: true, pruneShort: true, ignoreProper: false, bookCommon: 0.5, minLength: 4 };
 const scoped = (over) => {
     const s = buildKeyPruneScan(scopeBook, { ...scopeOpts, ...over }, new Set());
     return Object.values(scopeBook.entries).filter(e => s.classifyEntry(e).length).map(e => e.uid);

@@ -344,7 +344,6 @@ export async function lorebookStudio(preferredBook = null) {
                 check(studioOpts, 'pruneShort', 'Flag short keys'),
                 num(studioOpts, 'minLength', '↳ short: under', 'chars', { min: 1 }),
                 check(studioOpts, 'ignoreProper', 'Spare proper nouns from the dead flag'),
-                check(studioOpts, 'stickySkipCommon', 'Spare sticky entries from the book-common flag'),
             ),
             col('Recommender (⚡ / ✨)',
                 num(suggestOpts, 'dfCeil', 'Skip terms in >', '% of entries', { min: 1, max: 100, scale: 100 }, invSuggest),

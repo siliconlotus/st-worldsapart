@@ -91,15 +91,6 @@ export function looksLikeFragment(key) {
     return words.length > 1 && words.some(w => FUNCTION_WORDS.has(w));
 }
 
-/** Baseline English-frequency cut for the too-common flag. A key this common in general English
- * over-fires against the CHAT, not just other entries — a signal lorebook df alone can't see.
- * Sticky reference sheets tolerate more (a bare-name trigger is meant to be ubiquitous), so they
- * test only the head of the frequency-ordered list; keyword/vector entries test all of it.
- * ponytail: rank cut into COMMON_WORDS; retune if words land the wrong side (magic~1725 spared on
- * sticky, home~137/street~497 flagged everywhere). */
-const ENGLISH_COMMON_STICKY_CUT = 1000;
-const COMMON_HEAD = new Set([...COMMON_WORDS].slice(0, ENGLISH_COMMON_STICKY_CUT));
-
 /**
  * The term a SmartKey's matching surface reduces to under `isLoose`, or null if it has a selective term.
  *
@@ -335,7 +326,7 @@ export function buildKeyPruneScan(data, opts, ignoreSet, { caseSensitiveDefault 
     const effWhole = e => e.matchWholeWords ?? wholeWordsDefault;
     // One key → its recommendation (or null). Priority dead, too-common, short. Short is skipped
     // under whole-word matching (no substring collision) and otherwise reports whole-word/total.
-    const classify = (key, cs, ww, sticky) => {
+    const classify = (key, cs, ww) => {
         const k = String(key).trim();
         if (!k) return null;
         // A key the MATCHER refuses to run, checked before anything reads the text: it is a fact about
@@ -376,10 +367,9 @@ export function buildKeyPruneScan(data, opts, ignoreSet, { caseSensitiveDefault 
         // the same one: a key whose whole matching surface is a common English word over-fires whether it
         // was written `heat` or `? (your|my|Kyle's) heat`.
         if (opts.pruneCommon) {
-            const list = sticky ? COMMON_HEAD : COMMON_WORDS;
-            if (literal && !/\s/.test(k) && list.has(k.toLowerCase())) return { flag: 'english common', bookContent, chatRate };
+            if (literal && !/\s/.test(k) && COMMON_WORDS.has(k.toLowerCase())) return { flag: 'english common', bookContent, chatRate };
             // `term` only on this path: naming it beside a literal key would just repeat the key.
-            const term = literal ? null : commonSmartKey(k, isEnglishCommon(list));
+            const term = literal ? null : commonSmartKey(k, isEnglishCommon(COMMON_WORDS));
             if (term) return { flag: 'english common', term, bookContent, chatRate };
         }
         // ignoreProper spares a capitalised key from the dead flag on the grounds it is a name the chat
@@ -435,14 +425,14 @@ export function buildKeyPruneScan(data, opts, ignoreSet, { caseSensitiveDefault 
         if (!inScope(e)) return [];
         const cs = effCase(e), ww = effWhole(e);
         const out = [];
-        const sticky = Number(e.sticky) > 0;
+        // STICKY IS NOT READ HERE. Sticky means an armed entry persists once activated; it says nothing
+        // about whether a key is a good trigger, so it earns no reprieve from any flag. The exemption it
+        // used to carry — spare the df-based too-common, and test only the top-1000 of the English list —
+        // was an author declaration that an entry should be present, wearing the wrong flag.
         for (const key of (Array.isArray(e.key) ? e.key : [])) {
             if (ignoreSet.has(key)) continue;
-            const c = classify(key, cs, ww, sticky);
-            // Sticky = a reference sheet whose bare-name trigger is meant to be ubiquitous, so spare
-            // the df-based too-common (cross-entry ubiquity is expected). The English-common flag
-            // still bites — a genuinely generic word (top-1000) is a bad trigger even here.
-            if (c && !(c.flag === 'book common' && sticky && opts.stickySkipCommon)) out.push({ uid: e.uid, key, ...c });
+            const c = classify(key, cs, ww);
+            if (c) out.push({ uid: e.uid, key, ...c });
         }
         return out;
     };
@@ -1261,7 +1251,7 @@ export function buildKeySuggest(data, opts) {
 
 // Studio scans every entry (all modes, active + inactive) so every entry's keywords get a verdict;
 // suggestions use the pruner's own dfCeil so a suggested key can't be one the pruner would then flag.
-export const STUDIO_PRUNE_OPTS = { scanKeyword: true, scanVectorized: true, scanConstant: true, includeInactive: true, pruneUnattested: true, pruneCommon: true, pruneShort: true, pruneShared: true, pruneFragment: true, ignoreProper: false, stickySkipCommon: true, bookCommon: KEY_BOOK_COMMON, minLength: KEY_MIN_LENGTH, bookShared: KEY_BOOK_SHARED, chatCommon: KEY_CHAT_COMMON };
+export const STUDIO_PRUNE_OPTS = { scanKeyword: true, scanVectorized: true, scanConstant: true, includeInactive: true, pruneUnattested: true, pruneCommon: true, pruneShort: true, pruneShared: true, pruneFragment: true, ignoreProper: false, bookCommon: KEY_BOOK_COMMON, minLength: KEY_MIN_LENGTH, bookShared: KEY_BOOK_SHARED, chatCommon: KEY_CHAT_COMMON };
 // dfCeil sits just under the pruner's too-common danger line (KEY_BOOK_COMMON * 0.75 = 0.375): the
 // suggester must not pre-reject a term the pruner itself considers fine. It was 0.15 when
 // cross-entry df was the only junk signal; the Zipf gate now owns English junk, and 0.15 was

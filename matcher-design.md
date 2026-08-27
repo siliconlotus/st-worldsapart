@@ -1569,10 +1569,11 @@ instances the books on disk hold.
    `sticky: 1, constant: false` is reaching for the insertion guarantee, not the persistence; promoting
    it keeps that and drops the two it was never asking for.
 
-   **It also takes the too-common exemption over from `sticky`** (`stickySkipCommon`, which becomes
-   `promoteSkipCommon`): the audit's reprieve is for an author declaring an entry should be present,
-   which is what `promote` says and what `sticky` only used to imply. Until then sticky keeps it, for
-   want of anywhere else to put it.
+   **The audit no longer exempts anything on stickiness.** `stickySkipCommon` and the top-1000
+   `COMMON_HEAD` are both deleted: sticky means an armed entry persists once activated, which says
+   nothing about whether a key is a good trigger. So a reprieve for an author declaring an entry should
+   be present is now unclaimed rather than inherited, and giving one to `promote` is a new call to make
+   on its own evidence.
 
    Stored as `entry.promote`, top-level beside `sticky` and `vectorized` rather than under
    `extensions` — `convertCharacterBook` reads 25 fields OUT of `extensions` and never copies the map,

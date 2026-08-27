@@ -24,7 +24,7 @@ const msgs = fs.readFileSync(new URL('sentinel-chat.jsonl', here), 'utf8').split
 const OPTS = {
     scanKeyword: true, scanVectorized: true, scanConstant: true, includeInactive: true,
     pruneUnattested: true, pruneCommon: true, pruneShort: true, pruneShared: true, pruneFragment: true,
-    ignoreProper: false, stickySkipCommon: true, bookCommon: 0.5, minLength: 4, bookShared: 0.75,
+    ignoreProper: false, bookCommon: 0.5, minLength: 4, bookShared: 0.75,
 };
 const RED = '#e06c6c';
 const entries = Object.values(data.entries);

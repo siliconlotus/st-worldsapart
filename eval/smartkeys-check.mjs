@@ -202,7 +202,7 @@ eq(countKey('? fire::3 XOR flood', 'a fire burns', false, false), 3, 'XOR still 
 // verdicts have to say which, since only one of them would change were the text different.
 {
     const data = { entries: { 0: { uid: 0, key: ['? moon mission', '? -apollo'], content: 'nothing relevant' } } };
-    const opts = { scanKeyword: true, scanVectorized: true, scanConstant: true, includeInactive: true, pruneUnattested: true, pruneCommon: true, pruneShort: true, ignoreProper: false, stickySkipCommon: true, bookCommon: 0.5, minLength: 4 };
+    const opts = { scanKeyword: true, scanVectorized: true, scanConstant: true, includeInactive: true, pruneUnattested: true, pruneCommon: true, pruneShort: true, ignoreProper: false, bookCommon: 0.5, minLength: 4 };
     const { classifyEntry } = buildKeyPruneScan(data, opts, new Set());
     eq(classifyEntry(data.entries[0]).map(f => f.flag).join(','), 'unattested,unusable', 'a dead query is flagged; a negation-only one is flagged unusable, not dead');
 }
@@ -216,8 +216,7 @@ eq(countKey('? fire::3 XOR flood', 'a fire burns', false, false), 3, 'XOR still 
     entries[1].content += ' By the door.';
     entries[1].key = ['/\\n/', '/zzznope/', '/by the door/i', 'x'];
     const opts = { scanKeyword: true, scanVectorized: true, scanConstant: true, includeInactive: true,
-        pruneUnattested: true, pruneCommon: true, pruneShort: true, pruneShared: true, ignoreProper: false,
-        stickySkipCommon: true, bookCommon: 0.5, bookShared: 0.5, minLength: 4 };
+        pruneUnattested: true, pruneCommon: true, pruneShort: true, pruneShared: true, ignoreProper: false, bookCommon: 0.5, bookShared: 0.5, minLength: 4 };
     const { classifyEntry, reasonOf } = buildKeyPruneScan({ entries }, opts, new Set());
     const flags = new Map(classifyEntry(entries[1]).map(f => [String(f.key), f]));
     eq(flags.get('/\\n/')?.flag, 'book common', 'a pattern that fires on every entry is flagged, like any ubiquitous key');

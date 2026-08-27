@@ -81,8 +81,7 @@ console.log('ok   matchWindow: scan is the old behaviour, narrower settings scop
     const { buildKeyPruneScan } = await import('../extension/keyword-core.mjs');
     const opts = {
         scanKeyword: true, scanVectorized: true, scanConstant: true, includeInactive: true,
-        pruneUnattested: true, pruneCommon: true, pruneShort: true, ignoreProper: false,
-        stickySkipCommon: true, bookCommon: 0.5, minLength: 4,
+        pruneUnattested: true, pruneCommon: true, pruneShort: true, ignoreProper: false, bookCommon: 0.5, minLength: 4,
     };
     const book = {
         entries: {
@@ -114,8 +113,7 @@ console.log('ok   the audit segments like the runtime, and literals are slice-in
     const { buildKeyPruneScan, KEY_CHAT_COMMON } = await import('../extension/keyword-core.mjs');
     const opts = {
         scanKeyword: true, scanVectorized: true, scanConstant: true, includeInactive: true,
-        pruneUnattested: true, pruneCommon: true, pruneShort: true, ignoreProper: false,
-        stickySkipCommon: true, bookCommon: 0.5, minLength: 4,
+        pruneUnattested: true, pruneCommon: true, pruneShort: true, ignoreProper: false, bookCommon: 0.5, minLength: 4,
     };
     // `mother` is in COMMON_WORDS; `zzznope` is in neither the book's text nor any word list.
     const book = { entries: { 0: { uid: 0, key: ['mother', 'zzznope'], content: 'Nothing relevant here.' } } };
@@ -148,8 +146,7 @@ console.log('ok   chat evidence reaches the classifier and conditions severity')
     const { buildKeyPruneScan } = await import('../extension/keyword-core.mjs');
     const opts = {
         scanKeyword: true, scanVectorized: true, scanConstant: true, includeInactive: true,
-        pruneUnattested: true, pruneCommon: true, pruneShort: true, ignoreProper: false,
-        stickySkipCommon: true, bookCommon: 0.5, minLength: 4,
+        pruneUnattested: true, pruneCommon: true, pruneShort: true, ignoreProper: false, bookCommon: 0.5, minLength: 4,
     };
     const book = { entries: { 0: { uid: 0, key: ['zzznope'], content: 'Nothing relevant.' } } };
     const why = chatScan => {
