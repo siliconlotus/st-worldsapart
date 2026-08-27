@@ -83,7 +83,7 @@ for (const path of files) {
             if (acts.includes('vectorize') && book === view.primaryBook) vectorized.add(path);
             if (WRITE) {
                 if (acts.includes('strip-marker')) { delete e.stmemorybooks; delete e.STMB_start; delete e.STMB_end; }
-                // Presence is the whole signal — scene.mjs's isMemory and keyword-core's `generated` both test
+                // Presence is the whole signal — scene.mjs's isMemory and keyword-suggest's `generated` both test
                 // for it and never read the range, which a repair has no way to recover anyway.
                 if (acts.includes('add-marker')) e.stmemorybooks = true;
                 if (acts.includes('vectorize')) e.vectorized = true;

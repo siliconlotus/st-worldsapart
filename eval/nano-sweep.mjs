@@ -19,7 +19,7 @@
 //
 // Flags: --model <id>  --concurrency 8  --out <file>  --variants all|shipped  --score-only
 import { readFileSync, appendFileSync, existsSync } from 'node:fs';
-import { buildKeySuggest, parseKeyList, STUDIO_SUGGEST_OPTS } from '../extension/keyword-core.mjs';
+import { buildKeySuggest, parseKeyList, STUDIO_SUGGEST_OPTS } from '../extension/keyword-suggest.mjs';
 
 const HERE = new URL('.', import.meta.url).pathname;
 const BASE = process.env.NANO_BASE_URL ?? 'https://nano-gpt.com/api/v1';

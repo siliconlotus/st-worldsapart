@@ -53,7 +53,7 @@ import { COMMON_WORDS } from '../plugin/commonwords.js';
 import { logisticFit, auc, cumulativeFit, prCurve, reliability, sigmoid } from './logistic.mjs';
 import * as entity from '../extension/entity.mjs';
 import { properNames, properDensity, modelKey, properNounsOf } from '../extension/relevance.mjs';
-import { nameEvidence } from '../extension/keyword-core.mjs';
+import { nameEvidence } from '../extension/keyword-suggest.mjs';
 import { fold, normalizeOrthography } from '../extension/smartkeys.mjs';
 import { tokenize } from '../extension/lexical.mjs';
 import { chunkEntry } from '../extension/chunking.mjs';
@@ -276,7 +276,7 @@ const featureDef = {
 // words. Restricting the vocabulary to names asks a different question — is this entry about someone who
 // is on screen — and that is the axis the three shipped signals do not have.
 //
-// Title-case token minus the common-English list, which is the same heuristic keyword-core's looksProper
+// Title-case token minus the common-English list, which is the same heuristic keyword-audit's looksProper
 // uses. It over-fires on sentence-initial words; that noise is shared by both sides of the intersection,
 // so it inflates the floor rather than the discrimination, and a POS tagger is not worth it to find out
 // whether the axis exists at all.
@@ -334,7 +334,7 @@ const properSpans = (text) => {
     for (const w of [...out]) if (!w.includes(' ') && COMMON_WORDS.has(w)) out.delete(w);
     return out;
 };
-// `book` mode: the suggester's own corpus name test (keyword-core nameEvidence), fed the scene's
+// `book` mode: the suggester's own corpus name test (keyword-suggest nameEvidence), fed the scene's
 // entries, arbitrating every capitalised token — sentence-initial included, which properNounsOf cannot
 // count, and with no COMMON_WORDS subtraction, since the book's own statistics are the stoplist's job
 // here. Tokens are folded and lowercased by the evidence's own fold, so entry, window and df keys agree.

@@ -10,9 +10,9 @@
 // The files are also importable into SillyTavern, which is the point: the half that cannot be tested
 // from node (chips, tooltips, colours) is eyeballed against a book whose every answer is written down.
 import fs from 'node:fs';
-import { buildKeyPruneScan } from '../extension/keyword-core.mjs';
+import { buildKeyPruneScan } from '../extension/keyword-audit.mjs';
 import { keywordScore, scanSegments, countKey, isRegexKey, activationAdds, makeWindowFor } from '../extension/matcher.mjs';
-import { buildKeyPruneScan as _pruneScan } from '../extension/keyword-core.mjs';
+import { buildKeyPruneScan as _pruneScan } from '../extension/keyword-audit.mjs';
 import { buildAutomaton, addMessageHits, fold } from '../extension/smartkeys.mjs';
 import { eq } from './metrics.mjs';
 

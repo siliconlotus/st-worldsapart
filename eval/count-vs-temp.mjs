@@ -31,7 +31,7 @@
 // Usage:  node count-vs-temp.mjs --model gemma3:4b [--count "15 to 25"] [--repeats 3]
 import { readFileSync, writeFileSync, existsSync } from 'node:fs';
 import { createHash } from 'node:crypto';
-import { buildKeySuggest, parseKeyList, STUDIO_SUGGEST_OPTS } from '../extension/keyword-core.mjs';
+import { buildKeySuggest, parseKeyList, STUDIO_SUGGEST_OPTS } from '../extension/keyword-suggest.mjs';
 import { countKey } from '../extension/matcher.mjs';
 
 const HERE = new URL('.', import.meta.url).pathname;

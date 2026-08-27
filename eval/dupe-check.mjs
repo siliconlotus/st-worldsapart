@@ -2,7 +2,7 @@
 // taken from the real instances: one scene summarized twice (Sommers 197/198), an arc that overlaps a
 // scene it contains (Time Whore, must NOT flag), and two arc entries with the same text (Isekai
 // Adventure, must flag).
-import { buildKeyPruneScan, KEY_DUPE_MIN } from '../extension/keyword-core.mjs';
+import { buildKeyPruneScan, KEY_DUPE_MIN } from '../extension/keyword-audit.mjs';
 import { eq } from './metrics.mjs';
 
 const OPTS = { scanKeyword: true, scanVectorized: true, scanConstant: true, includeInactive: true,

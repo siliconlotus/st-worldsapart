@@ -1,5 +1,5 @@
 // Offline batch version of the Studio's keyword audit: audits EVERY entry's keys. Same classifier
-// (keyword-core buildKeyPruneScan / KEY_BOOK_COMMON), so this and the in-app audit never drift.
+// (keyword-audit buildKeyPruneScan / KEY_BOOK_COMMON), so this and the in-app audit never drift.
 //
 // Per key:  dfContent — entries whose CONTENT contains the key (firing commonness)
 //           bookListedBy — entries that LIST the key (shared-memory span; NOT a defect)
@@ -30,7 +30,7 @@ for (const [what, path] of [['index', INDEX], ['lorebook', LORE]]) {
     console.error('usage: node keyword-audit.mjs <path/to/index.json> <path/to/lorebook.json> [--json out.json]');
     process.exit(2);
 }
-const BOOK_COMMON = 0.50;  // matches KEY_BOOK_COMMON in keyword-core.mjs
+const BOOK_COMMON = 0.50;  // matches KEY_BOOK_COMMON in extension/keyword-audit.mjs
 
 const idx = JSON.parse(readFileSync(INDEX, 'utf8'));
 const lb = JSON.parse(readFileSync(LORE, 'utf8'));

@@ -4,7 +4,8 @@
 // search, and the Tool Settings tray.
 //
 // DOM- and ST-coupled, like keyword-tools.mjs. The pure logic it stands on lives elsewhere and is
-// shared with the rest of WA: the keyword classifier/suggester in keyword-core.mjs (via keyword-tools'
+// shared with the rest of WA: the keyword classifier in keyword-audit.mjs and the suggester in
+// keyword-suggest.mjs (via keyword-tools'
 // flag-injecting wrapper), the sort vocabulary and tier definitions in sort.mjs, and the shared widgets
 // (context menu, sort control, stylesheet) in ui-widgets.mjs — so the Studio and the wand-menu reports
 // can never drift on what counts as a weak key or how entries order.
@@ -18,13 +19,13 @@ import { runState, settings } from './state.mjs';
 import { ensureStudioStyle, makeSortControl, showCtxMenu, showEntryText, wiGlyph } from './ui-widgets.mjs';
 import { SORT_FNS, SORT_LABELS, normPresentation, reconcileTiers, tierRank, wiTitleOf } from './sort.mjs';
 import { buildKeyPruneScan, llmKeyCandidates, STUDIO_PRUNE_OPTS, STUDIO_SUGGEST_OPTS } from './keyword-tools.mjs';
-import { buildKeySuggest, classifyLlmCand } from './keyword-core.mjs';
+import { buildKeySuggest, classifyLlmCand } from './keyword-suggest.mjs';
 import { buildAutomaton, addMessageHits, fold, validateSmartKey } from './smartkeys.mjs';
 import { findOrphanBindings } from './bindings.mjs';
 import { WI_LOGIC, isRegexKey, secondaryKeys, usableKeys, wholeWordAdvice } from './matcher.mjs';
 
 const WA_GREEN = '#7bbf6a';   // "no prune" — a keyword the scan doesn't flag
-const WA_RED = '#e06c6c';     // severe — same value keyword-core's severityOf hands back
+const WA_RED = '#e06c6c';     // severe — same value keyword-audit's severityOf hands back
 // Core's world_info_logic, worded as the sentence the chips beside it complete. The gate reads
 // backwards without it: the same list means "must also contain" or "must not contain" by logic alone.
 const LOGIC_LABEL = { 0: 'only if any of', 1: 'unless all of', 2: 'unless any of', 3: 'only if all of' };

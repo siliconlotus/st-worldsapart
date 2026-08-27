@@ -278,7 +278,7 @@ Both worth re-testing against the public books, which need no chat.
 scry → scried). Whole-word matching inverts this: collisions vanish, and every variant must be spelled
 out. It is one knob with two faces, and no key needs both workstreams.
 
-**`matchWholeWords` is per entry** (`extension/keyword-core.mjs:202-203`), so a keyset would have to be
+**`matchWholeWords` is per entry** (`extension/keyword-audit.mjs`), so a keyset would have to be
 internally coherent under one regime — except that **SmartKeys make matching semantics per key**: `=`
 is word-boundary, `^` is case-sensitive, combinable, per term (`extension/smartkeys.mjs:70`). So
 `? =rut` and a loose `thaumaturg` can coexist on one entry.
@@ -308,9 +308,9 @@ nobody runs.
 - The Aho-Corasick trie is flag-blind: it always yields the folded substring count, and exact is
   computed afterward only where the flags demand it — **on the primed path**. Unprimed *and* whole-word
   goes straight to a lookaround regex (`matcher.mjs`) that produces no substring count at all.
-- Production always primes (`matcher.mjs`, `keyword-core.mjs:143,154`). `cachedCount`'s three
+- Production always primes (`matcher.mjs`, `keyword-audit.mjs`). `cachedCount`'s three
   undefined branches are for out-of-band callers, never live matching.
-- The exact/substring ratio already exists: `keyword-core.mjs:225` computes `strictClean` against
+- The exact/substring ratio already exists: `keyword-audit.mjs` computes `strictClean` against
   `scan(k, cs, false).total`, read by `severityOf` — currently gated to short keys only. Generalizing
   it is caller-side work, no `countKey` surgery.
 - The case for changing `countKey`'s signature to `(exactCount, substringCount, weight)` is uniformity
@@ -336,7 +336,7 @@ nobody runs.
   (`studio.mjs:1957`) is painted after classification and so appears on one tab only. And a finding
   about `defChecked`, the pre-tick, is a finding about the rarely-visited screen: real, worth fixing,
   never the first thing to fix.
-- **`generated()` (`keyword-core.mjs:298`) tests field *presence*** — `stmemorybooks`, `STMB_start`,
+- **`generated()` (`keyword-audit.mjs`) tests field *presence*** — `stmemorybooks`, `STMB_start`,
   `stmbArc` — and is used only in `defChecked` (`:300`), the pre-tick state in the prune popup. It does
   not affect scanning; scope is `inScope` (`:109-113`), which knows nothing about STMB. Since
   `severityOf` returns `''` for `unattested`, that clause is the only route by which a dead key arrives
@@ -639,7 +639,7 @@ Blocking the definition:
 1. **The renderer's two thresholds.** The backoff picks "the longest collision-free common substring
    of the family", and neither word in that phrase has a number yet.
    - *How clean is clean enough.* The quantity exists: `strictClean(k) / scan(k, cs, false).total`,
-     already computed at `keyword-core.mjs:225` and banded by `severityOf` at 1.0 / ⅓ for short keys.
+     already computed at `keyword-audit.mjs` and banded by `severityOf` at 1.0 / ⅓ for short keys.
      The open question is whether a stem reuses those bands or earns its own, since a stem is
      deliberately not a word and will never score 1.0 the way a short key can. Settled by running the
      backoff over the gold families and reading the cases where it picks a stem you would reject.
@@ -667,7 +667,7 @@ Blocking measurement:
 Accepted as follow-on:
 
 5. **SmartKeys emission.** Portability policy is a judgement call, and the quality gates exempt `?`
-   keys entirely (`keyword-core.mjs:211`), so they would enter precisely where nothing can see them.
+   keys entirely (`keyword-audit.mjs`), so they would enter precisely where nothing can see them.
 6. **`countKey` signature change.**
 7. **`generated()` fallback** — the numbering-series heuristic in Populations. Low stakes (a checkbox
     default), so "fairly safe" is the proportionate standard.

@@ -317,7 +317,7 @@ inflated a reported number.
 `matcher.mjs` `countKey()` mirrors ST core's `matchKeys` — match flags, `/regex/` keys, `?` SmartKeys.
 Anything that reports on how a key will behave (the audit, the pruner, the Studio's keyword colouring)
 calls it rather than re-deriving the rules, so the audit can't drift from what actually fires at
-runtime. The Aho-Corasick batching in `keyword-core.mjs` changes only when and how often it is called.
+runtime. The Aho-Corasick batching in `keyword-audit.mjs` changes only when and how often it is called.
 
 **Its checks are split by what they are faithful to.** `core-matcher-check.mjs` holds every claim about
 how WA relates to core on an unmodified lorebook — the parity AND the named divergences, since a
@@ -328,7 +328,7 @@ expression is WORTH goes in the second.
 
 ## Pure vs ST-coupled
 
-`matcher.mjs`, `entity.mjs`, `query.mjs`, `keyword-core.mjs`, `selection.mjs`, `smartkeys.mjs`, `sort.mjs`, `lexical.mjs`, `relevance.mjs` and `plugin/*.mjs` are
+`matcher.mjs`, `entity.mjs`, `query.mjs`, `keyword-audit.mjs`, `keyword-suggest.mjs`, `selection.mjs`, `smartkeys.mjs`, `sort.mjs`, `lexical.mjs`, `relevance.mjs` and `plugin/*.mjs` are
 ST-free and node-importable, so the evals exercise the real shipped code instead of string-slicing it.
 Settings and ST globals are injected by the caller, never imported. The ST/DOM half is
 `worldsapart.js`, `keyword-tools.mjs`, `studio.mjs`, `ui-widgets.mjs`.

@@ -266,7 +266,7 @@ export const defaultSettings = {
      * dominant in one, so the compressed range was the book's sharpest signal about which scene it is.
      *
      * NO FREQUENCY DISCOUNT accompanies this, deliberately. A ubiquitous key is an author declaration
-     * (keyword-core.mjs already exempts sticky and constant entries from the too-common flags on that
+     * (keyword-audit.mjs already exempts constant entries from the too-common flags on that
      * ground), a badly chosen one is reported by the audit where the author can act on it, and an
      * entry whose key fires broadly but whose content does not fit still ranks low on the other two
      * fused signals. Discounting here would be that same judgement taken a second time, silently.

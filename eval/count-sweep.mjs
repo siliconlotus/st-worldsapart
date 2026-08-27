@@ -21,7 +21,7 @@
 // Usage:  node count-sweep.mjs --model gemma3:4b [--seed 42] [--temp 1]
 import { readFileSync, writeFileSync, existsSync } from 'node:fs';
 import { createHash } from 'node:crypto';
-import { buildKeySuggest, parseKeyList, STUDIO_SUGGEST_OPTS } from '../extension/keyword-core.mjs';
+import { buildKeySuggest, parseKeyList, STUDIO_SUGGEST_OPTS } from '../extension/keyword-suggest.mjs';
 import { countKey } from '../extension/matcher.mjs';
 
 const HERE = new URL('.', import.meta.url).pathname;

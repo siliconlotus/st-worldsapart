@@ -31,7 +31,7 @@
 // Usage:  node chunk-vs-whole.mjs --model gemma3:4b [--temp 0] [--entries 6]
 import { readFileSync, writeFileSync, existsSync } from 'node:fs';
 import { createHash } from 'node:crypto';
-import { buildKeySuggest, buildKeyPrompt, parseKeyList, STUDIO_SUGGEST_OPTS } from '../extension/keyword-core.mjs';
+import { buildKeySuggest, buildKeyPrompt, parseKeyList, STUDIO_SUGGEST_OPTS } from '../extension/keyword-suggest.mjs';
 import { splitRecursive } from '../extension/chunking.mjs';
 import { countKey } from '../extension/matcher.mjs';
 

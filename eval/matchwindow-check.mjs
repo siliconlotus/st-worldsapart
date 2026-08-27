@@ -78,7 +78,7 @@ console.log('ok   matchWindow: scan is the old behaviour, narrower settings scop
 // A LITERAL key is slice-invariant either way — measured over 8 books and 8,970 distinct keys on
 // disk, 0 change df and 0 change their occurrence total, because no literal spans a paragraph break.
 {
-    const { buildKeyPruneScan } = await import('../extension/keyword-core.mjs');
+    const { buildKeyPruneScan } = await import('../extension/keyword-audit.mjs');
     const opts = {
         scanKeyword: true, scanVectorized: true, scanConstant: true, includeInactive: true,
         pruneUnattested: true, pruneCommon: true, pruneShort: true, ignoreProper: false, bookCommon: 0.5, minLength: 4,
@@ -110,7 +110,7 @@ console.log('ok   the audit segments like the runtime, and literals are slice-in
 // Chat evidence reaching the CLASSIFIER, not the cleanup display layer — so the Explorer's chips,
 // which colour from reasonOf/severityOf, carry it too. Absent chatRate must behave exactly as before.
 {
-    const { buildKeyPruneScan, KEY_CHAT_COMMON } = await import('../extension/keyword-core.mjs');
+    const { buildKeyPruneScan, KEY_CHAT_COMMON } = await import('../extension/keyword-audit.mjs');
     const opts = {
         scanKeyword: true, scanVectorized: true, scanConstant: true, includeInactive: true,
         pruneUnattested: true, pruneCommon: true, pruneShort: true, ignoreProper: false, bookCommon: 0.5, minLength: 4,
@@ -143,7 +143,7 @@ console.log('ok   chat evidence reaches the classifier and conditions severity')
 // visibleEntries(), so a filter change leaves classified keys the scan never sent — and calling those
 // "not in entry text or chat" is the strong claim on evidence nobody gathered.
 {
-    const { buildKeyPruneScan } = await import('../extension/keyword-core.mjs');
+    const { buildKeyPruneScan } = await import('../extension/keyword-audit.mjs');
     const opts = {
         scanKeyword: true, scanVectorized: true, scanConstant: true, includeInactive: true,
         pruneUnattested: true, pruneCommon: true, pruneShort: true, ignoreProper: false, bookCommon: 0.5, minLength: 4,
@@ -162,7 +162,7 @@ console.log('ok   a key the chat scan never covered is not reported as chat-chec
 
 // A chat "hit" is a MESSAGE, not an occurrence — the browser and the server plugin both accumulate
 // through addMessageHits so they cannot drift. They had drifted: the client added 1 per message, the
-// server added the occurrence count, and keyword-core divides by the message total to get a share.
+// server added the occurrence count, and keyword-audit divides by the message total to get a share.
 {
     const { buildAutomaton, addMessageHits } = await import('../extension/smartkeys.mjs');
     const aut = buildAutomaton(['fire']);

@@ -2,7 +2,7 @@
 // plus the lexer edge cases the spec calls out (internal hyphens, weights, flags).
 import { countKey, keywordScore, repeatCurveOf, setBoundaryMode, isRegexKey } from '../extension/matcher.mjs';
 import { tokenize, parse, evaluate, buildAutomaton, scanAutomaton, validateSmartKey, fold, resetSmartKeys } from '../extension/smartkeys.mjs';
-import { buildKeyPruneScan } from '../extension/keyword-core.mjs';
+import { buildKeyPruneScan } from '../extension/keyword-audit.mjs';
 import { eq } from './metrics.mjs';
 
 const matches = (key, text) => countKey(key, text, false, false) > 0;

@@ -5,7 +5,7 @@
 //
 // A failure prints the case's whole candidate list, because the useful question is never just
 // "which term is missing" but "what did it offer instead".
-import { buildKeySuggest } from '../extension/keyword-core.mjs';
+import { buildKeySuggest } from '../extension/keyword-suggest.mjs';
 import { GENRE_CASES, SUGGEST_OPTS, paddedBook } from './genre-cases.mjs';
 
 const filter = process.argv[2]?.toLowerCase();

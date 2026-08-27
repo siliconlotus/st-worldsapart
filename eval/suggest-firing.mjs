@@ -29,7 +29,7 @@
 // got its scope overstated.
 import { readFileSync } from 'node:fs';
 import { basename } from 'node:path';
-import { buildKeySuggest } from '../extension/keyword-core.mjs';
+import { buildKeySuggest } from '../extension/keyword-suggest.mjs';
 import { countKey } from '../extension/matcher.mjs';
 
 const args = process.argv.slice(2);

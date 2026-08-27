@@ -33,7 +33,7 @@
 // model or a rung never re-pays for the ones already run.
 import { readFileSync, writeFileSync, existsSync } from 'node:fs';
 import { createHash } from 'node:crypto';
-import { buildKeySuggest, buildKeyPrompt, parseKeyList, STUDIO_SUGGEST_OPTS } from '../extension/keyword-core.mjs';
+import { buildKeySuggest, buildKeyPrompt, parseKeyList, STUDIO_SUGGEST_OPTS } from '../extension/keyword-suggest.mjs';
 import { countKey } from '../extension/matcher.mjs';
 
 const HERE = new URL('.', import.meta.url).pathname;

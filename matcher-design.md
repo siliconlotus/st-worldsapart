@@ -580,7 +580,7 @@ has no way to write. Under the NOT logics the operator's own negation cancels th
 Studio says so at the moment the operator changes. Under `AND_ANY` it is refused: a negation is
 satisfied by absence and `AND_ANY` `OR`s its secondaries, so the branch stands open on nearly any text
 and the gate stops gating — the objection that makes the key fatal in a primary, one level down.
-`secondaryKeys` is the only place that rule lives, and `unusableKeysOf` (`keyword-core.mjs`) reports the
+`secondaryKeys` is the only place that rule lives, and `unusableKeysOf` (`keyword-audit.mjs`) reports the
 difference rather than re-deriving it.
 
 **A key the matcher refuses is flagged per key, ahead of every other verdict.** `classify` asks
@@ -652,7 +652,7 @@ same, and the curve has stopped ordering entries by how much the text says. Unbo
 curve goes deaf when it does is not.
 
 **No frequency discount accompanies this, deliberately.** A ubiquitous key is an author declaration —
-`keyword-core.mjs` exempts entries carrying one from the too-common flags on that ground — a badly
+`keyword-audit.mjs` exempts entries carrying one from the too-common flags on that ground — a badly
 chosen one is reported by the audit, where the author can act on it, and an entry whose key fires
 broadly but whose content does not fit still ranks low on the other two fused signals. A discount here
 would be that same judgement taken a second time, silently, where nobody can see it.
@@ -1053,7 +1053,7 @@ vocabulary. A never-lowercase word is the one shape the evidence cannot arbitrat
 cell left is a span arm on the `book` detector, which nothing now motivates.
 
 `--proper-nouns-extract book` replaces `properNounsOf`'s per-text sentence-position rule with the
-suggester's corpus name test (`keyword-core.mjs` `nameEvidence`, one properness test for both
+suggester's corpus name test (`keyword-suggest.mjs` `nameEvidence`, one properness test for both
 consumers), fed the scene's entries: every capitalised token is arbitrated by how the BOOK writes the
 word, sentence-initial included, with no `COMMON_WORDS` subtraction anywhere in the arm. **Measured**:
 per-scene F2 +0.0102 (30 up / 24 down / 40 tied, p 0.497), 3 books up of 5 (p 1.000), model AUC +0.002,

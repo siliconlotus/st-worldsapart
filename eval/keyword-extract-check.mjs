@@ -1,10 +1,11 @@
 // Guards the keyword classifier + ranker: buildKeyPruneScan / buildKeySuggest live in the pure,
-// node-importable keyword-core.mjs, so this imports the real shipped code and runs it on a tiny
+// node-importable keyword-audit.mjs / keyword-suggest.mjs, so this imports the real shipped code and runs it on a tiny
 // synthetic book — a botched refactor or an edit that changes a verdict fails here instead of
 // silently drifting the prune popup, the suggest popup, and Lorebook Studio.
 // Run: node eval/keyword-extract-check.mjs
 import assert from 'node:assert';
-import { buildKeyPruneScan, buildKeySuggest, classifyLlmCand, KEY_BOOK_COMMON, KEY_MIN_LENGTH, KEY_MIN_BOOK_COMMON_ENTRIES } from '../extension/keyword-core.mjs';
+import { buildKeyPruneScan, KEY_BOOK_COMMON, KEY_MIN_LENGTH, KEY_MIN_BOOK_COMMON_ENTRIES } from '../extension/keyword-audit.mjs';
+import { buildKeySuggest, classifyLlmCand } from '../extension/keyword-suggest.mjs';
 
 // --- buildKeyPruneScan ---------------------------------------------------------------------------
 // Four entries so df ratios are meaningful (the classify priority is english-common -> dead ->
@@ -312,7 +313,7 @@ console.log('keyword-extract-check: ok');
 // Machine-written keys are lifted verbatim from an entry's own prose, so they sit in that entry's text
 // (df 1, not "dead"), appear nowhere else (not too-common, not shared) and are long (not short) — every
 // other category misses them. What is decidable from the key alone is COHERENCE, not specificity.
-import { looksLikeFragment, FUNCTION_WORDS } from '../extension/keyword-core.mjs';
+import { looksLikeFragment, FUNCTION_WORDS } from '../extension/keyword-audit.mjs';
 
 // Fires: real auto-generated keys that name nothing.
 for (const k of ['naked for morale', 'try stuff and see', 'web not spoke wheel', 'the soft stuff',
