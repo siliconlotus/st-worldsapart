@@ -1,4 +1,4 @@
-// Locks the two lorebook-priority retention comparators from rankActivated.
+// Locks the two lorebook-priority retention comparators from onScanDone.
 // The sorts live inline in a browser-only async function, so we mirror the exact
 // comparator expressions here and assert the motivating cases.
 import { eq } from './metrics.mjs';

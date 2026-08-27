@@ -7,7 +7,7 @@
 //
 // EVERY INPUT IS A PARAMETER. The signals are already on the rows, and everything else arrives as plain
 // data: the caller resolves ST's chat-sentinel book names and reads the settings, so this runs under
-// node against literal rows. It was 70 lines inside rankActivated with no check of its own.
+// node against literal rows. It was 70 lines inside onScanDone with no check of its own.
 import { SORT_FNS, normPresentation, reconcileTiers, tierRank } from './sort.mjs';
 
 /**

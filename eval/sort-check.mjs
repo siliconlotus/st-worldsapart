@@ -8,7 +8,7 @@
 import { gradeOrder } from '../extension/sort.mjs';
 import { eq } from './metrics.mjs';
 
-// One row per class, deliberately in the order rankActivated hands them over: the budget walk hoists
+// One row per class, deliberately in the order onScanDone hands them over: the budget walk hoists
 // always-on entries to the front, so capture order puts the two rows a grader least needs FIRST.
 const rows = [
     { t: 'const',     block: 'constant', score: null, bestRank: 0 },

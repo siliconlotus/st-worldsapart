@@ -22,7 +22,7 @@ export const wiTitleOf = e => (e.comment && e.comment.trim()) ? e.comment.trim()
  * Presentation order for the two grading tables (/wa-grade, /wa-super-grade): gradeable rows first, then
  * persisting stickies, then constants — and inside each block, best first.
  *
- * NOT CAPTURE ORDER, and that is the point. rankActivated hoists stickies and constants to the front of
+ * NOT CAPTURE ORDER, and that is the point. onScanDone hoists stickies and constants to the front of
  * `ranked` in AUTHORED order so the budget walk is a prefix cut (selection.mjs), which hands the always-on
  * rows `#` 0,1,2 and would otherwise head the grading list for a structural reason rather than a relevance
  * one — the opposite of grading the strongest candidates while attention is freshest.

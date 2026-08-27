@@ -619,7 +619,7 @@ on restores the author's own operator.
 
 ## Stage 3: Scoring
 
-`rankActivated`, on `WORLDINFO_SCAN_DONE`. Vector and chunk-text scores are looked up from what
+`onScanDone`, on `WORLDINFO_SCAN_DONE`. Vector and chunk-text scores are looked up from what
 retrieval stored, keyword score is computed over the scan window, and the fitted model produces the
 **layout order** — the quantity stage 4 cuts on, and which stage 5's caps then take a prefix of.
 
@@ -731,7 +731,7 @@ entry is.
 
 **The token budget** decides how much, and is the only one measured in tokens rather than entries. The maxes and the budget both live in `applyBudget`, which walks the ranked layout once, sticky
 and constant first so every cap is a prefix cut, returns the survivors, and reports every cap that
-rejected a row. `rankActivated` deletes the rest from `activated` — `delivery.mjs` is ST-free and the
+rejected a row. `onScanDone` deletes the rest from `activated` — `delivery.mjs` is ST-free and the
 map is core's.
 
 **The relevance cut arbitrates over the whole dynamic block**, keyword-activated entries included, which
@@ -1546,7 +1546,7 @@ instances the books on disk hold.
    bulk sitting ahead of the hoisted blocks, `query`/`queryChat` duplicate per arm, and nothing yet fills
    `modelDigest` or a pass's `params` at capture.
 
-2. **The relevance prediction — LANDED.** Stage 4 makes a relevance decision: `rankActivated` fills the
+2. **The relevance prediction — LANDED.** Stage 4 makes a relevance decision: `onScanDone` fills the
    `E[credit]` column every scan, `selection.relevanceCut` drops dynamic memory rows below
    `relevanceCutoff`, and the layout is ordered by that same quantity. It takes no setting — a switch
    would mean carrying two orderings for the dynamic block forever — and the fusion it replaced is gone
@@ -1578,7 +1578,7 @@ instances the books on disk hold.
    subtraction — the definition every fit was trained on — computed by one shipped function on both
    sides. `E[credit]` itself is unchecked, and the only
    missing piece is a saved capture: the runtime records the PRE-CUT population with `eCredit` at full
-   precision for exactly this comparison (`lastRanked`, the verbose rows), but the only on-disk carriers
+   precision for exactly this comparison (`lastLayoutOrder`, the verbose rows), but the only on-disk carriers
    are `core-compare` exports, which record the delivered union — too few rows to rebuild the
    within-scene standardisation. One `/wa-grade` capture from after the column shipped closes it.
 

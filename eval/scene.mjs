@@ -192,7 +192,7 @@ export const openSample = (path, arm = null) => openBundle(JSON.parse(readFileSy
 export const sceneLabel = S => (S?.arm ? `${S.name ?? ''}--${S.arm}` : String(S?.name ?? ''));
 
 /**
- * Key hits for one entry against a scan window — the same call `rankActivated` makes, so the excerpt
+ * Key hits for one entry against a scan window — the same call `onScanDone` makes, so the excerpt
  * localises the match that was actually scored rather than a re-derivation of the match rules.
  *
  * Lives here beside `scoringKeys`, which decides what it is allowed to score. It used to live in the v1
@@ -1069,7 +1069,7 @@ export const makeKeywordScore = P => (e, text, k1) => {
  *
  * SPANS THREE STAGES, and they are marked below because collapsing them is how this harness has produced
  * wrong numbers twice. Production keeps them apart by construction: retrieval runs in selectAndActivate on
- * one event and scoring in rankActivated on another. Offline there is no event loop, so they collapse into
+ * one event and scoring in onScanDone on another. Offline there is no event loop, so they collapse into
  * one pass — which is a reason to label the boundaries, not to forget they exist.
  *
  * Stage 2 genuinely depends on a stage-3 computation: `keywordScore > 0` is what decides keyword
@@ -1381,7 +1381,7 @@ export async function scoreScene({ sample: S, overrides = {}, k = 10, vectors, m
     //               move the cutoff, and this is the set that moves.
     //
     // MEMORY ONLY, mirroring the runtime — a reference entry that fires is included and answers only to
-    // the budget (worldsapart.js `rankActivated`), so it is never cut here either. A row the model could
+    // the budget (worldsapart.js `onScanDone`), so it is never cut here either. A row the model could
     // not score is kept for the same reason it is kept live: an absent verdict is not a negative one.
     // THE CUT IS APPLIED HERE, and the number it cuts at is chosen here too: an arm's `memoryCutoff` when
     // it set one, otherwise the fit's own. That fallback is NOT what production reads — the runtime cuts

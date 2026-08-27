@@ -4,7 +4,7 @@ import { eq } from './metrics.mjs';
 
 const mk = (key, tokens, opts = {}) => ({ key, tokens, entry: { ...opts } });
 
-// 7 constants then 12 dynamic, which is the walk order rankActivated produces.
+// 7 constants then 12 dynamic, which is the walk order onScanDone produces.
 const constants = Array.from({ length: 7 }, (_, i) => mk(`c${i + 1}`, 10));
 const dynamic = Array.from({ length: 12 }, (_, i) => mk(`d${i + 1}`, 10));
 const ranked = [...constants, ...dynamic];
@@ -238,7 +238,7 @@ r = await applyBudget({
 });
 eq(r.skipped.every(x => x.tail), true, 'count cap rejections are always tail');
 
-// Sticky rows ride at the HEAD of the walk (rankActivated partitions sticky, then constant, then
+// Sticky rows ride at the HEAD of the walk (onScanDone partitions sticky, then constant, then
 // results — always-on by authorial intent), so a token squeeze exhausts the budget on them first
 // and the cut lands entirely in the retrieved block. Sticky's timed-effect detection is ST-side;
 // what is pure — and what this pins — is that head placement IS the protection.
@@ -258,7 +258,7 @@ eq(r.skipped.every(x => x.tail), true, 'count cap rejections are always tail');
 
 // --- vector cap: the third nesting level, vector ⊆ dynamic ⊆ all -------------------------------------
 // Provenance, not the `vectorized` flag: the cap bounds what RETRIEVAL contributed, so an entry admitted
-// on a key it kept is keyword no matter what its flag says (see worldsapart.js rankActivated).
+// on a key it kept is keyword no matter what its flag says (see worldsapart.js onScanDone).
 const vectorSet = new Set(dynamic.slice(0, 6));   // 6 of the 12 dynamic rows came from retrieval
 const runV = (opts) => run({ isVector: item => vectorSet.has(item), ...opts });
 

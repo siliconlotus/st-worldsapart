@@ -226,7 +226,7 @@ intent rather than because relevance chose it. It is how a row got there, not wh
 a keyword-activated reference entry is not durable and a durable entry may be either tier.
 
 **Sticky is read at two moments and they do not coincide, so say which durable you mean.** The runtime
-reads the ARMED effect (`isEffectActive`, `worldsapart.js` `rankActivated`) — `walkOrder` hoists an armed
+reads the ARMED effect (`isEffectActive`, `worldsapart.js` `onScanDone`) — `walkOrder` hoists an armed
 sticky into stage 5's population, so an entry that is in the prompt because an earlier turn put it there
 never reaches stage 4's cut. The eval side reads the CONFIGURED
 sticky value (`grading.mjs` `isDurable` of a capture row, `eval/scene.mjs` `isDurableEntry` of a raw
@@ -256,7 +256,7 @@ any lexical signal** — both live at stage 3.
 `WORLDINFO_FORCE_ACTIVATE` on the retrieval winners; ST core keyword-matches whatever keys are live;
 `constant`, decorators and sticky persistence. The result is core's `activated` map.
 
-**3. Scoring** — `rankActivated`, on `WORLDINFO_SCAN_DONE`. The vector score is looked up from what
+**3. Scoring** — `onScanDone`, on `WORLDINFO_SCAN_DONE`. The vector score is looked up from what
 retrieval stored; the TEXT score is BM25 over entry content, computed in the browser by
 `content-lexical.mjs` over every entry (a superset of the vectorized chunks stage 1 sees) and filtered by
 the entity filter's term weights; keyword score is computed over the scan window. Those signals plus
@@ -267,7 +267,7 @@ the PROMPT order, which is a user setting defaulting to `entry.order` and is app
 survived.
 
 **This is where the lexical half of WA lives.** `content-lexical.mjs` computes BM25 over every entry's
-content, a superset of the vectorized chunks stage 1 sees, and `rankActivated` reads it.
+content, a superset of the vectorized chunks stage 1 sees, and `onScanDone` reads it.
 
 **Which signal predicts best is a property of the embedding model, so it is quoted with one**
 (`eval/relevance-regress.mjs`, standardised logistic betas). Under bge-m3, text led: +0.794 against
@@ -276,7 +276,7 @@ the order inverts: cosine +0.762, text +0.567, keys +0.137, over 6051 rows on 10
 the signals carried across a model change is the claim to distrust.
 
 **4. Selection** — DOES THIS ENTRY BELONG. The RELEVANCE CUT drops a memory row whose `E[credit]` is
-below the `relevanceCutoff` setting (`selection.mjs` `relevanceCut`, from `rankActivated`), and it is the
+below the `relevanceCutoff` setting (`selection.mjs` `relevanceCut`, from `onScanDone`), and it is the
 one relevance decision *Principles* rules for. Three conditions: MEMORY ONLY, because a key on a reference
 entry is the author declaring when it should be present, so reference rows are ordered and never cut; it
 NEEDS A FIT, and a row the model could not score is kept — an absent verdict, not a negative one; and THE
@@ -293,11 +293,12 @@ per-book cap — with `maxVectorEntries` counted off the `vectorized` flag — t
 entries are added to the layout, which is a question about what an entry is. The TOKEN BUDGET decides how much. The maxes and the budget live in `applyBudget`,
 which walks the layout order constant and sticky first — constant leads, because constant means always
 and should only be cut when constants alone overflow — so every cap is a prefix cut, and returns the
-survivors; `rankActivated` is what deletes the rest from `activated`, since `delivery.mjs` is ST-free
+survivors; `onScanDone` is what deletes the rest from `activated`, since `delivery.mjs` is ST-free
 and the map is core's.
 
 **THREE ORDERINGS, and only one is a ranking.** `fuseRetrieval` decides what is ACTIVATED; LAYOUT ORDER
-is the score the caps and budget take a prefix of; PROMPT ORDER is the user's sort over the survivors. **A change to the layout score can never surface an entry retrieval did not
+is the score the caps and budget take a prefix of (`layout.mjs`, stashed as `runState.lastLayoutOrder`);
+PROMPT ORDER is the user's sort over the survivors (`runState.lastPromptOrder`). **A change to the layout score can never surface an entry retrieval did not
 return** — so no keyword weight, tilt or fusion change is a recall lever, only a precision one. With
 stage 1 admitting everything, the retrieval ranking's ORDER now decides nothing except which entries
 survive `admitCeiling`, which no measured book approaches (largest: 208 vectorized entries).

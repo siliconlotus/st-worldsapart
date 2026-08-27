@@ -12,7 +12,7 @@
 //
 // The stage-3 text signal is UNAFFECTED and was already elsewhere: content-lexical.mjs computes BM25 over
 // every entry's content in the browser, a superset of the vectorized chunks this file ever indexed, and
-// rankActivated has read it rather than these scores since it landed. It measures as the strongest of the
+// onScanDone has read it rather than these scores since it landed. It measures as the strongest of the
 // three stage-3 predictors of per-entry relevance (standardised logistic beta +0.756 against cosine's
 // +0.570, n=7536 judged rows) — so lexical evidence did not leave the system, it left the stage that had
 // stopped using it.

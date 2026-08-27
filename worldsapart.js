@@ -368,7 +368,7 @@ async function syncWorld(world, entries) {
             const hash = getStringHash(`${text}${entry.uid}`);
             // DOT, not the US of CLAUDE.md's composite-key rule, and it must stay a dot: this is ST core's
             // key format, not ours (world-info.js builds `${entry.world}.${entry.uid}` for
-            // allActivatedEntries and externalActivations). rankActivated is handed that map and looks its
+            // allActivatedEntries and externalActivations). onScanDone is handed that map and looks its
             // keys up in runState.lastScores, so a "tidier" separator here would silently return undefined
             // for every score — and fuseRanks drops rows whose score is undefined, so the vector signal
             // would vanish from the layout ranking with nothing thrown. Use grading.mjs's US-separated
@@ -1229,7 +1229,7 @@ async function selectAndActivate(chat) {
  *
  * WA used to return early on quiet, which was half a skip and incoherent — retrieval and the union
  * were skipped, but `onEntriesLoaded` still took core's budget and still blinded core to
- * vectorized entries' keys, and `rankActivated` still ranked and budgeted the result against
+ * vectorized entries' keys, and `onScanDone` still ranked and budgeted the result against
  * `lastScores` left over from the PREVIOUS real generation. A vectorized entry could therefore
  * never activate on a quiet run (no retrieval, keys blanked), while the entries that did activate
  * were cut by a budget walk reading another turn's scores.
@@ -1280,7 +1280,7 @@ function onEntriesLoaded(loaded) {
     showExemptCount(entries);
 
     // Gated on WA actually cutting this generation, because core's budget is the BACKSTOP: on any
-    // path where rankActivated returns early, core's cut is the only thing still bounding the
+    // path where onScanDone returns early, core's cut is the only thing still bounding the
     // prompt. Dry runs (PromptManager token counts, chat load) are exactly that path.
     if (settings().enabled && !runState.generationIsDryRun) {
         for (const entry of entries) {
@@ -1862,7 +1862,7 @@ async function versusCore(named) {
     // RUNS THE DEBUG PIPELINE ITSELF, as /wa-grade does, so the rows this freezes are the selection that
     // actually happened rather than whatever a previous command left behind. `candidates` bounds the
     // captured population the same way and for the same reason; shipped rows are never dropped by it
-    // (see the gradeDepth filter in rankActivated), so the comparison itself cannot be truncated.
+    // (see the gradeDepth filter in onScanDone), so the comparison itself cannot be truncated.
     const wanted = Math.max(1, Number(named?.candidates ?? 30));
     runState.gradeCutoff = { maxVectorEntries: wanted };
     try {
@@ -1871,14 +1871,14 @@ async function versusCore(named) {
         runState.gradeCutoff = null;
     }
 
-    const population = runState.lastRanked;
+    const population = runState.lastLayoutOrder;
     if (!runState.lastCandidates?.length || !population?.length) { toastr.info('Nothing ranked \u2014 the scan activated no entries.', 'Worlds Apart'); return; }
 
     const { entries: coreEntries, viaVectors, vectorsRan } = await coreSelection();
 
     const keyOf = e => `${e.world}.${e.uid}`;
     const coreKeys = new Set(coreEntries.map(keyOf));
-    const waKeys = new Set((runState.lastLayout ?? []).map(x => keyOf(x.item.entry)));
+    const waKeys = new Set((runState.lastPromptOrder ?? []).map(x => keyOf(x.item.entry)));
     const byKey = new Map(population.map(x => [keyOf(x.entry), x]));
     for (const e of coreEntries) if (!byKey.has(keyOf(e))) byKey.set(keyOf(e), { entry: e });
 
@@ -2058,10 +2058,10 @@ async function versusBundle(union, coreKeys, waKeys, viaVectors) {
     toastr.info(`Saved ${filename} — open it with Review bundles to grade these ${union.length} rows.`, 'Worlds Apart', { timeOut: 8000 });
 }
 
-async function rankActivated(args) {
+async function onScanDone(args) {
     const activated = args?.activated?.entries;
 
-    // Silent returns, EXCEPT under /wa-dry: every one of them leaves lastLayout untouched, so the
+    // Silent returns, EXCEPT under /wa-dry: every one of them leaves lastPromptOrder untouched, so the
     // user's own dry run reports "nothing activated" with no way to tell a real empty selection from
     // a scan WA declined to rank. `enabled` is not among them — dryRun refuses outright when WA is
     // off, so that branch cannot be reached from a dry run at all.
@@ -2109,7 +2109,7 @@ async function rankActivated(args) {
 
     if (activated.size === 0) {
         skip('core activated nothing');
-        runState.lastLayout = [];
+        runState.lastPromptOrder = [];
         if (!args?.state?.next) renderWiPanel([]);
         return;
     }
@@ -2124,7 +2124,7 @@ async function rankActivated(args) {
     // ENTRIES THAT HAVE NOT BEEN WRITTEN YET, at this point in the chat. Inert at the latest turn and
     // load-bearing on a branch: the book still holds every summary written later, so without this WA
     // ranks descriptions of events the character has not lived through. Applied HERE because
-    // `rankActivated` owns what survives into the prompt — it deletes the rest from core's `activated`
+    // `onScanDone` owns what survives into the prompt — it deletes the rest from core's `activated`
     // map — so one filter covers both the retrieval route and the keyword one.
     const at = settings().dropUnavailable ? (getContext().chat?.length ?? NaN) : NaN;
     let postDated = 0;
@@ -2305,10 +2305,10 @@ async function rankActivated(args) {
     // an offline harness can replay any budget setting against the whole population.
     // Survivors and losers can't be re-interleaved afterwards: concatenating them loses the rank order
     // the cuts were prefixes of.
-    runState.lastRanked = [...sticky, ...constant, ...results];
+    runState.lastLayoutOrder = [...sticky, ...constant, ...results];
 
     // THE RELEVANCE CUT, before the walk and before the caps. It is the only decision here that asks
-    // WHETHER an entry belongs; everything after it asks how many and how much. `lastRanked` above kept
+    // WHETHER an entry belongs; everything after it asks how many and how much. `lastLayoutOrder` above kept
     // the whole pre-cut population, so a row dropped here is still captured and gradeable — a harness
     // that only saw survivors could never score the decision that produced them.
     //
@@ -2332,7 +2332,7 @@ async function rankActivated(args) {
     }
 
     // Constants and stickies lead, which is what makes every cap below a prefix cut.
-    let ranked = delivery.walkOrder({ sticky, constant, results });
+    let walk = delivery.walkOrder({ sticky, constant, results });
 
     const maxTokens = effectiveTokenBudget();
     const maxTotal = settings().maxTotalEntries;
@@ -2343,7 +2343,7 @@ async function rankActivated(args) {
     if (maxTokens > 0 || maxTotal > 0 || maxDynamic > 0 || maxVectorEntries > 0 || bookCaps.size) {
         const dynamicSet = new Set(results);
         const { survivors, counted, skipped, dropped, budgeted, inPrompt } = await delivery.applyBudget({
-            ranked,
+            walk,
             isDynamic: item => dynamicSet.has(item),
             // THE TAG, not retrieval provenance. maxVectorEntries exists so that at most N vector
             // entries are added to the layout during the walk, which is a question about what an entry
@@ -2365,7 +2365,7 @@ async function rankActivated(args) {
             slackOnce: settings().budgetSlackMode !== 'all',
         });
 
-        for (const item of ranked) {
+        for (const item of walk) {
             if (!survivors.has(item)) {
                 activated.delete(item.key);
             }
@@ -2386,8 +2386,8 @@ async function rankActivated(args) {
         }
 
         runState.lastSkipped = skipped;
-        runState.lastDropped = ranked.filter(x => !survivors.has(x));
-        ranked = ranked.filter(x => survivors.has(x));
+        runState.lastDropped = walk.filter(x => !survivors.has(x));
+        walk = walk.filter(x => survivors.has(x));
     } else {
         runState.lastSkipped = [];
         runState.lastDropped = [];
@@ -2403,8 +2403,8 @@ async function rankActivated(args) {
     // Sequential mode groups the whole prompt by book tier — book1's survivors, then
     // book2's — with the chosen layout order applied within each book.
     const promptOrder = priorityMode === 'sequential'
-        ? [...ranked].sort((a, b) => (bookTierOf(a.entry.world) - bookTierOf(b.entry.world)) || compare(a, b))
-        : [...ranked].sort(compare);
+        ? [...walk].sort((a, b) => (bookTierOf(a.entry.world) - bookTierOf(b.entry.world)) || compare(a, b))
+        : [...walk].sort(compare);
 
     // Assembly sorts descending by `order` then unshifts, so the prompt reads
     // in ASCENDING order value. Index 0 of `promptOrder` therefore lands first. WA owns the
@@ -2420,22 +2420,22 @@ async function rankActivated(args) {
         ...constant.map(x => [x, 'constant']),
         ...results.map(x => [x, 'dynamic']),
     ]);
-    runState.lastLayout = promptOrder.map(item => ({ item, block: blockOf.get(item) ?? 'dynamic' }));
+    runState.lastPromptOrder = promptOrder.map(item => ({ item, block: blockOf.get(item) ?? 'dynamic' }));
     runState.lastDropped = runState.lastDropped.map(item => ({ item, block: blockOf.get(item) ?? 'dynamic' }));
     runState.lastSkipped = runState.lastSkipped.map(x => ({ ...x, block: blockOf.get(x.item) ?? 'dynamic' }));
 
     // Reflect the final selection in the active-entries panel. Fires once per scan
     // loop; only the last one (no further state) is the real prompt.
-    if (!args?.state?.next) renderWiPanel(runState.lastLayout);
+    if (!args?.state?.next) renderWiPanel(runState.lastPromptOrder);
 
     // A plain /wa-dry has its own selected table below; this one is the selection candidates
-    // — everything activated, ranked, before caps cut into it. Only /wa-debug wants this much.
+    // — everything activated, in layout order, before caps cut into it. Only /wa-debug wants this much.
     // Built whenever a debug-class run is in flight, and stashed: /wa-grade grades THESE rows rather than
     // recomputing a ranking, so the grades attach to the selection that actually happened.
     if (runState.verboseRun) {
-        // The PRE-CLIFF, PRE-BUDGET population (see lastRanked): every entry that shipped, plus — down to
+        // The PRE-CLIFF, PRE-BUDGET population (see lastLayoutOrder): every entry that shipped, plus — down to
         // the grading depth below — the ones this pass rejected, with `cut`/`cutBy` recording which side
-        // each fell on. `ranked` is survivors only by this point.
+        // each fell on. `walk` is survivors only by this point.
         //
         // /wa-grade's candidates=N caps the DYNAMIC rows and nothing else. It is a grading-budget
         // decision rather than a selection one: the grading popup LISTS sticky and constant rows but
@@ -2446,13 +2446,13 @@ async function rankActivated(args) {
         // than stops (selection.mjs), so a short entry below rank N still reaches the prompt when the
         // larger ones ahead of it did not fit — and a shipped row with no capture row is invisible to
         // grading and to every offline replay of the scene, with nothing downstream able to notice.
-        const kept = new Set(ranked);
+        const kept = new Set(walk);
         let dynamicSeen = 0;
         const gradeDepth = runState.gradeCutoff?.maxVectorEntries ?? 0;
-        const population = (runState.lastRanked ?? ranked)
+        const population = (runState.lastLayoutOrder ?? walk)
             .filter(x => !gradeDepth || (blockOf.get(x) ?? 'dynamic') !== 'dynamic' || ++dynamicSeen <= gradeDepth || kept.has(x));
         // WHY a row was cut, not just that it was. applyBudget already computes this per skipped entry
-        // (`blockedBy`) and it is the difference between "ranked too low" and "would not fit" — a large
+        // (`blockedBy`) and it is the difference between "ordered too low" and "would not fit" — a large
         // entry is SKIPPED so smaller ones behind it still get in (selection.mjs), so a cut row is not
         // evidence that everything below it was cut too.
         const blockedOf = new Map(
@@ -2562,7 +2562,7 @@ async function dryRun(verbose = false) {
 
     // `intercept` gates on this and dryRun calls selectAndActivate directly, so this is the only gate
     // on that path. Without it a dry run with WA off half-runs: retrieval force-activates its winners
-    // into core's map, and onEntriesLoaded and rankActivated then decline to touch a scan WA does not own.
+    // into core's map, and onEntriesLoaded and onScanDone then decline to touch a scan WA does not own.
     if (!settings().enabled) {
         toastr.warning('Worlds Apart is disabled — turn it on to run a dry run.', 'Worlds Apart');
         return '';
@@ -2585,7 +2585,7 @@ async function dryRun(verbose = false) {
     // Cleared so a scan that activates nothing reports nothing, rather than last run's. The /wa-grade
     // capture is in here too: a stale candidate list would be graded as if it belonged to this scene,
     // and its `if (!rows.length)` guard cannot see the difference.
-    runState.lastLayout = [];
+    runState.lastPromptOrder = [];
     runState.lastDropped = [];
     runState.lastSkipped = [];
     runState.lastCandidates = [];
@@ -2608,7 +2608,7 @@ async function dryRun(verbose = false) {
     try {
         await selectAndActivate(chat);
 
-        // Stage 2 — the scan; rankActivated prints the selection candidates (verbose) as it runs.
+        // Stage 2 — the scan; onScanDone prints the selection candidates (verbose) as it runs.
         await getWorldInfoPrompt(chatForWI, getMaxPromptTokens(), true, { ...scanSources(), trigger: 'normal' });
 
         // Stage 3 — selection: what survived caps and layout.
@@ -2818,7 +2818,7 @@ async function reportLayout(verbose = false, countTokens = true) {
     // Before the layout, so a scan whose only story is "WA deleted what core matched" still
     // tells it — the runtime must visibly agree with what the audit reports.
 
-    if (!runState.lastLayout.length) {
+    if (!runState.lastPromptOrder.length) {
         console.log('Worlds Apart: nothing activated.');
         return;
     }
@@ -2826,7 +2826,7 @@ async function reportLayout(verbose = false, countTokens = true) {
     const rows = [];
     let total = 0;
 
-    for (const { item, block } of runState.lastLayout) {
+    for (const { item, block } of runState.lastPromptOrder) {
         const entry = item.entry;
         // Skipped on live generations unless a token cap already made us count: this
         // runs before every turn when debugLog is on, and a remote tokenizer would turn
@@ -4267,8 +4267,8 @@ function bind(selector, key, kind) {
 // ---------------------------------------------------------------------------
 // Active-entries panel — a book icon (bottom-left) that expands into the list
 // WA actually selected, each row tooltipped with its per-signal scores and
-// keyword hits, click opening the entry text. Refreshed from runState.lastLayout at the
-// end of every real scan (see rankActivated).
+// keyword hits, click opening the entry text. Refreshed from runState.lastPromptOrder at the
+// end of every real scan (see onScanDone).
 // ---------------------------------------------------------------------------
 let wiTrigger = null, wiPanel = null;
 function ensureWiPanel() {
@@ -4466,12 +4466,12 @@ export async function init() {
     // resetSmartKeys's `scope` parameter and defeat its default. It threw only when a chat was actually
     // open, since the id is undefined otherwise.
     eventSource.on(event_types.CHAT_CHANGED, () => resetSmartKeys());
-    // The panel survives dry-run scans untouched (rankActivated ignores them), so without
+    // The panel survives dry-run scans untouched (onScanDone ignores them), so without
     // this it would carry the previous chat's selection across a switch.
-    eventSource.on(event_types.CHAT_CHANGED, () => { runState.lastLayout = []; renderWiPanel([]); });
+    eventSource.on(event_types.CHAT_CHANGED, () => { runState.lastPromptOrder = []; renderWiPanel([]); });
     refreshAttached();
-    eventSource.on(event_types.WORLDINFO_SCAN_DONE, rankActivated);
-    // Registered AFTER rankActivated so the feed sees the flag while the scan is live. Clearing on
+    eventSource.on(event_types.WORLDINFO_SCAN_DONE, onScanDone);
+    // Registered AFTER onScanDone so the feed sees the flag while the scan is live. Clearing on
     // the final loop (not just GENERATION_ENDED) is what keeps a between-scans getSortedEntries —
     // ST's dry runs, other extensions, the exempt-count refresh — off the takeover blanking.
     eventSource.on(event_types.WORLDINFO_SCAN_DONE, (args) => {
@@ -4479,7 +4479,7 @@ export async function init() {
     });
 
     // Show the active-entries icon right away; it fills in on the next scan.
-    if (settings().enabled) renderWiPanel(runState.lastLayout);
+    if (settings().enabled) renderWiPanel(runState.lastPromptOrder);
 
     SlashCommandParser.addCommandObject(SlashCommand.fromProps({
         name: 'wa-versus',

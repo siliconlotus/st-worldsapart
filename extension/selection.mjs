@@ -14,7 +14,7 @@
  * set never changed.
  *
  * DYNAMIC ONLY. Constants and armed stickies are in the prompt by intent rather than because relevance
- * chose them, and they never reach this list — `rankActivated` classifies them out before the walk. That
+ * chose them, and they never reach this list — `onScanDone` classifies them out before the walk. That
  * is also why the cut cannot break `applyBudget`'s prefix property: it removes rows from the block the
  * caps were already going to walk last.
  *

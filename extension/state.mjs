@@ -99,7 +99,7 @@ export const defaultSettings = {
      * and loses both. The default sits at the recall-favouring end deliberately, matching F2.
      *
      * The `cutoff` a fit carries in relevance-model-<tier>.json is that MODEL's own F2 optimum, kept as
-     * provenance and never read at runtime. Reference is not cut at all (rankActivated).
+     * provenance and never read at runtime. Reference is not cut at all (onScanDone).
      */
     relevanceCutoff: 0.10,
     /**
@@ -407,10 +407,10 @@ export function ensureSettings(extensionSettings) {
  * the debug commands toggle verboseRun/dryRunInProgress; the panel + debug read them back.
  */
 export const runState = {
-    // Keyed `${world}.${uid}` — ST CORE'S format, which rankActivated receives and looks up here. Not a
+    // Keyed `${world}.${uid}` — ST CORE'S format, which onScanDone receives and looks up here. Not a
     // candidate for the US separator; see the note in worldsapart.js syncWorld.
     lastScores: new Map(),        // vector scores from the last retrieval
-    lastLayout: [],               // final layout of the last scan, for /wa-dry
+    lastPromptOrder: [],          // the last scan's PROMPT order, post-cut, for /wa-dry and the panel
     lastQuery: '',                // last retrieval query text, bundled by /wa-grade
     lastQueryChat: [],            // the messages that query was joined from, for offline depth ablation
     scanChat: null,               // the interceptor's chat — core's own scan haystack (regex-scripted,
