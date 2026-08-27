@@ -45,6 +45,7 @@ import * as entity from './extension/entity.mjs';
 import * as matcher from './extension/matcher.mjs';
 import { registerKeys, resetSmartKeys } from './extension/smartkeys.mjs';
 import * as selection from './extension/selection.mjs';
+import * as layout from './extension/layout.mjs';
 import * as delivery from './extension/delivery.mjs';
 import { getTokenCountAsync, getTokenizerModel } from '../../../tokenizers.js';
 import { textgen_types, textgenerationwebui_settings } from '../../../textgen-settings.js';
@@ -2285,74 +2286,19 @@ async function rankActivated(args) {
     // ordered by a different combination of the same signals lets the budget drop a high-E[credit] entry
     // because that other combination ranked it low.
     //
-    // An unscored row sorts BELOW every scored one rather than beside them at 0 — a missing score means
-    // the model file did not load or the row is not in a fitted tier, which is not the same claim as
-    // "predicted irrelevant", and authored order is what remains to order them by.
-    const layoutScore = it => (Number.isFinite(it.eCredit) ? it.eCredit : -1);
-
-    // Budget walk order — NOT prompt order. Stickies and constants are always-on by
-    // authorial intent, so they go first and the budget can only ever cut into the
-    // retrieved block, weakest match first. Classification is by what an entry IS: a
-    // constant that also matched keywords is a durable row, not a retrieval result.
-    const sticky = [];
-    const constant = [];
-    let results = [];
-
-    for (const item of items) {
-        if (args?.timedEffects?.isEffectActive('sticky', item.entry)) {
-            sticky.push(item);
-        } else if (item.entry.constant) {
-            constant.push(item);
-        } else {
-            results.push(item);
-        }
-    }
-
-    // Interleaved mode's per-book offset rides on the authored order, so it threads through
-    // every layout comparator (and the retention tiebreak) consistently. Sequential mode
-    // ignores offset — it groups the layout by book tier instead (below).
-    const priorityMode = settings().worldPriorityMode;
-    // Resolve the character's saved order (chat sentinel → live book) once, up front, so the
-    // sort comparators don't re-resolve per comparison. `cfgOf` defaults for unknown books.
+    // STAGE 3'S PRODUCT, in layout.mjs: the three blocks the budget walks, each ordered. Names are
+    // resolved and settings read HERE, so the ordering itself takes plain data and runs under node.
     const priorityList = charPriority() ?? [];
-    const cfgByName = new Map(priorityList.map(w => [resolvedName(w), w]).filter(([n]) => n));
-    const cfgOf = name => cfgByName.get(name) ?? { weight: 1, offset: 0, cap: 0 };
-    // Tier rank scoped to the books in THIS scan only, in saved priority order — a book left
-    // over from another chat can neither occupy a tier nor shift the ones actually present.
-    const priorityOrder = [...cfgByName.keys()].filter(name => scanWorlds.has(name));
-    const rankOf = world => { const i = priorityOrder.indexOf(world); return i < 0 ? priorityOrder.length : i; };
-    const orderOf = it => it.entry.waOriginalOrder + (priorityMode === 'sequential' ? 0 : cfgOf(it.entry.world).offset);
-    const authored = (a, b) => orderOf(a) - orderOf(b);
-    // Insertion order draws from the shared sort vocabulary (SORT_FNS), same as the Studio. Order asc/desc
-    // keep the offset-aware `authored` (book offsets + priority modes) rather than plain SORT_FNS['order-*'];
-    // relevance (best-first/last) is prompt-only (needs the query-time fused score); everything else adapts
-    // SORT_FNS over item.entry, falling back to authored within equal keys so ties stay deterministic.
-    const orderKey = normPresentation(settings().presentationOrder);
-    const baseCompare =
-        orderKey === 'order-asc'  ? authored :
-        orderKey === 'order-desc' ? (a, b) => -authored(a, b) :
-        orderKey === 'best-first' ? (a, b) => (layoutScore(b) - layoutScore(a)) || authored(a, b) :
-        orderKey === 'best-last'  ? (a, b) => (layoutScore(a) - layoutScore(b)) || authored(a, b) :
-        SORT_FNS[orderKey]        ? (a, b) => SORT_FNS[orderKey](a.entry, b.entry) || authored(a, b) :
-        authored;
-    // Optional tiered grouping (default off — preserves existing output). Groups by tier first (shared
-    // config), base order within. Disabled entries never activate, so that tier is inert here.
-    const layoutTierCfg = reconcileTiers(settings().tierCfg);
-    const compare = settings().presentationTiered
-        ? (a, b) => (tierRank(a.entry, layoutTierCfg) - tierRank(b.entry, layoutTierCfg)) || baseCompare(a, b)
-        : baseCompare;
-
-    // Retention order for the dynamic block. Sequential: book tier is the primary key, so a
-    // lower book only gets slots the higher books leave. Interleaved: a per-book weight
-    // scales fused, so a strong low-book entry can still out-rank a weak high-book one.
-    if (priorityMode === 'sequential') {
-        results.sort((a, b) => (rankOf(a.entry.world) - rankOf(b.entry.world)) || (layoutScore(b) - layoutScore(a)) || authored(a, b));
-    } else {
-        // Interleaved: per-book weight scales fused (weight 1 = plain relevance ranking).
-        results.sort((a, b) => (layoutScore(b) * cfgOf(b.entry.world).weight - layoutScore(a) * cfgOf(a.entry.world).weight) || authored(a, b));
-    }
-    sticky.sort(authored);
-    constant.sort(authored);
+    const priorityMode = settings().worldPriorityMode;
+    const { sticky, constant, results: dynamicRows, compare, bookTierOf } = layout.layoutOrder(items, {
+        isArmedSticky: entry => Boolean(args?.timedEffects?.isEffectActive('sticky', entry)),
+        priorityList: priorityList.map(w => ({ ...w, name: resolvedName(w) })).filter(w => w.name),
+        priorityMode,
+        presentationOrder: settings().presentationOrder,
+        presentationTiered: settings().presentationTiered,
+        tierCfg: settings().tierCfg,
+    });
+    let results = dynamicRows;
 
     // Stashed BEFORE the cuts, so a debug or grading capture holds a row for every entry this pass
     // judged rather than only the survivors — `cut`/`cutBy` below record which side each fell on, and
@@ -2456,15 +2402,15 @@ async function rankActivated(args) {
     // value in a deterministic sequence instead of at the mercy of core's tiebreak.
     // Sequential mode groups the whole prompt by book tier — book1's survivors, then
     // book2's — with the chosen layout order applied within each book.
-    const layout = priorityMode === 'sequential'
-        ? [...ranked].sort((a, b) => (rankOf(a.entry.world) - rankOf(b.entry.world)) || compare(a, b))
+    const promptOrder = priorityMode === 'sequential'
+        ? [...ranked].sort((a, b) => (bookTierOf(a.entry.world) - bookTierOf(b.entry.world)) || compare(a, b))
         : [...ranked].sort(compare);
 
     // Assembly sorts descending by `order` then unshifts, so the prompt reads
-    // in ASCENDING order value. Index 0 of `layout` therefore lands first. WA owns the
+    // in ASCENDING order value. Index 0 of `promptOrder` therefore lands first. WA owns the
     // whole `order` space (it rewrites every activated entry), so the base is a fixed
     // pad, not a setting — nothing else writes here to collide with.
-    layout.forEach((item, index) => {
+    promptOrder.forEach((item, index) => {
         item.entry.order = ORDER_BASE + index;
     });
 
@@ -2474,7 +2420,7 @@ async function rankActivated(args) {
         ...constant.map(x => [x, 'constant']),
         ...results.map(x => [x, 'dynamic']),
     ]);
-    runState.lastLayout = layout.map(item => ({ item, block: blockOf.get(item) ?? 'dynamic' }));
+    runState.lastLayout = promptOrder.map(item => ({ item, block: blockOf.get(item) ?? 'dynamic' }));
     runState.lastDropped = runState.lastDropped.map(item => ({ item, block: blockOf.get(item) ?? 'dynamic' }));
     runState.lastSkipped = runState.lastSkipped.map(x => ({ ...x, block: blockOf.get(x.item) ?? 'dynamic' }));
 

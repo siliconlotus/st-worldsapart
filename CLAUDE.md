@@ -261,7 +261,8 @@ retrieval stored; the TEXT score is BM25 over entry content, computed in the bro
 `content-lexical.mjs` over every entry (a superset of the vectorized chunks stage 1 sees) and filtered by
 the entity filter's term weights; keyword score is computed over the scan window. Those signals plus
 `properNouns` and `density` feed the fitted per-tier model (`relevance.mjs` `scoreRelevance`), whose
-`E[credit]` is the **layout order** — the quantity stage 4 cuts on, and which stage 5's caps then take a prefix of. It is not
+`E[credit]` is the **layout order** — built by `layout.mjs` `layoutOrder`, which takes every input as a
+parameter and so is checkable under node (`eval/layout-check.mjs`) — the quantity stage 4 cuts on, and which stage 5's caps then take a prefix of. It is not
 the PROMPT order, which is a user setting defaulting to `entry.order` and is applied to whatever
 survived.
 
@@ -328,7 +329,7 @@ expression is WORTH goes in the second.
 
 ## Pure vs ST-coupled
 
-`matcher.mjs`, `entity.mjs`, `query.mjs`, `keyword-audit.mjs`, `keyword-suggest.mjs`, `selection.mjs`, `delivery.mjs`, `smartkeys.mjs`, `sort.mjs`, `lexical.mjs`, `relevance.mjs` and `plugin/*.mjs` are
+`matcher.mjs`, `entity.mjs`, `query.mjs`, `keyword-audit.mjs`, `keyword-suggest.mjs`, `layout.mjs`, `selection.mjs`, `delivery.mjs`, `smartkeys.mjs`, `sort.mjs`, `lexical.mjs`, `relevance.mjs` and `plugin/*.mjs` are
 ST-free and node-importable, so the evals exercise the real shipped code instead of string-slicing it.
 Settings and ST globals are injected by the caller, never imported. The ST/DOM half is
 `worldsapart.js`, `keyword-tools.mjs`, `studio.mjs`, `ui-widgets.mjs`.
