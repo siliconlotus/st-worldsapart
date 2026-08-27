@@ -197,7 +197,7 @@ if (FREEZE) {
 // --- entity filter: the gazetteer is built in loadScene (see scene.mjs for what it reads
 // here — reading raw book keys admitted 2.3x the terms and moved BM25 by up to 74%). Only the query-
 // dependent term weights are derived per run, since --depths rebuilds the query.
-const termWeights = (P.entityFilter && P.queryMode !== 'summary') ? ranking.buildTermWeights(query, gaz, P.boost) : null;
+const termWeights = P.entityFilter ? ranking.buildTermWeights(query, gaz, P.boost) : null;
 
 const keywordScore = makeKeywordScore(P);
 // TWO EMBEDDERS, because the prefixes differ and mixing them compares two spaces. A query takes the task
@@ -370,7 +370,7 @@ const fmt = n => (n == null ? '·' : (+n).toFixed(3));
         for (const d of DEPTHS) {
             const q = ranking.buildQuery(chat, { depth: d });
             const st = haystackOf(chat, d);
-            const tw = P.entityFilter && P.queryMode !== 'summary' ? ranking.buildTermWeights(q, gaz, P.boost) : null;
+            const tw = P.entityFilter ? ranking.buildTermWeights(q, gaz, P.boost) : null;
             const v = await embed(q);
             const rows = scoreAll(DEF.k1, DEF.b, tw, v, q).map(r => ({ ...r, keywordScore: (e => keywordScore(e, st(e), DEF.k1))(byKey.get(entryKey(r.entry)) ?? { key: [] }) }));
             const fused = fuse(layoutOf(rows));

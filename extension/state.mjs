@@ -28,43 +28,8 @@ export const defaultSettings = {
     chunkSize: 1750,
     /** 'paragraph' keeps semantic boundaries; 'length' fills to chunkSize (chunking.mjs splitRecursive). */
     chunkMode: 'paragraph',
-    /**
-     * 'messages' embeds raw chat text; 'summary' condenses it first with an LLM call.
-     *
-     * WITHDRAWN FROM PRODUCTION — internalized, so this is always 'messages' for a user. It never
-     * measured better than raw messages, and the one head-to-head on record went the other way on
-     * cost: the corpus-derived stoplist (stopwordDocFreq 0.25) put all 5 gold targets in the top 5
-     * at mean rank 3.0, "matching the LLM summary with no model call". Against that it charges an
-     * LLM call per generation and buys nothing back — the query is embedded and BM25'd, never sent
-     * in the prompt, so it cannot reduce prompt tokens; the only input it shortens is the
-     * embedder's, which is the cheapest and usually free stage. Since WA also runs on quiet
-     * generations, that charge is now per background call (Summarize, image prompts, LLM
-     * expression classification) as well.
-     *
-     * Kept reachable because `summary` is a /wa-super-grade POOL ARM and a pool arm's job is to
-     * change the population, not to be good — dropping it would permanently narrow the pool every
-     * defaults review is graded against (CLAUDE.md, "pool first, then pair"). captureArm overrides
-     * live settings at runtime, so the arm still reaches it; nothing else can.
-     */
-    queryMode: 'messages',
-    /**
-     * Instruction used to build the summarized query.
-     *
-     * Prose, deliberately: the entries being searched are prose summaries, and a query
-     * has to match their register as well as their level of abstraction. Measured on a
-     * real corpus, a bare noun list of the same entities failed to clear a threshold
-     * that a hand-written prose sentence beat comfortably.
-     */
-    summaryPrompt: 'Describe the current scene in three or four plain sentences of flowing prose. Name the characters present, the location, and what each group of them is doing, covering every thread that is active. Use concrete names and places. Do not write a list or bullet points. No dialogue, no atmosphere, no commentary. Output only the description.',
-    /**
-     * Response length cap for the summary, in tokens. A runaway guard, not a budget —
-     * models stop when done, so a tight cap only risks truncating mid-output.
-     * Generous enough that a reasoning model can finish thinking and still answer.
-     */
-    summaryLength: 1024,
-    // The next three are WA's SHARED LLM connection, not the summarizer's — the ✨ keyword
-    // suggester (keyword-tools.mjs generateText) is their only production reader now that
-    // queryMode is internalized.
+        // WA's SHARED LLM connection. The ✨ keyword suggester (keyword-tools.mjs generateText) is
+    // their only reader; the query summarizer that once shared them is gone.
     /**
      * Connection Manager profile id for WA's own generation calls. Empty = the current API.
      * Worth setting: a reasoning model spends its whole budget thinking and returns nothing,
@@ -408,10 +373,6 @@ const INTERNAL_KEYS = [
     'meanCentered', 'entityFilter', 'properNounBoost', 'stopwordDocFreq',
     'bm25K1', 'bm25B', 'repeatCurve', 'repeatR', 'keywordScoring',
     'chunkSize', 'chunkMode', 'minChunkSize',
-    // Withdrawn with the query summarizer. queryMode in particular MUST be reset rather than
-    // merely un-surfaced: anyone who had it on 'summary' would otherwise keep paying an LLM call
-    // per generation with no control left in the panel to see it or turn it off.
-    'queryMode', 'summaryPrompt', 'summaryLength',
 ];
 
 /**

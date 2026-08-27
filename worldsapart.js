@@ -737,7 +737,7 @@ async function contentTextScores(query) {
 }
 
 async function queryTermWeights(searchText, { log = true } = {}) {
-    if (!settings().entityFilter || settings().queryMode === 'summary') {
+    if (!settings().entityFilter) {
         return null;
     }
 
@@ -940,88 +940,6 @@ async function scoreEntriesUnsafe(searchText) {
     return { targets, scores };
 }
 
-/** Summaries keyed by the hash of the raw text they condense. @type {Map<number, string>} */
-const summaryCache = new Map();
-
-/**
- * Condenses raw chat text into a scene description, so the query sits at the same
- * level of abstraction as the entries. Cached on the chat state AND every setting that
- * affects the output, so repeated dry runs and rerolls are free but any change that
- * would alter the summary produces a fresh one.
- * @param {string} rawText Raw query text
- * @returns {Promise<string>} Summary, or the raw text if summarization fails
- */
-async function summarizeQuery(rawText) {
-    const prompt = `${rawText}\n\n${settings().summaryPrompt}`;
-    // Key on everything that changes the output, not just the prompt — otherwise editing
-    // the temperature or switching profile silently reuses the old summary. Anything that
-    // would produce a different answer must be in the key.
-    const s = settings();
-    const key = getStringHash(`${prompt}${s.llmProfile}${s.llmTemperature}${s.summaryLength}`);
-
-    if (summaryCache.has(key)) {
-        console.log('Worlds Apart: reusing cached summary');
-        return summaryCache.get(key);
-    }
-
-    try {
-        const profileId = settings().llmProfile;
-        const profile = profileId
-            ? (extension_settings.connectionManager?.profiles ?? []).find(x => x.id === profileId)
-            : null;
-
-        // Empty means "don't send it" — the preset (or the backend default when the
-        // preset is bypassed) decides. Only reachable on the profile path; generateRaw
-        // takes no generation parameters, so the current-API path can't honour it.
-        const temperature = String(settings().llmTemperature ?? '').trim();
-        const overridePayload = temperature === '' ? {} : { temperature: Number(temperature) };
-
-        if (temperature !== '' && !profile) {
-            console.warn(`Worlds Apart: summary temperature ${temperature} ignored — it needs a summary profile. The current API's preset governs instead.`);
-        }
-
-        console.log(`Worlds Apart: summarizing ${prompt.length} chars via ${profile ? `profile "${profile.name}" (preset bypassed)` : 'the current API'}${profile && temperature !== '' ? `, temperature ${temperature}` : ''}`);
-
-        // The full prompt is the instruction plus the whole chat slice — thousands of
-        // tokens. Only dump it on a debug run, and as an object so devtools collapses it.
-        if (runState.verboseRun) {
-            console.log('%cWorlds Apart · summarizer prompt', 'font-weight: bold', { prompt });
-        }
-
-        let summary;
-
-        if (profile) {
-            // includePreset false, always — see keyword-tools.mjs generateText for why the preset
-            // is business logic rather than a setting (it contributes samplers, not prompt text).
-            const result = await ConnectionManagerRequestService.sendRequest(profileId, prompt, settings().summaryLength, { includePreset: false }, overridePayload);
-            summary = String(result?.content ?? '').trim();
-
-            // Reasoning models put everything in `reasoning` and return empty content.
-            // The reasoning is meta-commentary about the task, so it's not usable as a
-            // query even when it contains the right answer — say so rather than guess.
-            if (!summary && result?.reasoning) {
-                throw new Error(`profile "${profile.name}" is a reasoning model: it returned ${String(result.reasoning).length} chars of reasoning and no content. Pick a profile without ":thinking".`);
-            }
-        } else {
-            summary = String(await generateRaw({
-                prompt,
-                responseLength: settings().summaryLength,
-            })).trim();
-        }
-
-        if (!summary) {
-            throw new Error('empty summary');
-        }
-
-        // ponytail: unbounded cache. Chats end long before this matters.
-        summaryCache.set(key, summary);
-        return summary;
-    } catch (error) {
-        console.warn('Worlds Apart: summarization failed, using raw messages', error);
-        return rawText;
-    }
-}
-
 /**
  * Prints /wa-query's table: every scored entry by cosine, with the gap between neighbours.
  *
@@ -1072,16 +990,8 @@ async function retrieve(chat) {
         return [];
     }
 
-    const searchText = settings().queryMode === 'summary'
-        ? await summarizeQuery(rawText)
-        : rawText;
-
-
-    if (settings().queryMode === 'summary') {
-        console.log(`Worlds Apart: summarized ${rawText.length} chars into ${searchText.length}: "${searchText}"`);
-    } else {
-        console.log(`Worlds Apart: query is ${searchText.length} chars from ${settings().messageDepth} message(s), matched against ~${settings().chunkSize}-char entry chunks`);
-    }
+    const searchText = rawText;
+    console.log(`Worlds Apart: query is ${searchText.length} chars from ${settings().messageDepth} message(s), matched against ~${settings().chunkSize}-char entry chunks`);
 
     // Recorded for /wa-grade BEFORE the retrieval outcome is known: a book with no vectorized
     // entries legitimately scores nothing below, but the query exists the moment it is built, and a
@@ -2791,7 +2701,7 @@ function paramSnapshot() {
     // DECLARATION ORDER, not sorted — defaultSettings is already written in rough pipeline order, so
     // that grouping comes free and alphabetising would throw it away.
     //
-    // It includes `raterId` and `summaryPrompt`, so a snapshot pasted somewhere public carries them.
+    // It includes `raterId`, so a snapshot pasted somewhere public carries it.
     const snap = {
         // A STRUCTURED SETTING IS STORAGE, NOT A KNOB, and is left out. `worldPriorityByChar` holds one
         // priority list per CHARACTER OR GROUP (`priorityKey`), every book any of them has ever seen, so
@@ -2834,11 +2744,6 @@ function paramSnapshot() {
                 .map(([tier, m]) => [tier, m
                     ? { features: m.features, cutoff: m.cutoff, heldOutAuc: m.heldOutAuc, fittedOn: m.fittedOn }
                     : null])),
-            // The profile NAME and endpoint behind `llmProfile`, which stores an id.
-            ...(s.queryMode === 'summary' ? { summaryProfile: (() => {
-                const profile = (extension_settings.connectionManager?.profiles ?? []).find(x => x.id === s.llmProfile);
-                return { name: profile ? profile.name : 'current API', endpoint: profile ? (profile['api-url'] || profile.api || '—') : '—' };
-            })() } : {}),
         },
     };
 
@@ -3407,9 +3312,9 @@ async function gradeScene(named) {
  *               termWeights as a parameter, so this arm now fails the criterion above. Kept until the
  *               section is resettled; it still cannot ride a preloaded sweep (scene.mjs's guard names
  *               only the gazetteer settings).
- * `summary` is not eligible however tempting: state.mjs RESETS queryMode rather than un-surfacing it, so
- * an arm setting it would resurrect a withdrawn feature and pay an LLM call per scene for a mode no user
- * can be in. Bundles captured under it still open by name.
+ * A SUMMARIZED QUERY is not among them and cannot be: the summarizer is gone. Measured before it went,
+ * n=106 scenes paired, F2 over the delivered set -0.021 against the raw messages. Bundles captured under
+ * the old `queryMode` still open by name; the field is read and ignored.
  *
  * ARM COUNT IS NOT A DESIGN CONSTANT. Add an entry here whenever graded-scene-grid.mjs reports a
  * configuration whose top rows are not fully judged; that number is the stopping rule, not this list's
@@ -4129,33 +4034,6 @@ function effectiveTokenBudget() {
 }
 
 
-/**
- * Summarizes the current chat and scores the result, so the summary prompt can be
- * tuned against retrieval quality directly. Activates nothing.
- * @returns {Promise<string>} Empty string — output goes to the console
- */
-async function probeSummary() {
-    const chat = getContext().chat ?? [];
-    const rawText = buildQuery(chat);
-
-    if (!rawText) {
-        toastr.warning('No chat to summarize.', 'Worlds Apart');
-        return '';
-    }
-
-    const summary = await summarizeQuery(rawText);
-
-    console.log(`Worlds Apart: summary (${summary.length} chars):\n%c${summary}`, 'color: #6cf');
-
-    if (summary === rawText) {
-        console.warn('Worlds Apart: summarization returned the raw text — it failed, see the error above');
-        return '';
-    }
-
-    await probeQuery(null, summary);
-    return '';
-}
-
 // ---------------------------------------------------------------------------
 // Settings UI
 // ---------------------------------------------------------------------------
@@ -4728,13 +4606,6 @@ export async function init() {
         // land in preferredBook.
         callback: () => lorebookStudio(chatBook()),
         helpString: 'Worlds Apart: open Lorebook Studio — a wide two-pane manager listing every lorebook on the left and the selected book\'s entries on the right. Per-entry tools (mode, flags, sticky, ⚡/✨ keyword suggestions, prune-scan colouring, duplicate/delete), a Tool Settings drawer, bulk selection + actions (enable/disable, mode, sticky, trigger %, renumber, delete), and book tools (rename, duplicate, delete, type filter, suggest-all). Also on the extensions (wand) menu.',
-        returns: 'nothing',
-    }));
-
-    SlashCommandParser.addCommandObject(SlashCommand.fromProps({
-        name: 'wa-summary',
-        callback: probeSummary,
-        helpString: 'Worlds Apart: summarize the current chat with the built-in summary prompt and score the result. Activates nothing. Dev probe for the /wa-super-grade `summary` pool arm — the summarized-query mode is withdrawn from production, so this is the only way to exercise it by hand.',
         returns: 'nothing',
     }));
 

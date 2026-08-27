@@ -18,7 +18,7 @@ eq(full[1].content.length, 3000, 'entries are verbatim; a bundle that drops cont
 eq(Object.keys(keyByUid(Object.values(book))).length, 2, 'an array of entries is accepted too');
 
 // --- captureParams maps settings onto the harness's argument names ---
-const s = { bm25K1: 1.2, bm25B: 0.75, properNounBoost: 3, stopwordDocFreq: 0.25,  maxVectorEntries: 10, suppressVectorKeys: true, entityFilter: true, queryMode: 'messages' };
+const s = { bm25K1: 1.2, bm25B: 0.75, properNounBoost: 3, stopwordDocFreq: 0.25,  maxVectorEntries: 10, suppressVectorKeys: true, entityFilter: true };
 const p = captureParams(s, { caseSensitive: false, wholeWords: false, includeNames: true, allowWIScan: true });
 eq(p.K1, 1.2, 'bm25K1 -> K1');
 // NO FUSION PARAMS. K/LEXW/KEYW/weightByOrder described RRF over the layout, which no longer exists —
@@ -357,7 +357,7 @@ const mk = (arm, over) => ({ arm, sample: buildSample({
     cutoff: { gradingOverride: { maxVectorEntries: 1 } }, gradedCandidates: 1, pluginFP: 'ab', sourceFP: 'ab', now: '2026-07-29',
 }) });
 const bundle = await bundleSamples(
-    [mk('shipped', {}), mk('summary', { queryMode: 'summary' }), mk('depth', { messageDepth: 8 })],
+    [mk('shipped', {}), mk('no-filter', { entityFilter: false }), mk('depth', { messageDepth: 8 })],
     { start: 90, end: 100, user: 'f47ac10b-58cc-4372-a567-0e02b2c3d479', captureId: 'cap-test' },
 );
 const scene0 = bundle.scenes[0];
@@ -419,15 +419,15 @@ for (const f of ['query', 'candidates', 'cutoff', 'index', 'primaryBook', 'grade
     eq(bundle[f] === undefined && bundle.arms.every(a => a.scenes[scene0.id][f] !== undefined), true, `"${f}" is on the cell`);
 }
 eq(bundle.arms.every(a => a.params !== undefined && a.scenes[scene0.id].params === undefined), true, '"params" is on the arm');
-eq(bundle.arms.find(a => a.name === 'summary').scenes[scene0.id].query, 'q-summary', 'each arm keeps its own query text');
+eq(bundle.arms.find(a => a.name === 'no-filter').scenes[scene0.id].query, 'q-no-filter', 'each arm keeps its own query text');
 // The span is the ARM's: it is what that configuration chose to read back from the graded moment.
 eq(scene0.sceneStart, undefined, 'a scene records no span');
 eq(bundle.arms[0].scenes[scene0.id].sceneStart, 90, '...the arm that read it does');
 
 // Round trip: an unpacked arm is an ordinary sample every tool can read.
-const back = openBundle(bundle, 'summary');
-eq(back.query, 'q-summary', 'unpacking restores the arm\'s own query');
-eq(back.params.queryMode, 'summary', 'unpacking restores the arm\'s own params');
+const back = openBundle(bundle, 'no-filter');
+eq(back.query, 'q-no-filter', 'unpacking restores the arm\'s own query');
+eq(back.params.entityFilter, false, 'unpacking restores the arm\'s own params');
 // `depth` is the CELL's, not the arm's params: it is what this configuration read of THIS scene, and the
 // view hands it back as its own field beside them.
 eq(back.params.depth, undefined, 'depth is not among the arm\'s params');
@@ -447,9 +447,9 @@ eq(gradeValue(back.entries[0]), 4, '...so the verdict in force resolves');
 eq(back.entries[0].book, 'Main', 'under the schema\'s own name for the book');
 eq(back.scenes, undefined, 'the view carries no scene list');
 eq(back.name, 'sc', 'the view carries the DOCUMENT\'s name, verbatim');
-eq(back.arm, 'summary', '...and the arm\'s name beside it, so a label is composed rather than baked in');
+eq(back.arm, 'no-filter', '...and the arm\'s name beside it, so a label is composed rather than baked in');
 eq(openBundle(bundle).arm, 'shipped', 'the default arm is "shipped" when present');
-eq(openBundle({ ...bundle, arms: bundle.arms.filter(a => a.name !== 'shipped') }).arm, 'summary',
+eq(openBundle({ ...bundle, arms: bundle.arms.filter(a => a.name !== 'shipped') }).arm, 'no-filter',
     'otherwise the first arm that captured the scene');
 // Something that is not a graded-scene document is REFUSED. Reading one as though it were would silently
 // give a reader no entries and no candidates rather than an error.

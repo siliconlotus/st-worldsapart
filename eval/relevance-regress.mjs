@@ -493,7 +493,7 @@ const queryVec = async (S, name, value, em) => {
                     .filter(e => e.world === book && typeof e.content === 'string' && e.content.trim())
                     .map(e => e.content.trim())));
             }
-            const tw = (P.entityFilter && P.queryMode !== 'summary') ? ranking.buildTermWeights(S.query, scene.gaz, P.boost) : null;
+            const tw = P.entityFilter ? ranking.buildTermWeights(S.query, scene.gaz, P.boost) : null;
             const haystack = haystackFor(S, P);
             const rows = makeCandidateSet({ ...scene, params: P })(P.K1, P.B, tw, qvec, S.query, haystack);
             if (WITH.includes('properNouns')) {

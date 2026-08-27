@@ -357,6 +357,28 @@ scenes. **A ceiling that binds on an ordinary scene is a cut, not a limit.**
 mean-centre and does not pool server-side. It has never had BM25, and since stage 1 no longer does
 either, that has stopped being a difference between the paths. Neither path passes a threshold now.
 
+**Neither side of the comparison is summarized, and both were measured before the code went.** The query
+is the raw recent messages and an entry is its whole content; the LLM query summarizer that once produced
+the former is deleted, and nothing summarizes an entry. **Measured**, n=106 graded scenes, paired against
+each scene's own baseline, F2 over the delivered set, one local summarizer at temperature 0:
+
+| what was summarized | mean ΔF2 | sign test |
+| --- | --- | --- |
+| the query (as the withdrawn `queryMode` did) | -0.021 | 31 up, 52 down, p=0.028, fails Holm at two comparisons |
+| the query, entity filter left on | -0.014 | same signs; recall recovered, precision did not |
+| every entry over one chunk | **-0.094** | 17 up, 79 down, p<0.001 |
+
+Summarizing the entries also lost at a MATCHED window (@R, mean -0.107), so the loss is in the ordering
+and not only in what the relevance cut admits — though the cut admitted 44% more rows (20.9 -> 30.2 per
+scene), because shortening every entry raises BM25 and `density` and so inflates `E[credit]` against a fit
+trained on full entries. Recall barely moved in either direction (0.751 -> 0.736); precision carried the
+whole loss (0.292 -> 0.203). Condensing an entry keeps enough to find it and not enough to tell it from
+its neighbours, and it costs more on the corpus side than the query side, since one query is compared
+against every entry at once.
+
+Caveats: one summarizer and one prompt per side, and the entry prompt was new rather than shipped. The
+effective n is nearer the 3 stories than the 106 scenes.
+
 **The gazetteer reads the AUTHORED vocabulary** — see *Stage 2* for why that has to be deliberate rather
 than inherited from the scan's blanking. It is a TERM count, not an entry count, and no admission effect
 at all since stage 1 admits every candidate it scores; the 74% BM25 inflation the old figure carried was

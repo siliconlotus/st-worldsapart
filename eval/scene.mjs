@@ -567,7 +567,9 @@ export const sceneParams = (S, overrides = {}) => ({
     sharedScatter: 'pooled',
     // Exact key strings to treat as removed from the book (see scoringKeys). Null = none.
     dropKeys: null,
-    queryMode: 'messages',
+    // NO queryMode. The summarized-query mode is gone from production (measured: F2 over the delivered
+    // set -0.021, n=106 scenes paired), and with it the only thing that read it here. Stored bundles
+    // still carry the field; it is read and ignored, like `threshold`.
     // PER-BOOK QUOTA for stage 5 (applyBudget capOf), as {book: cap}. Null = no cap, which is what every
     // capture in the corpus ran under — the live setting lives on the world priority list and no bundle
     // records it, so this is an arm's knob rather than a replayed value.
@@ -1267,7 +1269,7 @@ export async function scoreScene({ sample: S, overrides = {}, k = 10, vectors, m
     const gradeOf = makeGradeOf(S.entries, scene);
 
     const query = S.query;
-    const tw = (P.entityFilter && P.queryMode !== 'summary') ? ranking.buildTermWeights(query, scene.gaz, P.boost) : null;
+    const tw = P.entityFilter ? ranking.buildTermWeights(query, scene.gaz, P.boost) : null;
     // No collection means no cosine to compute, so the embed call is skipped rather than made and ignored.
     // Under denseAllEntries a keyword-only book has an empty stage-1 collection and still has vectors to
     // score against, which is the whole point of the arm there.

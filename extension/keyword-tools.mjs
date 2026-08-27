@@ -26,9 +26,8 @@ export const buildKeyPruneScan = (data, opts, ignoreSet, extra = {}) =>
 
 
 /**
- * One-shot text generation over the configured summary profile (or the current API). Mirrors the
- * connection path in summarizeQuery minus the caching/prompt-building/fallback — callers handle
- * failure — so the LLM keyword mode hits the same local model the summariser uses.
+ * One-shot text generation over WA's configured LLM profile (or the current API). Callers handle
+ * failure themselves; nothing here caches or retries.
  */
 async function generateText(prompt, responseLength) {
     const s = settings();
@@ -59,8 +58,8 @@ async function generateText(prompt, responseLength) {
 }
 
 /**
- * Response cap per call. A runaway guard, not a budget — the same reading `summaryLength` takes:
- * you pay for tokens generated, not tokens allowed, so a tight cap buys nothing.
+ * Response cap per call. A runaway guard, not a budget: you pay for tokens generated, not tokens
+ * allowed, so a tight cap buys nothing.
  *
  * It must clear a THINKING model's reasoning, which spends this same budget. At the previous 400 a
  * reasoning model could consume the whole allowance and return an empty string, which the

@@ -108,7 +108,6 @@ export function captureParams(s, { caseSensitive, wholeWords, includeNames, allo
         meanCentered: s.meanCentered,
         maxVectorEntries: s.maxVectorEntries,
         entityFilter: s.entityFilter,
-        queryMode: s.queryMode,
         caseSensitive,
         wholeWords,
         // The boundary class whole-word matching used. Recorded here rather than only in
