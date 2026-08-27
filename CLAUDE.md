@@ -285,14 +285,14 @@ directly, so they are never scored for relevance.
 
 **5. Delivery** — WHAT FITS, AND IN WHAT ORDER. Nothing here judges an entry: a row it drops cleared
 stage 4 and lost to space, which is why every cut is a prefix of the layout order rather than a test
-against a threshold. `selection.mjs`
+against a threshold. `delivery.mjs`
 `walkOrder` hoists constants then armed stickies ahead of the dynamic block, which is what makes every
 cap below a prefix cut; it cuts nothing. The ENTRY MAXES decide how many, on nested populations — vector ⊆ dynamic ⊆ all, plus the
 per-book cap — with `maxVectorEntries` counted off the `vectorized` flag — the cap exists so that at most N vector
 entries are added to the layout, which is a question about what an entry is. The TOKEN BUDGET decides how much. The maxes and the budget live in `applyBudget`,
 which walks the layout order constant and sticky first — constant leads, because constant means always
 and should only be cut when constants alone overflow — so every cap is a prefix cut, and returns the
-survivors; `rankActivated` is what deletes the rest from `activated`, since `selection.mjs` is ST-free
+survivors; `rankActivated` is what deletes the rest from `activated`, since `delivery.mjs` is ST-free
 and the map is core's.
 
 **THREE ORDERINGS, and only one is a ranking.** `fuseRetrieval` decides what is ACTIVATED; LAYOUT ORDER
@@ -328,7 +328,7 @@ expression is WORTH goes in the second.
 
 ## Pure vs ST-coupled
 
-`matcher.mjs`, `entity.mjs`, `query.mjs`, `keyword-audit.mjs`, `keyword-suggest.mjs`, `selection.mjs`, `smartkeys.mjs`, `sort.mjs`, `lexical.mjs`, `relevance.mjs` and `plugin/*.mjs` are
+`matcher.mjs`, `entity.mjs`, `query.mjs`, `keyword-audit.mjs`, `keyword-suggest.mjs`, `selection.mjs`, `delivery.mjs`, `smartkeys.mjs`, `sort.mjs`, `lexical.mjs`, `relevance.mjs` and `plugin/*.mjs` are
 ST-free and node-importable, so the evals exercise the real shipped code instead of string-slicing it.
 Settings and ST globals are injected by the caller, never imported. The ST/DOM half is
 `worldsapart.js`, `keyword-tools.mjs`, `studio.mjs`, `ui-widgets.mjs`.

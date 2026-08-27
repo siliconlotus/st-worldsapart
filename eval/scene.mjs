@@ -20,6 +20,7 @@ import * as entity from '../extension/entity.mjs';
 import * as matcher from '../extension/matcher.mjs';
 import { isDurable, openBundle } from '../extension/grading.mjs';
 import * as selection from '../extension/selection.mjs';
+import * as delivery from '../extension/delivery.mjs';
 import { buildContentIndex, scoreContent, entryKey } from '../extension/content-lexical.mjs';
 // Cycle: reindex.mjs imports getStringHash from here. Safe because neither side calls across at module
 // scope — both references live inside function bodies, so whichever module loads first finishes evaluating
@@ -1402,8 +1403,8 @@ export async function scoreScene({ sample: S, overrides = {}, k = 10, vectors, m
         // bodies (median over 1297 rows, p5 4.46 / p95 5.33). A flat /4 would be 23% out.
         const recorded = new Map((S.candidates ?? []).map(c => [entryKey({ world: c.book ?? S.primaryBook, uid: c.uid }), c.tokens]).filter(([, t]) => typeof t === 'number'));
         const tokensOf = r => recorded.get(entryKey(r.entry)) ?? Math.round(String(r.entry?.content ?? '').length / 4.91);
-        const kept = await selection.applyBudget({
-            ranked: selection.walkOrder({ results: ranked.filter(admits) }),
+        const kept = await delivery.applyBudget({
+            ranked: delivery.walkOrder({ results: ranked.filter(admits) }),
             isDynamic: () => true,
             maxTokens: P.budgetTokens,
             maxTotal: P.maxTotalEntries ?? 0,

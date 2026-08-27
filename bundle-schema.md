@@ -212,7 +212,7 @@ described, and re-tokenizing offline gives a different answer than the tokenizer
 **`budget` is DOCUMENT-LEVEL, and that is a consequence of the above.** It holds stage 5's caps — the entry
 maxes, the token budget, the slack mode — and `tokenizer`, the name those per-candidate counts were produced
 under. No arm carries a variant, because none is ever captured: a budget arm is a prefix cut over a layout
-ranking that is already recorded, so it is swept OFFLINE through `selection.mjs` `applyBudget` instead of
+ranking that is already recorded, so it is swept OFFLINE through `delivery.mjs` `applyBudget` instead of
 costing a capture. `tokenizer` could not vary in any case — it is ST's `getTokenizerModel()`, an environment
 fact WA does not set, which is why it sits beside `embedModel` rather than inside `paramSnapshot`. **Measured**
 across the corpus: 0 of 106 multi-arm documents varied any field of it.

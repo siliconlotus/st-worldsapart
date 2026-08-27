@@ -45,6 +45,7 @@ import * as entity from './extension/entity.mjs';
 import * as matcher from './extension/matcher.mjs';
 import { registerKeys, resetSmartKeys } from './extension/smartkeys.mjs';
 import * as selection from './extension/selection.mjs';
+import * as delivery from './extension/delivery.mjs';
 import { getTokenCountAsync, getTokenizerModel } from '../../../tokenizers.js';
 import { textgen_types, textgenerationwebui_settings } from '../../../textgen-settings.js';
 import { oai_settings } from '../../../openai.js';
@@ -1341,7 +1342,7 @@ function showExemptCount(entries) {
         return;
     }
 
-    const exempt = entries.filter(selection.authorIgnoreBudget).length;
+    const exempt = entries.filter(delivery.authorIgnoreBudget).length;
 
     // Nothing to say when there are none, which is the common case.
     field.text(exempt
@@ -2385,7 +2386,7 @@ async function rankActivated(args) {
     }
 
     // Constants and stickies lead, which is what makes every cap below a prefix cut.
-    let ranked = selection.walkOrder({ sticky, constant, results });
+    let ranked = delivery.walkOrder({ sticky, constant, results });
 
     const maxTokens = effectiveTokenBudget();
     const maxTotal = settings().maxTotalEntries;
@@ -2395,7 +2396,7 @@ async function rankActivated(args) {
 
     if (maxTokens > 0 || maxTotal > 0 || maxDynamic > 0 || maxVectorEntries > 0 || bookCaps.size) {
         const dynamicSet = new Set(results);
-        const { survivors, counted, skipped, dropped, budgeted, inPrompt } = await selection.applyBudget({
+        const { survivors, counted, skipped, dropped, budgeted, inPrompt } = await delivery.applyBudget({
             ranked,
             isDynamic: item => dynamicSet.has(item),
             // THE TAG, not retrieval provenance. maxVectorEntries exists so that at most N vector
@@ -2429,8 +2430,8 @@ async function rankActivated(args) {
                 // Nested innermost first — vector ⊆ dynamic ⊆ total — so the line reads in the order the
                 // caps bind. Recounted from the survivors on the same terms applyBudget counted them:
                 // by provenance, and exempt entries are outside the population the caps bound.
-                maxVectorEntries > 0 ? `vector ${results.filter(x => survivors.has(x) && runState.lastScores.has(x.key) && !selection.authorIgnoreBudget(x.entry)).length}/${maxVectorEntries}` : null,
-                maxDynamic > 0 ? `dynamic ${results.filter(x => survivors.has(x) && !selection.authorIgnoreBudget(x.entry)).length}/${maxDynamic}` : null,
+                maxVectorEntries > 0 ? `vector ${results.filter(x => survivors.has(x) && runState.lastScores.has(x.key) && !delivery.authorIgnoreBudget(x.entry)).length}/${maxVectorEntries}` : null,
+                maxDynamic > 0 ? `dynamic ${results.filter(x => survivors.has(x) && !delivery.authorIgnoreBudget(x.entry)).length}/${maxDynamic}` : null,
                 maxTotal > 0 ? `total ${counted}/${maxTotal}` : null,
                 maxTokens > 0 ? `tokens ${budgeted}/${maxTokens} budgeted${inPrompt !== budgeted ? `, ${inPrompt - budgeted} exempt, ${inPrompt} in prompt` : ''}` : null,
             ].filter(Boolean).join(', ');
@@ -2923,7 +2924,7 @@ async function reportLayout(verbose = false, countTokens = true) {
             why: whySelected(item, block),
             position: POSITION_NAMES[entry.position] ?? `position ${entry.position}`,
             depth: entry.position === 4 ? (entry.depth ?? 4) : null,
-            exempt: selection.authorIgnoreBudget(entry),
+            exempt: delivery.authorIgnoreBudget(entry),
             tokens: tokens ?? null,
             _pos: Number(entry.position) || 0,
         });

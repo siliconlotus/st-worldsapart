@@ -1,5 +1,5 @@
 // Checks the nested entry caps: vector ⊆ dynamic ⊆ all.
-import { applyBudget } from '../extension/selection.mjs';
+import { applyBudget } from '../extension/delivery.mjs';
 import { eq } from './metrics.mjs';
 
 const mk = (key, tokens, opts = {}) => ({ key, tokens, entry: { ...opts } });
@@ -306,7 +306,7 @@ eq(vAfterCap.survivors.has(constants[0]), true, 'a constant walked after the vec
 // --- walkOrder: the list the budget walks ------------------------------------------------------------
 // The cliff that used to cut this list is gone (extension/selection.mjs); what is left is the ORDER, and
 // the order is load-bearing on its own — it is what makes every cap in applyBudget a prefix cut.
-import { walkOrder } from '../extension/selection.mjs';
+import { walkOrder } from '../extension/delivery.mjs';
 
 const row = (key, fused) => ({ key, fused, entry: {} });
 const res = [row('r1', 9), row('r2', 8.9), row('r3', 8.8), row('r4', 1)];

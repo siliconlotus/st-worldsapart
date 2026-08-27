@@ -731,7 +731,7 @@ entry is.
 
 **The token budget** decides how much, and is the only one measured in tokens rather than entries. The maxes and the budget both live in `applyBudget`, which walks the ranked layout once, sticky
 and constant first so every cap is a prefix cut, returns the survivors, and reports every cap that
-rejected a row. `rankActivated` deletes the rest from `activated` — `selection.mjs` is ST-free and the
+rejected a row. `rankActivated` deletes the rest from `activated` — `delivery.mjs` is ST-free and the
 map is core's.
 
 **The relevance cut arbitrates over the whole dynamic block**, keyword-activated entries included, which
