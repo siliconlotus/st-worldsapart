@@ -59,6 +59,14 @@ export const KEY_DUPE_MIN = 0.35;
  *  about what junk looks like. */
 export const FUNCTION_WORDS = new Set('a an the and or but if then else for to of in on at by with from as is are was were be been being this that these those it its he she they them his her their you your i we our my me not no do does did has have had will would can could should'.split(' '));
 
+/** Words that live INSIDE a constructed proper noun — "Church of the Sun", "van der Berg", "War and
+ *  Peace" — genitive and article particles plus `and`. The authoritative list; the harness's prose-side
+ *  span arm derives from it MINUS `and`, which in running text joins two entities rather than living
+ *  inside one. A key is different: its author chose the span, so `and` is part of the name.
+ *  ponytail: prepositional titles ("Nightmare on Elm Street") still read as fragments; widen when a
+ *  real key hits it. */
+export const NAME_PARTICLES = new Set(['of', 'the', 'and', 'de', 'del', 'della', 'di', 'da', 'van', 'von', 'der', 'den', 'du', 'la', 'le', 'el', 'bin', 'ibn']);
+
 /**
  * A key that reads as a CLAUSE FRAGMENT rather than a name for something.
  *
@@ -76,9 +84,11 @@ export const FUNCTION_WORDS = new Set('a an the and or but if then else for to o
  *
  * Single words are never fragments (a bare word is a name or it is caught by the English-common flag).
  *
- * TITLE CASE IS EXEMPT, because a capitalised phrase is a name even when it contains a function word:
- * "No Contact Order" and "The Bali Trip" are things, "no script" and "the extra one" are not. Without this
- * the flag fires on legitimate hand-written keys — which is exactly what the check caught.
+ * A CONSTRUCTED PROPER NOUN IS EXEMPT: capitalised tokens at both ends, and every lowercase token
+ * between them a name particle. "No Contact Order", "The Bali Trip" and "Church of the Sun" are things;
+ * "no script", "the extra one" and "went to Teddy" are not — a non-particle lowercase word anywhere, or
+ * a lowercase end, is prose. Capitalisation is the author's declaration, so a lowercase "church of the
+ * sun" still reads as a fragment.
  *
  * @param {string} key Raw keyword
  * @returns {boolean} True when the key contains an English function word in a multi-word phrase
@@ -86,7 +96,9 @@ export const FUNCTION_WORDS = new Set('a an the and or but if then else for to o
 export function looksLikeFragment(key) {
     const raw = String(key ?? '').trim();
     const tokens = raw.split(/\s+/).filter(Boolean);
-    if (tokens.length > 1 && tokens.every(t => /^[^\p{L}]*\p{Lu}/u.test(t))) return false;   // Title Case = a name
+    const cap = t => /^[^\p{L}]*\p{Lu}/u.test(t);
+    if (tokens.length > 1 && cap(tokens[0]) && cap(tokens[tokens.length - 1])
+        && tokens.every(t => cap(t) || NAME_PARTICLES.has(t.toLowerCase()))) return false;
     const words = raw.toLowerCase().match(/[\p{L}][\p{L}'-]*/gu) ?? [];
     return words.length > 1 && words.some(w => FUNCTION_WORDS.has(w));
 }

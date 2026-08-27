@@ -335,6 +335,15 @@ for (const k of ['Dia de los Muertos', 'Cirque du Soleil', 'Coup de Grace']) {
     assert.equal(looksLikeFragment(k), false, `named entity spared: "${k}"`);
 }
 
+// CONSTRUCTED PROPER NOUNS: a capitalised frame with name-particle interior is a name, not a fragment.
+for (const k of ['Church of the Sun', 'War and Peace', 'House of the Rising Sun', 'The Bali Trip']) {
+    assert.equal(looksLikeFragment(k), false, `constructed proper noun spared: "${k}"`);
+}
+// ...but a non-particle lowercase word, a lowercase end, or no capitals is still prose.
+for (const k of ['Kyle went to Teddy', 'Order of the', 'church of the sun']) {
+    assert.equal(looksLikeFragment(k), true, `still a fragment: "${k}"`);
+}
+
 // A single word is never a fragment — it is a name, or the English-common flag catches it.
 for (const k of ['the', 'and', 'Marjorie', 'Grindr']) {
     assert.equal(looksLikeFragment(k), false, `single word: "${k}"`);

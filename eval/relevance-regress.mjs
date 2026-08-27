@@ -53,7 +53,7 @@ import { COMMON_WORDS } from '../plugin/commonwords.js';
 import { logisticFit, auc, cumulativeFit, prCurve, reliability, sigmoid } from './logistic.mjs';
 import * as ranking from '../extension/ranking.mjs';
 import { properNames, properDensity, modelKey } from '../extension/relevance.mjs';
-import { nameEvidence } from '../extension/keyword-core.mjs';
+import { nameEvidence, NAME_PARTICLES } from '../extension/keyword-core.mjs';
 import { fold, normalizeOrthography } from '../extension/smartkeys.mjs';
 import { tokenize } from '../extension/lexical.mjs';
 import { chunkEntry } from '../extension/chunking.mjs';
@@ -284,11 +284,10 @@ const PROPER_RE = /\b[A-Z][a-z]{2,}\b/g;
 // EMITS THE SPAN AND ITS PARTS. Spans alone are brittle — an entry saying "Brackenmoor Patrol" against a
 // window saying only "Brackenmoor" would share nothing, which is worse than the unigram arm rather than
 // better. Both levels means the phrase is extra evidence when it agrees, never a replacement.
-// NOT 'and': it joins two entities rather than living inside one, so "Maren and Brackenmoor Patrol"
-// formed a single three-name span. Every member here is a genitive or article particle that appears
-// INSIDE a name.
-const PARTICLES = new Set(['of', 'the', 'de', 'del', 'della', 'di', 'da', 'van', 'von', 'der', 'den',
-    'du', 'la', 'le', 'el', 'bin', 'ibn']);
+// NOT 'and': in prose it joins two entities rather than living inside one, so "Maren and Brackenmoor
+// Patrol" formed a single three-name span. Derived from the shipped list so the two cannot drift on
+// what a particle is; the one difference is stated there.
+const PARTICLES = new Set([...NAME_PARTICLES].filter(w => w !== 'and'));
 const properSpans = (text) => {
     const norm = normalizeOrthography(String(text ?? ''));
     const names = ranking.properNounsOf(norm);
