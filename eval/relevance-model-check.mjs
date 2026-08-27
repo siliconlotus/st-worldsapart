@@ -16,10 +16,13 @@ import fs from 'node:fs';
 eq([...properNames('Then Maren left. Then she returned.')].sort().join(','), 'maren',
     'a name is a capital that is not sentence-initial');
 
-// COMMON ENGLISH IS DROPPED even when it passes the capitalisation rule — "London" is in the top-2000
-// list, so a book whose prose mentions it gets no signal from it.
-eq(properNames('We met in London today.').has('london'), false,
+// COMMON ENGLISH IS DROPPED even when it passes the capitalisation rule — "Home" is in the stoplist,
+// so a heading-cased mention gets no signal from it. Proper nouns are NOT in the stoplist (it is
+// generated minus SUBTLEX Name-dominant tokens), so "London" counts as the name it is.
+eq(properNames('We met at Home today.').has('home'), false,
     'a common English word is not counted as a name even mid-sentence');
+eq(properNames('We met in London today.').has('london'), true,
+    'a proper noun is never stoplisted');
 
 // ORTHOGRAPHY IS NORMALISED BEFORE DETECTION, so the two apostrophes are one name. This is the rule that
 // makes the entry side and the window side intersectable at all.
