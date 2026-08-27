@@ -95,12 +95,30 @@ export const NAME_PARTICLES = new Set(['of', 'the', 'and', 'de', 'del', 'della',
  */
 export function looksLikeFragment(key) {
     const raw = String(key ?? '').trim();
-    const tokens = raw.split(/\s+/).filter(Boolean);
-    const cap = t => /^[^\p{L}]*\p{Lu}/u.test(t);
-    if (tokens.length > 1 && cap(tokens[0]) && cap(tokens[tokens.length - 1])
-        && tokens.every(t => cap(t) || NAME_PARTICLES.has(t.toLowerCase()))) return false;
+    if (looksProper(raw)) return false;
     const words = raw.toLowerCase().match(/[\p{L}][\p{L}'-]*/gu) ?? [];
     return words.length > 1 && words.some(w => FUNCTION_WORDS.has(w));
+}
+
+/**
+ * A key that reads as a PROPER NAME: a capitalised frame with a name-particle interior.
+ *
+ * ONE TEST FOR BOTH CONSUMERS — the fragment flag's exemption above and `ignoreProper`'s reprieve from
+ * the unattested flag. They ask the same question of the same kind of string, and two copies diverged:
+ * the older one was `[A-Z]`, so `Étienne` was not a name; it required EVERY token capitalised, so
+ * `Church of the Sun` was not a name; and it did not skip leading punctuation, so `"Aldric` was not
+ * either. `\p{Lu}` and the particle frame are what the rest of the project already means by a name
+ * (`relevance.properNounsOf`, `NAME_PARTICLES`).
+ *
+ * A single capitalised word qualifies: a bare name IS a key, and only the fragment flag needs more than
+ * one token, which it tests for itself.
+ */
+export function looksProper(key) {
+    const tokens = String(key ?? '').trim().split(/\s+/).filter(Boolean);
+    if (!tokens.length) return false;
+    const cap = t => /^[^\p{L}]*\p{Lu}/u.test(t);
+    return cap(tokens[0]) && cap(tokens[tokens.length - 1])
+        && tokens.every(t => cap(t) || NAME_PARTICLES.has(t.toLowerCase()));
 }
 
 /**
@@ -192,10 +210,11 @@ export const isEnglishCommon = (list) => (v) => !/\s/.test(v) && list.has(v.toLo
  * authored.
  *
  * Used only to CONFIRM another flag, never to raise one on its own — and the value is calibrated for
- * that job. A `chat common` flag that RAISES exempts constant and sticky (author declarations that the
- * entry is meant to be ubiquitous) and NOT vectorized, whose keys fire like any other — so the 20% was
- * sized against a population that flag still reports on, and the threshold wants re-reading against what
- * it surfaces rather than inheriting a bound set for a different job. */
+ * that job. A `chat common` flag that RAISES exempts constant (an author declaration that the entry is
+ * meant to be ubiquitous) and NOT sticky, which says only that an armed entry persists, and NOT
+ * vectorized, whose keys fire like any other — so the 20% was sized against a population that flag
+ * still reports on, and the threshold wants re-reading against what it surfaces rather than inheriting
+ * a bound set for a different job. */
 export const KEY_CHAT_COMMON = 0.20;
 
 /**
@@ -224,7 +243,6 @@ export function buildKeyPruneScan(data, opts, ignoreSet, { caseSensitiveDefault 
         return n === undefined ? undefined : n / chatScan.messages;
     };
     const RED = '#e06c6c', YEL = '#d9b74a', GRN = '#7bbf6a';
-    const looksProper = k => k.split(/\s+/).every(t => /^[A-Z]/.test(t));   // Title Case = a name
 
     // constant / vector / keyword are exclusive; sticky rides orthogonally on any of them.
     // Pure predicate, so classifyEntry can re-test it: callers that iterate their OWN entry list
