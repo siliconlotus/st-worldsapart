@@ -7,11 +7,11 @@ const mk = (key, tokens, opts = {}) => ({ key, tokens, entry: { ...opts } });
 // 7 constants then 12 dynamic, which is the walk order onScanDone produces.
 const constants = Array.from({ length: 7 }, (_, i) => mk(`c${i + 1}`, 10));
 const dynamic = Array.from({ length: 12 }, (_, i) => mk(`d${i + 1}`, 10));
-const ranked = [...constants, ...dynamic];
+const walkAll = [...constants, ...dynamic];
 const dynamicSet = new Set(dynamic);
 
 const run = (opts) => applyBudget({
-    ranked,
+    walk: walkAll,
     isDynamic: item => dynamicSet.has(item),
     tokensOf: item => item.tokens,
     maxTokens: 0,
@@ -59,7 +59,7 @@ eq(r.inPrompt, 40, 'with nothing exempt, budgeted and in-prompt agree');
 // Skip-don't-stop: an entry too big for the remainder must not bar smaller ones.
 const mixed = [mk('big', 100), mk('small1', 10), mk('small2', 10)];
 r = await applyBudget({
-    ranked: mixed, isDynamic: () => true, tokensOf: i => i.tokens,
+    walk: mixed, isDynamic: () => true, tokensOf: i => i.tokens,
     maxTokens: 25, maxTotal: 0, maxDynamic: 0,
 });
 eq(r.survivors.size, 2, 'oversized entry is skipped, smaller ones behind it still fit');
@@ -68,7 +68,7 @@ eq(r.survivors.has(mixed[0]), false, 'the oversized entry is the one dropped');
 // ignoreBudget is honoured even after a cap is exhausted, which requires not stopping.
 const vip = mk('vip', 10, { ignoreBudget: true });
 r = await applyBudget({
-    ranked: [...dynamic.slice(0, 3), vip], isDynamic: () => true, tokensOf: i => i.tokens,
+    walk: [...dynamic.slice(0, 3), vip], isDynamic: () => true, tokensOf: i => i.tokens,
     maxTokens: 0, maxTotal: 2, maxDynamic: 0,
 });
 eq(r.survivors.size, 3, 'ignoreBudget entry gets in past an exhausted cap');
@@ -78,7 +78,7 @@ eq(r.survivors.has(vip), true, 'and it is the ignoreBudget one');
 // The motivating case — 10 exempt entries against a cap of 10 must not return zero.
 const exempt10 = Array.from({ length: 10 }, (_, i) => mk(`x${i + 1}`, 10, { ignoreBudget: true }));
 r = await applyBudget({
-    ranked: [...exempt10, ...dynamic], isDynamic: item => dynamicSet.has(item), tokensOf: i => i.tokens,
+    walk: [...exempt10, ...dynamic], isDynamic: item => dynamicSet.has(item), tokensOf: i => i.tokens,
     maxTokens: 0, maxTotal: 10, maxDynamic: 0,
 });
 eq(r.counted, 10, '10 exempt + cap 10: the cap applies to non-exempt entries only');
@@ -89,7 +89,7 @@ eq([...r.survivors].filter(x => dynamicSet.has(x)).length, 10, 'and retrieval st
 const exemptDyn = Array.from({ length: 4 }, (_, i) => mk(`xd${i + 1}`, 10, { ignoreBudget: true }));
 const exemptDynSet = new Set([...exemptDyn, ...dynamic]);
 r = await applyBudget({
-    ranked: [...exemptDyn, ...dynamic], isDynamic: item => exemptDynSet.has(item), tokensOf: i => i.tokens,
+    walk: [...exemptDyn, ...dynamic], isDynamic: item => exemptDynSet.has(item), tokensOf: i => i.tokens,
     maxTokens: 0, maxTotal: 0, maxDynamic: 5,
 });
 eq(r.survivors.size, 9, 'exempt dynamic entries do not consume the dynamic cap');
@@ -99,7 +99,7 @@ eq(r.survivors.size, 9, 'exempt dynamic entries do not consume the dynamic cap')
 // for entries the author marked must-have, at flat cost — the same failure the count caps refuse.
 const withVip = [mk('vip2', 40, { ignoreBudget: true }), ...dynamic];
 r = await applyBudget({
-    ranked: withVip, isDynamic: () => true, tokensOf: i => i.tokens,
+    walk: withVip, isDynamic: () => true, tokensOf: i => i.tokens,
     maxTokens: 60, maxTotal: 0, maxDynamic: 0,
 });
 eq(r.budgeted, 60, 'the exempt entry does not spend the budget');
@@ -108,7 +108,7 @@ eq(r.inPrompt, 100, '...so the prompt is the budget PLUS what was marked mandato
 // maxTokensIncludesExempt turns it back on, for a book whose exempt entries could overrun the context by
 // themselves — there a ceiling is worth more than an honest bill.
 r = await applyBudget({
-    ranked: withVip, isDynamic: () => true, tokensOf: i => i.tokens,
+    walk: withVip, isDynamic: () => true, tokensOf: i => i.tokens,
     maxTokens: 60, maxTotal: 0, maxDynamic: 0, exemptIsBudgeted: true,
 });
 eq(r.budgeted, 60, 'with it on, the exempt entry takes its tokens off the top');
@@ -117,7 +117,7 @@ eq(r.survivors.size, 3, 'and squeezes what fits below it');
 
 // ...unless the user turns that off, at which point exemption is total.
 r = await applyBudget({
-    ranked: withVip, isDynamic: () => true, tokensOf: i => i.tokens,
+    walk: withVip, isDynamic: () => true, tokensOf: i => i.tokens,
     maxTokens: 60, maxTotal: 0, maxDynamic: 0, exemptIsBudgeted: false,
 });
 eq(r.budgeted, 60, 'exemptIsBudgeted off: only the 6 non-exempt entries are budgeted');
@@ -130,7 +130,7 @@ eq(r.survivors.size, 7, 'so six budgeted entries fit instead of two');
 // it takes the slot, which is a worse entry beating a better one.
 const boundary = [mk('a', 300), mk('big', 250), mk('s1', 100), mk('s2', 100)];
 const budgetRun = (opts) => applyBudget({
-    ranked: boundary, isDynamic: () => true, tokensOf: i => i.tokens,
+    walk: boundary, isDynamic: () => true, tokensOf: i => i.tokens,
     maxTokens: 400, maxTotal: 0, maxDynamic: 0, ...opts,
 });
 
@@ -151,7 +151,7 @@ eq(r.survivors.has(boundary[1]), false, 'slack too small to cover the overhang: 
 // but not under the plain budget (490 > 400), so only continuous admits it.
 const drift = [mk('d1', 300), mk('d2', 150), mk('d3', 40)];
 const driftRun = (opts) => applyBudget({
-    ranked: drift, isDynamic: () => true, tokensOf: i => i.tokens,
+    walk: drift, isDynamic: () => true, tokensOf: i => i.tokens,
     maxTokens: 400, maxTotal: 0, maxDynamic: 0, slack: 0.25, ...opts,
 });
 
@@ -171,7 +171,7 @@ eq(r.skipped[0].blockedBy[0].slackNeeded, 38, 'or 38% slack would have covered i
 
 // An entry blocked by two caps reports both, so raising one is not a wasted trip.
 r = await applyBudget({
-    ranked: [mk('p', 300), mk('q', 300)], isDynamic: () => true, tokensOf: i => i.tokens,
+    walk: [mk('p', 300), mk('q', 300)], isDynamic: () => true, tokensOf: i => i.tokens,
     maxTokens: 400, maxTotal: 1, maxDynamic: 0,
 });
 eq(r.skipped[0].blockedBy.length, 2, 'both caps reported for one entry');
@@ -185,7 +185,7 @@ eq(r.skipped[0].blockedBy[0].slackSpent, true, 'reports that slack was already u
 // 300 fits, 250 does not but 100 does after it (near miss), then 100 more fits, and the
 // budget is exactly spent — anything after that is tail.
 r = await applyBudget({
-    ranked: [mk('a', 300), mk('big', 250), mk('s1', 100), mk('s2', 100), mk('s3', 100)],
+    walk: [mk('a', 300), mk('big', 250), mk('s1', 100), mk('s2', 100), mk('s3', 100)],
     isDynamic: () => true, tokensOf: i => i.tokens, maxTokens: 400, maxTotal: 0, maxDynamic: 0,
 });
 eq(r.skipped.length, 3, 'three entries skipped');
@@ -196,7 +196,7 @@ eq(r.skipped[0].blockedBy[0].remaining, 100, 'near miss reports the room that wa
 
 // Everything rejected after the last admission is tail, even if sizes vary.
 r = await applyBudget({
-    ranked: [mk('a', 400), mk('b', 10), mk('c', 500), mk('d', 10)],
+    walk: [mk('a', 400), mk('b', 10), mk('c', 500), mk('d', 10)],
     isDynamic: () => true, tokensOf: i => i.tokens, maxTokens: 400, maxTotal: 0, maxDynamic: 0,
 });
 eq(r.skipped.every(x => x.tail), true, 'budget exactly filled by the first entry: all rejections are tail');
@@ -210,7 +210,7 @@ const twoBooks = [
     bookEntry('b', 1), bookEntry('b', 2), bookEntry('b', 3), bookEntry('b', 4),
 ];
 r = await applyBudget({
-    ranked: twoBooks, isDynamic: () => true, tokensOf: i => i.tokens,
+    walk: twoBooks, isDynamic: () => true, tokensOf: i => i.tokens,
     maxTokens: 0, maxTotal: 0, maxDynamic: 0, capOf: i => (i.entry.world === 'a' ? 2 : 0),
 });
 eq([...r.survivors].filter(x => x.entry.world === 'a').length, 2, 'book cap 2 admits exactly 2 from book a');
@@ -225,7 +225,7 @@ const withConstant = [
 ];
 const constSet = new Set(withConstant.slice(1));
 r = await applyBudget({
-    ranked: withConstant, isDynamic: i => constSet.has(i), tokensOf: i => i.tokens,
+    walk: withConstant, isDynamic: i => constSet.has(i), tokensOf: i => i.tokens,
     maxTokens: 0, maxTotal: 0, maxDynamic: 0, capOf: () => 1,
 });
 eq(r.survivors.size, 2, 'book cap 1: the constant plus 1 dynamic survive');
@@ -233,7 +233,7 @@ eq(r.survivors.has(withConstant[0]), true, 'the constant is not counted against 
 
 // A count cap has no near-miss case — once it is reached nothing else can qualify.
 r = await applyBudget({
-    ranked: [mk('a', 10), mk('b', 10), mk('c', 10)],
+    walk: [mk('a', 10), mk('b', 10), mk('c', 10)],
     isDynamic: () => true, tokensOf: i => i.tokens, maxTokens: 0, maxTotal: 1, maxDynamic: 0,
 });
 eq(r.skipped.every(x => x.tail), true, 'count cap rejections are always tail');
@@ -246,7 +246,7 @@ eq(r.skipped.every(x => x.tail), true, 'count cap rejections are always tail');
     const sticky = Array.from({ length: 3 }, (_, i) => mk(`s${i + 1}`, 10));
     const walk = [...sticky, ...constants, ...dynamic];
     const r = await applyBudget({
-        ranked: walk,
+        walk: walk,
         isDynamic: item => dynamicSet.has(item),
         tokensOf: item => item.tokens,
         maxTokens: 120, maxTotal: 0, maxDynamic: 0,
@@ -286,7 +286,7 @@ eq(v.skipped.filter(s => s.blockedBy.some(b => b.cap === 'vector')).length, 4, '
 // isVector reads the entry's own flag and answers true for one, which is exactly why the block clause
 // guards on isDynamic rather than trusting the predicate.
 //
-// The shared `ranked` (constants then dynamic) cannot exercise this: applyBudget always walks
+// The shared walk (constants then dynamic) cannot exercise this: applyBudget always walks
 // constants before dynamic, so `vector` is still 0 throughout the constant block on any ordering a
 // caller actually produces, and the guard is never reached either way. This local order — two
 // vector rows exhausting the cap, THEN a constant, which no caller produces — exists only to pin
@@ -295,7 +295,7 @@ eq(v.skipped.filter(s => s.blockedBy.some(b => b.cap === 'vector')).length, 4, '
 // from the counter.
 const constantAfterVectorCap = [dynamic[0], dynamic[1], constants[0]];
 const vAfterCap = await applyBudget({
-    ranked: constantAfterVectorCap,
+    walk: constantAfterVectorCap,
     isDynamic: item => dynamicSet.has(item),
     isVector: () => true,
     tokensOf: item => item.tokens,

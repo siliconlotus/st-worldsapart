@@ -35,7 +35,7 @@ export function walkOrder({ sticky = [], constant = [], results = [] }) {
  * budget loop runs before WA is ever called and DROPS the entries it cuts, so a core budget smaller
  * than WA's silently caps WA's — the shipped 25% default against WA's 40% made any WA ceiling above
  * 25% inoperative. onEntriesLoaded therefore tells core every entry is exempt, so its loop never
- * cuts, and applyBudget does the cutting on the ranked layout instead.
+ * cuts, and applyBudget does the cutting on the layout order instead.
  *
  * `??`, not `||`: a stashed `false` must beat the `true` core was handed. The fallback fires only for
  * entries WA never processed — a dry run, or WA disabled — where the field is still the author's own.
@@ -54,7 +54,7 @@ export const authorIgnoreBudget = entry => Boolean(entry?.waIgnoreBudget ?? entr
  *   maxTotal    caps everything, so constants consume it before the dynamic entries
  *   maxTokens   caps context usage, which is only meaningful over everything
  *
- * `ranked` must walk stickies and constants first, which makes every cap a prefix cut:
+ * `walk` must lead with stickies and constants, which makes every cap a prefix cut:
  * once the dynamic count is used up there is nothing but dynamic entries left to reject.
  * Leaving maxTotal at 0 is what guarantees an always-on entry is never dropped.
  *
@@ -65,7 +65,7 @@ export const authorIgnoreBudget = entry => Boolean(entry?.waIgnoreBudget ?? entr
  * @param {object} args Budget arguments
  * @returns {Promise<{survivors: Set, counted: number, dropped: number, budgeted: number, inPrompt: number}>}
  */
-export async function applyBudget({ ranked, isDynamic, maxTokens, maxTotal, maxDynamic, maxVectorEntries = 0, isVector = () => false, tokensOf, capOf = () => 0, exemptIsBudgeted = false, slack = 0, slackOnce = true }) {
+export async function applyBudget({ walk, isDynamic, maxTokens, maxTotal, maxDynamic, maxVectorEntries = 0, isVector = () => false, tokensOf, capOf = () => 0, exemptIsBudgeted = false, slack = 0, slackOnce = true }) {
     const survivors = new Set();
     let counted = 0;
     let dynamic = 0;
@@ -90,7 +90,7 @@ export async function applyBudget({ ranked, isDynamic, maxTokens, maxTotal, maxD
 
     const ceiling = maxTokens > 0 ? maxTokens * (1 + slack) : 0;
 
-    for (const item of ranked) {
+    for (const item of walk) {
         index += 1;
         const itemTokens = await tokensOf(item);
         const exempt = authorIgnoreBudget(item.entry);
@@ -192,5 +192,5 @@ export async function applyBudget({ ranked, isDynamic, maxTokens, maxTotal, maxD
         skip.tail = skip.index > lastAdmitted;
     }
 
-    return { survivors, counted, skipped, dropped: ranked.length - survivors.size, budgeted, inPrompt };
+    return { survivors, counted, skipped, dropped: walk.length - survivors.size, budgeted, inPrompt };
 }

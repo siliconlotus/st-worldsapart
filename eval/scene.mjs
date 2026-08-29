@@ -1404,7 +1404,7 @@ export async function scoreScene({ sample: S, overrides = {}, k = 10, vectors, m
         const recorded = new Map((S.candidates ?? []).map(c => [entryKey({ world: c.book ?? S.primaryBook, uid: c.uid }), c.tokens]).filter(([, t]) => typeof t === 'number'));
         const tokensOf = r => recorded.get(entryKey(r.entry)) ?? Math.round(String(r.entry?.content ?? '').length / 4.91);
         const kept = await delivery.applyBudget({
-            ranked: delivery.walkOrder({ results: ranked.filter(admits) }),
+            walk: delivery.walkOrder({ results: ranked.filter(admits) }),
             isDynamic: () => true,
             maxTokens: P.budgetTokens,
             maxTotal: P.maxTotalEntries ?? 0,
