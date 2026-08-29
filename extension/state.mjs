@@ -303,11 +303,12 @@ export const defaultSettings = {
      * trigger listed on most entries) activates the whole book and WA has nothing to cut
      * with, so World Info crowds out the actual conversation. 40% leaves the majority of
      * the context to chat while being generous enough that a normal scan never touches it.
-     * Only bites when WA has more entries than budget; set 0 to defer to core entirely.
+     * Only bites when WA has more entries than budget; 0 is no token cap, not a handover —
+     * core's own budget cannot act once onEntriesLoaded has marked every entry exempt.
      */
     maxTokensPercent: 40,
     /**
-     * Token budget over ALL activated entries, absolute. 0 = leave it to core.
+     * Token budget over ALL activated entries, absolute. 0 = no cap, as everywhere else here.
      * Only meaningful globally — a token cap that exempted constants would report a
      * ceiling the prompt then exceeds by however much those constants weigh.
      */

@@ -2060,6 +2060,12 @@ async function onScanDone(args) {
     });
     const cutByRelevance = new Set(relevanceCutRows);
     results = results.filter(it => !cutByRelevance.has(it));
+    // DELETED FROM CORE'S MAP HERE, not left to the budget walk. That walk deletes what it WALKS, and
+    // these rows are no longer in it — so a cut row stayed in `activated` and shipped, spending tokens
+    // no cap had counted. Stage 4 is the decision that an entry does not belong; it has to leave.
+    for (const it of relevanceCutRows) {
+        activated.delete(it.key);
+    }
     if (relevanceCutRows.length) {
         console.log(`Worlds Apart: relevance cut dropped ${relevanceCutRows.length} of ${relevanceCutRows.length + results.length} dynamic entries`);
     }
