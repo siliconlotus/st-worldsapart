@@ -55,7 +55,7 @@ import { runState, defaultSettings, settings, ensureSettings } from './extension
 import { ensureStudioStyle, makeSortControl, makeTierEditor, showEntryText, wiGlyph, wiTooltip } from './extension/ui-widgets.mjs';
 import { PRESENTATION_ALIAS, SORT_FNS, normPresentation, presentationBaseLabel, presentationLabel, reconcileTiers, tierRank, wiTitleOf } from './extension/sort.mjs';
 import { lorebookStudio } from './extension/studio.mjs';
-import { setCaptureHost, versusCore, gradeScene, superGradeScene, superEvalScene } from './extension/capture-ui.mjs';
+import { setCaptureHost, versusCore, gradeScene, superGradeScene, superEvalScene, POOL_ARMS } from './extension/capture-ui.mjs';
 import { rowKey, unionArms } from './extension/grading.mjs';
 
 // Chunking is WA's own, not ST's: it is unreachable under node and it determines every stored vector, so an

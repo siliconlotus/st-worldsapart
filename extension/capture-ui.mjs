@@ -658,7 +658,7 @@ export async function gradeScene(named) {
  * configuration whose top rows are not fully judged; that number is the stopping rule, not this list's
  * length. `arms=` runs a subset when a round only needs to close one gap.
  */
-const POOL_ARMS = {
+export const POOL_ARMS = {
     shipped: {},
     'no-filter': { entityFilter: false },
 };
