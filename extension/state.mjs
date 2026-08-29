@@ -167,6 +167,16 @@ export const defaultSettings = {
      */
     messageDepth: 10,
     /**
+     * Tag names whose elements are REMOVED — tag and content — from every message before WA reads it.
+     * Comma-separated; empty is off. Applies to the retrieval query and the keyword scan window alike,
+     * since a state-tracking block distorts the embedded query exactly as it over-fires keys.
+     *
+     * Off by default and never inferred: the same chat renders letters and screens as markup too, and
+     * that is scene text. Only the author knows which of their blocks is bookkeeping (matcher.mjs
+     * `dropTags`).
+     */
+    dropChatTags: '',
+    /**
      * How surviving entries are laid out in the prompt:
      * 'authored' | 'authored-inverse' | 'best-first' | 'best-last'.
      *

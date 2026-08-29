@@ -9,7 +9,7 @@
 // authority belongs there, not here.
 //
 // countKey/keywordScore live in matcher.mjs, which is isomorphic — imported directly.
-import { countKey, keyExcerpt, keyExcerpts, keywordScore as rankKeywordScore, repeatCurveOf, secondaryKeys, usableKeys, usedMatchSources, withMatchSources, WI_LOGIC } from '../extension/matcher.mjs';
+import { countKey, dropTags, keyExcerpt, keyExcerpts, keywordScore as rankKeywordScore, repeatCurveOf, secondaryKeys, usableKeys, usedMatchSources, withMatchSources, WI_LOGIC } from '../extension/matcher.mjs';
 import { validateSmartKey } from '../extension/smartkeys.mjs';
 import { eq } from './metrics.mjs';
 
@@ -382,4 +382,39 @@ console.log('ok   keyExcerpt: localises what countKey counted, folded-haystack d
     eq(JSON.stringify(withMatchSources(['chat'], entry, usedMatchSources(SRC, [entry]), 'scan')),
         JSON.stringify(withMatchSources(['chat'], entry, SRC, 'scan')),
         'a gated capture rebuilds the same window as the full source set');
+}
+
+// dropChatTags: a named element leaves with its CONTENT, and nothing else moves. The setting exists
+// because a state-tracking block puts every name the story ever used into every turn's haystack; the
+// point of naming tags rather than ruling on them is that the same chat renders scene text as markup.
+{
+    const MES = 'She waited.\n<internal_states>\nLocation: Big Sur\nPresent: Kyle, Mara\n</internal_states>\n<div style="border:1px solid">Kyle: are you there?</div>\nShe did not answer.';
+    const out = dropTags(MES, 'internal_states');
+
+    eq(countKey('Big Sur', MES, false, false), 1, 'the tracker fires the key before the strip');
+    eq(countKey('Big Sur', out, false, false), 0, 'and not after — the content went with the tag');
+    eq(countKey('Kyle', out, false, false), 1, 'the div survives: an unnamed tag is scene text, not bookkeeping');
+    eq(out.includes('She waited.') && out.includes('She did not answer.'), true, 'prose either side is untouched');
+
+    eq(dropTags(MES, ''), MES, 'empty spec is off, not a no-tag strip');
+    eq(dropTags(MES, undefined), MES, 'no spec at all is not a throw');
+    eq(dropTags('a<x>1</x>b<y>2</y>c', 'x, y'), 'abc', 'a comma/space list drops each named tag');
+    eq(dropTags('a<x>1</x>b', 'x>'), 'ab', 'a tag pasted with its brackets still names the tag');
+    eq(dropTags('a<x>1</x>b', '<>'), 'a<x>1</x>b', 'a spec with no tag name in it drops nothing');
+
+    // The three shapes that decide whether a strip is safe to leave on.
+    eq(dropTags('a<x>1<x>2</x>3</x>b', 'x'), 'ab', 'same-tag nesting: the inner close does not end the outer element');
+    eq(dropTags('keep<x>gone', 'x'), 'keep', 'an unclosed tag runs to the end when it has no parent — presets write these blocks unclosed');
+    eq(dropTags('a<x>1</x>b<x>gone', 'x'), 'ab', '...after any closed ones have already gone');
+
+    // The parent is found by BALANCE: the first close with no open inside the span is an ancestor's.
+    eq(dropTags('<div>a<x>gone</div>keep', 'x'), '<div>a</div>keep', 'an unclosed tag stops at its parent, not at the end of the message');
+    eq(dropTags('<div>a<x>gone<b>1</b>gone</div>keep', 'x'), '<div>a</div>keep', 'balanced tags inside the span do not end it');
+    eq(dropTags('<div>a<x>gone<br>gone</div>keep', 'x'), '<div>a</div>keep', 'an unclosed void tag inside the span balances nothing and ends nothing');
+    eq(dropTags('<div>a<x>gone</div>b<x>also gone', 'x'), '<div>a</div>b', 'a later copy of the same tag is its own element and gets its own verdict');
+    eq(dropTags('<div>a<x>1</x>keep</div>', 'x'), '<div>akeep</div>', 'a tag that closes itself never consults its parent');
+    eq(dropTags('a</x>b', 'x'), 'a</x>b', 'a stray close tag is left alone — a lone close makes no claim on any text');
+    eq(dropTags('a<x/>b<x />c', 'x'), 'abc', 'the void form takes the tag and no content');
+    eq(dropTags('a<xy>1</xy>b', 'x'), 'a<xy>1</xy>b', 'a tag name is matched whole: `x` is not `xy`');
+    eq(dropTags('a<X ID="1">1</x>b', 'x'), 'ab', 'tag names are case-insensitive and attributes come along');
 }

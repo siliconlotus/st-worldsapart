@@ -1156,9 +1156,12 @@ function reportFailure(stage, consequence, error, severity = 'error') {
  * @param {object[]} chat Chat messages
  */
 async function selectAndActivate(chat) {
+    chat = dropChatTags(chat);
+
     // /wa-dry reaches here without the interceptor running — its replayed scan must judge
     // against the chat it was handed, not a previous generation's stash. Redundant (same
-    // array) on the intercept path.
+    // array) on the intercept path — but NOT when dropChatTags is set, since that is the one
+    // thing standing between this stash and the raw haystack `intercept` recorded.
     runState.scanChat = chat.slice();
 
     // Per-scan takeover state. waOwnsScan goes FALSE first — WA's own getSortedEntries calls
@@ -1467,6 +1470,31 @@ async function scanInjects() {
     }
 
     return out;
+}
+
+/**
+ * The chat WA reads, with the `dropChatTags` elements gone — ONE strip, at the only door.
+ *
+ * At intake rather than in the window builder because both halves read the same messages: a state
+ * block over-fires keys and dilutes the embedded query, and fixing one of those leaves the other.
+ * Everything downstream of here — the query, the scan window, the recursion rematches, and what
+ * /wa-grade freezes — sees the stripped text, which is what determined the result.
+ *
+ * COPIES, never an edit: this is ST's live chat array. The file prefix is left alone so
+ * `extra.fileLength` still counts to the same place (query.mjs `queryMessages` slices on it, and a
+ * strip ahead of that offset would cut the wrong character).
+ *
+ * NOT the Studio's chat-rate scan, which counts key hits across whole chat FILES through the plugin
+ * route — that would take a redeploy, and it is a diagnostic rather than an activation.
+ */
+function dropChatTags(chat) {
+    const spec = settings().dropChatTags;
+    if (!spec?.trim()) return chat;
+    return chat.map(m => {
+        const mes = String(m?.mes ?? '');
+        const off = m?.extra?.fileLength || 0;
+        return { ...m, mes: mes.slice(0, off) + matcher.dropTags(mes.slice(off), spec) };
+    });
 }
 
 // withMatchSources and MATCH_SOURCE_FIELDS live in matcher.mjs (pure window assembly, shared
@@ -4024,6 +4052,10 @@ const SETTINGS_HTML = `
             </select>
             <small class="opacity50p">Only affects keys that combine conditions: secondary keys (AND ANY / NOT ANY / …) and <code>?</code> SmartKeys. A single keyword matches the same text either way. Narrower settings stop an entry firing on terms that were pages apart — and stop a negation five messages back from silently vetoing a match. Core has no equivalent, so anything but "Whole scan window" is a deliberate divergence from what core would have activated.</small>
 
+            <label for="wa_drop_chat_tags">Ignore these HTML tags in chat (comma-separated)</label>
+            <input id="wa_drop_chat_tags" type="text" class="text_pole" placeholder="e.g. internal_states, thinking">
+            <small class="opacity50p">Each named element is removed <b>with its contents</b> from every message before Worlds Apart reads it — both the retrieval query and the keyword scan. For presets that keep state tracking in the reply: the block lists every character, place and item the story has touched, so keywords fire on the bookkeeping instead of the scene, every turn. Only the tags you name are dropped, so a <code>&lt;div&gt;</code> rendering a letter or a phone screen still counts as scene text. Does not change what SillyTavern sends to the model, and does not affect the Studio&rsquo;s chat-rate check.</small>
+
             <label for="wa_word_boundary">Word boundary (what counts as inside a word)</label>
             <select id="wa_word_boundary" class="text_pole">
                 <option value="strict">Strict — hyphens and apostrophes are part of the word</option>
@@ -4398,6 +4430,7 @@ export async function init() {
     bind('#wa_rater_id', 'raterId', 'string');
     bind('#wa_message_depth', 'messageDepth', 'number');
     bind('#wa_match_window', 'matchWindow', 'string');
+    bind('#wa_drop_chat_tags', 'dropChatTags', 'string');
     bind('#wa_word_boundary', 'wordBoundary', 'string');
     $('#wa_word_boundary').on('change', () => matcher.setBoundaryMode(settings().wordBoundary));
     // number binding would collapse it to 0 and silently switch the keys signal off.

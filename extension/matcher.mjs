@@ -233,6 +233,104 @@ export function scanWindow(chat, cfg) {
 const PARAGRAPH_BREAK = /\n[ \t]*\n/;
 
 /**
+ * Removes named elements — TAG AND CONTENT — from one message's text, before anything else reads it.
+ *
+ * WHY A TAG LIST AND NOT A RULE. A preset that keeps machine-readable state in the reply writes it as
+ * markup, and every name, place and object the story has ever touched sits in it on every turn: keys
+ * fire on the tracker rather than on the scene, permanently, and no scan depth can reach past it. But
+ * the same chat renders letters, screens and emails as markup too, and that IS scene text. Nothing
+ * structural separates the two — both are elements carrying prose — so the tag name is the only
+ * evidence available, and it comes from the author, who knows which of their blocks is bookkeeping.
+ * Hence a list, empty by default: WA does not guess at this.
+ *
+ * TAG AND CONTENT, because the content is the whole problem. Stripping markup alone would leave the
+ * tracker's text in the haystack, which is exactly what fires.
+ *
+ * AN UNCLOSED TAG RUNS TO ITS PARENT'S CLOSE, or to the end of the text. Presets write these blocks
+ * unclosed — measured on the chat this was built for:
+ * `<!-- GFX_START --><internal_states><details>…</details><!-- GFX_END -->`, five opening tags and no
+ * closing one, the block ending where the message does. Reading an unclosed tag as "removes nothing"
+ * made the setting a no-op on exactly the block it exists for.
+ *
+ * The parent is found by BALANCE, not by parsing: scanning forward from the unclosed tag, the first close
+ * tag with no matching open inside the span has to belong to an ancestor, so the element ends there.
+ * Nothing needs a DOM, a void-element list or well-formed markup — an unclosed `<br>` is simply an open
+ * that never balances anything, and a close it never had cannot end anything either. Falling back to
+ * end-of-text is the same rule with no ancestor to find.
+ *
+ * The cost is a TRUNCATED reply cut inside a named element with no enclosing tag: its tail leaves the
+ * haystack. Bounded to one message, since this runs per message and never across the join — and a reply
+ * cut mid-block was going to be scanned as half a block either way. A stray CLOSE tag is still left
+ * alone; a lone `</x>` makes no claim on any text. Nesting of the SAME tag is tracked, so an inner copy
+ * does not end the outer element early.
+ *
+ * @param {string} text One message's text
+ * @param {string|string[]} spec Tag names — a comma/space-separated list, or an array
+ * @returns {string} The text with every named element gone
+ */
+export function dropTags(text, spec) {
+    const tags = (Array.isArray(spec) ? spec : String(spec ?? '').split(/[\s,]+/))
+        // A tag name, or nothing: the setting is free text, and a stray `<`, `/` or `>` from someone
+        // pasting the tag as they wrote it must not reach the RegExp as syntax.
+        .map(t => String(t).replace(/[^\w:-]/g, '')).filter(Boolean);
+    let out = String(text ?? '');
+    if (!out || !tags.length) return out;
+
+    // `(?=[\s/>])` so `<div>` is not matched by the tag `di`, and the attributes come along.
+    for (const tag of tags) {
+        const re = new RegExp(`<(/?)${tag}(?=[\\s/>])[^>]*>`, 'gi');
+        // Re-run after an unclosed one, on what is left: its parent's close is where the next copy of the
+        // same tag can start, and that copy is its own element with its own verdict.
+        for (let unclosed = true; unclosed;) {
+            let kept = 0, start = -1, openEnd = 0, depth = 0, next = '', m;
+            unclosed = false;
+            re.lastIndex = 0;
+            while ((m = re.exec(out)) !== null) {
+                if (m[1] === '/') {
+                    if (depth && --depth === 0) { next += out.slice(kept, start); kept = re.lastIndex; }
+                } else if (m[0].endsWith('/>')) {
+                    if (!depth) { next += out.slice(kept, m.index); kept = re.lastIndex; }
+                } else {
+                    if (!depth) { start = m.index; openEnd = re.lastIndex; }
+                    depth++;
+                }
+            }
+            if (depth) { unclosed = true; next += out.slice(kept, start); kept = parentClose(out, openEnd, tag); }
+            out = next + out.slice(kept);
+        }
+    }
+    return out;
+}
+
+/** Every tag in a string, for the ancestor scan. Deliberately not a parser: names and offsets only. */
+const ANY_TAG = /<(\/?)([A-Za-z][\w:-]*)(?=[\s/>])[^>]*>/g;
+
+/**
+ * Where an unclosed element ends: the offset of the first close tag after `from` that has no matching
+ * open inside the span, which can only be an ancestor's — or `text.length` when there is none.
+ * @param {string} text
+ * @param {number} from Offset just past the unclosed opening tag
+ * @param {string} tag The unclosed tag's own name, which cannot be its own parent
+ * @returns {number}
+ */
+function parentClose(text, from, tag) {
+    const open = new Map();
+    ANY_TAG.lastIndex = from;
+    for (let m; (m = ANY_TAG.exec(text)) !== null;) {
+        const name = m[2].toLowerCase();
+        if (name === tag.toLowerCase()) continue;
+        if (m[1] === '/') {
+            const n = open.get(name) ?? 0;
+            if (!n) return m.index;
+            open.set(name, n - 1);
+        } else if (!m[0].endsWith('/>')) {
+            open.set(name, (open.get(name) ?? 0) + 1);
+        }
+    }
+    return text.length;
+}
+
+/**
  * The scan window as SEGMENTS — the unit a key has to match within.
  *
  * WHY THIS AND NOT A JOIN. A conjunction over the whole window matches terms a dozen messages apart:

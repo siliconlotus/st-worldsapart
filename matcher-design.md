@@ -290,6 +290,37 @@ degenerate one-segment array that reproduces the pre-setting behaviour exactly.
   has no reliable marker: models drop closing quotes, use `—` for dialogue, and write narration
   unmarked. Rejected as unavailable, not as wrong.
 
+### Dropped chat elements
+
+A setting, `dropChatTags`: tag names, comma-separated, empty by default. Each named element is removed
+**with its content** from every message before WA reads it — `matcher.mjs` `dropTags`, applied once at
+intake in `selectAndActivate`.
+
+- **A list, not a rule.** A preset that keeps machine-readable state in the reply puts every name, place
+  and object the story has touched into every turn's haystack, permanently, and no scan depth reaches
+  past it. But the same chat renders letters, screens and emails as markup, and that IS scene text.
+  Nothing structural separates the two — both are elements carrying prose — so the tag name is the only
+  evidence available, and only the author has it. WA does not guess: empty means off.
+- **Tag AND content.** Stripping markup alone leaves the tracker's text in the haystack, which is
+  exactly what fires.
+- **One strip, at intake**, so both halves see the same messages. A state block dilutes the embedded
+  query exactly as it over-fires keys, and fixing one of them would leave the other.
+- **Off is core's behaviour; on is a deliberate divergence** — core scans the raw message text, as WA
+  did before the setting. Nothing about what ST sends the model changes either way.
+- **A capture freezes the STRIPPED text**, which is what determined the result. `intercept` still
+  stashes the raw chat ahead of the enabled gate, so the core-comparison baseline is untouched.
+- **An unclosed tag runs to its parent's close, or to the end of the text.** Presets write these blocks
+  unclosed — **measured** on the chat this was built for: five `<internal_states>` opening tags across
+  ten messages and no closing one, each block ending where its message does. Reading an unclosed tag as
+  "removes nothing" made the setting a no-op on exactly the block it exists for.
+- **The parent is found by balance, not by parsing.** Scanning forward from the unclosed tag, the first
+  close with no matching open inside the span belongs to an ancestor, so the element ends there. No DOM,
+  no void-element list, no well-formedness requirement: an unclosed `<br>` balances nothing and a close
+  it never had ends nothing. A stray close tag is still left alone — a lone `</x>` makes no claim on any
+  text — and same-tag nesting is tracked, so an inner copy cannot end the outer element early.
+- **Not the Studio's chat-rate scan**, which counts key hits across whole chat FILES through the plugin
+  route. It is a diagnostic rather than an activation, and reaching it would take a redeploy.
+
 ### Witness spans
 
 **Ruled, unimplemented.** `keyExcerpts` answers only for a lone `TERM` or `REGEX` and returns null for
