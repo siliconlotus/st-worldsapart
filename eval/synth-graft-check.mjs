@@ -180,18 +180,18 @@ ok(!/\b(0|1|[1-4][0-9])\b/.test(String(picks(a1.out)).split(', ')[0]) || Number(
     'a sampled turn has the required history behind it');
 
 // --- synth: the arm table mirrors the one production pools with ---------------------------------------
-// worldsapart.js imports ST, so its POOL_ARMS cannot be loaded under node and is read as text. Names only:
+// capture-ui.mjs imports ST, so its POOL_ARMS cannot be loaded under node and is read as text. Names only:
 // the VALUES are in two vocabularies on purpose — settings there, harness here — which is exactly why the
 // mirror needs pinning. A drifted entry derives a differently-configured arm under the right label, and
 // nothing downstream can tell.
 {
     const SRC = readFileSync(join(HERE, 'synth-scenes.mjs'), 'utf8');
-    const WA = readFileSync(join(HERE, '..', 'worldsapart.js'), 'utf8');
+    const WA = readFileSync(join(HERE, '..', 'extension', 'capture-ui.mjs'), 'utf8');
     const names = src => (src.match(/POOL_ARMS\s*=\s*\{([\s\S]*?)\n\};/) ?? [, ''])[1]
         .split('\n').map(l => (l.match(/^\s*'?([\w-]+)'?\s*:/) ?? [])[1]).filter(Boolean).sort();
     const live = names(WA), mine = names(SRC);
-    ok(live.length > 0, 'POOL_ARMS was found in worldsapart.js');
-    ok(mine.join(',') === live.join(','), 'the generator mirrors worldsapart.js POOL_ARMS exactly');
+    ok(live.length > 0, 'POOL_ARMS was found in capture-ui.mjs');
+    ok(mine.join(',') === live.join(','), 'the generator mirrors capture-ui.mjs POOL_ARMS exactly');
 }
 
 process.exit(bad ? 1 : 0);
