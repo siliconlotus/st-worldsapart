@@ -29,7 +29,7 @@
 //
 // Rows are `[primary, secondaries, logic, text, expected, why]`, asserting the VERDICT: 1 when the
 // gate passes, 0 when it refuses, which is the whole of what core's rule decides.
-import { countKey, keywordScore, secondaryKeys, setBoundaryMode, wholeWordAdvice, WI_LOGIC } from '../extension/matcher.mjs';
+import { countKey, hasPromoteDecorator, keywordScore, secondaryKeys, setBoundaryMode, wholeWordAdvice, withPromote, WI_LOGIC } from '../extension/matcher.mjs';
 import { synthesizeSecondary } from '../extension/smartkeys.mjs';
 import { eq } from './metrics.mjs';
 
@@ -398,3 +398,45 @@ eq(countKey('sisterhood', 'It is called *sister*hood', false, false), 0, 'in-wor
 eq(countKey('sister', 'It is called *sister*hood', false, true), 1, 'in-word emphasis CREATES a false word boundary');
 eq(countKey('sister', 'It is called sisterhood', false, true), 0, '...which the unemphasised control correctly does not');
 console.log('ok   markdown in the scan text: whole-word emphasis fine, in-word emphasis is a known limit');
+
+// --- `@@promote`, read under core's decorator grammar ------------------------------------------------
+// WHY IT IS HERE AND NOT IN matcher-check: the name is WA's, but everything that makes it WORK is a fact
+// about core. `parseDecorators` (world-info.js) reads decorators only from LEADING `@@` lines, stops at
+// the first line that is not one, treats `@@@name` as the fallback form — and records only the two names
+// in KNOWN_DECORATORS. So an unknown decorator is stripped from the injected content for free and never
+// reaches `entry.decorators`, which is why WA reads it at WORLDINFO_ENTRIES_LOADED, where raw content
+// still exists, and stashes the answer. Any of these rules changing upstream silently unpromotes a book.
+const promo = content => hasPromoteDecorator({ content });
+eq(promo('@@promote\nThe villa'), true, 'a leading @@promote is read');
+eq(promo('@@promote'), true, '...with no content after it');
+eq(promo('@@dont_activate\n@@promote\nThe villa'), true, 'one of several leading decorator lines is read');
+eq(promo('The villa\n@@promote'), false, 'a decorator after content is not a decorator, by core\'s rule');
+eq(promo('@@promote\n@@dont_activate\nx'), true, 'order among the leading lines does not matter');
+eq(promo(''), false, 'empty content promotes nothing');
+eq(promo('Nothing here'), false, '...and neither does ordinary content');
+// THE FALLBACK FORM. Core strips the leading `@` and tests the remainder, so `@@@promote` is the same
+// name. WA mirrors that rather than treating it as a distinct decorator.
+eq(promo('@@@promote\nx'), true, 'the @@@ fallback form is the same decorator');
+// EXACT, WHERE CORE IS PREFIX. Core tests its own two names with startsWith, which is safe for a closed
+// list it owns; the decorator namespace is open and applications are told to add snake_case names of
+// their own, so a prefix test here would claim every future @@promote_* as this one.
+eq(promo('@@promoted_by_hand\nx'), false, 'a longer name that merely starts with promote is a different decorator');
+eq(promo('@@promote 2\nx'), true, '...but an argument after the name is the same decorator');
+console.log('ok   @@promote: core\'s leading-line grammar and fallback form, with an exact name test');
+
+// Writing it back: the Studio toggle edits CONTENT, there being no field to set. Round-tripping is what
+// makes the toggle safe to press twice, and the reader above is the only thing that says it worked.
+const rt = (text, on) => promo(withPromote(text, on));
+eq(withPromote('The villa', true), '@@promote\nThe villa', 'adding prepends the line');
+eq(rt('The villa', true), true, '...and the reader sees it');
+eq(withPromote('@@promote\nThe villa', true), '@@promote\nThe villa', 'adding twice is idempotent');
+eq(withPromote('@@promote\nThe villa', false), 'The villa', 'removing takes the line and nothing else');
+eq(rt('@@promote\nThe villa', false), false, '...and the reader agrees');
+eq(withPromote('@@dont_activate\n@@promote\nThe villa', false), '@@dont_activate\nThe villa',
+    'removing leaves core\'s own decorators alone');
+eq(withPromote('@@@promote\nx', false), 'x', 'the fallback form is removed too, being the same name');
+eq(withPromote('The villa\n@@promote', false), 'The villa\n@@promote',
+    'a line past the leading run is content, not a decorator, so removal does not touch it');
+eq(withPromote('', true), '@@promote\n', 'an empty entry can be promoted');
+eq(withPromote(undefined, false), '', 'absent content is not a throw');
+console.log('ok   withPromote: add/remove round-trips through the reader and leaves the rest of the run alone');

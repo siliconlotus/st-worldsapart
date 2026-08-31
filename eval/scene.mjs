@@ -18,6 +18,7 @@ import { scoreCollection, poolEntries, selectTopK, admitCeiling } from '../plugi
 import { corpusMean, centeredCosineScores } from '../plugin/vector.mjs';
 import * as entity from '../extension/entity.mjs';
 import * as matcher from '../extension/matcher.mjs';
+import { hasPromoteDecorator } from '../extension/matcher.mjs';
 import { isDurable, openBundle } from '../extension/grading.mjs';
 import * as selection from '../extension/selection.mjs';
 import * as delivery from '../extension/delivery.mjs';
@@ -1427,7 +1428,11 @@ export async function scoreScene({ sample: S, overrides = {}, k = 10, vectors, m
     // measured at the default, which is a decision about the corpus rather than a fix; `param-screen.mjs`
     // and any tool that cares passes one.
     const cutFor = r => (isMemory(r.entry) && Number.isFinite(P.memoryCutoff)) ? P.memoryCutoff : r.tierCutoff;
-    const admits = r => !isMemory(r.entry) || !Number.isFinite(cutFor(r)) || !Number.isFinite(r.eCredit) || r.eCredit >= cutFor(r);
+    // PROMOTED ROWS ARE EXEMPT, as at runtime, or this would score a delivered set the runtime never
+    // produces. Read off the entry rather than a stash: a bundle embeds the book verbatim, so the `@@`
+    // lines the browser only sees at ENTRIES_LOADED are still in the content here.
+    const promotedRow = r => hasPromoteDecorator(r.entry);
+    const admits = r => promotedRow(r) || !isMemory(r.entry) || !Number.isFinite(cutFor(r)) || !Number.isFinite(r.eCredit) || r.eCredit >= cutFor(r);
     const atCut = scoreWindow(ranked.filter(admits));
 
     //   @budget     what the token ceiling actually leaves — stages 4 and 5 end to end, so the only window here
@@ -1447,8 +1452,14 @@ export async function scoreScene({ sample: S, overrides = {}, k = 10, vectors, m
     let atBudget = null;
     if (P.budgetTokens > 0) {
         const kept = await delivery.applyBudget({
-            walk: delivery.walkOrder({ results: ranked.filter(admits) }),
-            isDynamic: () => true,
+            // CLASSIFIED, so the walk is the runtime's. `isDynamic` excludes promoted rows; the capacity
+            // caps take the wider population explicitly, the default `isCapped` being `isDynamic`.
+            walk: delivery.walkOrder({
+                promoted: ranked.filter(r => admits(r) && promotedRow(r)),
+                results: ranked.filter(r => admits(r) && !promotedRow(r)),
+            }),
+            isDynamic: r => !promotedRow(r),
+            isCapped: () => true,
             maxTokens: P.budgetTokens,
             maxTotal: P.maxTotalEntries ?? 0,
             maxDynamic: 0,

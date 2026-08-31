@@ -1105,6 +1105,48 @@ export function hasDecorator(entry, name) {
 }
 
 /**
+ * `@@promote`: the author declaring that activation alone is sufficient for this entry.
+ *
+ * NOT KNOWN TO CORE, which is what makes it work: `parseDecorators` strips every leading `@@` line from
+ * the injected content but records only the names it knows, so this is stripped for free and never
+ * reaches `entry.decorators`. WA reads it at WORLDINFO_ENTRIES_LOADED, before that map, and stashes it.
+ *
+ * EXACT, not `startsWith`. Core tests its own closed list by prefix; this namespace is open, so a prefix
+ * test would claim every future `@@promote_*`. A trailing argument is allowed.
+ */
+export const isPromoteDecorator = line => /^@@promote(\s|$)/.test(String(line ?? ''));
+
+/** Whether the author promoted this entry, read off RAW content (the ENTRIES_LOADED shape). Returns
+ *  false for a parsed entry, whose content core has already stripped — the runtime reads the stash. */
+export function hasPromoteDecorator(entry) {
+    const content = String(entry?.content ?? '');
+    if (!content.startsWith('@@')) return false;
+    for (const line of content.split('\n')) {
+        if (!line.startsWith('@@')) break;
+        if (isPromoteDecorator(line.startsWith('@@@') ? line.slice(1) : line)) return true;
+    }
+    return false;
+}
+
+/**
+ * Content with `@@promote` added or removed — what a Studio toggle writes.
+ *
+ * A CONTENT EDIT, there being no field: core keeps the line in the stored book and strips it only from
+ * the copy it injects. REMOVAL TOUCHES THE LEADING RUN ONLY, and adding prepends — order within the run
+ * means nothing to core, and a stable position keeps a toggle's diff to one line.
+ */
+export function withPromote(content, on) {
+    const text = String(content ?? '');
+    const lines = text.split('\n');
+    let end = 0;
+    while (end < lines.length && lines[end].startsWith('@@')) end += 1;
+    const head = lines.slice(0, end).filter(l => !isPromoteDecorator(l.startsWith('@@@') ? l.slice(1) : l));
+    const rest = lines.slice(end);
+    if (on) head.unshift('@@promote');
+    return [...head, ...rest].join('\n');
+}
+
+/**
  * Keys WA will act on at all: non-blank, and no validator ERROR — `negation-only` matches on absence
  * (nearly everywhere), `no-terms` never, `stray-quote` on a phrase whose opening delimiter was
  * swallowed into the first word, so on nothing the author wrote.

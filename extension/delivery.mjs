@@ -8,24 +8,28 @@
 // Pure; every setting is injected, so the extension and the harnesses run the identical code.
 
 /**
- * The order the budget walks: constants, then armed stickies, then the dynamic block in retention order.
+ * The order the budget walks: constants, armed stickies, promoted rows, then the dynamic block.
  *
  * CONSTANT LEADS, because constant means always. A constant should only be cut when constants ALONE
  * exceed the budget — anything else is a world rule losing its place to an entry that persists from an
  * earlier turn, which is a surprise no author asked for. The previous order put sticky first and nothing
  * argued for it; it was incidental.
  *
- * Walking both classes first is what makes every cap in applyBudget a PREFIX cut: once the dynamic count
- * is used up there is nothing but dynamic entries left to reject.
+ * PROMOTED SITS BEHIND BOTH DURABLE BLOCKS AND AHEAD OF DYNAMIC: an author declaring activation
+ * sufficient outranks relevance choosing a row, and does not outrank always-on.
  *
- * @param {object} blocks The three activation classes
+ * Walking the first three classes ahead of dynamic is what makes every cap in applyBudget a PREFIX cut:
+ * once the dynamic count is used up there is nothing but dynamic entries left to reject.
+ *
+ * @param {object} blocks The four activation classes
  * @param {Array<object>} blocks.sticky Armed stickies, authored order
  * @param {Array<object>} blocks.constant Constants, authored order
+ * @param {Array<object>} blocks.promoted Author-declared rows, layout order
  * @param {Array<object>} blocks.results The dynamic block, retention order
  * @returns {Array<object>} Budget walk order
  */
-export function walkOrder({ sticky = [], constant = [], results = [] }) {
-    return [...constant, ...sticky, ...results];
+export function walkOrder({ sticky = [], constant = [], promoted = [], results = [] }) {
+    return [...constant, ...sticky, ...promoted, ...results];
 }
 
 /**
@@ -65,7 +69,7 @@ export const authorIgnoreBudget = entry => Boolean(entry?.waIgnoreBudget ?? entr
  * @param {object} args Budget arguments
  * @returns {Promise<{survivors: Set, counted: number, dropped: number, budgeted: number, inPrompt: number}>}
  */
-export async function applyBudget({ walk, isDynamic, maxTokens, maxTotal, maxDynamic, maxVectorEntries = 0, isVector = () => false, tokensOf, capOf = () => 0, exemptIsBudgeted = false, slack = 0, slackOnce = true }) {
+export async function applyBudget({ walk, isDynamic, isCapped = isDynamic, maxTokens, maxTotal, maxDynamic, maxVectorEntries = 0, isVector = () => false, tokensOf, capOf = () => 0, exemptIsBudgeted = false, slack = 0, slackOnce = true }) {
     const survivors = new Set();
     let counted = 0;
     let dynamic = 0;
@@ -125,16 +129,18 @@ export async function applyBudget({ walk, isDynamic, maxTokens, maxTotal, maxDyn
         if (maxDynamic > 0 && isDynamic(item) && dynamic >= maxDynamic) {
             blockedBy.push({ cap: 'dynamic', shortfall: 1 });
         }
-        // Retrieval's own ceiling, inside the dynamic block. Nested rather than parallel: a vector entry
-        // is a dynamic entry, so maxDynamic still binds first when it is the tighter of the two. Guarded
-        // on isDynamic here too, not just at the increment below — isVector reads the entry's own
-        // vectorized flag, and a constant can be vectorized, so vector ⊆ dynamic has to be enforced at
-        // the block rather than assumed of the caller's predicate.
-        if (maxVectorEntries > 0 && isDynamic(item) && isVector(item) && vector >= maxVectorEntries) {
+        // Retrieval's own ceiling. Guarded on a population here, not just at the increment below —
+        // isVector reads the entry's own vectorized flag and a CONSTANT can be vectorized, so the block
+        // has to be enforced rather than assumed of the caller's predicate.
+        //
+        // `isCapped`, NOT `isDynamic`: the two differ by exactly the promoted block. maxDynamic bounds
+        // relevance-selected material; these bound CAPACITY, which a promoted row consumes like any
+        // other. Defaults to `isDynamic`, so a caller with no promoted block is unchanged.
+        if (maxVectorEntries > 0 && isCapped(item) && isVector(item) && vector >= maxVectorEntries) {
             blockedBy.push({ cap: 'vector', shortfall: 1 });
         }
         const bookCap = capOf(item);
-        if (bookCap > 0 && isDynamic(item) && (perWorld.get(item.entry?.world) ?? 0) >= bookCap) {
+        if (bookCap > 0 && isCapped(item) && (perWorld.get(item.entry?.world) ?? 0) >= bookCap) {
             blockedBy.push({ cap: 'book', shortfall: 1, world: item.entry?.world, limit: bookCap });
         }
 
@@ -173,6 +179,9 @@ export async function applyBudget({ walk, isDynamic, maxTokens, maxTotal, maxDyn
             counted += 1;
             if (isDynamic(item)) {
                 dynamic += 1;
+            }
+            // The capacity counters, on the wider population — see the caps above.
+            if (isCapped(item)) {
                 if (isVector(item)) {
                     vector += 1;
                 }

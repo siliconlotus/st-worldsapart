@@ -1,5 +1,5 @@
-// layout.mjs — STAGE 3's product: the LAYOUT ORDER. Classifies every activated row into the three
-// blocks the budget walks (constant, armed sticky, dynamic) and orders each one.
+// layout.mjs — STAGE 3's product: the LAYOUT ORDER. Classifies every activated row into the four
+// blocks the budget walks (constant, armed sticky, promoted, dynamic) and orders each one.
 //
 // POSITION MEANS SOMETHING HERE, which is why this is an order and not merely a list: stage 5 takes a
 // PREFIX of it, so a row's place decides whether it survives the caps. Whether a row BELONGS is stage 4
@@ -26,6 +26,11 @@ export const layoutScore = it => (Number.isFinite(it.eCredit) ? it.eCredit : -1)
  * is a durable row, not a retrieval result. Constants and armed stickies are in the prompt by intent,
  * so they are ordered by authored order alone and never by relevance.
  *
+ * PROMOTED IS A FOURTH BLOCK, and being a block is the whole mechanism: stage 4 cuts the DYNAMIC list,
+ * so a row outside it is exempt without selection.mjs knowing promotion exists. It sits behind both
+ * durable blocks and ahead of dynamic, and takes the dynamic block's comparator — the declaration says
+ * the row belongs, not where in the queue it sits.
+ *
  * THE DYNAMIC BLOCK'S ORDER IS THE PRIORITY MODE'S. `sequential` makes book tier the primary key, so a
  * lower book only gets the slots higher books leave; `interleaved` scales the layout score by each
  * book's weight, so a strong entry in a low book can still outrank a weak one in a high book. Both
@@ -34,19 +39,22 @@ export const layoutScore = it => (Number.isFinite(it.eCredit) ? it.eCredit : -1)
  * @param {object[]} items Activated rows, each `{ entry, eCredit? }`
  * @param {object} cfg
  * @param {(entry: object) => boolean} cfg.isArmedSticky Whether ST's timed effect is armed for this entry
+ * @param {(entry: object) => boolean} [cfg.isPromoted] Whether the author declared activation sufficient
  * @param {Array<{name: string, weight?: number, offset?: number, cap?: number}>} cfg.priorityList
  *        Book priority in saved order, names ALREADY RESOLVED by the caller (the chat sentinel is ST's)
  * @param {'sequential'|'interleaved'} cfg.priorityMode
  * @param {string} cfg.presentationOrder Insertion-order key, from the shared sort vocabulary
  * @param {boolean} cfg.presentationTiered Group by tier before the base order
  * @param {object} cfg.tierCfg Tier configuration, reconciled by the caller or here
- * @returns {{sticky: object[], constant: object[], results: object[], compare: Function, bookTierOf: Function}}
+ * @returns {{sticky: object[], constant: object[], promoted: object[], results: object[], compare: Function, bookTierOf: Function}}
  */
-export function layoutOrder(items, { isArmedSticky, priorityList = [], priorityMode, presentationOrder, presentationTiered = false, tierCfg }) {
-    const sticky = [], constant = [], results = [];
+export function layoutOrder(items, { isArmedSticky, isPromoted, priorityList = [], priorityMode, presentationOrder, presentationTiered = false, tierCfg }) {
+    const sticky = [], constant = [], promoted = [], results = [];
     for (const item of items ?? []) {
+        // DURABLE FIRST: a promoted constant is a constant, exempt from a cut it never reaches anyway.
         if (isArmedSticky?.(item.entry)) sticky.push(item);
         else if (item.entry?.constant) constant.push(item);
+        else if (isPromoted?.(item.entry)) promoted.push(item);
         else results.push(item);
     }
 
@@ -85,14 +93,16 @@ export function layoutOrder(items, { isArmedSticky, priorityList = [], priorityM
         ? (a, b) => (tierRank(a.entry, cfg) - tierRank(b.entry, cfg)) || baseCompare(a, b)
         : baseCompare;
 
-    if (priorityMode === 'sequential') {
-        results.sort((a, b) => (bookTierOf(a.entry.world) - bookTierOf(b.entry.world)) || (layoutScore(b) - layoutScore(a)) || authored(a, b));
-    } else {
-        results.sort((a, b) => (layoutScore(b) * (cfgOf(b.entry.world).weight ?? 1) - layoutScore(a) * (cfgOf(a.entry.world).weight ?? 1)) || authored(a, b));
-    }
+    // ONE COMPARATOR FOR BOTH SCORED BLOCKS, or a promoted entry's place would depend on the exemption
+    // rather than on the entry.
+    const byRelevance = priorityMode === 'sequential'
+        ? (a, b) => (bookTierOf(a.entry.world) - bookTierOf(b.entry.world)) || (layoutScore(b) - layoutScore(a)) || authored(a, b)
+        : (a, b) => (layoutScore(b) * (cfgOf(b.entry.world).weight ?? 1) - layoutScore(a) * (cfgOf(a.entry.world).weight ?? 1)) || authored(a, b);
+    results.sort(byRelevance);
+    promoted.sort(byRelevance);
     sticky.sort(authored);
     constant.sort(authored);
     // `compare` and `bookTierOf` ride out because the PROMPT order — a third ordering, the user's sort
     // over whatever survived — is built from the same comparators after stage 5 has cut.
-    return { sticky, constant, results, compare, bookTierOf };
+    return { sticky, constant, promoted, results, compare, bookTierOf };
 }

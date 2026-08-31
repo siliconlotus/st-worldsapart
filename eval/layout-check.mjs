@@ -91,9 +91,37 @@ eq(layoutScore({ eCredit: 0 }), 0, '...and a genuine 0 is not treated as unscore
 
 // --- empties -----------------------------------------------------------------------------------------
 {
-    const { sticky, constant, results } = layoutOrder([], BASE);
-    eq([sticky.length, constant.length, results.length], [0, 0, 0], 'no rows is three empty blocks, not a throw');
+    const { sticky, constant, promoted, results } = layoutOrder([], BASE);
+    eq([sticky.length, constant.length, promoted.length, results.length], [0, 0, 0, 0], 'no rows is four empty blocks, not a throw');
     eq(layoutOrder(undefined, BASE).results.length, 0, 'undefined rows is empty too');
+}
+
+
+// --- the promoted block ---------------------------------------------------------------------------
+// `@@promote` exempts a row from stage 4 by MOVING IT OUT of the list stage 4 cuts, so the whole of the
+// exemption is which array it lands in. These pin the classification and the ordering; selection.mjs
+// has no test here because it correctly knows nothing about promotion.
+{
+    const P = { ...BASE, isPromoted: e => e.uid >= 10 };
+    const rows = [row(1, { eCredit: 0.9 }), row(10, { eCredit: 0.1 }), row(11, { eCredit: 0.5 }), row(2, { eCredit: 0.2 })];
+    const out = layoutOrder(rows, P);
+    eq(uids(out.promoted), [11, 10], 'promoted rows form their own block, ordered by layout score like the dynamic one');
+    eq(uids(out.results), [1, 2], '...and leave the dynamic block, which is what exempts them from the cut');
+
+    // A promoted constant is a constant: promotion exempts from a cut a constant never reaches.
+    const dur = layoutOrder([row(10, { constant: true }), row(11, {})], { ...P, isPromoted: () => true });
+    eq(uids(dur.constant), [10], 'a promoted constant stays a constant');
+    eq(uids(dur.promoted), [11], '...and only the non-durable row is promoted');
+
+    // An armed sticky outranks promotion for the same reason.
+    const st = layoutOrder([row(10, {}), row(11, {})], { ...P, isArmedSticky: e => e.uid === 10, isPromoted: () => true });
+    eq(uids(st.sticky), [10], 'an armed sticky outranks promotion');
+    eq(uids(st.promoted), [11], '...and the rest promote');
+
+    // No predicate at all is the pre-promote world: every non-durable row is dynamic.
+    const none = layoutOrder(rows, BASE);
+    eq(uids(none.promoted), [], 'no isPromoted means no promoted block');
+    eq(uids(none.results), [1, 11, 2, 10], '...and every non-durable row stays dynamic, in score order');
 }
 
 console.log(fails ? `\n${fails} FAILED` : '\nlayout-check: ok');

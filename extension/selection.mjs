@@ -24,8 +24,9 @@
  * A ROW NOTHING SCORED IS KEPT. An absent score means no fitted model covers the row, or the file did
  * not load — neither of which is the claim "predicted irrelevant", and silently dropping on a missing
  * number is how an outage becomes a content change. `ignoreBudget` does NOT exempt: it is an author
- * declaration about the BUDGET, and the per-entry escape from relevance is `promote`, which does not
- * exist yet.
+ * declaration about the BUDGET. The per-entry escape from relevance is `@@promote`, and it needs no
+ * condition here — `layoutOrder` gives a promoted row its own block, so it is never in the list this
+ * function is handed.
  *
  * @param {object[]} results The dynamic block
  * @param {(item: object) => number} scoreOf Predicted relevance, NaN when unscored

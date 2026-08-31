@@ -321,8 +321,55 @@ eq(walkOrder({ sticky: stick, constant: cons, results: res }).map(x => x.key).jo
     'constant and sticky lead, then the dynamic block in retention order');
 eq(walkOrder({ sticky: stick, constant: cons, results: res }).length, 6,
     'nothing is dropped on the way in — every cut at this stage is applyBudget s');
+// PROMOTED SITS BETWEEN. An author declaring an entry belongs outranks relevance choosing one and does
+// not outrank always-on, so the block goes behind both durable classes and ahead of the dynamic one.
+eq(walkOrder({ sticky: stick, constant: cons, promoted: [row('p1', 0.5)], results: res }).map(x => x.key).join(','),
+    'k1,s1,p1,r1,r2,r3,r4', 'promoted rows walk behind both durable blocks and ahead of the dynamic one');
+eq(walkOrder({ sticky: stick, constant: cons, results: res }).map(x => x.key).join(','), 'k1,s1,r1,r2,r3,r4',
+    'a caller passing no promoted block gets the walk it always got');
 
 // Empty blocks are the ordinary keyword-only and retrieval-only cases, not edge cases.
 eq(walkOrder({ sticky: [], constant: [], results: [] }).length, 0, 'nothing activated');
 eq(walkOrder({ sticky: stick, constant: cons, results: [] }).map(x => x.key).join(','), 'k1,s1',
     'a scene with no dynamic rows still ranks its always-on ones');
+
+// --- promotion: exempt from relevance, NOT from capacity ---------------------------------------------
+// `isCapped` is the population the vector and per-book caps bound and `isDynamic` is the one maxDynamic
+// bounds; they differ by exactly the promoted block. Getting this wrong in either direction is a real
+// failure — charging promoted rows against maxDynamic makes promoting things silently eat retrieval,
+// and exempting them from the book cap lets one book flood a turn, which is what that cap exists for.
+{
+    const promoted = Array.from({ length: 4 }, (_, i) => mk(`p${i + 1}`, 10, { world: 'A', vectorized: true }));
+    const dyn4 = Array.from({ length: 4 }, (_, i) => mk(`x${i + 1}`, 10, { world: 'A', vectorized: true }));
+    const dynSet = new Set(dyn4);
+    const promSet = new Set(promoted);
+    // The runtime's walk: promoted ahead of dynamic, which is what makes every cap below a prefix cut.
+    const walk = [...promoted, ...dyn4];
+    const go = (opts) => applyBudget({
+        walk,
+        isDynamic: i => dynSet.has(i),
+        isCapped: i => dynSet.has(i) || promSet.has(i),
+        isVector: i => Boolean(i.entry.vectorized),
+        tokensOf: i => i.tokens,
+        maxTokens: 0, maxTotal: 0, maxDynamic: 0,
+        ...opts,
+    });
+
+    let p = await go({ maxDynamic: 2 });
+    eq(p.survivors.size, 6, 'maxDynamic bounds only the dynamic block: 4 promoted + 2 dynamic');
+    eq(promoted.every(x => p.survivors.has(x)), true, '...so promotion cannot be eaten by a retrieval cap');
+
+    p = await go({ maxVectorEntries: 3 });
+    eq(p.survivors.size, 3, 'the vector cap counts promoted rows — capacity is not exempted');
+    eq([...p.survivors].every(x => promSet.has(x)), true, '...and the walk order means they take the slots');
+
+    p = await go({ capOf: () => 3 });
+    eq(p.survivors.size, 3, 'the per-book cap counts them too, which is what stops one book flooding');
+
+    // The default keeps every existing caller intact: with no isCapped, the two populations are one.
+    const legacy = await applyBudget({
+        walk, isDynamic: i => dynSet.has(i), isVector: i => Boolean(i.entry.vectorized),
+        tokensOf: i => i.tokens, maxTokens: 0, maxTotal: 0, maxDynamic: 0, maxVectorEntries: 3,
+    });
+    eq(legacy.survivors.size, 7, 'isCapped defaults to isDynamic, so a caller with no promoted block is unchanged');
+}

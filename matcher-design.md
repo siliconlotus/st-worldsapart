@@ -1577,42 +1577,34 @@ instances the books on disk hold.
    subtraction — the definition every fit was trained on — computed by one shipped function on both
    sides.
 
-3. **`promote` — an author declaration that activation is sufficient.** A promoted entry enters the
-   layout whenever its keys fire, exempt from the relevance cut. It is the per-entry form of *triggered
-   == relevant*, which stage 4 broke by having the cliff arbitrate keyword-activated entries alongside
-   retrieved ones. The fused score still orders it within its block; it no longer gates inclusion.
+3. **`promote` — LANDED.** An author declaration that activation is sufficient: a promoted entry enters
+   the layout whenever its keys fire, exempt from the relevance cut. It is the per-entry form of
+   *triggered == relevant*. The fused score orders it within its block and does not gate inclusion.
 
-   It ships with the relevance cut, having nothing to be exempt from until then. The walk becomes
-   `[constant, fired-sticky, promoted, dynamic]`, which `walkOrder` gains as one more array; the cut must
-   exempt those rows as it exempts constants, and the harness must too, or it cuts what the runtime
-   keeps. The RANKING metrics still rank them: how a haystack should be sorted is a question about the
-   entries, and only `constant` is outside that population.
+   **Exempt from relevance, not capacity.** The per-book cap and `maxVectorEntries` apply; `maxDynamic`
+   does not, that cap bounding relevance-selected material. So `applyBudget` takes `isCapped` beside
+   `isDynamic`, differing by exactly the promoted block and defaulting to it. Only `ignoreBudget` exempts
+   from the budget.
 
-   **Exempt from relevance, not capacity.** The per-book cap applies, which is what stops one book
-   flooding a turn. `maxDynamic` does not — that cap bounds relevance-selected material, and charging
-   author-declared entries against it would make promoting things silently eat retrieval, the failure
-   `applyBudget` already refuses for `ignoreBudget` rows. `maxVectorEntries` cannot apply: it reads the
-   `vectorized` flag and a promoted keyword entry does not carry it. Only `ignoreBudget` exempts from
-   the budget itself.
+   The walk is `[constant, fired-sticky, promoted, dynamic]`. **Being a block IS the exemption** — stage
+   4 cuts the dynamic list, so `selection.mjs` has no condition for promotion and needs none. The harness
+   exempts them the same way (`eval/scene.mjs` `admits`). A capture records `block: 'promoted'`; the row
+   is not durable, having had to activate.
 
-   **It replaces sticky-as-priority.** ST fills sticky entries first, making sticky the only reliable
-   way to guarantee a keyword entry is inserted, so it carries persistence, cliff exemption and queue
-   position at once — and the ST maintainers recommend it for exactly that. A reference entry marked
-   `sticky: 1, constant: false` is reaching for the insertion guarantee, not the persistence; promoting
-   it keeps that and drops the two it was never asking for.
+   **Declared as `@@promote`, read at `WORLDINFO_ENTRIES_LOADED`.** Core's `parseDecorators` records only
+   `KNOWN_DECORATORS` but strips every leading `@@` line from the content it hands on, so the decorator
+   is stripped from the prompt for free and never reaches `entry.decorators`; the event fires before that
+   map and is the last place the raw content exists. WA stashes `entry.waPromote` there, as it stashes
+   `waIgnoreBudget`. The stored book keeps the line. The name is unnamespaced — promotion is not a WA
+   paradigm — and WA's read is EXACT where core's is `startsWith`, the decorator namespace being open.
 
-   **The audit no longer exempts anything on stickiness.** `stickySkipCommon` and the top-1000
-   `COMMON_HEAD` are both deleted: sticky means an armed entry persists once activated, which says
-   nothing about whether a key is a good trigger. So a reprieve for an author declaring an entry should
-   be present is now unclaimed rather than inherited, and giving one to `promote` is a new call to make
-   on its own evidence.
+   **It is what `sticky: 1, constant: false` was reaching for.** ST fills sticky entries first, so sticky
+   is the only reliable way to guarantee a keyword entry is inserted — and the ST maintainers recommend
+   it for that. An entry marked so wants the insertion guarantee, not the persistence; promoting it keeps
+   that and drops the rest.
 
-   Stored as `entry.promote`, top-level beside `sticky` and `vectorized` rather than under
-   `extensions` — `convertCharacterBook` reads 25 fields OUT of `extensions` and never copies the map,
-   so an ST entry has no such key. It is author data rather than WA scratch, so it takes no `wa`
-   prefix. It survives loose-JSON import, load and save (`addMissingWorldInfoFields` backfills and
-   deletes nothing; `/api/worldinfo/edit` writes verbatim; the Studio mutates the loaded object), and
-   is lost only through `convertCharacterBook`, as CCv2 `priority` is (`upstream-st.md` #13).
+   **The audit gives it no reprieve**, and would need its own evidence to. Nothing here is exempt on
+   stickiness either: an armed entry persisting says nothing about whether a key is a good trigger.
 
    No per-book count is worth surfacing: promoted entries are situational, so forty of them is not
    forty constants — activation gates them and most turns fire a handful. The number that means

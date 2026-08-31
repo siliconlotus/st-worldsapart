@@ -22,7 +22,7 @@ import { buildKeyPruneScan, llmKeyCandidates, STUDIO_PRUNE_OPTS, STUDIO_SUGGEST_
 import { buildKeySuggest, classifyLlmCand } from './keyword-suggest.mjs';
 import { buildAutomaton, addMessageHits, fold, validateSmartKey } from './smartkeys.mjs';
 import { findOrphanBindings } from './bindings.mjs';
-import { WI_LOGIC, isRegexKey, secondaryKeys, usableKeys, wholeWordAdvice } from './matcher.mjs';
+import { WI_LOGIC, hasPromoteDecorator, isRegexKey, secondaryKeys, usableKeys, wholeWordAdvice, withPromote } from './matcher.mjs';
 
 const WA_GREEN = '#7bbf6a';   // "no prune" — a keyword the scan doesn't flag
 const WA_RED = '#e06c6c';     // severe — same value keyword-audit's severityOf hands back
@@ -708,7 +708,8 @@ export async function lorebookStudio(preferredBook = null) {
 
     // Tiny sticky editor: number box + −/+ steppers + 🚫 reset-to-0.
     /**
-     * The per-entry tool row (power / case / whole-word / sticky / trigger % / advanced / copy / delete).
+     * The per-entry tool row (power / case / whole-word / promote / sticky / trigger % / advanced / copy /
+     * delete).
      * Shared by the Explorer's entry header and the term tabs' group headers, so an entry exposes the
      * same controls wherever you meet it — and toggling case or whole-word from Cleanup re-classifies
      * that entry's keys, since the scan reads those flags live.
@@ -770,10 +771,19 @@ export async function lorebookStudio(preferredBook = null) {
         // overwrote the light green that says "inherited from the global", so an advisory entry read
         // as one that had set the flag itself. Two channels, two questions.
         if (wholeAdvice.length) { wholeTool.classList.add('wa-badge'); wholeTool.dataset.badge = '!'; }
+        // PROMOTE: the one tool here that edits CONTENT rather than a field, `@@promote` being a
+        // decorator. The crown is the promoted state, not the act.
+        const promoted = hasPromoteDecorator(e);
+        const promoteTool = tool('fa-crown', promoted, promoted
+            ? 'Promoted: activation is enough — this entry skips the relevance cut. Click to un-promote.'
+            : 'Not promoted — this entry answers to the relevance cut like any other. Click to promote.',
+            () => { e.content = withPromote(e.content, !promoted); save(); repaint(e); });
+
         tools.append(
             tool('fa-power-off', !e.disable, e.disable ? 'Disabled — click to enable' : 'Active — click to disable', () => { e.disable = !e.disable; save(); repaint(e); }),
             caseTool,
             wholeTool,
+            promoteTool,
             ...(compact ? [] : [stickyTool, probTool]),
             advTool,
             tool('fa-copy', false, 'Duplicate entry', () => dupEntry(e)),

@@ -272,17 +272,20 @@ one relevance decision *Principles* rules for. Three conditions: MEMORY ONLY, be
 entry is the author declaring when it should be present, so reference rows are ordered and never cut; it
 NEEDS A FIT, and a row the model could not score is kept — an absent verdict, not a negative one; and THE
 CUTOFF IS ONE SETTING for every model, not a property of the fit, whose own `cutoff` is provenance. It
-sees the DYNAMIC BLOCK only: constants and armed stickies are separate arrays that reach `walkOrder`
-directly, so they are never scored for relevance.
+sees the DYNAMIC BLOCK only: constants, armed stickies and `@@promote`d rows are separate arrays that
+reach `walkOrder` directly, so they are never scored for relevance. Being a block IS `promote`'s
+exemption; `selection.mjs` has no condition for it.
 
 **5. Delivery** — WHAT FITS, AND IN WHAT ORDER. Nothing here judges an entry: a row it drops cleared
 stage 4 and lost to space, which is why every cut is a prefix of the layout order rather than a test
 against a threshold. `delivery.mjs`
-`walkOrder` hoists constants then armed stickies ahead of the dynamic block, which is what makes every
-cap below a prefix cut; it cuts nothing. The ENTRY MAXES decide how many, on nested populations — vector ⊆ dynamic ⊆ all, plus the
+`walkOrder` hoists constants, then armed stickies, then promoted rows ahead of the dynamic block, which
+is what makes every cap below a prefix cut; it cuts nothing. The ENTRY MAXES decide how many, on nested populations — vector ⊆ capped ⊆ all, plus the
 per-book cap — with `maxVectorEntries` counted off the `vectorized` flag — the cap exists so that at most N vector
-entries are added to the layout, which is a question about what an entry is. The TOKEN BUDGET decides how much. The maxes and the budget live in `applyBudget`,
-which walks the layout order constant and sticky first — constant leads, because constant means always
+entries are added to the layout, which is a question about what an entry is. **`isDynamic` and `isCapped` are two populations,
+differing by exactly the promoted block**: `maxDynamic` bounds relevance-selected material, the vector
+and per-book caps bound CAPACITY. `isCapped` defaults to `isDynamic`. The TOKEN BUDGET decides how much. The maxes and the budget live in `applyBudget`,
+which walks the layout order durable-first — constant leads, because constant means always
 and should only be cut when constants alone overflow — so every cap is a prefix cut, and returns the
 survivors; `onScanDone` is what deletes the rest from `activated`, since `delivery.mjs` is ST-free
 and the map is core's.

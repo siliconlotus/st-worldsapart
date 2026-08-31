@@ -1275,6 +1275,11 @@ function onEntriesLoaded(loaded) {
     // here rather than loading the lorebooks a second time.
     showExemptCount(entries);
 
+    // THE AUTHOR'S PROMOTION, read HERE and nowhere else: this hook is the last place the `@@` lines
+    // still exist, `getSortedEntries` stripping them a few lines later. Stashed like `waIgnoreBudget`,
+    // and ungated — a promotion is a property of the entry, not of whether WA cuts this turn.
+    for (const entry of entries) entry.waPromote = matcher.hasPromoteDecorator(entry);
+
     // Gated on WA actually cutting this generation, because core's budget is the BACKSTOP: on any
     // path where onScanDone returns early, core's cut is the only thing still bounding the
     // prompt. Dry runs (PromptManager token counts, chat load) are exactly that path.
@@ -1992,8 +1997,9 @@ async function onScanDone(args) {
     // resolved and settings read HERE, so the ordering itself takes plain data and runs under node.
     const priorityList = charPriority() ?? [];
     const priorityMode = settings().worldPriorityMode;
-    const { sticky, constant, results: dynamicRows, compare, bookTierOf } = layout.layoutOrder(items, {
+    const { sticky, constant, promoted, results: dynamicRows, compare, bookTierOf } = layout.layoutOrder(items, {
         isArmedSticky: entry => Boolean(args?.timedEffects?.isEffectActive('sticky', entry)),
+        isPromoted: entry => Boolean(entry?.waPromote),
         priorityList: priorityList.map(w => ({ ...w, name: resolvedName(w) })).filter(w => w.name),
         priorityMode,
         presentationOrder: settings().presentationOrder,
@@ -2007,7 +2013,7 @@ async function onScanDone(args) {
     // an offline harness can replay any budget setting against the whole population.
     // Survivors and losers can't be re-interleaved afterwards: concatenating them loses the rank order
     // the cuts were prefixes of.
-    runState.lastLayoutOrder = [...sticky, ...constant, ...results];
+    runState.lastLayoutOrder = [...sticky, ...constant, ...promoted, ...results];
 
     // THE RELEVANCE CUT, before the walk and before the caps. It is the only decision here that asks
     // WHETHER an entry belongs; everything after it asks how many and how much. `lastLayoutOrder` above kept
@@ -2035,11 +2041,12 @@ async function onScanDone(args) {
         activated.delete(it.key);
     }
     if (relevanceCutRows.length) {
-        console.log(`Worlds Apart: relevance cut dropped ${relevanceCutRows.length} of ${relevanceCutRows.length + results.length} dynamic entries`);
+        console.log(`Worlds Apart: relevance cut dropped ${relevanceCutRows.length} of ${relevanceCutRows.length + results.length} dynamic entries`
+            + (promoted.length ? ` (${promoted.length} promoted entr${promoted.length === 1 ? 'y was' : 'ies were'} exempt)` : ''));
     }
 
-    // Constants and stickies lead, which is what makes every cap below a prefix cut.
-    let walk = delivery.walkOrder({ sticky, constant, results });
+    // Constants, stickies and promoted rows lead, which is what makes every cap below a prefix cut.
+    let walk = delivery.walkOrder({ sticky, constant, promoted, results });
 
     const maxTokens = effectiveTokenBudget();
     const maxTotal = settings().maxTotalEntries;
@@ -2049,9 +2056,13 @@ async function onScanDone(args) {
 
     if (maxTokens > 0 || maxTotal > 0 || maxDynamic > 0 || maxVectorEntries > 0 || bookCaps.size) {
         const dynamicSet = new Set(results);
+        const promotedSet = new Set(promoted);
         const { survivors, counted, skipped, dropped, budgeted, inPrompt } = await delivery.applyBudget({
             walk,
             isDynamic: item => dynamicSet.has(item),
+            // CAPACITY'S POPULATION: the dynamic block plus the promoted one. Exempt from relevance,
+            // not from how many entries a layout carries or how much of it one book may be.
+            isCapped: item => dynamicSet.has(item) || promotedSet.has(item),
             // THE TAG, not retrieval provenance. maxVectorEntries exists so that at most N vector
             // entries are added to the layout during the walk, which is a question about what an entry
             // IS — and that is what the flag records. It read runState.lastScores before: a stage-1
@@ -2125,6 +2136,9 @@ async function onScanDone(args) {
     const blockOf = new Map([
         ...sticky.map(x => [x, 'sticky']),
         ...constant.map(x => [x, 'constant']),
+        // NAMED, not folded into 'dynamic': that would tell a harness the row answered to a cut it never
+        // reached, and `gradeDepth` below caps the dynamic block only. Still not DURABLE — it activated.
+        ...promoted.map(x => [x, 'promoted']),
         ...results.map(x => [x, 'dynamic']),
     ]);
     runState.lastPromptOrder = promptOrder.map(item => ({ item, block: blockOf.get(item) ?? 'dynamic' }));
