@@ -13,6 +13,7 @@
 import fs, { readFileSync, existsSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 import { dirname, resolve as resolvePath } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { scoreCollection, poolEntries, selectTopK, admitCeiling } from '../plugin/scoring.mjs';
 import { corpusMean, centeredCosineScores } from '../plugin/vector.mjs';
 import * as entity from '../extension/entity.mjs';
@@ -426,6 +427,11 @@ export const sceneParams = (S, overrides = {}) => ({
     // A run that sets this must also fix `memoryCutoff`, or each arm cuts at its own fit's provenance
     // cutoff and the contrast reads coefficients and cut sizes at once.
     relevanceFit: null,
+    // WHICH ARTEFACT the fits are read from — a directory holding `relevance-model-<tier>.json`, resolved
+    // from the working directory. null is the shipped `extension/` pair. Orthogonal to `relevanceFit`,
+    // which picks a fit WITHIN a file by embedding model; this picks the file. Same warning as above: an
+    // arm setting it must fix `memoryCutoff`, or the contrast reads coefficients and cut sizes at once.
+    fitDir: null,
     caseSensitive: false, wholeWords: false, includeNames: true,
     // How the haystack is SEGMENTED, which decides what `scan` means to countKey. Captured in `params`
     // (worldsapart.js captureParams), so a document that records it overrides this; 'scan' is what
@@ -1165,21 +1171,34 @@ export function makeCandidateSet({ loaded, byKey, entries, params: P, chunkCfg, 
     };
 }
 
-/** The fitted models, read once. `extension/` is the shipped location; the harness reads the same files
- *  the runtime fetches, so a refit reaches both without a second copy. */
-const MODEL_FILES = (() => {
-    const out = {};
-    for (const tier of ['memory', 'reference']) {
-        try { out[tier] = JSON.parse(fs.readFileSync(new URL(`../extension/relevance-model-${tier}.json`, import.meta.url), 'utf8')); }
-        catch { out[tier] = null; }
+/** The fitted models by tier, read once per directory. `extension/` is the shipped location, and the
+ *  harness reads the same files the runtime fetches so a refit reaches both without a second copy.
+ *
+ *  A DIRECTORY, NOT A FILE, because a fit is per tier and the pair is what scores a scene. An arm naming
+ *  one (`fitDir=`) is comparing an ALTERNATIVE ARTEFACT against the shipped one — a different
+ *  standardisation, a different feature set — which is a question no `byModel` key can express, those
+ *  being embedding models rather than fits. A tier the directory does not carry falls back to the shipped
+ *  file: an arm varying the memory fit is not also claiming something about reference. */
+const MODEL_CACHE = new Map();
+const modelFiles = (dir = null) => {
+    const key = dir ?? '';
+    if (!MODEL_CACHE.has(key)) {
+        const base = dir ? resolvePath(process.cwd(), dir) : dirname(fileURLToPath(new URL('../extension/x', import.meta.url)));
+        const out = {};
+        for (const tier of ['memory', 'reference']) {
+            try { out[tier] = JSON.parse(fs.readFileSync(resolvePath(base, `relevance-model-${tier}.json`), 'utf8')); }
+            catch { out[tier] = dir ? modelFiles()[tier] : null; }
+        }
+        MODEL_CACHE.set(key, out);
     }
-    return out;
-})();
+    return MODEL_CACHE.get(key);
+};
 
 /** The fits for one embedding model, by tier. THROWS when the model has none, where production borrows
  *  `UNFITTED_FALLBACK`'s — production has nobody to ask, a harness is told its embedder. Modelling the
  *  borrow has its own door: name the fit (`--arms fit=mxbai`), which the run then records. */
-export const modelsFor = (embedModel) => {
+export const modelsFor = (embedModel, dir = null) => {
+    const MODEL_FILES = modelFiles(dir);
     // Through resolveModel, because a bundle records a SPEC: `omlx:Qwen3-...` keys as the served id
     // `qwen3-...`, which is what the runtime can compute for itself. A bare name resolves to itself.
     const key = modelKey(resolveModel(embedModel).model);
@@ -1197,7 +1216,8 @@ export const modelsFor = (embedModel) => {
 /** The fits under one NAME — a `byModel` key, or `noCosine` — so a scene can be scored through another
  *  model's coefficients. THROWS on an unknown name: silently scoring an arm as unfitted would report the
  *  fallback as that arm's result. Production resolves by embedding model, never by name. */
-export const fitsNamed = (name) => {
+export const fitsNamed = (name, dir = null) => {
+    const MODEL_FILES = modelFiles(dir);
     const out = {};
     for (const tier of ['memory', 'reference']) {
         const file = MODEL_FILES[tier];
@@ -1207,7 +1227,7 @@ export const fitsNamed = (name) => {
     return out;
 };
 /** Which models the shipped artifact carries a fit for, for a caller that wants to say so. */
-export const fittedModels = () => [...new Set(Object.values(MODEL_FILES).flatMap(f => Object.keys(f?.byModel ?? {})))];
+export const fittedModels = () => [...new Set(Object.values(modelFiles()).flatMap(f => Object.keys(f?.byModel ?? {})))];
 
 /**
  * The LAYOUT ORDER: rows sorted by predicted relevance, the quantity stage 4 selects on.
@@ -1222,12 +1242,12 @@ export const fittedModels = () => [...new Set(Object.values(MODEL_FILES).flatMap
  *
  * PER TIER, each standardised among its own rows, as each fit was built.
  */
-export const makeLayoutOrder = ({ scene, haystack, fit = null }) => {
+export const makeLayoutOrder = ({ scene, haystack, fit = null, fitDir = null }) => {
     // The fits are per embedding model, resolved from the scene's own record — a bundle names the model
     // its collections are keyed under, so the fit follows the vectors rather than whatever shipped last.
     // `fit` overrides that by NAME — a screening arm, never production.
     if (!fit && !scene?.embedModel) throw new Error('scene records no embedModel — the fits are per embedding model');
-    const MODELS = fit ? fitsNamed(fit) : modelsFor(scene.embedModel);
+    const MODELS = fit ? fitsNamed(fit, fitDir) : modelsFor(scene.embedModel, fitDir);
     // PER BOOK, as `bookIndexes` builds it — df asks how distinctive a name is IN ITS BOOK'S vocabulary,
     // and a name common in one book and unique in another has two answers, not one.
     const dfs = new Map();
@@ -1297,7 +1317,7 @@ export async function scoreScene({ sample: S, overrides = {}, k = 10, vectors, m
     const em = resolveModel(model);
     const scene = preloaded ?? loadScene(S, { indexFile: indexPath(S, { vectors, model: em.label, index }), indexOpts: { vectors, model: em.label }, params: P });
     const scoreAll = makeCandidateSet({ ...scene, params: P, topK });
-    const layoutOrder = makeLayoutOrder({ scene, haystack: haystackFor(S, P), fit: P.relevanceFit });
+    const layoutOrder = makeLayoutOrder({ scene, haystack: haystackFor(S, P), fit: P.relevanceFit, fitDir: P.fitDir });
     const gradeOf = makeGradeOf(S.entries, scene);
 
     const query = S.query;
@@ -1413,12 +1433,19 @@ export async function scoreScene({ sample: S, overrides = {}, k = 10, vectors, m
     //   @budget     what the token ceiling actually leaves — stages 4 and 5 end to end, so the only window here
     //               that is the DELIVERED set rather than a stage of it. Off by default; see budgetTokens
     //               for what the captures cannot supply.
+    // Recorded token counts where the capture has them, since they came from the real tokenizer; the
+    // fallback constant 4.91 is this corpus's measured chars-per-token for entry bodies (G12).
+    const recorded = new Map((S.candidates ?? []).map(c => [entryKey({ world: c.book ?? S.primaryBook, uid: c.uid }), c.tokens]).filter(([, t]) => typeof t === 'number'));
+    const tokensOf = r => recorded.get(entryKey(r.entry)) ?? Math.round(String(r.entry?.content ?? '').length / 4.91);
+    // WHAT THE DELIVERED SET COSTS, unconditionally — the price of the answer beside its quality. Outside
+    // the budget branch because the two ask different questions: `@budget` asks what survives a ceiling,
+    // this asks what the selection SPENDS when nothing binds. A cheaper arm that scores the same is a
+    // better arm, and no set-based score can see that — F2 reads one scene's set and averages, so an arm
+    // delivering half the tokens registers only as whatever recall it lost.
+    atCut.tokens = ranked.filter(admits).reduce((n, r) => n + tokensOf(r), 0);
+
     let atBudget = null;
     if (P.budgetTokens > 0) {
-        // Recorded token counts where the capture has them, since they came from the real tokenizer; the
-        // fallback constant 4.91 is this corpus's measured chars-per-token for entry bodies (G12).
-        const recorded = new Map((S.candidates ?? []).map(c => [entryKey({ world: c.book ?? S.primaryBook, uid: c.uid }), c.tokens]).filter(([, t]) => typeof t === 'number'));
-        const tokensOf = r => recorded.get(entryKey(r.entry)) ?? Math.round(String(r.entry?.content ?? '').length / 4.91);
         const kept = await delivery.applyBudget({
             walk: delivery.walkOrder({ results: ranked.filter(admits) }),
             isDynamic: () => true,

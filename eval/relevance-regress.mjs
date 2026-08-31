@@ -52,7 +52,7 @@ import { gradeValue, gradeCredit, fbeta, RECALL_WEIGHT, signTest } from './metri
 import { COMMON_WORDS } from '../plugin/commonwords.js';
 import { logisticFit, auc, cumulativeFit, prCurve, reliability, sigmoid } from './logistic.mjs';
 import * as entity from '../extension/entity.mjs';
-import { properNames, properDensity, modelKey, properNounsOf } from '../extension/relevance.mjs';
+import { properNames, properDensity, modelKey, properNounsOf, NAME_PARTICLES } from '../extension/relevance.mjs';
 import { nameEvidence } from '../extension/keyword-suggest.mjs';
 import { fold, normalizeOrthography } from '../extension/smartkeys.mjs';
 import { tokenize } from '../extension/lexical.mjs';

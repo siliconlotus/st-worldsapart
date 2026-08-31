@@ -986,13 +986,19 @@ share-versus-scene-maximum correlation flips positive (a confident scene now del
 size-dependence falls, the spread of delivered share widens, and the mean delivered count roughly halves.
 A count that falls out of the prediction has to VARY, and under per-scene it barely did.
 
-**It loses on the score of record and that cannot settle it.** F2 and held-out AUC both slip, so the
-ordering is genuinely a little worse; a recall-heavier beta halves the gap, which localises most of it
-to the smaller delivered set rather than to worse ordering (F25) —
-but no beta closes it, and none can: F-beta scores one scene's delivered set and averages over scenes, so
-it is blind by construction to whether the COUNT is calibrated ACROSS scenes, which is the whole of what
-per-book buys. Deciding this needs a token-aware score, which does not exist here; per-book halves the
-bill and the budget is what binds.
+**It loses on the score of record at a FIXED cutoff, and that loss is the cutoff's.** F2 and held-out
+AUC both slip when the two are read at one cutoff (F25), which reads as a worse model. It is not:
+`relevanceCutoff` is a user setting, so each fit sweeps into a CURVE of F2 against what the delivered set
+costs, and the two curves coincide. **Measured** (F53): both refit on the same scenes and swept 0.04–0.30,
+every paired reading at matched token spend differs by under 0.006 with the sign alternating, against a
+0.09 swing along either curve. So per-book delivers fewer tokens and loses exactly the recall those tokens
+were buying — which the cutoff already does, on either fit.
+
+**That closes the question rather than deciding it.** Per-book is not worse, and it is not better; it
+reverses the sign of the count pathology without moving the quality-per-token the system achieves. Since
+the shipped fit is the one every measurement stands on, there is no reason to change artefacts, and the
+delivered COUNT remains uncalibrated — the pathology is real and this is not its fix. What a fix would
+have to beat is the curve, not the cutoff.
 
 **THE COLD START IS EMPTY ON BOTH SIDES.** A runtime would accumulate these statistics across turns
 rather than hold them per scan, and a story has no memory entries at turn one by definition — the tier
@@ -1534,9 +1540,9 @@ instances the books on disk hold.
    translates nothing: `entries`, `params`, `scanChat`, `book`, `index`, `scores`. `entry.world` is ST's
    field, read where an ST entry becomes a WA row and nowhere else.
 
-   What is still open is in `bundle-schema.md`'s own *Open*: `waVersion` has no browser source, `why` is
-   bulk sitting ahead of the hoisted blocks, `query`/`queryChat` duplicate per arm, and nothing yet fills
-   `modelDigest` or a pass's `params` at capture.
+   What is still open is in `bundle-schema.md`'s own *Open*, and it is one question: whether the schema is
+   camelCase throughout. `waVersion` now resolves through the server plugin, and `why` and the
+   `query`/`queryChat` pair have left the arms block for the trailing bulk.
 
 2. **The relevance prediction — LANDED.** Stage 4 makes a relevance decision: `onScanDone` fills the
    `E[credit]` column every scan, `selection.relevanceCut` drops dynamic memory rows below
@@ -1563,16 +1569,13 @@ instances the books on disk hold.
    would be a second definition of what WA searched.
 
    What is still open is in *Stage 4 predicts per-entry relevance*: the delivered COUNT is a fixed share
-   of what activation produced rather than of what the scene needs, and per-book standardisation reverses
-   that pathology while losing on the score of record. **The runtime's entry-side signals agree with the
+   of what activation produced rather than of what the scene needs. Per-book standardisation reverses that
+   pathology and is no longer a candidate fix — it lies on the same cost curve as the shipped fit (F53),
+   so it buys nothing the cutoff setting does not. **The runtime's entry-side signals agree with the
    harness's**: measured on one browser capture, `properNouns` reproduces from
    `relevance.mjs` to the capture's own rounding (F52). `density` is `properNounsOf` with no stoplist
    subtraction — the definition every fit was trained on — computed by one shipped function on both
-   sides. `E[credit]` itself is unchecked, and the only
-   missing piece is a saved capture: the runtime records the PRE-CUT population with `eCredit` at full
-   precision for exactly this comparison (`lastLayoutOrder`, the verbose rows), but the only on-disk carriers
-   are `core-compare` exports, which record the delivered union — too few rows to rebuild the
-   within-scene standardisation. One `/wa-grade` capture from after the column shipped closes it.
+   sides.
 
 3. **`promote` — an author declaration that activation is sufficient.** A promoted entry enters the
    layout whenever its keys fire, exempt from the relevance cut. It is the per-entry form of *triggered
