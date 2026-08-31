@@ -3035,7 +3035,7 @@ let initialized = false;
 export async function init() {
     // The capture commands drive the pipeline; they are handed its entry points once, here, so the
     // dependency runs one way and nothing in the pipeline reaches back into the capture UI.
-    setCaptureHost({ chatBook, dryRun, effectiveTokenBudget, paramSnapshot, retrieve, scopedPriority, vectorRequestBody });
+    setCaptureHost({ chatBook, coreSelection, dryRun, effectiveTokenBudget, paramSnapshot, retrieve, scopedPriority, vectorRequestBody });
     // Both `hooks.activate` and the jQuery bootstrap below can reach here, and
     // whichever loses the race would otherwise duplicate the panel, the event
     // listeners and the slash command.

@@ -10,7 +10,7 @@
 // selection. The pipeline calls none of this back.
 
 import { getContext, extension_settings } from '../../../../extensions.js';
-import { getSortedEntries, loadWorldInfo, world_info_budget, world_info_budget_cap, world_info_case_sensitive, world_info_include_names, world_info_match_whole_words } from '../../../../world-info.js';
+import { getSortedEntries, loadWorldInfo, world_info_budget, world_info_budget_cap, world_info_case_sensitive, world_info_depth, world_info_include_names, world_info_match_whole_words } from '../../../../world-info.js';
 import { Popup, POPUP_TYPE, POPUP_RESULT } from '../../../../popup.js';
 import { escapeHtml, getCharaFilename, getStringHash, download, uuidv4 } from '../../../../utils.js';
 import { getRequestHeaders, saveSettingsDebounced } from '../../../../../script.js';
@@ -179,7 +179,7 @@ export async function versusCore(named) {
     const population = runState.lastLayoutOrder;
     if (!runState.lastCandidates?.length || !population?.length) { toastr.info('Nothing ranked \u2014 the scan activated no entries.', 'Worlds Apart'); return; }
 
-    const { entries: coreEntries, viaVectors, vectorsRan } = await coreSelection();
+    const { entries: coreEntries, viaVectors, vectorsRan } = await host.coreSelection();
 
     const keyOf = e => `${e.world}.${e.uid}`;
     const coreKeys = new Set(coreEntries.map(keyOf));
