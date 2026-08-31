@@ -121,6 +121,8 @@ carry.
           // Redundant with `depth` on purpose: the two disagreeing means the scene was mis-extracted.
           "sceneStart": 1035,
           "depth": 10,
+          // ON THE CELL ONLY WHEN THE ARMS DISAGREE — `queryMode` moves them, so they cannot hoist
+          // unconditionally; when nothing moved them they sit once on the scene instead.
           "query": "…", "queryChat": [ /* … */ ], "primaryBook": "Sommers_Pack__v22",
           // WHAT THE GRADER WAS SHOWN, which a later run needs to know what it may believe. `cutoff` is
           // the depth this capture graded at; `gradedCandidates` is how many rows actually reached a
@@ -136,7 +138,9 @@ carry.
               // What the row IS, beside what it scored — the classification the runtime gave it, the
               // budget's verdict, and the key hits that explain the keyword number.
               "title": "262 - Finale…", "block": "dynamic", "sticky": 1, "wiOrder": 1001,
-              "score": 0.0456, "vRank": 3, "tRank": 14, "kRank": 3, "why": [],
+              // NO `why`: the key hits that explain the keyword number are bulk, and live in
+              // `candidateWhy` behind the head of the file. `openBundle` puts them back on the row.
+              "score": 0.0456, "vRank": 3, "tRank": 14, "kRank": 3,
               "scores": { "cosine": 0.1234, "text": 25.1234, "proper": 12, "length": 0.1237 } }
           ]
         }
@@ -158,6 +162,9 @@ carry.
   // CONTENT IDENTITY, keyed by the same names as `books`. Two captures hold the same book when these
   // agree — answerable without inflating two megabytes of entries.
   "bookHashes": { "Sommers_Pack__v22": "10bdb8e8…" },
+  // arm -> scene -> the matched-key excerpts of each candidate, POSITIONALLY ALIGNED with that cell's
+  // `candidates`. Absent when no candidate matched a key.
+  "candidateWhy": { "shipped": { "Sommers-ABO-Frozen-Test-msg-1044": [ [ { "key": "ada", "excerpt": "…" } ] ] } },
   "sceneChats": { "Sommers-ABO-Frozen-Test-msg-1044": [ { "name": "Ada", "mes": "…" } ] },
   "sceneInjects": { "Sommers-ABO-Frozen-Test-msg-1044": [
     { "key": "NOTE", "text": "…", "ambient": false, "depth": 2 },
@@ -171,11 +178,17 @@ carry.
 
 ## Field order is part of the schema
 
-`sceneChats`, `sceneInjects` and `books` go LAST, in that order, and every writer emits them so — books
-last, being the largest by a wide margin. `bookHashes` sits just AHEAD of them: it describes the bulk but
-is two lines, and putting it in front is what makes "same book?" answerable with `head`. They are almost all of a bundle's
-bytes, so anything ahead of them is reachable with `head` — every scene, every param, every grade — and
-anything behind them is not.
+`candidateWhy`, `sceneChats`, `sceneInjects` and `books` go LAST, in that order, and every writer emits
+them so — books last, being the largest by a wide margin. `bookHashes` sits just AHEAD of them: it
+describes the bulk but is two lines, and putting it in front is what makes "same book?" answerable with
+`head`. They are almost all of a bundle's bytes, so anything ahead of them is reachable with `head` —
+every scene, every param, every grade — and anything behind them is not.
+
+**`why` is in that block rather than on the candidate it describes.** A row's matched-key excerpts are the
+heaviest thing in a bundle after the books themselves, many times the weight of every scene field and
+verdict combined (G8), so inline they put the bulk ahead of everything the order exists to keep reachable.
+`candidateWhy` is keyed arm -> scene and aligned by POSITION with that cell's `candidates`; `openBundle`
+re-attaches it, so a reader still says `c.why` and nothing downstream knows where it was stored.
 
 **`sceneSources` carries only what an entry opted into.** There are eight things that can enter a
 haystack: five character-card fields and the persona description, each gated by a per-entry `matchXxx`
@@ -220,9 +233,10 @@ fact WA does not set, which is why it sits beside `embedModel` rather than insid
 **REQUIRED VERSUS EMITTED-WHEN-PRESENT.** A structural field is one of two things, and the difference is
 what makes conformance checkable at all. REQUIRED fields are written by every capture and their absence is a
 defect. The rest are emitted only when they have a value, and their absence is silence rather than damage —
-`waVersion` and `stVersion` (older captures recorded neither), `book` and `gradedCandidates`, `gradeScale`,
-`queryChat`, `paramSnapshot`, and `invalidConfiguration`, which by construction appears only on a
-configuration that is not real. **Measured** (G8): every bundle on disk is structurally clean, and every
+`waVersion` and `stVersion` (older captures recorded neither, and `waVersion` is empty with no server
+plugin), `book` and `gradedCandidates`, `gradeScale`, `paramSnapshot`, `candidateWhy`, `invalidConfiguration`
+— which by construction appears only on a configuration that is not real — and the `query`/`queryChat` pair,
+which sits on the scene or on the cell but never on both. **Measured** (G8): every bundle on disk is structurally clean, and every
 remaining gap is an optional field an older capture never had. None of that is recoverable and none of it
 is a defect.
 
@@ -255,6 +269,16 @@ bundle written before the revision would read as malformed rather than as older.
 
 A reader that needs a score it cannot find has met an older capture, not a broken file — which is what
 `waVersion` and `stVersion` on the arm are for.
+
+**Both are RESOLVED, never declared.** `waVersion` is `<branch>@<git describe --tags --always --dirty>`
+over the extension directory, which the browser cannot compute — it comes off the server plugin's `/ping`,
+the extension supplying its own `third-party/<name>` folder since that name varies per clone. With no
+plugin the field is empty rather than falling back to `manifest.json`: a manifest names the next release,
+and only a tag makes a version a fact about a commit, so a capture naming no version reads as unknown
+where one naming the wrong version reads as a fact. `sourceFP` is the stronger drift signal for WA anyway,
+being a hash of the code rather than a name for it. `stVersion` comes from ST's own `/version`
+(`<branch>@<short HEAD>`, no tags and no dirty flag) — the thinner form of the same convention, not a
+different one.
 
 **Only measured SIGNAL VALUES go in it.** A rank is a position within one arm's ordering and the fused
 `score` is that arm's own composite, so neither is a feature and neither is something a model indexes by
@@ -516,36 +540,3 @@ of the file lossless rather than a silent re-labelling.
 
 - Whether the schema is camelCase throughout. It is now, but `sceneChat` and `waVersion` were arrived at
   separately.
-- **`waVersion` has no browser source.** A live capture records `stVersion` from ST's own `/version`
-  (`<branch>@<short HEAD>`, no tags and no dirty flag) and omits `waVersion` entirely, since the page
-  cannot run git and the deployed plugin is a copy rather than the repo. `sourceFP` is the stronger drift
-  signal there anyway, being a hash of the code rather than a name for it. Node-side writers resolve both
-  properly. Closing this wants a plugin route reporting `git describe` over the extension directory.
-- **`why` is bulk, and it is not last.** A candidate's matched-key excerpts are most of what sits ahead of
-  `sceneChats` — many times the weight of every scene field and verdict combined (G8).
-  The field-order rule names only the two hoisted blocks, so this is within the letter of it and against
-  the point.
-- **Arms nest inside scenes, so a configuration is recorded once per scene.** A fifteen-scene document
-  repeats `shipped`'s `params` fifteen times. The alternative is arms at DOCUMENT level, each holding its
-  captures keyed by scene id — a configuration recorded once, which is what an arm IS:
-
-  ```jsonc
-  "scenes": [ { "id": "…", "sceneChat": "…", "sceneStart": 90, "sceneEnd": 100, "entries": [ … ] } ],
-  "arms": [ { "name": "shipped", "params": { … },
-              "captures": { "…-msg-90-100": { "query": "…", "candidates": [ … ] } } } ]
-  ```
-
-  A CAPTURE IS THE (SCENE, ARM) CELL and everything that varies with both belongs on it: the candidates,
-  the query, the cutoff, the index. What stays on the arm is what varies with the configuration alone.
-
-  `depth` does NOT obstruct this, though an earlier draft of this note said it did. One arm has one depth,
-  and the N scenes it covers all have spans that depth produced — different spans, one value. Two arms at
-  different depths produce different spans and so are captures of different SCENES, which the schema
-  already says. Nothing stores an arm spanning two depths; `--depths` in `graded-scene-grid.mjs` is a
-  read-time ablation that rebuilds queries and writes nothing.
-
-  What it costs is that a scene stops being self-contained — slicing a document to one scene means walking
-  every arm — and nothing writes a multi-scene document yet, so the win is currently zero.
-- **`query` and `queryChat` are per-arm and duplicated.** Both are produced by a configuration (`queryMode`
-  moves them), so they cannot hoist to the scene the way the haystack does — but every arm of one scene
-  carries an identical copy whenever none moved them, which is every capture on disk.

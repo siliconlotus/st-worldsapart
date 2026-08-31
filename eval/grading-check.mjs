@@ -574,7 +574,7 @@ const keys = o => Object.keys(o).sort().join(',');
 eq(keys(built),
     'arms,bookHashes,bookPriority,books,budget,createdAt,createdBy,embedModel,gradeScale,name,notes,pluginFP,sceneChats,scenes,schemaVersion,sourceFP',
     'document keys are the schema\'s');
-eq(keys(built.scenes[0]), 'entries,id,sceneChat,sceneEnd', 'scene keys are the schema\'s');
+eq(keys(built.scenes[0]), 'entries,id,query,queryChat,sceneChat,sceneEnd', 'scene keys are the schema\'s — query and queryChat hoisted, the arms all agreeing');
 eq(keys(built.arms[0]), 'name,paramSnapshot,params,scenes,stVersion,waVersion', 'arm keys are the schema\'s — paramSnapshot among them, not in the cell');
 // The fixture above sets everything, so the sets are exact. A capture that omits an EMITTED-WHEN-PRESENT
 // field is still conformant — most arms on disk predate the version pair and many cells the `book`,
@@ -584,7 +584,7 @@ const bare = { ...schemaFixture };
 for (const k of ['waVersion', 'stVersion', 'paramSnapshot', 'book', 'gradedCandidates', 'queryChat', 'gradeScale', 'invalidConfiguration']) delete bare[k];
 const thin = await bundleForSchema([{ arm: 'shipped', sample: bare }], { start: 0, end: 10, user: 'u' });
 eq(keys(thin.arms[0]), 'name,params,scenes', 'an arm omitting every optional field carries no stray key');
-eq(keys(Object.values(thin.arms[0].scenes)[0]), 'candidates,cutoff,depth,index,primaryBook,query,sceneStart', '...and neither does its cell');
+eq(keys(Object.values(thin.arms[0].scenes)[0]), 'candidates,cutoff,depth,index,primaryBook,sceneStart', '...and neither does its cell');
 
 // --- THE ROUND-TRIP INVARIANT: openBundle -> setGrades must reproduce the rater table -----------------
 // The assertion above is on a HUMAN rater, whose id IS raterKey's whole output, so it cannot fail. An
@@ -617,5 +617,44 @@ eq(keys(Object.values(thin.arms[0].scenes)[0]), 'candidates,cutoff,depth,index,p
     eq(llmVerdict.modelDigest, undefined, '...and a model NAME is not handed back as a digest');
 }
 eq(keys(Object.values(built.arms[0].scenes)[0]),
-    'book,candidates,cutoff,depth,gradedCandidates,index,invalidConfiguration,primaryBook,query,queryChat,sceneStart',
+    'book,candidates,cutoff,depth,gradedCandidates,index,invalidConfiguration,primaryBook,sceneStart',
     'cell keys are the schema\'s');
+
+// --- THE TWO HOISTS: bulk out of the cell, and a reader that cannot tell -----------------------------
+// `why` and the query pair leave the arms block so the file's head carries the scene, the params and the
+// verdicts rather than matched-key excerpts. Both are writer-side only: openBundle must hand back exactly
+// what a caller handed in, or every grade UI reading `c.why` goes blank and no test says so.
+{
+    const withWhy = await bundleForSchema([{
+        arm: 'shipped',
+        sample: { ...schemaFixture, candidates: [
+            { book: 'B', uid: 1, tokens: 10, why: [{ key: 'villa', excerpt: 'the villa' }] },
+            { book: 'B', uid: 2, tokens: 10 },
+        ] },
+    }], { start: 0, end: 10, user: 'u' });
+    eq(Object.values(withWhy.arms[0].scenes)[0].candidates.every(c => !('why' in c)), true,
+        'no candidate in the arms block carries its excerpts');
+    eq(withWhy.candidateWhy.shipped[withWhy.scenes[0].id][0][0].key, 'villa',
+        '...they are in the trailing block, positionally aligned');
+    const ord = Object.keys(withWhy);
+    eq(ord.indexOf('candidateWhy') > ord.indexOf('arms') && ord.indexOf('candidateWhy') < ord.indexOf('sceneChats'), true,
+        '...which is behind every field the order exists to keep reachable with head');
+    const back = openBundle(structuredClone(withWhy));
+    eq(back.candidates[0].why[0].excerpt, 'the villa', 'openBundle puts them back on the row they came off');
+    eq('why' in back.candidates[1], false, '...and invents none for a row that had none');
+    // Idempotent: a re-bundle of what openBundle handed out must not double-store or lose them.
+    const again = await bundleForSchema([{ arm: 'shipped', sample: { ...schemaFixture, candidates: back.candidates } }],
+        { start: 0, end: 10, user: 'u' });
+    eq(openBundle(structuredClone(again)).candidates[0].why[0].key, 'villa', 'and a round trip through both is stable');
+}
+{
+    // Arms that DISAGREE keep their own copies — `queryMode` moves the query, and hoisting a summary arm's
+    // query onto the scene would report every other arm as having run on text it never saw.
+    const split = await bundleForSchema([
+        { arm: 'shipped', sample: schemaFixture },
+        { arm: 'summary', sample: { ...schemaFixture, query: 'a summary' } },
+    ], { start: 0, end: 10, user: 'u' });
+    eq('query' in split.scenes[0], false, 'a query that varies by arm does not hoist');
+    eq(openBundle(structuredClone(split), 'summary').query, 'a summary', '...and each arm reads back its own');
+    eq(openBundle(structuredClone(built), 'shipped').query, 'q', 'a hoisted query still reaches the arm view');
+}

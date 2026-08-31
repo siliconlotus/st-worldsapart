@@ -169,9 +169,13 @@ async function hasPlugin() {
     }
 
     try {
-        const response = await fetch('/api/plugins/worlds-apart/ping', { method: 'POST', headers: getRequestHeaders() });
+        // The third-party folder this extension is served from, so the plugin can resolve WA's git version
+        // over it — see its /ping. Taken from import.meta.url rather than hard-coded: ST clones into
+        // `third-party/<repo name>` and that name is whatever the clone was called.
+        const dir = new URL('.', import.meta.url).pathname.replace(/\/$/, '').split('/').pop();
+        const response = await fetch('/api/plugins/worlds-apart/ping', { method: 'POST', headers: getRequestHeaders(), body: JSON.stringify({ dir }) });
         runState.pluginAvailable = response.ok;
-        if (response.ok) { try { const d = await response.json(); runState.pluginRoot = d?.root ?? null; runState.pluginHost = d?.hostname ?? null; runState.pluginFP = d?.fingerprint ?? null; } catch { /* older plugin: no root/hostname/fingerprint fields */ } }
+        if (response.ok) { try { const d = await response.json(); runState.pluginRoot = d?.root ?? null; runState.pluginHost = d?.hostname ?? null; runState.pluginFP = d?.fingerprint ?? null; runState.pluginWaVersion = d?.waVersion || ''; } catch { /* older plugin: no root/hostname/fingerprint/waVersion fields */ } }
     } catch {
         runState.pluginAvailable = false;
     }
@@ -1518,32 +1522,6 @@ function priorityKey() {
     if (ctx.characterId == null) return null;
     return getCharaFilename(ctx.characterId);
 }
-
-
-/**
- * SillyTavern's resolved version, as `<branch>@<commit>` — what actually ran, not what package.json says.
- *
- * ST's declared version only advances on pushes to main, so a staging checkout reports a number with
- * nothing to do with the tree serving the page. `/version` gives the branch and a short HEAD; it has no
- * tags and no dirty flag, so this is the thinner form of the schema's `<branch>@<git describe>` rather
- * than a different convention. Empty when the endpoint cannot be read — an absent field reads as an older
- * capture, and a guessed version would not.
- *
- * Cached: it cannot change without a page reload.
- */
-/** WHAT WA WAS, from its own manifest. The extension cannot read git — it runs in the browser — so the
- *  declared version is what there is, and a declared one is at least honest about being declared.
- *
- *  THROUGH import.meta.url, not a fixed path: ST clones into third-party/<repo-name> and that name varies
- *  with whatever the clone was called, so a hard-coded folder reads nothing on half the installs.
- *
- *  Cached, and an empty string on failure rather than a guess: a capture naming no version is readable as
- *  "unknown", while one naming the wrong version is not readable as anything. */
-let waVersionCache = null;
-
-let stVersionCache = null;
-
-
 
 
 

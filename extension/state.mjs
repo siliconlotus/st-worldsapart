@@ -439,5 +439,6 @@ export const runState = {
     pluginAvailable: null,        // did the server plugin answer /ping
     pluginRoot: null,             // absolute ST root from /ping (for the deploy command)
     pluginFP: null,               // fingerprint the deployed plugin reports
+    pluginWaVersion: null,        // WA's resolved `<branch>@<git describe>` from /ping — the browser can't read git
     sourceFP: null,               // fingerprint of this extension's source plugin files
 };

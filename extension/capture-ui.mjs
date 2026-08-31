@@ -13,7 +13,7 @@ import { getContext, extension_settings } from '../../../../extensions.js';
 import { getSortedEntries, loadWorldInfo, world_info_budget, world_info_budget_cap, world_info_case_sensitive, world_info_include_names, world_info_match_whole_words } from '../../../../world-info.js';
 import { Popup, POPUP_TYPE, POPUP_RESULT } from '../../../../popup.js';
 import { escapeHtml, getCharaFilename, getStringHash, download, uuidv4 } from '../../../../utils.js';
-import { saveSettingsDebounced } from '../../../../../script.js';
+import { getRequestHeaders, saveSettingsDebounced } from '../../../../../script.js';
 import { getTokenCountAsync } from '../../../../tokenizers.js';
 import { runState, settings } from './state.mjs';
 import * as matcher from './matcher.mjs';
@@ -74,15 +74,35 @@ function sceneRange() {
     return { start: win[0].i + 1, end: win[win.length - 1].i + 1 };
 }
 
-async function waVersion() {
-    if (waVersionCache !== null) return waVersionCache;
-    try {
-        const r = await fetch(new URL('./manifest.json', import.meta.url));
-        const d = r.ok ? await r.json() : null;
-        waVersionCache = d?.version ? String(d.version) : '';
-    } catch { waVersionCache = ''; }
-    return waVersionCache;
-}
+/**
+ * WA's RESOLVED version, `<branch>@<git describe>` — what actually ran, not what manifest.json declares.
+ *
+ * The browser cannot read git, so this comes off the server plugin's /ping, which runs `git describe` over
+ * the extension's own third-party directory. Declared versions were what this used to report, and a
+ * manifest names the next release rather than the tree serving the page — only a tag makes a version a
+ * fact about a commit.
+ *
+ * Empty with no plugin, and empty rather than falling back to the manifest: a capture naming no version
+ * reads as "unknown", where one naming the wrong version reads as a fact. `sourceFP` is the stronger drift
+ * signal there anyway, being a hash of the code rather than a name for it.
+ *
+ * Read off runState rather than fetched: the settings panel pings the plugin at init, so the value is
+ * already there by the time any capture runs.
+ */
+const waVersion = () => runState.pluginWaVersion ?? '';
+
+/**
+ * SillyTavern's resolved version, as `<branch>@<commit>` — what actually ran, not what package.json says.
+ *
+ * ST's declared version only advances on pushes to main, so a staging checkout reports a number with
+ * nothing to do with the tree serving the page. `/version` gives the branch and a short HEAD; it has no
+ * tags and no dirty flag, so this is the thinner form of the schema's `<branch>@<git describe>` rather
+ * than a different convention. Empty when the endpoint cannot be read — an absent field reads as an older
+ * capture, and a guessed version would not.
+ *
+ * Cached: it cannot change without a page reload.
+ */
+let stVersionCache = null;
 
 async function stVersion() {
     if (stVersionCache !== null) return stVersionCache;
@@ -291,7 +311,7 @@ async function versusBundle(union, coreKeys, waKeys, viaVectors) {
         depth: settings().messageDepth,
         pluginFP: runState.pluginFP,
         sourceFP: runState.sourceFP,
-        waVersion: await waVersion(),
+        waVersion: waVersion(),
         stVersion: await stVersion(),
         chat: chatFilePath(),
         book: primaryBook ? `data/default-user/worlds/${primaryBook}.json` : '',
@@ -588,7 +608,7 @@ export async function gradeScene(named) {
         depth: settings().messageDepth,
         pluginFP: runState.pluginFP,
         sourceFP: runState.sourceFP,
-        waVersion: await waVersion(),
+        waVersion: waVersion(),
         stVersion: await stVersion(),
         chat: chatFilePath(),
         book: primaryBook ? `data/default-user/worlds/${primaryBook}.json` : '',
@@ -1098,7 +1118,7 @@ export async function superGradeScene(named) {
     const { grades, prior } = done;
 
     const base = named?.name || defaultSampleName();
-    const wav = await waVersion();
+    const wav = waVersion();
     const stv = await stVersion();
     const built = [];
     for (const cap of captures) {

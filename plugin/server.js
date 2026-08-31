@@ -28,6 +28,7 @@
 import path from 'node:path';
 import fs from 'node:fs';
 import readline from 'node:readline';
+import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import sanitize from 'sanitize-filename';
 import { LocalIndex } from 'vectra';
@@ -56,6 +57,23 @@ const ST_ROOT = path.resolve(PLUGIN_DIR, '..', '..');
 // the same hash over its source files to detect a /plugins copy that wasn't redeployed after a change.
 const readDeployed = f => { try { return fs.readFileSync(path.join(PLUGIN_DIR, f), 'utf8'); } catch { return ''; } };
 const FINGERPRINT = pluginFingerprint(...PLUGIN_FILES.map(([, deployed]) => readDeployed(deployed)));
+
+/**
+ * A checked-out directory's RESOLVED version: `<branch>@<git describe --tags --always --dirty>`.
+ *
+ * The same string `eval/synth-scenes.mjs` writes, so a browser capture and a node-side one are the same
+ * fact rather than two conventions. `+dirty` rather than git's `-dirty` because it is SemVer BUILD
+ * metadata: `0.2.0+dirty` compares equal to `0.2.0`, which is what a dirty tree is.
+ *
+ * Empty when the directory is not a repo or git is absent — an absent version reads as a thinner capture,
+ * where a guessed one reads as a fact.
+ */
+const gitVersion = (dir) => {
+    const git = (...a) => execFileSync('git', ['-C', dir, ...a], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim();
+    try {
+        return `${git('rev-parse', '--abbrev-ref', 'HEAD')}@${git('describe', '--tags', '--always', '--dirty=+dirty')}`;
+    } catch { return ''; }
+};
 
 export const info = {
     id: 'worlds-apart',
@@ -412,7 +430,17 @@ export async function init(router) {
         }
     });
 
-    router.post('/ping', (_request, response) => response.send({ ok: true, id: info.id, root: ST_ROOT, fingerprint: FINGERPRINT }));
+    // WHAT WA ACTUALLY IS, resolved rather than declared — the one thing the extension cannot answer for
+    // itself: it runs in the browser and cannot read git, and manifest.json names the next release rather
+    // than the tree serving the page. The extension supplies its own third-party folder name, since ST
+    // clones into `third-party/<repo name>` and that name varies per install; a plugin guessing it reads
+    // nothing on half of them. Sanitized because it arrives from the page — one path component, never a
+    // traversal out of third-party/.
+    router.post('/ping', (request, response) => {
+        const dir = sanitize(String(request.body?.dir ?? ''));
+        const waVersion = dir ? gitVersion(path.join(ST_ROOT, 'public', 'scripts', 'extensions', 'third-party', dir)) : '';
+        response.send({ ok: true, id: info.id, root: ST_ROOT, fingerprint: FINGERPRINT, waVersion });
+    });
 
     console.log('[Worlds Apart] server plugin ready at /api/plugins/worlds-apart');
 }

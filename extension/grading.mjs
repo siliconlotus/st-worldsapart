@@ -908,6 +908,7 @@ export async function bundleSamples(arms, scene = {}, extra = {}) {
     // ARMS AT DOCUMENT LEVEL, because an arm is a CONFIGURATION and a configuration spans scenes — that is
     // what a grid search is. Nesting them inside a scene records `params`, `waVersion` and `stVersion`
     // once per scene, so a fifteen-scene run repeats one arm's knobs fifteen times.
+    const whyBlock = {};
     doc.arms = arms.map(({ arm, sample }) => {
         const per = { name: arm };
         if (sample.waVersion !== undefined) per.waVersion = sample.waVersion;
@@ -930,10 +931,34 @@ export async function bundleSamples(arms, scene = {}, extra = {}) {
         }
         // IN LAYOUT ORDER, which is load-bearing: every stage-5 cap is a prefix cut, so a reader can
         // replay the budget walk over the array as it stands.
-        cell.candidates = (sample.candidates ?? []).map(toCandidate);
+        //
+        // `why` LEAVES THE CANDIDATE HERE, into the trailing block, aligned by position. A row's matched-key
+        // excerpts are the single heaviest thing in the file after the books themselves — many times the
+        // weight of every scene field and verdict combined (G8) — so leaving them inline put the bulk ahead
+        // of everything the field order exists to keep reachable with `head`. `openBundle` puts them back.
+        const cands = (sample.candidates ?? []).map(toCandidate);
+        cell.candidates = cands.map(({ why: _why, ...c }) => c);
+        const whys = cands.map(c => c.why ?? []);
+        if (whys.some(w => w.length)) whyBlock[arm] = { [id]: whys };
         per.scenes = { [id]: cell };
         return per;
     });
+
+    // ONE COPY WHEN NOTHING MOVED IT. `query` and `queryChat` are produced by a configuration — `queryMode`
+    // moves them — so they cannot hoist unconditionally the way the haystack does. But every arm of a
+    // capture carries an identical copy whenever none of them moved it, which is most captures. Hoisted
+    // onto the scene when the arms agree and left on the cell when they do not; `openBundle` spreads the
+    // scene first and the cell last, so a per-arm value still wins.
+    const cells = doc.arms.map(a => a.scenes[id]);
+    const key = c => JSON.stringify([c.query ?? null, c.queryChat ?? null]);
+    if (cells.length && cells.every(c => key(c) === key(cells[0]))) {
+        const { query, queryChat } = cells[0];
+        for (const c of cells) { delete c.query; delete c.queryChat; }
+        // AFTER `entries`, because `queryChat` is frozen messages and the scene's own fields are what a
+        // reader wants first.
+        if (query !== undefined) doc.scenes[0].query = query;
+        if (queryChat !== undefined) doc.scenes[0].queryChat = queryChat;
+    }
 
     // WHO THE INDICES NAME. Ahead of the bulk, because a verdict is unreadable without them.
     if (indexed.raters.length) doc.raters = indexed.raters;
@@ -944,6 +969,10 @@ export async function bundleSamples(arms, scene = {}, extra = {}) {
     // size. It is also what a reader wants without inflating a 2MB book: "same book?" is answerable here.
     const books = first.books ?? {};
     doc.bookHashes = await hashBooks(books);
+
+    // arm -> scene -> per-candidate excerpts, positionally aligned with that cell's `candidates`. Down
+    // here because it is bulk; see the arms walk above.
+    if (Object.keys(whyBlock).length) doc.candidateWhy = whyBlock;
 
     // THE MESSAGES THE HAYSTACK IS BUILT FROM, once per scene — not a window. A window is fixed at one
     // depth, one matchWindow and one includeNames; these rebuild any of them, so arms reading the same
@@ -1005,6 +1034,7 @@ export function openBundle(doc, arm = null, scene = null) {
     const { entries, ...sceneFields } = sc;
     const { name: armName, scenes: _cells, params, ...armFields } = hit;
     const { depth, ...cell } = hit.scenes[sc.id];
+    const whys = doc.candidateWhy?.[armName]?.[sc.id];
     return {
         ...docFields,
         ...sceneFields,
@@ -1022,6 +1052,9 @@ export function openBundle(doc, arm = null, scene = null) {
         params,
         depth,
         ...cell,
+        // `why` REJOINS THE CANDIDATE IT CAME OFF, by position — the writer split it out to keep the bulk
+        // behind the fields a reader heads the file for, and no reader should have to know that.
+        ...(whys ? { candidates: (cell.candidates ?? []).map((c, i) => (whys[i]?.length ? { ...c, why: whys[i] } : c)) } : {}),
         arm: armName,
     };
 }
