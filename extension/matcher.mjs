@@ -224,11 +224,11 @@ export function scanWindow(chat, cfg) {
 /**
  * A paragraph break: a blank line, tolerating trailing whitespace on the line above.
  *
- * NOT a single newline. Chat prose uses both — measured over one author's chats (392 messages,
- * 780KB), 27.6% of messages carry blank-line breaks AND single newlines within a paragraph, and only
- * 3.8% use single newlines alone. Splitting on `\n` would chop soft-wrapped dialogue into fragments;
- * splitting on a blank line reads the Markdown correctly, and in that 3.8% degenerates to the whole
- * message — never narrower than the author's own structure supports.
+ * NOT a single newline. Chat prose mixes blank-line breaks with single newlines inside a paragraph,
+ * and messages using single newlines alone are rare (K7). Splitting on `\n` would chop soft-wrapped
+ * dialogue into fragments; splitting on a blank line reads the Markdown correctly, and in the
+ * single-newline-only case degenerates to the whole message — never narrower than the author's own
+ * structure supports.
  */
 const PARAGRAPH_BREAK = /\n[ \t]*\n/;
 
@@ -246,11 +246,9 @@ const PARAGRAPH_BREAK = /\n[ \t]*\n/;
  * TAG AND CONTENT, because the content is the whole problem. Stripping markup alone would leave the
  * tracker's text in the haystack, which is exactly what fires.
  *
- * AN UNCLOSED TAG RUNS TO ITS PARENT'S CLOSE, or to the end of the text. Presets write these blocks
- * unclosed — measured on the chat this was built for:
- * `<!-- GFX_START --><internal_states><details>…</details><!-- GFX_END -->`, five opening tags and no
- * closing one, the block ending where the message does. Reading an unclosed tag as "removes nothing"
- * made the setting a no-op on exactly the block it exists for.
+ * AN UNCLOSED TAG RUNS TO ITS PARENT'S CLOSE, or to the end of the text. Presets really do write
+ * these blocks unclosed, the block ending where the message does (K6). Reading an unclosed tag as
+ * "removes nothing" made the setting a no-op on exactly the block it exists for.
  *
  * The parent is found by BALANCE, not by parsing: scanning forward from the unclosed tag, the first close
  * tag with no matching open inside the span has to belong to an ancestor, so the element ends there.
@@ -597,7 +595,7 @@ export function countKey(key, text, caseSensitive, wholeWords, scope) {
     //
     // The HAYSTACK fold is memoised, the needle's is not. Every key in a pass sees the same text, so
     // folding it per call is the same waste core's matchKeys makes with its per-key toLowerCase — and
-    // it costs more here, because the fold does real work now (33x a bare toLowerCase on 15KB).
+    // it costs more here, because the fold does real work now, many times a bare toLowerCase (K9).
     // Needles are short, so they stay uncached.
     const hay = foldedHay(text, caseSensitive);
     const needle = caseSensitive ? normalizeOrthography(raw) : fold(raw);

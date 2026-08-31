@@ -11,17 +11,13 @@ export const defaultSettings = {
      * inserted.
      *
      * IT SITS ABOVE THE PARAGRAPH DISTRIBUTION, which is the point: paragraph mode exists to make the
-     * paragraph the unit, and at the old 800 the cap fired on 36.5% of them. **Measured** over 3642
-     * paragraphs of 604 memory entries: mean 881, median 650, p90 1735, p99 4934. The mean paragraph was
-     * LONGER than the cap. 1750 is that p90, so the cap now fires on the tail rather than the body.
+     * paragraph the unit, and the old 800 cap fired on the body of that distribution — the mean paragraph
+     * was longer than it. 1750 is the corpus's p90 paragraph length, so the cap fires on the tail (R24).
      *
-     * NOT A CAPACITY LIMIT. bge-m3 takes ~32,800 characters and the longest paragraph in the corpus is
-     * 17,115, so nothing here ever truncated; 800 was 2.4% of what the model accepts.
+     * NOT A CAPACITY LIMIT: the longest paragraph in the corpus sits well inside what the embedder
+     * accepts, so nothing here ever truncated (R24).
      *
-     * MEASURED ~FLAT, and moved on that basis rather than on a gain: F-beta(2) over the delivered set
-     * (walkOrder + applyBudget) at three ceilings, 103 scenes on 5 lineages, paired — +0.0045 at 4k,
-     * +0.0063 at 12k, +0.0017 at 32k, none significant, four of five lineages positive. It also halves the
-     * sub-floor chunk leak on some books without fixing it: Sommers still holds a 3-character chunk.
+     * MEASURED ~FLAT across ceilings, and moved on that basis rather than on a gain (R24).
      *
      * CHANGING IT RE-EMBEDS EVERY COLLECTION, since the chunk text and therefore every hash changes.
      */
@@ -77,26 +73,24 @@ export const defaultSettings = {
      */
     meanCentered: true,
     // Removed: baselineQuery/baselineWeight (subtract a hand-crafted "shared background" query's cosine
-    // scores). Measured harmful over a 374-trial LOO grid (baseline-grid.mjs) — monotonic decline, no
-    // beneficial weight. It was a worse, redundant hand-rolled version of mean-centering (meanCentered),
-    // which subtracts the real corpus mean vector and measurably helps (+8.8% nDCG@5, centering-grid.mjs).
+    // scores). Measured harmful at every weight (R12). It was a worse, redundant hand-rolled version of
+    // mean-centering (meanCentered), which subtracts the real corpus mean vector and measurably helps (R12).
     /**
      * The E[credit] a MEMORY entry must clear at stage 4. One value for every embedding model, and the
      * user's to set.
      *
      * IT IS A BUDGET DIAL, NOT A MODEL SETTING. `E[credit]` is calibrated, so how many entries clear a
-     * given value is a property of the CORPUS rather than the embedder. **Measured** over 99 scenes,
-     * memory tier, across all seven fitted models: at 0.10 they deliver between 13.3 and 14.2 entries, and
-     * the spread stays under one entry at every value from 0.10 to 0.30. The model moves WHICH entries
-     * clear the bar, not how many — so a per-model cutoff would be seven names for one number, and picking
-     * a model would silently change the budget.
+     * given value is a property of the CORPUS rather than the embedder — every fitted model delivers
+     * nearly the same count at the same cutoff (E4). The model moves WHICH entries clear the bar, not how
+     * many — so a per-model cutoff would be seven names for one number, and picking a model would
+     * silently change the budget.
      *
      * That is why it is a setting: it is the precision-for-recall trade, which is the user's call, and
      * choosing an embedding model is then only a question of how much recall that budget buys.
      *
-     * 0.10 delivers about 13.8 memory entries, roughly 24k tokens. The usable range is 0.05 to about 0.35
-     * — precision peaks at 50.8% (measured, any model, any cutoff) and past there the dial stops trading
-     * and loses both. The default sits at the recall-favouring end deliberately, matching F2.
+     * The usable range is roughly 0.05 to 0.35 — precision plateaus partway up, for every model, and past
+     * there the dial stops trading and loses both (E5). The default sits at the recall-favouring end
+     * deliberately, matching F2.
      *
      * The `cutoff` a fit carries in relevance-model-<tier>.json is that MODEL's own F2 optimum, kept as
      * provenance and never read at runtime. Reference is not cut at all (onScanDone).
@@ -137,11 +131,8 @@ export const defaultSettings = {
     /**
      * Filter raw-text queries down to entity-ish terms before lexical scoring:
      * keep capitalised tokens and anything in the lorebook's own vocabulary, drop
-     * the rest. Re-measured over three graded scenes: mean nDCG@5 0.896 filtered vs
-     * 0.808 unfiltered — a real win, but far smaller than the old note claimed, and it
-     * lands on top-of-list quality rather than mean target rank. See entity.mjs
-     * buildTermWeights for the per-scene table and which old figures did not reproduce.
-     * Ignored in summary mode.
+     * the rest. A real win, but far smaller than the old note claimed, and it lands
+     * on top-of-list quality rather than mean target rank (R19). Ignored in summary mode.
      */
     entityFilter: true,
     /** Weight multiplier for capitalised query tokens under the entity filter. */
@@ -149,10 +140,9 @@ export const defaultSettings = {
     /**
      * Corpus-derived stoplist: drop query terms appearing in more than this fraction
      * of chunks. 0 disables. Beats a fixed English stoplist because it also removes
-     * the recurring cast — on a real lorebook it strips "kyle" (72.8% of chunks) and
-     * "jeffrey" (58.3%) alongside "the" and "and", and no generic list would.
-     * Benchmarked at 0.25: all 5 gold targets in the top 5, mean rank 3.0, matching
-     * the LLM summary with no model call.
+     * the recurring cast — on a real lorebook it strips "kyle" and "jeffrey" alongside
+     * "the" and "and", and no generic list would. 0.25 benchmarked as matching the
+     * LLM summary with no model call (R27).
      */
     stopwordDocFreq: 0.25,
     /**
@@ -160,10 +150,9 @@ export const defaultSettings = {
      * query (the text embedded / BM25'd, or summarized in summary mode) and the keyword
      * scan window. A per-entry scanDepth still overrides the keyword window (as in core).
      *
-     * 10 sits mid-plateau on the measured dose-response (n=80 graded scenes, paired vs each
-     * scene's own depth-10 capture): nDCG@10 climbs monotonically 1→10 (depth 3 −0.098,
-     * p=0.001; depth 5 −0.053, p=0.020), is flat 10–15, and dips slightly at 20 (−0.009,
-     * p=0.044) — over-widening dilutes the query. Cost is query length (~6k chars at 10).
+     * 10 sits mid-plateau on the measured dose-response: quality climbs monotonically up to
+     * 10, is flat to 15, and dips slightly at 20 — over-widening dilutes the query (R13).
+     * Cost is query length.
      */
     messageDepth: 10,
     /**
@@ -195,8 +184,8 @@ export const defaultSettings = {
      *
      * INERT AT THE LATEST TURN, where nothing post-dates it. It bites when you BRANCH BACK: the book
      * still holds every summary written later, so without this WA ranks descriptions of events the
-     * character has not lived through — a spoiler rather than a ranking error. Measured on one frozen
-     * capture, 105 of 213 candidates post-dated the turn and 18 of them cleared the relevance cut.
+     * character has not lived through — a spoiler rather than a ranking error. On a real branched
+     * capture, post-dated candidates were about half the pool and some cleared the relevance cut (F28).
      *
      * A SETTING RATHER THAN A RULE, because the two readings are both legitimate: replaying a branch as
      * it was played wants them gone, and using an old branch as a writing surface for a story you have
@@ -214,9 +203,9 @@ export const defaultSettings = {
      * behaviour (one segment) and reproduces it exactly; core has no equivalent, so anything
      * narrower is a deliberate divergence from what core's selective logic does.
      *
-     * Paragraph by default because message is close to a no-op on real prose: measured over one
-     * author's chats, p90 is 19 paragraphs per message and 81.6% of scanned text lives in messages
-     * of six or more. One corpus, so this is a default, not a finding about everyone.
+     * Paragraph by default because message is close to a no-op on real prose: most scanned text
+     * lives in messages of many paragraphs (R26 — one author's chats, so a default, not a finding
+     * about everyone).
      */
     matchWindow: 'paragraph',
     /**
@@ -262,18 +251,16 @@ export const defaultSettings = {
      * OCCURRENCES -> a key's contribution (matcher.mjs repeatCurveOf). k1 above is the RATE repeats
      * accrue at; this is the SHAPE, and the two used to be one knob that could not express both.
      *
-     * 'bm25' is the classic tf term, `count/(count+k1)`: bounded by 1, so a key present once scores
-     * 0.455 and everything above n~20 is compressed into the top 4% of the range. 'presence-log'
-     * makes presence categorical — a matched key is worth its full weight — and lets only the n-1
-     * repeats accrue, unbounded and ever more slowly.
+     * 'bm25' is the classic tf term, `count/(count+k1)`: bounded by 1, so everything above a couple
+     * dozen occurrences is compressed into the top few percent of the range. 'presence-log' makes
+     * presence categorical — a matched key is worth its full weight — and lets only the n-1 repeats
+     * accrue, unbounded and ever more slowly.
      *
-     * MEASURED, why the default moved. Two books' graded scenes, raw keyword scores over the real
-     * scan windows. Foxbridge tops out at n=10 and the curves barely differ. Sommers and Time Whore
-     * run to n=90, which is where 'bm25' has nothing left to say: across n=21..89 — a 4.2x difference
-     * in evidence — it moves 0.041, so `cock` at 21 and `Arthur` at 89 score 0.946 and 0.987. Under
-     * 'presence-log' they are 3.872 and 5.309. Those counts are not noise to be discounted: across 14
-     * sommers scenes NO key fires in all of them at n>=5, and `Arthur` is absent from nine scenes and
-     * dominant in one, so the compressed range was the book's sharpest signal about which scene it is.
+     * MEASURED, why the default moved. On books whose keys run to high counts, the bounded curve stops
+     * discriminating exactly there — a several-fold difference in evidence barely moves it. Those
+     * counts are not noise to be discounted: a key can be absent from most of a book's scenes and
+     * dominant in one, so the compressed range was the book's sharpest signal about which scene it
+     * is (K8). On a book that never reaches such counts the curves barely differ.
      *
      * NO FREQUENCY DISCOUNT accompanies this, deliberately. A ubiquitous key is an author declaration
      * (keyword-audit.mjs already exempts constant entries from the too-common flags on that
@@ -375,8 +362,8 @@ export const defaultSettings = {
 };
 
 /**
- * Settings with no UI: measured-stable knobs internalized after tuning (the measurements live on
- * their defaultSettings comments). They stay in defaultSettings so every read site and the eval
+ * Settings with no UI: measured-stable knobs internalized after tuning (the evidence lives in
+ * eval/eval-data/measured-claims.md, under the IDs their comments cite). They stay in defaultSettings so every read site and the eval
  * harness keep working, but ensureSettings resets them each init — a knob removed from the panel
  * must not linger at a stale hand-tuned value the user can no longer see.
  */

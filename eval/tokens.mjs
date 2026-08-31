@@ -7,14 +7,14 @@
 // number or the two cannot be compared.
 //
 // THE OFFSET IS THE WHOLE TRICK. WA counts through ST's getTokenCountAsync, which adds a fixed
-// per-message overhead on top of the raw encoding. Measured against 259 captured rows carrying both a
-// recorded count and their entry text: `recorded - cl100k(content)` was 6 on every single row — min 6,
-// median 6, max 6, no spread at all. So the offline count is exact rather than approximate, and
+// per-message overhead on top of the raw encoding. Measured against captured rows carrying both a
+// recorded count and their entry text, `recorded - cl100k(content)` came out exact, no spread at
+// all (G12). So the offline count is exact rather than approximate, and
 // `tokens-check.mjs` re-derives it from whatever captures are on disk rather than trusting this comment.
 //
-// A tokenizer with no entry here THROWS. The alternative is a silent 0 offset, which is a 6-token error
-// per entry that nothing would ever surface — and at ~10 entries per prompt that is most of a slack
-// allowance. A model not listed has no offline counter; count it against a running SillyTavern instead.
+// A tokenizer with no entry here THROWS. The alternative is a silent 0 offset — a per-entry error that
+// nothing would ever surface and that compounds across a prompt's entries.
+// A model not listed has no offline counter; count it against a running SillyTavern instead.
 import { createRequire } from 'node:module';
 import { stInstall } from './scene.mjs';
 import { armNames, openBundle } from '../extension/grading.mjs';

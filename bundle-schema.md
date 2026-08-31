@@ -21,8 +21,8 @@ A reduced value stored beside the record is indistinguishable from a verdict som
 ## Identity is `book` + `uid`, as two fields
 
 `uid` is unique within a book and nowhere else, and a scene routinely draws on more than one book. The two
-are never joined into one string in the file: lorebook names are filenames, and **measured** across 44
-books they already contain spaces, commas, apostrophes, parentheses, `#` and `@` — so no printable
+are never joined into one string in the file: lorebook names are filenames, and **measured** (G8) they
+already contain spaces, commas, apostrophes, parentheses, `#` and `@` — so no printable
 separator is safe. Code needing a single key joins them in memory with US (`\x1f`), as the rest of the
 codebase does.
 
@@ -190,8 +190,8 @@ description is spliced INTO the Author's Note when its position is `TOP_AN`/`BOT
 depth prompt is injected separately under `allowWIScan` for every entry rather than only those opting in.
 Both then arrive as injects, and both are captured that way.
 
-**An absent `sceneInjects` means no injects.** **Measured** across all 107 documents: every haystack ends
-at its own last chat message, so none has inject text folded into it — the only scan-enabled prompt on the
+**An absent `sceneInjects` means no injects.** **Measured** (G8): every haystack on disk ends at its own
+last chat message, so none has inject text folded into it — the only scan-enabled prompt on the
 capturing install was the built-in summarizer, which carries `scan: true` by default but had no value, and
 an empty prompt is never pushed.
 
@@ -215,17 +215,16 @@ under. No arm carries a variant, because none is ever captured: a budget arm is 
 ranking that is already recorded, so it is swept OFFLINE through `delivery.mjs` `applyBudget` instead of
 costing a capture. `tokenizer` could not vary in any case — it is ST's `getTokenizerModel()`, an environment
 fact WA does not set, which is why it sits beside `embedModel` rather than inside `paramSnapshot`. **Measured**
-across the corpus: 0 of 106 multi-arm documents varied any field of it.
+(G8): no multi-arm document on disk varies any field of it.
 
 **REQUIRED VERSUS EMITTED-WHEN-PRESENT.** A structural field is one of two things, and the difference is
 what makes conformance checkable at all. REQUIRED fields are written by every capture and their absence is a
 defect. The rest are emitted only when they have a value, and their absence is silence rather than damage —
 `waVersion` and `stVersion` (older captures recorded neither), `book` and `gradedCandidates`, `gradeScale`,
 `queryChat`, `paramSnapshot`, and `invalidConfiguration`, which by construction appears only on a
-configuration that is not real. **Measured** over the 107 bundles on disk: every one is structurally clean,
-and every remaining gap is an optional field an older capture never had — 491 arms carry no version pair,
-436 cells no `book` or `gradedCandidates`, 37 documents no `gradeScale`. None of that is recoverable and
-none of it is a defect.
+configuration that is not real. **Measured** (G8): every bundle on disk is structurally clean, and every
+remaining gap is an optional field an older capture never had. None of that is recoverable and none of it
+is a defect.
 
 **SOME OBJECTS HERE ARE OPEN MAPS AND ARE MEANT TO GROW.** `candidates[].scores`, `params`,
 `paramSnapshot.settings`, `books`, `bookHashes` and the `scene*` maps are keyed by whatever the capturing
@@ -233,9 +232,9 @@ version computed or attached, so a key this file does not list is expected rathe
 STRUCTURAL field — the document, scene, arm and cell keys — is closed and listed: one absent from here is a
 writer this document has not caught up with, and that is the failure this section exists to make visible.
 
-`paramSnapshot` stays per-arm and does vary — `scoring`, `matchText`, `vectors` and `nonDefaults` all differ
-between arms in 9 documents. It is the settings the arm ran under; `budget` is what the whole capture was
-budgeted by.
+`paramSnapshot` stays per-arm and does vary — `scoring`, `matchText`, `vectors` and `nonDefaults` all
+genuinely differ between arms in captures on disk (G8). It is the settings the arm ran under; `budget` is
+what the whole capture was budgeted by.
 
 A writer that sorts candidates by anything else produces a valid bundle that silently answers budget
 questions wrongly, and array order is the only record of layout — so `index` restates it as the one
@@ -272,7 +271,8 @@ where the root is; first rather than last, because a chat folder may itself be n
 **An absolute path is machine identity and nothing else.** No reader can use one — `eval/scene.mjs` skips a
 stored `index` that does not exist locally and derives its own, which is the normal case for a scene
 somebody else captured — while it does carry the author's OS username, in a document meant to be shared.
-**Measured** before the rule existed: 97 of 107 documents held one, across two different usernames.
+**Measured** before the rule existed (G8): nearly every document on disk held one, across more than one
+username.
 
 The reader half already assumed this. `stInstall().resolve` maps a `data/` prefix through the install's own
 `config.yaml` `dataRoot` and anything else through the root, and returns an absolute path untouched — which
@@ -295,7 +295,7 @@ matcher-and-studio@7cd7496    no tags reachable: the commit alone
 
 **The branch is not decoration.** ST's declared version only advances on pushes to `main`, so a staging
 checkout reports a number with nothing to do with the tree that ran — this one's `package.json` says
-`1.18.0` while its tree is 167 commits past `1.17.0`. `staging` and `release` are different software, and
+`1.18.0` while its tree sits far past `1.17.0` (G8). `staging` and `release` are different software, and
 the branch is what says which.
 
 **On `main` the identity is always exactly a version**, because a release is one squashed commit carrying
@@ -447,9 +447,9 @@ time is a last resort and cannot separate two passes filed in one invocation.
 instructions were never an artifact still has an identity, and a hole named `unknown` folds the next such
 pass into the same rater.
 
-**Measured**: 33 rater rows are `scene-relevance@fable-inline-1` — the 2026-07-31 round, graded inline by
-claude-fable-5 before any rubric was a file. The lineage is real: `scene-relevance.md` was recovered from
-that session. Such a name does not resolve in `eval/contracts/` and must not.
+**Measured** (G8): the corpus holds rater rows named `scene-relevance@fable-inline-1` — a round graded
+inline by claude-fable-5 before any rubric was a file. The lineage is real: `scene-relevance.md` was
+recovered from that session. Such a name does not resolve in `eval/contracts/` and must not.
 
 Only Ollama surfaces one. `/api/tags` gives `digest` (sha256, 64 hex) and `/api/show` gives
 `details.family`, `.quantization_level`, `.parameter_size` and `capabilities` — the last being what makes an
@@ -458,13 +458,12 @@ absent `think` mean "unsupported" rather than "unrecorded".
 **oMLX's API surfaces neither the digest nor the org.** Its OpenAI-shaped `/v1/models` carries `id`,
 `created`, `owned_by` and `max_model_len` and nothing else, with no per-model route, and the `id` is the
 repo id's TAIL — its own UI shows `mlx-community/gemma-4-31B-it-qat-mxfp4` and hands over the bare name.
-The org is not decoration: **measured**, the local models come from 6 different accounts, so two
+The org is not decoration: **measured** (G8), the local models span several publishing accounts, so two
 publishing one tail would record as one rater.
 
 Its STORE has it, though. `~/.omlx/models/` is `<org>/<name>` for anything oMLX downloaded and flat for a
 model copied in from elsewhere — so the org is resolvable rather than guessable, at the cost of reading
-the filesystem beside the API. **Measured**: 7 of 10 resolve, and the other 3 were copied in and have no
-org to record, which is an absence rather than a lookup failure. Nothing reads this yet.
+the filesystem beside the API. Nothing reads this yet.
 
 Names often encode size and quantisation (`gemma-4-31B-it-MLX-8bit`), and parsing that IS guessing, so
 those fields stay absent — but a local model's `config.json` names its `architectures`, which is `family`
@@ -472,8 +471,8 @@ resolved rather than parsed. A hosted model has none of any of it.
 
 Three facts the block above cannot carry:
 
-- **US, not a printable separator.** **Measured**: 11 of 11 Ollama models carry a `:`, an MLX model's
-  identity is an HF repo id carrying a `/`, and `@` already appears inside a rubric.
+- **US, not a printable separator.** **Measured** (G8): every Ollama model name carries a `:`, an MLX
+  model's identity is an HF repo id carrying a `/`, and `@` already appears inside a rubric.
   `raterKey`/`raterParts` in `extension/grading.mjs` are the only join and split.
 - **A digest, because a name is not an identity.** `bge-m3:latest` is whatever was pulled most recently,
   so two captures months apart record one string for different weights.
@@ -492,9 +491,8 @@ names, which is structural either way. The collapse the split guarded against wa
 kinds at one value with nothing saying which; nothing here can be written without naming a rater.
 
 **A verdict names its rater by INDEX**, and the table says who that is. Spelled out per verdict these are
-the same handful of strings repeated tens of thousands of times — **measured**: 645KB of llm identity
-across 3 distinct models and 4 rubrics — and unreadable by eye, which is most of what anyone does with a
-bundle. `openBundle` resolves the index back to the whole rater, so every reader and writer works in
+the same handful of strings repeated tens of thousands of times — **measured** (G8) — and unreadable by
+eye, which is most of what anyone does with a bundle. `openBundle` resolves the index back to the whole rater, so every reader and writer works in
 identities and only the file is indexed; unlike a joined blob, an index can always be followed.
 
 **The table is per DOCUMENT, so an index is document-local.** Pooling several documents means remapping
@@ -510,9 +508,9 @@ The rule WA states is `extension/grading.mjs` `gradeValue`, re-exported by `eval
 reader shares one copy of it: the latest human verdict if any — a person re-grading has seen the earlier
 one and replaced it — else the judges' MEDIAN once three exist, else the latest judge. Newest-first among
 judges is only defensible when a later pass is known to be better, and it is not: re-grading the same rows
-with the same model under a corrected rubric moved ~30% of the relevant set out. **Measured**: this rule
-reproduces all 11,946 `llmGrade` scalars v2 stored, which is what made moving the resolution out of the
-file lossless rather than a silent re-labelling.
+with the same model under a corrected rubric moved a large share of the relevant set out (G7). **Measured**
+(G7): this rule reproduces every stored v2 `llmGrade` scalar, which is what made moving the resolution out
+of the file lossless rather than a silent re-labelling.
 
 ## Open
 
@@ -524,7 +522,7 @@ file lossless rather than a silent re-labelling.
   signal there anyway, being a hash of the code rather than a name for it. Node-side writers resolve both
   properly. Closing this wants a plugin route reporting `git describe` over the extension directory.
 - **`why` is bulk, and it is not last.** A candidate's matched-key excerpts are most of what sits ahead of
-  `sceneChats` — 18% of a two-megabyte document, against 0.6% for every scene field and verdict combined.
+  `sceneChats` — many times the weight of every scene field and verdict combined (G8).
   The field-order rule names only the two hoisted blocks, so this is within the letter of it and against
   the point.
 - **Arms nest inside scenes, so a configuration is recorded once per scene.** A fifteen-scene document
@@ -549,5 +547,5 @@ file lossless rather than a silent re-labelling.
   What it costs is that a scene stops being self-contained — slicing a document to one scene means walking
   every arm — and nothing writes a multi-scene document yet, so the win is currently zero.
 - **`query` and `queryChat` are per-arm and duplicated.** Both are produced by a configuration (`queryMode`
-  moves them), so they cannot hoist to the scene the way the haystack does — but six arms of one scene
-  carry six identical copies whenever no arm moved them, which is every capture on disk.
+  moves them), so they cannot hoist to the scene the way the haystack does — but every arm of one scene
+  carries an identical copy whenever none moved them, which is every capture on disk.

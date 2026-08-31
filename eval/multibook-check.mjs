@@ -117,8 +117,10 @@ eq(top2.length, 2, 'topK counts entries across every collection, not per collect
 // --- stage 4's per-book quota ------------------------------------------------------------------------
 // No capture records a cap (it lives on the live world priority list), so it is a param. Without the
 // wiring this returns all four rows and reads as "the cap does nothing".
+// `relevanceFit` NAMES THE FIT: `check-embed` is a synthetic 3-dimensional embedder with none, and
+// `modelsFor` refuses rather than borrowing. Which fit is arbitrary — this checks the per-book quota.
 const delivered = async (overrides) => {
-    const r = await scoreScene({ sample: sample(), overrides: { budgetTokens: 100000, ...overrides }, scene, qv: QV });
+    const r = await scoreScene({ sample: sample(), overrides: { budgetTokens: 100000, relevanceFit: 'bge-m3', ...overrides }, scene, qv: QV });
     return r.atBudget.n;
 };
 eq(await delivered({}), 4, 'no cap: the budget alone delivers every row');

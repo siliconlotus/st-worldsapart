@@ -151,7 +151,7 @@ eq(rowKey({ book: 'A', uid: 7 }) === rowKey({ book: 'B', uid: 7 }), false, 'rowK
 
 // --- the scene guard (sceneDiff) -------------------------------------------------------------------
 // rowKey is book + uid, so pooling prior grades WITHOUT this attaches one scene's verdicts to another —
-// which is what put 50 rows of a Time Whore scene onto an Ascensus scene captured 15 minutes later. The
+// which is what put one scene's rows onto a scene captured minutes later (G9). The
 // same-book case is the one a book test misses, so it is the case asserted first.
 const SCENE = { query: 'q', scanChat: [{ name: 'N', mes: 'Ketheric raised his glass' }], depth: 2 };
 eq(sceneDiff(SCENE, { ...SCENE }).join(','), '', 'the same scene differs in nothing');
@@ -577,8 +577,8 @@ eq(keys(built),
 eq(keys(built.scenes[0]), 'entries,id,sceneChat,sceneEnd', 'scene keys are the schema\'s');
 eq(keys(built.arms[0]), 'name,paramSnapshot,params,scenes,stVersion,waVersion', 'arm keys are the schema\'s — paramSnapshot among them, not in the cell');
 // The fixture above sets everything, so the sets are exact. A capture that omits an EMITTED-WHEN-PRESENT
-// field is still conformant — measured, 491 arms on disk carry no version pair and 436 cells no `book`,
-// because those runs predate them and nothing can recover it. What must never appear is a key outside
+// field is still conformant — most arms on disk predate the version pair and many cells the `book`,
+// and nothing can recover them (G8). What must never appear is a key outside
 // these four lists.
 const bare = { ...schemaFixture };
 for (const k of ['waVersion', 'stVersion', 'paramSnapshot', 'book', 'gradedCandidates', 'queryChat', 'gradeScale', 'invalidConfiguration']) delete bare[k];
@@ -591,7 +591,7 @@ eq(keys(Object.values(thin.arms[0].scenes)[0]), 'candidates,cutoff,depth,index,p
 // llm's id is JOINED from the model half and the rubric, and only the join is stored — so a deref that
 // hands back `{id, modelName}` lets re-indexing recompose `modelName + <empty rubric>` and drop the
 // rubric. Observed on a real bundle: `claude-sonnet-5<US>scene-relevance@b49449ef` came back as
-// `claude-sonnet-5<US>`. graft-grades.mjs and grade-pending.mjs are both exactly this round trip, so the
+// `claude-sonnet-5<US>` (G9). graft-grades.mjs and grade-pending.mjs are both exactly this round trip, so the
 // loss reached every bundle either one wrote. Asserted on the TABLE, not on a field, because the failure
 // is a changed identity and nothing downstream can tell one rater from another once it has moved.
 {

@@ -1,15 +1,15 @@
 // core-compare.mjs — WA against ST core, scored on the set each one SHIPS.
 //
 // WHY THE BUDGET HAS TO BE IN THE LOOP. Every other readout here scores the set a rule NOMINATES, which
-// for core is a claim about a prompt that does not fit: measured on this corpus, core nominates 34.2
-// memory entries at 86.1% recall, and at a 25k budget it ships 14.4 at 66.4% — twenty points of that
-// recall is cut by `entry.order`, a sort key that knows nothing about the turn. Reporting the nominated
-// number as core's recall is a mistake this file exists to stop being made twice.
+// for core is a claim about a prompt that does not fit: core nominates far more than the budget ships,
+// and a large slice of the nominated recall is cut by `entry.order`, a sort key that knows nothing about
+// the turn (R14). Reporting the nominated number as core's recall is a mistake this file exists to stop
+// being made twice.
 //
 // WHAT CORE IS, HERE. Two activation routes unioned, exactly as an install runs them:
 //   keywords  — every entry whose keys fire, INCLUDING vectorized ones. Core has no cosine opinion; a
-//               vectorized entry with a keyword hit is activated on the hit alone. On this corpus 40.4%
-//               of vectorized rows have one, which is why core's delivered set is so large and so
+//               vectorized entry with a keyword hit is activated on the hit alone. A large share of
+//               vectorized rows carry one (R14), which is why core's delivered set is so large and so
 //               imprecise: STMB generates broad keys and they fire constantly.
 //   vectors   — ST's Vector Storage extension force-activates its top `max_entries` above
 //               `score_threshold`. Modelled as top-K by cosine, which OVERSTATES it: ST hashes whole
@@ -30,23 +30,23 @@
 //
 //   core AS CONFIGURED — one author's tuning, which is a story about what ST can be MADE to do. On this
 //                     install: max_entries 10, score_threshold 0.6, budget 60%, depth 10, and an `order`
-//                     hand-set per book. Measured, that tuning is worth +0.056 F2 to core, so quoting it
+//                     hand-set per book. That tuning is measurably worth F2 to core (R14), so quoting it
 //                     as "core" understates a stock install and quoting the default overstates a tuned
 //                     one. Say which.
 //
 // SCAN DEPTH IS CORE'S ALONE HERE, and shallower is better for core for a reason that is not a
-// recommendation. **Measured**, 89 scenes: at depth 2 only 11 of 28 grade-4 entries have their keys fire
-// at all, against 21 of 28 at depth 10 — depth 2 misses 61% of the material graded as the scene's
-// CURRENT SUBJECT. Core still scores higher there because its delivered recall is carried by the vector
-// route, which does not read the scan window: at depth 10 the keyword flood (40.4% of vectorized rows
-// fire) fills the budget and displaces the vector picks, and an insertion-order walk cannot protect
-// them. So depth 2 helps core by suppressing core's own worst behaviour, and says nothing about what
-// depth suits a system that can RANK what it activates. WA's window is not varied here.
+// recommendation. At depth 2 most grade-4 entries never have their keys fire at all (R14) — the shallow
+// window misses the bulk of the material graded as the scene's CURRENT SUBJECT. Core still scores higher
+// there because its delivered recall is carried by the vector route, which does not read the scan
+// window: at depth 10 the keyword flood fills the budget and displaces the vector picks, and an
+// insertion-order walk cannot protect them. So depth 2 helps core by suppressing core's own worst
+// behaviour, and says nothing about what depth suits a system that can RANK what it activates. WA's
+// window is not varied here.
 //
 // THE THRESHOLD IS NOT MODELLED, top-K is. `score_threshold` is a single global applied to RAW cosine,
-// and raw similarity on a single-story corpus sits compressed near 0.6 — which is why WA mean-centres at
-// all. At 0.25 almost everything passes and max_entries is the only real constraint, so top-K is the
-// honest instrument; at a raised threshold this OVERSTATES core's vector route.
+// and raw similarity on a single-story corpus sits compressed in a narrow band (R9) — which is why WA
+// mean-centres at all. At 0.25 almost everything passes and max_entries is the only real constraint, so
+// top-K is the honest instrument; at a raised threshold this OVERSTATES core's vector route.
 //
 // Usage (from SillyTavern root):
 //   node .../core-compare.mjs <sample.json> [...] [--tier memory|reference|all] [--budget 25083,37624]
@@ -72,7 +72,7 @@ const BUDGETS = String(arg('--budget') ?? '5000,10000,15000,25000,40000').split(
 const TOP_K = Number(arg('--core-top-k') ?? 5);
 // A hand-tuned `order` is one author's workaround; uid is story order on an STMB book and stands in for a
 // book nobody tuned. Both extremes are offered because an untuned book leaves every order equal, and which
-// way the tie falls is ST's business rather than something to assume — measured, it is worth ~0.07 F2.
+// way the tie falls is ST's business rather than something to assume — the direction is worth real F2 (R14).
 const CORE_ORDER = arg('--core-order') ?? 'oldest';
 const ORDERS = {
     order: (a, b) => (Number(b.entry?.order ?? 0) - Number(a.entry?.order ?? 0)) || (Number(a.uid) - Number(b.uid)),

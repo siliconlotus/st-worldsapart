@@ -140,7 +140,7 @@ eq(scored({ key: ['? -zebra'] }, 'the cosmonaut waited'), false, 'an entry keyed
 // its unit rather than feeding the curve, so `::2` is twice as important rather than as-if-seen-twice.
 //
 // EVERY ROW HERE WAS A DEFECT before units. A stricter expression outscored its own left operand, a
-// synonym group collected a saturation budget per spelling, and `::2` survived the curve as 1.38x.
+// synonym group collected a saturation budget per spelling, and `::2` survived the curve diluted (K8).
 // None of it was visible to a `score > 0` assertion, which is what the rest of this file mostly makes.
 //
 // Through this file's own `keywordScore` wrapper, so k1 is 2 here and `curve` says so — passing a cfg
@@ -261,9 +261,8 @@ eq(scored({ key: ['? -zebra'] }, 'the cosmonaut waited'), false, 'an entry keyed
 // key is worth its full weight with only the n-1 repeats accruing.
 //
 // PINNED AS A TABLE because the difference only shows at counts a synthetic test would not think to
-// use. Foxbridge's busiest key reaches 10 and every curve looks alike there; sommers runs to 90, and
-// across n=21..89 — 4.2x the evidence — bm25 moves 0.041 while presence-log moves 1.44. A regression
-// that flattened the tail again would pass every other assertion in this file.
+// use: the busiest real keys reach counts where bm25 has stopped ordering while presence-log still
+// moves (K8). A regression that flattened the tail again would pass every other assertion in this file.
 {
     const at = (n, c, R = 1) => Number(repeatCurveOf(n, 1.2, c, R).toFixed(3));
 

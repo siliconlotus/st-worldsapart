@@ -87,7 +87,7 @@ export const ndcgAt = (map, targets, k, gradeOf = () => 1) => {
  * Exact two-sided sign test over paired per-scene deltas.
  *
  * THE ESTIMATOR FOR SINGLE-DIGIT n. Absolute nDCG varies far more between scenes than between parameter
- * settings — one graded scene's grid spans 0.87-0.99, another's sits elsewhere entirely — so averaging
+ * settings (H10), so averaging
  * absolute scores across scenes mostly measures which scenes you happened to grade. Pairing each scene
  * against its own baseline cancels that variance, and what survives is the DIRECTION of the change, which is
  * the only thing a handful of scenes can support.
@@ -204,12 +204,12 @@ export const qwk = (pairs, k = 5) => {
 /**
  * The leading principal components of a set of vectors, about `mean`.
  *
- * WHY THIS EXISTS. Mean-centering subtracts ONE direction, and measured across 10 books only 8-16% of
- * that direction is the book's own — the rest is the component every book shares (model plus narrative-
- * domain anisotropy, equal-weight global mean norm 0.6440). So the operation that is supposed to make
+ * WHY THIS EXISTS. Mean-centering subtracts ONE direction, and most of that direction is not the book's
+ * own — the rest is the component every book shares (model plus narrative-domain anisotropy). So the
+ * operation that is supposed to make
  * "magic is unremarkable in a fantasy book" cheap spends most of its effect on something no book is
  * distinguished by, and it spends the LEAST book-specific effort on the long memory books that most need
- * it (Ascensus 7.9%, Time Whore 8.5% against Foxbridge's 22.9%). A mean is only the first moment, and
+ * it (R15). A mean is only the first moment, and
  * what is unremarkable in a book is plausibly several directions — the setting, the recurring cast, the
  * genre furniture — which one vector cannot carry. This is the standard treatment for that (all-but-the-
  * top): remove the mean, then project out the leading components.

@@ -93,7 +93,7 @@ const DEPTH = Number(arg('--depth') ?? S.params?.depth ?? 10);
 // name is an ollama model.
 // FALLS BACK TO THE BUNDLE'S OWN MODEL, not to a hardcoded name. A bundle records the model its
 // collections are keyed under, and hardcoding one meant a corpus that had moved on still resolved the old
-// collections — which exist, so nothing errored, it just quietly measured the previous model.
+// collections — which exist, so nothing errored, it just quietly measured the previous model (H3).
 const OLLAMA = process.env.OLLAMA_URL ?? 'http://localhost:11434', MODEL = process.env.WA_EMBED_MODEL ?? S.embedModel;
 if (!MODEL) { console.error('sample records no embedModel — set WA_EMBED_MODEL'); process.exit(2); }
 const EM = resolveModel(MODEL);
@@ -197,7 +197,7 @@ if (FREEZE) {
 }
 
 // --- entity filter: the gazetteer is built in loadScene (see scene.mjs for what it reads
-// here — reading raw book keys admitted 2.3x the terms and moved BM25 by up to 74%). Only the query-
+// here — reading raw book keys once inflated the term set and the scores, R22). Only the query-
 // dependent term weights are derived per run, since --depths rebuilds the query.
 const termWeights = P.entityFilter ? entity.buildTermWeights(query, gaz, P.boost) : null;
 
@@ -244,7 +244,7 @@ const fmt = n => (n == null ? '·' : (+n).toFixed(3));
     //
     // What is NOT in the pool is a logged row nobody graded. A sample may record a population wider than the
     // graded set — an offline re-derivation does — and treating those rows as judged reported full coverage
-    // on a scene that was 18% judged.
+    // on a scene that was mostly unjudged (G10).
     //
     // ponytail: the union is over the arms actually run, not over the whole parameter space, so a param swept
     // far outside those arms is still ranking against a pool that never saw its population. Widen the arm set
@@ -288,9 +288,9 @@ const fmt = n => (n == null ? '·' : (+n).toFixed(3));
         // --unjudged zero: don't restrict to the pool at all; ungraded rows keep their signals and score 0
         // (gradeOf's default). Restricting to the pool makes a wrong promotion INVISIBLE — the promoted entry
         // is filtered out rather than penalised — which is why fine-grained arms (boost 1..8) collapse to
-        // identical scores there while coarse ones (filter on/off) still separate. Scoring unjudged as 0
-        // restores that resolution at the cost of assuming nothing relevant sits outside the pool; see the
-        // grade profiles in eval-data (relevance is sparse and the pools bottom out around rank 24-28).
+        // identical scores there while coarse ones (filter on/off) still separate (R21). Scoring unjudged as 0
+        // restores that resolution at the cost of assuming nothing relevant sits outside the pool; the
+        // graded pools bottom out in zeros well before their tails (R21).
         if (UNJUDGED_ZERO) return rows;
         const kept = rows.filter(r => POOL.has(entryKey(r.entry)));
         // Coverage is measured against THIS capture's own rows, not the union. A sibling arm's entry that
@@ -317,8 +317,8 @@ const fmt = n => (n == null ? '·' : (+n).toFixed(3));
         console.log('cap#  my#  | cosine(cap/mine)  text(cap/mine)  keys(cap/mine)  title');
         let n = 0, sd = 0;
         // Per-signal agreement, stated rather than left to the eye. A wall of cap/mine pairs invites
-        // "looks close enough": the BM25 column has sat ~30% out since this fixture was made and got
-        // carried through a refactor as "unchanged" without anyone characterising it. Each signal is
+        // "looks close enough": the BM25 column sat measurably out since this fixture was made and got
+        // carried through a refactor as "unchanged" without anyone characterising it (H7). Each signal is
         // reproduced by a different half of the pipeline, so which one disagrees is the diagnosis —
         // cosine pins the query text + vectors + centering, keys pins the keyword scorer, text pins the
         // lexical scorer and everything feeding its term weights.
@@ -391,8 +391,8 @@ const fmt = n => (n == null ? '·' : (+n).toFixed(3));
     // inside RRF, and RRF is gone — the layout is ordered by E[credit], which reads the signals through
     // fitted coefficients rather than a hand-set ratio. Sweeping it returned five identical cells per
     // (k1, b) and named an arbitrary one of them best.
-    // @10 IS THE TARGET, @5 is carried as a secondary column. Relevance on these scenes runs deep enough
-    // (pools bottom out around rank 24-28) that ranks 6-10 carry real signal rather than padding, so tuning
+    // @10 IS THE TARGET, @5 is carried as a secondary column. Relevance on these scenes runs deep
+    // enough (R21) that ranks 6-10 carry real signal rather than padding, so tuning
     // on @5 optimises a window narrower than the decision being made. Argmax on @10 for the same reason.
     console.log('grid (k1 × b) — graded nDCG on the scene\n  k1     b | layout@10 layout@R vector@10 vector@R  judged@10');
     let best = null;
@@ -446,7 +446,7 @@ const fmt = n => (n == null ? '·' : (+n).toFixed(3));
 
     // --- entity filter: mean rank of the graded targets, at production's suppressed gazetteer. This is
     // the arm that re-measures entity.mjs buildTermWeights, whose own tuning was done at stage 1 against
-    // a gazetteer built from raw book keys — 2.3x the terms production admits.
+    // a gazetteer built from raw book keys — far more terms than production admits (R22).
     const rankMetrics = tw => {
         const all = scoreAll(DEF.k1, DEF.b, tw);
         // Coverage before the pool filter, same reasoning as the grid above. These arms need it most: turning

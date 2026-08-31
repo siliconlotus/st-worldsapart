@@ -35,9 +35,8 @@ import { properNounsOf } from './relevance.mjs';
  * vocabulary is entry TITLES plus the keys of constants and `@@activate` entries. That looks like a bug
  * and reads like one here.
  *
- * It is not worth arguing about: the gazetteer SOURCE was swept at n=71 scenes paired and came back flat
- * on every arm INCLUDING an empty gazetteer (`eval/param-screen.mjs` `gaz=*`), with all four returning a
- * byte-identical candidate set and differing only in query terms. The proper-noun boost is carrying the
+ * It is not worth arguing about: the gazetteer SOURCE measured flat on every arm, an empty gazetteer
+ * included, with the arms differing only in query terms (R20). The proper-noun boost is carrying the
  * entity filter on its own.
  *
  * The offline harnesses must reproduce whatever production hands this, or they measure a gazetteer
@@ -76,23 +75,22 @@ export function buildGazetteer(entries) {
  * ranked worse — plus the two traps that produced four different answers from four attempts:
  *
  * TRAP 1, THE METRIC. Use mean target rank, not nDCG@5. Relevance here is sparse and OVERDISPERSED
- * (relevant-per-scene mean 9.9, variance 24.5 — var/mean 2.48, where Poisson is 1, which is 71 scenes
- * over 3 stories showing through)
- * (5-11 judged-relevant entries per scene), so nDCG@5 sees a handful of placements and has few reachable
- * states: it returned an IDENTICAL 0.9322 for boost 1/2/3/5/8 on one scene under every population tried.
+ * (a handful of judged-relevant entries per scene, with far more variance than Poisson allows — the
+ * few underlying stories showing through), so nDCG@5 sees a handful of placements and has few
+ * reachable states: it returned an IDENTICAL score for every boost tried on one scene, under every
+ * population tried (R21).
  * That is mechanistic rather than noise — the boost is a uniform multiplier over proper nouns, so where
  * the top entries match the same entities it cannot reorder them at all. Anything that looks like a tie
  * on nDCG@5 should be re-read on mean rank, which pools every judged-relevant entry and does not saturate.
  *
  * TRAP 2, THE POPULATION. Grades exist only for entries production ACTIVATED, so scoring within that pool
  * makes a wrong promotion INVISIBLE — the promoted entry is filtered out rather than penalised, and one
- * scene returned 0.9634 for every arm including no-filter that way. Score unjudged rows as 0 over the
- * uncut ranking (`--unjudged zero`); the sparse shape licenses it, since past roughly rank 25 the
- * marginal candidate is almost surely irrelevant (measured: one sample's grades bottom out in zeros by
- * rank 24), so "unjudged" and "irrelevant" nearly coincide.
+ * scene returned the same score for every arm including no-filter that way (R21). Score unjudged rows
+ * as 0 over the uncut ranking (`--unjudged zero`); the sparse shape licenses it, since graded pools
+ * bottom out in zeros well before the tail, so "unjudged" and "irrelevant" nearly coincide.
  *
- * WHAT IS MEASURED AT THIS STAGE is the gazetteer SOURCE question, re-run at n=71 scenes paired: flat on
- * every arm, INCLUDING an empty gazetteer (eval/param-screen.mjs `gaz=*`). So the boost is the mechanism
+ * WHAT IS MEASURED AT THIS STAGE is the gazetteer SOURCE question: flat on
+ * every arm, INCLUDING an empty gazetteer (R20). So the boost is the mechanism
  * and the gazetteer is a thin safety net for entities a query happens to mention in lowercase — treat its
  * assembly as having nothing to tune, and re-measure before moving `properNounBoost` or the filter itself.
  *
@@ -103,7 +101,7 @@ export function buildGazetteer(entries) {
  * corpus rarity is dominated by prose variation rather than topic — the high-IDF terms an IDF cutoff
  * admits are "grind", "flaring", "nape", "gaze", noise at high weight. A part-of-speech filter keeps all
  * of those and more and loses by the same mechanism; feeding the gazetteer entry BODIES admits most of the
- * query's distinct terms at 5-10x the vocabulary and loses the same way. What discriminates here is
+ * query's distinct terms at several times the vocabulary and loses the same way (R20). What discriminates here is
  * identity, which no tagger can see and capitalisation can.
  *
  * @param {string} queryText Raw query

@@ -3,38 +3,34 @@
 // ones are gone.
 //
 // WHY A FIRST STAGE EXISTS AT ALL. Removing a book's top components straight off its own centred corpus
-// does not remove "what is unremarkable in this book" — **measured**, a book's mean carries only 8-16% of
-// its mass orthogonal to the shared direction on the long narrative books, and its leading component sits
-// 0.55-0.77 inside a subspace built from other books' memory chunks. So single-stage pcRemove takes mostly
-// common structure, and it scored NEGATIVE on the delivered set for exactly that reason (F2 -0.0038 at
-// k=1 over 103 scenes). Strip the shared part first and whatever leads the residual is the book's own.
+// does not remove "what is unremarkable in this book" — a book's mean is mostly shared mass, and its
+// leading component sits largely inside a subspace built from other books' memory chunks (R15). So
+// single-stage pcRemove takes mostly common structure, and it scored NEGATIVE on the delivered set for
+// exactly that reason. Strip the shared part first and whatever leads the residual is the book's own.
 //
-// MEMORY TIER ONLY, ARCHIVED INCLUDED. Whole-book PC1 is largely the memory-versus-reference axis — **measured** at 0.89 on
-// Time Whore, 0.94 on one Ascensus file — which every book has, so a mixed basis would make "generic" mean
+// MEMORY TIER ONLY, ARCHIVED INCLUDED. Whole-book PC1 is largely the memory-versus-reference axis (R17),
+// which every book has, so a mixed basis would make "generic" mean
 // "register" and remove the tier distinction as its first act.
 //
-// LEAVE ONE LINEAGE OUT, not one file. Three names in this corpus are the same Ascensus at 92-100%
-// identical bodies; leaving out only the file puts two near-copies of a book into its own "everyone else",
-// which moved one alignment from 0.83 to 0.77 when fixed. scene.mjs lineagesOf does the grouping.
+// LEAVE ONE LINEAGE OUT, not one file. Several names in this corpus are the same Ascensus with
+// near-identical bodies; leaving out only the file puts two near-copies of a book into its own "everyone
+// else", which measurably moved an alignment when fixed (R17). scene.mjs lineagesOf does the grouping.
 //
 // COMPONENTS ARE RANKED BY VARIANCE, WHICH IS NOT SHAREDNESS, so each one's eta^2 is recorded beside it:
 // the between-lineage share of its projection's variance over the books the basis was built from. Low is
-// shared across books, high separates them. **Measured** on this corpus, the two orderings disagree at the
-// top — PC1 sits at 0.81-0.86 in four of the five bases while PC2 sits at 0.003-0.026, because whenever
-// Sommers is in the pool PC1 becomes the Sommers axis (its mean projection +0.18 to +0.25 against every
-// LTM book's -0.18 to +0.15). Not mass: Sommers is 910 of 3899 memory chunks, and Time Whore, at 1879,
-// owns no component. So a variance-ranked prefix removes the MOST book-specific direction first, which is
+// shared across books, high separates them. The two orderings disagree at the top on this corpus:
+// whenever Sommers is in the pool PC1 becomes the Sommers axis, and not by mass (R16). So a
+// variance-ranked prefix removes the MOST book-specific direction first, which is
 // the opposite of stage A's job; scene.mjs `sharedSelect` reads this to select by sharedness instead.
 //
-// WEAK AT THIS n, and recorded rather than acted on for that reason: four lineage groups, two of them
-// vestigial (Richard 81 chunks, Panopticon 58), so the estimate rests on three books.
+// WEAK AT THIS n, and recorded rather than acted on for that reason: few lineage groups, two of them
+// vestigial, so the estimate rests on about three books (R17).
 //
 // POOLED, NOT EQUAL-WEIGHTED PER BOOK. The shared component is a property of the model and of narrative
 // prose, not of any book, so a bigger book is a better estimate of the same thing rather than a louder
-// opinion. Equal-weighting hands the most influence to the least reliable means: **measured** split-half
-// error is 0.13-0.14 on the 58-101 chunk books against 0.023 on Time Whore. It costs little — pooled and
-// pooled-over-books-with-500+-chunks agree at cosine 0.99955, so pooling already behaves like "use the
-// well-estimated ones".
+// opinion. Equal-weighting hands the most influence to the least reliable means — split-half error runs
+// far higher on the small books — while pooled and pooled-over-large-books-only agree almost exactly, so
+// pooling already behaves like "use the well-estimated ones" (R17).
 //
 // Usage (from eval/):
 //   node global-basis.mjs <sample.json ...> [--m 8] [--force]
@@ -74,9 +70,8 @@ const memoryChunks = (S, model) => {
     // ARCHIVED MEMORY COUNTS. This is modelling what narrative prose LOOKS LIKE, not what can be
     // retrieved, and a summary the author retired is the same prose it was the day before. Excluding it
     // was `!e.disable` inherited from the retrieval path, where the flag genuinely decides something; here
-    // it only shrinks the sample, and unevenly — **measured**, the live-only pool is 604 memory entries
-    // against 914 with archived, and the 51% it was discarding falls hardest on the books that are
-    // already thin (Ascensus +88%, the Isekai pair +102%, Sommers +70%, Panopticon +59%).
+    // it only shrinks the sample, and unevenly — the archived mass it was discarding falls hardest on the
+    // books that are already thin (R17).
     //
     // So the collection wanted is the `--archived` build, whose centroidOnly chunks ARE the disabled
     // entries (reindex.mjs buildItems). A book with nothing retired has none and reads the same either
@@ -157,8 +152,8 @@ export const buildBases = (samplePaths, { m = 8, model, within = false, force = 
         // WHICH SCATTER THE DIRECTIONS COME OFF, which is a different question from where the corpus sits.
         // The mean is the pooled centroid either way — that is the register's LOCATION. `within` takes the
         // directions off the POOLED WITHIN-BOOK scatter instead of the raw pool: each lineage centred on its
-        // own mean first, so a direction that merely separates books cannot lead. **Measured** under
-        // Qwen3-Embedding-8B, PC1's eta^2 falls 0.771 -> 0.069 and its share of variance 7.33% -> 4.28%,
+        // own mean first, so a direction that merely separates books cannot lead. Within-book scatter
+        // collapses PC1's eta^2 and shrinks its variance share (R17),
         // the gap being the between-book separation PCA was ranking on.
         //
         // NOT LDA, which is the other half of the same decomposition: LDA maximises between-class over
@@ -176,8 +171,8 @@ export const buildBases = (samplePaths, { m = 8, model, within = false, force = 
             eta,
             // WHAT IT WAS BUILT FROM, because a basis is only comparable to collections chunked the same
             // way and nothing recorded it before: the bases on disk turned out to predate the 800 -> 1750
-            // migration, and the only tell was their chunk counts running a uniform ~1.5x over what the
-            // indexes hold. `fromSamples` names the bundles because which snapshot of a book a bundle
+            // migration, and the only tell was their chunk counts running uniformly high over what the
+            // indexes hold (R17). `fromSamples` names the bundles because which snapshot of a book a bundle
             // embeds decides which memory uids are in the pool.
             meta: { model, chunkCfg: chunkConfig(v.S), fromSamples: samplePaths.map(x => x.split('/').pop()),
                 scatter: within ? 'within' : 'pooled',

@@ -22,7 +22,7 @@ export const KEY_BOOK_COMMON = 0.5;
  * straight apostrophe ("isn't" z=4.8, "don't" 5.6); roleplay prose writes U+2019, and so does
  * anything that has been through a smart-quote filter, which is most model output. Unfolded,
  * "isn’t" missed ZIPF_EN and every POS set, scored as maximally rare — the exact inverse of the
- * truth — and reached a real book's suggestions as a key firing in 770 of 16,360 messages.
+ * truth — and reached a real book's suggestions as a heavily-firing key (K14).
  *
  * Lookup only. The term itself must keep the apostrophe it was written with: "Kal'thas" is a name
  * rather than a contraction, and the elision rule reads both apostrophes on purpose.
@@ -47,12 +47,12 @@ export const KEY_BOOK_SHARED = 0.75;
 
 /** Rare-vocabulary Jaccard at which two entries are reported as near-duplicates by the audit.
  *
- * It sits in an empty band rather than on a slope. Across seven books, disabled entries included, the
- * duplicates score 0.52-1.00 and the highest pair that is NOT one scores 0.294; nothing at all falls
- * between. So the cut is not knife-edge and nothing is hiding just beneath it here.
+ * It sits in an empty band rather than on a slope: across the measured books, duplicates and
+ * non-duplicates are separated by a gap with nothing at all in it, so the cut is not knife-edge and
+ * nothing is hiding just beneath it here (K14).
  *
  * What lives below is a continuum of adjacent scenes sharing material — the near-misses are all
- * consecutive entries with overlapping STMB spans, e.g. "Part 16"/"Part 17" of one sequence at 0.200.
+ * consecutive entries with overlapping STMB spans, e.g. "Part 16"/"Part 17" of one sequence.
  * The flagged consecutive splits are the same shape with far more overlap, which is why they read as
  * one scene cut in two rather than two scenes that touch.
  *
@@ -70,9 +70,8 @@ export const FUNCTION_WORDS = new Set('a an the and or but if then else for to o
  *
  * This is the dominant failure of machine-written keys and nothing else in the audit sees it: an entry's
  * auto-generated keys are lifted verbatim from its own prose, so they sit in that entry's text (df 1, not
- * "dead"), appear nowhere else (not "book common", not "book shared") and are long (not "short"). Three uncurated
- * entries were measured with 22 keys between them, all with zero hits across 5473 chat messages, and every
- * single one UNFLAGGED.
+ * "dead"), appear nowhere else (not "book common", not "book shared") and are long (not "short") — measured,
+ * uncurated entries full of never-firing keys sailed past every other flag unflagged (K14).
  *
  * WHAT IT DELIBERATELY DOES NOT CATCH is over-specificity, because that is not decidable from the key and is
  * not the same defect. "dick flag towels" and "epsom salts" are unlikely to recur but they NAME something
@@ -201,11 +200,10 @@ export const isEnglishCommon = (list) => (v) => !/\s/.test(v) && list.has(v.toLo
  * @returns {{entries:object[], nE:number, classifyEntry:Function, reasonOf:Function, defChecked:Function, effCase:Function, effWhole:Function}}
  */
 /** Share of messages a key must match before chat evidence calls it chat-common. Not a fitted
- * threshold — a bound. Measured on Richard's curation event, no key the author kept fired above 11%,
- * so 20% sits above the known-good ceiling with margin. It is deliberately loose because what lives
- * above it is mostly legitimate: of 20 keys over 20% across seven books, 8 were on vectorized entries
- * and most of the rest were main-cast names on sticky sheets, which is how continuous memory is
- * authored.
+ * threshold — a bound, sitting above the known-good ceiling a curation event established, with
+ * margin (K14). It is deliberately loose because what lives above it is mostly legitimate — largely
+ * keys on vectorized entries and main-cast names on sticky sheets, which is how continuous memory is
+ * authored (K16).
  *
  * Used only to CONFIRM another flag, never to raise one on its own — and the value is calibrated for
  * that job. A `chat common` flag that RAISES exempts constant (an author declaration that the entry is
@@ -295,10 +293,9 @@ export function buildKeyPruneScan(data, opts, ignoreSet, { caseSensitiveDefault 
         // works. df still counts ENTRIES, not segments: "how widely is this term used" is a fact about
         // the book, per the note above, and must not start moving with paragraph length.
         //
-        // Measured inert on every book on disk: 8 books, 8,970 distinct keys (6,353 of them multi-word),
-        // 0 keys change df and 0 change their occurrence total. A literal key cannot span a paragraph
-        // break, so it is slice-invariant; only a multi-term SmartKey can differ, and those are the keys
-        // whose unsegmented answer was wrong.
+        // Measured inert on every book on disk (K5): a literal key cannot span a paragraph break, so
+        // it is slice-invariant; only a multi-term SmartKey can differ, and those are the keys whose
+        // unsegmented answer was wrong.
         for (const c of contents) {
             const segments = segment([c], matchWindow);
             primeScan(allKeys, segments, scanScope);
@@ -384,9 +381,9 @@ export function buildKeyPruneScan(data, opts, ignoreSet, { caseSensitiveDefault 
         // outranks dead (a word absent from the book's own text still floods it from the chat).
         // Sticky gets the shorter head-of-list cut; keyword/vector test the whole list.
         //
-        // `eng` is the ASSERTION that it over-fires; a chat scan is the evidence. Measured across the
-        // books curation has not touched, 1 of 38 English-flagged keys actually fires broadly — the rest
-        // are proper nouns colliding with common words (River, Blue, Angel, Paris) or generic words this
+        // `eng` is the ASSERTION that it over-fires; a chat scan is the evidence. Measured on
+        // uncurated books, very few English-flagged keys actually fire broadly (K14) — the rest are
+        // proper nouns colliding with common words (River, Paris) or generic words this
         // story simply does not use. So the flag stands when unevidenced, and severityOf reads `chatRate`
         // to decide how loudly. It is NOT suppressed by a quiet chat: absence of over-firing here is not
         // evidence the word denotes anything, which is the other half of what this flag is claiming.
@@ -520,25 +517,22 @@ export function buildKeyPruneScan(data, opts, ignoreSet, { caseSensitiveDefault 
     // the author's call rather than the tool's. Pre-ticking it made "accept the defaults" silently agree to
     // both tiers, and with no bulk control in the prune popup that pre-tick WAS the bulk action.
     //
-    // Costs nothing measurable either way: removing the whole yellow band was worth +0.036 nDCG on one graded
-    // book and 0.000 / -0.0006 on two others. This is about the tool being honest about its own confidence,
-    // not about retrieval.
+    // Costs nothing measurable in retrieval either way (K14): this is about the tool being honest about
+    // its own confidence, not about retrieval.
     //
     // Green (a short key whose every hit is a clean standalone match, so it cannot collide) stays exempt too.
     //
     // DEAD IS PRE-TICKED ONLY ON MACHINE-WRITTEN ENTRIES, because the label measures the wrong corpus and
     // "Unattested" means the key appears in no ENTRY's text — NOT that it will never fire, and whether that
-    // matters depends on who wrote it, since keys fire against the CHAT. Over three full chat histories:
+    // matters depends on who wrote it, since keys fire against the CHAT. The asymmetry is measured (K14):
     //
-    //   on STMemoryBooks entries  12% / 39% / 40% ever appear in the chat, so 60-88% are exactly
-    //                             what the flag claims — one-off scene furniture the model scraped
-    //                             ("waterproof mattress pad", "quart", "canopy bed") plus incidental
-    //                             pop-culture off a simile ("Seinfeld", "Galaxy Quest"). Bulk removal is the
-    //                             point of the tool for an unpruned memory book.
+    //   on STMemoryBooks entries  most unattested keys are exactly what the flag claims — one-off scene
+    //                             furniture the model scraped ("waterproof mattress pad") plus incidental
+    //                             pop-culture off a simile. Bulk removal is the point of the tool for an
+    //                             unpruned memory book.
     //   on hand-written entries   it is far more likely deliberate — an ALIAS, a name the prose does not use
-    //                             because prose uses the canonical form. A public Deltarune book showed
-    //                             ~90% aliases ("Toriel's House" for "Dreemurr Residence"); the real finds were
-    //                             two typos and two apostrophe-form breaks.
+    //                             because prose uses the canonical form ("Toriel's House" for "Dreemurr
+    //                             Residence"); the real finds were a few typos and apostrophe-form breaks.
     //
     // So the tool decides where the author didn't, and defers where they did. Everything still SHOWS with its
     // colour; this only controls what "accept the defaults" agrees to.
@@ -550,20 +544,20 @@ export function buildKeyPruneScan(data, opts, ignoreSet, { caseSensitiveDefault 
     const defChecked = p => p.flag !== 'unusable' && (severityOf(p) === RED || (p.flag === 'unattested' && generated(byUid.get(String(p.uid)))));
 
     // NEAR-DUPLICATE ENTRIES. Two summaries of one scene split its relevance: both rank mid, neither
-    // wins, and no key can separate them because they say the same thing. Found by accident in a
-    // 334-entry book — one pair, already disabled by hand, with `duplicate breakfast entry` left as a
-    // key on the survivor — so it is invisible without a tool.
+    // wins, and no key can separate them because they say the same thing. The motivating pair was
+    // found by accident, already disabled by hand — invisible without a tool.
     //
     // Similarity is Jaccard over each entry's RARE vocabulary, not its words: scene summaries share
-    // boilerplate and a recurring cast, and raw overlap reads ~0.6 on unrelated pairs of the same book.
+    // boilerplate and a recurring cast, so raw word overlap runs high on unrelated pairs of the same
+    // book (K14).
     //
     // AN ARC AND ITS MEMBER SCENE ARE NOT DUPLICATES — they cover one span at different levels of
     // detail and both are wanted, so those pairs are skipped rather than reported. Arc-vs-arc still
-    // counts: one book carries two Arc 05 entries with identical text and different title punctuation.
+    // counts: duplicated arc entries exist in the wild.
     //
-    // ADVISORY ONLY. The threshold is calibrated against a single known instance (0.584, against a
-    // 0.289 ceiling across every other pair in that book), so it cannot claim the no-false-positive
-    // standard the dead-key diagnostic meets, and nothing here feeds defChecked.
+    // ADVISORY ONLY. The threshold is calibrated against a single known instance (K14), so it cannot
+    // claim the no-false-positive standard the dead-key diagnostic meets, and nothing here feeds
+    // defChecked.
     const isArc = e => e?.stmbArc === true || /^\s*\[?\s*arc\b/i.test(String(e?.comment ?? ''));
     const dupeVocab = e => {
         const out = new Set();
@@ -572,9 +566,8 @@ export function buildKeyPruneScan(data, opts, ignoreSet, { caseSensitiveDefault 
         }
         return out;
     };
-    // ponytail: O(n^2) over in-scope entries — 55k set intersections on the largest book here and
-    // unmeasurable next to the automaton pass above. If a book ever makes this bite, invert it: index
-    // rare term -> entries and only compare pairs sharing one.
+    // ponytail: O(n^2) over in-scope entries — unmeasurable next to the automaton pass above. If a
+    // book ever makes this bite, invert it: index rare term -> entries and only compare pairs sharing one.
     const dupes = new Map();
     {
         const cand = entries.filter(e => String(e.content ?? '').length > 200);

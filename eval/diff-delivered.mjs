@@ -78,7 +78,7 @@ if (armOnly.length) {
 
 // THE HAYSTACK, which is what makes a drop legible. A relevant row cut from a scene that still delivers
 // four others is redundancy; the same row cut from a scene that then has none is the failure the F2 mean
-// cannot show you, because one scene's collapse averages away against 102 that improved.
+// cannot show you, because one scene's collapse averages away against every scene that improved.
 //
 // UNGRADED IS ITS OWN COLUMN, never folded into g0. Those rows are scored 0 by the delivery convention
 // (scene.mjs) rather than judged 0, so counting them as irrelevant would report the pool's depth as the

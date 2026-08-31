@@ -3,10 +3,9 @@
 //
 // llmKeyCandidates splits an entry at 5000 CHARACTERS and runs one call per chunk. The stated reason
 // is behavioural — "a small local model summarises instead of extracting once an entry runs long" —
-// not a context limit, and it has never been measured. The context justification does not hold here
-// anyway: the longest entry across the three curated books is 35,127 chars ≈ 7,001 tokens (measured,
-// 5.02 chars/token), against declared contexts of 131k–262k, and ollama ingests the whole thing at
-// default settings without truncating. So the question is live: does chunking help, hurt, or nothing?
+// not a context limit, and it has never been measured. Chunking is not context-driven: the longest
+// entry on disk fits comfortably inside every declared context, and ollama ingests it whole at
+// default settings without truncating (S20). So the question is live: does chunking help, hurt, or nothing?
 //
 // THREE ARMS over the same entries, same prompt builder, same parser:
 //   whole    — the entry in one call. What "the model can take it" would imply.
@@ -14,8 +13,8 @@
 //   first    — first chunk only. The temp-ladder's approximation, here to size its own bias.
 //
 // Restricted to entries ABOVE the chunk size, because for anything shorter all three arms are the
-// same call and would only dilute the contrast. 38.6% of enabled entries across these books qualify
-// (Foxbridge 2.7%, Sommers 30.2%, Time Whore 51.0%), so this is the normal path on the big books.
+// same call and would only dilute the contrast. A substantial share of enabled entries qualifies on
+// the big books (S20), so this is the normal path there.
 //
 // WHAT WOULD FAVOUR EACH. Chunking buys coverage mechanically: N chunks x 5-10 keys beats one 5-10
 // key list for a 35k-char entry, and the generator's job is recall since the Zipf/df gates and a

@@ -6,8 +6,8 @@
 // `:thinking` variant. And local inference serialises on one GPU, so it cannot show what the feature
 // would actually feel like for the users who are on hosted models — which is most of them.
 //
-// CONCURRENCY. Measured 5.5x at 6-way on this endpoint with no rate-limit errors; the provider's
-// stated ceiling is 10, so the default here is 8. This is also the shape a shipped worker pool would
+// CONCURRENCY. A 6-way pool measured a near-linear speedup with no rate-limit errors (H5); the
+// provider's stated ceiling is 10, so the default here is 8. This is also the shape a shipped worker pool would
 // take, so the numbers double as a feasibility check for parallelising the Studio's suggest-all.
 //
 // Follows CLAUDE.md's harness rules: appends one JSONL line per response as it lands, resumes from
@@ -88,8 +88,8 @@ if (!has('score-only')) {
 
     /**
      * A 429 is BACK-PRESSURE, not a failure. The provider's documented "10" is a rate, not a count of
-     * open connections: 8 workers sustained 5.25 calls/s and 76 of 120 calls were rejected, while an
-     * earlier six-call burst passed cleanly. So a pool has to respond to the signal rather than cap
+     * open connections: a wider pool sustained full throughput while most of its calls were rejected,
+     * where a smaller burst passed cleanly (H5). So a pool has to respond to the signal rather than cap
      * connections and hope. Exponential backoff with jitter, retried up to 5 times; anything that is
      * not a 429 fails immediately, since retrying an auth error or a bad model id just wastes calls.
      *

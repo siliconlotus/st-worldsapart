@@ -1,14 +1,14 @@
 // Is temperature's only benefit just "more candidates", obtainable more cheaply by asking for more?
 //
 // The temperature ladder found no per-response quality effect on any model, and exactly one positive
-// result: the UNION across repeats reaches more of a book's own keys at T=1 than at T=0. But part of
+// result: the UNION across repeats reaches more of a book's own keys at T=1 than at T=0 (S1). But part of
 // that is arithmetic — at T=0 the repeats are identical, so the union IS the single response and any
 // departure from determinism necessarily grows it — and more draws mean more chances to hit the
 // reference set. So "temperature buys coverage" and "any source of extra candidates buys coverage"
 // are not distinguished by that result.
 //
 // This distinguishes them. The prompt already governs yield: it says "Output 5 to 10 keywords", and
-// measured responses sit at 8-10, i.e. at the instruction, nowhere near the token budget. So raising
+// measured responses sit at the instruction, nowhere near the token budget (S1). So raising
 // the instruction is a second route to more candidates — one that costs ONE call instead of three
 // and stays deterministic at T=0.
 //

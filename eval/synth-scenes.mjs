@@ -6,13 +6,13 @@
 // the old judgements back on the (scene, entry) pairs they were made about.
 //
 // NOTHING IS CARRIED FROM A PREVIOUS BUNDLE. The predecessor built its output as "the old bundle, minus
-// arms, plus overrides", so any field nobody remembered to overwrite survived — which is how all 56
-// bundles ended up recording candidate lists derived from one book beside an embedded copy of another, six
-// weeks older, with nothing saying so. Everything here comes from the chat and the world as they are now,
+// arms, plus overrides", so any field nobody remembered to overwrite survived — which is how a whole
+// set of bundles ended up recording candidate lists derived from one book beside an embedded, weeks-older
+// copy of another, with nothing saying so (H8). Everything here comes from the chat and the world as they are now,
 // and the only inputs that may come from elsewhere are the message ids.
 //
 // MESSAGE IDS ARE RAW RECORD INDICES — line N of the .jsonl, counting hidden messages. Verified against the
-// existing set: sommers-syn-msg5347 sits at raw 5347 and usable 5340 in a chat with 7 hidden records. The
+// existing set: sommers-syn-msg5347 sits at raw 5347, above its usable index in a chat with hidden records. The
 // query and scan window are built from is_system-filtered messages, because query.queryMessages and
 // matcher.scanWindow both expect the caller to have dropped them (matcher.scanWindow's own docstring says
 // so), but the id that names the scene stays the raw one so it can be found in the file by line.
@@ -20,10 +20,9 @@
 // EVERY BOOK THE CHAT HAD ATTACHED, not only the one being ranked. loadScene builds the gazetteer from
 // ALL embedded books because production's spans all of them, and those terms decide which query terms
 // survive the entity filter — so a bundle that embeds one book of two scores its OWN entries against a
-// vocabulary the runtime never had. Measured on the sommers set, which was derived that way: the
-// gazetteer was short 78 of 1083 terms (7.8%) and all 14 scenes admitted different query terms, mean +6.6,
-// the missing ones being the vocabulary the scenes are about (scent, slick, bond, rut, heat). Same class
-// of error as reading raw keys into the gazetteer, which moved BM25 by up to 74%.
+// vocabulary the runtime never had. Measured on a set derived that way: the gazetteer ran short and
+// every scene admitted different query terms, the missing ones being the vocabulary the scenes are
+// about (R22). Same class of error as reading raw keys into the gazetteer.
 //
 // THE SET IS DETECTED, and --also only ADDS to it. attachedWorlds() below resolves the same five bindings
 // worldsapart.js worldSourceRank names — global, persona, character (primary), character (additional),
@@ -85,9 +84,9 @@ const src = FROM ? openBundle(JSON.parse(readFileSync(FROM, 'utf8'))) : null;
 // different query out of the same turn: the source scenes were captured at 10, and the shorter window
 // scored as a scene nobody had graded while looking identical in every field a reader checks.
 // DEPTH 10 IS THE CORPUS, so it is the default rather than something every invocation has to remember.
-// All 97 existing bundles across all six books record depth 10; a set derived at anything else cannot be
+// Every existing bundle records depth 10 (G13); a set derived at anything else cannot be
 // compared with them, and the failure is silent — the bundle looks fine and only its query is short.
-// Deriving at the old default of 5 has now produced two sets that had to be thrown away and re-derived.
+// Deriving at the old default of 5 has already produced sets that had to be thrown away and re-derived.
 const DEPTH = Number(arg('--depth') ?? src?.params?.depth ?? 10);
 const CHAT = arg('--chat') ?? src?.sceneChat;
 const BOOK = arg('--book') ?? src?.primaryBook;
@@ -350,8 +349,8 @@ const TOKENIZER = src?.budget?.tokenizer ?? 'gpt-3.5-turbo';
 const tokens = offlineTokenCounter(TOKENIZER);
 
 // The budget block a derived bundle should carry: the settings it was derived under, minus the one field
-// that is a resolved RUNTIME number. `maxTokens` reads "40%* = 29036" on the source — 40% of whatever
-// context window was open on that machine — and no budget was applied here at all, so passing it through
+// that is a resolved RUNTIME number. `maxTokens` on the source is a display string (G13) — a percentage
+// of whatever context window was open on that machine — and no budget was applied here at all, so passing it through
 // describes a run that never happened. Same class of staleness as the inherited candidate lists this tool
 // was rewritten to stop producing.
 /** `budget` is a document field of its own now, so the snapshot no longer carries it. */
@@ -405,8 +404,8 @@ for (const idx of picks) {
         const scene = loadScene(S, { indexFile: indexPath(S, { model: MODEL }), indexOpts: { model: MODEL }, params: P });
         const haystack = haystackFor(S, P);
         // Term weights exactly as scoreScene derives them. Passing null instead runs every arm with the
-        // entity filter off — the gazetteer path that admitted 2.3x the query terms and moved BM25 by up
-        // to 74%, which is a difference no arm label would have shown.
+        // entity filter off — the gazetteer path that inflated the query term set and BM25 with it
+        // (R22), which is a difference no arm label would have shown.
         const tw = P.entityFilter ? entity.buildTermWeights(query, scene.gaz, P.boost) : null;
         const rows = makeCandidateSet({ ...scene, params: P })(
             P.K1, P.B, tw, qv, query, haystack,

@@ -29,8 +29,7 @@ const ST_ROOTS = /[\\/](data|public|plugins|backups|default)[\\/]/;
  * AN ABSOLUTE PATH IS MACHINE IDENTITY AND NOTHING ELSE. It names a directory no other install has, so no
  * reader can use it — `eval/scene.mjs` skips a stored `index` that does not exist locally and derives its
  * own, which is the normal case for a scene somebody else captured. What it does carry is the author's OS
- * username, in a document meant to be shared. Measured before this existed: 97 of 107 documents held one,
- * across two different usernames.
+ * username, in a document meant to be shared — nearly every pre-existing document held one (G8).
  *
  * The reader half already assumed this — `stInstall().resolve` maps a `data/` prefix through config.yaml's
  * own `dataRoot` and anything else through the install root, and returns an absolute path untouched, which
@@ -55,9 +54,9 @@ export function stRelative(path) {
  * already-graded scene's numbers.
  *
  * There is deliberately no "only the candidate entries" mode. It looks like the thrifty choice and is a
- * trap: the entity filter's gazetteer is built from every entry's keys and title, and admitting 2.3x too
- * many query terms moves content-lexical's BM25 at stage 3 (see entity.mjs buildGazetteer; the 74%
- * figure that used to sit here was stage-1 BM25, which no longer exists).
+ * trap: the entity filter's gazetteer is built from every entry's keys and title, and admitting far too
+ * many query terms moves content-lexical's BM25 at stage 3 (R22; the figure that used to sit here was
+ * stage-1 BM25, which no longer exists).
  *
  * @param {Record<string, object>|object[]} entries A book's entries (ST stores a uid-keyed object)
  * @returns {Record<string, object>} uid-keyed entries
@@ -143,21 +142,19 @@ const median = v => [...v].sort((a, b) => a - b)[Math.floor((v.length - 1) / 2)]
  * earlier verdict and replaced it, which is a revision rather than a second opinion.
  *
  * AMONG LLM VERDICTS THE MEDIAN WINS once three exist, and latest-wins is the fallback below that.
- * Newest-first is only defensible when a later pass is known to be better, and it is not: re-grading the
- * same rows with the same model under a corrected rubric moved ~30% of the relevant set out and a smaller
- * number in, the same magnitude as the contract's own non-reproduction rate (CLAUDE.md, graded scenes).
+ * Newest-first is only defensible when a later pass is known to be better, and it is not (G7).
  * At three the median is the majority on the >= 3 line whenever a majority exists, stays on the 0-4 scale
  * and needs no tie policy for an odd count. Two disagreeing verdicts cannot be resolved by any rule over
  * themselves; those keep the latest and want a third pass.
  *
- * MEASURED: this rule reproduces all 11,946 of the stored `llmGrade` scalars in eval-data exactly, which
- * is what makes moving the resolution out of the file lossless rather than a silent re-labelling.
+ * MEASURED: this rule reproduces every stored `llmGrade` scalar in eval-data exactly (G7), which is
+ * what makes moving the resolution out of the file lossless rather than a silent re-labelling.
  *
  * EVERY VERDICT NAMES ITS RATER, and the rater's `kind` is the provenance — a verdict of kind `human` is
  * "a person set this", and a row with only `llm` verdicts is "no human has looked". The two used to be one
  * column written at the same value, which made an unreviewed row indistinguishable from one a human
- * reviewed and agreed with; at 87.7% self-agreement most reviews DO agree, so that collision would have
- * arrived silently on first use of the review flow.
+ * reviewed and agreed with; most reviews DO agree (G3), so that collision would have arrived silently
+ * on first use of the review flow.
  *
  * Provenance cannot be inferred from anything else here: an llm-graded document and a human-graded one are
  * structurally identical, and a filename convention is enforced by nothing.
@@ -207,8 +204,8 @@ export const isDurable = row => row.block === 'constant' || row.block === 'stick
 
 // --- delta pooling (/wa-super-grade) -----------------------------------------------------------------
 //
-// WHY THIS EXISTS. A single sample's pool is whatever ONE configuration surfaced — 15-20 entries out of a
-// 145-334 entry book. Score a configuration far from that one and its top rows are unjudged, so they count
+// WHY THIS EXISTS. A single sample's pool is whatever ONE configuration surfaced — a small fraction of
+// the book (G10). Score a configuration far from that one and its top rows are unjudged, so they count
 // as irrelevant and it is penalised for surfacing entries nobody looked at. That is textbook pool bias, and
 // it is fatal to a zero-based defaults review, which exists precisely to score distant configurations.
 //
@@ -230,10 +227,9 @@ const US = '';
  * A GRADE IS A VERDICT ABOUT A (SCENE, ENTRY) PAIR, so a row may only be carried between two documents
  * that hold the same scene — and neither half is checkable by name. The scene id is a position in a file
  * that gets branched, edited and replayed, and `rowKey` is book + uid, which two scenes of ONE book share
- * for almost every row. **Measured**: 50 rows of a Time Whore scene were carried onto an Ascensus scene
- * captured 15 minutes later in the same sitting, at their original values including two half-grades,
- * because the loader compared nothing. A book test would not have caught the same-book case, which is the
- * commoner one.
+ * for almost every row. This has happened: one scene's rows were carried onto another captured minutes
+ * later, at their original values, because the loader compared nothing (G9). A book test would not have
+ * caught the same-book case, which is the commoner one.
  *
  * DEPTH IS PART OF THE SCENE, NOT METADATA BESIDE IT. Relevance is a property of the (entry, WINDOW) pair:
  * an entry is relevant because something in the window refers to it, so ablating turns can remove the very
@@ -530,8 +526,8 @@ export function buildSample({ name, notes, query, queryChat, scanChat, injects, 
         // reason that one is: an arm never varies them. `tokenizer` is ST's `getTokenizerModel()`, an
         // environment fact WA cannot change. The maxes and the token budget are WA's own, but a budget
         // arm is never CAPTURED — every cap is a prefix cut over the layout ranking, and the per-entry
-        // `tokens` counts are recorded, so it is swept offline through `applyBudget` instead. Measured:
-        // 0 of 106 multi-arm documents vary any of it.
+        // `tokens` counts are recorded, so it is swept offline through `applyBudget` instead; no
+        // captured multi-arm document varies any of it (G8).
         budget,
         primaryBook,
         // Path to the primary book on disk. PROVENANCE ONLY, never a fallback: no reader may open it,
@@ -627,11 +623,9 @@ export const sceneId = (chat, end) => {
  * model; a hosted model has none to give, and an empty component says so rather than implying stability
  * nothing provides.
  *
- * US, NOT A PRINTABLE SEPARATOR. **Measured** on this machine: 11 of 11 Ollama models carry a `:`
- * (`gemma4:31b-mlx`, `bge-m3:latest`) and every MLX model is a HuggingFace repo id carrying a `/`, while
- * `@` already appears inside a rubric — so a printable join cannot be decomposed. US is a control
- * character and cannot occur in either component, which is why CLAUDE.md makes it the project's composite
- * key everywhere else.
+ * US, NOT A PRINTABLE SEPARATOR. Model ids routinely carry `:` and `/`, and `@` already appears inside a
+ * rubric — surveyed, no printable join can be decomposed (G8, P6). US is a control character and cannot
+ * occur in either component, which is why CLAUDE.md makes it the project's composite key everywhere else.
  */
 export const raterKey = r => (r?.kind === 'human'
     ? String(r.id ?? '')
@@ -650,9 +644,8 @@ export const raterParts = r => (r?.kind === 'human'
  * SETTINGS ARE NOT IDENTITY. Seed, effort, temperature, context length and thinking change the SAMPLE, not
  * who produced it: the same weights under the same rubric sampled twice is one rater giving two verdicts,
  * which is exactly the third vote the median rule wants. Folding a seed into the rater would also assert a
- * determinism nothing has — a model without one is nondeterministic, one with it frequently still is, and
- * CLAUDE.md records hosted reasoning models honouring neither seed nor temperature (measured: identical
- * requests, same seed, 1815 vs 935 reasoning tokens).
+ * determinism nothing has — a model without one is nondeterministic, one with it frequently still is,
+ * and hosted reasoning models honour neither seed nor temperature (H1).
  *
  * WHO AND WHEN, and nothing else. Dedup runs over ONE entry's verdicts and a pass grades each row exactly
  * once, so two verdicts on a row always came from two dispatches — which differ in their millisecond
@@ -678,8 +671,8 @@ const RATER_DESC = ['modelName', 'family', 'quant', 'modelParams'];
  * saying which; here nothing can be written without naming a rater.
  *
  * A VERDICT NAMES ITS RATER BY INDEX. Spelled out per verdict these are the same handful of strings
- * repeated tens of thousands of times — measured on the corpus, 645KB of llm identity across 3 models and
- * 4 rubrics — and unreadable by eye, which is most of what anyone does with a bundle.
+ * repeated tens of thousands of times (G8) — and unreadable by eye, which is most of what anyone does
+ * with a bundle.
  *
  * DEREFERENCING IS NOT TRANSLATING. `openBundle` resolves the index back to the whole rater, so every
  * reader and writer works in identities and only the file is indexed. Unlike a joined blob, an index can
@@ -728,8 +721,7 @@ function indexVerdicts(entries) {
  * RUBRIC — live only inside the string. Handing a reader `{id, modelName}` and no rubric meant that
  * re-indexing recomposed a different id (`modelName` + an empty rubric), deleting the pass identity from
  * every document that went through openBundle -> setGrades: graft-grades.mjs and grade-pending.mjs both,
- * and observed on a real bundle, where `claude-sonnet-5<US>scene-relevance@b49449ef` came back as
- * `claude-sonnet-5<US>`.
+ * and observed on a real bundle (G9).
  *
  * THROUGH raterParts, which is the inverse raterKey already documents, so this is that split rather than
  * a second rule about how an id decomposes. The invariant it buys is asserted in grading-check.mjs:
@@ -848,7 +840,7 @@ const sha256Hex = async text => [...new Uint8Array(
 /** A field that restates WHERE an entry is stored is not part of what the entry IS. `entry.world` is ST's
  *  own back-pointer to the book name — which is already the key of the `books` map holding it — and it is
  *  present or absent depending on which ST path produced the entries, so leaving it in made one lorebook
- *  hash two ways. Measured across the corpus: 21,077 entries carry it, 0 disagree with their book's name. */
+ *  hash two ways; corpus-wide it never disagrees with the book's name (G8). */
 const withoutLocation = e => {
     if (!e || typeof e !== 'object' || Array.isArray(e)) return e;
     const { world, ...rest } = e;
@@ -1066,8 +1058,8 @@ export function setGrades(doc, rows, who = {}) {
 
 /**
  * The grading scale: 0-4, each grade an INCLUSION DECISION rather than a magnitude. Anchored wording is
- * what inter-rater agreement hangs on — measured on one scene, restating the rubric alone nearly doubled
- * weighted kappa between two raters — so the anchors are data here and the grading UIs show them verbatim.
+ * what inter-rater agreement hangs on — restating the question alone nearly doubled agreement between
+ * two raters (G5) — so the anchors are data here and the grading UIs show them verbatim.
  */
 export const GRADE_ANCHORS = [
     'Definitely not relevant',

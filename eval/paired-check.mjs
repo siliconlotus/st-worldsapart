@@ -61,7 +61,7 @@ eq(JSON.stringify(bookFingerprint({ 2: fpBook[2], 1: fpBook[1] })), JSON.stringi
 eq(Number.isFinite(bookFingerprint({}).gaz), true, 'an existing but empty book still fingerprints');
 
 // --- tierRecall: the guard that catches a selection trading a hard class for an easy one ---------------
-// memory (~7% relevant here) and reference (~30%) have very different base rates, so an arm that favours
+// memory and reference have very different base rates (F39), so an arm that favours
 // the denser class raises every pooled metric while delivering less of what the system retrieves. This
 // splits delivered recall so that shows up. Ungraded counts as not relevant, matching the `?? 0` rule the
 // windows use; identity comparison, since kept holds the same row objects the population does.
@@ -89,8 +89,8 @@ eq(sceneParams(S, { K1: 3 }).LEXW, 1.5, 'an arm override leaves other params on 
 eq(sceneParams({}).entityFilter, true, 'a view with no params still gets a full param set');
 
 // --- the arm-reuse guard: reusing a loaded scene is only valid while the gazetteer is unchanged ---
-// gazetteerSource is baked in at load time, and a stale gazetteer has already cost this project a 74%
-// BM25 error, so sweeping it against a preloaded scene must throw rather than quietly mislead. Asserted
+// gazetteerSource is baked in at load time, and a stale gazetteer has already cost this project a real
+// scoring error (R22), so sweeping it against a preloaded scene must throw rather than quietly mislead. Asserted
 // on the MESSAGE, not merely on throwing: a preloaded stub throws for a dozen other reasons, and this
 // test passed against one of them while the guard it names was not firing at all.
 let threw = '';
@@ -267,7 +267,7 @@ eq(dropUnavailable(mkSample(null)).entries.length, 3, 'no scene message index ->
 // hands out ONE arm's view, so there is no second list here to forget — the guard moved into the shape.
 eq('arms' in dropUnavailable(mkSample(100)), false, 'the filter sees one arm\'s view, never a list of them');
 // The books are the half that matters: makeCandidateSet re-derives the pool from them, so an entry left
-// there returns as an UNJUDGED row holding a rank. Measured when this was missed: precision 33.5% -> 15.5%.
+// there returns as an UNJUDGED row holding a rank. Missing this half once collapsed measured precision (F28).
 const booked = dropUnavailable(mkSample(100));
 eq(Object.keys(booked.books.W).length, 2, 'a post-dating entry leaves the BOOK, not just the grade list');
 eq(booked.books.W['2'], undefined, '...and it is the post-dating uid that goes');
@@ -334,8 +334,8 @@ eq(twice.entries.length, 2, '...and the grade list is stable across a second pas
 }
 
 // --- principal components: the all-but-the-top arm for centering (metrics.mjs topComponents) ---------
-// Mean-centering removes one direction and, measured, 8-16% of it is the book's own. This is the machinery
-// for removing several. Checked on a synthetic corpus with KNOWN axes, because a power iteration that has
+// Mean-centering removes one direction, and most of it is shared across books rather than the book's own.
+// This is the machinery for removing several. Checked on a synthetic corpus with KNOWN axes, because a power iteration that has
 // silently converged to the wrong direction still returns a unit vector and still scores.
 const { topComponents, projectOut } = await import('./metrics.mjs');
 const V = (...xs) => ({ vector: xs });
@@ -365,8 +365,8 @@ eq(JSON.stringify([...topComponents(pts, 2, MU)[0]]), JSON.stringify([...topComp
 
 // --- lineages: two versions of one book are one book (scene.mjs lineagesOf) ------------------------
 // The real instance this exists for: an LTM file is named after the CHARACTER CARD, and one card carries
-// several stories, so "Isekai Adventure" was byte-identical to Ascensus while sharing under 5% with Time
-// Whore — the other story on that same card. Names are not evidence in either direction.
+// several stories, so "Isekai Adventure" was byte-identical to Ascensus while sharing almost nothing with
+// Time Whore — the other story on that same card (C11). Names are not evidence in either direction.
 // --- the query embedding cache: keyed by (label, exact text), tolerant of a torn append ------------
 // Retraining re-embeds the same scene queries every run, so they are memoised to disk. Two ways that goes
 // wrong silently: a hit across MODELS hands back a vector from another embedding space, and a torn last
@@ -403,8 +403,8 @@ eq(JSON.stringify([...topComponents(pts, 2, MU)[0]]), JSON.stringify([...topComp
 }
 
 // --- etaSquared: the sharedness statistic stage A selects on ------------------------------------------
-// Components come back in VARIANCE order, which is not sharedness order — measured on this corpus the two
-// disagree at the top. So the selection rule needs a statistic that separates "every book varies along
+// Components come back in VARIANCE order, which is not sharedness order — the two disagree at the top on
+// this corpus (R16). So the selection rule needs a statistic that separates "every book varies along
 // this" from "this offsets whole books", and it has to be the second that scores high.
 const { etaSquared } = await import('./global-basis.mjs');
 {

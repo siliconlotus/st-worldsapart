@@ -18,17 +18,20 @@ the reviewed layer; quoting is the single escape) plus the open work. Read it be
 
 They carry decisions and the facts whose absence would cause a mistake. The instance that convinced
 someone, the counts behind it, and any account of what an earlier draft got wrong all stay out. One
-pass added 312 lines and half of it was archaeology that had already answered its question.
+pass was half archaeology that had already answered its question.
 
 **Terms are stable, or they are announced as new.** Use the doc's vocabulary exactly — seed, expander,
 renderer, required forms, hypernymy, propriolization. A synonym reads as a different concept, and a
 reader cannot tell whether something settled is being restated or something new introduced. Prefer the
-standard technical term to a coinage: five of six invented ones did not survive review, and two were
+standard technical term to a coinage: most invented terms here did not survive review, and two were
 hiding errors — "breadth" was hypernymy, and "contraction" concealed the false claim that truncating a
 key is a purely local operation (`Big Sur` → `Sur` is not).
 
-**Say which claims are measured.** A measured claim names its measurement; anything else is labelled an
-assertion. Unchallenged is not agreed — a scan-window conversion invented in a single message was still
+**Say which claims are measured, and keep the evidence out.** A measured claim states its finding and
+cites its entry in `eval/eval-data/measured-claims.md` — "measured flat (F41)" — the register that
+holds the numbers, the instrument and the n under a stable ID, gitignored with the corpus it measures.
+Anything else is labelled an assertion. A number that would not be worth registering is not worth
+stating. Unchallenged is not agreed — a scan-window conversion invented in a single message was still
 load-bearing three commits later, and outlived its own revert because it had been written into two
 sections and only one was checked.
 
@@ -44,11 +47,11 @@ problem here came from a new claim, none from a deletion.
 - `scene.mjs`, `metrics.mjs` — libraries, no CLI. `scene.mjs` loads and scores one graded scene (index,
   gazetteer, scorers, pool, nDCG); `metrics.mjs` holds the shared statistics. Both `graded-scene-grid.mjs`
   and `param-screen.mjs` go through them, so a second copy of the gazetteer or the scorers must never appear
-  — that path has already produced one 74% BM25 error, and two tools disagreeing would report the drift as a
-  parameter effect.
+  — that path has already produced one serious BM25 error (R22), and two tools disagreeing would report the
+  drift as a parameter effect.
 - `fixtures/` + `sentinel-check.mjs` — a synthetic book and chat whose every audit verdict is written
   down, and `install-sentinel.mjs`, which SYMLINKS both into `data/default-user/` so the same fixture
-  can be opened in the Studio. That is the point of it: three faults shipped behind a green suite
+  can be opened in the Studio. That is the point of it: faults have shipped behind a green suite
   because every other check calls the classifier directly, one layer below what the UI uses. Symlinks
   rather than copies, so editing the fixture changes what the UI shows.
 - everything else (`*-grid.mjs`, `param-screen`, `keyword-audit`, `relevance-eval`, `summary-center`) —
@@ -78,9 +81,9 @@ gone, which is when a buffered run would have been useless anyway.
 
 **Redirect the runner's output to a file and grep THAT; never filter the live stream.** Piping through
 `tail` re-buffers the log you just made incremental, and piping through `grep <pattern>` discards
-whatever you did not think to anticipate — which is always the line that explains the failure. One run
-produced zero rows and the reason was unrecoverable, because the filter kept two patterns and the
-error matched neither. `> run.log 2>&1` then grep the log costs nothing and keeps the evidence.
+whatever you did not think to anticipate — which is always the line that explains the failure. A run
+has already failed unrecoverably this way: the filter kept what was anticipated and the error matched
+none of it (H4). `> run.log 2>&1` then grep the log costs nothing and keeps the evidence.
 
 Two more, same origin. `pkill -f <script>` matches the wrapper shell whose command line contains that
 string, so it kills queued jobs too — kill by PID.
@@ -94,28 +97,25 @@ session.
 
 **Prompt work belongs on a local model with a fixed seed.** A seed pins output at any temperature, so
 a prompt change is the only thing that can move the result — which is what makes a prompt A/B
-readable at all. Hosted reasoning models honour neither seed nor temperature (measured: identical
-requests, same seed, spent 1815 vs 935 reasoning tokens), so they can confirm that a finding
-transfers but cannot be where it is found.
+readable at all. Hosted reasoning models honour neither seed nor temperature (measured, H1), so they
+can confirm that a finding transfers but cannot be where it is found.
 
 ## Graded scenes: pool first, then pair
 
 Three constraints shape every tuning claim, and each has tooling rather than a workaround.
 
 `n` is small — a chat has to be long enough to have retrievable history and rich enough for some of it to be
-irrelevant, and HUMAN grading is the scarce input. Deriving scenes offline (`synth-scenes.mjs`) raised it to
-56, which is enough for a paired screen to clear Holm correction but not enough to make the scenes
-independent draws. Count the LINES, not the files: the 56 sit on 4 chat files but only 3 books and 3
-stories — `timewhore-syn` and `timewhore-sample-syn` are two chat files of one CONTINUOUS chat, split
-because ST slows on a large file, so 28 of the 56 share both a corpus and a narrative. **A story is
-neither a chat file nor a character card**: a long run gets continued into a new file, and one card
-carries many stories — `Isekai Adventure` is Ascensus AND Time Whore, which share nothing. The closest
-key to a story is the LOREBOOK, so group by that and never take a per-story n off a file or card count.
-Anything resting on corpus statistics has an effective n nearer 3 than 56. The shared prefix
+irrelevant, and HUMAN grading is the scarce input. Deriving scenes offline (`synth-scenes.mjs`) made paired
+screens workable without making the scenes independent draws. Count the STORIES, not the files (C1): half
+the set is one continuous chat, split only because ST slows on a large file. **A story is neither a chat
+file nor a character card**: a long run gets continued into a new file, and one card carries many stories —
+`Isekai Adventure` is Ascensus AND Time Whore, which share nothing. The closest key to a story is the
+LOREBOOK, so group by that and never take a per-story n off a file or card count. Anything resting on
+corpus statistics has an effective n nearer the story count than the scene count (C1). The shared prefix
 is deliberate: the second set was called `adventure-syn` and read as a fourth line for as long as nobody
 checked its `primaryBook`. So prefer `param-screen.mjs`, which contrasts one parameter at a time against
-each scene's own baseline and reports the sign test. At n<6 nothing can reach p<0.05, so the finding is the
-direction plus the mean delta, and "measured flat, n=X scenes across Y chats, paired" is a legitimate and
+each scene's own baseline and reports the sign test. At single-digit n nothing can reach significance, so
+the finding is the direction plus the mean delta, and "measured flat (ID), paired" is a legitimate and
 common outcome to write next to a default.
 
 A pool built from one configuration penalises every configuration far from it, so a defaults review scored
@@ -133,8 +133,8 @@ the value in force through `metrics.mjs` `gradeValue` (NaN when ungraded) and th
 verdict sits in: a non-empty `humanGrades` means a person set it, judge verdicts alone mean none has
 looked. Nothing else can recover this — a judge's bundle and a human's are structurally identical, and a
 filename convention is enforced by nothing. The two were once ONE column written at the same value, which
-made an unreviewed row indistinguishable from a reviewed-and-agreed one. **Measured** on the migrated
-corpus: 598 human verdicts, 16,962 judge verdicts, 12,519 rows across 107 bundles.
+made an unreviewed row indistinguishable from a reviewed-and-agreed one — and human verdicts are a small
+minority of the corpus (census: G1), so that ambiguity sat on nearly every row.
 
 **No verdict is ever overwritten** (`bundle-schema.md`, *Verdict elements*). A re-grade appends beside the
 one it disagrees with — that comparison is the only thing that says whether a rater or a rubric moved. The
@@ -147,35 +147,28 @@ for what is still pending (`grade-pending.mjs`). Where a shape change would do, 
 re-grading.
 
 **A grade mean is only comparable at matched retrieval rank.** Grades fall steeply with pool depth, so a
-pass that graded deeper reads as a harsher rater when nothing about the rater changed. Measured, n=258 rows
-graded by both the human rater and `scene-relevance.md`, joined on shipped-arm rank: the contract sits at
-0.68x the human's mean at rank 0-19 and 1.03x at 20-44. **Those human grades predate the current rubric**, so
-head disagreement is a changed construct as much as rater drift, and no agreement statistic can tell you
-whether a rule the human never applied is right. What it can show is the shape of the change: the rule that
-reserves 4 for the scene's current subject reads as a tightening rather than a redefinition — every 4 the
-contract emitted fell on a row the human also graded 4, n=5 — while 19 of its 62 3s sit on rows the human
-called 0-2. Quadratic weighted kappa is 0.690 over those 258 rows and Kendall tau-b averages 0.54 per scene,
-but both are agreement statistics against a superseded construct, and neither is what the validity score
-reads, which is which band a row lands in. Raw means across two passes said 0.26 vs 0.83 and almost all of
-that was which rows each pass drew, not disagreement. Match the band or make no comparison; a scene's
-`entries` carry no rank, so join through the arm's `candidates`.
+pass that graded deeper reads as a harsher rater when nothing about the rater changed. Measured on the rows
+both raters graded, joined on shipped-arm rank (G2): the contract reads harsh at the head of the pool and
+level deeper down. **Those human grades predate the current rubric**, so head disagreement is a changed
+construct as much as rater drift, and no agreement statistic can tell you whether a rule the human never
+applied is right. What the join can show is the shape of the change: the rule that reserves 4 for the
+scene's current subject reads as a tightening rather than a redefinition (G2). Raw means across two passes
+disagreed wildly and almost all of that was which rows each pass drew, not disagreement (G2). Match the
+band or make no comparison; a scene's `entries` carry no rank, so join through the arm's `candidates`.
 
 That cuts two ways once a bundle holds more than one pass. Which rater graded a row correlates with rank
 band, so an arm whose wins come from deep rows is scored on a different scale than one winning at the head,
 and `graded-scene-grid.mjs` will report that as a parameter effect.
 
 **The contract does not reproduce evenly, and the relevant band is the unstable one.** Re-graded at the
-original job size — 179 rows, 12 jobs, 4 books — it agrees with itself 87.7% exactly and 98.3% within one
-grade, so most rows are solid. But agreement is 79% at the head of the pool against 90-93% deeper, and 4 of
-the 13 rows originally graded >= 3 came back below it. The 0s are what is stable. Since every selection
-criterion is defined on the >= 3 line, a single pass's relevant set carries real noise there, and a
-one-scene difference between arms is inside it.
+original job size (G3) it agrees with itself on most rows, but agreement is weakest at the head of the
+pool and a meaningful share of the rows originally graded >= 3 came back below it. The 0s are what is
+stable. Since every selection criterion is defined on the >= 3 line, a single pass's relevant set carries
+real noise there, and a one-scene difference between arms is inside it.
 
-**Job size does not move grades, and was checked rather than assumed.** 16-row jobs run ~140KB with single
-entry lines to 28KB, which no one Read returns; the obvious worry is that a judge grades a prefix. Measured
-flat: the same 64 rows at 4 rows/job scored +0.11 against 16 rows/job, 10 up and 5 down, sign test p~0.3.
-Prefer small batches anyway — two of those 64 were real 0-to-3 catches — but a large-batch pass does not
-need re-grading on size grounds.
+**Job size does not move grades, and was checked rather than assumed** — the obvious worry being that a
+judge grades a prefix of a large job. Measured flat (G4). Prefer small batches anyway, since the paired
+check caught a couple of real misses, but a large-batch pass does not need re-grading on size grounds.
 
 ## Chat-based measurement uses the standard corpus
 
@@ -186,14 +179,14 @@ reference books and genre vocabulary against unmarked prose. That file is gitign
 corpus is one person's chats; it also records which chats are unrepresentative and how.
 
 Count **usable** messages, not raw lines: core and WA both drop `is_system` before scanning, and one
-chat in the set is 65% hidden, so `CORPUS-MAP.md`'s line counts overstate it threefold.
+chat in the set is mostly hidden (C3), so `CORPUS-MAP.md`'s line counts badly overstate it.
 
-Book-only measurements are not so limited: 40 books are available, 19 with no chat at all and 11 of
-those third-party lorebooks never played — the widest sample of other people's key authoring here.
-**Count LINEAGES, not files, here too**: 43 book files collapse to 34 lineages at 30% shared content,
-because a book is versioned in place — `Daddy_Next_Door` is seven files and `Sommers_Pack__v22` is its
-v21 renamed, 190 of 327 entries byte-identical. Two versions of one book are not two books.
-Say which population a two-part finding rests on; the chat half cannot be widened by adding books.
+Book-only measurements are not so limited: the book population is several times the chat-paired one,
+including third-party lorebooks never played — the widest sample of other people's key authoring here
+(C2). **Count LINEAGES, not files, here too** (C2): a book is versioned in place — `Daddy_Next_Door` is
+many files and `Sommers_Pack__v22` is its v21 renamed, most entries byte-identical. Two versions of one
+book are not two books. Say which population a two-part finding rests on; the chat half cannot be
+widened by adding books.
 
 **A key existing in a book is not evidence that it is a good key**, and which books are curated is
 NOT derivable from the data — STMB share is how keys were generated, not whether anyone reviewed
@@ -247,10 +240,10 @@ through. It has never had BM25; that is no longer a difference between the paths
 
 Everything lexical left this stage, and the removals are measured — see `plugin/scoring.mjs`'s header
 before proposing any of it back. `scoreThreshold` was a p90 quantile whose every exclusion the `bm25 > 0`
-clause beside it undid (removing it moved admission by 6 entries in 10,103); BM25 then had no admission
-to serve; `retrievalMode` chose between cosine and cosine+BM25 and lost its subject; the ENTITY FILTER
-builds BM25 query terms and so no longer runs here either. **Keys are not in this ranking, and neither is
-any lexical signal** — both live at stage 3.
+clause beside it undid (removing it was a measured no-op, R1); BM25 then had no admission to serve;
+`retrievalMode` chose between cosine and cosine+BM25 and lost its subject; the ENTITY FILTER builds BM25
+query terms and so no longer runs here either. **Keys are not in this ranking, and neither is any lexical
+signal** — both live at stage 3.
 
 **2. Activation** — whether an entry is ranked at all. Three independent routes: WA emits
 `WORLDINFO_FORCE_ACTIVATE` on the retrieval winners; ST core keyword-matches whatever keys are live;
@@ -269,11 +262,9 @@ survived.
 **This is where the lexical half of WA lives.** `content-lexical.mjs` computes BM25 over every entry's
 content, a superset of the vectorized chunks stage 1 sees, and `onScanDone` reads it.
 
-**Which signal predicts best is a property of the embedding model, so it is quoted with one**
-(`eval/relevance-regress.mjs`, standardised logistic betas). Under bge-m3, text led: +0.794 against
-cosine's +0.465 and keys' -0.006, over 8924 judged rows on 69 scenes. Under Qwen3-Embedding-8B-4bit-DWQ
-the order inverts: cosine +0.762, text +0.567, keys +0.137, over 6051 rows on 102 scenes. A ranking of
-the signals carried across a model change is the claim to distrust.
+**Which signal predicts best is a property of the embedding model, so it is quoted with one** (E14).
+Under bge-m3 text led; under Qwen3-Embedding-8B the order inverts and cosine leads. A ranking of the
+signals carried across a model change is the claim to distrust.
 
 **4. Selection** — DOES THIS ENTRY BELONG. The RELEVANCE CUT drops a memory row whose `E[credit]` is
 below the `relevanceCutoff` setting (`selection.mjs` `relevanceCut`, from `onScanDone`), and it is the
@@ -301,7 +292,7 @@ is the score the caps and budget take a prefix of (`layout.mjs`, stashed as `run
 PROMPT ORDER is the user's sort over the survivors (`runState.lastPromptOrder`). **A change to the layout score can never surface an entry retrieval did not
 return** — so no keyword weight, tilt or fusion change is a recall lever, only a precision one. With
 stage 1 admitting everything, the retrieval ranking's ORDER now decides nothing except which entries
-survive `admitCeiling`, which no measured book approaches (largest: 208 vectorized entries).
+survive `admitCeiling`, which no measured book approaches (R4).
 
 **`scoreVectorKeys` is stage 3 and does not reopen stage 2.** It decides whether a vectorized entry's
 keys are SCORED, and asks that of the entry rather than of whether its keys are blank. Keys re-rank

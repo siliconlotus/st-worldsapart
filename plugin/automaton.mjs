@@ -15,8 +15,7 @@ const APOSTROPHES = /[‘’‚‛ʼʹ´`′‹›]/g;
  *  its modifier letter, and the guillemets. A key field takes the straight one; prose arrives typeset. */
 const DOUBLE_QUOTES = /[“”„‟″ʺ«»]/g;
 /** Combining marks — the signal that a string may be decomposed (NFD). Guarding the NFC pass on this
- *  makes it free where it is not needed: the test measures 0.000 ms on a 15 KB window with no marks,
- *  against 0.019 ms to compose unconditionally. It only costs when it has something to do. */
+ *  makes it free where it is not needed: it only costs when it has something to do. */
 const COMBINING = /[̀-ͯ᪰-᫿᷀-᷿⃐-⃿︠-︯]/;
 
 /**
@@ -24,12 +23,11 @@ const COMBINING = /[̀-ͯ᪰-᫿᷀-᷿⃐-⃿︠-︯]/;
  *
  * WHY THIS EXISTS. A key written "Cap'n Joe" never matched prose written "Cap’n Joe", and nothing
  * surfaced it — the key simply never fired. Models emit typographic apostrophes constantly, so a key typed
- * with a straight one silently dies against chat as well as against entry text. Measured on real books:
- * 2 of 3 apostrophe-bearing keys in one, 2 of 84 in another, mismatched in BOTH directions.
+ * with a straight one silently dies against chat as well as against entry text. Real books carry
+ * apostrophe-form keys mismatched in BOTH directions (K10).
  *
- * The same argument covers every other form here, and the counts are larger. Over 512 MB of chat:
- * em-dash 729,692, curly doubles 93,065, curly singles 87,665, ellipsis 7,215, en-dash 2,230,
- * non-breaking space 57.
+ * The same argument covers every other form here, and the chat censuses show each of them live at far
+ * larger counts (K10).
  *
  * STRICTLY ORTHOGRAPHY, and that boundary is the whole point. None of these rewrites can destroy a
  * distinction anyone means, because nobody means anything different by a curly apostrophe. Anything
@@ -39,9 +37,9 @@ const COMBINING = /[̀-ͯ᪰-᫿᷀-᷿⃐-⃿︠-︯]/;
  *
  * NFC composition is the same argument in its purest form — "José" and "José" are one name in
  * two encodings, and the difference is invisible on screen, so a mismatch has nothing to surface it.
- * Measured absent from this corpus (0 non-NFC keys of 46,140, 0 in the chat), but it is included anyway
- * because the exposure is asymmetric: text pasted from another source or typed on another input method
- * arrives decomposed, and the guard above makes the check cost nothing when it is not needed.
+ * Measured absent from this corpus (K10), but it is included anyway because the exposure is asymmetric:
+ * text pasted from another source or typed on another input method arrives decomposed, and the guard
+ * above makes the check cost nothing when it is not needed.
  *
  * A character joins the quote classes if it is a typographic VARIANT of the ASCII form, and not if it
  * is FINER-GRAINED than it. A variant collapses nothing — „ and “ are the double quote, differently
@@ -50,9 +48,9 @@ const COMBINING = /[̀-ͯ᪰-᫿᷀-᷿⃐-⃿︠-︯]/;
  * the haystack where no key can ask for it back. So 《》 (titles) and 「」 (speech) stay out: they
  * partition what " collapses.
  *
- * NOT included, measured absent: zero-width characters (0), ligatures (0), U+2212 minus (0), fullwidth
- * forms (14,367 in chat but all punctuation — a key is a word, and the fullwidth comma is already a
- * non-word character, so it makes no difference to a match).
+ * NOT included, measured absent (K10): zero-width characters, ligatures, U+2212 minus; fullwidth forms
+ * occur in chat but only as punctuation — a key is a word, and the fullwidth comma is already a
+ * non-word character, so it makes no difference to a match.
  */
 export const normalizeOrthography = s => {
     s = String(s ?? '');

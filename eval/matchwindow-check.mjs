@@ -75,8 +75,8 @@ console.log('ok   matchWindow: scan is the old behaviour, narrower settings scop
 
 // The audit asks the runtime's question. A key whose terms never land in one paragraph will never
 // fire at that setting, so reporting it as attested would be the audit telling the author it works.
-// A LITERAL key is slice-invariant either way — measured over 8 books and 8,970 distinct keys on
-// disk, 0 change df and 0 change their occurrence total, because no literal spans a paragraph break.
+// A LITERAL key is slice-invariant either way — measured over the books on disk, no literal key's
+// df or occurrence total moves, because no literal spans a paragraph break (K5).
 {
     const { buildKeyPruneScan } = await import('../extension/keyword-audit.mjs');
     const opts = {

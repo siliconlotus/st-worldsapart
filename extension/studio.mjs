@@ -135,10 +135,10 @@ export async function lorebookStudio(preferredBook = null) {
     // toggle only decides what's REACHABLE.
     let cleanupShowAll = false;
     // CHAT EVIDENCE for the "not in entry text" flag. That flag measures the book's own prose, but keys fire
-    // against the CHAT — which is the whole ambiguity: on a hand-authored book ~90% of them are deliberate
+    // against the CHAT — which is the whole ambiguity: on a hand-authored book most of them are deliberate
     // aliases ("Toriel's House" for "Dreemurr Residence"), on a machine-written one most are stale scene
-    // detail. One Aho-Corasick pass settles it per key, so the cost is O(chat) and independent of key count
-    // (measured 254ms for 497 keys over 5473 messages; getContext().chat is already in memory).
+    // detail (K14). One Aho-Corasick pass settles it per key, so the cost is O(chat) and independent of
+    // key count (P2; getContext().chat is already in memory).
     //
     // Opt-in, because it is evidence the user asked for rather than a verdict the tool imposes — and because
     // a key with 0 hits still is not proven useless, only unproven. Survives a rescan; cleared on book change.
@@ -166,9 +166,9 @@ export async function lorebookStudio(preferredBook = null) {
     /**
      * The chat index, as cheaply as it can be had.
      *
-     * ST's /api/characters/chats reads every line of every chat to count messages and grab the last one
-     * — 1.28GB and 3.2s on a real corpus — even though a binding lives on line 0. The plugin route reads
-     * only that line (0.06s measured over the same 194 chats) and returns the bindings; card bindings
+     * ST's /api/characters/chats reads every line of every chat to count messages and grab the last one,
+     * even though a binding lives on line 0. The plugin route reads
+     * only that line — orders of magnitude cheaper (P1) — and returns the bindings; card bindings
      * come from the `characters` array, which is already in memory. Falls back to ST's endpoint when the
      * plugin is not deployed, which is correct and slow rather than unavailable.
      */
@@ -633,24 +633,23 @@ export async function lorebookStudio(preferredBook = null) {
     // bgDocs rides in the call, not in suggestOpts — that object is persisted to settings, and the
     // chat would go with it. No chat open = empty = book-only ranking, same as before.
     //
-    // The OPEN chat only, and the alternatives were measured rather than assumed. Pooling a
-    // character's other chats looks like a free win — on one book the share of candidates that
-    // never occur anywhere falls from 51% to 25% — and Aho-Corasick absorbs the size (0.28 s/MB, so
-    // 22 MB of pooled history costs ~7s against ~2.5s, linear, not quadratic in term count).
+    // The OPEN chat only, and the alternatives were measured rather than assumed (P2). Pooling a
+    // character's other chats looks like a free win, and Aho-Corasick absorbs the size — the pass is
+    // linear in pooled text, not quadratic in term count.
     //
     // By CHARACTER is simply wrong — too coarse. Two chats on one card here are entirely different
     // settings, so one story's vocabulary would vouch for the other's keys.
     //
     // By the chat's BOUND LOREBOOK is correct: chats declaring the same book are one story, and it
     // separates those two settings cleanly. Its VALUE, though, depends on how the book was managed,
-    // and both measured cases are real: on a book versioned heavily mid-story the pool collapsed to
-    // the open chat itself (5646 messages against 5598, 0.1pp), while on a cleanly bound one it
-    // picked up a genuine sibling branch (20045 against 16359, and 32.0% -> 28.2% of candidates
-    // never occurring) for a bit over 2x the build — 5.8s against 2.6s.
+    // and both cases are real: on a book versioned heavily mid-story the pool collapses to the open
+    // chat itself, while on a cleanly bound one it picks up a genuine sibling branch for a modest
+    // gain at roughly double the build time.
     //
     // So this is a cost call, not a correctness one: a multi-second synchronous rebuild every time
-    // the Studio opens is a worse trade than ~4pp of dead candidates. Worth revisiting if the build
-    // ever moves off the main thread, in which case bound-lorebook is the key to group on.
+    // the Studio opens is a worse trade than the few dead candidates pooling would trim. Worth
+    // revisiting if the build ever moves off the main thread, in which case bound-lorebook is the
+    // key to group on.
     const ensureSuggest = () => suggest ?? (suggest = buildKeySuggest(data,
         { ...suggestOpts, bgDocs: (getContext().chat ?? []).map(m => String(m?.mes ?? '')).filter(Boolean) }));
     const hasKey = (e, term) => Array.isArray(e.key) && e.key.some(k => String(k).toLowerCase().trim() === term.toLowerCase().trim());
@@ -1099,7 +1098,7 @@ export async function lorebookStudio(preferredBook = null) {
         h.append(selBox, chev, mode, title, ...(dupMark ? [dupMark] : []), pencil, meta);
         // Collapsed-line badge: how many keys the last scan flagged, so problems show without expanding.
         // Tinted by the most severe flag for glance-triage; unattested-only stays neutral, since it is
-        // low-signal (on a hand-authored book ~90% of those are deliberate aliases).
+        // low-signal (on a hand-authored book those are mostly deliberate aliases).
         // COUNTS PROBLEMS, NOT WARNINGS. Yellow is the 0.75x band — "probably not harming, your call" — and
         // green shorts cannot collide at all, so neither belongs in a number the eye reads as a defect count.
         // They still appear on expansion with their colour; only the headline excludes them.
@@ -1252,7 +1251,7 @@ export async function lorebookStudio(preferredBook = null) {
         // They gate the entry, so a broken one changes what fires, and nothing here used to show them
         // at all: the audit's only surface was a toast, which cannot say WHICH key on a book with two
         // of them. Rendered only when the entry has any — an empty gate row on every entry is clutter,
-        // and the population is 84 entries across 43 books.
+        // and entries carrying secondaries are rare (K12).
         //
         // ONLY the `unusable` verdict is painted. The rest of the audit asks whether a key is a good
         // TRIGGER — english-common, book-common, fragment, short — and a gate is not a trigger: a
@@ -2134,8 +2133,8 @@ export async function lorebookStudio(preferredBook = null) {
      *   chat-bound       chat_metadata.world_info, line 0 of the .jsonl. /api/characters/chats with
      *                    metadata:true returns it without transferring any chat body.
      *   character-bound  characters[i].data.extensions.world — already in memory, free.
-     *   global           selected_world_info, which means EVERY chat. Never pre-ticked: on a real corpus
-     *                    that is 190 chats and 1.2GB, and the individual files run 12-17MB.
+     *   global           selected_world_info, which means EVERY chat. Never pre-ticked: a globally-active
+     *                    book reaches every chat on the install, gigabytes on a real corpus (P1).
      *
      * Returns candidates with their size so the cost is visible before anything is fetched.
      */
@@ -2214,8 +2213,8 @@ export async function lorebookStudio(preferredBook = null) {
 
     const findBookChats = async () => {
         // Global books are listed in ST's settings, not in the lorebook file — the book itself has no idea.
-        // A globally-active book genuinely applies to every chat, so those are OFFERED but never pre-ticked:
-        // on a real corpus that is 190 chats and 1.2GB, and not everyone runs ST on localhost.
+        // A globally-active book genuinely applies to every chat, so those are OFFERED but never
+        // pre-ticked — that is every chat on the install, and not everyone runs ST on localhost.
         const isGlobal = (selected_world_info ?? []).includes(selected);
         const out = [];
         for (const c of await loadChatIndex()) {
@@ -2260,8 +2259,8 @@ export async function lorebookStudio(preferredBook = null) {
         const keys = bookKeys().filter(k => !k.startsWith('?') && !isRegexKey(k));
         if (!keys.length || !picked?.length) return null;
 
-        // PLUGIN FIRST: it scans the files where they already live and returns only counts, so a 1.2GB
-        // history never crosses the wire. The client-side path below is the fallback for an undeployed
+        // PLUGIN FIRST: it scans the files where they already live and returns only counts, so a
+        // multi-gigabyte history never crosses the wire. The client-side path below is the fallback for an undeployed
         // plugin — correct, just wasteful, which only matters off localhost.
         const onDisk = picked.filter(c => !c.open && c.avatar);
         if (runState.pluginAvailable && onDisk.length === picked.length) {
@@ -2306,7 +2305,7 @@ export async function lorebookStudio(preferredBook = null) {
     };
 
     /** Every chat BOUND to this book — the set worth scanning without being asked. Excludes chats that
-     *  only qualify because the book is globally active: that is 190 chats on a real corpus, which is
+     *  only qualify because the book is globally active: that is every chat on the install, which is
      *  what the picker is for. */
     const boundChats = async () => {
         let bound = (await findBookChats()).filter(c => c.bound);

@@ -1,7 +1,7 @@
 // gazetteerSource selects WHICH FIELDS the gazetteer reads (scene.mjs). It is the one place where an arm
 // can silently widen or narrow the BM25 term set without changing anything visible in a run's output, and
-// that failure has already cost this project one 74% BM25 error — so the field selection is asserted rather
-// than eyeballed. Tokenization is not re-derived here: every arm goes through buildGazetteer, so a change to
+// that failure has already cost this project one large BM25 inflation (R22) — so the field selection is
+// asserted rather than eyeballed. Tokenization is not re-derived here: every arm goes through buildGazetteer, so a change to
 // the fold moves all five together and this check stays about selection.
 import { loadScene, sceneParams } from './scene.mjs';
 import { eq } from './metrics.mjs';

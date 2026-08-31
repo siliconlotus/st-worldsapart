@@ -68,8 +68,8 @@ const byUid = book => new Map(Object.values(book ?? {}).map(e => [String(e.uid),
 // THE CONTRACT IS STAMPED ON THE JOB, and merge reads it from there rather than re-hashing the file.
 // A result records no rubric of its own, so a hash taken at merge time is the rubric in force WHEN THE
 // MERGE RAN, not the one the judge was given: re-merging a stale result directory after a rubric
-// correction relabelled 395 old-contract job files as if they had been graded under the new one, and
-// the appended history said so. The job is written and the judge dispatched in the same breath, so the
+// correction relabelled a whole run's old-contract job files as if they had been graded under the new
+// one, and the appended history said so (G9). The job is written and the judge dispatched in the same breath, so the
 // hash at build time is the only one that describes the grading.
 // One definition of what a contract IS and what it hashes to, shared with grade-local — see contract.mjs.
 // The block is archived under its hash, so a verdict's `scene-relevance@<hash>` resolves to text.
@@ -99,8 +99,8 @@ if (cmd === 'build') {
         // IDENTITY IS THE FILENAME, never `name` — two bundles can carry the same name and one pair does
         // (isekai-time-whore-frozen-2-msg3728 and its -null-book variant, the same scene under a different
         // book). Keyed on name, their jobs overwrite each other here and merge writes the survivor's rows
-        // into whichever file the name resolves to: measured, one row landed in a bundle whose books do not
-        // contain that book. `scene` stays the display label; `bundle` is what merge resolves.
+        // into whichever file the name resolves to: one row really did land in a bundle whose books do not
+        // contain that book (G9). `scene` stays the display label; `bundle` is what merge resolves.
         const base = bundleFile.replace(/\.json$/, '');
         const books = new Map(Object.entries(bundle.books ?? {}).map(([b, bk]) => [b, byUid(bk)]));
 
@@ -235,7 +235,7 @@ for (const jf of jobFiles) {
     // carry a verdict, and comparing the two IS the validation that the correction worked.
     //
     // `llmGrade` stays as the value IN FORCE so every existing reader (metrics.mjs `gradeValue`) is
-    // untouched and 9340 rows need no migration; `llmGrades` is the history, newest last, and the two
+    // untouched and existing rows need no migration; `llmGrades` is the history, newest last, and the two
     // are kept in step here. A row graded once has a one-element history, which is the same shape.
     const rater = raterOf(job, res);
     bySceneRows.get(target).push(...job.candidates.map(c => {

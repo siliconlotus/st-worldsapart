@@ -1,8 +1,9 @@
 // slice-bundles.mjs — cuts graded bundles down to a SHORTLIST of rows, so /wa-super-eval renders those
 // rows and nothing else.
 //
-// The reviewer draws its rows from `arms[].candidates`, and a sommers scene carries ~177 of them. Opening
-// 15 of those to adjudicate 45 rows is 1985 rows of hunting with no marker on the ones that matter, which
+// The reviewer draws its rows from `arms[].candidates`, and a scene carries far more of them than any
+// review touches (G10). Opening whole bundles to adjudicate a handful of rows is thousands of rows of
+// hunting with no marker on the ones that matter, which
 // is what a shortlist exists to avoid. Dropping the other candidates is the whole mechanism.
 //
 // ONE PACK FILE, not one file per scene: the reviewer reads a top-level ARRAY as one section per element,
@@ -12,8 +13,8 @@
 // records that name, and apply-review.mjs resolves it against eval-data and writes to the REAL bundle. The
 // pack is a disposable input to the picker, never a thing to keep.
 //
-// `books` are cut to the entries the kept rows name — they are all of the weight (2MB a scene against
-// 10KB of rows), and a section only ever renders text for its own rows. `grades` are copied whole, so the
+// `books` are cut to the entries the kept rows name — they are all of the weight,
+// and a section only ever renders text for its own rows. `grades` are copied whole, so the
 // reviewer still pre-fills with what the judges said.
 //
 // The shortlist is a JSON array of {bundle, book, uid}; anything else on the row (grader scores, notes)

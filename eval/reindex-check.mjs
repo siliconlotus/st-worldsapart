@@ -68,7 +68,7 @@ eq(typeof buildItems({ '7': V('7', 'alpha') }, CFG)[0].index, 'number', 'a strin
 // differently per owner and is stored twice, once per uid, by fresh and incremental syncs alike.
 // Collapsing them changes which entry owns a shared chunk; since entry pooling takes the max over an
 // entry's chunks, that moves the ranking and the elbow cut. A deduped rebuild reproduced every nDCG
-// figure of a live index and still cut 4 entries where production cut 8.
+// figure of a live index and still cut different entries than production did (P4).
 const shared = buildItems({ 1: V(1, 'same text'), 2: V(2, 'same text') }, CFG);
 eq(shared.length, 2, 'text shared by two entries is stored once PER ENTRY');
 eq(shared[0].hash !== shared[1].hash, true, 'the uid in the hash keeps the two copies distinct');

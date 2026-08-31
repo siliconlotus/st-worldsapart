@@ -363,7 +363,7 @@ console.log('ok   looksLikeFragment: fires on clause fragments, spares concrete 
 // --- cohesion subsumption + properness --------------------------------------------------------
 // At equal frequency the longer gram used to win outright, on the assumption that longer is more
 // specific. Specificity is worthless if the string never occurs: measured against a real chat, a
-// half of an INCOHESIVE tetragram out-fires the whole 96% of the time. So the longer gram now has
+// half of an INCOHESIVE tetragram almost always out-fires the whole (S7). So the longer gram now has
 // to be a unit — count(whole)/(count(halfA)+count(halfB)) >= 0.4 — or the contained gram wins.
 {
     const filler = n => Object.fromEntries([...Array(n)].map((_, i) => [20 + i,
@@ -502,8 +502,8 @@ console.log('ok   display takes the most-used capitalisation, counted book-wide'
 }
 console.log('ok   phrase budget counts content words; truncations do not outrank whole names');
 // A unit phrase swallows contained PHRASES but not a bare word — the word is a broader instrument
-// and often the form the chat actually uses ("Ashworth" 149 chat hits against 4 for "Evelyn
-// Ashworth"), so both are offered. A particle-led name is the exception: "Sacres" occurs only ever
+// and often the form the chat actually uses ("Ashworth" fires in chat where "Evelyn Ashworth"
+// barely does — S7), so both are offered. A particle-led name is the exception: "Sacres" occurs only ever
 // inside "de Sacres", and the particle is the structural tell.
 {
     const filler = n => Object.fromEntries([...Array(n)].map((_, i) => [20 + i,

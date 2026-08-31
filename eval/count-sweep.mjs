@@ -1,7 +1,7 @@
 // How should buildKeyPrompt ask for a count? The instruction turned out to be the largest lever
-// found so far — raising it moved agreement with the books' own keys from 0.152 to 0.337 on
-// gemma3:4b and 0.286 to 0.396 on gemma4:e4b (eval/count-vs-temp.mjs) — and its current wording,
-// "Output 5 to 10 keywords", has never been compared against any alternative.
+// found so far — raising it moved agreement with the books' own keys substantially on both models
+// tried (S1) — and its current wording, "Output 5 to 10 keywords", has never been compared against
+// any alternative.
 //
 // TWO HYPOTHESES, both from the author, both testable here:
 //   1. A model given a RANGE hugs the bottom of it. If so, "5 to 10" is really "5", and an open
@@ -16,7 +16,7 @@
 // seed) are byte-identical and buy nothing — the calls go to all 24 entries instead of to repeats of
 // 6, which is where the statistical power actually is. Every variant sees the same entries at the
 // same seed, so a difference between variants is the wording and nothing else. Local only: hosted
-// reasoning models ignore both seed and temperature (measured), so prompt work belongs here.
+// reasoning models ignore both seed and temperature (H1), so prompt work belongs here.
 //
 // Usage:  node count-sweep.mjs --model gemma3:4b [--seed 42] [--temp 1]
 import { readFileSync, writeFileSync, existsSync } from 'node:fs';

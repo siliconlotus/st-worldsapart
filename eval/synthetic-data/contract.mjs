@@ -7,7 +7,7 @@
 //
 // HASHED OVER WHAT IS SENT. The frontmatter is how Claude Code discovers an agent and is stripped before
 // the model sees it, so it is not part of the contract: hashing it made an edit to a `description` line
-// move both rubric hashes on 2026-08-21 while neither instruction block changed by a byte.
+// move both rubric hashes while neither instruction block changed by a byte (G9).
 //
 // CONTENT-ADDRESSED, SO WRITING IS IDEMPOTENT and the store is append-only in effect — a hash's content
 // cannot change, so a second pass under the same contract writes nothing. Committed, unlike eval-data:

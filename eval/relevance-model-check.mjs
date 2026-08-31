@@ -44,7 +44,7 @@ eq(idx.ndoc, 3, 'ndoc counts entries with content, not chunks and not blank entr
 eq(idx.names.has('B.3'), false, 'a contentless entry contributes no name set');
 
 // DISABLED ENTRIES ARE IN THE CORPUS. uid 2 is disabled and still raises maren's df to 2 — the decision
-// recorded in matcher-design.md, measured at F2 0.5160 against 0.5105 for excluding them.
+// recorded in matcher-design.md: excluding them measured worse (F27).
 eq(idx.df.get('maren'), 2, 'a disabled entry still contributes to df');
 eq(idx.df.get('brackenmoor'), 1, 'a name in one entry has df 1');
 
@@ -117,8 +117,8 @@ eq(threw, true, 'a model whose beta does not match its feature count throws');
 // trusted: a file emitted by an older harness carried ONE beta vector at a boundary the cutoff was not
 // chosen on, and nothing would have noticed at runtime.
 // ONE FIT PER EMBEDDING MODEL, keyed by relevance.mjs `modelKey`. Coefficients are fitted against one
-// embedder's cosines and do not transfer — measured, memory-tier cosine ran +0.3113 under bge-m3 and
-// +0.7460 under Qwen3-Embedding-8B — so the artifact is a map and the contract below has to hold for
+// embedder's cosines and measurably do not transfer across embedders (E14) — so the artifact is a map
+// and the contract below has to hold for
 // EVERY entry in it, not for whichever one a reader happens to open.
 const file = JSON.parse(fs.readFileSync(new URL('../extension/relevance-model-memory.json', import.meta.url), 'utf8'));
 eq(file.tier, 'memory', 'the shipped artifact is the memory tier');
@@ -190,8 +190,8 @@ eq(cutKept.length + cutOut.length, cutRows.length, 'every row is either kept or 
 // Shared by the harness's dropUnavailable and the runtime's setting, so the two cannot drift on what
 // "not yet written" means. THE BOUNDARY IS THE END: a summary exists once the messages it covers have
 // happened, so an entry spanning the turn could not be in the book either, and a start-only test keeps
-// every one of them — measured, 66 of 446 memory positives straddle their scene and rank first in 53%
-// of them against 7% for clean positives.
+// every one of them — measured, straddling positives are common and dominate the head of their
+// scenes where clean positives do not (F28).
 eq(postDates({ STMB_start: 90, STMB_end: 110 }, 100), true, 'an entry straddling the turn had not been written');
 eq(postDates({ STMB_start: 80, STMB_end: 100 }, 100), true, '...including one ending exactly at it, which needs the turn to have happened');
 eq(postDates({ STMB_start: 80, STMB_end: 99 }, 100), false, '...but not one that ends the message before');
@@ -202,5 +202,30 @@ eq(postDates({ STMB_start: 50 }, 100), false, '...and an earlier one does not');
 // that lost the field — the predicate cannot tell those apart and does not pretend to.
 eq(postDates({}, 100), false, 'an entry with no range is available, which is what a reference sheet is');
 eq(postDates({ STMB_start: 150 }, NaN), false, 'with no current position nothing is post-dated, so the filter is off rather than total');
+
+// ---- fitsNamed ---------------------------------------------------------------------------------
+//
+// Scores one scene through another model's coefficients. Its dangerous failure is silent — a name
+// resolving to nothing would report the fallback as the arm's result — so the contract is that it throws.
+const { fitsNamed, modelsFor } = await import('./scene.mjs');
+const { UNFITTED_FALLBACK } = await import('../extension/relevance.mjs');
+eq(fitsNamed('noCosine').memory.features.includes('cosine'), false, 'the noCosine fit carries no cosine feature');
+eq(fitsNamed('bge-m3').memory.features.includes('cosine'), true, '...where a model fit does');
+// SAME OBJECT AS THE PRODUCTION PATH for the model's own name, or the control arm in a fit screen would
+// not be a control: `fit=<own model>` has to reproduce the baseline exactly rather than merely closely.
+eq(fitsNamed('bge-m3').memory === modelsFor('bge-m3').memory, true, 'a name resolves to the same fit the embedding model does');
+// THE HARNESS REFUSES AN UNFITTED MODEL; PRODUCTION BORROWS. Asserted because the asymmetry reads as a
+// bug from either side, and "fixing" it in either direction is wrong.
+let unfittedThrew = false;
+try { modelsFor('no-such-embedder-anywhere'); } catch { unfittedThrew = true; }
+eq(unfittedThrew, true, 'the harness refuses an embedding model it has no fit for');
+eq(fitsNamed(UNFITTED_FALLBACK).memory === modelsFor(UNFITTED_FALLBACK).memory, true,
+    'the production fallback names a real fit in the shipped artifact');
+eq(fitsNamed(UNFITTED_FALLBACK).memory.features.includes('cosine'), true,
+    '...and it is cosine-bearing, since an unfitted model still has cosines');
+
+let unknownThrew = false;
+try { fitsNamed('no-such-model'); } catch { unknownThrew = true; }
+eq(unknownThrew, true, 'an unknown fit name throws rather than resolving to nothing');
 
 console.log('ok');

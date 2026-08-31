@@ -7,9 +7,8 @@ const { tmpdir } = await import('node:os');
 const { join } = await import('node:path');
 
 const ME = { user: 'f47ac10b-58cc-4372-a567-0e02b2c3d479', now: '2026-08-21' };
-// An llm rater is a MODEL and a RUBRIC, two fields — never one composed string. Measured: every Ollama
-// model name carries a `:` (`gemma4:31b-mlx`) and every MLX one is an HF repo id carrying a `/`, so no
-// printable separator is safe. The same finding that keeps `book` + `uid` apart.
+// An llm rater is a MODEL and a RUBRIC, two fields — never one composed string: real model names
+// leave no printable separator safe (G8). The same finding that keeps `book` + `uid` apart.
 const llm = g => [{ kind: 'llm', model: 'gemma4:31b-mlx', rubric: 'scene-relevance@abc', grade: g }];
 const humansIn = row => (row.grades ?? []).filter(v => v.kind === 'human');
 const llmsIn = row => (row.grades ?? []).filter(v => v.kind === 'llm');

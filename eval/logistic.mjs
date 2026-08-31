@@ -184,7 +184,7 @@ export function prCurve(scores, y, recalls = [0.5, 0.75, 0.9]) {
  * in-sample row is worth printing precisely so a near-zero ECE there is recognised as arithmetic
  * rather than read as evidence.
  *
- * QUANTILE BINS, NOT EQUAL WIDTH. Prevalence here is ~7%, so predictions pile up near zero: ten
+ * QUANTILE BINS, NOT EQUAL WIDTH. Prevalence here is low (F39), so predictions pile up near zero: ten
  * equal-width bins put nine rows in ten into the first and leave the upper tail — the only region a
  * bar is ever drawn in — with a handful of rows each, where the observed rate is noise. Equal-count
  * bins spend the same n on every point of the curve. The cost is that bin EDGES move between runs,
@@ -202,7 +202,7 @@ export function prCurve(scores, y, recalls = [0.5, 0.75, 0.9]) {
  * scatters around p by ~sqrt(p(1-p)/n) whatever the model does, so a PERFECTLY calibrated predictor
  * reports a positive ECE, and a smaller sample reports a larger one. Comparing two tiers of very
  * different size on raw ECE therefore reads sample size as miscalibration — which is not a hypothetical
- * here: the two tiers differ 25-fold in row count. `nullSamples` draws labels from the model's OWN
+ * here: the two tiers differ enormously in row count (F30). `nullSamples` draws labels from the model's OWN
  * probabilities and recomputes ECE, giving the value a well-calibrated model of this size and shape
  * would produce (`eceNull`) and the share of null draws at least as extreme (`eceP`). A parametric
  * bootstrap rather than a closed form because the bins are quantile-cut and tie-merged, so their sizes

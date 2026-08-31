@@ -4,7 +4,8 @@ Companion to `keyword-suggest-design.md`, which owns the *suggester*. This owns 
 key is written, how it is matched, and what WA does at each of the four stages.
 
 Rules only. The arguments that produced them are in the commit messages and the module headers; do not
-restate them here. A claim that was measured names its measurement — anything else is an assertion, and
+restate them here. A claim that was measured cites its
+register entry — `eval/eval-data/measured-claims.md`, by ID — anything else is an assertion, and
 saying so is not optional.
 
 Sections follow the four-stage model (`CLAUDE.md`), because conflating the stages has produced several
@@ -39,20 +40,16 @@ marks a punctuation-only term as deliberate. One rule to learn, not four. Quotin
 changes what it matches; quoting *across a space* does, turning a conjunction into a phrase.
 
 That last clause is the one authors get wrong, because an alternation of possessives READS as a phrase
-alternation and is not one. **Measured**, against the default paragraph window:
-
-```
-                                        Your husband   Your sister's    …a husband at this point.
-                                             Michael   husband Thomas   Your relationship…
-? ("your husband" | "my husband")                  1                0                        0
-? (your | my) husband                              2                2                        2
-```
+alternation and is not one. Take `? ("your husband" | "my husband")` against `? (your | my) husband`
+over three probes — "Your husband Michael", "Your sister's husband Thomas", and "…a husband at this
+point. Your relationship…". **Measured** against the default paragraph window (K1): the quoted form
+matches only the first, while the loose form matches all three — and outscores the phrase even on the
+genuine phrase match.
 
 The second is `(your OR my)` AND `husband`, co-occurring anywhere in the paragraph — a different claim
-from the phrase, and true of every line above. **An alternation is only as selective as its loosest
+from the phrase, and true of every probe above. **An alternation is only as selective as its loosest
 branch**: `Kyle's` is rare, `your` is not, so a group containing both is open on almost every paragraph
-and the conjunction collapses to bare `husband`. Two good branches do not save it, and the loose form
-scores 2 against the phrase's 1, so it also outranks a genuine phrase match.
+and the conjunction collapses to bare `husband`. Two good branches do not save it.
 
 The third reading is the one that is **ruled but not built**: `? ((your | my) husband)~3` constrains the
 group to a window (*Ruled, unimplemented*, below) and would separate "Your sister's husband Thomas" from
@@ -143,9 +140,8 @@ fragment, short — because the matching surface of `/sal(a|e)/` is its pattern 
 is written with. Without this a pattern has no oversight anywhere: the validator skips value checks on
 patterns by design, so `/\n/` firing on every multi-line message drew not one word from any tool.
 `registerKeys` skips regex keys, so they miss the Aho-Corasick batching and pay a compile and a scan
-per entry — **measured**, 100 regex keys × 300 entries × ~1KB is 9.8 ms when nothing matches and
-18.4 ms at 630,000 hits, against a Studio open already costing hundreds. V8 caches a compile by source,
-so caching them would recover ~5 ms and is not worth the code.
+per entry — **measured** cheap even at heavy load, against a Studio open already costing far more (K2).
+V8 caches a compile by source, so a compile cache would recover too little to be worth the code (K2).
 
 **Entry flags reach plain keys only. Ruled: a `?` or `/re/` key is self-describing.** `caseSensitive`
 and `matchWholeWords` are entry-level defaults for plain keys and do not reach inside a SmartKey or a
@@ -154,8 +150,8 @@ still matches `never`, and an author who wanted boundaries would have written `?
 
 The reason is expressiveness rather than symmetry: the grammar has `^` and `=` and no inverse of
 either, so an entry flag winning over an unflagged term would leave "insensitive here" and "substring
-here" unwritable. **Measured** against `countKey`: this is already what fires, since the `?` and `/re/`
-branches return before the flag arguments are read.
+here" unwritable. **Measured** against `countKey` (K3): this is already what fires, since the `?` and
+`/re/` branches return before the flag arguments are read.
 
 ### Proximity — `(…)~N`
 
@@ -233,7 +229,7 @@ strict      [\p{L}\p{N}\p{M}\-'’]     ...plus hyphen and both apostrophes
 **A DOUBLED hyphen is a boundary in both modes**, which strict's class alone does not say. The fold
 rewrites an em dash to `--` so `wait--no` matches `wait—no`; strict counts `-` as word-internal so
 `Sara-shaped` does not match `Sara`. Their product read an ordinary em dash as inside a word, costing
-`Sara— catch` and `Hey—Sara` — punctuation, not a compound, and four of the seven spacings prose uses.
+`Sara— catch` and `Hey—Sara` — punctuation, not a compound, and most of the dash spacings prose uses (K4).
 A single hyphen joins a compound; `--` is the ASCII spelling of the dash the fold just rewrote and is
 never inside a word. So the assertion is "the neighbour is not a word character, OR it is a doubled
 hyphen" — `boundaryBefore`/`boundaryAfter`, still zero-width, because the pattern counts under `g` and
@@ -279,8 +275,8 @@ degenerate one-segment array that reproduces the pre-setting behaviour exactly.
   At `scan` this is arithmetically identical to the unsegmented window, which `matchwindow-check` pins.
 - **Match sources and injects are each their own segment** — nothing may merge a character description
   onto the end of chat prose and let a conjunction span the seam. `segment()` is idempotent.
-- **Split, do not track positions.** **Measured** 1.01x for 8 segments against one join (200 patterns,
-  18KB, n=2000), so `scanAutomaton` keeps its counts-Map return and `plugin/automaton.mjs` never
+- **Split, do not track positions.** **Measured** as costing essentially nothing over one join (K5),
+  so `scanAutomaton` keeps its counts-Map return and `plugin/automaton.mjs` never
   changes — no redeploy, and no window where the browser and server halves disagree.
 - **The audit segments the same way**, so `unattested` means *not attested in any segment*. df still
   counts ENTRIES, not segments, or "how widely is this term used" would move with paragraph length.
@@ -310,8 +306,8 @@ intake in `selectAndActivate`.
 - **A capture freezes the STRIPPED text**, which is what determined the result. `intercept` still
   stashes the raw chat ahead of the enabled gate, so the core-comparison baseline is untouched.
 - **An unclosed tag runs to its parent's close, or to the end of the text.** Presets write these blocks
-  unclosed — **measured** on the chat this was built for: five `<internal_states>` opening tags across
-  ten messages and no closing one, each block ending where its message does. Reading an unclosed tag as
+  unclosed — **measured** on the chat this was built for (K6): the motivating block is opened message
+  after message and never closed, each block ending where its message does. Reading an unclosed tag as
   "removes nothing" made the setting a no-op on exactly the block it exists for.
 - **The parent is found by balance, not by parsing.** Scanning forward from the unclosed tag, the first
   close with no matching open inside the span belongs to an ancestor, so the element ends there. No DOM,
@@ -363,57 +359,46 @@ Keys are not in this ranking either.
 
 Everything else that used to gate here was removed against measurement, and `plugin/scoring.mjs`'s header
 is the record — read it before proposing any of it back. In short: `scoreThreshold` resolved to a p90
-quantile, a top-decile SELECTOR rather than a floor, and sat beside `bm25 > 0`, which admitted 99.9% of
-every book's indexed entries and so undid each of its exclusions; removing the threshold outright moved
-admission by 6 entries in 10,103 across 70 graded scenes and recovered no relevant entry. BM25 then had
+quantile, a top-decile SELECTOR rather than a floor, and sat beside `bm25 > 0`, which admitted nearly
+every indexed entry and so undid each of its exclusions; removing the threshold outright was measured a
+near no-op that recovered no relevant entry (R1). BM25 then had
 no admission left to serve, `retrievalMode` had no second signal to choose, and the entity filter — which
 produces BM25 query terms — had nothing here to spend them on.
 
-**What that concedes.** A strict cosine gate loses 110 of 672 graded-relevant entries (measured, 70
-scenes): chunks below the corpus mean in embedding space that carry the query's exact terms, which
+**What that concedes.** A strict cosine gate would lose a real share of graded-relevant entries (R2):
+chunks below the corpus mean in embedding space that carry the query's exact terms, which
 mean-centering is what puts there. Stage 1 no longer applies such a gate, so the loss is not live — but
 `admitCeiling` overflow is now chosen on cosine alone, which is the same population. The ceiling is 1000
-entries and the largest book measured holds 208 vectorized ones. **If a book approaches the ceiling, this
+entries and no measured book comes near it (R4). **If a book approaches the ceiling, this
 is the decision to revisit first.**
 
 `admitCeiling` (`plugin/scoring.mjs`, beside `poolEntries`) bounds how much a pathological scene may feed
 stage 3 rather than judging any entry, and is path-dependent because topK counts a different thing on
 each path: the plugin pools to one record per entry before `selectTopK`, so K counts ENTRIES (1000); the
-NO-PLUGIN PATH does not pool, so K counts CHUNKS (10000, holding the 9.1-10.3 chunks/entry ratio).
-`queryCollections` chooses per path, since the no-plugin path can fire mid-request. It was 100/300 and
-that bound *did* bind — below two of seven books here, costing 23 of 672 graded-relevant entries on 20
-scenes. **A ceiling that binds on an ordinary scene is a cut, not a limit.**
+NO-PLUGIN PATH does not pool, so K counts CHUNKS (10000, sized to the measured chunks-per-entry
+ratio (R5)). `queryCollections` chooses per path, since the no-plugin path can fire mid-request. The old,
+far lower ceiling *did* bind — below some of the books here, costing graded-relevant entries on routine
+scenes (R3). **A ceiling that binds on an ordinary scene is a cut, not a limit.**
 
 **The NO-PLUGIN PATH** (ST's own `/api/vector`, taken when the WA plugin is absent or errors) does not
 mean-centre and does not pool server-side. It has never had BM25, and since stage 1 no longer does
 either, that has stopped being a difference between the paths. Neither path passes a threshold now.
 
 **Neither side of the comparison is summarized.** The query is the raw recent messages and an entry is
-its whole content. **Measured**, n=106 graded scenes, paired against each scene's own baseline, F2 over
-the delivered set, one local summarizer at temperature 0:
-
-| what was summarized | mean ΔF2 |
-| --- | --- |
-| the query, entity filter off | -0.021, p=0.028 (fails Holm over the two query arms) |
-| the query, entity filter kept | -0.014 |
-| every entry over one chunk | **-0.094**, p<0.001 |
-
-Condensing an entry keeps enough to find it and not enough to tell it from its neighbours. The entries
-arm lost at a MATCHED window as well (@R, mean -0.107), so that loss is in the ordering and not only in
-what the cut admits. It costs more on the corpus side than on the query side, since one query is compared
-against every entry at once.
+its whole content. **Measured** (R11): summarizing the query costs a little and summarizing the entries
+costs a lot, at a matched window as well as on the delivered set — so the loss is in the ordering and
+not only in what the cut admits. Condensing an entry keeps enough to find it and not enough to tell it
+from its neighbours, and it costs more on the corpus side than on the query side, since one query is
+compared against every entry at once.
 
 **Summarizing the entries also decalibrates the fit**, which is a separate effect from the ranking loss
 and larger: shortening every entry raises BM25 and `density`, inflating `E[credit]` against a fit trained
-on full entries, so the cut admitted 44% more rows.
-
-Caveats: one summarizer and one prompt per side, and the entry prompt was new rather than shipped. The
-effective n is nearer the 3 stories than the 106 scenes.
+on full entries, so the cut admits substantially more rows (R11).
 
 **The gazetteer reads the AUTHORED vocabulary** — see *Stage 2* for why that has to be deliberate rather
 than inherited from the scan's blanking. It is a TERM count, not an entry count, and no admission effect
-at all since stage 1 admits every candidate it scores; the 74% BM25 inflation the old figure carried was
-stage-1 BM25 and is retired with it. It still moves content-lexical's scores at STAGE 3, where the filter
+at all since stage 1 admits every candidate it scores; the BM25-inflation figure the old rule carried was
+stage-1 BM25 and is retired with it (R22). It still moves content-lexical's scores at STAGE 3, where the filter
 now lives, so `eval/scene.mjs` reproduces production for that reason instead.
 
 ---
@@ -654,6 +639,11 @@ on restores the author's own operator.
 retrieval stored, keyword score is computed over the scan window, and the fitted model produces the
 **layout order** — the quantity stage 4 cuts on, and which stage 5's caps then take a prefix of.
 
+**Which fit, when the model has none.** A model with no fit of its own is scored through
+`UNFITTED_FALLBACK` (`relevance.mjs`); `noCosine` is for a turn with no cosine AT ALL — the no-plugin
+path or a retrieval outage. **The harness refuses where production borrows**, because production has
+nobody to ask and a harness is told its embedder. Measured (E13), and inside that corpus's noise floor.
+
 **A key's score is the sum over the things it is about.** `AND` joins distinct things and their scores
 add; `OR` names one thing several ways and its mentions pool into one saturation; a weight multiplies
 its unit rather than feeding the curve. `SMARTKEYS.md` is the grammar. What matters here is that the
@@ -661,7 +651,7 @@ UNIT is the saturation boundary and not the key: saturating a key as a whole wou
 expression outscore its own left operand, and would hand a synonym group a separate budget per
 spelling — breadth the author does not have. Weight outside the curve is the other half of the same
 rule: the curve is concave, so a weight fed INTO it arrives as less than the author wrote, and by an
-amount that moves with the curve — `::2` would land at 1.61x. Outside it, `::2` is 2x whatever the
+amount that moves with the curve (K8). Outside it, `::2` is 2x whatever the
 curve is set to, which is what makes the weight the author's and the saturation WA's.
 
 **A hit reports a count and a score, and they answer different questions.** `count` is how many times
@@ -675,12 +665,11 @@ expression size, so `? fire::3` on one mention is indistinguishable from `fire` 
 `R` 1. `bm25K1` is the RATE repeats accrue at and the curve is the SHAPE; one knob could express
 neither alone, which is why they are two settings.
 
-**A bounded curve stops discriminating, and that is a property of the curve.** Above roughly n=20 its
-entire remaining range is a few percent: `count/(count+k1)` moves 0.041 between n=21 and n=89, and a
-bounded presence form moves 0.043 — so two keys with four times the evidence between them score the
-same, and the curve has stopped ordering entries by how much the text says. Unbounded, the same pair is
-3.872 against 5.309. Whether a given book ever reaches that range is a property of the book; that the
-curve goes deaf when it does is not.
+**A bounded curve stops discriminating, and that is a property of the curve.** Above a modest count its
+entire remaining range is a few percent, so two keys with several times the evidence between them score
+the same, and the curve has stopped ordering entries by how much the text says — where the unbounded
+form keeps them apart (K8). Whether a given book ever reaches that range is a property of the book; that
+the curve goes deaf when it does is not.
 
 **No frequency discount accompanies this, deliberately.** A ubiquitous key is an author declaration —
 `keyword-audit.mjs` exempts entries carrying one from the too-common flags on that ground — a badly
@@ -697,8 +686,8 @@ The two were one thing before `promote` separated them, and the exemption stayed
 kept the name.
 
 So sticky is audited like any other entry: the whole English list rather than the head-of-list cut, and
-no book-common reprieve. **Measured** across 43 books: 2 SmartKeys on sticky entries are hidden by the
-head cut and 23 book-common flags by the reprieve — small, and both of the SmartKeys are keys their
+no book-common reprieve. **Measured** across the books on disk (K12): the exemption hides only a handful
+of flags, and the SmartKeys among them are keys their
 author had already judged bad by eye. The exemption lands with `promote`, since until then a
 declaration has nowhere to live and the main-cast-name-on-a-sticky-sheet pattern would flag with no way
 to say it was meant.
@@ -717,7 +706,7 @@ admit one — stage 1 already did.
 injects plus opted-in match sources, and never the recursion buffer, so an entry whose key matched
 another entry's CONTENT is scored against text where that key does not appear. It scores `keys: 0`,
 sorts to the bottom, and the budget drops it first — and the budget binds on every graded scene
-measured. **Ruled: stage 3 scores the recursion buffer**, via the existing `matcher.withExtraTexts` on
+measured (F4). **Ruled: stage 3 scores the recursion buffer**, via the existing `matcher.withExtraTexts` on
 the same `runState.waRecursionTexts`, so this closes with one call rather than a second code path.
 Recursion contents are per-entry strings and become their own segments, the rule match sources and
 injects already follow.
@@ -747,8 +736,8 @@ row the model could not score is kept: an absent verdict, not a negative one. It
 only; constants and armed stickies reach `walkOrder` directly and are never scored for relevance.
 
 The cutoff is a setting, one value for every embedding model. `E[credit]` is calibrated, so how many rows
-clear a given value is a property of the corpus rather than the embedder — **measured**, at 0.10 eight
-fits deliver between 13.2 and 14.2 entries.
+clear a given value is a property of the corpus rather than the embedder — **measured** (E4): at one
+cutoff, every fitted embedder delivers essentially the same count.
 
 **Stage 5 — the entry maxes and the token budget** then decide how much of what survived actually fits.
 Neither is a relevance judgement: a row they remove cleared the cut and lost to space, which is why they
@@ -849,8 +838,8 @@ existed has not declined to use them.
 haystack exists independently of whether anyone has written the key yet.
 
 **Chat-based measurement uses the standard corpus** listed in `eval/eval-data/README.md`, counting
-usable messages rather than raw lines. Book-only measurements are not so limited: 40 books are
-available, 19 with no chat at all. Say which population a two-part finding rests on; the chat half
+usable messages rather than raw lines. Book-only measurements are not so limited: far more books are
+available than have any chat (C2). Say which population a two-part finding rests on; the chat half
 cannot be widened by adding books.
 
 **A key existing in a book is not evidence that it is a good key**, and which books are curated is not
@@ -915,12 +904,10 @@ this ordering can beat it. **In the ideal case the two coincide** — a layout c
 relevant entries makes `@R` and `@layout` the same set — and the gap between them is the cardinality
 error.
 
-**Measured, and it is why stage 4's relevance decision comes before any layout tuning:** with no
-relevance cut, F2@layout is EXACTLY invariant to the layout. 5 arms over 4 parameter families (LEXW,
-KEYW, K1, gazetteer source), 3 scenes, every per-scene delta 0.0000 — because the delivered set is
-everything activated, and no ranking parameter changes set membership. The level is F2 ~0.25: precision
-0.064-0.104 with recall 1.000. Read `@R` on the same scenes and arms and it moves, which is the
-diagnostic doing its job and not evidence about the set.
+**Measured (F2), and it is why stage 4's relevance decision comes before any layout tuning:** with no
+relevance cut, F2@layout is EXACTLY invariant to the layout — because the delivered set is
+everything activated, and no ranking parameter changes set membership. Read `@R` on the same scenes and
+arms and it moves, which is the diagnostic doing its job and not evidence about the set.
 
 **nDCG is a DIAGNOSTIC, not an evaluation score.** It asks whether the ordering puts the good material
 at the top. The evaluation score asks whether the system delivers the right set. A reordering inside the
@@ -942,11 +929,10 @@ must-deliver material arrive. Precision credits a 3 or 4 in full and a 2 at HALF
 denominator (`metrics.mjs` `gradeCredit`): a 2 is "weakly relevant, 50/50 on inclusion", so the grader
 declined to call it and the metric must not call it either. Full credit made padding with ambiguous
 entries raise the score; dropping 2s from the denominator instead let a configuration shrink what it is
-judged on by delivering ambiguity. **Measured**, one scene, contrasting two HARD bars rather than the
-shipped half-credit: P@>=3 0.542 against P@>=2 0.708, F1 0.703 against 0.829; the arm ORDERING barely
-moves, so comparative findings survive but the absolute level does not. **Measured**, 73 scenes: under the symmetric bar F1 ranked the shallow cuts on top and the
-ordering inverted at F4 — under the asymmetric bar depth wins at every beta and the inversion
-disappears.
+judged on by delivering ambiguity. **Measured** (F3): moving the bar moves the absolute level while the
+arm ORDERING barely moves, so comparative findings survive and absolute levels do not; and under the
+symmetric bar the shallow cuts ranked on top with the ordering inverting as beta rose, where the
+asymmetric bar keeps depth winning at every beta.
 
 **What this unblocks**: what the relevance cut should BE — the cliff was removed rather than retuned, so
 this is now a design question and not a parameter sweep — what `maxVectorEntries` should default to, and
@@ -955,14 +941,14 @@ grades stage 4.
 
 **The offline half exists.** `/wa-grade` records the pre-budget population with per-row `tokens`, `cut`
 and `cutBy`, plus the tokenizer, so `applyBudget` replays offline at any budget — verified exact
-against the runtime's own verdicts on 315 rows across 7 arms.
+against the runtime's own verdicts (F4).
 
 ### Stage 4 predicts per-entry relevance
 
 **Shipped.** Regression was measured to be no worse than RRF + nDCG and was chosen for
-explainability. Unless a paragraph says otherwise, everything below is measured by
-`eval/relevance-regress.mjs` on the memory tier, 102 graded scenes, 6051 judged rows and 379 positives on
-5 books, held out by book — the corpus with entries that STRADDLE their scene removed (`dropUnavailable`).
+explainability (F1). Unless a paragraph says otherwise, everything below is measured by
+`eval/relevance-regress.mjs` on the corpus of record, held out by book (see the register's corpus-states
+table) — the corpus with entries that STRADDLE their scene removed (`dropUnavailable`).
 
 **LOGISTIC regression**, on the project's own relevance line (grade >= 3). Linear would put predictions
 outside [0,1] on a bounded target and would weight a 0-vs-1 error the same as a 0.4-vs-0.5 one. Each
@@ -972,42 +958,37 @@ entry gets p, and ships if it clears the cutoff.
 scene with three relevant entries delivers three, so that "how many" took no parameter of its own. The
 design cannot do that: the signals are standardised WITHIN THE SCENE, so `E[credit]` encodes a row's
 position among its neighbours and carries nothing about how much relevant material exists. A fixed
-threshold on it is a quantile wearing a probability's clothes. **Measured**, 100 scenes at the shipped
-memory cutoff: mean delivered share is 23.2% / 21.6% / 20.4% / 21.0% across scenes of under 40, 40-80,
-80-150 and over 150 candidates, and delivered count correlates with CANDIDATE count at r 0.946. One
-Time Whore turn offered 208 activated memory entries and passed 51 — though that capture is a FROZEN
-scene whose book has since grown, so 105 of its 213 rows post-date the turn and a live playthrough at
-that point would have offered about 108 and passed about 23. The share is what generalises; the count
-from a frozen capture is roughly doubled.
+threshold on it is a quantile wearing a probability's clothes. **Measured** (F24): delivered share is
+nearly constant across scene sizes, and delivered count tracks CANDIDATE count almost exactly. The
+share is what generalises; a count read off a FROZEN capture overstates a live playthrough, since rows
+post-dating the turn inflate its pool.
 
-**WHAT THE COUNT DOES TRACK IS DISTRIBUTION SHAPE, AND THE SIGN IS BACKWARDS.** **Measured**, 100
-scenes at the shipped memory cutoff, delivered share mean 22.0% (sd 5.8 points): it correlates with the
-SKEW of the signals — text -0.584, properNouns -0.509, `E[credit]` itself -0.486 — and with the scene's
-relevant share at only 0.150. So a scene where one or two entries stand out sharply delivers FEWER, and
+**WHAT THE COUNT DOES TRACK IS DISTRIBUTION SHAPE, AND THE SIGN IS BACKWARDS.** **Measured** (F24): the
+share correlates with the SKEW of the signals and barely at all with the scene's
+relevant share. So a scene where one or two entries stand out sharply delivers FEWER, and
 a scene where everything looks alike delivers MORE, which is the opposite of what either should do. The
 mechanism is the z-score: a long right tail inflates the scene's sd and compresses every z, while a flat
 distribution has a small sd and standardisation manufactures spread out of noise. It is also why a large
 scene over-delivers — more candidates put more mass in the middle and flatten the relative shape.
 
-**IN THE EXTREMES IT IS ONE THING: WHETHER THE SCENE HAS A STANDOUT.** The MEDIAN `E[credit]` is ~0.03
-in every scene measured; what moves is the top. **Measured**, the eight lowest-delivering scenes carry a
-maximum of 0.70-0.98 and the eight highest carry 0.16-0.41. Richard supplies a controlled comparison,
-five scenes at exactly 15 candidates each: maxima 0.747 and 0.695 deliver ONE entry, maxima 0.265, 0.186
-and 0.160 deliver FIVE. Same book, same count, fivefold difference, and the only thing separating them
-is whether a confident match exists. **The model delivers most where it is least confident**, and against
-need in both directions — a Time Whore scene with 3 relevant of 155 delivers 14, while the corpus's
-densest scene (Foxbridge, 9 relevant of 13) delivers 5.
+**IN THE EXTREMES IT IS ONE THING: WHETHER THE SCENE HAS A STANDOUT.** The MEDIAN `E[credit]` sits low
+in every scene measured; what moves is the top. **Measured** (F24): the lowest-delivering scenes carry
+the highest maxima and the highest-delivering the lowest, and Richard supplies a controlled comparison —
+same book, same candidate count, severalfold difference in delivered entries, and the only thing
+separating them is whether a confident match exists. **The model delivers most where it is least
+confident**, and against need in both directions — a sparse scene over-delivers while the corpus's
+densest scene is short-changed (F24).
 
 **PER-BOOK STANDARDISATION REVERSES THE PATHOLOGY, and is the only thing measured that does.**
 `--standardise book` pools every scene of a book for the mean and sd, so no single row can move the
-scale. **Measured**, memory tier held out by book, 94 scenes, against the per-scene design: the
-share-versus-scene-maximum correlation goes -0.158 -> **+0.486** (a confident scene now delivers MORE),
-size-dependence 0.928 -> 0.652, spread of delivered share 7.1 -> 11.9 points, mean delivered 17.8 -> 9.4.
+scale. **Measured** against the per-scene design (F25): the
+share-versus-scene-maximum correlation flips positive (a confident scene now delivers MORE),
+size-dependence falls, the spread of delivered share widens, and the mean delivered count roughly halves.
 A count that falls out of the prediction has to VARY, and under per-scene it barely did.
 
-**It loses on the score of record and that cannot settle it.** F2 0.5102 -> 0.4671, with held-out AUC
-0.8076 against 0.8198, so the ordering is genuinely a little worse. `--beta 1.5` halves the gap (0.4594
-against 0.4396), which localises most of it to the smaller delivered set rather than to worse ordering —
+**It loses on the score of record and that cannot settle it.** F2 and held-out AUC both slip, so the
+ordering is genuinely a little worse; a recall-heavier beta halves the gap, which localises most of it
+to the smaller delivered set rather than to worse ordering (F25) —
 but no beta closes it, and none can: F-beta scores one scene's delivered set and averages over scenes, so
 it is blind by construction to whether the COUNT is calibrated ACROSS scenes, which is the whole of what
 per-book buys. Deciding this needs a token-aware score, which does not exist here; per-book halves the
@@ -1023,20 +1004,19 @@ book's behaviour in THIS story is known yet.
 
 **A SCENE-LEVEL COVARIATE CANNOT FIX IT, because candidate count is not a property of the scene.**
 Stage 1 admits every vectorized entry, so the count is the book's size minus whatever post-dates the
-turn, plus a handful of keyword hits. **Measured**, within each book, r between message index and
-candidate count: Ascensus 0.964, Sommers 0.940, Time Whore 0.988, Richard 0.660 — it is how far into
-the story the turn sits, and across books it is 57% book identity. In a live chat it grows by about one
-per summarised scene and is otherwise flat, so it cannot tell a turn needing three entries from one
-needing fifteen. The corpus-level correlation between candidate count and relevant SHARE (r -0.422)
-is those two things and not a signal any turn could act on.
+turn, plus a handful of keyword hits. **Measured** (F26): within a book, candidate count is almost
+entirely how far into the story the turn sits, and across books it is mostly book identity. In a live
+chat it grows by about one per summarised scene and is otherwise flat, so it cannot tell a turn needing
+three entries from one needing fifteen. The corpus-level correlation between candidate count and
+relevant SHARE is those two things and not a signal any turn could act on (F26).
 
 **So the count can only come from the per-entry scores**, which is what makes the standardisation the
 thing to change rather than something to compensate for. Raw signal LEVEL does not carry it either:
-mean text against relevant COUNT reads r 0.367 but against relevant SHARE r 0.010 — a hotter scene
+mean text tracks relevant COUNT and not relevant SHARE (F26) — a hotter scene
 holds more because it is larger, not because it is denser.
 
-**The macro-average hides it, which is why it survived the fit.** F2 is averaged over scenes, so 40
-small scenes delivering 4.6 outvote 17 large ones delivering 38.7 and the corpus mean reads 16.4. The
+**The macro-average hides it, which is why it survived the fit.** F2 is averaged over scenes, so the
+many small scenes outvote the few large ones and the corpus mean reads unremarkably (F24). The
 scenes that dominate the token bill are exactly the ones the average buries — and on a large book the
 stage-5 token budget is still doing the real selecting, which makes stage 4's relevance decision decorative
 there.
@@ -1053,28 +1033,25 @@ diluted among hundreds of ordinary words.
 detection signal and it is preserved: `normalizeOrthography` is the fold MINUS its case half, and a token
 enters the set only where it appears capitalised somewhere that is not sentence-initial — so a window
 saying "apple" the fruit never joins, and cannot match an entry's "Apple". Only the stored key is
-lowercased, after detection. **Measured** against the private ASCII regex this feature was found with,
-paired over 88 scenes: F2 0.5443 -> 0.5476, 47 scenes up against 17 with 24 tied, p 0.0002, and the
-validation fold's AP 0.873 -> 0.883. It is also the reading that removes the second implementation.
+lowercased, after detection. **Measured** (F7): the `entity` extractor beats the private ASCII regex
+this feature was found with, on the paired scenes and on the validation fold alike. It is also the
+reading that removes the second implementation.
 
 **MULTI-TOKEN SPANS ADD NOTHING.** The span arm builds runs on the same name detection: particles join
 only BETWEEN name tokens and a trailing one is trimmed ("Church of the Sun", "Maren's Gap",
 "van der Berg"), `and` is excluded because it joins entities rather than living inside one, and a run
 contributes itself plus only those tokens the text also attests standalone — `gap` is a common noun
-capitalised because it sits inside a name. **Measured**, `--sweep properNounsExtract=entity,span` over
-105 bundles (102 scored scenes), held out by book, both arms at the 0.10 cutoff: per-scene F2 -0.0019
-(18 up / 28 down / 48 tied, p 0.184), 2 books up of 5, model AUC identical to the third decimal, and the
-signal alone is WEAKER (std beta 0.325 -> 0.247, solo AUC 0.755 -> 0.739). So a name is a TOKEN, and the
+capitalised because it sits inside a name. **Measured** (F8): the span arm is flat on the score of
+record, leaves the model unmoved held out, and the signal alone is WEAKER. So a name is a TOKEN, and the
 phrase adds no evidence beside it.
 
 **BOTH FITTED NAME COLUMNS KEEP THEIR SHIPPED DETECTOR, measured no better under the corpus test.**
 Four cells vary the detector on the same design as the span arm. The overlap column is insensitive
-(below). `density` under the corpus test (`--density-extract book`) reads slightly worse — std beta
-0.221 -> 0.169 solo (-> 0.139 in the full swap, part of which is shared-detector collinearity), solo
-AUC 0.556 -> 0.543, per-scene F2 flat (p 1.000 / 0.896) — a decline small enough to sit inside the
+(below). `density` under the corpus test (`--density-extract book`) reads slightly worse (F9) — a
+decline small enough to sit inside the
 noise floor at this corpus size. **RETEST when the graded corpus grows**; until then the shipped
 detector stands on parsimony — no cell shows a gain — not on the decline being real. It survives
-dropping Richard's 25 scenes (solo AUC -0.014 over the remaining 4 books), so if real it is the
+dropping Richard's scenes (F9), so if real it is the
 detector, not one book.
 
 What is exact rather than statistical: the corpus test certifies Richard's summary-template tokens as
@@ -1086,106 +1063,97 @@ cell left is a span arm on the `book` detector, which nothing now motivates.
 `--proper-nouns-extract book` replaces `properNounsOf`'s per-text sentence-position rule with the
 suggester's corpus name test (`keyword-suggest.mjs` `nameEvidence`, one properness test for both
 consumers), fed the scene's entries: every capitalised token is arbitrated by how the BOOK writes the
-word, sentence-initial included, with no `COMMON_WORDS` subtraction anywhere in the arm. **Measured**:
-per-scene F2 +0.0102 (30 up / 24 down / 40 tied, p 0.497), 3 books up of 5 (p 1.000), model AUC +0.002,
-signal std beta +0.325 -> +0.345 with solo AUC 0.755 -> 0.749.
+word, sentence-initial included, with no `COMMON_WORDS` subtraction anywhere in the arm. **Measured**
+flat (F9).
 
 `--proper-nouns-extract named` is the SURGICAL contrast for "the stoplist deletes character names from
 the overlap": the shipped extraction exactly, except `COMMON_WORDS` spares a word the book's own
 statistics attest as a name — `richard`, `frank`, `mike` and the other stoplisted names come back, and
-nothing else changes. **Measured**: per-scene F2 -0.0001 (10 up / 13 down / 71 tied, p 0.678), every
-per-book delta within 0.001, model AUC +0.0002, signal std beta +0.325 -> +0.317 with solo AUC
-0.755 -> 0.758. The restored names are mostly high-df, so the idf weighting had already priced their
-absence at near zero.
+nothing else changes. **Measured** flat, every per-book delta negligible (F9). The restored names are
+mostly high-df, so the idf weighting had already priced their absence at near zero.
 
-Restricting to the GAZETTEER loses too, 15 up against 44 (p 0.0002): the signal is a rare name shared
+Restricting to the GAZETTEER loses outright too (F6): the signal is a rare name shared
 with what is on screen, not an author-declared one.
 
 **IDF-WEIGHTED, and the weighting is what makes it work.** A shared name is worth `log((N+1)/(df+1))`
 with the ENTRY as the document and the primary book as the corpus — the same one-index principle
 `content-lexical` rests on — so a protagonist named in every scene summary counts for almost nothing and
-a name two entries share counts for a lot. **Measured**, memory tier, held out by book, against the
-unweighted count: 45 scenes up against 14 with 9 tied, p 0.0001. Jaccard is WORSE than the count (27 up
-against 33) and restricting to the gazetteer loses outright (above), so neither the
-normalisation nor the vocabulary restriction is what matters — the term weighting is.
+a name two entries share counts for a lot. **Measured** (F6): idf clearly beats the
+unweighted count, Jaccard is WORSE than the count, and restricting to the gazetteer loses outright
+(above) — so neither the
+normalisation nor the vocabulary restriction is what matters; the term weighting is.
 
 **THE df CORPUS IS EVERY ENTRY IN THE BOOK, DISABLED INCLUDED**, and that is a decision rather than an
 oversight. df asks how DISTINCTIVE a name is in the book's vocabulary, which a disabled entry still
 contributes to; `buildContentIndex` excludes disabled entries beside it because it is asking a different
 question, what can be RETRIEVED. Parity does not decide this — the entries are in the book, so the
-runtime can compute it either way — and the measurement does. **Measured**, memory tier, held out by
-book, excluding them: F2 0.5160 -> 0.5105 with each arm at its own cutoff, 7 scenes up against 53 with
-34 tied, and **4 books down of 5** (Ascensus -0.019, Sommers -0.023, Time Whore -0.016, Panopticon
--0.017, against Richard +0.053 on 2 up / 3 down). Not a marginal population either: the fitted books run
-15-39% disabled. An entry with no CONTENT is excluded, which is the separate question — it would raise
+runtime can compute it either way — and the measurement does. **Measured** (F27): excluding them costs
+the score of record with most books down, and disabled entries are not a marginal population in the
+fitted books. An entry with no CONTENT is excluded, which is the separate question — it would raise
 `ndoc` while contributing no df, inflating every name's idf by pretending the corpus is larger than the
-text in it. Measured no-op here (0 empty of 844 entries across 6 books), so it guards other people's
+text in it. Measured a no-op here (F27), so it guards other people's
 books rather than changing this fit.
 
-**Measured**, memory tier, held out by book, against the three shipped signals: +0.476 (SE 0.070) — the
-LARGEST coefficient in the model, ahead of text's +0.424 and cosine's +0.313 — at solo AUC 0.758 against
-text's 0.759 and cosine's 0.713. On the score of record: **F2 0.4801 -> 0.5010, paired 53 scenes up
-against 22 with 19 tied, p 0.0004**, with AUC 0.7805 -> 0.7915 and AP 0.325 -> 0.340. The first feature
+**Measured** (F5): the LARGEST coefficient in the model, ahead of text and cosine, and a clear win on
+the score of record — the first feature
 change to clear the line rather than approach it, and now the one the model leans on hardest.
 
-**It improves 6 of 7 folds** on the corpus it was found on; the one that falls holds 59 rows and 5
-positives. A Fenwood validation fold was graded for it and is NOT quotable: on `--tier memory` that book
-yields 20 rows and 9 positives, its 149 judged rows being almost entirely reference, so its AP moved on a
+**It improves nearly every fold** on the corpus it was found on; the one that falls is tiny (F5). A
+Fenwood validation fold was graded for it and is NOT quotable: on `--tier memory` that book
+yields almost no rows, its judged rows being almost entirely reference, so its AP moved on a
 population this model is not fitted for.
 
-**LENGTH IS EARNED BUT OVER-READ, which is what `length` was correcting.** **Measured**, 6107 graded
-rows: P(grade >= 3) rises 5.6% -> 6.3% -> 9.6% -> 13.0% across entry-length quartiles, so a long entry
+**LENGTH IS EARNED BUT OVER-READ, which is what `length` was correcting.** **Measured** (F10):
+P(grade >= 3) rises across entry-length quartiles, so a long entry
 genuinely is likelier to be relevant and preferring one is not an error. But the SIGNALS track length
-about three times harder than relevance does — r(log length, grade) 0.100 against r(log length, text)
-0.308, properNouns 0.284, cosine 0.349. Two mechanisms produce that: `text` and `cosine` pool MAX over
+severalfold harder than relevance does (F10). Two mechanisms produce that: `text` and `cosine` pool MAX over
 chunks, so a longer entry gets more draws, and `properNouns` is an un-normalised idf SUM, so a longer
 entry shares more names.
 
 **The score of record cannot see what that costs**, which is why dropping `length` reads as free: F2 is
-over the delivered SET with no token term, so a model that prefers 2000-token entries to 700-token ones
-scores the same either way. Under a budget it is not the same — measured on one turn, 25,083 tokens
-bought 13 entries averaging 1945 tokens against a population mean of 1385. What is NOT established is
+over the delivered SET with no token term, so a model that prefers long entries to short ones
+scores the same either way. Under a budget it is not the same — measured on one turn, the budget bought
+entries well above the population's mean length (F10). What is NOT established is
 that more smaller entries would be better: relevance-per-token assumes a currency the grades do not
-use, since a long entry graded 4 may be 2000 tokens genuinely about the scene.
+use, since a long entry graded 4 may genuinely be about the scene at full length.
 
 **Of the two ENTRY-INTRINSIC columns, `density` earns and `length` costs.** Neither reads the query —
 entry length (log tokens) and proper-noun density (names per 100 tokens, `relevance.properNounsOf`) are
-priors rather than signals. **Measured** over the full lattice on `properNouns`, `length` and `density`, held out by book: `length`
-costs wherever it sits — F2 0.4801 -> 0.4723 alone, -0.0094 mean given `properNouns`, -0.0069 given both
-on 12 scenes up against 53, and -0.5 precision points at matched 70% recall. `density` earns +0.0129 mean
-given `properNouns` (56 up against 21, p 0.0001) and **+2.8 precision points at matched recall**, so it is
+priors rather than signals. **Measured** over the full lattice on `properNouns`, `length` and `density`,
+held out by book (F11): `length`
+costs wherever it sits, in the fit and at matched recall alike; `density` earns given `properNouns`,
+and at matched recall it buys precision, so it is
 a better ordering rather than a looser cut.
 
-**The shipped model is cosine, text, keys, properNouns, density**: AUC 0.7989, AP 0.346, F2 0.5139
-delivering 17.5 entries against 4.0 relevant, against 0.7958 / 0.345 / 0.5070 at 20.0 with `length` added
-back. What `length`
-did was correct `properNouns`'s un-normalised COUNT — dropping `text` leaves it at -0.366 while dropping
-`properNouns` collapses it to -0.128 (SE 0.049) — and `keys` supplies enough of that correction to make
+**The shipped model is cosine, text, keys, properNouns, density** (F1), against a slightly worse and
+looser design with `length` added back (F11). What `length`
+did was correct `properNouns`'s un-normalised COUNT — its coefficient collapses once `properNouns` is
+out of the design (F11) — and `keys` supplies enough of that correction to make
 it cost more than it returns.
 
 **Measure against the RULED variant of a feature, not the harness default.** `--proper-nouns` defaulted
-to `count`, which the ruling three sections above rejects at p 0.0001, so a run that passed no flag
+to `count`, which the ruling three sections above rejects (F6), so a run that passed no flag
 measured a variant already discarded. It defaults to `idf` now. `--proper-nouns-extract` had the same
-defect and the same fix — it defaulted to `regex` against a ruling for `entity` at p 0.0002 — so the
+defect and the same fix — it defaulted to `regex` against a ruling for `entity` (F7) — so the
 shipped model is now what a run reproduces passing NEITHER flag, which is the property that makes the
 trap impossible rather than merely documented.
 
 **An entry's own relevance rate in its other scenes adds nothing**, which is what bounds any entry-level
-prior: `oracle` in `--features` reads grades the runtime cannot have and still fails, held out by book, raising
-AUC while losing the delivered set. A better ordering read at a looser cutoff is not a better chosen set.
+prior: `oracle` in `--features` reads grades the runtime cannot have and still fails, held out by book,
+raising AUC while losing the delivered set (F12). A better ordering read at a looser cutoff is not a better chosen set.
 
 **Nor does its embedding profile, which is the grade-FREE form of the same idea and the reason to record
 this one.** An entry that belongs somewhere should sit close to a few windows of its chat and far from
 the rest, and that is computable from the index and the chat alone — no grading pass, so it could have
-been an author-facing diagnostic. **Measured** on Sommers, 282 memory entries against 219 depth-10
-windows, mean-centred: peakedness `(max - median)/sd` reads AUC 0.517 against the author's own DISABLE
-calls and 0.612 against whether the entry ever earned a 3, neither surviving its controls. Height —
-the 95th-percentile centred cosine — reads 0.743 against disable and collapses to +0.070 (SE 0.224) once
+been an author-facing diagnostic. **Measured** (F12): peakedness `(max - median)/sd` reads near chance
+against the author's own DISABLE
+calls and against whether the entry ever earned a 3, neither surviving its controls. Height —
+the 95th-percentile centred cosine — reads well against disable and collapses once
 length and story position are in.
 
-**LENGTH IS WHAT BOTH LABELS ARE MOSTLY MADE OF**, at AUC 0.809 and 0.724, with opposite signs that
-agree: a short entry is likelier to be disabled (-2.170) and less likely to ever be relevant (+0.847 the
-other way). Disabled entries are also earlier (mean STMB_start 805 against 1650), which is the
+**LENGTH IS WHAT BOTH LABELS ARE MOSTLY MADE OF**, with opposite signs that
+agree: a short entry is likelier to be disabled and less likely to ever be relevant (F12). Disabled
+entries are also earlier, which is the
 `chunkdens` artifact reproduced. Two things fall out worth keeping: the author's keep/drop calls and the
 judge's grades agree with each other, and the unconditional half of *Length is a SUPPRESSOR* is now
 measured on its own — long entries ARE likelier to be relevant, which is why the fitted coefficient
@@ -1195,111 +1163,107 @@ Re-run it (`peaked.mjs` shape: embed entries and windows, profile, logistic agai
 embedding model changes or a second book gets a curation pass — it is cheap and it is the third
 entry-level quantity to die the same way.
 
-**`density` INVERTS ON REFERENCE**, which is the concrete case for *Fit PER TIER*: it runs -0.935
-(SE 0.185) there against +0.215 on memory, solo AUC 0.336 — strongly predictive inverted. A reference
+**`density` INVERTS ON REFERENCE**, which is the concrete case for *Fit PER TIER*: strongly predictive
+there, inverted (F19). A reference
 entry thick with names is a roster or an index, scaffolding rather than subject, where a memory
 scene-summary thick with names is a specific scene. A shared coefficient would carry the wrong SIGN.
 Measured before keys were scored, and reference has no fitted model to re-measure it against.
 
 **Story-time position carries nothing.** Fitted as the entry's uid, which within-scene standardisation
 makes equivalent to distance from the current point up to sign: added to the shipped model it costs
-0.0055 mean F2 on 24 scenes up against 53 (p 0.0013) and leaves AUC flat. `order` is deliberately not consulted — it is ST's
+a little on the score of record and leaves AUC flat (F13). `order` is deliberately not consulted — it is ST's
 insertion priority, and a column falling back between the two would mean story position in one book and
 priority in the next, which a fit held out BY BOOK cannot survive.
 
 **Polynomial terms measured WORSE, on the tier that could afford them.** Squares of the standardised
-signals were fitted on memory (6051 rows, `--degree 2`): held out by book they cost AUC 0.7989 -> 0.7966,
-AP 0.346 -> 0.336 and F2 0.5139 -> 0.5109, while gaining in-sample — the signature of terms fitted to the
-training books. No square reaches two standard errors except `properNouns^2` at
--0.066 (SE 0.034), and a negative curvature on the strongest feature is what an overfit looks like rather
-than a shape worth keeping. `keys^2` reads +0.002 (SE 0.019); it once destabilised at +2.244 (SE 1.418),
-which was the blanked column and not the signal. Not retried on reference, where 342 rows cannot support
-three more coefficients and the delivered set is already at full recall.
+signals were fitted on memory (`--degree 2`): held out by book they cost across the board while gaining
+in-sample — the signature of terms fitted to the
+training books (F14). The one square that approaches significance is a negative curvature on the
+strongest feature, which is what an overfit looks like rather
+than a shape worth keeping; `keys` squared once destabilised,
+which was the blanked column and not the signal. Not retried on reference, whose rows cannot support
+three more coefficients and whose delivered set is already at near-full recall.
 
-**Two-way INTERACTIONS fail the same way** (`--interactions`, memory): AUC 0.7989 -> 0.7971 held out,
-AP 0.346 -> 0.328 and F2 0.5139 -> 0.5074, with `cosine*text` the one term near two standard errors
-(+0.135, SE 0.070) and the two carrying `keys` pure noise (-0.017 and -0.021, both under one). Curvature and combination were tested separately because they are different
+**Two-way INTERACTIONS fail the same way** (`--interactions`, memory): the held-out numbers all slip,
+with `cosine*text` the one term near significance
+and the terms carrying `keys` pure noise (F14). Curvature and combination were tested separately because they are different
 questions, and a tree ensemble that beat this model would have to be exploiting one of them. Neither
-exists at this n, which is 5 BOOKS however many rows it is.
+exists at this n, which is measured in BOOKS however many rows it is.
 
 **Retried once PROPER existed**, since the argument above — three readings of one question cannot
 combine into a fourth — does not cover a pair containing a signal from the empty cell. It does not
-survive either: `cosine*properNouns` reads -0.059 (SE 0.063) and `text*properNouns` -0.016 (SE 0.039),
-both under one standard error, held-out AUC slips 0.7980 to 0.7973, and paired against it alone it is 14 scenes
-up against 12 with 42 TIED. `cosine*text` is the only product ever to reach 2 SE and it has never
+survive either (F14): both new products sit under one standard error, held-out AUC slips, and the paired
+read is mostly ties. `cosine*text` is the only product ever to reach 2 SE and it has never
 improved a held-out number. The model is linear in its features, at four features as at three.
 
 **RELEVANCE IS A PROPERTY OF THE PAIR, never of the entry.** Every feature is query-dependent and every
-grade belongs to one scene. **Measured**: of the 594 entries graded in two or more scenes, 89.7% have a
-grade that varies and 54.5% cross the relevance line — the same entry, the same book, relevant here and
-not there. Anything that caches a verdict per entry is wrong by construction.
+grade belongs to one scene. **Measured** (F15): of the entries graded in two or more scenes, most have a
+grade that varies and over half cross the relevance line — the same entry, the same book, relevant here
+and not there. Anything that caches a verdict per entry is wrong by construction.
 
 **AN UNGRADED ROW IS NOT A NEGATIVE, even where the pool was built to surface everything relevant.**
-`--ungraded-negative` fits on it as a 0. **Measured**, memory tier held out by book, against the graded
-design: rows 6051 -> 7088 and prevalence 6.26% -> 5.35%, AUC 0.8015 -> **0.8185** while AP 0.342 ->
-0.321, precision at 50/75/90% recall 27.6/14.3/8.8% -> 26.0/13.6/8.6%, and F2 over the delivered set
-0.5081 -> 0.5021 delivering 18.9 against 17.9. Every readout that pays for precision falls and only AUC
+`--ungraded-negative` fits on it as a 0. **Measured** against the graded design (F16): every readout
+that pays for precision falls and only AUC
 rises — the signature of adding EASY negatives, which a prevalence-independent statistic rewards for
 being easy to rank low. The rule below is what predicts it.
 
 **JUDGE THE PREDICTOR BY AP AND PRECISION-AT-RECALL, NOT AUC.** AUC is prevalence-independent, which
 makes it the right thing for comparing signals and the wrong thing for asking what clears a cutoff — at
-grade >= 4 it reads 0.975 while 90% recall costs 17.5% precision. `logistic.mjs` `prCurve` prints both.
+the rarest band AUC reads near-perfect while precision at high recall is dismal (F17). `logistic.mjs`
+`prCurve` prints both.
 The same distinction as nDCG against the layout score, one level down.
 
 **HOLD OUT A BOOK, NOT A SCENE.** The system meets books it has never seen, and a held-out scene still
 shares its book's vocabulary, entry style, chunk statistics and BM25 scale with the rows that fitted the
 model. `--lobo` is the honest estimate; `--loso` measures another moment in a book already known.
 
-**The number of record is AP 0.346 at AUC 0.799, held out by book** (`--lobo`, grade >= 3, one intercept,
-the shipped five columns). In-sample on the same design it is 0.820, so an unseen book costs about 2.5%
-relative on AUC against an unseen scene.
+**The number of record is the held-out-by-book AP and AUC of the shipped design (F1)** (`--lobo`,
+grade >= 3, one intercept, the shipped five columns). In-sample reads only a little better, so an unseen
+book costs little against an unseen scene.
 Per-scene intercepts were tried as a control for differing base rates and measured to buy nothing.
 
-**Fit PER TIER, on which signals the tier carries rather than on base rate.** The tiers do not carry the same signals:
-99.8% of memory rows are vectorized and carry cosine and text, while 84% of reference rows are
-keyword-only. **And where both carry one, it is not worth the same.** **Measured**, solo AUC per tier:
-cosine 0.713 memory against 0.448 reference, text 0.759 against 0.662, keys 0.687 against 0.668. Cosine
-is the reading to distrust: reference's is only computed under `denseAllEntries`, so 0.448 is an absence
-rather than a failure. Memory's keys once read 0.503 for the same reason — `scoringKeys` blanked a
-vectorized entry's keys unless `scoreVectorKeys` was on, it defaulted off, and memory is 99.8%
-vectorized, so that number was the AUC
-of a constant. On books whose memory entries are all vectorized the column's within-scene SD is exactly
-0, and the fit returns +0.000 at SE 1000 rather than a slope.
+**Fit PER TIER, on which signals the tier carries rather than on base rate.** The tiers do not carry the
+same signals: nearly all memory rows are vectorized and carry cosine and text, while most reference rows
+are keyword-only (F18). **And where both carry one, it is not worth the same** — the solo AUCs split
+per tier, widest on cosine (F18). Cosine
+is the reading to distrust: reference's is only computed under `denseAllEntries`, so its weak read is an
+absence rather than a failure. Memory's keys once read as chance for the same reason — `scoringKeys`
+blanked a vectorized entry's keys unless `scoreVectorKeys` was on, it defaulted off, and memory is
+nearly all vectorized, so that number was the AUC
+of a constant (F20). On books whose memory entries are all vectorized the column's within-scene SD is
+exactly 0, and the fit returns +0.000 at SE 1000 rather than a slope.
 
-**Scoring memory's keys gives a real signal and costs a little.** **Measured**, memory tier,
-`scoreVectorKeys` on: keys go from within-scene SD 0 and solo AUC 0.500 to 0.7134 and 0.687, fitting at
-std beta +0.123 (SE 0.052) in the shipped model. A third signal exists in that tier; it is redundant,
+**Scoring memory's keys gives a real signal and costs a little.** **Measured** (F20): with
+`scoreVectorKeys` on, the keys column goes from a constant to a real within-scene signal earning a
+small positive coefficient in the shipped model. A third signal exists in that tier; it is redundant,
 which follows from an entry's keys being drawn from its own content while `text` scores that content
 directly.
 
 **ASK IT AS A FEATURE CONTRAST, not as a parameter sweep.** Turning the setting off does not remove the
 column — it leaves a DEGENERATE one on a tier that is all but entirely vectorized, still consuming a
 coefficient. Leaving `keys` out of `--features` drops it, which is the honest counterfactual.
-On the current corpus the two coincide exactly: the blanked column is constant in every one of the 103
-scenes, so its SD is 0, the fit returns +0.000 at SE 1000, and `scoreVectorKeys=false` reproduces
-the keys-free feature set to the bit on all 97 scored scenes. They stop coinciding at the first scene holding an
+On the current corpus the two coincide exactly: the blanked column is constant in every scored scene,
+so `scoreVectorKeys=false` reproduces
+the keys-free feature set to the bit (F20). They stop coinciding at the first scene holding an
 unvectorized memory entry whose keys score, where the one row breaking the constant meets a fitted slope.
 
-**Measured** on the shipped design, 102 scenes, 6051 rows, 379 relevant, held out by book. **The score of
-record is F2 over the delivered set**, and each arm at its own peak reads 0.5160 -> 0.5139 with the column
-live. AUC is 0.7996 -> 0.7989 and AP 0.345 -> 0.346, so the ordering is a wash and the delivered set is
-not.
+**Measured** on the shipped design, held out by book (F20). **The score of
+record is F2 over the delivered set**, and each arm at its own peak reads slightly worse with the column
+live; the ordering is a wash and the delivered set is not.
 
 **PEAK TO PEAK IS THE SHIPPING COMPARISON HERE, and it is the exception to the rule below.** *A
 cutoff-curve peak is not a comparison* governs a screen, where a moved peak masquerades as a better
 ordering. This is not a screen: each setting ships as a fit with its OWN derived cutoff, so what a user
-gets is one peak or the other — 0.5160 at 0.10 against 0.5139 at 0.08.
+gets is one peak or the other.
 
-**What matched reads add is the diagnosis, not the verdict.** Paired per scene the column is -0.0021 mean
-F2 on 19 scenes up against 54 (p 0.0001), and at matched RECALL it is -0.7 precision points at 60% and
--2.3 at 70%. So it costs a fifth of a percent, concentrated in the band the system operates in — a
+**What matched reads add is the diagnosis, not the verdict.** Paired per scene and at matched RECALL the
+column costs a little, concentrated in the band the system operates in (F20) — a
 redundant reading of an entry's own content, priced.
 
 **WHETHER A SIGNAL IS IN THE MODEL IS A QUESTION ABOUT THE FEATURE SET, never about a row.** The fit
 carries one standardised column per signal and nothing else, so a signal is either fitted for the whole
-tier or left out of `--features`. On the memory tier every entry is vectorized and 4 of 496 have no
-keys, so nothing varies. On reference, `cosine` is missing on 124 of 135 entries — missing because nobody
+tier or left out of `--features`. On the memory tier every entry is vectorized and almost none lack
+keys, so nothing varies. On reference, `cosine` is missing on most entries — missing because nobody
 computed one, not because the quantity does not exist, since `reindex --all` builds a collection over
 every entry with content and `denseAllEntries` scores it. So the reference model is one of two designs:
 WITHOUT cosine, on the four remaining columns, or with a cosine COMPUTED FOR ALL OF THEM. Computing one
@@ -1307,19 +1271,16 @@ is not vectorizing the entry — it is a column in the fit, where `vectorized` d
 retrieves.
 
 **Per book it is small in both directions, and curation does not pick the sign.** Held-out AUC with the
-column against without: Ascensus 0.7996 / 0.8056, Panopticon 0.8014 / 0.8139, Time Whore 0.8177 / 0.8190,
-Sommers 0.8444 / 0.8429, Richard 0.7775 / 0.7689 — the two that gain are one curated book and one
-uncurated, and the largest single loss is Panopticon at 63 rows. What separates them is the column's
+column against without splits the books both ways: the two that gain are one curated book and one
+uncurated, and the largest single loss sits on the smallest fold (F20). What separates them is the column's
 dispersion (*Open work* #13).
 
-**A SMALL FOLD IS NOT A HARMLESS FOLD**, because `--lobo` trains each fold on all the others. At 5 scenes
-Richard decided the sign of this contrast for every other book, Sommers moving between +0.0026 and
--0.0032 on its inclusion without one of its own rows changing. At 25 scenes it no longer does: on the
-three-signal design the contrast reads the same with Richard in (29 scenes up / 34 down) as with it held
-out (27 / 34 over 78 scenes).
+**A SMALL FOLD IS NOT A HARMLESS FOLD**, because `--lobo` trains each fold on all the others. At a few
+scenes Richard decided the sign of this contrast for every other book, moving another book's delta on
+its inclusion without one of that book's own rows changing; at its current size it no longer does (F21).
 
 **A per-book rule has nothing to key on, so the AUTHOR asserts it.** Selecting the setting off the
-curation detector (`eval-data/README.md`) has read 6-for-6 and then signless across corpus revisions, and
+curation detector (`eval-data/README.md`) has read cleanly and then signless across corpus revisions (C5), and
 wants a book nobody fitted the threshold on. `scoreVectorKeys` is therefore a checkbox in Ranking &
 fusion, **defaulting OFF**: the column costs across the operating band on most of the corpus, so the
 default is the reading that does not punish a book whose keys nobody reviewed, and TICKING it is the
@@ -1327,38 +1288,40 @@ author's assertion that they curated theirs.
 
 **ONE FIT SERVES BOTH SETTINGS, and it is the keys-live one.** `relevance-model-memory.json` carries the
 column so that ticking the box reaches the prediction; unticking blanks the keys, the column standardises
-to 0 for every row, and the other four decide. **Measured** on blanked rows, `P(>=3)`: that fit reads F2
-0.5164 at its own 0.08 against 0.5161 for a purpose-built keys-free fit at its 0.10. So the setting and the fit are separate questions — the setting
-is worth a fifth of a percent of F2 and the fit it is read through is worth nothing.
+to 0 for every row, and the other four decide. **Measured** on blanked rows (F20): that fit reads as
+well as a purpose-built keys-free fit. So the setting and the fit are separate questions — the setting
+is worth a sliver of F2 and the fit it is read through is worth nothing.
 
-**MOST OF THE MEMORY TIER'S KEYS ARE MACHINE OUTPUT, which every claim above rests on.** **Measured**,
-by key provenance: 6136 of the 10,981 memory rows (55.9%) sit on books whose scene-summary keys nobody
-reviewed, against 4687 curated. Time Whore alone is 5027 of them and its 208 STMB entries average 21.5
-keys where Sommers' average 9.4 — its "mostly curated" label described the reference half. So a claim
+**MOST OF THE MEMORY TIER'S KEYS ARE MACHINE OUTPUT, which every claim above rests on.** **Measured**
+by key provenance (F22): over half the memory rows sit on books whose scene-summary keys nobody
+reviewed, most of them one book whose STMB entries carry keys far more densely than the curated
+books' — its "mostly curated" label described the reference half. So a claim
 about what KEYS are worth on this tier is a claim about generated keys, and the curated counter-sample is
 one book. `eval-data/README.md` carries the per-book status and how to recover it from a book alone.
 
 **Nor does the redundancy hide a denoised copy of `text`.** The agreement term is the shape that
-hypothesis predicts, and it is inside one standard error: `text*keys` reads -0.021 (SE 0.065) with the
-signal live. PAIRED per scene at each arm's own best cutoff, scoring keys is
--0.0134 mean F2 on 15 scenes up against 55, which is the redundancy priced rather than a denoised copy
+hypothesis predicts, and it is inside one standard error with the
+signal live; PAIRED per scene at each arm's own best cutoff, scoring keys
+costs (F20) — the redundancy priced rather than a denoised copy
 appearing.
 
 **AND EACH ARM'S PEAK IS A DIFFERENT OPERATING POINT.** The paired sign test compares two arms where each
 sits at ITS own best cutoff, and F2 walks that peak toward precision as a model improves — so a contrast
 between peaks mixes "ranks better" with "cut tighter", and reports the second as the first. `--emit`
 carries the whole cutoff grid and `pair-f2 --at-recall` reads it, which is how the two are separated.
-**Measured**, and it is what split the two entry-intrinsic columns above: `length+density` peaks at 0.08
-where `properNouns` alone peaks at 0.13, delivering 17.7 entries against 10.9 — nowhere near the same
-operating point. Held at matched recall the pair is worth half a precision point, and `length` on its own
-is negative there while `density` is worth two. Any target stated as a recall (*Evidence*) has to be read this way or a feature is credited
+**Measured** (F11), and it is what split the two entry-intrinsic columns above: their peaks sit nowhere
+near the same
+operating point, and held at matched recall `length` on its own
+is negative while `density` earns. Any target stated as a recall (*Evidence*) has to be read this way or a feature is credited
 where it does nothing.
 
 **A SCENE-LEVEL SIGN TEST OVERSTATES ITS OWN n, so a contrast reports books up against books down.** The
-test treats ~100 scenes as independent draws where they sit on 5 books, and within-book correlation is
-then counted as evidence — which is why a feature can read p 0.0000 across scenes and have no consistent
-direction across corpora. Both numbers are given above where they disagree, and the book count is the one
-that decides. With 5 books the test itself is nearly powerless, so what carries a positive result is the
+test treats the scenes as independent draws where they sit on a handful of books, and within-book
+correlation is
+then counted as evidence — which is why a feature can read overwhelmingly significant across scenes and
+have no consistent
+direction across corpora. A contrast reports both reads, and the book count is the one
+that decides. With so few books the test itself is nearly powerless, so what carries a positive result is the
 AGREEMENT OF MAGNITUDES across books, not the count — which is what separates `density` from `rarity`,
 `chunkdens` and `oracle`.
 
@@ -1368,28 +1331,28 @@ contrast between arms reads that, never the peak — the same rule `param-screen
 same reason.
  A pooled fit reads one slope across two tiers holding different columns, and it is also blind to any
 change confined to the smaller one — computing a cosine for every reference entry (`denseAllEntries`)
-moves that tier's AUC from 0.7387 to 0.7851 and its log-loss from 0.5539 to 0.5163, while the memory tier
-and the pooled model do not move at all. Reference cosine then carries the tier's largest slope
-(+0.806 standardised, against text's +0.419), where without it the tier runs on keys.
+moves that tier's fit substantially while the memory tier
+and the pooled model do not move at all (F35). Reference cosine then carries the tier's largest slope,
+where without it the tier runs on keys.
 **The base-rate argument for the split does NOT hold, and was measured wrong.** Pooled over all judged
-rows the tiers look 3.7x apart, but base rate correlates -0.63 with how deep a capture was graded, and
+rows the tiers look far apart, but base rate correlates with how deep a capture was graded, and
 memory is admitted wholesale while reference only enters when a key fires — so a pooled comparison puts
 memory's whole distribution against reference's head. **Measured at matched rank** (top-K of each
-scene's own ranking, no scene dropped): the tiers are indistinguishable at the head, 38.4% against 37.7%
-at K=10, and the gap grows monotonically with K. Filtering scenes by pool depth instead of matching rank
-reproduces the artifact AND selects the rater — a `judged >= 50` cut drops 39% of every human grade in
-the corpus while keeping 8536 of 8546 judge rows.
+scene's own ranking, no scene dropped): the tiers are indistinguishable at the head, with the gap
+growing monotonically with K (F38). Filtering scenes by pool depth instead of matching rank
+reproduces the artifact AND selects the rater — a depth cut drops a large share of the human grades
+while keeping nearly all the judge rows (F38).
 
 **The scale is ordinal in the signals, and the line we threshold is its weakest boundary.** Mean
 standardised signal rises monotonically across grades, so the levels are not decoration — but 2 and 3
-sit together and cosine INVERTS across them (+0.748 against +0.694). Fitted at every boundary
-(`--ordinal`, `logistic.mjs` `cumulativeFit`), cosine runs +0.682, +0.625, **+0.468**, +0.901 across
->= 1, 2, 3, 4: the operational cut is drawn through the flattest part of the scale. **Proportional odds
+sit together and cosine INVERTS across them (F29). Fitted at every boundary
+(`--ordinal`, `logistic.mjs` `cumulativeFit`), cosine is flattest at exactly the
+operational >= 3 cut (F29): the cut is drawn through the flattest part of the scale. **Proportional odds
 does not hold** — that non-constancy is what a shared slope would average away, which is why the
 boundaries are fitted separately.
 
 **And the flat spot is memory's.** In the reference tier cosine strengthens monotonically across the
-boundaries (+0.123, +0.588, +1.397) and the >= 3 line is real; in memory it collapses at exactly that
+boundaries and the >= 3 line is real (F29); in memory it collapses at exactly that
 cut. The tiers may not want the same cutoff, let alone the same model.
 
 **`cutoff` is the threshold; `cut` is the mechanism; a `bar` is a GRADE boundary.** Three words for three
@@ -1414,65 +1377,61 @@ the budget drop a high-`E[credit]` entry because a different combination of the 
 it low. Ordering by the thresholded quantity makes the prefix property true by construction. Constant and
 armed-sticky hoisting is unaffected, being about kind rather than relevance. This retires `rrfK`,
 `lexicalWeight` and `keywordWeight` for the dynamic block, and costs nothing measured — regression was
-already no worse than RRF on nDCG.
+already no worse than RRF on nDCG (F1).
 
 **Clamp `P(>=3)` to `P(>=2)`.** The boundaries are fitted separately, so nothing guarantees the nesting
-the events have, and `E[credit]` is malformed where it inverts. **Measured**: 39 of 8975 rows invert, by
-at most 0.0002 — numerically trivial, so a clamp costs nothing and removes the case entirely. It is not
+the events have, and `E[credit]` is malformed where it inverts. **Measured** (F31): a handful of rows
+invert, by a numerically trivial amount — so a clamp costs nothing and removes the case entirely. It is not
 optional for being small; an incoherent probability pair is a bug that reads as a threshold effect.
 
 **Watch the asymmetry when the cutoff is chosen.** The layout score's two halves read different quantities
 on purpose — precision credits a 2 at half, recall counts only grade >= 3, because recall asks whether the
 must-deliver material arrived. So `E[credit]` is aligned with the precision half and not with the recall
-half, and recall is the half weighted twice. **Measured**, ranking by `E[credit]`: 2s are a steady ~20% of
-what it surfaces at every depth (22.0% of the top 5 per scene, 19.4% of the top 20), and those rows pay
+half, and recall is the half weighted twice. **Measured** (F32): 2s are a steady share of
+what `E[credit]` surfaces at every depth, and those rows pay
 into precision and not into recall. That is the target and the score disagreeing at the margin. It is
 recorded rather than resolved, because the alternative is a weight between the halves that no measurement
 here would choose.
 
-**The gazetteer is worth about two F2 points, and keys are the best source of it.** **Measured**, memory
-tier, held out by book, AP: keys 0.397, keys+titles 0.398, titles 0.380, none 0.371, bodies 0.369 — so
-bodies are WORSE than having no gazetteer, a source drawn from every entry weighting everything and
-therefore nothing. F2 over the delivered set spans 0.495 for keys to 0.471 for none.
+**The gazetteer earns its keep, and keys are the best source of it.** **Measured** (F33): the first pass
+read keys as the best source and
+bodies as WORSE than having no gazetteer, a source drawn from every entry weighting everything and
+therefore nothing.
 
-**Re-measured** on the shipped design over the availability-filtered corpus, and only the SPAN survives:
-F2 against the shipped `keys+titles` (0.5160), bodies 0.5234 (**+0.0074**, 45 scenes up against 24,
-p 0.015), none 0.5134, keys 0.5088 (-0.0071), titles 0.5065 (-0.0095). Held-out AP is 0.345 for
-keys+titles against 0.346 for keys and 0.339 for titles. So `bodies`, which the first pass called worse
-than no gazetteer at all, now reads best — and per book it is 2 up against 3, carried by Sommers +0.040
-and Panopticon +0.079. **The ordering below the top does not replicate across passes and should not be
-read**; what does is that every source lands within about a point of every other. `keys` against
+**Re-measured** on the shipped design over the availability-filtered corpus, and only the SPAN
+survives (F33). `bodies`, which the first pass called worse
+than no gazetteer at all, now reads best — and per book it splits, carried by two
+books. **The ordering below the top does not replicate across passes and should not be
+read**; what does is that every source lands within a whisker of every other. `keys` against
 `keys+titles` is a coin flip in both passes, so the default stands on neither being better. That span is the
 ceiling on the whole line of work: the query terms reaching `text` are not what limits it. Keys are the
 best source while being useless as a SIGNAL in the same tier, which is not a contradiction — a signal
 asks whether an entry's keys fired in the chat, a gazetteer asks what vocabulary the query should weight,
 and an entry's keys can name the right entities without ever matching.
 
-**Curation does not explain it.** Split into the curated books (Sommers, Richard, Time Whore; 50 scenes)
-and the rest (20 scenes), the gazetteer is worth MORE where keys were never reviewed — AP 0.401 against
-0.378 curated, 0.317 against 0.268 uncurated. The uncurated tranche is 4 books with 3 of them tiny, so
+**Curation does not explain it.** Split into the curated books
+and the rest, the gazetteer is worth MORE where keys were never reviewed (F33). The uncurated tranche is
+a few books, most of them tiny, so
 read the direction and not the size.
 
-**Two cutoffs, one per tier.** **Measured**, F2 over the delivered set, macro-averaged over scenes, with
-`E[credit]` held out by book and `P(>=3)` clamped: memory peaks at 0.08 (F2 0.5139, 17.5 delivered against
-4.0 relevant), reference at 0.19 (F2 0.806, 6.5 against 2.5). Pooling costs reference its full-recall
+**Two cutoffs, one per tier.** **Measured** (F34), F2 over the delivered set, macro-averaged over scenes,
+with `E[credit]` held out by book and `P(>=3)` clamped: memory peaks low and reference much higher, and
+pooling costs reference its near-full-recall
 region and pulls memory off its own peak.
 
-**The cutoff is a RANGE, not a point.** Both curves are flat around their peak — memory stays within
-0.012 of its best across 0.10-0.20, reference within 0.03 across 0.05-0.25 — so a re-tune that moves a
+**The cutoff is a RANGE, not a point.** Both curves are flat around their peak (F34), so a re-tune that
+moves a
 cutoff inside its band is measuring noise, and a reported third decimal is false precision.
 
 **The reference fit is `cosine`, `text`, `properNouns`, `density` at cutoff 0.17**
 (`extension/relevance-model-reference.json`), the same columns as memory. Cosine is the tier's strongest
-signal there (+0.683 standardised), which it can only be now that every entry has one.
+signal there (F35), which it can only be now that every entry has one.
 
 **COSINE IS ADMITTED FOR ALL OF A TIER'S ENTRIES OR FOR NONE.** Fitted on the subset that happens to
-carry one it is an ABSENCE INDICATOR, not a similarity: -0.281 (SE 0.119) at solo AUC 0.442, below
-chance, and it inverts on the vectorized entries where the number is real. **Measured**, reference
-tier, 647 rows on 84 scenes held out by book, with one computed for every entry: +0.683 (SE 0.122) at
-solo AUC 0.759, the tier's strongest signal — AUC 0.7417 -> 0.7712, held-out AUC 0.679 -> 0.718, and
-F2 0.7674 -> 0.7746 at a shared cutoff of 0.17, paired 25 scenes up against 9 with 32 tied, p 0.0090,
-delivering 6.4 entries against 6.8 for the same 2.9 relevant.
+carry one it is an ABSENCE INDICATOR, not a similarity: below
+chance solo, and it inverts on the vectorized entries where the number is real (F35). **Measured** with
+one computed for every entry (F35): the tier's strongest signal, lifting the fit and the delivered set
+alike.
 
 **LANDED: every entry with content is embedded and scored, and only `vectorized` ones are admitted.**
 The two were one filter because they had always named the same set. Computing a cosine is not
@@ -1487,11 +1446,11 @@ set means every item counts, which is what an older client sends and what a book
 falls back to.
 
 It was `vectorized` — a retrievability flag, and the comparison set from before every entry with content
-became scorable. **Measured** over 103 graded scenes on 4 lineages, paired: the switch is -0.0003 n@10 and
--0.0016 F2, neither significant, and the two centroids sit at cosine 0.99873-1.00000 across 6 books. So it
+became scorable. **Measured** paired (F44): the switch is flat on both readouts,
+and the two centroids all but coincide. So it
 is a consistency change, not a performance one, and the memory fit's cosine coefficient needs no refit.
 
-The reference fit reads cosine and weights it highest of its four features (0.717).
+The reference fit reads cosine and weights it highest of its four features (F35).
 
 **REFERENCE IS SCORED AND NOT CUT, because a key on a reference entry IS the authorial decision.** The
 column orders reference rows for the budget walk; no threshold is applied to them. An author writing keys
@@ -1500,54 +1459,56 @@ every reference entry that fires is included, subject only to the user's budget 
 form of *triggered == relevant*, and it is why the tier needs no relevance model to be considered
 finished.
 
-**The fit corroborates it rather than carrying it.** At the reference model's own peak (0.17) the cut
-drops 35.3% of Foxbridge's relevant rows and 3 of its 10 grade-4s, against 1.0% on Sommers — and
-Foxbridge is the corpus's only reference-ONLY book, contributing 21 of the fit's 647 rows. What goes
+**The fit corroborates it rather than carrying it.** At the reference model's own peak the cut falls
+almost entirely on Foxbridge — the corpus's only reference-ONLY book, and a sliver of the fit's
+rows (F36). What goes
 there is abstract world-mechanics material carrying few names, which is what a hand-authored reference
 book is made of and what `properNouns` and a negative `density` both score down. **Recall at that cutoff
-is 94.4%, not full**: the claim below that the tier reaches full recall anywhere under 0.20 was measured
+is high but not full** (F36): the earlier claim that the tier reaches full recall anywhere under the
+band was measured
 on the cosine-free fit and does not survive the refit.
 
-**The reference tier tolerates a weak fit, and its cutoff barely matters.** **Measured**: its AUC falls
-0.733 to 0.698 held out by book, against memory's 0.820 to 0.799 — 342 rows against 6051 — and it still
-reaches F2 0.806 at full recall anywhere below 0.20. Its calibration is unmeasurable at that n (ECE p
-0.336 and 0.044 at the two boundaries). None of this is a reason to work on it: recall is already
+**The reference tier tolerates a weak fit, and its cutoff barely matters.** **Measured** (F37): its AUC
+falls further held out than memory's, on a fraction of the rows, and the delivered-set score holds up
+regardless. Its calibration is unmeasurable at that n (F30). None of this is a reason to work on it:
+recall is nearly
 complete, and the score weights that half twice. **This is not the base-rate argument**, which is
-measured wrong above — the tiers' pooled prevalences differ by 5x here and that gap is the grading-depth
-artifact, not evidence about activation. What is measured is the delivered set.
+measured wrong above — the tiers' pooled prevalence gap is the grading-depth
+artifact (F38), not evidence about activation. What is measured is the delivered set.
 
-**Grade 4 is a band the ORDERING finds and the delivered set cannot.** Held out by book at 0.63%
-prevalence: AUC 0.8877 — a strong ordering — against AP 0.139 and precision 3.4% at 75% recall. Half of
-the grade-4 rows were entries straddling their own scene, and removing them halved the prevalence and cut
-AP from 0.324 to 0.139: what the signals were finding at this band was substantially the paraphrase. Its
+**Grade 4 is a band the ORDERING finds and the delivered set cannot.** Held out by book at tiny
+prevalence: a strong ordering against dismal precision at usable recall (F17). Half of
+the grade-4 rows were entries straddling their own scene, and removing them halved the prevalence and
+collapsed AP (F17): what the signals were finding at this band was substantially the paraphrase. Its
 remaining strength is also book-specific, which follows from the construct: the anchors reserve 4 for the scene's current SUBJECT, and what counts as a
 subject is a property of how a book was written. Treat it as a high-confidence core within a known book,
 never as a guarantee on a new one.
 
-**The labels are the ceiling, not the model.** About a third of boundary positives change side between
-two passes of the same judge — corroborated by the contract re-grade, where 4 of 13 rows originally >= 3
-came back below it (`CLAUDE.md`, graded scenes). The headroom is small and it is not in the fitting.
+**The labels are the ceiling, not the model.** A substantial share of boundary positives change side
+between two passes of the same judge, corroborated by the contract re-grade (G3). The headroom is small
+and it is not in the fitting.
 
 **Calibration is measured, and an ECE is read against its null.** Everything above reads the ORDERING,
 which a monotone rescaling leaves untouched — so a model can rank exactly as measured and be wrong about
 every probability it reports, and the cutoff is argued in probability terms. `logistic.mjs` `reliability`
 bins by quantile and reports the ECE a perfectly calibrated model of the same size and shape would
 score, because binomial scatter alone produces one and it grows as the sample shrinks: the tiers differ
-25-fold in rows, so raw ECE compares their sizes as much as their models. Read HELD OUT — a fit with an
+enormously in rows, so raw ECE compares their sizes as much as their models. Read HELD OUT — a fit with an
 intercept forces `mean(p)` to the base rate as one of its score equations, so in-sample calibration is
 arithmetic.
 
-**Measured**, held out by book, 6051 memory rows on 102 scenes: `P(>=3)` is indistinguishable from
-calibrated (ECE 0.0077 against a 0.0067 null, p 0.252). `P(>=2)` reads ECE 0.0112 against 0.0080 at
-**p 0.080** — over-confident through the middle of its range, but no longer at the p 0.002 the leaked
+**Measured**, held out by book (F30): `P(>=3)` is indistinguishable from
+calibrated. `P(>=2)` reads
+over-confident through the middle of its range, but far less than the leaked
 corpus showed, so most of that bias was the straddling rows. `E[credit]` inherits about half of what
-remains, on the boundary the signals already separate worst. The reference tier is unmeasurable at n=342, and its
+remains, on the boundary the signals already separate worst. The reference tier is unmeasurable at its
+n (F30), and its
 precision matters less regardless: activation has already removed the entries a relevance model would
 reject, which is why the score weights its recall twice.
 
 **Still naming no instrument**, and suspect rather than merely unverified, since the claim beside them
-was measured wrong: the 71% p-overlap, the 25%-purity-at-66%-recall cut, and the per-tier recall curve
-(reference 95% at 5.4 entries, memory 38 for 73%). Nothing computes an overlap or a purity.
+was measured wrong: the p-overlap, purity-at-recall and per-tier recall-curve figures the register marks
+UNSOURCED (F46). Nothing computes an overlap or a purity.
 
 ---
 
@@ -1557,16 +1518,16 @@ Ordered by whether a user can see the difference — not by how tidy the fix is,
 instances the books on disk hold.
 1. **Bundle v3 — LANDED.** `bundle-schema.md` carries the shape and the rules that decide it; the writer
    is `bundleSamples`, the reader is `openBundle`, and `gradeValue` resolves the verdict in force out of
-   the record rather than reading a stored scalar. The corpus is on it: 107 documents, one schema, no
+   the record rather than reading a stored scalar. The whole corpus is on it (G1): one schema, no
    compatibility path — the migration was one-shot and is deleted, along with the v1 tool before it.
 
    `resolve-grades.mjs`, `normalize-grades.mjs` and `split-rater.mjs` went too; all three existed to
    maintain or repair a reduced scalar that no longer exists.
 
-   **Measured** on the way through, each having caught a real defect: the reader's resolution rule
-   reproduces all 11,946 stored `llmGrade` scalars; 611 bare grades sit in `/wa-grade` documents and are
-   human, while 37 sat in synth documents and were llm verdicts in the wrong field; every one of the 107
-   frozen haystacks re-derives from its source chat, so all decompose to messages; and the grids print
+   **Measured** on the way through, each having caught a real defect (G1): the reader's resolution rule
+   reproduces every stored `llmGrade` scalar; the bare grades split cleanly into human verdicts in
+   `/wa-grade` documents and misfiled llm verdicts in synth ones; every
+   frozen haystack re-derives from its source chat, so all decompose to messages; and the grids print
    byte-identical numbers either side of the whole change.
 
    **THE READERS READ THE SCHEMA'S NAMES.** `openBundle` selects a view across the nesting levels and
@@ -1604,8 +1565,8 @@ instances the books on disk hold.
    What is still open is in *Stage 4 predicts per-entry relevance*: the delivered COUNT is a fixed share
    of what activation produced rather than of what the scene needs, and per-book standardisation reverses
    that pathology while losing on the score of record. **The runtime's entry-side signals agree with the
-   harness's**: measured on one browser capture, 16 scored rows, `properNouns` reproduces from
-   `relevance.mjs` to the capture's own rounding. `density` is `properNounsOf` with no stoplist
+   harness's**: measured on one browser capture, `properNouns` reproduces from
+   `relevance.mjs` to the capture's own rounding (F52). `density` is `properNounsOf` with no stoplist
    subtraction — the definition every fit was trained on — computed by one shipped function on both
    sides. `E[credit]` itself is unchecked, and the only
    missing piece is a saved capture: the runtime records the PRE-CUT population with `eCredit` at full
@@ -1675,9 +1636,8 @@ instances the books on disk hold.
    set is the apostrophe family, the double-quote family, en-dash ↔ hyphen, and nbsp ↔ space; em-dash
    and ellipsis are left to the author, being visible in both pattern and prose.
 
-   possessives, 18 are above 90% curly (worst 97.6%), 91 sit between 5% and 95%, and 44 are under 5%.
-   The mixed chats are the worse failure, since a key that fires SOMETIMES reads as weak rather than
-   broken. Which argues for building it BEFORE the keys exist.
+   Real chats mix apostrophe forms within one chat (K11), and a key that fires SOMETIMES reads as weak
+   rather than broken — which argues for building the expansion BEFORE the keys exist.
 10. **`reportFailure`: retrieval failure is a failure, not a degradation.** The two-severity split rests
    on "keys are still handled". Weaker than it was now that a vectorized entry keeps its keys, but a
    retrieval outage still costs the vector and text signals on every entry it was the only source for.
@@ -1689,8 +1649,8 @@ instances the books on disk hold.
 12. **Group weights, `(...)::N`.** A weight is per unit and a conjunction has one intent, so the author's
    unit is the group — but the grammar has nowhere to put it. `? (copper pipe)::3` tokenizes to
    `(copper AND pipe) AND TERM("::3")`, a required literal no text contains, and the validator passes
-   it. **Measured** across 43 books: 1 of 148 SmartKeys carries a per-term weight and it is a
-   single-term key, so nothing on disk depends on the current reading and the change is free. Until it
+   it. **Measured** across the books on disk (K12): essentially nothing depends on the current reading,
+   so the change is free. Until it
    lands, a bare `::N` or `^N` term is a silently dead key of the same class as `~N` proximity.
 13. **A firing-rate diagnostic for LOOSE reference keys.** Reference entries are never cut, so a key
     that fires too easily costs budget on every turn it wins and nothing warns anybody. The tier's
@@ -1702,23 +1662,23 @@ instances the books on disk hold.
     is a budget cost, where a wrongly cut one is missing material.
 
 14. **A signal's within-scene SD varies by book, and the two books `keys` costs are its extremes.**
-    **Measured**, memory tier with keys live, solo AUC against mean within-scene SD of the column:
-    Richard 0.744 at SD 0.249 and Ascensus 0.576 at 1.761, against 0.67-0.79 at SD 0.71-0.75 for the
+    **Measured**, memory tier with keys live (F45): the two books sit at the extremes of the column's
+    within-scene SD, against a middle band for the
     three books the column does not cost. Standardisation divides by the scene's own SD, so a
     near-constant column has its few small differences amplified into large z meeting a slope fitted on
     other books, and a wide noisy one is taken at face value. Richard is contemporary and
     character-driven — the same cast in every scene, so no key separates them — which is also why it
-    holds the corpus's lowest cosine AUC (0.676) and its highest positive rate (18%). No use proposed
+    holds the corpus's lowest cosine AUC and its highest positive rate (F45). No use proposed
     yet. What makes it worth keeping is that it is a property a book can be MEASURED for, where curation
     is a label someone applies.
 
 15. **Reference is centred on the memory tier's centroid, and nothing has asked whether it should be.**
     Stage 1 subtracts one mean per collection and that mean is the memory tier's, so reference entries are
     displaced by a vector built from a different register — narrative summaries against encyclopedic
-    sheets. **Measured** across 7 books: the memory centroid sits at cosine 0.99106-0.99896 of the whole
-    collection's mean while the reference centroid sits at 0.81806-0.97998, because memory is 59-93% of the
+    sheets. **Measured** (F44): the memory centroid all but coincides with the whole
+    collection's mean while the reference centroid sits well off it, because memory is the bulk of the
     chunks — the pooled mean is nearly memory's own, and reference is the tier it displaces. The distortion
-    scales with how small the tier is, worst on the book with 7.3% reference. Cosine is the reference fit's
+    scales with how small the tier is. Cosine is the reference fit's
     largest coefficient, so those scores are load-bearing. Three candidates, none screened: a per-tier
     centroid, which would make centering the last stage to stop pooling tiers (the fits, the within-scene
     standardisation and the stage-4 cutoff are already per tier); reference on raw cosine, on the argument

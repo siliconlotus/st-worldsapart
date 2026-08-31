@@ -3,8 +3,8 @@
 //
 // Both of these were silent, and both reported a number instead of a failure. A sample's `index` and the
 // hash-derived path are recorded with ST's `data/` prefix, so testing them against the CWD asks a question
-// whose answer moves with the directory the tool was launched from: the same scene read 10/10 judged from
-// the ST root and 0/0 one level down. And a book whose collection is simply absent — the state every
+// whose answer moves with the directory the tool was launched from: the same scene read fully judged from
+// the ST root and empty one level down (H2). And a book whose collection is simply absent — the state every
 // exported bundle is in on someone else's machine — scored keyword-and-BM25-only and looked plausible.
 //
 // The keyword-only case must stay silent, though: a book with nothing to index legitimately has no

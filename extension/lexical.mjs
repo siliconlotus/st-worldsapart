@@ -21,8 +21,8 @@ export const DEFAULT_K1 = 1.2, DEFAULT_B = 0.75;
  *
  * THE FOLD IS THE MATCHER'S, NOT A LOOKALIKE. Tokenizing with a private notion of sameness made BM25
  * disagree with every match verdict in the system: the old [^a-z0-9'] split treated an accented letter
- * as a separator, so "Möbius" indexed as "bius" and could match nothing — measured, 87 word types /
- * 319 occurrences across four books, character names included (André x51). What the fold deliberately
+ * as a separator, so "Möbius" indexed as "bius" and could match nothing — a real population,
+ * character names included (K9). What the fold deliberately
  * does NOT do is strip diacritics: é vs e is a distinction an author can write, so "mobius" still does
  * not match "möbius" — same verdict countKey gives, which is the point.
  */

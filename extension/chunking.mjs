@@ -19,7 +19,7 @@
 //
 // The port is verbatim, and its exactness is not taken on trust: eval/chunking-check.mjs re-chunks a graded
 // sample's embedded books and compares against the `metadata.text` actually stored in the live index — a
-// real-data oracle for byte-identity, currently clean across three collections (983 + 640 + 1049 chunks).
+// real-data oracle for byte-identity, clean across the live collections (P3).
 // It doubles as a staleness detector, since a book edited after it was vectorized stops reproducing what is
 // stored.
 //
@@ -27,7 +27,7 @@
 // It re-trims every chunk and drops blanks (splitRecursive splitting on '. ' leaves edge whitespace), and it
 // keys the collection by hash, so identical text across several entries is stored once. Comparing raw chunk
 // output per-entry and positionally against a hash-keyed, insertion-ordered store reported a perfectly synced
-// collection as 70% stale.
+// collection as mostly stale (P3).
 
 /**
  * ST's recursive text splitter, ported verbatim from public/scripts/utils.js.
@@ -100,8 +100,7 @@ export function splitRecursive(input, length, delimiters = ['\n\n', '\n', ' ', '
  *   low  — many tiny chunks. Two corpus-wide effects, both invisible per-entry: BM25's `avgdl` drops, which
  *          re-weights length normalisation for EVERY chunk in the book, and entry pooling takes the max over
  *          an entry's chunks, so inflating chunk count hands long entries more chances at a high max than
- *          short ones get. On one real book, 20 vs 120 was 4572 vs 4027 chunks and 738 vs 156 chunks under
- *          120 chars, with the longest entry going from 64 chunks to 102.
+ *          short ones get (R25).
  *
  * That trade is exactly what eval/param-screen.mjs is for, once a reindexer can rebuild a collection per arm.
  *
@@ -143,12 +142,10 @@ export function chunkEntry(content, { chunkMode, chunkSize, minChunkSize }) {
         } else {
             const parts = splitRecursive(merged, maxLength, ['\n', '. ', ' ', '']);
             // THE FLOOR APPLIES TO SPLIT FRAGMENTS TOO. splitRecursive packs greedily from the left, so
-            // every run it emits ends in whatever did not fit — measured on a real collection, 144 of
-            // 3332 chunks (4.3%) came out under the floor that way, including five bare `---` rules, an
-            // 11-character `production.` and a title cut mid-word at `[Past Event: Aldric`. Those get
-            // embedded, they enter the corpus mean every centred cosine subtracts, they count toward
-            // BM25's document total, and a 3-character chunk's direction is arbitrary enough to win an
-            // entry's max-pool against anything.
+            // every run it emits ends in whatever did not fit — on a real collection that leaked
+            // sub-floor chunks, including bare `---` rules (R25). Those get embedded, they enter the
+            // corpus mean every centred cosine subtracts, they count toward BM25's document total, and a
+            // tiny chunk's direction is arbitrary enough to win an entry's max-pool against anything.
             //
             // The tail carries into `pending` rather than being glued on here, because that is the
             // faithful join: the tail ENDS a paragraph, so the text following it in the source is a

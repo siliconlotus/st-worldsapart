@@ -11,11 +11,10 @@
 // What to read, in order of what it decides:
 //   - the >= 3 BAND. Every selection criterion in this project is defined on that line (CLAUDE.md,
 //     "Four stages"), so agreement there is the number that matters and overall accuracy is not.
-//   - MEAN GRADE and the per-scene harsher/lenient split, which is where a judge drifts first: the
-//     measured failure of the last pass was leniency, not rank order.
+//   - MEAN GRADE and the per-scene harsher/lenient split, which is where a judge drifts first.
 //   - exact / within-1 agreement and QWK, read against the reference line printed at the end. The
-//     contract does not reproduce EVENLY — 87.7% exact against itself overall, but 79% at the head of a
-//     pool — so a candidate at 80% is not obviously worse than the incumbent, it is inside its noise.
+//     contract does not reproduce EVENLY — exact agreement against itself falls at the head of the
+//     pool (G3) — so a candidate near the incumbent is not obviously worse, it is inside its noise.
 //
 // Usage (any cwd):
 //   node eval/judge-agree.mjs <refDir> <candDir> [--labels sonnet,gemma]

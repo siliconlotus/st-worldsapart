@@ -14,9 +14,8 @@
  * modifies SillyTavern; it mounts at /api/plugins/worlds-apart.
  *
  * Why centering: in a single-story corpus every chunk shares a large common direction
- * (the recurring cast, the narrative register). Measured on a real lorebook the corpus
- * mean vector had norm 0.71 — roughly 70% of every embedding was that shared direction —
- * which compresses all similarities into a narrow band near 0.6. Subtracting the mean
+ * (the recurring cast, the narrative register) that carries most of every embedding's
+ * mass and compresses all similarities into a narrow band (R9). Subtracting the mean
  * before comparing removes that offset and leaves the topical variance that actually
  * discriminates.
  *
@@ -282,9 +281,9 @@ export async function init(router) {
      * Scan chat histories for a set of literal keys, returning only counts.
      *
      * WHY SERVER-SIDE. The client can do this itself by fetching each chat, and for a localhost install that
-     * is fine — but the chats are the largest thing SillyTavern owns (measured: 190 chats, 1.2GB, individual
-     * files 12-17MB) and a served instance would pull all of it over the network to answer a question whose
-     * answer is a few hundred integers. The keys go up, the counts come back, the histories never move.
+     * is fine — but the chats are the largest thing SillyTavern owns, gigabytes on a real corpus (P1), and a
+     * served instance would pull all of it over the network to answer a question whose answer is a few
+     * hundred integers. The keys go up, the counts come back, the histories never move.
      *
      * Streams line by line: a chat is JSONL, so this never holds a whole history in memory, and one
      * Aho-Corasick pass per message keeps the cost O(text) regardless of how many keys are checked.
@@ -342,9 +341,8 @@ export async function init(router) {
      * Every chat's lorebook binding, and nothing else.
      *
      * ST's /api/characters/chats streams EVERY LINE of every chat to count messages and grab the last
-     * one, even when the caller asked only for metadata — 1.28GB and 3.2s on a real corpus, against
-     * 0.06s to read the one line the binding lives on. Fifty-three times the work, per Studio session,
-     * to answer "which book does this chat name".
+     * one, even when the caller asked only for metadata — orders of magnitude more work than reading the
+     * one line the binding lives on (P1), per Studio session, to answer "which book does this chat name".
      *
      * Returns [{ dir, file, world_info }] for every chat that names a book. The caller pairs it with
      * the character list it already has in memory for card bindings.

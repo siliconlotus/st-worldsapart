@@ -69,7 +69,7 @@ const OPS = {
  *
  * The compile is the one semantic step in the lexer. Bounded: only tokens opening with `/` reach it
  * and ASTs are cached per key. Exposure, not justification — the rule stands on one syntax having one
- * reading, and the books on disk hold 2 regex keys in 46,226, so they cannot speak to it either way.
+ * reading, and the books on disk hold almost no regex keys, so they cannot speak to it either way (K12).
  *
  * @param {string} s A string whose first character is `/`
  * @returns {{value: string, rest: string}|null} The `/pattern/flags` token and what follows
@@ -162,8 +162,8 @@ export function tokenize(input) {
         // `^N` is accepted as an ALIAS. It is Lucene's boost, and Elasticsearch's query_string and Solr
         // carry it too, so it is muscle memory worth not breaking. It cannot be confused with the `^`
         // case-sensitivity flag, which is a PREFIX consumed before the value; this one is a postfix
-        // followed by digits. Measured collision surface across the books on disk: 0 keys contain `^`
-        // followed by a digit, and 0 in 367KB of scan text.
+        // followed by digits. Measured collision surface across the books on disk and the scan text:
+        // none (K12).
         if (m[2] !== undefined) {
             const w = src.match(/^(?:::|\^)(\d+(?:\.\d+)?)/); // quoted: weight sits after the close quote
             if (w) { weight = parseFloat(w[1]); src = src.slice(w[0].length); }

@@ -39,18 +39,9 @@ export function buildKeyPrompt(entryText, avoid) {
         // SELF-SELECTING COUNT, not a range. Was "5 to 10". A fixed count is the wrong instrument
         // because entries differ in how much key material they hold: any floor is too high for a
         // sparse entry, where the model pads rather than stops, and too low for a rich one.
-        // Chosen on WORST-CASE F over five wordings x six model configurations (three local and
-        // seeded, three hosted; eval/count-sweep.mjs and eval/nano-sweep.mjs), not because it won
-        // any single cell: 5 wins of 6, best mean rank, best floor. The sixth is a tie inside a
-        // measured noise floor. The old wording ranked fourth of five and never won a cell.
-        //
-        // RE-SCORED ACROSS THE BETA SPREAD from the same cached responses (596, hosted arms): it wins
-        // the mean at F1, F1.5, F2 and F4, and the worst cell at every beta except F1, where the
-        // lowest-yield wording edges it by 0.006 inside that same noise floor. So the choice does not
-        // depend on where recall is weighted against precision — which the old "F2" wording implied it
-        // might. Caveat that does not move the verdict but should travel with the number: this scores
-        // against the books' own keys, which eval-data/README.md is explicit is not a denominator that
-        // establishes quality.
+        // Chosen on WORST-CASE F across wordings and model configurations, not on any single cell,
+        // and the choice holds across the beta spread — it does not depend on where recall is
+        // weighted against precision (S2).
         '- Output as many keywords as you are confident about, each 1 to 4 words, lowercase unless a proper noun or acronym.',
         '- Prefer concrete nouns and named entities. Include the obvious paraphrase a reader would reach for even if those exact words are not in the text.',
         '- NEVER output a full sentence, clause, or verb phrase (bad: "kyle confesses", "makes him feel").',
@@ -187,12 +178,10 @@ export function nameEvidence() {
         });
     };
     // ONE properness test, used by every gate that exempts names, and a RATIO rather than "never
-    // seen lowercase". That boolean was brittle in exactly one direction: "Marches" is capitalised
-    // 397 times and lowercase twice ("he marches"), and those two occurrences were enough to strip
-    // its name status. Measured over two books the classes separate cleanly — real names sit at
-    // 99.5-100% (marches, aldric, stearns, jeffrey, kyle), junk at 1.6-16.4% (under, what, because,
-    // away, coffee) — with "lord" the nearest miss at 91%, correctly below the bar.
-    // Sentence-initial capitals are not counted at all: they are punctuation, not spelling.
+    // seen lowercase". That boolean was brittle in exactly one direction: "Marches" is overwhelmingly
+    // capitalised, and a couple of lowercase "he marches" were enough to strip its name status.
+    // Measured, the classes separate cleanly, with "lord" the nearest miss, correctly below the
+    // bar (S3). Sentence-initial capitals are not counted at all: they are punctuation, not spelling.
     // ponytail: 0.95 sits in a wide empty gap; retune only if a real name lands under it.
     const NAME_CAP_RATIO = 0.95;
     const isName = w => {
@@ -231,9 +220,9 @@ export function buildKeySuggest(data, opts) {
     for (const s of seqs) { for (const t of new Set(s)) uDF.set(t, (uDF.get(t) ?? 0) + 1); for (const t of s) uCF.set(t, (uCF.get(t) ?? 0) + 1); }
     // A name is never a function word, however ubiquitous. The distributional test looks for
     // domain stopwords — common across entries, rarely repeated within one — and a place name that
-    // half the book mentions has exactly that shape: "marches" (48.6% of entries, 3.0 repeats) was
-    // being blocked from every n-gram, so "Governor of the Verenthian Marches" could not form at
-    // all. "aldric" escaped only by repeating 6.42 times, a hair over the threshold.
+    // half the book mentions has exactly that shape: "marches" was being blocked from every n-gram,
+    // so "Governor of the Verenthian Marches" could not form at all, and "aldric" escaped the same
+    // fate only by a hair (S3).
     const isFunc = t => STOP.has(t) || ((uDF.get(t) ?? 0) / N > 0.3 && (uCF.get(t) ?? 0) / (uDF.get(t) || 1) < 6 && !isName(t));
     const satEntity = t => (uDF.get(t) ?? 0) / N > 0.85;
     const DET = new Set('the a an this that his her its their my your our los la el whole each every some'.split(' '));
@@ -296,9 +285,9 @@ export function buildKeySuggest(data, opts) {
     //
     // Every other function word still breaks phrases everywhere. The flood of ordinary of-phrases
     // this admits ("glass of wine") is handled downstream: common-anchored phrases gate to zero.
-    // Deliberately broader than any one book needs: measured over 38 books only de/la/los/el/van/
-    // del/du/da/der/le actually occur, but a missing particle fails SILENTLY — the name fragments
-    // into junk and the good key is never offered — so the cheap side of the trade is coverage.
+    // Deliberately broader than the particles the books on disk actually use (S4), because a missing
+    // particle fails SILENTLY — the name fragments into junk and the good key is never offered — so
+    // the cheap side of the trade is coverage.
     const PARTICLES = new Set('de del da di du la las le les los el van von der den bin ibn al af av dos das'.split(' '));
     const ENG_LINKERS = new Set(['of', 'the']);
     // French/Italian elision writes the particle onto the name — "d'Orléans", "dell'Arte" — so the
@@ -358,8 +347,7 @@ export function buildKeySuggest(data, opts) {
     // call from suggestForEntry is a guaranteed hit, because the warm-up collects exactly the terms
     // that reach this gate. The scan-on-miss path survives for terms the warm-up never saw — the ✨
     // path hands classifyLlmCand this same function for model-proposed candidates, and answering 0 for
-    // those would quietly switch off their too-common filter. (Answering it term-by-term for the whole
-    // build was 97% of this function's runtime on a 327-entry book, hence the warm-up.)
+    // those would quietly switch off their too-common filter.
     const contentsLc = entries.map(e => String(e.content ?? '').toLowerCase());
     const dfCache = new Map();
     const dfSubstr = t => {
@@ -435,8 +423,8 @@ export function buildKeySuggest(data, opts) {
     // can. Human-curated keys fall into three classes, and each has its own test: PROPER NOUNS
     // (Jeffrey, Rolex — often common words by z) are exempt via isName, scoring 0;
     // UNCOMMON UNIGRAMS (minotaur, orrery) are any word NOT in the table (its floor is z 3.0, so
-    // membership itself is the unigram cut — measured: good unigrams like "jubilee" 3.4 overlap
-    // junk like "rut" 3.1, so no finer unigram ramp is honest); CONCRETE PHRASES ride on their
+    // membership itself is the unigram cut — measured, good unigrams overlap junk in Zipf, so no
+    // finer unigram ramp is honest (S5)); CONCRETE PHRASES ride on their
     // rarest anchor word ("brass orrery" on "orrery"), gated on a looser ramp — full weight at
     // z<=2.5, dropped at z>=3.8 — because a phrase can't fire more often than its rarest word,
     // yet is worth more than that word alone (the length boost in the score).
@@ -501,8 +489,8 @@ export function buildKeySuggest(data, opts) {
     // Warm dfCache for every term that will reach the substring gate, in ONE pass per document.
     //
     // dfSubstr is the gate on every candidate, and answering it term-by-term means re-reading the whole
-    // corpus per term — 97% of this function's runtime on a large book, and still the bulk of it once
-    // memoized, because most terms are distinct. Aho-Corasick inverts the loop: build one automaton over
+    // corpus per term — nearly the whole of this function's runtime on a large book (S10), and still
+    // the bulk of it once memoized, because most terms are distinct. Aho-Corasick inverts the loop: build one automaton over
     // all candidates, then each document reports every term it contains in a single walk, so the cost is
     // (corpus + patterns) instead of (terms x corpus). Same numbers, just not recomputed per term.
     // Background pseudo-documents (the open chat's messages, injected by the caller so this stays
@@ -544,7 +532,7 @@ export function buildKeySuggest(data, opts) {
     // they do. Counted over the entries AND the chat, because a name's real independence shows up in
     // conversation, not in a 300-entry book. Splitting a trigram down the middle instead (A | BC)
     // measured far worse — a bare leading word is common on its own for reasons that say nothing
-    // about the phrase, and the bands muddied to 0/50/55/68% where the bigram pair reads 8/65/100/100%.
+    // about the phrase, and the bands muddy where the bigram pair separates cleanly (S6).
     // ponytail: validated at n=3..4; a longer gram compares only its shoulders, which errs toward
     // keeping it. Revisit if maxN above 4 becomes a real setting rather than a knob.
     const bgCache = new Map();
@@ -560,10 +548,10 @@ export function buildKeySuggest(data, opts) {
         if (v !== undefined) return v;
         const w = term.split(' ');
         const docs = t => dfSubstr(t) + bgCount(t);
-        // Only parts that could THEMSELVES be offered count as alternatives. Measured on two books,
-        // 13/84 and 31/102 of the grams this rule dropped were being counted against an illegal
-        // part ("Bishop of", "de Montclair" before particles were allowed to lead) and so vanished
-        // with nothing put in their place. A gram no legal part can replace is indivisible: keep it,
+        // Only parts that could THEMSELVES be offered count as alternatives. Measured, a real share
+        // of the grams this rule dropped were being counted against an illegal part ("Bishop of",
+        // "de Montclair" before particles were allowed to lead) and so vanished with nothing put in
+        // their place (S6). A gram no legal part can replace is indivisible: keep it,
         // which is precisely the "Bishop of Queensgrace" / "Duke of Edinburgh" case.
         const parts = [w.slice(0, 2), w.slice(-2)].filter(p => !edgeIllegal(p)).map(p => docs(p.join(' ')));
         // Against the BEST alternative, doubled so the ceiling stays 0.5 however many parts qualify:
@@ -575,10 +563,10 @@ export function buildKeySuggest(data, opts) {
     // Per-entry TF-IDF: distinctive terms, ranked, subsumed, split into new vs already-keyed.
     //
     // Subsumption used to be "at equal frequency the longer gram wins", on the assumption that longer
-    // is more specific. Specificity is worthless if the string never appears: measured over one book
-    // and its 5598-message chat, a half of an INCOHESIVE tetragram out-fires the whole 96% of the
-    // time (13% when cohesive), so that rule was trading live keys for dead ones — "arthur baxter"
-    // (241 chat hits) discarded in favour of "Kyle FaceTimed Arthur Baxter" (0). The longer gram now
+    // is more specific. Specificity is worthless if the string never appears: measured against a
+    // real chat, a half of an INCOHESIVE tetragram almost always out-fires the whole (rarely when
+    // cohesive), so that rule was trading live keys for dead ones — "arthur baxter" discarded in
+    // favour of the never-firing "Kyle FaceTimed Arthur Baxter" (S7). The longer gram now
     // has to earn the swap by being a unit; otherwise the contained gram wins and IT swallows the
     // long one, so the pair still collapses to a single row.
     // ponytail: measured on n>=3 only, so bigram-over-unigram subsumption keeps the old rule —
@@ -601,10 +589,9 @@ export function buildKeySuggest(data, opts) {
             if (k > 0 && lw.length - k === 1 && srt.term === lw[k] && !ZIPF_EN.has(tblKey(lw[k]))) return r === lng;
             // Otherwise a unit swallows contained PHRASES, but never a bare word: that word is a
             // different instrument rather than a worse version of the same one — broader, and often
-            // the form the chat actually reaches for. Measured, "Ashworth" fires 149 times against
-            // 4 for "Evelyn Ashworth", "Raleigh" 134 against 0 for "Raleigh atrium", and roughly a
-            // third of swallowed unigrams sat in that band. Both are offered; the choice is the
-            // user's.
+            // the form the chat actually reaches for. Measured, "Ashworth" far out-fires "Evelyn
+            // Ashworth" and "Raleigh" out-fires "Raleigh atrium", and a meaningful share of swallowed
+            // unigrams sat in that band (S7). Both are offered; the choice is the user's.
             if (srt.n === 1) return false;
             return r === srt;
         }
@@ -690,9 +677,9 @@ export function buildKeySuggest(data, opts) {
         // Batch triage: cap the per-entry paragraph to the strongest few so it stays scannable
         // (a focused entry can pull more via ✨). Score-sorted, so the cut only sheds the weak tail.
         // Gated-out entries return nothing on purpose. A demoted-rejects fallback used to run here,
-        // on the theory that an empty paragraph helps nobody; measured over 38 books / 3466 entries
-        // it fired on 1% of them and offered "friend, things, years" — the gate was right and the
-        // real emptiness cure was admitting f=1 names, which now covers 98.8% of entries.
+        // on the theory that an empty paragraph helps nobody; measured, it almost never fired and
+        // offered junk when it did — the gate was right, and the real emptiness cure was admitting
+        // f=1 names, which covers nearly every entry (S9).
         return { existing, newRows: kept.filter(r => !r.present).slice(0, cap), keyedRows: kept.filter(r => r.present) };
     };
 
@@ -709,12 +696,10 @@ export function buildKeySuggest(data, opts) {
 // dfCeil sits just under the pruner's too-common danger line (KEY_BOOK_COMMON * 0.75 = 0.375): the
 // suggester must not pre-reject a term the pruner itself considers fine. It was 0.15 when
 // cross-entry df was the only junk signal; the Zipf gate now owns English junk, and 0.15 was
-// silently cutting a book's recurring cast and setting names ("Stearns" in ~25% of entries).
-// cap is a display budget, not a quality line. Measured uncapped over 39 books / 3405 entries, an
-// entry yields a median of 17 candidates and a mean of 27, near-linear in content length (~7 per
-// 1000 chars) rather than tailing off — so 8 was discarding ~70% of what survives the gates, and
-// what it discarded was not junk. On a 269-candidate entry the top 8 were the entry's own subject
-// but the next hundred still held its proper nouns. 30 sits just above the p75 of 29, so most
-// entries now return everything they have and only the largest are trimmed.
+// silently cutting a book's recurring cast and setting names ("Stearns") (S8).
+// cap is a display budget, not a quality line. Measured uncapped, per-entry yield is near-linear in
+// content length rather than tailing off, and what the old cap of 8 discarded was not junk (S9).
+// 30 sits just above the per-entry p75, so most entries return everything they have and only the
+// largest are trimmed.
 export const STUDIO_SUGGEST_OPTS = { dfCeil: 0.35, maxN: 4, excludeDates: true, excludeShort: true, onlyActive: false, cap: 30, llmChunk: 5000 };
 

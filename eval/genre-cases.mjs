@@ -1,11 +1,11 @@
 // Genre vocabulary cases for the keyword suggester — the data half; eval/genre-check.mjs runs it.
 //
 // WHY THIS EXISTS. Roleplay prose is not the English the frequency tables were built from, and
-// every genre breaks the ranker somewhere different. Measured over one user's 35 books, the shapes
-// that actually occur are: acronyms (30 books), bracket tags (26), apostrophe names (20), accented
-// text (18), nobiliary particles (15), hyphenated species compounds (12), shouted markdown headers
-// (9), elisions (8), roman numerals (8) and LitRPG stat blocks (7). Nearly every bug found while
-// tuning the suggester came from one of those and not from ordinary prose.
+// every genre breaks the ranker somewhere different. Measured over one user's books, the shapes
+// that actually occur are: acronyms, bracket tags, apostrophe names, accented text, nobiliary
+// particles, hyphenated species compounds, shouted markdown headers, elisions, roman numerals and
+// LitRPG stat blocks (S19). Nearly every bug found while tuning the suggester came from one of
+// those and not from ordinary prose.
 //
 // Cases carry the SHAPE, never anyone's actual writing: the point is that a name has a particle or
 // a header is shouted, not what the scene is about. Neutral vocabulary keeps the suite publishable.

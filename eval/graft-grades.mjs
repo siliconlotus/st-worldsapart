@@ -5,9 +5,9 @@
 // that can look right while being wrong: two bundles can name the same message id and hold different
 // scenes, because the id is a position in a file that gets branched, edited and replayed — and because
 // the query is built at a depth that is itself a parameter. So the scene is compared by its FROZEN TEXT,
-// not by its id, and a mismatch refuses rather than warns. Measured while building the generator: reading
-// depth from a default instead of the source turned msg2919 into a 3484-character query where the graded
-// scene was 5896, identical in every field a reader would think to check.
+// not by its id, and a mismatch refuses rather than warns. Reading depth from a default instead of the
+// source once produced a query far shorter than the graded scene's, identical in every field a reader
+// would think to check (G9).
 //
 // ORPHANS ARE REPORTED BY REASON, not counted. Four of the five reasons are classification facts and carry
 // no information about retrieval — an entry that is durable, disabled, reference tier, or deleted was never
@@ -72,11 +72,11 @@ for (const path of files) {
 
     // --- the scene guard, before anything is read out of the source -----------------------------------
     // THE RULE LIVES IN grading.mjs, because the browser's prior-sample loader needs the same one — and
-    // that loader having no guard at all is what put one scene's 50 rows onto another's bundle.
+    // that loader having no guard at all is what put one scene's rows onto another's bundle (G9).
     const a = armOf(fresh), b = armOf(src);
     let diff = sceneDiff(a, b);
-    // TRAILING WHITESPACE ONLY, and only when asked for. Measured on 4 of 56 scenes across 3 chats: the
-    // capture's scanText is one character shorter than the window rebuilt from the same turn, because a
+    // TRAILING WHITESPACE ONLY, and only when asked for. On some captures the scanText comes out one
+    // character shorter than the window rebuilt from the same turn (G9), because a
     // message in the chat file ends with a space that the capture did not record. Production reads `mes`
     // raw into scanSegments, so the rebuilt window is the faithful one and the recorded text was subtly
     // wrong — and under strict word boundaries a space before a newline is a boundary either way, so no

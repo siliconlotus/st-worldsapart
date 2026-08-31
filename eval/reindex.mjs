@@ -37,10 +37,9 @@ export const chunkConfig = (S, overrides = {}) => {
     // `scoreThreshold`), and reading it would let a stored capture resurrect a parameter there is no code
     // for. Prerelease, so nothing is owed to it.
     //
-    // THE COST IS EXPLICIT: measured, 363 of 491 scene-arms carry only the grouped shape, so every capture
-    // in the corpus now re-derives at today's defaults rather than at what it ran under — Ascensus moves
-    // from paragraph/800/20 to paragraph/1750/120. Every cached index path changes with it, and no number
-    // measured before this is comparable to one measured after.
+    // THE COST IS EXPLICIT: most scene-arms on disk carry only the grouped shape (P4), so every such
+    // capture now re-derives at today's defaults rather than at what it ran under. Every cached index
+    // path changes with it, and no number measured before this is comparable to one measured after.
     const p = S?.params ?? {};
     const recorded = {};
     for (const k of ['chunkMode', 'chunkSize', 'minChunkSize']) if (p[k] !== undefined) recorded[k] = p[k];
@@ -61,7 +60,7 @@ export const chunkConfig = (S, overrides = {}) => {
  * Chunks a book into the exact item set syncWorld would store.
  *
  * MIRRORS syncWorld, INCLUDING WHAT HAPPENS AFTER CHUNKING — the parts that are invisible in chunkEntry's
- * output and have already produced one false "your index is 30% stale" scare:
+ * output and have already produced one false index-staleness scare (P3):
  *
  *   - only `vectorized && !disable && content` entries are indexed at all;
  *   - every chunk is re-trimmed and blanks are dropped (splitRecursive on '. ' leaves edge whitespace);
@@ -72,7 +71,7 @@ export const chunkConfig = (S, overrides = {}) => {
  * is stored twice, once under each uid — even by an incremental sync. Collapsing them changes which entry
  * owns a shared chunk, and since entry pooling takes the max over an entry's chunks, that moves the entry
  * ranking, the gaps between scores, and therefore where the elbow cuts. A globally-deduped rebuild
- * reproduced every nDCG figure of the live index and still cut 4 entries instead of 8.
+ * reproduced every nDCG figure of the live index and still cut different entries than production did (P4).
  *
  * Any drift from this is drift from what the extension actually indexes, which would make every offline
  * number describe a collection production would never build.
@@ -142,9 +141,8 @@ export function cachePath(S, cfg, model, book = S.primaryBook, all = false, arch
  * QUERY, so it never reaches a stored vector and a collection is named by its model alone.
  *
  * EACH MODEL GETS EXACTLY ONE CONFIGURATION, so the prefix is not a parameter and there is no unprefixed
- * arm. **Measured** over 5585 rows on 99 scenes, memory tier, leave-one-book-out, against the SAME
- * collections so that only the query vector moves: Qwen3-Embedding-8B's instruction is worth +0.0131
- * held-out AUC and +0.0235 F2 at its best cutoff, on 4 of 5 books.
+ * arm. Measured against the SAME collections so that only the query vector moves, Qwen3-Embedding-8B's
+ * instruction is worth real held-out AUC and F2 (E7).
  *
  * A SERVER STEM (`lms:`, `omlx:`) names a model served by something other than ollama, over its
  * OpenAI-compatible /v1/embeddings. The transport is in the spec rather than in a flag so that two arms in
@@ -202,10 +200,10 @@ export const resolveModel = (spec) => {
  *  as index-ordered and is sorted here anyway — a silently permuted batch would attach every vector to the
  *  wrong chunk and still build a plausible-looking index. */
 export const embedTexts = async (texts, opts) => {
-    // ONE DROPPED CONNECTION MUST NOT COST THE RUN. A 4-arm sweep died on a single ECONNRESET partway
-    // through its last collection and took three already-fitted arms with it, because the readouts print
-    // at the end. The per-book index cache is the resume unit, so a retry here is what keeps a transient
-    // blip from costing anything at all.
+    // ONE DROPPED CONNECTION MUST NOT COST THE RUN. A sweep died on a single ECONNRESET partway
+    // through its last collection and took its already-fitted arms with it, because the readouts print
+    // at the end (H4). The per-book index cache is the resume unit, so a retry here is what keeps a
+    // transient blip from costing anything at all.
     //
     // ONLY TRANSPORT FAILURES. undici throws TypeError for those; every error raised below is a plain
     // Error about what the server actually answered, and retrying one of those would just ask a wrong
@@ -223,12 +221,12 @@ export const embedTexts = async (texts, opts) => {
  *
  *  ONE TEXT PER CALL, NEVER A BATCH. Mean pooling in `sillytavern-transformers` is not attention-mask
  *  aware, so it averages over the PADDING of every sequence shorter than the longest in the batch.
- *  Measured: one sentence embedded alone and again beside a longer one came back at cosine 0.345 — not a
- *  rounding difference but a different vector, which would have built a whole collection and reported
+ *  Measured: one sentence embedded alone and again beside a longer one came back as a different vector
+ *  entirely, not a rounding difference (P4) — which would have built a whole collection and reported
  *  the model as far worse than it is. This loop is the correctness condition, not a simplification; it
  *  also matches `getTransformersVector`, which ST calls one text at a time for the same reason.
  *
- *  The pipeline is cached per model because loading it costs ~0.2s and a book is thousands of calls. */
+ *  The pipeline is cached per model because loading it is the expensive step and a book is many calls. */
 const stPipes = new Map();
 const embedST = async (model, texts) => {
     let pipe = stPipes.get(model);
@@ -261,8 +259,8 @@ const embedOnce = async (texts, { model, endpoint = 'ollama', url = 'http://loca
         const j = await r.json();
         if (!Array.isArray(j.data) || j.data.length !== texts.length) throw new Error(`embed returned ${j.data?.length ?? 0} vectors for ${texts.length} inputs${j.error ? ` (${JSON.stringify(j.error)})` : ''}`);
         // WHICH MODEL ANSWERED, checked rather than assumed. LM Studio ignores the requested id on
-        // /v1/embeddings and serves whatever embedding model is loaded — asking it for an 8B qwen while
-        // nomic was resident returned 768-dim nomic vectors under a qwen label, which would have built a
+        // /v1/embeddings and serves whatever embedding model is loaded — asking it for a qwen while
+        // nomic was resident returned nomic vectors under a qwen label (P4), which would have built a
         // whole index and a whole result table for a model that never ran. The response says who really
         // answered, so the mismatch is detectable and is the only thing standing between that and a
         // silently mislabelled arm.

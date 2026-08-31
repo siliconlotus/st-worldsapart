@@ -729,7 +729,7 @@ async function captureArm(overrides, wanted) {
  * cutoff — a merged row would carry one arm's signals under another's parameters. They share only the grades.
  *
  * Books default to 'full' despite N samples meaning N copies. 'meta' is lossless for how the harness scores
- * TODAY and 20x smaller, which made it the obvious default — until the samples started being things other
+ * TODAY and far smaller (G10), which made it the obvious default — until the samples started being things other
  * people send you. A sample is only re-scorable by someone who has the vector index, and nobody but the
  * author does; what makes a third-party dump usable is REBUILDING the index from the sample, which needs
  * entry content (plus the chunk params in paramSnapshot and the recorded embedModel, both already carried).
@@ -763,8 +763,8 @@ async function superGradePopup({ captures, union, entryOf, prior: prior0 = [], s
     //
     // THE DOM INDEX IS FLAT ACROSS SECTIONS. `data-i` addresses `flat`, not a section's own rows, which
     // is what lets wireFolds, gradeOrder and the row renderer stay untouched — a per-section index would
-    // collide the moment the same entry appears against two scenes, and 10 of 19 entries in the set this
-    // was built for do exactly that. Section membership rides on the row instead, for the collector.
+    // collide the moment the same entry appears against two scenes, which is routine in a review set
+    // (G10). Section membership rides on the row instead, for the collector.
     const secs = sections ?? [{ captures, union, entryOf, prior: prior0 }];
     const multi = Boolean(sections);
     const flat = [];
@@ -953,10 +953,10 @@ async function superGradePopup({ captures, union, entryOf, prior: prior0 = [], s
                     const priorSample = openBundle(parsed);
                     // THE SCENE GUARD. Prior grades are pooled by `rowKey`, which is book + uid — so
                     // without this, loading ANY graded bundle attaches its verdicts to whatever scene is
-                    // being graded, and they are written straight through to the new sample. That is not
-                    // hypothetical: it is how 50 rows of a Time Whore scene ended up on an Ascensus scene
-                    // captured 15 minutes later, at their original values. A book test would have missed
-                    // the commoner case, two scenes of one book, since those rows name the same books.
+                    // being graded, and they are written straight through to the new sample. Not
+                    // hypothetical: one scene's rows landed on another scene captured minutes later, at
+                    // their original values (G9). A book test would have missed the commoner case, two
+                    // scenes of one book, since those rows name the same books.
                     //
                     // ANY ARM, because the arms of one capture differ in `query` (the summary arm builds
                     // its own) while sharing the scene. Skipped rather than thrown: one wrong file in a
@@ -1192,7 +1192,7 @@ const pickJsonFiles = ({ multiple = false } = {}) => new Promise(resolve => {
  * offline (or by someone else, or by an LLM judge) can be reviewed without loading the chat it came from.
  * Entry text resolves from each bundle's embedded books and stored grades arrive pre-filled and editable.
  *
- * ONE SECTION PER BUNDLE, ONE SAVE FILE PER RUN. Grading 15 scenes was 15 imports and would have been 15
+ * ONE SECTION PER BUNDLE, ONE SAVE FILE PER RUN. Grading N scenes was N imports and would have been N
  * download prompts; the save is a single file that `eval/synthetic-data/apply-review.mjs` writes back
  * into eval-data. It is SELF-CONTAINED, as a grading bundle is: each section carries the scene, and each
  * graded row the entry text and the judge verdicts it was weighed against, so the review can be read

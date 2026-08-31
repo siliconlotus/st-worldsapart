@@ -8,7 +8,7 @@
 // So every chunk arm in param-screen.mjs is scored against a pool collected under ONE chunking, and any entry
 // a different chunking surfaces counts as irrelevant because nobody looked at it. That biases chunk arms
 // downward, systematically, and the bias grows with distance from the live settings — which is precisely the
-// region the sweep exists to explore. Measured on three scenes, every chunk cell was a lower bound.
+// region the sweep exists to explore. Measured, every chunk cell was a lower bound (H9).
 //
 // The fix is the same iterative pooling loop, driven by rebuilt indexes instead of live captures: score each
 // dose offline, take the top-k it would actually deploy, union across doses, subtract what is already judged,
@@ -64,7 +64,7 @@ const K = Number(arg('--k') ?? 10);
 // name is an ollama model.
 // FALLS BACK TO THE BUNDLE'S OWN MODEL, not to a hardcoded name. A bundle records the model its
 // collections are keyed under, and hardcoding one meant a corpus that had moved on still resolved the old
-// collections — which exist, so nothing errored, it just quietly measured the previous model.
+// collections — which exist, so nothing errored, it just quietly measured the previous model (H3).
 const MODEL = process.env.WA_EMBED_MODEL ?? openSample(samples[0], arg('--arm')).embedModel;
 if (!MODEL) { console.error(`${samples[0]} records no embedModel — set WA_EMBED_MODEL`); process.exit(2); }
 const EM = resolveModel(MODEL);

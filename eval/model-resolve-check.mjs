@@ -36,9 +36,9 @@ eq(jina.query, '', 'jina is trained with no task prefix');
 idem('st:Cohee/jina-embeddings-v2-base-en', 'st');
 
 // --- one configuration per model: its own contract ----------------------------------------------------
-// There is no unprefixed arm. Following the contract measured +0.0235 F2 on Qwen3-8B and flat on gemma,
-// so it is always followed and the prefixes are not a parameter. A label therefore carries no marker, and
-// every model resolves to exactly one set of prefixes.
+// There is no unprefixed arm. Following the contract measured a real gain on Qwen3-8B and flat on
+// gemma (E7), so it is always followed and the prefixes are not a parameter. A label therefore carries
+// no marker, and every model resolves to exactly one set of prefixes.
 for (const [stem, want] of Object.entries(PREFIXES)) {
     eq(resolveModel(stem).query, want, `${stem}: the family's query prefix is found`);
 }

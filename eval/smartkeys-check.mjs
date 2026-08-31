@@ -340,8 +340,8 @@ console.log('ok   SmartKey structural validation');
     eq(sc.reasonOf(sc.classifyEntry(entries[5])[0]).text, 'english common · the', '...and the loose branch is named');
     eq(sc.classifyEntry(entries[6])[0]?.flag, 'book common', 'a conjunction is as tight as its tightest conjunct');
     // A CASE-SENSITIVE capitalised term cannot be the common word, so the collision is impossible rather
-    // than unlikely. Measured: this is 2 of the 7 SmartKeys the flag caught across the books on disk,
-    // both the same character name. A term written PLAINLY is not spared — `Mark` does match `mark`, and
+    // than unlikely. The exemption covers real flagged SmartKeys on the books on disk, all the same
+    // character name (K12). A term written PLAINLY is not spared — `Mark` does match `mark`, and
     // sparing it would put this path at odds with the literal one.
     entries[7].key = ['? ^Mark'];
     entries[8].key = ['? Mark'];
@@ -477,7 +477,7 @@ console.log('ok   unsupported Lucene syntax is named rather than silently dead')
 // ^N is accepted as an ALIAS for ::N — Lucene's boost, carried by Elasticsearch's query_string and
 // Solr, so it is muscle memory worth not breaking. It cannot collide with the ^ case-sensitivity flag,
 // which is a PREFIX consumed before the value; this is a postfix followed by digits. Measured across
-// the books on disk: 0 keys contain ^ followed by a digit.
+// the books on disk, no key contains ^ followed by a digit (K12).
 {
     const T = q => tokenize(q).filter(t => t.type === 'TERM')
         .map(t => `${t.value}@${t.weight}${t.isExact ? '=' : ''}${t.isCaseSensitive ? '^' : ''}`).join(' ');

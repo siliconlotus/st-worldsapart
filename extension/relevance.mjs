@@ -10,9 +10,8 @@
 // THE TARGET IS EXPECTED gradeCredit, NOT P(>=3). The layout score's precision numerator is a sum of
 // credits — a delivered 2 scores half — so the quantity to threshold is the one that sum is built from:
 // `E[credit] = 0.5*P(>=2) + 0.5*P(>=3)`. That is why a fitted model file carries TWO coefficient vectors.
-// The boundaries are fitted separately because proportional odds does not hold here (measured: cosine
-// runs +0.682, +0.625, +0.468, +0.901 across the four boundaries), so neither vector derives from the
-// other.
+// The boundaries are fitted separately because proportional odds measurably does not hold here (F29), so
+// neither vector derives from the other.
 //
 // ST-FREE AND NODE-IMPORTABLE, like the rest of the pure half — the model file is data, the settings and
 // the entries are the caller's. `worldsapart.js` wires it; nothing here reads a global.
@@ -25,8 +24,8 @@ import { COMMON_WORDS } from '../plugin/commonwords.js';
  * Which TIER an entry belongs to — provenance, not kind. `memory` is STMB-marked, `reference` is
  * everything that is not.
  *
- * IT LIVES HERE BECAUSE THE TIER DECIDES WHICH FIT APPLIES. The tiers do not carry the same signals
- * (99.8% of memory rows are vectorized against 84% of reference rows keyword-only) and `density`
+ * IT LIVES HERE BECAUSE THE TIER DECIDES WHICH FIT APPLIES. The tiers do not carry the same signals —
+ * memory is nearly all vectorized where reference is mostly keyword-only (F18) — and `density`
  * INVERTS between them, so a shared coefficient would carry the wrong sign — the model is per tier, and
  * the predicate that selects one is part of reading it. It was defined in the harness alone, which is
  * one copy short of what the runtime now needs.
@@ -38,9 +37,8 @@ export const isMemory = e => Boolean(e) && ('stmemorybooks' in e || 'STMB_start'
  *
  * THE BOUNDARY IS THE END, NOT THE START. A summary exists once the messages it covers have happened, so
  * an entry spanning the point (`start <= at < end`) could not be in the book either, and a start-only
- * test keeps every one of them. Measured on the graded corpus, those straddling entries are the scene's
- * own haystack paraphrased: 66 of 446 memory positives, within-scene z 2.795 against clean positives'
- * 0.800, ranking FIRST in 53% of their scenes against 7%.
+ * test keeps every one of them. Those straddling entries are the scene's own haystack paraphrased, and
+ * they rank at the top of their scenes far more often than clean positives do (F28).
  *
  * A MISSING RANGE READS AS AVAILABLE, which is right for a reference sheet and wrong for a memory entry
  * that lost the field — the check is silently inert on exactly those, and cannot tell the two apart.
@@ -70,8 +68,8 @@ export const NAME_PARTICLES = new Set(['of', 'the', 'and', 'de', 'del', 'della',
  *
  * Its tokens are layout, not spelling, and the sentence-position rule cannot see that: a label alone
  * on a line makes its FIRST word position 0 and every later word a mid-sentence capital, so
- * `**Key Dynamics:**` yields `dynamics` (measured: 51% of Richard's entries) and `## The Guest List`
- * yields `guest`. Single-word labels were always harmless — the one token is position 0.
+ * `**Key Dynamics:**` yields `dynamics` (C9) and `## The Guest List` yields `guest`. Single-word
+ * labels were always harmless — the one token is position 0.
  *
  * ONLY WHEN THE LABEL IS THE WHOLE LINE. A label with content after it is already correct and must not
  * be touched: `**Location:** Big Sur` works BECAUSE `Location` absorbs position 0, and stripping the
@@ -134,8 +132,7 @@ export function properNames(text) {
  *
  * DISABLED ENTRIES ARE INCLUDED. df asks how distinctive a name is in the book's vocabulary, which a
  * disabled entry still contributes to — where `buildContentIndex` excludes them because it is asking
- * what can be RETRIEVED. Measured, memory tier held out by book: excluding them costs F2 0.5160 -> 0.5105
- * and loses on 4 books of 5 (matcher-design.md, *Stage 4 predicts per-entry relevance*).
+ * what can be RETRIEVED. Excluding them here measurably costs, on most books (F27).
  *
  * AN ENTRY WITH NO CONTENT IS NOT A DOCUMENT, which is the separate question: counting one raises `ndoc`
  * while contributing no df, so it inflates every name's idf by pretending the corpus is larger than the
@@ -162,6 +159,11 @@ export function properNames(text) {
  */
 export const modelKey = name => String(name ?? '').trim().toLowerCase().replace(/:latest$/, '');
 
+/** The fit an embedding model with no fit of its own is scored through. NOT `noCosine`, which is for a
+ *  turn with no cosine at all. Chosen for its cosine coefficient sitting low-middle of the seven (E13),
+ *  so a refit that moves it invalidates the choice. */
+export const UNFITTED_FALLBACK = 'mxbai-embed-large';
+
 /**
  * The key to look a fit up under, from `vectorRequestBody()`'s `{source, model}`.
  *
@@ -174,6 +176,8 @@ export const modelKey = name => String(name ?? '').trim().toLowerCase().replace(
  * The residual risk is a hand-edited config.yaml naming some other transformers model, which would take
  * jina's fit. There is no UI that produces that state, and nothing the client can read to detect it.
  */
+// The `transformers` literal is ASSUMED, not read: that source exposes no model to the client, so a
+// changed `extensions.models.embedding` mis-resolves silently (upstream-st.md). It is also the default.
 export const fitKey = ({ source, model } = {}) =>
     modelKey(model || (source === 'transformers' ? 'Cohee/jina-embeddings-v2-base-en' : ''));
 
@@ -183,10 +187,8 @@ export const fitKey = ({ source, model } = {}) =>
  *
  * A MODEL IS HERE ONLY IF ITS PREFIX IS MEASURED TO EARN ONE. bge-m3 and ST's default jina document none.
  * EmbeddingGemma documents a pair — an instruction on the query and `title: none | text: ` on every
- * document — and **measured** (5585 rows, 99 scenes, memory tier, leave-one-book-out) applying the pair
- * against applying neither is flat: 0.7976 vs 0.7982 held-out AUC. Flat is not a reason to carry a
- * special case, and the document half would additionally have to be rebuilt into every collection, so
- * gemma has no entry.
+ * document — and applying it measured flat (E7). Flat is not a reason to carry a special case, and the
+ * document half would additionally have to be rebuilt into every collection, so gemma has no entry.
  *
  * KEYED BY FAMILY STEM, matched as a substring at neither end: the served id is whoever packaged the
  * model's spelling — `qwen3-embedding:4b` from ollama, `Qwen3-Embedding-8B-4bit-DWQ` from oMLX,
@@ -208,10 +210,8 @@ export const PREFIXES = {
  * EVERY PREFIX WA APPLIES IS A QUERY PREFIX, which is why this needs no counterpart for documents and why
  * turning one on costs no rebuild: a query prefix never reaches a stored vector.
  *
- * **Measured** (5585 rows, 99 scenes, memory tier, leave-one-book-out, same collections so only the query
- * vector moves): applying Qwen3-Embedding-8B's instruction is worth +0.0131 held-out AUC and +0.0235 F2 at
- * its best cutoff, on 4 of 5 books. It is also what the shipped coefficients were fitted against, so
- * NOT applying it served a fit its own signal never produced.
+ * Qwen3-Embedding's instruction is measured to earn its place (E7). It is also what the shipped
+ * coefficients were fitted against, so NOT applying it served a fit its own signal never produced.
  */
 export const queryPrefix = (model) => {
     const fam = modelKey(model);
@@ -239,10 +239,10 @@ export function buildNameDf(entries) {
  * arrives diluted among hundreds of ordinary words; restricting the vocabulary to names asks whether
  * this entry is about someone who is ON SCREEN, which is the axis the three older signals do not have.
  *
- * THE WEIGHTING IS WHAT MAKES IT WORK — measured against the unweighted count, 45 scenes up against 14,
- * p 0.0001 — so a protagonist named in every scene summary counts for almost nothing. Jaccard measured
- * worse and restricting to the gazetteer lost outright, so it is neither the normalisation nor the
- * vocabulary restriction that matters.
+ * THE WEIGHTING IS WHAT MAKES IT WORK — idf beats the unweighted count decisively — so a protagonist
+ * named in every scene summary counts for almost nothing. Jaccard measured worse and restricting to the
+ * gazetteer lost outright, so it is neither the normalisation nor the vocabulary restriction that
+ * matters (F6).
  */
 export function properShared(entryNames, windowNames, { df, ndoc }) {
     let v = 0;
@@ -260,8 +260,8 @@ export function properShared(entryNames, windowNames, { df, ndoc }) {
  * Entry-intrinsic, so it never reads the query: it is a prior, and within-scene standardisation still
  * works on it because it varies between the entries of one scene.
  *
- * MEMORY TIER ONLY. Measured, this INVERTS on reference (-0.935 against +0.215), where an entry thick
- * with names is a roster rather than a subject — so a shared coefficient would carry the wrong sign.
+ * MEMORY TIER ONLY. This INVERTS on reference (F19), where an entry thick with names is a roster
+ * rather than a subject — so a shared coefficient would carry the wrong sign.
  */
 export function properDensity(content) {
     const text = String(content ?? '');
@@ -290,9 +290,9 @@ const sd = xs => { const m = mean(xs); return Math.sqrt(mean(xs.map(x => (x - m)
  * a slope fitted on other books.
  *
  * P(>=3) IS CLAMPED TO P(>=2). The boundaries are fitted separately, so nothing guarantees the nesting
- * the events have, and `E[credit]` is malformed where they invert. Measured: 39 of 8975 rows invert, by
- * at most 0.0002 — trivial in size, which is exactly why leaving it out would read as a threshold effect
- * rather than as the incoherent probability pair it is.
+ * the events have, and `E[credit]` is malformed where they invert. Inversions are rare and tiny (F31) —
+ * which is exactly why leaving the clamp out would read as a threshold effect rather than as the
+ * incoherent probability pair it is.
  *
  * @param {{features: string[], beta: {ge2: number[], ge3: number[]}}} model A fitted model file
  * @param {object[]} rows One scene's candidates, each carrying a raw value per `model.features`

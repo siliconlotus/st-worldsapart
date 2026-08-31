@@ -51,8 +51,8 @@ ok(Math.abs((ps.get('B.1') ?? 0) - (ps.get('B.2') ?? 0)) < 1e-9,
 
 // --- the fold: BM25 tokenizes under the MATCHER's fold (plugin/automaton.mjs), not a private one ----
 // The old [^a-z0-9'] split treated an accented letter as a separator, so "Möbius" indexed as "bius"
-// and could match nothing — 87 word types / 319 occurrences across four books, character names
-// included. The fold normalizes encoding and typography; it deliberately does NOT strip diacritics,
+// and could match nothing — a real class in the books, character names included (K9).
+// The fold normalizes encoding and typography; it deliberately does NOT strip diacritics,
 // because é vs e is a distinction an author can write and countKey preserves it. Assert both halves,
 // so neither a re-shattering nor a well-meant "fix" into diacritic stripping lands silently.
 const foldIdx = buildContentIndex([e(1, 'The Möbius spire hums over André’s quarter.')], CFG);

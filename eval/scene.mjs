@@ -3,9 +3,8 @@
 //
 // WHY IT IS A MODULE AND NOT COPY-PASTE. Every line below is a place a second copy would silently drift.
 // The gazetteer alone has already cost this project one wrong answer (at stage 1, when it still fed
-// admission): reading raw book keys instead of the
-// suppressed ones admitted 2.3x the query terms and inflated every BM25 score by up to 74%, which is what
-// made a validated sample look unreproducible. A cross-sample tool that re-derived any of this by hand would
+// admission): reading raw book keys instead of the suppressed ones inflated the scores and made a
+// validated sample look unreproducible (R22). A cross-sample tool that re-derived any of this by hand would
 // be comparing two subtly different rankings and reporting the difference as a parameter effect.
 //
 // Nothing here parses argv or prints a report — callers own their own CLI and output. Nothing here reads a
@@ -53,7 +52,7 @@ const US = String.fromCharCode(31);
  * a finished book. A live /wa-grade capture cannot contain one, which is why it keys on
  * `generatedFrom.msg` and no-ops when that is absent.
  *
- * **Measured** over the 96 syn scenes: 43% of graded rows go and 20% of the grade >= 3 rows.
+ * A large share of graded rows goes, grade >= 3 rows included (F28).
  *
  * BOOKS, NOT ONLY GRADES. `makeCandidateSet` re-derives the pool from the books, so filtering the grades
  * alone leaves every future entry in the pool as an UNJUDGED row still holding a rank — worse than
@@ -76,10 +75,9 @@ export const dropUnavailable = (S, label = "sample") => {
     // THE BOUNDARY IS THE END, NOT THE START. A summary exists once the messages it covers have happened,
     // so an entry spanning the frozen turn — `start <= at < end` — could not be in the book either, and a
     // start-only test kept every one of them. They are not merely unavailable, they are the scene's own
-    // haystack paraphrased: **measured**, 66 of the corpus's 446 memory positives straddled their scene,
-    // scoring within-scene z 2.795 against clean positives' 0.800 and ranking FIRST in 53% of their scenes
-    // against 7%. A grade of 4 on such a row is correct and the retrieval is correct; the SCENE is
-    // impossible, and both the score and the fitted coefficients were reading it.
+    // haystack paraphrased, and they outrank clean positives (F28). A grade of 4 on such a row is correct
+    // and the retrieval is correct; the SCENE is impossible, and both the score and the fitted
+    // coefficients were reading it.
     // The rule itself is relevance.mjs's, so the runtime's `dropUnavailable` setting and this cannot
     // drift on what "not yet written" means.
     const future = r => postDates({ STMB_end: end.get(`${r.book}${US}${r.uid}`), STMB_start: start.get(`${r.book}${US}${r.uid}`) }, at);
@@ -90,9 +88,8 @@ export const dropUnavailable = (S, label = "sample") => {
     // THE PRISTINE BOOKS SURVIVE THE FILTER, because a COLLECTION is not scene-scoped and the index cache
     // is keyed as though it were not (reindex.mjs cachePath: book + model + chunk settings). Building from
     // the stripped book bakes ONE scene's message cutoff into a file every other scene of that book then
-    // reads — silently, since a smaller collection scores fine. Measured on Time Whore: an index built
-    // inside a param-screen run held 207 of the book's 243 entries, and the 36 missing ones were whatever
-    // post-dated the scene that happened to build it first.
+    // reads — silently, since a smaller collection scores fine. It has happened: an index built mid-run
+    // was missing whatever post-dated the scene that happened to build it first (P4).
     S.pristineBooks ??= structuredClone(S.books ?? {});
     for (const [book, bk] of Object.entries(S.books ?? {})) {
         for (const [k, e] of Object.entries(bk ?? {})) {
@@ -103,12 +100,11 @@ export const dropUnavailable = (S, label = "sample") => {
     // WHAT IT COULD NOT CHECK, and why that is not the same as "reference". A missing `STMB_start` reads
     // here as an entry STMB never wrote, which is always available — true of a reference sheet and false
     // of a MEMORY entry that lost the field. Richard's summaries were rewritten offline against an LLM and
-    // no longer map to their original ranges, so 11 of its 37 memory entries are unverifiable and the
-    // guard is silently inert on exactly them. **Measured** corpus-wide: 41 memory entries, carrying 456
-    // of 6075 judged rows and 63 of 446 graded >= 3.
+    // no longer map to their original ranges, so most of its memory entries are unverifiable and the
+    // guard is silently inert on exactly them (P5).
     //
-    // REPORTED, NOT DROPPED. Dropping them is defensible and costs Richard 30 of its 37 positives, so it
-    // is a corpus decision rather than one this function should take on its own.
+    // REPORTED, NOT DROPPED. Dropping them is defensible but would cost Richard nearly all its positives,
+    // so it is a corpus decision rather than one this function should take on its own.
     const unverified = Object.entries(S.books ?? {}).flatMap(([, bk]) => Object.values(bk ?? {}))
         .filter(e => isMemory(e) && !Number.isFinite(Number(e.STMB_start))).length;
     if (unverified) console.error(`  ${label}: ${unverified} MEMORY entr(ies) carry no STMB_start — availability unchecked, not verified as available`);
@@ -120,16 +116,16 @@ export const dropUnavailable = (S, label = "sample") => {
  * book is versioned in place and two versions of one book are not two books.
  *
  * NAMES CANNOT DO THIS. An LTM file is named after the CHARACTER CARD, and a card carries many stories:
- * measured on the graded corpus, `LTM - Isekai Adventure - ...@14h45` is byte-identical to `LTM - Ascensus`
- * in all 145 entries and shares under 5% with Time Whore, which is the other story on that same card. So
- * the name says nothing about which corpus a book is, in either direction.
+ * `LTM - Isekai Adventure - ...@14h45` is byte-identical to `LTM - Ascensus` and shares almost nothing
+ * with Time Whore, which is the other story on that same card (C11). So the name says nothing about which
+ * corpus a book is, in either direction.
  *
  * IT MATTERS WHEREVER INDEPENDENCE DOES. A sign test over scenes treats each as a draw, and three files of
  * one book are one draw wearing three hats; a leave-one-book-out basis that leaves out only the FILE puts
- * two near-identical copies of a book into its own "everyone else", which is how an alignment of 0.83 came
- * back as 0.77 once the siblings left.
+ * two near-identical copies of a book into its own "everyone else", which measurably moved an
+ * alignment once the siblings left (R17).
  *
- * 30% of the smaller book's bodies, the threshold CLAUDE.md records for 43 files collapsing to 34 lineages.
+ * 30% of the smaller book's bodies, the threshold CLAUDE.md records for the file-to-lineage collapse.
  * Transitive, so a chain of partial revisions lands in one group.
  *
  * THE GROUP TAKES THE MOST RECENTLY USED NAME, since that is the one the author is currently calling it and
@@ -137,7 +133,7 @@ export const dropUnavailable = (S, label = "sample") => {
  * createdAt is what the callers have.
  *
  * TIES BREAK TO THE SHORTEST NAME, which matters because those stamps are day-granular and tie constantly:
- * `LTM - Ascensus` and `LTM - Isekai Adventure - Isekai Adventure - 2026-03-04@14h45` are the same 145
+ * `LTM - Ascensus` and `LTM - Isekai Adventure - Isekai Adventure - 2026-03-04@14h45` are the same
  * entries and were last written the same day. Version and card decoration only ever makes a name longer, so
  * shortest recovers the base name. Then by name, so the answer never depends on iteration order.
  *
@@ -349,8 +345,8 @@ export const indexPath = (S, { vectors = 'data/default-user/vectors/ollama', mod
     // THROUGH stInstall, NOT THE CWD. Both local candidates are recorded with ST's `data/` prefix, so testing
     // them raw asks whether the collection exists *relative to wherever the tool was launched from* — and the
     // answer changes with the directory while the scene does not. That is not hypothetical: the same sample
-    // scored 10/10 judged from the ST root and 0/0 one directory down, and the second run reported it as a
-    // result. stInstall returns null only on a machine with no ST install, where neither candidate can exist
+    // has read fully judged from one directory and empty from another, and the empty run reported it as a
+    // result (H2). stInstall returns null only on a machine with no ST install, where neither candidate can exist
     // anyway and the rebuild cache is the answer.
     const st = stInstall();
     const local = p => (st ? st.resolve(p) : p);
@@ -373,7 +369,7 @@ export const indexPath = (S, { vectors = 'data/default-user/vectors/ollama', mod
  * embedded, so it has to be part of what is keyed; and a weak hash risks handing back another query's
  * vector, which is the kind of wrong number nothing downstream could catch.
  *
- * APPENDED, one JSONL line per call, per the harness rule: retraining re-embeds the same 105 scene
+ * APPENDED, one JSONL line per call, per the harness rule: retraining re-embeds the same scene
  * queries every run, and a killed run keeps every embed it already paid for. Lives in eval-data, which is
  * gitignored — it is a cache, and it rebuilds from the bundles.
  */
@@ -426,6 +422,10 @@ export const sceneParams = (S, overrides = {}) => ({
     K: 20, K1: 2, B: 0.75, LEXW: 1.5, KEYW: null, boost: 3, stopwordDf: 0.25,
     // null = whatever the shipped memory fit carries. Set only by a cutoff arm; see scoreScene `admits`.
     memoryCutoff: null,
+    // WHICH FIT SCORES THE COLUMN, by name, overriding the scene's own embedding model. null is production.
+    // A run that sets this must also fix `memoryCutoff`, or each arm cuts at its own fit's provenance
+    // cutoff and the contrast reads coefficients and cut sizes at once.
+    relevanceFit: null,
     caseSensitive: false, wholeWords: false, includeNames: true,
     // How the haystack is SEGMENTED, which decides what `scan` means to countKey. Captured in `params`
     // (worldsapart.js captureParams), so a document that records it overrides this; 'scan' is what
@@ -501,20 +501,20 @@ export const sceneParams = (S, overrides = {}) => ({
     // memory entries are not all flagged, while adding archived mass moves whatever the author retired.
     // 'memory' IS PRODUCTION (worldsapart.js centroidUids), so it defaults on for the same reason
     // denseAllEntries does: a harness run at 'vectorized' scores the pipeline as it was before that change,
-    // which is an arm rather than a baseline. No stored capture records this field, and the populations
-    // measured at cosine 0.99873-1.00000 of each other, so no recorded number is invalidated by the switch.
+    // which is an arm rather than a baseline. No stored capture records this field, and the two centroids
+    // measured essentially coincident (F44), so no recorded number is invalidated by the switch.
     centroidPopulation: 'memory',
     // HOW MANY LEADING COMPONENTS OF THE CENTRED CORPUS ARE PROJECTED OUT, on top of the mean. 0 is
     // production: mean-centering only.
     //
-    // The mean is one direction, and measured across 10 books only 8-16% of it is the book's own — the
-    // rest is shared with every other book (metrics.mjs topComponents). So the operation meant to make
+    // The mean is one direction, and most of its mass is shared with every other book rather than the
+    // book's own (R15; metrics.mjs topComponents). So the operation meant to make
     // "magic is unremarkable in a fantasy book" cheap spends most of its effect on something no book is
     // distinguished by, and least of it on the long memory books that most need it. What is unremarkable
     // in a book is plausibly several directions, which one vector cannot carry; this removes k of them.
     //
     // SCREENED ON THE LOO CHUNK-TO-SIBLING TASK AND NOT PROMISING THERE: helps in proportion to a book's
-    // own-direction share (Spearman 0.94, n=6) and so helps small thematic reference books while going
+    // own-direction share (R15), so it helps small thematic reference books while going
     // slightly negative on the long narrative ones. That task cannot answer the question, though — it has
     // no selection stage, so every metric it emits is read at a window nobody chooses. This param is what
     // asks it against the delivered set instead.
@@ -522,8 +522,8 @@ export const sceneParams = (S, overrides = {}) => ({
     // WHITENING: how many of the book's own directions to RESCALE, and by how much.
     //
     // The argument, and it is the one thing in this family that is not a translation: centering moves the
-    // cloud and provably leaves its geometry intact — **measured**, per-book centring takes 1-NN
-    // same-book purity from 99.4% to 98.2%, so book identity survives it entirely. A direction the book
+    // cloud and leaves its geometry intact — book identity survives per-book centring essentially
+    // whole (R18). A direction the book
     // SPREADS OUT along is not discriminating within that book, so it should count less rather than be
     // shifted. whitenAlpha 0 is production (nothing rescaled); 1 flattens the top `whitenR` directions to
     // the scale of the smallest retained one; the interior is the tunable version of what pcRemove does
@@ -544,17 +544,16 @@ export const sceneParams = (S, overrides = {}) => ({
     // cost. maxTotalEntries and the per-book cap are not recorded either and come from the caller.
     //
     // The ceiling itself is not a property of the scene — it is a user's cost decision — so it is passed in
-    // rather than read off the bundle, and the 52 of 107 bundles that do record one write it as a display
-    // string ("40%* = 29036") rather than a number.
+    // rather than read off the bundle; the bundles that do record one write it only as a display
+    // string (G13).
     budgetTokens: 0,
     // HOW MANY SHARED COMPONENTS COME OFF FIRST (global-basis.mjs). 0 is production: no first stage.
     //
-    // WITHOUT IT pcRemove DOES NOT TEST WHAT IT CLAIMS. A book's leading component is not its own —
-    // **measured**, memory-tier PC1 sits 0.55-0.77 inside a subspace built from other lineages' memory
-    // chunks, and the book mean carries only 8-16% of its mass orthogonal to the shared direction on the
-    // long narrative books. So single-stage pcRemove takes mostly common structure, which is what its
-    // negative F2 says. Strip the shared mean and its top m directions first, and whatever leads the
-    // residual is the book's own by construction.
+    // WITHOUT IT pcRemove DOES NOT TEST WHAT IT CLAIMS. A book's leading component is mostly not its
+    // own — it sits largely inside a subspace built from other lineages' memory chunks (R15). So
+    // single-stage pcRemove takes mostly common structure, which is what its negative F2 says. Strip the
+    // shared mean and its top m directions first, and whatever leads the residual is the book's own by
+    // construction.
     //
     // The basis is per book, leave-one-LINEAGE-out, memory tier only; build it with
     // `node eval/global-basis.mjs <samples...>`.
@@ -562,9 +561,9 @@ export const sceneParams = (S, overrides = {}) => ({
     denseColumn: null,
     denseWeight: 0.5,
     maxVectorEntries: 20, entityFilter: true,
-    // WHICH FIELDS THE GAZETTEER READS. Production is 'keys+titles' (buildGazetteer's own sources), chosen on
-    // a 5-target gold set that no longer exists; 'bodies' was re-measured at n=3 scenes and lost. This param
-    // exists so the choice can be re-run paired at the current scene count instead of re-argued.
+    // WHICH FIELDS THE GAZETTEER READS. Production is 'keys+titles' (buildGazetteer's own sources), chosen
+    // on a gold set that no longer exists; 'bodies' was re-measured on a handful of scenes and lost (F33).
+    // This param exists so the choice can be re-run paired at the current scene count instead of re-argued.
     //   'keys+titles'  shipped
     //   'keys'         key/keysecondary only — the header claims this scores identically to shipped
     //   'titles'       comment only, which is what a mostly-vectorized book already reduces to
@@ -576,8 +575,7 @@ export const sceneParams = (S, overrides = {}) => ({
     //             stored measurement reproduces.
     //   'shared'  the N with the LOWEST eta^2, the between-lineage share of their projection's variance
     //             (global-basis.mjs). Stage A's job is to remove what the books SHARE, and variance rank
-    //             is not sharedness rank: **measured** on this corpus the two disagree at the very top —
-    //             PC1 scores 0.82-0.86 in four of the five bases against PC2's 0.005-0.049, so 'rank'
+    //             is not sharedness rank: the two disagree at the very top on this corpus (R16), so 'rank'
     //             removes the most book-specific direction available first. Needs a basis carrying `eta`.
     sharedSelect: 'rank',
     // WHICH SCATTER stage A's directions come off. 'pooled' is PCA on the raw corpus — what a basis has
@@ -606,7 +604,7 @@ export const sceneParams = (S, overrides = {}) => ({
  * EVERY ATTACHED BOOK, one ranking. Production pools them: `scoreEntriesUnsafe` syncs a collection per
  * world and the plugin's /query-multi scores them all, each against its OWN centroid, before one top-K
  * across the lot. Loading only `primaryBook` made cross-book competition and `applyBudget`'s per-book cap
- * unmeasurable, and discarded every graded row from a second book — 336 of them across 12 cells here.
+ * unmeasurable, and discarded every graded row from a second book (F50).
  *
  * PER-BOOK CENTROIDS, POOLED COSINES, deliberately: it is what production does, and the harness models
  * the pipeline rather than an argument about it. It does mean two books' cosines come from different
@@ -662,11 +660,11 @@ export function loadScene(S, { indexFile, indexOpts = {}, params: P }) {
     // its primary is first, so it is hoisted: `loaded[0]` and `items` are the primary's, which is what the
     // callers' diagnostics read.
     const books = [primary, ...Object.keys(S.books).filter(b => b !== primary)];
-    // STAMPED, because `world` is what identifies an entry across books and 1295 of the corpus's embedded
+    // STAMPED, because `world` is what identifies an entry across books and many of the corpus's embedded
     // entries carry none — a bundle copies whatever the world file held, and the field is optional there.
     // entryKey, the content index, the name df and applyBudget's per-book cap all read it. Idempotent, and
-    // `??=` rather than `=` because a copy that HAS a world is the authority: measured over all 107
-    // bundles, none disagrees with the key it sits under.
+    // `??=` rather than `=` because a copy that HAS a world is the authority: no bundle disagrees with
+    // the key it sits under (F50).
     for (const b of books) for (const e of Object.values(S.books[b])) e.world ??= b;
     const entries = books.flatMap(b => Object.values(S.books[b]));
     const byKey = new Map(entries.map(e => [entryKey(e), e]));
@@ -680,9 +678,9 @@ export function loadScene(S, { indexFile, indexOpts = {}, params: P }) {
         const uids = new Set(own.map(e => Number(e.uid)));
         // A KEYWORD-ONLY BOOK HAS NO COLLECTION, and that is a configuration rather than a failure: indexing
         // gates on `vectorized` (reindex.mjs buildItems), so a book with no vectorized entry yields no items
-        // and ensureIndex refuses to build one. Foxbridge is exactly that — 38 hand-keyed reference entries,
-        // 0 vectorized — and until this branch existed its two clean captures could not be scored at all,
-        // while the 8 that could embedded a reverted, partly-vectorized copy of the same book. Retrieval then
+        // and ensureIndex refuses to build one. Foxbridge is exactly that — hand-keyed reference entries,
+        // nothing vectorized — and until this branch existed its clean captures could not be scored at
+        // all (F50). Retrieval then
         // contributes nothing, every entry arrives by the keyword route, and the scene is deterministic: no
         // index, no embedding call, no ollama. corpusMean is the only thing that cannot take an empty list,
         // and it is guarded here rather than in plugin/ so this needs no redeploy.
@@ -716,8 +714,7 @@ export function loadScene(S, { indexFile, indexOpts = {}, params: P }) {
         // buildItems applies, so the two agree on what "nothing to index" means. Without this the two cases are
         // indistinguishable at runtime: a missing collection scores keyword-and-BM25-only and returns a
         // plausible number rather than an error, which is what a bundle opened on a machine that never held the
-        // author's vectors does. Measured on this corpus: the same scene read 10/10 judged with the index and
-        // 0/0 without, and only the second one looked like a result.
+        // author's vectors does. It has happened, and only the wrong run looked like a result (H2).
         if (!items.length && own.some(e => e.vectorized && !e.disable && e.content)) {
             throw new Error(`no vector collection for "${book}" at ${indexFile} — the book has vectorized entries, so scoring without one would silently drop cosine. Build it with: node eval/reindex.mjs <sample.json> --book ${JSON.stringify(book)}`);
         }
@@ -779,12 +776,12 @@ export function loadScene(S, { indexFile, indexOpts = {}, params: P }) {
             // memory are parallel processes: the register is one direction across all memories on disk
             // (global-basis.mjs memoryChunks), and a reference sheet is not in the population it was
             // estimated over. Subtracting it from every chunk of the book applied a correction fitted on
-            // one process to the other — 46 of Sommers' 327 entries, and the whole of a reference-only
-            // book. The build side has always been memory-only; this is the apply side agreeing with it.
+            // one process to the other — Sommers' reference entries, and the whole of a reference-only
+            // book (F51). The build side has always been memory-only; this is the apply side agreeing with it.
             //
             // A BOOK WITH NO MEMORIES HAS NOTHING FOR STAGE A TO ACT ON, so it needs no basis at all. That
             // is not a special case for a second book: it falls out of the tier gate, and it is why
-            // `grounded omegaverse` (17 entries, 0 memory) does not need one built for the sommers scenes.
+            // `grounded omegaverse` (no memory tier) does not need one built for the sommers scenes.
             const hasMemory = live.some(ofMemory);
             if (P.sharedComponents > 0 && hasMemory) {
                 // Stage B's mean has to be taken over chunks in the SAME transform state, or it averages
@@ -899,9 +896,9 @@ export function loadScene(S, { indexFile, indexOpts = {}, params: P }) {
     //
     // OWN USED TO BE UNIONED INTO THE POOL, which was a shorthand for "a capture logs exactly the rows the
     // grader was shown" — true while every logged row got a verdict, and false the moment a sample records a
-    // population wider than the graded set. A re-derived bundle logging 144 rows against 47 grades then
-    // reported judged@10 of 100% on a scene that was 18% judged, so the stopping rule said "pool is
-    // adequate" precisely where it was not. An ungraded row is unjudged no matter who logged it.
+    // population wider than the graded set. A re-derived bundle then reported judged@10 of 100% on a
+    // scene that was mostly unjudged, so the stopping rule said "pool is adequate" precisely where it
+    // was not (G10). An ungraded row is unjudged no matter who logged it.
     //
     // KEYED BY (book, uid), which is the only identity that survives a second book: uids are per book and
     // number from 0, so a bare-uid pool silently declares one book's row judged on the strength of the
@@ -976,7 +973,7 @@ export function makeGradeOf(grades, { outOfScope, primary }) {
 // and the fit would end up scoring different populations.
 // Imported AND re-exported: a bare `export ... from` forwards the name without binding it in this
 // module, and scene.mjs calls isMemory itself (tierRecall, the STMB_start audit).
-import { isMemory, buildNameDf, properNames, properShared, properDensity, scoreRelevance, modelKey, postDates } from '../extension/relevance.mjs';
+import { isMemory, buildNameDf, properNames, properShared, properDensity, scoreRelevance, modelKey, postDates, UNFITTED_FALLBACK } from '../extension/relevance.mjs';
 export { isMemory };
 export const isReference = e => !isMemory(e);
 export const isDurableEntry = e => Boolean(e?.constant);
@@ -984,12 +981,12 @@ export const isDurableEntry = e => Boolean(e?.constant);
 /**
  * Recall split by TIER, over one selection's kept set.
  *
- * WHY IT IS STANDING RATHER THAN AD HOC. `memory` and `reference` have very different base rates — 7%
- * against 30% on this corpus — so a rule that favours the denser class raises every pooled metric while
- * delivering less of what the system exists to retrieve. Measured on a threshold that looked like a clean
- * win at 69% less material for 29% less relevance: it kept 93% of relevant reference rows and 56% of
- * relevant memory ones. F2, precision, recall, nDCG and calibration were all blind to it, because a class
- * prior that tracks base rates genuinely predicts. Only the split shows it.
+ * WHY IT IS STANDING RATHER THAN AD HOC. `memory` and `reference` have very different base rates on this
+ * corpus, so a rule that favours the denser class raises every pooled metric while delivering less of
+ * what the system exists to retrieve: a threshold that read as a clean win kept most of the relevant
+ * reference rows and only half the relevant memory ones (F39). F2, precision, recall, nDCG and
+ * calibration were all blind to it, because a class prior that tracks base rates genuinely predicts.
+ * Only the split shows it.
  *
  * Identity comparison, not uid: `kept` holds the same row objects the population does (fuse sorts a copy
  * of the same references), so a uid join would be a second way to say the same thing and a place to drift.
@@ -1143,8 +1140,8 @@ export function makeCandidateSet({ loaded, byKey, entries, params: P, chunkCfg, 
         //
         // DISABLED ENTRIES ARE EXCLUDED HERE TOO, and this route is why the exclusion matters. Disabling an
         // entry does NOT purge its chunks from the collection, so the index keeps answering for it long after
-        // core stopped activating it — measured: every one of the 41 ungraded rows in the top-40 of three
-        // sommers scenes was a disabled entry, all of them still in the index, 34% of the delivered slots.
+        // core stopped activating it — disabled entries still in the index have filled a large share of
+        // delivered slots as ungraded rows (F49).
         // They read as "unjudged" for the honest reason that no live capture could ever have listed them, so
         // the pool is complete and the RANKING was wrong. The keyword route below has always guarded this;
         // its comment used to justify being the only guard by claiming a disabled entry "is never indexed
@@ -1156,8 +1153,8 @@ export function makeCandidateSet({ loaded, byKey, entries, params: P, chunkCfg, 
         // --- STAGE 2: ACTIVATION (keyword route). Stands in for ST core's keyword match, so it may only
         // admit an entry core could actually have activated. One exclusion, a stage-2 fact:
         //
-        //   disable            core never activates a disabled entry — 279 of 611 keyword-only rows on the
-        //                      curated sommers scenes arrived this way before the guard. The retrieval route
+        //   disable            core never activates a disabled entry — keyword-only rows arrived this
+        //                      way in bulk before the guard (F49). The retrieval route
         //                      needs the same exclusion for a different reason (see above): a disabled entry
         //                      stays in the collection, so that door does not close on its own.
         //
@@ -1179,15 +1176,34 @@ const MODEL_FILES = (() => {
     return out;
 })();
 
-/** The fits for one embedding model, by tier. A model with no fit gets null for that tier, which makes
- *  `makeLayoutOrder` leave its rows unscored and stage 4 cut nothing on relevance — the same path an outage
- *  takes, and the only honest one: another embedder's coefficients are not a fallback. */
+/** The fits for one embedding model, by tier. THROWS when the model has none, where production borrows
+ *  `UNFITTED_FALLBACK`'s — production has nobody to ask, a harness is told its embedder. Modelling the
+ *  borrow has its own door: name the fit (`--arms fit=mxbai`), which the run then records. */
 export const modelsFor = (embedModel) => {
     // Through resolveModel, because a bundle records a SPEC: `omlx:Qwen3-...` keys as the served id
     // `qwen3-...`, which is what the runtime can compute for itself. A bare name resolves to itself.
     const key = modelKey(resolveModel(embedModel).model);
     const out = {};
-    for (const tier of ['memory', 'reference']) out[tier] = MODEL_FILES[tier]?.byModel?.[key] ?? null;
+    for (const tier of ['memory', 'reference']) {
+        out[tier] = MODEL_FILES[tier]?.byModel?.[key] ?? null;
+        if (!out[tier]) {
+            throw new Error(`no ${tier} relevance fit for embedding model "${key}" (have: ${Object.keys(MODEL_FILES[tier]?.byModel ?? {}).join(', ') || 'none'}). `
+                + `The runtime would borrow "${UNFITTED_FALLBACK}"'s coefficients here; a harness is told its embedder, so say which fit you mean `
+                + 'with an explicit arm (fit=<name>) or fit this model with eval/relevance-regress.mjs --emit-model.');
+        }
+    }
+    return out;
+};
+/** The fits under one NAME — a `byModel` key, or `noCosine` — so a scene can be scored through another
+ *  model's coefficients. THROWS on an unknown name: silently scoring an arm as unfitted would report the
+ *  fallback as that arm's result. Production resolves by embedding model, never by name. */
+export const fitsNamed = (name) => {
+    const out = {};
+    for (const tier of ['memory', 'reference']) {
+        const file = MODEL_FILES[tier];
+        out[tier] = name === 'noCosine' ? (file?.noCosine ?? null) : (file?.byModel?.[name] ?? null);
+        if (!out[tier]) throw new Error(`no ${tier} fit named "${name}" (have: ${Object.keys(file?.byModel ?? {}).join(', ') || 'none'}, noCosine)`);
+    }
     return out;
 };
 /** Which models the shipped artifact carries a fit for, for a caller that wants to say so. */
@@ -1206,11 +1222,12 @@ export const fittedModels = () => [...new Set(Object.values(MODEL_FILES).flatMap
  *
  * PER TIER, each standardised among its own rows, as each fit was built.
  */
-export const makeLayoutOrder = ({ scene, haystack }) => {
+export const makeLayoutOrder = ({ scene, haystack, fit = null }) => {
     // The fits are per embedding model, resolved from the scene's own record — a bundle names the model
     // its collections are keyed under, so the fit follows the vectors rather than whatever shipped last.
-    if (!scene?.embedModel) throw new Error('scene records no embedModel — the fits are per embedding model');
-    const MODELS = modelsFor(scene.embedModel);
+    // `fit` overrides that by NAME — a screening arm, never production.
+    if (!fit && !scene?.embedModel) throw new Error('scene records no embedModel — the fits are per embedding model');
+    const MODELS = fit ? fitsNamed(fit) : modelsFor(scene.embedModel);
     // PER BOOK, as `bookIndexes` builds it — df asks how distinctive a name is IN ITS BOOK'S vocabulary,
     // and a name common in one book and unique in another has two answers, not one.
     const dfs = new Map();
@@ -1267,7 +1284,7 @@ export async function scoreScene({ sample: S, overrides = {}, k = 10, vectors, m
     const P = sceneParams(S, overrides);
     // A preloaded scene is reused across arms so N arms cost ONE embed and ONE index parse per scene. Valid
     // only while no arm moves the gazetteer, which is baked in at load time — asserted
-    // rather than trusted, because the failure would be a silently wrong gazetteer and those cost 74% BM25.
+    // rather than trusted, because the failure would be a silently wrong gazetteer.
     // denseAllEntries is baked in the same way for a different reason: it is read when the index is split,
     // so against a preloaded scene it would silently score the ordinary collection and report flat.
     if (preloaded && (overrides.denseAllEntries !== undefined || overrides.gazetteerSource !== undefined)) {
@@ -1280,7 +1297,7 @@ export async function scoreScene({ sample: S, overrides = {}, k = 10, vectors, m
     const em = resolveModel(model);
     const scene = preloaded ?? loadScene(S, { indexFile: indexPath(S, { vectors, model: em.label, index }), indexOpts: { vectors, model: em.label }, params: P });
     const scoreAll = makeCandidateSet({ ...scene, params: P, topK });
-    const layoutOrder = makeLayoutOrder({ scene, haystack: haystackFor(S, P) });
+    const layoutOrder = makeLayoutOrder({ scene, haystack: haystackFor(S, P), fit: P.relevanceFit });
     const gradeOf = makeGradeOf(S.entries, scene);
 
     const query = S.query;
@@ -1305,9 +1322,9 @@ export async function scoreScene({ sample: S, overrides = {}, k = 10, vectors, m
     //
     // STICKY IS IN, and used not to be — isDurableEntry is `constant || sticky > 0`, which threw both out
     // together. A sticky entry is ordinary content that persists once activated, and how it should be
-    // ordered is exactly the question here. The pair mattered: 34 of sommers' 45 reference entries are
-    // sticky: 1 with constant false, so lumping them with constants deleted that book's whole reference
-    // tier from every ranking measurement taken here.
+    // ordered is exactly the question here. The pair mattered: most of sommers' reference entries are
+    // sticky with constant false, so lumping them with constants deleted that book's whole reference
+    // tier from every ranking measurement taken here (F48).
     //
     // REFERENCE IS IN, also newly. Stage 1 once arbitrated a retrieval ranking only vectorized entries
     // could enter, so a keyword entry arrived by a route ranking never judged; stage 4 ended that, and
@@ -1322,7 +1339,7 @@ export async function scoreScene({ sample: S, overrides = {}, k = 10, vectors, m
     // Re-fuse the pooled subset AFTER reading the slice above: fuse mutates, and the subset shares references.
     // FROM `rankable`, NOT `all` — the exclusion above is the whole point, and reading `all` here applied it
     // to coverage alone. That is what it did until 2026-08-12: every nDCG this harness had ever printed still
-    // ranked the reference tier, and a reference-only book reported `judged 0/0` beside a healthy nDCG.
+    // ranked the reference tier, and a reference-only book reported `judged 0/0` beside a healthy nDCG (F48).
     // `?? 0` is the standard partial-label rule: an unjudged row occupies its rank and contributes
     // nothing. Explicit here because gradeOf now returns null for it — see makeGradeOf.
     const g = layoutOrder(rankable.filter(r => scene.POOL.has(entryKey(r.entry)))).map(r => gradeOf(r) ?? 0);
@@ -1399,8 +1416,7 @@ export async function scoreScene({ sample: S, overrides = {}, k = 10, vectors, m
     let atBudget = null;
     if (P.budgetTokens > 0) {
         // Recorded token counts where the capture has them, since they came from the real tokenizer; the
-        // fallback is content length over 4.91, which is this corpus's MEASURED chars-per-token for entry
-        // bodies (median over 1297 rows, p5 4.46 / p95 5.33). A flat /4 would be 23% out.
+        // fallback constant 4.91 is this corpus's measured chars-per-token for entry bodies (G12).
         const recorded = new Map((S.candidates ?? []).map(c => [entryKey({ world: c.book ?? S.primaryBook, uid: c.uid }), c.tokens]).filter(([, t]) => typeof t === 'number'));
         const tokensOf = r => recorded.get(entryKey(r.entry)) ?? Math.round(String(r.entry?.content ?? '').length / 4.91);
         const kept = await delivery.applyBudget({

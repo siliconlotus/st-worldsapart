@@ -8,7 +8,7 @@
 //
 // THE MODEL IS LOGISTIC, on the project's own relevance line (grade >= 3, metrics.mjs). Linear would put
 // predictions outside [0,1] on a bounded target and weight a 0-vs-1 error the same as a 0.4-vs-0.5 one;
-// polynomial terms MEASURED WORSE and `--degree 2` is what measured them (see the doc). Fit quality is
+// polynomial terms MEASURED WORSE and `--degree 2` is what measured them (F14). Fit quality is
 // printed (AUC, log-loss) so the case is always against a number rather than against the shape of the
 // model.
 //
@@ -24,7 +24,7 @@
 //           were the only thing stage 4 read.
 //
 // WITHIN-SCENE standardisation, not pooled: BM25 is not comparable across queries or corpora (the same
-// note governs bm25FloorPct in scene.mjs), so pooling raw scores across 71 scenes would let a scene's
+// note governs bm25FloorPct in scene.mjs), so pooling raw scores across scenes would let a scene's
 // scale masquerade as a coefficient. ONE intercept over all of them — a per-scene intercept was tried as
 // a control for differing base rates and measured to buy nothing, while reproducing each scene's base
 // rate by construction and so inflating any in-sample number that carried it.
@@ -101,7 +101,7 @@ const EMBED_SWEEP = SWEPT === 'embedModel';
 // it is what the recorded figures were measured on.
 // ORDINAL MODE. The 0-4 scale asserts four boundaries and the shipped model fits only one of them
 // (>=3), which is also the one the signals separate worst: pooled, grades 2 and 3 sit at the same mean
-// standardised cosine. --ordinal fits every boundary so the scale can be read rather than assumed — see
+// standardised cosine (F29). --ordinal fits every boundary so the scale can be read rather than assumed — see
 // logistic.mjs cumulativeFit for why the slopes are fitted separately instead of shared.
 const ORDINAL = argv.includes('--ordinal');
 // HELD OUT BY SCENE. Within-scene standardisation leaks nothing across the fold: it reads only the
@@ -110,8 +110,8 @@ const LOSO = argv.includes('--loso');
 // HELD OUT BY BOOK, which is the generalisation the system actually needs. A held-out SCENE still shares
 // its book's vocabulary, entry style, chunk statistics and BM25 scale with the rows that fitted the model,
 // so --loso measures "another moment in a book we know" — and production meets books it has never seen.
-// Folds are wildly unequal here (one book is 58% of the rows), so read the per-fold sizes, not just the
-// pooled number.
+// Folds are wildly unequal here — one book dominates the rows (C11) — so read the per-fold sizes, not
+// just the pooled number.
 const LOBO = argv.includes('--lobo');
 const CUTOFF = argv.includes('--cutoff');
 // EXPERIMENT (uncommitted default): mirror gradeCredit onto recall, so a 2 is half a hit on BOTH bars
@@ -191,7 +191,7 @@ const DROP_KEYS = arg('--drop-keys') ? JSON.parse(fs.readFileSync(arg('--drop-ke
 // names an entry happens to carry; `gaz` = count restricted to the gazetteer, i.e. to names the BOOK
 // declared in a key, secondary or title rather than any capitalised token.
 // REQUIRED when the properNouns feature is in the run. The variants are not interchangeable — idf beats
-// count at p 0.0001 (matcher-design, *IDF-WEIGHTED*) — so which one a number was measured under is part
+// count (F6) — so which one a number was measured under is part
 // of the number, and the harness does not choose it.
 const PROPER_MODE = arg('--proper-nouns');
 // HOW a name is recognised, orthogonal to how a shared one is scored. `regex` is the private ASCII
@@ -199,7 +199,7 @@ const PROPER_MODE = arg('--proper-nouns');
 // already uses; `span` takes maximal runs of capitalised tokens as one term, so "Brackenmoor Patrol"
 // is a name rather than two.
 // REQUIRED under the same rule. `entity` is properNounsOf via relevance.properNames — the
-// shipped extractor; `entity` beat `regex` at p 0.0002 paired over 88 scenes.
+// shipped extractor; `entity` beat `regex`, paired (F7).
 const PROPER_EXTRACT = arg('--proper-nouns-extract');
 // WHICH DETECTOR feeds the density column — 'entity' is the shipped properDensity (properNounsOf, no
 // stoplist), 'book' the corpus name test. Separate from --proper-nouns-extract because the two fitted
@@ -253,17 +253,16 @@ const OLLAMA = process.env.OLLAMA_URL ?? 'http://localhost:11434';
 
 // THE FEATURE SET. One standardised column per signal and NO ELIGIBILITY INDICATORS: whether a signal is
 // absent is a question about the FEATURE SET, not about a row, and it is answered by leaving the column
-// out of `--features`. Every memory entry carries cosine and text, and 4 of 496 have no keys; on reference the
+// out of `--features`. Every memory entry carries cosine and text, and only a handful have no keys; on reference the
 // only signal that varies is cosine, missing because nobody computed one, which `reindex --all` plus
 // `denseAllEntries` closes. So the model is either fitted on a signal or it is not, and a mixed state is
 // an author's vectorization choices rather than something to model.
 //
-// THE INDICATORS DID DAMAGE. A column that is 1 on 99.2% of rows is near-collinear with the intercept, so
+// THE INDICATORS DID DAMAGE. A nearly-constant column is near-collinear with the intercept, so
 // how the fit splits weight between them is arbitrary AND VARIES PER FOLD — and `--lobo` pools etas from
-// different folds into one AUC, where those offsets stop cancelling. **Measured**, memory tier with keys
-// live: removing them moved held-out AUC 0.8155 -> 0.8238, AP 0.462 -> 0.466, F2 over the delivered set
-// 0.5416 -> 0.5514, and moved Ascensus — which holds 2 of the 4 keyless entries — from -0.067 to -0.007,
-// the whole of what had read as one book rejecting keys. Arms whose indicators were already constant do
+// different folds into one AUC, where those offsets stop cancelling. Removing them improved every
+// held-out readout and dissolved the whole of what had read as one book rejecting keys (F23). Arms whose
+// indicators were already constant do
 // not move at all.
 const FEATURES = [];
 const featureDef = {
@@ -406,14 +405,14 @@ featureDef.density = r => Number(r.properDensity) || 0;
 // MEAN -log10(tf/total) over the entry's tokens, the book as the corpus. "How rare is this entry's
 // vocabulary among its siblings" — the surviving half of a mean-TF-IDF prior. The English-frequency half
 // is deliberately absent: ZIPF_EN scores a name maximally rare and a book's own coinages with it, so the
-// two axes disagree on a tenth of a book's token mass and a min-of-percentiles combination measured
+// two axes disagree on a real share of a book's token mass and a min-of-percentiles combination measured
 // WORSE than this column alone.
 featureDef.rarity = r => Number(r.bookRarity) || 0;
 // NAMES PER CHUNK, the same construct as `density` at the unit the system retrieves in. Proposed off the
-// DISABLED-entry population, where length-controlled it agreed with the author's keep/drop call in 7
-// books of 7 — and that finding is an ARTIFACT: disabled entries sit earlier in the story (mean position
-// 0.33 against 0.60), early entries name fewer distinct people because the cast has not accumulated, and
-// controlling position as well as length takes it to 3 of 7 and mean AUC 0.489. It measures nothing on
+// DISABLED-entry population, where length-controlled it agreed with the author's keep/drop calls — and
+// that finding is an ARTIFACT: disabled entries sit earlier in the story, early entries name fewer
+// distinct people because the cast has not accumulated, and
+// controlling position as well as length takes it to chance (F12, C7). It measures nothing on
 // grades either. Kept because the unit is an obvious thing to try and this answers it both ways.
 featureDef.chunkdens = r => Number(r.chunkDensity) || 0;
 for (const f of FEATURE_LIST) FEATURES.push([f, featureDef[f]]);
@@ -561,9 +560,8 @@ const queryVec = async (S, name, value, em) => {
                     // EVERY ENTRY IS A DOCUMENT HERE, disabled included, and that is a modelling choice
                     // rather than an oversight. df asks how DISTINCTIVE a name is in the book's
                     // vocabulary, which a disabled entry still contributes to — where buildContentIndex
-                    // excludes disabled entries because it is asking what can be RETRIEVED. **Measured**,
-                    // memory tier, held out by book: excluding them costs F2 0.5160 -> 0.5105 at each
-                    // arm's own cutoff, 7 scenes up against 53 with 34 tied, and 4 books down of 5. The
+                    // excludes disabled entries because it is asking what can be RETRIEVED. Measured:
+                    // excluding them costs, consistently across scenes and books (F27). The
                     // runtime can compute it either way — the entries are in the book — so parity does
                     // not decide it and the measurement does.
                     //
@@ -571,7 +569,7 @@ const queryVec = async (S, name, value, em) => {
                     // whether it is enabled. Counting one raises ndoc while contributing no df, so it
                     // inflates every name's idf by pretending the corpus is larger than the text in it —
                     // the one way a malformed book could move this column without anybody seeing it.
-                    // **Measured** no-op on this corpus (0 empty of 844 entries across 6 books), so it is
+                    // Measured a no-op on this corpus (F27), so it is
                     // a guard for other people's books and not a change to the fit.
                     for (const e of scene.entries ?? []) {
                         if (typeof e.content !== 'string' || !e.content.trim()) continue;
@@ -591,7 +589,7 @@ const queryVec = async (S, name, value, em) => {
                         for (const w of ents) if (win.has(w)) v += Math.log((ndoc + 1) / ((df.get(w) ?? 0) + 1));
                     } else if (PROPER_MODE === 'idf-len') {
                         // ONE COLUMN FOR WHAT THE MODEL RECONSTRUCTS FROM TWO. `length` was measured to be a
-                        // correction to `proper`'s COUNT — dropping proper collapses it to under 1 SE — so
+                        // correction to `proper`'s COUNT — dropping proper collapses it (F11) — so
                         // the normalised overlap is the quantity the pair is expressing. Divided by log
                         // tokens rather than tokens, because that is the column the fit standardises.
                         // NOT the jaccard arm, which normalises by the UNION of both name sets and lost.
@@ -646,7 +644,7 @@ const queryVec = async (S, name, value, em) => {
                     // reindex.chunkConfig's defaults, NOT the scene params — those carry no chunk settings
                     // at all, and passing them gives chunkEntry an undefined chunkSize, which recurses
                     // until the stack blows rather than failing. Verified against the built index: chunk
-                    // counts match on all 199 shared uids of Sommers, so this is the split the vector
+                    // counts match on every shared uid (P4), so this is the split the vector
                     // collection and content-lexical actually saw.
                     r.chunkDensity = (names?.size ?? 0) / Math.max(1, chunkEntry(String(r.entry?.content ?? ''), CHUNK_CFG).length);
                     r.bookRarity = toks.length ? toks.reduce((a, t) => a + bk.rarity(t), 0) / toks.length : 0;
@@ -743,10 +741,10 @@ const queryVec = async (S, name, value, em) => {
         // the RUNTIME computes, and the runtime has no notion of "graded" — `scoreRelevance` centres over
         // every activated row. Taking them from the pooled subset instead was a train/serve skew: the
         // ungraded tail sits low, so leaving it out lifts the mean and shrinks the sd, and every z at
-        // serving time comes out larger than the fit ever saw. **Measured** at 73% pool coverage (the
-        // Time Whore turn, the corpus's worst) it delivered 49 entries where the fit's own statistics
-        // gave 35 — and coverage falls as a scene grows (r -0.661), so the inflation was worst exactly
-        // where over-delivery already hurt. Well-covered scenes are unaffected: 3 against 3 at 93%.
+        // serving time comes out larger than the fit ever saw. On the corpus's worst-covered turn the
+        // graded-only statistics substantially over-delivered — and coverage falls as a scene grows, so
+        // the inflation was worst exactly
+        // where over-delivery already hurt; well-covered scenes are unaffected (F43).
         const X = [], y = [], rawCols = FEATURES.map(() => []), stats = FEATURES.map(() => ({ sd: [], mean: [] }));
         const perSignal = FEATURES.map(() => ({ s: [], y: [] }));
         const sceneCols = [];
@@ -832,12 +830,12 @@ const queryVec = async (S, name, value, em) => {
             process.exit(2);
         }
         // TWO NAMES FOR ONE BOOK ARE NOT TWO FOLDS. holdOut groups by book NAME, and a book is versioned
-        // and renamed in place (CLAUDE.md, *Chat-based measurement*: 43 files collapse to 34 lineages at
-        // 30% shared content), so a renamed copy in the sample set splits one lineage across two folds —
+        // and renamed in place (CLAUDE.md, *Chat-based measurement*), so a renamed copy in the sample set
+        // splits one lineage across two folds —
         // and each is then TRAINED ON ITS OWN BOOK under the other name, which is the leak holding out by
         // book exists to prevent. Observed: `LTM - Ascensus` and `LTM - Isekai Adventure - …2026-03-04`
-        // are 145 entries each and 145 of 145 identical, and the fold that read as "the one that falls"
-        // was the one whose training set contained itself.
+        // are entry-for-entry identical, and the fold that read as "the one that falls"
+        // was the one whose training set contained itself (C11).
         //
         // SHARE OF THE SMALLER BOOK, not of the union, and 30% is CLAUDE.md's own lineage bar rather than
         // a number chosen here. Fatal for the same reason the guard above is: a leaked fold still prints a
@@ -1070,9 +1068,9 @@ const queryVec = async (S, name, value, em) => {
             if (!b) continue;
             // --at PINS THE OPERATING POINT so two arms can be contrasted at the SAME cutoff. Each arm's
             // own best is chosen on the same macro F2 the arms are then compared by, so an arm whose
-            // optimum sits deeper is credited for delivering more as if that were free — measured, the
-            // proper-noun arm optimised to 0.04 against the baseline's 0.10 and delivered twice as many
-            // entries, which moved 39 of 63 scenes' per-scene F2 down while the macro mean went up. A
+            // optimum sits deeper is credited for delivering more as if that were free — measured, an
+            // arm at its own deeper cutoff delivered twice as many
+            // entries and moved most scenes' per-scene F2 down while the macro mean went up (F42). A
             // paired sign test across arms is only a statement about the feature when the cutoff is held.
             const best = AT === null ? b.grid.reduce((a, x) => (x.f > a.f ? x : a))
                 : b.grid.reduce((a, x) => (Math.abs(x.cut - AT) < Math.abs(a.cut - AT) ? x : a));
@@ -1107,7 +1105,7 @@ const queryVec = async (S, name, value, em) => {
                 const fit = {
                     tier: TIER, cutoff: best.cut, f2: best.f,
                     // The rule the two vectors combine under, stated where a consumer reads them. The
-                    // clamp is not optional for being small: 39 of 8975 rows invert, by at most 0.0002,
+                    // clamp is not optional for being small: a handful of rows genuinely invert (F31),
                     // and an incoherent probability pair is a bug that reads as a threshold effect.
                     target: 'E[credit] = 0.5*P(>=2) + 0.5*min(P(>=3), P(>=2))',
                     features: FEATURES.map(([n]) => n),
@@ -1179,9 +1177,9 @@ const queryVec = async (S, name, value, em) => {
             const b0 = bases[0];
             console.log(`\npaired against ${SWEPT}=${b0.value}, every arm at the ${AT} cutoff — per-scene F2, sign test`);
             // AND AGAIN PER BOOK, because the scene-level p above is not the evidence it looks like:
-            // scenes on one book share its vocabulary, its entry style and its BM25 scale, so 90 scenes
-            // on 5 books is nearer 5 observations than 90 and a within-book correlation is counted as
-            // independent agreement (CLAUDE.md, *Graded scenes*). A change that wins on every book is a
+            // scenes on one book share its vocabulary, its entry style and its BM25 scale, so many
+            // scenes on few books are nearer the book count than the scene count as observations, and a
+            // within-book correlation is counted as independent agreement (CLAUDE.md, *Graded scenes*). A change that wins on every book is a
             // change; one that wins on the largest book and loses elsewhere is a book finding wearing the
             // parameter's name — and the scene-level test cannot tell them apart, since the largest book
             // supplies most of the scenes.

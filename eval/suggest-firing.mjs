@@ -15,9 +15,9 @@
 //
 // BOTH DENOMINATORS ARE PRINTED, and that is the point of this file as much as the bands are. The
 // measurement this replaces compared per-entry candidate rows against UNIQUE existing keys and
-// concluded the suggester beat the book's own keys on dead rate. On the original book those
-// denominators read 39.1% and 56.1% for the same 3519 keys, so the comparison inverted its own
-// result. Per-row counts what the user is offered; unique counts distinct strings. Either is
+// concluded the suggester beat the book's own keys on dead rate — the two denominators diverge
+// enough on the same key set that the comparison inverted its own result (S11). Per-row counts what
+// the user is offered; unique counts distinct strings. Either is
 // defensible, mixing them is not, so neither is allowed to be the only one on screen.
 //
 // The chat doubles as bgDocs, exactly as the Studio passes the open chat, so this measures shipped

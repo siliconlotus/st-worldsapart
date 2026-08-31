@@ -132,8 +132,8 @@ run([
 
 // --- ENTRY FLAGS reach the synthesised nodes -------------------------------------------------------
 // The thing the string route could not do at all: countKey returns from its `?` branch before it
-// reads the flag arguments, so a synthesised string was always evaluated flags-off. The 16,000-
-// comparison fuzz this file replaced never caught it, because it only ever ran with both flags off.
+// reads the flag arguments, so a synthesised string was always evaluated flags-off. The fuzz this
+// file replaced never caught it, because it only ever ran with both flags off (K3).
 {
     const cs = { caseSensitive: true };
     const ww = { matchWholeWords: true };

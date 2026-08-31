@@ -62,7 +62,7 @@ import { rowKey, unionArms } from './extension/grading.mjs';
 // upstream edit would silently invalidate existing indexes. See extension/chunking.mjs.
 import { chunkEntry } from './extension/chunking.mjs';
 import { buildContentIndex, scoreContent, indexFingerprint, entryKey } from './extension/content-lexical.mjs';
-import { buildNameDf, properNames, properShared, properDensity, scoreRelevance, isMemory, fitKey, queryPrefix, postDates } from './extension/relevance.mjs';
+import { buildNameDf, properNames, properShared, properDensity, scoreRelevance, isMemory, fitKey, queryPrefix, postDates, UNFITTED_FALLBACK } from './extension/relevance.mjs';
 
 /** Base value for the rewritten `order` sequence. WA rewrites every activated entry's order, so only
  * the relative index matters and the base is free. It is parked far above any plausible authored value
@@ -384,10 +384,9 @@ async function syncWorld(world, entries) {
 
     if (newItems.length) {
         console.log(`Worlds Apart: embedding ${newItems.length} new chunks for "${world}"`);
-        // Timed, not counted: ms/chunk is the endpoint's, not the book's — measured 110ms on 8B over
-        // MLX against 910ms over llama.cpp, so no chunk count means "slow" for every user
-        // (embedding-models.md). Indeterminate because the insert is one awaited call; a percentage
-        // would need it batched client-side.
+        // Timed, not counted: ms/chunk is the endpoint's, not the book's — backends differ by an order
+        // of magnitude (E10), so no chunk count means "slow" for every user. Indeterminate because the
+        // insert is one awaited call; a percentage would need it batched client-side.
         let announced = false;
         const slow = setTimeout(() => {
             announced = true;
@@ -424,8 +423,8 @@ const buildTermWeights = (queryText, gazetteer) => entity.buildTermWeights(query
  * and /wa-debug's stage-1 "vector candidates" table IS that probe. So the table reported BM25 from a
  * different term set than the retrieval it was explaining — and since its `gap` and `kept` columns come
  * from fusing those scores, the cutoff it showed could differ from the one live retrieval actually
- * applied. Measured on a real scene, unfiltered BM25 ran ~2x the filtered value (101.06 vs 46.11), which
- * reorders the ranking the cutoff reads. Anything that scores a query goes through here.
+ * applied. Unfiltered BM25 runs far enough above the filtered value to reorder the ranking the cutoff
+ * reads (R19). Anything that scores a query goes through here.
  *
  * @param {string} searchText Query text
  * @param {object} [opts]
@@ -558,40 +557,37 @@ const relevanceModel = { promise: null, value: null };
 
 function loadRelevanceModel() {
     // ONE FILE PER TIER, because the tiers do not carry the same signals and do not agree on their
-    // sign. `density` fits +0.21 on memory and -0.58 on reference — an entry thick with names is a
-    // specific scene there and a roster here — so a shared coefficient would carry the wrong sign
-    // rather than merely being imprecise. Reference also drops `cosine` entirely: it is absent on 124
-    // of 135 of its entries, so a fitted slope reads "nobody computed one" as evidence and would
-    // invert on exactly the vectorized reference entries where the number is real.
+    // sign. `density` fits positive on memory and negative on reference (F19) — an entry thick with
+    // names is a specific scene there and a roster here — so a shared coefficient would carry the
+    // wrong sign rather than merely being imprecise. Reference also drops `cosine` entirely: most of
+    // its rows are keyword-only (F18), so a fitted slope reads "nobody computed one" as evidence and
+    // would invert on exactly the vectorized reference entries where the number is real.
     relevanceModel.promise ??= Promise.all(['memory', 'reference'].map(tier =>
         fetch(new URL(`./extension/relevance-model-${tier}.json`, import.meta.url))
             .then(r => (r.ok ? r.json() : Promise.reject(new Error(`HTTP ${r.status}`))))
             .then((file) => {
                 // PER EMBEDDING MODEL. Coefficients are fitted against one embedder's cosines and do not
-                // carry to another — measured, memory-tier cosine ran +0.3113 under bge-m3 and +0.7460
-                // under Qwen3-Embedding-8B, with text and properNouns falling to compensate. So the file
+                // carry to another — the cosine coefficient moves by more than double between embedders,
+                // with text and properNouns falling to compensate (E14). So the file
                 // is a map keyed by relevance.mjs `modelKey`, and a model with no fit gets NO fit rather
                 // than another model's: stage 4 then makes no relevance cut for that tier, which is the
                 // documented behaviour for an unscored row, instead of cutting on numbers from elsewhere.
                 const key = fitKey(vectorRequestBody());
-                // TWO FITS PER TIER, and the second is not a model's. `noCosine` drops the one feature
-                // the embedder produces, so `text`, `properNouns` and `density` are computed from entry
-                // text and the scan window alone and carry across every model — which is what a user with
-                // no WA plugin actually has, since ST's own endpoint sorts by score and then returns only
-                // hashes and metadata (multiQueryCollection). Stage 1 hands stage 3 no cosine at all.
-                //
-                // It is the fallback in BOTH directions: an embedding model with no fit of its own gets it
-                // rather than nothing, and a model that HAS one falls back to it on a turn that came back
-                // scoreless. Applying a cosine-bearing fit to rows with no cosine is not graceful
-                // degradation — the column standardises to zeros, so cosine drops out while the intercept
-                // and the other coefficients stay fitted around a feature that is no longer there.
-                //
-                // Both its features and its ROWS are model-independent: stage 1 admits every vectorized
-                // entry, so the candidate set is identical under every embedder — measured, 5585 rows and
-                // 359 relevant on 99 scenes, the same under all seven model fits and under this one. It is
-                // therefore comparable to them directly rather than only a fallback.
-                const m = file?.byModel?.[key] ?? file?.noCosine ?? null;
+                // THREE FITS, IN ORDER. The model's own; then UNFITTED_FALLBACK's, because an unfitted
+                // model has cosines and borrowing a wrong coefficient beats discarding the feature; then
+                // `noCosine`, which drops cosine entirely and is for a turn that HAS none — the no-plugin
+                // path, or a retrieval outage clearing `lastScores`. Applying a cosine-bearing fit there
+                // standardises the column to zeros, leaving the other coefficients fitted around a
+                // feature that is gone.
+                const m = file?.byModel?.[key] ?? file?.byModel?.[UNFITTED_FALLBACK] ?? file?.noCosine ?? null;
                 if (m) m.noCosine = file?.noCosine ?? null;
+                // SAY WHEN THE COEFFICIENTS ARE NOT THIS MODEL'S: a borrowed fit scores and cuts and
+                // looks entirely ordinary, and a typo'd model name takes the same path as an unfitted one.
+                if (m && !file?.byModel?.[key]) {
+                    console.warn(`Worlds Apart: no ${tier} relevance fit for embedding model "${key}" — `
+                        + `scoring through "${UNFITTED_FALLBACK}"'s (have: ${Object.keys(file?.byModel ?? {}).join(', ') || 'none'}). `
+                        + 'Fit this one with eval/relevance-regress.mjs --emit-model.');
+                }
                 if (!m) {
                     console.warn(`Worlds Apart: no ${tier} relevance model for embedding model "${key}" `
                         + `(have: ${Object.keys(file?.byModel ?? {}).join(', ') || 'none'}) — that tier's E[credit] will not be scored, `
@@ -633,10 +629,9 @@ function loadRelevanceModel() {
  * statistic of one book, so an entry's names are weighted against its own corpus and never against the
  * pooled attached set. That is the same one-index rule content-lexical rests on.
  *
- * ONE FIT PER TIER, never one across both. `density` measured INVERTED on reference (-0.935 against
- * +0.215), so scoring reference rows through memory's coefficients would carry the wrong sign rather
- * than merely being imprecise. Reference is scored — the column orders it for the budget walk — and cut
- * nowhere.
+ * ONE FIT PER TIER, never one across both. `density` measured INVERTED on reference (F19), so scoring
+ * reference rows through memory's coefficients would carry the wrong sign rather than merely being
+ * imprecise. Reference is scored — the column orders it for the budget walk — and cut nowhere.
  */
 async function scoreRelevanceColumn(items, windowFor) {
     const models = await loadRelevanceModel();
@@ -814,8 +809,8 @@ async function scoreEntriesUnsafe(searchText) {
     // EVERY ENTRY WITH CONTENT IS EMBEDDED AND SCORED. Computing a cosine is not vectorizing an entry:
     // `vectorized` decides what stage 1 RETRIEVES, and a cosine is a column stage 3 reads. An entry that
     // arrives by keyword had no cosine at all before this, which left the relevance model reading an
-    // absence as evidence — measured on the reference tier, a column fitted on the entries that happened
-    // to carry one runs solo AUC 0.442, below chance, and inverts on the entries where it is real.
+    // absence as evidence — on the reference tier, a column fitted only on the entries that happened to
+    // carry one scores below chance and inverts on the entries where it is real (F35).
     const targets = allEntries.filter(x => !x.disable && x.content);
     /** @type {Map<string, {score: number, chunk: string}>} */
     const scores = new Map();
@@ -863,13 +858,10 @@ async function scoreEntriesUnsafe(searchText) {
     // Reading the tier makes this consistent with every other per-tier thing downstream (relevance.mjs's
     // two fits, its within-tier standardisation, stage 4's per-tier cutoff).
     //
-    // CHOSEN ON CONSISTENCY, MEASURED FLAT — the two populations produce near-identical means, so this is
-    // not a performance change and should not be reported as one. Measured over 104 graded scenes on 4
-    // lineages, paired: -0.0003 n@10 and -0.0016 F2, neither significant. The centroids themselves sit at
-    // cosine 0.99873-1.00000 of each other across 6 books (eval/scene.mjs centroidPopulation runs the
-    // contrast; 'vectorized' restores this line's old behaviour). That closeness is also why the memory
-    // tier's fitted cosine coefficient needs no refit: 0.002 of centroid movement is far below what it
-    // could read.
+    // CHOSEN ON CONSISTENCY, MEASURED FLAT (F44) — the two populations produce near-identical centroids,
+    // so this is not a performance change and should not be reported as one, and the memory tier's fitted
+    // cosine coefficient needs no refit. (eval/scene.mjs centroidPopulation runs the contrast;
+    // 'vectorized' restores this line's old behaviour.)
     const centroidUids = {};
     for (const [world, entries] of Object.entries(byWorld)) {
         centroidUids[`wa_${getStringHash(world)}`] = entries.filter(isMemory).map(e => Number(e.uid));
@@ -909,9 +901,9 @@ async function scoreEntriesUnsafe(searchText) {
             // returned none, which was harmless while the value only had to ORDER things — and is not
             // harmless now that a fitted coefficient multiplies it. ST's own endpoint drops the score
             // (`src/endpoints/vectors.js` maps `x.item.metadata`), so on the no-plugin path every
-            // "cosine" became a rank position in [0,1] fed to a model expecting a centred cosine around
-            // [-0.01, 0.42]. Observed: a whole capture where the column was 1 - rank/3332, exact to the
-            // rounding, and the relevance cut ran on it.
+            // "cosine" became a rank position in [0,1] fed to a model expecting a centred cosine —
+            // observed as a whole capture whose cosine column was exactly the rank formula, with the
+            // relevance cut running on it (H12).
             //
             // Absent is the honest value. A row with no cosine is a row the model scores on its other
             // signals, which is a claim it can make; a rank wearing a cosine's units is not.
@@ -1039,7 +1031,7 @@ async function retrieve(chat) {
     // NO STAGE-1 TABLE. It printed the admitted ranking, the neighbour gaps and each entry's matched
     // chunk, which was worth reading while stage 1 CHOSE something. It no longer does: admission is
     // unconditional and the cosine ranking's order now decides nothing except which entries survive
-    // `admitCeiling`, which no measured book approaches (largest: 208 vectorized entries). So the table
+    // `admitCeiling`, which no measured book approaches (R4). So the table
     // was one row per entry in the book, ranked by a quantity with no consequence — and the per-entry
     // cosine it carried is in the stage-3/4 table beside the signals it is actually weighed against.
     // `/wa-query` still renders it, where an explicit ranking of arbitrary text IS the answer.
@@ -1084,10 +1076,9 @@ async function keywordActivations(chat) {
     // first-seen key mid-loop dirties it, and the rebuild throws away every cached scan.
     //
     // SECONDARIES COUNT. countSelective interns their literals too, so leaving them to be primed per
-    // entry meant a rebuild for the first entry carrying a novel secondary, and another for the next:
-    // measured 102 ms against 2 ms over 200 entries x 20 segments. Filtered exactly as the matching
-    // path filters them, so nothing is registered that will never be asked — and an entry with no
-    // usable primary is skipped whole, as activationAdds skips it.
+    // entry meant a rebuild for the first entry carrying a novel secondary, and another for the next
+    // (K13). Filtered exactly as the matching path filters them, so nothing is registered that will
+    // never be asked — and an entry with no usable primary is skipped whole, as activationAdds skips it.
     //
     // Registering here also pre-covers stage 3's registerKeys for this generation.
     registerKeys(candidates.flatMap(e => {
@@ -2050,9 +2041,8 @@ async function onScanDone(args) {
     // MEMORY ONLY, because a key on a REFERENCE entry is the authorial decision. Reference rows are
     // scored — the column orders them for the budget walk — and never cut: an author writing keys on a
     // world-rules entry is declaring when it should be present, so every reference entry that fires is
-    // included and answers only to the budget cap. Measured, the fit agrees rather than deciding it: at
-    // its own 0.17 the cut drops 35.3% of Foxbridge's relevant rows and 3 of its 10 grade-4s against
-    // 1.0% on Sommers, Foxbridge being the only reference-ONLY book in the corpus.
+    // included and answers only to the budget cap. Measured, the fit agrees rather than deciding it:
+    // cutting reference would cost heavily on exactly the corpus's one reference-only book (F36).
     const cutoffs = relevanceModel.value ?? {};
     const { cut: relevanceCutRows } = selection.relevanceCut(results, {
         scoreOf: it => it.eCredit,
@@ -2237,8 +2227,8 @@ async function onScanDone(args) {
             // BM25 over entry keys, gated on ELIGIBILITY (set at the scan, ~line 1608) rather than on the
             // value. keywordScore is 0 both when an eligible key missed and when the entry had no
             // scorable keys at all — and only the first is a measurement. Reading the
-            // value alone reported 32 confident zeros on a capture where those entries had no keys to
-            // score, which also silently defeats unionArms' absent-signal fill.
+            // value alone reported confident zeros on a capture where those entries had no keys to
+            // score (H12), which also silently defeats unionArms' absent-signal fill.
             keys: x.keysEligible === false ? null : (Number.isFinite(x.keywordScore) ? Number(x.keywordScore.toFixed(2)) : null),
             tokens: tokens[i],
             cut: !kept.has(x),
@@ -2294,8 +2284,8 @@ async function dryRun(verbose = false) {
     //
     // It matters most exactly where it is least visible. STMemoryBooks can hide a turn once it has been
     // swept into a memory entry, so a well-developed chat is the one most likely to be mostly hidden —
-    // 68% on the chat that surfaced this — and every /wa-grade capture from it described a scene no
-    // generation could produce.
+    // and every /wa-grade capture from the mostly-hidden chat that surfaced this described a scene no
+    // generation could produce (G9).
     const rawChat = context.chat ?? [];
     const chat = rawChat.filter(x => x && !x.is_system);
 

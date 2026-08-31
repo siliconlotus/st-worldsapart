@@ -7,13 +7,13 @@
 // convention is the author's, not a property of World Info, so it lives here as a repair rule over data and
 // must not become a predicate in scene.mjs or matcher.mjs — those keep testing fields.
 //
-// WHAT DRIFTED, MEASURED. In Time Whore 13 character and place sheets carry a marker copied from entry 001,
-// so they rank as memory. In Ascensus 6 arc summaries lost theirs and are excluded from every ranking metric,
-// as is Sommers 051B, which was split off 051 by hand. Separately, 109 Time Whore memory entries are not
-// vectorized — a workaround for an ST core limitation, not intent — and being reachable only by key they are
-// normalised over keys alone in fuseRanks, which lifts them above vectorized entries carrying a real cosine.
-// Measured across 28 scenes, that displacement cost 8.2 of 10 judged rows and F2 -0.387 against the same
-// grades.
+// WHAT DRIFTED, MEASURED (F47). In Time Whore, character and place sheets carry a marker copied from
+// entry 001, so they rank as memory. In Ascensus, arc summaries lost theirs and are excluded from every
+// ranking metric, as is Sommers 051B, which was split off 051 by hand. Separately, many Time Whore memory
+// entries are not vectorized — a workaround for an ST core limitation, not intent — and being reachable
+// only by key they are normalised over keys alone in fuseRanks, which lifts them above vectorized
+// entries carrying a real cosine. That displacement measurably costs judged rows and F2 against the
+// same grades.
 //
 // DURABLE ENTRIES ARE LEFT ALONE. A constant or sticky entry is included by authorial assertion, so this
 // pass neither vectorizes it nor changes its flags — whether a given pin still means what it meant is a

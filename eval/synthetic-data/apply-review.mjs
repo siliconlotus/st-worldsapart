@@ -40,8 +40,8 @@ const HERE = dirname(fileURLToPath(import.meta.url));
  * the grades look native once written. So an unresolvable section refuses and the run reports it.
  *
  * READ FROM THE HEAD. `captureId` is the second key a writer emits, ahead of the bulk, which is what the
- * schema's field-order rule is for. Measured over the corpus: 8ms against 263ms to parse every document
- * whole, finding the same 107 ids.
+ * schema's field-order rule is for. A head read is ~30x cheaper than parsing every document whole and
+ * finds the same ids (G14).
  *
  * @param {Array<{captureId?: string, file?: string}>} sections The review's sections
  * @param {string} dir eval-data
@@ -118,9 +118,9 @@ export function mergeReview(bundleGrades, sectionGrades, who = {}) {
             ...(who.user ? { id: who.user } : {}),
             // WHICH TOOL PRODUCED IT. A human grade can arrive three ways — `/wa-grade`, a merge from
             // `/wa-super-grade`, or `/wa-super-eval` writing a review back — and nothing on a verdict used
-            // to say which. That absence is what let 37 review verdicts be read as an llm pass's, because
-            // the only signal left was the document's creator, and a synth document has no human path of
-            // its own. It is provenance of the pass, so it rides with the rest of it.
+            // to say which. That absence is what let a batch of review verdicts be read as an llm
+            // pass's (G9), because the only signal left was the document's creator, and a synth document
+            // has no human path of its own. It is provenance of the pass, so it rides with the rest of it.
             ...(who.tool ? { params: { tool: who.tool } } : {}),
             grade: Number(grade),
             ...(who.now ? { gradedAt: who.now } : {}),

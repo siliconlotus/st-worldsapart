@@ -8,8 +8,8 @@ import { join } from 'node:path';
 import { archiveContract, contractBody, contractHash, readContract, CONTRACT_DIR } from './synthetic-data/contract.mjs';
 
 // THE FRONTMATTER IS NOT THE CONTRACT. Claude Code reads it to discover the agent and the prompt strips it,
-// so the model never sees it — and hashing it moved BOTH rubric hashes on 2026-08-21 for an edit to a
-// `description` line, while neither instruction block changed by a byte.
+// so the model never sees it — and hashing it once moved BOTH rubric hashes for an edit to a
+// `description` line, while neither instruction block changed by a byte (G9). Hash what is sent.
 const withFm = d => `---\nname: r\ndescription: ${d}\n---\n\nYou are the judge.\nGrade 0-4.\n`;
 eq(contractBody(withFm('one')).trim(), 'You are the judge.\nGrade 0-4.', 'the frontmatter is stripped, leaving what is sent');
 eq(contractHash(contractBody(withFm('one'))), contractHash(contractBody(withFm('a completely different description'))),

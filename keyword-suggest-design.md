@@ -125,8 +125,8 @@ and what it gates on is whether the thing has a form people use to refer to it �
 entry's descriptive material is not key material even when its subject is. Referent persistence enters
 as evidence about *where* the seed is: a cluster of persistent-but-undiscussed detail is the signature
 of a continuity entry, and its seed is the container that owns the detail — the Grove, not the tile.
-Foxbridge's "witch levels" has the same shape (thesis projects, five disciplines, none of them keys)
-and all eight of its human keys are container terms: witch, wizard, mage, magician, sorceror,
+Foxbridge's "witch levels" has the same shape (thesis projects and their disciplines, none of them
+keys) and all of its human keys are container terms (S17): witch, wizard, mage, magician, sorceror,
 practitioner, qualification, specialty.
 
 An entry low on both — scene-bounded detail — yields few or no seeds. That is the honest version
@@ -222,9 +222,8 @@ plural or possessive coinciding with an established proper name, `chili` → `Ch
 so it is not reached by anything above. Rare, and unhandled.
 
 Embedding-based drift detection was tried and does not work: seed-variant cosine reads surface overlap
-about twice as strongly as it reads meaning — 1.71x by standardised coefficient over 45 term pairs on
-bge-m3, where synonyms carrying no surface overlap average 0.61 and orthographic neighbours sharing no
-meaning average 0.68, so no threshold separates a real variant from a collision. The distributional
+about twice as strongly as it reads meaning, so no threshold separates a real variant from a
+collision (S15). The distributional
 version is dead a priori — it needs contexts for a variant that by definition is not attested yet.
 
 **Realizability for synonyms** is not gated, and the reason is not inheritance. A lorebook is upstream
@@ -259,16 +258,16 @@ under whole-word matching. The same limit applies to compounds that are not name
 
 The verdict has a rule: **referent recurrence decides truncation**. A recurring subject earns its
 short form (`Joe Pagliani` → `Joe`, `Julian Vargas` → `Julian`), a disposable one keeps the full name
-(`Karen Halloway` — nine Sommers entries, no bare `Karen`). Two vetoes sit above it: the player
+(`Karen Halloway` — many Sommers entries, no bare `Karen`). Two vetoes sit above it: the player
 persona is excluded outright, and orthographic collision changes the *rendering* rather than the
 verdict (`Sara` survives beside `Sarah Olusanmokun` as `? =^Sara`). Measured against the finished
 Sommers curation, which applies it throughout — arc-local cast earn bare names the same way the main
-cast do. Richard predates the rule and is over-specified against it (`Joe Pagliani` on nine entries,
-bare `Joe` on none).
+cast do (S13). Richard predates the rule and is over-specified against it (`Joe Pagliani` throughout,
+bare `Joe` nowhere).
 
-Evidence is thin, and the count depends on where attestation is read: 9 of the 9 zero-attestation gold
-keys in Richard have a live shorter form against the chat, 8 of 11 against the entries' own text.
-Either way zero attestation reads as a form-error signal rather than a frontier signal there. One book.
+Evidence is thin, and the count depends on where attestation is read — but read either way, nearly
+every zero-attestation gold key in Richard has a live shorter form, so zero attestation reads as a
+form-error signal rather than a frontier signal there (S13). One book.
 Both worth re-testing against the public books, which need no chat.
 
 ## Matching mechanics that constrain the design
@@ -346,7 +345,7 @@ nobody runs.
 - **Chat header identity fields are deprecated** — newer files write a literal `"unused"`. The
   per-message `name` on `is_user` turns is authoritative in both formats.
 - **`matchPersonaDescription` and its siblings join that text to the search text** when set. Nothing on
-  disk sets one, which is why nothing handles them yet.
+  disk sets one (S21), which is why nothing handles them yet.
 
 ## Populations
 
@@ -357,10 +356,9 @@ the chat exists, in an expository register the chat never uses. Overlap there is
 guaranteed.
 
 Measured on the pair that isolates it — `grounded omegaverse` against `Sommers_Pack__v22`'s memory
-entries, same story and chat: bge-m3 cosine of entry text to chat messages 0.53 against 0.62, share of
-Zipf-admitted terms recurring three or more times 9% against 18%. Foxbridge, Albion and Gladiator fall
-in the same band. Counting presence rather than recurrence, or comparing chats of different lengths,
-reverses it.
+entries, same story and chat: reference sits below memory on both entry-to-chat cosine and term
+recurrence (S16), with Foxbridge, Albion and Gladiator in the same band. Counting presence rather
+than recurrence, or comparing chats of different lengths, reverses it.
 
 **They are not a distinct class for keying.** Checked against Foxbridge (human-curated, reference-only)
 and Sommers' reference minority: characters, concepts and places are all keyed the same way — the
@@ -370,9 +368,8 @@ subject's canonical name, its morphological variants, and the common noun people
     Arnold Atkins               Arnold, Atkins, sherriff, police, cop
     Miss Roberta's Boarding House   boarding house, Miss Roberta, guest rooms
 
-Same shape three times, and the key counts of the two populations overlap completely — Foxbridge runs
-0–10 end to end, and both extremes are characters and concepts respectively (`Max's Parents` 10,
-`witch levels` 8), so neither class brackets the other.
+Same shape three times, and the key counts of the two populations overlap completely — Foxbridge's
+own extremes land on a character and a concept, so neither class brackets the other (S17).
 
 What varies is **subject ubiquity**, which is a continuum rather than a class. Foxbridge's peripheral
 NPCs earn role nouns; Sommers' principals get a bare first name and nothing else — Jeffrey Sommers
@@ -389,15 +386,15 @@ than names, and is correspondingly weaker.
 
 Asserted, not measured.
 
-The 40 books on disk are 25 book lines — versions of one book match on entry titles, not on entry
-text, since re-summarizing rewrites every entry and keeps the scene list. Every book over 100 entries
-is 85–93% STMemoryBooks entries, so reference entries are a 7–15% minority living *inside* memory
-books; but those 12 books are 3 stories, 9 of them snapshots of one, so this has the same n as the
-rates below and not the corpus's. Any memory/reference branch must therefore be per entry, as the
-pruner's `generated()` split already is. Book size does not identify a population: pure-reference
-books here run 0–75 entries, and the three public ones run 106–261.
+The books on disk collapse to far fewer book lines — versions of one book match on entry titles, not
+on entry text, since re-summarizing rewrites every entry and keeps the scene list. Every large book
+is overwhelmingly STMemoryBooks entries, so reference entries are a small minority living *inside*
+memory books; but those books are a handful of stories, most of them snapshots of one, so this has
+the same n as the rates below and not the corpus's (S17). Any memory/reference branch must therefore
+be per entry, as the pruner's `generated()` split already is. Book size does not identify a
+population: pure-reference book sizes here overlap the memory books'.
 
-**That figure is a `generated()` count, and `generated()` under-detects**, because offline editing —
+**That share is a `generated()` count, and `generated()` under-detects**, because offline editing —
 dropping a lorebook into a model chat to clean it up, which anyone invested enough to run STMB will
 eventually do — strips the metadata. Books that have been through that carry scene summaries with no
 STMB fields at all, and they read as reference.
@@ -428,8 +425,8 @@ Shane), which is probably desirable but arrives by accident.
 
 Persona names must also be kept out of any threshold calibration, because their rate measures POV
 rather than salience. Sommers is narrated in second person, so `Kyle` appears only in dialogue and
-scores 35.1% of assistant turns while being present in essentially every scene; a third-person chat
-would score the identical persona two or three times higher.
+scores a modest share of assistant turns while being present in essentially every scene (S14); a
+third-person chat would score the identical persona two or three times higher.
 
 ## The books are not an eval set
 
@@ -450,11 +447,10 @@ provenance (below) establishes which subset is trustworthy.
 
 ### The gold sets
 
-Three books are now curated and usable. **Foxbridge** — 38 entries, 123 keys, hand-authored end to end
-with no LLM involvement, pure reference, several chats attached under character-card binding.
-**Richard** — 59 entries, 311 keys, curated by hand through the Explorer.
-**Sommers** — 327 entries, 2866 keys, and the first gold set carrying memory entries and a chat long
-enough to measure firing against.
+Three books are now curated and usable (S18). **Foxbridge** — hand-authored end to end with no LLM
+involvement, pure reference, several chats attached under character-card binding. **Richard** —
+curated by hand through the Explorer. **Sommers** — by far the largest, and the first gold set
+carrying memory entries and a chat long enough to measure firing against.
 
 Richard's provenance matters and should travel with any number derived from it. Curation was
 **entry-grounded**: judged against entry text, not against the chat, which matches the scope boundary
@@ -463,7 +459,7 @@ realizability by construction — except where synonyms were added (`VSOE` besid
 is a realizability claim. Two acknowledged uses of outside knowledge: `Joe` → Joe Pagliani, `Mr. Stern`
 → Marty Stern.
 
-**549 labelled negatives** come with it, recovered from the pre-edit book preserved inside the
+**Labelled negatives** come with it (S18), recovered from the pre-edit book preserved inside the
 `richard-syn-*` grade bundles. Three cautions on consuming them. They are **(entry, key) pairs, not bad
 strings** — the same term is a negative on one entry and a positive on nine others, because the
 judgement is about the entry. Some are **form corrections rather than rejections** (`TMZ leak` → `TMZ`),
@@ -472,8 +468,8 @@ are excluded and unlabelled.
 
 Sommers was curated to the same **entry-grounded** standard — judged against the edited entry text,
 supplemented by author memory — so it is silent on realizability by construction in the same way. It
-carries **981 labelled negatives**, recovered from the `sommers-syn-*` bundles, under all three of the
-cautions above. Author memory is an input the entry text does not carry, so superset recall against
+carries its own **labelled negatives** (S18), recovered from the `sommers-syn-*` bundles, under all
+three of the cautions above. Author memory is an input the entry text does not carry, so superset recall against
 this gold has a ceiling below 100% that is not a suggester defect.
 
 Anything a suggester proposes that is in neither set is unjudged, so this measures superset recall and
@@ -481,28 +477,27 @@ known-junk precision, not precision generally. And **provenance decays**: a key 
 definitions existed was vetted against a different standard, so "already approved" is not a shortcut
 for the anchor pass.
 
-Foxbridge carries **six chat lineages** with no shared prefixes — but continuation, separate story and
-ephemeral repeat all look alike from a zero-length prefix, so that is not the same as independence.
+Foxbridge carries **several chat lineages** with no shared prefixes (S18) — but continuation, separate
+story and ephemeral repeat all look alike from a zero-length prefix, so that is not the same as
+independence.
 Only the **lorebook binding** distinguishes same-story from separate-story, and it has three sources:
 `chat_metadata.world_info` per chat, the character card, and — rarely —
 `settings.json` → `world_info_settings.world_info.charLore`.
 
-### Numbers so far, and what they are worth
+### Findings so far, and what they are worth
 
-**The activation ceiling, bracketed.** Whole-word rates over assistant turns, personas excluded,
-against your own verdicts: Dylan 21.8% kept ("grew, never crested"), Arthur 35.1% undecided (still
-being tagged), Liam 53.4% crossed ("good until he wasn't"), Richard 94.5% long gone. Giselle 18.3% kept
-on eight entries. The most informative point is Arthur, because the threshold sits where a human cannot
-call it either. Gold positives in Richard top out at **10.9% of all messages** with p99 at 4.6% and a
-median of 0.1%, so nothing human-approved lives high in the range.
+**The activation ceiling, bracketed** (S14). Whole-word rates over assistant turns, personas excluded,
+against your own verdicts, climb from Dylan kept ("grew, never crested") through Arthur undecided
+(still being tagged) to Liam crossed ("good until he wasn't") and Richard long gone. The most
+informative point is Arthur, because the threshold sits where a human cannot call it either. Gold
+positives in Richard top out far below the bracket, so nothing human-approved lives high in the range.
 
 **The suggester does not beat curated keys, and the finding that it did was an artifact of the
-book.** `suggest-firing.mjs` over Sommers × its own chat, per-row dead rate: against the pre-curation
-book, candidates 40.6% versus the book's own 39.1% — level, and ahead on unique (53.7% vs 56.2%).
-Against the same book curated, the book falls to **20.3%** (34.1% unique) while candidates stay put at
-41.7%, and the useful 4-100 band splits 50.3% to 30.5%. Both sides read only entry text, so the gap is
-like-for-like. Read it as a bound, not a score: `cap: 30` offers 6257 candidate rows against 2866 keys,
-and a dead rate at 2.2x the volume flatters the smaller set.
+book** (S11). `suggest-firing.mjs` over Sommers × its own chat, per-row dead rate: against the
+pre-curation book, candidates and the book's own keys are level; against the same book curated, the
+book's dead rate roughly halves while the candidates' stays put. Both sides read only entry text, so
+the gap is like-for-like. Read it as a bound, not a score: `cap: 30` offers candidate rows at a
+multiple of the book's key count, and a dead rate at that volume flatters the smaller set.
 
 **This is n=1 curator.** The genre spread is wide, which controls vocabulary and entry structure, but
 only a handful of books carry memory entries and the bracket came from two of them. ST mechanics
@@ -511,32 +506,29 @@ findings — none has a chat, so activation cannot be checked against them at al
 
 ### What the curation diffs measured
 
-Pre/post diff of Sommers — union of the 15 eval-bundle snapshots against the finished book: 1,760
-kept, ~1,460 removed, ~860 added, 245 in-place corrections — replicated on Richard (525 removed).
-Two count inflations: snapshot churn between captures, and one book-wide spelling fix
-(`Mark Lanning` → `Mark Lansing`) that reads as ~20 removals plus ~20 additions. Same n=1 curator
-caveat as above.
+Pre/post diff of Sommers — union of the eval-bundle snapshots against the finished book, replicated
+on Richard (S12). Same n=1 curator caveat as above.
 
-- **The form divide is the proper-noun prior, twice.** Kept keys 80% capitalized and 92% at one or
-  two words; removals 59% all-lowercase and phrase-heavy. Richard: 78% against 44%.
-- **Scene furniture is the dominant removal class** — 673 of 1,460 are lowercase multiword one-off
+- **The form divide is the proper-noun prior, twice.** Kept keys are mostly capitalized and at one
+  or two words; removals mostly all-lowercase and phrase-heavy. Richard splits the same way.
+- **Scene furniture is the dominant removal class** — lowercase multiword one-off
   props and actions ("granola bar", "water fight"; Richard: "garlic bread", "pancetta") — plus
   quote fragments ("the morning is mine"). Discourse-recurrence gating, observed in gold.
-- **The player character is keyed nowhere.** Kyle on 0 of 327 entries; `Richard Ryder` stripped
+- **The player character is keyed nowhere.** Kyle on no entry at all; `Richard Ryder` stripped
   from Richard's episodic entries the same way.
-- **Truncation ran one way**: ~100 corrections shortened over-specified keys ("Halloween party" →
+- **Truncation ran one way**: corrections shortened over-specified keys ("Halloween party" →
   "Halloween", "Mr. Sterling" → "Sterling" — the article or honorific blocks the substring).
-- **Attestation was not required**: 36% of kept keys never fire in the 5,466-message frozen chat,
-  and 39% of the curator's own additions are unattested in the entry text (author memory).
-- **Collision was always rescued, never fatal**: all 84 SmartKeys in Sommers post-date the
+- **Attestation was not required**: a sizeable share of kept keys never fire in the frozen chat,
+  and many of the curator's own additions are unattested in the entry text (author memory).
+- **Collision was always rescued, never fatal**: every SmartKey in Sommers post-dates the
   curation (`? =^Sara`, `? =DP`, `? =Huber`, alternation families like `? (your|my|Kyle's) heat`).
   Practice diverges from the degradation principle above: most carry no plain-literal fallback, so
   un-extended core loses the entry. Unresolved.
 - **Variants and aliases were enumerated by hand** — `three inch inseam` beside
   `three-inch inseam`, `Quins` beside `Harlequins` — the expander's job, observed in gold.
 - **Nested bare+full name pairs are deliberate and systematic**, not occasional: full names added
-  beside existing bare names on ~160 entries (57 of 58 for `Teddy O'Neill`), part term-weighting,
-  part instrumentation. Open item 0 is understated; the collapse diagnostic must stay advisory.
+  beside existing bare names across a broad slice of entries (near-universally for `Teddy O'Neill`),
+  part term-weighting, part instrumentation. Open item 0 is understated; the collapse diagnostic must stay advisory.
 - **Title-case is not proper-nounhood.** LLM-capitalized generics were removed ("Kitchen",
   "Certifications", "Lime Green"), and one-scene proper nouns ("West Elm", "Brenda") fail
   recurrence despite the capital.
@@ -555,28 +547,24 @@ that is where curation happens; Cleanup is the once-per-book sweep.
 | high rate, survives, entry is premise-level | the concept is always relevant | `constant` |
 | moderate rate, survives, word denotes nothing | actually a bad key | remove |
 
-**The collapse ratio is the sharp instrument**, and it is threshold-free: `Ver` 50%→0%, `ma` 51%→1%,
-`tin` 50%→2%, `cop` 15%→0%, `Ian` 14%→0.4%. Keys that are merely frequent do not move — `Jeffrey`
-39%→39%, `Kimberly` 12%→12%. It also catches the 14% cases a rate band set high enough to be safe
-would miss. The usual cause is a **short form nesting inside its own long form** (`Kim`⊂`Kimberly`,
+**The collapse ratio is the sharp instrument**, and it is threshold-free: colliding keys collapse to
+near zero under whole-word while keys that are merely frequent do not move, and it catches the
+moderate-rate cases a rate band set high enough to be safe would miss (K15). The usual cause is a **short form nesting inside its own long form** (`Kim`⊂`Kimberly`,
 `Rich`⊂`Richard`), so the diagnostic is per ENTRY rather than per key: the message is "this entry has
 a key inside another of its keys", and the fix is one checkbox for the entry.
 
-**A firing-rate band is not the sharp instrument, and nearly everything it catches is legitimate.**
-Of 20 keys over 20% across seven books, 8 sit on vectorized entries where `suppressVectorKeys` blanks
-them, and most of the rest are main-cast names on sticky sheets. In Sommers the >20% band has a 0%
-removal rate against a 41% curation baseline, and every key curation removed fired under 15.6%
-(re-measured on the finished curation, over the 1740 pre-curation keys on entries enabled and
-non-constant in both versions).
+**A firing-rate band is not the sharp instrument, and nearly everything it catches is legitimate**
+(K16). Much of what it flags sits on vectorized entries where `suppressVectorKeys` blanks the keys,
+and most of the rest are main-cast names on sticky sheets. In Sommers the high band has a zero
+removal rate against a substantial curation baseline, and every key curation removed fired below the
+band.
 
-**The Sommers 0% is by design, and the designed test has now run.** Every key above 15.6% of messages
-(whole-word, frozen chat: Jeffrey 39%, Liam 29%, Brad 25%, Arthur 22%, Shane 21%) was deliberately
-retained through curation as a hold-out, so keep-vs-remove could be measured in ranking rather than
-called by intuition. **Measured flat** (`param-screen.mjs`, 15 graded scenes, paired, reference tier
-excluded): removing the band 2/5/8, mean Δ −0.0004 nDCG@10; uniform cast placement 8/7/0, +0.019;
-both together 7/6/2, −0.004. Nothing is distinguishable from its own baseline, which per the arm's
-own reading rule is "not better, not worse" and licenses nothing beyond itself. The band stays
-retained because nothing argues for moving it, not because keeping it was shown to win.
+**The Sommers zero is by design, and the designed test has now run.** Every key above the band — the
+main-cast names — was deliberately retained through curation as a hold-out, so keep-vs-remove could
+be measured in ranking rather than called by intuition. **Measured flat** (F41): neither removing the
+band, nor uniform cast placement, nor both together is distinguishable from its own baseline, which
+per the arm's own reading rule is "not better, not worse" and licenses nothing beyond itself. The
+band stays retained because nothing argues for moving it, not because keeping it was shown to win.
 
 Two things this result cannot do. The graded samples embed the pre-curation book, so what the baseline
 calls "selective" placement is the generator's, not the finished curation's. And nDCG here excludes
@@ -585,21 +573,20 @@ runs on memory-tier re-ranking alone — the two-score work in `matcher-design.m
 be asked of the ranking that actually arbitrates.
 
 **Three signals, not one, and none supersedes another.** `ENGLISH_COMMON` says the word denotes
-nothing in particular and needs no chat, which matters because 19 of the 40 books on disk have none.
-Chat firing rate says how much a key matches. The collapse ratio says it matches the wrong thing.
-Measured overlap between the first two: 1 key of 38 across the books curation has not touched.
+nothing in particular and needs no chat, which matters because roughly half the books on disk have
+none. Chat firing rate says how much a key matches. The collapse ratio says it matches the wrong
+thing. Measured overlap between the first two is nearly empty (K16).
 
 **Where `ENGLISH_COMMON` is wrong is proper nouns that collide with common words** — `River`, `Blue`,
 `Angel`, `Jack`, `Paris`, `Red`, `Mark`. That is most of the high-Zipf population in real books, not
-an edge case, and chat rate is right about them where the word list is not. Measured share of keys at
-Zipf ≥ 4.5: public books 2-5%, this author's curated books 0-1%, hand-written Foxbridge 12%, untouched
-Red Dead 17%. Synthetic control — random Zipf 5.5+ words used as keys fire at median 7%, p90 34%, and
-collapse under whole-word only 11 times in 100, so the class is real and separable when it occurs.
+an edge case (K16), and chat rate is right about them where the word list is not. Synthetic control —
+random high-Zipf words used as keys fire at real rates yet almost never collapse under whole-word, so
+the class is real and separable when it occurs (K15).
 
 **Ruled: `chat common` raises its own flag.** Chat rate was confirm-only — it could redden
 `english common` and never speak alone — so a key that floods the chat without being a common English
 word or frequent in the book's own prose went unflagged entirely. `magic` on a Foxbridge entry is the
-shape: not on the word list, and 38 entries of encyclopedia prose will never clear the `book common`
+shape: not on the word list, and a small book of encyclopedia prose will never clear the `book common`
 ratio.
 
 **It claims something about the KEY against this chat, not about the entry's wiring.** That is what
@@ -685,9 +672,9 @@ Accepted as follow-on:
 10. **The collapse diagnostic.** Ship "this entry has a key matching inside other words" as an advisory
     on the Explorer chips, per ENTRY. The rule and its evidence are in the four-classes section above;
     what is missing is precision and recall against human judgement rather than against examples. A
-    finished Sommers gives a second curation event on a 2068-key book, and its removed set is a clean
-    negative label — the author's own asymmetry, that presence proves nothing in a partial pass but
-    removal is a reviewed rejection. Until then, the risk is shipping a red flag calibrated on anecdote.
+    finished Sommers gives a second curation event on a far larger book (S18), and its removed set is
+    a clean negative label — the author's own asymmetry, that presence proves nothing in a partial
+    pass but removal is a reviewed rejection. Until then, the risk is shipping a red flag calibrated on anecdote.
     Note item 0: some nesting is deliberate, so this advises and never repairs.
 11. **Whether the pre-tick is calibrated well enough to be the default.** Not whether the tool should
     recommend — a pre-tick IS a recommendation, and the bulk bar's "suggestions, not verified problems"
@@ -716,7 +703,7 @@ Retired, recorded so they are not re-derived:
 ## Related
 
 `.claude/agents/entry-vocabulary.md` is a first attempt at the LLM half, committed as a revert point
-rather than a settled design — at ~190 lines it is over-engineered for the task, and its entry-kind
+rather than a settled design — it is over-engineered for the task, and its entry-kind
 branch prose predates the scope boundary above. Its texture/skip machinery is superseded by "an entry
 with neither axis yields few or no seeds", and it should shrink to the referring-expression question,
 an instruction to emit base forms, the no-frequency-judgement rule, and the output shape. Ask the model

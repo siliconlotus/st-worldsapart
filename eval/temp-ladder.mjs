@@ -100,9 +100,9 @@ function prepBook([slug, file, provenance], nEntries) {
  *
  * `think: false` is REQUIRED, not a tuning choice. gemma4:e4b is a thinking model: at 400 tokens it
  * spent the entire budget reasoning and returned `done_reason: length` with an EMPTY response on
- * every one of the 24 prompts — a silent zero that scores as "the model proposed nothing" rather
- * than as a failure. Disabling thinking fixes it and is also 7x faster on the same prompt (2.1s / 25
- * tokens vs 15.4s / 601). A no-op for non-thinking models like gemma3:4b, so setting it uniformly
+ * every prompt — a silent zero that scores as "the model proposed nothing" rather
+ * than as a failure (H6). Disabling thinking fixes it and is also several times faster on the same
+ * prompt. A no-op for non-thinking models like gemma3:4b, so setting it uniformly
  * keeps the arms comparable.
  *
  * This is a real defect in the shipped path too, not just here — see the report; the extension has

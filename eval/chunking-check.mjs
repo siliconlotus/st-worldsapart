@@ -4,12 +4,12 @@
 // re-chunks a graded sample's EMBEDDED books and compares the result against the `metadata.text` actually
 // stored in that book's live vector index. That is a real-data oracle for byte-identity — the port is only
 // safe if it reproduces indexes that already exist, and no amount of hand-written fixtures can establish
-// that. It found 992/992 chunks identical on the first book it ran against.
+// that.
 //
 // The same comparison is a STALENESS DETECTOR, which is why it prints rather than asserts on mismatch: a
 // book edited after it was vectorized no longer chunks to what is stored, and its sample's per-entry cosines
-// therefore describe text the book no longer contains. One existing eval sample is ~30% out of sync this
-// way. That is a fact about the DATA, not a regression in the code, so it must not fail the suite — but it
+// therefore describe text the book no longer contains. One existing eval sample really is out of sync this
+// way (P3). That is a fact about the DATA, not a regression in the code, so it must not fail the suite — but it
 // must not be silent either, since a stale index quietly corrupts every number derived from it.
 //
 // Runs clean with no arguments and no eval-data present: the oracle half skips when there is nothing to
@@ -91,7 +91,7 @@ for (const file of samples) {
     //   keyed by hash       — identical text is ONE collection item however many entries produce it.
     //
     // Comparing per-entry and positionally against a hash-keyed, insertion-ordered store reported a
-    // perfectly-synced 1050-chunk collection as 70% stale, so the comparison is set-to-set over the whole
+    // perfectly-synced collection as mostly stale (P3), so the comparison is set-to-set over the whole
     // collection, exactly the granularity syncWorld itself works at.
     const vectorized = Object.values(book).filter(e => e.vectorized && !e.disable && typeof e.content === 'string' && e.content);
     const expected = new Set();
@@ -127,11 +127,10 @@ if (!samples.length) {
 // ---- the merge floor applies to split fragments too ----------------------------------------------
 //
 // splitRecursive packs greedily from the left, so every run it emits ends in whatever did not fit.
-// Those tails used to be emitted as chunks: measured on a live collection, 144 of 3332 (4.3%) came out
-// under the floor, including five bare `---` rules, an 11-character `production.` and a title cut
-// mid-word. They are embedded, they enter the corpus mean every centred cosine subtracts, they count
-// toward BM25's document total, and a 3-character chunk's direction is arbitrary enough to win an
-// entry's max-pool against anything.
+// Those tails used to be emitted as chunks — a live collection leaked sub-floor fragments this way,
+// including bare `---` rules, a lone `production.` and a title cut mid-word (R25). They are embedded,
+// they enter the corpus mean every centred cosine subtracts, they count toward BM25's document total,
+// and a 3-character chunk's direction is arbitrary enough to win an entry's max-pool against anything.
 const CFG = { chunkMode: 'paragraph', chunkSize: 800, minChunkSize: 120 };
 const words = n => Array.from({ length: n }, () => 'word').join(' ');
 const floorCases = [

@@ -13,7 +13,7 @@
 //   lot. A book with four keyword-matching entries hands its top one the same contribution a 300-entry
 //   vector list hands its best.
 //
-// param-screen.mjs already found supporting evidence: rrfK=60 hurt all three scenes and rrfK=10 helped two.
+// param-screen.mjs already found supporting evidence: a large rrfK hurt where a small one helped (R23).
 // Less flattening measured better, and score fusion is the limit of that direction.
 //
 // READS THE LOGGED SIGNALS, DOES NOT RE-DERIVE THEM. Every sample records per-entry cosine/text/keys from
@@ -58,8 +58,8 @@ const zshift = vals => {
     return z.map(v => (v == null ? null : v - lo));
 };
 /** Quantile within the present values: 1 = best, 0 = worst, ties broken by position. Scale-free, so it
- *  transfers across scenes whose raw distributions differ — which absolute thresholds provably do not
- *  (text medians run 41/53/57 across three scenes, and keys never exceeds 3.5 while text reaches 158). */
+ *  transfers across scenes whose raw distributions differ — which absolute thresholds measurably do
+ *  not (R23). */
 const quant = vals => {
     const present = vals.map((v, i) => [v, i]).filter(([v]) => v != null).sort((a, b) => a[0] - b[0]);
     const out = vals.map(() => null);

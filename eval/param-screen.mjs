@@ -2,7 +2,7 @@
 //
 // WHY NOT graded-scene-grid.mjs PER SAMPLE. That tool answers "which cell wins on THIS scene", and with a
 // handful of scenes that question has no defensible answer: between-scene variance swamps between-parameter
-// variance (one sample's grid spans nDCG@10 0.87-0.99, another's sits elsewhere), and picking the argmax of
+// variance (H10), and picking the argmax of
 // hundreds of cells from three scenes is noise-mining. Gradeable chats are structurally rare — a chat has to
 // be long enough to have history worth retrieving and rich enough for some of it to be irrelevant.
 //
@@ -28,7 +28,8 @@
 // an arm that surfaces unjudged entries scores them 0 and looks worse than it is, so judged coverage is
 // reported per cell and a run with gaps is flagged. Pool first with /wa-super-grade, then screen here.
 import { readFileSync } from 'node:fs';
-import { indexPath, loadScene, openSample, sceneParams, scoreScene, embed, sceneLabel, lineagesOf } from './scene.mjs';
+import { indexPath, loadScene, openSample, sceneParams, scoreScene, embed, sceneLabel, lineagesOf, fittedModels } from './scene.mjs';
+import { modelKey } from '../extension/relevance.mjs';
 import { jaccard, signTest, spearman, gradeValue } from './metrics.mjs';
 import { isDurable, rowKey } from '../extension/grading.mjs';
 import { ensureIndex, resolveModel } from './reindex.mjs';
@@ -54,8 +55,8 @@ const ARMS = {
     'repeat=log-R2': { repeatCurve: 'presence-log', repeatR: 2 },
     'LEXW=0.5': { LEXW: 0.5 }, 'LEXW=1': { LEXW: 1 }, 'LEXW=2': { LEXW: 2 }, 'LEXW=3': { LEXW: 3 },
     // KEYS WEIGHT, now separable from text. null mirrors LEXW, which is what every capture before the split
-    // used; a number overrides it. The per-scene optima that motivated the split were (text 0.5, keys 3),
-    // (1.5, 0) and (1.5, 1), so 0 is a real candidate, not a degenerate one.
+    // used; a number overrides it. The per-scene optima that motivated the split scattered widely (H10),
+    // including a zero, so 0 is a real candidate, not a degenerate one.
     'KEYW=0': { KEYW: 0 }, 'KEYW=0.5': { KEYW: 0.5 }, 'KEYW=1': { KEYW: 1 }, 'KEYW=2': { KEYW: 2 }, 'KEYW=3': { KEYW: 3 },
     // Whether a VECTORIZED entry's keys score at all. SCORING, never selection: the keys are admitted to
     // scoringKeys() to re-rank candidates retrieval already returned, so it can reorder the top 10 but can
@@ -66,12 +67,11 @@ const ARMS = {
     // the other is a silent no-op. Check the printed baseline before reading a flat result as a finding.
     // Only means anything on a book whose keys have been curated — on an uncurated one it measures the
     // generator, not the hypothesis.
-    // THESE NO LONGER MOVE THE POPULATION. Measured at the current architecture, 70 scenes: every arm below
-    // returns a BYTE-IDENTICAL candidate set — 10103 vector rows, 353 keyword rows, 670 of 672 retrievable
-    // relevant — and only the query-term count differs (6130 shipped, 9839 keys-live). The old figure here
-    // ("adds 767 keyword-only rows, loses 174 vector rows across 65 scenes") was an artifact of
-    // admitCeiling 100: those rows were vectorized entries the ceiling kept out of the pooled set, which
-    // live keys then re-admitted by the keyword route. At 1000 the ceiling excludes nothing and stage 1
+    // THESE NO LONGER MOVE THE POPULATION. Measured at the current architecture, every arm below
+    // returns a BYTE-IDENTICAL candidate set, differing only in query terms (R20). The old population
+    // figure here was an artifact of the old, small
+    // admitCeiling: those rows were vectorized entries the ceiling kept out of the pooled set, which
+    // live keys then re-admitted by the keyword route. Now the ceiling excludes nothing and stage 1
     // reads no term weights, so suppression cannot reach admission from either direction.
     //
     // What is left is stage 3 alone: the term set feeds content-lexical, and scoringKeys decides whether a
@@ -79,23 +79,22 @@ const ARMS = {
     // surface an unjudged row, so unlike a chunk arm its delta is not a pool-biased lower bound.
     //
     // WHAT THE GAZETTEER READS. Shipped is keys+titles, and everything defending that choice is thin: the
-    // "keys alone score identically" claim comes from a 5-target gold set that no longer exists, and the
-    // bodies arm lost at n=3 scenes. One family, so the doses correct against each other. __reload because
-    // the gazetteer is baked at load time.
+    // "keys alone score identically" claim comes from a gold set that no longer exists, and the
+    // bodies arm lost at a handful of scenes. One family, so the doses correct against each other.
+    // __reload because the gazetteer is baked at load time.
     //
-    // ALL FOUR MEASURED FLAT, n=71 scenes, paired — including gaz=none, which deletes the gazetteer
-    // outright (nDCG@10 -0.0082, 28/42, p=0.120; F@R -0.0054, 19/15/37, p=0.608). So the field choice is not
+    // ALL FOUR MEASURED FLAT, paired — including gaz=none, which deletes the gazetteer
+    // outright (R20). So the field choice is not
     // what to argue about: at this sample size the whole gazetteer is inside noise, and the proper-noun
     // boost is carrying the entity filter on its own. Kept as standing arms because that null is the answer
     // to a question that keeps getting re-asked, and re-asking it should cost one command.
     //
-    // THOSE DELTAS WERE MEASURED WHEN THESE ARMS ALSO MOVED ADMISSION, by up to 137 rows. They no longer
-    // do: re-measured at the current architecture over 70 scenes, all four return a byte-identical
-    // candidate set to baseline and to each other (10103 vector rows, 353 keyword rows, 670 relevant),
-    // differing only in query terms — 2911 for none, 4042 keys, 6130 shipped, 36789 bodies. Stage 1 reads
+    // THOSE DELTAS WERE MEASURED WHEN THESE ARMS ALSO MOVED ADMISSION. They no longer
+    // do: re-measured at the current architecture, all four return a byte-identical
+    // candidate set to baseline and to each other, differing only in query terms (R20). Stage 1 reads
     // no term weights, so the gazetteer reaches content-lexical at stage 3 and nothing else. The flat
     // finding survives the narrowing; what changed is that these now measure a pure reweighting, which is
-    // a cleaner contrast than the one that produced the numbers above.
+    // a cleaner contrast than the one that produced the superseded deltas.
     'gaz=keys': { gazetteerSource: 'keys', __reload: true },
     'gaz=titles': { gazetteerSource: 'titles', __reload: true },
     'gaz=bodies': { gazetteerSource: 'bodies', __reload: true },
@@ -137,7 +136,7 @@ const ARMS = {
     //
     // Only 'nocos' is a standing arm. denseColumn 'all' and 'cos' put a vectorized entry's own cosine in
     // the column beside itself, so they can only reweight the vector signal — a question the vector weight
-    // asks directly. Measured on 70 scenes they moved +0.0056 and +0.0005 nDCG@10, and an arm that measures
+    // asks directly. Measured, they moved essentially nothing (R20), and an arm that measures
     // nothing still costs a comparison in every later run's multiplicity count. scene.mjs still implements
     // both; call scoreScene with the override to run them.
     'denseCol=nocos': { __dense: true, denseAllEntries: true, denseColumn: 'nocos' },
@@ -176,7 +175,7 @@ const ARMS = {
     ...Object.fromEntries([1, 2, 4, 8].map(v => [`sharedWithin=${v}`, { __reload: true, sharedComponents: v, sharedScatter: 'within' }])),
     // WHITENING (scene.mjs whitenR/whitenAlpha) — the only lever in this family that changes the cloud's
     // SHAPE rather than its position. Centring is a translation and provably cannot remove book identity
-    // (measured: 1-NN same-book purity 99.4% -> 98.2%); rescaling the directions a book spreads along is
+    // (R18); rescaling the directions a book spreads along is
     // the operation that can. alpha 0 is the control and must reproduce the baseline exactly.
     ...Object.fromEntries([0.25, 0.5, 1].map(a => [`whiten=${a}`, { __reload: true, whitenR: 16, whitenAlpha: a }])),
     'whiten=1r64': { __reload: true, whitenR: 64, whitenAlpha: 1 },
@@ -190,10 +189,10 @@ const ARMS = {
     // tie-break from the entries that get one, so tilt=1 is what splits the pair (the cosine's own
     // contribution reads as denseAllΔ - tiltΔ).
     //
-    // THE DOSE QUESTION IS CLOSED — the ladder finding lives at KEYWORD_ONLY_TILT (13 doses
-    // 0.75-3, 70 scenes, unimodal on both metrics, joint plateau [1.25, 1.3]). These two are TRIPWIRES,
-    // one per cliff edge: tilt=1 must read ~-0.02 F@R and tilt=1.5 ~-0.02 nDCG, and a flat cell means the
-    // fusion or the population changed shape and the ladder wants re-running, not that the tilt is free.
+    // THE DOSE QUESTION IS CLOSED — the ladder finding lives at KEYWORD_ONLY_TILT (F40). These two are
+    // TRIPWIRES, one per cliff edge: tilt=1 must read ~-0.02 F@R and tilt=1.5 ~-0.02 nDCG, and a flat cell
+    // means the fusion or the population changed shape and the ladder wants re-running, not that the tilt
+    // is free.
 
     // Mean-centering off: rank on RAW cosine. The contrast is end-to-end — it moves the retrieval ranking,
     // the top-K, the admission gate and the fused layout order together, which is what makes it different
@@ -201,9 +200,9 @@ const ARMS = {
     'centering=off': { meanCentered: false },
 
     // THE HIGH-BAND HOLD-OUT. Sommers curation deliberately retained every key firing above 15.6% of
-    // messages (whole-word, frozen chat) so keep-vs-remove could be answered here instead of by intuition:
-    // Jeffrey 39%, Liam 29%, Brad 25%, Arthur 22%, Shane 21%. Teddy sits AT 15.6% and was judged per-entry
-    // (removed from 9 entries, kept on 71), so it is not in the arm. Removal semantics via scoringKeys:
+    // messages (whole-word, frozen chat) so keep-vs-remove could be answered here instead of by
+    // intuition (F41). Teddy sits AT the band edge and was judged per-entry,
+    // so it is not in the arm. Removal semantics via scoringKeys:
     // stops scoring and keyword-activating; gazetteer untouched (see scene.mjs). READ THE SIGN, per the
     // curator: consistent negative = removal hurts (keep wins); consistent positive = removal helps; flat
     // or mixed = "not better, not worse" — which licenses nothing beyond itself.
@@ -211,8 +210,8 @@ const ARMS = {
     // UNIFORM CAST PLACEMENT. The curation kept main-cast bare names only where the generator had already
     // put them, so dropKeys=hiband measured removal from INCONSISTENT placement. These arms fill the gap
     // mechanically (scene.mjs addCastKeys: name appended wherever entry content mentions it whole-word and
-    // no key form exists — 700 (entry,name) fills over the curated book, dominated by pack principals:
-    // Jeffrey 178 fills vs 2 keyed, Brad 151/1, Shane 134/3). Kyle excluded (player persona), Sara and Ian
+    // no key form exists — the fills are dominated by pack principals the book barely
+    // keys, F41). Kyle excluded (player persona), Sara and Ian
     // excluded (known orthographic collisions the fill would reintroduce).
     // cast+dropHi is the interaction: uniform placement of the non-band cast with the band absent — read it
     // against addKeys=cast, not only against baseline, to see whether the band still earns its keep once
@@ -228,6 +227,18 @@ const ARMS = {
     'cutoff=0.16': { memoryCutoff: 0.16 },
     'cutoff=0.22': { memoryCutoff: 0.22 },
     'cutoff=0.30': { memoryCutoff: 0.30 },
+    // WHICH FIT scores the column, by name. Standardisation removes the SCALE difference between
+    // embedders, so what a foreign beta gets wrong is the signal's discriminative power, not its units.
+    // REQUIRES --cutoff: each fit carries its own provenance cutoff, so without a fixed one the arms
+    // differ in how many rows they admit as well as how they order.
+    'fit=noCosine': { relevanceFit: 'noCosine' },
+    'fit=bge-m3': { relevanceFit: 'bge-m3' },
+    'fit=jina': { relevanceFit: 'cohee/jina-embeddings-v2-base-en' },
+    'fit=gemma': { relevanceFit: 'embeddinggemma' },
+    'fit=mxbai': { relevanceFit: 'mxbai-embed-large' },
+    'fit=qwen0.6b': { relevanceFit: 'qwen3-embedding:0.6b' },
+    'fit=qwen4b': { relevanceFit: 'qwen3-embedding:4b' },
+    'fit=qwen8b': { relevanceFit: 'qwen3-embedding-8b-4bit-dwq' },
 };
 
 /** Arms that answer the SAME question at different doses. Derived from the name, so adding a dose needs no
@@ -250,6 +261,17 @@ const K = Number(arg('--k') ?? 10);
 // The token ceiling every scene is walked under, baseline and arms alike — it is a user's cost decision,
 // not a property of a scene, so it cannot come off the bundle. Required by --metric fAtBudget.
 const BUDGET = Number(arg('--budget') ?? 0);
+// THE RELEVANCE CUTOFF every scene is cut at, baseline and arms alike. A user setting (`relevanceCutoff`,
+// one value for every model), so never defaulted here. Absent it each scene cuts at its FIT's provenance
+// cutoff, which is wrong the moment two arms use different fits. REQUIRED by any `fit=` arm.
+const CUTOFF = arg('--cutoff') === null ? null : Number(arg('--cutoff'));
+if (CUTOFF !== null && !Number.isFinite(CUTOFF)) { console.error('--cutoff must be a number'); process.exit(2); }
+if (CUTOFF === null && picked.some(a => 'relevanceFit' in ARMS[a])) {
+    console.error('a fit= arm needs --cutoff: without it each fit cuts at its own provenance cutoff and the contrast is confounded');
+    process.exit(2);
+}
+/** The globals that ride on the baseline and on every arm, so both are scored under one stage-4 condition. */
+const GLOBAL = { ...(BUDGET ? { budgetTokens: BUDGET } : {}), ...(CUTOFF !== null ? { memoryCutoff: CUTOFF } : {}) };
 // WHICH METRIC THE SIGN TEST READS, and the default is the VALIDITY SCORE rather than a diagnostic.
 //
 // `fAtCut` is F-beta(2) on the asymmetric bars over the set the relevance cut admits — the only window the
@@ -257,10 +279,9 @@ const BUDGET = Number(arg('--budget') ?? 0);
 // half of what stage 4 decides. It was `n`, and that is a ranking metric read at a fixed k: it cannot see an
 // entry that lands outside the window, and it cannot see a count change at all.
 //
-// THE DEFAULT IS LOAD-BEARING, which is why it is not left at the diagnostic. Measured across five arms on
-// 103 scenes, moving the window from top-10 to the admitted set roughly halved every tie column — 82 to 52
-// on a chunkSize dose, 84 to 47 on a two-stage PCA arm — and reversed the sign of the largest per-lineage
-// effect in the set. A screen reporting `n` therefore says "flat" about arms that move the delivered set,
+// THE DEFAULT IS LOAD-BEARING, which is why it is not left at the diagnostic. Moving the window from
+// top-10 to the admitted set roughly halved the tie columns and reversed the sign of the largest
+// per-lineage effect in the set (F42). A screen reporting `n` therefore says "flat" about arms that move the delivered set,
 // and it says it in the same words as a real null.
 //
 // The others stay available and are diagnostics on the ORDERING: `n`/`nAt5` are nDCG at a fixed depth, `f2`
@@ -275,12 +296,25 @@ const mOf = r => (WINDOWED[METRIC] ? WINDOWED[METRIC](r) : r[METRIC]);
 // name is an ollama model.
 // FALLS BACK TO THE BUNDLE'S OWN MODEL, not to a hardcoded name. A bundle records the model its
 // collections are keyed under, and hardcoding one meant a corpus that had moved on still resolved the old
-// collections — which exist, so nothing errored, it just quietly measured the previous model.
+// collections — which exist, so nothing errored, it just quietly measured the previous model (H3).
 // Read off the FIRST sample; a screen pools scenes, and pooling two models' cosines is not a
 // comparison, so a disagreement is reported below rather than silently averaged.
 const MODEL = process.env.WA_EMBED_MODEL ?? openSample(samples[0], arg('--arm')).embedModel;
 if (!MODEL) { console.error(`${samples[0]} records no embedModel — set WA_EMBED_MODEL`); process.exit(2); }
 const EM = resolveModel(MODEL);
+// WHICH FIT THE EMBEDDER RESOLVED TO, before the first index parse. The usual way to get here is a spec
+// read off an index DIRECTORY name: `pathSafe` maps `/` to `-`, so `st:Cohee-jina-…` and `st:Cohee/jina-…`
+// share a directory and are different models.
+{
+    const key = modelKey(EM.model);
+    if (!fittedModels().includes(key)) {
+        console.error(`embedder ${EM.label} resolves to fit key "${key}", which has no fit `
+            + `(have: ${fittedModels().join(', ')}). Check the spec — an index directory name is not one, `
+            + `pathSafe having replaced its "/" — or pass an explicit fit= arm.`);
+        process.exit(2);
+    }
+    console.log(`embedder ${EM.label} -> fit "${key}"`);
+}
 const OLLAMA = process.env.OLLAMA_URL ?? 'http://localhost:11434';
 const fx = n => (n >= 0 ? '+' : '') + n.toFixed(4);
 
@@ -307,10 +341,10 @@ const fx = n => (n >= 0 ? '+' : '') + n.toFixed(4);
         }
         if (!Object.keys(S.books?.[S.primaryBook] ?? {}).length) { console.error(`${path}: embeds no entries for primary book "${S.primaryBook ?? '?'}" — re-grade with books=full|meta`); process.exit(2); }
         if (!S.candidates?.length) { console.error(`${path}: logs no candidates`); process.exit(2); }
-        const P = sceneParams(S, BUDGET ? { budgetTokens: BUDGET } : {});
+        const P = sceneParams(S, GLOBAL);
         const scene = loadScene(S, { indexFile: indexPath(S, { model: EM.label, all: P.denseAllEntries }), indexOpts: { model: EM.label }, params: P });
         const qv = await embed(EM.query + S.query, { ollama: OLLAMA, model: EM.model, label: EM.label, endpoint: EM.endpoint, url: EM.endpoint === 'ollama' ? OLLAMA : EM.url });
-        const base = await scoreScene({ sample: S, overrides: BUDGET ? { budgetTokens: BUDGET } : {}, k: K, scene, qv });
+        const base = await scoreScene({ sample: S, overrides: GLOBAL, k: K, scene, qv });
         scenes.push({ path, name: sceneLabel(S) || path, S, scene, qv, P, base });
         console.log(`scene "${sceneLabel(S) || path}": baseline ${METRIC}@${K} ${mOf(base).toFixed(4)} (nDCG ${base.n.toFixed(4)}, P ${base.precision.toFixed(3)}, R ${base.recall.toFixed(3)}, rel ${base.relevant}), judged ${base.judged}/${base.of}${base.judged < base.of ? ' !!' : ''}`);
         console.log(`    F@R ${base.atR.f.toFixed(4)} (P ${base.atR.precision.toFixed(3)} R ${base.atR.recall.toFixed(3)}, n ${base.atR.n})`);
@@ -359,7 +393,8 @@ const fx = n => (n >= 0 ? '+' : '') + n.toFixed(4);
 
     // SIGNAL QUALITY per scene. Every arm below is a reweighting of these three signals, so knowing which of
     // them actually tracks relevance on which book is the context that makes a delta interpretable — a keys
-    // arm moving nothing on a book whose keys correlate 0.27 with grade is not a null result about the arm.
+    // arm moving nothing on a book whose keys barely correlate with grade is not a null result about the
+    // arm (F45).
     // Measured with tie-corrected Spearman (graded pools are mostly zeros); absent signals count as 0.
     console.log('\nsignal quality — Spearman against the human grade (absent signal counts as 0)');
     for (const sc of scenes) {
@@ -385,9 +420,9 @@ const fx = n => (n >= 0 ? '+' : '') + n.toFixed(4);
     const results = [];
     for (const armName of picked) {
         const { __chunk: chunkCfg, __reload: needsReload, __dense: denseAll, __archived: archived, ...armParams } = ARMS[armName];
-        // The ceiling rides on every arm as well as the baseline, or the two are scored under different
-        // stage-4 conditions and the delta is that difference rather than the parameter's.
-        const scoring = BUDGET ? { ...armParams, budgetTokens: BUDGET } : armParams;
+        // The ceiling and the cutoff ride on every arm as well as the baseline, or the two are scored under
+        // different stage-4 conditions and the delta is that difference rather than the parameter's.
+        const scoring = { ...armParams, ...GLOBAL };
         const cells = [];
         for (const sc of scenes) {
             let r;
@@ -451,8 +486,8 @@ const fx = n => (n >= 0 ? '+' : '') + n.toFixed(4);
 
     // --- PER LINEAGE, which is the unit the sign test above is NOT using ---------------------------------
     // Scenes of one book are not independent draws, and books are not either: a book is versioned in place
-    // and renamed by whatever card it hung off, so file names split one corpus into several. Measured here:
-    // three of this corpus's file names are the same Ascensus at 92-100% identical bodies. Grouping by
+    // and renamed by whatever card it hung off, so file names split one corpus into several — several of
+    // this corpus's file names are the same Ascensus with near-identical bodies (C11). Grouping by
     // content (scene.mjs lineagesOf) is the only thing that recovers the real n.
     //
     // BOTH ROWS ARE REPORTED, and neither replaces the other. The scene-level sign test above has power and
