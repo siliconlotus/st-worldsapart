@@ -2453,9 +2453,11 @@ function tokenBudgetLabel() {
  * @returns {string} Short explanation
  */
 function whySelected(item, block) {
-    if (block !== 'dynamic') {
+    if (block === 'constant' || block === 'sticky') {
         return 'always-on';
     }
+    // A promoted row still won its place on a signal — the author waived the CUT, not the scoring — so
+    // it falls through to the explanation below rather than reporting a declaration.
 
     // THE SIGNALS, NOT THEIR RANKS. There are no per-signal ranks any more: fusing them into a layout
     // position was RRF's job, and E[credit] reads the signals directly. So this names what the entry had

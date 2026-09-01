@@ -40,7 +40,9 @@ export const wiTitleOf = e => (e.comment && e.comment.trim()) ? e.comment.trim()
  * @param {(row: object) => number} rank Within-block ordering, ascending
  * @returns {{row: object, i: number}[]} Rows paired with their capture index, in presentation order
  */
-const GRADE_BLOCK_ORDER = { dynamic: 0, sticky: 1, constant: 2 };
+// Promoted rows sit with the dynamic ones: both are this turn's activations and both get graded. The
+// two durable blocks trail, being listed rather than graded.
+const GRADE_BLOCK_ORDER = { dynamic: 0, promoted: 0, sticky: 1, constant: 2 };
 export const gradeOrder = (rows, rank) => (rows ?? [])
     .map((row, i) => ({ row, i }))
     .sort((a, b) => (GRADE_BLOCK_ORDER[a.row.block] ?? 0) - (GRADE_BLOCK_ORDER[b.row.block] ?? 0) || rank(a.row) - rank(b.row));

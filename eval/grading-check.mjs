@@ -49,6 +49,11 @@ eq(isDurable({ block: 'dynamic', sticky: 3 }), false, 'configured sticky with no
 eq(isDurable({ block: 'sticky', sticky: 3 }), true, 'an ARMED sticky row is durable');
 eq(isDurable({ block: 'sticky', sticky: 0 }), true, '...read off block, not the setting');
 eq(isDurable({ block: 'dynamic', sticky: 0 }), false, 'a plain dynamic row is gradeable');
+// A PROMOTED ROW IS GRADED. `@@promote` waives the relevance CUT, not the judgement — and the exemption
+// is what a grade on it measures. Every "is this gradeable" test reads !isDurable for this reason; the
+// capture UI tested `block === 'dynamic'` and silently listed promoted rows as ungradeable scaffolding.
+eq(isDurable({ block: 'promoted', sticky: 0 }), false, 'a promoted row is gradeable — it is exempt from the cut, not from judgement');
+eq(isDurable({ block: 'promoted', sticky: 3 }), false, '...and a configured sticky value does not change that');
 
 // --- searchedBook: which collection the harness must load ---
 // The case that motivated it: the chat's bound book contributed ONE retrieved row, another book contributed

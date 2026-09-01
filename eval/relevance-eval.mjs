@@ -22,6 +22,7 @@
 //                The title need only be a distinctive substring of the debug title.
 //                Lines without '|' are ignored, so you can keep notes in the file.
 import { readFileSync } from 'node:fs';
+import { isDurable } from '../extension/grading.mjs';
 
 // A row is any line with a true/false (the kept flag) followed by a quoted title. Titles with
 // apostrophes come double-quoted (console.table's rule), so match either quote style whole.
@@ -159,7 +160,7 @@ Final Inspection | 0`;
     // JSON path: order preserved, tricky titles intact, non-title rows dropped.
     const j = parseDebug(JSON.stringify([{ title: "Mitchell's Pile", block: 'dynamic', sticky: 0 }, { title: 'Jeffrey Sommers', block: 'dynamic', sticky: 1 }, { title: '[ARC 031]', block: 'constant' }, { title: '  ' }, { bogus: 1 }]));
     const jok = j.length === 3 && j[0].sticky === 0 && j[1].sticky === 1 && j[2].block === 'constant';
-    const graded = j.filter(r => (r.block === undefined || r.block === 'dynamic') && !(Number(r.sticky) > 0));   // eval's tier filter
+    const graded = j.filter(r => !isDurable(r) && !(Number(r.sticky) > 0));   // eval's tier filter
     const fok = graded.length === 1 && graded[0].title === "Mitchell's Pile";   // sticky sheet + constant set aside
     console.log(`selftest JSON parse — ${jok ? 'ok' : 'FAIL'} (${j.length} rows) · tier filter — ${fok ? 'ok' : 'FAIL'} (grades ${graded.map(r => r.title).join(', ') || 'none'})`);
 
@@ -180,7 +181,7 @@ if (!parsed.length) { console.error('no ranked rows parsed from debug file'); pr
 // runtime sticky-active state: a sticky entry reads `block: dynamic` on its keyword-activation
 // turn and /wa-debug (a dry run) never arms the effect, so `sticky > 0` is the stable signal.
 // A text paste has neither column, so everything is kept.
-const rows = parsed.filter(r => (r.block === undefined || r.block === 'dynamic') && !(Number(r.sticky) > 0));
+const rows = parsed.filter(r => !isDurable(r) && !(Number(r.sticky) > 0));
 const setAside = parsed.length - rows.length;
 if (!rows.length) { console.error('no dynamic (retrieved) rows to grade — is this a constant-only table?'); process.exit(1); }
 console.log(`parsed ${parsed.length} rows${setAside ? `, set aside ${setAside} constant/sticky` : ''}; grading ${rows.length} retrieved against ${grades.length} grades\n`);

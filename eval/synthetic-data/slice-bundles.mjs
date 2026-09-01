@@ -25,6 +25,7 @@
 import { readFileSync, writeFileSync, existsSync } from 'node:fs';
 import { dirname, resolve as resolvePath, basename } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { isDurable } from '../../extension/grading.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const argv = process.argv.slice(2);
@@ -63,7 +64,7 @@ export function sliceBundle(m, keys) {
     const kept = (sliced.arms ?? []).flatMap(a => Object.values(a.scenes ?? {}));
     // The reviewer grades the dynamic block only, and refuses a section with none — a constant row is in
     // the prompt whatever it scores, so a shortlist naming one yields a section that cannot be opened.
-    const dyn = new Set(kept.flatMap(a => (a.candidates ?? []).filter(c => c.block === 'dynamic').map(key)));
+    const dyn = new Set(kept.flatMap(a => (a.candidates ?? []).filter(c => !isDurable(c)).map(key)));
     // Books down to the kept rows. Entries are keyed by their own uid in the book map, but the row's uid
     // is what is authoritative, so the match is on the entry rather than on the key.
     const need = new Map();

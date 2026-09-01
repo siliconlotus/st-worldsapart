@@ -59,6 +59,7 @@
 // depth. The query VECTOR is deliberately not frozen: it is one cheap local embed call, and a stored
 // vector would keep answering after the embedding model underneath it changed.
 import { readFileSync, writeFileSync, statSync, openSync, readSync } from 'node:fs';
+import { isDurable } from '../extension/grading.mjs';
 import { tokenize } from '../extension/lexical.mjs';
 import { norm } from '../plugin/vector.mjs';
 import * as queryBuild from '../extension/query.mjs';
@@ -308,7 +309,7 @@ const fmt = n => (n == null ? '·' : (+n).toFixed(3));
     const layoutOrder = makeLayoutOrder({ scene, haystack: haystackFor(S, P) });
 
     if (VALIDATE) {
-        const capAll = JSON.parse(readFileSync(VALIDATE, 'utf8')).filter(r => (r.block === undefined || r.block === 'dynamic') && !(Number(r.sticky) > 0));
+        const capAll = JSON.parse(readFileSync(VALIDATE, 'utf8')).filter(r => !isDurable(r) && !(Number(r.sticky) > 0));
         const cap = capAll.filter(r => !outOfScope(r));
         if (cap.length < capAll.length) console.log(`(skipping ${capAll.length - cap.length} out-of-scope row(s): ${capAll.filter(r => outOfScope(r)).map(r => r.title).join(', ')})`);
         const mine = layoutOrder(scoreAll(P.K1, P.B));

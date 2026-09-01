@@ -136,7 +136,8 @@ carry.
           "candidates": [
             { "book": "Sommers_Pack__v22", "uid": 1, "index": 0, "tokens": 214,
               // What the row IS, beside what it scored — the classification the runtime gave it, the
-              // budget's verdict, and the key hits that explain the keyword number.
+              // budget's verdict, and the key hits that explain the keyword number. `block` is one of
+              // `constant` | `sticky` | `promoted` | `dynamic`; see *A row's block*.
               "title": "262 - Finale…", "block": "dynamic", "sticky": 1, "wiOrder": 1001,
               // NO `why`: the key hits that explain the keyword number are bulk, and live in
               // `candidateWhy` behind the head of the file. `openBundle` puts them back on the row.
@@ -279,6 +280,29 @@ where one naming the wrong version reads as a fact. `sourceFP` is the stronger d
 being a hash of the code rather than a name for it. `stVersion` comes from ST's own `/version`
 (`<branch>@<short HEAD>`, no tags and no dirty flag) — the thinner form of the same convention, not a
 different one.
+
+## A row's block
+
+`block` is the activation class the runtime put the row in, and it is the only categorical field on a
+candidate. Four values, and the distinction that matters to a reader is DURABLE versus not:
+
+| block | in the prompt because | graded |
+|---|---|---|
+| `constant` | it is always on | no |
+| `sticky` | an EARLIER turn armed the effect | no |
+| `promoted` | it activated and the author declared that sufficient (`@@promote`) | yes |
+| `dynamic` | it activated and relevance selected it | yes |
+
+**`isDurable` (`extension/grading.mjs`) is the predicate, and it is `constant || sticky`.** The two
+durable classes are in the prompt by intent rather than because ranking chose them, so grading them
+would put an authoring call into a ranker metric — they are listed and not graded. The other two are
+this turn's activations and both are graded: a promoted row is exempt from the relevance CUT, not from
+being judged, and that exemption is precisely what a grade on it measures. Anything asking "is this
+row gradeable" reads `!isDurable(row)`; testing `block === 'dynamic'` drops promoted rows out of the
+pool.
+
+**A row with `sticky` CONFIGURED that fired this turn reads `dynamic`**, the effect not yet being armed.
+`block` is the runtime state, `sticky` the authored value, and they answer different questions.
 
 **Only measured SIGNAL VALUES go in it.** A rank is a position within one arm's ordering and the fused
 `score` is that arm's own composite, so neither is a feature and neither is something a model indexes by

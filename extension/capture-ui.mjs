@@ -22,7 +22,7 @@ import * as layout from './layout.mjs';
 import * as selection from './selection.mjs';
 import { entryFoldHtml, keyHitsHtml, showEntryText, wiGlyph } from './ui-widgets.mjs';
 import { gradeOrder } from './sort.mjs';
-import { GRADE_ANCHORS, GRADE_SCALE, armNames, buildSample, bundleSamples, captureParams, gradeValue, keyByUid, mergeGrades, openBundle, rowKey, sampleFile, sceneDiff, searchedBook, splitGraded, toCandidate, unionArms } from './grading.mjs';
+import { GRADE_ANCHORS, GRADE_SCALE, armNames, buildSample, bundleSamples, captureParams, gradeValue, isDurable, keyByUid, mergeGrades, openBundle, rowKey, sampleFile, sceneDiff, searchedBook, splitGraded, toCandidate, unionArms } from './grading.mjs';
 
 /**
  * The pipeline entry points the capture flows drive, injected once at registration.
@@ -354,7 +354,7 @@ async function versusBundle(union, coreKeys, waKeys, viaVectors) {
         name: `${defaultSampleName()}-versus`,
         notes: `WA against ST core on one turn. Each arm's candidates are the population it ranked; delivered is !cut. Core's vector route was ${viaVectors ? 'ON' : 'OFF'}.`,
         candidates: rows,
-        gradedCandidates: rows.filter(r => r.block === 'dynamic').length,
+        gradedCandidates: rows.filter(r => !isDurable(r)).length,
     }) }));
 
     const bundle = await bundleSamples(arms, { ...sceneRange(), user: raterId(), captureId: uuidv4() });
@@ -515,7 +515,11 @@ export async function gradeScene(named) {
     // An entry with `sticky` CONFIGURED that fired this scan is not in that class: the effect is not yet
     // armed, so it classifies `dynamic` and grades like any other activation. isDurable() lumps the
     // configured value in with the runtime one; left alone here because the eval side still reads it.
-    const gradeable = rows.map((row, i) => ({ row, entry: entries[i], i })).filter(x => x.row.block === 'dynamic');
+    // A PROMOTED ROW IS GRADED. It activated this turn like any other and is exempt from the relevance
+    // CUT, not from being judged — the exemption is what the grade measures. So the predicate is
+    // not-durable rather than is-dynamic; testing `block === 'dynamic'` silently listed them as
+    // scaffolding and dropped them out of the pool.
+    const gradeable = rows.map((row, i) => ({ row, entry: entries[i], i })).filter(x => !isDurable(x.row));
     const scaffold = rows.length - gradeable.length;
     const esc = s => escapeHtml(String(s ?? ''));
 
@@ -530,7 +534,7 @@ export async function gradeScene(named) {
         // Presented in block + score order, NOT capture order (see gradeOrder). `i` stays the CAPTURE
         // index because every data-i in this table indexes back into `rows`/`entries`.
         + gradeOrder(rows, r => -(r.score ?? -Infinity)).map(({ row, i }) => {
-            const scaff = row.block !== 'dynamic';
+            const scaff = isDurable(row);
             const num = n => (n == null ? '·' : String(n));
             const cell = scaff
                 ? `<span style="opacity:0.5;font-size:0.85em;">${row.block === 'constant' ? 'const' : 'sticky'}</span>`
@@ -867,9 +871,9 @@ async function superGradePopup({ captures, union, entryOf, prior: prior0 = [], s
         const split = secs.map((sc, si) => splitGraded(sc.union.rows, si === 0 && !multi ? prior : (sc.prior ?? [])));
         // Counted over the GRADEABLE subset — the union now carries durable rows for completeness, and
         // "N to grade" must not count rows this table renders as uneditable.
-        const freshN = split.reduce((a, x) => a + x.fresh.filter(r => r.block === 'dynamic').length, 0);
+        const freshN = split.reduce((a, x) => a + x.fresh.filter(r => !isDurable(r)).length, 0);
         const known = split.flatMap(x => x.known);
-        const scaffoldN = secs.reduce((a, sc) => a + sc.union.rows.filter(r => r.block !== 'dynamic').length, 0);
+        const scaffoldN = secs.reduce((a, sc) => a + sc.union.rows.filter(r => isDurable(r)).length, 0);
 
         body.innerHTML = `<small style="display:block;opacity:0.7;margin-bottom:0.5em;">${freshN} to grade`
             + `${known.length ? `; ${known.length} judged in an earlier round (pre-filled — edit any you disagree with, untouched rows carry through as shown)` : ''}`
@@ -883,7 +887,7 @@ async function superGradePopup({ captures, union, entryOf, prior: prior0 = [], s
             + secs.map((sc, si) => (multi
                 ? `<tr><td colspan="7" style="padding:0.9em 0.25em 0.35em;border-top:2px solid var(--SmartThemeBorderColor);">`
                   + `<b>${esc(sc.name ?? sc.file ?? `scene ${si + 1}`)}</b>`
-                  + `<small style="opacity:0.6;"> — ${sc.union.rows.filter(r => r.block === 'dynamic').length} gradeable, ${split[si].known.length} pre-filled</small>`
+                  + `<small style="opacity:0.6;"> — ${sc.union.rows.filter(r => !isDurable(r)).length} gradeable, ${split[si].known.length} pre-filled</small>`
                   + queryBlocksFor(sc) + `</td></tr>`
                 : '')
             + gradeOrder(sc.union.rows, r => r.bestRank ?? Infinity).map(({ row, i: rowI }) => {
@@ -903,7 +907,7 @@ async function superGradePopup({ captures, union, entryOf, prior: prior0 = [], s
                 // Reference rows are LISTED, NOT GRADED, exactly as /wa-grade shows them. unionArms now
                 // keeps them so the sample is complete; declining to grade them is this layer's call, and
                 // it has to be made here or the grader is asked to judge an always-on entry.
-                const cell = row.block !== 'dynamic'
+                const cell = isDurable(row)
                     ? `<span style="opacity:0.5;font-size:0.85em;">${row.block === 'constant' ? 'const' : 'sticky'}</span>`
                     : `<input type="number" class="wa-grade text_pole" data-key="${esc(key)}" data-i="${i}" min="0" max="4" step="1" ${typed.has(key) ? 'data-dirty="1" ' : ''}value="${esc(typed.get(key) ?? (done ? priorOf.get(pkey) : ''))}" placeholder="—" title="${esc(GRADE_ANCHORS.map((a, g) => `${g}: ${a}`).join('\n'))}" style="width:4em;padding:2px 4px;">`;
                 return `<tr style="border-top:1px solid var(--SmartThemeBorderColor);${done ? 'opacity:0.55;' : ''}">`
@@ -1095,7 +1099,7 @@ export async function superGradeScene(named) {
     const union = unionArms(captures);
     // Tested on the gradeable subset, not on the union: since unionArms keeps durable rows, a scene with
     // nothing but constants now has a non-empty union and would have opened an ungradeable popup.
-    if (!union.rows.some(r => r.block === 'dynamic')) {
+    if (!union.rows.some(r => !isDurable(r))) {
         toastr.warning('Every activated row was constant or a persisting sticky — relevance chose nothing to grade.', 'Worlds Apart');
         return '';
     }
@@ -1158,7 +1162,7 @@ export async function superGradeScene(named) {
             // unlike /wa-grade this is an exact count of judged rows rather than a conservative proxy.
             // Counts what a human was actually offered — constants excepted, stickies included, matching
             // the two grading tables. It is the boundary the harness reads to know where grades stop.
-            gradedCandidates: cap.rows.filter(r => r.block === 'dynamic').length,
+            gradedCandidates: cap.rows.filter(r => !isDurable(r)).length,
             now: new Date().toISOString(),
         });
         built.push({ arm: cap.arm, sample });
@@ -1262,7 +1266,7 @@ export async function superEvalScene() {
             depth: a.depth ?? '?',
         }));
         const union = unionArms(captures);
-        if (!union.rows.some(r => r.block === 'dynamic')) {
+        if (!union.rows.some(r => !isDurable(r))) {
             toastr.warning(`${fileName} has no gradeable rows — skipped`, 'Worlds Apart');
             continue;
         }

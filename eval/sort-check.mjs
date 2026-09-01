@@ -47,3 +47,19 @@ eq(gradeOrder(undefined, () => 0).length, 0, 'a missing row list is empty, not a
 // An unknown block sorts as gradeable rather than vanishing — a row whose class the capture didn't record
 // is still a row somebody has to look at.
 eq(gradeOrder([{ block: undefined, score: 1 }], r => -(r.score ?? 0))[0].i, 0, 'an unclassified row sorts with the gradeable block');
+
+// A PROMOTED ROW SORTS WITH THE DYNAMIC ONES, not with the scaffolding. Both are this turn's
+// activations and both are graded (`isDurable`), so a grader should meet them interleaved by score
+// rather than find them parked below the constants where the rows nobody grades sit.
+{
+    const withProm = [
+        { t: 'const',   block: 'constant', score: null },
+        { t: 'promHi',  block: 'promoted', score: 0.95 },
+        { t: 'dynMid',  block: 'dynamic',  score: 0.50 },
+        { t: 'promLo',  block: 'promoted', score: 0.20 },
+        { t: 'sticky',  block: 'sticky',   score: 0.99 },
+    ];
+    eq(gradeOrder(withProm, r => -(r.score ?? -Infinity)).map(x => x.row.t).join(','),
+        'promHi,dynMid,promLo,sticky,const',
+        'promoted rows interleave with dynamic ones by score; only the durable blocks trail');
+}
