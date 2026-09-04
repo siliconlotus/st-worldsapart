@@ -130,11 +130,23 @@ const HALF_RECALL = argv.includes('--half-recall');
 const UNGRADED_NEGATIVE = argv.includes('--ungraded-negative');
 // WHICH POPULATION THE STANDARDISATION IS COMPUTED OVER. `scene` is the shipped design: each row is
 // centred among the rows it competes with. `book` pools every scene of the same book, which is the
-// same statistic a runtime could accumulate across turns rather than recompute per scan.
+// same statistic a runtime could accumulate across turns rather than recompute per scan. `pooled`
+// keeps the scene but drops the TIER boundary: the statistics come from every candidate the scene
+// offered, both tiers, while the fitted rows stay whichever tier `--tier` names.
 //
 // The scene version has a measured pathology: one confident match inflates its scene's sd and
 // compresses every other row, so the delivered count moves inversely to confidence (matcher-design.md).
 // A book-level scale cannot do that — no single row can move it.
+//
+// `pooled` exists for a SECOND pathology that `book` does not fix. Each tier is standardised among its
+// own rows, so a tier holding two entries gives every z a value of exactly +/-1 and the magnitudes are
+// erased before a coefficient sees them — while the other tier, holding twenty, ranges freely. Stage 5
+// then puts the two on ONE layout order and cuts a prefix. Pooling gives the small tier the scene's
+// whole population to sit in. `book` relocates the problem rather than removing it, since a small book
+// is small in every scene of it.
+//
+// IT CHANGES THE UNIT THE COEFFICIENTS ARE IN, so a fit under it is only readable against another fit
+// under it — the pooled sd is set by whichever tier brought more rows.
 const STD_BY = arg('--standardise') ?? 'scene';
 // THE BETA OF THE SCORE OF RECORD. RECALL_WEIGHT (2) is the shipped definition — recall counts twice,
 // because the cost of missing must-deliver material is higher than the cost of carrying a spare entry.
@@ -142,7 +154,7 @@ const STD_BY = arg('--standardise') ?? 'scene';
 // high beta whether or not its ordering is worse, and separating those needs the curve, not one number.
 const BETA = Number(arg('--beta') ?? RECALL_WEIGHT);
 if (!Number.isFinite(BETA) || BETA <= 0) { console.error(`--beta must be a positive number, got ${arg('--beta')}`); process.exit(2); }
-if (!['scene', 'book'].includes(STD_BY)) { console.error(`--standardise must be scene|book, got ${STD_BY}`); process.exit(2); }
+if (!['scene', 'book', 'pooled'].includes(STD_BY)) { console.error(`--standardise must be scene|book|pooled, got ${STD_BY}`); process.exit(2); }
 const RELEVANT_AT = Number(arg('--relevant-at') ?? 3);
 const creditOf = g => (RELEVANT_AT === 2 ? (g >= 2 ? 1 : 0) : gradeCredit(g));
 const AT = arg('--at') === null ? null : Number(arg('--at'));
@@ -227,6 +239,10 @@ const CUT = Number(arg('--cut') ?? 3);
 if (!Number.isFinite(CUT)) { console.error(`--cut must be a number, got ${arg('--cut')}`); process.exit(2); }
 const TIER = arg('--tier');
 if (!['all', 'memory', 'reference'].includes(TIER)) { console.error(`--tier is required: all|memory|reference (got ${arg('--tier')})`); process.exit(2); }
+// `pooled` differs from `scene` only by admitting the other tier's rows to the statistics, so with no
+// tier excluded there is nothing for it to admit. Refusing beats returning the shipped fit under a name
+// that claims otherwise.
+if (STD_BY === 'pooled' && TIER === 'all') { console.error('--standardise pooled needs --tier memory|reference; with --tier all it is the scene design under another name'); process.exit(2); }
 // A SHIPPED MODEL IS EMITTED AT THE SHIPPED DEFINITION, or the file's two halves describe different
 // targets — which is exactly the defect this guard was added with. The emitted coefficients are the
 // boundaries E[credit] is built from (2 and 3, fixed by gradeCredit), so --cut only moves the AUC printed
@@ -653,9 +669,11 @@ const queryVec = async (S, name, value, em) => {
             const gradeOf = makeGradeOf(S.entries, scene);
             // Same population scoreScene ranks: constants are out, because relevance is not a concept that
             // applies to them. Ungraded rows are out because they carry no label.
-            const kept = [], ungraded = [];
+            const kept = [], ungraded = [], offTier = [];
             for (const r of rows.filter(r => !r.entry?.constant)) {
-                if (TIER !== 'all' && (isMemory(r.entry) ? 'memory' : 'reference') !== TIER) continue;
+                // The other tier's rows are never FITTED, but under --standardise pooled they are part of
+                // the population the statistics come from, so they are kept rather than dropped here.
+                if (TIER !== 'all' && (isMemory(r.entry) ? 'memory' : 'reference') !== TIER) { offTier.push(r); continue; }
                 const g = gradeOf(r);
                 // An ungraded row carries no label, so it is out of the FIT — a 0 there would be a claim
                 // about relevance. It is kept for the bar sweep, where the same row scored 0 is a claim
@@ -685,7 +703,7 @@ const queryVec = async (S, name, value, em) => {
             // PAIR, so a dropped row cannot be judged from its title: the same entry is right in one
             // scene and wrong in the next. Bounded, because the whole query over 103 scenes is a file
             // nobody opens.
-            if (kept.length >= 5) perScene.push({ name, book, kept, ungraded, query: String(S.query ?? '').slice(-4000) });
+            if (kept.length >= 5) perScene.push({ name, book, kept, ungraded, offTier, query: String(S.query ?? '').slice(-4000) });
         }
         if (!perScene.length) { console.log(`  ${SWEPT}=${value}: no scene has both classes among its judged rows`); continue; }
 
@@ -760,10 +778,12 @@ const queryVec = async (S, name, value, em) => {
         const bookCols = new Map();
         for (const [b, rows] of bookPopulation) bookCols.set(b, FEATURES.map(([, get]) => rows.map(get)));
 
-        for (const [si, { kept, ungraded, book }] of perScene.entries()) {
+        for (const [si, { kept, ungraded, offTier, book }] of perScene.entries()) {
             // Every candidate the scene offered, in the order the runtime would see them: what the
-            // standardisation is computed over.
-            const population = [...kept.map(k => k.r), ...ungraded.map(u => u.r)];
+            // standardisation is computed over. Under `pooled` that is the scene's whole population
+            // rather than this tier's share of it — the fitted rows are unchanged either way.
+            const population = [...kept.map(k => k.r), ...ungraded.map(u => u.r),
+                ...(STD_BY === 'pooled' ? offTier : [])];
             const statCols = STD_BY === 'book' ? bookCols.get(book) : FEATURES.map(([, get]) => population.map(get));
             const cols = FEATURES.map(([, get]) => kept.map(k => get(k.r)));
             sceneCols[si] = statCols;
@@ -987,7 +1007,7 @@ const queryVec = async (S, name, value, em) => {
         });
     }
 
-    console.log(`\nlogistic fit of P(grade>=${CUT}), signals standardised within scene`);
+    console.log(`\nlogistic fit of P(grade>=${CUT}), signals standardised within ${STD_BY === 'scene' ? 'scene' : STD_BY === 'book' ? 'book' : 'scene, pooling both tiers'}`);
     console.log(`  ${SWEPT.padEnd(14)} signal | std beta (SE)   raw beta   mean within-scene SD   solo AUC   droppable @100%/95% recall`);
     for (const t of table) {
         for (const [i, r] of t.rows.entries()) {
@@ -1103,7 +1123,10 @@ const queryVec = async (S, name, value, em) => {
             // the other and both have to travel.
             if (EMIT_MODEL) {
                 const fit = {
-                    tier: TIER, cutoff: best.cut, f2: best.f,
+                    // WHICH POPULATION THE z's WERE TAKEN OVER rides with the coefficients, because a
+                    // consumer must standardise the same way or the slopes meet a different unit. Absent
+                    // means `scene`, which every fit written before the flag existed used.
+                    tier: TIER, standardise: STD_BY, cutoff: best.cut, f2: best.f,
                     // The rule the two vectors combine under, stated where a consumer reads them. The
                     // clamp is not optional for being small: a handful of rows genuinely invert (F31),
                     // and an incoherent probability pair is a bug that reads as a threshold effect.

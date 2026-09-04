@@ -294,11 +294,27 @@ const sd = xs => { const m = mean(xs); return Math.sqrt(mean(xs.map(x => (x - m)
  * which is exactly why leaving the clamp out would read as a threshold effect rather than as the
  * incoherent probability pair it is.
  *
+ * THE POPULATION IS A SEPARATE ARGUMENT FROM THE ROWS, because the two are not always the same set. A
+ * fit emitted under `--standardise pooled` took its statistics from every candidate the scene offered,
+ * both tiers, while fitting only its own tier's rows — so a consumer must standardise the same way or
+ * the slopes meet a different unit. `model.standardise` says which; absent means `scene`, the design
+ * every fit written before the flag used, where the population IS the rows.
+ *
+ * WHY POOLED EXISTS: a tier holding two entries gives every z a value of exactly +/-1, since the sd of
+ * two points is half their gap — the magnitudes are erased before a coefficient sees them, and
+ * `E[credit]` can take only sixteen values however relevant the entry is. A tier holding one collapses
+ * to the intercept, which is below every fitted cutoff, so it can never ship. That is the state a NEW
+ * BOOK is in, which is where every chat starts. Measured flat on the corpus of record, paired, at three
+ * cutoffs — the corpus has no scene with a small memory tier, so it can say adopting this is free and
+ * cannot say what it gains.
+ *
  * @param {{features: string[], beta: {ge2: number[], ge3: number[]}}} model A fitted model file
  * @param {object[]} rows One scene's candidates, each carrying a raw value per `model.features`
+ * @param {object[]} [population] The rows the mean and sd are taken over. Defaults to `rows`, which is
+ *        what a `scene`-standardised fit wants; a `pooled` fit wants every candidate of the scene.
  * @returns {number[]} `E[credit]` per row, in the order given
  */
-export function scoreRelevance(model, rows) {
+export function scoreRelevance(model, rows, population = rows) {
     const feats = model?.features ?? [];
     const { ge2, ge3 } = model?.beta ?? {};
     if (!rows?.length || !ge2?.length || !ge3?.length) return (rows ?? []).map(() => NaN);
@@ -308,10 +324,14 @@ export function scoreRelevance(model, rows) {
     if (ge2.length !== feats.length + 1 || ge3.length !== feats.length + 1) {
         throw new Error(`relevance model has ${feats.length} features but ${ge2.length}/${ge3.length} coefficients; expected ${feats.length + 1} of each`);
     }
+    // The statistics come from the POPULATION and the columns from the ROWS. They are the same array
+    // under `scene`, so this is the identical arithmetic there; under `pooled` the population is wider
+    // than what is being scored and only the mean and sd come from the extra rows.
+    const pop = population?.length ? population : rows;
     const z = feats.map(name => {
-        const col = rows.map(r => Number(r?.[name]) || 0);
-        const m = mean(col), s = sd(col) || 1;
-        return col.map(x => (x - m) / s);
+        const m = mean(pop.map(r => Number(r?.[name]) || 0));
+        const s = sd(pop.map(r => Number(r?.[name]) || 0)) || 1;
+        return rows.map(r => ((Number(r?.[name]) || 0) - m) / s);
     });
     return rows.map((_, i) => {
         const eta = beta => feats.reduce((a, _f, fi) => a + z[fi][i] * beta[fi + 1], beta[0]);

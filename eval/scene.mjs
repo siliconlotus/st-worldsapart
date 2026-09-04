@@ -1262,17 +1262,24 @@ export const makeLayoutOrder = ({ scene, haystack, fit = null, fitDir = null }) 
             r.properNouns = properShared(names, windowNames, df);
             r.density = properDensity(r.entry?.content);
         }
+        const col = r => ({
+            cosine: Number.isFinite(r.score) ? r.score : 0,
+            text: Number(r.textScore) || 0,
+            keys: Number(r.keywordScore) || 0,
+            properNouns: Number(r.properNouns) || 0,
+            density: Number(r.density) || 0,
+        });
         for (const [tier, model] of Object.entries(MODELS)) {
             if (!model) continue;
             const mine = rows.filter(r => (isMemory(r.entry) ? 'memory' : 'reference') === tier);
             if (!mine.length) continue;
-            const e = scoreRelevance(model, mine.map(r => ({
-                cosine: Number.isFinite(r.score) ? r.score : 0,
-                text: Number(r.textScore) || 0,
-                keys: Number(r.keywordScore) || 0,
-                properNouns: Number(r.properNouns) || 0,
-                density: Number(r.density) || 0,
-            })));
+            // THE SAME POPULATION RULE THE RUNTIME USES (`worldsapart.js` scoreRelevanceColumn), read off
+            // the fit. A `pooled` fit took its statistics from every candidate of the scene and must be
+            // served that way; standardising it over the tier's rows alone would rescale every z and read
+            // as the artefact being worse. This file and the runtime must not drift on it — a cost curve
+            // comparing two artefacts is measuring exactly this.
+            const population = model.standardise === 'pooled' ? rows.map(col) : undefined;
+            const e = scoreRelevance(model, mine.map(col), population);
             // `tierCutoff` is the FIT'S OWN F2 optimum, carried as provenance and nothing else — the
             // runtime does not read it, and cuts at the `relevanceCutoff` setting instead, one value for
             // every model. STAGE 4 DOES NOT HAPPEN HERE: this produces the layout order, and whoever cuts

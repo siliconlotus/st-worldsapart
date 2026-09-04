@@ -995,10 +995,36 @@ every paired reading at matched token spend differs by under 0.006 with the sign
 were buying — which the cutoff already does, on either fit.
 
 **That closes the question rather than deciding it.** Per-book is not worse, and it is not better; it
-reverses the sign of the count pathology without moving the quality-per-token the system achieves. Since
-the shipped fit is the one every measurement stands on, there is no reason to change artefacts, and the
-delivered COUNT remains uncalibrated — the pathology is real and this is not its fix. What a fix would
-have to beat is the curve, not the cutoff.
+reverses the sign of the count pathology without moving the quality-per-token the system achieves, so it
+is not the artefact to change. The delivered COUNT remains uncalibrated — the pathology is real and this
+is not its fix. What a fix would have to beat is the curve, not the cutoff.
+
+**THE STATISTICS POOL BOTH TIERS. The scene stays; the TIER boundary goes.** The shipped fit is emitted
+under `--standardise pooled`: the mean and sd come from every candidate the scene offered, while the
+coefficients are still fitted, and served, per tier. A fit records which population it was built over in
+`standardise`, and both consumers read that field rather than assuming — `worldsapart.js`
+`scoreRelevanceColumn` and `eval/scene.mjs` `makeLayoutOrder`. Serving a fit the wrong population
+rescales every z silently, which is the one failure here that produces a plausible number instead of an
+error, so the field is provenance the consumer must obey and not a label.
+
+**WHAT DECIDED IT IS ARITHMETIC, NOT THE CURVE.** A tier standardised among its own rows has no scale
+when it holds two of them: the sd of two points is half their gap, so every z is exactly +/-1, the raw
+magnitudes are erased before a coefficient sees them, and `E[credit]` can take sixteen values however
+relevant the entry is. A tier of one collapses to the intercept, which is below the fitted cutoff of
+every shipped model, so a lone memory entry can never ship (F54). **That is the state a NEW BOOK is in,
+and every chat starts there** — it is the default case, not an edge one. The cold-start note below is
+about a tier gaining entries over time; this is about the tier being small at the moment it is scored,
+which no accumulation across turns of a two-entry book will fix.
+
+**On mature books it buys the REFERENCE ordering and little else.** **Measured** (F55): on the
+whole-system cost curve at matched token spend, pooled sits above per-scene at all ten cutoffs read with
+the sign never alternating — which is exactly what per-book could not do (F53). **Measured** (F56): the
+gain is reference's, where held-out AUC rises for all seven embedding models and that tier is never cut
+so AUC is its whole measure; the memory tier, paired per scene at the served cutoff, has more scenes
+WORSE in five models of seven while its macro mean rises in six. At the served cutoff the whole-system
+delta is +0.0011, so the shipped configuration is not measurably improved by it (F55). **The corpus
+cannot test the case that decided the change** — its smallest memory tier is 20-45 rows — so F55 and
+F56 say adopting this costs nothing, and say nothing about what it gains.
 
 **THE COLD START IS EMPTY ON BOTH SIDES.** A runtime would accumulate these statistics across turns
 rather than hold them per scan, and a story has no memory entries at turn one by definition — the tier

@@ -662,10 +662,10 @@ async function scoreRelevanceColumn(items, windowFor) {
         item.density = properDensity(item.entry.content);
     }
 
-    // ONE SCENE, ONE STANDARDISATION — PER TIER. The columns are centred over the rows being scored
-    // together, which is what the coefficients are in units of, and each fit standardised over its OWN
-    // tier's rows. So memory rows are centred among memory rows and reference among reference; pooling
-    // them would score every row on a scale neither fit was built in.
+    // ONE SCENE, ONE STANDARDISATION. The columns are centred over a population, which is what the
+    // coefficients are in units of, and WHICH population is the fit's own business — `standardise` on
+    // the fit says whether it was built over its tier's rows alone or over every candidate the scene
+    // offered. The loop stays per tier either way: a tier only ever meets its own coefficients.
     for (const [tier, model] of Object.entries(models)) {
         if (!model) continue;
         const rows = items.filter(it => (isMemory(it.entry) ? 'memory' : 'reference') === tier);
@@ -673,13 +673,20 @@ async function scoreRelevanceColumn(items, windowFor) {
         // Chosen against the ROWS, not predicted from settings: the plugin can be present and still fall
         // back mid-request, and it is the presence of a score that decides which fit is valid.
         const fit = rows.some(it => Number.isFinite(it.score)) ? model : (model.noCosine ?? model);
-        const eCredit = scoreRelevance(fit, rows.map(it => ({
+        const col = it => ({
             cosine: Number.isFinite(it.score) ? it.score : 0,
             text: Number(it.textScore) || 0,
             keys: Number(it.keywordScore) || 0,
             properNouns: Number(it.properNouns) || 0,
             density: Number(it.density) || 0,
-        })));
+        });
+        // WHICH POPULATION THE FIT WANTS, read off the fit rather than assumed. A `pooled` fit took its
+        // mean and sd from every candidate of the scene and fitted only its own tier's rows, so it must
+        // be SERVED that way; `scene` (and any fit predating the field) standardises over the tier's own
+        // rows, where the population and the rows are one array. Serving the wrong one silently rescales
+        // every z and meets slopes fitted in another unit.
+        const population = fit.standardise === 'pooled' ? items.map(col) : undefined;
+        const eCredit = scoreRelevance(fit, rows.map(col), population);
         rows.forEach((it, i) => { it.eCredit = eCredit[i]; it.eCreditTier = tier; });
     }
 
