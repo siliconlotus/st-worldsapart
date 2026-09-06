@@ -56,7 +56,7 @@ import { ensureStudioStyle, makeSortControl, makeTierEditor, showEntryText, wiGl
 import { PRESENTATION_ALIAS, SORT_FNS, normPresentation, presentationBaseLabel, presentationLabel, reconcileTiers, tierRank, wiTitleOf } from './extension/sort.mjs';
 import { lorebookStudio } from './extension/studio.mjs';
 import { setCaptureHost, versusCore, gradeScene, superGradeScene, superEvalScene, POOL_ARMS } from './extension/capture-ui.mjs';
-import { rowKey, unionArms } from './extension/grading.mjs';
+import { isDurable, rowKey, unionArms } from './extension/grading.mjs';
 
 // Chunking is WA's own, not ST's: it is unreachable under node and it determines every stored vector, so an
 // upstream edit would silently invalidate existing indexes. See extension/chunking.mjs.
@@ -172,7 +172,8 @@ async function hasPlugin() {
         // The third-party folder this extension is served from, so the plugin can resolve WA's git version
         // over it — see its /ping. Taken from import.meta.url rather than hard-coded: ST clones into
         // `third-party/<repo name>` and that name is whatever the clone was called.
-        const dir = new URL('.', import.meta.url).pathname.replace(/\/$/, '').split('/').pop();
+        // Decoded: a pathname is percent-encoded, and a folder with a space in its name is not.
+        const dir = decodeURIComponent(new URL('.', import.meta.url).pathname).replace(/\/$/, '').split('/').pop();
         const response = await fetch('/api/plugins/worlds-apart/ping', { method: 'POST', headers: getRequestHeaders(), body: JSON.stringify({ dir }) });
         runState.pluginAvailable = response.ok;
         if (response.ok) { try { const d = await response.json(); runState.pluginRoot = d?.root ?? null; runState.pluginHost = d?.hostname ?? null; runState.pluginFP = d?.fingerprint ?? null; runState.pluginWaVersion = d?.waVersion || ''; } catch { /* older plugin: no root/hostname/fingerprint/waVersion fields */ } }
@@ -546,7 +547,7 @@ async function reportOrphanCollections() {
 }
 
 /**
- * The fitted relevance model, loaded once.
+ * The fitted relevance model, loaded once per embedding model.
  *
  * FETCHED RATHER THAN IMPORTED. A JSON module import would tie the whole extension's load to a syntax
  * not every browser accepts, so a user on an older build would lose WA entirely rather than lose one
@@ -557,9 +558,17 @@ async function reportOrphanCollections() {
  * so a 404 is not re-fetched every turn.
  * @type {{promise: Promise<object|null>|null}}
  */
-const relevanceModel = { promise: null, value: null };
+const relevanceModel = { promise: null, value: null, key: null };
 
 function loadRelevanceModel() {
+    // KEYED BY THE EMBEDDING MODEL: the fit is chosen per embedder below, and Vector Storage switches model
+    // without a page load. A memo that outlived the switch scored new cosines through old coefficients.
+    const key = fitKey(vectorRequestBody());
+    if (relevanceModel.key !== key) {
+        relevanceModel.key = key;
+        relevanceModel.promise = null;
+        relevanceModel.value = null;
+    }
     // ONE FILE PER TIER, because the tiers do not carry the same signals and do not agree on their
     // sign. `density` fits positive on memory and negative on reference (F19) — an entry thick with
     // names is a specific scene there and a roster here — so a shared coefficient would carry the
@@ -576,7 +585,6 @@ function loadRelevanceModel() {
                 // is a map keyed by relevance.mjs `modelKey`, and a model with no fit gets NO fit rather
                 // than another model's: stage 4 then makes no relevance cut for that tier, which is the
                 // documented behaviour for an unscored row, instead of cutting on numbers from elsewhere.
-                const key = fitKey(vectorRequestBody());
                 // THREE FITS, IN ORDER. The model's own; then UNFITTED_FALLBACK's, because an unfitted
                 // model has cosines and borrowing a wrong coefficient beats discarding the feature; then
                 // `noCosine`, which drops cosine entirely and is for a turn that HAS none — the no-plugin
@@ -683,9 +691,11 @@ async function scoreRelevanceColumn(items, windowFor) {
         // WHICH POPULATION THE FIT WANTS, read off the fit rather than assumed. A `pooled` fit took its
         // mean and sd from every candidate of the scene and fitted only its own tier's rows, so it must
         // be SERVED that way; `scene` (and any fit predating the field) standardises over the tier's own
-        // rows, where the population and the rows are one array. Serving the wrong one silently rescales
-        // every z and meets slopes fitted in another unit.
-        const population = fit.standardise === 'pooled' ? items.map(col) : undefined;
+        // rows. Serving the wrong one silently rescales every z and meets slopes fitted in another unit.
+        //
+        // MINUS CONSTANTS, as both calibration sites build it (relevance-regress.mjs, scene.mjs): a constant
+        // was never a candidate, and a few long ones move every mean and sd the cut is read in.
+        const population = (fit.standardise === 'pooled' ? items : rows).filter(it => !it.entry?.constant).map(col);
         const eCredit = scoreRelevance(fit, rows.map(col), population);
         rows.forEach((it, i) => { it.eCredit = eCredit[i]; it.eCreditTier = tier; });
     }
@@ -2034,8 +2044,13 @@ async function onScanDone(args) {
     // world-rules entry is declaring when it should be present, so every reference entry that fires is
     // included and answers only to the budget cap. Measured, the fit agrees rather than deciding it:
     // cutting reference would cost heavily on exactly the corpus's one reference-only book (F36).
+    //
+    // ON THE LAST LOOP ONLY. Core emits this event after every recursion loop and the population grows with
+    // each, so a pooled fit standardises the same row against six neighbours at loop 1 and forty at loop 3.
+    // Cutting once, when the population is complete, is what makes the delivered set independent of
+    // recursion depth; the earlier loops walk the uncut block, which core reads only for recursion text.
     const cutoffs = relevanceModel.value ?? {};
-    const { cut: relevanceCutRows } = selection.relevanceCut(results, {
+    const { cut: relevanceCutRows } = args?.state?.next ? { cut: [] } : selection.relevanceCut(results, {
         scoreOf: it => it.eCredit,
         cutoffOf: it => (isMemory(it.entry) && cutoffs.memory ? settings().relevanceCutoff : NaN),
     });
@@ -2064,7 +2079,7 @@ async function onScanDone(args) {
     if (maxTokens > 0 || maxTotal > 0 || maxDynamic > 0 || maxVectorEntries > 0 || bookCaps.size) {
         const dynamicSet = new Set(results);
         const promotedSet = new Set(promoted);
-        const { survivors, counted, skipped, dropped, budgeted, inPrompt } = await delivery.applyBudget({
+        const { survivors, counted, dynamic, vector, skipped, dropped, budgeted, inPrompt } = await delivery.applyBudget({
             walk,
             isDynamic: item => dynamicSet.has(item),
             // CAPACITY'S POPULATION: the dynamic block plus the promoted one. Exempt from relevance,
@@ -2099,10 +2114,9 @@ async function onScanDone(args) {
         if (dropped) {
             const caps = [
                 // Nested innermost first — vector ⊆ dynamic ⊆ total — so the line reads in the order the
-                // caps bind. Recounted from the survivors on the same terms applyBudget counted them:
-                // by provenance, and exempt entries are outside the population the caps bound.
-                maxVectorEntries > 0 ? `vector ${results.filter(x => survivors.has(x) && runState.lastScores.has(x.key) && !delivery.authorIgnoreBudget(x.entry)).length}/${maxVectorEntries}` : null,
-                maxDynamic > 0 ? `dynamic ${results.filter(x => survivors.has(x) && !delivery.authorIgnoreBudget(x.entry)).length}/${maxDynamic}` : null,
+                // caps bind. applyBudget's own counters, so the line reports each cap on the terms it bound.
+                maxVectorEntries > 0 ? `vector ${vector}/${maxVectorEntries}` : null,
+                maxDynamic > 0 ? `dynamic ${dynamic}/${maxDynamic}` : null,
                 maxTotal > 0 ? `total ${counted}/${maxTotal}` : null,
                 maxTokens > 0 ? `tokens ${budgeted}/${maxTokens} budgeted${inPrompt !== budgeted ? `, ${inPrompt - budgeted} exempt, ${inPrompt} in prompt` : ''}` : null,
             ].filter(Boolean).join(', ');
@@ -2144,7 +2158,7 @@ async function onScanDone(args) {
         ...sticky.map(x => [x, 'sticky']),
         ...constant.map(x => [x, 'constant']),
         // NAMED, not folded into 'dynamic': that would tell a harness the row answered to a cut it never
-        // reached, and `gradeDepth` below caps the dynamic block only. Still not DURABLE — it activated.
+        // reached. Still not DURABLE — it activated — so `gradeDepth` below counts it as gradeable.
         ...promoted.map(x => [x, 'promoted']),
         ...results.map(x => [x, 'dynamic']),
     ]);
@@ -2165,20 +2179,20 @@ async function onScanDone(args) {
         // the grading depth below — the ones this pass rejected, with `cut`/`cutBy` recording which side
         // each fell on. `walk` is survivors only by this point.
         //
-        // /wa-grade's candidates=N caps the DYNAMIC rows and nothing else. It is a grading-budget
-        // decision rather than a selection one: the grading popup LISTS sticky and constant rows but
-        // does not grade them, so capping the whole walk order would spend slots on rows nobody judges
-        // and N would mean a different depth on every book.
+        // /wa-grade's candidates=N caps the GRADEABLE rows — everything `isDurable` is not — and nothing
+        // else. It is a grading-budget decision rather than a selection one: the grading popup LISTS sticky
+        // and constant rows but does not grade them, so capping the whole walk order would spend slots on
+        // rows nobody judges and N would mean a different depth on every book.
         //
         // WHAT IT BOUNDS IS THE EXTRA, and it never drops a row that shipped. applyBudget SKIPS rather
         // than stops (selection.mjs), so a short entry below rank N still reaches the prompt when the
         // larger ones ahead of it did not fit — and a shipped row with no capture row is invisible to
         // grading and to every offline replay of the scene, with nothing downstream able to notice.
         const kept = new Set(walk);
-        let dynamicSeen = 0;
+        let gradeableSeen = 0;
         const gradeDepth = runState.gradeCutoff?.maxVectorEntries ?? 0;
         const population = (runState.lastLayoutOrder ?? walk)
-            .filter(x => !gradeDepth || (blockOf.get(x) ?? 'dynamic') !== 'dynamic' || ++dynamicSeen <= gradeDepth || kept.has(x));
+            .filter(x => !gradeDepth || isDurable({ block: blockOf.get(x) ?? 'dynamic' }) || ++gradeableSeen <= gradeDepth || kept.has(x));
         // WHY a row was cut, not just that it was. applyBudget already computes this per skipped entry
         // (`blockedBy`) and it is the difference between "ordered too low" and "would not fit" — a large
         // entry is SKIPPED so smaller ones behind it still get in (selection.mjs), so a cut row is not
@@ -2526,6 +2540,8 @@ function describeFix(blockedBy, tail = false) {
                 return 'raise the total entry cap';
             case 'dynamic':
                 return 'raise the dynamic entry cap';
+            case 'vector':
+                return 'raise the vector entry cap';
             case 'book':
                 return `raise "${block.world}" book cap (at ${block.limit})`;
             default:

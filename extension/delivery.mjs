@@ -67,7 +67,7 @@ export const authorIgnoreBudget = entry => Boolean(entry?.waIgnoreBudget ?? entr
  * ones". They do still spend tokens; see the note at the accounting.
  *
  * @param {object} args Budget arguments
- * @returns {Promise<{survivors: Set, counted: number, dropped: number, budgeted: number, inPrompt: number}>}
+ * @returns {Promise<{survivors: Set, counted: number, dynamic: number, vector: number, dropped: number, budgeted: number, inPrompt: number}>}
  */
 export async function applyBudget({ walk, isDynamic, isCapped = isDynamic, maxTokens, maxTotal, maxDynamic, maxVectorEntries = 0, isVector = () => false, tokensOf, capOf = () => 0, exemptIsBudgeted = false, slack = 0, slackOnce = true }) {
     const survivors = new Set();
@@ -201,5 +201,5 @@ export async function applyBudget({ walk, isDynamic, isCapped = isDynamic, maxTo
         skip.tail = skip.index > lastAdmitted;
     }
 
-    return { survivors, counted, skipped, dropped: walk.length - survivors.size, budgeted, inPrompt };
+    return { survivors, counted, dynamic, vector, skipped, dropped: walk.length - survivors.size, budgeted, inPrompt };
 }

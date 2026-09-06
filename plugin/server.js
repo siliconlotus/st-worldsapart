@@ -41,6 +41,7 @@ import { getLlamaCppVector } from '../../src/vectors/llamacpp-vectors.js';
 import { getNomicAIVector } from '../../src/vectors/nomicai-vectors.js';
 import { getExtrasVector } from '../../src/vectors/extras-vectors.js';
 import { getMakerSuiteVector, getVertexVector } from '../../src/vectors/google-vectors.js';
+import { getConfigValue } from '../../src/util.js';
 import { scoreCollection, poolEntries, selectTopK } from './scoring.mjs';
 // Same matcher and text fold the extension uses for keyword hits — shared, not copied, so a chat scan and a
 // live keyword match can never disagree about what a key matches.
@@ -98,8 +99,8 @@ const meanCache = new Map();
  *
  * WHAT IS COPIED IS ROUTING, NOT PLUMBING. Every per-source function here is ST's own export and reads
  * its API key from `directories` itself, so no credential is duplicated and no provider request is
- * reimplemented. The two `urlOverride` constructions and the model defaults are copied, because they
- * live in `getSourceSettings` rather than in the exported functions.
+ * reimplemented. The two `urlOverride` constructions are copied, because they live in `getSourceSettings`
+ * rather than in the exported functions; the model defaults are `modelScope`'s.
  *
  * IT WILL DRIFT, and silently: a source ST adds or renames lands here as "that provider quietly gets no
  * cosine", which now degrades into the noCosine fit rather than failing. `eval/embed-sources-check.mjs`
@@ -108,7 +109,7 @@ const meanCache = new Map();
  * (upstream-st.md).
  *
  * @param {string} source Vector source
- * @param {object} s Provider settings, as the client sends them
+ * @param {object} s Provider settings, as the client sends them, with `model` resolved by modelScope
  * @param {string} text Text to embed
  * @param {object} directories User directories
  * @param {object} request The plugin's own Express request — Google's vectors read credentials off it,
@@ -116,8 +117,7 @@ const meanCache = new Map();
  * @returns {Promise<number[]>} Embedding
  */
 async function embed(source, s, text, directories, request) {
-    const openAiish = (urlOverride = null, fallback = '') =>
-        getOpenAIVector(text, source, directories, String(s.model || fallback), urlOverride);
+    const openAiish = (urlOverride = null) => getOpenAIVector(text, source, directories, String(s.model), urlOverride);
     switch (source) {
         case 'transformers': return await getTransformersVector(text);
         case 'nomicai':      return await getNomicAIVector(text, source, directories);
@@ -129,21 +129,47 @@ async function embed(source, s, text, directories, request) {
         case 'llamacpp':     return await getLlamaCppVector(text, s.apiUrl, directories);
         case 'vllm':         return await getVllmVector(text, s.apiUrl, String(s.model), directories);
         case 'ollama':       return await getOllamaVector(text, s.apiUrl, String(s.model), Boolean(s.keep), directories);
-        case 'siliconflow':  return await openAiish(s.siliconflow_endpoint === 'cn' ? 'https://api.siliconflow.cn/v1' : null, 'Qwen/Qwen3-Embedding-0.6B');
+        case 'siliconflow':  return await openAiish(s.siliconflow_endpoint === 'cn' ? 'https://api.siliconflow.cn/v1' : null);
         case 'workers_ai': {
             const accountId = String(s.workers_ai_account_id || '').trim();
             return await openAiish(accountId
                 ? `https://api.cloudflare.com/client/v4/accounts/${encodeURIComponent(accountId)}/ai/v1`
-                : null, '@cf/baai/bge-m3');
+                : null);
         }
-        case 'electronhub':  return await openAiish(null, 'text-embedding-3-small');
-        case 'nanogpt':      return await openAiish(null, 'text-embedding-3-small');
-        case 'openrouter':   return await openAiish(null, 'openai/text-embedding-3-large');
-        case 'openai': case 'togetherai': case 'mistral': case 'webllm': case 'koboldcpp': case 'chutes':
+        case 'webllm': case 'koboldcpp':
+            // Vector Storage embeds these in the browser and hands ST the vectors; nothing here can. Thrown
+            // so the client falls back, rather than failing inside getOpenAIVector as an unknown provider.
+            throw new Error(`Worlds Apart: source "${source}" embeds in the browser — the plugin cannot embed a query for it.`);
+        case 'openai': case 'togetherai': case 'mistral': case 'chutes': case 'electronhub': case 'nanogpt': case 'openrouter':
             return await openAiish();
         default:
             throw new Error(`Worlds Apart: no embedding route for source "${source}" — `
                 + 'the extension will fall back to stock vector search, which returns no scores, so stage 1 will have no cosine.');
+    }
+}
+
+/**
+ * The model scope ST wrote the collection under — `getSourceSettings(source).model` — which keys the index
+ * path and is what the query is embedded with. Mirrored because ST resolves it SERVER-SIDE for several
+ * sources and the client sends nothing: reading the client's field alone named a directory ST never wrote,
+ * which loads as an empty collection — a 200 with no scores, not a fallback.
+ * @param {string} source Vector source
+ * @param {object} s Provider settings, as the client sends them
+ * @returns {string} Model scope
+ */
+function modelScope(source, s) {
+    switch (source) {
+        case 'transformers': return getConfigValue('extensions.models.embedding', '');
+        case 'mistral':      return 'mistral-embed';
+        case 'nomicai':      return 'nomic-embed-text-v1.5';
+        case 'palm': case 'vertexai': return String(s.model || 'text-embedding-005');
+        case 'electronhub': case 'nanogpt': return String(s.model || 'text-embedding-3-small');
+        case 'openrouter':   return String(s.model) || 'openai/text-embedding-3-large';
+        case 'chutes':       return String(s.model || 'chutes-qwen-qwen3-embedding-8b');
+        case 'siliconflow':  return String(s.model || 'Qwen/Qwen3-Embedding-0.6B');
+        case 'workers_ai':   return String(s.model || '@cf/baai/bge-m3');
+        case 'llamacpp': case 'extras': return '';
+        default:             return String(s.model);
     }
 }
 
@@ -243,7 +269,7 @@ export async function init(router) {
             }
 
             const topK = Number(request.body.topK) || 10;
-            const settings = sourceSettings ?? {};
+            const settings = { ...sourceSettings, model: modelScope(String(source), sourceSettings ?? {}) };
             // Stage 1 is cosine-only (scoring.mjs header). The lexical fields a client may still send —
             // threshold, bm25K1, bm25B, termWeights, stopwordDf — are IGNORED rather
             // than rejected: an extension and a deployed plugin drift apart across a redeploy, and a

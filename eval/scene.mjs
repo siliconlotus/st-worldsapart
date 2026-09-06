@@ -1211,6 +1211,8 @@ export const modelsFor = (embedModel, dir = null) => {
                 + `The runtime would borrow "${UNFITTED_FALLBACK}"'s coefficients here; a harness is told its embedder, so say which fit you mean `
                 + 'with an explicit arm (fit=<name>) or fit this model with eval/relevance-regress.mjs --emit-model.');
         }
+        // The cosine-free fit rides on the model's own, as the runtime attaches it (loadRelevanceModel).
+        out[tier].noCosine = MODEL_FILES[tier]?.noCosine ?? null;
     }
     return out;
 };
@@ -1278,13 +1280,16 @@ export const makeLayoutOrder = ({ scene, haystack, fit = null, fitDir = null }) 
             // served that way; standardising it over the tier's rows alone would rescale every z and read
             // as the artefact being worse. This file and the runtime must not drift on it — a cost curve
             // comparing two artefacts is measuring exactly this.
-            const population = model.standardise === 'pooled' ? rows.map(col) : undefined;
-            const e = scoreRelevance(model, mine.map(col), population);
+            // THE RUNTIME'S CHOICE (scoreRelevanceColumn): a tier with no cosine at all — a keyword-only book,
+            // a no-plugin capture — scores through `noCosine` rather than standardising a column of zeros.
+            const fit = mine.some(r => Number.isFinite(r.score)) ? model : (model.noCosine ?? model);
+            const population = fit.standardise === 'pooled' ? rows.map(col) : undefined;
+            const e = scoreRelevance(fit, mine.map(col), population);
             // `tierCutoff` is the FIT'S OWN F2 optimum, carried as provenance and nothing else — the
             // runtime does not read it, and cuts at the `relevanceCutoff` setting instead, one value for
             // every model. STAGE 4 DOES NOT HAPPEN HERE: this produces the layout order, and whoever cuts
             // on it owns which number it cuts at (scoreScene `admits`).
-            mine.forEach((r, i) => { r.eCredit = e[i]; r.tierCutoff = model.cutoff; });
+            mine.forEach((r, i) => { r.eCredit = e[i]; r.tierCutoff = fit.cutoff; });
         }
         return [...rows].sort((a, b) => (b.eCredit ?? -1) - (a.eCredit ?? -1));
     };
