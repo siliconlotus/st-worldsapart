@@ -1,8 +1,8 @@
-// delivery.mjs — STAGE 5: what fits, and in what order the budget walks. The entry maxes (how many),
-// the token budget (how much), and the walk order the caps take a prefix of. Whether an entry BELONGS
+// delivery.mjs — stage 5: what fits, and in what order the budget walks. The entry maxes (how many),
+// the token budget (how much), and the walk order the caps take a prefix of. Whether an entry belongs
 // was settled at stage 4 (selection.mjs).
 //
-// NOTHING HERE JUDGES AN ENTRY. A row this file drops cleared stage 4 and lost to space, which is why
+// Nothing here judges an entry. A row this file drops cleared stage 4 and lost to space, which is why
 // every cut is a prefix of the layout order rather than a test against a threshold.
 //
 // Pure; every setting is injected, so the extension and the harnesses run the identical code.
@@ -10,15 +10,14 @@
 /**
  * The order the budget walks: constants, armed stickies, promoted rows, then the dynamic block.
  *
- * CONSTANT LEADS, because constant means always. A constant should only be cut when constants ALONE
- * exceed the budget — anything else is a world rule losing its place to an entry that persists from an
- * earlier turn, which is a surprise no author asked for. The previous order put sticky first and nothing
- * argued for it; it was incidental.
+ * Constant leads, because constant means always: a constant should only be cut when constants alone
+ * exceed the budget, anything else being a world rule losing its place to an entry that persists from an
+ * earlier turn.
  *
- * PROMOTED SITS BEHIND BOTH DURABLE BLOCKS AND AHEAD OF DYNAMIC: an author declaring activation
+ * Promoted sits behind both durable blocks and ahead of dynamic: an author declaring activation
  * sufficient outranks relevance choosing a row, and does not outrank always-on.
  *
- * Walking the first three classes ahead of dynamic is what makes every cap in applyBudget a PREFIX cut:
+ * Walking the first three classes ahead of dynamic is what makes every cap in applyBudget a prefix cut:
  * once the dynamic count is used up there is nothing but dynamic entries left to reject.
  *
  * @param {object} blocks The four activation classes
@@ -33,12 +32,11 @@ export function walkOrder({ sticky = [], constant = [], promoted = [], results =
 }
 
 /**
- * The `ignoreBudget` the AUTHOR set, which is not the one core is shown.
+ * The `ignoreBudget` the author set, which is not the one core is shown.
  *
- * WA's budget supersedes core's, and that is not a preference core can be asked to honour: core's
- * budget loop runs before WA is ever called and DROPS the entries it cuts, so a core budget smaller
- * than WA's silently caps WA's — the shipped 25% default against WA's 40% made any WA ceiling above
- * 25% inoperative. onEntriesLoaded therefore tells core every entry is exempt, so its loop never
+ * WA's budget supersedes core's, and that is not a preference core can be asked to honour: core's budget
+ * loop runs before WA is called and drops the entries it cuts, so a core budget smaller than WA's
+ * silently caps WA's. onEntriesLoaded therefore tells core every entry is exempt, so its loop never
  * cuts, and applyBudget does the cutting on the layout order instead.
  *
  * `??`, not `||`: a stashed `false` must beat the `true` core was handed. The fallback fires only for
@@ -78,13 +76,10 @@ export async function applyBudget({ walk, isDynamic, isCapped = isDynamic, maxTo
     // relevance flood in one book can't crowd the others out. Counts dynamic only — a book's
     // constants are always-on and not subject to it, same as maxDynamic.
     const perWorld = new Map();
-    // budgeted: tokens the caps enforce against. inPrompt: tokens actually reaching the
-    // prompt. They diverge when exempt entries are not budgeted, and conflating them is
-    // how a cap ends up reporting a ceiling the prompt has already gone through.
-    //
-    // Deliberately no spend/charge/cost vocabulary here: the only thing that literally
-    // costs anything is the API call, and these numbers are not that. They count World
-    // Info tokens only — no chat, system prompt, persona or examples.
+    // budgeted: tokens the caps enforce against. inPrompt: tokens actually reaching the prompt. They
+    // diverge when exempt entries are not budgeted, and conflating them is how a cap ends up reporting a
+    // ceiling the prompt has already gone through. Both count World Info tokens only — no chat, system
+    // prompt, persona or examples.
     let budgeted = 0;
     let inPrompt = 0;
     let slackSpent = false;
@@ -130,11 +125,11 @@ export async function applyBudget({ walk, isDynamic, isCapped = isDynamic, maxTo
             blockedBy.push({ cap: 'dynamic', shortfall: 1 });
         }
         // Retrieval's own ceiling. Guarded on a population here, not just at the increment below —
-        // isVector reads the entry's own vectorized flag and a CONSTANT can be vectorized, so the block
-        // has to be enforced rather than assumed of the caller's predicate.
+        // isVector reads the entry's own vectorized flag and a constant can be vectorized, so the block
+        // must be enforced rather than assumed of the caller's predicate.
         //
-        // `isCapped`, NOT `isDynamic`: the two differ by exactly the promoted block. maxDynamic bounds
-        // relevance-selected material; these bound CAPACITY, which a promoted row consumes like any
+        // `isCapped`, never `isDynamic`: the two differ by exactly the promoted block. maxDynamic bounds
+        // relevance-selected material; these bound capacity, which a promoted row consumes like any
         // other. Defaults to `isDynamic`, so a caller with no promoted block is unchanged.
         if (maxVectorEntries > 0 && isCapped(item) && isVector(item) && vector >= maxVectorEntries) {
             blockedBy.push({ cap: 'vector', shortfall: 1 });
@@ -152,19 +147,15 @@ export async function applyBudget({ walk, isDynamic, isCapped = isDynamic, maxTo
             continue;
         }
 
-        // An entry that can't be cut isn't part of the population being budgeted, so it
-        // stays out of the denominator too. Counting it would mean 10 ignoreBudget
-        // entries against a cap of 10 silently returns zero retrieval results — a total
-        // failure whose cause is a flag on ten unrelated entries. Not counting it means
-        // you asked for 10 and got 20, which is visible and proportional.
+        // An entry that can't be cut isn't part of the population being budgeted, so it stays out of the
+        // denominator too: counting it would mean 10 ignoreBudget entries against a cap of 10 silently
+        // returns zero retrieval results, where not counting it means you asked for 10 and got 20 —
+        // visible and proportional.
         //
-        // TOKENS FOLLOW THE SAME RULE, and the default is off for the same reason. maxTokens is a COST
-        // GUARD, not a limit anything downstream enforces — nothing rejects a prompt for exceeding it. So
-        // charging a mandatory entry against it means marking ten entries exempt silently collapses
-        // retrieval while the cost stays flat, which is the failure the paragraph above refuses on the
-        // count caps. Free means the cost rises by exactly what was marked mandatory: visible and
-        // proportional. maxTokensIncludesExempt turns it back on for a book whose exempt entries could
-        // overrun the context by themselves, which is the one case where a ceiling beats an honest bill.
+        // Tokens follow the same rule, and the default is off for the same reason: maxTokens is a cost
+        // guard, not a limit anything downstream enforces, so charging a mandatory entry against it
+        // collapses retrieval while the cost stays flat. maxTokensIncludesExempt turns it back on for a
+        // book whose exempt entries could overrun the context by themselves.
         if (rescuable) {
             slackSpent = true;
         }
@@ -193,10 +184,9 @@ export async function applyBudget({ walk, isDynamic, isCapped = isDynamic, maxTo
         lastAdmitted = index;
     }
 
-    // Two different situations wear the same rejection. If something was admitted after
-    // an entry was rejected, the budget still had usable room and that entry simply did
-    // not fit — shortening it would work. If nothing after it got in, it is the tail of
-    // an exhausted budget, where per-entry advice is noise and only the cap matters.
+    // Two different situations wear the same rejection. If something was admitted after an entry was
+    // rejected, the budget still had usable room and shortening that entry would work; if nothing after
+    // it got in, it is the tail of an exhausted budget and only the cap matters.
     for (const skip of skipped) {
         skip.tail = skip.index > lastAdmitted;
     }

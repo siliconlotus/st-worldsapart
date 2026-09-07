@@ -6,27 +6,22 @@
 //   ? "moon mission" OR cosmonaut   quoted phrases, AND/OR/NOT/XOR, &&/||/!/-/+, (...) grouping
 //   ? fire::2.5                     ::weight scales the key's BM25 contribution (Midjourney's form)
 //   ? fire^2.5                      ^N is accepted as an alias — Lucene/Elasticsearch/Solr boost
-//   ? meeting 10:30                 a SINGLE colon is ordinary text -- times, verse refs, re:code and
+//   ? meeting 10:30                 a single colon is ordinary text — times, verse refs, re:code and
 //                                   URLs need no quoting. Only :: introduces a weight.
 //   ? +fire +water                  Lucene's per-term required-marker; absorbed, since AND is implicit
-//   ? /co(l|s)monaut/i landed       /pattern/flags is a TERM — negatable, weightable, not folded
-//   ? M*A*S*H   ? ~5                 * and ~ are LITERALS, not wildcards or fuzzy matching. Substring is
-//                                    the default, so "fir" already finds "confirm" without help; a
-//                                    /regex/ term is the only pattern syntax, and "/re/" is its literal.
+//   ? /co(l|s)monaut/i landed       /pattern/flags is a term — negatable, weightable, not folded
+//   ? M*A*S*H   ? ~5                * and ~ are literals, not wildcards or fuzzy matching. Substring is
+//                                   the default, and a /regex/ term is the only pattern syntax.
 //
-// WHEN IN DOUBT, QUOTE IT. Quoting is the one escape in this syntax: it turns off operator, weight,
-// paren and wildcard interpretation, and marks a punctuation-only term as deliberate rather than a
-// typo. Quoting a SINGLE term never changes what it matches — "fire" and fire are identical, flags
-// and weights compose either way — so there is no cost to quoting when unsure.
-//
-// The exception is quoting ACROSS A SPACE, which is a different SmartKey rather than a safer one:
+// Quoting is the one escape in this syntax: it turns off operator, weight, paren and wildcard
+// interpretation, and marks a punctuation-only term as deliberate. Quoting a single term never changes
+// what it matches, so there is no cost to quoting when unsure. The exception is quoting across a space,
+// which is a different SmartKey rather than a safer one:
 //   ? hot tub       two terms, implicit AND — matches a hot bath beside a cold tub
 //   ? "hot tub"     one phrase — matches the words adjacent, in that order
-// Sigur Rós's "()" and its 142-character successor are both single quoted terms; unquoted they parse
-// as parens and a conjunction of punctuation.
-
-// Un-extended ST cores see the raw string "? moon ..." and silently never match it — that
-// degradation is the compatibility story, so lorebooks stay portable.
+//
+// Un-extended ST cores see the raw string "? moon ..." and never match it — that degradation is the
+// compatibility story, so lorebooks stay portable.
 //
 // Isomorphic like matcher.mjs: no DOM, no ST imports. Entry point is evaluateSmartKey();
 // countKey() in matcher.mjs routes `?` keys here.
@@ -48,28 +43,23 @@ const OPS = {
 /**
  * The regex literal opening at position 0, or null when the token is not one.
  *
- * LEFTMOST QUALIFYING CLOSE, not merely the leftmost close. A candidate delimiter is accepted only
- * when the body it delimits COMPILES and its flag run ENDS AT A TOKEN BOUNDARY; otherwise the scan
- * keeps going. Delimiter hunting alone is not enough, because `/` is both this grammar's delimiter
- * and an ordinary character inside a pattern.
+ * Leftmost qualifying close, not merely the leftmost close: a candidate delimiter is accepted only when
+ * the body it delimits compiles and its flag run ends at a token boundary. Delimiter hunting alone is
+ * not enough, because `/` is both this grammar's delimiter and an ordinary character inside a pattern,
+ * and no token-boundary set can be drawn first — `(`, `)` and `|` are simultaneously SmartKey syntax and
+ * regex syntax.
  *
- * WHY THIS AND NOT A TOKEN BOUNDARY FIRST. `(`, `)` and `|` are simultaneously SmartKey syntax and
- * regex syntax, so no boundary set can be drawn before the scan: splitting on them breaks
- * `? /(rain|snow)/`, and splitting on whitespace alone breaks `? (/a/|/b/) x`. Scanning with regex
- * literal rules and letting the surviving candidate decide needs neither classification up front.
- *
- * WHAT IT BUYS: a term reads exactly as the same string reads as a WHOLE KEY. The plain-key rule is
- * "the entire string is `/…/flags`" (REGEX_KEY_RE), and when a term is the entire key this rule's
- * accept test is that same test — so `/home/user/lux/` is one pattern in both, `/home/user/file` is
- * a literal in both, and `countKey is the only matcher` finally holds for the `?` path too.
+ * What it buys: a term reads exactly as the same string reads as a whole key. The plain-key rule is "the
+ * entire string is `/…/flags`" (REGEX_KEY_RE), and when a term is the entire key this rule's accept test
+ * is that same test, so "countKey is the only matcher" holds for the `?` path too.
  *
  * `\` escapes the next character and `[`…`]` is a class the delimiter cannot close inside, both as
- * ECMA-262's RegularExpressionLiteral has them. `\/` writes a literal slash and is what core
- * requires for portability, so escaping also collapses the WA/core divergence (regex-core-refuses).
+ * ECMA-262's RegularExpressionLiteral has them. `\/` writes a literal slash and is what core requires
+ * for portability, so escaping also collapses the WA/core divergence (regex-core-refuses).
  *
- * The compile is the one semantic step in the lexer. Bounded: only tokens opening with `/` reach it
- * and ASTs are cached per key. Exposure, not justification — the rule stands on one syntax having one
- * reading, and the books on disk hold almost no regex keys, so they cannot speak to it either way (K12).
+ * The compile is the one semantic step in the lexer, bounded: only tokens opening with `/` reach it and
+ * ASTs are cached per key. The books on disk hold almost no regex keys, so they cannot speak to this
+ * either way (K12).
  *
  * @param {string} s A string whose first character is `/`
  * @returns {{value: string, rest: string}|null} The `/pattern/flags` token and what follows
@@ -85,9 +75,8 @@ function regexLiteral(s) {
             const body = s.slice(1, i);
             // An empty body is not a pattern, exactly as REGEX_KEY_RE's `.+` says of a whole key.
             if (!body) continue;
-            // Flags run to a token boundary or there are none — an unbounded run eats the next token
-            // (`? /home/user/file` once took `us` out of "user"), and a run that cannot end cleanly
-            // means this delimiter was not the close.
+            // Flags run to a token boundary or there are none: an unbounded run would eat the next
+            // token, and a run that cannot end cleanly means this delimiter was not the close.
             const f = s.slice(i + 1).match(/^[gimsuy]*(?=[\s()|&]|::|\^|$)/);
             if (!f) continue;
             try { new RegExp(body, f[0]); } catch { continue; }
@@ -117,23 +106,17 @@ export function tokenize(input) {
             src = src.slice(m[0].length);
             continue;
         }
-        // REGEX TERM. A `/re/` key is evaluated as a pattern everywhere else it appears — core's
-        // matchKeys and countKey both branch on it — and the literal reading survived in exactly one
-        // place, in here, where tokenize handed evaluate a bare word. Nobody chose that; it fell out
-        // of a lexer that did not know regexes exist. So this closes a divergence rather than adding
-        // a feature, and the literal stays reachable through the escape already there: `? "/re/"`.
+        // Regex term. A `/re/` key is evaluated as a pattern everywhere else it appears, so reading one
+        // here as a bare word would be a divergence; the literal stays reachable through `? "/re/"`.
         //
-        // Only at TOKEN START, the rule `"` and `-`/`!`/`+` already follow, so `and/or` and `3/4` are
+        // Only at token start, the rule `"` and `-`/`!`/`+` already follow, so `and/or` and `3/4` are
         // untouched. After the operator match, so `? -/re/` negates a pattern.
         if (src[0] === '/') {
-            // Not a pattern falls through to the term lexer, which is core's own answer for a regex
-            // it refuses and the plain key's answer for `/home/user/file`. Nothing here reports a
-            // fault, because there is no longer a fault to report: the string simply is a literal.
-            // A token that fails to compile is still a REGEX when the WHOLE remaining source is a
-            // well-formed `/…/flags`, because that is precisely the plain-key test and the two must
-            // agree: `? /(/` has to be the dead pattern `/(/` is as a bare key, not the literal three
-            // characters. Only the SHAPE being absent — `/re`, `//`, `/home/user/file` — makes it a
-            // literal, and those are literals as bare keys too.
+            // Not a pattern falls through to the term lexer, which is the plain key's answer for
+            // `/home/user/file`. A token that fails to compile is still a REGEX when the whole
+            // remaining source is a well-formed `/…/flags`, because that is the plain-key test and the
+            // two must agree: `? /(/` is the dead pattern `/(/` is as a bare key. Only the shape being
+            // absent makes it a literal, and those are literals as bare keys too.
             const re = regexLiteral(src) ?? (REGEX_KEY_RE.test(src) ? { value: src, rest: '' } : null);
             if (re) {
                 const w = re.rest.match(/^(?:::|\^)(\d+(?:\.\d+)?)/);
@@ -148,22 +131,13 @@ export function tokenize(input) {
         src = src.slice(m[0].length);
         let value = m[2] ?? m[3];
         let weight = 1.0;
-        // WEIGHT IS `::`, NOT `:`. A single colon is an ordinary character, so `10:30`, `Judges 3:16`,
-        // `re:code` and `https://…` all tokenise as written and need no quoting. With one colon they
-        // did not: `3:16` parsed as the term `3` at weight 16, which is silent and absurd, and the
-        // documented escape (quoting) was the only way out of a construction nobody expects to escape.
+        // Weight is `::`, never `:`, so `10:30`, `Judges 3:16`, `re:code` and `https://…` tokenise as
+        // written and need no quoting. `::` is Midjourney's multi-prompt weight and cannot collide with
+        // times or ratios. A delimiter followed by non-digits stays part of the term (`fire::abc`).
         //
-        // `::` is Midjourney's multi-prompt weight, so it is a convention rather than an invention. It
-        // cannot collide with times or ratios, which never double the colon. Lucene's boost is `^N`,
-        // which is unavailable here — `^` is already the case-sensitivity flag, and that is worth more.
-        //
-        // Delimiter followed by non-digits stays part of the term (`fire::abc`), same as a lone colon.
-        //
-        // `^N` is accepted as an ALIAS. It is Lucene's boost, and Elasticsearch's query_string and Solr
-        // carry it too, so it is muscle memory worth not breaking. It cannot be confused with the `^`
-        // case-sensitivity flag, which is a PREFIX consumed before the value; this one is a postfix
-        // followed by digits. Measured collision surface across the books on disk and the scan text:
-        // none (K12).
+        // `^N` is accepted as an alias — Lucene's boost, also in Elasticsearch and Solr. It cannot be
+        // confused with the `^` case-sensitivity flag, which is a prefix consumed before the value;
+        // this one is a postfix followed by digits. Measured collision surface: none (K12).
         if (m[2] !== undefined) {
             const w = src.match(/^(?:::|\^)(\d+(?:\.\d+)?)/); // quoted: weight sits after the close quote
             if (w) { weight = parseFloat(w[1]); src = src.slice(w[0].length); }
@@ -195,10 +169,9 @@ export function tokenize(input) {
 export function parse(tokens) {
     let i = 0;
     const peek = () => tokens[i];
-    // A binary operator with nothing on one side is a typo, not an instruction. Building the node
-    // anyway made the whole key dead — AND(x, null) can never match — so `? fire &` matched nothing
-    // at all rather than matching `fire`. Keep the side that exists; the Studio validator is what
-    // tells the author their key is malformed, rather than the matcher silently refusing to fire.
+    // A binary operator with nothing on one side is a typo, not an instruction: keep the side that
+    // exists, since AND(x, null) can never match. The Studio validator is what tells the author their
+    // key is malformed, rather than the matcher silently refusing to fire.
     const bin = (type, left, right) => (left && right ? { type, left, right } : left ?? right);
     const parseOr = () => {
         let left = parseAnd();
@@ -226,10 +199,9 @@ export function parse(tokens) {
         return parsePrimary();
     };
     const parsePrimary = () => {
-        // A binary operator in PREFIX position is Lucene's per-term marker, not an operator: `+fire`
-        // means "fire is required", which is already what an implicit AND says here. Skip it rather
-        // than treating it as a missing left operand — `? +fire +water` is the single most idiomatic
-        // Lucene form there is, and it matched nothing at all. Covers the same form after `(`.
+        // A binary operator in prefix position is Lucene's per-term marker, not an operator: `+fire`
+        // means "fire is required", which is what an implicit AND already says here. Skipped rather
+        // than treated as a missing left operand. Covers the same form after `(`.
         while (peek() && (peek().type === 'AND' || peek().type === 'OR' || peek().type === 'XOR')) i++;
         const t = tokens[i++];
         if (!t) return null;
@@ -244,7 +216,7 @@ export function parse(tokens) {
 }
 
 /**
- * Whether any TERM contributes POSITIVELY — reachable without passing through an odd number of NOTs.
+ * Whether any TERM contributes positively — reachable without passing through an odd number of NOTs.
  * Mirrors how evaluate() accumulates: NOT yields no score and discards its subtree's, so a SmartKey with
  * no positive term matches on absence alone.
  */
@@ -261,8 +233,8 @@ const hasPositiveTerm = (node, negated = false) => {
  * the one exception is a bare `/re/` key core and WA read differently, which is checked and returned
  * before the SmartKey body because it is the same question — will this key do what it looks like.
  *
- * STRUCTURE ONLY. Whether a term ever occurs is a question about a book's text, and belongs to the
- * audit's df machinery rather than here; this needs nothing but the string.
+ * Structure only. Whether a term ever occurs is a question about a book's text and belongs to the
+ * audit's df machinery; this needs nothing but the string.
  *
  * Severity is the split that matters. `error` is a SmartKey that cannot do what its author meant under
  * any text. `warn` is legal and probably a typo. Nothing here is fatal at match time — the matcher's
@@ -275,24 +247,19 @@ export function validateSmartKey(raw) {
     const out = [];
     const src = String(raw ?? '');
     if (!src.trim().startsWith('?')) {
-        // A BARE regex key the two implementations read differently: core refuses a pattern whose
-        // delimiter appears unescaped inside it and matches the whole delimited string as literal
-        // text, where WA runs it as a pattern. Neither reading is dead — core's fires wherever the
-        // delimited form itself appears — so this says what each side does and leaves what was meant
-        // to the author. WARN, not error: the matcher's reading is unchanged.
+        // A bare regex key the two implementations read differently: core refuses a pattern whose
+        // delimiter appears unescaped inside it and matches the whole delimited string as literal text,
+        // where WA runs it as a pattern. Neither reading is dead, so this says what each side does and
+        // leaves what was meant to the author. Warn, not error: the matcher's reading is unchanged.
         //
-        // The literal hatch is `? "…"`, NOT `"…"`. Quoting is a SmartKey term rule; a bare key keeps
-        // the quotes as characters and then matches neither reading.
-        //
-        // The term goes in RAW, in typographic quotes. JSON.stringify renders a JSON view of it —
-        // `/a\/b/c/` came back as `/a\\/b/c/` — so the hatch instructed the author to type a string
-        // that was not their key. A key already containing a `"` has no hatch at all, because the
-        // quote would close the term early, so that sentence is dropped rather than made wrong.
+        // The literal hatch is `? "…"`, never `"…"` — quoting is a SmartKey term rule, and a bare key
+        // keeps the quotes as characters. The term goes in raw, in typographic quotes: JSON.stringify
+        // renders a JSON view of it, which is a different string from the author's key. A key already
+        // containing a `"` has no hatch, since the quote would close the term early.
         const bare = src.trim();
-        // A bare pattern `new RegExp` refuses, checked here for the same reason the SmartKey body checks
-        // its REGEX terms: it is a fact about the string, and countRegexKey's catch turns it into a key
-        // that silently counts 0 forever. Nobody depends on a broken pattern to never match — the literal
-        // is one rewrite away — so this is an ERROR and usableKeys bars it, in either key position.
+        // A bare pattern `new RegExp` refuses is an error rather than a warning, and usableKeys bars it
+        // in either key position: countRegexKey's catch would otherwise turn it into a key that counts 0
+        // forever, and the literal reading is one rewrite away.
         const rx = bare.match(REGEX_KEY_RE);
         if (rx) {
             try {
@@ -315,11 +282,9 @@ export function validateSmartKey(raw) {
         return out;   // not a SmartKey; nothing further to say
     }
     const tokens = tokenize(src);
-    // A REGEX counts as a term for no-terms, for hasPositiveTerm and for all-zero-weights. Without
-    // that, `? /re/` reported no-terms and `? /re/ -drill` reported negation-only — both fatal, and
-    // usableKeys would bar a key that matches perfectly well. The checks that read a term's
-    // VALUE still skip it below: a pattern is punctuation by nature, so punctuation-term and
-    // stray-quote would fire on every one.
+    // A REGEX counts as a term for no-terms, hasPositiveTerm and all-zero-weights, or usableKeys would
+    // bar a key that matches perfectly well. The checks that read a term's value skip it below: a
+    // pattern is punctuation by nature, so punctuation-term and stray-quote would fire on every one.
     const terms = tokens.filter(t => t.type === 'TERM' || t.type === 'REGEX');
 
     if (!terms.length) {
@@ -338,12 +303,11 @@ export function validateSmartKey(raw) {
     }
 
     // A term with no letters and no digits fires on punctuation, which is in nearly every message. The
-    // usual cause is a doubled sentinel: only the FIRST `?` is stripped as the prefix, so `? or ? ()`
-    // leaves `?` behind as a literal term and the SmartKey quietly matches any text containing one.
+    // usual cause is a doubled sentinel: only the first `?` is stripped as the prefix.
     for (const t of terms) {
         if (t.type !== 'TERM') continue;
-        // A QUOTED punctuation term is deliberate — Sigur Rós really did name an album "()" — and
-        // quoting is already how this syntax says "exactly this, I meant it". Only unquoted ones warn.
+        // A quoted punctuation term is deliberate — quoting is how this syntax says "exactly this, I
+        // meant it" — so only unquoted ones warn.
         if (!t.quoted && !/[\p{L}\p{N}]/u.test(String(t.value))) {
             out.push({
                 severity: 'warn', code: 'punctuation-term',
@@ -354,12 +318,10 @@ export function validateSmartKey(raw) {
         }
     }
 
-    // An UNCLOSED quote, which is the only shape the lexer can produce from one: the quoted
-    // alternative needs a closing `"`, so `? "moon` falls through to the bare-word branch and keeps
-    // the quote as the first character of the value. Anywhere else a `"` is ordinary text —
-    // `? 6" copper pipe` is three terms that score 3 against *that copper pipe is 6" in diameter*,
-    // and flagging its VALUE (which is what this did) made a working key fatal, so `usableKeys`
-    // barred it from activating while countKey went on scoring it. Reads structure, not intent.
+    // An unclosed quote, which is the only shape the lexer can produce from one: the quoted alternative
+    // needs a closing `"`, so `? "moon` falls through to the bare-word branch and keeps the quote as the
+    // first character of the value. Anywhere else a `"` is ordinary text (`? 6" copper pipe` is three
+    // working terms), so this reads structure and never a term's value.
     for (const t of terms) {
         if (t.type === 'TERM' && !t.quoted && String(t.value).startsWith('"')) {
             out.push({
@@ -369,11 +331,9 @@ export function validateSmartKey(raw) {
         }
     }
 
-    // A REGEX token now only exists where the SHAPE exists, so the two shape faults are gone:
-    // `? /re` and `? //` are literal terms, exactly as the bare keys `/re` and `//` are literal.
-    // What survives is the pattern that is well-formed and will not compile — a fact about the
-    // string, the same bar the other checks clear — plus core's refusal, which is about the reading
-    // rather than the string and so warns instead.
+    // A REGEX token only exists where the shape exists — `? /re` and `? //` are literal terms, as the
+    // bare keys `/re` and `//` are — so what is left to fault is the well-formed pattern that will not
+    // compile, plus core's refusal, which is about the reading rather than the string and so warns.
     for (const t of terms) {
         if (t.type !== 'REGEX') continue;
         const val = String(t.value);
@@ -387,14 +347,9 @@ export function validateSmartKey(raw) {
             });
             continue;
         }
-        // Reachable from a TERM only since the term rule became the whole-key rule; before that the
-        // scan split a slash-bearing pattern before anything could ask what core made of it.
         if (!coreReadsAsRegex(val)) {
-            // WA FIRST, because WA is the side that runs it. Four things an author can have meant, and
-            // only one of them wants anything done: written for core as a pattern, core was silently
-            // dead and WA repairs it; meant to evaluate under WA, it already does; meant as the
-            // literal delimited string, the hatch is here. Leading with core's reading framed WA as
-            // the deviant in three cases out of four.
+            // WA's reading first, because WA is the side that runs it: of the readings an author can
+            // have meant, only "the literal delimited string" wants anything done, and the hatch is here.
             const hatch = val.includes('"') ? '' : ` If you meant the literal string, quote the term: "${val}".`;
             out.push({
                 severity: 'warn', code: 'regex-core-refuses',
@@ -434,9 +389,9 @@ const SCAN_CACHE_MAX = 8;
  * One key as one node, by the same three-way split countKey makes — so the synthesis inherits
  * "entry flags reach plain keys only" rather than restating it.
  *
- *   `? …`      parses and splices in as a SUBTREE, carrying its own per-term flags and weights.
+ *   `? …`      parses and splices in as a subtree, carrying its own per-term flags and weights.
  *   `/re/`     a REGEX node, which carries its own case sensitivity in its flags.
- *   anything   a TERM carrying the ENTRY's flags. No escaping and no quoting: a node holds arbitrary
+ *   anything   a TERM carrying the entry's flags. No escaping and no quoting: a node holds arbitrary
  *              text verbatim, which is why a key containing a double quote needs no escape here.
  */
 const keyNode = (raw, { caseSensitive = false, wholeWords = false } = {}, weight = 1) => {
@@ -448,38 +403,28 @@ const keyNode = (raw, { caseSensitive = false, wholeWords = false } = {}, weight
 };
 
 /**
- * Rewrites core's `(key, keysecondary, selectiveLogic)` as ONE expression AST — the route by which
+ * Rewrites core's `(key, keysecondary, selectiveLogic)` as one expression AST — the route by which
  * WA's own matcher answers core's selective logic, so that stays one question with one answer.
  *
- * One expression PER PRIMARY KEY, not one for the whole entry. Collapsing the primaries into an
- * alternation would work for activation and lose the per-key granularity keywordScore's saturation
- * wants: an entry keyed on three names that all appear should not score as one term.
+ * One expression per primary key, not one for the whole entry: collapsing the primaries into an
+ * alternation would lose the per-key granularity keywordScore's saturation wants, so an entry keyed on
+ * three names that all appear does not score as one term.
  *
  *   AND_ANY   p and at least one secondary   AND(p, OR(s1, s2))
  *   AND_ALL   p and all of them              AND(p, AND(s1, s2))
  *   NOT_ANY   p and none of them             AND(AND(p, NOT(s1)), NOT(s2))
  *   NOT_ALL   p and not all of them          AND(p, NOT(AND(s1, s2)))
  *
- * AN AST, NOT A STRING, and that is the whole of why this has no refusals. Every one the string route
- * had was an artifact of emitting a `?` string the lexer then had to read back: a key containing a
- * double quote had no escape in the grammar, and a `?` or `/re/` key could not survive being quoted
- * as a term. A node carries its value verbatim and nothing lexes it.
+ * An AST, not a string, which is why this has no refusals: a node carries its value verbatim and
+ * nothing lexes it, so a key containing a double quote, a `?` or a `/re/` all survive as secondaries.
  *
- * SECONDARY NODES CARRY WEIGHT 1, like any other term, so this converts the two-list form into the
- * expression an author would have written by hand and the two score alike. They used to be zeroed,
- * on the reasoning that a gate contributing anything would inflate the primary's count — true while
- * AND and OR summed into ONE count, and dissolved by scoring units: a secondary is now its own unit
- * and inflates nothing. What was left was a policy that the same logic scored differently depending
- * on which of WA's two syntaxes wrote it, which is the disagreement synthesizeSecondary exists to
- * prevent.
- *
- * THE NOT LOGICS ARE UNAFFECTED either way, which is why the zeroing looked more principled than it
- * was: NOT yields no unit whatever its operand weighs, so the weight only ever reached AND_ANY and
- * AND_ALL — where the secondary is a positive term the author required, not a condition.
+ * Secondary nodes carry weight 1, like any other term, so the two-list form scores as the expression an
+ * author would have written by hand. A secondary is its own scoring unit and inflates nothing; under
+ * the NOT logics it is moot either way, since NOT yields no unit whatever its operand weighs.
  *
  * A non-blank secondary that parses to nothing stays in the list as a null child rather than being
- * dropped — evaluate reads null as "did not match", which is core's answer for a key that cannot
- * fire, where dropping it would make AND_ALL pass on a gate core fails.
+ * dropped — evaluate reads null as "did not match", which is core's answer for a key that cannot fire,
+ * where dropping it would make AND_ALL pass on a gate core fails.
  *
  * @param {string} primary One of the entry's primary keys
  * @param {string[]} secondaries entry.keysecondary
@@ -511,11 +456,10 @@ export function synthesizeSecondary(primary, secondaries, logic = 0, flags = {})
  * One matching context: the term registry (folded literal -> pattern index), the automaton built from
  * it, the parsed-AST cache, and the per-text scan results.
  *
- * Scoped rather than module-global because two callers want batching over disjoint key sets and very
- * different lifetimes: live retrieval primes the chat's scan window with the active books' keys and
- * keeps it for the session, while the keyword audit primes every key in one book against every entry's
- * text and is done. Sharing one registry meant each paid for the other's vocabulary, and the audit's
- * few-hundred keys would linger in the retrieval automaton for the rest of the session.
+ * Scoped rather than module-global because two callers batch over disjoint key sets with very different
+ * lifetimes: live retrieval primes the chat's scan window with the active books' keys and keeps it for
+ * the session, while the keyword audit primes every key in one book and is done. One registry would
+ * make each pay for the other's vocabulary.
  *
  * ASTs live here too rather than in a shared cache, because registerTerms stamps a scope-local pattern
  * index onto each TERM node.
@@ -552,10 +496,9 @@ function registerTerms(scope, node) {
     }
 }
 
-// Pass-1 results per text buffer: text -> counts Map. A handful of distinct buffers coexist in
-// one retrieval pass (per-depth windows x per-entry match-source suffixes), so a small cache keeps
-// each of them scanned once per automaton generation. Cleared on rebuild — with registerKeys()
-// batching registration up front, rebuilds happen at most once per pass.
+// Pass-1 results per text buffer: text -> counts Map. A handful of distinct buffers coexist in one
+// retrieval pass (per-depth windows x per-entry match-source suffixes), so a small cache keeps each
+// scanned once per automaton generation. Cleared on rebuild.
 
 function ensureScan(scope, text) {
     if (scope.dirty || scope.automaton === null) {
@@ -574,51 +517,45 @@ function ensureScan(scope, text) {
 }
 
 /**
- * Evaluates an AST against a text buffer.
- * @param {Map<number, number>} [acHits] Pass-1 counts for this text; omitted = pure regex path.
- * @returns {{matched: boolean, scoreBoost: number}}
- */
-/**
- * A SCORING UNIT: one thing the expression is about, with the occurrences it was seen by and the
- * weight those occurrences carried. `n` is a count and `wsum` is weight x count, so the unit's mean
- * weight is `wsum/n` — which is how a mixed group (`? (everest OR kailash::2)`) reports 2 when only
- * the weighted alternative fired and 1 when only the plain one did.
+ * A scoring unit: one thing the expression is about, with the occurrences it was seen by and the weight
+ * those occurrences carried. `n` is a count and `wsum` is weight x count, so the unit's mean weight is
+ * `wsum/n` — how a mixed group (`? (everest OR kailash::2)`) reports 2 when only the weighted
+ * alternative fired and 1 when only the plain one did.
  *
- * WHY UNITS AND NOT ONE NUMBER. Saturation has to be applied per unit, and a single accumulated
- * count cannot say how many units it came from: `? moon AND rocket` and `? moon` on a text holding
- * both reach 2 and 1 the old way, so the STRICTER expression scored higher. AND joins distinct
- * things, so its operands are separate units and their scores add; OR names one thing several ways,
- * so its operands POOL into one unit and their occurrences share a single saturation. Everything
- * else in the tree is a condition, not a thing, and yields no unit.
+ * Units rather than one number, because saturation is applied per unit and a single accumulated count
+ * cannot say how many units it came from — `? moon AND rocket` would otherwise outscore `? moon` on a
+ * text holding both. AND joins distinct things, so its operands are separate units and their scores add;
+ * OR names one thing several ways, so its operands pool into one unit sharing a single saturation.
+ * Everything else in the tree is a condition, not a thing, and yields no unit.
  *
- * `id` is the AST node heading the unit. Nodes are interned per (cache id, scope), so the same unit
- * is the same object across every segment of a window — which is what lets keywordScore pool a
- * unit's occurrences across segments and saturate it once, as it always has for a plain key.
+ * `id` is the AST node heading the unit. Nodes are interned per (cache id, scope), so the same unit is
+ * the same object across every segment of a window, which is what lets keywordScore pool a unit's
+ * occurrences across segments and saturate it once.
  *
- * WEIGHT 0 YIELDS NO UNIT. That is the whole meaning of a zero weight: a condition, never evidence.
- * `? a AND b::0` is how an author says it by hand. Excluded from the unit entirely rather than
- * averaged in at 0, or a zero-weight member of an OR group would drag its mean down and quietly
- * discount the term the author did mean.
+ * Weight 0 yields no unit — that is the whole meaning of a zero weight: a condition, never evidence.
+ * Excluded entirely rather than averaged in at 0, which would drag an OR group's mean down.
  */
 const unit = (id, wsum, n) => (wsum > 0 && n > 0 ? [{ id, wsum, n }] : []);
 /** Pool units into one — OR's rule: the same thing, spelled more than one way. */
 const pool = (id, units) => (units.length
     ? unit(id, units.reduce((a, u) => a + u.wsum, 0), units.reduce((a, u) => a + u.n, 0))
     : []);
-/** Σ weighted occurrences — EXACTLY the scalar evaluate returned before units existed, under every
- *  operator (AND concatenates and OR pools, and both sum the same wsums). Kept so countKey's contract
- *  and every caller reading a count are untouched by the unit split. */
+/** Σ weighted occurrences — the same scalar under every operator (AND concatenates and OR pools, and
+ *  both sum the same wsums), so countKey's contract and every caller reading a count are unaffected by
+ *  the unit split. */
 const boostOf = units => units.reduce((a, u) => a + u.wsum, 0);
 
+/**
+ * Evaluates an AST against a text buffer.
+ * @param {Map<number, number>} [acHits] Pass-1 counts for this text; omitted = pure regex path.
+ * @returns {{matched: boolean, scoreBoost: number, units: object[]}}
+ */
 export function evaluate(node, text, acHits) {
     if (!node) return { matched: false, scoreBoost: 0, units: [] };
     switch (node.type) {
-        // A TERM's contribution is weight x OCCURRENCES, not weight alone. Scoring on presence made a
-        // SmartKey blind to recurrence: "? (glasses | spectacles)" returned the same number whether the
-        // concept appeared once or nine times, so it scored WORSE than the bare key `glasses` the moment
-        // the word repeated — being thorough about spelling was penalised. The counts were already
-        // computed and cached: the automaton's scan returns a per-term occurrence map, and this function
-        // was handed it and called .has() on it.
+        // A TERM's contribution is weight x occurrences, not weight alone, or a SmartKey is blind to
+        // recurrence and scores worse than the bare key the moment its word repeats. The automaton's
+        // scan already returns a per-term occurrence map.
         case 'TERM': {
             if (acHits && node.acIndex !== undefined) {
                 // Candidate filter: no folded-substring hit means no match under any flags.
@@ -627,53 +564,43 @@ export function evaluate(node, text, acHits) {
                 // Unflagged term = case-insensitive substring, which is exactly what Pass 1 proved.
                 if (!node.isExact && !node.isCaseSensitive) return { matched: true, scoreBoost: node.weight * n, units: unit(node, node.weight * n, n) };
             }
-            // Fold BOTH sides, exactly as countKey's naive walk does. Pass 1 proved the term present in
-            // FOLDED text, so verifying the flags against raw text asks a different question than the
-            // filter that got here: `? =Cap'n` passed the automaton against "Cap’n" and then failed its
-            // own regex, where the plain whole-word key `Cap'n` matched. Case is handled by lowercasing
-            // rather than the `i` flag, again like countKey, so the two paths cannot drift.
+            // Fold both sides, exactly as countKey's naive walk does: pass 1 proved the term present in
+            // folded text, so verifying the flags against raw text would ask a different question than
+            // the filter that got here. Case is handled by lowercasing rather than the `i` flag, again
+            // like countKey, so the two paths cannot drift.
             const hay = foldedHay(text, node.isCaseSensitive);
             let pattern = escapeRegex(node.isCaseSensitive ? normalizeOrthography(node.value) : fold(node.value));
             // Same lookaround boundary as countKey's whole-word path — \b would make punctuation-edged
-            // terms like =c++ unmatchable. Shares wordChar() with countKey rather than restating it:
-            // two boundary definitions is two matchers, which is exactly what CLAUDE.md forbids.
+            // terms like =c++ unmatchable — and shares wordChar() with it, since two boundary
+            // definitions is two matchers.
             if (node.isExact) pattern = `${boundaryBefore()}${pattern}${boundaryAfter()}`;
             // Counted, not tested: same walk of the text either way, and a flagged term has as much
             // right to recurrence as an unflagged one.
             const n = (hay.match(new RegExp(pattern, 'gu')) ?? []).length;
             return { matched: n > 0, scoreBoost: node.weight * n, units: unit(node, node.weight * n, n) };
         }
-        // Structurally a TERM that never uses the candidate filter. It shares countRegexKey with
-        // countKey, so "countKey is the only matcher" holds across the regex path too — and, like a
-        // whole-key regex, it is CASE-SENSITIVE and FOLD-EXEMPT: countKey branches before foldedHay,
-        // so a pattern runs on raw text. Inside a SmartKey that means mixed folding, and `/i` is how
-        // insensitivity is written.
+        // Structurally a TERM that never uses the candidate filter. Shares countRegexKey with countKey,
+        // so "countKey is the only matcher" holds across the regex path too — and, like a whole-key
+        // regex, it is case-sensitive and fold-exempt, running on raw text. Inside a SmartKey that means
+        // mixed folding, and `/i` is how insensitivity is written.
         case 'REGEX': {
             const n = countRegexKey(node.value, text);
             return { matched: n > 0, scoreBoost: node.weight * n, units: unit(node, node.weight * n, n) };
         }
-        // A negation is a CONDITION: it narrows what matched and is never itself a thing the text is
+        // A negation is a condition: it narrows what matched and is never itself a thing the text is
         // about, so it yields no unit and no boost however its operand scored.
         case 'NOT': {
             const r = evaluate(node.operand, text, acHits);
             return { matched: !r.matched, scoreBoost: 0, units: [] };
         }
         // Invariant: an unmatched node carries scoreBoost 0. Parents read child boosts without
-        // re-checking child.matched (AND and OR both sum), so a failed branch that kept a
-        // boost would leak it upward — e.g. "? (fire:3 XOR flood:3) OR water:0.5" with both fire
-        // and flood present must score 0.5, not 3.
-        // AND joins DISTINCT things, so each side keeps its own units and their scores will add. This
-        // is why a conjunction no longer outscores its own left operand: `? moon AND rocket` is two
-        // units of one occurrence each, not one unit of two.
-        // SHORT-CIRCUITS, alone among the operators, because it is the only one that throws its operands
-        // away on failure: an unmatched AND contributes no units, so a right operand evaluated after a
-        // failed left cannot affect the result. Worth nothing for a plain term, which the automaton has
-        // already reduced to a map lookup — the saving is a REGEX operand or a flagged term (`=`, `^`),
-        // both of which fall through to a regex over the folded haystack that no candidate filter can
-        // spare them.
+        // re-checking child.matched (AND and OR both sum), so a failed branch keeping a boost would leak
+        // it upward.
         //
-        // OR and XOR must still visit both: OR pools the two sides into one unit and sums them, and XOR
-        // needs both verdicts to know whether exactly one held.
+        // AND joins distinct things, so each side keeps its own units and their scores add. It
+        // short-circuits, alone among the operators, because it is the only one that throws its operands
+        // away on failure. OR and XOR must visit both: OR pools the two sides into one unit and sums
+        // them, and XOR needs both verdicts to know whether exactly one held.
         case 'AND': {
             const l = evaluate(node.left, text, acHits);
             if (!l.matched) return { matched: false, scoreBoost: 0, units: [] };
@@ -681,15 +608,10 @@ export function evaluate(node, text, acHits) {
             const units = r.matched ? [...l.units, ...r.units] : [];
             return { matched: r.matched, scoreBoost: boostOf(units), units };
         }
-        // OR SUMS, like AND. max() was only ever right because it coincided with the sum whenever a
-        // single branch matched — unmatched branches carry 0 — and it diverged exactly where a synonym
-        // group needs the total: "(glasses | spectacles)" is one concept, and its mentions are its
-        // mentions however they were spelled. Summing is also what keywordScore already does across
-        // keys, and saturation caps the result, so a wide alternation cannot run away.
-        // OR names ONE thing several ways, so its operands pool into a single unit: the mentions are
-        // the concept's mentions however they were spelled, and they share one saturation. That is what
-        // makes `? (glasses OR spectacles)` score exactly as the bare key does on equal evidence,
-        // instead of collecting a separate saturation budget per synonym.
+        // OR names one thing several ways, so its operands pool into a single unit and sum: the mentions
+        // are the concept's mentions however they were spelled, sharing one saturation. That is what
+        // makes `? (glasses OR spectacles)` score as the bare key does on equal evidence, instead of
+        // collecting a separate saturation budget per synonym.
         case 'OR': {
             const l = evaluate(node.left, text, acHits), r = evaluate(node.right, text, acHits);
             const units = pool(node, [...l.units, ...r.units]);
@@ -748,10 +670,10 @@ export function evaluateSmartKey(rawKey, text, scope = defaultScope) {
 }
 
 /**
- * Registers a key list with the scope's automaton without scanning anything. Plain keys register
- * their folded literal; smart keys parse and register their terms; regex keys are skipped (they
- * stay regex). Call this ONCE per pass with every key the pass will score, BEFORE any scoring —
- * a new key mid-pass dirties the automaton, and the rebuild throws away every cached scan.
+ * Registers a key list with the scope's automaton without scanning anything. Plain keys register their
+ * folded literal; smart keys parse and register their terms; regex keys are skipped. Call this once per
+ * pass with every key the pass will score, before any scoring — a new key mid-pass dirties the
+ * automaton, and the rebuild throws away every cached scan.
  * @param {string[]} rawKeys
  * @param {object} [scope]
  */
@@ -768,14 +690,13 @@ export function registerKeys(rawKeys, scope = defaultScope) {
 }
 
 /**
- * Batch-registers a key list and scans the text once, so subsequent countKey calls against
- * the same text answer from the automaton instead of walking the buffer per key.
+ * Batch-registers a key list and scans the text once, so subsequent countKey calls against the same
+ * text answer from the automaton instead of walking the buffer per key.
  *
- * Accepts a segmented window (see ranking.scanSegments). Every segment is primed in one call so the
+ * Accepts a segmented window (matcher.scanSegments). Every segment is primed in one call so the
  * automaton is built once, and the cache is raised to hold all of them — evicting a segment mid-pass
- * would send the next entry back to the naive walk for a buffer that was just scanned. Segments key
- * BY VALUE, so two entries segmenting the same window share every scan and an entry that appends
- * match sources pays only for the appended text.
+ * would send the next entry back to the naive walk for a buffer just scanned. Segments key by value, so
+ * two entries segmenting the same window share every scan.
  *
  * @param {string[]} rawKeys
  * @param {string|string[]} text One text, or the window's segments
@@ -789,10 +710,9 @@ export function primeScan(rawKeys, text, scope = defaultScope) {
 }
 
 /**
- * Occurrence count for a plain key from a primed scan, or undefined when the cache can't
- * answer (unscanned text, unregistered key, or a pending rebuild) — caller falls back to the
- * naive walk. A 0 is authoritative under ANY flags: no folded-substring hit means no
- * case-sensitive or whole-word hit either.
+ * Occurrence count for a plain key from a primed scan, or undefined when the cache can't answer
+ * (unscanned text, unregistered key, or a pending rebuild) — the caller falls back to the naive walk. A
+ * 0 is authoritative under any flags: no folded-substring hit means no case-sensitive or whole-word hit.
  * @param {string} raw Plain key (not regex, not smart)
  * @param {string} text
  * @param {object} [scope]
@@ -809,8 +729,8 @@ export function cachedCount(raw, text, scope = defaultScope) {
 
 /**
  * Drops every registered key, cached AST, and cached scan in a scope. Called on chat switch for the
- * default scope, so the automaton tracks the ACTIVE books' vocabulary instead of the union of every
- * book ever seen — the next pass re-registers what it needs (one rebuild + one scan per buffer).
+ * default scope, so the automaton tracks the active books' vocabulary rather than the union of every
+ * book ever seen; the next pass re-registers what it needs.
  * @param {object} [scope]
  */
 export function resetSmartKeys(scope = defaultScope) {

@@ -1,6 +1,6 @@
 // Deploys the server plugin from this repo (source of truth) into ST's /plugins/worlds-apart/.
 // The plugin, scoring math, and common-word list all live in this repo so the extension and its
-// server half travel as one unit; /plugins/worlds-apart/ is a generated COPY, never hand-edited.
+// server half travel as one unit; /plugins/worlds-apart/ is a generated copy, never hand-edited.
 //
 // Run from this extension's folder after editing anything in plugin/ (server.js, the scoring math, etc.),
 // then restart SillyTavern (the folder name doesn't matter — the script locates itself):
@@ -39,13 +39,12 @@ for (const [from, to] of PLUGIN_FILES) {
 fs.writeFileSync(path.join(DEST, 'package.json'), PACKAGE_JSON);
 console.log('wrote    package.json');
 
-// THE MANIFEST IS THE WHOLE CONTENTS. This directory is generated, so a file the manifest no longer
-// names is a leftover from an older layout — and leaving it is how a module the plugin stopped running
-// goes on looking like plugin code. lexical.mjs sat here after stage 1 went cosine-only, which is
-// exactly the confusion that cost a wrong answer about where the text signal is computed.
+// The manifest is the whole contents. This directory is generated, so a file the manifest no longer
+// names is a leftover from an older layout, and leaving it is how a module the plugin stopped running
+// goes on looking like plugin code.
 //
-// TOP-LEVEL FILES ONLY, never directories: a node_modules, or anything a user deliberately put here,
-// is theirs to remove and not worth the blast radius of a recursive delete for the tidiness gained.
+// Top-level files only, never directories: a node_modules, or anything a user deliberately put here, is
+// theirs to remove and not worth the blast radius of a recursive delete.
 for (const name of fs.readdirSync(DEST)) {
     if (KEEP.has(name)) continue;
     const stale = path.join(DEST, name);

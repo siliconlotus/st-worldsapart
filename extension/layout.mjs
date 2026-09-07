@@ -1,19 +1,19 @@
-// layout.mjs — STAGE 3's product: the LAYOUT ORDER. Classifies every activated row into the four
-// blocks the budget walks (constant, armed sticky, promoted, dynamic) and orders each one.
+// layout.mjs — stage 3's product: the layout order. Classifies every activated row into the four blocks
+// the budget walks (constant, armed sticky, promoted, dynamic) and orders each one.
 //
-// POSITION MEANS SOMETHING HERE, which is why this is an order and not merely a list: stage 5 takes a
-// PREFIX of it, so a row's place decides whether it survives the caps. Whether a row BELONGS is stage 4
-// (selection.mjs); what FITS is stage 5 (delivery.mjs). This file judges neither — it only arranges.
+// Position means something here, which is why this is an order and not merely a list: stage 5 takes a
+// prefix of it, so a row's place decides whether it survives the caps. Whether a row belongs is stage 4
+// (selection.mjs); what fits is stage 5 (delivery.mjs). This file judges neither — it only arranges.
 //
-// EVERY INPUT IS A PARAMETER. The signals are already on the rows, and everything else arrives as plain
+// Every input is a parameter. The signals are already on the rows, and everything else arrives as plain
 // data: the caller resolves ST's chat-sentinel book names and reads the settings, so this runs under
-// node against literal rows. It was 70 lines inside onScanDone with no check of its own.
+// node against literal rows (eval/layout-check.mjs).
 import { SORT_FNS, normPresentation, reconcileTiers, tierRank } from './sort.mjs';
 
 /**
  * The quantity the layout is ordered by: stage 4's `E[credit]`.
  *
- * AN UNSCORED ROW SORTS BELOW EVERY SCORED ONE rather than beside them at 0. A missing score means the
+ * An unscored row sorts below every scored one rather than beside them at 0: a missing score means the
  * model file did not load or the row is not in a fitted tier, which is not the claim "predicted
  * irrelevant" — and authored order is what remains to order those by.
  */
@@ -22,19 +22,19 @@ export const layoutScore = it => (Number.isFinite(it.eCredit) ? it.eCredit : -1)
 /**
  * The three blocks the budget walks, each ordered.
  *
- * CLASSIFICATION IS BY WHAT AN ENTRY IS, not by how it got here: a constant that also matched keywords
- * is a durable row, not a retrieval result. Constants and armed stickies are in the prompt by intent,
- * so they are ordered by authored order alone and never by relevance.
+ * Classification is by what an entry is, not by how it got here: a constant that also matched keywords
+ * is a durable row, not a retrieval result. Constants and armed stickies are in the prompt by intent, so
+ * they are ordered by authored order alone and never by relevance.
  *
- * PROMOTED IS A FOURTH BLOCK, and being a block is the whole mechanism: stage 4 cuts the DYNAMIC list,
+ * Promoted is a fourth block, and being a block is the whole mechanism: stage 4 cuts the dynamic list,
  * so a row outside it is exempt without selection.mjs knowing promotion exists. It sits behind both
  * durable blocks and ahead of dynamic, and takes the dynamic block's comparator — the declaration says
  * the row belongs, not where in the queue it sits.
  *
- * THE DYNAMIC BLOCK'S ORDER IS THE PRIORITY MODE'S. `sequential` makes book tier the primary key, so a
+ * The dynamic block's order is the priority mode's. `sequential` makes book tier the primary key, so a
  * lower book only gets the slots higher books leave; `interleaved` scales the layout score by each
- * book's weight, so a strong entry in a low book can still outrank a weak one in a high book. Both
- * fall back to authored order, which is what keeps ties deterministic.
+ * book's weight, so a strong entry in a low book can outrank a weak one in a high book. Both fall back
+ * to authored order, which is what keeps ties deterministic.
  *
  * @param {object[]} items Activated rows, each `{ entry, eCredit? }`
  * @param {object} cfg
@@ -51,7 +51,7 @@ export const layoutScore = it => (Number.isFinite(it.eCredit) ? it.eCredit : -1)
 export function layoutOrder(items, { isArmedSticky, isPromoted, priorityList = [], priorityMode, presentationOrder, presentationTiered = false, tierCfg }) {
     const sticky = [], constant = [], promoted = [], results = [];
     for (const item of items ?? []) {
-        // DURABLE FIRST: a promoted constant is a constant, exempt from a cut it never reaches anyway.
+        // Durable first: a promoted constant is a constant, exempt from a cut it never reaches anyway.
         if (isArmedSticky?.(item.entry)) sticky.push(item);
         else if (item.entry?.constant) constant.push(item);
         else if (isPromoted?.(item.entry)) promoted.push(item);
@@ -93,7 +93,7 @@ export function layoutOrder(items, { isArmedSticky, isPromoted, priorityList = [
         ? (a, b) => (tierRank(a.entry, cfg) - tierRank(b.entry, cfg)) || baseCompare(a, b)
         : baseCompare;
 
-    // ONE COMPARATOR FOR BOTH SCORED BLOCKS, or a promoted entry's place would depend on the exemption
+    // One comparator for both scored blocks, or a promoted entry's place would depend on the exemption
     // rather than on the entry.
     const byRelevance = priorityMode === 'sequential'
         ? (a, b) => (bookTierOf(a.entry.world) - bookTierOf(b.entry.world)) || (layoutScore(b) - layoutScore(a)) || authored(a, b)
@@ -102,7 +102,7 @@ export function layoutOrder(items, { isArmedSticky, isPromoted, priorityList = [
     promoted.sort(byRelevance);
     sticky.sort(authored);
     constant.sort(authored);
-    // `compare` and `bookTierOf` ride out because the PROMPT order — a third ordering, the user's sort
-    // over whatever survived — is built from the same comparators after stage 5 has cut.
+    // `compare` and `bookTierOf` ride out because the prompt order — the user's sort over whatever
+    // survived — is built from the same comparators after stage 5 has cut.
     return { sticky, constant, promoted, results, compare, bookTierOf };
 }

@@ -2,46 +2,42 @@
 // that nothing else in the pipeline computes, and the consumer that turns a fitted model file into one
 // number per entry.
 //
-// WHAT THIS IS FOR. Stage 4's relevance cut needs a per-entry prediction, and this is where it comes
-// from: each entry gets `E[credit]` and ships if it clears the cutoff, so "how many entries does this
-// scene need" falls out of the prediction rather than taking a parameter of its own. Stage 5's entry
-// maxes and token budget then decide what fits, and judge nothing (matcher-design.md, *Stage 4*).
+// Stage 4's relevance cut needs a per-entry prediction: each entry gets `E[credit]` and ships if it
+// clears the cutoff, so "how many entries does this scene need" falls out of the prediction rather than
+// taking a parameter of its own (matcher-design.md, *Stage 4*).
 //
-// THE TARGET IS EXPECTED gradeCredit, NOT P(>=3). The layout score's precision numerator is a sum of
-// credits — a delivered 2 scores half — so the quantity to threshold is the one that sum is built from:
-// `E[credit] = 0.5*P(>=2) + 0.5*P(>=3)`. That is why a fitted model file carries TWO coefficient vectors.
-// The boundaries are fitted separately because proportional odds measurably does not hold here (F29), so
-// neither vector derives from the other.
+// The target is expected gradeCredit, not P(>=3): the score's precision numerator is a sum of credits —
+// a delivered 2 scores half — so the quantity to threshold is `E[credit] = 0.5*P(>=2) + 0.5*P(>=3)`.
+// That is why a fitted model file carries two coefficient vectors, fitted separately because
+// proportional odds measurably does not hold here (F29).
 //
-// ST-FREE AND NODE-IMPORTABLE, like the rest of the pure half — the model file is data, the settings and
-// the entries are the caller's. `worldsapart.js` wires it; nothing here reads a global.
+// ST-free and node-importable, like the rest of the pure half — the model file is data, the settings and
+// the entries are the caller's.
 import { normalizeOrthography } from '../plugin/automaton.mjs';
 import { entryKey } from './content-lexical.mjs';
 import { tokenize } from './lexical.mjs';
 import { COMMON_WORDS } from '../plugin/commonwords.js';
 
 /**
- * Which TIER an entry belongs to — provenance, not kind. `memory` is STMB-marked, `reference` is
+ * Which tier an entry belongs to — provenance, not kind. `memory` is STMB-marked, `reference` is
  * everything that is not.
  *
- * IT LIVES HERE BECAUSE THE TIER DECIDES WHICH FIT APPLIES. The tiers do not carry the same signals —
- * memory is nearly all vectorized where reference is mostly keyword-only (F18) — and `density`
- * INVERTS between them, so a shared coefficient would carry the wrong sign — the model is per tier, and
- * the predicate that selects one is part of reading it. It was defined in the harness alone, which is
- * one copy short of what the runtime now needs.
+ * It lives here because the tier decides which fit applies: the tiers do not carry the same signals —
+ * memory is nearly all vectorized where reference is mostly keyword-only (F18) — and `density` inverts
+ * between them, so a shared coefficient would carry the wrong sign.
  */
 export const isMemory = e => Boolean(e) && ('stmemorybooks' in e || 'STMB_start' in e);
 
 /**
- * Whether an entry POST-DATES a point in the chat — a summary of messages that have not happened yet.
+ * Whether an entry post-dates a point in the chat — a summary of messages that have not happened yet.
  *
- * THE BOUNDARY IS THE END, NOT THE START. A summary exists once the messages it covers have happened, so
- * an entry spanning the point (`start <= at < end`) could not be in the book either, and a start-only
- * test keeps every one of them. Those straddling entries are the scene's own haystack paraphrased, and
- * they rank at the top of their scenes far more often than clean positives do (F28).
+ * The boundary is the end, not the start: a summary exists once the messages it covers have happened, so
+ * an entry spanning the point (`start <= at < end`) could not be in the book either. Those straddling
+ * entries are the scene's own haystack paraphrased, and rank at the top of their scenes far more often
+ * than clean positives do (F28).
  *
- * A MISSING RANGE READS AS AVAILABLE, which is right for a reference sheet and wrong for a memory entry
- * that lost the field — the check is silently inert on exactly those, and cannot tell the two apart.
+ * A missing range reads as available, which is right for a reference sheet and wrong for a memory entry
+ * that lost the field — the check is inert on exactly those, and cannot tell the two apart.
  *
  * Shared so the harness's `dropUnavailable` and the runtime's setting cannot drift on what "not yet
  * written" means.
@@ -54,26 +50,24 @@ export const postDates = (entry, at) => {
     return Number.isFinite(start) && start > at;
 };
 
-/** Words that live INSIDE a constructed proper noun — "Church of the Sun", "van der Berg", "War and
+/** Words that live inside a constructed proper noun — "Church of the Sun", "van der Berg", "War and
  *  Peace" — genitive and article particles plus `and`. The authoritative list; the harness's prose-side
- *  span arm derives from it MINUS `and`, which in running text joins two entities rather than living
+ *  span arm derives from it minus `and`, which in running text joins two entities rather than living
  *  inside one. A key is different: its author chose the span, so `and` is part of the name.
  *  ponytail: prepositional titles ("Nightmare on Elm Street") still read as fragments; widen when a
  *  real key hits it. */
 export const NAME_PARTICLES = new Set(['of', 'the', 'and', 'de', 'del', 'della', 'di', 'da', 'van', 'von', 'der', 'den', 'du', 'la', 'le', 'el', 'bin', 'ibn']);
 
 /**
- * A line that is ENTIRELY a label — an ATX heading, a `**Bold:**` field name, or a bare `Label:` —
- * with nothing after it.
+ * A line that is entirely a label — an ATX heading, a `**Bold:**` field name, or a bare `Label:` — with
+ * nothing after it.
  *
- * Its tokens are layout, not spelling, and the sentence-position rule cannot see that: a label alone
- * on a line makes its FIRST word position 0 and every later word a mid-sentence capital, so
- * `**Key Dynamics:**` yields `dynamics` (C9) and `## The Guest List` yields `guest`. Single-word
- * labels were always harmless — the one token is position 0.
+ * Its tokens are layout, not spelling, and the sentence-position rule cannot see that: a label alone on
+ * a line makes its first word position 0 and every later word a mid-sentence capital (C9).
  *
- * ONLY WHEN THE LABEL IS THE WHOLE LINE. A label with content after it is already correct and must not
- * be touched: `**Location:** Big Sur` works BECAUSE `Location` absorbs position 0, and stripping the
- * line takes `Sur` with it.
+ * Only when the label is the whole line. A label with content after it is already correct and must not
+ * be touched: `**Location:** Big Sur` works because `Location` absorbs position 0, and stripping the
+ * line would take `Sur` with it.
  */
 const LABEL_ONLY = /^(?:#{1,6}\s+\S.*|\*\*[^*]+:?\*\*|\p{Lu}[\p{L}' ]{0,30}:)$/u;
 
@@ -87,11 +81,9 @@ const LABEL_ONLY = /^(?:#{1,6}\s+\S.*|\*\*[^*]+:?\*\*|\p{Lu}[\p{L}' ]{0,30}:)$/u
  *
  * Exported because it is the project's definition of a name and more than one thing asks: the entity
  * filter weights query terms with it, and stage 4's proper-noun overlap feature reads entries and the
- * scan window with it. A second regex somewhere else is the drift this exists to prevent — the private
- * one it replaced was ASCII-only, counted sentence-initial capitals, and missed any name under three
- * letters.
+ * scan window with it. A second regex elsewhere is the drift this exists to prevent.
  *
- * ORTHOGRAPHY IS THE CALLER'S. buildTermWeights normalises once and hands the result to both loops;
+ * Orthography is the caller's: buildTermWeights normalises once and hands the result to both loops, and
  * a caller comparing two texts must normalise both the same way or the sets cannot intersect.
  */
 export function properNounsOf(text) {
@@ -109,13 +101,13 @@ export function properNounsOf(text) {
 /**
  * The names a text uses, as the relevance model counts them.
  *
- * `ranking.properNounsOf` decides what a name IS — capitalisation somewhere that is not sentence-initial
- * — and this adds the two rules that are about which names are worth COUNTING: orthography is normalised
- * first so a curly apostrophe and a straight one are one name, and common English words are dropped so a
+ * `properNounsOf` decides what a name is — capitalisation somewhere that is not sentence-initial — and
+ * this adds the two rules about which names are worth counting: orthography is normalised first so a
+ * curly apostrophe and a straight one are one name, and common English words are dropped so a
  * sentence-initial "Then" that also appears mid-sentence cannot join.
  *
- * NORMALISE BOTH SIDES OR THE SETS CANNOT INTERSECT, which is why this is one function rather than a
- * convention. The entry and the scan window are compared as sets of these strings.
+ * One function rather than a convention, because both sides must be normalised the same way or the sets
+ * cannot intersect.
  */
 export function properNames(text) {
     const out = properNounsOf(normalizeOrthography(String(text ?? '')));
@@ -124,35 +116,13 @@ export function properNames(text) {
 }
 
 /**
- * Document frequency of every name in a book, with the ENTRY as the document.
+ * The key a fitted relevance model is stored and recalled under: the served model id, normalised.
  *
- * THE CORPUS IS THE BOOK, and `ndoc` counts ENTRIES — not chunks. The BM25 index this sits beside counts
- * chunks (`content-lexical` `docCount`), so the two Ns are different numbers over the same walk; reading
- * one for the other would silently rescale every idf.
- *
- * DISABLED ENTRIES ARE INCLUDED. df asks how distinctive a name is in the book's vocabulary, which a
- * disabled entry still contributes to — where `buildContentIndex` excludes them because it is asking
- * what can be RETRIEVED. Excluding them here measurably costs, on most books (F27).
- *
- * AN ENTRY WITH NO CONTENT IS NOT A DOCUMENT, which is the separate question: counting one raises `ndoc`
- * while contributing no df, so it inflates every name's idf by pretending the corpus is larger than the
- * text in it.
- *
- * The per-entry name sets ride along because this walk already extracted them, and the caller needs
- * exactly those to score against the window.
- *
- * @param {object[]} entries Every entry of ONE book
- * @returns {{df: Map<string, number>, ndoc: number, names: Map<string, Set<string>>}} keyed `world.uid`
- */
-/**
- * The key a fitted relevance model is stored and recalled under: the SERVED MODEL ID, normalised.
- *
- * NOT the eval-side label. That carries a server stem (`omlx:`, `lms:`) because two servers of the same
- * weights store different vectors, which a COLLECTION must distinguish — it compares stored vectors
- * against a query bit for bit. A FIT is coefficients over signals standardised within scene, far less
- * sensitive to that, and the runtime has no notion of a server at all: `vectorRequestBody()` yields
- * `{source, model}`. Keying on the label would make every fit unfindable at runtime, which is the one
- * thing the key exists to prevent. The full label rides inside the fit as provenance instead.
+ * Not the eval-side label, which carries a server stem (`omlx:`, `lms:`) because two servers of the same
+ * weights store different vectors — a distinction a collection must make and a fit need not, being
+ * coefficients over signals standardised within scene. The runtime has no notion of a server at all
+ * (`vectorRequestBody()` yields `{source, model}`), so keying on the label would make every fit
+ * unfindable at runtime. The full label rides inside the fit as provenance.
  *
  * `:latest` goes because ollama appends it to an untagged pull, so the same model reads as `bge-m3` from
  * a spec and `bge-m3:latest` from the settings — one model, two keys, and a silent miss.
@@ -167,17 +137,14 @@ export const UNFITTED_FALLBACK = 'mxbai-embed-large';
 /**
  * The key to look a fit up under, from `vectorRequestBody()`'s `{source, model}`.
  *
- * THE `transformers` SOURCE CARRIES NO MODEL. ST resolves it server-side from config.yaml
+ * The `transformers` source carries no model: ST resolves it server-side from config.yaml
  * (`extensions.models.embedding`, read at src/endpoints/vectors.js) and its Vector Storage UI offers no
- * way to choose one, so the source names the model: a stock install embeds with the jina it ships. Without
- * this the key is the empty string, no fit is found, and every default install runs with no relevance
- * model at all.
+ * way to choose one, so the source names the model. Without this the key is the empty string, no fit is
+ * found, and every default install runs with no relevance model.
  *
- * The residual risk is a hand-edited config.yaml naming some other transformers model, which would take
- * jina's fit. There is no UI that produces that state, and nothing the client can read to detect it.
+ * The `transformers` literal is assumed, not read, so a hand-edited `extensions.models.embedding`
+ * mis-resolves silently to jina's fit (upstream-st.md); no UI produces that state.
  */
-// The `transformers` literal is ASSUMED, not read: that source exposes no model to the client, so a
-// changed `extensions.models.embedding` mis-resolves silently (upstream-st.md). It is also the default.
 export const fitKey = ({ source, model } = {}) =>
     modelKey(model || (source === 'transformers' ? 'Cohee/jina-embeddings-v2-base-en' : ''));
 
@@ -185,19 +152,17 @@ export const fitKey = ({ source, model } = {}) =>
  * How a model wants to be ASKED. Qwen3-Embedding and mxbai are trained with a task instruction on the
  * query and ollama's template is a bare `{{ .Prompt }}`, so applying it is the caller's job.
  *
- * A MODEL IS HERE ONLY IF ITS PREFIX IS MEASURED TO EARN ONE. bge-m3 and ST's default jina document none.
- * EmbeddingGemma documents a pair — an instruction on the query and `title: none | text: ` on every
- * document — and applying it measured flat (E7). Flat is not a reason to carry a special case, and the
- * document half would additionally have to be rebuilt into every collection, so gemma has no entry.
+ * A model is here only if its prefix is measured to earn one. bge-m3 and ST's default jina document
+ * none; EmbeddingGemma documents a pair and applying it measured flat (E7), and its document half would
+ * have to be rebuilt into every collection, so gemma has no entry.
  *
- * KEYED BY FAMILY STEM, matched as a substring at neither end: the served id is whoever packaged the
- * model's spelling — `qwen3-embedding:4b` from ollama, `Qwen3-Embedding-8B-4bit-DWQ` from oMLX,
- * `text-embedding-qwen3-embedding-8b` from LM Studio, which prepends its own type tag. Anchoring the match
- * at either end drops the instruction from a model that should have it, and that does not fail — it
- * quietly makes the model look worse than it is. It has bitten at both ends, hence neither.
+ * Keyed by family stem, matched as a substring anchored at neither end: the served id is whoever
+ * packaged the model's spelling (`qwen3-embedding:4b`, `Qwen3-Embedding-8B-4bit-DWQ`,
+ * `text-embedding-qwen3-embedding-8b`). Anchoring at either end drops the instruction from a model that
+ * should have it, which does not fail — it quietly makes the model look worse than it is.
  *
- * Lives here rather than in eval/ because it is PRODUCTION behaviour that the evals verify, not a
- * measurement setting; reindex.mjs imports this table rather than keeping a second copy of it.
+ * Production behaviour that the evals verify, not a measurement setting; reindex.mjs imports this table
+ * rather than keeping a second copy.
  */
 export const PREFIXES = {
     'mxbai-embed-large': 'Represent this sentence for searching relevant passages: ',
@@ -207,17 +172,35 @@ export const PREFIXES = {
 /**
  * The prefix to put on a QUERY before it is embedded, or '' when there is none to apply.
  *
- * EVERY PREFIX WA APPLIES IS A QUERY PREFIX, which is why this needs no counterpart for documents and why
- * turning one on costs no rebuild: a query prefix never reaches a stored vector.
+ * Every prefix WA applies is a query prefix, which is why this needs no counterpart for documents and
+ * why turning one on costs no rebuild: a query prefix never reaches a stored vector.
  *
- * Qwen3-Embedding's instruction is measured to earn its place (E7). It is also what the shipped
- * coefficients were fitted against, so NOT applying it served a fit its own signal never produced.
+ * Qwen3-Embedding's instruction is measured to earn its place (E7), and is what the shipped coefficients
+ * were fitted against, so not applying it serves a fit its own signal never produced.
  */
 export const queryPrefix = (model) => {
     const fam = modelKey(model);
     return Object.entries(PREFIXES).find(([stem]) => fam.includes(stem))?.[1] ?? '';
 };
 
+/**
+ * Document frequency of every name in a book, with the entry as the document.
+ *
+ * The corpus is the book, and `ndoc` counts entries — not chunks. The BM25 index this sits beside counts
+ * chunks (`content-lexical` `docCount`), so reading one N for the other would rescale every idf.
+ *
+ * Disabled entries are included: df asks how distinctive a name is in the book's vocabulary, which a
+ * disabled entry contributes to, where `buildContentIndex` excludes them because it asks what can be
+ * retrieved. Excluding them here measurably costs, on most books (F27).
+ *
+ * An entry with no content is not a document: counting one raises `ndoc` while contributing no df, so it
+ * inflates every name's idf.
+ *
+ * The per-entry name sets ride along because this walk already extracted them.
+ *
+ * @param {object[]} entries Every entry of one book
+ * @returns {{df: Map<string, number>, ndoc: number, names: Map<string, Set<string>>}} keyed `world.uid`
+ */
 export function buildNameDf(entries) {
     const df = new Map();
     const names = new Map();
@@ -235,14 +218,13 @@ export function buildNameDf(entries) {
 /**
  * The `properNouns` signal: idf-weighted count of names an entry shares with the scan window.
  *
- * NOT A REWEIGHTING OF `text`. BM25 spreads its mass over every term the two share, so a character name
- * arrives diluted among hundreds of ordinary words; restricting the vocabulary to names asks whether
- * this entry is about someone who is ON SCREEN, which is the axis the three older signals do not have.
+ * Not a reweighting of `text`: BM25 spreads its mass over every term the two share, so a character name
+ * arrives diluted among hundreds of ordinary words, where restricting the vocabulary to names asks
+ * whether this entry is about someone on screen.
  *
- * THE WEIGHTING IS WHAT MAKES IT WORK — idf beats the unweighted count decisively — so a protagonist
+ * The idf weighting is what makes it work — it beats the unweighted count decisively, so a protagonist
  * named in every scene summary counts for almost nothing. Jaccard measured worse and restricting to the
- * gazetteer lost outright, so it is neither the normalisation nor the vocabulary restriction that
- * matters (F6).
+ * gazetteer lost outright (F6).
  */
 export function properShared(entryNames, windowNames, { df, ndoc }) {
     let v = 0;
@@ -256,20 +238,19 @@ export function properShared(entryNames, windowNames, { df, ndoc }) {
 /**
  * The `density` signal: names per 100 tokens of the entry.
  *
- * A DENSITY, NOT A COUNT — the count is length wearing another name, and the two would be one column.
- * Entry-intrinsic, so it never reads the query: it is a prior, and within-scene standardisation still
- * works on it because it varies between the entries of one scene.
+ * A density, not a count — the count is length wearing another name. Entry-intrinsic, so it never reads
+ * the query: it is a prior, and within-scene standardisation still works on it because it varies between
+ * the entries of one scene.
  *
- * MEMORY TIER ONLY. This INVERTS on reference (F19), where an entry thick with names is a roster
- * rather than a subject — so a shared coefficient would carry the wrong sign.
+ * Memory tier only. It inverts on reference (F19), where an entry thick with names is a roster rather
+ * than a subject, so a shared coefficient would carry the wrong sign.
  */
 export function properDensity(content) {
     const text = String(content ?? '');
     const toks = tokenize(text);
-    // properNounsOf DIRECTLY, not properNames: the fits' density column counts every detected name with
-    // no stoplist subtraction — that filter is the overlap's, where a common word must not match across
-    // the two sets, and how name-DENSE a text is is not that question. The runtime computes the column
-    // the coefficients were trained on.
+    // properNounsOf directly, not properNames: the fits' density column counts every detected name with
+    // no stoplist subtraction — that filter belongs to the overlap, where a common word must not match
+    // across the two sets. The runtime computes the column the coefficients were trained on.
     return (properNounsOf(normalizeOrthography(text)).size / Math.max(1, toks.length)) * 100;
 }
 
@@ -280,33 +261,29 @@ const sd = xs => { const m = mean(xs); return Math.sqrt(mean(xs.map(x => (x - m)
 /**
  * `E[credit]` for every row of ONE scene, from a fitted model file.
  *
- * STANDARDISED WITHIN THE SCENE, as the fit was. The coefficients are per within-scene sd and mean
+ * Standardised within the scene, as the fit was. The coefficients are per within-scene sd and mean
  * nothing against a raw value — BM25 is not comparable across queries or corpora, so a pooled scale
  * would let a scene's own spread masquerade as a coefficient. That is also why this takes the whole
- * scene at once rather than scoring an entry alone: an entry has no standardised value by itself.
+ * scene at once: an entry has no standardised value by itself.
  *
- * A COLUMN CONSTANT WITHIN THE SCENE STANDARDISES TO 0, via `sd || 1` — the same guard the fit used, and
- * it has to be the same one or a signal that carries no information here would be divided by ~0 and meet
- * a slope fitted on other books.
+ * A column constant within the scene standardises to 0, via `sd || 1` — the same guard the fit used, and
+ * it must be the same one, or a signal carrying no information here would be divided by ~0 and meet a
+ * slope fitted on other books.
  *
- * P(>=3) IS CLAMPED TO P(>=2). The boundaries are fitted separately, so nothing guarantees the nesting
- * the events have, and `E[credit]` is malformed where they invert. Inversions are rare and tiny (F31) —
- * which is exactly why leaving the clamp out would read as a threshold effect rather than as the
- * incoherent probability pair it is.
+ * P(>=3) is clamped to P(>=2): the boundaries are fitted separately, so nothing guarantees the nesting
+ * the events have, and `E[credit]` is malformed where they invert. Inversions are rare and tiny (F31),
+ * which is why an unclamped one would read as a threshold effect rather than an incoherent pair.
  *
- * THE POPULATION IS A SEPARATE ARGUMENT FROM THE ROWS, because the two are not always the same set. A
+ * The population is a separate argument from the rows, because the two are not always the same set. A
  * fit emitted under `--standardise pooled` took its statistics from every candidate the scene offered,
- * both tiers, while fitting only its own tier's rows — so a consumer must standardise the same way or
- * the slopes meet a different unit. `model.standardise` says which; absent means `scene`, the design
- * every fit written before the flag used, where the population IS the rows.
+ * both tiers, while fitting only its own tier's rows, so a consumer must standardise the same way or the
+ * slopes meet a different unit. `model.standardise` says which; absent means `scene`, where the
+ * population is the rows.
  *
- * WHY POOLED EXISTS: a tier holding two entries gives every z a value of exactly +/-1, since the sd of
- * two points is half their gap — the magnitudes are erased before a coefficient sees them, and
- * `E[credit]` can take only sixteen values however relevant the entry is. A tier holding one collapses
- * to the intercept, which is below every fitted cutoff, so it can never ship. That is the state a NEW
- * BOOK is in, which is where every chat starts. Measured flat on the corpus of record, paired, at three
- * cutoffs — the corpus has no scene with a small memory tier, so it can say adopting this is free and
- * cannot say what it gains.
+ * Pooled exists because a tier holding two entries gives every z a value of exactly +/-1, erasing the
+ * magnitudes before a coefficient sees them, and a tier holding one collapses to the intercept, which is
+ * below every fitted cutoff and so can never ship — the state a new book is in. Measured flat on the
+ * corpus of record, paired, at three cutoffs: it can say adopting this is free and not what it gains.
  *
  * @param {{features: string[], beta: {ge2: number[], ge3: number[]}}} model A fitted model file
  * @param {object[]} rows One scene's candidates, each carrying a raw value per `model.features`
@@ -318,15 +295,14 @@ export function scoreRelevance(model, rows, population = rows) {
     const feats = model?.features ?? [];
     const { ge2, ge3 } = model?.beta ?? {};
     if (!rows?.length || !ge2?.length || !ge3?.length) return (rows ?? []).map(() => NaN);
-    // COLUMN ORDER IS THE CONTRACT: [intercept, one standardised column per feature]. A model whose beta
+    // Column order is the contract: [intercept, one standardised column per feature]. A model whose beta
     // is the wrong length is a file from another design, and scoring through it would return plausible
-    // numbers rather than an error — the one failure mode here that produces a result.
+    // numbers rather than an error.
     if (ge2.length !== feats.length + 1 || ge3.length !== feats.length + 1) {
         throw new Error(`relevance model has ${feats.length} features but ${ge2.length}/${ge3.length} coefficients; expected ${feats.length + 1} of each`);
     }
-    // The statistics come from the POPULATION and the columns from the ROWS. They are the same array
-    // under `scene`, so this is the identical arithmetic there; under `pooled` the population is wider
-    // than what is being scored and only the mean and sd come from the extra rows.
+    // The statistics come from the population and the columns from the rows — the same array under
+    // `scene`; under `pooled` only the mean and sd come from the extra rows.
     const pop = population?.length ? population : rows;
     const z = feats.map(name => {
         const m = mean(pop.map(r => Number(r?.[name]) || 0));

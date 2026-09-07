@@ -1,47 +1,37 @@
-// entity.mjs — the ENTITY FILTER: the lorebook's own vocabulary, and the weighted BM25 query terms
+// entity.mjs — the entity filter: the lorebook's own vocabulary, and the weighted BM25 query terms
 // built from it. Reduces a raw query to entity-ish terms and boosts the names among them; the weights
 // reach content-lexical at stage 3, which is the only thing that reads them.
 //
-// Query CONSTRUCTION is query.mjs and name DETECTION is relevance.mjs; this file decides what a query
-// term is WORTH, which is a different question from either.
+// Query construction is query.mjs and name detection is relevance.mjs; this file decides what a query
+// term is worth, which is a different question from either.
 //
-// Imported by both the extension and the offline harnesses, so it must stay isomorphic — no DOM, no ST
-// imports. Every SillyTavern/settings dependency (the proper-noun boost) is INJECTED by the caller.
-// It lives with the extension, NOT the plugin: a change here is a browser refresh, never a plugin
-// redeploy, and it is never copied into /plugins, so it stays out of the plugin fingerprint.
+// Isomorphic — no DOM, no ST imports; the proper-noun boost is injected by the caller. It lives with the
+// extension, never the plugin: a change here is a browser refresh, and it stays out of the plugin
+// fingerprint.
 
-// The INDEX's tokenizer, imported rather than restated, because the tokens built here are BM25 QUERY
-// TERMS: buildTermWeights' keys feed bm25Scores directly, so they must be tokenized exactly as the
-// index is or an accented query term shatters on this side and silently matches nothing. A private
-// [^A-Za-z0-9'] split was how "Möbius" indexed as "bius" — see the tokenize header for the measurement.
+// The index's tokenizer, imported rather than restated, because the tokens built here are BM25 query
+// terms: buildTermWeights' keys feed bm25Scores directly, so they must be tokenized exactly as the index
+// is or an accented query term shatters on this side and matches nothing.
 import { tokenize } from './lexical.mjs';
 import { normalizeOrthography } from '../plugin/automaton.mjs';
-// THE PROJECT'S DEFINITION OF A NAME, imported rather than restated. relevance.mjs owns every name
-// rule; a second regex here is the drift that one exists to prevent.
+// The project's definition of a name, imported rather than restated: relevance.mjs owns every name rule.
 import { properNounsOf } from './relevance.mjs';
 
 /**
- * Collects the lorebook's own vocabulary — every term appearing in an entry's keys
- * or title. Anything named there is something this corpus treats as a thing worth
- * naming, which is a better salience signal than rarity.
+ * Collects the lorebook's own vocabulary — every term appearing in an entry's keys or title. Anything
+ * named there is something this corpus treats as worth naming, which is a better salience signal than
+ * rarity.
  *
- * READS AT STAGE 3 ONLY. The entity filter's term weights are BM25 query terms, and stage 1 has no BM25
- * (plugin/scoring.mjs) — so this feeds content-lexical alone and can reweight what an activated entry
- * scores, never what gets admitted. Measurements taken against the old pipeline mixed both effects.
+ * Read at stage 3 only: the term weights are BM25 query terms and stage 1 has no BM25
+ * (plugin/scoring.mjs), so this can reweight what an activated entry scores, never what is admitted.
  *
- * DO NOT "fix" the missing keys. The one production call site is `queryTermWeights`, inside
- * `contentTextScores` at stage 3, where `waOwnsScan` is true — so the takeover has already blanked
- * key/keysecondary on every keyword-activating entry of the `getSortedEntries()` this is handed, and the
- * vocabulary is entry TITLES plus the keys of constants and `@@activate` entries. That looks like a bug
- * and reads like one here.
- *
- * It is not worth arguing about: the gazetteer SOURCE measured flat on every arm, an empty gazetteer
- * included, with the arms differing only in query terms (R20). The proper-noun boost is carrying the
- * entity filter on its own.
+ * Do not "fix" the missing keys. At the one production call site the takeover has already blanked
+ * key/keysecondary on every keyword-activating entry, so the vocabulary is entry titles plus the keys of
+ * constants and `@@activate` entries. The gazetteer source measured flat on every arm, an empty
+ * gazetteer included (R20) — the proper-noun boost is carrying the entity filter on its own.
  *
  * The offline harnesses must reproduce whatever production hands this, or they measure a gazetteer
- * nothing builds — a TERM count, never an entry count, and never an admission effect: stage 1 admits
- * every candidate it scores and reads no term weights at all.
+ * nothing builds.
  *
  * @param {object[]} entries All World Info entries
  * @returns {Set<string>} Lowercased gazetteer terms
@@ -60,50 +50,21 @@ export function buildGazetteer(entries) {
 }
 
 /**
- * Reduces a raw query to entity-ish terms, weighted.
+ * Reduces a raw query to entity-ish terms, weighted: a term survives if it is capitalised or in the
+ * lorebook's vocabulary, and capitalised terms get `boost`.
  *
- * Keeps a term only if it is capitalised (a cheap entity proxy) or appears in the
- * lorebook's own vocabulary, and boosts the capitalised ones.
+ * Reaches only content-lexical at stage 3 now. Every arm that admitted more terms ranked worse (R20,
+ * R21): IDF and part-of-speech filters admit prose variation at high weight, and identity is what
+ * discriminates here. The gazetteer source measured flat, empty included (R20), so treat its assembly
+ * as having nothing to tune. Judge any change on mean target rank over the uncut ranking with unjudged
+ * rows as 0: nDCG@5 saturates on this sparse relevance and the activated pool hides a wrong promotion (R21).
  *
- * TUNED AT STAGE 1, WHICH NO LONGER READS THIS. Its arms ranked the retrieval ranking when that fused
- * BM25 and admission could turn on a query term; today the filter reaches only content-lexical at stage
- * 3, so the tables are gone and what survives them is the DIRECTION — every arm admitting more terms
- * ranked worse — plus the two traps that produced four different answers from four attempts:
- *
- * TRAP 1, THE METRIC. Use mean target rank, not nDCG@5. Relevance here is sparse and OVERDISPERSED
- * (a handful of judged-relevant entries per scene, with far more variance than Poisson allows — the
- * few underlying stories showing through), so nDCG@5 sees a handful of placements and has few
- * reachable states: it returned an IDENTICAL score for every boost tried on one scene, under every
- * population tried (R21).
- * That is mechanistic rather than noise — the boost is a uniform multiplier over proper nouns, so where
- * the top entries match the same entities it cannot reorder them at all. Anything that looks like a tie
- * on nDCG@5 should be re-read on mean rank, which pools every judged-relevant entry and does not saturate.
- *
- * TRAP 2, THE POPULATION. Grades exist only for entries production ACTIVATED, so scoring within that pool
- * makes a wrong promotion INVISIBLE — the promoted entry is filtered out rather than penalised, and one
- * scene returned the same score for every arm including no-filter that way (R21). Score unjudged rows
- * as 0 over the uncut ranking (`--unjudged zero`); the sparse shape licenses it, since graded pools
- * bottom out in zeros well before the tail, so "unjudged" and "irrelevant" nearly coincide.
- *
- * WHAT IS MEASURED AT THIS STAGE is the gazetteer SOURCE question: flat on
- * every arm, INCLUDING an empty gazetteer (R20). So the boost is the mechanism
- * and the gazetteer is a thin safety net for entities a query happens to mention in lowercase — treat its
- * assembly as having nothing to tune, and re-measure before moving `properNounBoost` or the filter itself.
- *
- * Deliberately NOT applied to summarized queries, which are already salience-selected and would only lose
- * context.
- *
- * Do not "improve" this by admitting more terms. IDF measures rarity, and on a single-author narrative
- * corpus rarity is dominated by prose variation rather than topic — the high-IDF terms an IDF cutoff
- * admits are "grind", "flaring", "nape", "gaze", noise at high weight. A part-of-speech filter keeps all
- * of those and more and loses by the same mechanism; feeding the gazetteer entry BODIES admits most of the
- * query's distinct terms at several times the vocabulary and loses the same way (R20). What discriminates here is
- * identity, which no tagger can see and capitalisation can.
+ * Deliberately not applied to summarized queries, which are already salience-selected.
  *
  * @param {string} queryText Raw query
  * @param {Set<string>} gazetteer Lorebook vocabulary
- * @param {number} boost Weight for proper nouns (settings().properNounBoost)
- * @returns {Record<string, number>} Term weights for the plugin
+ * @param {number} boost settings().properNounBoost
+ * @returns {Record<string, number>} Term weights
  */
 export function buildTermWeights(queryText, gazetteer, boost) {
     const weights = {};

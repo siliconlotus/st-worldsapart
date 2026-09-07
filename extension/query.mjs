@@ -1,10 +1,8 @@
-// query.mjs — the RETRIEVAL QUERY: which messages the query is built from, and how they join into
-// one string. What that query is then worth against a term is entity.mjs; what it is compared against
-// is the vector index.
+// query.mjs — the retrieval query: which messages the query is built from, and how they join into one
+// string. What that query is then worth against a term is entity.mjs.
 //
-// Imported by both the extension and the offline harnesses, so it must stay isomorphic — no DOM, no ST
-// imports. Every SillyTavern dependency (message depth, substituteParams) is INJECTED by the caller;
-// the harness passes identity for the substitution ST does live.
+// Isomorphic — no DOM, no ST imports. Every SillyTavern dependency (message depth, substituteParams) is
+// injected by the caller; the harness passes identity for the substitution ST does live.
 
 /**
  * Builds the retrieval query from the tail of the chat.
@@ -37,10 +35,10 @@ export function joinQueryMessages(messages) {
  * `depth` of them, chronological. Same {name, mes} shape as ST's chat, so the output can be fed straight
  * back in.
  *
- * Exported because /wa-grade freezes this into its sample. That is what makes messageDepth the one query
- * parameter a frozen sample can still sweep: buildQuery over the last d of these is exact for any
+ * Exported because /wa-grade freezes this into its sample, which is what makes messageDepth the one
+ * query parameter a frozen sample can still sweep: buildQuery over the last d of these is exact for any
  * d <= the captured depth. It has to be the pre-join form — buildQuery joins on '\n\n' and RP messages
- * contain blank lines, so the boundaries can't be recovered from the joined text.
+ * contain blank lines, so the boundaries cannot be recovered from the joined text.
  *
  * @param {object[]} chat Chat messages
  * @param {object} cfg
@@ -53,16 +51,15 @@ export function queryMessages(chat, { depth, substituteParams = s => s }) {
         .map((x, i) => ({
             name: String(x?.name ?? '').trim(),
             mes: substituteParams(String(x?.mes || '').substring(x?.extra?.fileLength || 0).trim()),
-            // Index in the array HANDED IN, not in any canonical chat — a caller that pre-filtered maps it
-            // back itself. It is what lets a capture record the message range it covers rather than
+            // Index in the array handed in, not in any canonical chat — a caller that pre-filtered maps
+            // it back itself. It is what lets a capture record the message range it covers rather than
             // approximating it as `last - depth`, which is wrong the moment an empty message is skipped.
             i,
         }))
         .filter(x => x.mes)
         .reverse()
         .slice(0, Math.max(1, depth))
-        // Back to chronological. Taking the newest N requires reversing first, but
-        // handing a summarizer the messages backwards makes it read the scene in
-        // reverse — it can't tell what happened after what.
+        // Back to chronological: taking the newest N requires reversing first, but a summarizer handed
+        // the messages backwards reads the scene in reverse.
         .reverse();
 }

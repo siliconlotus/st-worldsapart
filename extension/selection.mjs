@@ -1,5 +1,5 @@
-// selection.mjs — STAGE 4: does this entry belong. One question, one answer, over the dynamic block
-// alone. What FITS once the set is chosen is delivery.mjs, and the two are separate because they judge
+// selection.mjs — stage 4: does this entry belong. One question, one answer, over the dynamic block
+// alone. What fits once the set is chosen is delivery.mjs, and the two are separate because they judge
 // differently: this stage tests each row against a threshold on its own, where stage 5 takes a prefix
 // of an order and judges nothing.
 //
@@ -8,25 +8,21 @@
 /**
  * Stage 4's relevance cut: the dynamic rows whose predicted relevance clears their tier's cutoff.
  *
- * THE ONLY RELEVANCE DECISION WA MAKES. Every other cut here answers "how many" or "how much"; this one
+ * The only relevance decision WA makes: every other cut answers "how many" or "how much", and this one
  * answers "does it belong", which is what makes the delivered set something other than everything
- * activated. Until it existed the score of record was invariant to every layout parameter, because the
- * set never changed.
+ * activated.
  *
- * DYNAMIC ONLY. Constants and armed stickies are in the prompt by intent rather than because relevance
- * chose them, and they never reach this list — `onScanDone` classifies them out before the walk. That
- * is also why the cut cannot break `applyBudget`'s prefix property: it removes rows from the block the
- * caps were already going to walk last.
+ * Dynamic only. Constants and armed stickies are in the prompt by intent rather than because relevance
+ * chose them, and never reach this list — `onScanDone` classifies them out before the walk. That is also
+ * why the cut cannot break `applyBudget`'s prefix property: it removes rows from the block the caps were
+ * going to walk last.
  *
- * PER TIER, because each tier's cutoff was chosen on its own fit and its own delivered set — memory's
- * against reference's are not the same number and do not mean the same thing.
+ * Per tier, because each tier's cutoff was chosen on its own fit and its own delivered set.
  *
- * A ROW NOTHING SCORED IS KEPT. An absent score means no fitted model covers the row, or the file did
- * not load — neither of which is the claim "predicted irrelevant", and silently dropping on a missing
- * number is how an outage becomes a content change. `ignoreBudget` does NOT exempt: it is an author
- * declaration about the BUDGET. The per-entry escape from relevance is `@@promote`, and it needs no
- * condition here — `layoutOrder` gives a promoted row its own block, so it is never in the list this
- * function is handed.
+ * A row nothing scored is kept: an absent score means no fitted model covers the row, or the file did
+ * not load, neither of which is the claim "predicted irrelevant". `ignoreBudget` does not exempt, being
+ * an author declaration about the budget; the per-entry escape from relevance is `@@promote`, which
+ * needs no condition here because `layoutOrder` gives a promoted row its own block.
  *
  * @param {object[]} results The dynamic block
  * @param {(item: object) => number} scoreOf Predicted relevance, NaN when unscored

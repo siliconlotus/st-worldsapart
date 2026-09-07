@@ -1,11 +1,10 @@
 // automaton.mjs — the Aho-Corasick literal matcher and the text fold it matches on. Pure, no imports,
-// and SHARED BY BOTH SIDES: the extension's smartkeys.mjs re-exports it for keyword matching, and the
+// and shared by both sides: the extension's smartkeys.mjs re-exports it for keyword matching, and the
 // server plugin uses it to scan chat histories without shipping them to the browser.
 //
-// It lives under plugin/ because that is the half that gets deployed, and the extension can import across
-// but not the reverse. Duplicating it was the alternative and would have been the same mistake CLAUDE.md
-// records for countKey: two copies of a matcher drift, and the drift surfaces as a scoring difference
-// nobody can trace back.
+// It lives under plugin/ because that is the half that gets deployed, and the extension can import
+// across but not the reverse. One copy, per the one-matcher rule: two would drift, and the drift
+// surfaces as a scoring difference nobody can trace back.
 
 /** Single-quote variants that authors and models mix freely: right/left single quotes, the low and
  *  high-reversed forms, the modifier letters, prime, acute, grave and the single guillemets. All
@@ -19,38 +18,27 @@ const DOUBLE_QUOTES = /[“”„‟″ʺ«»]/g;
 const COMBINING = /[̀-ͯ᪰-᫿᷀-᷿⃐-⃿︠-︯]/;
 
 /**
- * Normalises ORTHOGRAPHY without touching case: the same character in a different encoding.
+ * Normalises orthography without touching case: the same character in a different encoding. A key typed
+ * with a straight apostrophe otherwise dies silently against typeset prose, and real books carry
+ * apostrophe-form keys mismatched in both directions (K10), as they do every other form here.
  *
- * WHY THIS EXISTS. A key written "Cap'n Joe" never matched prose written "Cap’n Joe", and nothing
- * surfaced it — the key simply never fired. Models emit typographic apostrophes constantly, so a key typed
- * with a straight one silently dies against chat as well as against entry text. Real books carry
- * apostrophe-form keys mismatched in BOTH directions (K10).
- *
- * The same argument covers every other form here, and the chat censuses show each of them live at far
- * larger counts (K10).
- *
- * STRICTLY ORTHOGRAPHY, and that boundary is the whole point. None of these rewrites can destroy a
- * distinction anyone means, because nobody means anything different by a curly apostrophe. Anything
- * that CAN carry meaning — a hyphen against a space, a case difference — does not belong here: folding
- * it into the scan text erases it for every key at once, and no flag can ask for it back, because the
- * damage was done to the haystack. Case gets away with it only because `^` exists to opt out.
+ * Strictly orthography, and that boundary is the whole point: none of these rewrites can destroy a
+ * distinction anyone means. Anything that can carry meaning — a hyphen against a space, a case
+ * difference — does not belong here, because folding it into the scan text erases it for every key at
+ * once and no flag can ask it back. Case gets away with it only because `^` exists to opt out.
  *
  * NFC composition is the same argument in its purest form — "José" and "José" are one name in
- * two encodings, and the difference is invisible on screen, so a mismatch has nothing to surface it.
- * Measured absent from this corpus (K10), but it is included anyway because the exposure is asymmetric:
- * text pasted from another source or typed on another input method arrives decomposed, and the guard
- * above makes the check cost nothing when it is not needed.
+ * two encodings, measured absent from this corpus (K10) and included anyway because the exposure is
+ * asymmetric: text pasted from another source arrives decomposed, and the guard above makes the check
+ * free when it is not needed.
  *
- * A character joins the quote classes if it is a typographic VARIANT of the ASCII form, and not if it
- * is FINER-GRAINED than it. A variant collapses nothing — „ and “ are the double quote, differently
- * typeset, and the guillemets are quotation in Russian and French with no narrower job. A finer-grained
- * mark imports a distinction its writing system draws and ASCII cannot express, and that loss lands in
- * the haystack where no key can ask for it back. So 《》 (titles) and 「」 (speech) stay out: they
- * partition what " collapses.
+ * A character joins the quote classes if it is a typographic variant of the ASCII form, and not if it is
+ * finer-grained than it. A variant collapses nothing; a finer-grained mark imports a distinction its
+ * writing system draws and ASCII cannot express, and that loss lands in the haystack where no key can
+ * ask it back. So 《》 (titles) and 「」 (speech) stay out: they partition what " collapses.
  *
- * NOT included, measured absent (K10): zero-width characters, ligatures, U+2212 minus; fullwidth forms
- * occur in chat but only as punctuation — a key is a word, and the fullwidth comma is already a
- * non-word character, so it makes no difference to a match.
+ * Not included, measured absent (K10): zero-width characters, ligatures, U+2212 minus. Fullwidth forms
+ * occur in chat but only as punctuation, which is already non-word.
  */
 export const normalizeOrthography = s => {
     s = String(s ?? '');
@@ -69,9 +57,9 @@ export const normalizeOrthography = s => {
 /**
  * The one folding used for every match: orthography-normalised and case-folded.
  *
- * MUST be the only fold. countKey short-circuits on a 0 from the automaton (`if (cached === 0) return 0`),
- * so normalising the naive walk alone would change nothing — the trie would still report a miss and return
- * before the walk ran. Registry, scan and fallback all go through here or they silently disagree.
+ * Must be the only fold: countKey short-circuits on a 0 from the automaton, so normalising the naive
+ * walk alone would change nothing — the trie would still report a miss and return before the walk ran.
+ * Registry, scan and fallback all go through here or they silently disagree.
  */
 export const fold = s => normalizeOrthography(s).toLowerCase();
 
@@ -137,18 +125,13 @@ export function scanAutomaton(aut, foldedText) {
 }
 
 /**
- * Accumulates a chat scan: one text, counted as ONE hit per pattern present.
+ * Accumulates a chat scan: one text, counted as one hit per pattern present.
  *
- * MESSAGES CONTAINING, NOT OCCURRENCES, and that is the whole reason this exists rather than being
- * written at each call site. The browser and the server both scan chats for the Studio's key evidence,
- * and they wrote the loop separately: the client added 1 per message, the server added `n`. Cosmetic
- * while the result was only ever tested for truthiness and shown as "47 hits in chat" — then
- * keyword-audit started dividing it by the message count to get a share, and the same book scored
- * differently depending on whether the plugin was installed.
- *
- * A share needs the numerator and denominator to count the same thing. `messages` is the denominator,
- * so a hit is a message. Occurrence counts are still available per text from scanAutomaton directly;
- * nothing that compares against a message total may use them.
+ * Messages containing, never occurrences, which is why this exists rather than being written at each
+ * call site — the browser and the server both scan chats for the Studio's key evidence, and a share
+ * needs numerator and denominator to count the same thing. `messages` is the denominator, so a hit is a
+ * message. Occurrence counts are available per text from scanAutomaton directly; nothing that compares
+ * against a message total may use them.
  *
  * @param {object} aut Automaton from buildAutomaton
  * @param {string} text One message, unfolded

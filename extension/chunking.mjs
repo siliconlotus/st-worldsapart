@@ -1,33 +1,20 @@
 // chunking.mjs — how an entry's text is cut up before it is embedded. Pure and ST-free (settings are passed
 // in), so the offline harness can reproduce an index instead of only reading one.
 //
-// WHY WA OWNS THIS INSTEAD OF IMPORTING ST's splitRecursive.
+// WA owns this rather than importing ST's splitRecursive, for two reasons. It is unreachable offline —
+// ST's utils.js is not node-importable — so every tool that wants to know how a book would be chunked
+// would need a private copy, and a private copy drifts. And chunking determines the index: nothing about
+// a vectra collection records the chunker that produced it, so an upstream edit would leave existing
+// indexes full of old chunks with no banner and no way to notice. Owning the splitter makes the chunk
+// format WA's own artefact, versioned with WA.
 //
-// Two reasons, and the second is the one that bites.
+// The port is verbatim, and eval/chunking-check.mjs is the oracle: it re-chunks a graded sample's
+// embedded books and compares against the `metadata.text` stored in the live index, clean across the
+// live collections (P3). It doubles as a staleness detector.
 //
-// 1. It is unreachable offline. `splitRecursive` lives in ST's utils.js, which is not node-importable — its
-//    import graph resolves browser-absolute paths. So every tool that wants to know how a book WOULD be
-//    chunked (the reindexer, any sweep of chunkSize/chunkMode/minChunkSize) either can't exist or has to
-//    keep a private copy, and a private copy is a copy that drifts.
-//
-// 2. CHUNKING DETERMINES THE INDEX, so an upstream change to it silently invalidates every stored vector.
-//    Nothing about a vectra collection records the chunker that produced it. If ST edits splitRecursive in a
-//    release, WA's existing indexes are still full of the OLD chunks while the new code chunks differently —
-//    a query is then matched against text that no longer corresponds to how the book would be cut today,
-//    with no banner, no version bump and no way to notice. Owning the splitter makes the chunk format WA's
-//    own artefact, versioned with WA.
-//
-// The port is verbatim, and its exactness is not taken on trust: eval/chunking-check.mjs re-chunks a graded
-// sample's embedded books and compares against the `metadata.text` actually stored in the live index — a
-// real-data oracle for byte-identity, clean across the live collections (P3).
-// It doubles as a staleness detector, since a book edited after it was vectorized stops reproducing what is
-// stored.
-//
-// If you touch that check, mirror syncWorld's POST-chunking steps or it will invent drift that isn't there.
-// It re-trims every chunk and drops blanks (splitRecursive splitting on '. ' leaves edge whitespace), and it
-// keys the collection by hash, so identical text across several entries is stored once. Comparing raw chunk
-// output per-entry and positionally against a hash-keyed, insertion-ordered store reported a perfectly synced
-// collection as mostly stale (P3).
+// If you touch that check, mirror syncWorld's post-chunking steps or it will invent drift: syncWorld
+// re-trims every chunk and drops blanks, and keys the collection by hash, so identical text across
+// several entries is stored once (P3).
 
 /**
  * ST's recursive text splitter, ported verbatim from public/scripts/utils.js.
@@ -36,8 +23,8 @@
  * greedily merges adjacent parts back together while they fit under `length`. The merge pass is why 'length'
  * mode produces chunks that span unrelated topics: it fills to capacity without regard for structure.
  *
- * DO NOT "improve" this. Its output is baked into every existing vector index; a change here silently
- * invalidates all of them, and the check that guards it compares against real stored chunks.
+ * Do not "improve" this: its output is baked into every existing vector index, so a change here silently
+ * invalidates all of them.
  *
  * @param {string} input Text to split
  * @param {number} length Maximum chunk length
@@ -89,20 +76,16 @@ export function splitRecursive(input, length, delimiters = ['\n\n', '\n', ' ', '
  * 'paragraph' mode keeps one paragraph per chunk. Oversized paragraphs are split further; runs of very short
  * ones are joined so stray lines aren't embedded alone.
  *
- * minChunkSize IS A MERGE FLOOR, NOT A SPLIT THRESHOLD, and the direction surprises people. A paragraph
- * shorter than it is held and glued onto the NEXT one, so raising it yields fewer, larger chunks and lowering
- * it yields more, paragraph-aligned ones. Nothing is ever split because of it. Both ends cost something and
- * neither has been measured:
+ * minChunkSize is a merge floor, not a split threshold: a paragraph shorter than it is held and glued
+ * onto the next one, so raising it yields fewer, larger chunks and nothing is ever split because of it.
+ * Both ends cost something and neither has been measured:
  *
  *   high — a run of short paragraphs accumulates until the total crosses the floor, so the boundary lands
- *          wherever that happens rather than anywhere structural; observed gluing a document title, a `---`
- *          rule and a subheading onto the start of unrelated content.
- *   low  — many tiny chunks. Two corpus-wide effects, both invisible per-entry: BM25's `avgdl` drops, which
- *          re-weights length normalisation for EVERY chunk in the book, and entry pooling takes the max over
- *          an entry's chunks, so inflating chunk count hands long entries more chances at a high max than
- *          short ones get (R25).
- *
- * That trade is exactly what eval/param-screen.mjs is for, once a reindexer can rebuild a collection per arm.
+ *          wherever that happens rather than anywhere structural.
+ *   low  — many tiny chunks. Two corpus-wide effects, both invisible per-entry: BM25's `avgdl` drops,
+ *          re-weighting length normalisation for every chunk in the book, and entry pooling takes the max
+ *          over an entry's chunks, so inflating chunk count hands long entries more chances at a high max
+ *          (R25).
  *
  * @param {string} content Entry content
  * @param {object} opts Chunking settings (pass `settings()` — the field names match)
@@ -141,16 +124,14 @@ export function chunkEntry(content, { chunkMode, chunkSize, minChunkSize }) {
             chunks.push(merged);
         } else {
             const parts = splitRecursive(merged, maxLength, ['\n', '. ', ' ', '']);
-            // THE FLOOR APPLIES TO SPLIT FRAGMENTS TOO. splitRecursive packs greedily from the left, so
-            // every run it emits ends in whatever did not fit — on a real collection that leaked
-            // sub-floor chunks, including bare `---` rules (R25). Those get embedded, they enter the
-            // corpus mean every centred cosine subtracts, they count toward BM25's document total, and a
-            // tiny chunk's direction is arbitrary enough to win an entry's max-pool against anything.
+            // The floor applies to split fragments too: splitRecursive packs greedily from the left, so
+            // every run it emits ends in whatever did not fit, which leaks sub-floor chunks (R25). Those
+            // enter the corpus mean every centred cosine subtracts, count toward BM25's document total,
+            // and are arbitrary enough in direction to win an entry's max-pool.
             //
             // The tail carries into `pending` rather than being glued on here, because that is the
-            // faithful join: the tail ENDS a paragraph, so the text following it in the source is a
-            // blank line and the next paragraph — exactly what the loop's `\n\n` merge reconstructs.
-            // Re-joining fragments here would have to guess which delimiter split them.
+            // faithful join: the tail ends a paragraph, so what follows it in the source is a blank line
+            // and the next paragraph — what the loop's `\n\n` merge reconstructs.
             const tail = parts[parts.length - 1];
             if (parts.length > 1 && tail.length < minChunkSize) {
                 parts.pop();

@@ -4,7 +4,7 @@
 // means the copy drifted from source and needs a redeploy. Pure and isomorphic.
 
 /** Every deployed plugin file as [source name in plugin/, deployed name], in fingerprint order.
- * The single manifest: deploy-plugin.mjs copies these, and both fingerprint sides hash them in THIS
+ * The single manifest: deploy-plugin.mjs copies these, and both fingerprint sides hash them in this
  * order — adding or reordering a plugin file is one edit here, nowhere else. */
 export const PLUGIN_FILES = [
     ['scoring.mjs', 'scoring.mjs'],

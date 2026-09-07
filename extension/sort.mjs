@@ -7,14 +7,8 @@
 /**
  * An entry's display name: its comment, or `UID n`.
  *
- * NOT its keys. Falling back to a joined key list read as a title the author had written, when in fact
- * they had written no title — and it duplicated, in the title line, the very chips sitting underneath
- * it. On an entry with many keys it also ran the header off the end of the pane. "UID 12" is honest
- * about there being no name, which is the thing the reader actually needs to know.
- *
- * Costs the title sort a little: comment-less entries now sort as "UID 12" vs "UID 3", which
- * localeCompare orders lexically rather than numerically. They previously sorted by key text, which
- * was more meaningful but only because it was pretending to be a title.
+ * Never its keys: a joined key list reads as a title the author wrote when they wrote none, and
+ * duplicates the chips sitting underneath it. "UID 12" is honest about there being no name.
  */
 export const wiTitleOf = e => (e.comment && e.comment.trim()) ? e.comment.trim() : `UID ${e.uid}`;
 
@@ -22,19 +16,17 @@ export const wiTitleOf = e => (e.comment && e.comment.trim()) ? e.comment.trim()
  * Presentation order for the two grading tables (/wa-grade, /wa-super-grade): gradeable rows first, then
  * persisting stickies, then constants — and inside each block, best first.
  *
- * NOT CAPTURE ORDER, and that is the point. onScanDone hoists stickies and constants to the front of
- * `ranked` in AUTHORED order so the budget walk is a prefix cut (selection.mjs), which hands the always-on
- * rows `#` 0,1,2 and would otherwise head the grading list for a structural reason rather than a relevance
- * one — the opposite of grading the strongest candidates while attention is freshest.
+ * Not capture order: the budget walk hoists stickies and constants to the front in authored order, which
+ * would head the grading list for a structural reason rather than a relevance one.
  *
- * `rank` is the caller's because the two graders have different orderings available. /wa-grade covers ONE
- * arm, so its fused `score` is meaningful and sorts descending. A /wa-super-grade union spans arms whose
- * fused scores were computed under different parameters and are therefore not comparable at all; it sorts
- * on `bestRank`, ordinal and the only cross-arm quantity that means the same thing in every row.
+ * `rank` is the caller's because the two graders have different orderings available. /wa-grade covers one
+ * arm, so its fused `score` is meaningful and sorts descending; a /wa-super-grade union spans arms whose
+ * fused scores are not comparable, so it sorts on `bestRank`, the only cross-arm quantity that means the
+ * same thing in every row.
  *
- * Returns `{row, i}` pairs carrying the ORIGINAL index, because every `data-i` in those tables indexes
- * back into the capture-ordered rows and entries arrays. Sorting the rows alone would silently
- * misattribute every grade.
+ * Returns `{row, i}` pairs carrying the original index, because every `data-i` in those tables indexes
+ * back into the capture-ordered rows and entries arrays; sorting the rows alone would misattribute
+ * every grade.
  *
  * @param {object[]} rows Candidate rows, in capture order
  * @param {(row: object) => number} rank Within-block ordering, ascending
@@ -48,9 +40,9 @@ export const gradeOrder = (rows, rank) => (rows ?? [])
     .sort((a, b) => (GRADE_BLOCK_ORDER[a.row.block] ?? 0) - (GRADE_BLOCK_ORDER[b.row.block] ?? 0) || rank(a.row) - rank(b.row));
 
 // Tier definitions for the explorer's tiered grouping (/wa-studio). `test` is a pure entry predicate; the
-// order the user arranges the tiers in IS the precedence order — an entry falls into the first ENABLED
-// tier it matches (so a constant+sticky entry lands in Constant when Constant precedes Sticky). The active-
-// type tiers guard on !disable so disabled entries sink to the Disabled tier wherever it sits in the list.
+// order the user arranges the tiers in is the precedence order — an entry falls into the first enabled
+// tier it matches. The active-type tiers guard on !disable so disabled entries sink to the Disabled tier
+// wherever it sits in the list.
 export const TIER_DEFS = {
     constant: { label: 'Constant', test: e => !e.disable && e.constant },
     sticky:   { label: 'Sticky',   test: e => !e.disable && Number(e.sticky) > 0 },
@@ -65,9 +57,9 @@ export const reconcileTiers = cfg => {
     for (const id of DEFAULT_TIER_ORDER) if (!out.some(t => t.id === id)) out.push({ id, on: true });
     return out;
 };
-// Tier rank of an entry under a config: index of the first ENABLED tier it matches (order = precedence);
+// Tier rank of an entry under a config: index of the first enabled tier it matches (order = precedence);
 // entries matching nothing fall to a bucket after them all. Shared by the Studio display and the prompt
-// insertion order. (Verified in scratchpad/tier_test.mjs.)
+// insertion order.
 export const tierRank = (e, cfg) => {
     let rank = 0;
     for (const t of cfg) { if (!t.on) continue; if (TIER_DEFS[t.id].test(e)) return rank; rank++; }
@@ -75,20 +67,18 @@ export const tierRank = (e, cfg) => {
 };
 
 // --- Shared sort vocabulary --------------------------------------------------------------------------
-// Pure entry-field comparators, reused by the Lorebook Studio (display order) AND the prompt builder
+// Pure entry-field comparators, reused by the Lorebook Studio (display order) and the prompt builder
 // (insertion order). Parity with core's #world_info_sort_order set; each tie-breaks like core (secondary
-// = order desc, tertiary = uid asc). Deviations, both improvements: Title sorts comment-less entries to
-// one end rather than scattering them; Trigger% treats unset probability as 100 (always-fires) not core's null→0.
+// = order desc, tertiary = uid asc). Two deviations: Title sorts comment-less entries to one end rather
+// than scattering them, and Trigger% treats unset probability as 100 rather than core's null→0.
 const sortPrio = e => e.disable ? 2 : e.constant ? 0 : 1;   // constant → normal → disabled
 const sortSec = (a, b) => (Number(b.order) || 0) - (Number(a.order) || 0);
 const sortTer = (a, b) => a.uid - b.uid;
 const sortWith = primary => (a, b) => primary(a, b) || sortSec(a, b) || sortTer(a, b);
 const numAsc = f => (a, b) => (Number(a[f]) || 0) - (Number(b[f]) || 0);
 /**
- * The SORT key for a title, which is not the DISPLAY name. An untitled entry displays as "UID 12" —
- * honest — but sorting on that string files it among the U-words, scattered through the middle of the
- * list. Sorting on the empty comment instead puts every untitled entry at one end: first ascending,
- * last descending, since "" collates before everything.
+ * The sort key for a title, which is not the display name: sorting on "UID 12" would file an untitled
+ * entry among the U-words, where sorting on the empty comment puts every untitled entry at one end.
  */
 const titleKey = e => (e.comment ?? '').trim();
 
@@ -131,7 +121,6 @@ export const normPresentation = k => PRESENTATION_ALIAS[k] ?? k ?? 'order-asc';
 // Human label for a presentation-order key (base sort only; relevance keys keep their own names).
 export const presentationBaseLabel = k => SORT_LABELS[normPresentation(k)] ?? { 'best-first': 'Most relevant first', 'best-last': 'Most relevant last' }[k] ?? k;
 // Combined label (base + tiered prefix) for the renumber dialog's "current sort order" line. Takes the
-// settings rather than importing them: this one convenience was the module's only tie to state.mjs, and
-// through it to ST — which cost the whole file its node-importability, and eval/ any coverage of the
-// comparators. Settings are injected by the caller here as everywhere else.
+// settings rather than importing them, like everything else here: importing state.mjs would cost the
+// whole file its node-importability, and eval/ any coverage of the comparators.
 export const presentationLabel = s => (s.presentationTiered ? 'Tiered · ' : '') + presentationBaseLabel(s.presentationOrder);
