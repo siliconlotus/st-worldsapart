@@ -54,7 +54,7 @@ problem here came from a new claim, none from a deletion.
   can be opened in the Studio. That is the point of it: faults have shipped behind a green suite
   because every other check calls the classifier directly, one layer below what the UI uses. Symlinks
   rather than copies, so editing the fixture changes what the UI shows.
-- everything else (`*-grid.mjs`, `param-screen`, `keyword-audit`, `relevance-eval`, `summary-center`) —
+- everything else (`*-grid.mjs`, `param-screen`, `keyword-audit`, `relevance-regress`) —
   benchmark and analysis tools that need a vector index and/or lorebook path as an argument. Run bare they
   print a usage line and exit non-zero; that is not a test failure.
 
