@@ -7,24 +7,17 @@ const MODULE_NAME = 'worldsApart';
 export const defaultSettings = {
     enabled: true,
     /**
-     * CHARACTERS per chunk — not tokens. Entries are chunked for MATCHING only; the whole entry is still
+     * Characters per chunk — not tokens. Entries are chunked for matching only; the whole entry is still
      * inserted.
      *
-     * IT SITS ABOVE THE PARAGRAPH DISTRIBUTION, which is the point: paragraph mode exists to make the
-     * paragraph the unit, and the old 800 cap fired on the body of that distribution — the mean paragraph
-     * was longer than it. 1750 is the corpus's p90 paragraph length, so the cap fires on the tail (R24).
-     *
-     * NOT A CAPACITY LIMIT: the longest paragraph in the corpus sits well inside what the embedder
-     * accepts, so nothing here ever truncated (R24).
-     *
-     * MEASURED ~FLAT across ceilings, and moved on that basis rather than on a gain (R24).
-     *
-     * CHANGING IT RE-EMBEDS EVERY COLLECTION, since the chunk text and therefore every hash changes.
+     * It sits above the paragraph distribution: 1750 is the corpus's p90 paragraph length, so the cap
+     * fires on the tail (R24). Not a capacity limit — nothing here has ever truncated (R24). Measured
+     * ~flat across ceilings (R24). Changing it re-embeds every collection, since every hash changes.
      */
     chunkSize: 1750,
     /** 'paragraph' keeps semantic boundaries; 'length' fills to chunkSize (chunking.mjs splitRecursive). */
     chunkMode: 'paragraph',
-        // WA's SHARED LLM connection. The ✨ keyword suggester (keyword-tools.mjs generateText) is its
+    // WA's shared LLM connection. The ✨ keyword suggester (keyword-tools.mjs generateText) is its
     // only reader.
     /**
      * Connection Manager profile id for WA's own generation calls. Empty = the current API.
@@ -35,144 +28,100 @@ export const defaultSettings = {
     /**
      * Temperature for those calls. Blank sends none and lets the backend decide.
      *
-     * The only sampling control WA has: the profile's preset normally holds these, and
-     * generateText always bypasses it (see keyword-tools.mjs). Needs a profile — generateRaw takes
-     * no generation parameters, so the no-profile path ignores it.
+     * The only sampling control WA has: generateText always bypasses the profile's preset (see
+     * keyword-tools.mjs). Needs a profile — generateRaw takes no generation parameters, so the
+     * no-profile path ignores it. 1.0 is not a measured optimum; nonzero because the Studio invites
+     * a second ✨ click and at 0 a local model returns the identical list forever, and explicit
+     * rather than blank so the behaviour does not depend on which backend the profile points at.
      *
-     * 1.0 because that is roughly where instruction tuning assumes sampling happens, not because
-     * it measured better: temperature showed no effect on suggestion quality on any model tried.
-     * Nonzero rather than 0 for one concrete reason — the Studio invites the user to click ✨ again,
-     * and at 0 a local model returns the identical list forever. Explicit rather than blank so the
-     * behaviour does not depend on which backend the profile points at.
-     *
-     * EXPECT IT TO BE IGNORED, increasingly. Hosted reasoning models sample their own reasoning
-     * under provider settings that no client parameter reaches, so neither temperature nor seed
-     * pins their output. Treat this as a request, not a control, and treat reproducible output as
-     * something only a local model can offer (there, a seed pins it at any temperature).
-     *
-     * What it cannot do at any value is restrict output to terms present in the entry: it rescales
-     * logits before the softmax (p_i ∝ exp(z_i/T)), reshaping a distribution over the whole
-     * vocabulary without reordering it or removing support. Only constrained decoding could, and
-     * that is unwanted — buildKeyPrompt asks for the paraphrase that is NOT in the text on purpose
-     * (the realizability rule: presence confirms, absence does not
-     * disqualify).
+     * Treat it as a request, not a control: hosted reasoning models sample under provider settings
+     * no client parameter reaches, so reproducible output is something only a local model offers.
+     * At no value does it restrict output to terms present in the entry — it rescales logits without
+     * removing support, and only constrained decoding could, which is unwanted: buildKeyPrompt asks
+     * for the paraphrase that is not in the text (the realizability rule).
      */
     llmTemperature: '1',
     /** Paragraphs shorter than this are joined with the next one, so stray lines don't become chunks. */
     minChunkSize: 120,
     /**
-     * Use the Worlds Apart server plugin's mean-centered search when it is loaded.
-     * Centering removes the direction every chunk in a single-story corpus shares,
-     * which is what compresses similarities into a narrow band. Scores come out much
-     * lower in absolute terms.
-     * Internal, and shipped on. The gate in queryCollections is the PLUGIN's presence, not this — it
-     * used to be both, which made this flag inert (the only way to reach the plugin was with it on, so
-     * the `centered` sent to the plugin was always true) and made turning it off cost every score rather
-     * than buy uncentered ones, since ST's own endpoint returns hashes and metadata with the score
-     * already discarded. The plugin has always taken it as a parameter; now it is actually passed one.
+     * Use the Worlds Apart server plugin's mean-centered search. Centering removes the direction every
+     * chunk in a single-story corpus shares, which is what compresses similarities into a narrow band;
+     * scores come out much lower in absolute terms. Internal, and shipped on.
+     *
+     * The gate in queryCollections is the PLUGIN's presence, not this flag — this is passed to the
+     * plugin as a parameter, so turning it off buys uncentered scores rather than none.
      */
     meanCentered: true,
-    // Removed: baselineQuery/baselineWeight (subtract a hand-crafted "shared background" query's cosine
-    // scores). Measured harmful at every weight (R12). It was a worse, redundant hand-rolled version of
-    // mean-centering (meanCentered), which subtracts the real corpus mean vector and measurably helps (R12).
+    // Do not propose back: baselineQuery/baselineWeight (subtracting a hand-crafted "shared background"
+    // query's cosine) measured harmful at every weight, and mean-centering subtracts the real corpus
+    // mean vector and measurably helps (R12).
     /**
-     * The E[credit] a MEMORY entry must clear at stage 4. One value for every embedding model, and the
+     * The E[credit] a memory entry must clear at stage 4. One value for every embedding model, and the
      * user's to set.
      *
-     * IT IS A BUDGET DIAL, NOT A MODEL SETTING. `E[credit]` is calibrated, so how many entries clear a
-     * given value is a property of the CORPUS rather than the embedder — every fitted model delivers
-     * nearly the same count at the same cutoff (E4). The model moves WHICH entries clear the bar, not how
-     * many — so a per-model cutoff would be seven names for one number, and picking a model would
-     * silently change the budget.
+     * It is a budget dial, not a model setting: `E[credit]` is calibrated, so every fitted model delivers
+     * nearly the same count at the same cutoff (E4) — the model moves which entries clear the bar, not how
+     * many. So it stays one setting, the precision-for-recall trade being the user's call.
      *
-     * That is why it is a setting: it is the precision-for-recall trade, which is the user's call, and
-     * choosing an embedding model is then only a question of how much recall that budget buys.
+     * The usable range is roughly 0.05 to 0.35; past there the dial stops trading and loses both (E5).
+     * The default sits at the recall-favouring end, matching F2.
      *
-     * The usable range is roughly 0.05 to 0.35 — precision plateaus partway up, for every model, and past
-     * there the dial stops trading and loses both (E5). The default sits at the recall-favouring end
-     * deliberately, matching F2.
-     *
-     * The `cutoff` a fit carries in relevance-model-<tier>.json is that MODEL's own F2 optimum, kept as
+     * The `cutoff` a fit carries in relevance-model-<tier>.json is that model's own F2 optimum, kept as
      * provenance and never read at runtime. Reference is not cut at all (onScanDone).
      */
     relevanceCutoff: 0.10,
     /**
-     * Cap on VECTOR entries in the final selection — stage 5, inside applyBudget, nested as
+     * Cap on vector entries in the final selection — stage 5, inside applyBudget, nested as
      * vector ⊆ dynamic ⊆ all. At most this many vector entries are added to the layout during the walk;
-     * it does not decide what activates. Stage 1 admits every vectorized entry up to a fixed ceiling
-     * (plugin/scoring.mjs admitCeiling) and makes no relevance decision at all.
+     * it does not decide what activates.
      *
-     * IT IS THE KEYWORD-TO-VECTOR RATIO KNOB, and the guard against runaway retrieval suppressing the
-     * keyword population entirely. Vector results are numerous and arrive already ranked, so a walk that
-     * simply fills until the budget is gone hands the whole prompt to them and a keyword entry never
-     * gets in — which is what ST core does, having no such cap. Capping the vector side is what leaves
-     * room for the entries an author keyed by hand.
+     * It is the keyword-to-vector ratio knob: vector results are numerous and arrive already ranked, so
+     * without it a walk that fills until the budget is gone hands the whole prompt to them and a keyword
+     * entry never gets in. It is also an input-token cost the user is choosing, so keep it generous —
+     * the tighter it is set the more it does a relevance job it has no signal for, cutting by rank
+     * position with no view of the gap it cuts across.
      *
-     * IT IS ALSO AN INPUT-TOKEN COST the user is choosing, not a ranker protection: how much of their
-     * context window World Info may occupy on the retrieval side. So it is deliberately GENEROUS — the
-     * tighter it is set, the more it is doing a relevance job it has no signal for, since it cuts by rank
-     * position and knows nothing about the gap it cuts across.
-     *
-     * It and the token budget are the only things bounding the dynamic block once stage 4's relevance
-     * cut has run, and neither of them judges an entry (selection.mjs).
-     *
-     * The failure it does not guard against: a prompt can be well within every cap and still dilute the
-     * model's attention across too much material. No metric here sees that — the layout score reads the
-     * SET, not what the model did with it.
-     *
-     * Counted off the `vectorized` flag, because the cap is about what an entry IS. It read retrieval
-     * provenance before — a stage-1 framing from when this WAS the count retrieval cut to, carried onto
-     * a stage-5 cap. The two now differ only for an entry the wrong-book gate zeroed.
-     *
-     * THE VALUE IS A JUDGEMENT, NOT A MEASUREMENT: 20 is where a deliberately generous cap was put.
-     * Nothing grades stage 4 yet, so no measurement chose it and none endorses any other value either.
+     * Counted off the `vectorized` flag, because the cap is about what an entry is, not how it was
+     * retrieved. The value is a judgement, not a measurement: nothing grades stage 4 yet.
      */
     maxVectorEntries: 20,
     /**
-     * Filter raw-text queries down to entity-ish terms before lexical scoring:
-     * keep capitalised tokens and anything in the lorebook's own vocabulary, drop
-     * the rest. A real win, but far smaller than the old note claimed, and it lands
-     * on top-of-list quality rather than mean target rank (R19). Ignored in summary mode.
+     * Filter raw-text queries down to entity-ish terms before lexical scoring: keep capitalised tokens
+     * and anything in the lorebook's own vocabulary, drop the rest. A small win, landing on
+     * top-of-list quality rather than mean target rank (R19). Ignored in summary mode.
      */
     entityFilter: true,
     /** Weight multiplier for capitalised query tokens under the entity filter. */
     properNounBoost: 3,
     /**
-     * Corpus-derived stoplist: drop query terms appearing in more than this fraction
-     * of chunks. 0 disables. Beats a fixed English stoplist because it also removes
-     * the recurring cast — on a real lorebook it strips "kyle" and "jeffrey" alongside
-     * "the" and "and", and no generic list would. 0.25 benchmarked as matching the
-     * LLM summary with no model call (R27).
+     * Corpus-derived stoplist: drop query terms appearing in more than this fraction of chunks.
+     * 0 disables. Beats a fixed English stoplist because it also removes the recurring cast, which no
+     * generic list would. 0.25 benchmarked as matching the LLM summary with no model call (R27).
      */
     stopwordDocFreq: 0.25,
     /**
-     * How many recent chat messages WA looks at — one depth shared by both the retrieval
-     * query (the text embedded / BM25'd, or summarized in summary mode) and the keyword
-     * scan window. A per-entry scanDepth still overrides the keyword window (as in core).
+     * How many recent chat messages WA looks at — one depth shared by both the retrieval query and the
+     * keyword scan window. A per-entry scanDepth still overrides the keyword window (as in core).
      *
-     * 10 sits mid-plateau on the measured dose-response: quality climbs monotonically up to
-     * 10, is flat to 15, and dips slightly at 20 — over-widening dilutes the query (R13).
-     * Cost is query length.
+     * 10 sits mid-plateau on the measured dose-response, which dips past 15 as over-widening dilutes
+     * the query (R13). Cost is query length.
      */
     messageDepth: 10,
     /**
-     * Tag names whose elements are REMOVED — tag and content — from every message before WA reads it.
-     * Comma-separated; empty is off. Applies to the retrieval query and the keyword scan window alike,
-     * since a state-tracking block distorts the embedded query exactly as it over-fires keys.
+     * Tag names whose elements are removed — tag and content — from every message before WA reads it.
+     * Comma-separated; empty is off. Applies to the retrieval query and the keyword scan window alike.
      *
      * Off by default and never inferred: the same chat renders letters and screens as markup too, and
-     * that is scene text. Only the author knows which of their blocks is bookkeeping (matcher.mjs
-     * `dropTags`).
+     * that is scene text. Only the author knows which block is bookkeeping (matcher.mjs `dropTags`).
      */
     dropChatTags: '',
     /**
      * How surviving entries are laid out in the prompt: any of `SORT_FNS`' keys (sort.mjs), plus
      * 'best-first' | 'best-last'.
      *
-     * Ranking answers WHICH entries survive; this answers where they go, and the two
-     * are not the same question. For a lorebook of scene summaries, authored `order`
-     * carries chronology — laying them out by relevance instead makes the model read
-     * scene 181 before 176 whenever 181 matched the query better.
+     * Prompt order, not layout order: ranking answers which entries survive, this answers where they
+     * go. For a lorebook of scene summaries, authored `order` carries chronology, which laying them
+     * out by relevance destroys.
      */
     presentationOrder: 'order-asc',
     /** Group insertion order into tiers (constant → sticky → …) before the base sort. Off = flat. */
@@ -180,30 +129,24 @@ export const defaultSettings = {
     /**
      * Hide memory entries that summarise messages which have not happened yet at this point in the chat.
      *
-     * INERT AT THE LATEST TURN, where nothing post-dates it. It bites when you BRANCH BACK: the book
-     * still holds every summary written later, so without this WA ranks descriptions of events the
-     * character has not lived through — a spoiler rather than a ranking error. On a real branched
-     * capture, post-dated candidates were about half the pool and some cleared the relevance cut (F28).
-     *
-     * A SETTING RATHER THAN A RULE, because the two readings are both legitimate: replaying a branch as
-     * it was played wants them gone, and using an old branch as a writing surface for a story you have
-     * already told may want them.
+     * Inert at the latest turn; it bites when you branch back, where the book still holds every summary
+     * written later and ranking them is a spoiler rather than a ranking error (F28). A setting rather
+     * than a rule, because using an old branch as a writing surface for a story already told may want
+     * them.
      *
      * `STMB_end` is the boundary (relevance.mjs `postDates`), and an entry with no range reads as
      * available — right for a reference sheet, silently inert on a memory entry that lost the field.
      */
     dropUnavailable: true,
     /**
-     * The unit a key has to match WITHIN — `scan` | `message` | `paragraph`.
+     * The unit a key has to match within — `scan` | `message` | `paragraph`.
      *
-     * A conjunction over the whole window matches terms a dozen messages apart, and the same
-     * blindness silently vetoes on a negation five messages back. `scan` is the pre-setting
-     * behaviour (one segment) and reproduces it exactly; core has no equivalent, so anything
-     * narrower is a deliberate divergence from what core's selective logic does.
+     * A conjunction over the whole window matches terms a dozen messages apart, and vetoes on a
+     * negation five messages back. `scan` is one segment and is what core does, so anything narrower
+     * is a deliberate divergence from core's selective logic.
      *
-     * Paragraph by default because message is close to a no-op on real prose: most scanned text
-     * lives in messages of many paragraphs (R26 — one author's chats, so a default, not a finding
-     * about everyone).
+     * Paragraph by default because message is close to a no-op on real prose: most scanned text lives
+     * in messages of many paragraphs (R26 — one author's chats, so a default, not a general finding).
      */
     matchWindow: 'paragraph',
     /**
@@ -213,60 +156,46 @@ export const defaultSettings = {
      *   strict      ...plus hyphen and apostrophes             it does not
      *
      * Strict by default because the escapes are asymmetric: a `/regex/` key with `\b` recovers
-     * permissive behaviour for any ASCII key, and `\b` is what core's own boundary approximates,
-     * so one escape hatch returns both. From permissive there is no short form. Land in the mode
-     * that is cheap to leave.
+     * permissive behaviour for any ASCII key, and from permissive there is no short form.
      *
      * Read by matcher.mjs through setBoundaryMode() rather than as an argument — it is global by
      * construction, and threading it would touch every countKey caller for a value none of them vary.
      */
     wordBoundary: 'strict',
-    // WHO A TYPED GRADE IS SIGNED AS — a UUIDv4, generated once on first use and kept.
+    // Who a typed grade is signed as — a UUIDv4, generated once on first use and kept.
     //
-    // RANDOM RATHER THAN DESCRIPTIVE, because grades are meant to arrive from other users on their own
-    // books. A composed `<st-user>@<host>` cannot carry that: almost nobody changes `default-user`, and
-    // the browser sees only the address it dialled, which is `localhost` for everyone — so two
-    // contributors sign the same string and merge into one rater, silently and unrecoverably once pooled.
-    // Asking the server plugin for `os.hostname()` fixes the collision and buys a second problem, since a
-    // hostname is frequently a person's name and would ship in every shared document.
-    //
-    // Not a security boundary: a contributor can write any id they like whatever generates it, so the
-    // strength of the generator is not what protects a merge. Collision-by-accident is what it prevents.
+    // Random rather than composed from user and host: grades pool across contributors, and
+    // `default-user@localhost` is what nearly every install would sign, merging two raters into one
+    // unrecoverably. A real hostname would fix that and ship a person's name in every shared document.
+    // Not a security boundary — it prevents collision by accident, nothing more.
     raterId: '',
 
     /**
-     * BM25 term-frequency saturation, for the key scorer (matcher.mjs) and the CONTENT text scorer
+     * BM25 term-frequency saturation, for the key scorer (matcher.mjs) and the content text scorer
      * (content-lexical.mjs, in the browser). Roughly: how many distinct matching terms one
      * heavily-repeated term is worth. Higher = repetition counts for more.
      *
-     * NOT the plugin: stage 1 is cosine-only since the admission gate was cut, and server.js ignores
-     * this field if a client sends it. lexical.mjs moved out of plugin/ with that cut.
-     *
-     * For the key scorer this is the RATE only; repeatCurve below is the shape.
+     * Not the plugin: stage 1 is cosine-only and server.js ignores this field if a client sends it.
+     * For the key scorer this is the rate only; repeatCurve below is the shape.
      */
     bm25K1: 1.2,
     /**
-     * OCCURRENCES -> a key's contribution (matcher.mjs repeatCurveOf). k1 above is the RATE repeats
-     * accrue at; this is the SHAPE, and the two used to be one knob that could not express both.
+     * Occurrences -> a key's contribution (matcher.mjs repeatCurveOf). k1 above is the rate repeats
+     * accrue at; this is the shape.
      *
-     * 'bm25' is the classic tf term, `count/(count+k1)`: bounded by 1, so everything above a couple
-     * dozen occurrences is compressed into the top few percent of the range. 'presence-log' makes
-     * presence categorical — a matched key is worth its full weight — and lets only the n-1 repeats
-     * accrue, unbounded and ever more slowly.
+     * 'bm25' is the classic tf term, `count/(count+k1)`, bounded by 1 and so compressing high counts
+     * into the top few percent of the range. 'presence-log' makes presence categorical — a matched key
+     * is worth its full weight — and lets only the n-1 repeats accrue, unbounded and ever more slowly.
+     * Default because high counts are signal, not noise: a key absent from most of a book's scenes and
+     * dominant in one is the book's sharpest evidence about which scene it is, and the bounded curve
+     * stops discriminating exactly there (K8).
      *
-     * MEASURED, why the default moved. On books whose keys run to high counts, the bounded curve stops
-     * discriminating exactly there — a several-fold difference in evidence barely moves it. Those
-     * counts are not noise to be discounted: a key can be absent from most of a book's scenes and
-     * dominant in one, so the compressed range was the book's sharpest signal about which scene it
-     * is (K8). On a book that never reaches such counts the curves barely differ.
+     * No frequency discount accompanies this, deliberately: a ubiquitous key is an author declaration
+     * (keyword-audit.mjs exempts constant entries from the too-common flags on that ground), a badly
+     * chosen one is reported by the audit, and a broadly-firing entry whose content does not fit still
+     * ranks low on the other two fused signals.
      *
-     * NO FREQUENCY DISCOUNT accompanies this, deliberately. A ubiquitous key is an author declaration
-     * (keyword-audit.mjs already exempts constant entries from the too-common flags on that
-     * ground), a badly chosen one is reported by the audit where the author can act on it, and an
-     * entry whose key fires broadly but whose content does not fit still ranks low on the other two
-     * fused signals. Discounting here would be that same judgement taken a second time, silently.
-     *
-     * ACTIVATION IS UNAFFECTED: stage 2 counts hits, never the score (matcher.mjs), so this moves
+     * Activation is unaffected: stage 2 counts hits, never the score (matcher.mjs), so this moves
      * ranking only and can never admit or refuse an entry.
      */
     repeatCurve: 'presence-log',
@@ -280,16 +209,12 @@ export const defaultSettings = {
     /**
      * Token budget as a percentage of max prompt tokens. 0 = off.
      *
-     * Independent of maxTokens, and both apply — the tighter of the two wins, the same
-     * pairing ST uses for world_info_budget and world_info_budget_cap. A percentage
-     * scales when you switch models; an absolute value is a hard ceiling that doesn't.
+     * Independent of maxTokens, and both apply — the tighter of the two wins, the same pairing ST uses
+     * for world_info_budget and world_info_budget_cap.
      *
-     * On by default, unlike every other cap. Without it a single over-shared key (one
-     * trigger listed on most entries) activates the whole book and WA has nothing to cut
-     * with, so World Info crowds out the actual conversation. 40% leaves the majority of
-     * the context to chat while being generous enough that a normal scan never touches it.
-     * Only bites when WA has more entries than budget; 0 is no token cap, not a handover —
-     * core's own budget cannot act once onEntriesLoaded has marked every entry exempt.
+     * On by default, unlike every other cap: without it one over-shared key activates the whole book
+     * and World Info crowds out the conversation. 0 is no token cap, not a handover — core's own budget
+     * cannot act once onEntriesLoaded has marked every entry exempt.
      */
     maxTokensPercent: 40,
     /**
@@ -314,23 +239,16 @@ export const defaultSettings = {
     /**
      * Whether ignoreBudget entries spend maxTokens.
      *
-     * Off (default): they are free on every axis, which is what marking an entry
-     * "ignore budget" is for — the flag reads as "this is not subject to the budget",
-     * not "this is merely uncuttable". The cost is that maxTokens then bounds only the
-     * cuttable entries, so the World Info actually sent is exempt tokens PLUS the budget.
-     * On: they still can't be cut, but their tokens come off the top and squeeze what
-     * fits below, so maxTokens is an honest ceiling on the whole of World Info.
-     *
-     * Turn this on if a book has enough exempt entries to overrun the context on its own —
-     * maxTokensPercent can't guard against exempt entries while this is off.
+     * Off (default): they are free on every axis, so maxTokens bounds only the cuttable entries and
+     * what is sent is exempt tokens plus the budget. On: they still can't be cut, but their tokens come
+     * off the top, making maxTokens an honest ceiling on the whole of World Info. Turn it on if a book
+     * has enough exempt entries to overrun the context on its own.
      */
     maxTokensIncludesExempt: false,
     /**
-     * Cap on every activated entry. 0 = no cap. Constants and stickies are walked first
-     * and consume it, so a cap of 10 alongside 7 constants yields 10 entries, 3 dynamic.
-     *
-     * Leaving this at 0 is what guarantees an always-on entry is never dropped. The two
-     * caps are independent and both apply — set both to bound each population at once.
+     * Cap on every activated entry. 0 = no cap. Constants and stickies are walked first and consume it,
+     * so a cap of 10 alongside 7 constants yields 10 entries, 3 dynamic — leaving it at 0 is what
+     * guarantees an always-on entry is never dropped. Independent of maxDynamicEntries; both apply.
      */
     maxTotalEntries: 0,
     /**
@@ -348,10 +266,9 @@ export const defaultSettings = {
     worldPriorityMode: 'interleaved',
     /**
      * The ordered book list, keyed by a stable character/group id so two chats (or branches) of the
-     * same character share one order. There is no global list: a `worldPriority` array preceded this
-     * and was read once per key to seed it, and it is gone now that every key it could seed is seeded. Position is the tier (sequential);
-     * weight/offset/cap ride per book. The current chat's book is stored as the sentinel
-     * `'chat'` (resolved at runtime) so the order survives switching chats.
+     * same character share one order; there is no global list. Position is the tier (sequential);
+     * weight/offset/cap ride per book. The current chat's book is stored as the sentinel `'chat'`
+     * (resolved at runtime) so the order survives switching chats.
      * @type {Record<string, Array<{ world: string, weight: number, offset: number, cap: number }>>}
      */
     worldPriorityByChar: {},
@@ -360,10 +277,9 @@ export const defaultSettings = {
 };
 
 /**
- * Settings with no UI: measured-stable knobs internalized after tuning (the evidence lives in
- * eval/eval-data/measured-claims.md, under the IDs their comments cite). They stay in defaultSettings so every read site and the eval
- * harness keep working, but ensureSettings resets them each init — a knob removed from the panel
- * must not linger at a stale hand-tuned value the user can no longer see.
+ * Settings with no UI: measured-stable knobs internalized after tuning. They stay in defaultSettings so
+ * every read site and the eval harness keep working, but ensureSettings resets them each init — a knob
+ * removed from the panel must not linger at a stale hand-tuned value the user can no longer see.
  */
 const INTERNAL_KEYS = [
     'meanCentered', 'entityFilter', 'properNounBoost', 'stopwordDocFreq',
@@ -372,18 +288,16 @@ const INTERNAL_KEYS = [
 ];
 
 /**
- * ST'S SETTINGS STORE, BOUND RATHER THAN IMPORTED. This module holds the shipped value of every knob, so
- * the eval harness has to be able to read it — and importing `extension_settings` made that impossible,
- * which is why `chunkConfig` carried its own copy of chunkSize/chunkMode/minChunkSize and would have gone
- * on chunking at 1750 after production changed. Injecting the store is the same rule the pure modules
- * already follow (CLAUDE.md, *Pure vs ST-coupled*); this module was the one stating it and not obeying it.
+ * ST's settings store, bound rather than imported. This module holds the shipped value of every knob, so
+ * the eval harness has to read it under node — importing `extension_settings` would make that impossible
+ * and force harness-side copies of the defaults (CLAUDE.md, *Pure vs ST-coupled*).
  */
 let store = null;
 
 /** The live WA settings object (ST's `extension_settings[MODULE_NAME]`). */
 export function settings() {
-    // LOUD, because returning undefined here yields `settings().anything` as a TypeError somewhere far
-    // away, or worse a falsy read that looks like a user's choice.
+    // Loud: returning undefined yields a TypeError somewhere far away, or a falsy read that looks like
+    // a user's choice.
     if (!store) throw new Error('Worlds Apart: settings() read before ensureSettings() bound ST\'s store');
     return store[MODULE_NAME];
 }
@@ -399,8 +313,6 @@ export function ensureSettings(extensionSettings) {
 /**
  * Cross-module runtime state (mutable). Holder object so any module can read/write a live value —
  * ESM won't let an imported `let` be reassigned across module boundaries, but object props can.
- * The engine writes the last* / plugin* fields; the hooks write attachedWorlds/generationIsDryRun;
- * the debug commands toggle verboseRun/dryRunInProgress; the panel + debug read them back.
  */
 export const runState = {
     // Keyed `${world}.${uid}` — ST CORE'S format, which onScanDone receives and looks up here. Not a
