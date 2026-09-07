@@ -1,7 +1,16 @@
 # WorldsApart
 
-Only what isn't already in the file headers. Each module's header explains what it is and why; read it
-before changing it.
+Only what isn't already in the file headers. Each module's header says what it is; read it before
+changing it.
+
+## Code comments say what is not obvious, never why
+
+A comment is one of three things: what this is, when the name does not say it; what it does, when the
+code does not show it; or a likely misstep in editing it — the `??` that must not become `||`, the order
+a fixture must keep, the field core reads. Decisions, rationale and provenance are not comments: they
+live in the design docs and `measured-claims.md`, and a misstep warning may cite a claim ID as the
+pointer, in one line. A module header is at most two lines, a docblock one sentence plus the params
+whose shape is not obvious, an inline comment one line.
 
 `keyword-suggest-design.md` is the live, unsettled definition work for the rebuilt keyword suggester —
 what a good key is, what would count as success, and which of the books' own keys are not evidence.
