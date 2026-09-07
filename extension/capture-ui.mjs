@@ -5,21 +5,18 @@
 // rules. This file is the UI around it: the popups, the tables, the toastr validation, and the
 // provenance stamps a capture carries (rater, scene range, versions, chat identity).
 //
-// IT DRIVES THE PIPELINE RATHER THAN OWNING IT. Six entry points arrive in `host` because a capture has
+// IT DRIVES THE PIPELINE RATHER THAN OWNING IT. Seven entry points arrive in `host` because a capture has
 // to run a real scan and read the config it ran under; nothing here decides retrieval, scoring or
 // selection. The pipeline calls none of this back.
 
 import { getContext, extension_settings } from '../../../../extensions.js';
-import { getSortedEntries, loadWorldInfo, world_info_budget, world_info_budget_cap, world_info_case_sensitive, world_info_depth, world_info_include_names, world_info_match_whole_words } from '../../../../world-info.js';
+import { loadWorldInfo, world_info_budget, world_info_budget_cap, world_info_case_sensitive, world_info_depth, world_info_include_names, world_info_match_whole_words } from '../../../../world-info.js';
 import { Popup, POPUP_TYPE, POPUP_RESULT } from '../../../../popup.js';
 import { escapeHtml, getCharaFilename, getStringHash, download, uuidv4 } from '../../../../utils.js';
 import { getRequestHeaders, saveSettingsDebounced } from '../../../../../script.js';
 import { getTokenCountAsync } from '../../../../tokenizers.js';
 import { runState, settings } from './state.mjs';
 import * as matcher from './matcher.mjs';
-import * as query from './query.mjs';
-import * as layout from './layout.mjs';
-import * as selection from './selection.mjs';
 import { entryFoldHtml, keyHitsHtml, showEntryText, wiGlyph } from './ui-widgets.mjs';
 import { gradeOrder } from './sort.mjs';
 import { GRADE_ANCHORS, GRADE_SCALE, armNames, buildSample, bundleSamples, captureParams, gradeValue, isDurable, keyByUid, mergeGrades, openBundle, rowKey, sampleFile, sceneDiff, searchedBook, splitGraded, toCandidate, unionArms } from './grading.mjs';
@@ -27,12 +24,12 @@ import { GRADE_ANCHORS, GRADE_SCALE, armNames, buildSample, bundleSamples, captu
 /**
  * The pipeline entry points the capture flows drive, injected once at registration.
  *
- * SEVEN, AND THEY ALL POINT ONE WAY. A capture runs a real scan (`dryRun`, `retrieve`), records the
- * config it ran under (`paramSnapshot`, `vectorRequestBody`, `scopedPriority`) and names the book it
- * ran against (`chatBook`), and the budget it would have delivered under (`effectiveTokenBudget`).
- * Nothing in the pipeline reads this module.
- * @typedef {{chatBook: Function, dryRun: Function, effectiveTokenBudget: Function, paramSnapshot: Function,
- *            retrieve: Function, scopedPriority: Function, vectorRequestBody: Function}} CaptureHost
+ * SEVEN, AND THEY ALL POINT ONE WAY. A capture runs a real scan (`dryRun`) and, for /wa-versus, ST core's
+ * own selection beside it (`coreSelection`); records the config it ran under (`paramSnapshot`,
+ * `vectorRequestBody`, `scopedPriority`) and names the book it ran against (`chatBook`), and the budget it
+ * would have delivered under (`effectiveTokenBudget`). Nothing in the pipeline reads this module.
+ * @typedef {{chatBook: Function, coreSelection: Function, dryRun: Function, effectiveTokenBudget: Function,
+ *            paramSnapshot: Function, scopedPriority: Function, vectorRequestBody: Function}} CaptureHost
  */
 let host = null;
 
@@ -42,15 +39,22 @@ export function setCaptureHost(h) { host = h; }
 /** The grading scale in one caption line, shared by both grading popups. */
 const gradeAnchorLine = () => `Grade 0–4: ${GRADE_ANCHORS.map((a, g) => `${g} = ${a.split(';')[0].toLowerCase()}`).join(' · ')}.`;
 
+/** HTML-escaping for the grading tables, with null/undefined rendering blank rather than "undefined". */
+const esc = s => escapeHtml(String(s ?? ''));
+
 /**
- * Best-effort on-disk path of the current chat file, for a graded sample to record.
- *
- * Provenance, but load-bearing provenance: rebuilding the query at a different messageDepth is the one
- * sweep a frozen sample can't do from its own contents, and it needs the chat. Best-effort for the same
- * reason as vectorIndexPath — the browser can't see the data root or the user handle. Group chats live
- * under groupchats/ with no per-character folder.
- * @returns {string} Relative chat path
+ * ST's match flags, which captureParams takes injected because they are core globals rather than WA
+ * settings. A FUNCTION, not an object: the imports are live bindings, so each capture must read them as
+ * they stand when it runs.
+ * @returns {object} captureParams' `wi` argument
  */
+const stParams = () => ({
+    caseSensitive: world_info_case_sensitive,
+    wholeWords: world_info_match_whole_words,
+    includeNames: world_info_include_names,
+    allowWIScan: Boolean(extension_settings.note?.allowWIScan),
+});
+
 /**
  * The message span this capture covers, as CHAT FILE RECORD indices — what a scene id is composed from.
  *
@@ -139,6 +143,15 @@ function raterId() {
     return s.raterId;
 }
 
+/**
+ * Best-effort on-disk path of the current chat file, for a graded sample to record.
+ *
+ * Provenance, but load-bearing provenance: rebuilding the query at a different messageDepth is the one
+ * sweep a frozen sample can't do from its own contents, and it needs the chat. Best-effort for the same
+ * reason as vectorIndexPath — the browser can't see the data root or the user handle. Group chats live
+ * under groupchats/ with no per-character folder.
+ * @returns {string} Relative chat path
+ */
 function chatFilePath() {
     const ctx = getContext();
     if (!ctx.chatId) {
@@ -161,6 +174,58 @@ function chatFilePath() {
 function vectorIndexPath(world) {
     const body = host.vectorRequestBody();
     return `data/default-user/vectors/${body.source}/wa_${getStringHash(world)}/${body.model || 'default'}/index.json`;
+}
+
+/**
+ * Every attached book, keyed by uid — embedded whole into a sample, so a later lorebook edit can't move
+ * the numbers it recorded.
+ * @returns {Promise<object>} Book name -> uid -> entry
+ */
+async function loadBooks() {
+    const books = {};
+    for (const world of runState.attachedWorlds) {
+        const data = await loadWorldInfo(world);
+        if (data?.entries) books[world] = keyByUid(data.entries);
+    }
+    return books;
+}
+
+/** Resolves an entry out of an embedded book map — how the grading tables find text for a row. */
+const entryResolver = books => (world, uid) => Object.values(books[world] ?? {}).find(e => Number(e.uid) === Number(uid));
+
+/**
+ * The provenance stamps every capture writes, shared by all three writers: what code ran, what chat it ran
+ * against, which book the harness must load, and the books themselves.
+ *
+ * `rows` NAME THE PRIMARY BOOK. Taken from the ranking (see searchedBook), because the chat's bound book is
+ * an ST binding, not a statement about what was retrieved: a book with no entries never appears in
+ * attachedWorlds at all, so trusting it here keyed samples to a collection that doesn't exist. The chat book
+ * stays the fallback for a keyword-only scene, where nothing was retrieved. Per ARM rather than per capture,
+ * because a lexical-only arm can retrieve from a different book than the hybrid one — and the harness loads
+ * exactly one collection, so getting this wrong keys a sample to a collection that contributed nothing.
+ *
+ * `books` is passed in rather than loaded here: /wa-super-grade needs them before its grading popup opens
+ * and stamps one sample per arm afterwards, off the one load.
+ *
+ * @param {object[]} rows The arm's capture rows
+ * @param {object} books loadBooks() output
+ * @returns {Promise<object>} The shared half of a buildSample call
+ */
+async function sceneCommon(rows, books) {
+    const primaryBook = searchedBook(rows) ?? host.chatBook() ?? Object.keys(books)[0] ?? '';
+    return {
+        pluginFP: runState.pluginFP,
+        sourceFP: runState.sourceFP,
+        waVersion: waVersion(),
+        stVersion: await stVersion(),
+        chat: chatFilePath(),
+        book: primaryBook ? `data/default-user/worlds/${primaryBook}.json` : '',
+        index: primaryBook ? vectorIndexPath(primaryBook) : '',
+        primaryBook,
+        embedModel: host.vectorRequestBody().model || '',
+        books,
+        priority: (host.scopedPriority() ?? []).map(x => x.cfg),
+    };
 }
 
 export async function versusCore(named) {
@@ -270,11 +335,7 @@ export async function versusCore(named) {
  * @param {boolean} viaVectors Whether Vector Storage's WI route was on for core
  */
 async function versusBundle(union, coreKeys, waKeys, viaVectors) {
-    const books = {};
-    for (const world of runState.attachedWorlds) {
-        const data = await loadWorldInfo(world);
-        if (data?.entries) books[world] = keyByUid(data.entries);
-    }
+    const books = await loadBooks();
 
     // WA's arm IS the /wa-grade capture, untouched — same rows, same cut flags, same signals.
     const waRows = runState.lastCandidates;
@@ -301,7 +362,6 @@ async function versusBundle(union, coreKeys, waKeys, viaVectors) {
         };
     });
 
-    const primaryBook = searchedBook(waRows) ?? host.chatBook() ?? Object.keys(books)[0] ?? '';
     const common = {
         query: runState.lastQuery,
         queryChat: runState.lastQueryChat,
@@ -309,36 +369,20 @@ async function versusBundle(union, coreKeys, waKeys, viaVectors) {
         injects: runState.lastInjects,
         sources: matcher.usedMatchSources(runState.lastSources, Object.values(books).flatMap(b => Object.values(b))),
         depth: settings().messageDepth,
-        pluginFP: runState.pluginFP,
-        sourceFP: runState.sourceFP,
-        waVersion: waVersion(),
-        stVersion: await stVersion(),
-        chat: chatFilePath(),
-        book: primaryBook ? `data/default-user/worlds/${primaryBook}.json` : '',
-        index: primaryBook ? vectorIndexPath(primaryBook) : '',
-        primaryBook,
-        embedModel: host.vectorRequestBody().model || '',
+        ...await sceneCommon(waRows, books),
         snapshot: host.paramSnapshot(),
-        books,
-        priority: (host.scopedPriority() ?? []).map(x => x.cfg),
         grades: [],
         cutoff: { live: { maxVectorEntries: settings().maxVectorEntries } },
         now: new Date().toISOString(),
     };
-    const stParams = {
-        caseSensitive: world_info_case_sensitive,
-        wholeWords: world_info_match_whole_words,
-        includeNames: world_info_include_names,
-        allowWIScan: Boolean(extension_settings.note?.allowWIScan),
-    };
 
     const arms = [
-        { arm: 'wa', rows: waRows, params: captureParams(settings(), stParams) },
+        { arm: 'wa', rows: waRows, params: captureParams(settings(), stParams()) },
         // WHAT MADE THIS ARM DIFFERENT, in its params and nowhere else: core's own budget percentage and
         // scan depth, and whether Vector Storage's World Info route ran. A reader comparing the two arms
         // reads these rather than inferring from the arm's name.
         { arm: viaVectors ? 'core+vectors' : 'core', rows: coreRows, params: {
-            ...captureParams(settings(), stParams),
+            ...captureParams(settings(), stParams()),
             selector: 'st-core',
             coreBudgetPercent: Number(world_info_budget) || 25,
             coreBudgetCap: Number(world_info_budget_cap) || 0,
@@ -468,11 +512,10 @@ function fillReadZeros(root) {
  * persist-on-trigger, so relevance never chose them and grading them would drag nDCG down for entries the
  * ranking isn't responsible for.
  *
- * @param {object} named Named args: name, books (full|meta|none), notes
+ * @param {object} named Named args: name, candidates, notes
  * @returns {Promise<string>} Empty string — output is a downloaded file
  */
 export async function gradeScene(named) {
-
 
     // Cap the dynamic rows at the depth asked for. Nothing cuts the population for relevance any more, at
     // either stage, so this is purely a grading budget: without it a capture pools the whole admitted set.
@@ -496,7 +539,7 @@ export async function gradeScene(named) {
         return '';
     }
 
-    // host.retrieve() records the query as soon as it builds one, whatever retrieval then scores — so an
+    // The pipeline's retrieve() records the query as soon as it builds one, whatever retrieval then scores — so an
     // empty lastQuery here means no query text could be built at all (macro-empty messages), and the
     // sample really would be unrunnable. Keyword-only scenes pass: rows from the scan, query frozen.
     if (!runState.lastQuery) {
@@ -521,7 +564,6 @@ export async function gradeScene(named) {
     // scaffolding and dropped them out of the pool.
     const gradeable = rows.map((row, i) => ({ row, entry: entries[i], i })).filter(x => !isDurable(x.row));
     const scaffold = rows.length - gradeable.length;
-    const esc = s => escapeHtml(String(s ?? ''));
 
     const wrap = document.createElement('div');
     wrap.innerHTML = '<h3 style="margin:0 0 0.25em;">Grade this scene</h3>'
@@ -586,20 +628,7 @@ export async function gradeScene(named) {
             return { title: row.title, grade: Number(input.value), book: row.book, uid: row.uid };
         });
 
-    // Every attached book, at the requested fidelity — so a later lorebook edit can't move the numbers.
-    const books = {};
-    for (const world of runState.attachedWorlds) {
-        const data = await loadWorldInfo(world);
-        if (data?.entries) {
-            books[world] = keyByUid(data.entries);
-        }
-    }
-
-    // Which collection the harness must load. Taken from the ranking (see searchedBook), because the chat's
-    // bound book is an ST binding, not a statement about what was retrieved: a book with no entries never
-    // appears in attachedWorlds at all, so trusting it here keyed samples to a collection that doesn't
-    // exist. The chat book stays the fallback for a keyword-only scene, where nothing was retrieved.
-    const primaryBook = searchedBook(rows) ?? host.chatBook() ?? Object.keys(books)[0] ?? '';
+    const books = await loadBooks();
     const sample = buildSample({
         name: named?.name || defaultSampleName(),
         notes: named?.notes,
@@ -610,25 +639,10 @@ export async function gradeScene(named) {
         // Only the card/persona fields an entry's `matchXxx` actually pulls in — see usedMatchSources.
         sources: matcher.usedMatchSources(runState.lastSources, Object.values(books).flatMap(b => Object.values(b))),
         depth: settings().messageDepth,
-        pluginFP: runState.pluginFP,
-        sourceFP: runState.sourceFP,
-        waVersion: waVersion(),
-        stVersion: await stVersion(),
-        chat: chatFilePath(),
-        book: primaryBook ? `data/default-user/worlds/${primaryBook}.json` : '',
-        index: primaryBook ? vectorIndexPath(primaryBook) : '',
-        primaryBook,
-        embedModel: host.vectorRequestBody().model || '',
-        params: captureParams(settings(), {
-            caseSensitive: world_info_case_sensitive,
-            wholeWords: world_info_match_whole_words,
-            includeNames: world_info_include_names,
-            allowWIScan: Boolean(extension_settings.note?.allowWIScan),
-        }),
+        ...await sceneCommon(rows, books),
+        params: captureParams(settings(), stParams()),
         snapshot: host.paramSnapshot(),
         candidates: rows,
-        books,
-        priority: (host.scopedPriority() ?? []).map(x => x.cfg),
         grades,
         // Kept under its historical name so samples on disk stay readable; it now records only the
         // grading depth, the cliff it also described having been removed.
@@ -697,7 +711,8 @@ export const POOL_ARMS = {
  *
  * ponytail: the override is live across awaits, so a real generation firing mid-capture would use the arm's
  * settings. Acceptable for a dev eval command driven by hand; the fix if it ever bites is a per-run settings
- * object threaded through host.retrieve(), which is a much larger change than this feature justifies.
+ * object threaded through the pipeline's retrieve(), which is a much larger change than this feature
+ * justifies.
  *
  * @param {object} overrides Settings to force for this run
  * @param {number} wanted Candidate depth (the cliff is dropped and the dynamic rows capped, as /wa-grade does)
@@ -721,12 +736,7 @@ async function captureArm(overrides, wanted) {
             injects: runState.lastInjects,
             sources: runState.lastSources,
             depth: s.messageDepth,
-            params: captureParams(s, {
-                caseSensitive: world_info_case_sensitive,
-                wholeWords: world_info_match_whole_words,
-                includeNames: world_info_include_names,
-                allowWIScan: Boolean(extension_settings.note?.allowWIScan),
-            }),
+            params: captureParams(s, stParams()),
             snapshot: host.paramSnapshot(),
             // This arm's own cap, which the grading depth overrode.
             live: { maxVectorEntries: s.maxVectorEntries },
@@ -738,32 +748,6 @@ async function captureArm(overrides, wanted) {
 }
 
 /**
- * Captures several arms, unions what they surfaced, and grades only what no earlier round has judged.
- *
- * WHY NOT JUST RUN /wa-grade N TIMES. Two reasons, and the second is the load-bearing one. The arms overlap
- * heavily, so N separate gradings re-judge the same entries N times. And more importantly a pool assembled
- * from one configuration systematically penalises every configuration far from it (see POOL_ARMS), so the
- * defaults review the pool is meant to support cannot be run against it.
- *
- * Round 2 onwards, load the previous round's samples into the file picker: those grades are subtracted, so
- * only genuinely new entries need a human, and the written samples carry the accumulated grade set. That is
- * what lets the arm list grow without the grading cost growing with it.
- *
- * Writes ONE SAMPLE PER ARM, each with its own `params`, its own candidate rows and its own recorded
- * cutoff — a merged row would carry one arm's signals under another's parameters. They share only the grades.
- *
- * Books default to 'full' despite N samples meaning N copies. 'meta' is lossless for how the harness scores
- * TODAY and far smaller (G10), which made it the obvious default — until the samples started being things other
- * people send you. A sample is only re-scorable by someone who has the vector index, and nobody but the
- * author does; what makes a third-party dump usable is REBUILDING the index from the sample, which needs
- * entry content (plus the chunk params in paramSnapshot and the recorded embedModel, both already carried).
- * 'meta' drops content and so permanently forecloses that. Size is recoverable later; a dump captured at
- * 'meta' is not.
- *
- * @param {object} named Named args: name, books, candidates, arms, notes
- * @returns {Promise<string>} Empty string — output is downloaded files
- */
-/**
  * The super-grade grading popup, extracted so /wa-super-grade (live captures) and /wa-super-eval (a graded
  * file, no chat required) share one shell: query blocks, prior loading, the editable union table, and the
  * merged-grade result. Callers own what happens to the grades afterwards.
@@ -772,14 +756,13 @@ async function captureArm(overrides, wanted) {
  * @param {Array<{arm: string, rows: object[], entries: object[], query: string, depth?: number|string}>} args.captures Per-arm captures
  * @param {{rows: object[], entries: object[]}} args.union unionArms() output over those captures
  * @param {(world: string, uid: number) => object|undefined} args.entryOf Entry resolver for the text viewer
- * @param {object[]} [args.prior] Pre-loaded prior grades (pre-filled, editable)
  * @param {string} [args.subtitle] Extra context line under the title (escaped here)
  * @param {string} [args.okButton] Confirm-button label
- * @returns {Promise<{grades: object[], prior: object[]}|null>} Merged grades, or null on cancel
+ * @returns {Promise<{grades: object[]}|null>} Merged grades, or null on cancel
  */
-async function superGradePopup({ captures, union, entryOf, prior: prior0 = [], subtitle = '', okButton = 'Save samples', sections = null }) {
-    const esc = s => escapeHtml(String(s ?? ''));
-    let prior = [...prior0];
+async function superGradePopup({ captures, union, entryOf, subtitle = '', okButton = 'Save samples', sections = null }) {
+    // Grades from earlier rounds. Empty until the file picker below loads some — no caller pre-supplies them.
+    let prior = [];
 
     // ONE SECTION OR MANY, through one shell. `sections` is /wa-super-eval reviewing N bundles at once;
     // without it this is the single-scene path exactly as before, expressed as a one-element list so
@@ -789,7 +772,7 @@ async function superGradePopup({ captures, union, entryOf, prior: prior0 = [], s
     // is what lets wireFolds, gradeOrder and the row renderer stay untouched — a per-section index would
     // collide the moment the same entry appears against two scenes, which is routine in a review set
     // (G10). Section membership rides on the row instead, for the collector.
-    const secs = sections ?? [{ captures, union, entryOf, prior: prior0 }];
+    const secs = sections ?? [{ captures, union, entryOf, prior }];
     const multi = Boolean(sections);
     const flat = [];
     for (let s = 0; s < secs.length; s++) {
@@ -856,7 +839,7 @@ async function superGradePopup({ captures, union, entryOf, prior: prior0 = [], s
         // them silently means re-judging everything the last round already covered.
         + (multi ? '' : '<div style="margin:0.6em 0;display:flex;align-items:center;gap:0.6em;flex-wrap:wrap;">'
         + '<div class="menu_button wa-sg-pick" style="width:auto;padding:0.3em 0.8em;">Load earlier samples / pool requests…</div>'
-        + `<small class="wa-sg-loaded" style="opacity:0.7;">${prior0.length ? `${prior0.length} grade(s) pre-loaded, shown in the table` : 'nothing loaded — grading everything from scratch'}</small>`
+        + '<small class="wa-sg-loaded" style="opacity:0.7;">nothing loaded — grading everything from scratch</small>'
         + '<input type="file" class="wa-sg-prior" accept=".json,application/json" multiple style="display:none;">'
         + '</div>'
         + '<small style="display:block;opacity:0.6;margin-bottom:0.5em;">Earlier rounds\' samples: their grades are subtracted so you only judge what is new. Pool requests from eval/pool-extend.mjs: their entries are added.</small>');
@@ -1055,13 +1038,36 @@ async function superGradePopup({ captures, union, entryOf, prior: prior0 = [], s
             edited: edited.length,
         };
     }
-    return { grades: mergeGrades(prior, edited.map(e => e.g), who), prior };
+    return { grades: mergeGrades(prior, edited.map(e => e.g), who) };
 }
 
+/**
+ * Captures several arms, unions what they surfaced, and grades only what no earlier round has judged.
+ *
+ * WHY NOT JUST RUN /wa-grade N TIMES. Two reasons, and the second is the load-bearing one. The arms overlap
+ * heavily, so N separate gradings re-judge the same entries N times. And more importantly a pool assembled
+ * from one configuration systematically penalises every configuration far from it (see POOL_ARMS), so the
+ * defaults review the pool is meant to support cannot be run against it.
+ *
+ * Round 2 onwards, load the previous round's samples into the file picker: those grades are subtracted, so
+ * only genuinely new entries need a human, and the written samples carry the accumulated grade set. That is
+ * what lets the arm list grow without the grading cost growing with it.
+ *
+ * Writes ONE SAMPLE PER ARM, each with its own `params`, its own candidate rows and its own recorded
+ * cutoff — a merged row would carry one arm's signals under another's parameters. They share only the grades.
+ *
+ * Books are embedded WHOLE despite N samples meaning N copies. Metadata alone is lossless for how the harness
+ * scores TODAY and far smaller (G10), which made it the obvious default — until the samples started being
+ * things other people send you. A sample is only re-scorable by someone who has the vector index, and nobody
+ * but the author does; what makes a third-party dump usable is REBUILDING the index from the sample, which
+ * needs entry content (plus the chunk params in paramSnapshot and the recorded embedModel, both already
+ * carried). Dropping content permanently forecloses that. Size is recoverable later; a dump captured without
+ * content is not.
+ *
+ * @param {object} named Named args: name, candidates, arms, notes
+ * @returns {Promise<string>} Empty string — output is a downloaded file
+ */
 export async function superGradeScene(named) {
-    // Sharable dumps need content to be re-indexable by anyone but their author (see above), so a downgrade
-    // is allowed but never silent.
-
     const wanted = Math.max(1, Number(named?.candidates ?? 30));
     const picked = String(named?.arms ?? '').trim()
         ? String(named.arms).split(/[,\s]+/).filter(Boolean)
@@ -1106,30 +1112,18 @@ export async function superGradeScene(named) {
 
     // Loaded BEFORE the popup, not after: an offline pool request names entries no arm surfaced, so the
     // grading table has to resolve them from the book to show their text.
-    const books = {};
-    for (const world of runState.attachedWorlds) {
-        const data = await loadWorldInfo(world);
-        if (data?.entries) {
-            books[world] = keyByUid(data.entries);
-        }
-    }
-    const entryOf = (world, uid) => Object.values(books[world] ?? {}).find(e => Number(e.uid) === Number(uid));
+    const books = await loadBooks();
+    const entryOf = entryResolver(books);
 
     const done = await superGradePopup({ captures, union, entryOf });
     if (!done) {
         return '';
     }
-    const { grades, prior } = done;
+    const { grades } = done;
 
     const base = named?.name || defaultSampleName();
-    const wav = waVersion();
-    const stv = await stVersion();
     const built = [];
     for (const cap of captures) {
-        // Per arm, because a lexical-only arm can retrieve from a different book than the hybrid one — and the
-        // harness loads exactly one collection, so getting this wrong keys a sample to a collection that
-        // contributed nothing.
-        const primaryBook = searchedBook(cap.rows) ?? host.chatBook() ?? Object.keys(books)[0] ?? '';
         const sample = buildSample({
             name: `${base}--${cap.arm}`,
             notes: named?.notes || `Arm "${cap.arm}" of a ${captures.length}-arm pooled grading (${captures.map(c => c.arm).join(', ')}); ${grades.length} grades pooled across arms and rounds.`,
@@ -1139,20 +1133,10 @@ export async function superGradeScene(named) {
             injects: cap.injects,
             sources: matcher.usedMatchSources(cap.sources, Object.values(books).flatMap(b => Object.values(b))),
             depth: cap.depth,
-            pluginFP: runState.pluginFP,
-            sourceFP: runState.sourceFP,
-            waVersion: wav,
-            stVersion: stv,
-            chat: chatFilePath(),
-            book: primaryBook ? `data/default-user/worlds/${primaryBook}.json` : '',
-            index: primaryBook ? vectorIndexPath(primaryBook) : '',
-            primaryBook,
-            embedModel: host.vectorRequestBody().model || '',
+            ...await sceneCommon(cap.rows, books),
             params: cap.params,
             snapshot: cap.snapshot,
             candidates: cap.rows,
-            books,
-            priority: (host.scopedPriority() ?? []).map(x => x.cfg),
             grades,
             cutoff: {
                 live: cap.live,
@@ -1256,8 +1240,7 @@ export async function superEvalScene() {
             toastr.warning(`${fileName} is not a graded scene — skipped`, 'Worlds Apart');
             continue;
         }
-        const books = manifest.books ?? {};
-        const entryOf = (world, uid) => Object.values(books[world] ?? {}).find(e => Number(e.uid) === Number(uid));
+        const entryOf = entryResolver(manifest.books ?? {});
         const captures = arms.map((a, i) => ({
             arm: names[i] ?? manifest.name ?? 'capture',
             rows: a.candidates ?? [],
