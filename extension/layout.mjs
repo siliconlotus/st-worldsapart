@@ -1,82 +1,45 @@
-// layout.mjs — stage 3's product: the layout order. Classifies every activated row into the four blocks
-// the budget walks (constant, armed sticky, promoted, dynamic) and orders each one.
-//
-// Position means something here, which is why this is an order and not merely a list: stage 5 takes a
-// prefix of it, so a row's place decides whether it survives the caps. Whether a row belongs is stage 4
-// (selection.mjs); what fits is stage 5 (delivery.mjs). This file judges neither — it only arranges.
-//
-// Every input is a parameter. The signals are already on the rows, and everything else arrives as plain
-// data: the caller resolves ST's chat-sentinel book names and reads the settings, so this runs under
-// node against literal rows (eval/layout-check.mjs).
+// layout.mjs — stage 3's product: the layout order. Classifies activated rows into the four blocks the
+// budget walks and orders each. Pure: settings and resolved book names arrive as parameters
+// (eval/layout-check.mjs).
 import { SORT_FNS, normPresentation, reconcileTiers, tierRank } from './sort.mjs';
 
-/**
- * The quantity the layout is ordered by: stage 4's `E[credit]`.
- *
- * An unscored row sorts below every scored one rather than beside them at 0: a missing score means the
- * model file did not load or the row is not in a fitted tier, which is not the claim "predicted
- * irrelevant" — and authored order is what remains to order those by.
- */
+/** Stage 4's E[credit]; an unscored row sorts below every scored one, then by authored order. */
 export const layoutScore = it => (Number.isFinite(it.eCredit) ? it.eCredit : -1);
 
 /**
- * The three blocks the budget walks, each ordered.
+ * The four blocks the budget walks, each ordered. Classification is by what an entry is: a constant
+ * that also matched keywords is a constant. Durable blocks sort by authored order alone; promoted takes
+ * the dynamic comparator, since the declaration says the row belongs, not where it sits. `sequential`
+ * makes book tier the primary key; `interleaved` scales the score by book weight.
  *
- * Classification is by what an entry is, not by how it got here: a constant that also matched keywords
- * is a durable row, not a retrieval result. Constants and armed stickies are in the prompt by intent, so
- * they are ordered by authored order alone and never by relevance.
- *
- * Promoted is a fourth block, and being a block is the whole mechanism: stage 4 cuts the dynamic list,
- * so a row outside it is exempt without selection.mjs knowing promotion exists. It sits behind both
- * durable blocks and ahead of dynamic, and takes the dynamic block's comparator — the declaration says
- * the row belongs, not where in the queue it sits.
- *
- * The dynamic block's order is the priority mode's. `sequential` makes book tier the primary key, so a
- * lower book only gets the slots higher books leave; `interleaved` scales the layout score by each
- * book's weight, so a strong entry in a low book can outrank a weak one in a high book. Both fall back
- * to authored order, which is what keeps ties deterministic.
- *
- * @param {object[]} items Activated rows, each `{ entry, eCredit? }`
- * @param {object} cfg
- * @param {(entry: object) => boolean} cfg.isArmedSticky Whether ST's timed effect is armed for this entry
- * @param {(entry: object) => boolean} [cfg.isPromoted] Whether the author declared activation sufficient
+ * @param {object[]} items Activated rows `{ entry, eCredit? }`
  * @param {Array<{name: string, weight?: number, offset?: number, cap?: number}>} cfg.priorityList
- *        Book priority in saved order, names ALREADY RESOLVED by the caller (the chat sentinel is ST's)
+ *        Saved order; names already resolved by the caller
  * @param {'sequential'|'interleaved'} cfg.priorityMode
- * @param {string} cfg.presentationOrder Insertion-order key, from the shared sort vocabulary
- * @param {boolean} cfg.presentationTiered Group by tier before the base order
- * @param {object} cfg.tierCfg Tier configuration, reconciled by the caller or here
  * @returns {{sticky: object[], constant: object[], promoted: object[], results: object[], compare: Function, bookTierOf: Function}}
  */
 export function layoutOrder(items, { isArmedSticky, isPromoted, priorityList = [], priorityMode, presentationOrder, presentationTiered = false, tierCfg }) {
     const sticky = [], constant = [], promoted = [], results = [];
     for (const item of items ?? []) {
-        // Durable first: a promoted constant is a constant, exempt from a cut it never reaches anyway.
+        // Durable first: a promoted constant is a constant.
         if (isArmedSticky?.(item.entry)) sticky.push(item);
         else if (item.entry?.constant) constant.push(item);
         else if (isPromoted?.(item.entry)) promoted.push(item);
         else results.push(item);
     }
 
-    // Books contributing rows to THIS scan. A book left over from another chat can neither occupy a
-    // tier nor shift the ones actually present, so the tier index is scoped to what is here.
+    // The tier index is scoped to the books in this scan.
     const scanWorlds = new Set(items?.map(it => it.entry?.world));
     const cfgByName = new Map(priorityList.filter(w => w?.name).map(w => [w.name, w]));
     const cfgOf = name => cfgByName.get(name) ?? { weight: 1, offset: 0, cap: 0 };
     const priorityOrder = [...cfgByName.keys()].filter(name => scanWorlds.has(name));
-    // The book's tier INDEX in the scan-scoped priority order — a rank, since a lower index outranks a
-    // higher one. Named apart from sort.mjs `tierRank`, which tiers an ENTRY, not a book.
     const bookTierOf = world => { const i = priorityOrder.indexOf(world); return i < 0 ? priorityOrder.length : i; };
 
-    // Interleaved mode's per-book offset rides on the authored order, so it threads through every
-    // comparator consistently. Sequential ignores the offset — it groups by book tier instead.
+    // Interleaved mode's per-book offset rides on authored order; sequential groups by tier instead.
     const orderOf = it => it.entry.waOriginalOrder + (priorityMode === 'sequential' ? 0 : (cfgOf(it.entry.world).offset ?? 0));
     const authored = (a, b) => orderOf(a) - orderOf(b);
 
-    // Insertion order draws from the shared sort vocabulary, same as the Studio. Order asc/desc keep the
-    // offset-aware `authored` rather than plain SORT_FNS['order-*']; relevance (best-first/last) reads
-    // the layout score; everything else adapts SORT_FNS over the entry, falling back to authored within
-    // equal keys so ties stay deterministic.
+    // Insertion order from the shared sort vocabulary; ties fall back to authored order.
     const orderKey = normPresentation(presentationOrder);
     const baseCompare =
         orderKey === 'order-asc' ? authored :
@@ -86,15 +49,12 @@ export function layoutOrder(items, { isArmedSticky, isPromoted, priorityList = [
         SORT_FNS[orderKey] ? (a, b) => SORT_FNS[orderKey](a.entry, b.entry) || authored(a, b) :
         authored;
 
-    // Optional tiered grouping: tier first, base order within. Disabled entries never activate, so that
-    // tier is inert here.
     const cfg = reconcileTiers(tierCfg);
     const compare = presentationTiered
         ? (a, b) => (tierRank(a.entry, cfg) - tierRank(b.entry, cfg)) || baseCompare(a, b)
         : baseCompare;
 
-    // One comparator for both scored blocks, or a promoted entry's place would depend on the exemption
-    // rather than on the entry.
+    // One comparator for both scored blocks, so a promoted row's place depends on the entry, not the exemption.
     const byRelevance = priorityMode === 'sequential'
         ? (a, b) => (bookTierOf(a.entry.world) - bookTierOf(b.entry.world)) || (layoutScore(b) - layoutScore(a)) || authored(a, b)
         : (a, b) => (layoutScore(b) * (cfgOf(b.entry.world).weight ?? 1) - layoutScore(a) * (cfgOf(a.entry.world).weight ?? 1)) || authored(a, b);
@@ -102,7 +62,5 @@ export function layoutOrder(items, { isArmedSticky, isPromoted, priorityList = [
     promoted.sort(byRelevance);
     sticky.sort(authored);
     constant.sort(authored);
-    // `compare` and `bookTierOf` ride out because the prompt order — the user's sort over whatever
-    // survived — is built from the same comparators after stage 5 has cut.
     return { sticky, constant, promoted, results, compare, bookTierOf };
 }
