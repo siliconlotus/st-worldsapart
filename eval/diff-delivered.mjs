@@ -1,16 +1,15 @@
 // diff-delivered.mjs — what two arms actually deliver differently, entry by entry.
 //
-// F2 says an arm is better; it never says WHICH entries changed hands, and a set-based score can improve
+// F2 says an arm is better; it never says which entries changed hands, and a set-based score can improve
 // while dropping something a reader would have wanted. This prints the two cuts against each other: the
 // rows one arm delivers and the other does not, split by grade, with each arm's score on the row and the
 // per-column values behind it.
 //
-// THE RELEVANT DROPS ARE THE POINT. An arm that trades recall for a smaller set pays in grade >= 3 rows,
-// and the paired F2 test cannot show you what they were. Those are listed individually; everything else is
-// counted. Reading them is how a trade the metric approves of gets vetoed on grounds the metric has no
-// access to — a scene's only entry about its subject is not interchangeable with a 0.
+// The relevant drops are the point. An arm that trades recall for a smaller set pays in grade >= 3 rows,
+// and the paired F2 test cannot show what they were, so those are listed individually and everything else
+// is counted — a scene's only entry about its subject is not interchangeable with a 0.
 //
-// EACH ARM AT ITS OWN BEST CUTOFF, as --cutoff reports them, so this is a diff of what SHIPS and not of two
+// Each arm at its own best cutoff, as --cutoff reports them, so this is a diff of what ships and not of two
 // rankings at one threshold.
 //
 // Usage (any cwd):
@@ -35,9 +34,9 @@ const byScene = x => new Map(x.scenes.map(sc => [sc.name, sc]));
 const [ma, mb] = [byScene(A), byScene(B)];
 const shared = [...ma.keys()].filter(n => mb.has(n) && (!ONLY || n.includes(ONLY)));
 
-// ALWAYS THE ARM'S FEATURE VALUES, never the baseline's: the baseline has no column for what the arm
-// added, so showing its row would print the diff without the two numbers that explain it. Scores are
-// always printed baseline -> arm regardless of which direction the row moved.
+// Always the arm's feature values, never the baseline's: the baseline has no column for what the arm
+// added, so showing its row would print the diff without the numbers that explain it. Scores are always
+// printed baseline -> arm regardless of which direction the row moved.
 const fmt = d => {
     const f = Object.entries(d.row.feats).map(([k, v]) => `${k} ${Number(v).toFixed(2)}`).join('  ');
     return `      g${d.row.g}${d.row.ungraded ? '?' : ' '} ${String(d.row.title).slice(0, 50).padEnd(50)} ${d.eBase.toFixed(3)} -> ${d.eArm.toFixed(3)}   ${f}`;
@@ -76,11 +75,11 @@ if (armOnly.length) {
     console.log();
 }
 
-// THE HAYSTACK, which is what makes a drop legible. A relevant row cut from a scene that still delivers
-// four others is redundancy; the same row cut from a scene that then has none is the failure the F2 mean
-// cannot show you, because one scene's collapse averages away against every scene that improved.
+// The haystack is what makes a drop legible: a relevant row cut from a scene that still delivers four
+// others is redundancy, the same row cut from a scene that then has none is a failure the F2 mean cannot
+// show, since one scene's collapse averages away against every scene that improved.
 //
-// UNGRADED IS ITS OWN COLUMN, never folded into g0. Those rows are scored 0 by the delivery convention
+// Ungraded is its own column, never folded into g0: those rows are scored 0 by the delivery convention
 // (scene.mjs) rather than judged 0, so counting them as irrelevant would report the pool's depth as the
 // arm's precision.
 const compose = (x) => {
@@ -119,9 +118,9 @@ for (const [title, rows] of [['DROPPED (delivered by the baseline, cut by the ar
     const relevant = rows.filter(d => d.row.g >= 3).sort((x, y) => y.row.g - x.row.g || y.eBase - x.eBase);
     if (!relevant.length) { console.log('    none at grade >= 3\n'); continue; }
     console.log(`    grade >= 3 (${relevant.length}), score under baseline -> under arm:`);
-    // GROUPED BY SCENE, with the scene's own text above its rows. Relevance is a property of the PAIR,
-    // so a list of titles is unreadable: the same entry is right in one scene and wrong in the next, and
-    // whether a drop was a mistake is a question about what the scene was ABOUT.
+    // Grouped by scene, with the scene's own text above its rows: relevance is a property of the pair, so
+    // a list of titles is unreadable — whether a drop was a mistake is a question about what the scene was
+    // about.
     const groups = new Map();
     for (const d of relevant) groups.set(d.name, [...(groups.get(d.name) ?? []), d]);
     let shown = 0;

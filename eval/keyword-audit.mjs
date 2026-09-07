@@ -1,25 +1,24 @@
-// Offline batch version of the Studio's keyword audit: audits EVERY entry's keys. Same classifier
+// Offline batch version of the Studio's keyword audit: audits every entry's keys. Same classifier
 // (keyword-audit buildKeyPruneScan / KEY_BOOK_COMMON), so this and the in-app audit never drift.
 //
-// Per key:  dfContent — entries whose CONTENT contains the key (firing commonness)
-//           bookListedBy — entries that LIST the key (shared-memory span; NOT a defect)
-// A key is prunable (*) when dead (dfContent 0, never findable) or too common (in >BOOK_COMMON of
-// entries — fires almost always, no discrimination). Shared triggers carry continuous memory of a
-// person/event, so they are never flagged.
+// Per key:  dfContent — entries whose content contains the key (firing commonness)
+//           bookListedBy — entries that list the key (shared-memory span; not a defect)
+// A key is prunable (*) when dead (dfContent 0, never findable) or too common (in >BOOK_COMMON of entries,
+// so it fires almost always and discriminates nothing). Shared triggers carry continuous memory of a
+// person or event, so they are never flagged.
 //
 // Usage:  node keyword-audit.mjs [path/to/index.json] [path/to/lorebook.json] [--json out.json]
 //
 // --json writes the flagged key strings as a flat array, which is what scene.mjs `dropKeys` takes: it
-// simulates the book edit this audit recommends WITHOUT editing the book, so a curation pass can be
-// scored before anyone spends days on it.
+// simulates the book edit this audit recommends without editing the book, so a curation pass can be scored
+// before anyone spends days on it.
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { isRegexKey } from '../extension/matcher.mjs';
 // The threshold has an authoritative home; a restated 0.50 here is how this and the in-app audit drift.
 import { KEY_BOOK_COMMON as BOOK_COMMON } from '../extension/keyword-audit.mjs';
 import { stInstall } from './scene.mjs';
 
-// The install is LOCATED, never named: an absolute path here is one machine's, and this file carried
-// another host's for long enough that both defaults were dead on this one (scene.mjs stInstall).
+// The install is located, never named: an absolute path here is one machine's (scene.mjs stInstall).
 const ST = stInstall();
 const JSON_OUT = (() => { const i = process.argv.indexOf('--json'); return i >= 0 ? process.argv[i + 1] : null; })();
 const positional = process.argv.slice(2).filter((a, i, xs) => !a.startsWith('--') && xs[i - 1] !== '--json');
@@ -84,7 +83,7 @@ for (const e of flaggedEntries) {
 }
 
 if (JSON_OUT) {
-    // DEDUPED BY EXACT STRING, because dropKeys matches exactly and the same key is listed by many
+    // Deduped by exact string, because dropKeys matches exactly and the same key is listed by many
     // entries — a shared trigger flagged once is flagged everywhere it appears.
     const keys = [...new Set(flaggedEntries.flatMap(e => e.marks.filter(m => m.prune).map(m => m.key)))];
     writeFileSync(JSON_OUT, JSON.stringify(keys, null, 1));

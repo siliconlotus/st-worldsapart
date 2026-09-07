@@ -1,32 +1,24 @@
 // Is temperature's only benefit just "more candidates", obtainable more cheaply by asking for more?
 //
-// The temperature ladder found no per-response quality effect on any model, and exactly one positive
-// result: the UNION across repeats reaches more of a book's own keys at T=1 than at T=0 (S1). But part of
-// that is arithmetic — at T=0 the repeats are identical, so the union IS the single response and any
-// departure from determinism necessarily grows it — and more draws mean more chances to hit the
-// reference set. So "temperature buys coverage" and "any source of extra candidates buys coverage"
-// are not distinguished by that result.
+// The temperature ladder found no per-response quality effect and exactly one positive result: the union
+// across repeats reaches more of a book's own keys at T=1 than at T=0 (S1). Part of that is arithmetic — at
+// T=0 the repeats are identical, so the union is the single response — so "temperature buys coverage" and
+// "any source of extra candidates buys coverage" are not distinguished by it.
 //
-// This distinguishes them. The prompt already governs yield: it says "Output 5 to 10 keywords", and
-// measured responses sit at the instruction, nowhere near the token budget (S1). So raising
-// the instruction is a second route to more candidates — one that costs ONE call instead of three
-// and stays deterministic at T=0.
+// The prompt already governs yield: it says "Output 5 to 10 keywords", and measured responses sit at the
+// instruction, nowhere near the token budget (S1). So raising the instruction is a second route to more
+// candidates, one call instead of three and deterministic at T=0.
 //
 //   base   T=0, "5 to 10"   x3   — deterministic; union == single response
 //   temp   T=1, "5 to 10"   x3   — the temperature route to more candidates
 //   count  T=0, "15 to 25"  x3   — the prompt route, one call, reproducible
 //
-// The comparison that matters is `temp` union against `count` SINGLE: if one deterministic call
-// matches three sampled ones, temperature is strictly dominated for this purpose — same coverage,
-// a third of the calls, and reproducible output a prompt change can be diffed against.
+// The comparison that matters is `temp` union against `count` single: if one deterministic call matches
+// three sampled ones, temperature is strictly dominated for this purpose.
 //
-// base and temp are read from temp-ladder-cache.json (the six prompts here are a subset of that
-// run's 24, so they are already paid for). Only `count` makes new calls.
-//
-// The count variant is produced by rewriting buildKeyPrompt's instruction line rather than by
-// parameterising the shipped function: this is an experiment, and the shipped prompt should not grow
-// a knob before there is a reason for one. If the finding lands, that is when the parameter earns
-// its place.
+// base and temp are read from temp-ladder-cache.json, so they are already paid for; only `count` makes new
+// calls. The count variant rewrites buildKeyPrompt's instruction line rather than parameterising the
+// shipped function — the shipped prompt should not grow a knob before a finding earns it one.
 //
 // Usage:  node count-vs-temp.mjs --model gemma3:4b [--count "15 to 25"] [--repeats 3]
 import { readFileSync, writeFileSync, existsSync } from 'node:fs';
@@ -69,9 +61,8 @@ const prompts = JSON.parse(readFileSync(`${HERE}eval-data/ladder-prompts-small.j
 const TEXT = Object.fromEntries(prompts.map(p => [p.id, p.prompt]));
 // The shipped instruction line, verbatim from buildKeyPrompt. Asserting it is present keeps this
 // from silently measuring an unmodified prompt if that wording ever changes.
-// SHIPPED is the anchor the variants are substituted over, so it must track buildKeyPrompt. It is
-// now the self-selecting wording; `range-5-10` is therefore a counterfactual arm rather than the
-// default. Substituted strings are unchanged either way, so the caches keyed on prompt hash survive.
+// `shipped` is the anchor the variants are substituted over, so it must track buildKeyPrompt — currently
+// the self-selecting wording, which makes `range-5-10` a counterfactual arm rather than the default.
 const COUNT_LINE = '- Output as many keywords as you are confident about,';
 const recount = p => {
     if (!p.includes(COUNT_LINE)) throw new Error('buildKeyPrompt instruction line not found — update COUNT_LINE');

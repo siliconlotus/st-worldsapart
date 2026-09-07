@@ -1,20 +1,16 @@
-// pool-extend.mjs — find the entries an OFFLINE arm would surface that nobody has graded, and ask for them.
+// pool-extend.mjs — find the entries an offline arm would surface that nobody has graded, and ask for them.
 //
-// WHY THIS EXISTS SEPARATELY FROM /wa-super-grade. That command widens the judged pool by capturing several
-// live configurations, which works for anything the extension can vary at query time. It cannot reach the
-// chunk settings: changing chunkSize or minChunkSize changes what gets EMBEDDED, so covering them live would
-// mean re-vectorizing the lorebook mid-capture, twice per arm, against the user's real collection.
+// Separate from /wa-super-grade, which widens the judged pool by capturing several live configurations and
+// so cannot reach the chunk settings: changing chunkSize or minChunkSize changes what gets embedded, which
+// would mean re-vectorizing the lorebook mid-capture against the user's real collection. So every chunk arm
+// in param-screen.mjs is scored against a pool collected under one chunking, and any entry a different
+// chunking surfaces counts as irrelevant because nobody looked at it — a downward bias that grows with
+// distance from the live settings, which is the region the sweep exists to explore (H9).
 //
-// So every chunk arm in param-screen.mjs is scored against a pool collected under ONE chunking, and any entry
-// a different chunking surfaces counts as irrelevant because nobody looked at it. That biases chunk arms
-// downward, systematically, and the bias grows with distance from the live settings — which is precisely the
-// region the sweep exists to explore. Measured, every chunk cell was a lower bound (H9).
-//
-// The fix is the same iterative pooling loop, driven by rebuilt indexes instead of live captures: score each
-// dose offline, take the top-k it would actually deploy, union across doses, subtract what is already judged,
-// and emit the remainder as a grading request. /wa-super-grade's file picker accepts the emitted file and
-// folds those entries into its table, so they get graded alongside the live arms and land in the same
-// accumulated grade set. Re-run this afterwards and the list should be empty.
+// The fix is the same iterative pooling loop driven by rebuilt indexes: score each dose offline, take the
+// top-k it would deploy, union across doses, subtract what is already judged, and emit the remainder as a
+// grading request. /wa-super-grade's file picker accepts the emitted file and folds those entries into its
+// table. Re-run this afterwards and the list should be empty.
 //
 // Usage (from SillyTavern root):
 //   node .../pool-extend.mjs <sample.json> [more.json ...] [--arms chunkSize=200,chunkSize=400] [--k 10]
@@ -40,9 +36,9 @@ const CHUNK_ARMS = {
     'chunkMode=length': { chunkMode: 'length' },
 };
 
-// NO QUERY-TIME ARMS. The KEYW/LEXW set here described the RRF fusion, which no longer exists — nothing
-// reads either param, so those arms could only ever surface the baseline's own rows. Chunk arms are what
-// live pooling cannot reach, and they are the whole of this tool's default set.
+// No query-time arms: the KEYW/LEXW set described the RRF fusion, which no longer exists, so those arms
+// could only ever surface the baseline's own rows. Chunk arms are what live pooling cannot reach, and they
+// are the whole of this tool's default set.
 
 if (!samples.length) {
     console.error('need at least one sample: node pool-extend.mjs <sample.json> [more.json ...] [--arms a,b] [--k 10] [--out-dir <dir>] [--dry]');
@@ -54,12 +50,11 @@ const unknown = picked.filter(a => !CHUNK_ARMS[a]);
 if (unknown.length) { console.error(`unknown arm(s): ${unknown.join(', ')} — known: ${Object.keys(CHUNK_ARMS).join(', ')}`); process.exit(2); }
 
 const K = Number(arg(argv, '--k') ?? 10);
-// THE MODEL IS A SPEC, resolved once (reindex.mjs resolveModel). The LABEL names collections and bases;
-// the rest says how to call the model, including the task prefix a prefix-trained family needs. A bare
-// name is an ollama model.
-// FALLS BACK TO THE BUNDLE'S OWN MODEL, not to a hardcoded name. A bundle records the model its
-// collections are keyed under, and hardcoding one meant a corpus that had moved on still resolved the old
-// collections — which exist, so nothing errored, it just quietly measured the previous model (H3).
+// The model is a spec, resolved once (reindex.mjs resolveModel): the label names collections and bases, the
+// rest says how to call the model, including the task prefix a prefix-trained family needs. A bare name is
+// an ollama model. Falls back to the bundle's own model, never a hardcoded name — a hardcoded one resolves
+// collections that exist for a corpus that has moved on, so nothing errors and the previous model is
+// quietly measured (H3).
 const MODEL = process.env.WA_EMBED_MODEL ?? openSample(samples[0], arg(argv, '--arm')).embedModel;
 if (!MODEL) { console.error(`${samples[0]} records no embedModel — set WA_EMBED_MODEL`); process.exit(2); }
 const EM = resolveModel(MODEL);
@@ -71,15 +66,15 @@ const DRY = argv.includes('--dry');
     for (const path of samples) {
         const S = openSample(path, arg(argv, '--arm'));
         if (!Object.keys(S.books?.[S.primaryBook] ?? {}).length) { console.error(`${path}: no embedded entries for "${S.primaryBook}" — a bundle that does not embed its books is malformed`); continue; }
-        // `all` FROM THE SCENE'S OWN PARAMS, which default it on: a denseAllEntries scene cannot be
-        // scored against a vectorized-only build, so resolving without it named a file loadScene refused.
+        // `all` from the scene's own params, which default it on: a denseAllEntries scene cannot be scored
+        // against a vectorized-only build.
         const P = sceneParams(S);
         const scene = loadScene(S, { indexFile: indexPath(S, { model: EM.label, all: P.denseAllEntries }), indexOpts: { model: EM.label }, params: P });
         const qv = await embed(EM.query + S.query, { ollama: OLLAMA, model: EM.model, label: EM.label, endpoint: EM.endpoint, url: EM.endpoint === 'ollama' ? OLLAMA : EM.url });
 
         // (book, uid) -> { title, doses[], bestRank }. Keyed the way a grade is keyed — every attached book
-        // is ranked, and two books number their uids from 0, so a bare-uid map merges two entries into one
-        // pending row. The title is carried for the human and is NOT the identity (titles get edited).
+        // is ranked and two books number their uids from 0, so a bare-uid map merges two entries into one
+        // pending row. The title is carried for the human and is not the identity.
         const wanted = new Map();
         const note = (rows, arm) => {
             for (const r of rows) {
@@ -97,7 +92,7 @@ const DRY = argv.includes('--dry');
         note(base.unjudgedRows, 'baseline');
 
         for (const arm of picked) {
-            // Every arm here changes what gets EMBEDDED, so each needs its own collection.
+            // Every arm here changes what gets embedded, so each needs its own collection.
             const r = await scoreScene({ sample: S, overrides: {}, k: K, model: MODEL, ollama: OLLAMA, qv,
                 index: (await ensureIndex(S, { overrides: CHUNK_ARMS[arm], model: EM.model, label: EM.label, endpoint: EM.endpoint, url: EM.endpoint === 'ollama' ? OLLAMA : EM.url, ollama: OLLAMA, log: () => {} })).path });
             note(r.unjudgedRows, arm);

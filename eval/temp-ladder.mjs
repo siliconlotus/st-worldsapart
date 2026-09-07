@@ -1,28 +1,22 @@
 // Does sampling temperature change what the ✨ LLM keyword suggester proposes, and how?
 //
-// The temperature setting (state.mjs llmTemperature) carries an ASSERTION, not a measurement — the
-// claim that "low values suit this job" was inherited from the withdrawn query summarizer, where a
-// stable query genuinely mattered. The suggester is a different job: it feeds a candidate set to the
-// Zipf/df gates and a human review, so recall is the generator's half and precision is the filter's,
-// and breadth may be worth more there than stability. This harness is what turns that into a number.
+// The temperature setting (state.mjs llmTemperature) carries an assertion, not a measurement: the claim
+// that low values suit this job was inherited from the withdrawn query summarizer, where a stable query
+// mattered. The suggester feeds a candidate set to the Zipf/df gates and a human review, so recall is the
+// generator's half and precision the filter's, and breadth may be worth more there than stability.
 //
-// WHAT IS AND IS NOT MEASURABLE HERE. Agreement with a book's existing keys is a RELATIVE measure
-// across arms and nothing more. Per eval-data/README.md, curation is evidence about PRECISION and
-// never about recall: the audit flags decided which keys got examined, so a curated book says
-// nothing about keys the flags never surfaced. A candidate absent from the book may be a bad key or
-// a good one nobody considered, and this cannot tell them apart. What it CAN do is hold the
-// reference fixed while temperature moves, which is the param-screen logic the repo already uses —
-// the bias is constant across the ladder, so the DIRECTION of a change is interpretable even though
-// the absolute level is not a quality score.
+// What is and is not measurable here: agreement with a book's existing keys is a relative measure across
+// arms and nothing more. Curation is evidence about precision and never about recall (eval-data/README.md),
+// so a candidate absent from the book may be a bad key or a good one nobody considered. What this can do is
+// hold the reference fixed while temperature moves — the bias is constant across the ladder, so the
+// direction of a change is interpretable even though the absolute level is not a quality score. The three
+// books are the ones whose provenance supports even that much; uncurated books are output, not judgement,
+// and are deliberately excluded.
 //
-// The three books are the ones whose provenance supports even that much: Foxbridge is hand-written,
-// Sommers and Time Whore are manually curated. Uncurated books are output, not judgement, and are
-// deliberately excluded.
-//
-// SHIPPED CODE, NOT A REIMPLEMENTATION. The prompt is buildKeyPrompt, the parse is parseKeyList, the
+// Shipped code, not a reimplementation: the prompt is buildKeyPrompt, the parse is parseKeyList, the
 // avoid-list and canonicaliser come from buildKeySuggest, attestation goes through countKey, and the
-// options are STUDIO_SUGGEST_OPTS — all the real thing, so a prompt or gate change moves this too.
-// Only the transport is local (keyword-tools.mjs generateText imports ST and cannot load in node).
+// options are STUDIO_SUGGEST_OPTS, so a prompt or gate change moves this too. Only the transport is local
+// (keyword-tools.mjs generateText imports ST and cannot load in node).
 //
 // Usage:
 //   node temp-ladder.mjs --dump-prompts prompts.json          # exact prompts, for cross-model parity
@@ -99,15 +93,11 @@ function prepBook([slug, file, provenance], nEntries) {
  * num_predict 400 mirrors llmKeyCandidates' hardcoded responseLength, so the ladder is measuring the
  * budget production actually gives the model.
  *
- * `think: false` is REQUIRED, not a tuning choice. gemma4:e4b is a thinking model: at 400 tokens it
- * spent the entire budget reasoning and returned `done_reason: length` with an EMPTY response on
- * every prompt — a silent zero that scores as "the model proposed nothing" rather
- * than as a failure (H6). Disabling thinking fixes it and is also several times faster on the same
- * prompt. A no-op for non-thinking models like gemma3:4b, so setting it uniformly
- * keeps the arms comparable.
- *
- * This is a real defect in the shipped path too, not just here — see the report; the extension has
- * no equivalent escape, and its 400-token cap makes every thinking model return nothing.
+ * `think: false` is required, not a tuning choice: a thinking model spends the whole budget reasoning and
+ * returns `done_reason: length` with an empty response, a silent zero that scores as "the model proposed
+ * nothing" rather than as a failure (H6). A no-op for non-thinking models, so setting it uniformly keeps
+ * the arms comparable. The shipped path has no equivalent escape, and its 400-token cap makes every
+ * thinking model return nothing.
  */
 async function askOllama(model, prompt, temperature) {
     const r = await fetch(`${OLLAMA}/api/generate`, {
@@ -134,11 +124,10 @@ const jaccard = (a, b) => {
 /**
  * Per-arm statistics over one book's entries.
  *
- * `agree*` compare against the book's own keys and are relative-only (see the header). `stability`
- * is the mean pairwise Jaccard between repeats of the same entry at the same rung, which is the one
- * metric here with no reference-bias caveat at all — it asks only whether the generator repeats
- * itself. `grounded` is the set-level predicate: does ANY candidate occur in
- * the entry text, i.e. is the set anchored to the entry rather than invented wholesale.
+ * `agree*` compare against the book's own keys and are relative-only (see the header). `stability` is the
+ * mean pairwise Jaccard between repeats of the same entry at the same rung — the one metric here with no
+ * reference-bias caveat, since it asks only whether the generator repeats itself. `grounded` is the
+ * set-level predicate: does any candidate occur in the entry text.
  */
 function scoreArm(book, runs) {
     const canon = book.canon;
@@ -148,13 +137,10 @@ function scoreArm(book, runs) {
         if (!reps.length) continue;
         const refs = new Set(e.keys.map(canon).filter(Boolean));
 
-        // UNION ACROSS REPEATS — the breadth measure, and the production-relevant one. The Studio
-        // merges each ✨ click into the entry's existing chips (mergeLlmCands), so what a user
-        // building a key list actually accumulates is the union of their retries, not one response.
-        // This is the only metric that can pay off a temperature above 0: at T=0 the repeats are
-        // identical, so the union IS the single response and re-clicking buys literally nothing,
-        // while sampling can reach keys greedy decoding never emits. If breadth is worth anything
-        // here, it shows up in this column and nowhere else.
+        // Union across repeats — the breadth measure, and the production-relevant one: the Studio merges
+        // each ✨ click into the entry's existing chips (mergeLlmCands), so what a user accumulates is the
+        // union of their retries. It is the only metric that can pay off a temperature above 0, since at
+        // T=0 the repeats are identical and the union is the single response.
         const union = new Set(reps.flatMap(s => [...s]));
         let uhit = 0;
         for (const x of union) if (refs.has(x)) uhit++;
@@ -211,9 +197,8 @@ const model = arg('model');
 
 // Extra arms from outside ollama (subagent runs, an ST-routed profile): a JSON array of
 // {id, model, cands[]} or {id, model, raw} — one object per response, repeated ids meaning repeats.
-// `raw` is preferred where the transport can give it: the shipped parseKeyList then does the
-// splitting, so an arm collected in the browser is scored by the same parser as production rather
-// than by whatever the collecting snippet decided a line was. `temp` labels a rung if the arm has one.
+// `raw` is preferred where the transport can give it, so the shipped parseKeyList does the splitting and an
+// arm collected in the browser is scored by production's parser. `temp` labels a rung if the arm has one.
 const extraArms = new Map();
 for (const path of String(arg('extra', '')).split(',').filter(Boolean)) {
     for (const row of JSON.parse(readFileSync(path, 'utf8'))) {
@@ -299,11 +284,10 @@ for (const r of rows) {
 
 // --- paired contrast against the T=0 rung ------------------------------------
 //
-// The pooled means above cannot support a claim on their own: the differences between rungs are
-// small, and an unpaired mean hides that entries vary far more than rungs do. So contrast each rung
-// against the SAME entry's T=0 result and sign-test the per-entry deltas, which is the discipline
-// param-screen.mjs applies to scenes. n is entries, not responses — repeats are averaged first,
-// because three samples of one entry are not three independent observations.
+// The pooled means above cannot support a claim on their own: entries vary far more than rungs do, and an
+// unpaired mean hides that. So contrast each rung against the same entry's T=0 result and sign-test the
+// per-entry deltas, the discipline param-screen.mjs applies to scenes. n is entries, not responses —
+// repeats are averaged first, because several samples of one entry are not independent observations.
 if (has('paired')) {
     // Every arm's per-entry candidate sets in one shape, so the ollama rungs and the outside arms
     // (an ST-routed profile ladder, a subagent) get the same treatment. Keyed arm -> "book.uid" ->
@@ -336,8 +320,8 @@ if (has('paired')) {
         }
     }
 
-    // An arm's baseline is its OWN model's lowest rung — comparing GLM against gemma would be a
-    // model contrast, not a temperature one.
+    // An arm's baseline is its own model's lowest rung — across models this would be a model contrast,
+    // not a temperature one.
     const familyOf = a => a.replace(/@.*$/, '');
     const rungOf = a => Number(String(a.split('@')[1] ?? '').replace(/^T/, ''));
     const refsFor = new Map();

@@ -1,32 +1,26 @@
-// Does a suggested key actually fire? Scores buildKeySuggest's candidates against a real chat and
-// buckets them by how many messages they would match, alongside the book's own existing keys as the
-// baseline. This is the harness behind the numbers in the suggester's tuning commits, which were
-// otherwise reproducible only from prose.
+// Does a suggested key actually fire? Scores buildKeySuggest's candidates against a real chat and buckets
+// them by how many messages they would match, alongside the book's own existing keys as the baseline.
 //
-// WHY THE BANDS. Utility is parabolic in firing rate, not monotonic. A key matching 0 messages can
-// never do anything; one matching most of them carries no information about WHICH message. The
-// middle is the product. So "% dead" and "% in 4-100" are the two numbers worth moving, and a
-// candidate set that beats the book's hand-written keys on both is doing its job.
+// Utility is parabolic in firing rate, not monotonic: a key matching 0 messages can never do anything, one
+// matching most of them carries no information about which message. So "% dead" and "% in 4-100" are the
+// two numbers worth moving, and a candidate set that beats the book's hand-written keys on both is doing
+// its job.
 //
-// Matching goes through countKey — the same matcher ST core uses, per this repo's one-matcher rule.
-// That is not pedantry here: it is what lets existing keys be scored at all, since a book's keys can
-// include /regex/ and ?SmartKeys that a substring test has to skip. Existing keys are matched under
-// their own entry's case/whole-word flags; candidates under the defaults a newly added key would get.
+// Matching goes through countKey, the same matcher ST core uses, which is what lets existing keys be scored
+// at all — a book's keys can include /regex/ and ?SmartKeys a substring test has to skip. Existing keys are
+// matched under their own entry's case/whole-word flags; candidates under the defaults a newly added key
+// would get.
 //
-// BOTH DENOMINATORS ARE PRINTED, and that is the point of this file as much as the bands are. The
-// measurement this replaces compared per-entry candidate rows against UNIQUE existing keys and
-// concluded the suggester beat the book's own keys on dead rate — the two denominators diverge
-// enough on the same key set that the comparison inverted its own result (S11). Per-row counts what
-// the user is offered; unique counts distinct strings. Either is
-// defensible, mixing them is not, so neither is allowed to be the only one on screen.
+// Both denominators are printed: per-row counts what the user is offered, unique counts distinct strings,
+// and the two diverge enough on one key set to invert a comparison (S11). Either is defensible, mixing them
+// is not, so neither is allowed to be the only one on screen.
 //
 // The chat doubles as bgDocs, exactly as the Studio passes the open chat, so this measures shipped
-// behaviour rather than an idealisation. Scoring against the same chat that informed the ranking is
-// not circular — "would these keys fire in the conversation the user is having" is the real question.
+// behaviour. Scoring against the same chat that informed the ranking is not circular — "would these keys
+// fire in the conversation the user is having" is the question.
 //
 // Usage:  node suggest-firing.mjs <book.json> <chat.jsonl> [<book.json> <chat.jsonl> ...]
-// Pairs are independent; several are worth passing because n=1 book is how the original measurement
-// got its scope overstated.
+// Pairs are independent; pass several, since n=1 book overstates the scope of any finding.
 import { readFileSync } from 'node:fs';
 import { basename } from 'node:path';
 import { buildKeySuggest, STUDIO_SUGGEST_OPTS as OPTS } from '../extension/keyword-suggest.mjs';

@@ -1,20 +1,20 @@
-// judge-agree.mjs — compares two judges' answers to the SAME grade jobs, row by row.
+// judge-agree.mjs — compares two judges' answers to the same grade jobs, row by row.
 //
-// Both sides are `-graded.json` result directories, so the comparison never touches an eval-data bundle.
-// That is deliberate: `grade-pending.mjs merge` makes the last pass merged the value IN FORCE, so merging
-// a trial judge to compare it would quietly hand every downstream eval that judge's grades. A judge is
-// audited from its raw answers and merged only once it is the judge you want.
+// Both sides are `-graded.json` result directories, so the comparison never touches an eval-data bundle:
+// `grade-pending.mjs merge` makes the last pass merged the value in force, so merging a trial judge to
+// compare it would hand every downstream eval that judge's grades. A judge is audited from its raw answers
+// and merged only once it is the judge you want.
 //
 // Rows join on job id plus world/uid, so only jobs both sides answered are counted; a job one side failed
 // is reported as unmatched rather than dropped silently.
 //
 // What to read, in order of what it decides:
-//   - the >= 3 BAND. Every selection criterion in this project is defined on that line (CLAUDE.md,
+//   - the >= 3 band. Every selection criterion in this project is defined on that line (CLAUDE.md,
 //     "Four stages"), so agreement there is the number that matters and overall accuracy is not.
-//   - MEAN GRADE and the per-scene harsher/lenient split, which is where a judge drifts first.
-//   - exact / within-1 agreement and QWK, read against the reference line printed at the end. The
-//     contract does not reproduce EVENLY — exact agreement against itself falls at the head of the
-//     pool (G3) — so a candidate near the incumbent is not obviously worse, it is inside its noise.
+//   - mean grade and the per-scene harsher/lenient split, which is where a judge drifts first.
+//   - exact / within-1 agreement and QWK, read against the reference line printed at the end. The contract
+//     does not reproduce evenly — exact agreement against itself falls at the head of the pool (G3) — so a
+//     candidate near the incumbent is inside its noise rather than worse.
 //
 // Usage (any cwd):
 //   node eval/judge-agree.mjs <refDir> <candDir> [--labels sonnet,gemma]
@@ -100,6 +100,6 @@ for (const [s, d] of [...deltas.slice(0, 3), ...deltas.slice(-3)].filter((v, i, 
     console.log(`  ${d >= 0 ? '+' : ''}${d.toFixed(2)}  ${s}`);
 }
 
-// The only scale on which the agreement numbers mean anything: the contract re-graded against ITSELF.
+// The only scale on which the agreement numbers mean anything: the contract re-graded against itself.
 console.log(`\nreference: the contract vs itself is 87.7% exact / 98.3% within-1 overall, but 79% at the`);
 console.log(`head of a pool, and 4 of 13 rows originally >= 3 came back below it (CLAUDE.md, "Graded scenes").`);

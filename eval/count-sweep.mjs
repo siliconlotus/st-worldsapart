@@ -3,20 +3,18 @@
 // tried (S1) — and its current wording, "Output 5 to 10 keywords", has never been compared against
 // any alternative.
 //
-// TWO HYPOTHESES, both from the author, both testable here:
-//   1. A model given a RANGE hugs the bottom of it. If so, "5 to 10" is really "5", and an open
-//      floor ("at least 5") should behave differently from a closed range with the same floor.
-//   2. A high floor INFLATES on entries that have few good keys — the model pads rather than stops.
-//      That shows up as precision falling further on sparse entries than on rich ones, which the
-//      per-entry split below reports directly.
-// The open-ended variant tests whether the model can self-select a count at all, which is what you
-// would want if (2) holds: a floor the entry cannot support is the thing doing the damage.
+// Two hypotheses, both testable here:
+//   1. A model given a range hugs the bottom of it. If so, "5 to 10" is really "5", and an open floor
+//      ("at least 5") should behave differently from a closed range with the same floor.
+//   2. A high floor inflates on entries that have few good keys — the model pads rather than stops, which
+//      shows up as precision falling further on sparse entries than on rich ones.
+// The open-ended variant tests whether the model can self-select a count at all, which is what you would
+// want if (2) holds.
 //
-// A FIXED SEED IS WHAT MAKES THIS CHEAP. Output is pinned, so repeats of the same (prompt, variant,
-// seed) are byte-identical and buy nothing — the calls go to all 24 entries instead of to repeats of
-// 6, which is where the statistical power actually is. Every variant sees the same entries at the
-// same seed, so a difference between variants is the wording and nothing else. Local only: hosted
-// reasoning models ignore both seed and temperature (H1), so prompt work belongs here.
+// A fixed seed is what makes this cheap: output is pinned, so repeats of the same (prompt, variant, seed)
+// are byte-identical and the calls go to more entries instead, which is where the power is. Every variant
+// sees the same entries at the same seed, so a difference between variants is the wording and nothing
+// else. Local only: hosted reasoning models ignore both seed and temperature (H1).
 //
 // Usage:  node count-sweep.mjs --model gemma3:4b [--seed 42] [--temp 1]
 import { readFileSync, writeFileSync, existsSync } from 'node:fs';
@@ -46,9 +44,8 @@ const VARIANTS = {
     'atleast-15': 'Output at least 15 keywords',
     'confident': 'Output as many keywords as you are confident about',
 };
-// SHIPPED is the anchor the variants are substituted over, so it must track buildKeyPrompt. It is
-// now the self-selecting wording; `range-5-10` is therefore a counterfactual arm rather than the
-// default. Substituted strings are unchanged either way, so the caches keyed on prompt hash survive.
+// `shipped` is the anchor the variants are substituted over, so it must track buildKeyPrompt — currently
+// the self-selecting wording, which makes `range-5-10` a counterfactual arm rather than the default.
 const SHIPPED = 'Output as many keywords as you are confident about';
 
 const hash = s => createHash('sha1').update(s).digest('hex').slice(0, 16);
@@ -84,11 +81,9 @@ const results = {};   // variant -> id -> {yield, ref, prec, att}
 let done = 0;
 const total = Object.keys(VARIANTS).length * prompts.length;
 
-// ENTRY OUTERMOST, VARIANT INNERMOST — CLAUDE.md's sweep-ordering rule. Variant-outermost means
-// the last arm has zero coverage until the run is nearly done, and every partial cell is biased to
-// whichever books happen to sort first; both were true of this file before, and the interim read it
-// produced was uninterpretable. This way every entry completes all five arms before the next entry
-// starts, so a partial run is a smaller balanced sample rather than a skewed one.
+// Entry outermost, variant innermost — CLAUDE.md's sweep-ordering rule. Variant-outermost leaves the last
+// arm with no coverage until the run is nearly done and biases every partial cell to whichever books sort
+// first; this way a partial run is a smaller balanced sample rather than a skewed one.
 for (const name of Object.keys(VARIANTS)) results[name] = {};
 for (const p of prompts) {
     for (const [name, phrase] of Object.entries(VARIANTS)) {

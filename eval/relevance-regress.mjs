@@ -1,37 +1,14 @@
-// What each stage-3 signal is WORTH as a predictor of per-entry relevance, and how a parameter moves that.
+// What each stage-3 signal is worth as a predictor of per-entry relevance, and how a parameter moves that.
+// param-screen asks whether the ranking improved; this asks whether a signal became a better predictor.
+// The two can disagree without contradicting: RRF reads only ranks, this reads the scores themselves.
 //
-// Stage 4 predicts whether an individual entry is relevant, so the question a tuning parameter has to
-// answer is no longer "did the ranking improve" but "did this signal become a better or worse predictor".
-// param-screen answers the first; this answers the second. They can disagree, and that disagreement is
-// informative rather than a contradiction: a parameter can leave nDCG flat while moving what the fusion
-// would have to weight, because RRF reads only RANKS and this reads the scores themselves.
-//
-// THE MODEL IS LOGISTIC, on the project's own relevance line (grade >= 3, metrics.mjs). Linear would put
-// predictions outside [0,1] on a bounded target and weight a 0-vs-1 error the same as a 0.4-vs-0.5 one;
-// polynomial terms MEASURED WORSE and `--degree 2` is what measured them (F14). Fit quality is
-// printed (AUC, log-loss) so the case is always against a number rather than against the shape of the
-// model.
-//
-// THREE READINGS OF A COEFFICIENT, because they answer different questions and only one of them is what
-// "the weight moved" usually means:
-//
-//   raw     per unit of the signal. Moves when the SCALE moves — and the gazetteer changes which query
-//           terms reach BM25, so it changes BM25's scale by construction. A raw shift alone is not
-//           evidence the signal got better.
-//   std     per within-scene standard deviation. Scale-free, so this is the discriminative value: it
-//           moves only when the signal separates relevant from irrelevant better or worse.
-//   AUC     the signal alone, ranked. No fit, no other columns — what the column would be worth if it
-//           were the only thing stage 4 read.
-//
-// WITHIN-SCENE standardisation, not pooled: BM25 is not comparable across queries or corpora (the same
-// note governs bm25FloorPct in scene.mjs), so pooling raw scores across scenes would let a scene's
-// scale masquerade as a coefficient. ONE intercept over all of them — a per-scene intercept was tried as
-// a control for differing base rates and measured to buy nothing, while reproducing each scene's base
-// rate by construction and so inflating any in-sample number that carried it.
-//
-// THE POOL IS WHAT WAS JUDGED. An ungraded row has no label, so it is dropped rather than scored 0 — a
-// 0 here would be a claim about relevance, where in a ranking metric it is a claim about a rank. Judged
-// coverage is printed per arm for the same reason param-screen prints it.
+// The model is logistic, on the project's own relevance line (grade >= 3, metrics.mjs); polynomial terms
+// measured worse and `--degree 2` is what measured them (F14). Three readings of a coefficient: raw is
+// per unit and moves whenever the signal's scale moves, so a raw shift alone is not evidence the signal
+// got better; std is per within-scene standard deviation, the discriminative value; AUC is the signal
+// alone, ranked. Standardisation is within scene under one intercept — BM25 is not comparable across
+// queries or corpora (the same note governs bm25FloorPct in scene.mjs). The pool is what was judged: an
+// ungraded row has no label, so it is dropped rather than scored 0.
 //
 // Usage (from SillyTavern root):
 //   node .../relevance-regress.mjs <sample.json> [...] [--sweep gazetteerSource=keys,titles]
@@ -39,9 +16,9 @@
 //   --tier and --features are required. With properNouns in --features, --proper-nouns and --proper-nouns-extract are
 //   required. A --sweep read with --cutoff requires --at: arms compare at one set cutoff.
 //
-// THE SHIPPED MEMORY FIT, which is what `relevance-model-memory.json` was emitted by — the four columns
-// the doc rules (keys is computed and recorded, and deliberately not fitted), the entity name detector,
-// held out by book:
+// The shipped memory fit, which `relevance-model-memory.json` was emitted by — the four columns the doc
+// rules (keys is computed and recorded, and deliberately not fitted), the entity name detector, held out
+// by book:
 //   node .../relevance-regress.mjs eval-data/*-syn-msg*.json <the rest of the graded corpus>
 //        --tier memory --features cosine,text,properNouns,density --proper-nouns idf --proper-nouns-extract entity --density-extract entity
 //        --lobo --cutoff --emit-model extension/relevance-model-memory.json
@@ -59,10 +36,8 @@ import { tokenize } from '../extension/lexical.mjs';
 import { chunkEntry } from '../extension/chunking.mjs';
 
 const argv = process.argv.slice(2);
-// A .json that is the VALUE of a flag is not a sample — --emit takes one, and without this the file it
-// is about to write is opened as an input bundle. Named flags rather than "anything after a --", or
-// `--lobo scene.json` would silently DROP that scene, which is the worse failure: a wrong sample set
-// prints a clean table and says nothing about what it left out.
+// A .json that is the value of a flag is not a sample — --emit takes one. Named flags rather than
+// "anything after a --", so `--lobo scene.json` cannot silently drop that scene.
 const VALUED = new Set(['--arm', '--sweep', '--tier', '--cut', '--degree', '--square', '--features', '--density-extract', '--emit', '--emit-rows', '--emit-model', '--drop-keys', '--proper-nouns', '--proper-nouns-extract', '--standardise', '--beta']);
 const samples = argv.filter((a, i) => a.endsWith('.json') && !a.startsWith('--') && !VALUED.has(argv[i - 1]));
 if (!samples.length) {
@@ -70,87 +45,62 @@ if (!samples.length) {
     process.exit(2);
 }
 
-// One parameter, several values — the same shape param-screen's arms have, minus the pairing, because a
-// coefficient is fitted over the pooled rows and has no per-scene counterpart to pair.
-//
-// NO DEFAULT SWEEP. Bare, this fits the shipped configuration once. It used to default to a five-value
-// gazetteerSource sweep, which quintupled every bare run and — since the emits are written inside the
-// per-arm block — left --emit describing whichever arm happened to run last.
+// One parameter, several values — param-screen's arm shape minus the pairing, since a coefficient is
+// fitted over pooled rows and has no per-scene counterpart. No default sweep: bare, this fits the
+// shipped configuration once.
 const sweep = arg(argv, '--sweep');
 const SWEPT = sweep ? sweep.slice(0, sweep.indexOf('=')) : 'shipped';
 const valuesRaw = sweep ? sweep.slice(sweep.indexOf('=') + 1) : '';
-// Values arrive as strings from a shell; a numeric parameter swept as "0.5" would silently become a string
-// and compare unequal to every default. Booleans the same.
+// Values arrive as strings from a shell; a numeric parameter swept as "0.5" must not stay a string and
+// compare unequal to every default. Booleans the same.
 const coerce = v => (v === 'true' ? true : v === 'false' ? false : v === 'null' ? null : (v !== '' && !Number.isNaN(Number(v)) ? Number(v) : v));
 const VALUES = sweep ? valuesRaw.split(',').map(s => coerce(s.trim())) : [null];
-// THE EMBEDDING MODEL IS SWEPT HERE AND NOT IN param-screen, because it is a stage-1 change whose effect
-// is only readable at stage 4: cosine is one column of the ruled predictor, and what a better cosine buys
-// is a better DELIVERED SET (--cutoff), not a better ranking at a window nobody chose. It is not a
-// sceneParams field — a value rebuilds the collection under that model and re-embeds the query under it,
-// so unlike every other sweep the arms do not share an index. `<model>/raw` drops the task prefixes
-// (reindex.mjs resolveModel).
-//
-// EVERY ARM IS BUILT BY ensureIndex, including the baseline, so the only difference between two arms is
-// the model. Scoring bge-m3 off ST's live collection instead would contrast a model change against a
-// build-path change at the same time.
+// The embedding model is swept here and not in param-screen: it is a stage-1 change readable only at
+// stage 4, on the delivered set (--cutoff). Not a sceneParams field — a value rebuilds the collection
+// under that model and re-embeds the query under it, so unlike every other sweep the arms do not share
+// an index. `<model>/raw` drops the task prefixes (reindex.mjs resolveModel). Every arm is built by
+// ensureIndex, baseline included, so the only difference between two arms is the model.
 const EMBED_SWEEP = SWEPT === 'embedModel';
-// WHICH TIER IS FITTED. The ruled predictor fits per tier (matcher-design.md, Stage 4), and the tiers do
+// Which tier is fitted. The ruled predictor fits per tier (matcher-design.md, Stage 4) and the tiers do
 // not carry the same signals — memory is ~all vectorized, reference ~all keyword-only — so a pooled fit
-// reads one slope across two populations that hold different columns. 'all' is the pooled fit and stays the default, because
-// it is what the recorded figures were measured on.
-// ORDINAL MODE. The 0-4 scale asserts four boundaries and the shipped model fits only one of them
-// (>=3), which is also the one the signals separate worst: pooled, grades 2 and 3 sit at the same mean
-// standardised cosine (F29). --ordinal fits every boundary so the scale can be read rather than assumed — see
+// reads one slope across two populations. 'all' is the pooled fit and stays the default, because it is
+// what the recorded figures were measured on.
+// Ordinal mode: the shipped model fits only the >=3 boundary, which the signals separate worst — pooled,
+// grades 2 and 3 sit at the same mean standardised cosine (F29). --ordinal fits every boundary; see
 // logistic.mjs cumulativeFit for why the slopes are fitted separately instead of shared.
 const ORDINAL = argv.includes('--ordinal');
-// HELD OUT BY SCENE. Within-scene standardisation leaks nothing across the fold: it reads only the
+// Held out by scene. Within-scene standardisation leaks nothing across the fold: it reads only the
 // held-out scene's own candidates, which stage 3 also holds.
 const LOSO = argv.includes('--loso');
-// HELD OUT BY BOOK, which is the generalisation the system actually needs. A held-out SCENE still shares
-// its book's vocabulary, entry style, chunk statistics and BM25 scale with the rows that fitted the model,
-// so --loso measures "another moment in a book we know" — and production meets books it has never seen.
-// Folds are wildly unequal here — one book dominates the rows (C11) — so read the per-fold sizes, not
-// just the pooled number.
+// Held out by book, the generalisation the system needs: a held-out scene still shares its book's
+// vocabulary, entry style, chunk statistics and BM25 scale with the rows that fitted the model. Folds
+// are wildly unequal here (C11), so read the per-fold sizes, not just the pooled number.
 const LOBO = argv.includes('--lobo');
 const CUTOFF = argv.includes('--cutoff');
-// EXPERIMENT (uncommitted default): mirror gradeCredit onto recall, so a 2 is half a hit on BOTH bars
-// instead of half on precision and nothing on recall. Off = the shipped asymmetric definition.
+// EXPERIMENT: mirror gradeCredit onto recall, so a 2 is half a hit on both bars instead of half on
+// precision and nothing on recall. Off = the shipped asymmetric definition.
 const HALF_RECALL = argv.includes('--half-recall');
-// EXPERIMENT: where the relevant/irrelevant line sits for the SCORING BARS (not the fit target, which
-// is --cut). At 3 the shipped definition holds: full credit >= 3, a 2 at half, recall over >= 3. At 2
-// the class is "anything a delivery would not be unequivocally wrong about": full credit >= 2, nothing
-// below, recall over >= 2, and the score cut on becomes P(>=2) rather than E[credit], since a half band
-// no longer exists to take an expectation over.
-// EXPERIMENT: treat an UNGRADED row as a graded 0 and fit on it. The pool is built to surface
-// everything relevant, so an entry no arm ever surfaced is very likely irrelevant — but "very likely"
-// is an assertion about the CORPUS, not a label, which is why this is a flag and not the default. It
-// roughly doubles the negative class on poorly-covered scenes and moves the base rate, so it changes
-// what the coefficients mean rather than only their scale.
+// EXPERIMENT: where the relevant/irrelevant line sits for the scoring bars (not the fit target, which is
+// --cut). At 3 the shipped definition holds. At 2 the class is "anything a delivery would not be
+// unequivocally wrong about": full credit >= 2, recall over >= 2, and the score cut on becomes P(>=2)
+// rather than E[credit], since no half band exists to take an expectation over.
+// EXPERIMENT: treat an ungraded row as a graded 0 and fit on it. That is an assertion about the corpus,
+// not a label, which is why it is a flag; it moves the base rate, so it changes what the coefficients
+// mean rather than only their scale.
 const UNGRADED_NEGATIVE = argv.includes('--ungraded-negative');
-// WHICH POPULATION THE STANDARDISATION IS COMPUTED OVER. `scene` is the shipped design: each row is
-// centred among the rows it competes with. `book` pools every scene of the same book, which is the
-// same statistic a runtime could accumulate across turns rather than recompute per scan. `pooled`
-// keeps the scene but drops the TIER boundary: the statistics come from every candidate the scene
-// offered, both tiers, while the fitted rows stay whichever tier `--tier` names.
-//
-// The scene version has a measured pathology: one confident match inflates its scene's sd and
-// compresses every other row, so the delivered count moves inversely to confidence (matcher-design.md).
-// A book-level scale cannot do that — no single row can move it.
-//
-// `pooled` exists for a SECOND pathology that `book` does not fix. Each tier is standardised among its
-// own rows, so a tier holding two entries gives every z a value of exactly +/-1 and the magnitudes are
-// erased before a coefficient sees them — while the other tier, holding twenty, ranges freely. Stage 5
-// then puts the two on ONE layout order and cuts a prefix. Pooling gives the small tier the scene's
-// whole population to sit in. `book` relocates the problem rather than removing it, since a small book
-// is small in every scene of it.
-//
-// IT CHANGES THE UNIT THE COEFFICIENTS ARE IN, so a fit under it is only readable against another fit
-// under it — the pooled sd is set by whichever tier brought more rows.
+// Which population the standardisation is computed over. `scene` is the shipped design: each row is
+// centred among the rows it competes with, and it has a measured pathology — one confident match
+// inflates its scene's sd and compresses every other row, so the delivered count moves inversely to
+// confidence (matcher-design.md). `book` pools every scene of the same book, the statistic a runtime
+// could accumulate across turns; no single row can move it, but a small book is small in every scene of
+// it. `pooled` keeps the scene and drops the tier boundary, so a tier holding two entries is not reduced
+// to z = +/-1 before a coefficient sees the magnitudes while stage 5 puts both tiers on one layout order;
+// the fitted rows stay whichever tier `--tier` names. It changes the unit the coefficients are in, so a
+// fit under it is only readable against another fit under it.
 const STD_BY = arg(argv, '--standardise') ?? 'scene';
-// THE BETA OF THE SCORE OF RECORD. RECALL_WEIGHT (2) is the shipped definition — recall counts twice,
-// because the cost of missing must-deliver material is higher than the cost of carrying a spare entry.
-// Overridable so the arms can be read at another trade: a design that delivers FEWER is penalised by a
-// high beta whether or not its ordering is worse, and separating those needs the curve, not one number.
+// The beta of the score of record. RECALL_WEIGHT (2) is the shipped definition. Overridable so the arms
+// can be read at another trade: a design that delivers fewer is penalised by a high beta whether or not
+// its ordering is worse, and separating those needs the curve, not one number.
 const BETA = Number(arg(argv, '--beta') ?? RECALL_WEIGHT);
 if (!Number.isFinite(BETA) || BETA <= 0) { console.error(`--beta must be a positive number, got ${arg(argv, '--beta')}`); process.exit(2); }
 if (!['scene', 'book', 'pooled'].includes(STD_BY)) { console.error(`--standardise must be scene|book|pooled, got ${STD_BY}`); process.exit(2); }
@@ -158,16 +108,14 @@ const RELEVANT_AT = Number(arg(argv, '--relevant-at') ?? 3);
 const creditOf = g => (RELEVANT_AT === 2 ? (g >= 2 ? 1 : 0) : gradeCredit(g));
 const AT = arg(argv, '--at') === null ? null : Number(arg(argv, '--at'));
 const DEGREE = Number(arg(argv, '--degree') ?? 1);
-// Which signals get a squared term. Empty means all of them — naming a subset is how a term that
-// carries support is tested apart from two that do not, since three added coefficients can lose held
-// out while one of them gains.
+// Which signals get a squared term. Empty means all of them; naming a subset tests one term apart from
+// others, since three added coefficients can lose held out while one of them gains.
 const SQUARE = String(arg(argv, '--square') ?? '').split(',').filter(Boolean);
 const INTERACT = argv.includes('--interactions');
-// Extra candidate features, off by default: `proper` = shared proper nouns with the scan window,
-// THE FEATURE SET, stated in full. `--features` names every fitted column, in order — there is no base
-// set to add to or subtract from, so the flag IS the design matrix and two runs differing in one name
+// The feature set, stated in full. `--features` names every fitted column, in order — there is no base
+// set to add to or subtract from, so the flag is the design matrix and two runs differing in one name
 // differ in exactly that column. `time` = the entry's story-time position; `oracle` = the entry's own
-// relevance rate in its OTHER scenes, a CEILING on any entry-level prior rather than a shippable column.
+// relevance rate in its other scenes, a ceiling on any entry-level prior rather than a shippable column.
 const KNOWN_FEATURES = ['cosine', 'text', 'keys', 'properNouns', 'time', 'oracle', 'length', 'density', 'rarity', 'chunkdens'];
 const FEATURE_LIST = String(arg(argv, '--features') ?? '').split(',').filter(Boolean);
 if (!FEATURE_LIST.length) { console.error(`--features is required: a comma list of fitted columns, from ${KNOWN_FEATURES.join(',')}`); process.exit(2); }
@@ -175,46 +123,41 @@ for (const f of FEATURE_LIST) if (!KNOWN_FEATURES.includes(f)) { console.error(`
 if (new Set(FEATURE_LIST).size !== FEATURE_LIST.length) { console.error('--features names a column twice'); process.exit(2); }
 const has = f => FEATURE_LIST.includes(f);
 // Where to write the per-scene F2 vector. Two feature sets cannot be swept in one process — the design
-// matrix is built once — so the paired contrast is made between two RUNS, and this is what carries the
-// per-scene numbers between them. Scene names go with it: pairing by index is only safe if both runs
-// kept the same scenes, and that has to be checked rather than assumed.
+// matrix is built once — so the paired contrast is made between two runs and this carries the per-scene
+// numbers between them. Scene names go with it: pairing by index is only safe if both runs kept the same
+// scenes, which has to be checked rather than assumed.
 const EMIT = arg(argv, '--emit');
-// Every scored row at the best cutoff, delivered flag included — what --emit carries for the paired TEST,
+// Every scored row at the best cutoff, delivered flag included — what --emit carries for the paired test,
 // this carries for reading the cut. Separate flags because the per-scene F2 vector is small enough to keep
 // forever and this is not.
 const EMIT_ROWS = arg(argv, '--emit-rows');
 const EMIT_MODEL = arg(argv, '--emit-model');
 
-// AN EMIT DESCRIBES ONE ARM. All three are written inside the per-arm block, so a multi-value sweep would
-// leave the file holding whichever arm ran last, silently and with no field saying which.
+// An emit describes one arm: all three are written inside the per-arm block, so a multi-value sweep would
+// leave the file holding whichever arm ran last, with no field saying which.
 if ((EMIT || EMIT_MODEL || EMIT_ROWS) && VALUES.length > 1) {
     console.error(`--emit* writes one arm, but --sweep names ${VALUES.length} (${VALUES.join(', ')}) — run them one value at a time`);
     process.exit(2);
 }
-// SIMULATES A BOOK EDIT the keyword audit recommends, without editing the book: scene.mjs `dropKeys`
-// stops the named keys scoring AND keyword-activating, which is what removing them would do. Takes the
-// JSON array `keyword-audit.mjs --json` writes. It UNDERSTATES removal — the terms stay in the
-// gazetteer, where a real edit would also take them out (scene.mjs, scoringKeys).
+// Simulates a book edit the keyword audit recommends, without editing the book: scene.mjs `dropKeys`
+// stops the named keys scoring and keyword-activating. Takes the JSON array `keyword-audit.mjs --json`
+// writes. It understates removal — the terms stay in the gazetteer (scene.mjs, scoringKeys).
 const DROP_KEYS = arg(argv, '--drop-keys') ? JSON.parse(fs.readFileSync(arg(argv, '--drop-keys'), 'utf8')) : null;
 // How the proper-noun overlap is scored. `count` = shared names; `idf` = shared names weighted by
-// log(N/df) over the book's own entries, so a name every entry mentions counts for little and the
-// protagonist stops dominating; `jaccard` = intersection over union, which normalises for how many
-// names an entry happens to carry; `gaz` = count restricted to the gazetteer, i.e. to names the BOOK
-// declared in a key, secondary or title rather than any capitalised token.
-// REQUIRED when the properNouns feature is in the run. The variants are not interchangeable — idf beats
-// count (F6) — so which one a number was measured under is part
-// of the number, and the harness does not choose it.
+// log(N/df) over the book's own entries, so a name every entry mentions counts for little; `jaccard` =
+// intersection over union, normalising for how many names an entry carries; `gaz` = count restricted to
+// the gazetteer, i.e. to names the book declared in a key, secondary or title. Required when the
+// properNouns feature is in the run: the variants are not interchangeable — idf beats count (F6) — so
+// which one a number was measured under is part of the number, and the harness does not choose it.
 const PROPER_MODE = arg(argv, '--proper-nouns');
-// HOW a name is recognised, orthogonal to how a shared one is scored. `regex` is the private ASCII
-// pattern this feature was found with; `entity` is relevance.mjs's own rule, which the entity filter
-// already uses; `span` takes maximal runs of capitalised tokens as one term, so "Brackenmoor Patrol"
-// is a name rather than two.
-// REQUIRED under the same rule. `entity` is properNounsOf via relevance.properNames — the
-// shipped extractor; `entity` beat `regex`, paired (F7).
+// How a name is recognised, orthogonal to how a shared one is scored. `regex` is a private ASCII pattern;
+// `entity` is relevance.mjs's own rule (properNounsOf via relevance.properNames), which the entity filter
+// already uses; `span` takes maximal runs of capitalised tokens as one term. Required under the same rule;
+// `entity` beat `regex`, paired (F7).
 const PROPER_EXTRACT = arg(argv, '--proper-nouns-extract');
-// WHICH DETECTOR feeds the density column — 'entity' is the shipped properDensity (properNounsOf, no
+// Which detector feeds the density column — 'entity' is the shipped properDensity (properNounsOf, no
 // stoplist), 'book' the corpus name test. Separate from --proper-nouns-extract because the two fitted
-// columns can be swapped independently, and sweeping `detector` sets both at once for the full-swap arm.
+// columns swap independently, and sweeping `detector` sets both at once for the full-swap arm.
 const DENSITY_EXTRACT = arg(argv, '--density-extract');
 const CALIB = argv.includes('--calibration');
 if (has('properNouns') && !['count', 'idf', 'idf-len', 'jaccard', 'gaz'].includes(PROPER_MODE)) {
@@ -226,27 +169,25 @@ if (has('properNouns') && !['regex', 'entity', 'span', 'book', 'named'].includes
 if (has('density') && !['entity', 'book'].includes(DENSITY_EXTRACT)) {
     console.error(`--density-extract is required with the density feature: entity|book (got ${DENSITY_EXTRACT})`); process.exit(2);
 }
-// ARMS COMPARE AT ONE CUTOFF. The cutoff is a user setting, not a property of an arm, so a paired
+// Arms compare at one cutoff. The cutoff is a user setting, not a property of an arm, so a paired
 // comparison read at each arm's own F2 peak scores two configurations neither of which ships.
 if (sweep && VALUES.length > 1 && CUTOFF && AT === null) {
     console.error('--sweep with --cutoff needs --at <cutoff>: arms compare at one set cutoff, not each at its own optimum.'); process.exit(2);
 }
-// WHICH BOUNDARY IS THE TARGET. 3 is the project's relevance line and the default; --cut 4 fits the band
-// the anchors reserve for the scene's current subject, which separates far better and is far rarer, so it
-// is the one place AUC and AP disagree loudly enough to be worth reading side by side.
+// Which boundary is the target. 3 is the project's relevance line and the default; --cut 4 fits the band
+// the anchors reserve for the scene's current subject, which separates far better and is far rarer.
 const CUT = Number(arg(argv, '--cut') ?? 3);
 if (!Number.isFinite(CUT)) { console.error(`--cut must be a number, got ${arg(argv, '--cut')}`); process.exit(2); }
 const TIER = arg(argv, '--tier');
 if (!['all', 'memory', 'reference'].includes(TIER)) { console.error(`--tier is required: all|memory|reference (got ${arg(argv, '--tier')})`); process.exit(2); }
 // `pooled` differs from `scene` only by admitting the other tier's rows to the statistics, so with no
-// tier excluded there is nothing for it to admit. Refusing beats returning the shipped fit under a name
-// that claims otherwise.
+// tier excluded there is nothing to admit. Refusing beats returning the shipped fit under a name that
+// claims otherwise.
 if (STD_BY === 'pooled' && TIER === 'all') { console.error('--standardise pooled needs --tier memory|reference; with --tier all it is the scene design under another name'); process.exit(2); }
-// A SHIPPED MODEL IS EMITTED AT THE SHIPPED DEFINITION, or the file's two halves describe different
-// targets — which is exactly the defect this guard was added with. The emitted coefficients are the
-// boundaries E[credit] is built from (2 and 3, fixed by gradeCredit), so --cut only moves the AUC printed
-// beside them, --relevant-at 2 replaces the target with P(>=2) outright, and --half-recall changes the
-// bars the cutoff was chosen on. Each would produce a file that reads as the shipping artefact and is not.
+// A shipped model is emitted at the shipped definition, or the file's two halves describe different
+// targets. The emitted coefficients are the boundaries E[credit] is built from (2 and 3, fixed by
+// gradeCredit), so --cut only moves the AUC printed beside them, --relevant-at 2 replaces the target with
+// P(>=2) outright, and --half-recall changes the bars the cutoff was chosen on.
 if (EMIT_MODEL && (CUT !== 3 || RELEVANT_AT !== 3 || HALF_RECALL
     || (has('properNouns') && (PROPER_MODE !== 'idf' || PROPER_EXTRACT !== 'entity'))
     || (has('density') && DENSITY_EXTRACT !== 'entity'))) {
@@ -254,61 +195,47 @@ if (EMIT_MODEL && (CUT !== 3 || RELEVANT_AT !== 3 || HALF_RECALL
         + 'and with properNouns, --proper-nouns idf --proper-nouns-extract entity. Drop --emit-model to explore another target.');
     process.exit(2);
 }
-// And it is written inside the --cutoff block, since the operating point is half of what a selection rule
-// is. Without this the flag is a silent no-op: the run prints a full table and writes nothing.
+// And it is written inside the --cutoff block, so without this the flag is a silent no-op: the run prints
+// a full table and writes nothing.
 if (EMIT_MODEL && !(CUTOFF && LOBO)) {
     console.error('--emit-model needs --cutoff --lobo: the cutoff is read off the held-out delivered set, and a model shipped without its operating point is not a selection rule.');
     process.exit(2);
 }
-// WA_EMBED_MODEL overrides; otherwise the model is the bundle's own record. Neither present is a
-// refusal — the fits are per embedding model, so a run that guessed one would fit, and emit, under it.
+// WA_EMBED_MODEL overrides; otherwise the model is the bundle's own record. Neither present is a refusal —
+// the fits are per embedding model, so a run that guessed one would fit, and emit, under it.
 const MODEL = process.env.WA_EMBED_MODEL ?? openSample(samples[0], arg(argv, '--arm')).embedModel;
 if (!MODEL) { console.error(`${samples[0]} records no embedModel — set WA_EMBED_MODEL`); process.exit(2); }
 const OLLAMA = process.env.OLLAMA_URL ?? 'http://localhost:11434';
 
-// THE FEATURE SET. One standardised column per signal and NO ELIGIBILITY INDICATORS: whether a signal is
-// absent is a question about the FEATURE SET, not about a row, and it is answered by leaving the column
-// out of `--features`. Every memory entry carries cosine and text, and only a handful have no keys; on reference the
-// only signal that varies is cosine, missing because nobody computed one, which `reindex --all` plus
-// `denseAllEntries` closes. So the model is either fitted on a signal or it is not, and a mixed state is
-// an author's vectorization choices rather than something to model.
-//
-// THE INDICATORS DID DAMAGE. A nearly-constant column is near-collinear with the intercept, so
-// how the fit splits weight between them is arbitrary AND VARIES PER FOLD — and `--lobo` pools etas from
-// different folds into one AUC, where those offsets stop cancelling. Removing them improved every
-// held-out readout and dissolved the whole of what had read as one book rejecting keys (F23). Arms whose
-// indicators were already constant do
-// not move at all.
+// The feature set: one standardised column per signal and no eligibility indicators. Whether a signal is
+// absent is a question about the feature set, not about a row, and it is answered by leaving the column
+// out of `--features` — a mixed state is an author's vectorization choices rather than something to model.
+// A nearly-constant indicator column is near-collinear with the intercept, so the fit splits weight
+// between them arbitrarily and per fold, and `--lobo` pools etas from different folds into one AUC where
+// those offsets stop cancelling. Removing the indicators improved every held-out readout (F23).
 const FEATURES = [];
 const featureDef = {
     cosine: r => (Number.isFinite(r.score) ? r.score : 0),
     text: r => Number(r.textScore) || 0,
     keys: r => Number(r.keywordScore) || 0,
 };
-// PROPER NOUNS shared between the entry and the scan window. NOT a reweighting of `text`: BM25 spreads
-// its mass over every term the two share, so a character name arrives diluted among hundreds of ordinary
-// words. Restricting the vocabulary to names asks a different question — is this entry about someone who
-// is on screen — and that is the axis the three shipped signals do not have.
+// Proper nouns shared between the entry and the scan window. Not a reweighting of `text`: BM25 spreads its
+// mass over every term the two share, so a character name arrives diluted among ordinary words.
+// Restricting the vocabulary to names asks whether this entry is about someone on screen, which is the
+// axis the three shipped signals do not have.
 //
-// Title-case token minus the common-English list, which is the same heuristic keyword-audit's looksProper
-// uses. It over-fires on sentence-initial words; that noise is shared by both sides of the intersection,
-// so it inflates the floor rather than the discrimination, and a POS tagger is not worth it to find out
-// whether the axis exists at all.
+// Title-case token minus the common-English list, the same heuristic keyword-audit's looksProper uses. It
+// over-fires on sentence-initial words, but that noise is shared by both sides of the intersection, so it
+// inflates the floor rather than the discrimination.
 const PROPER_RE = /\b[A-Z][a-z]{2,}\b/g;
-// A name may CONTAIN lowercase — "Church of the Sun", "Maren's Gap", "van der Berg" — so a run cannot
-// simply break at the first uncapitalised token. Particles join a run only between name tokens, and a
-// trailing one is trimmed, so "Sun of" never forms.
-//
-// Built on properNounsOf rather than on capitalisation directly: the first span arm started runs
-// at sentence-initial capitals, which is how "The" became the head of a name, and it lost to plain
-// unigrams because of it.
-//
-// EMITS THE SPAN AND ITS PARTS. Spans alone are brittle — an entry saying "Brackenmoor Patrol" against a
-// window saying only "Brackenmoor" would share nothing, which is worse than the unigram arm rather than
-// better. Both levels means the phrase is extra evidence when it agrees, never a replacement.
-// NOT 'and': in prose it joins two entities rather than living inside one, so "Maren and Brackenmoor
-// Patrol" formed a single three-name span. Derived from the shipped list so the two cannot drift on
-// what a particle is; the one difference is stated there.
+// A name may contain lowercase — "Church of the Sun", "van der Berg" — so a run cannot break at the first
+// uncapitalised token. Particles join a run only between name tokens, and a trailing one is trimmed, so
+// "Sun of" never forms. Built on properNounsOf rather than on capitalisation directly, so a
+// sentence-initial capital cannot head a name. Emits the span and its parts: spans alone are brittle,
+// since an entry saying "Brackenmoor Patrol" against a window saying only "Brackenmoor" would share
+// nothing, and both levels make the phrase extra evidence rather than a replacement. Not 'and' — in prose
+// it joins two entities rather than living inside one. Derived from the shipped list so the two cannot
+// drift on what a particle is; the one difference is stated there.
 const PARTICLES = new Set([...NAME_PARTICLES].filter(w => w !== 'and'));
 const properSpans = (text) => {
     const norm = normalizeOrthography(String(text ?? ''));
@@ -324,22 +251,17 @@ const properSpans = (text) => {
         };
         for (const tok of sentence.trim().split(/[^\p{L}\p{N}\p{M}']+/u)) {
             const lw = tok.toLowerCase();
-            // BOTH tests, and the per-occurrence one is not optional. `names` says the token is used as
-            // a name SOMEWHERE in this text; the capital says THIS occurrence is the name rather than
-            // the common noun. Testing membership alone discards exactly the distinction the
-            // capitalisation rule exists to make, so a later "church of the sun" would build the same
-            // span as "Church of the Sun" in a text that used both.
+            // Both tests: `names` says the token is used as a name somewhere in this text, the capital
+            // says this occurrence is the name rather than the common noun.
             if (/^\p{Lu}/u.test(tok) && names.has(lw)) { run.push(lw); continue; }
             if (run.length && PARTICLES.has(lw)) { run.push(lw); continue; }
             flush();
         }
         flush();
     }
-    // A COMPONENT IS ONLY A NAME IF THE TEXT USES IT ALONE. "Maren's Gap" splitting to `maren's` is
-    // right and to `gap` is not — `gap` is a common noun capitalised because it sits inside a name, and
-    // nothing but standalone use distinguishes it from `maren's`. Same for `corporal` in "Corporal
-    // Persh". So components come from the runs of length ONE, and a longer run contributes only itself
-    // plus whichever of its tokens the text also attests standalone.
+    // A component is only a name if the text uses it alone: "Maren's Gap" splitting to `maren's` is right
+    // and to `gap` is not. So components come from the runs of length one, and a longer run contributes
+    // only itself plus whichever of its tokens the text also attests standalone.
     const solo = new Set(runs.filter(r => r.length === 1).map(r => r[0]));
     for (const r of runs) {
         out.add(r.join(' '));
@@ -349,12 +271,11 @@ const properSpans = (text) => {
     return out;
 };
 // `book` mode: the suggester's own corpus name test (keyword-suggest nameEvidence), fed the scene's
-// entries, arbitrating every capitalised token — sentence-initial included, which properNounsOf cannot
-// count, and with no COMMON_WORDS subtraction, since the book's own statistics are the stoplist's job
-// here. Tokens are folded and lowercased by the evidence's own fold, so entry, window and df keys agree.
-// `named` mode: the shipped extraction exactly, except the stoplist spares a word the book's own
-// statistics attest as a name — the SURGICAL contrast for "the stoplist deletes character names from
-// the overlap". One change against `entity`; `book` changes the detector wholesale and cannot isolate it.
+// entries, arbitrating every capitalised token — sentence-initial included, with no COMMON_WORDS
+// subtraction, since the book's own statistics are the stoplist here. Tokens are folded and lowercased by
+// the evidence's own fold, so entry, window and df keys agree. `named` mode: the shipped extraction
+// exactly, except the stoplist spares a word the book's own statistics attest as a name — one change
+// against `entity`, where `book` changes the detector wholesale and cannot isolate it.
 const makeExtract = (mode, entries) => {
     if (mode !== 'book' && mode !== 'named') return text => properNouns(text, mode);
     const ev = nameEvidence();
@@ -375,10 +296,8 @@ const makeExtract = (mode, entries) => {
     };
 };
 const properNouns = (text, mode = PROPER_EXTRACT) => {
-    // THE SHIPPED ONE IS THE SHIPPED FUNCTION, not a copy of its three lines. `relevance.properNames`
-    // is what stage 4 calls at runtime, so the fit and the runtime cannot drift on what a name is — the
-    // same rule countKey follows for matching and scene.mjs follows for the scorers. It was open-coded
-    // here, identically, right up until there were two of them.
+    // The shipped one is the shipped function, not a copy of its three lines: `relevance.properNames` is
+    // what stage 4 calls at runtime, so the fit and the runtime cannot drift on what a name is.
     if (mode === 'entity') return properNames(text);
     if (mode === 'span') return properSpans(text);
     const out = new Set();
@@ -389,46 +308,39 @@ const properNouns = (text, mode = PROPER_EXTRACT) => {
     return out;
 };
 
-// STORY TIME. Within-scene standardisation makes "distance from the current point" and "position in the
-// book" the same column up to sign, because the current point is one value per scene — so the position
-// is what is stored and the coefficient's SIGN says whether recent wins. STMB appends, so uid order is
-// story order.
-//
-// uid ONLY, never `order`: that field is ST's insertion PRIORITY and an author may or may not have set
-// it, so a column that fell back between the two would mean story position in one book and priority in
-// the next — which a fit held out BY BOOK cannot survive, and which reads as a feature failing to
-// transfer rather than as two features sharing a column.
+// Story time. Within-scene standardisation makes "distance from the current point" and "position in the
+// book" the same column up to sign, so the position is stored and the coefficient's sign says whether
+// recent wins. STMB appends, so uid order is story order. uid only, never `order`: that field is ST's
+// insertion priority and an author may not have set it, so a column falling back between the two would
+// mean story position in one book and priority in the next.
 const storyTime = r => Number(r.entry?.uid ?? 0);
 
 featureDef.properNouns = r => Number(r.properShared) || 0;
 featureDef.time = storyTime;
-// Built below, once every scene is loaded — an entry's prior is read off its OTHER scenes and so cannot
+// Built below, once every scene is loaded — an entry's prior is read off its other scenes and so cannot
 // be computed inside the per-scene loop the way properShared is.
 featureDef.oracle = r => Number(r.entryBase) || 0;
-// THE THREE COMPUTABLE PRIORS, each an attempt at part of what `oracle` bounds. All are entry-intrinsic
-// — they never read the query — so they are priors rather than signals, and within-scene standardisation
+// The three computable priors, each an attempt at part of what `oracle` bounds. All are entry-intrinsic —
+// they never read the query — so they are priors rather than signals, and within-scene standardisation
 // still works on them because they vary between the entries of one scene.
 //
-// LENGTH IS LOG, because token counts run over an order of magnitude and a raw column would let one
-// 15k-token entry set the scene's SD. It is not already in the model: BM25 length-normalises INSIDE
-// `text`, which is a different claim — that a long document should not out-score a short one on the same
-// query — and says nothing about whether long entries are likelier to be relevant at all.
+// Length is log, because token counts run over an order of magnitude and a raw column would let one huge
+// entry set the scene's sd. It is not already in the model: BM25 length-normalises inside `text`, which is
+// the different claim that a long document should not out-score a short one on the same query.
 featureDef.length = r => Math.log(Math.max(1, Number(r.entryTokens) || 0));
-// NAMES PER 100 TOKENS, on properNounsOf — the same detector `proper` settled on. A DENSITY, not
-// the count: the count is length wearing another name, and the two would be one column.
+// Names per 100 tokens, on properNounsOf — the same detector `proper` settled on. A density, not the
+// count: the count is length wearing another name, and the two would be one column.
 featureDef.density = r => Number(r.properDensity) || 0;
-// MEAN -log10(tf/total) over the entry's tokens, the book as the corpus. "How rare is this entry's
-// vocabulary among its siblings" — the surviving half of a mean-TF-IDF prior. The English-frequency half
-// is deliberately absent: ZIPF_EN scores a name maximally rare and a book's own coinages with it, so the
-// two axes disagree on a real share of a book's token mass and a min-of-percentiles combination measured
-// WORSE than this column alone.
+// Mean -log10(tf/total) over the entry's tokens, the book as the corpus — how rare is this entry's
+// vocabulary among its siblings, the surviving half of a mean-TF-IDF prior. The English-frequency half is
+// deliberately absent: ZIPF_EN scores a name and a book's own coinages maximally rare, so the two axes
+// disagree on a real share of a book's token mass and a min-of-percentiles combination measured worse
+// than this column alone.
 featureDef.rarity = r => Number(r.bookRarity) || 0;
-// NAMES PER CHUNK, the same construct as `density` at the unit the system retrieves in. Proposed off the
-// DISABLED-entry population, where length-controlled it agreed with the author's keep/drop calls — and
-// that finding is an ARTIFACT: disabled entries sit earlier in the story, early entries name fewer
-// distinct people because the cast has not accumulated, and
-// controlling position as well as length takes it to chance (F12, C7). It measures nothing on
-// grades either. Kept because the unit is an obvious thing to try and this answers it both ways.
+// Names per chunk, the same construct as `density` at the unit the system retrieves in. The
+// disabled-entry finding it was proposed off is an artifact — controlling story position as well as
+// length takes it to chance (F12, C7) — and it measures nothing on grades either. Kept because the unit
+// is an obvious thing to try and this answers it both ways.
 featureDef.chunkdens = r => Number(r.chunkDensity) || 0;
 for (const f of FEATURE_LIST) FEATURES.push([f, featureDef[f]]);
 
@@ -437,27 +349,21 @@ for (const f of FEATURE_LIST) FEATURES.push([f, featureDef[f]]);
 // otherwise all of them.
 const SQUARED = DEGREE < 2 ? []
     : FEATURES.map((f, i) => i).filter(i => !SQUARE.length || SQUARE.includes(FEATURES[i][0]));
-// Two-way products of the standardised signals. A DIFFERENT question from the squares: those ask
-// whether one signal bends, these ask whether two of them combine — which is the structure a tree
-// ensemble would be reaching for, and the cheap way to find out whether any exists.
+// Two-way products of the standardised signals: the squares ask whether one signal bends, these ask
+// whether two of them combine.
 const PAIRS = INTERACT
     ? FEATURES.flatMap((_, i) => FEATURES.map((__, j) => [i, j]).filter(([a, b]) => a < b))
     : [];
 
-// WHAT A SIGNAL IS WORTH AS A REJECTION FILTER, which is a different question from AUC and the one an
-// entry-level prior is actually for. A prior that says "this entry is generic" is not a claim that a
-// high-scoring entry is relevant, so the symmetric number hides it: a column can sit near 0.5 AUC and
-// still have a pure low tail. This walks the signal's own ranking from the bottom and reports how much
-// of the pool can be cut before the first relevant row is lost, and again at 95% recall.
+// What a signal is worth as a rejection filter, which AUC does not say: a column can sit near 0.5 AUC and
+// still have a pure low tail. Walks the signal's own ranking from the bottom and reports how much of the
+// pool can be cut before the first relevant row is lost, and again at 95% recall.
 //
-// POOLED ACROSS SCENES ON PURPOSE, where solo AUC carries the same caveat by accident: a rejection
-// filter has ONE threshold for every scene, so the pooled ranking is the population it would face. That
-// makes the number honest for a scene-independent prior and pessimistic for a signal whose scale moves
-// per scene (BM25), which is the right way round.
-// TIE-AWARE, which is not a detail here: a threshold cuts on a VALUE, so every row sharing the lowest
-// positive's value is kept with it. An entry-level prior is tied by construction — a whole block of
-// entries scores exactly 0 — and walking row indices instead would let the sort order inside that block
-// decide the answer, reporting a filter as pure when the tie it sits on contains relevant rows.
+// Pooled across scenes on purpose: a rejection filter has one threshold for every scene, so the pooled
+// ranking is the population it would face — honest for a scene-independent prior and pessimistic for a
+// signal whose scale moves per scene (BM25). Tie-aware, because a threshold cuts on a value: an
+// entry-level prior ties a whole block at exactly 0, and walking row indices would let the sort order
+// inside that block decide the answer.
 const tailCut = (s, labels) => {
     const order = s.map((v, i) => [v, labels[i]]).sort((a, b) => a[0] - b[0]);
     const pos = order.reduce((a, [, l]) => a + (l ? 1 : 0), 0);
@@ -467,8 +373,8 @@ const tailCut = (s, labels) => {
         let j = i;
         while (j + 1 < order.length && order[j + 1][0] === order[i][0]) j++;
         const groupPos = order.slice(i, j + 1).reduce((a, [, l]) => a + (l ? 1 : 0), 0);
-        // `below` is what a cut placed under this group would drop, and it is recorded BEFORE the group
-        // is counted — dropping the group itself costs the positives inside it.
+        // `below` is what a cut under this group would drop, recorded before the group is counted —
+        // dropping the group itself costs the positives inside it.
         if (groupPos && Number.isNaN(at100)) at100 = below / order.length;
         if (Number.isNaN(at95) && (lost + groupPos) / pos > 0.05) at95 = below / order.length;
         below = j + 1; lost += groupPos; i = j + 1;
@@ -482,8 +388,8 @@ const PRIORS = ['length', 'density', 'rarity', 'chunkdens'];
 const CHUNK_CFG = { chunkMode: 'paragraph', chunkSize: 800, minChunkSize: 120 };
 // Book term-frequency, keyed by book — see the per-scene block.
 const bookTf = new Map();
-// The set of entry contents each book NAME holds, for the fold-identity check below. One entry per name,
-// filled the first time a scene on that book is loaded.
+// The set of entry contents each book name holds, for the fold-identity check below. Filled the first
+// time a scene on that book is loaded.
 const bookContents = new Map();
 
 const mean = xs => xs.reduce((a, b) => a + b, 0) / (xs.length || 1);
@@ -494,10 +400,9 @@ const fx = n => (Number.isFinite(n) ? (n >= 0 ? '+' : '') + n.toFixed(3) : '  n/
 // sweep cannot, since the model is what varies.
 const QV = new Map();
 const queryVec = async (S, name, value, em) => {
-    // THE SCENE IS IN THE KEY. It was (name, value) only, so every scene of an embedModel sweep was
-    // handed the FIRST scene's query vector — one query scored against every scene's collection, which
-    // produces a full table of plausible numbers and compares nothing. Keyed on the query TEXT rather
-    // than a label, because the text is what the embedding is of.
+    // The scene is in the key, or an embedModel sweep hands every scene the first scene's query vector —
+    // a full table of plausible numbers that compares nothing. Keyed on the query text rather than a
+    // label, because the text is what the embedding is of.
     const k = `${name}\u001f${value}\u001f${S.query}`;
     // `label`, not `model`: the disk cache is keyed by it, and two stems can serve the same `model` id
     // while producing different vectors. The in-memory QV map stays as the within-run hit.
@@ -512,10 +417,9 @@ const queryVec = async (S, name, value, em) => {
     for (const path of samples) {
         const S = openSample(path, arg(argv, '--arm'));
         if (!S.candidates?.length) { console.error(`${path}: logs no candidates`); process.exit(2); }
-        // THROUGH resolveModel, like the sweep's own queryVec above. It sent the raw spec to ollama and
-        // applied no task prefix, so a server-stemmed model was an unknown ollama name and a
-        // prefix-trained one was silently embedded without its instruction — which does not fail, it
-        // just scores the model worse than it is.
+        // Through resolveModel, like the sweep's own queryVec above: a raw spec is an unknown ollama name
+        // for a server-stemmed model and drops the task prefix for a prefix-trained one, which does not
+        // fail — it just scores the model worse than it is.
         const qv = await queryVec(S, 'baseline', MODEL, resolveModel(MODEL));
         loaded.push({ path, name: sceneLabel(S) || path, book: S.primaryBook ?? path, S, qv });
     }
@@ -528,26 +432,26 @@ const queryVec = async (S, name, value, em) => {
         let dropped = 0;
         for (const { S, qv, name, book } of loaded) {
             const P = sceneParams(S, { ...(sweep ? { [SWEPT]: value } : {}), ...(DROP_KEYS ? { dropKeys: DROP_KEYS } : {}) });
-            // THE INDEX FOLLOWS THE PARAMS. denseAllEntries wants a collection covering every entry, not
-            // only the vectorized ones — scored against the standard index it would find no extra vectors
-            // and report a null result that reads like an answer. ensureIndex is cached per (book, cfg,
-            // all), so this costs an existsSync on every scene after the first.
+            // The index follows the params: denseAllEntries wants a collection covering every entry, not
+            // only the vectorized ones, or it finds no extra vectors and reports a null result that reads
+            // like an answer. ensureIndex is cached per (book, cfg, all), so this costs an existsSync
+            // on every scene after the first.
             const em = resolveModel(EMBED_SWEEP ? value : MODEL);
             const indexFile = P.denseAllEntries || EMBED_SWEEP
                 ? (await ensureIndex(S, { all: !!P.denseAllEntries, model: em.model, label: em.label, endpoint: em.endpoint, url: em.endpoint === 'ollama' ? OLLAMA : em.url, log: () => {} })).path
-                // THE LABEL NAMES THE FILE, not the spec: cachePath and the derived ST path are both
-                // written with `omlx-Qwen3-...`, while the spec is `omlx:Qwen3-...`. Passing the spec
-                // resolves a path nothing ever wrote.
+                // The label names the file, not the spec: cachePath and the derived ST path are written
+                // with `omlx-Qwen3-...` while the spec is `omlx:Qwen3-...`, so passing the spec resolves
+                // a path nothing ever wrote.
                 : indexPath(S, { model: em.label });
-            // The query has to be embedded by the same model as the collection it is scored against. A
-            // stale qv here returns plausible cosines that mean nothing, which is the one failure mode of
-            // this sweep that produces a number rather than an error. Memoised per (scene, arm).
+            // The query has to be embedded by the same model as the collection it is scored against: a
+            // stale qv returns plausible cosines that mean nothing, the one failure mode of this sweep
+            // that produces a number rather than an error. Memoised per (scene, arm).
             const qvec = EMBED_SWEEP ? await queryVec(S, name, value, em) : qv;
             const scene = loadScene(S, { indexFile, indexOpts: { model: em.label }, params: P });
-            // THIS BOOK'S ENTRIES, not the scene's — `scene.entries` spans every attached book now, and
-            // this set feeds the leave-one-book-out lineage guard, which compares two books by the share
-            // of the SMALLER one they hold in common. Pooling a second book in grows the denominator and
-            // silently pushes a real lineage under the 30% bar.
+            // This book's entries, not the scene's — `scene.entries` spans every attached book, and this
+            // set feeds the leave-one-book-out lineage guard, which compares two books by the share of
+            // the smaller one they hold in common. A second book's rows would grow the denominator and
+            // push a real lineage under the 30% bar.
             if (!bookContents.has(book)) {
                 bookContents.set(book, new Set((scene.entries ?? [])
                     .filter(e => e.world === book && typeof e.content === 'string' && e.content.trim())
@@ -561,31 +465,24 @@ const queryVec = async (S, name, value, em) => {
             const dMode = P.detector ?? P.densityExtract ?? DENSITY_EXTRACT;
             const bookX = (xMode === 'book' || dMode === 'book') ? makeExtract('book', scene.entries) : null;
             if (has('properNouns')) {
-                // Proper nouns are a property of the SCENE, so read off a plain entry's window: an entry's
-                // own sources are its, not the scene's.
-                // SWEEPABLE, so two detectors can be compared paired per scene AND per book rather than
-                // by diffing two runs. Absent a sweep this is the required flags, so a bare run is unchanged.
+                // Proper nouns are a property of the scene, so read off a plain entry's window. Sweepable,
+                // so two detectors can be compared paired per scene and per book rather than by diffing
+                // two runs; absent a sweep this is the required flags.
                 const extract = xMode === 'book' ? bookX : makeExtract(xMode, scene.entries);
                 const win = extract(haystack({}).join('\n'));
-                // df over THIS book's entries, which is the corpus the names live in — the same reason
-                // content-lexical insists on one index for both classes. Computed once per scene.
+                // df over this book's entries, the corpus the names live in. Computed once per scene.
                 const df = new Map();
                 let ndoc = 0;
                 if (PROPER_MODE === 'idf' || PROPER_MODE === 'idf-len') {
-                    // EVERY ENTRY IS A DOCUMENT HERE, disabled included, and that is a modelling choice
-                    // rather than an oversight. df asks how DISTINCTIVE a name is in the book's
-                    // vocabulary, which a disabled entry still contributes to — where buildContentIndex
-                    // excludes disabled entries because it is asking what can be RETRIEVED. Measured:
-                    // excluding them costs, consistently across scenes and books (F27). The
-                    // runtime can compute it either way — the entries are in the book — so parity does
-                    // not decide it and the measurement does.
+                    // Every entry is a document here, disabled included: df asks how distinctive a name is
+                    // in the book's vocabulary, which a disabled entry still contributes to, where
+                    // buildContentIndex excludes them because it asks what can be retrieved. Excluding
+                    // them costs, consistently across scenes and books (F27).
                     //
-                    // AN ENTRY WITH NO CONTENT IS NOT A DOCUMENT, which is a different question from
-                    // whether it is enabled. Counting one raises ndoc while contributing no df, so it
-                    // inflates every name's idf by pretending the corpus is larger than the text in it —
-                    // the one way a malformed book could move this column without anybody seeing it.
-                    // Measured a no-op on this corpus (F27), so it is
-                    // a guard for other people's books and not a change to the fit.
+                    // An entry with no content is not a document, which is a different question from
+                    // whether it is enabled: counting one raises ndoc while contributing no df, inflating
+                    // every name's idf. Measured a no-op on this corpus (F27), so it guards other
+                    // people's books rather than changing the fit.
                     for (const e of scene.entries ?? []) {
                         if (typeof e.content !== 'string' || !e.content.trim()) continue;
                         ndoc++;
@@ -603,16 +500,16 @@ const queryVec = async (S, name, value, em) => {
                     } else if (PROPER_MODE === 'idf') {
                         for (const w of ents) if (win.has(w)) v += Math.log((ndoc + 1) / ((df.get(w) ?? 0) + 1));
                     } else if (PROPER_MODE === 'idf-len') {
-                        // ONE COLUMN FOR WHAT THE MODEL RECONSTRUCTS FROM TWO. `length` was measured to be a
-                        // correction to `proper`'s COUNT — dropping proper collapses it (F11) — so
-                        // the normalised overlap is the quantity the pair is expressing. Divided by log
-                        // tokens rather than tokens, because that is the column the fit standardises.
-                        // NOT the jaccard arm, which normalises by the UNION of both name sets and lost.
+                        // One column for what the model reconstructs from two: `length` measured as a
+                        // correction to `proper`'s count — dropping proper collapses it (F11) — so the
+                        // normalised overlap is what the pair expresses. Divided by log tokens rather
+                        // than tokens, the column the fit standardises. Not the jaccard arm, which
+                        // normalises by the union of both name sets and lost.
                         let idf = 0;
                         for (const w of ents) if (win.has(w)) idf += Math.log((ndoc + 1) / ((df.get(w) ?? 0) + 1));
                         v = idf / Math.log(Math.max(2, tokenize(r.entry?.content).length));
                     } else if (PROPER_MODE === 'gaz') {
-                        // buildGazetteer stores FOLDED tokens, so the membership test folds too — a
+                        // buildGazetteer stores folded tokens, so the membership test folds too — a
                         // lowercase compare misses every accented name the book declared.
                         for (const w of ents) if (win.has(w) && scene.gaz?.has(fold(w))) v++;
                     } else {
@@ -621,14 +518,11 @@ const queryVec = async (S, name, value, em) => {
                     r.properShared = v;
                 }
             }
-            // THE ENTRY-INTRINSIC PRIORS, stamped on the row so the feature accessors stay pure lookups.
-            // Book term-frequency is CACHED PER BOOK: it reads scene.entries, which is the same corpus for
-            // every scene of a book, and recomputing it per scene would tokenize the book 14 times over on
-            // the larger lines for an identical answer.
-            //
-            // KEYED BY THE ROW'S OWN BOOK, as the name df is: rarity asks how unusual a term is in the
-            // book the entry came from, and a scene now ranks every attached book. Keying the cache on
-            // the scene's primary would give a second book's entries the primary's vocabulary.
+            // The entry-intrinsic priors, stamped on the row so the feature accessors stay pure lookups.
+            // Book term-frequency is cached per book, and keyed by the row's own book as the name df is:
+            // rarity asks how unusual a term is in the book the entry came from, and a scene ranks every
+            // attached book, so keying on the scene's primary would give a second book's entries the
+            // primary's vocabulary.
             if (PRIORS.some(has)) {
                 const tfFor = (bookName) => {
                     let bk = bookTf.get(bookName);
@@ -651,16 +545,15 @@ const queryVec = async (S, name, value, em) => {
                     const toks = tokenize(r.entry?.content);
                     r.entryTokens = toks.length;
                     const names = properNounsOf(normalizeOrthography(String(r.entry?.content ?? '')));
-                    // THE SHIPPED FUNCTION, so the fit and the runtime cannot drift on what density is —
-                    // the same rule the overlap follows through properNames. `names` stays for chunkdens.
+                    // The shipped function, so the fit and the runtime cannot drift on what density is.
+                    // `names` stays for chunkdens.
                     r.properDensity = dMode === 'book'
                         ? (bookX(String(r.entry?.content ?? '')).size / Math.max(1, toks.length)) * 100
                         : properDensity(String(r.entry?.content ?? ''));
-                    // reindex.chunkConfig's defaults, NOT the scene params — those carry no chunk settings
-                    // at all, and passing them gives chunkEntry an undefined chunkSize, which recurses
-                    // until the stack blows rather than failing. Verified against the built index: chunk
-                    // counts match on every shared uid (P4), so this is the split the vector
-                    // collection and content-lexical actually saw.
+                    // reindex.chunkConfig's defaults, not the scene params — those carry no chunk settings,
+                    // and an undefined chunkSize recurses until the stack blows rather than failing. Chunk
+                    // counts match the built index on every shared uid (P4), so this is the split the
+                    // vector collection and content-lexical saw.
                     r.chunkDensity = (names?.size ?? 0) / Math.max(1, chunkEntry(String(r.entry?.content ?? ''), CHUNK_CFG).length);
                     r.bookRarity = toks.length ? toks.reduce((a, t) => a + bk.rarity(t), 0) / toks.length : 0;
                 }
@@ -670,59 +563,49 @@ const queryVec = async (S, name, value, em) => {
             // applies to them. Ungraded rows are out because they carry no label.
             const kept = [], ungraded = [], offTier = [];
             for (const r of rows.filter(r => !r.entry?.constant)) {
-                // The other tier's rows are never FITTED, but under --standardise pooled they are part of
+                // The other tier's rows are never fitted, but under --standardise pooled they are part of
                 // the population the statistics come from, so they are kept rather than dropped here.
                 if (TIER !== 'all' && (isMemory(r.entry) ? 'memory' : 'reference') !== TIER) { offTier.push(r); continue; }
                 const g = gradeOf(r);
-                // An ungraded row carries no label, so it is out of the FIT — a 0 there would be a claim
-                // about relevance. It is kept for the bar sweep, where the same row scored 0 is a claim
-                // about DELIVERY: a bar that admits it puts an unvetted entry in front of a user and
-                // should pay precision for it, which is the `?? 0` convention scene.mjs already uses.
-                // Dropping them from both would score every bar on the rows some arm already surfaced,
-                // and so would reward a bar for reaching deeper than the pool.
+                // An ungraded row carries no label, so it is out of the fit — a 0 there would be a claim
+                // about relevance. It is kept for the bar sweep, where a row scored 0 is a claim about
+                // delivery: a bar that admits it should pay precision for it, the `?? 0` convention
+                // scene.mjs uses. Dropping them from both would reward a bar for reaching deeper than
+                // the pool.
                 if (g === null || g === undefined || Number.isNaN(g)) {
                     dropped++;
-                    // Under --ungraded-negative it MOVES from `ungraded` to `kept` as a labelled 0
-                    // rather than appearing in both: the cutoff sweep reads the two lists separately and
-                    // would otherwise count the row twice in precision.
+                    // Under --ungraded-negative it moves from `ungraded` to `kept` as a labelled 0 rather
+                    // than appearing in both: the cutoff sweep reads the two lists separately and would
+                    // otherwise count the row twice in precision.
                     if (UNGRADED_NEGATIVE) kept.push({ r, y: 0, g: 0, wasUngraded: true });
                     else ungraded.push({ r, g: 0 });
                     continue;
                 }
                 kept.push({ r, y: g >= CUT ? 1 : 0, g });
             }
-            // A ROW FLOOR, and nothing about the labels. The features are standardised within scene, so a
-            // scene with a couple of rows scales its columns by an sd estimated from a couple of points;
-            // 5 is where that stops being nonsense. There is no both-classes test: the fit POOLS ACROSS
-            // SCENES behind one intercept, so an all-negative scene still contrasts its own rows against
-            // each other and still informs the slopes. Requiring both classes dropped those rows for a
-            // property the fit does not need, and the cutoff sweep separately drops scenes with no
-            // relevant row, where recall is undefined rather than uninformative.
-            // THE SCENE TEXT RIDES ALONG for --emit-rows. A grade is a verdict about a (scene, entry)
-            // PAIR, so a dropped row cannot be judged from its title: the same entry is right in one
-            // scene and wrong in the next. Bounded, because the whole query over 103 scenes is a file
-            // nobody opens.
+            // A row floor, and nothing about the labels: the features are standardised within scene, so a
+            // scene with a couple of rows scales its columns by an sd estimated from a couple of points.
+            // There is no both-classes test — the fit pools across scenes behind one intercept, so an
+            // all-negative scene still contrasts its own rows and still informs the slopes, and the cutoff
+            // sweep separately drops scenes with no relevant row, where recall is undefined.
+            // The scene text rides along for --emit-rows: a grade is a verdict about a (scene, entry)
+            // pair, so a dropped row cannot be judged from its title. Bounded, because the whole query
+            // over every scene is a file nobody opens.
             if (kept.length >= 5) perScene.push({ name, book, kept, ungraded, offTier, query: String(S.query ?? '').slice(-4000) });
         }
         if (!perScene.length) { console.log(`  ${SWEPT}=${value}: no scene has both classes among its judged rows`); continue; }
 
-        // THE ORACLE ENTRY PRIOR — a CEILING, not a candidate feature. It reads the entry's own grades in
-        // the OTHER scenes, so nothing computable from an entry's text can beat it; the question it answers
-        // is whether an entry-level prior has any room at all beside the query-dependent signals, before a
-        // proxy for one is built. `RELEVANCE IS A PROPERTY OF THE PAIR` (matcher-design.md) rules out
-        // caching a verdict per entry; it does not rule out an INTERCEPT, and this measures that intercept
-        // at its best possible value.
+        // The oracle entry prior — a ceiling, not a candidate feature. It reads the entry's own grades in
+        // the other scenes, so nothing computable from an entry's text can beat it; the question is whether
+        // an entry-level prior has room beside the query-dependent signals. `Relevance is a property of the
+        // pair` (matcher-design.md) rules out caching a verdict per entry, not an intercept, and this
+        // measures that intercept at its best possible value.
         //
-        // LEAVE-ONE-SCENE-OUT within the entry, which removes the self-leak — with the row's own label in
-        // the average, a singleton entry would predict itself perfectly and the column would read as an
-        // oracle for being one. What it does NOT remove is the cross-scene leak inside a book, so --lobo
-        // does not protect this column and its held-out number is optimistic BY CONSTRUCTION. That is what
-        // makes it a bound: a real prior gets none of this.
-        //
-        // An entry seen in one scene only has no out-of-fold estimate, so it takes the pooled base rate —
-        // the neutral value, which keeps the row population identical to the run without the column and so
-        // keeps the two runs paired. The count is printed because a column mostly made of imputed rows is
-        // measuring the imputation.
+        // Leave-one-scene-out within the entry removes the self-leak. It does not remove the cross-scene
+        // leak inside a book, so --lobo does not protect this column and its held-out number is optimistic
+        // by construction — which is what makes it a bound. An entry seen in one scene only takes the
+        // pooled base rate, keeping the row population identical to the run without the column; the imputed
+        // count is printed because a column mostly made of imputed rows is measuring the imputation.
         if (has('oracle')) {
             const tally = new Map();
             const idOf = r => `${r.entry?.world ?? ''}${r.entry?.uid ?? ''}`;
@@ -739,9 +622,8 @@ const queryVec = async (S, name, value, em) => {
                     if (t.n > 1) k.r.entryBase = (t.pos - k.y) / (t.n - 1);
                     else { k.r.entryBase = pooled; imputed++; }
                 }
-                // An ungraded row never entered the tally, so it has no estimate of its own even when its
-                // entry does. It takes the entry's full rate where one exists — there is no self to leave
-                // out — and the pooled rate otherwise.
+                // An ungraded row never entered the tally, so it takes the entry's full rate where one
+                // exists — there is no self to leave out — and the pooled rate otherwise.
                 for (const u of ungraded) {
                     const t = tally.get(idOf(u.r));
                     u.r.entryBase = t ? t.pos / t.n : pooled;
@@ -753,20 +635,16 @@ const queryVec = async (S, name, value, em) => {
         // Design matrix: one intercept, then each signal's standardised value. Standardising within scene
         // is what makes one slope mean one thing across corpora whose BM25 lives on different scales.
         //
-        // THE STATISTICS COME FROM EVERY CANDIDATE, THE ROWS ONLY FROM THE GRADED ONES. A label exists
-        // only where somebody graded, but the mean and sd a coefficient is expressed in must be the ones
-        // the RUNTIME computes, and the runtime has no notion of "graded" — `scoreRelevance` centres over
-        // every activated row. Taking them from the pooled subset instead was a train/serve skew: the
-        // ungraded tail sits low, so leaving it out lifts the mean and shrinks the sd, and every z at
-        // serving time comes out larger than the fit ever saw. On the corpus's worst-covered turn the
-        // graded-only statistics substantially over-delivered — and coverage falls as a scene grows, so
-        // the inflation was worst exactly
-        // where over-delivery already hurt; well-covered scenes are unaffected (F43).
+        // The statistics come from every candidate, the rows only from the graded ones: the mean and sd a
+        // coefficient is expressed in must be the ones the runtime computes, and `scoreRelevance` centres
+        // over every activated row. Graded-only statistics are a train/serve skew — the ungraded tail sits
+        // low, so leaving it out lifts the mean, shrinks the sd, and over-delivers worst on the
+        // least-covered scenes (F43).
         const X = [], y = [], rawCols = FEATURES.map(() => []), stats = FEATURES.map(() => ({ sd: [], mean: [] }));
         const perSignal = FEATURES.map(() => ({ s: [], y: [] }));
         const sceneCols = [];
         // Under --standardise book, the statistics pool every candidate of every scene on that book. Built
-        // up front because a scene needs its BOOK's rows, which it does not hold.
+        // up front because a scene needs its book's rows, which it does not hold.
         const bookPopulation = new Map();
         if (STD_BY === 'book') {
             for (const { kept, ungraded, book } of perScene) {
@@ -797,9 +675,8 @@ const queryVec = async (S, name, value, em) => {
                     perSignal[fi].s.push(c[i]);
                     perSignal[fi].y.push(k.y);
                 });
-                // DEGREE 2 APPENDS, never interleaves: every readout below indexes a linear coefficient
-                // as base + fi, so a squared column inserted beside its own signal would silently
-                // renumber all of them.
+                // Degree 2 appends, never interleaves: every readout below indexes a linear coefficient as
+                // base + fi, so a squared column beside its own signal would renumber all of them.
                 const sq = [...SQUARED.map(fi => feats[fi] ** 2),
                     ...PAIRS.map(([a, b]) => feats[a] * feats[b])];
                 X.push([...scene, ...feats, ...sq]);
@@ -811,10 +688,9 @@ const queryVec = async (S, name, value, em) => {
 
         const sceneOf = perScene.flatMap(({ kept }, si) => kept.map(() => si));
         const etaOf = (fit, rows) => rows.map(row => row.reduce((a, x, j) => a + x * fit.beta[j], 0));
-        // One held-out estimator, two groupings. The fold is the unit the model must generalise ACROSS.
-        // `labels` defaults to the shipped cut, and is a parameter so the SAME held-out estimator can be
-        // run at another boundary — E[credit] is built from P(>=2) and P(>=3), and a calibration claim
-        // about it has to hold for both.
+        // One held-out estimator, two groupings; the fold is the unit the model must generalise across.
+        // `labels` is a parameter so the same estimator can run at another boundary — E[credit] is built
+        // from P(>=2) and P(>=3), and a calibration claim about it has to hold for both.
         const holdOut = (groupOf, nGroups, labels = y) => {
             const held = Array(labels.length).fill(NaN);
             const betas = Array(nGroups).fill(null);
@@ -828,37 +704,29 @@ const queryVec = async (S, name, value, em) => {
             }
             const keep = held.map((v, i) => [v, labels[i]]).filter(([v]) => Number.isFinite(v));
             // `betas` is what lets a row the fit never saw — an ungraded one — be scored by the fold that
-            // did not train on its book, which is the only honest way to put it in a delivered set.
-            // `fold` rides along so the readout can report ONE held-out book on its own: pooling every
-            // fold answers "does this generalise on average", and a validation book asks something else.
+            // did not train on its book, the only honest way to put it in a delivered set. `fold` rides
+            // along so the readout can report one held-out book on its own.
             return {
                 eta: keep.map(k => k[0]), y: keep.map(k => k[1]), betas,
                 fold: held.map((v, i) => [v, i]).filter(([v]) => Number.isFinite(v)).map(([, i]) => groupOf(i)),
             };
         };
         const books = [...new Set(perScene.map(p => p.book))];
-        // ONE BOOK IS NOT A FOLD. holdOut trains on the rows OUTSIDE each group, so a single-book scene set
-        // leaves an empty training set, the fit is skipped, every eta comes back NaN — and the cutoff grid
-        // then scores an empty row set and prints `F2 0.0000, delivering 0.0` as though it were a result.
-        // Fatal rather than a warning: every held-out number in the run is that same NaN, and a clean zero
-        // is the failure shape this codebase has been bitten by before.
+        // One book is not a fold. holdOut trains on the rows outside each group, so a single-book scene set
+        // leaves an empty training set, every eta comes back NaN, and the cutoff grid prints a clean
+        // `F2 0.0000, delivering 0.0` as though it were a result. Fatal rather than a warning.
         if (LOBO && books.length < 2) {
             console.error(`--lobo needs at least 2 books; these ${perScene.length} scene(s) are all "${books[0]}". `
                 + `Every held-out readout would be NaN and --cutoff would print a zero. `
                 + `Run the full corpus and read the per-book fold, or use --loso.`);
             process.exit(2);
         }
-        // TWO NAMES FOR ONE BOOK ARE NOT TWO FOLDS. holdOut groups by book NAME, and a book is versioned
+        // Two names for one book are not two folds. holdOut groups by book NAME, and a book is versioned
         // and renamed in place (CLAUDE.md, *Chat-based measurement*), so a renamed copy in the sample set
-        // splits one lineage across two folds —
-        // and each is then TRAINED ON ITS OWN BOOK under the other name, which is the leak holding out by
-        // book exists to prevent. Observed: `LTM - Ascensus` and `LTM - Isekai Adventure - …2026-03-04`
-        // are entry-for-entry identical, and the fold that read as "the one that falls"
-        // was the one whose training set contained itself (C11).
-        //
-        // SHARE OF THE SMALLER BOOK, not of the union, and 30% is CLAUDE.md's own lineage bar rather than
-        // a number chosen here. Fatal for the same reason the guard above is: a leaked fold still prints a
-        // full table, and it prints a BETTER one.
+        // splits one lineage across two folds and each is then trained on its own book under the other
+        // name — the leak holding out by book exists to prevent (C11). Share of the smaller book, not of
+        // the union, and 30% is CLAUDE.md's own lineage bar. Fatal for the same reason the guard above is:
+        // a leaked fold still prints a full table, and a better one.
         if (LOBO && books.length > 1) {
             for (let i = 0; i < books.length; i++) {
                 for (let j = i + 1; j < books.length; j++) {
@@ -882,8 +750,8 @@ const queryVec = async (S, name, value, em) => {
         if (LOBO) {
             console.log(`\n  held out by book: ${books.length} folds — ${books.map(b => `${String(b).split(/[ _]/).slice(-1)[0].slice(0, 10)} ${bookOf.filter(x => x === books.indexOf(b)).length}`).join(', ')} rows`);
         }
-        // The raw fit is the same design with unstandardised signals — the per-unit reading. Same intercepts,
-        // so the only difference between the two is the scale the slope is expressed in.
+        // The raw fit is the same design with unstandardised signals — the per-unit reading, same
+        // intercepts, so the only difference is the scale the slope is expressed in.
         const Xraw = X.map((row, i) => {
             const out = row.slice(0, 1);
             FEATURES.forEach((_, fi) => out.push(rawCols[fi][i]));
@@ -917,26 +785,22 @@ const queryVec = async (S, name, value, em) => {
                 ...(lobo ? { 'held out by BOOK': lobo } : {}),
             },
             books,
-            // Calibration is read at BOTH boundaries E[credit] combines, not only the shipped cut: the
-            // target is 0.5*P(>=2) + 0.5*P(>=3), and a convex combination of two probabilities is
-            // calibrated only if each of them is. Held out by book where that was asked for, and
-            // in-sample beside it so the near-zero there is visible as the score equation it is.
-            // THE CUTOFF. Stage 4's question is not "which rows rank highest" but "which rows belong", so the
-            // sweep scores the DELIVERED SET at each candidate cutoff rather than a window: F2 on the asymmetric
-            // bars (recall at grade >= 3, precision crediting a 2 at half), macro-averaged over scenes so a
-            // scene with many candidates does not outvote one with few.
-            //
-            // Scored on E[credit] = 0.5*P(>=2) + 0.5*P(>=3), both held out BY BOOK and P(>=3) clamped to
-            // P(>=2) — the boundaries are fitted separately, so nothing guarantees the nesting the events
-            // have, and E[credit] is malformed where they invert.
+            // Calibration is read at both boundaries E[credit] combines: the target is
+            // 0.5*P(>=2) + 0.5*P(>=3), and a convex combination of two probabilities is calibrated only if
+            // each of them is. Held out by book where asked for, with in-sample beside it so the near-zero
+            // there is visible as the score equation it is.
+            // The cutoff. Stage 4 asks which rows belong, so the sweep scores the delivered set at each
+            // candidate cutoff rather than a window: F2 on the asymmetric bars (recall at grade >= 3,
+            // precision crediting a 2 at half), macro-averaged over scenes so a scene with many candidates
+            // does not outvote one with few. Scored on E[credit] = 0.5*P(>=2) + 0.5*P(>=3), both held out
+            // by book and P(>=3) clamped to P(>=2) — the boundaries are fitted separately, so nothing
+            // guarantees the nesting the events have and E[credit] is malformed where they invert.
             cutoff: CUTOFF && LOBO ? (() => {
                 const labelsAt = c => grades.map(g => (g >= c ? 1 : 0));
                 const cuts = [2, 3].map(c => holdOut(i => bookOf[i], books.length, labelsAt(c)).betas);
-                // THE SAME TWO BOUNDARIES, POOLED — what --emit-model ships. The grid above scores each row
-                // through the fold that did not train on its book, which is the honest way to CHOOSE a
-                // cutoff and the wrong thing to ship: a fold's betas are deliberately fitted on less than
-                // the corpus. So the operating point is read held out and the coefficients that ride with
-                // it are the pooled fit at the same two boundaries.
+                // The same two boundaries, pooled — what --emit-model ships. The grid above scores each row
+                // through the fold that did not train on its book, the honest way to choose a cutoff and
+                // the wrong thing to ship, since a fold's betas are fitted on less than the corpus.
                 const pooled = [2, 3].map(c => logisticFit(X, labelsAt(c)).beta);
                 const scoreRow = (design, fold) => {
                     const eta = b => (b ? design.reduce((a, x, j) => a + x * b[j], 0) : NaN);
@@ -947,14 +811,13 @@ const queryVec = async (S, name, value, em) => {
                 let gi = 0;
                 const scenes = perScene.map(({ kept, ungraded, name, query }, si) => {
                     const fold = bookOf[gi];
-                    // IDENTITY AND RAW FEATURES RIDE ALONG, for --emit-rows. The cutoff readout needs
-                    // only (score, grade); what a human reads to understand a cut needs to know WHICH
-                    // entry and what it scored on each column, and reconstructing that from a second run
-                    // would re-derive the standardisation the fit used.
+                    // Identity and raw features ride along for --emit-rows: the cutoff readout needs only
+                    // (score, grade), but a human reading a cut needs which entry and what it scored on
+                    // each column, and a second run would re-derive the standardisation the fit used.
                     const idOf = r => ({ uid: r.entry?.uid, title: r.entry?.comment || r.entry?.title || `uid ${r.entry?.uid}`,
                         feats: Object.fromEntries(FEATURES.map(([n, get]) => [n, get(r)])) });
                     const rows = kept.map(k => ({ e: scoreRow(X[gi++], fold), g: k.g, ...idOf(k.r) }));
-                    // An ungraded row is projected through ITS OWN scene's standardisation, the same
+                    // An ungraded row is projected through its own scene's standardisation, the same
                     // statistics the fit used, so it lands on one scale with the rows beside it.
                     for (const u of ungraded) {
                         const design = [1];
@@ -971,7 +834,7 @@ const queryVec = async (S, name, value, em) => {
                     scenes: scenes.length,
                     pooled,
                     sceneNames: scenes.map(sc => sc.name),
-                    // Which BOOK each scene sits on, so the paired test can be read at the n that is
+                    // Which book each scene sits on, so the paired test can be read at the n that is
                     // actually independent — see the per-book block below.
                     sceneBooks: scenes.map(sc => sc.book),
                     sceneRows: scenes,
@@ -986,10 +849,9 @@ const queryVec = async (S, name, value, em) => {
                         return {
                             cut, f: mean(per.map(x => x.f)), precision: mean(per.map(x => x.precision)),
                             recall: mean(per.map(x => x.recall)), delivered: mean(per.map(x => x.n)),
-                            // Per scene, kept so arms can be contrasted against each other's OWN scenes.
-                            // A macro-averaged difference between two arms is one number with no test
-                            // behind it, and at 68 scenes on 7 books that is how a flat band gets
-                            // reported as an improvement (CLAUDE.md, graded scenes).
+                            // Per scene, kept so arms can be contrasted against each other's own scenes:
+                            // a macro-averaged difference between two arms is one number with no test
+                            // behind it (CLAUDE.md, graded scenes).
                             perScene: per.map(x => x.f),
                         };
                     }),
@@ -1023,11 +885,11 @@ const queryVec = async (S, name, value, em) => {
     }
 
     if (ORDINAL) {
-        // ONE ROW PER BOUNDARY OF THE SCALE. `n>=k` is how many rows sit at or above that grade, so the
-        // boundaries get rarer down the column and the last one is often too thin to fit. Read the slopes
-        // ACROSS boundaries: a scale whose levels the signals can see gives similar slopes with rising
-        // intercepts, and a boundary whose slope collapses is a distinction the grader made and the
-        // features cannot reproduce.
+        // One row per boundary of the scale. `n>=k` is how many rows sit at or above that grade, so the
+        // boundaries get rarer down the column and the last is often too thin to fit. Read the slopes
+        // across boundaries: a scale whose levels the signals can see gives similar slopes with rising
+        // intercepts, and a collapsed slope is a distinction the grader made that the features cannot
+        // reproduce.
         console.log('\nordinal: P(grade >= k) fitted at every boundary, same design matrix, slopes free');
         for (const t of table) {
             console.log(`  ${SWEPT}=${t.value}`);
@@ -1040,7 +902,7 @@ const queryVec = async (S, name, value, em) => {
         }
     }
 
-    // WHAT A THRESHOLD WOULD DELIVER, which the AUC above does not say: AP moves with prevalence and the
+    // What a threshold would deliver, which the AUC above does not say: AP moves with prevalence and the
     // precision-at-recall rows are in the units a bar is chosen in. The in-sample row is the same fit
     // scored on the rows that produced it; the held-out rows are what the number of record reads.
     console.log(`\noperational readout of P(grade>=${CUT}): average precision, and precision at recall`);
@@ -1053,10 +915,9 @@ const queryVec = async (S, name, value, em) => {
             console.log(`  ${head} ${label.padEnd(21)} | ${`${(100 * m.pos / m.n).toFixed(2)}%`.padStart(9)}  ${auc(f.eta, f.y).toFixed(4)}  ${m.ap.toFixed(3)} | ${cell(0.5)}  ${cell(0.75)}  ${cell(0.9)}`);
         }
     }
-    // PER HELD-OUT BOOK. The pooled row above answers "does this generalise on average"; a VALIDATION
-    // book asks whether it generalised to one specific corpus nobody fitted on, and averaging that away
-    // is the whole thing being avoided. Small folds are reported with their n rather than suppressed —
-    // an AUC on 40 rows is not wrong, it is imprecise, and hiding it would hide the imprecision too.
+    // Per held-out book. The pooled row above answers "does this generalise on average"; a validation book
+    // asks whether it generalised to one corpus nobody fitted on. Small folds are reported with their n
+    // rather than suppressed — a small-fold AUC is imprecise, not wrong, and hiding it hides that.
     if (LOBO) {
         console.log(`\nheld out by BOOK, one row per fold — the fit trained on every OTHER book`);
         console.log(`  ${SWEPT.padEnd(14)} book                             |     n   pos   prevalence   AUC     AP`);
@@ -1077,20 +938,18 @@ const queryVec = async (S, name, value, em) => {
 
     if (!LOSO || !LOBO) console.log('  (--loso holds out a scene, --lobo a book; only the second is the generalisation production needs)');
 
-    // WHERE THE CUTOFF GOES. This is the only readout here that scores what stage 4 actually ships — a SET,
-    // chosen by the model rather than cut at a rank someone picked. Everything above is a diagnostic on
-    // the ordering; F2 over the delivered set is the score of record.
+    // Where the cutoff goes: the only readout here that scores what stage 4 ships — a set, chosen by the
+    // model rather than cut at a rank someone picked. Everything above is a diagnostic on the ordering;
+    // F2 over the delivered set is the score of record.
     if (CUTOFF) {
         if (!LOBO) console.log('\n--cutoff needs --lobo: a cutoff chosen on in-sample probabilities is chosen on rows the fit has seen.');
         else for (const t of table) {
             const b = t.cutoff;
             if (!b) continue;
-            // --at PINS THE OPERATING POINT so two arms can be contrasted at the SAME cutoff. Each arm's
+            // --at pins the operating point so two arms can be contrasted at the same cutoff. Each arm's
             // own best is chosen on the same macro F2 the arms are then compared by, so an arm whose
-            // optimum sits deeper is credited for delivering more as if that were free — measured, an
-            // arm at its own deeper cutoff delivered twice as many
-            // entries and moved most scenes' per-scene F2 down while the macro mean went up (F42). A
-            // paired sign test across arms is only a statement about the feature when the cutoff is held.
+            // optimum sits deeper is credited for delivering more as if that were free (F42). A paired
+            // sign test across arms is only a statement about the feature when the cutoff is held.
             const best = AT === null ? b.grid.reduce((a, x) => (x.f > a.f ? x : a))
                 : b.grid.reduce((a, x) => (Math.abs(x.cut - AT) < Math.abs(a.cut - AT) ? x : a));
             console.log(`\nthe cutoff: F2 over the delivered set, macro-averaged over ${b.scenes} scenes (mean ${b.meanRelevant.toFixed(1)} relevant each)`);
@@ -1102,63 +961,54 @@ const queryVec = async (S, name, value, em) => {
             }
             console.log(`  best cutoff ${best.cut.toFixed(2)}: F2 ${best.f.toFixed(4)}, delivering ${best.delivered.toFixed(1)} entries against ${b.meanRelevant.toFixed(1)} relevant.`);
             t.best = best;
-            // THE SHIPPED MODEL IS THE POOLED FIT, and the held-out numbers above are what say whether it
-            // generalises. Shipping a fold's betas would ship a model deliberately trained on less than
-            // the corpus. The cutoff rides along because it is not a property of the coefficients: it is
-            // read off the delivered set, and a model shipped without the operating point it was chosen
-            // at is not a selection rule.
+            // The shipped model is the pooled fit, and the held-out numbers above are what say whether it
+            // generalises; shipping a fold's betas would ship a model trained on less than the corpus. The
+            // cutoff rides along because it is not a property of the coefficients: it is read off the
+            // delivered set, and a model shipped without its operating point is not a selection rule.
             //
-            // COLUMN ORDER IS THE CONTRACT: [intercept, one standardised column per feature, then any
-            // squared/interaction columns appended]. The consumer must standardise WITHIN THE SCENE it is
+            // Column order is the contract: [intercept, one standardised column per feature, then any
+            // squared/interaction columns appended]. The consumer must standardise within the scene it is
             // scoring, as the fit did — the coefficients are per within-scene sd and mean nothing against
             // a raw value.
             //
-            // TWO COEFFICIENT VECTORS, ONE PER BOUNDARY, because the target is E[credit] and not P(>=3).
-            // The file used to carry the single --cut fit beside a cutoff read off the E[credit] grid, so
-            // its two halves described different quantities: E[credit] >= P(>=3) everywhere the clamp
-            // holds, and a consumer thresholding the emitted beta at the emitted cutoff delivered a
-            // strictly tighter set than the one the number was chosen on. The boundaries are fitted
-            // SEPARATELY (proportional odds does not hold here), so neither vector can be derived from
-            // the other and both have to travel.
+            // Two coefficient vectors, one per boundary, because the target is E[credit] and not P(>=3).
+            // The boundaries are fitted separately (proportional odds does not hold here), so neither
+            // vector can be derived from the other and both have to travel.
             if (EMIT_MODEL) {
                 const fit = {
-                    // WHICH POPULATION THE z's WERE TAKEN OVER rides with the coefficients, because a
+                    // Which population the z's were taken over rides with the coefficients, because a
                     // consumer must standardise the same way or the slopes meet a different unit. Absent
-                    // means `scene`, which every fit written before the flag existed used.
+                    // means `scene`.
                     tier: TIER, standardise: STD_BY, cutoff: best.cut, f2: best.f,
                     // The rule the two vectors combine under, stated where a consumer reads them. The
-                    // clamp is not optional for being small: a handful of rows genuinely invert (F31),
-                    // and an incoherent probability pair is a bug that reads as a threshold effect.
+                    // clamp is not optional: a handful of rows genuinely invert (F31), and an incoherent
+                    // probability pair is a bug that reads as a threshold effect.
                     target: 'E[credit] = 0.5*P(>=2) + 0.5*min(P(>=3), P(>=2))',
                     features: FEATURES.map(([n]) => n),
                     properNounsMode: PROPER_MODE, properNounsExtract: PROPER_EXTRACT,
                     layout: ['intercept', ...FEATURES.map(([n]) => `${n}.z`)],
                     beta: { ge2: Array.from(b.pooled[0] ?? []), ge3: Array.from(b.pooled[1] ?? []) },
-                    // BOTH AUCs, because they answer different questions and the in-sample one alone
-                    // would flatter a model shipped for books it has never seen. Held out by BOOK is the
-                    // generalisation number production actually gets.
-                    //
-                    // AT THE >= 3 BOUNDARY, which is the guard above forcing --cut 3: an AUC is read on
-                    // ONE ordering and E[credit] combines two, so this names the boundary rather than the
-                    // shipped target. `f2` beside it is the one number here read on E[credit] itself.
+                    // Both AUCs: the in-sample one alone would flatter a model shipped for books it has
+                    // never seen, and held out by book is the generalisation production gets. At the >= 3
+                    // boundary, which is the guard above forcing --cut 3 — an AUC is read on one ordering
+                    // and E[credit] combines two, so this names the boundary rather than the shipped
+                    // target. `f2` beside it is the one number here read on E[credit] itself.
                     aucAt: 3,
                     auc: t.auc ?? null,
                     heldOutAuc: t.fits?.['held out by BOOK']
                         ? auc(t.fits['held out by BOOK'].eta, t.fits['held out by BOOK'].y) : null,
-                    // COUNTS, NEVER NAMES. The model file is checked in; the corpus is one person's
-                    // chats and `eval-data/` is gitignored for exactly that reason. A book title names a
-                    // private story, so the fold count is what travels and the named provenance stays
-                    // beside the data it describes (eval-data/README.md).
+                    // Counts, never names. The model file is checked in and the corpus is one person's
+                    // chats, so the fold count travels and the named provenance stays beside the data it
+                    // describes (eval-data/README.md).
                     fittedOn: {
                         scenes: b.scenes, rows: t.nRows ?? null,
                         books: Array.isArray(t.books) ? t.books.length : (Number(t.books) || null),
                     },
                 };
-                // MERGED INTO THE MAP, never over it. The artifact holds one fit per embedding model
+                // Merged into the map, never over it. The artifact holds one fit per embedding model
                 // (extension/relevance.mjs modelKey), because coefficients fitted against one embedder's
-                // cosines do not carry to another — so writing the whole file would delete every other
-                // model's fit, which is what happens the first time someone refits under a new embedder
-                // and is exactly what this shape exists to stop.
+                // cosines do not carry to another, so writing the whole file would delete every other
+                // model's fit.
                 const key = modelKey(resolveModel(MODEL).model);
                 let file = { schema: 2, tier: TIER, byModel: {} };
                 try { const prev = JSON.parse(fs.readFileSync(EMIT_MODEL, 'utf8')); if (prev?.byModel) file = prev; } catch { /* first write */ }
@@ -1192,19 +1042,17 @@ const queryVec = async (S, name, value, em) => {
                 console.log(`  per-scene F2 written to ${EMIT}`);
             }
         }
-        // PAIRED against the first arm, every arm at the --at cutoff — the contrast param-screen makes,
+        // Paired against the first arm, every arm at the --at cutoff — the contrast param-screen makes,
         // and the only one that can tell a real gain from the flatness of the cutoff curve.
         const bases = table.filter(t => t.best);
         if (bases.length > 1) {
             const b0 = bases[0];
             console.log(`\npaired against ${SWEPT}=${b0.value}, every arm at the ${AT} cutoff — per-scene F2, sign test`);
-            // AND AGAIN PER BOOK, because the scene-level p above is not the evidence it looks like:
-            // scenes on one book share its vocabulary, its entry style and its BM25 scale, so many
-            // scenes on few books are nearer the book count than the scene count as observations, and a
-            // within-book correlation is counted as independent agreement (CLAUDE.md, *Graded scenes*). A change that wins on every book is a
-            // change; one that wins on the largest book and loses elsewhere is a book finding wearing the
-            // parameter's name — and the scene-level test cannot tell them apart, since the largest book
-            // supplies most of the scenes.
+            // And again per book: scenes on one book share its vocabulary, entry style and BM25 scale, so
+            // many scenes on few books are nearer the book count than the scene count as observations
+            // (CLAUDE.md, *Graded scenes*). A change that wins on every book is a change; one that wins on
+            // the largest book and loses elsewhere is a book finding wearing the parameter's name, and the
+            // scene-level test cannot tell them apart.
             const bk = b0.cutoff?.sceneBooks ?? [];
             const bookNames = [...new Set(bk)];
             for (const t of bases.slice(1)) {
@@ -1220,13 +1068,11 @@ const queryVec = async (S, name, value, em) => {
         }
     }
 
-    // DO THE PROBABILITIES MEAN WHAT THEY SAY. Everything above reads the ORDERING, and a monotone
-    // rescaling leaves AUC and AP untouched — so the readout that decides where a bar goes is not in
-    // any of it. The bar is argued in probability terms, so this is the check that argument rests on.
-    //
-    // The in-sample row is printed to be discounted: a logistic fit with an intercept forces
-    // mean(p) == base rate, so a near-zero ECE there is one of its own score equations. Only the
-    // held-out row is evidence, which is why --calibration is worth little without --lobo.
+    // Do the probabilities mean what they say. Everything above reads the ordering, and a monotone
+    // rescaling leaves AUC and AP untouched, so the readout that decides where a bar goes is not in any of
+    // it. The in-sample row is printed to be discounted: a logistic fit with an intercept forces
+    // mean(p) == base rate, so a near-zero ECE there is one of its own score equations. Only the held-out
+    // row is evidence, which is why --calibration is worth little without --lobo.
     if (CALIB) {
         console.log('\nreliability of P(grade >= k), quantile bins — ECE is the n-weighted mean gap, MCE the worst bin');
         for (const t of table) {

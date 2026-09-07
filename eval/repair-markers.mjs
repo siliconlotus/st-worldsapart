@@ -1,27 +1,18 @@
 // repair-markers.mjs — reconciles a bundle's embedded books with what its entries actually are.
 //
-// Two fields decide how scene.mjs treats an entry and both drifted through ordinary editing as these books
-// grew. The STMB marker says memory-or-reference (scene.mjs's isMemory reads its PRESENCE, never the range),
-// and `vectorized` says which route can reach the entry at all. Neither is repairable from the other, but on
-// THIS corpus the title convention settles it: an STMB entry is titled with a number, or ARC + number. That
+// Two fields decide how scene.mjs treats an entry and both drift through ordinary editing (F47). The STMB
+// marker says memory-or-reference (scene.mjs's isMemory reads its presence, never the range), and
+// `vectorized` says which route can reach the entry at all. Neither is repairable from the other, but on
+// this corpus the title convention settles it: an STMB entry is titled with a number, or ARC + number. That
 // convention is the author's, not a property of World Info, so it lives here as a repair rule over data and
 // must not become a predicate in scene.mjs or matcher.mjs — those keep testing fields.
 //
-// WHAT DRIFTED, MEASURED (F47). In Time Whore, character and place sheets carry a marker copied from
-// entry 001, so they rank as memory. In Ascensus, arc summaries lost theirs and are excluded from every
-// ranking metric, as is Sommers 051B, which was split off 051 by hand. Separately, many Time Whore memory
-// entries are not vectorized — a workaround for an ST core limitation, not intent — and being reachable
-// only by key they are normalised over keys alone in fuseRanks, which lifts them above vectorized
-// entries carrying a real cosine. That displacement measurably costs judged rows and F2 against the
-// same grades.
+// Durable entries are left alone: a constant or sticky entry is included by authorial assertion, so this
+// pass neither vectorizes it nor changes its flags.
 //
-// DURABLE ENTRIES ARE LEFT ALONE. A constant or sticky entry is included by authorial assertion, so this
-// pass neither vectorizes it nor changes its flags — whether a given pin still means what it meant is a
-// judgement about that entry, not something a title tells you.
-//
-// TAKES EITHER A BUNDLE OR A LIVE WORLD FILE. Repairing the book itself is what makes every future capture
+// Takes either a bundle or a live world file. Repairing the book itself is what makes every future capture
 // correct; repairing a bundle only patches one fixture, and the two then disagree about what ST would
-// activate. A world is written back at ST's own 4-space indent so the file stays diffable and so ST's next
+// activate. A world is written back at ST's own 4-space indent so the file stays diffable and ST's next
 // save is not a whole-file rewrite.
 //
 // Usage (any cwd):
@@ -59,9 +50,9 @@ for (const path of files) {
     // A world file is `{ entries, name }`; a document is `{ books: { book: entries }, scenes }`. Normalising to
     // the bundle's shape means one repair rule serves both rather than two copies drifting apart.
     const isWorld = !m.books && Boolean(m.entries);
-    // THE FILENAME IS THE WORLD'S IDENTITY, not the `name` inside it. ST addresses a book by file and hashes
+    // The filename is the world's identity, not the `name` inside it: ST addresses a book by file and hashes
     // that name into the collection id, while the embedded `name` is whatever the file was last copied from
-    // and goes stale silently — Sommers_Pack__v22.json still calls itself a Daddy Next Door book.
+    // and goes stale silently.
     const books = isWorld ? { [basename(path, '.json')]: m.entries } : (m.books ?? {});
     // primaryBook and paramSnapshot live on the ARM, not at the root, so the read goes through the same
     // adapter openSample uses. Reading them off the root silently yields undefined, which is a book name
@@ -92,15 +83,15 @@ for (const path of files) {
             touched++;
         }
     }
-    // A REPAIRED BOOK OUTGROWS ITS RECORDED COLLECTION. The live ST collection holds chunks for the entries
-    // that were vectorized when it was synced; entries vectorized here have none, and loadScene gives a row
-    // with no item no cosine at all — so re-deriving against the old path would score exactly as if the
-    // repair had not happened, silently. Repoint at the rebuild cache, which keys on book + model + chunk
-    // settings and so names the same file on any machine (absent there, indexPath falls through to it anyway).
+    // A repaired book outgrows its recorded collection: the live ST collection holds chunks for the entries
+    // vectorized when it was synced, entries vectorized here have none, and loadScene gives a row with no
+    // item no cosine at all — so re-deriving against the old path scores as if the repair had not happened.
+    // Repoint at the rebuild cache, which keys on book + model + chunk settings and so names the same file
+    // on any machine.
     if (!isWorld && vectorized.has(path)) {
         if (!m.embedModel) throw new Error(`${path}: marker records no embedModel — cannot name its rebuild cache`);
         const target = cachePath(view, chunkConfig(view), m.embedModel);
-        // EVERY arm, whichever schema: the repair changed the book, so no arm's recorded collection is
+        // Every arm, whichever schema: the repair changed the book, so no arm's recorded collection is
         // current any more.
         for (const a of (m.scenes?.[0]?.arms ?? (Array.isArray(m.arms) ? m.arms : [m]))) a.index = target;
         if (!m.scenes && !Array.isArray(m.arms)) m.index = target;

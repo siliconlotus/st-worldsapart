@@ -1,31 +1,27 @@
 // Should a long entry be chunked, or sent whole? "Can" and "should" are different questions and the
 // shipped code answers only the first one implicitly.
 //
-// llmKeyCandidates splits an entry at 5000 CHARACTERS and runs one call per chunk. The stated reason
-// is behavioural — "a small local model summarises instead of extracting once an entry runs long" —
-// not a context limit, and it has never been measured. Chunking is not context-driven: the longest
-// entry on disk fits comfortably inside every declared context, and ollama ingests it whole at
-// default settings without truncating (S20). So the question is live: does chunking help, hurt, or nothing?
+// llmKeyCandidates splits an entry at llmChunk characters and runs one call per chunk, for a behavioural
+// reason rather than a context limit — the longest entry on disk fits inside every declared context and
+// ollama ingests it whole without truncating (S20).
 //
-// THREE ARMS over the same entries, same prompt builder, same parser:
+// Three arms over the same entries, same prompt builder, same parser:
 //   whole    — the entry in one call. What "the model can take it" would imply.
 //   chunked  — splitRecursive at llmChunk, one call per chunk, candidates unioned. Production.
 //   first    — first chunk only. The temp-ladder's approximation, here to size its own bias.
 //
-// Restricted to entries ABOVE the chunk size, because for anything shorter all three arms are the
-// same call and would only dilute the contrast. A substantial share of enabled entries qualifies on
-// the big books (S20), so this is the normal path there.
+// Restricted to entries above the chunk size, since for anything shorter all three arms are the same call
+// and would only dilute the contrast. A substantial share of enabled entries qualifies on the big books
+// (S20), so this is the normal path there.
 //
-// WHAT WOULD FAVOUR EACH. Chunking buys coverage mechanically: N chunks x 5-10 keys beats one 5-10
-// key list for a 35k-char entry, and the generator's job is recall since the Zipf/df gates and a
-// human supply precision. Whole-entry buys global choice: the model can see which terms actually
-// discriminate the entry instead of picking locally-salient ones per slice, and cannot repeat itself
-// across slices. Cost differs too — chunked is N calls, whole is one, so if they tie, whole wins on
-// cost and chunked wins on nothing.
+// What would favour each: chunking buys coverage mechanically, and the generator's job is recall since the
+// Zipf/df gates and a human supply precision. Whole-entry buys global choice — the model can see which
+// terms discriminate the entry instead of picking locally-salient ones per slice, and cannot repeat itself
+// across slices — and costs one call against N, so a tie is a win for whole.
 //
-// Agreement with the books' own keys is RELATIVE ONLY, exactly as in temp-ladder.mjs — curation is
-// evidence about precision, never recall (eval-data/README.md). The arms share one fixed reference,
-// so the contrast is interpretable; the level is not a quality score.
+// Agreement with the books' own keys is relative only, as in temp-ladder.mjs: curation is evidence about
+// precision, never recall (eval-data/README.md). The arms share one fixed reference, so the contrast is
+// interpretable; the level is not a quality score.
 //
 // Usage:  node chunk-vs-whole.mjs --model gemma3:4b [--temp 0] [--entries 6]
 import { readFileSync, writeFileSync, existsSync } from 'node:fs';
@@ -59,10 +55,10 @@ const temp = Number(arg('temp', '0'));
 const perBook = Number(arg('entries', '6'));
 
 /**
- * num_predict 400 per CALL, mirroring llmKeyCandidates. Note this is the one place the arms are not
- * on equal footing and cannot be: chunked gets 400 tokens per chunk and whole gets 400 total. That
- * asymmetry IS production's, so removing it would measure a system nobody ships — but it means a
- * yield win for chunked is partly a budget win, which the report says out loud.
+ * num_predict 400 per call, mirroring llmKeyCandidates. The one place the arms are not on equal footing
+ * and cannot be: chunked gets 400 tokens per chunk and whole gets 400 total. That asymmetry is
+ * production's, so removing it would measure a system nobody ships — but a yield win for chunked is
+ * partly a budget win, which the report says out loud.
  */
 async function ask(prompt) {
     const key = `${model}\x1f${temp}\x1f${hash(prompt)}`;

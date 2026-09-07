@@ -1,13 +1,12 @@
 // The count-instruction sweep against a hosted OpenAI-compatible endpoint, with a bounded
 // concurrency pool. Companion to count-sweep.mjs, which does the same arms locally against ollama.
 //
-// WHY THIS EXISTS SEPARATELY. Two things the local runner cannot answer. Thinking cannot be disabled
-// on a hosted model, so the only way to price reasoning is to compare a model against its own
-// `:thinking` variant. And local inference serialises on one GPU, so it cannot show what the feature
-// would actually feel like for the users who are on hosted models — which is most of them.
+// Two things the local runner cannot answer: thinking cannot be disabled on a hosted model, so the only
+// way to price reasoning is to compare a model against its own `:thinking` variant; and local inference
+// serialises on one GPU, so it cannot show what the feature feels like for users on hosted models.
 //
-// CONCURRENCY. A 6-way pool measured a near-linear speedup with no rate-limit errors (H5); the
-// provider's stated ceiling is 10, so the default here is 8. This is also the shape a shipped worker pool would
+// Concurrency: a pool measured a near-linear speedup with no rate-limit errors (H5), against a stated
+// provider ceiling of 10, so the default here is 8. This is also the shape a shipped worker pool would
 // take, so the numbers double as a feasibility check for parallelising the Studio's suggest-all.
 //
 // Follows CLAUDE.md's harness rules: appends one JSONL line per response as it lands, resumes from
@@ -41,9 +40,8 @@ const VARIANTS = {
     'atleast-15': 'Output at least 15 keywords',
     'confident': 'Output as many keywords as you are confident about',
 };
-// SHIPPED is the anchor the variants are substituted over, so it must track buildKeyPrompt. It is
-// now the self-selecting wording; `range-5-10` is therefore a counterfactual arm rather than the
-// default. Substituted strings are unchanged either way, so the caches keyed on prompt hash survive.
+// `shipped` is the anchor the variants are substituted over, so it must track buildKeyPrompt — currently
+// the self-selecting wording, which makes `range-5-10` a counterfactual arm rather than the default.
 const SHIPPED = 'Output as many keywords as you are confident about';
 const useVariants = arg('variants', 'all') === 'shipped' ? { 'range-5-10': SHIPPED } : VARIANTS;
 
@@ -88,15 +86,11 @@ if (!has('score-only')) {
     const sleep = ms => new Promise(res => setTimeout(res, ms));
 
     /**
-     * A 429 is BACK-PRESSURE, not a failure. The provider's documented "10" is a rate, not a count of
-     * open connections: a wider pool sustained full throughput while most of its calls were rejected,
-     * where a smaller burst passed cleanly (H5). So a pool has to respond to the signal rather than cap
-     * connections and hope. Exponential backoff with jitter, retried up to 5 times; anything that is
-     * not a 429 fails immediately, since retrying an auth error or a bad model id just wastes calls.
-     *
-     * This is the behaviour a shipped worker pool needs too — the Studio's current loop aborts the
-     * whole run on any error, which at concurrency would throw away a whole book's work because one
-     * request was throttled.
+     * A 429 is back-pressure, not a failure: the provider's documented ceiling is a rate, not a count of
+     * open connections, so a pool has to respond to the signal rather than cap connections and hope (H5).
+     * Exponential backoff with jitter, retried up to 5 times; anything that is not a 429 fails immediately,
+     * since retrying an auth error or a bad model id just wastes calls. A shipped worker pool needs the
+     * same behaviour — the Studio's loop aborts the whole run on any error.
      */
     const fetchWithBackoff = async (task) => {
         for (let attempt = 0; ; attempt++) {

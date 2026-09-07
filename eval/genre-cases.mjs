@@ -1,17 +1,15 @@
 // Genre vocabulary cases for the keyword suggester — the data half; eval/genre-check.mjs runs it.
 //
-// WHY THIS EXISTS. Roleplay prose is not the English the frequency tables were built from, and
-// every genre breaks the ranker somewhere different. Measured over one user's books, the shapes
-// that actually occur are: acronyms, bracket tags, apostrophe names, accented text, nobiliary
-// particles, hyphenated species compounds, shouted markdown headers, elisions, roman numerals and
-// LitRPG stat blocks (S19). Nearly every bug found while tuning the suggester came from one of
-// those and not from ordinary prose.
+// Roleplay prose is not the English the frequency tables were built from, and every genre breaks the
+// ranker somewhere different. The shapes that actually occur are acronyms, bracket tags, apostrophe
+// names, accented text, nobiliary particles, hyphenated species compounds, shouted markdown headers,
+// elisions, roman numerals and LitRPG stat blocks (S19).
 //
 // Cases carry the SHAPE, never anyone's actual writing: the point is that a name has a particle or
 // a header is shouted, not what the scene is about. Neutral vocabulary keeps the suite publishable.
 //
-// Adding a case is four lines, which is the point — when a suggestion looks wrong, write down the
-// text that produced it rather than reasoning about which gate misfired.
+// Adding a case is four lines — when a suggestion looks wrong, write down the text that produced it
+// rather than reasoning about which gate misfired.
 //   { genre, shape, text, expect: [...], reject: [...] }
 // `expect` terms must be offered for that entry, `reject` must not. Both are compared against the
 // lowercased ranking term (not the display form), so casing is irrelevant here.
@@ -27,10 +25,9 @@ const FILLER = [
 
 /**
  * Wrap one entry's text in enough neutral filler that the corpus-wide gates behave as they would on
- * a real book. This is not decoration: a term appearing in 3 of 9 entries lands over the >30% share
- * that the distributional function-word cut treats as a stopword, which silently strips it from
- * every n-gram. Two separate debugging sessions were lost to exactly that before this helper
- * existed, so cases should never hand-roll their own padding.
+ * a real book. Not decoration: a term appearing in 3 of 9 entries lands over the >30% share that the
+ * distributional function-word cut treats as a stopword, which silently strips it from every n-gram.
+ * Cases must never hand-roll their own padding.
  * @param {string} text     the entry under test (uid 0)
  * @param {number} [pad=14] filler entries to surround it with
  */
@@ -48,9 +45,9 @@ export const GENRE_CASES = [
     // --- LitRPG / dungeon system --------------------------------------------------------------
     // Notation taken from real books: "[State]", "[FROZEN - Victory]", "Lv1", "HP 25", "- Devoted:".
     {
-        // Chrome repeats — that is what makes it chrome — so the case supplies several entries
-        // carrying the tag. With one entry the frequency gates cannot see it and the shouted words
-        // ride in on the acronym exemption, which is a property of the fixture, not the ranker.
+        // Chrome repeats — that is what makes it chrome — so the case supplies several entries carrying
+        // the tag. With one entry the frequency gates cannot see it and the shouted words ride in on the
+        // acronym exemption, which would be a property of the fixture rather than of the ranker.
         genre: 'litrpg', shape: 'system bracket tag',
         text: [
             '[SKILL ACQUIRED: Mana Weaving]\nThe sigil granted Mana Weaving to the party. Mana Weaving held for an hour, and Mana Weaving faded at dawn.',
@@ -70,9 +67,8 @@ export const GENRE_CASES = [
             'The scout held Lv4 and HP 30 through the second descent.',
             'Every delve begins at Lv1 with HP 10, whatever the pledge.',
         ],
-        // Four of ten entries carry the stat notation, which is what a real stat-block book looks
-        // like — and what puts "HP" over the frequency gates. Below that it rides in on the acronym
-        // exemption, indistinguishable from a genuine initialism like SDG.
+        // Four of ten entries carry the stat notation, which is what puts "HP" over the frequency gates.
+        // Below that it rides in on the acronym exemption, indistinguishable from a genuine initialism.
         pad: 6,
         expect: ['ashgate'],
         reject: ['lv', 'hp', 'warden'],   // "warden" is a common noun, not this book's coinage
@@ -92,11 +88,10 @@ export const GENRE_CASES = [
         reject: ['warlock kal\'thas sunstrider'],
     },
     {
-        // Apostrophe names are ordinary tokens and need no handling of their own — but they look
-        // exactly like a French elision, so the rule that turns "d'Orléans" into "Orléans" could
-        // eat one. Elision happens only before a VOWEL, which settles it structurally: "D'Vorah"
-        // has a consonant after the apostrophe, so no particle produced it. The fixture writes
-        // both forms in ONE entry deliberately — nothing but the vowel test can save it there.
+        // Apostrophe names are ordinary tokens, but they look exactly like a French elision, so the rule
+        // that turns "d'Orléans" into "Orléans" could eat one. Elision happens only before a vowel, which
+        // settles it structurally. The fixture writes both forms in one entry deliberately — nothing but
+        // the vowel test can save it there.
         genre: 'fantasy', shape: 'apostrophe name that looks like an elision',
         text: "The warlord D'Vorah led the swarm, and Vorah kept the hive quiet while D'Vorah slept and Vorah watched.",
         expect: ["d'vorah", 'vorah'],
@@ -109,10 +104,9 @@ export const GENRE_CASES = [
         reject: ["kal'thas's", "kal'thas'", "kal'tha"],   // the fold must not mangle the name
     },
     {
-        // "Tenzing" is seven letters ending in -ing, so the gerund rule reads it as a verb form
-        // unless something proves it is a name. Bullet-led entries never provide a mid-sentence
-        // capital, which is exactly the shape a machine-written book uses — so the name has to
-        // survive on "never written lowercase, and English has no such word".
+        // "Tenzing" ends in -ing, so the gerund rule reads it as a verb form unless something proves it
+        // is a name. Bullet-led entries never provide a mid-sentence capital — the shape a machine-written
+        // book uses — so the name has to survive on "never written lowercase, and English has no such word".
         genre: 'any', shape: 'name that looks like a gerund, in bullet-led prose',
         text: '- Tenzing arrives at camp.\n- Tenzing refuses the third route.\n- Tenzing waits for weather.',
         expect: ['tenzing'],
@@ -198,10 +192,9 @@ export const GENRE_CASES = [
     },
     {
         // Typographic apostrophes are what model output and any smart-quote filter produce, and the
-        // frequency tables are keyed by the straight one. Unfolded, every contraction in the corpus
-        // is unknown to the tables and therefore "maximally rare" — the inverse of the truth, since
-        // these are among the commonest tokens in dialogue. Both spellings appear here because the
-        // straight form was already passing and only the curly one regressed.
+        // frequency tables are keyed by the straight one. Unfolded, every contraction in the corpus is
+        // unknown to the tables and therefore "maximally rare" — the inverse of the truth. Both spellings
+        // appear here because only the curly form regresses.
         genre: 'any', shape: 'curly-apostrophe contractions',
         text: [
             'The steward isn’t convinced, and the ledger doesn’t balance. He isn’t sure the Verenthian tally isn\'t short.',
@@ -223,10 +216,10 @@ export const GENRE_CASES = [
         reject: ["i've", "i'm", "i'd", "i've walked", "i've seen"],
     },
     {
-        // A name plus a contraction is a clause fragment, but every evidence source misses it:
-        // SUBTLEX has no PoS for contractions, and the corpus-side verb test gets vetoed when the
-        // contraction also follows a relative "that", which counts as a determiner. The relative
-        // clauses below are what make this case fail without the shape rule, not decoration.
+        // A name plus a contraction is a clause fragment, but every evidence source misses it: SUBTLEX
+        // has no PoS for contractions, and the corpus-side verb test is vetoed when the contraction
+        // follows a relative "that", which counts as a determiner. The relative clauses below are what
+        // make this case fail without the shape rule, not decoration.
         genre: 'any', shape: 'proper noun plus contraction',
         text: [
             "Boulder hasn't lost a duel. Anything that hasn't been tried, Boulder hasn't feared.",

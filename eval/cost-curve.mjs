@@ -1,15 +1,14 @@
-// cost-curve.mjs — F2 over the DELIVERED SET against what that set COSTS, for two fitted artefacts.
+// cost-curve.mjs — F2 over the delivered set against what that set costs, for two fitted artefacts.
 //
-// WHY A CURVE AND NOT A SCORE. Stage 4's delivered count is not chosen: the signals are standardised
-// within the scene, so a fixed cutoff keeps roughly a fixed FRACTION of whatever activation produced
-// (F24). Pooling the statistics per book fixes the sign of that but scores slightly worse on F2 (F25) —
-// and F2 cannot settle it, reading one scene's set and averaging over scenes, so an arm delivering half
-// the tokens registers only as whatever recall it lost. Sweeping the cutoff turns each artefact into a
-// CURVE of quality against spend; an artefact is better only if its curve sits ABOVE the other at equal
-// tokens. Two arms on one curve means the cheaper one is buying nothing the cutoff setting cannot.
+// A curve and not a score, because stage 4's delivered count is not chosen: the signals are standardised
+// within the scene, so a fixed cutoff keeps roughly a fixed fraction of whatever activation produced (F24).
+// Pooling the statistics per book fixes the sign of that but scores slightly worse on F2 (F25), and F2
+// cannot settle it — it reads one scene's set and averages over scenes, so an arm delivering half the
+// tokens registers only as whatever recall it lost. Sweeping the cutoff turns each artefact into a curve of
+// quality against spend, and an artefact is better only if its curve sits above the other at equal tokens.
 //
-// BOTH ARTEFACTS, NOT ONE AGAINST THE SHIPPED FILE. `--fits a=<dir>,b=<dir>` names directories of
-// `relevance-model-<tier>.json`, and a comparison is only clean when both were fitted on THIS corpus:
+// Both artefacts, not one against the shipped file: `--fits a=<dir>,b=<dir>` names directories of
+// `relevance-model-<tier>.json`, and a comparison is only clean when both were fitted on this corpus —
 // scoring a model fitted elsewhere against one fitted here reads two corpora as a standardisation effect.
 //
 // Usage (from SillyTavern root):
@@ -29,7 +28,7 @@ if (!samples.length || FITS.length < 2 || FITS.some(p => p.length !== 2)) {
     console.error('usage: cost-curve.mjs <sample.json> [...] --fits <name>=<dir>,<name>=<dir> [--cutoffs 0.04,0.08,...]');
     process.exit(2);
 }
-// The embedding model is a USER SETTING with no knowable default, so it comes off the bundles and a
+// The embedding model is a user setting with no knowable default, so it comes off the bundles and a
 // disagreement is fatal rather than pooled — two models' cosines are not one column.
 const MODEL = process.env.WA_EMBED_MODEL ?? openSample(samples[0]).embedModel;
 if (!MODEL) { console.error(`${samples[0]} records no embedModel — set WA_EMBED_MODEL`); process.exit(2); }
@@ -48,7 +47,7 @@ for (const path of samples) {
 }
 console.log(`${scenes.length} scenes, embedder ${EM.label}\n`);
 
-// EVERY FIT AT EVERY CUTOFF, fit-outermost so a killed run still holds whole curves rather than
+// Every fit at every cutoff, fit-outermost so a killed run still holds whole curves rather than
 // half of each. Each cell is scored over the same loaded scenes: nothing but the artefact and the
 // cutoff moves between rows.
 for (const [name, dir] of FITS) {

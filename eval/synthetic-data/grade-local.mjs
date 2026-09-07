@@ -1,22 +1,19 @@
-// grade-local.mjs — dispatches grade-pending's job files to a LOCAL model, via ollama or any
+// grade-local.mjs — dispatches grade-pending's job files to a local model, via ollama or any
 // OpenAI-compatible server (oMLX, llama.cpp, vLLM). `--api openai` picks the second.
 //
 // The other half of grade-pending: `build` writes jobs, something grades them, `merge` reads the answers
-// back. Swapping the judge touches nothing else. The system prompt is `.claude/agents/scene-relevance.md`
-// VERBATIM (frontmatter stripped) — the rubric is the thing under test, not something to paraphrase.
-//
-// Candidates go in INLINE rather than as a job path: ollama has no filesystem, and the contract already
-// carries that branch ("Otherwise return only the JSON"). `out` and `note` are dropped for the same reason.
+// back. The system prompt is `.claude/agents/scene-relevance.md` verbatim (frontmatter stripped) — the
+// rubric is the thing under test, not something to paraphrase. Candidates go in inline rather than as a job
+// path, since ollama has no filesystem and the contract already carries that branch; `out` and `note` are
+// dropped for the same reason.
 //
 // Fixed seed and temperature 0 (CLAUDE.md, "Prompt work belongs on a local model with a fixed seed").
-// `think` is off by default: the Sonnet passes these are compared against ran without extended thinking.
+// `think` is off by default: the hosted passes these are compared against ran without extended thinking.
 //
-// APPEND, never collect: one job -> one result file, written only after the answer parses and its uid set
+// Append, never collect: one job -> one result file, written only after the answer parses and its uid set
 // matches the job's. A kill costs the call in flight; a re-run resumes, because an existing result file is
-// skipped. A malformed answer writes nothing and is retried by the next run.
-//
-// Jobs are dispatched ROUND-ROBIN OVER SCENES, not in name order, so stopping at 20% leaves a sample that
-// spans books instead of one book graded four times.
+// skipped, and a malformed answer writes nothing and is retried. Jobs are dispatched round-robin over
+// scenes, not in name order, so stopping at 20% leaves a sample that spans books.
 //
 // Usage (any cwd):
 //   node eval/synthetic-data/grade-local.mjs --out eval/eval-data/grade-gemma [--model gemma4:31b-mlx]
@@ -59,7 +56,7 @@ const API = arg(argv, '--api', 'ollama');
 if (!['ollama', 'openai'].includes(API)) { console.error(`--api must be ollama|openai, got ${API}`); process.exit(2); }
 const HOST = arg(argv, '--host', process.env.OLLAMA_HOST ?? (API === 'openai' ? 'http://localhost:8008' : 'http://localhost:11434'));
 
-// --rubric swaps the system prompt for a VARIANT: editing the contract of record would change the hash
+// --rubric swaps the system prompt for a variant: editing the contract of record would change the hash
 // stamped on every job, making an experiment indistinguishable from a ruling.
 const RUBRIC = resolvePath(arg(argv, '--rubric', resolvePath(ROOT, '.claude', 'agents', 'scene-relevance.md')));
 const rubricRaw = readFileSync(RUBRIC);
@@ -73,10 +70,10 @@ if (archiveContract(system, rubricHash).written) console.log(`contract ${rubricH
 /**
  * Who the rater is, resolved from the backend rather than from what was typed.
  *
- * A NAME IS NOT AN IDENTITY. `bge-m3:latest` is whatever was pulled most recently, and an oMLX id is a
- * repo id's tail, so two accounts publishing one tail would record as one rater. What each backend can
- * actually answer differs, and a field it cannot answer stays ABSENT — a guess here is worse than a gap,
- * because the gap is legible and the guess is not (bundle-schema.md, *A rater is whoever passed a verdict*).
+ * A name is not an identity: `bge-m3:latest` is whatever was pulled most recently, and an oMLX id is a repo
+ * id's tail, so two accounts publishing one tail would record as one rater. What each backend can answer
+ * differs, and a field it cannot answer stays absent — a guess here is worse than a gap, because the gap is
+ * legible and the guess is not (bundle-schema.md, *A rater is whoever passed a verdict*).
  *
  * Ollama: `/api/tags` carries the manifest digest, `/api/show` the descriptive fields and `capabilities`.
  * oMLX: its API carries neither, but its STORE is `<org>/<name>` for anything it downloaded — so the org
@@ -97,7 +94,7 @@ async function resolveModel() {
 
     if (API === 'ollama') {
         const hit = ((await j(`${HOST}/api/tags`))?.models ?? []).find(m => m.name === MODEL);
-        // `modelDigest`, the field raterKey reads. `modelId` is the name of the COMPONENT it becomes
+        // `modelDigest`, the field raterKey reads. `modelId` is the name of the component it becomes
         // inside the joined id, not a field — raterParts hands that back.
         if (hit?.digest) out.modelDigest = hit.digest;
         const show = await j(`${HOST}/api/show`, { model: MODEL });
@@ -118,9 +115,9 @@ async function resolveModel() {
             if (!e.isDirectory()) continue;
             if (e.name === MODEL) { dir = `${store}/${MODEL}`; break; }
             if (existsSync(`${store}/${e.name}/${MODEL}/config.json`)) {
-                // The ORG-QUALIFIED name, into `modelName` — not `modelDigest`, which is a digest and
-                // this is not. The schema calls modelName the model LINE, and the repo id is that line
-                // more precisely than its tail.
+                // The org-qualified name, into `modelName` — not `modelDigest`, which is a digest and this
+                // is not. The schema calls modelName the model line, and a repo id is that line more
+                // precisely than its tail.
                 out.modelName = `${e.name}/${MODEL}`;
                 dir = `${store}/${e.name}/${MODEL}`;
                 break;
@@ -138,7 +135,7 @@ async function resolveModel() {
 
 const MODEL_INFO = await resolveModel();
 const { capabilities: _caps, ...RATER } = MODEL_INFO;
-// WHAT THE INVOCATION SET, under the names it set them. Mirrors the request body exactly rather than a
+// What the invocation set, under the names it set them. Mirrors the request body exactly rather than a
 // common scale: `num_ctx` and `think` are Ollama's and are not sent on the OpenAI path, and `think` is
 // recorded only where the model declares the capability — so an absent one means unsupported, not unset.
 const PARAMS = API === 'ollama'
@@ -168,7 +165,7 @@ for (const p of pending) {
     if (!byScene.has(s)) byScene.set(s, []);
     byScene.get(s).push(p);
 }
-// Round-robin over BOOKS first, then that book's scenes: scene names sort by book, so interleaving
+// Round-robin over books first, then that book's scenes: scene names sort by book, so interleaving
 // scenes alone still grades one book to exhaustion before touching the next.
 const byBook = new Map();
 for (const s of byScene.keys()) {
@@ -212,7 +209,7 @@ for (const { id, job } of work) {
                 // Usage only arrives on the final chunk if asked for.
                 stream_options: { include_usage: true },
             } : {
-                // STREAM: node's fetch aborts at 300s waiting for HEADERS, and an unstreamed reply sends
+                // Stream: node's fetch aborts at 300s waiting for headers, and an unstreamed reply sends
                 // none until the whole answer is ready, so a slow job dies rather than being slow.
                 model: MODEL, messages, stream: true, think: THINK, format: 'json',
                 options: { seed: SEED, temperature: 0, num_ctx: CTX },
@@ -234,7 +231,7 @@ for (const { id, job } of work) {
                 if (j.error) throw new Error(j.error.message ?? j.error);
                 content += j.message?.content ?? j.choices?.[0]?.delta?.content ?? '';
                 // The stats chunk: ollama flags it `done`, OpenAI just attaches `usage` (and sends it
-                // with an EMPTY choices array, so it must not be mistaken for the end of the content).
+                // with an empty choices array, so it must not be mistaken for the end of the content).
                 if (j.done || j.usage) res = j;
             }
         }
@@ -247,7 +244,7 @@ for (const { id, job } of work) {
     if (!why) {
         try {
             parsed = JSON.parse(unfence(res.message?.content ?? ''));
-            // The right ANSWER in the wrong wrapper: the object inside a one-element array, or bare rows
+            // The right answer in the wrong wrapper: the object inside a one-element array, or bare rows
             // with no envelope. Anything else still fails the uid check below.
             if (Array.isArray(parsed)) parsed = parsed.length === 1 && parsed[0]?.grades ? parsed[0] : { grades: parsed };
         } catch (e) { why = `parse: ${e.message}`; }
@@ -263,15 +260,13 @@ for (const { id, job } of work) {
     }
 
     if (why) { bad++; console.log(`  FAIL ${id}  ${dt.toFixed(0)}s  ${why}`); }
-    // `gradedAt` is WHEN THIS PASS RAN, not when someone later merged it. Merge time cannot separate two
-    // passes filed in one invocation, and a day cannot separate two passes run in one day — which is the
-    // adjudication case, where a second pass over the same rows is the entire point.
+    // `gradedAt` is when this pass ran, not when someone later merged it: merge time cannot separate two
+    // passes filed in one invocation, which is the adjudication case.
     else { ok++; writeFileSync(`${OUTDIR}/${id}-graded.json`, JSON.stringify({
         scene: job.scene, gradedAt: new Date().toISOString(),
-        // WHAT PRODUCED THIS, carried rather than re-stated at merge time. The merge used to rebuild the
-        // rater from a --model flag, so the tool that resolved the model dropped it and the tool that
-        // wrote it guessed.
-        // `capabilities` decided whether `think` is a knob at all; it is not a rater field and does not travel.
+        // What produced this, carried rather than re-stated at merge time, where only a --model flag is
+        // available. `capabilities` decided whether `think` is a knob at all; it is not a rater field and
+        // does not travel.
         rater: { ...RATER, rubric: `${RUBRIC.split('/').pop().replace(/\.md$/, '')}@${rubricHash}` },
         params: PARAMS,
         grades: parsed.grades,
@@ -280,7 +275,7 @@ for (const { id, job } of work) {
         id, model: MODEL, api: API, host: HOST, seed: SEED, rubric: rubricHash, rubricFile: RUBRIC.split('/').pop(), contract: job.contract, ok: !why, why,
         secs: Number(dt.toFixed(1)), rows: job.candidates.length,
         promptTokens: res?.prompt_eval_count ?? null, outTokens: res?.eval_count ?? null,
-        // The head of the raw answer, ON FAILURE ONLY: a rejected result writes no file, so otherwise the
+        // The head of the raw answer, on failure only: a rejected result writes no file, so otherwise the
         // only record of why is a shape count.
         ...(why ? { raw: (res?.message?.content ?? '').slice(0, 400) } : {}),
     }) + '\n');

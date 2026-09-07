@@ -1,36 +1,29 @@
-// global-basis.mjs — the SHARED half of all-but-the-top: the mean and leading components of memory-tier
-// prose across every OTHER lineage, so a book's own leading directions can be measured after the generic
+// global-basis.mjs — the shared half of all-but-the-top: the mean and leading components of memory-tier
+// prose across every other lineage, so a book's own leading directions can be measured after the generic
 // ones are gone.
 //
-// WHY A FIRST STAGE EXISTS AT ALL. Removing a book's top components straight off its own centred corpus
-// does not remove "what is unremarkable in this book" — a book's mean is mostly shared mass, and its
-// leading component sits largely inside a subspace built from other books' memory chunks (R15). So
-// single-stage pcRemove takes mostly common structure, and it scored NEGATIVE on the delivered set for
-// exactly that reason. Strip the shared part first and whatever leads the residual is the book's own.
+// A first stage exists because removing a book's top components straight off its own centred corpus does
+// not remove what is unremarkable in that book — its mean is mostly shared mass, and its leading component
+// sits largely inside a subspace built from other books' memory chunks (R15). Strip the shared part first
+// and whatever leads the residual is the book's own.
 //
-// MEMORY TIER ONLY, ARCHIVED INCLUDED. Whole-book PC1 is largely the memory-versus-reference axis (R17),
-// which every book has, so a mixed basis would make "generic" mean
-// "register" and remove the tier distinction as its first act.
+// Memory tier only, archived included: whole-book PC1 is largely the memory-versus-reference axis (R17), so
+// a mixed basis would make "generic" mean "register" and remove the tier distinction as its first act.
 //
-// LEAVE ONE LINEAGE OUT, not one file. Several names in this corpus are the same Ascensus with
-// near-identical bodies; leaving out only the file puts two near-copies of a book into its own "everyone
-// else", which measurably moved an alignment when fixed (R17). scene.mjs lineagesOf does the grouping.
+// Leave one lineage out, not one file — leaving out only the file puts near-copies of a book into its own
+// "everyone else" (R17). scene.mjs lineagesOf does the grouping.
 //
-// COMPONENTS ARE RANKED BY VARIANCE, WHICH IS NOT SHAREDNESS, so each one's eta^2 is recorded beside it:
+// Components are ranked by variance, which is not sharedness, so each one's eta^2 is recorded beside it:
 // the between-lineage share of its projection's variance over the books the basis was built from. Low is
-// shared across books, high separates them. The two orderings disagree at the top on this corpus:
-// whenever Sommers is in the pool PC1 becomes the Sommers axis, and not by mass (R16). So a
-// variance-ranked prefix removes the MOST book-specific direction first, which is
-// the opposite of stage A's job; scene.mjs `sharedSelect` reads this to select by sharedness instead.
+// shared across books, high separates them, and the two orderings disagree at the top on this corpus (R16),
+// so a variance-ranked prefix removes the most book-specific direction first — the opposite of stage A's
+// job. scene.mjs `sharedSelect` reads eta to select by sharedness instead. Weak at this n, and recorded
+// rather than acted on for that reason (R17).
 //
-// WEAK AT THIS n, and recorded rather than acted on for that reason: few lineage groups, two of them
-// vestigial, so the estimate rests on about three books (R17).
-//
-// POOLED, NOT EQUAL-WEIGHTED PER BOOK. The shared component is a property of the model and of narrative
+// Pooled, not equal-weighted per book: the shared component is a property of the model and of narrative
 // prose, not of any book, so a bigger book is a better estimate of the same thing rather than a louder
-// opinion. Equal-weighting hands the most influence to the least reliable means — split-half error runs
-// far higher on the small books — while pooled and pooled-over-large-books-only agree almost exactly, so
-// pooling already behaves like "use the well-estimated ones" (R17).
+// opinion. Equal-weighting hands the most influence to the least reliable means, while pooled and
+// pooled-over-large-books-only agree almost exactly (R17).
 //
 // Usage (from eval/):
 //   node global-basis.mjs <sample.json ...> [--m 8] [--force]
@@ -45,10 +38,8 @@ import { isMemory } from '../extension/relevance.mjs';
 /** Where a book's basis lives. Keyed by the BOOK being scored, since that is all scene.mjs knows — the
  *  lineage exclusion is baked in at build time, when the other books are in hand.
  *
- *  THE HASH IS OF THE FULL NAME, not of the truncated slug: two of this corpus's books differ only past
- *  character 40 (`LTM - Isekai Adventure - Isekai Adventure - 2026-03-04@14h45` and the same with ` old`),
- *  so a slug-only path silently gave one book the other's basis. Harmless while they share a lineage and a
- *  latent wrong answer the moment they do not. */
+ *  The hash is of the full name, not of the truncated slug: two books can differ only past character 40, so
+ *  a slug-only path would give one book the other's basis. */
 export const basisPath = (book, model, within = false) => {
     if (!model) throw new Error('basisPath needs the model label — a basis is per model');
     return new URL(`./eval-data/basis/${String(book).replace(/[^\w.-]+/g, '-').slice(0, 40)}__${model}${within ? '__within' : ''}__${getStringHash(String(book))}.json`, import.meta.url).pathname;
@@ -67,20 +58,15 @@ export const loadBasis = (book, model, within = false) => {
 
 /** Memory-tier chunks of one sample's primary book, from the collection already on disk. */
 const memoryChunks = (S, model) => {
-    // ARCHIVED MEMORY COUNTS. This is modelling what narrative prose LOOKS LIKE, not what can be
-    // retrieved, and a summary the author retired is the same prose it was the day before. Excluding it
-    // was `!e.disable` inherited from the retrieval path, where the flag genuinely decides something; here
-    // it only shrinks the sample, and unevenly — the archived mass it was discarding falls hardest on the
-    // books that are already thin (R17).
+    // Archived memory counts: this models what narrative prose looks like, not what can be retrieved, and a
+    // summary the author retired is the same prose it was the day before. Excluding it shrinks the sample
+    // unevenly, hardest on the books that are already thin (R17). So the collection wanted is the
+    // `--archived` build, whose centroidOnly chunks are the disabled entries (reindex.mjs buildItems); a
+    // book with no archived build falls back to the live collection rather than failing.
     //
-    // So the collection wanted is the `--archived` build, whose centroidOnly chunks ARE the disabled
-    // entries (reindex.mjs buildItems). A book with nothing retired has none and reads the same either
-    // way; a book with no archived build falls back to the live collection rather than failing, and
-    // contributes its live half.
-    // THE FALLBACK IS REPORTED, NOT SILENT. Missing the archived build costs half the sample on some
-    // books and none on others, and it produces a perfectly ordinary-looking basis either way — which is
-    // how the first attempt at this rebuilt the register from live-only and printed success. The caller
-    // logs `archived`, and it goes in the meta so a stored basis says which pool estimated it.
+    // The fallback is reported, not silent: missing the archived build costs half the sample on some books
+    // and none on others, and produces a perfectly ordinary-looking basis either way. The caller logs
+    // `archived`, and it goes in the meta so a stored basis says which pool estimated it.
     const cfg = chunkConfig(S);
     const archived = cachePath(S, cfg, model, S.primaryBook, true, true);
     const usingArchived = existsSync(archived);
@@ -95,22 +81,22 @@ const memoryChunks = (S, model) => {
     return out;
 };
 
-/**
- * Per component, the BETWEEN-LINEAGE share of its projection's variance (eta^2) over the groups the basis
- * was built from. It is the sharedness statistic the variance ranking is not: a component every book
- * varies along scores near 0, one that offsets whole books scores near 1.
- *
- * @param {Array<Array<{vector: number[]}>>} groups Chunks, one array per lineage
- * @param {number[]} mean The basis mean, already subtracted conceptually
- * @param {number[][]} comps The components, in variance order
- * @returns {number[]} eta^2 per component, same order
- */
-/** Each group centred on its OWN mean, pooled — the within-class scatter, as one flat list. */
+/** Each group centred on its own mean, pooled — the within-class scatter, as one flat list. */
 export const groupResiduals = (groups) => groups.flatMap((g) => {
     const m = corpusMean(g);
     return g.map(it => ({ vector: Float64Array.from({ length: m.length }, (_, i) => it.vector[i] - m[i]) }));
 });
 
+/**
+ * Per component, the between-lineage share of its projection's variance (eta^2) over the groups the basis
+ * was built from — the sharedness statistic the variance ranking is not: a component every book varies
+ * along scores near 0, one that offsets whole books scores near 1.
+ *
+ * @param {Array<Array<{vector: number[]}>>} groups Chunks, one array per lineage
+ * @param {number[]} mean The basis mean
+ * @param {number[][]} comps The components, in variance order
+ * @returns {number[]} eta^2 per component, same order
+ */
 export const etaSquared = (groups, mean, comps) => comps.map((c) => {
     const proj = groups.map(g => g.map(it => { let p = 0; for (let i = 0; i < mean.length; i++) p += (it.vector[i] - mean[i]) * c[i]; return p; }));
     const all = proj.flat();
@@ -137,7 +123,7 @@ export const buildBases = (samplePaths, { m = 8, model, within = false, force = 
     for (const [book, v] of byBook) {
         const out = basisPath(book, model, within);
         if (!force && existsSync(out)) { written.push([book, 'cached']); continue; }
-        // GROUPED as well as pooled: the mean and the components come off the pooled chunks, eta^2 needs
+        // Grouped as well as pooled: the mean and the components come off the pooled chunks, eta^2 needs
         // them back in their lineages.
         const restByLin = new Map();
         for (const [o, x] of byBook) {
@@ -149,17 +135,15 @@ export const buildBases = (samplePaths, { m = 8, model, within = false, force = 
         const rest = [...restByLin.values()].flat();
         if (!rest.length) { log(`  "${book}" is the only book in its lineage group — no basis possible, skipped`); continue; }
         const mean = corpusMean(rest);
-        // WHICH SCATTER THE DIRECTIONS COME OFF, which is a different question from where the corpus sits.
-        // The mean is the pooled centroid either way — that is the register's LOCATION. `within` takes the
-        // directions off the POOLED WITHIN-BOOK scatter instead of the raw pool: each lineage centred on its
-        // own mean first, so a direction that merely separates books cannot lead. Within-book scatter
-        // collapses PC1's eta^2 and shrinks its variance share (R17),
+        // Which scatter the directions come off, a different question from where the corpus sits: the mean
+        // is the pooled centroid either way. `within` takes the directions off the pooled within-book
+        // scatter instead of the raw pool — each lineage centred on its own mean first, so a direction that
+        // merely separates books cannot lead. It collapses PC1's eta^2 and shrinks its variance share (R17),
         // the gap being the between-book separation PCA was ranking on.
         //
-        // NOT LDA, which is the other half of the same decomposition: LDA maximises between-class over
-        // within-class, so its discriminants ARE the book axes, it is rank-capped at (classes - 1) — four
-        // here, short of the eight the arms sweep — and it folds the per-book directions stage B needs
-        // kept separable into one space fitted to whichever books are present.
+        // Not LDA, the other half of the same decomposition: LDA maximises between-class over within-class,
+        // so its discriminants are the book axes, it is rank-capped at (classes - 1) — short of the doses
+        // the arms sweep — and it folds the per-book directions stage B needs separable into one space.
         const comps = within
             ? topComponents(groupResiduals([...restByLin.values()]), m, new Float64Array(mean.length))
             : topComponents(rest, m, mean);
@@ -169,11 +153,10 @@ export const buildBases = (samplePaths, { m = 8, model, within = false, force = 
             mean: [...mean],
             comps: comps.map(c => [...c]),
             eta,
-            // WHAT IT WAS BUILT FROM, because a basis is only comparable to collections chunked the same
-            // way and nothing recorded it before: the bases on disk turned out to predate the 800 -> 1750
-            // migration, and the only tell was their chunk counts running uniformly high over what the
-            // indexes hold (R17). `fromSamples` names the bundles because which snapshot of a book a bundle
-            // embeds decides which memory uids are in the pool.
+            // What it was built from, because a basis is only comparable to collections chunked the same way
+            // and the only tell of a stale one is its chunk count running high over what the indexes hold
+            // (R17). `fromSamples` names the bundles because which snapshot of a book a bundle embeds
+            // decides which memory uids are in the pool.
             meta: { model, chunkCfg: chunkConfig(v.S), fromSamples: samplePaths.map(x => x.split('/').pop()),
                 scatter: within ? 'within' : 'pooled',
                 archivedPool: [...byBook].filter(([o]) => lin.get(o) !== lin.get(book)).every(([, x]) => x.chunks.archived),
@@ -198,11 +181,9 @@ if (process.argv[1] && import.meta.url.endsWith(process.argv[1].split('/').pop()
         process.exit(2);
     }
     const m = Number(argv[argv.indexOf('--m') + 1]) || 8;
-    // THE LABEL, not the spec. It is what names a collection (cachePath) and so what has to name the basis
-    // built from one: the same weights at another quantization are other vectors, and a basis is only
-    // meaningful against the collection it was estimated on. A register is per model in the strongest
-    // sense — bge-m3 is 1024-dimensional and Qwen3-Embedding-8B is 4096, so one is not even applicable
-    // to the other's vectors.
+    // The label, not the spec: it names a collection (cachePath) and so must name the basis built from one.
+    // The same weights at another quantization are other vectors, and models differ in dimension outright,
+    // so a basis is only meaningful against the collection it was estimated on.
     const spec = (argv.includes('--model') ? argv[argv.indexOf('--model') + 1] : null) ?? process.env.WA_EMBED_MODEL;
     if (!spec) { console.error('no model: pass --model or set WA_EMBED_MODEL — a basis is per model'); process.exit(2); }
     const model = resolveModel(spec).label;

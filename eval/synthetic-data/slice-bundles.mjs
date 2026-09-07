@@ -1,21 +1,20 @@
-// slice-bundles.mjs — cuts graded bundles down to a SHORTLIST of rows, so /wa-super-eval renders those
+// slice-bundles.mjs — cuts graded bundles down to a shortlist of rows, so /wa-super-eval renders those
 // rows and nothing else.
 //
 // The reviewer draws its rows from `arms[].candidates`, and a scene carries far more of them than any
-// review touches (G10). Opening whole bundles to adjudicate a handful of rows is thousands of rows of
-// hunting with no marker on the ones that matter, which
-// is what a shortlist exists to avoid. Dropping the other candidates is the whole mechanism.
+// review touches (G10), so adjudicating a handful of rows in a whole bundle is hunting with no marker on
+// the ones that matter. Dropping the other candidates is the whole mechanism.
 //
-// ONE PACK FILE, not one file per scene: the reviewer reads a top-level ARRAY as one section per element,
-// so a shortlist spanning eleven scenes is one pick and one save rather than eleven.
+// One pack file, not one file per scene: the reviewer reads a top-level array as one section per element,
+// so a shortlist spanning many scenes is one pick and one save.
 //
-// EACH ELEMENT CARRIES ITS SOURCE BASENAME in `file`, which is what makes the round trip work: the review
-// records that name, and apply-review.mjs resolves it against eval-data and writes to the REAL bundle. The
+// Each element carries its source basename in `file`, which is what makes the round trip work: the review
+// records that name, and apply-review.mjs resolves it against eval-data and writes to the real bundle. The
 // pack is a disposable input to the picker, never a thing to keep.
 //
-// `books` are cut to the entries the kept rows name — they are all of the weight,
-// and a section only ever renders text for its own rows. `grades` are copied whole, so the
-// reviewer still pre-fills with what the judges said.
+// `books` are cut to the entries the kept rows name — they are all of the weight, and a section only
+// renders text for its own rows. `grades` are copied whole, so the reviewer still pre-fills with what the
+// judges said.
 //
 // The shortlist is a JSON array of {bundle, book, uid}; anything else on the row (grader scores, notes)
 // is ignored, so a contested-rows dump can be passed as-is.
@@ -46,17 +45,15 @@ const OUT = resolvePath(arg(argv, '--out', resolvePath(DATA, 'review-pack.json')
  * @returns {{sliced: object, dyn: Set<string>, lost: string[]}} the cut bundle, the keys that survived as
  *   gradeable rows, and the keys that did not.
  */
-/** Unit Separator — see CLAUDE.md. This key used to join book and uid with NOTHING, so `W`+`11` and
- *  `W1`+`1` were the same shortlist entry; the collision needs two books whose names differ by a numeric
- *  suffix, which is why nothing has hit it yet. `rowKey` in grading.mjs is the same key with the same
- *  separator, and this is deliberately not a second copy of the rule so much as the same one. */
+/** Unit Separator — see CLAUDE.md. Without it `W`+`11` and `W1`+`1` are the same shortlist entry. Same key
+ *  and same separator as `rowKey` in grading.mjs. */
 const US = String.fromCharCode(31);
 
 export function sliceBundle(m, keys) {
     if (!Array.isArray(m?.scenes)) throw new Error('sliceBundle expects a graded-scene document — no `scenes`');
     const key = c => `${c.book ?? ''}${US}${c.uid}`;
     const cut = cell => (cell.candidates ?? []).filter(c => keys.has(key(c)));
-    // ARMS ARE AT DOCUMENT LEVEL and hold one CELL per scene they captured, so the cut walks the cells.
+    // Arms are at document level and hold one cell per scene they captured, so the cut walks the cells.
     const sliced = { ...m, arms: (m.arms ?? []).map(a => ({
         ...a,
         scenes: Object.fromEntries(Object.entries(a.scenes ?? {}).map(([id, cell]) => [id, { ...cell, candidates: cut(cell) }])),
@@ -75,8 +72,8 @@ export function sliceBundle(m, keys) {
     sliced.books = Object.fromEntries(Object.entries(m.books ?? {}).map(([w, bk]) => [
         w, Object.fromEntries(Object.entries(bk).filter(([, e]) => need.get(w)?.has(Number(e?.uid)))),
     ]));
-    // The pack's books are a SUBSET, so the capture's content hashes no longer describe them. Dropped
-    // rather than recomputed: a shortlist is not a capture and nothing downstream asks it what book it holds.
+    // The pack's books are a subset, so the capture's content hashes no longer describe them. Dropped rather
+    // than recomputed: a shortlist is not a capture and nothing downstream asks it what book it holds.
     delete sliced.bookHashes;
     return { sliced, dyn, lost: [...keys].filter(k => !dyn.has(k)) };
 }

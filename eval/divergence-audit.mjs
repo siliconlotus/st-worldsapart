@@ -1,17 +1,15 @@
-// divergence-audit.mjs — the analysis tool for KEYWORD-ONLY books' graded samples.
+// divergence-audit.mjs — the analysis tool for keyword-only books' graded samples.
 //
-// Keyword-only books exist and are different. A reference book (e.g. Foxbridge: every entry keyed
-// or constant, nothing vectorized — deliberately, since reference register does not match narrative
-// prose) has no retrieval channel, so activation IS delivery and core's scan window is the book's
-// entire memory horizon. The graded-scene machinery does not apply to them twice over:
-//   - scene.mjs needs a vector index and these books have none (loadScene throws ENOENT), and
-//   - ranking metrics (nDCG, oracle-prefix) are definitionally empty here — reference-entry
-//     relevance is presence-DECLARED (author keys), not prose-discoverable, so the whole book is
-//     the class those metrics exclude. Set metrics are the only ones that mean anything.
-// What a graded sample of such a book measures is the KEYS: did each firing deserve to fire
-// (the grades), and what should have fired but did not. This tool reads the frozen bundle
-// directly — candidates, grades, sceneChats, embedded book — plus countKey, and reports the
-// divergences, in three classes with different fixes:
+// A book with every entry keyed or constant and nothing vectorized has no retrieval channel, so activation
+// is delivery and core's scan window is the book's entire memory horizon. The graded-scene machinery does
+// not apply to them twice over: scene.mjs needs a vector index and these books have none (loadScene throws
+// ENOENT), and ranking metrics are definitionally empty here, since reference-entry relevance is
+// presence-declared by the author's keys rather than prose-discoverable. Set metrics are the only ones that
+// mean anything.
+//
+// What a graded sample of such a book measures is the keys: did each firing deserve to fire (the grades),
+// and what should have fired but did not. This reads the frozen bundle directly — candidates, grades,
+// sceneChats, embedded book — plus countKey, and reports the divergences in three classes:
 //   key miss        — no key of a relevant entry occurs anywhere; fix the keys (suggester).
 //   window miss     — a key occurs in the sample's scan window (WA's) but the entry did not
 //                     fire, i.e. core's shallower scan expired it; fix is depth/persistence

@@ -1,22 +1,14 @@
-// reindex.mjs — rebuild a vector collection from a sample's EMBEDDED books, offline.
+// reindex.mjs — rebuild a vector collection from a sample's embedded books, offline.
 //
-// This unblocks the two things a frozen sample otherwise cannot do.
+// This unblocks the two things a frozen sample otherwise cannot do: chunkSize / chunkMode / minChunkSize
+// decide what text gets embedded, so they cannot be re-derived from a stored index the way k1 can; and a
+// 'full' sample carries entry content, the chunk settings in `paramSnapshot.settings` and `embedModel`, so
+// a stranger's graded scene can be reconstructed locally and scored like one of your own.
 //
-// 1. CHUNKING BECOMES SWEEPABLE. chunkSize / chunkMode / minChunkSize decide what text gets embedded, so
-//    they cannot be re-derived from a stored index the way k1 or lexicalWeight can — you have to build a
-//    different index to ask the question. Until now they were the one class of parameter the harness had no
-//    way to test, which is why WA's own defaults there were set by eye.
-//
-// 2. OTHER PEOPLE'S GRADES BECOME USABLE. A sample records the path to its author's index; that path means
-//    nothing on your machine. But a 'full' sample carries entry content, the chunk settings in
-//    `paramSnapshot.settings`, and `embedModel` — everything needed to reconstruct the collection locally.
-//    Rebuild it and a stranger's graded scene scores like one of your own.
-//
-// WRITES TO A CACHE, NEVER TO SillyTavern's LIVE VECTORS. The output path is derived from book + model +
-// chunk params, so re-runs are free and a sweep can hold many indexes at once. Overwriting
-// data/default-user/vectors would silently replace a real collection with one built at experimental
-// settings, and the only symptom would be retrieval quietly changing in the app. Pass --out to aim it
-// somewhere specific if you really want that.
+// Writes to a cache, never to SillyTavern's live vectors. The output path is derived from book + model +
+// chunk params, so re-runs are free and a sweep can hold many indexes at once; overwriting
+// data/default-user/vectors would replace a real collection with one built at experimental settings, whose
+// only symptom is retrieval quietly changing in the app. Pass --out to aim it somewhere specific.
 //
 // Usage (any cwd):
 //   node .../reindex.mjs <sample.json> [--chunkSize 400] [--chunkMode paragraph|length] [--minChunkSize 20]
@@ -32,27 +24,21 @@ import { defaultSettings } from '../extension/state.mjs';
 
 /** Chunk settings, sample's own unless overridden. Field names match `settings()` and paramSnapshot.settings. */
 export const chunkConfig = (S, overrides = {}) => {
-    // FROM THE ARM'S OWN PARAMS — `paramSnapshot.settings`, the current writer's full scalar dump, and
-    // nothing else. An older writer emitted grouped blocks (`vectors`, `cutoff`, `layout`) and that shape is
-    // NOT read: it names knobs the pipeline no longer has (`vectorCutoff`, `elbowSensitivity`,
-    // `scoreThreshold`), and reading it would let a stored capture resurrect a parameter there is no code
-    // for. Prerelease, so nothing is owed to it.
-    //
-    // THE COST IS EXPLICIT: most scene-arms on disk carry only the grouped shape (P4), so every such
-    // capture now re-derives at today's defaults rather than at what it ran under. Every cached index
-    // path changes with it, and no number measured before this is comparable to one measured after.
+    // From the arm's own params — `paramSnapshot.settings`, the current writer's full scalar dump, and
+    // nothing else. The older grouped shape (`vectors`, `cutoff`, `layout`) is not read: it names knobs the
+    // pipeline no longer has, and reading it would let a stored capture resurrect a parameter there is no
+    // code for. The cost is explicit: most scene-arms on disk carry only that shape (P4), so they re-derive
+    // at today's defaults rather than at what they ran under, and every cached index path changes with it.
     const p = S?.params ?? {};
     const recorded = {};
     for (const k of ['chunkMode', 'chunkSize', 'minChunkSize']) if (p[k] !== undefined) recorded[k] = p[k];
-    // PRODUCTION'S VALUES (state.mjs), so a sample with no recorded vectors block is re-derived the way the
-    // app would chunk it today. chunkSize=800 is an ARM in param-screen for reproducing the old default.
+    // Production's values (state.mjs), so a sample with no recorded vectors block is re-derived the way the
+    // app would chunk it today.
     const dumped = S.paramSnapshot?.settings ?? {};
     const fromDump = Object.fromEntries(['chunkMode', 'chunkSize', 'minChunkSize']
         .filter(k => dumped[k] !== undefined).map(k => [k, dumped[k]]));
-    // PRODUCTION'S VALUES, READ RATHER THAN RESTATED. These were three literals under a comment saying
-    // they were state.mjs's — which is not the same thing, and would have gone on chunking at 1750 the day
-    // production moved. state.mjs binds ST's store instead of importing it, so it is readable from node and
-    // there is one authority for the number.
+    // Read rather than restated: state.mjs binds ST's store instead of importing it, so it is readable from
+    // node and there is one authority for the number.
     const shipped = { chunkMode: defaultSettings.chunkMode, chunkSize: defaultSettings.chunkSize, minChunkSize: defaultSettings.minChunkSize };
     return { ...shipped, ...fromDump, ...recorded, ...overrides };
 };
@@ -60,34 +46,25 @@ export const chunkConfig = (S, overrides = {}) => {
 /**
  * Chunks a book into the exact item set syncWorld would store.
  *
- * MIRRORS syncWorld, INCLUDING WHAT HAPPENS AFTER CHUNKING — the parts that are invisible in chunkEntry's
- * output and have already produced one false index-staleness scare (P3):
+ * Mirrors syncWorld, including what happens after chunking — the parts invisible in chunkEntry's output (P3):
  *
  *   - only `vectorized && !disable && content` entries are indexed at all;
  *   - every chunk is re-trimmed and blanks are dropped (splitRecursive on '. ' leaves edge whitespace);
- *   - one item per (entry, chunk), and NO global de-duplication.
+ *   - one item per (entry, chunk), and no global de-duplication.
  *
- * That last one is worth stating because de-duplicating looks obviously correct and is not. Since ccc5512
- * the hash carries (text, uid), so text repeated across two entries hashes differently per owner and really
- * is stored twice, once under each uid — even by an incremental sync. Collapsing them changes which entry
- * owns a shared chunk, and since entry pooling takes the max over an entry's chunks, that moves the entry
- * ranking, the gaps between scores, and therefore where the elbow cuts. A globally-deduped rebuild
- * reproduced every nDCG figure of the live index and still cut different entries than production did (P4).
+ * That last one is worth stating because de-duplicating looks obviously correct and is not: the hash carries
+ * (text, uid), so text repeated across two entries hashes differently per owner and really is stored twice.
+ * Collapsing them changes which entry owns a shared chunk, and since entry pooling takes the max over an
+ * entry's chunks, that moves the entry ranking and therefore what gets cut (P4).
  *
- * Any drift from this is drift from what the extension actually indexes, which would make every offline
- * number describe a collection production would never build.
+ * `archived` breaks the mirror in the opposite direction: it indexes disabled memory entries, which no ST
+ * install stores. They are marked `centroidOnly` and exist only to contribute to the corpus mean (scene.mjs
+ * centroidPopulation); an index built without the flag is unchanged, since its items carry no such marker.
  *
- * `archived` BREAKS IT FURTHER, in the opposite direction: it indexes DISABLED memory entries, which no ST
- * install stores at all. They are marked `centroidOnly` and exist for one purpose — contributing to the
- * corpus mean (scene.mjs centroidPopulation). Nothing scores them and nothing retrieves them, and an index
- * built without the flag is unchanged, since its items carry no such marker.
- *
- * `all` DELIBERATELY BREAKS THAT MIRROR, and is the only thing here that may: it drops the `vectorized`
- * gate so every entry with content is embedded, which is a collection no ST install holds. It exists for
- * the dense-all arm (scene.mjs denseAllEntries), which reads the two halves at different stages — the
- * vectorized half is stage 1's collection and is item-for-item what the ordinary build produces, so a
- * baseline scored against this index is unchanged. Cached under a different path (cachePath) so the two
- * can never be mistaken for each other.
+ * `all` deliberately breaks that mirror, and is the only thing here that may: it drops the `vectorized` gate
+ * so every entry with content is embedded, for the dense-all arm (scene.mjs denseAllEntries). The vectorized
+ * half is stage 1's collection and is item-for-item what the ordinary build produces, so a baseline scored
+ * against this index is unchanged. Cached under a different path (cachePath) so the two cannot be confused.
  *
  * @param {Record<string, object>} book uid-keyed entries
  * @param {object} cfg chunkConfig() output
@@ -99,7 +76,7 @@ export function buildItems(book, cfg, all = false, archived = false) {
     const items = [];
     for (const entry of Object.values(book)) {
         if (typeof entry.content !== 'string' || !entry.content) continue;
-        // A disabled entry is indexed ONLY under `archived`, only when it is memory-tier, and only ever as
+        // A disabled entry is indexed only under `archived`, only when it is memory-tier, and only ever as
         // centroid mass. The branches are exclusive: an entry is live collection or centroid-only, never both.
         const centroidOnly = Boolean(entry.disable);
         if (centroidOnly ? !(archived && isMemory(entry)) : (!all && !entry.vectorized)) continue;
@@ -116,82 +93,69 @@ export function buildItems(book, cfg, all = false, archived = false) {
 }
 
 /** A model label is a path component in three places — this cache, the derived vectors dir, and the query
- *  cache — and a HuggingFace repo id carries a slash, which would silently make one collection into a
- *  nested directory. ONLY the slash folds: every other label on disk is left exactly as it is, so nothing
- *  already built moves. It is not a general slug, and it cannot merge two models, because every caller
- *  still keys its hash on the RAW label. */
+ *  cache — and a HuggingFace repo id carries a slash, which would make one collection into a nested
+ *  directory. Only the slash folds: every other label on disk is left exactly as it is. It is not a general
+ *  slug and cannot merge two models, because every caller still keys its hash on the raw label. */
 export const pathSafe = (label) => String(label).replace(/\//g, '-');
 
 /** Deterministic cache location: same book + model + chunk settings always resolves to the same file, so a
  *  sweep re-running an arm costs nothing and two arms can never collide.
  *
- *  `all` and `archived` are in the key AND in the directory name, because the builds differ only in which
- *  entries are
- *  present, and one silently standing in for the other would read as a parameter effect. It contributes
- *  nothing to either when false, so every existing cache path stays where it is. */
+ *  `all` and `archived` are in the key and in the directory name, because the builds differ only in which
+ *  entries are present and one standing in for the other would read as a parameter effect. Neither
+ *  contributes anything when false, so every existing cache path stays where it is. */
 export function cachePath(S, cfg, model, book = S.primaryBook, all = false, archived = false) {
     const slug = String(book).replace(/[^\w.-]+/g, '-').slice(0, 40);
     const key = getStringHash(`${book}${model}${cfg.chunkMode}${cfg.chunkSize}${cfg.minChunkSize}${all ? `all` : ``}${archived ? `archived` : ``}`);
     return new URL(`./eval-data/indexes/${slug}__${pathSafe(model)}${all ? `__all` : ``}${archived ? `__archived` : ``}__${key}/index.json`, import.meta.url).pathname;
 }
 
-/** How a model is CALLED and how its collection is NAMED.
+/** How a model is called and how its collection is named.
  *
- * THE PREFIX TABLE IS `relevance.mjs` PREFIXES — production's, imported rather than copied, because the
- * prefix a model gets is shipped behaviour and this file only verifies it. Every prefix in it goes on the
- * QUERY, so it never reaches a stored vector and a collection is named by its model alone.
+ * The prefix table is `relevance.mjs` PREFIXES — production's, imported rather than copied. Every prefix in
+ * it goes on the query, so it never reaches a stored vector and a collection is named by its model alone.
+ * Each model gets exactly one configuration, so the prefix is not a parameter and there is no unprefixed
+ * arm; measured against the same collections, Qwen3-Embedding-8B's instruction is worth real held-out AUC
+ * and F2 (E7).
  *
- * EACH MODEL GETS EXACTLY ONE CONFIGURATION, so the prefix is not a parameter and there is no unprefixed
- * arm. Measured against the SAME collections so that only the query vector moves, Qwen3-Embedding-8B's
- * instruction is worth real held-out AUC and F2 (E7).
- *
- * A SERVER STEM (`lms:`, `omlx:`) names a model served by something other than ollama, over its
- * OpenAI-compatible /v1/embeddings. The transport is in the spec rather than in a flag so that two arms in
- * one sweep can sit on different servers: an MLX build and a GGUF one of the same weights are a
- * comparison, and a global --endpoint would make them two runs.
- *
- * LM Studio cannot actually serve an MLX embedder — its mlx-llm engine declares only the `llm` domain, so
- * /v1/embeddings falls through to whatever GGUF embedder is loaded (see the served-model check in
- * embedTexts). oMLX is the one that does; `lms:` stays because llama.cpp GGUF embedders work there.
+ * A server stem (`lms:`, `omlx:`) names a model served by something other than ollama, over its
+ * OpenAI-compatible /v1/embeddings. The transport is in the spec rather than in a flag so two arms in one
+ * sweep can sit on different servers. LM Studio cannot serve an MLX embedder — its mlx-llm engine declares
+ * only the `llm` domain, so /v1/embeddings falls through to whatever GGUF embedder is loaded (see the
+ * served-model check in embedTexts); oMLX does, and `lms:` stays because llama.cpp GGUF embedders work there.
  */
 export const SERVERS = { 'lms:': 'http://localhost:1234', 'omlx:': 'http://localhost:8008' };
 
-/** Every stem names a model SERVICE; `SERVERS` is the subset reached over HTTP. None of them is a remote
- *  host — oMLX and LM Studio are local processes that happen to speak /v1/embeddings — so the axis that
- *  matters is the transport, not where the model sits.
+/** Every stem names a model service; `SERVERS` is the subset reached over HTTP. None is a remote host, so
+ *  the axis that matters is the transport, not where the model sits.
  *
- *  `st:` is the in-process one: SillyTavern's own embedder, transformers.js over the ONNX weights already
- *  in ST's `data/_cache`, with the model given as a HuggingFace repo id.
- *
- *  It exists because a stock ST install cannot be measured any other way. ST embeds with
- *  `Cohee/jina-embeddings-v2-base-en` at `quantized: true`, so an ollama pull of the same weights and an
- *  fp32 build from HuggingFace both answer a DIFFERENT question than "what do users get by default" —
- *  and ollama could not load these anyway, since it reads GGUF and safetensors and these are ONNX. */
+ *  `st:` is the in-process one: SillyTavern's own embedder, transformers.js over the ONNX weights already in
+ *  ST's `data/_cache`, with the model given as a HuggingFace repo id. It exists because a stock ST install
+ *  cannot be measured any other way — ST embeds at `quantized: true`, so an ollama pull of the same weights
+ *  and an fp32 HuggingFace build both answer a different question than "what do users get by default", and
+ *  ollama cannot load ONNX at all. */
 const SERVICES = { ...SERVERS, 'st:': '' };
 export { PREFIXES };
 
 /** @returns {{model: string, query: string, label: string, endpoint: string, url: string}} */
 export const resolveModel = (spec) => {
-    // IDEMPOTENT ON ITS OWN LABEL. The label names collections and bases, so it is what a bundle records
-    // and what a human retypes — and it has to resolve back to the same model, endpoint and prefixes. What
-    // used to stop it was the stem's colon being rewritten to a hyphen, which made `omlx-Qwen3-...` read as
-    // a bare OLLAMA model: a stable label, silently pointing at the wrong endpoint. Model names carry
-    // hyphens and colons themselves — `qwen3-embedding:4b` is already a label with a colon in it, on disk —
-    // so the colon was never the filesystem's problem.
+    // Idempotent on its own label. The label names collections and bases, so it is what a bundle records and
+    // what a human retypes, and it has to resolve back to the same model, endpoint and prefixes. The stem's
+    // colon is never rewritten: `omlx-Qwen3-...` would read as a bare ollama model — a stable label pointing
+    // at the wrong endpoint — and a colon is fine on disk anyway (`qwen3-embedding:4b` already carries one).
     const named = String(spec);
     const stem = Object.keys(SERVICES).find(k => named.startsWith(k)) ?? null;
     const model = stem ? named.slice(stem.length) : named;
     const endpoint = stem === 'st:' ? 'st' : stem ? 'openai' : 'ollama';
     const url = stem ? SERVICES[stem] : 'http://localhost:11434';
-    // SUBSTRING, CASE-INSENSITIVE. The served id is whoever packaged the model's spelling, and every
-    // server rewrites it differently: `qwen3-embedding:4b` (ollama), `Qwen3-Embedding-8B-4bit-DWQ` (oMLX),
-    // `text-embedding-qwen3-embedding-8b` (LM Studio, which PREPENDS its own type tag). Anchoring the
-    // match at either end drops the instruction from a model that should have it, and a missing prefix
-    // does not fail — it quietly reports the model as worse than it is. This has now bitten twice, at
-    // both ends of the string, which is why the match is anchored at neither.
+    // Substring, case-insensitive, anchored at neither end. The served id is whoever packaged the model's
+    // spelling and every server rewrites it differently: `qwen3-embedding:4b` (ollama),
+    // `Qwen3-Embedding-8B-4bit-DWQ` (oMLX), `text-embedding-qwen3-embedding-8b` (LM Studio, which prepends
+    // its own type tag). Anchoring at either end drops the instruction from a model that should have it, and
+    // a missing prefix does not fail — it reports the model as worse than it is.
     const fam = model.toLowerCase();
     const query = Object.entries(PREFIXES).find(([s]) => fam.includes(s))?.[1] ?? '';
-    // The label carries the SERVER too: the same weights quantized differently are different vectors, and
+    // The label carries the server too: the same weights quantized differently are different vectors, and
     // the served id is what distinguishes them ('...-8B-4bit-DWQ' vs '...-8B-4bit-MLX').
     return { model, endpoint, url, query, label: (stem ?? '') + model };
 };
@@ -201,14 +165,10 @@ export const resolveModel = (spec) => {
  *  as index-ordered and is sorted here anyway — a silently permuted batch would attach every vector to the
  *  wrong chunk and still build a plausible-looking index. */
 export const embedTexts = async (texts, opts) => {
-    // ONE DROPPED CONNECTION MUST NOT COST THE RUN. A sweep died on a single ECONNRESET partway
-    // through its last collection and took its already-fitted arms with it, because the readouts print
-    // at the end (H4). The per-book index cache is the resume unit, so a retry here is what keeps a
-    // transient blip from costing anything at all.
-    //
-    // ONLY TRANSPORT FAILURES. undici throws TypeError for those; every error raised below is a plain
-    // Error about what the server actually answered, and retrying one of those would just ask a wrong
-    // model the same question three times.
+    // One dropped connection must not cost the run (H4): the per-book index cache is the resume unit, so a
+    // retry here keeps a transient blip from costing anything. Only transport failures — undici throws
+    // TypeError for those, while every error raised below is a plain Error about what the server answered,
+    // and retrying one of those would ask a wrong model the same question three times.
     for (let attempt = 0; ; attempt++) {
         try { return await embedOnce(texts, opts); }
         catch (e) {
@@ -220,12 +180,10 @@ export const embedTexts = async (texts, opts) => {
 
 /** SillyTavern's own embedder, in this process.
  *
- *  ONE TEXT PER CALL, NEVER A BATCH. Mean pooling in `sillytavern-transformers` is not attention-mask
- *  aware, so it averages over the PADDING of every sequence shorter than the longest in the batch.
- *  Measured: one sentence embedded alone and again beside a longer one came back as a different vector
- *  entirely, not a rounding difference (P4) — which would have built a whole collection and reported
- *  the model as far worse than it is. This loop is the correctness condition, not a simplification; it
- *  also matches `getTransformersVector`, which ST calls one text at a time for the same reason.
+ *  One text per call, never a batch. Mean pooling in `sillytavern-transformers` is not attention-mask aware,
+ *  so it averages over the padding of every sequence shorter than the longest in the batch: one sentence
+ *  embedded alone and again beside a longer one comes back a different vector entirely (P4). This loop is
+ *  the correctness condition, not a simplification, and matches `getTransformersVector`.
  *
  *  The pipeline is cached per model because loading it is the expensive step and a book is many calls. */
 const stPipes = new Map();
@@ -259,12 +217,9 @@ const embedOnce = async (texts, { model, endpoint = 'ollama', url = 'http://loca
         const r = await fetch(`${url}/v1/embeddings`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ model, input }) });
         const j = await r.json();
         if (!Array.isArray(j.data) || j.data.length !== texts.length) throw new Error(`embed returned ${j.data?.length ?? 0} vectors for ${texts.length} inputs${j.error ? ` (${JSON.stringify(j.error)})` : ''}`);
-        // WHICH MODEL ANSWERED, checked rather than assumed. LM Studio ignores the requested id on
-        // /v1/embeddings and serves whatever embedding model is loaded — asking it for a qwen while
-        // nomic was resident returned nomic vectors under a qwen label (P4), which would have built a
-        // whole index and a whole result table for a model that never ran. The response says who really
-        // answered, so the mismatch is detectable and is the only thing standing between that and a
-        // silently mislabelled arm.
+        // Which model answered, checked rather than assumed: LM Studio ignores the requested id on
+        // /v1/embeddings and serves whatever embedding model is loaded, returning one model's vectors under
+        // another's label (P4). The response says who really answered, so the mismatch is detectable.
         if (j.model && String(j.model).toLowerCase() !== String(model).toLowerCase()) {
             throw new Error(`asked ${url} for "${model}" and "${j.model}" answered — load the right model (lms load "${model}"), or its vectors would be cached under the wrong name`);
         }
@@ -292,10 +247,9 @@ export async function ensureIndex(S, { overrides = {}, model, label = model, end
     const path = out ?? cachePath(S, cfg, label, book, all, archived);
     if (!force && existsSync(path)) return { path, built: false, items: JSON.parse(readFileSync(path, 'utf8')).items.length };
 
-    // THE PRISTINE BOOK, never the availability-filtered one (scene.mjs dropUnavailable). A collection is
-    // a property of the book; which of its entries a given scene may see is a property of the scene, and
-    // loadScene applies that. Falls back to S.books for a sample no loadScene has touched, which is what a
-    // bare reindex.mjs run is.
+    // The pristine book, never the availability-filtered one (scene.mjs dropUnavailable). A collection is a
+    // property of the book; which of its entries a given scene may see is a property of the scene, and
+    // loadScene applies that. Falls back to S.books for a sample no loadScene has touched.
     const entries = S.pristineBooks?.[book] ?? S.books?.[book];
     if (!entries || !Object.keys(entries).length) throw new Error(`sample embeds no entries for book "${book}" — a bundle that does not embed its books is malformed`);
     const items = buildItems(entries, cfg, all, archived);
@@ -336,10 +290,9 @@ if (process.argv[1] && import.meta.url.endsWith(process.argv[1].split('/').pop()
     const overrides = {};
     for (const k of ['chunkSize', 'minChunkSize']) if (arg(argv, `--${k}`) !== null) overrides[k] = Number(arg(argv, `--${k}`));
     if (arg(argv, '--chunkMode')) overrides.chunkMode = arg(argv, '--chunkMode');
-    // THROUGH resolveModel, like every other tool that takes a model. It took the spec as a bare ollama
-    // model name, so `omlx:Qwen3-Embedding-8B-4bit-DWQ` was sent to ollama as a literal name and a
-    // prefix-trained family silently lost its instruction — the two failures modelSpec exists to prevent,
-    // in the one tool that actually writes the vectors.
+    // Through resolveModel, like every other tool that takes a model: a bare spec would go to ollama as a
+    // literal name and a prefix-trained family would lose its instruction — the two failures modelSpec
+    // exists to prevent, in the one tool that actually writes the vectors.
     const spec = arg(argv, '--model') ?? process.env.WA_EMBED_MODEL ?? S.embedModel;
     if (!spec) { console.error('no model: pass --model, set WA_EMBED_MODEL, or use a sample that records embedModel'); process.exit(2); }
     const em = resolveModel(spec);
