@@ -1,21 +1,5 @@
-/**
- * Worlds Apart — takes over World Info selection, ranking and budget.
- *
- * Core still does the mechanical scanning (keywords, constant, sticky, recursion) and the prompt
- * assembly (positions, depth, roles, outlets, regex, Author's Note). This extension decides which
- * entries survive, in what order, and how many tokens they may spend, by hooking three sanctioned points:
- *
- *   1. WORLDINFO_ENTRIES_LOADED — take the budget; blank keys so core's matcher stays out of what
- *                                  WA owns (vectorized entries always; every keyword-activating
- *                                  entry on a WA-run scan; constants and @@activate keep theirs for
- *                                  group scoring).
- *   2. generate_interceptor      — chunked vector retrieval + WA's keyword matches, force-activate both.
- *   3. WORLDINFO_SCAN_DONE       — feed the scan loop (recursion / min-activation matches, owned scans),
- *                                  then rank everything activated, apply budget, rewrite `order`.
- *
- * Prompt order is set at assembly time by sorting on `entry.order` (world-info.js), and the
- * unshift-based build means the final prompt order is ascending `order`.
- */
+// worldsapart.js — the ST-coupled half: hooks WORLDINFO_ENTRIES_LOADED, generate_interceptor and
+// WORLDINFO_SCAN_DONE to take World Info selection, ranking and budget over from core.
 
 import {
     eventSource,
@@ -55,29 +39,17 @@ import { lorebookStudio } from './extension/studio.mjs';
 import { setCaptureHost, versusCore, gradeScene, superGradeScene, superEvalScene, POOL_ARMS } from './extension/capture-ui.mjs';
 import { isDurable } from './extension/grading.mjs';
 
-// Chunking is WA's own, not ST's: it is unreachable under node and it determines every stored vector, so an
-// upstream edit would silently invalidate existing indexes. See extension/chunking.mjs.
 import { chunkEntry } from './extension/chunking.mjs';
 import { buildContentIndex, scoreContent, indexFingerprint, entryKey } from './extension/content-lexical.mjs';
 import { buildNameDf, properNames, properShared, properDensity, scoreRelevance, isMemory, fitKey, queryPrefix, postDates, UNFITTED_FALLBACK } from './extension/relevance.mjs';
 
-/** Base value for the rewritten `order` sequence. Only the relative index matters, so the base is free;
- * it is parked far above any plausible authored value so WA's orders are recognisable on sight and cannot
- * collide with an authored band or with ST's default of 100, which a late force-activation from another
- * extension would still carry into assembly. */
+/** Base of the rewritten `order` sequence, parked above any authored value and ST's default of 100. */
 const ORDER_BASE = 99000;
 
-// ---------------------------------------------------------------------------
-// Vector backend — reuses Vector Storage's provider config and ST's own endpoints.
-// ---------------------------------------------------------------------------
+// Vector backend — Vector Storage's provider config and ST's own endpoints.
 
-/**
- * Builds the request body for /api/vector/*, borrowing Vector Storage's provider settings.
- * ponytail: model key is derived by `${source}_model` convention, which covers every
- * provider except the special cases below. Add a case if a new one breaks the pattern.
- * @param {object} args Extra body fields
- * @returns {object} Request body
- */
+/** Request body for /api/vector/*, from Vector Storage's provider settings.
+ *  ponytail: the model key is `${source}_model` except for the cases below; add a case when a provider breaks the pattern. */
 function vectorRequestBody(args = {}) {
     const v = extension_settings.vectors ?? {};
     const source = v.source || 'transformers';
@@ -128,8 +100,7 @@ function vectorRequestBody(args = {}) {
     return body;
 }
 
-/** Mirrors Vector Storage's current embed endpoint + model into the Vector Match panel. Read-only;
- * reuses vectorRequestBody() so the per-provider derivation stays in one place. */
+/** Mirrors Vector Storage's embed endpoint and model into the Vector Match panel. */
 function updateEmbedInfo() {
     const b = vectorRequestBody();
     const endpoint = b.apiUrl || b.extrasUrl || b.siliconflow_endpoint || b.source;
@@ -153,20 +124,14 @@ async function vectorPost(route, args) {
 }
 
 
-/**
- * Checks once whether the Worlds Apart server plugin is loaded. It only exists if
- * enableServerPlugins is on in config.yaml, so absence is expected, not an error.
- * @returns {Promise<boolean>} True if the plugin responded
- */
+/** Whether the WA server plugin is loaded, checked once; absent is the stock install, not an error. */
 async function hasPlugin() {
     if (runState.pluginAvailable !== null) {
         return runState.pluginAvailable;
     }
 
     try {
-        // The third-party folder this extension is served from, so the plugin's /ping can resolve WA's git
-        // version over it. Read from import.meta.url because the clone's folder name is whatever the user
-        // called it, and decoded because a pathname is percent-encoded and a folder name is not.
+        // The extension's own folder name, decoded: a pathname is percent-encoded and a folder name is not.
         const dir = decodeURIComponent(new URL('.', import.meta.url).pathname).replace(/\/$/, '').split('/').pop();
         const response = await fetch('/api/plugins/worlds-apart/ping', { method: 'POST', headers: getRequestHeaders(), body: JSON.stringify({ dir }) });
         runState.pluginAvailable = response.ok;
@@ -179,12 +144,7 @@ async function hasPlugin() {
     return runState.pluginAvailable;
 }
 
-/**
- * Fingerprints this extension's SOURCE plugin files (fetched from its own served directory) with the
- * same hash the running plugin applies to its DEPLOYED files. Comparing the two spots a /plugins copy
- * that drifted from source — no hand-maintained version number. Cached after the first call.
- * @returns {Promise<string|null>}
- */
+/** Fingerprint of this extension's source plugin files, hashed exactly as the plugin hashes its deployed copy; cached. */
 async function computeSourceFingerprint() {
     if (runState.sourceFP !== null) return runState.sourceFP;
     try {
@@ -196,19 +156,11 @@ async function computeSourceFingerprint() {
     return runState.sourceFP;
 }
 
-/**
- * Fills the setup box under the mean-centered checkbox with copyable install commands. The plugin ships
- * inside this extension but ST loads server plugins separately, so a fresh install needs: enable plugins
- * in config → deploy the copy → restart. The deploy path is derived from this module's own URL, so it is
- * correct whatever the install folder is named.
- */
+/** Fills the plugin setup box with copyable install and redeploy commands, and the drift banner. */
 function renderPluginSetup() {
     const box = $('#wa_plugin_setup');
     if (!box.length) return;
     const extDir = new URL('.', import.meta.url).pathname.replace(/\/+$/, '').split('/').pop();
-    // Absolute path once the plugin has reported the ST root, so the command runs from any cwd. Before
-    // first install the browser cannot know the server's filesystem root, so the fallback is the
-    // ST-root-relative command plus an "open a terminal there" instruction.
     const rel = `public/scripts/extensions/third-party/${extDir}/deploy-plugin.mjs`;
     const deployCmd = runState.pluginRoot ? `node "${runState.pluginRoot.replace(/\\/g, '/')}/${rel}"` : `node ${rel}`;
     const row = (cmd) => {
@@ -222,14 +174,10 @@ function renderPluginSetup() {
         });
         return r.append(code, btn);
     };
-    // Drift is silent breakage, so it also gets a banner at the top of WA settings — the setup box is two
-    // collapsed drawers deep. Every other state stays in the box: "not detected" is the stock install.
     const alert = $('#wa_plugin_alert').empty();
     box.empty();
     if (runState.pluginAvailable === null) { box.text('Checking for server plugin…'); return; }
     if (runState.pluginAvailable) {
-        // Stale only when there is a source fingerprint to compare and it differs. If the source fetch
-        // failed we cannot judge, so don't nag.
         const stale = runState.sourceFP && runState.pluginFP !== runState.sourceFP;
         if (stale) {
             const warn = '⚠ Server plugin out of date — the deployed copy differs from this extension\'s source. Redeploy and restart:';
@@ -250,41 +198,25 @@ function renderPluginSetup() {
     box.append($('<div style="margin-top:3px;">2. Restart SillyTavern. This box will then show the exact redeploy command with your full path.</div>'));
 }
 
-/**
- * Runs a multi-collection query, preferring the plugin's mean-centered search. Takes the NO-PLUGIN PATH
- * — ST's own /api/vector — when the plugin is absent or errors, so the extension works on a stock install.
- * @param {object} args Query arguments
- * @returns {Promise<object>} Grouped results
- */
+/** Multi-collection query through the plugin's mean-centered search, or the no-plugin path (ST's own /api/vector)
+ *  when the plugin is absent or errors. */
 async function queryCollections(args) {
-    // The model's query prefix goes on here, and only here: the caller's `searchText` also feeds
-    // queryTermWeights, where an instruction would land in the BM25 term weights and the gazetteer as if
-    // the user had written it, and applying it inside this function is what gets it onto both transports
-    // below, including the no-plugin path that re-asks after a failure. `queryPrefix` returns '' for any
-    // model whose contract WA cannot honour in full — see relevance.mjs.
+    // The model's query prefix goes on here and only here: the caller's `searchText` also feeds queryTermWeights.
     const prefix = queryPrefix(vectorRequestBody().model);
     if (prefix) args = { ...args, searchText: prefix + args.searchText };
 
-    // admitCeiling counts entries or chunks depending on which path answers (plugin/scoring.mjs). Chosen
-    // here rather than by the caller because the no-plugin path below can fire mid-request, and a ceiling
-    // picked before the attempt would ask for entries and be handed chunks. It is a safety limit on what
-    // a pathological scene may feed core's scan loop, not a verdict on any entry.
-    //
-    // Gated on the plugin, not on centering: `meanCentered` is passed to the plugin as a parameter, so
-    // turning it off must still reach this path or it buys no scores at all.
+    // The ceiling is chosen per path here, since the no-plugin path can fire mid-request. Gated on the plugin's
+    // presence, not on `meanCentered`, which is a plugin parameter.
     if (await hasPlugin()) {
         try {
             const body = vectorRequestBody({ ...args, topK: admitCeiling(true) });
-            // The plugin needs the provider settings under one key, as the server does.
             const response = await fetch('/api/plugins/worlds-apart/query-multi', {
                 method: 'POST',
                 headers: getRequestHeaders(),
                 body: JSON.stringify({
                     ...body,
                     centered: settings().meanCentered,
-                    // Every provider field, not a hand-picked subset: the plugin routes all of ST's
-                    // sources, so narrowing here makes a provider fail on a missing setting. Only the
-                    // query fields are stripped, being provider settings. API keys are read server-side.
+                    // Every provider field minus the query fields; narrowing it makes a provider fail on a missing setting.
                     sourceSettings: (({ collectionIds, searchText, centroidUids, topK, ...rest }) => rest)(body),
                 }),
             });
@@ -299,38 +231,23 @@ async function queryCollections(args) {
         }
     }
 
-    // No threshold to pass: WA has no admission gate at either path, and ST's endpoint defaults its own
-    // to 0. No server-side pooling here either, so K counts chunks and must run deep enough for each
-    // entry's best one to survive. Re-asked rather than inherited from a failed plugin attempt.
+    // No threshold and no server-side pooling here, so K counts chunks.
     return await vectorPost('query-multi', { ...args, topK: admitCeiling(false) }) ?? {};
 }
 
-// ---------------------------------------------------------------------------
 // Retrieval
-// ---------------------------------------------------------------------------
 
 /** Unit Separator — see CLAUDE.md. The same literal grading.mjs's rowKey and studio.mjs's rowId join with. */
 const US = '';
 
-/**
- * Chunks entries and brings the collection in sync with them.
- * Chunking is for matching only — activation still emits the whole entry.
- * @param {string} world World name
- * @param {object[]} entries Entries belonging to that world
- * @returns {Promise<{collectionId: string, owners: Map<number, string[]>}>}
- */
+/** Chunks a book's entries and brings its vector collection in sync with them.
+ *  @returns {Promise<{collectionId: string, owners: Map<number, string[]>}>} owners: chunk hash -> `${world}.${uid}` */
 async function syncWorld(world, entries) {
     const collectionId = `wa_${getStringHash(world)}`;
     const saved = await vectorPost('list', { collectionId }) ?? [];
 
     const items = [];
-    /**
-     * Chunk hash -> owning `${world}.${uid}`(s). Hashes carry (text, uid), so within one world every hash
-     * has exactly one owner; it stays a list because identical (text, uid) in two attached books still
-     * collides once scoreActivated concats these maps. Resolved here off the hashes just computed from the
-     * live entries, so it is independent of how the collection was built (eval/reindex-check.mjs).
-     * @type {Map<number, string[]>}
-     */
+    /** @type {Map<number, string[]>} A list, because identical (text, uid) in two attached books collides once scoreEntriesUnsafe merges these. */
     const owners = new Map();
 
     for (const entry of entries) {
@@ -339,15 +256,9 @@ async function syncWorld(world, entries) {
             if (!text) {
                 continue;
             }
-            // Identity is (text, uid), not text alone: two entries can produce the same chunk, and ST core
-            // lists and deletes by hash only, so the pair has to live in the hash or one hash stands for
-            // both entries.
+            // Identity is (text, uid): core lists and deletes by hash alone, so two entries sharing a chunk need distinct hashes.
             const hash = getStringHash(`${text}${entry.uid}`);
-            // Dot, not the US of CLAUDE.md's composite-key rule, and it must stay a dot: this is ST core's
-            // key format (world-info.js builds `${entry.world}.${entry.uid}` for allActivatedEntries and
-            // externalActivations). onScanDone looks that map's keys up in runState.lastScores, and
-            // fuseRanks silently drops rows whose score is undefined. Use grading.mjs's US-separated
-            // rowKey for anything that is ours alone.
+            // A dot, not US: this is core's own `${world}.${uid}` key, which onScanDone looks up in runState.lastScores.
             owners.set(hash, [`${entry.world}.${entry.uid}`]);
             items.push({ hash, text, index: entry.uid });
         }
@@ -359,8 +270,6 @@ async function syncWorld(world, entries) {
 
     if (newItems.length) {
         console.log(`Worlds Apart: embedding ${newItems.length} new chunks for "${world}"`);
-        // Timed, not counted: ms/chunk is the endpoint's, and backends differ by an order of magnitude
-        // (E10), so no chunk count means "slow" for every user. Indeterminate — the insert is one call.
         let announced = false;
         const slow = setTimeout(() => {
             announced = true;
@@ -383,32 +292,13 @@ async function syncWorld(world, entries) {
     return { collectionId, owners };
 }
 
-// Entity filter (gazetteer + proper-noun-weighted term filter) lives in entity.mjs — the tuning layer,
-// so it stays out of the plugin and its fingerprint. Rationale and benchmarks are in entity.mjs.
 const buildTermWeights = (queryText, gazetteer) => entity.buildTermWeights(queryText, gazetteer, settings().properNounBoost);
 
-/**
- * Content-lexical indexes, one per book, rebuilt when that book's fingerprint moves.
- *
- * Per book, not one index across the attached set, because IDF is a corpus statistic and a term common in
- * one book and rare in another must not average; the scores merge after pooling. Built from every entry in
- * the book, not the activated ones, or the same entry's score would move because its neighbours did.
- * @type {Map<string, {fingerprint: string, index: object}>}
- */
+/** @type {Map<string, {fingerprint: string, index: object, nameDf: object|null}>} Per-book content-lexical and name indexes, rebuilt when the book's fingerprint moves. */
 const contentIndexes = new Map();
 
-/**
- * Both per-book indexes over one book's entries, behind one fingerprint. The name index rides this cache
- * because it is the same kind of quantity — a query-independent corpus statistic, stale exactly when the
- * book changes — and is not persisted, name extraction being local string work.
- *
- * Two walks, not one, deliberately: `buildContentIndex` excludes disabled entries because it asks what can
- * be retrieved, while `buildNameDf` includes them because df asks how distinctive a name is in the book's
- * vocabulary (matcher-design.md, *Stage 4 predicts per-entry relevance*, measured). Their document counts
- * also differ — chunks against entries — so neither N may be read for the other.
- *
- * The name index is built only when something wants it: it is a whole-book pass.
- */
+/** Both per-book indexes over one book's entries behind one fingerprint; the name index only when `names` is set.
+ *  `buildContentIndex` excludes disabled entries and `buildNameDf` includes them, and their N differ, so neither may be read for the other. */
 function bookIndexes(world, entries, { names = false } = {}) {
     const fingerprint = indexFingerprint(entries, settings());
     const hit = contentIndexes.get(world);
@@ -426,18 +316,9 @@ function bookIndexes(world, entries, { names = false } = {}) {
     return fresh;
 }
 
-/**
- * Which vector collections on disk nothing claims any more. Nothing removes a collection: `syncWorld`
- * prunes stale chunks only for a book it is currently syncing, so a renamed, deleted or detached book —
- * or a switch of embedding source or model, both path components — leaves its whole collection behind.
- *
- * A book that is not attached is not an orphan: the test is whether any lorebook the user still has
- * hashes to that collection id (`world_names`, not this chat's attached set). A live book whose vectors
- * were built under another source or model is listed as `stale config`, since switching back reuses them.
- *
- * Reports, never deletes. Somebody paid embedding time for these.
- * @returns {Promise<{unclaimed: object[], staleConfig: object[], live: object[], bytes: number}|null>}
- */
+/** Vector collections on disk that no lorebook in `world_names` hashes to, plus live books built under another
+ *  source or model. Reports, never deletes.
+ *  @returns {Promise<{unclaimed: object[], staleConfig: object[], live: object[], bytes: number}|null>} */
 async function findOrphanCollections() {
     if (!await hasPlugin()) return null;
     const response = await fetch('/api/plugins/worlds-apart/collections', { method: 'POST', headers: getRequestHeaders() });
@@ -446,9 +327,7 @@ async function findOrphanCollections() {
     const claimed = new Set((world_names ?? []).map(n => `wa_${getStringHash(n)}`));
     const v = extension_settings.vectors ?? {};
     const source = v.source || 'transformers';
-    // Per source, not a `??` chain over all of them: `ollama_model` carries a non-empty default, so a
-    // chain reads it under any source and every collection then looks foreign. Unknown means empty,
-    // which compares source alone rather than guessing.
+    // Per source, not a `??` chain: `ollama_model` carries a non-empty default, so a chain reads it under any source.
     const model = String(({ ollama: v.ollama_model, vllm: v.vllm_model })[source] ?? v[`${source}_model`] ?? '');
     const unclaimed = [], staleConfig = [], live = [];
     for (const c of all) {
@@ -478,45 +357,25 @@ async function reportOrphanCollections() {
         : `${mib(bytes)} in ${live.length} collection(s), all claimed.`;
 }
 
-/**
- * The fitted relevance model, loaded once per embedding model.
- *
- * Fetched rather than imported: a JSON module import ties the extension's load to a syntax not every
- * browser accepts, so an older build would lose WA entirely rather than lose one column. A missing or
- * malformed file disables the column and does not throw, and `null` is cached so a 404 is not re-fetched.
- * @type {{promise: Promise<object|null>|null}}
- */
+/** Per-tier relevance fits for the current embedding model — fetched, never a JSON import; `null` is cached so a 404 is not re-fetched. */
 const relevanceModel = { promise: null, value: null, key: null };
 
 function loadRelevanceModel() {
-    // Keyed by the embedding model: Vector Storage switches model without a page load, and a memo that
-    // outlived the switch would score new cosines through old coefficients.
+    // Keyed by embedding model: Vector Storage switches model without a page load.
     const key = fitKey(vectorRequestBody());
     if (relevanceModel.key !== key) {
         relevanceModel.key = key;
         relevanceModel.promise = null;
         relevanceModel.value = null;
     }
-    // One file per tier: the tiers do not carry the same signals and do not agree on sign. `density`
-    // fits positive on memory and negative on reference (F19), so a shared coefficient would carry the
-    // wrong sign. Reference also drops `cosine` entirely, most of its rows being keyword-only (F18), so
-    // a fitted slope would read "nobody computed one" as evidence.
+    // One fit per tier, never shared: the coefficients differ in sign across tiers (F19).
     relevanceModel.promise ??= Promise.all(['memory', 'reference'].map(tier =>
         fetch(new URL(`./extension/relevance-model-${tier}.json`, import.meta.url))
             .then(r => (r.ok ? r.json() : Promise.reject(new Error(`HTTP ${r.status}`))))
             .then((file) => {
-                // Per embedding model: coefficients are fitted against one embedder's cosines and do not
-                // carry to another (E14), so the file is a map keyed by relevance.mjs `modelKey`.
-                //
-                // Three fits, in order. The model's own; then UNFITTED_FALLBACK's, because an unfitted
-                // model has cosines and borrowing a wrong coefficient beats discarding the feature; then
-                // `noCosine`, for a turn that has none — the no-plugin path, or a retrieval outage
-                // clearing `lastScores`. A cosine-bearing fit there standardises the column to zeros and
-                // leaves the other coefficients fitted around a feature that is gone.
+                // Own fit, else UNFITTED_FALLBACK's, else `noCosine` for a turn with no cosine (no-plugin path, retrieval outage).
                 const m = file?.byModel?.[key] ?? file?.byModel?.[UNFITTED_FALLBACK] ?? file?.noCosine ?? null;
                 if (m) m.noCosine = file?.noCosine ?? null;
-                // Say when the coefficients are not this model's: a borrowed fit scores and cuts and looks
-                // entirely ordinary, and a typo'd model name takes the same path as an unfitted one.
                 if (m && !file?.byModel?.[key]) {
                     console.warn(`Worlds Apart: no ${tier} relevance fit for embedding model "${key}" — `
                         + `scoring through "${UNFITTED_FALLBACK}"'s (have: ${Object.keys(file?.byModel ?? {}).join(', ') || 'none'}). `
@@ -536,41 +395,24 @@ function loadRelevanceModel() {
                 return [tier, null];
             })))
         .then((pairs) => {
-            // Kept resolved so the synchronous paramSnapshot can name the fits a capture's eCredit column
-            // came out of: a refit changes those numbers, and a bundle that does not record which fit
-            // produced them cannot be compared across one.
+            // Kept resolved: the synchronous paramSnapshot names the fits a capture's eCredit column came out of.
             relevanceModel.value = Object.fromEntries(pairs);
             return relevanceModel.value;
         });
     return relevanceModel.promise;
 }
 
-/** Every entry of every book in the scan, grouped by book — the population both per-book statistics
- *  (content-lexical IDF, name df) are statistics OF. */
+/** Every entry of every book in the scan, grouped by book — the population the per-book statistics are of. */
 const entriesByWorld = async () => Map.groupBy(await getSortedEntries(), e => e.world);
 
 /**
- * Stage 4's relevance column: the two signals the fitted model needs that nothing else computes, then
- * `E[credit]` per entry.
- *
- * It fills the column; it does not cut. The cut is `selection.relevanceCut`, at the walk, so the whole
- * pre-cut population is still captured and gradeable.
- *
- * The same window the fit saw, at the global depth with a plain entry: proper-noun overlap is a property
- * of the scene, so an entry's own opted-in sources are its and not the scene's. `eval/scene.mjs`
- * `haystackFor` calls the same builder with the same inputs, which is why `windowFor` is passed in.
- *
- * Names are weighted per book, df being a statistic of one book, never against the pooled attached set —
- * the same one-index rule content-lexical rests on. One fit per tier, never one across both: `density`
- * measured inverted on reference (F19). Reference is scored — the column orders it for the budget walk —
- * and cut nowhere.
+ * Fills the stage-4 relevance column: `properNouns`, `density`, then `E[credit]` per entry. Cuts nothing.
+ * @param {Function} windowFor The scan window builder; eval/scene.mjs `haystackFor` calls the same one with the same inputs
  */
 async function scoreRelevanceColumn(items, windowFor) {
     const models = await loadRelevanceModel();
     if (!models || !windowFor) return;
 
-    // Every entry of every book in the scan, which is what df is a statistic of — not the activated
-    // subset, whose population changes every turn.
     const byWorld = await entriesByWorld();
 
     const depth = Number(settings().messageDepth || world_info_depth);
@@ -578,22 +420,17 @@ async function scoreRelevanceColumn(items, windowFor) {
 
     for (const item of items) {
         const book = bookIndexes(item.entry.world, byWorld.get(item.entry.world) ?? [], { names: true }).nameDf;
-        // The entry's names come off the book walk that built df, so they are extracted once per book
-        // rather than once per turn per entry.
         const names = book?.names.get(entryKey(item.entry)) ?? properNames(item.entry.content);
         item.properNouns = book ? properShared(names, windowNames, book) : 0;
         item.density = properDensity(item.entry.content);
     }
 
-    // One scene, one standardisation. The columns are centred over a population, which is what the
-    // coefficients are in units of, and which population is the fit's own business (`standardise`). The
-    // loop stays per tier either way: a tier only ever meets its own coefficients.
+    // Per tier: a tier only ever meets its own coefficients.
     for (const [tier, model] of Object.entries(models)) {
         if (!model) continue;
         const rows = items.filter(it => (isMemory(it.entry) ? 'memory' : 'reference') === tier);
         if (!rows.length) continue;
-        // Chosen against the ROWS, not predicted from settings: the plugin can be present and still fall
-        // back mid-request, and it is the presence of a score that decides which fit is valid.
+        // Chosen against the rows, not settings: the plugin can fall back mid-request.
         const fit = rows.some(it => Number.isFinite(it.score)) ? model : (model.noCosine ?? model);
         const col = it => ({
             cosine: Number.isFinite(it.score) ? it.score : 0,
@@ -602,11 +439,7 @@ async function scoreRelevanceColumn(items, windowFor) {
             properNouns: Number(it.properNouns) || 0,
             density: Number(it.density) || 0,
         });
-        // Which population the fit wants, read off the fit rather than assumed: a `pooled` fit took its
-        // mean and sd from every candidate of the scene, `scene` (and any fit with no such field) from the
-        // tier's own rows. Serving the wrong one silently rescales every z against slopes fitted in
-        // another unit. Minus constants, as both calibration sites build it (relevance-regress.mjs,
-        // scene.mjs): a constant was never a candidate, and a few long ones move every mean and sd.
+        // The fit's own population (`standardise`), minus constants, as both calibration sites build it.
         const population = (fit.standardise === 'pooled' ? items : rows).filter(it => !it.entry?.constant).map(col);
         const eCredit = scoreRelevance(fit, rows.map(col), population);
         rows.forEach((it, i) => { it.eCredit = eCredit[i]; it.eCreditTier = tier; });
@@ -631,16 +464,8 @@ async function scoreRelevanceColumn(items, windowFor) {
     }
 }
 
-/**
- * BM25 of the scan's query against every entry's content — the stage-3 text signal, for keyword and
- * vectorized entries alike.
- *
- * Scoring, never admission: this runs on entries core has already activated, so no amount of lexical
- * overlap can surface an entry whose keys never fired. It uses the same term weights stage 1 used, so the
- * text signal cannot disagree with the admission it refines.
- *
- * @returns {Promise<Map<string, number>>} `${world}.${uid}` -> best chunk score; empty when unavailable.
- */
+/** BM25 of the query against every entry's content — the stage-3 text signal.
+ *  @returns {Promise<Map<string, number>>} `${world}.${uid}` -> best chunk score; empty when unavailable */
 async function contentTextScores(query) {
     if (!query) return new Map();
     const byWorld = await entriesByWorld();
@@ -659,26 +484,15 @@ async function contentTextScores(query) {
     return out;
 }
 
-/**
- * Builds the entity-filter term weights for a query — or null when the filter is off.
- *
- * Anything that scores a query goes through here, and nothing re-derives the weights: unfiltered BM25
- * runs far enough above the filtered value to reorder the ranking (R19), so a second owner would have a
- * probe explaining retrieval with numbers retrieval never used.
- *
- * @param {string} searchText Query text
- * @param {object} [opts]
- * @param {boolean} [opts.log] Log the kept-term count and (in a verbose run) the surviving terms
- * @returns {Promise<Record<string, number>|null>} Term weights, or null to leave the query unfiltered
- */
+/** The entity-filter term weights for a query, or null when the filter is off. Nothing else derives them (R19).
+ *  @param {boolean} [opts.log] Log the kept-term count and, in a verbose run, the surviving terms
+ *  @returns {Promise<Record<string, number>|null>} */
 async function queryTermWeights(searchText, { log = true } = {}) {
     if (!settings().entityFilter) {
         return null;
     }
 
-    // The authored vocabulary, not whatever the key blanking left behind: getSortedEntries emits
-    // WORLDINFO_ENTRIES_LOADED, so at stage 3 with waOwnsScan true the entries come back with
-    // key/keysecondary stashed. A local view, never a write-back.
+    // The authored keys, not the takeover's blanks: getSortedEntries fires WORLDINFO_ENTRIES_LOADED. A local view, never a write-back.
     const authored = entry => (entry.waKeys || entry.waSecondary)
         ? { ...entry, key: entry.key?.length ? entry.key : (entry.waKeys ?? []), keysecondary: entry.keysecondary?.length ? entry.keysecondary : (entry.waSecondary ?? []) }
         : entry;
@@ -698,42 +512,22 @@ async function queryTermWeights(searchText, { log = true } = {}) {
     return termWeights;
 }
 
-/**
- * Serializes retrieval so a second call can't query a half-built index while the
- * first is still inserting. Changing chunk settings triggers a long re-embed, and
- * results read during one are meaningless.
- * @type {Promise<any>}
- */
+/** Serialises retrieval so a query cannot read a half-built index. */
 let retrievalQueue = Promise.resolve();
 
-/**
- * Scores every vectorized entry against arbitrary query text.
- * Shared by real retrieval and by /wa-query, so calibration exercises the same path
- * generation does rather than an approximation of it.
- * @param {string} searchText Text to search with
- * @returns {Promise<{targets: object[], scores: Map<string, {score: number, chunk: string}>}>}
- */
+/** Scores every entry with content against arbitrary query text; shared by retrieval and /wa-query.
+ *  @returns {Promise<{targets: object[], scores: Map<string, {score: number, chunk: string}>}>} */
 function scoreEntries(searchText) {
     const run = () => scoreEntriesUnsafe(searchText);
     const result = retrievalQueue.then(run, run);
-    // The catch is on the queue, deliberately not on `result`: it stops one rejection from poisoning
-    // every later call while the rejection still reaches the caller. Do not tidy it into
-    // `return result.catch(...)` — that makes a failure indistinguishable from retrieve()'s two
-    // legitimate empties.
+    // The catch is on the queue, not on `result`: `return result.catch(...)` would make a failure look like retrieve()'s empties.
     retrievalQueue = result.catch(() => {});
     return result;
 }
 
-/**
- * @param {string} searchText Text to search with
- * @returns {Promise<{targets: object[], scores: Map<string, {score: number, chunk: string}>}>}
- */
 async function scoreEntriesUnsafe(searchText) {
     const allEntries = await getSortedEntries();
-    // Every entry with content is embedded and scored. Computing a cosine is not vectorizing an entry:
-    // `vectorized` decides what stage 1 retrieves, a cosine is a column stage 3 reads. Scoring only the
-    // vectorized ones lets the relevance model read an absence as evidence, which on the reference tier
-    // fits below chance and inverts where the number is real (F35).
+    // Every entry with content, not only the vectorized: `vectorized` decides what stage 1 retrieves, a cosine is a column stage 3 reads (F35).
     const targets = allEntries.filter(x => !x.disable && x.content);
     /** @type {Map<string, {score: number, chunk: string}>} */
     const scores = new Map();
@@ -745,16 +539,7 @@ async function scoreEntriesUnsafe(searchText) {
     const byWorld = Map.groupBy(targets, e => e.world);
 
     const collectionIds = [];
-    /**
-     * `${collectionId}${US}${hash}` -> every owning `${world}.${uid}` in that collection (see syncWorld).
-     *
-     * Scoped by collection, because a score only means something inside the corpus it was computed in: the
-     * plugin centers each book on its own centroid and derives its own BM25 IDF (plugin/vector.mjs,
-     * extension/lexical.mjs), so two books sharing a paragraph score it differently and neither number
-     * transfers. Keyed by hash alone, the max-pooling below would hand each owner whichever book flattered
-     * the chunk more, which defeats IDF exactly where it works.
-     * @type {Map<string, string[]>}
-     */
+    /** @type {Map<string, string[]>} `${collectionId}${US}${hash}` -> owning `${world}.${uid}`s; keyed by collection too, since by hash alone the pooling below would credit an owner with another book's score. */
     const owners = new Map();
 
     for (const [world, entries] of byWorld) {
@@ -763,15 +548,7 @@ async function scoreEntriesUnsafe(searchText) {
         synced.owners.forEach((v, k) => owners.set(`${synced.collectionId}${US}${k}`, v));
     }
 
-    // The centroid is the memory tier, named per collection rather than inherited from whatever the
-    // collection holds: widening what is stored must not widen what mean-centering subtracts, the mean
-    // carrying most of an embedding's mass.
-    //
-    // Memory, not `vectorized`: centering removes a corpus's shared direction, which only means something
-    // over one register, and a blend of narrative summaries and encyclopedic entries fully removes
-    // neither. Chosen on consistency with every other per-tier thing downstream and measured flat (F44),
-    // so it is not a performance change and the memory tier's cosine coefficient needs no refit
-    // (eval/scene.mjs centroidPopulation runs the contrast).
+    // The centroid is the memory tier, per collection; measured flat against `vectorized` (F44).
     const centroidUids = {};
     for (const [world, entries] of byWorld) {
         centroidUids[`wa_${getStringHash(world)}`] = entries.filter(isMemory).map(e => Number(e.uid));
@@ -783,37 +560,25 @@ async function scoreEntriesUnsafe(searchText) {
         centroidUids,
     });
 
-    // The plugin returns one pooled record per entry, so the max-taking below is a no-op against a current
-    // one; it stays because it unpacks the response into `scores` and keeps an un-redeployed plugin, which
-    // still returns raw chunks, pooling correctly.
-    //
-    // Object.entries, not values: the collectionId is half the owner lookup, a chunk's score being
-    // meaningful only against the corpus it was computed in (see `owners`). `rankOnly` counts chunks that
-    // came back with no score at all, which means the no-plugin path answered and stage 3 has no cosine.
+    // The max is a no-op against a current plugin (one pooled record per entry) and keeps an un-redeployed one, which
+    // still returns raw chunks, pooling. `rankOnly` counts chunks with no score: the no-plugin path answered.
     let rankOnly = 0;
     for (const [collectionId, group] of Object.entries(results)) {
         const metadata = group?.metadata ?? [];
         metadata.forEach((item, index) => {
-            // Every owner of the chunk within this collection, not one: the store keeps at most one row
-            // per hash on an incremental sync, so two entries in the same book sharing a chunk come back
-            // once and crediting either alone makes the other unreachable through that text.
+            // Every owner of the chunk, not one: the store keeps one row per hash.
             const chunkOwners = owners.get(`${collectionId}${US}${Number(item?.hash)}`);
             if (!chunkOwners?.length) {
                 return;
             }
 
-            // No invented score: ST's own endpoint drops the score (`src/endpoints/vectors.js` maps
-            // `x.item.metadata`), and substituting rank position feeds a model expecting a centred cosine
-            // a number in another unit, which the relevance cut then runs on (H12). Absent is the honest
-            // value — a row with no cosine is scored on its other signals, a claim the model can make.
+            // No invented score: ST's endpoint drops it, and a rank substitute feeds the fit a number in another unit (H12).
             const score = typeof item?.score === 'number' ? item.score : null;
             if (score === null) { rankOnly++; return; }
 
             for (const owner of chunkOwners) {
                 const previous = scores.get(owner);
 
-                // One signal, so one maximum: stage 1 is cosine-only (plugin/scoring.mjs) and the server
-                // sends no bm25 to pool.
                 if (!previous || previous.score < score) {
                     scores.set(owner, { score, chunk: String(item?.text ?? '') });
                 }
@@ -821,8 +586,6 @@ async function scoreEntriesUnsafe(searchText) {
         });
     }
 
-    // Loud, because the failure is silent by nature: the stock endpoint answers, the rows come back in the
-    // right order, and nothing looks wrong until a fitted coefficient multiplies a score nobody computed.
     if (rankOnly) {
         console.warn(`Worlds Apart: ${rankOnly} chunk(s) came back with no score — the no-plugin path answered, so stage 1 has no cosine. `
             + 'The relevance model is running on text, proper nouns and density alone. Check that the server plugin is loaded and that its query is not failing.');
@@ -831,16 +594,7 @@ async function scoreEntriesUnsafe(searchText) {
     return { targets, scores };
 }
 
-/**
- * Prints /wa-query's table: every scored entry by cosine, with the gap between neighbours.
- *
- * Takes the scores retrieval computed rather than re-scoring, so it cannot disagree with the retrieval it
- * is explaining.
- *
- * @param {Map<string, {score: number, chunk: string}>} scores Per-entry results
- * @param {object[]} targets Entries in the active books
- * @param {string} searchText The query
- */
+/** Prints /wa-query's table: every scored entry by cosine, with the gap between neighbours. */
 function reportVectorCandidates(scores, targets, searchText) {
     const byKey = new Map(targets.map(x => [`${x.world}.${x.uid}`, x]));
     const rows = [...scores.entries()].sort((a, b) => b[1].score - a[1].score);
@@ -849,8 +603,6 @@ function reportVectorCandidates(scores, targets, searchText) {
     console.log(`Worlds Apart: query "${searchText.slice(0, 80)}${searchText.length > 80 ? '\u2026' : ''}" (${searchText.length} chars)`);
     console.log(`Worlds Apart: ${rows.length} entries scored, cosine order, top-5 spread ${spread.toFixed(5)}`);
     console.log('%cWorlds Apart \u00b7 /wa-query \u2014 every scored entry by cosine, best first', 'font-weight: bold');
-    // Sorted here, not ranked upstream: stage 1 admits everything it scores and assigns no rank. This is a
-    // presentation order for one command, computed where it is displayed.
     console.table(rows.map(([key, value], index) => ({
         gap: index > 0 ? Number((rows[index - 1][1].score - value.score).toFixed(6)) : null,
         title: byKey.get(key)?.comment,
@@ -860,17 +612,11 @@ function reportVectorCandidates(scores, targets, searchText) {
     })));
 }
 
-/**
- * Runs retrieval against the chat and returns the winning entries. Emission is
- * selectAndActivate's — retrieval is one of two activation routes, not the owner of the emit.
- * @param {object[]} chat Chat messages
- * @returns {Promise<object[]>} Entries retrieval selected for activation
- */
+/** Retrieval over the chat; returns the vectorized entries that scored. The emit is selectAndActivate's. */
 async function retrieve(chat) {
     runState.lastScores.clear();
 
-    // One substitution pass over the chat serves both the query string and the /wa-grade stash below —
-    // queryMessages runs ST's macro engine over every message, so it must not run twice per generation.
+    // One substitution pass serves both the query and the /wa-grade stash: queryMessages must not run twice per generation.
     const queryChat = query.queryMessages(chat, { depth: settings().messageDepth, substituteParams });
     const rawText = query.joinQueryMessages(queryChat);
 
@@ -882,20 +628,14 @@ async function retrieve(chat) {
     const searchText = rawText;
     console.log(`Worlds Apart: query is ${searchText.length} chars from ${settings().messageDepth} message(s), matched against ~${settings().chunkSize}-char entry chunks`);
 
-    // Recorded for /wa-grade before the retrieval outcome is known: a book with no vectorized entries
-    // legitimately scores nothing below, and a keyword-only scene is still gradeable against the query.
+    // Before the empties below: a keyword-only scene is still gradeable against the query.
     runState.lastQuery = searchText;
-    // The messages the query was built from, macros already resolved, in ST's own {name, mes} shape so
-    // query.buildQuery can be re-run over them offline at any depth <= this one — capture wide, then
-    // narrow. Not recoverable by splitting `lastQuery`: messages contain blank lines and the join
-    // separator is '\n\n'.
+    // ST's own {name, mes} shape, so query.buildQuery can re-run offline at any depth <= this one; not recoverable by splitting `lastQuery`.
     runState.lastQueryChat = queryChat;
 
-    // No entity filter here: it produces BM25 query terms and stage 1 has no BM25 to spend them on
-    // (plugin/scoring.mjs). It still runs at stage 3, where content-lexical reads it.
+    // No entity filter here: stage 1 has no BM25 to spend its terms on (plugin/scoring.mjs).
     const { targets, scores } = await scoreEntries(searchText);
 
-    // Two different empties, kept apart: a book with nothing vectorized has no candidates at all.
     if (!targets.length) {
         console.log('Worlds Apart: no entries with content in the active books, so retrieval has nothing to score');
         return [];
@@ -905,51 +645,28 @@ async function retrieve(chat) {
         return [];
     }
 
-    // Admission is narrower than scoring, and the two must not be confused: every entry with content is
-    // embedded and scored, so a keyword-activated entry has a cosine for stage 3 to read, but only a
-    // `vectorized` entry is force-activated here. The author's flag is what says an entry should be
-    // retrievable; a cosine is just a number computed about it.
+    // Only a `vectorized` entry is force-activated; every scored entry keeps its cosine for stage 3.
     const vectorizedKeys = new Set(targets.filter(x => x.vectorized).map(x => `${x.world}.${x.uid}`));
     const winnerKeys = new Set([...scores.keys()].filter(k => vectorizedKeys.has(k)));
 
-    // No stage-1 table, deliberately: admission is unconditional, so the cosine ranking's order decides
-    // nothing except which entries survive `admitCeiling`, which no measured book approaches (R4). The
-    // per-entry cosine is in the stage-3/4 table beside the signals it is weighed against, and /wa-query
-    // still ranks arbitrary text on request.
-
-    // Every admitted entry, not a surviving prefix: stage 3 looks its vector score up from here, and a
-    // missing signal reads as a low score rather than as an error.
+    // Every scored entry, not the winners: stage 3 looks its cosine up here.
     for (const [key, value] of scores) {
         runState.lastScores.set(key, value.score);
     }
 
-    // winnerKeys is the vectorized half of what scored. `targets` includes entries the query never scored
-    // at all, and admitting those would return an entry with no vector score for stage 3 to look up.
     return targets.filter(x => winnerKeys.has(`${x.world}.${x.uid}`));
 }
 
-/**
- * The union direction: entries WA's matcher activates over its own
- * window, which core cannot or would not — `?` SmartKeys have no core semantics, the fold and
- * messageDepth are supersets. This function only extracts ST context; the candidacy rules and the
- * verdict live in matcher.mjs (activationAdds), where the check suite exercises them.
- * @param {object[]} chat The interceptor's chat — core's own scan haystack
- * @returns {Promise<object[]>} Entries to force-activate
- */
+/** The entries WA's own matcher activates over its window; candidacy and the verdict live in matcher.mjs activationAdds. */
 async function keywordActivations(chat) {
     const candidates = await getSortedEntries();
 
-    // These copies carry live keys — waOwnsScan is false during WA's own fetch, so onEntriesLoaded's
-    // blanking never touches them — and are what the SCAN_DONE feed rematches on every pass.
+    // Live keys: waOwnsScan is false during this fetch, so onEntriesLoaded does not blank them. The SCAN_DONE feed rematches on these.
     runState.waCandidates = candidates;
 
     const { windowFor } = await scanWindowFor(chat);
 
-    // Register every key this pass will match up front so the smartkeys automaton is built once — a
-    // first-seen key mid-loop dirties it, and the rebuild throws away every cached scan. Secondaries
-    // count, selectiveEval interning their literals too (K13). Filtered exactly as the matching path
-    // filters them, so an entry with no usable primary is skipped whole as activationAdds skips it.
-    // Registering here also pre-covers stage 3's registerKeys for this generation.
+    // Register every key up front, secondaries included (K13): a first-seen key mid-loop rebuilds the automaton and drops every cached scan.
     registerKeys(candidates.flatMap(e => {
         const keys = e.disable ? [] : matcher.usableKeys(e.key);
         return keys.length ? [...keys, ...matcher.secondaryKeys(e)] : [];
@@ -962,17 +679,8 @@ async function keywordActivations(chat) {
 const reportedFailures = new Set();
 
 /**
- * A generation-time failure the user has to see, not just the console. The realistic trigger is the ST
- * surface WA sits on — `getSortedEntries`, the inject API, the `world_info_*` globals — so it fires after
- * someone updates SillyTavern and presents as "my lorebook stopped working".
- *
- * Carries stage, consequence in plain terms, the error's message and the top stack frame, the frame being
- * what separates "ST changed an API" from "WA has a bug"; the console keeps the full trace. Once per
- * distinct message per session, since a toast every turn trains the user to dismiss it unread.
- *
- * @param {string} stage Which half failed, as the toast title
+ * Toasts a generation-time failure once per distinct message per session, with the top stack frame.
  * @param {string} consequence What the user will observe this turn
- * @param {unknown} error
  * @param {'error'|'warning'} [severity]
  */
 function reportFailure(stage, consequence, error, severity = 'error') {
@@ -982,10 +690,7 @@ function reportFailure(stage, consequence, error, severity = 'error') {
     if (reportedFailures.has(key)) return;
     reportedFailures.add(key);
     const frame = String(error?.stack ?? '').split('\n')[1]?.trim().replace(/^at\s+/, '');
-    // ST sets toastr.options.escapeHtml = true globally (script.js), which collapses `\n` to a space, so
-    // opt out per-toast and escape the parts by hand — `cause` and `frame` come from an exception and can
-    // carry anything. closeButton too: the global default is false, and a 20s undismissable error is its
-    // own annoyance.
+    // ST sets toastr.options.escapeHtml = true globally, which collapses `\n`; opt out per toast and escape by hand.
     toastr[severity](
         [escapeHtml(consequence),
             escapeHtml(cause) + (frame ? `<br>&nbsp;&nbsp;at ${escapeHtml(frame)}` : ''),
@@ -995,23 +700,14 @@ function reportFailure(stage, consequence, error, severity = 'error') {
     );
 }
 
-/**
- * Stage 1+2 orchestrator: retrieval winners ∪ keyword adds, one FORCE_ACTIVATE emit.
- * The two routes fail independently — a vector-plugin outage must not cost keyword
- * activation, and vice versa.
- * @param {object[]} chat Chat messages
- */
+/** Stages 1 and 2: retrieval winners ∪ keyword adds, one FORCE_ACTIVATE emit. The two routes fail independently. */
 async function selectAndActivate(chat) {
     chat = dropChatTags(chat);
 
-    // /wa-dry reaches here without the interceptor running, so its replayed scan must judge against the
-    // chat it was handed. Redundant on the intercept path except when dropChatTags is set, which is what
-    // separates this stash from the raw haystack `intercept` recorded.
+    // /wa-dry reaches here without the interceptor, so the replayed scan judges the chat it was handed.
     runState.scanChat = chat.slice();
 
-    // Per-scan takeover state. waOwnsScan goes FALSE first — WA's own getSortedEntries calls
-    // below fire WORLDINFO_ENTRIES_LOADED, and the takeover blanking must not eat the keys WA
-    // is about to match on (a stale true from an aborted scan would).
+    // waOwnsScan FALSE first: WA's own getSortedEntries calls below fire WORLDINFO_ENTRIES_LOADED, and the blanking must not eat the keys WA matches on.
     runState.waOwnsScan = false;
     runState.waMatched = new Set();
     runState.waRecursionTexts = [];
@@ -1022,8 +718,6 @@ async function selectAndActivate(chat) {
     try {
         winners = await retrieve(chat);
     } catch (error) {
-        // A DEGRADATION, not a break: keyword matching still runs below and the takeover still
-        // engages, so keys are handled — only the vector half of this turn is missing.
         reportFailure('retrieval failed',
             'Vectorized entries will not be retrieved this turn. Keyword matching is unaffected.',
             error, 'warning');
@@ -1034,9 +728,7 @@ async function selectAndActivate(chat) {
     try {
         adds = await keywordActivations(chat);
     } catch (error) {
-        // TOTAL, and the message must say so: waOwnsScan is set below regardless, blanking every key,
-        // so core does not match either. WA owns its failure states — it does not hand matching back
-        // per turn, it fails visibly.
+        // Total: waOwnsScan is set below regardless, so core does not match either.
         reportFailure('keyword activation failed',
             'No entry will activate by keyword this turn. WA has taken over key matching, so SillyTavern will not match them either — the prompt has only retrieved, constant and sticky entries.',
             error);
@@ -1051,42 +743,18 @@ async function selectAndActivate(chat) {
         await eventSource.emit(event_types.WORLDINFO_FORCE_ACTIVATE, activated);
     }
 
-    // The takeover flag goes TRUE last, after WA's own fetches are done: the next
-    // WORLDINFO_ENTRIES_LOADED is core's scan, and that is the one whose keys get blanked.
-    // Cleared on the scan's final SCAN_DONE loop and at generation end.
+    // TRUE last, after WA's own fetches: the next WORLDINFO_ENTRIES_LOADED is core's scan. Cleared on the final SCAN_DONE loop and at generation end.
     for (const e of activated) runState.waMatched.add(`${e.world}.${e.uid}`);
     runState.waOwnsScan = true;
 }
 
-// ---------------------------------------------------------------------------
 // Hooks
-// ---------------------------------------------------------------------------
 
-/**
- * Generation interceptor. Runs before the World Info scan.
- *
- * Quiet generations are ordinary generations here. A `type === 'quiet'` run (Summarize, the SD prompt
- * generator, the LLM expression classifier, /gen and the st-context API) scans World Info exactly like a
- * visible one — `skipWIAN` gates only whether depth/outlet entries are injected, never the scan — so if
- * the scan happens, WA's selection is what it should return.
- *
- * Neither summarization route re-enters this: `generateRaw` and ConnectionManagerRequestService both
- * bypass `Generate`, so summary mode cannot recurse. Dry runs are upstream's call, not WA's —
- * `runGenerationInterceptors` is skipped for them entirely, so core's matcher and budget are what those
- * token estimates see.
- *
- * @param {object[]} chat Chat messages
- * @param {number} _maxContext Max context size
- * @param {string} _type Generation type
- */
+/** Generation interceptor. Quiet generations scan like visible ones; ST skips interceptors on its dry runs. */
 async function intercept(chat, _maxContext, _type) {
-    // Stashed BEFORE the gates: the received chat IS core's scan haystack (script.js builds
-    // chatForWI from this same coreChat — regex scripts applied, file content and titles
-    // appended, reasoning merged). Sliced so ST's later in-place splices (jailbreak injects)
-    // can't shift membership under a SCAN_DONE consumer.
+    // Before the gates: this chat IS core's scan haystack (regex applied, files appended). Sliced so ST's later in-place splices cannot shift it.
     runState.scanChat = chat.slice();
-    // BEFORE the gate: a disabled generation's scan is core's, and a takeover flag leaked from
-    // an aborted scan would blank its keys with no WA union behind them.
+    // Before the gate: a takeover flag leaked from an aborted scan would blank a disabled generation's keys.
     runState.waOwnsScan = false;
 
     if (!settings().enabled) {
@@ -1097,34 +765,22 @@ async function intercept(chat, _maxContext, _type) {
 }
 
 
-/**
- * Blinds core's keyword matcher on a scan WA owns — every keyword-activating entry's keys are stashed
- * and blanked, so WA's force-emit is the only keyword route into `activated` — and takes the budget
- * off core.
- * Entries here are freshly-spread objects, so REASSIGNING `key` is safe —
- * mutating the array in place would corrupt the cached world data.
- * @param {object} loaded Lore buckets
- */
+/** Blinds core's keyword matcher on a scan WA owns — keys stashed on `waKeys`/`waSecondary`, then blanked — and takes
+ *  the budget off core. REASSIGN `key`, never mutate it: the array is loadWorldInfo's cache. */
 function onEntriesLoaded(loaded) {
     if (runState.inCoreProbe) return;   // the exemption is lifted on purpose mid-probe
     const entries = Object.values(loaded ?? {}).filter(Array.isArray).flat();
 
-    // Free ride: this hook already sees every entry in scope, so count the exempt ones
-    // here rather than loading the lorebooks a second time.
     showExemptCount(entries);
 
-    // THE AUTHOR'S PROMOTION, read HERE and nowhere else: this hook is the last place the `@@` lines
-    // still exist, `getSortedEntries` stripping them a few lines later. Stashed like `waIgnoreBudget`,
-    // and ungated — a promotion is a property of the entry, not of whether WA cuts this turn.
+    // Read here and nowhere else: this hook is the last place the `@@` lines still exist. Ungated, a promotion being a property of the entry.
     for (const entry of entries) entry.waPromote = matcher.hasPromoteDecorator(entry);
 
-    // Gated on WA actually cutting this generation, because core's budget is the BACKSTOP: on any
-    // path where onScanDone returns early, core's cut is the only thing still bounding the
-    // prompt. Dry runs (PromptManager token counts, chat load) are exactly that path.
+    // Gated on WA actually cutting this generation: core's budget is the backstop on every path where onScanDone returns early.
     if (settings().enabled && !runState.generationIsDryRun) {
         for (const entry of entries) {
-            entry.waIgnoreBudget = Boolean(entry.ignoreBudget);   // always set, so `??` above only
-            entry.ignoreBudget = true;                            // falls through for the ungated paths
+            entry.waIgnoreBudget = Boolean(entry.ignoreBudget);   // always set, so authorIgnoreBudget's `??` falls through only on the ungated paths
+            entry.ignoreBudget = true;
         }
     }
 
@@ -1132,26 +788,13 @@ function onEntriesLoaded(loaded) {
         return;
     }
 
-    // On a scan WA intercepted, core's keyword matcher goes blind: every keyword-activating entry's keys
-    // are stashed and blanked, so the only keyword route into `activated` is WA's force-emit and the group
-    // filter runs over WA's verdicts. waOwnsScan is only true between the end of selectAndActivate and the
-    // scan's last loop, so WA's own fetches and the dry-run scans WA is never offered keep live keys and
-    // core behaviour. Secondaries are stashed too: stage 3's secondary gate must judge the condition the
-    // author wrote, not an empty one.
+    // Stashed, not deleted, and secondaries too: stage 3 scores the authored keys and gates on the authored condition.
     if (runState.waOwnsScan && !runState.generationIsDryRun) {
         for (const entry of entries) {
             if (!entry || entry.waKeys) continue;   // already stashed and blanked this load
-            // Constants and @@activate entries keep their keys. Core short-circuits both before its
-            // key-matching path, so live keys cannot leak a core keyword activation — and the
-            // inclusion-group filter's getScore reads entry.key, so blanking would make a grouped constant
-            // score 0 and lose ties it should win. Sticky winners skip scoring entirely
-            // (filterGroupsByTimedEffects), and keyword-activated entries reach the filter as WA's
-            // live-key copy via the external-activation map.
+            // Constants and @@activate keep their keys: core short-circuits both before matching, and the inclusion-group filter's getScore reads entry.key.
             if (entry.constant || matcher.hasDecorator(entry, '@@activate')) continue;
-            // Copied, not aliased: getGlobalLore builds each entry with a shallow spread, so `entry.key`
-            // is still loadWorldInfo's cached array. Blanking rebinds the field and is safe, but holding
-            // the reference would put a live handle on the cache one in-place sort away from corrupting
-            // the lorebook for the session.
+            // Copied, not aliased: `entry.key` is loadWorldInfo's cached array.
             entry.waKeys = [...(entry.key ?? [])];
             entry.waSecondary = [...(entry.keysecondary ?? [])];
             entry.key = [];
@@ -1160,15 +803,9 @@ function onEntriesLoaded(loaded) {
     }
 }
 
-/**
- * Reports how many entries are exempt from the caps, since that number changes what
- * the caps mean and is otherwise invisible — it lives on individual entries.
- * @param {object[]} entries All entries in scope
- */
+/** Shows how many entries are exempt from the caps, and refreshes the attached-book set. */
 function showExemptCount(entries) {
-    // These entries are ST's full active set for the chat (chat + character + globals), so their worlds
-    // are exactly the books attached to the chat — the scope of the priority feature. Set before the
-    // panel-open check so the /wa-debug book line stays correct with the panel closed.
+    // ST's full active set for the chat, so these worlds are the attached books. Before the panel check, so /wa-debug's book line is right with the panel closed.
     runState.attachedWorlds = new Set(entries.map(e => e?.world).filter(Boolean));
     renderWorldPriority();
 
@@ -1180,17 +817,12 @@ function showExemptCount(entries) {
 
     const exempt = entries.filter(delivery.authorIgnoreBudget).length;
 
-    // Nothing to say when there are none, which is the common case.
     field.text(exempt
         ? `${exempt} of ${entries.length} entries are marked "ignore budget" — never cut, and not counted toward the entry caps.`
         : '');
 }
 
-/**
- * Renders the enumerated per-book priority list from settings. Books self-populate as WA
- * sees them (ensureWorldConfigs); this only reflects what's already stored. Weight/offset
- * inputs show only in interleaved mode — sequential uses list order alone.
- */
+/** Renders the current character's per-book priority list from settings. */
 function renderWorldPriority() {
     const $list = $('#wa_world_priority_list');
     if (!$list.length) {
@@ -1199,8 +831,7 @@ function renderWorldPriority() {
 
     const mode = settings().worldPriorityMode;
     $('#wa_world_priority_mode').val(mode);
-    // Scoped to the current character's saved order, filtered to what's attached to this chat.
-    // data-i is the index in that stored list, so edits/reorders still land right.
+    // data-i is the index in the stored list, so edits and reorders land on the right element.
     const scoped = scopedPriority();
 
     if (scoped == null) {
@@ -1212,8 +843,6 @@ function renderWorldPriority() {
         return;
     }
 
-    // Reorder matters only for sequential tiers; weight/offset only for interleaved. The
-    // per-book cap is a quota independent of priority, so it shows in every mode.
     const showOrder = mode === 'sequential';
     const showTuning = !showOrder;
     $list.empty();
@@ -1236,19 +865,8 @@ function renderWorldPriority() {
     });
 }
 
-// ---------------------------------------------------------------------------
-// Keyword scoring (BM25-style) and rank fusion
-// ---------------------------------------------------------------------------
-
-/**
- * The non-chat texts core's scan buffer can also match against, per entry opt-in flags
- * (matchCharacterDescription, matchScenario, …). "Shane" living in a character card is
- * why an entry fires every turn with nothing in the chat — core scans these, so WA must.
- *
- * characterDepthPrompt is left empty, matching dryRun: it isn't cleanly reachable here
- * and is a rare match source. The rest come straight off the active character/persona.
- * @returns {object} Source texts keyed as core's globalScanData expects
- */
+/** The non-chat texts core's scan buffer also matches, per entry opt-in (matchCharacterDescription, …), keyed as
+ *  core's globalScanData expects. characterDepthPrompt is left empty, as core's dryRun leaves it. */
 function scanSources() {
     const context = getContext();
     const character = context.characters?.[context.characterId];
@@ -1263,22 +881,8 @@ function scanSources() {
     };
 }
 
-/**
- * Text from extension prompts flagged for scanning (Author's Note with "Scan" on, and
- * any extension that injects with scan: true). Core adds these to the scan buffer for
- * every entry — so a keyword living only in the Author's Note fires each turn, and WA
- * has to scan it too or it scores 0.
- *
- * Mirrors core's loop in getWorldInfoPrompt: filter + macro handling come from
- * getExtensionPromptByName, so this is the same text core scanned.
- *
- * Where each one sits comes back with it, which core throws away — `addInject` takes a bare string, so by
- * the time core's buffer assembles a window every inject is ambient (`upstream-st.md` #16). `ambient`
- * collapses the position to the one question a window has to ask and keeps matcher.mjs ST-free;
- * `makeWindowFor` decides what it means.
- *
- * @returns {Promise<Array<{key: string, text: string, ambient: boolean, depth: number}>>} Scan-enabled injects
- */
+/** Scan-enabled extension prompts (Author's Note with Scan on, injects with scan: true) — the same text core scans.
+ *  @returns {Promise<Array<{key: string, text: string, ambient: boolean, depth: number}>>} `ambient`: no chat position, so no window bounds it (`upstream-st.md` #16) */
 async function scanInjects() {
     const prompts = getContext().extensionPrompts ?? {};
     const out = [];
@@ -1290,9 +894,7 @@ async function scanInjects() {
         out.push({
             key,
             text,
-            // Only an IN_CHAT prompt has a chat position to bound. IN_PROMPT, BEFORE_PROMPT and NONE
-            // carry a `depth` that means nothing as a message index, so testing it would be inventing a
-            // position core never gave them.
+            // Only an IN_CHAT prompt has a chat position; the others' `depth` means nothing as a message index.
             ambient: prompts[key].position !== extension_prompt_types.IN_CHAT,
             depth: Number(prompts[key].depth) || 0,
         });
@@ -1301,23 +903,9 @@ async function scanInjects() {
     return out;
 }
 
-/**
- * The scan window builder, with the ST-side inputs it was built from.
- *
- * One builder for every site that needs a window — activation, the scan-loop feed and stage-3 scoring —
- * because a second copy is where the depth bound gets applied on one path and not the other.
- *
- * Core removes hidden/system messages before it scans, then counts depth over what remains; WA filters
- * them too, or a hidden message in the window costs WA a slot core didn't spend and WA misses a keyword
- * core matched one message further back.
- *
- * The injects are collected once and reused across depths; which of them a given depth scans is
- * `makeWindowFor`'s call — an inject placed in the chat is bounded by the window, an ambient one is not
- * (`upstream-st.md` #16). Core appends all of them to every window regardless.
- *
- * @param {object[]} chat Scan haystack, unfiltered
- * @returns {Promise<{windowFor: Function, chat: object[], injects: object[], sources: object}>}
- */
+/** The one scan window builder for every site, with the ST-side inputs it was built from. is_system messages are
+ *  dropped before depth is counted, as core drops them.
+ *  @returns {Promise<{windowFor: Function, chat: object[], injects: object[], sources: object}>} */
 async function scanWindowFor(chat) {
     const scanChat = chat.filter(x => x && !x.is_system);
     const injects = await scanInjects();
@@ -1335,10 +923,7 @@ async function scanWindowFor(chat) {
     };
 }
 
-/**
- * The match defaults both activation passes read — every value a live setting or an ST global, so it is
- * read at call time rather than frozen. The scan-loop pass adds only `depthSkew`.
- */
+/** Match defaults for both activation passes — live settings and ST globals, so it stays a function read at call time. */
 const activationOpts = () => ({
     messageDepth: settings().messageDepth,
     fallbackDepth: world_info_depth,
@@ -1346,18 +931,8 @@ const activationOpts = () => ({
     wholeWordsDefault: world_info_match_whole_words,
 });
 
-/**
- * The chat WA reads, with the `dropChatTags` elements gone — one strip, at the only door.
- *
- * At intake rather than in the window builder because both halves read the same messages: a state block
- * over-fires keys and dilutes the embedded query alike. Everything downstream — the query, the scan
- * window, the recursion rematches, what /wa-grade freezes — sees the stripped text.
- *
- * Copies, never an edit: this is ST's live chat array. The file prefix is left alone so
- * `extra.fileLength` still counts to the same place (query.mjs `queryMessages` slices on it).
- *
- * Not the Studio's chat-rate scan, which counts key hits across whole chat files through the plugin.
- */
+/** The chat WA reads with the `dropChatTags` elements gone — the one strip, at intake. Copies, never an edit of ST's
+ *  live chat, and the file prefix is left alone so `extra.fileLength` still counts to the same place. */
 function dropChatTags(chat) {
     const spec = settings().dropChatTags;
     if (!spec?.trim()) return chat;
@@ -1368,8 +943,6 @@ function dropChatTags(chat) {
     });
 }
 
-// Keyword scoring lives in matcher.mjs (match semantics), the layout score in relevance.mjs. Settings
-// and ST globals are injected, never imported there.
 const keywordScore = (entry, text, keys = entry.key) => matcher.keywordScore(entry, text, keys, {
     k1: settings().bm25K1,
     repeatCurve: settings().repeatCurve,
@@ -1378,11 +951,7 @@ const keywordScore = (entry, text, keys = entry.key) => matcher.keywordScore(ent
     wholeWordsDefault: world_info_match_whole_words,
 });
 
-/**
- * Stable per-character key for the priority order — survives switching chats/branches.
- * Null in a character-less context (nothing selected), which makes the feature inert.
- * Group chats key by group id (also stable, and their attached books are shared).
- */
+/** Stable per-character (or per-group) key for the priority order; null with nothing selected. */
 function priorityKey() {
     const ctx = getContext();
     if (ctx.groupId) return `group:${ctx.groupId}`;
@@ -1392,8 +961,7 @@ function priorityKey() {
 
 
 
-/** Chat messages as `checkWorldInfo`/`getWorldInfoPrompt` want them: the strings core builds at
- *  script.js's scan site, most-recent-first. */
+/** Chat messages as `checkWorldInfo`/`getWorldInfoPrompt` want them: script.js's scan-site strings, most-recent-first. */
 const forWI = chat => chat.map(x => (world_info_include_names ? `${x.name}: ${x.mes}` : x.mes)).reverse();
 
 /** The current chat's bound lorebook, or null. The `'chat'` sentinel resolves to this. */
@@ -1401,17 +969,11 @@ function chatBook() {
     return getContext().chatMetadata?.[METADATA_KEY] || null;
 }
 
-/**
- * The current character's saved priority list — the live, mutable reference. Null when nothing is
- * selected: without a character there is nowhere to store an order, so the feature does nothing (the
- * panel shows "no character selected").
- */
+/** The current character's saved priority list — the live, mutable reference; null with nothing selected. */
 function charPriority() {
     const key = priorityKey();
     if (key == null) return null;
     const byChar = (settings().worldPriorityByChar ??= {});
-    // A key with no list starts empty; ensureWorldConfigs seeds it in source order from the books
-    // actually in the scan.
     byChar[key] ??= [];
     return byChar[key];
 }
@@ -1421,13 +983,8 @@ function resolvedName(entry) {
     return entry.world === 'chat' ? chatBook() : entry.world;
 }
 
-/**
- * The current character's priority entries, in order, each paired with its storage index (so
- * reorder/edit still target the right element) and its resolved book name. Scoped to the books
- * actually attached to this chat, so a book in the saved order but inactive here drops out.
- * Returns `null` when no character is selected — distinct from an empty list (character with
- * no attached books). The `'chat'` sentinel drops out when the chat has no bound book.
- */
+/** The current character's priority entries attached to this chat, each with its storage index `i` and resolved book
+ *  name; null with no character, as against an empty list. */
 function scopedPriority() {
     const list = charPriority();
     if (list == null) return null;
@@ -1436,11 +993,7 @@ function scopedPriority() {
         .filter(x => x.world && runState.attachedWorlds.has(x.world));
 }
 
-/**
- * Default sequential-priority rank of a book by its ST binding source: global → persona → character
- * → chat, everything unclassified last. Only used to seed a FRESH list (see ensureWorldConfigs), so
- * it never reorders a hand-arranged one. First match wins if a book is bound in more than one place.
- */
+/** Default sequential rank of a book by its ST binding source: global → persona → character → chat → unclassified. Seeds a fresh list only. */
 function worldSourceRank(name) {
     if (selected_world_info?.includes(name)) return 0;                       // global (world editor)
     if (power_user.persona_description_lorebook === name) return 1;           // persona
@@ -1463,42 +1016,22 @@ function ensureWorldConfigs(worlds) {
     const known = new Set(list.map(resolvedName).filter(Boolean));
     const toAdd = [...worlds].filter(w => w != null && !known.has(w));
     if (!toAdd.length) return;
-    // A fresh (empty) list is seeded in source order; a populated one keeps its order (possibly
-    // hand-arranged) and just gets the new books appended. The chat's book is stored as the
-    // 'chat' sentinel so the order survives switching chats/branches.
+    // The chat's book is stored as the 'chat' sentinel, so the order survives switching chats.
     if (list.length === 0) toAdd.sort((a, b) => worldSourceRank(a) - worldSourceRank(b));
     for (const world of toAdd) list.push({ world: world === book ? 'chat' : world, weight: 1, offset: 0, cap: 0 });
     saveSettingsDebounced();
     renderWorldPriority();
 }
 
-/**
- * The per-loop feed: with core's keyword matcher blanked, WA answers
- * "did a key match" for every scan loop after the initial pass — recursion text and min-activation
- * widening. Runs on each WORLDINFO_SCAN_DONE of an owned scan, matches the not-yet-emitted
- * candidates over chat + all recursion content so far, and force-emits the winners; core's next
- * loop admits them through its own gates (probability, delay levels, group filter, triggers).
- *
- * Two things this deliberately does not do, both verified against core's loop:
- *  - No `state.next` writes. Core schedules the next loop itself in every case WA feeds, and WA only
- *    ever has something new to emit in those cases. The takeover does not starve that: core's scheduler
- *    builds `successfulNewEntriesForRecursion` from `activatedNow`, and an externally-activated entry is
- *    added to `activatedNow` by the same walk (world-info.js, the `getExternallyActivated` branch).
- *  - No re-emission. WorldInfoBuffer.externalActivations is a static map cleared only at scan end, so
- *    one emit stands for the whole scan — core re-checks it every loop, which is how an entry refused at
- *    one delay level is admitted at a later one.
- *
- * @param {object} args WORLDINFO_SCAN_DONE args
- */
+/** The per-loop feed on an owned scan: rematches the not-yet-emitted candidates over chat + all recursion content so
+ *  far and force-emits the winners; core's next loop admits them through its own gates. Never writes `state.next`
+ *  (core schedules the next loop itself in every case WA feeds) and never re-emits (externalActivations persists for the scan). */
 async function feedScanLoop(args) {
     const activated = args.activated.entries;
-    // Already-activated entries (constant, sticky, other extensions' forces) never need an emit;
-    // recording them also keeps them out of every rematch.
+    // Already-activated entries never need an emit, and recording them keeps them out of every rematch.
     for (const key of activated.keys()) runState.waMatched.add(key);
 
-    // This pass's recursion-eligible content. preventRecursion is filtered first: args.new.successful is
-    // the list before core's own filter, and using it raw would restore the propagation the flag stops.
-    // Inherits world_info_recursive, or WA would force recursion the user disabled.
+    // preventRecursion filtered here, args.new.successful being the list before core's own filter. Inherits world_info_recursive.
     const newTexts = world_info_recursive
         ? (args?.new?.successful ?? [])
             .filter(e => e && !e.preventRecursion)
@@ -1507,9 +1040,7 @@ async function feedScanLoop(args) {
         : [];
     runState.waRecursionTexts.push(...newTexts);
 
-    // Core widens its min-activations window one message per pass (advanceScan); mirror the skew
-    // on WA's default depth so the widening actually reaches WA's matcher — with core's keys
-    // blanked, this feed is the only thing min activations can pull from.
+    // Mirrors core's advanceScan: one message wider per min-activation pass.
     const skewed = args?.state?.next === scan_state.MIN_ACTIVATIONS;
     if (skewed) runState.waMinSkew++;
 
@@ -1535,13 +1066,7 @@ async function feedScanLoop(args) {
     }
 }
 
-/**
- * What core selected while WA stood down — recorded, never acted on.
- *
- * WA disabled captures the full counterfactual (every interceptor runs); a dry run is free but
- * keyword-only, since ST skips interceptors. Either way it is core's SHIPPED set: WORLDINFO_SCAN_DONE
- * fires after core's budget loop and neither path lets WA mark entries `ignoreBudget`.
- */
+/** Records what core selected while WA stood down — core's shipped set, WORLDINFO_SCAN_DONE firing after its budget loop. */
 function recordCoreSet(activated, args, how) {
     runState.lastCoreSet = {
         at: (getContext().chat ?? []).length,
@@ -1556,16 +1081,9 @@ function recordCoreSet(activated, args, how) {
     };
 }
 
-/**
- * What ST core selects for this turn, with WA standing down for the call.
- *
- * `checkWorldInfo` is core's whole selection — inclusion groups, probability, timed effects, its own
- * budget — so nothing here models it. Two things must be undone for the call and are restored after:
- * the `ignoreBudget` takeover WA applies in `onEntriesLoaded`, and re-entry via WORLDINFO_SCAN_DONE,
- * which `inCoreProbe` suppresses.
- *
- * @returns {Promise<{entries: object[], viaVectors: boolean, vectorsRan: boolean}>}
- */
+/** What ST core selects for this turn with WA standing down: the `ignoreBudget` takeover is undone for the call and
+ *  re-entry via WORLDINFO_SCAN_DONE suppressed by `inCoreProbe`, both restored after.
+ *  @returns {Promise<{entries: object[], viaVectors: boolean, vectorsRan: boolean}>} */
 async function coreSelection() {
     const chat = (runState.scanChat ?? getContext().chat ?? []).filter(x => x && !x.is_system);
     const entries = await getSortedEntries();
@@ -1575,14 +1093,12 @@ async function coreSelection() {
     runState.inCoreProbe = true;
     try {
         for (const e of entries) if (e.waIgnoreBudget !== undefined) e.ignoreBudget = e.waIgnoreBudget;
-        // A copy: an interceptor may rearrange what it is handed, and this is not the real prompt.
+        // A copy: an interceptor may rearrange what it is handed.
         if (viaVectors && typeof globalThis.vectors_rearrangeChat === 'function') {
             try { await globalThis.vectors_rearrangeChat([...chat], getMaxPromptTokens(), null, 'normal'); vectorsRan = true; }
             catch (error) { console.warn('Worlds Apart: Vector Storage declined the probe, core will answer on keywords alone —', error); }
         }
-        // ST's haystack shape, not the interceptor's: `vectors_rearrangeChat` above reads message
-        // objects, `checkWorldInfo` takes strings. Sources ride along so the probe scans what WA's own
-        // dry run scans rather than core's empty default.
+        // Strings, as `checkWorldInfo` takes them; `vectors_rearrangeChat` above wanted message objects.
         core = await checkWorldInfo(forWI(chat), getMaxPromptTokens(), true, { ...scanSources(), trigger: 'normal' });
     } finally {
         for (const e of entries) if (e.waIgnoreBudget !== undefined) e.ignoreBudget = true;
@@ -1595,9 +1111,7 @@ async function coreSelection() {
 async function onScanDone(args) {
     const activated = args?.activated?.entries;
 
-    // Silent returns, except under /wa-dry: each leaves lastPromptOrder untouched, so a dry run would
-    // report "nothing activated" with no way to tell a real empty selection from a scan WA declined to
-    // rank.
+    // Silent except under /wa-dry, which otherwise could not tell an empty selection from a declined scan.
     const skip = reason => { if (runState.dryRunInProgress) console.warn(`Worlds Apart: did not rank this scan — ${reason}.`); };
 
     if (!(activated instanceof Map)) {
@@ -1606,32 +1120,17 @@ async function onScanDone(args) {
     }
     if (runState.inCoreProbe) return;   // core is answering for /wa-versus; ranking it would re-enter
     if (!settings().enabled) {
-        // WA off is the honest stand-down: core did everything, including its own budget, with every
-        // interceptor live. This is the comparison baseline `/wa-core` exists to capture.
         recordCoreSet(activated, args, 'WA disabled — core in full, interceptors live');
         return;
     }
-    // ST's dry-run generations (PromptManager token counts, chat load) skip generate interceptors, so
-    // retrieval never ran and the scan holds keyword activations only.
     if (runState.generationIsDryRun) {
         skip('it is an ST dry generation');
-        // Core's own answer, free, on every generation: a dry run is the one path where WA stands down
-        // completely — interceptors skipped, `onEntriesLoaded` gating its budget takeover on the same
-        // flag, and this returning before anything is deleted. `WORLDINFO_SCAN_DONE` fires after core's
-        // budget loop (world-info.js), so the map is core's shipped set rather than its nominations.
-        //
-        // Keyword route only, which is the whole of core for a default install: Vector Storage activates
-        // World Info from inside `vectors_rearrangeChat`, a generate_interceptor a dry run skips. A
-        // vectors-enabled baseline needs a real generation with WA told to stand down.
-        //
-        // Recorded, never acted on: ranking it would overwrite the panel and the /wa-dry state with a
-        // keyword-only selection.
+        // Recorded, never ranked: ranking a keyword-only scan would overwrite the panel and the /wa-dry state.
         recordCoreSet(activated, args, 'ST dry run — keyword route only, interceptors skipped');
         return;
     }
 
-    // Feed the scan loop BEFORE the size-0 return — a pass that activated nothing can
-    // still be followed by a min-activations widening WA has to answer.
+    // Before the size-0 return: a pass that activated nothing can still be followed by a min-activations widening.
     if (runState.waOwnsScan && Array.isArray(runState.waCandidates)) {
         await feedScanLoop(args);
     }
@@ -1643,13 +1142,9 @@ async function onScanDone(args) {
         return;
     }
 
-    // The text signal comes from content-lexical, which covers every entry rather than only the ones in
-    // the vector collection, and is the only source — stage 1 computes no BM25 (plugin/scoring.mjs).
     const contentText = await contentTextScores(runState.lastQuery);
 
-    // Entries that have not been written yet at this point in the chat. Applied here because
-    // `onScanDone` owns what survives into the prompt — it deletes the rest from core's `activated`
-    // map — so one filter covers both the retrieval route and the keyword one.
+    // Here because onScanDone owns what survives into the prompt, so one filter covers both routes.
     const at = settings().dropUnavailable ? (getContext().chat?.length ?? NaN) : NaN;
     let postDated = 0;
     for (const [key, entry] of [...activated.entries()]) {
@@ -1660,98 +1155,67 @@ async function onScanDone(args) {
     }
 
     const items = [...activated.entries()].map(([key, entry]) => {
-        // We overwrite `order` below, and this fires once per scan loop — stash the
-        // authored value on first sight so later loops don't sort by our own output.
+        // Stashed on first sight: `order` is overwritten below, and this fires once per scan loop.
         entry.waOriginalOrder ??= entry.order ?? 0;
         return {
             key,
             entry,
             score: runState.lastScores.get(key),
             textScore: contentText.get(key) ?? 0,
-            // Eligible means COULD have scored, not did: every entry carrying content.
+            // Could have scored, not did: every entry carrying content.
             textEligible: Boolean(String(entry.content ?? '').trim()),
         };
     });
 
-    // Books contributing entries to this scan — the priority sorts below rank only among
-    // these, and this registers any unseen one so its config can be set. Doubles as the
-    // attached set for the ordering path (independent of the async UI-scoping refresh).
     const scanWorlds = new Set(items.map(it => it.entry.world));
     ensureWorldConfigs(scanWorlds);
 
-    // One scan window, shared and unconditional: the relevance column needs the same window keyword
-    // scoring does, because that is what the model was fitted against (`eval/scene.mjs` `haystackFor`
-    // builds it with this builder and these inputs).
+    // One window, unconditional: the relevance column needs the window keyword scoring uses (eval/scene.mjs `haystackFor`).
     let windowFor = null;
     {
-        // The stash from intercept is core's transformed scan haystack — regex scripts applied, file
-        // content and titles appended, reasoning merged — so WA matches the text core matched. Raw
-        // context chat is the fallback only for a scan no WA entry point saw.
+        // scanChat is core's transformed haystack; raw context chat only for a scan no WA entry point saw.
         const built = await scanWindowFor(runState.scanChat ?? getContext().chat ?? []);
         const { chat, injects, sources } = built;
-        // Stashed for the capture. The frozen haystack is the chat half alone (`windowFor.windows` is
-        // chat-only); the injects ride beside it as their own list, so a reader reconstructs the window
-        // at any depth by admitting them rather than picking them back out of a joined blob.
+        // For the capture: the chat half alone, the injects beside it as their own list.
         runState.lastInjects = injects;
-        // Beside them, and raw: which of the six a capture keeps depends on the books it attaches, so the
-        // gate (matcher.usedMatchSources) runs where those are in scope rather than here.
+        // Raw; the gate (matcher.usedMatchSources) runs where the attached books are in scope.
         runState.lastSources = sources;
         windowFor = built.windowFor;
 
-        // The keys an activated entry is scored on: live keys, else the takeover's stash — blanking was
-        // an activation mechanism, not a scoring opinion. Every entry's keys are scored, a vectorized
-        // one's included, and the value is recorded in the capture whether or not the fit carries the
-        // column (matcher-design.md, *Scoring memory's keys*): a suppressed measurement cannot be
-        // recovered later, and leaves a blank meaning either "no keys fired" or "nobody looked".
+        // Live keys, else the takeover's stash; every entry's keys are scored, vectorized included (matcher-design.md, *Scoring memory's keys*).
         const scoreKeysOf = entry => (entry.key?.length ? entry.key : (entry.waKeys ?? []));
-        // Same restoration for the secondary gate, which must judge the condition the author wrote. A
-        // local view, never a write-back — restoring keys on core's scan copies mid-scan would hand
-        // core's next loop the keys the takeover blanked.
+        // A local view, never a write-back: restoring keys on core's scan copies mid-scan hands core's next loop the keys the takeover blanked.
         const scoringView = entry => (!entry.keysecondary?.length && entry.waSecondary?.length)
             ? { ...entry, keysecondary: entry.waSecondary }
             : entry;
 
-        // Register every key this pass will score before the loop, so the smartkeys automaton is built
-        // once — a first-seen key mid-loop rebuilds it and throws away every cached scan. Secondaries
-        // too, off the restored view keywordScore gates against, and only for entries whose keys are
-        // scored at all.
+        // Registered before the loop, secondaries too, so the automaton is built once.
         registerKeys(items.flatMap(it => {
             const keys = scoreKeysOf(it.entry);
             return keys.length ? [...keys, ...matcher.secondaryKeys(scoringView(it.entry))] : [];
         }));
 
         for (const item of items) {
-            // Per-entry scanDepth wins, as in core; otherwise the unified messageDepth, falling back to
-            // core's scan depth. Nullish on scanDepth: 0 is core's authored "match nothing from chat",
-            // not an unset value to fall through.
+            // Per-entry scanDepth wins, as in core. Nullish, not `||`: 0 is core's authored "match nothing from chat".
             const depth = Number(item.entry.scanDepth ?? (settings().messageDepth || world_info_depth));
             const scanText = windowFor(depth, item.entry);
             const scoreKeys = scoreKeysOf(item.entry);
             const scored = keywordScore(scoringView(item.entry), scanText, scoreKeys);
             item.keywordScore = scored.score;
             item.keywordHits = scored.hits;
-            // Debug-class runs only: WHERE each key matched, for /wa-grade's "why did this pop"
-            // column. Flags mirror the keywordScore call above exactly — same entry overrides,
-            // same defaults — so the excerpt localises the match that was actually scored.
+            // Verbose runs only: where each key matched, for /wa-grade's why column. Flags mirror the keywordScore call above exactly.
             item.keywordWhy = runState.verboseRun
                 ? scored.hits.slice(0, 4).map(h => {
-                    // Every place it landed, not just the first: one excerpt cannot tell a key firing
-                    // many times on one phrase from one firing across many scenes, which is the
-                    // judgement being made. `excerpt` is contexts[0], not a second call, so the
-                    // displayed line and the hover cannot disagree.
+                    // Every place it landed; `excerpt` is contexts[0], not a second call, so the line and the hover cannot disagree.
                     const contexts = matcher.keyExcerpts(h.key, scanText, item.entry.caseSensitive, item.entry.matchWholeWords);
                     return { key: h.key, count: h.count, score: h.score, excerpt: contexts[0] ?? null, contexts };
                 })
                 : undefined;
-            // Eligibility for the keyword rank: an entry with no keys to score must not be divided by a
-            // weight it could never have collected. Resolved here, where `scoreKeys` is decided.
+            // Resolved where `scoreKeys` is decided: an entry with no keys must not be divided by a weight it could not collect.
             item.keysEligible = scoreKeys.length > 0;
         }
 
-        // The messages, not the window. A joined haystack is fixed at one depth, one matchWindow and one
-        // includeNames, so narrowing it is impossible and re-deriving it needs the chat file. These are
-        // the scan-eligible messages as core transformed them (regex applied, attachments folded in),
-        // which no other source has, so a reader rebuilds any window: `scanWindow(scanChat, {depth})`.
+        // The messages, not the joined window, so a reader can rebuild any window: `scanWindow(scanChat, {depth})`.
         runState.lastScanChat = chat.slice(-Math.max(1, settings().messageDepth))
             .map(x => ({ name: String(x?.name ?? ''), mes: String(x?.mes ?? '') }));
 
@@ -1761,16 +1225,9 @@ async function onScanDone(args) {
         }
     }
 
-    // Stage 4's quantity, computed every scan and never a setting: `E[credit]` is what stage 4 selects
-    // and orders on, so a switch would mean carrying two orderings for the dynamic block forever.
     await scoreRelevanceColumn(items, windowFor);
 
-    // The layout score is E[credit], the same quantity stage 4 selects on. Ordering the dynamic block by
-    // anything else breaks the prefix property applyBudget assumes: the budget would drop a
-    // high-E[credit] entry because some other combination of the signals ranked it low.
-    //
-    // Stage 3's product is built in layout.mjs. Names are resolved and settings read here, so the
-    // ordering itself takes plain data and runs under node.
+    // Ordering the dynamic block by anything but E[credit] breaks the prefix property applyBudget assumes.
     const priorityList = charPriority() ?? [];
     const priorityMode = settings().worldPriorityMode;
     const { sticky, constant, promoted, results: dynamicRows, compare, bookTierOf } = layout.layoutOrder(items, {
@@ -1784,25 +1241,11 @@ async function onScanDone(args) {
     });
     let results = dynamicRows;
 
-    // Stashed before the cuts, so a capture holds a row for every entry this pass judged and an offline
-    // harness can replay any budget setting against the whole population. Survivors and losers cannot be
-    // re-interleaved afterwards: concatenating them loses the rank order the cuts were prefixes of.
+    // Before the cuts, so a capture holds every row this pass judged; survivors and losers cannot be re-interleaved afterwards.
     runState.lastLayoutOrder = [...sticky, ...constant, ...promoted, ...results];
 
-    // The relevance cut, before the walk and before the caps: the only decision here that asks whether an
-    // entry belongs, everything after it asking how many and how much. A row dropped here is still in
-    // `lastLayoutOrder` above, so it stays captured and gradeable.
-    //
-    // A row in no fitted tier, or one the model could not score, is kept: an absent verdict, not a
-    // negative one. Memory only, because a key on a reference entry is the author declaring when it
-    // should be present — reference rows are scored, so the column orders them for the budget walk, and
-    // answer only to the budget cap. The fit agrees rather than deciding it: cutting reference costs
-    // heavily on a reference-only book (F36).
-    //
-    // On the last loop only. Core emits this event after every recursion loop and the population grows
-    // with each, so cutting once, when the population is complete, is what makes the delivered set
-    // independent of recursion depth; earlier loops walk the uncut block, which core reads only for
-    // recursion text.
+    // On the last loop only: the population grows with each recursion loop, and cutting once it is complete is what
+    // keeps the delivered set independent of recursion depth.
     const cutoffs = relevanceModel.value ?? {};
     const { cut: relevanceCutRows } = args?.state?.next ? { cut: [] } : selection.relevanceCut(results, {
         scoreOf: it => it.eCredit,
@@ -1810,8 +1253,7 @@ async function onScanDone(args) {
     });
     const cutByRelevance = new Set(relevanceCutRows);
     results = results.filter(it => !cutByRelevance.has(it));
-    // Deleted from core's map here, not left to the budget walk: that walk deletes what it walks, and
-    // these rows are no longer in it, so a cut row left behind ships and spends tokens no cap counted.
+    // Deleted from core's map here: the budget walk deletes only what it walks, and a cut row left behind ships.
     for (const it of relevanceCutRows) {
         activated.delete(it.key);
     }
@@ -1820,7 +1262,6 @@ async function onScanDone(args) {
             + (promoted.length ? ` (${promoted.length} promoted entr${promoted.length === 1 ? 'y was' : 'ies were'} exempt)` : ''));
     }
 
-    // Constants, stickies and promoted rows lead, which is what makes every cap below a prefix cut.
     let walk = delivery.walkOrder({ sticky, constant, promoted, results });
 
     const maxTokens = effectiveTokenBudget();
@@ -1835,11 +1276,9 @@ async function onScanDone(args) {
         const { survivors, counted, dynamic, vector, skipped, dropped, budgeted, inPrompt } = await delivery.applyBudget({
             walk,
             isDynamic: item => dynamicSet.has(item),
-            // Capacity's population: the dynamic block plus the promoted one. Promotion exempts a row
-            // from relevance, not from how many entries a layout carries or how much of it one book may be.
+            // Capacity's population is dynamic plus promoted: promotion exempts from relevance, not from the caps.
             isCapped: item => dynamicSet.has(item) || promotedSet.has(item),
-            // The tag, not retrieval provenance: maxVectorEntries bounds how many vector entries the walk
-            // adds to the layout, which is a question about what an entry is.
+            // The tag, not retrieval provenance.
             isVector: item => Boolean(item.entry?.vectorized),
             maxTokens,
             maxTotal,
@@ -1860,8 +1299,6 @@ async function onScanDone(args) {
 
         if (dropped) {
             const caps = [
-                // Nested innermost first — vector ⊆ dynamic ⊆ total — so the line reads in the order the
-                // caps bind. applyBudget's own counters, so the line reports each cap on the terms it bound.
                 maxVectorEntries > 0 ? `vector ${vector}/${maxVectorEntries}` : null,
                 maxDynamic > 0 ? `dynamic ${dynamic}/${maxDynamic}` : null,
                 maxTotal > 0 ? `total ${counted}/${maxTotal}` : null,
@@ -1877,75 +1314,47 @@ async function onScanDone(args) {
         runState.lastSkipped = [];
     }
 
-    // Prompt order: one flat sort over every survivor, so a lorebook that uses `order` to build tiers
-    // keeps them. The blocks above are a budget policy, not a layout — they decide what gets cut, never
-    // where the survivors sit. Rewriting `order` keeps entries sharing an order value in a deterministic
-    // sequence instead of at the mercy of core's tiebreak. Sequential mode groups the prompt by book
-    // tier, with the chosen layout order applied within each book.
+    // Prompt order, not layout order: one flat sort over every survivor.
     const promptOrder = priorityMode === 'sequential'
         ? [...walk].sort((a, b) => (bookTierOf(a.entry.world) - bookTierOf(b.entry.world)) || compare(a, b))
         : [...walk].sort(compare);
 
-    // Assembly sorts descending by `order` then unshifts, so the prompt reads in ascending order value
-    // and index 0 of `promptOrder` lands first. WA rewrites every activated entry's order, so the base
-    // is a fixed pad rather than a setting.
+    // Assembly sorts descending by `order` then unshifts, so the prompt reads ascending and index 0 lands first.
     promptOrder.forEach((item, index) => {
         item.entry.order = ORDER_BASE + index;
     });
 
-    // Stash for /wa-dry. Classification is recomputed nowhere else, so record it here.
+    // Stash for /wa-dry; classification is recomputed nowhere else.
     const blockOf = new Map([
         ...sticky.map(x => [x, 'sticky']),
         ...constant.map(x => [x, 'constant']),
-        // NAMED, not folded into 'dynamic': that would tell a harness the row answered to a cut it never
-        // reached. Still not DURABLE — it activated — so `gradeDepth` below counts it as gradeable.
+        // Named, not folded into 'dynamic': a harness would read the row as answering to a cut it never reached. Still gradeable.
         ...promoted.map(x => [x, 'promoted']),
         ...results.map(x => [x, 'dynamic']),
     ]);
     runState.lastPromptOrder = promptOrder.map(item => ({ item, block: blockOf.get(item) ?? 'dynamic' }));
     runState.lastSkipped = runState.lastSkipped.map(x => ({ ...x, block: blockOf.get(x.item) ?? 'dynamic' }));
 
-    // Reflect the final selection in the active-entries panel. Fires once per scan
-    // loop; only the last one (no further state) is the real prompt.
+    // Only the last loop (no further state) is the real prompt.
     if (!args?.state?.next) renderWiPanel(runState.lastPromptOrder);
 
-    // The selection candidates — everything activated, in layout order, before caps cut into it. Stashed
-    // rather than recomputed: /wa-grade grades these rows, so the grades attach to the selection that
-    // actually happened.
     if (runState.verboseRun) {
-        // The pre-cut, pre-budget population (see lastLayoutOrder): every entry that shipped, plus — down
-        // to the grading depth below — the ones this pass rejected, with `cut`/`cutBy` recording which
-        // side each fell on. `walk` is survivors only by this point.
-        //
-        // /wa-grade's candidates=N caps the gradeable rows — everything `isDurable` is not — and nothing
-        // else, since the grading popup lists sticky and constant rows without grading them. It never
-        // drops a row that shipped: applyBudget skips rather than stops (selection.mjs), so a short entry
-        // below rank N can still reach the prompt, and a shipped row with no capture row is invisible to
-        // grading and to every offline replay of the scene.
+        // The pre-cut, pre-budget population, `cut`/`cutBy` recording which side each row fell on. candidates=N caps
+        // gradeable rows only — durable rows are listed ungraded — and never drops a row that shipped.
         const kept = new Set(walk);
         let gradeableSeen = 0;
         const gradeDepth = runState.gradeCutoff?.maxVectorEntries ?? 0;
         const population = (runState.lastLayoutOrder ?? walk)
             .filter(x => !gradeDepth || isDurable({ block: blockOf.get(x) ?? 'dynamic' }) || ++gradeableSeen <= gradeDepth || kept.has(x));
-        // Why a row was cut, not just that it was: the difference between "ordered too low" and "would
-        // not fit". A large entry is skipped so smaller ones behind it still get in (selection.mjs), so a
-        // cut row is not evidence that everything below it was cut too.
+        // Why a row was cut, not just that it was: "ordered too low" and "would not fit" are different facts.
         const blockedOf = new Map(
             (runState.lastSkipped ?? []).map(s => [s.item ?? s, (s.blockedBy ?? []).map(b => b.cap).join('+')]),
         );
-        // Tokens per entry, counted here rather than reused from applyBudget's tokensOf, which
-        // short-circuits to 0 when maxTokens is 0. Content only, matching applyBudget's own accounting;
-        // the assembled prompt is larger. With these on the row an offline harness replays the cut at any
-        // budget. getTokenizerModel() rides in the paramSnapshot, the counts being unreadable without it.
+        // Counted here, not reused from tokensOf, which short-circuits to 0 when maxTokens is 0. Content only, matching applyBudget.
         const tokens = await Promise.all(population.map(x => getTokenCountAsync(x.entry.content ?? '')));
         const rows = population.map((x, i) => ({
-            // `block` is the runtime budget class (constant / sticky-active / dynamic); `sticky` is the
-            // entry's configured sticky value (0 = off). The two differ — an entry with sticky configured
-            // shows block `dynamic` on the turn it keyword-activates, and dry runs arm no effect at all —
-            // so the eval side reads durable off constant-or-`sticky`, never off the runtime block.
-            //
-            // Numeric fields stay numeric so the copied JSON is computable, `null` meaning "no signal".
-            // Never a truthiness test: a scored 0 is a measurement, not an absent signal.
+            // `block` is the runtime budget class; `sticky` is the configured value, which is what the eval side reads
+            // durable off. Numeric fields stay numeric, `null` meaning no signal — never a truthiness test.
             title: x.entry.comment,
             block: blockOf.get(x) ?? 'dynamic',
             sticky: x.entry.sticky || 0,
@@ -1953,31 +1362,21 @@ async function onScanDone(args) {
             uid: x.entry.uid,
             wiOrder: x.entry.waOriginalOrder,
             cosine: x.score !== undefined ? Number(x.score.toFixed(5)) : null,
-            // The two signals the model reads that nothing else computes.
             pn: Number.isFinite(x.properNouns) ? Number(x.properNouns.toFixed(3)) : null,
             dens: Number.isFinite(x.density) ? Number(x.density.toFixed(2)) : null,
-            // BM25 over chunk text. Gated on the same condition as cosine, because both come from the
-            // retrieval path: an entry with no chunks in the collection has no text score to report, and
-            // the scorer returning 0 for it is a default, not a measurement.
+            // Gated as cosine is: an entry with no chunks in the collection has no text score, and the scorer's 0 is a default.
             text: x.score !== undefined && Number.isFinite(x.textScore) ? Number(x.textScore.toFixed(2)) : null,
-            // BM25 over entry keys, gated on eligibility rather than on the value: keywordScore is 0 both
-            // when an eligible key missed and when the entry had no scorable keys, and only the first is
-            // a measurement (H12). Reading the value alone also defeats unionArms' absent-signal fill.
+            // Gated on eligibility, not the value: 0 is both a miss and no scorable keys (H12).
             keys: x.keysEligible === false ? null : (Number.isFinite(x.keywordScore) ? Number(x.keywordScore.toFixed(2)) : null),
             tokens: tokens[i],
             cut: !kept.has(x),
-            // Which cap rejected it — 'tokens' means it did not FIT, which is a different fact from
-            // ranking too low and is the one a grader can act on (raise the budget, or trim the entry).
+            // 'tokens' means it did not FIT, a different fact from ranking too low.
             cutBy: blockedOf.get(x) || null,
-            // Layout position. `index`, not `#`: the row and the bundle candidate it becomes are the same
-            // thing under one name.
+            // `index`, matching the bundle candidate's field.
             index: i,
         }));
 
-        // uid alone is ambiguous across books, so carry the book for the grader and the eval. The one
-        // place `entry.world` is read — ST's field on an ST entry — since past this line WA calls it
-        // `book`, in a row, in a key and in the schema. `why` rides here rather than in `rows` so
-        // console.table stays scannable.
+        // `book` from here on, never `world`: the row, the key and the schema all say book.
         runState.lastCandidates = rows.map((row, i) => ({ ...row, book: population[i].entry.world, why: population[i].keywordWhy }));
         runState.lastCandidateEntries = population.map(x => x.entry);
 
@@ -1985,41 +1384,22 @@ async function onScanDone(args) {
         console.table(rows);
     }
 
-    // Live generations get the same "what was selected and why" table /wa-dry prints. Only on the final
-    // loop, earlier ones being provisional, and never on ST's dry runs, which fire on every chat load.
+    // Final loop only, and never on ST's dry runs, which fire on every chat load.
     if (settings().debugLog && !runState.dryRunInProgress && !runState.generationIsDryRun && !args?.state?.next) {
         await reportLayout(false, maxTokens > 0);
     }
 }
 
-// ---------------------------------------------------------------------------
 // Dry run
-// ---------------------------------------------------------------------------
 
-/**
- * Runs retrieval and a full World Info scan without generating anything.
- *
- * Safe to spam: `setTimedEffects` and `setTimedEffect` both bail on dry runs
- * (WorldInfoTimedEffects.js), so sticky and cooldown state is untouched, and
- * WORLD_INFO_ACTIVATED isn't emitted (world-info.js:900) so other extensions
- * stay quiet. It does refresh the Author's Note extension prompt, which the
- * next real generation overwrites anyway.
- *
- * @returns {Promise<string>} Empty string — output goes to the console table
- */
+/** Runs retrieval and a full World Info scan without generating. Safe to repeat: a dry-run scan arms no timed effect and emits no WORLD_INFO_ACTIVATED. */
 async function dryRun(verbose = false) {
     const context = getContext();
-    // is_system first, because production never sees those messages: ST filters them out of `coreChat`
-    // before any interceptor is called, so `intercept` is handed a chat that already lacks them and
-    // reading context.chat raw would put hidden turns into the query and the scan window. It matters most
-    // where it is least visible — STMemoryBooks hides a turn once it is swept into a memory entry, so a
-    // well-developed chat is the one most likely to be mostly hidden (G9).
+    // is_system first: ST filters them out of `coreChat` before any interceptor, so production never sees them (G9).
     const rawChat = context.chat ?? [];
     const chat = rawChat.filter(x => x && !x.is_system);
 
-    // `intercept` gates on this and dryRun calls selectAndActivate directly, so this is the only gate
-    // on that path. Without it a dry run with WA off half-runs: retrieval force-activates its winners
-    // into core's map, and onEntriesLoaded and onScanDone then decline to touch a scan WA does not own.
+    // The only gate on this path: with WA off a dry run would half-run, force-activating into a scan WA does not own.
     if (!settings().enabled) {
         toastr.warning('Worlds Apart is disabled — turn it on to run a dry run.', 'Worlds Apart');
         return '';
@@ -2034,14 +1414,10 @@ async function dryRun(verbose = false) {
 
     runState.verboseRun = Boolean(verbose);
     runState.dryRunInProgress = true;
-    // THIS SCAN IS NOT ST'S. The flag means "the scan now running belongs to an ST dry generation",
-    // and /wa-dry drives its own, so a value left over from one is wrong here. Nothing clears it
-    // otherwise: GENERATION_ENDED comes from hideStopButton, which a dry Generate never reaches.
+    // This scan is not ST's, and nothing else clears the flag: GENERATION_ENDED never fires for a dry Generate.
     runState.generationIsDryRun = false;
 
-    // Cleared so a scan that activates nothing reports nothing, rather than last run's. The /wa-grade
-    // capture is in here too: a stale candidate list would be graded as if it belonged to this scene,
-    // and its `if (!rows.length)` guard cannot see the difference.
+    // Cleared so a scan that activates nothing reports nothing rather than last run's; the /wa-grade capture too.
     runState.lastPromptOrder = [];
     runState.lastSkipped = [];
     runState.lastCandidates = [];
@@ -2050,68 +1426,42 @@ async function dryRun(verbose = false) {
     runState.lastScanChat = [];
     runState.lastQueryChat = [];
 
-    // Printed in pipeline order: retrieval → activation ranking → final selection, each from production's
-    // own result rather than a re-derived one. retrieve() is inside the try because it hits the network,
-    // and a throw outside the finally leaves verboseRun/dryRunInProgress stuck true for every later
-    // live generation.
+    // retrieve() is inside the try: a throw outside the finally leaves verboseRun/dryRunInProgress stuck true.
     try {
         await selectAndActivate(chat);
 
-        // Stage 2 — the scan; onScanDone prints the selection candidates (verbose) as it runs.
         await getWorldInfoPrompt(forWI(chat), getMaxPromptTokens(), true, { ...scanSources(), trigger: 'normal' });
 
-        // Stage 3 — selection: what survived caps and layout.
         await reportLayout(verbose);
     } finally {
         runState.verboseRun = false;
         runState.dryRunInProgress = false;
-        // An exception between selectAndActivate and the scan's last loop would otherwise leave
-        // the takeover flag armed for the next unrelated getSortedEntries.
+        // An exception before the scan's last loop would otherwise leave the takeover flag armed.
         runState.waOwnsScan = false;
     }
 
     return '';
 }
 
-/**
- * Every setting that can change a result, as a plain object — logged as JSON so it collapses in the
- * console and copies cleanly into bug reports.
- *
- * @returns {object} Settings snapshot
- */
+/** Every setting that can change a result, as a plain object logged as JSON. */
 function paramSnapshot() {
     const s = settings();
-    // Scoped to the books attached to this chat — the same set the priority actually acts on.
     const attached = (scopedPriority() ?? []).map(x => x.cfg);
-    // Every setting, never a curated view: a hand-maintained allowlist silently omits whatever was added
-    // last. Declaration order, not sorted — defaultSettings is already in rough pipeline order. It
-    // includes `raterId`, so a snapshot pasted somewhere public carries it.
+    // Every setting, never an allowlist; it includes `raterId`.
     const snap = {
-        // A structured setting is storage, not a knob, and is left out — anything whose default is
-        // structured is storage by that fact. `worldPriorityByChar` holds one priority list per character
-        // or group, every book any of them has ever seen. Nothing is lost: `derived.attached` below is
-        // this character's list filtered to the books actually attached, which is the part describing
-        // this run.
+        // Structured settings are storage, not knobs, and are left out; `derived.attached` carries this character's list scoped to the chat.
         settings: Object.fromEntries(Object.keys(defaultSettings)
             .filter(k => defaultSettings[k] === null || typeof defaultSettings[k] !== 'object')
             .map(k => [k, s[k]])),
-        // The values with no single backing setting, which is the only thing that belongs here beside
-        // the dump above: `maxTokens` is a percentage resolved against a live context size, `tokenizer`
-        // is what the per-row `tokens` counts were produced by, `insertionOrder` is a label over
-        // `presentationOrder`, and `attached` is scoped to the books this chat has.
+        // Values with no single backing setting.
         derived: {
             maxTokens: tokenBudgetLabel(),
-            // The ceiling as a number, `maxTokens` above being a human-readable label. The entry maxes
-            // are not repeated here — they are scalars already in the dump — and the per-book caps ride
-            // in `priority`, whose `cap` field is what applyBudget's capOf reads: recording either twice
-            // would let the two disagree.
+            // The entry maxes and per-book caps are not repeated: recording them twice would let the two disagree.
             maxTokensEffective: effectiveTokenBudget(),
             tokenizer: getTokenizerModel(),
             insertionOrder: presentationBaseLabel(s.presentationOrder),
             attached,
-            // Which fit the eCredit column came out of: a refit moves every value, so a capture naming
-            // no fit cannot be compared across one. `null` marks the model file failing to load, as
-            // against the column being off entirely.
+            // Which fit the eCredit column came out of; `null` marks the file failing to load.
             relevanceModel: Object.fromEntries(Object.entries(relevanceModel.value ?? {})
                 .map(([tier, m]) => [tier, m
                     ? { features: m.features, cutoff: m.cutoff, heldOutAuc: m.heldOutAuc, fittedOn: m.fittedOn }
@@ -2134,25 +1484,15 @@ function tokenBudgetLabel() {
         return '—';
     }
 
-    // Resolve only when a percentage is in play — otherwise "2048 = 2048" is noise.
     return s.maxTokensPercent > 0 ? `${parts.join(' & ')} = ${effective}` : parts.join(' & ');
 }
 
-/**
- * Names the signal that won an entry its place, for the `why` column.
- * @param {object} item Ranked item
- * @param {string} block Which block it was classified into
- * @returns {string} Short explanation
- */
+/** Names the signal that won an entry its place, for the `why` column. */
 function whySelected(item, block) {
     if (isDurable({ block })) {
         return 'always-on';
     }
-    // A promoted row still won its place on a signal — the author waived the CUT, not the scoring — so
-    // it falls through to the explanation below rather than reporting a declaration.
-
-    // The signals, not their ranks: E[credit] reads the signals directly, so this names what the entry
-    // had to say and what the model made of it.
+    // A promoted row still won its place on a signal: the author waived the cut, not the scoring.
     const parts = [
         Number.isFinite(item.eCredit) ? `E[credit] ${item.eCredit.toFixed(3)}` : null,
         Number.isFinite(item.score) ? `vec ${item.score.toFixed(3)}` : null,
@@ -2164,20 +1504,12 @@ function whySelected(item, block) {
         return parts.join(' · ');
     }
 
-    // No WA signal at all, yet it is here — so core activated it, not WA. Distinguish the
-    // ways that happen, because they need different fixes and look identical otherwise.
-
-    // @@activate fires unconditionally, before keyword matching — so an entry with this
-    // decorator was never keyword-activated, and scoring it 0 is correct, not a miss.
+    // No WA signal, so core activated it. @@activate fires before keyword matching, so its 0 is correct, not a miss.
     if (Array.isArray(item.entry.decorators) && item.entry.decorators.includes('@@activate')) {
         return 'core (@@activate)';
     }
 
-    // Has keys but WA scored 0. Core matched on evidence WA didn't reproduce. When Min
-    // Activations is on, the likely cause is core backfilling below its Scan Depth to
-    // hit the entry quota — a region WA never scans — so name that. Otherwise it is a
-    // matcher difference (whole-word/regex/case), or a keysecondary/selective-logic hit
-    // WA doesn't evaluate, or recursion if it's on.
+    // Keys, but WA scored 0: with min activations on, core likely backfilled below Scan Depth; otherwise a matcher difference.
     const hasKeys = Array.isArray(item.entry.key) && item.entry.key.length > 0;
 
     if (!hasKeys) {
@@ -2189,11 +1521,7 @@ function whySelected(item, block) {
         : 'core keyword (WA scored 0)';
 }
 
-/**
- * Turns a rejection into the change that would undo it.
- * @param {object[]} blockedBy Caps that rejected the entry
- * @returns {string} What to do about it
- */
+/** Turns a rejection into the change that would undo it. */
 function describeFix(blockedBy) {
     return blockedBy.map((block) => {
         switch (block.cap) {
@@ -2218,13 +1546,7 @@ function describeFix(blockedBy) {
 /** Human names for `world_info_position`, which is a bare enum on the entry. */
 const POSITION_NAMES = ['before char', 'after char', 'AN top', 'AN bottom', '@depth', 'EM top', 'EM bottom', 'outlet'];
 
-/**
- * Prints what the last scan decided: which entries reach the prompt, in prompt order.
- *
- * Entries are grouped by `position` first, because core assembles each position into its
- * own block — `order` only sequences entries WITHIN a position. A single global ranking
- * across mixed positions does not produce one linear prompt.
- */
+/** Prints the last scan's selection in prompt order, grouped by `position` first: core assembles each position into its own block. */
 async function reportLayout(verbose = false, countTokens = true) {
     if (!runState.lastPromptOrder.length) {
         console.log('Worlds Apart: nothing activated.');
@@ -2236,34 +1558,27 @@ async function reportLayout(verbose = false, countTokens = true) {
 
     for (const { item, block } of runState.lastPromptOrder) {
         const entry = item.entry;
-        // Skipped on live generations unless a token cap already made us count: this
-        // runs before every turn when debugLog is on, and a remote tokenizer would turn
-        // a debug table into one HTTP round trip per entry of added latency.
+        // Not counted on live generations unless a token cap already made us: a remote tokenizer is one round trip per entry.
         const tokens = countTokens ? await getTokenCountAsync(entry.content ?? '') : null;
         total += tokens ?? 0;
 
-        // Column order is insertion order in console.table, so identity leads and layout metadata and
-        // per-signal scores go right. `_pos` is a numeric sort key only, stripped before printing.
-        // Numeric fields stay numeric (rounded, `null` for "no signal") so the logged JSON is computable.
+        // Column order is insertion order; `_pos` is a sort key only, stripped before printing. Numeric fields stay numeric, `null` for no signal.
         rows.push({
             title: entry.comment || `uid ${entry.uid}`,
             score: Number.isFinite(item.eCredit) ? Number(item.eCredit.toFixed(5)) : null,
             uid: entry.uid,
-            // wiOrder is the entry's own WI `order` field (what "WI Order" layout sorts
-            // by); waOrder is the value WA writes to control the final prompt sequence.
+            // wiOrder is the entry's own WI `order`; waOrder is what WA wrote.
             wiOrder: entry.waOriginalOrder,
             waOrder: entry.order,
             ...(verbose ? {
                 cosine: item.score !== undefined ? Number(item.score.toFixed(5)) : null,
                 text: item.textScore ? Number(item.textScore.toFixed(2)) : null,
                 keys: item.keywordScore ? Number(item.keywordScore.toFixed(2)) : null,
-                // The stage-4 relevance column. `null` means the row was not scored rather than scored
-                // zero. Recorded at full precision: this is the value a harness run is compared against
-                // to show the runtime and the fit agree, and rounding would swallow the comparison.
+                // Full precision: a harness run is compared against these to show the runtime and the fit agree.
                 properNouns: Number.isFinite(item.properNouns) ? item.properNouns : null,
                 density: Number.isFinite(item.density) ? item.density : null,
                 eCredit: Number.isFinite(item.eCredit) ? item.eCredit : null,
-                // Which keys actually matched, strongest first: "Kyle×3 · pool". Textual by nature.
+                // Which keys matched, strongest first: "Kyle×3 · pool".
                 hits: item.keywordHits?.length
                     ? item.keywordHits.map(h => (h.count > 1 ? `${h.key}×${h.count}` : h.key)).join(' · ')
                     : null,
@@ -2278,8 +1593,6 @@ async function reportLayout(verbose = false, countTokens = true) {
         });
     }
 
-    // Position first (each is a separate block in the assembled prompt), then `order`
-    // within it — the same two-level sequence core produces.
     rows.sort((a, b) => a._pos - b._pos || a.waOrder - b.waOrder);
     rows.forEach(row => delete row._pos);
 
@@ -2287,8 +1600,6 @@ async function reportLayout(verbose = false, countTokens = true) {
     console.table(rows);
 
     if (runState.lastSkipped.length) {
-        // Near-misses first: these are the ones where an edit or a nudge to a cap would
-        // actually change the outcome. The tail is reported as a block below.
         const nearMiss = runState.lastSkipped.filter(x => !x.tail);
         const tail = runState.lastSkipped.filter(x => x.tail);
 
@@ -2297,7 +1608,6 @@ async function reportLayout(verbose = false, countTokens = true) {
             console.table(nearMiss.map(({ item, tokens, blockedBy }) => ({
                 blockedBy: blockedBy.map(x => x.cap).join(' + '),
                 tokens,
-                // What would admit it, so the log points at the fix rather than the symptom.
                 fix: describeFix(blockedBy),
                 eCredit: Number.isFinite(item.eCredit) ? Number(item.eCredit.toFixed(5)) : null,
                 entry: item.entry.comment || `uid ${item.entry.uid}`,
@@ -2310,9 +1620,7 @@ async function reportLayout(verbose = false, countTokens = true) {
             const sum = tail.reduce((total, x) => total + x.tokens, 0);
             const caps = [...new Set(tail.flatMap(x => x.blockedBy.map(y => y.cap)))].join(' + ');
 
-            // Everything after the last admission sees the same leftover room, so any
-            // token-blocked tail entry carries it. Fitting the whole tail costs its total
-            // MINUS that leftover — quoting the raw sum would overstate it.
+            // Every tail entry sees the same leftover room, so fitting the whole tail costs its sum minus that.
             const remaining = tail.find(x => x.blockedBy.some(y => y.cap === 'tokens'))
                 ?.blockedBy.find(y => y.cap === 'tokens')?.remaining;
             const toFitAll = remaining === undefined ? null : Math.max(0, sum - remaining);
@@ -2328,14 +1636,7 @@ async function reportLayout(verbose = false, countTokens = true) {
     }
 }
 
-/**
- * Scores entries against arbitrary text and prints the result. Activates nothing.
- * Lets you compare query formulations — raw messages vs. a hand-written summary —
- * against the same corpus.
- * @param {object} _named Named arguments (unused)
- * @param {string} text Query text
- * @returns {Promise<string>} Empty string — output goes to the console table
- */
+/** /wa-query: scores entries against arbitrary text and prints the result; activates nothing. */
 async function probeQuery(_named, text) {
     const searchText = String(text ?? '').trim();
 
@@ -2344,8 +1645,6 @@ async function probeQuery(_named, text) {
         return '';
     }
 
-    // Scores exactly what retrieval scores: stage 1 is cosine over the raw query, with no entity filter
-    // to apply or withhold.
     const { targets, scores } = await scoreEntries(searchText);
 
     if (!scores.size) {
@@ -2359,11 +1658,7 @@ async function probeQuery(_named, text) {
 }
 
 
-/**
- * Resolves the token budget from the percentage and absolute settings.
- * Both are optional and both apply; the tighter one wins. 0 means no token budget.
- * @returns {number} Effective budget in tokens
- */
+/** The token budget from the percentage and absolute settings; both apply and the tighter wins, 0 = none. */
 function effectiveTokenBudget() {
     const percent = Number(settings().maxTokensPercent) || 0;
     const absolute = Number(settings().maxTokens) || 0;
@@ -2374,9 +1669,7 @@ function effectiveTokenBudget() {
 }
 
 
-// ---------------------------------------------------------------------------
 // Settings UI
-// ---------------------------------------------------------------------------
 
 const SETTINGS_HTML = `
 <style>
@@ -2568,27 +1861,19 @@ const SETTINGS_HTML = `
     </div>
 </div>`;
 
-/**
- * Rebuilds the profile dropdown from Connection Manager's current list.
- * Called on init and from the refresh button, since profiles can be added or
- * renamed while ST is running.
- * @param {boolean} notify Show a toast with the result
- */
+/** Rebuilds the profile dropdown from Connection Manager's current list; `notify` toasts the result. */
 function populateProfiles(notify = false) {
     const profiles = extension_settings.connectionManager?.profiles ?? [];
     const selected = settings().llmProfile;
 
     $('#wa_llm_profile')
         .empty()
-        // Not a neutral fallback: on this path generateText uses generateRaw, which takes no generation
-        // parameters, so the settings below are ignored. Said in the option itself, since it is the
-        // default and nothing else in the panel would reveal it.
+        // Not a neutral fallback: without a profile generateText uses generateRaw, which takes no generation parameters.
         .append([`<option value="">Current chat API — ignores the settings below</option>`]
             .concat(profiles.map(x => `<option value="${escapeHtml(x.id)}">${escapeHtml(x.name)}</option>`))
             .join(''));
 
-    // A deleted profile leaves a dangling id: show the fallback rather than a blank
-    // select, but don't silently rewrite the setting.
+    // A deleted profile leaves a dangling id: show the fallback, but do not rewrite the setting.
     const stillExists = !selected || profiles.some(x => x.id === selected);
     $('#wa_llm_profile').val(stillExists ? selected : '');
 
@@ -2602,12 +1887,8 @@ function populateProfiles(notify = false) {
     }
 }
 
-/**
- * Wires a settings control to its backing value.
- * @param {string} selector Element selector
- * @param {string} key Settings key
- * @param {'checked'|'number'|'string'} kind Value type
- */
+/** Wires a settings control to its backing value.
+ *  @param {'checked'|'number'|'string'} kind */
 function bind(selector, key, kind) {
     const $el = $(selector);
 
@@ -2627,11 +1908,7 @@ function bind(selector, key, kind) {
 
 
 
-// ---------------------------------------------------------------------------
-// Active-entries panel — a book icon (bottom-left) expanding into the list WA selected, each row
-// tooltipped with its per-signal scores and keyword hits. Refreshed from runState.lastPromptOrder at
-// the end of every real scan (see onScanDone).
-// ---------------------------------------------------------------------------
+// Active-entries panel: a book icon (bottom-left) expanding into the list WA selected, refreshed from runState.lastPromptOrder.
 let wiTrigger = null, wiPanel = null;
 function ensureWiPanel() {
     if (wiTrigger) return;
@@ -2697,26 +1974,21 @@ function renderWiPanel(layout) {
 let initialized = false;
 
 export async function init() {
-    // The capture commands drive the pipeline; they are handed its entry points once, here, so the
-    // dependency runs one way and nothing in the pipeline reaches back into the capture UI.
+    // Handed the pipeline's entry points once, here, so the dependency runs one way.
     setCaptureHost({ chatBook, coreSelection, dryRun, effectiveTokenBudget, paramSnapshot, scopedPriority, vectorRequestBody });
-    // Both `hooks.activate` and the jQuery bootstrap below can reach here, and
-    // whichever loses the race would otherwise duplicate the panel, the event
-    // listeners and the slash command.
+    // Both `hooks.activate` and the jQuery bootstrap below can reach here.
     if (initialized) {
         return;
     }
     initialized = true;
 
     ensureSettings(extension_settings);
-    // 'off' folded into 'interleaved' (identical at weight 1/offset 0); drop the stale value.
+    // Migrations of stored values from earlier settings shapes.
     if (settings().worldPriorityMode === 'off') settings().worldPriorityMode = 'interleaved';
-    // Legacy presentationOrder ('authored'/'authored-inverse') → shared sort keys; studioTierCfg → shared tierCfg.
     if (settings().presentationOrder in PRESENTATION_ALIAS) settings().presentationOrder = PRESENTATION_ALIAS[settings().presentationOrder];
     if (settings().studioTierCfg && !settings().tierCfg) { settings().tierCfg = settings().studioTierCfg; delete settings().studioTierCfg; }
     delete settings().baselineQuery; delete settings().baselineWeight;   // removed feature — drop orphaned stored values
-    // The one place the word-boundary setting crosses into the matcher, which holds it module-level
-    // (see setBoundaryMode). Re-pushed by the select's own handler below.
+    // The one place wordBoundary crosses into the matcher, which holds it module-level; re-pushed by the select's handler below.
     matcher.setBoundaryMode(settings().wordBoundary);
 
     $('#extensions_settings').append(SETTINGS_HTML);
@@ -2728,9 +2000,7 @@ export async function init() {
     $('#wa_studio').on('click', () => { lorebookStudio(chatBook()); });
 
     bind('#wa_enabled', 'enabled', 'checked');
-    // Prompt insertion order — the same sort widget the Studio uses, plus relevance options (prompt-only).
-    // The widget's button (.wa-filter) and its popup (.wa-ctx) are styled by ensureStudioStyle, which the
-    // Studio injects lazily; the settings control can be used first, so inject here too (idempotent).
+    // ensureStudioStyle styles the sort widget; the Studio injects it lazily and this control can be used first (idempotent).
     ensureStudioStyle();
     const getTierCfg = () => reconcileTiers(settings().tierCfg);
     const setTierCfg = cfg => { settings().tierCfg = cfg; saveSettingsDebounced(); };
@@ -2744,14 +2014,12 @@ export async function init() {
         setTiered: on => { settings().presentationTiered = on; saveSettingsDebounced(); },
         getTierCfg, setTierCfg,
         extraItems: [{ label: 'Most relevant first', key: 'best-first' }, { label: 'Most relevant last', key: 'best-last' }],
-        // Keep the inline tier editor in sync if tiers are reordered from the button's Configure tiers… menu.
+        // Keeps the inline tier editor in sync when tiers are reordered from the button's menu.
         onChange: () => { if (tierEditor) tierEditor.replaceWith(tierEditor = makeTierEditor(getTierCfg, setTierCfg, () => {})); },
         block: true,
     }));
     if (tierMount) tierMount.append(tierEditor = makeTierEditor(getTierCfg, setTierCfg, () => {}));
     renderPluginSetup();                     // paints "checking…" then the detected/install state
-    // Detect the plugin and fingerprint the source in parallel; re-render once both settle so the box
-    // can show up-to-date / out-of-date. Both are cached, so this runs its fetches at most once.
     Promise.all([hasPlugin(), computeSourceFingerprint()]).then(renderPluginSetup);
     bind('#wa_debug_log', 'debugLog', 'checked');
     document.querySelector('#wa_find_orphans')?.addEventListener('click', async () => {
@@ -2791,8 +2059,7 @@ export async function init() {
     $wp.on('input change', '.wa-world-weight', function () { editField('weight', this); });
     $wp.on('input change', '.wa-world-offset', function () { editField('offset', this); });
     $wp.on('input change', '.wa-world-cap', function () { editField('cap', this); });
-    // Swap with the adjacent VISIBLE row, not the array neighbour — a filtered-out book
-    // from another chat sitting between them must not absorb the move.
+    // Swap with the adjacent VISIBLE row, not the array neighbour: a filtered-out book between them must not absorb the move.
     const moveWorld = (i, dir) => {
         const scoped = scopedPriority();
         if (!scoped) return;
@@ -2813,36 +2080,26 @@ export async function init() {
     $('#wa_refresh_profiles').on('click', () => populateProfiles(true));
     $('#wa_review_bundles').on('click', () => superEvalScene());
 
-    // ST fires a dry-run generation on chat load and for token estimates; note it so the
-    // scan-done handler can stay quiet, since its interceptor (and our retrieval) is skipped.
     eventSource.on(event_types.GENERATION_STARTED, (_type, _options, dryRun) => { runState.generationIsDryRun = Boolean(dryRun); });
     eventSource.on(event_types.GENERATION_ENDED, () => { runState.generationIsDryRun = false; runState.waOwnsScan = false; });
 
     eventSource.on(event_types.WORLDINFO_ENTRIES_LOADED, onEntriesLoaded);
 
-    // WORLDINFO_ENTRIES_LOADED only fires during a scan, so switching chat/character wouldn't
-    // refresh the attached-book set until the next generation. CHAT_CHANGED fires on every
-    // switch; re-read the active books then. Also populates once now so it isn't blank on load.
+    // WORLDINFO_ENTRIES_LOADED only fires during a scan, so CHAT_CHANGED refreshes the attached-book set.
     const refreshAttached = () => getSortedEntries().then(showExemptCount).catch(() => {});
     eventSource.on(event_types.CHAT_CHANGED, refreshAttached);
-    // New chat = possibly different books; drop the smartkeys key registry so the automaton tracks the
-    // active vocabulary rather than the union of every book ever scanned. Wrapped, not passed by
-    // reference: CHAT_CHANGED emits getCurrentChatId(), which would land in resetSmartKeys's `scope`
-    // parameter and defeat its default.
+    // Wrapped, not passed by reference: CHAT_CHANGED emits the chat id, which would land in resetSmartKeys's `scope`.
     eventSource.on(event_types.CHAT_CHANGED, () => resetSmartKeys());
-    // The panel survives dry-run scans untouched (onScanDone ignores them), so without
-    // this it would carry the previous chat's selection across a switch.
+    // The panel survives dry-run scans untouched, so it would carry the previous chat's selection across a switch.
     eventSource.on(event_types.CHAT_CHANGED, () => { runState.lastPromptOrder = []; renderWiPanel([]); });
     refreshAttached();
     eventSource.on(event_types.WORLDINFO_SCAN_DONE, onScanDone);
-    // Registered AFTER onScanDone so the feed sees the flag while the scan is live. Clearing on
-    // the final loop (not just GENERATION_ENDED) is what keeps a between-scans getSortedEntries —
-    // ST's dry runs, other extensions, the exempt-count refresh — off the takeover blanking.
+    // After onScanDone, so the feed sees the flag while the scan is live. Cleared on the final loop, not only at
+    // GENERATION_ENDED, so a between-scans getSortedEntries escapes the blanking.
     eventSource.on(event_types.WORLDINFO_SCAN_DONE, (args) => {
         if (!args?.state?.next) runState.waOwnsScan = false;
     });
 
-    // Show the active-entries icon right away; it fills in on the next scan.
     if (settings().enabled) renderWiPanel(runState.lastPromptOrder);
 
     SlashCommandParser.addCommandObject(SlashCommand.fromProps({
@@ -2918,8 +2175,7 @@ export async function init() {
 
     SlashCommandParser.addCommandObject(SlashCommand.fromProps({
         name: 'wa-studio',
-        // Wrapped, not passed by reference: ST hands callbacks (namedArgs, unnamedArgs), which would
-        // land in preferredBook.
+        // Wrapped: ST hands callbacks (namedArgs, unnamedArgs), which would land in preferredBook.
         callback: () => lorebookStudio(chatBook()),
         helpString: 'Worlds Apart: open Lorebook Studio — a wide two-pane manager listing every lorebook on the left and the selected book\'s entries on the right. Per-entry tools (mode, flags, sticky, ⚡/✨ keyword suggestions, prune-scan colouring, duplicate/delete), a Tool Settings drawer, bulk selection + actions (enable/disable, mode, sticky, trigger %, renumber, delete), and book tools (rename, duplicate, delete, type filter, suggest-all). Also on the extensions (wand) menu.',
         returns: 'nothing',
@@ -2944,8 +2200,7 @@ export async function init() {
 
 globalThis.worldsApart_intercept = intercept;
 
-// Third-party extensions are loaded as modules; `hooks.activate` may not fire for
-// every ST version, so fall back to the conventional jQuery bootstrap.
+// `hooks.activate` may not fire on every ST version; the jQuery bootstrap is the fallback.
 jQuery(async () => {
     await init();
 });
