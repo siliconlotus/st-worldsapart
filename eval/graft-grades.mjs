@@ -26,17 +26,16 @@ import { readFileSync, writeFileSync, existsSync } from 'node:fs';
 import { basename, resolve as resolvePath } from 'node:path';
 import { armNames, openBundle, rowKey, sceneDiff, setGrades } from '../extension/grading.mjs';
 import * as matcher from '../extension/matcher.mjs';
-import { gradeValue } from './metrics.mjs';
+import { gradeValue, arg } from './metrics.mjs';
 
 /** Unit Separator — joins title to content so neither can spell the other's boundary. */
 const US = String.fromCharCode(31);
 const argv = process.argv.slice(2);
-const arg = k => { const i = argv.indexOf(k); return i >= 0 ? argv[i + 1] : null; };
 const VALUE_FLAGS = new Set(['--from', '--from-dir', '--rename-book']);
 const files = argv.filter((a, i) => a.endsWith('.json') && !a.startsWith('--') && !VALUE_FLAGS.has(argv[i - 1]));
 const WRITE = argv.includes('--write');
-const FROM = arg('--from');
-const FROM_DIR = arg('--from-dir');
+const FROM = arg(argv, '--from');
+const FROM_DIR = arg(argv, '--from-dir');
 const WS_DRIFT = argv.includes('--allow-whitespace-drift');
 
 if (!files.length || (!FROM && !FROM_DIR)) {
@@ -50,7 +49,7 @@ if (!files.length || (!FROM && !FROM_DIR)) {
  *  while the uids line up perfectly — named explicitly because "the uids overlap" is also true of a book's
  *  wrong-book control, and a uid-only fallback would graft that silently. */
 const RENAME = (() => {
-    const raw = arg('--rename-book');
+    const raw = arg(argv, '--rename-book');
     if (!raw) return null;
     const i = raw.indexOf('=');
     if (i < 0) { console.error('--rename-book takes "old=new"'); process.exit(2); }

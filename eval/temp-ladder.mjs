@@ -35,6 +35,7 @@ import { readFileSync, writeFileSync, existsSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 import { buildKeySuggest, buildKeyPrompt, parseKeyList, STUDIO_SUGGEST_OPTS } from '../extension/keyword-suggest.mjs';
 import { countKey } from '../extension/matcher.mjs';
+import { mean, fmt3 as fmt } from './metrics.mjs';
 
 const HERE = new URL('.', import.meta.url).pathname;
 const CACHE_PATH = `${HERE}eval-data/temp-ladder-cache.json`;
@@ -129,8 +130,6 @@ const jaccard = (a, b) => {
     for (const x of a) if (b.has(x)) inter++;
     return inter / (a.size + b.size - inter);
 };
-const mean = xs => (xs.length ? xs.reduce((a, b) => a + b, 0) / xs.length : NaN);
-const fmt = x => (Number.isFinite(x) ? x.toFixed(3) : '—');
 
 /**
  * Per-arm statistics over one book's entries.

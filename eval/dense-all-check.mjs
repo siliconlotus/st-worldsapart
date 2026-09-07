@@ -88,33 +88,15 @@ eq(Number.isFinite(dense.byUid.get(2).score), true, 'dense-all: it earns one');
 eq(dense.byUid.get(2).vectorEligible, true, 'and becomes eligible, so the vector weight enters its denominator');
 eq(dense.byUid.get(2).keywordScore > 0, true, 'its keys still score — the cosine is added evidence, not a replacement');
 
-// --- the column form, which is what makes dense comparable to the learned-sparse arms ---------------
-// Same cosine, fused through fuseRanks's fourth column instead of the entry's own score, so `score` stays
-// absent, the entry stays outside the vector column's denominator, and it keeps the keyword-only tilt.
-// Getting this wrong in either direction silently turns the replication back into denseAll=on.
-const col = rowsOf(ALL, { denseAllEntries: true, denseColumn: 'nocos' });
-eq(col.byUid.get(2).score, undefined, 'denseColumn leaves `score` alone');
-eq(col.byUid.get(2).vectorEligible, false, '...so the entry is still not in the vector column');
-eq(col.byUid.get(2).sparseScore, dense.byUid.get(2).score, '...and the fourth column holds the same cosine the other form put in `score`');
-eq(col.byUid.get(1).sparseScore, undefined, "'nocos' leaves entries that already have a cosine out of the column");
-eq(rowsOf(ALL, { denseAllEntries: true, denseColumn: 'cos' }).byUid.get(1).sparseScore, base.byUid.get(1).score,
-    "'cos' duplicates a vectorized entry's own cosine into the column");
-eq(rowsOf(ALL, { denseAllEntries: true, denseColumn: 'cos' }).byUid.get(2).sparseScore, undefined, "...and leaves the keyword-only entry out");
-const all3 = rowsOf(ALL, { denseAllEntries: true, denseColumn: 'all' }).byUid;
-eq(Number.isFinite(all3.get(1).sparseScore) && Number.isFinite(all3.get(2).sparseScore), true, "'all' scores both classes");
-
-// --- the fourth-column ranking assertions are RETIRED, with fuseRanks ------------------------------
-// They pinned that a negative centered cosine still entered RRF's sparse column rather than being
-// dropped from it. There is no such column: E[credit] reads the signals directly, and a below-average
-// cosine is simply a low value of a feature the model already weights. The column form above still
-// matters — it is what puts the cosine on the row at all — so only the ranking half goes.
+// --- the fourth-column form is RETIRED, with fuseRanks ---------------------------------------------
+// `denseColumn` fused the same cosine through RRF's fourth column instead of the entry's own score, which
+// is what made dense comparable to the learned-sparse arms. There is no such column: E[credit] reads the
+// signals directly, and a below-average cosine is simply a low value of a feature the model already
+// weights. The only form left is the one above, which puts the cosine in `score`.
 
 // --- pointed at the wrong collection ---------------------------------------------------------------
 let threw = false;
 try { rowsOf(ORDINARY, { denseAllEntries: true }); } catch { threw = true; }
 eq(threw, true, 'denseAllEntries against an ordinary index throws rather than reporting flat');
-let threwCol = false;
-try { rowsOf(ORDINARY, { denseColumn: 'nocos' }); } catch { threwCol = true; }
-eq(threwCol, true, 'a column population needing the extras throws without the collection that holds them');
 
 rmSync(DIR, { recursive: true, force: true });

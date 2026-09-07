@@ -49,6 +49,7 @@ import { fileURLToPath } from 'node:url';
 import { randomUUID } from 'node:crypto';
 import { haystackFor, loadScene, makeCandidateSet, makeLayoutOrder, sceneParams, indexPath, embed, stInstall, wiTitle, bookFingerprint, whyFor } from './scene.mjs';
 import { ensureIndex } from './reindex.mjs';
+import { arg } from './metrics.mjs';
 
 import { offlineTokenCounter } from './tokens.mjs';
 import * as query from '../extension/query.mjs';
@@ -67,13 +68,12 @@ const POOL_ARMS = {
 };
 
 const argv = process.argv.slice(2);
-const arg = k => { const i = argv.indexOf(k); return i >= 0 ? argv[i + 1] : null; };
 const WRITE = argv.includes('--write');
-const FROM = arg('--from');
-const MIN_HISTORY = Number(arg('--min-history') ?? 50);
+const FROM = arg(argv, '--from');
+const MIN_HISTORY = Number(arg(argv, '--min-history') ?? 50);
 const INCLUDE_HIDDEN = argv.includes('--include-hidden');
-const OUT_DIR = arg('--out-dir') ?? (FROM ? dirname(resolvePath(FROM)) : '.');
-const MODEL = arg('--model') ?? process.env.WA_EMBED_MODEL;
+const OUT_DIR = arg(argv, '--out-dir') ?? (FROM ? dirname(resolvePath(FROM)) : '.');
+const MODEL = arg(argv, '--model') ?? process.env.WA_EMBED_MODEL;
 if (!MODEL) { console.error('no model: pass --model or set WA_EMBED_MODEL — the derived bundles record it'); process.exit(2); }
 const OLLAMA = process.env.OLLAMA_URL ?? 'http://localhost:11434';
 
@@ -87,13 +87,13 @@ const src = FROM ? openBundle(JSON.parse(readFileSync(FROM, 'utf8'))) : null;
 // Every existing bundle records depth 10 (G13); a set derived at anything else cannot be
 // compared with them, and the failure is silent — the bundle looks fine and only its query is short.
 // Deriving at the old default of 5 has already produced sets that had to be thrown away and re-derived.
-const DEPTH = Number(arg('--depth') ?? src?.params?.depth ?? 10);
-const CHAT = arg('--chat') ?? src?.sceneChat;
-const BOOK = arg('--book') ?? src?.primaryBook;
+const DEPTH = Number(arg(argv, '--depth') ?? src?.params?.depth ?? 10);
+const CHAT = arg(argv, '--chat') ?? src?.sceneChat;
+const BOOK = arg(argv, '--book') ?? src?.primaryBook;
 // From the donor's own `name`, not its filename — `sampleFile` derives one from the other, so they agree
 // until someone renames the file. A prefix is how a fold is told apart by eye, and CLAUDE.md records a set
 // that read as a separate lineage for as long as nobody checked its `primaryBook`.
-const PREFIX = arg('--prefix') ?? (FROM ? String(src?.name ?? basename(FROM)).replace(/-msg\d+(\.json)?$/, '') : 'syn');
+const PREFIX = arg(argv, '--prefix') ?? (FROM ? String(src?.name ?? basename(FROM)).replace(/-msg\d+(\.json)?$/, '') : 'syn');
 
 if (!CHAT || !BOOK) {
     console.error('usage: node eval/synth-scenes.mjs --chat <chat.jsonl> --book <world name> (--msgs a,b,c | --n N [--seed S]) [--write]');
@@ -189,7 +189,7 @@ function attachedWorlds(chatRelPath) {
 const detected = attachedWorlds(CHAT);
 const ALSO = [...new Set([
     ...[...detected.keys()],
-    ...String(arg('--also') ?? '').split(',').map(s => s.trim()).filter(Boolean),
+    ...String(arg(argv, '--also') ?? '').split(',').map(s => s.trim()).filter(Boolean),
     ...Object.keys(src?.books ?? {}),
 ])].filter(w => w !== BOOK);
 // A binding can name a book that no longer exists — a card outlives a renamed or deleted world, and the
@@ -261,7 +261,7 @@ const eligible = [];
 const mulberry32 = a => () => { a |= 0; a = (a + 0x6D2B79F5) | 0; let t = Math.imul(a ^ (a >>> 15), 1 | a); t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t; return ((t ^ (t >>> 14)) >>> 0) / 4294967296; };
 
 let picks;
-if (arg('--msgs') === 'same') {
+if (arg(argv, '--msgs') === 'same') {
     if (!src) { console.error('--msgs same needs --from'); process.exit(2); }
     // FROM THE DONOR'S OWN FIELDS, never from its filename. Parsing `-msg(\d+)` out of the name derived a
     // scene at whatever number the file happened to be called — so a rename by a well-meaning hand
@@ -270,13 +270,13 @@ if (arg('--msgs') === 'same') {
     const same = src.sceneEnd ?? src.generatedFrom?.msg;
     if (!Number.isFinite(Number(same))) { console.error(`${basename(FROM)} records no scene end to reuse`); process.exit(2); }
     picks = [Number(same)];
-} else if (arg('--msgs')) {
-    picks = String(arg('--msgs')).split(',').map(x => Number(x.trim())).filter(Number.isFinite);
-} else if (arg('--n')) {
-    const rng = mulberry32(Number(arg('--seed') ?? 1));
+} else if (arg(argv, '--msgs')) {
+    picks = String(arg(argv, '--msgs')).split(',').map(x => Number(x.trim())).filter(Number.isFinite);
+} else if (arg(argv, '--n')) {
+    const rng = mulberry32(Number(arg(argv, '--seed') ?? 1));
     const pool = [...eligible];
     picks = [];
-    for (let k = 0; k < Number(arg('--n')) && pool.length; k++) picks.push(...pool.splice(Math.floor(rng() * pool.length), 1));
+    for (let k = 0; k < Number(arg(argv, '--n')) && pool.length; k++) picks.push(...pool.splice(Math.floor(rng() * pool.length), 1));
     picks.sort((a, b) => a - b);
 } else { console.error('pass --msgs a,b,c or --n N'); process.exit(2); }
 

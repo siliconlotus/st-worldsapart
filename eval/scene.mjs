@@ -261,7 +261,8 @@ export const getStringHash = (str, seed = 0) => { let h1 = 0xdeadbeef ^ seed, h2
  */
 export const bookFingerprint = (book) => {
     const list = Object.values(book ?? {}).sort((a, b) => Number(a.uid) - Number(b.uid));
-    const US = '', RS = '';
+    // RS separates records; US (module scope) separates the fields within one.
+    const RS = String.fromCharCode(30);
     let gaz = '', content = '';
     for (const e of list) {
         gaz += [e.uid, (e.key ?? []).join(US), (e.keysecondary ?? []).join(US), e.comment ?? ''].join(US) + RS;
@@ -310,6 +311,20 @@ export function stInstall() {
     const resolve = p => p.startsWith('/') ? p : p.startsWith('data/') ? dataRoot + p.slice('data'.length) : `${root}/${p}`;
     return { root, dataRoot, resolve };
 }
+
+/**
+ * The graded corpus directory, with a trailing slash. `eval-data/` is gitignored (private captures), so a
+ * checkout that has none falls back to the canonical checkout's, located through stInstall() — a check is
+ * run from wherever the suite loop happens to sit, and without the fallback its oracle silently skips and
+ * prints a cheerful `ok … skipped` forever.
+ *
+ * The returned path may not exist; callers test it.
+ */
+export const evalDataDir = () => {
+    const local = new URL('./eval-data/', import.meta.url).pathname;
+    const st = stInstall();
+    return existsSync(local) || !st ? local : `${st.root}/public/scripts/extensions/third-party/WorldsApart/eval/eval-data/`;
+};
 
 /**
  * Where this sample's vector collection lives. Explicit --index wins, then the sample's own record, then the
@@ -397,9 +412,8 @@ const qCacheLoad = (label) => {
     qCache.set(label, m);
     return m;
 };
-export const embed = async (text, { ollama = 'http://localhost:11434', model, endpoint = 'ollama', url = ollama, label = model, cache = true } = {}) => {
+export const embed = async (text, { ollama = 'http://localhost:11434', model, endpoint = 'ollama', url = ollama, label = model } = {}) => {
     if (!model) throw new Error('embed needs a model — the caller resolves one; there is no default embedder');
-    if (!cache) return (await embedTexts([text], { model, endpoint, url }))[0];
     const store = qCacheLoad(label);
     const h = createHash('sha256').update(text).digest('hex');
     const hit = store.get(h);
@@ -413,15 +427,16 @@ export const embed = async (text, { ollama = 'http://localhost:11434', model, en
 /**
  * The parameter set a sample was captured under, layered over the harness defaults.
  *
- * The defaults are one tuned chat's snapshot, NOT the shipped defaults (extension/state.mjs ships K1 1.2,
- * LEXW 1) — an arm overrides them via its own `params`, which is the point of putting them in the
+ * The defaults are one tuned chat's snapshot, NOT the shipped defaults (extension/state.mjs ships K1
+ * 1.2) — an arm overrides them via its own `params`, which is the point of putting them in the
  * manifest: each graded scene carries the settings it was graded under. `overrides` on top is how an arm
  * asks "what would this scene look like at these parameters instead".
  */
 export const sceneParams = (S, overrides = {}) => ({
-    // KEYW null mirrors LEXW, exactly as the extension does — so a sample captured before the split scores
-    // identically, and an arm that sets KEYW is testing the split rather than a silent default change.
-    K: 20, K1: 2, B: 0.75, LEXW: 1.5, KEYW: null, boost: 3, stopwordDf: 0.25,
+    // NO FUSION PARAMS. K, LEXW and KEYW described the RRF over the layout, which no longer exists, so
+    // nothing read them — a stored bundle still carrying one is spread over these and ignored, like
+    // `threshold` below.
+    K1: 2, B: 0.75, boost: 3, stopwordDf: 0.25,
     // null = whatever the shipped memory fit carries. Set only by a cutoff arm; see scoreScene `admits`.
     memoryCutoff: null,
     // WHICH FIT SCORES THE COLUMN, by name, overriding the scene's own embedding model. null is production.
@@ -451,7 +466,7 @@ export const sceneParams = (S, overrides = {}) => ({
     // `params`, which is spread over these defaults, so this fallback only ever reaches old ones.
     repeatCurve: 'bm25', repeatR: 1,
     // Whether the cosine subtracts the corpus mean (state.mjs meanCentered, shipped on). An arm here contrasts
-    // the CENTERED and RAW rankings on graded scenes; centering-grid.mjs measures the same switch on the
+    // the CENTERED and RAW rankings on graded scenes; the same switch was screened earlier on the
     // leave-one-out chunk-to-sibling task, which is a different question and can disagree without either
     // being wrong. Captures taken before `params` recorded it fall back to this default, which is the
     // value they in fact ran under.
@@ -472,25 +487,6 @@ export const sceneParams = (S, overrides = {}) => ({
     // It still needs an `--all` index (`node eval/reindex.mjs <sample.json> --all`), and loadScene
     // throws rather than quietly scoring the ordinary collection if one is missing.
     denseAllEntries: true,
-    // WHERE THAT COSINE IS FUSED, and it decides which question is being asked.
-    //
-    // null puts it in the entry's own `score`: the entry becomes vector-eligible, is normalised by the
-    // vector weight, and loses the keyword-only tilt. That is what "vectorize this entry" would do in
-    // production, and it is a change to three things at once.
-    //
-    // A population name instead puts it in fuseRanks's FOURTH COLUMN at denseWeight — the column the
-    // learned-sparse scores were measured through. Same weight, same eligibility rule, `score` and the tilt
-    // untouched, so dense and sparse measured this way differ in the NUMBER THE COLUMN HOLDS and nothing
-    // else. That is the only form in which the two are comparable; the null form and the sparse arms differ
-    // in enough places that their gap is unattributable.
-    //
-    //   'nocos'  entries with no cosine of their own — the arm the sparse head won on
-    //   'all'    every ranked entry, a vectorized one's own cosine duplicated into the column
-    //   'cos'    only entries that already have one, which for dense IS that duplication
-    //
-    // 'all' and 'cos' are degenerate for dense in a way they were not for sparse: sparse was a second
-    // opinion from a different head, while duplicating the vector column is the same number twice and can
-    // only reweight the vector signal. They are run as controls, not as candidates.
     // WHICH ENTRIES DEFINE THE CORPUS MEAN — the vector centering subtracts (plugin/vector.mjs). Production
     // names the vectorized uids (worldsapart.js centroidUids) and the plugin means over those, so
     // 'vectorized' is what every stored capture ran under and stays the default.
@@ -565,8 +561,6 @@ export const sceneParams = (S, overrides = {}) => ({
     // The basis is per book, leave-one-LINEAGE-out, memory tier only; build it with
     // `node eval/global-basis.mjs <samples...>`.
     sharedComponents: 0,
-    denseColumn: null,
-    denseWeight: 0.5,
     maxVectorEntries: 20, entityFilter: true,
     // WHICH FIELDS THE GAZETTEER READS. Production is 'keys+titles' (buildGazetteer's own sources), chosen
     // on a gold set that no longer exists; 'bodies' was re-measured on a handful of scenes and lost (F33).
@@ -714,9 +708,6 @@ export function loadScene(S, { indexFile, indexOpts = {}, params: P }) {
         // as flat, which is the one failure that looks like a result. A book whose every entry is vectorized
         // legitimately has no extras, so the demand is on the BOOK rather than on the file.
         if (P.denseAllEntries && !extra.length && own.some(e => !e.vectorized && !e.disable && e.content)) throw new Error(`denseAllEntries is on but ${indexFile} holds no non-vectorized chunks for "${book}" — build that collection with: node eval/reindex.mjs <sample.json> --all --book ${JSON.stringify(book)}`);
-        // A column population that includes the extras has nothing to put in the column without them, and would
-        // report as a weight change on the vectorized half alone.
-        if (!P.denseAllEntries && (P.denseColumn === 'nocos' || P.denseColumn === 'all')) throw new Error(`denseColumn '${P.denseColumn}' scores entries the ordinary collection has no vectors for — set denseAllEntries too`);
         // AN EMPTY COLLECTION IS ONLY LEGITIMATE WHEN THE BOOK HAS NOTHING TO INDEX. Same gate reindex.mjs
         // buildItems applies, so the two agree on what "nothing to index" means. Without this the two cases are
         // indistinguishable at runtime: a missing collection scores keyword-and-BM25-only and returns a
@@ -882,7 +873,6 @@ export function loadScene(S, { indexFile, indexOpts = {}, params: P }) {
     // The gazetteer spans every book the live chat had attached, as production's does: `entries` is now
     // that whole set, so the union it used to be assembled from is the list itself.
     const gazSource = entries;
-    const gazEntries = gazSource;
     // Field selection rides on buildGazetteer rather than re-deriving its tokenization — a second tokenizer
     // is the seam the single-gazetteer rule exists to prevent. `comment` is the title slot, so 'bodies'
     // passes content through it.
@@ -895,7 +885,7 @@ export function loadScene(S, { indexFile, indexOpts = {}, params: P }) {
     };
     const pick = GAZ_FIELDS[P.gazetteerSource];
     if (!pick) throw new Error(`unknown gazetteerSource "${P.gazetteerSource}" — one of ${Object.keys(GAZ_FIELDS).join(', ')}`);
-    const gaz = entity.buildGazetteer(gazEntries.flatMap(e => pick(e)));
+    const gaz = entity.buildGazetteer(gazSource.flatMap(e => pick(e)));
 
     // THE POOL IS WHAT WAS JUDGED, and ONLY that — see graded-scene-grid.mjs. OWN is this capture's own
     // non-durable rows, kept separately so coverage warnings stay about re-derivation failing rather than
@@ -1118,9 +1108,6 @@ export function makeCandidateSet({ loaded, byKey, entries, params: P, chunkCfg, 
         }
         return out;
     };
-    // Which rows carry the dense cosine in the fourth column rather than in `score` (see denseColumn).
-    const colExtras = P.denseColumn === 'nocos' || P.denseColumn === 'all';
-    const colVectorized = P.denseColumn === 'cos' || P.denseColumn === 'all';
     // A HAYSTACK IS PER ENTRY, so the caller hands over the composer rather than one built window. It
     // resolves the entry's own scanDepth, admits the injects that depth reaches, and appends the sources
     // the entry opted into — which is what the runtime does. The document stores those inputs separately
@@ -1156,7 +1143,7 @@ export function makeCandidateSet({ loaded, byKey, entries, params: P, chunkCfg, 
         //
         // Dropped at admission rather than filtered from `entries`: the gazetteer and the BM25 corpus must
         // still see every entry, or the term weights move and the comparison measures the wrong thing.
-        for (const [key, s] of per) { const e = byKey.get(key); if (e && !e.disable) rows.push({ uid: Number(e.uid), book: e.world, entry: e, title: wiTitle(e), score: s.score, sparseScore: colVectorized ? s.score : undefined, textScore: contentText.get(entryKey(e)) ?? 0, keywordScore: keywordScore(e, haystackFor(e), k1), vectorEligible: !!e.vectorized, textEligible: hasContent(e), keysEligible: scoringKeys(e, P).length > 0 }); }
+        for (const [key, s] of per) { const e = byKey.get(key); if (e && !e.disable) rows.push({ uid: Number(e.uid), book: e.world, entry: e, title: wiTitle(e), score: s.score, textScore: contentText.get(entryKey(e)) ?? 0, keywordScore: keywordScore(e, haystackFor(e), k1), vectorEligible: !!e.vectorized, textEligible: hasContent(e), keysEligible: scoringKeys(e, P).length > 0 }); }
         // --- STAGE 2: ACTIVATION (keyword route). Stands in for ST core's keyword match, so it may only
         // admit an entry core could actually have activated. One exclusion, a stage-2 fact:
         //
@@ -1167,7 +1154,7 @@ export function makeCandidateSet({ loaded, byKey, entries, params: P, chunkCfg, 
         //
         // A vectorized entry is not excluded: WA judges it like any other candidate, and stage 1 has
         // usually admitted it already through `per`.
-        for (const e of entries) { const key = entryKey(e); if (per.has(key) || e.disable) continue; const kw = keywordScore(e, haystackFor(e), k1); if (kw > 0) rows.push({ uid: Number(e.uid), book: e.world, entry: e, title: wiTitle(e), score: P.denseColumn ? undefined : dense.get(key), sparseScore: colExtras ? dense.get(key) : undefined, textScore: contentText.get(key) ?? 0, keywordScore: kw, vectorEligible: (!P.denseColumn && dense.has(key)) || !!e.vectorized, textEligible: hasContent(e), keysEligible: true }); }
+        for (const e of entries) { const key = entryKey(e); if (per.has(key) || e.disable) continue; const kw = keywordScore(e, haystackFor(e), k1); if (kw > 0) rows.push({ uid: Number(e.uid), book: e.world, entry: e, title: wiTitle(e), score: dense.get(key), textScore: contentText.get(key) ?? 0, keywordScore: kw, vectorEligible: dense.has(key) || !!e.vectorized, textEligible: hasContent(e), keysEligible: true }); }
         return rows;
     };
 }

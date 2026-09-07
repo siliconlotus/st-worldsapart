@@ -35,33 +35,33 @@ import { archiveContract, contractBody, contractHash } from './contract.mjs';
 import { createHash } from 'node:crypto';
 import { dirname, resolve as resolvePath } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { arg } from '../metrics.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const ROOT = resolvePath(HERE, '..', '..');
 const argv = process.argv.slice(2);
-const arg = (k, d = null) => { const i = argv.indexOf(k); return i >= 0 ? argv[i + 1] : d; };
 
-const OUT = arg('--out');
+const OUT = arg(argv, '--out');
 if (!OUT) {
     console.error('usage: node eval/synthetic-data/grade-local.mjs --out <dir> [--model gemma4:31b-mlx]');
     console.error('       [--jobs eval/grade-jobs] [--contract <hash>] [--limit N] [--seed 7] [--ctx 65536] [--think]\n       [--api ollama|openai] [--host http://localhost:8008]');
     process.exit(2);
 }
 const OUTDIR = resolvePath(OUT);
-const JOBS = resolvePath(arg('--jobs', resolvePath(ROOT, 'eval', 'grade-jobs')));
-const MODEL = arg('--model', 'gemma4:31b-mlx');
-const CONTRACT = arg('--contract');
-const LIMIT = Number(arg('--limit', Infinity));
-const SEED = Number(arg('--seed', 7));
-const CTX = Number(arg('--ctx', 65536));
+const JOBS = resolvePath(arg(argv, '--jobs', resolvePath(ROOT, 'eval', 'grade-jobs')));
+const MODEL = arg(argv, '--model', 'gemma4:31b-mlx');
+const CONTRACT = arg(argv, '--contract');
+const LIMIT = Number(arg(argv, '--limit', Infinity));
+const SEED = Number(arg(argv, '--seed', 7));
+const CTX = Number(arg(argv, '--ctx', 65536));
 const THINK = argv.includes('--think');
-const API = arg('--api', 'ollama');
+const API = arg(argv, '--api', 'ollama');
 if (!['ollama', 'openai'].includes(API)) { console.error(`--api must be ollama|openai, got ${API}`); process.exit(2); }
-const HOST = arg('--host', process.env.OLLAMA_HOST ?? (API === 'openai' ? 'http://localhost:8008' : 'http://localhost:11434'));
+const HOST = arg(argv, '--host', process.env.OLLAMA_HOST ?? (API === 'openai' ? 'http://localhost:8008' : 'http://localhost:11434'));
 
 // --rubric swaps the system prompt for a VARIANT: editing the contract of record would change the hash
 // stamped on every job, making an experiment indistinguishable from a ruling.
-const RUBRIC = resolvePath(arg('--rubric', resolvePath(ROOT, '.claude', 'agents', 'scene-relevance.md')));
+const RUBRIC = resolvePath(arg(argv, '--rubric', resolvePath(ROOT, '.claude', 'agents', 'scene-relevance.md')));
 const rubricRaw = readFileSync(RUBRIC);
 // One definition of what a contract IS and what it hashes to, shared with grade-pending — see contract.mjs.
 const system = contractBody(rubricRaw.toString('utf8'));

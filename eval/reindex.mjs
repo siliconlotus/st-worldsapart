@@ -25,6 +25,7 @@ import { readFileSync, writeFileSync, mkdirSync, existsSync } from 'node:fs';
 import { dirname } from 'node:path';
 import { chunkEntry } from '../extension/chunking.mjs';
 import { getStringHash } from './scene.mjs';
+import { arg } from './metrics.mjs';
 import { openBundle } from '../extension/grading.mjs';
 import { isMemory, PREFIXES } from '../extension/relevance.mjs';
 import { defaultSettings } from '../extension/state.mjs';
@@ -322,7 +323,6 @@ export async function ensureIndex(S, { overrides = {}, model, label = model, end
 // --- CLI ---
 if (process.argv[1] && import.meta.url.endsWith(process.argv[1].split('/').pop())) {
     const argv = process.argv.slice(2);
-    const arg = k => { const i = argv.indexOf(k); return i >= 0 ? argv[i + 1] : null; };
     const sample = argv.find(a => a.endsWith('.json') && !a.startsWith('--'));
     if (!sample) {
         console.error('usage: node reindex.mjs <sample.json> [--chunkSize N] [--chunkMode paragraph|length] [--minChunkSize N] [--book <name>] [--out <index.json>] [--batch 64] [--force] [--all] [--archived]');
@@ -332,25 +332,25 @@ if (process.argv[1] && import.meta.url.endsWith(process.argv[1].split('/').pop()
         console.error('  --model <spec>  a modelSpec, so a server stem and a task prefix are honoured: omlx:Qwen3-Embedding-8B-4bit-DWQ');
         process.exit(2);
     }
-    const S = openBundle(JSON.parse(readFileSync(sample, 'utf8')), arg('--arm'));
+    const S = openBundle(JSON.parse(readFileSync(sample, 'utf8')), arg(argv, '--arm'));
     const overrides = {};
-    for (const k of ['chunkSize', 'minChunkSize']) if (arg(`--${k}`) !== null) overrides[k] = Number(arg(`--${k}`));
-    if (arg('--chunkMode')) overrides.chunkMode = arg('--chunkMode');
+    for (const k of ['chunkSize', 'minChunkSize']) if (arg(argv, `--${k}`) !== null) overrides[k] = Number(arg(argv, `--${k}`));
+    if (arg(argv, '--chunkMode')) overrides.chunkMode = arg(argv, '--chunkMode');
     // THROUGH resolveModel, like every other tool that takes a model. It took the spec as a bare ollama
     // model name, so `omlx:Qwen3-Embedding-8B-4bit-DWQ` was sent to ollama as a literal name and a
     // prefix-trained family silently lost its instruction — the two failures modelSpec exists to prevent,
     // in the one tool that actually writes the vectors.
-    const spec = arg('--model') ?? process.env.WA_EMBED_MODEL ?? S.embedModel;
+    const spec = arg(argv, '--model') ?? process.env.WA_EMBED_MODEL ?? S.embedModel;
     if (!spec) { console.error('no model: pass --model, set WA_EMBED_MODEL, or use a sample that records embedModel'); process.exit(2); }
     const em = resolveModel(spec);
     if (S.embedModel && em.label !== resolveModel(S.embedModel).label) console.error(`!! rebuilding under "${em.label}" but the sample was captured under "${S.embedModel}" — its recorded cosines will not be comparable`);
 
     ensureIndex(S, {
         overrides, model: em.model, label: em.label, endpoint: em.endpoint,
-        book: arg('--book') ?? S.primaryBook, out: arg('--out'),
+        book: arg(argv, '--book') ?? S.primaryBook, out: arg(argv, '--out'),
         ollama: process.env.OLLAMA_URL ?? 'http://localhost:11434',
         url: em.endpoint === 'ollama' ? (process.env.OLLAMA_URL ?? 'http://localhost:11434') : em.url,
-        batch: Number(arg('--batch')) || 64, force: argv.includes('--force'), all: argv.includes('--all'), archived: argv.includes('--archived'), log: m => console.log(m),
+        batch: Number(arg(argv, '--batch')) || 64, force: argv.includes('--force'), all: argv.includes('--all'), archived: argv.includes('--archived'), log: m => console.log(m),
     }).then(r => {
         console.log(r.built ? `wrote ${r.items} items -> ${r.path}` : `already built (${r.items} items) -> ${r.path}  [--force to rebuild]`);
         console.log(argv.includes('--all')

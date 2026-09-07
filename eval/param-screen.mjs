@@ -30,12 +30,11 @@
 import { readFileSync } from 'node:fs';
 import { indexPath, loadScene, openSample, sceneParams, scoreScene, embed, sceneLabel, lineagesOf, fittedModels } from './scene.mjs';
 import { modelKey } from '../extension/relevance.mjs';
-import { jaccard, signTest, spearman, gradeValue } from './metrics.mjs';
+import { jaccard, signTest, spearman, gradeValue, arg } from './metrics.mjs';
 import { isDurable, rowKey } from '../extension/grading.mjs';
 import { ensureIndex, resolveModel } from './reindex.mjs';
 
 const argv = process.argv.slice(2);
-const arg = k => { const i = argv.indexOf(k); return i >= 0 ? argv[i + 1] : null; };
 const samples = argv.filter(a => a.endsWith('.json') && !a.startsWith('--'));
 
 // One-at-a-time deviations. Values are ABSOLUTE, not offsets: each scene is compared against its own
@@ -53,11 +52,8 @@ const ARMS = {
     'repeat=log': { repeatCurve: 'presence-log', repeatR: 1 },
     'repeat=log-R0.5': { repeatCurve: 'presence-log', repeatR: 0.5 },
     'repeat=log-R2': { repeatCurve: 'presence-log', repeatR: 2 },
-    'LEXW=0.5': { LEXW: 0.5 }, 'LEXW=1': { LEXW: 1 }, 'LEXW=2': { LEXW: 2 }, 'LEXW=3': { LEXW: 3 },
-    // KEYS WEIGHT, now separable from text. null mirrors LEXW, which is what every capture before the split
-    // used; a number overrides it. The per-scene optima that motivated the split scattered widely (H10),
-    // including a zero, so 0 is a real candidate, not a degenerate one.
-    'KEYW=0': { KEYW: 0 }, 'KEYW=0.5': { KEYW: 0.5 }, 'KEYW=1': { KEYW: 1 }, 'KEYW=2': { KEYW: 2 }, 'KEYW=3': { KEYW: 3 },
+    // NO LEXW/KEYW/K ARMS. They described the RRF fusion, which no longer exists — nothing between here and
+    // the layout score reads any of the three, so an arm setting one could only ever report flat.
     // Whether a VECTORIZED entry's keys score at all. SCORING, never selection: the keys are admitted to
     // scoringKeys() to re-rank candidates retrieval already returned, so it can reorder the top 10 but can
     // never add an entry to it.
@@ -99,7 +95,6 @@ const ARMS = {
     'gaz=titles': { gazetteerSource: 'titles', __reload: true },
     'gaz=bodies': { gazetteerSource: 'bodies', __reload: true },
     'gaz=none': { gazetteerSource: 'none', __reload: true },
-    'K=10': { K: 10 }, 'K=60': { K: 60 },
     'boost=1': { boost: 1 }, 'boost=5': { boost: 5 }, 'boost=8': { boost: 8 },
     'stopwordDf=0.15': { stopwordDf: 0.15 }, 'stopwordDf=0.4': { stopwordDf: 0.4 },
     'filter=off': { entityFilter: false },
@@ -129,17 +124,6 @@ const ARMS = {
     // cannot surface an unjudged row and its delta is not a pool-biased lower bound. It does move two things
     // at once — see denseAllEntries in scene.mjs for the tilt that stops applying.
     'denseAll=on': { __dense: true, denseAllEntries: true },
-    // THE SAME COSINE THROUGH THE COLUMN THE LEARNED-SPARSE SCORES WERE MEASURED IN (entity.mjs
-    // sparseWeight, scene.mjs denseColumn). Weight 0.5, same eligibility rule, `score` and the keyword-only
-    // tilt untouched — so denseCol=nocos against the sparse run's own nocos arm differs in the number the
-    // column holds and nothing else, which denseAll=on does not.
-    //
-    // Only 'nocos' is a standing arm. denseColumn 'all' and 'cos' put a vectorized entry's own cosine in
-    // the column beside itself, so they can only reweight the vector signal — a question the vector weight
-    // asks directly. Measured, they moved essentially nothing (R20), and an arm that measures
-    // nothing still costs a comparison in every later run's multiplicity count. scene.mjs still implements
-    // both; call scoreScene with the override to run them.
-    'denseCol=nocos': { __dense: true, denseAllEntries: true, denseColumn: 'nocos' },
     // WHAT THE CORPUS MEAN IS TAKEN OVER (scene.mjs centroidPopulation). Two doses of one question, run
     // separately because they are two independent changes: 'memory' only drops the `vectorized` filter, and
     // moves nothing on a book whose memory entries are all flagged; 'memoryArchived' adds the disabled ones,
@@ -153,7 +137,7 @@ const ARMS = {
     // ALL-BUT-THE-TOP (scene.mjs pcRemove). Same collection as the baseline — the components come off the
     // vectors already on disk — so these need only a reload, not a build.
     //
-    // WHY IT IS ASKED HERE AND NOT ON centering-grid'S LOO TASK, where it was screened first: that task has
+    // WHY IT IS ASKED HERE AND NOT ON THE LOO CHUNK-TO-SIBLING TASK, where it was screened first: that has
     // no selection stage, so nDCG@10 and recall@5 are read at windows nothing chooses, while a real layout
     // runs past 200 entries. It screened unpromising — helps in proportion to a book's own-direction share,
     // which means it helps the small thematic reference books and goes slightly negative on the long
@@ -253,18 +237,18 @@ if (!samples.length) {
     process.exit(2);
 }
 
-const picked = arg('--arms') ? String(arg('--arms')).split(',').map(s => s.trim()).filter(Boolean) : Object.keys(ARMS);
+const picked = arg(argv, '--arms') ? String(arg(argv, '--arms')).split(',').map(s => s.trim()).filter(Boolean) : Object.keys(ARMS);
 const unknown = picked.filter(a => !ARMS[a]);
 if (unknown.length) { console.error(`unknown arm(s): ${unknown.join(', ')} — see --list`); process.exit(2); }
 
-const K = Number(arg('--k') ?? 10);
+const K = Number(arg(argv, '--k') ?? 10);
 // The token ceiling every scene is walked under, baseline and arms alike — it is a user's cost decision,
 // not a property of a scene, so it cannot come off the bundle. Required by --metric fAtBudget.
-const BUDGET = Number(arg('--budget') ?? 0);
+const BUDGET = Number(arg(argv, '--budget') ?? 0);
 // THE RELEVANCE CUTOFF every scene is cut at, baseline and arms alike. A user setting (`relevanceCutoff`,
 // one value for every model), so never defaulted here. Absent it each scene cuts at its FIT's provenance
 // cutoff, which is wrong the moment two arms use different fits. REQUIRED by any `fit=` arm.
-const CUTOFF = arg('--cutoff') === null ? null : Number(arg('--cutoff'));
+const CUTOFF = arg(argv, '--cutoff') === null ? null : Number(arg(argv, '--cutoff'));
 if (CUTOFF !== null && !Number.isFinite(CUTOFF)) { console.error('--cutoff must be a number'); process.exit(2); }
 if (CUTOFF === null && picked.some(a => 'relevanceFit' in ARMS[a])) {
     console.error('a fit= arm needs --cutoff: without it each fit cuts at its own provenance cutoff and the contrast is confounded');
@@ -287,7 +271,7 @@ const GLOBAL = { ...(BUDGET ? { budgetTokens: BUDGET } : {}), ...(CUTOFF !== nul
 // The others stay available and are diagnostics on the ORDERING: `n`/`nAt5` are nDCG at a fixed depth, `f2`
 // is F-beta(2) at a fixed k, and `fAtR` is sized by the scene's relevant count rather than by --k. Baseline
 // and arm are always scored on the same one, so a run mixing them is impossible.
-const METRIC = arg('--metric') ?? 'fAtCut';
+const METRIC = arg(argv, '--metric') ?? 'fAtCut';
 const WINDOWED = { fAtR: r => r.atR.f, fAtCut: r => r.atCut.f, nAtCut: r => r.atCut.n, fAtBudget: r => r.atBudget?.f ?? NaN, nAtBudget: r => r.atBudget?.n ?? NaN };
 if (!['n', 'nAt5', 'f2', 'recall', 'precision', ...Object.keys(WINDOWED)].includes(METRIC)) { console.error(`unknown --metric ${METRIC}`); process.exit(2); }
 const mOf = r => (WINDOWED[METRIC] ? WINDOWED[METRIC](r) : r[METRIC]);
@@ -299,7 +283,7 @@ const mOf = r => (WINDOWED[METRIC] ? WINDOWED[METRIC](r) : r[METRIC]);
 // collections — which exist, so nothing errored, it just quietly measured the previous model (H3).
 // Read off the FIRST sample; a screen pools scenes, and pooling two models' cosines is not a
 // comparison, so a disagreement is reported below rather than silently averaged.
-const MODEL = process.env.WA_EMBED_MODEL ?? openSample(samples[0], arg('--arm')).embedModel;
+const MODEL = process.env.WA_EMBED_MODEL ?? openSample(samples[0], arg(argv, '--arm')).embedModel;
 if (!MODEL) { console.error(`${samples[0]} records no embedModel — set WA_EMBED_MODEL`); process.exit(2); }
 const EM = resolveModel(MODEL);
 // WHICH FIT THE EMBEDDER RESOLVED TO, before the first index parse. The usual way to get here is a spec
@@ -324,7 +308,7 @@ const fx = n => (n >= 0 ? '+' : '') + n.toFixed(4);
     for (const path of samples) {
         // A bundle contributes ONE arm, never all of them: its arms are the same scene scored differently,
         // so expanding them would be textbook pseudo-replication in the sign test.
-        const S = openSample(path, arg('--arm'));
+        const S = openSample(path, arg(argv, '--arm'));
         // EXCLUDED, NOT WARNED ABOUT, AND BEFORE ANYTHING ELSE TOUCHES IT. A warning in a 250-line log is
         // not a guard: this corpus holds a deliberate WRONG-BOOK null fixture — a scene paired with a book
         // from another story, composed to measure what retrieval does when the corpus cannot answer — and
@@ -459,7 +443,7 @@ const fx = n => (n >= 0 ? '+' : '') + n.toFixed(4);
 
     // Holm-Bonferroni WITHIN each family, not across every arm run. A family is one question ("what should
     // chunkSize be?"), so correcting eight of its doses against each other is right; correcting them against
-    // unrelated LEXW arms would make the answer depend on what else you happened to pass on the command line.
+    // unrelated boost arms would make the answer depend on what else you happened to pass on the command line.
     // Reported alongside the raw p, never replacing it: the raw value is the screening signal.
     const byFamily = new Map();
     for (const r of results) { const f = familyOf(r.arm); if (!byFamily.has(f)) byFamily.set(f, []); byFamily.get(f).push(r); }

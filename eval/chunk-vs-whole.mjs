@@ -33,6 +33,7 @@ import { createHash } from 'node:crypto';
 import { buildKeySuggest, buildKeyPrompt, parseKeyList, STUDIO_SUGGEST_OPTS } from '../extension/keyword-suggest.mjs';
 import { splitRecursive } from '../extension/chunking.mjs';
 import { countKey } from '../extension/matcher.mjs';
+import { mean, fmt3 as fmt } from './metrics.mjs';
 
 const HERE = new URL('.', import.meta.url).pathname;
 const CACHE_PATH = `${HERE}eval-data/chunk-vs-whole-cache.json`;
@@ -52,8 +53,6 @@ const arg = (n, d = null) => {
 };
 const hash = s => createHash('sha1').update(s).digest('hex').slice(0, 16);
 const cache = existsSync(CACHE_PATH) ? JSON.parse(readFileSync(CACHE_PATH, 'utf8')) : {};
-const mean = xs => (xs.length ? xs.reduce((a, b) => a + b, 0) / xs.length : NaN);
-const fmt = x => (Number.isFinite(x) ? x.toFixed(3) : '—');
 
 const model = arg('model', 'gemma3:4b');
 const temp = Number(arg('temp', '0'));

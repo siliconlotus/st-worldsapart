@@ -20,10 +20,9 @@
 //   node eval/judge-agree.mjs <refDir> <candDir> [--labels sonnet,gemma]
 import { readFileSync, readdirSync, existsSync } from 'node:fs';
 import { resolve as resolvePath } from 'node:path';
-import { qwk } from './metrics.mjs';
+import { qwk, mean, arg } from './metrics.mjs';
 
 const argv = process.argv.slice(2);
-const arg = (k, d = null) => { const i = argv.indexOf(k); return i >= 0 ? argv[i + 1] : d; };
 const dirs = argv.filter(a => !a.startsWith('--') && argv[argv.indexOf(a) - 1] !== '--labels');
 
 if (dirs.length !== 2) {
@@ -31,7 +30,7 @@ if (dirs.length !== 2) {
     process.exit(2);
 }
 const [REF, CAND] = dirs.map(d => resolvePath(d));
-const [LA, LB] = arg('--labels', 'ref,cand').split(',');
+const [LA, LB] = arg(argv, '--labels', 'ref,cand').split(',');
 
 const load = dir => {
     const out = new Map();
@@ -54,7 +53,6 @@ const onlyB = b.size - keys.length;
 const scenes = new Set(keys.map(k => k.split('|')[0].replace(/-[br]\d+(-p\d+)?$/, '')));
 const jobs = new Set(keys.map(k => k.split('|')[0]));
 
-const mean = xs => xs.reduce((s, x) => s + x, 0) / xs.length;
 const av = keys.map(k => a.get(k)), bv = keys.map(k => b.get(k));
 
 const N = 5;

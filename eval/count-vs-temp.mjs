@@ -33,6 +33,7 @@ import { readFileSync, writeFileSync, existsSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 import { buildKeySuggest, parseKeyList, STUDIO_SUGGEST_OPTS } from '../extension/keyword-suggest.mjs';
 import { countKey } from '../extension/matcher.mjs';
+import { mean } from './metrics.mjs';
 
 const HERE = new URL('.', import.meta.url).pathname;
 const OLLAMA = process.env.OLLAMA_URL ?? 'http://localhost:11434';
@@ -111,7 +112,6 @@ for (const p of prompts) {
 }
 
 // --- score ---------------------------------------------------------------
-const mean = xs => (xs.length ? xs.reduce((a, b) => a + b, 0) / xs.length : NaN);
 const rows = [];
 for (const [arm, M] of Object.entries(arms)) {
     const single = [], singleRef = [], uni = [], uniRef = [], prec = [], att = [];

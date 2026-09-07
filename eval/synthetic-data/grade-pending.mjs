@@ -36,6 +36,7 @@ import { archiveContract, contractBody } from './contract.mjs';
 import { dirname, resolve as resolvePath } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { openBundle, passKey, raterParts, setGrades } from '../../extension/grading.mjs';
+import { arg } from '../metrics.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const EVAL = resolvePath(HERE, '..');
@@ -44,7 +45,6 @@ const CONTRACT = resolvePath(EVAL, '..', '.claude', 'agents', 'scene-relevance.m
 
 const argv = process.argv.slice(2);
 const cmd = argv[0];
-const arg = (k, d = null) => { const i = argv.indexOf(k); return i >= 0 ? argv[i + 1] : d; };
 const WRITE = argv.includes('--write');
 
 if (cmd !== 'build' && cmd !== 'merge') {
@@ -53,7 +53,7 @@ if (cmd !== 'build' && cmd !== 'merge') {
     process.exit(2);
 }
 
-const JOBS = resolvePath(arg('--jobs', resolvePath(EVAL, 'grade-jobs')));
+const JOBS = resolvePath(arg(argv, '--jobs', resolvePath(EVAL, 'grade-jobs')));
 const US = String.fromCharCode(31);
 // Trimmed because the judge now ECHOES the book string from its prompt rather than copying it out of a
 // file it read, and one already came back a trailing space short. Only the match key is trimmed — a
@@ -83,11 +83,11 @@ const contractHash = existsSync(CONTRACT)
 // tiebreak is. `build --run <label>` stamps the job, and merge appends `#<label>` to the pass id, so
 // the third verdict lands beside the first two instead of colliding with them, and still cannot be
 // merged twice itself.
-const RUN = arg('--run');
+const RUN = arg(argv, '--run');
 
 if (cmd === 'build') {
-    const BATCH = Number(arg('--batch', 16));
-    const ROWS = arg('--rows');
+    const BATCH = Number(arg(argv, '--batch', 16));
+    const ROWS = arg(argv, '--rows');
     mkdirSync(JOBS, { recursive: true });
 
     let files = 0, rows = 0, batches = 0, bytes = 0, dropped = 0, future = 0;
@@ -169,11 +169,11 @@ if (cmd === 'build') {
 }
 
 // ---- merge ----
-const RESULTS = resolvePath(arg('--results', JOBS));
-const MODEL = arg('--model', 'claude-sonnet-5');
+const RESULTS = resolvePath(arg(argv, '--results', JOBS));
+const MODEL = arg(argv, '--model', 'claude-sonnet-5');
 // The reasoning effort the pass ran at. A component of the rater id, not a note beside it: two passes
 // differing only in effort would otherwise collide on the idempotency key and the second be dropped.
-const EFFORT = arg('--effort', '');
+const EFFORT = arg(argv, '--effort', '');
 /** WHO GRADED, as v3 names them: the model, and the rubric that told it what to grade. The pass's REASON
  *  is not part of either — a tiebreak verdict is a third verdict, and the array's order already says so. */
 // WHAT THE RESULT SAYS PRODUCED IT, before what this run was told. grade-local resolves the model against

@@ -7,7 +7,7 @@
 // from a graded sample's embedded books at that sample's own settings and asserts the (hash, uid) multiset
 // matches the collection SillyTavern actually wrote.
 import { buildItems, chunkConfig, cachePath } from './reindex.mjs';
-import { getStringHash, stInstall } from './scene.mjs';
+import { getStringHash, stInstall, evalDataDir } from './scene.mjs';
 import { eq } from './metrics.mjs';
 import { readFileSync, readdirSync, existsSync } from 'node:fs';
 
@@ -109,11 +109,9 @@ eq(cachePath({ primaryBook: 'Book' }, chunkConfig(S), 'bge-m3', 'Book', true, fa
     === cachePath({ primaryBook: 'Book' }, chunkConfig(S), 'bge-m3', 'Book', true), true, 'not asking for --archived leaves the --all path untouched');
 
 // --- ORACLE: rebuild a real sample at its own settings and match what ST actually wrote ---
-// stInstall() walks to the live ST install, so this works from git worktrees too. eval-data/ is
-// gitignored (private captures), so when this checkout has none the canonical checkout's samples are used.
+// stInstall() walks to the live ST install, so this works from git worktrees too.
 const ST = stInstall();
-const LOCAL = new URL('./eval-data/', import.meta.url).pathname;
-const DATA = existsSync(LOCAL) || !ST ? LOCAL : `${ST.root}/public/scripts/extensions/third-party/WorldsApart/eval/eval-data/`;
+const DATA = evalDataDir();
 const resolve = p => ST ? ST.resolve(p) : p;
 let ran = 0;
 for (const file of existsSync(DATA) ? readdirSync(DATA).filter(f => f.endsWith('.json')) : []) {

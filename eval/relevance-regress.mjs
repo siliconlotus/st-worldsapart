@@ -48,7 +48,7 @@
 import { haystackFor, indexPath, isMemory, loadScene, openSample, sceneParams, makeCandidateSet, makeGradeOf, embed, sceneLabel } from './scene.mjs';
 import { ensureIndex, resolveModel } from './reindex.mjs';
 import fs from 'node:fs';
-import { gradeValue, gradeCredit, fbeta, RECALL_WEIGHT, signTest } from './metrics.mjs';
+import { gradeValue, gradeCredit, fbeta, RECALL_WEIGHT, signTest, arg } from './metrics.mjs';
 import { COMMON_WORDS } from '../plugin/commonwords.js';
 import { logisticFit, auc, cumulativeFit, prCurve, reliability, sigmoid } from './logistic.mjs';
 import * as entity from '../extension/entity.mjs';
@@ -59,7 +59,6 @@ import { tokenize } from '../extension/lexical.mjs';
 import { chunkEntry } from '../extension/chunking.mjs';
 
 const argv = process.argv.slice(2);
-const arg = k => { const i = argv.indexOf(k); return i >= 0 ? argv[i + 1] : null; };
 // A .json that is the VALUE of a flag is not a sample — --emit takes one, and without this the file it
 // is about to write is opened as an input bundle. Named flags rather than "anything after a --", or
 // `--lobo scene.json` would silently DROP that scene, which is the worse failure: a wrong sample set
@@ -77,7 +76,7 @@ if (!samples.length) {
 // NO DEFAULT SWEEP. Bare, this fits the shipped configuration once. It used to default to a five-value
 // gazetteerSource sweep, which quintupled every bare run and — since the emits are written inside the
 // per-arm block — left --emit describing whichever arm happened to run last.
-const sweep = arg('--sweep');
+const sweep = arg(argv, '--sweep');
 const SWEPT = sweep ? sweep.slice(0, sweep.indexOf('=')) : 'shipped';
 const valuesRaw = sweep ? sweep.slice(sweep.indexOf('=') + 1) : '';
 // Values arrive as strings from a shell; a numeric parameter swept as "0.5" would silently become a string
@@ -147,22 +146,22 @@ const UNGRADED_NEGATIVE = argv.includes('--ungraded-negative');
 //
 // IT CHANGES THE UNIT THE COEFFICIENTS ARE IN, so a fit under it is only readable against another fit
 // under it — the pooled sd is set by whichever tier brought more rows.
-const STD_BY = arg('--standardise') ?? 'scene';
+const STD_BY = arg(argv, '--standardise') ?? 'scene';
 // THE BETA OF THE SCORE OF RECORD. RECALL_WEIGHT (2) is the shipped definition — recall counts twice,
 // because the cost of missing must-deliver material is higher than the cost of carrying a spare entry.
 // Overridable so the arms can be read at another trade: a design that delivers FEWER is penalised by a
 // high beta whether or not its ordering is worse, and separating those needs the curve, not one number.
-const BETA = Number(arg('--beta') ?? RECALL_WEIGHT);
-if (!Number.isFinite(BETA) || BETA <= 0) { console.error(`--beta must be a positive number, got ${arg('--beta')}`); process.exit(2); }
+const BETA = Number(arg(argv, '--beta') ?? RECALL_WEIGHT);
+if (!Number.isFinite(BETA) || BETA <= 0) { console.error(`--beta must be a positive number, got ${arg(argv, '--beta')}`); process.exit(2); }
 if (!['scene', 'book', 'pooled'].includes(STD_BY)) { console.error(`--standardise must be scene|book|pooled, got ${STD_BY}`); process.exit(2); }
-const RELEVANT_AT = Number(arg('--relevant-at') ?? 3);
+const RELEVANT_AT = Number(arg(argv, '--relevant-at') ?? 3);
 const creditOf = g => (RELEVANT_AT === 2 ? (g >= 2 ? 1 : 0) : gradeCredit(g));
-const AT = arg('--at') === null ? null : Number(arg('--at'));
-const DEGREE = Number(arg('--degree') ?? 1);
+const AT = arg(argv, '--at') === null ? null : Number(arg(argv, '--at'));
+const DEGREE = Number(arg(argv, '--degree') ?? 1);
 // Which signals get a squared term. Empty means all of them — naming a subset is how a term that
 // carries support is tested apart from two that do not, since three added coefficients can lose held
 // out while one of them gains.
-const SQUARE = String(arg('--square') ?? '').split(',').filter(Boolean);
+const SQUARE = String(arg(argv, '--square') ?? '').split(',').filter(Boolean);
 const INTERACT = argv.includes('--interactions');
 // Extra candidate features, off by default: `proper` = shared proper nouns with the scan window,
 // THE FEATURE SET, stated in full. `--features` names every fitted column, in order — there is no base
@@ -170,7 +169,7 @@ const INTERACT = argv.includes('--interactions');
 // differ in exactly that column. `time` = the entry's story-time position; `oracle` = the entry's own
 // relevance rate in its OTHER scenes, a CEILING on any entry-level prior rather than a shippable column.
 const KNOWN_FEATURES = ['cosine', 'text', 'keys', 'properNouns', 'time', 'oracle', 'length', 'density', 'rarity', 'chunkdens'];
-const FEATURE_LIST = String(arg('--features') ?? '').split(',').filter(Boolean);
+const FEATURE_LIST = String(arg(argv, '--features') ?? '').split(',').filter(Boolean);
 if (!FEATURE_LIST.length) { console.error(`--features is required: a comma list of fitted columns, from ${KNOWN_FEATURES.join(',')}`); process.exit(2); }
 for (const f of FEATURE_LIST) if (!KNOWN_FEATURES.includes(f)) { console.error(`--features: unknown feature "${f}" — one of ${KNOWN_FEATURES.join(',')}`); process.exit(2); }
 if (new Set(FEATURE_LIST).size !== FEATURE_LIST.length) { console.error('--features names a column twice'); process.exit(2); }
@@ -179,12 +178,12 @@ const has = f => FEATURE_LIST.includes(f);
 // matrix is built once — so the paired contrast is made between two RUNS, and this is what carries the
 // per-scene numbers between them. Scene names go with it: pairing by index is only safe if both runs
 // kept the same scenes, and that has to be checked rather than assumed.
-const EMIT = arg('--emit');
+const EMIT = arg(argv, '--emit');
 // Every scored row at the best cutoff, delivered flag included — what --emit carries for the paired TEST,
 // this carries for reading the cut. Separate flags because the per-scene F2 vector is small enough to keep
 // forever and this is not.
-const EMIT_ROWS = arg('--emit-rows');
-const EMIT_MODEL = arg('--emit-model');
+const EMIT_ROWS = arg(argv, '--emit-rows');
+const EMIT_MODEL = arg(argv, '--emit-model');
 
 // AN EMIT DESCRIBES ONE ARM. All three are written inside the per-arm block, so a multi-value sweep would
 // leave the file holding whichever arm ran last, silently and with no field saying which.
@@ -196,7 +195,7 @@ if ((EMIT || EMIT_MODEL || EMIT_ROWS) && VALUES.length > 1) {
 // stops the named keys scoring AND keyword-activating, which is what removing them would do. Takes the
 // JSON array `keyword-audit.mjs --json` writes. It UNDERSTATES removal — the terms stay in the
 // gazetteer, where a real edit would also take them out (scene.mjs, scoringKeys).
-const DROP_KEYS = arg('--drop-keys') ? JSON.parse(fs.readFileSync(arg('--drop-keys'), 'utf8')) : null;
+const DROP_KEYS = arg(argv, '--drop-keys') ? JSON.parse(fs.readFileSync(arg(argv, '--drop-keys'), 'utf8')) : null;
 // How the proper-noun overlap is scored. `count` = shared names; `idf` = shared names weighted by
 // log(N/df) over the book's own entries, so a name every entry mentions counts for little and the
 // protagonist stops dominating; `jaccard` = intersection over union, which normalises for how many
@@ -205,18 +204,18 @@ const DROP_KEYS = arg('--drop-keys') ? JSON.parse(fs.readFileSync(arg('--drop-ke
 // REQUIRED when the properNouns feature is in the run. The variants are not interchangeable — idf beats
 // count (F6) — so which one a number was measured under is part
 // of the number, and the harness does not choose it.
-const PROPER_MODE = arg('--proper-nouns');
+const PROPER_MODE = arg(argv, '--proper-nouns');
 // HOW a name is recognised, orthogonal to how a shared one is scored. `regex` is the private ASCII
 // pattern this feature was found with; `entity` is relevance.mjs's own rule, which the entity filter
 // already uses; `span` takes maximal runs of capitalised tokens as one term, so "Brackenmoor Patrol"
 // is a name rather than two.
 // REQUIRED under the same rule. `entity` is properNounsOf via relevance.properNames — the
 // shipped extractor; `entity` beat `regex`, paired (F7).
-const PROPER_EXTRACT = arg('--proper-nouns-extract');
+const PROPER_EXTRACT = arg(argv, '--proper-nouns-extract');
 // WHICH DETECTOR feeds the density column — 'entity' is the shipped properDensity (properNounsOf, no
 // stoplist), 'book' the corpus name test. Separate from --proper-nouns-extract because the two fitted
 // columns can be swapped independently, and sweeping `detector` sets both at once for the full-swap arm.
-const DENSITY_EXTRACT = arg('--density-extract');
+const DENSITY_EXTRACT = arg(argv, '--density-extract');
 const CALIB = argv.includes('--calibration');
 if (has('properNouns') && !['count', 'idf', 'idf-len', 'jaccard', 'gaz'].includes(PROPER_MODE)) {
     console.error(`--proper-nouns is required with the properNouns feature: count|idf|idf-len|jaccard|gaz (got ${PROPER_MODE})`); process.exit(2);
@@ -235,10 +234,10 @@ if (sweep && VALUES.length > 1 && CUTOFF && AT === null) {
 // WHICH BOUNDARY IS THE TARGET. 3 is the project's relevance line and the default; --cut 4 fits the band
 // the anchors reserve for the scene's current subject, which separates far better and is far rarer, so it
 // is the one place AUC and AP disagree loudly enough to be worth reading side by side.
-const CUT = Number(arg('--cut') ?? 3);
-if (!Number.isFinite(CUT)) { console.error(`--cut must be a number, got ${arg('--cut')}`); process.exit(2); }
-const TIER = arg('--tier');
-if (!['all', 'memory', 'reference'].includes(TIER)) { console.error(`--tier is required: all|memory|reference (got ${arg('--tier')})`); process.exit(2); }
+const CUT = Number(arg(argv, '--cut') ?? 3);
+if (!Number.isFinite(CUT)) { console.error(`--cut must be a number, got ${arg(argv, '--cut')}`); process.exit(2); }
+const TIER = arg(argv, '--tier');
+if (!['all', 'memory', 'reference'].includes(TIER)) { console.error(`--tier is required: all|memory|reference (got ${arg(argv, '--tier')})`); process.exit(2); }
 // `pooled` differs from `scene` only by admitting the other tier's rows to the statistics, so with no
 // tier excluded there is nothing for it to admit. Refusing beats returning the shipped fit under a name
 // that claims otherwise.
@@ -263,7 +262,7 @@ if (EMIT_MODEL && !(CUTOFF && LOBO)) {
 }
 // WA_EMBED_MODEL overrides; otherwise the model is the bundle's own record. Neither present is a
 // refusal — the fits are per embedding model, so a run that guessed one would fit, and emit, under it.
-const MODEL = process.env.WA_EMBED_MODEL ?? openSample(samples[0], arg('--arm')).embedModel;
+const MODEL = process.env.WA_EMBED_MODEL ?? openSample(samples[0], arg(argv, '--arm')).embedModel;
 if (!MODEL) { console.error(`${samples[0]} records no embedModel — set WA_EMBED_MODEL`); process.exit(2); }
 const OLLAMA = process.env.OLLAMA_URL ?? 'http://localhost:11434';
 
@@ -511,7 +510,7 @@ const queryVec = async (S, name, value, em) => {
     // cheap next to the embed call it would otherwise repeat.
     const loaded = [];
     for (const path of samples) {
-        const S = openSample(path, arg('--arm'));
+        const S = openSample(path, arg(argv, '--arm'));
         if (!S.candidates?.length) { console.error(`${path}: logs no candidates`); process.exit(2); }
         // THROUGH resolveModel, like the sweep's own queryVec above. It sent the raw spec to ollama and
         // applied no task prefix, so a server-stemmed model was an unknown ollama name and a

@@ -16,8 +16,8 @@
 //   node .../cost-curve.mjs <sample.json> [...] --fits scene=<dir>,book=<dir> [--cutoffs 0.05,0.10,…]
 import { indexPath, loadScene, openSample, sceneParams, scoreScene, embed, sceneLabel } from './scene.mjs';
 import { resolveModel } from './reindex.mjs';
+import { mean } from './metrics.mjs';
 
-const mean = xs => (xs.length ? xs.reduce((a, b) => a + b, 0) / xs.length : NaN);
 
 const argv = process.argv.slice(2);
 const arg = (f, d = null) => { const i = argv.indexOf(f); return i >= 0 && argv[i + 1] ? argv[i + 1] : d; };

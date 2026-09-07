@@ -54,26 +54,25 @@
 //        [--tokenizer gpt-3.5-turbo]
 import fs from 'node:fs';
 import { haystackFor, indexPath, isMemory, loadScene, makeCandidateSet, makeGradeOf, openSample, sceneParams, makeLayoutOrder, sceneLabel } from './scene.mjs';
-import { gradeCredit, fbeta, RECALL_WEIGHT } from './metrics.mjs';
+import { gradeCredit, fbeta, RECALL_WEIGHT, arg } from './metrics.mjs';
 import { offlineTokenCounter } from './tokens.mjs';
 import { ensureIndex, resolveModel } from './reindex.mjs';
 
 const argv = process.argv.slice(2);
-const arg = k => { const i = argv.indexOf(k); return i >= 0 ? argv[i + 1] : null; };
 const VALUED = new Set(['--tier', '--budget', '--core-top-k', '--core-order', '--core-depth', '--core-uids', '--tokenizer']);
 const samples = argv.filter((a, i) => a.endsWith('.json') && !a.startsWith('--') && !VALUED.has(argv[i - 1]));
 if (!samples.length) {
     console.error('need at least one sample: node core-compare.mjs <sample.json> [more.json ...] [--budget 25083]');
     process.exit(2);
 }
-const TIER = arg('--tier') ?? 'memory';
+const TIER = arg(argv, '--tier') ?? 'memory';
 if (!['memory', 'reference', 'all'].includes(TIER)) { console.error(`--tier must be memory|reference|all, got ${TIER}`); process.exit(2); }
-const BUDGETS = String(arg('--budget') ?? '5000,10000,15000,25000,40000').split(',').map(Number).filter(Number.isFinite);
-const TOP_K = Number(arg('--core-top-k') ?? 5);
+const BUDGETS = String(arg(argv, '--budget') ?? '5000,10000,15000,25000,40000').split(',').map(Number).filter(Number.isFinite);
+const TOP_K = Number(arg(argv, '--core-top-k') ?? 5);
 // A hand-tuned `order` is one author's workaround; uid is story order on an STMB book and stands in for a
 // book nobody tuned. Both extremes are offered because an untuned book leaves every order equal, and which
 // way the tie falls is ST's business rather than something to assume — the direction is worth real F2 (R14).
-const CORE_ORDER = arg('--core-order') ?? 'oldest';
+const CORE_ORDER = arg(argv, '--core-order') ?? 'oldest';
 const ORDERS = {
     order: (a, b) => (Number(b.entry?.order ?? 0) - Number(a.entry?.order ?? 0)) || (Number(a.uid) - Number(b.uid)),
     newest: (a, b) => Number(b.uid) - Number(a.uid),
@@ -85,10 +84,10 @@ if (!ORDERS[CORE_ORDER]) { console.error(`--core-order must be order|newest|olde
 // CORE SCANS ITS OWN DEPTH. ST's world_info_depth defaults to 2 against WA's messageDepth of 10, and a
 // shallower window fires far fewer keys — which is most of what separates a stock install from a tuned
 // one. Scoring core's keyword route on WA's window would hand it activations it never had.
-const CORE_DEPTH = arg('--core-depth') === null ? 2 : Number(arg('--core-depth'));
-const CORE_UIDS = arg('--core-uids') ? new Set(String(arg('--core-uids')).split(',').map(Number)) : null;
+const CORE_DEPTH = arg(argv, '--core-depth') === null ? 2 : Number(arg(argv, '--core-depth'));
+const CORE_UIDS = arg(argv, '--core-uids') ? new Set(String(arg(argv, '--core-uids')).split(',').map(Number)) : null;
 const MODEL = process.env.WA_EMBED_MODEL ?? null;   // per-sample: the bundle's own record unless overridden
-const tk = offlineTokenCounter(arg('--tokenizer') ?? 'gpt-3.5-turbo');
+const tk = offlineTokenCounter(arg(argv, '--tokenizer') ?? 'gpt-3.5-turbo');
 
 const mean = a => a.reduce((x, y) => x + y, 0) / (a.length || 1);
 /** Walk in the given order, taking what fits. Every cap in both systems is a prefix cut, so this is it. */

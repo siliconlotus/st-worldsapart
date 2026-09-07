@@ -14,6 +14,8 @@
 // scored before anyone spends days on it.
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { isRegexKey } from '../extension/matcher.mjs';
+// The threshold has an authoritative home; a restated 0.50 here is how this and the in-app audit drift.
+import { KEY_BOOK_COMMON as BOOK_COMMON } from '../extension/keyword-audit.mjs';
 import { stInstall } from './scene.mjs';
 
 // The install is LOCATED, never named: an absolute path here is one machine's, and this file carried
@@ -30,8 +32,6 @@ for (const [what, path] of [['index', INDEX], ['lorebook', LORE]]) {
     console.error('usage: node keyword-audit.mjs <path/to/index.json> <path/to/lorebook.json> [--json out.json]');
     process.exit(2);
 }
-const BOOK_COMMON = 0.50;  // matches KEY_BOOK_COMMON in extension/keyword-audit.mjs
-
 const idx = JSON.parse(readFileSync(INDEX, 'utf8'));
 const lb = JSON.parse(readFileSync(LORE, 'utf8'));
 

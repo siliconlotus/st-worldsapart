@@ -1,7 +1,7 @@
 // Self-check for the paired estimator (metrics.mjs signTest) and scene.mjs's arm-reuse guard. The scoring
 // half needs a vector index so it can't run here; what CAN be pinned offline is the statistic every claim
 // about a default will rest on, and the exact p-values that set the floor on what single-digit n can say.
-import { eq, eqNear, signTest, gradeCredit, fbeta, RECALL_WEIGHT } from './metrics.mjs';
+import { eq, eqNear, signTest, gradeCredit, fbeta, RECALL_WEIGHT, jaccard, spearman, qwk, topComponents, projectOut } from './metrics.mjs';
 import { sceneParams, ndcg, dcg, nrm, wiTitle, makeGradeOf, makeKeywordScore, scoreScene, tierRecall, bookFingerprint } from './scene.mjs';
 import { rowKey } from '../extension/grading.mjs';
 
@@ -162,7 +162,6 @@ eq(kwP({ vectorized: true, key: [] }, 'meet me at the villa', 1.2), 0, 'an entry
 // --- scene independence (jaccard on relevant sets) ---
 // Pseudo-replication is the failure: two near-identical scenes counted as two draws invent power the data
 // does not have, and the sign test cannot detect it on its own.
-const { jaccard } = await import('./metrics.mjs');
 eq(jaccard([1, 2, 3], [1, 2, 3]), 1, 'identical relevant sets -> 1');
 eq(jaccard([1, 2], [3, 4]), 0, 'disjoint relevant sets -> 0');
 eq(jaccard([1, 2, 3, 4], [3, 4, 5, 6]), 1 / 3, 'half-shared -> |int|/|union|');
@@ -176,7 +175,6 @@ eq(jaccard([rowKey({ book: 'A', uid: 1 })], [rowKey({ book: 'B', uid: 1 })]), 0,
 // --- Spearman, tie-corrected (metrics.mjs) ---
 // Graded pools are half zeros, so tie handling is not a nicety: with the shortcut formula the coefficient
 // depends on how the sort broke ties, i.e. on array order.
-const { spearman } = await import('./metrics.mjs');
 eq(spearman([1, 2, 3], [1, 2, 3]), 1, 'identical order -> +1');
 eq(spearman([1, 2, 3], [3, 2, 1]), -1, 'reversed order -> -1');
 eq(Number.isNaN(spearman([1, 1, 1], [1, 2, 3])), true, 'no variance -> NaN, not a fake 0');
@@ -236,7 +234,6 @@ eq(fbeta(0, 0, 2), 0, 'no signal either way is 0, not NaN');
 eq(fbeta(0, 1, 2), 0, 'zero precision cannot be rescued by recall');
 
 // --- qwk: hand-computed matrices, because a self-consistent formula proves nothing about the formula.
-const { qwk } = await import('./metrics.mjs');
 eq(qwk([[0, 0], [1, 1], [2, 2], [3, 3], [4, 4]]), 1, 'identical grades -> 1');
 // a=[0,0,4,4] b=[0,4,0,4]: numerator 2, expected 2, so exactly chance.
 eq(qwk([[0, 0], [0, 4], [4, 0], [4, 4]]), 0, 'grades independent of each other -> 0');
@@ -337,7 +334,6 @@ eq(twice.entries.length, 2, '...and the grade list is stable across a second pas
 // Mean-centering removes one direction, and most of it is shared across books rather than the book's own.
 // This is the machinery for removing several. Checked on a synthetic corpus with KNOWN axes, because a power iteration that has
 // silently converged to the wrong direction still returns a unit vector and still scores.
-const { topComponents, projectOut } = await import('./metrics.mjs');
 const V = (...xs) => ({ vector: xs });
 // Spread along axis 0 dominates, axis 1 is second, axis 2 is flat. Mean is deliberately non-zero so the
 // components are of the CENTERED data, which is what the arm subtracts.
@@ -372,9 +368,9 @@ eq(JSON.stringify([...topComponents(pts, 2, MU)[0]]), JSON.stringify([...topComp
 // wrong silently: a hit across MODELS hands back a vector from another embedding space, and a torn last
 // line from a killed append takes the whole cache down with it on the next read.
 {
-    const { embed } = await import('./scene.mjs');
+    // queryCachePath is the implementation's own, so this cannot drift from it.
+    const { embed, queryCachePath: path } = await import('./scene.mjs');
     const { appendFileSync, writeFileSync, existsSync, unlinkSync } = await import('node:fs');
-    const { queryCachePath: path } = await import('./scene.mjs');   // the implementation's own, so this cannot drift from it
     const A = 'wa-check-model-a', B = 'wa-check-model-b';
     for (const l of [A, B]) if (existsSync(path(l))) unlinkSync(path(l));
     // A fake embedder is not reachable from here, so drive it through the cache directly: seed one label,

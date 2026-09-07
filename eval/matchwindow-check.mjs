@@ -3,6 +3,13 @@
 // conjunctions (both signs), and segmentation never merges texts that were separate.
 import { keywordScore, repeatCurveOf, scanSegments, scanWindow, segment } from '../extension/matcher.mjs';
 import { eq } from './metrics.mjs';
+// Dynamic, because keyword-audit.mjs pulls the ST-coupled half in at module scope on some branches.
+const { buildKeyPruneScan } = await import('../extension/keyword-audit.mjs');
+// The audit options every block below classifies under — one set, so a block cannot silently differ.
+const opts = {
+    scanKeyword: true, scanVectorized: true, scanConstant: true, includeInactive: true,
+    pruneUnattested: true, pruneCommon: true, pruneShort: true, ignoreProper: false, bookCommon: 0.5, minLength: 4,
+};
 
 const cfg = { k1: 1.2, caseSensitiveDefault: false, wholeWordsDefault: false };
 const score = (entry, text) => keywordScore(entry, text, entry.key, cfg).score;
@@ -78,11 +85,6 @@ console.log('ok   matchWindow: scan is the old behaviour, narrower settings scop
 // A LITERAL key is slice-invariant either way — measured over the books on disk, no literal key's
 // df or occurrence total moves, because no literal spans a paragraph break (K5).
 {
-    const { buildKeyPruneScan } = await import('../extension/keyword-audit.mjs');
-    const opts = {
-        scanKeyword: true, scanVectorized: true, scanConstant: true, includeInactive: true,
-        pruneUnattested: true, pruneCommon: true, pruneShort: true, ignoreProper: false, bookCommon: 0.5, minLength: 4,
-    };
     const book = {
         entries: {
             0: {
@@ -110,11 +112,7 @@ console.log('ok   the audit segments like the runtime, and literals are slice-in
 // Chat evidence reaching the CLASSIFIER, not the cleanup display layer — so the Explorer's chips,
 // which colour from reasonOf/severityOf, carry it too. Absent chatRate must behave exactly as before.
 {
-    const { buildKeyPruneScan, KEY_CHAT_COMMON } = await import('../extension/keyword-audit.mjs');
-    const opts = {
-        scanKeyword: true, scanVectorized: true, scanConstant: true, includeInactive: true,
-        pruneUnattested: true, pruneCommon: true, pruneShort: true, ignoreProper: false, bookCommon: 0.5, minLength: 4,
-    };
+    const { KEY_CHAT_COMMON } = await import('../extension/keyword-audit.mjs');
     // `mother` is in COMMON_WORDS; `zzznope` is in neither the book's text nor any word list.
     const book = { entries: { 0: { uid: 0, key: ['mother', 'zzznope'], content: 'Nothing relevant here.' } } };
     const run = chatScan => {
@@ -143,11 +141,6 @@ console.log('ok   chat evidence reaches the classifier and conditions severity')
 // visibleEntries(), so a filter change leaves classified keys the scan never sent — and calling those
 // "not in entry text or chat" is the strong claim on evidence nobody gathered.
 {
-    const { buildKeyPruneScan } = await import('../extension/keyword-audit.mjs');
-    const opts = {
-        scanKeyword: true, scanVectorized: true, scanConstant: true, includeInactive: true,
-        pruneUnattested: true, pruneCommon: true, pruneShort: true, ignoreProper: false, bookCommon: 0.5, minLength: 4,
-    };
     const book = { entries: { 0: { uid: 0, key: ['zzznope'], content: 'Nothing relevant.' } } };
     const why = chatScan => {
         const s = buildKeyPruneScan(book, opts, new Set(), { chatScan });

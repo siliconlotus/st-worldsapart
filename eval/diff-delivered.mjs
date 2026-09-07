@@ -16,18 +16,18 @@
 // Usage (any cwd):
 //   node eval/diff-delivered.mjs <baseline-rows.json> <arm-rows.json> [--limit 40] [--scene <substr>] [--scene-chars 700]
 import fs from 'node:fs';
+import { arg } from './metrics.mjs';
 
 const argv = process.argv.slice(2);
-const arg = (k, d = null) => { const i = argv.indexOf(k); return i >= 0 ? argv[i + 1] : d; };
 const files = argv.filter((a, i) => a.endsWith('.json') && !['--limit', '--scene', '--scene-chars'].includes(argv[i - 1]));
 if (files.length !== 2) {
     console.error('usage: node eval/diff-delivered.mjs <baseline-rows.json> <arm-rows.json> [--limit 40] [--scene <substr>] [--scene-chars 700]');
     process.exit(2);
 }
-const LIMIT = Number(arg('--limit', 40));
-const ONLY = arg('--scene');
+const LIMIT = Number(arg(argv, '--limit', 40));
+const ONLY = arg(argv, '--scene');
 // How much of the scene text to print above its rows. The tail, because that is the current turn.
-const QCHARS = Number(arg('--scene-chars', 700));
+const QCHARS = Number(arg(argv, '--scene-chars', 700));
 const [A, B] = files.map(p => JSON.parse(fs.readFileSync(p, 'utf8')));
 const label = x => (x.with?.length ? x.with.join('+') : 'three signals');
 

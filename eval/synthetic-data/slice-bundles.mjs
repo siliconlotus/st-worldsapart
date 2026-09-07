@@ -26,10 +26,10 @@ import { readFileSync, writeFileSync, existsSync } from 'node:fs';
 import { dirname, resolve as resolvePath, basename } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { isDurable } from '../../extension/grading.mjs';
+import { arg } from '../metrics.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const argv = process.argv.slice(2);
-const arg = (k, d = null) => { const i = argv.indexOf(k); return i >= 0 ? argv[i + 1] : d; };
 
 const CLI = import.meta.url === `file://${process.argv[1]}`;
 const LIST = argv.find(a => !a.startsWith('--') && !['--data', '--out'].includes(argv[argv.indexOf(a) - 1]));
@@ -37,8 +37,8 @@ if (CLI && !LIST) {
     console.error('usage: node eval/synthetic-data/slice-bundles.mjs <shortlist.json> [--data <dir>] [--out <file>]');
     process.exit(2);
 }
-const DATA = resolvePath(arg('--data', resolvePath(HERE, '..', 'eval-data')));
-const OUT = resolvePath(arg('--out', resolvePath(DATA, 'review-pack.json')));
+const DATA = resolvePath(arg(argv, '--data', resolvePath(HERE, '..', 'eval-data')));
+const OUT = resolvePath(arg(argv, '--out', resolvePath(DATA, 'review-pack.json')));
 
 /**
  * One bundle cut to `keys` (a Set of `world` + `uid` strings).

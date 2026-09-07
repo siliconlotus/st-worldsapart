@@ -27,9 +27,9 @@ import { dirname, basename } from 'node:path';
 import { entryKey } from '../extension/content-lexical.mjs';
 import { scoreScene, loadScene, indexPath, openSample, sceneParams, embed, sceneLabel } from './scene.mjs';
 import { ensureIndex, resolveModel } from './reindex.mjs';
+import { arg } from './metrics.mjs';
 
 const argv = process.argv.slice(2);
-const arg = k => { const i = argv.indexOf(k); return i >= 0 ? argv[i + 1] : null; };
 const samples = argv.filter(a => a.endsWith('.json') && !a.startsWith('--'));
 
 // The doses live pooling can't reach. Same values as param-screen.mjs's ladder — they have to match, or the
@@ -40,32 +40,27 @@ const CHUNK_ARMS = {
     'chunkMode=length': { chunkMode: 'length' },
 };
 
-// QUERY-TIME arms, which need no index at all — they re-rank the same collection. Live pooling CAN reach
-// these, so they are not in the default set; they are here because a pool must be extended for the arms
-// somebody is actually going to score, and an offline rescore of an edited book is exactly the case where
-// the live capture no longer covers them. Names match param-screen.mjs so a pool and a screen agree.
-const PARAM_ARMS = {
-    'KEYW=0': { KEYW: 0 }, 'KEYW=0.5': { KEYW: 0.5 }, 'KEYW=1': { KEYW: 1 }, 'KEYW=2': { KEYW: 2 }, 'KEYW=3': { KEYW: 3 },
-    'LEXW=0.5': { LEXW: 0.5 }, 'LEXW=1': { LEXW: 1 }, 'LEXW=3': { LEXW: 3 },
-};
+// NO QUERY-TIME ARMS. The KEYW/LEXW set here described the RRF fusion, which no longer exists — nothing
+// reads either param, so those arms could only ever surface the baseline's own rows. Chunk arms are what
+// live pooling cannot reach, and they are the whole of this tool's default set.
 
 if (!samples.length) {
     console.error('need at least one sample: node pool-extend.mjs <sample.json> [more.json ...] [--arms a,b] [--k 10] [--out-dir <dir>] [--dry]');
     console.error('writes <name>-pending.json next to each sample: the entries an offline arm would surface that nobody has graded.');
     process.exit(2);
 }
-const picked = arg('--arms') ? String(arg('--arms')).split(',').map(x => x.trim()).filter(Boolean) : Object.keys(CHUNK_ARMS);
-const unknown = picked.filter(a => !CHUNK_ARMS[a] && !PARAM_ARMS[a]);
-if (unknown.length) { console.error(`unknown arm(s): ${unknown.join(', ')} — known: ${[...Object.keys(CHUNK_ARMS), ...Object.keys(PARAM_ARMS)].join(', ')}`); process.exit(2); }
+const picked = arg(argv, '--arms') ? String(arg(argv, '--arms')).split(',').map(x => x.trim()).filter(Boolean) : Object.keys(CHUNK_ARMS);
+const unknown = picked.filter(a => !CHUNK_ARMS[a]);
+if (unknown.length) { console.error(`unknown arm(s): ${unknown.join(', ')} — known: ${Object.keys(CHUNK_ARMS).join(', ')}`); process.exit(2); }
 
-const K = Number(arg('--k') ?? 10);
+const K = Number(arg(argv, '--k') ?? 10);
 // THE MODEL IS A SPEC, resolved once (reindex.mjs resolveModel). The LABEL names collections and bases;
 // the rest says how to call the model, including the task prefix a prefix-trained family needs. A bare
 // name is an ollama model.
 // FALLS BACK TO THE BUNDLE'S OWN MODEL, not to a hardcoded name. A bundle records the model its
 // collections are keyed under, and hardcoding one meant a corpus that had moved on still resolved the old
 // collections — which exist, so nothing errored, it just quietly measured the previous model (H3).
-const MODEL = process.env.WA_EMBED_MODEL ?? openSample(samples[0], arg('--arm')).embedModel;
+const MODEL = process.env.WA_EMBED_MODEL ?? openSample(samples[0], arg(argv, '--arm')).embedModel;
 if (!MODEL) { console.error(`${samples[0]} records no embedModel — set WA_EMBED_MODEL`); process.exit(2); }
 const EM = resolveModel(MODEL);
 const OLLAMA = process.env.OLLAMA_URL ?? 'http://localhost:11434';
@@ -74,7 +69,7 @@ const DRY = argv.includes('--dry');
 (async () => {
     let grandTotal = 0;
     for (const path of samples) {
-        const S = openSample(path, arg('--arm'));
+        const S = openSample(path, arg(argv, '--arm'));
         if (!Object.keys(S.books?.[S.primaryBook] ?? {}).length) { console.error(`${path}: no embedded entries for "${S.primaryBook}" — a bundle that does not embed its books is malformed`); continue; }
         // `all` FROM THE SCENE'S OWN PARAMS, which default it on: a denseAllEntries scene cannot be
         // scored against a vectorized-only build, so resolving without it named a file loadScene refused.
@@ -102,11 +97,9 @@ const DRY = argv.includes('--dry');
         note(base.unjudgedRows, 'baseline');
 
         for (const arm of picked) {
-            // A query-time arm re-ranks the collection the scene already loaded; a chunk arm needs its own.
-            const r = PARAM_ARMS[arm]
-                ? await scoreScene({ sample: S, overrides: PARAM_ARMS[arm], k: K, scene, qv })
-                : await scoreScene({ sample: S, overrides: {}, k: K, model: MODEL, ollama: OLLAMA, qv,
-                    index: (await ensureIndex(S, { overrides: CHUNK_ARMS[arm], model: EM.model, label: EM.label, endpoint: EM.endpoint, url: EM.endpoint === 'ollama' ? OLLAMA : EM.url, ollama: OLLAMA, log: () => {} })).path });
+            // Every arm here changes what gets EMBEDDED, so each needs its own collection.
+            const r = await scoreScene({ sample: S, overrides: {}, k: K, model: MODEL, ollama: OLLAMA, qv,
+                index: (await ensureIndex(S, { overrides: CHUNK_ARMS[arm], model: EM.model, label: EM.label, endpoint: EM.endpoint, url: EM.endpoint === 'ollama' ? OLLAMA : EM.url, ollama: OLLAMA, log: () => {} })).path });
             note(r.unjudgedRows, arm);
             process.stdout.write(`\r  ${sceneLabel(S) || basename(path)}: scored ${arm}                    `);
         }
@@ -120,7 +113,7 @@ const DRY = argv.includes('--dry');
         if (!rows.length) { console.log('  pool already covers every dose — chunk arms on this scene are measurements, not lower bounds.'); continue; }
 
         if (DRY) continue;
-        const outDir = arg('--out-dir') ?? dirname(path);
+        const outDir = arg(argv, '--out-dir') ?? dirname(path);
         const out = `${outDir}/${basename(path, '.json')}-pending.json`;
         mkdirSync(outDir, { recursive: true });
         writeFileSync(out, `${JSON.stringify({

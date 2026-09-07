@@ -20,6 +20,7 @@
 // Flags: --model <id>  --concurrency 8  --out <file>  --variants all|shipped  --score-only
 import { readFileSync, appendFileSync, existsSync } from 'node:fs';
 import { buildKeySuggest, parseKeyList, STUDIO_SUGGEST_OPTS } from '../extension/keyword-suggest.mjs';
+import { mean, fmt3 as fmt } from './metrics.mjs';
 
 const HERE = new URL('.', import.meta.url).pathname;
 const BASE = process.env.NANO_BASE_URL ?? 'https://nano-gpt.com/api/v1';
@@ -141,10 +142,8 @@ if (!has('score-only')) {
 }
 
 // --- score ----------------------------------------------------------------
-const mean = xs => (xs.length ? xs.reduce((a, b) => a + b, 0) / xs.length : NaN);
 const med = xs => { const s = [...xs].sort((a, b) => a - b); return s.length ? s[Math.floor(s.length / 2)] : NaN; };
 const F = (p, r, b) => { const b2 = b * b; return (p + r) ? (1 + b2) * p * r / (b2 * p + r) : 0; };
-const fmt = x => (Number.isFinite(x) ? x.toFixed(3) : '—');
 
 const models = [...new Set(rows.map(r => r.model))];
 for (const m of models) {

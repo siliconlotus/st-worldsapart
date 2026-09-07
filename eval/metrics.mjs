@@ -1,7 +1,8 @@
-// metrics.mjs — the statistics the eval tools share, plus the one-line assertion the check scripts share.
+// metrics.mjs — the statistics the eval tools share, plus the one-line assertion the check scripts share
+// and the argv reader the CLI tools share.
 
 /**
- * Exact-equality console check: "ok <label>" / "FAIL <label>: got (want …)".
+ * "ok <label>" / "FAIL <label>: got (want …)".
  *
  * A mismatch sets `process.exitCode`, so a FAILING CHECK AND A CRASH ARE THE SAME SIGNAL and the
  * suite is `for f in eval/*-check.mjs; do node "$f" || …; done`. It used to print FAIL and exit 0,
@@ -11,18 +12,30 @@
  * `exitCode`, not `exit()`: the run finishes and reports every failure, rather than stopping at the
  * first one.
  */
-export const eq = (got, want, label) => {
-    const ok = got === want;
+const report = (ok, got, want, label) => {
     if (!ok) process.exitCode = 1;
     console.log(`${ok ? 'ok  ' : 'FAIL'} ${label}: ${got}${ok ? '' : ` (want ${want})`}`);
 };
 
+/** Exact-equality console check. */
+export const eq = (got, want, label) => report(got === want, got, want, label);
+
 /** eq for floats. Same reporting and the same exit signal, `===` swapped for a tolerance. */
-export const eqNear = (got, want, label, tol = 1e-9) => {
-    const ok = Math.abs(got - want) < tol;
-    if (!ok) process.exitCode = 1;
-    console.log(`${ok ? 'ok  ' : 'FAIL'} ${label}: ${got}${ok ? '' : ` (want ${want})`}`);
-};
+export const eqNear = (got, want, label, tol = 1e-9) => report(Math.abs(got - want) < tol, got, want, label);
+
+/**
+ * The value after `k` in `argv`, or `d`. Absent flag and flag-with-no-value are both the default, so a
+ * harness REFUSING when a required setting is unsupplied tests one thing (CLAUDE.md, *A harness may
+ * contain no literal that has an authoritative home*). `argv` is passed rather than read off
+ * `process.argv` here, because the callers disagree about whether it is sliced.
+ */
+export const arg = (argv, k, d = null) => { const i = argv.indexOf(k); return i >= 0 ? argv[i + 1] : d; };
+
+/** Arithmetic mean, NaN on empty — an absent number rather than a zero, which would read as a result. */
+export const mean = xs => (xs.length ? xs.reduce((a, b) => a + b, 0) / xs.length : NaN);
+
+/** Table cell for a score: three decimals, em dash when there is no number to print. */
+export const fmt3 = x => (Number.isFinite(x) ? x.toFixed(3) : '—');
 
 /**
  * PRECISION CREDIT for one delivered entry, on the 0-4 anchors (extension/grading.mjs GRADE_ANCHORS).
@@ -94,15 +107,15 @@ export const signTest = (deltas, eps = 1e-9) => {
     const minus = d.filter(x => x < -eps).length;
     const ties = d.length - plus - minus;
     const n = plus + minus;
-    const mean = d.length ? d.reduce((a, b) => a + b, 0) / d.length : NaN;
-    if (!n) return { plus, minus, ties, n, p: 1, mean, consistent: false };
+    const mu = mean(d);
+    if (!n) return { plus, minus, ties, n, p: 1, mean: mu, consistent: false };
     // P(X >= k) under Binomial(n, 1/2), doubled for two-sided and capped — exact integer binomials, since n
     // is single digit and floating-point factorials would be silly here.
     const choose = (a, b) => { let r = 1; for (let i = 0; i < b; i++) r = (r * (a - i)) / (i + 1); return Math.round(r); };
     const k = Math.max(plus, minus);
     let tail = 0;
     for (let i = k; i <= n; i++) tail += choose(n, i);
-    return { plus, minus, ties, n, p: Math.min(1, 2 * tail / 2 ** n), mean, consistent: n > 1 && (plus === 0 || minus === 0) };
+    return { plus, minus, ties, n, p: Math.min(1, 2 * tail / 2 ** n), mean: mu, consistent: n > 1 && (plus === 0 || minus === 0) };
 };
 
 /**

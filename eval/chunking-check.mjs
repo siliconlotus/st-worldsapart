@@ -17,7 +17,7 @@
 import { readFileSync, readdirSync, existsSync } from 'node:fs';
 import { chunkEntry, splitRecursive } from '../extension/chunking.mjs';
 import { eq } from './metrics.mjs';
-import { stInstall, openSample, indexPath, sceneLabel } from './scene.mjs';
+import { evalDataDir, openSample, indexPath, sceneLabel } from './scene.mjs';
 import { chunkConfig } from './reindex.mjs';
 
 const MODEL = process.env.WA_EMBED_MODEL ?? 'bge-m3';
@@ -59,13 +59,10 @@ eq(JSON.stringify(chunkEntry('a\n\nb', { chunkMode: 'length', chunkSize: 800, mi
     JSON.stringify(splitRecursive('a\n\nb', 800)), "'length' mode is splitRecursive verbatim, floor unused");
 
 // --- THE ORACLE: do we reproduce indexes that already exist? ---
-// A sample records `index` relative to the ST ROOT, because the grid tools are run from there. A check is
-// run from wherever the suite loop happens to sit, so stInstall() locates the live install instead —
-// otherwise the oracle silently skips and the port loses the only evidence that it is exact. eval-data/ is
-// gitignored (private captures), so when this checkout has none the canonical checkout's samples are used.
-const ST = stInstall();
-const LOCAL = new URL('./eval-data/', import.meta.url).pathname;
-const DATA = existsSync(LOCAL) || !ST ? LOCAL : `${ST.root}/public/scripts/extensions/third-party/WorldsApart/eval/eval-data/`;
+// A sample records `index` relative to the ST ROOT, because the grid tools are run from there; a check is
+// run from wherever the suite loop happens to sit, which is what evalDataDir() resolves — otherwise the
+// oracle silently skips and the port loses the only evidence that it is exact.
+const DATA = evalDataDir();
 const samples = existsSync(DATA) ? readdirSync(DATA).filter(f => f.endsWith('.json')) : [];
 let compared = 0, openable = 0;
 for (const file of samples) {

@@ -51,7 +51,7 @@ let bad = 0;
 for (const file of files) {
     const src = fs.readFileSync(join(ROOT, file), 'utf8');
     let ast;
-    try { ast = parse(src, { ecmaVersion: 'latest', sourceType: 'module', allowAwaitOutsideFunction: true, allowReturnOutsideFunction: true }); }
+    try { ast = parse(src, { ecmaVersion: 'latest', sourceType: 'module', locations: true, allowAwaitOutsideFunction: true, allowReturnOutsideFunction: true }); }
     catch (e) { console.log(`PARSE ${file}: ${e.message}`); continue; }
 
     const names = new Set();
@@ -95,8 +95,7 @@ for (const file of files) {
         for (const k of Object.keys(node)) { if (k === 'loc' || k === 'range') continue; collect(node[k]); }
     };
     collect(ast);
-    const withLoc = parse(src, { ecmaVersion: 'latest', sourceType: 'module', locations: true, allowAwaitOutsideFunction: true, allowReturnOutsideFunction: true });
-    walk(withLoc, null);
+    walk(ast, null);
 
     const missing = [...used].filter(([n]) => !names.has(n) && !GLOBALS.has(n));
     for (const [n, line] of missing) { console.log(`FAIL ${file}:${line} — \`${n}\` is used but declared nowhere in the file and not imported`); bad++; }

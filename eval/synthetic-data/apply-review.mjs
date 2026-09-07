@@ -27,6 +27,7 @@ const HEAD_BYTES = 4096;
 import { basename, dirname, resolve as resolvePath } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { openBundle, passKey, setGrades } from '../../extension/grading.mjs';
+import { arg } from '../metrics.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 
@@ -142,13 +143,12 @@ export function mergeReview(bundleGrades, sectionGrades, who = {}) {
 // argv is read here, not at module scope: the check imports mergeReview, and a usage guard would exit it.
 if (import.meta.url === `file://${process.argv[1]}`) {
     const argv = process.argv.slice(2);
-    const arg = (k, d = null) => { const i = argv.indexOf(k); return i >= 0 ? argv[i + 1] : d; };
     const WRITE = argv.includes('--write');
     // WHEN THE HUMAN REVIEWED, taken from the review file. This tool's own run time is a FALLBACK and a
     // poor one: a review applied a week later would record the verdict as passed then, and two reviews
     // applied in one invocation would share a stamp and collapse into one pass.
     const RAN_AT = new Date().toISOString();
-    const DATA = resolvePath(arg('--data', resolvePath(HERE, '..', 'eval-data')));
+    const DATA = resolvePath(arg(argv, '--data', resolvePath(HERE, '..', 'eval-data')));
     // No arguments is the normal case: the newest review-*.json across eval-data, Downloads and the cwd.
     // A FLAG'S VALUE IS NOT A POSITIONAL. `--user <uuid>` read the uuid as the review path until this
     // listed every flag that takes one; `--data` alone was special-cased, which is how the next flag added
@@ -180,7 +180,7 @@ if (import.meta.url === `file://${process.argv[1]}`) {
     // overrides for a review exported before it did; there is no empty default, because a verdict signed as
     // nobody is neither attributable nor idempotent (its pass key is rater + instant, so it matches nothing
     // and the whole review appends again on the next run).
-    const USER = arg('--user', review.user ?? '');
+    const USER = arg(argv, '--user', review.user ?? '');
     if (!USER) {
         console.error(`${REVIEW} records no rater, and one cannot be inferred — pass --user <your rater id>`);
         console.error('  it is the `user` field of a bundle your own /wa-grade produced');
