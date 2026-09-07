@@ -1,8 +1,7 @@
 // keyword-tools.mjs — the ST-coupled half of the lorebook keyword analysis feature: the flag-injecting
-// prune-scan wrapper and the LLM generation plumbing. The pure classifier logic lives in
-// keyword-audit.mjs and the ranker/filter in keyword-suggest.mjs (both ST-free and node-importable,
-// and both carrying the Studio's own option presets); the UI that surfaces it is the Studio
-// (studio.mjs), which replaced the old standalone popup reports.
+// prune-scan wrapper and the LLM generation plumbing. The pure classifier lives in keyword-audit.mjs
+// and the ranker/filter in keyword-suggest.mjs (both ST-free and node-importable, and both carrying the
+// Studio's own option presets); the UI that surfaces it is the Studio (studio.mjs).
 import { generateRaw } from '../../../../../script.js';
 import { extension_settings } from '../../../../extensions.js';
 import { world_info_case_sensitive, world_info_match_whole_words } from '../../../../world-info.js';
@@ -16,10 +15,8 @@ import { buildKeyPrompt, parseKeyList } from './keyword-suggest.mjs';
 /** buildKeyPruneScan with core's world-info match flags injected. A wrapper (not a bound value) so
  * the flags are read at call time — they're live ST settings. */
 export const buildKeyPruneScan = (data, opts, ignoreSet, extra = {}) =>
-    // FORWARD the caller's options. This took a fixed 4th argument and built it here, so everything the
-    // Studio passed — matchWindow, chatRate — was dropped on the floor: the audit ran at the default
-    // match window and with no chat evidence no matter what was gathered, and the only symptom was a
-    // verdict that never changed. ST's globals stay as DEFAULTS, so a caller can still override them.
+    // Forward the caller's options (matchWindow, chatScan): building this object here instead drops them
+    // silently. ST's globals stay as defaults, so a caller can still override them.
     buildKeyPruneScanCore(data, opts, ignoreSet, {
         caseSensitiveDefault: world_info_case_sensitive,
         wholeWordsDefault: world_info_match_whole_words,
@@ -38,19 +35,12 @@ async function generateText(prompt, responseLength) {
     if (profile) {
         const temp = String(s.llmTemperature ?? '').trim();
         const overridePayload = temp === '' ? {} : { temperature: Number(temp) };
-        // includePreset is always false, and that is business logic rather than a setting.
-        //
-        // What the preset contributes here is SAMPLING PARAMETERS ONLY — never prompt content.
-        // sendRequest forwards `presetName` to presetToGeneratePayload, which maps the preset onto
-        // an oai_settings clone; the messages array stays the one we passed. The prompt manager,
-        // which is where a roleplay preset's system prompt and jailbreak live, is never called on
-        // this path — so there is no prompt conditioning here to guard against.
-        //
-        // Bypassing is still right, for the samplers: a roleplay preset is tuned for prose variety
-        // — high temperature and top_p, repetition penalties — and this is an extraction that wants
-        // the opposite. Forced rather than offered because the failure is asymmetric. Bypassed, a
-        // purpose-built utility profile loses its samplers and llmTemperature can restore the one
-        // that matters; included, a roleplay profile poisons every suggestion with no escape.
+        // includePreset is always false, and that is business logic rather than a setting. A preset
+        // contributes sampling parameters only here — sendRequest maps it onto an oai_settings clone, the
+        // messages stay ours, and the prompt manager is never called — and a roleplay preset's samplers are
+        // tuned for prose variety where this is an extraction wanting the opposite. Forced rather than
+        // offered because the failure is asymmetric: a bypassed utility profile loses samplers
+        // llmTemperature can restore, an included roleplay one has no escape.
         const result = await ConnectionManagerRequestService.sendRequest(profileId, prompt, responseLength, { includePreset: false }, overridePayload);
         const content = String(result?.content ?? '').trim();
         if (!content && result?.reasoning) throw new Error(`profile "${profile.name}" is a reasoning model (returned reasoning, no content). Pick a profile without ":thinking".`);
@@ -60,19 +50,14 @@ async function generateText(prompt, responseLength) {
 }
 
 /**
- * Response cap per call. A runaway guard, not a budget: you pay for tokens generated, not tokens
- * allowed, so a tight cap buys nothing.
- *
- * It must clear a THINKING model's reasoning, which spends this same budget. At the previous 400 a
- * reasoning model could consume the whole allowance and return an empty string, which the
- * no-profile path passes through silently and the Studio reports as "Model returned nothing usable"
- * indefinitely.
+ * Response cap per call. A runaway guard, not a budget: you pay for tokens generated, not tokens allowed,
+ * so a tight cap buys nothing — and it must clear a thinking model's reasoning, which spends this same
+ * budget and otherwise returns an empty string the Studio can only report as unusable.
  */
 const KEY_RESPONSE_TOKENS = 4000;
 
-// One pass per chunk, concatenating the raw candidate lines (callers dedupe/filter). chunkSize is
-// user-tunable (Recommender settings). Whether chunking beats sending the entry whole, and what
-// size is right, are open; eval/chunk-vs-whole.mjs is the harness.
+// One pass per chunk, concatenating the raw candidate lines (callers dedupe/filter). Whether chunking
+// beats sending the entry whole, and what size is right, are open; eval/chunk-vs-whole.mjs is the harness.
 
 export async function llmKeyCandidates(content, avoid, chunkSize = 5000) {
     const text = String(content ?? '');

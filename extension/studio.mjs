@@ -3,12 +3,11 @@
 // ⚡/✨ keyword suggestions, duplicate, delete), prune-coloured click-to-edit keywords, bulk actions,
 // search, and the Tool Settings tray.
 //
-// DOM- and ST-coupled, like keyword-tools.mjs. The pure logic it stands on lives elsewhere and is
-// shared with the rest of WA: the keyword classifier in keyword-audit.mjs and the suggester in
-// keyword-suggest.mjs (via keyword-tools'
-// flag-injecting wrapper), the sort vocabulary and tier definitions in sort.mjs, and the shared widgets
-// (context menu, sort control, stylesheet) in ui-widgets.mjs — so the Studio and the wand-menu reports
-// can never drift on what counts as a weak key or how entries order.
+// DOM- and ST-coupled. The pure logic it stands on is shared with the rest of WA — the keyword
+// classifier (keyword-audit.mjs), the suggester (keyword-suggest.mjs, via keyword-tools' flag-injecting
+// wrapper), the sort vocabulary and tier definitions (sort.mjs), the shared widgets (ui-widgets.mjs) —
+// so the Studio and the wand-menu reports can never drift on what counts as a weak key or how entries
+// order.
 import { saveSettingsDebounced, getRequestHeaders, characters, getCharacters } from '../../../../../script.js';
 import { getContext } from '../../../../extensions.js';
 import { loadWorldInfo, saveWorldInfo, reloadEditor, createWorldInfoEntry, duplicateWorldInfoEntry, deleteWorldInfoEntry, getFreeWorldEntryUid, deleteWIOriginalDataValue, deleteWorldInfo, updateWorldInfoList, world_names, world_info_match_whole_words, world_info_case_sensitive, selected_world_info, world_info, METADATA_KEY } from '../../../../world-info.js';
@@ -31,9 +30,8 @@ const WA_RED = '#e06c6c';     // severe — same value keyword-audit's severityO
 // Core's world_info_logic, worded as the sentence the chips beside it complete. The gate reads
 // backwards without it: the same list means "must also contain" or "must not contain" by logic alone.
 const LOGIC_LABEL = { 0: 'only if any of', 1: 'unless all of', 2: 'unless any of', 3: 'only if all of' };
-/** The secondary-key operator select: core's four logics under core's own names, since that is what
- *  the WI editor, the CCv2 field and every card call them, and a second vocabulary for the same four
- *  values is a translation the author has to do. The reading rides the tooltip. OFF is the fifth
+/** The secondary-key operator select: core's four logics under core's own names, since that is what the
+ *  WI editor, the CCv2 field and every card call them. The reading rides the tooltip. OFF is the fifth
  *  position and writes `selective`, not `selectiveLogic`. */
 const LOGIC_OPTS = [
     ['off', 'OFF', 'selective: false — the keys are kept and never gate'],
@@ -44,14 +42,11 @@ const LOGIC_OPTS = [
 ];
 
 /**
- * Plan an advanced reorder: place the selected entries (given top-to-bottom in `orderedUids`) into a
- * contiguous UID/order block [start, start+N-1], leaving every unselected entry on its current UID.
- * Pure (no DOM, no mutation) so the destructive UID rebuild in Lorebook Studio stays unit-testable.
- * Returns { conflict: uid } if a target UID is held by an unselected entry (caller must abort — moving
- * onto it would clobber data), otherwise { moves: [[oldUid, newUid], …] } in application order.
- * @param {object} entries  the book's entries object (keyed by uid)
- * @param {number[]} orderedUids  selected uids, on-screen order
- * @param {number} start  first uid of the block
+ * Plan an advanced reorder: place the selected entries (`orderedUids`, on-screen order) into a contiguous
+ * UID/order block [start, start+N-1], leaving every unselected entry on its current UID. Pure, so the
+ * destructive UID rebuild stays unit-testable (eval/bulk-reorder-check.mjs).
+ * Returns { conflict: uid } if a target UID is held by an unselected entry — the caller must abort, since
+ * moving onto it would clobber data — otherwise { moves: [[oldUid, newUid], …] } in application order.
  * @param {boolean} desc  true = top gets the highest value (start+N-1), false = top gets `start`
  */
 function planUidReindex(entries, orderedUids, start, desc) {
@@ -63,9 +58,7 @@ function planUidReindex(entries, orderedUids, start, desc) {
 }
 
 /**
- * Lorebook Studio (/wa-studio) — a wide two-pane manager: all books on the left, the selected book's
- * entries on the right, with per-entry tools (mode, flag toggles, sticky, ⚡/✨ suggestions, duplicate,
- * delete), prune-coloured click-to-edit keywords, bulk actions, search, and the Tool Settings tray.
+ * Lorebook Studio (/wa-studio) — the two-pane manager; see the module header.
  * @param {string|null} preferredBook Book to open if it still exists — the caller's notion of "current"
  *        (the chat's bound lorebook). Falls back to any attached world, then to nothing selected.
  */
@@ -92,12 +85,12 @@ export async function lorebookStudio(preferredBook = null) {
     const selectedEntries = new Set();   // uids ticked for bulk actions
     let selAnchorUid = null;         // last-ticked entry, for shift-click range selection
     let entryFilter = 'all';         // explorer entry-type filter (all / keyword / constant / vector / enabled / disabled / flagged)
-    // Explorer sort view — the CURRENT book's base sort + tiered toggle. Persisted PER-LOREBOOK
-    // (settings().studioSortByBook), loaded on open, defaulting to 'insert' (mirror the prompt insertion
-    // order). Decoupled from the durable insertion settings. tierCfg is shared/durable with the prompt.
+    // Explorer sort view — the current book's base sort + tiered toggle, persisted per-lorebook
+    // (settings().studioSortByBook), defaulting to 'insert' (mirror the prompt insertion order).
+    // Decoupled from the durable insertion settings.
     let entrySort = 'insert';
     let tieredMode = true;
-    let tierCfg = reconcileTiers(settings().tierCfg);   // [{id, on}] tier precedence — DURABLE, shared with the prompt builder
+    let tierCfg = reconcileTiers(settings().tierCfg);   // [{id, on}] tier precedence — durable, shared with the prompt builder
     const loadSortView = name => { const v = settings().studioSortByBook?.[name]; entrySort = v?.sort ?? 'insert'; tieredMode = v?.tiered ?? true; };
     const persistSortView = () => { const s = settings(); (s.studioSortByBook ??= {})[selected] = { sort: entrySort, tiered: tieredMode }; saveSettingsDebounced(); };
     let searchQuery = '';            // explorer free-text search
@@ -118,61 +111,51 @@ export async function lorebookStudio(preferredBook = null) {
     const rowEls = new Map();        // uid -> entry row element, so one edit re-renders just that entry
     // --- Tabs -----------------------------------------------------------------------------------
     // Two views over one book: Explorer (entry rows) and Cleanup (flagged keys, key-per-row). Only
-    // Cleanup is a selection view, because only removal earns one: audit flags are high-precision, so
-    // its rows start ticked and the work is rescuing false positives from a batch you review before
-    // committing. Suggestions run the other way — each accept is independent, additive, and lands
-    // visibly as a key chip in the same paragraph — so they live inline in the Explorer and commit on
-    // click. A "Suggest Terms" tab used to mirror Cleanup's select-then-commit shape for them; at one
-    // line per term it read LESS densely than the chips it duplicated, and nobody ever wanted "add all".
+    // Cleanup is a selection view, because only removal earns one: audit flags are high-precision, so its
+    // rows start ticked and the work is rescuing false positives from a batch you review before
+    // committing. Suggestions run the other way — each accept is independent and additive — so they live
+    // inline in the Explorer and commit on click.
     let tab = 'explorer';
-    // Cleanup's selection. Deliberately survives tab switches AND rescans: a half-built selection is
-    // the user's work, not a cache. A rescan can retire rows (they stop rendering) without discarding
-    // the decision, so loosening a threshold back restores the earlier tick. The bulk bar shows counts
-    // so a stale selection is visible rather than silent.
+    // Cleanup's selection. Deliberately survives tab switches and rescans: a half-built selection is the
+    // user's work, not a cache. A rescan can retire rows without discarding the decision, so loosening a
+    // threshold back restores the earlier tick.
     const cleanupChecks = new Map();   // rowId -> bool (defaults from scan.defChecked — mostly ticked)
     let cleanupUndo = null;            // [{uid, key}] from the last prune, restorable until the next one
-    // Cleanup normally lists only what the audit flagged. This widens it to every key on every visible
-    // entry — the audit is a heuristic, so the term you want to prune, ignore or retitle in bulk is often
-    // one it had no opinion about. Unflagged rows never pre-tick; the flags decide what's suspect, this
-    // toggle only decides what's REACHABLE.
+    // Cleanup normally lists only what the audit flagged; this widens it to every key on every visible
+    // entry, since the term you want to prune or retitle in bulk is often one the heuristic had no opinion
+    // about. Unflagged rows never pre-tick — the flags decide what's suspect, this only decides reach.
     let cleanupShowAll = false;
-    // CHAT EVIDENCE for the "not in entry text" flag. That flag measures the book's own prose, but keys fire
-    // against the CHAT — which is the whole ambiguity: on a hand-authored book most of them are deliberate
-    // aliases ("Toriel's House" for "Dreemurr Residence"), on a machine-written one most are stale scene
-    // detail (K14). One Aho-Corasick pass settles it per key, so the cost is O(chat) and independent of
-    // key count (P2; getContext().chat is already in memory).
+    // Chat evidence for the "not in entry text" flag. That flag measures the book's own prose, but keys
+    // fire against the chat: on a hand-authored book most unattested keys are deliberate aliases, on a
+    // machine-written one most are stale scene detail (K14). One Aho-Corasick pass settles it per key, so
+    // the cost is O(chat) and independent of key count (P2).
     //
-    // Opt-in, because it is evidence the user asked for rather than a verdict the tool imposes — and because
-    // a key with 0 hits still is not proven useless, only unproven. Survives a rescan; cleared on book change.
+    // Opt-in, because it is evidence the user asked for rather than a verdict the tool imposes — and a key
+    // with 0 hits is not proven useless, only unproven. Survives a rescan; cleared on book change.
     let chatHits = null;        // Map<key, count>, null until the scan is run
     let chatMsgs = 0;
     let chatName = '';          // WHICH chat produced those counts — see runChatScan
     const rowId = (uid, term) => `${uid}${term}`;
     // The active term tab's list repaint, or null in the Explorer. Whitelist edits reach the list from
     // three places (the term right-click menu, the tray's per-key ✕, Clear whitelist), and the Explorer's
-    // rerenderKeys walks rowEls, which the term tabs never populate — so without this an ignored term
-    // just sat there, still showing its reason, until something else forced a rebuild.
+    // rerenderKeys walks rowEls, which the term tabs never populate.
     let termRepaint = null;
     const afterIgnoreChange = keys => {
         if (termRepaint) termRepaint(); else rerenderKeys(keys);
         if (trayOpen) refreshTray();   // the whitelist column lives there
     };
 
-    // Chats and character cards naming a lorebook that no longer exists. Computed once per Studio
-    // session, in the background, because it needs the whole chat index (one fetch per character) and
-    // nothing should wait on it. Null until it has run; a nav row appears only if it finds something,
-    // so a clean install never sees this feature at all.
+    // Chats and character cards naming a lorebook that no longer exists. Computed once per Studio session,
+    // in the background, because it needs the whole chat index (one fetch per character). Null until it
+    // has run; a nav row appears only if it finds something.
     let orphans = null;
     let orphanView = false;   // showing the list instead of a book — `selected` stays a real book name
 
     /**
-     * The chat index, as cheaply as it can be had.
-     *
-     * ST's /api/characters/chats reads every line of every chat to count messages and grab the last one,
-     * even though a binding lives on line 0. The plugin route reads
-     * only that line — orders of magnitude cheaper (P1) — and returns the bindings; card bindings
-     * come from the `characters` array, which is already in memory. Falls back to ST's endpoint when the
-     * plugin is not deployed, which is correct and slow rather than unavailable.
+     * The chat index, as cheaply as it can be had. ST's /api/characters/chats reads every line of every
+     * chat to count messages, though a binding lives on line 0; the plugin route reads only that line (P1).
+     * Card bindings come from the in-memory `characters` array. Falls back to ST's endpoint when the plugin
+     * is not deployed, which is correct and slow rather than unavailable.
      */
     const bindingIndex = async () => {
         if (runState.pluginAvailable) {
@@ -216,8 +199,7 @@ export async function lorebookStudio(preferredBook = null) {
     const nav = document.createElement('div'); nav.className = 'wa-studio-nav';
     const explorer = document.createElement('div'); explorer.className = 'wa-studio-explorer';
     // Close corner instead of the popup's button row — that row costs a whole line of a 72vh window.
-    // Floats over the empty right end of the tab strip, so it collides with nothing. Wired to the
-    // Popup once it exists, below.
+    // Wired to the Popup once it exists, below.
     const closeBtn = document.createElement('button');
     closeBtn.type = 'button'; closeBtn.className = 'fa-solid fa-xmark wa-studio-close';
     closeBtn.title = 'Close'; closeBtn.setAttribute('aria-label', 'Close');
@@ -230,48 +212,40 @@ export async function lorebookStudio(preferredBook = null) {
     const rebuildScan = () => {
         scan = buildKeyPruneScan(data, studioOpts, ignoreSet, {
             matchWindow: settings().matchWindow,
-            // Into the CLASSIFIER, not the cleanup display layer — the Explorer's chips colour from
-            // reasonOf/severityOf, and curation happens there. Painted on afterwards it reaches one tab.
+            // Into the classifier, not the cleanup display layer — the Explorer's chips colour from
+            // reasonOf/severityOf. Painted on afterwards it would reach one tab.
             chatScan: chatHits ? { messagesWith: chatHits, messages: chatMsgs } : undefined,
         });
     };
-    // A finished chat scan changes what classifyEntry returns, so the scan is rebuilt and everything
-    // repainted — the cleanup list via its hook, the Explorer rows directly.
+    // A finished chat scan changes what classifyEntry returns, so the scan is rebuilt and repainted.
     const afterChatScan = keys => { rebuildScan(); termRepaint?.(); rerenderKeys(keys); };
     /**
-     * ONE AUDIT, TWO DISPLAYS. The Explorer and Cleanup must reach identical verdicts for identical
-     * keys — same classifier, same evidence, same key set — and differ only in how they show them:
-     * chips coloured in place against rows with reasons and a selection. Every drift between the two
-     * so far came from something being computed on one side instead of gathered once, and each read as
-     * a bug in the surface that showed the weaker answer.
+     * Every key in the book — the key set both scan paths use.
      *
-     * The one legitimate exception is the checkbox state (`cleanupChecks`, `defChecked`), which the
-     * Explorer has no equivalent of because it has no bulk removal.
+     * One audit, two displays: the Explorer and Cleanup must reach identical verdicts for identical keys
+     * (same classifier, same evidence, same key set) and differ only in how they show them. The one
+     * legitimate exception is the checkbox state (`cleanupChecks`, `defChecked`), which the Explorer has
+     * no equivalent of because it has no bulk removal.
      *
-     * Every key in the BOOK, which is the key set both scan paths use.
-     *
-     * Not visibleEntries(): the audit classifies every entry, so evidence gathered from a filtered
-     * subset would make a verdict depend on what happened to be on screen when the scan ran — and the
-     * Explorer and Cleanup would disagree about the same key. One audit, two displays.
+     * Not visibleEntries(): the audit classifies every entry, so evidence gathered from a filtered subset
+     * would make a verdict depend on what happened to be on screen when the scan ran.
      */
     const bookKeys = () => [...new Set(Object.values(data?.entries ?? {})
         .flatMap(e => (Array.isArray(e.key) ? e.key : []).map(k => String(k).trim())).filter(Boolean))];
 
-    // Chat counts belong to a (book, chat) PAIR. Switching either one makes them describe something else,
+    // Chat counts belong to a (book, chat) pair. Switching either one makes them describe something else,
     // so they are dropped rather than left on screen attached to the wrong book.
     const clearChatScan = () => { chatHits = null; chatMsgs = 0; chatName = ''; };
     // Repaint only the entries whose key list includes one of `keys`. classifyEntry reads the live
-    // ignoreSet and the df table is ignore-independent, so whitelisting needs no rescan — just recolour
-    // the affected rows (chip colour + collapsed badge reflect the new ignore state).
+    // ignoreSet and the df table is ignore-independent, so whitelisting needs no rescan.
     const rerenderKeys = keys => { const set = new Set(keys); for (const e of Object.values(data?.entries ?? {})) if ((Array.isArray(e.key) ? e.key : []).some(k => set.has(k))) renderEntry(e); };
 
     const persistIgnore = () => { const s = settings(); if (!s.keywordIgnore) s.keywordIgnore = {}; s.keywordIgnore[selected] = [...ignoreSet]; saveSettingsDebounced(); };
     const persistOpts = () => { const s = settings(); s.studioScanOpts = studioOpts; s.studioSuggestOpts = suggestOpts; saveSettingsDebounced(); };
 
-    // The two shapes every tray here is built from — a titled column, and a checkbox row. The Tool
-    // Settings tray, the 🌐 global-WI tray and the per-entry ⚙ Advanced tray differ in their class
-    // names and in what a tick MEANS (persist an option, drive one of core's inputs, write the entry
-    // and repaint), so the commit is the caller's; only the row is shared.
+    // The two shapes every tray here is built from — a titled column, and a checkbox row. What a tick
+    // means differs per tray (persist an option, drive one of core's inputs, write the entry and repaint),
+    // so the commit is the caller's; only the row is shared.
     const trayCol = (colCls, secCls, title, ...kids) => {
         const c = document.createElement('div'); c.className = colCls;
         const h = document.createElement('div'); h.className = secCls; h.textContent = title;
@@ -286,9 +260,8 @@ export async function lorebookStudio(preferredBook = null) {
     };
 
     // "⚙ Tool Settings" tray under the explorer header. Scan/prune options apply on the next Scan press;
-    // recommender knobs invalidate the cached ranker so the next ⚡/✨ rebuilds with them; the whitelist
-    // is this book's prune ignore-set (settings().keywordIgnore, per book). Replaces the old
-    // shift-click options popup. All options persist globally to extension_settings.
+    // recommender knobs invalidate the cached ranker so the next ⚡/✨ rebuilds with them; the whitelist is
+    // this book's prune ignore-set (settings().keywordIgnore, per book). Options persist globally.
     const renderTray = () => {
         const wrap = document.createElement('div'); wrap.className = 'wa-tray';
         const head = document.createElement('div'); head.className = 'wa-tray-head';
@@ -369,14 +342,12 @@ export async function lorebookStudio(preferredBook = null) {
         wrap.append(panel);
         return wrap;
     };
-    // Open/close (and whitelist edits) rebuild only the tray in place — the entry list is untouched, so
-    // toggling stays instant no matter the book size or how many keys are whitelisted.
+    // Open/close (and whitelist edits) rebuild only the tray in place — the entry list is untouched.
     const refreshTray = () => { const fresh = renderTray(); if (trayEl?.isConnected) trayEl.replaceWith(fresh); trayEl = fresh; };
 
-    // 🌐 Global World Info settings — the app-wide knobs, surfaced in-context. WA's scan-depth and token
-    // budget OVERRIDE core (stored in extension_settings); the activation knobs are core globals, edited
-    // by driving core's own inputs so persistence + the min-activations/max-recursion mutual-exclusion
-    // come for free. Reading core values from those inputs keeps us in sync without importing internals.
+    // 🌐 Global World Info settings. WA's scan-depth and token budget override core (extension_settings);
+    // the activation knobs are core globals, edited by driving core's own inputs so persistence and the
+    // min-activations/max-recursion mutual exclusion come for free, and read back from those same inputs.
     const refreshGlobalTray = () => { const fresh = renderGlobalTray(); if (globalTrayEl?.isConnected) globalTrayEl.replaceWith(fresh); globalTrayEl = fresh; };
     function renderGlobalTray() {
         if (!globalTrayOpen) return document.createElement('div');   // nothing mounted when closed
@@ -421,17 +392,15 @@ export async function lorebookStudio(preferredBook = null) {
     }
 
     // --- Bulk selection + actions ---------------------------------------------------------------
-    // A contextual bar in the pinned region (below the tray) appears while any entry is ticked. Actions
-    // mutate the selected entries, save once, then repaint just those rows (selection persists). The bar
-    // itself is swapped in place (refreshBulkBar) so selecting never rebuilds the entry list.
+    // A contextual bar in the pinned region appears while any entry is ticked. Actions mutate the selected
+    // entries, save once, then repaint just those rows. The bar is swapped in place (refreshBulkBar) so
+    // selecting never rebuilds the entry list.
     const refreshBulkBar = () => { const fresh = renderBulkBar(); if (bulkEl?.isConnected) bulkEl.replaceWith(fresh); bulkEl = fresh; };
     const syncSelCheckboxes = () => { for (const [uid, row] of rowEls) { const cb = row.querySelector('.wa-entry-sel'); if (cb) cb.checked = selectedEntries.has(uid); } refreshBulkBar(); };
     const selectedList = () => [...selectedEntries].map(uid => data?.entries?.[uid]).filter(Boolean);
-    // Every bulk action spends the selection rather than leaving it ticked. A set left over from earlier
-    // work is invisible once the entries scroll away — worse, once a filter hides them — and the next
-    // bulk action then hits more than the user thinks it does. The spent set is offered back as
-    // "Reselect N" in the bar, so chaining two actions over the same entries costs one click, and the
-    // offer is deliberate rather than a timer nobody can see the state of.
+    // Every bulk action spends the selection rather than leaving it ticked: a set left over from earlier
+    // work is invisible once the entries scroll away or a filter hides them, and the next bulk action then
+    // hits more than the user thinks. The spent set is offered back as "Reselect N" in the bar.
     let lastSel = null;
     const consumeSelection = () => { if (!selectedEntries.size) return; lastSel = new Set(selectedEntries); selectedEntries.clear(); syncSelCheckboxes(); };
     const applyBulk = fn => { const sel = selectedList(); if (!sel.length) return; for (const e of sel) fn(e); save(); sel.forEach(x => renderEntry(x)); consumeSelection(); };
@@ -447,10 +416,10 @@ export async function lorebookStudio(preferredBook = null) {
     const bulkDelay = async () => { const v = await numberPrompt('Delay — selected entries', 'Messages before first activation (0 = none):', 0, 0); if (v != null) applyBulk(e => e.delay = Math.floor(v) || null); };
     const bulkCooldown = async () => { const v = await numberPrompt('Cooldown — selected entries', 'Messages before it can re-activate (0 = none):', 0, 0); if (v != null) applyBulk(e => e.cooldown = Math.floor(v) || null); };
     const bulkScanDepth = async () => { const v = await numberPrompt('Scan depth — selected entries', 'Messages to scan (0 = global default):', 0, 0); if (v != null) applyBulk(e => e.scanDepth = Math.floor(v) > 0 ? Math.floor(v) : null); };
-    // ONE VALUE ON EVERY SELECTED ENTRY, which Renumber… cannot do — it lays down a gradient, and a
-    // gradient is the thing worth removing. Core sorts descending by order and its budget walk breaks
-    // at overflow, so on a book whose order encodes sequence core's selection is a prefix of that
-    // sequence and says nothing about the scene. Flattening order is how that confound is taken out.
+    // One value on every selected entry, which Renumber… cannot do — it lays down a gradient, and the
+    // gradient is the thing worth removing: core sorts descending by order and its budget walk breaks at
+    // overflow, so on a book whose order encodes sequence core's selection is a prefix of that sequence
+    // and says nothing about the scene.
     const bulkOrderSet = async () => { const v = await numberPrompt('Order — selected entries', 'Order value for every selected entry:', 100); if (v != null) applyBulk(e => e.order = Math.floor(v)); };
     const bulkRecLevel = async () => { const v = await numberPrompt('Delay until recursion — selected entries', 'Recursion level (0 = any; turns the flag on):', 0, 0); if (v != null) applyBulk(e => e.delayUntilRecursion = Math.floor(v) > 0 ? Math.floor(v) : true); };
     // entriesToBook is shared with the single-entry Copy to… / Move to…, so the selection is spent here
@@ -469,9 +438,8 @@ export async function lorebookStudio(preferredBook = null) {
             ? 'Advanced reorder: renumber the selected entries into a contiguous block, setting <b>both order and UID</b>, top to bottom.'
             : 'Renumber the selected entries into a contiguous <b>order</b> block, top to bottom.')
             + '<div style="margin-top:8px;">Start at <input type="number" class="wa-bo-start text_pole" style="width:6em;margin:0 6px;" value="1"></div>'
-            // WHICH SEQUENCE THE NUMBERS FOLLOW. On screen is the default; picking a sort renumbers
-            // into THAT sequence instead, so `order` can be made to encode something other than however
-            // the book happened to be written.
+            // Which sequence the numbers follow. On screen is the default; picking a sort renumbers into
+            // that sequence instead, so `order` can encode something other than how the book was written.
             + '<div style="margin-top:8px;">In order of <select class="wa-bo-sort text_pole" style="width:auto;margin-left:6px;">'
             + '<option value="">On screen</option>'
             + Object.entries(SORT_LABELS).map(([k, v]) => `<option value="${escapeHtml(k)}">${escapeHtml(v)}</option>`).join('')
@@ -516,10 +484,9 @@ export async function lorebookStudio(preferredBook = null) {
         selectedEntries.clear(); lastSel = null;   // no Reselect offer: those uids don't exist any more
         save(); suggest = null; if (scan) rebuildScan(); renderExplorer();
     };
-    // One keyword onto every selected entry — the bulk form of the ➕ in an entry's keyword paragraph,
-    // so it skips entries that already carry the term (same case-insensitive hasKey the ➕ uses) rather
-    // than duplicating it. No rescan: a new key doesn't change any entry's text, and the per-entry ➕
-    // doesn't rescan either.
+    // One keyword onto every selected entry — the bulk form of the ➕ in an entry's keyword paragraph, so
+    // it skips entries that already carry the term (same case-insensitive hasKey). No rescan: a new key
+    // doesn't change any entry's text.
     const bulkAddTerm = async () => {
         const raw = await Popup.show.input('Add term — selected entries', 'Keyword to add to every selected entry:');
         const term = String(raw ?? '').trim();
@@ -534,10 +501,9 @@ export async function lorebookStudio(preferredBook = null) {
     // worth a rescan — the book-common/book-shared flags are df-based, so removing a book's worth of keys
     // changes the verdict on the ones left standing.
     //
-    // UNDO rides on the toast rather than the nav's undo bar: that bar belongs to book deletion, lives in
-    // a different pane, and survives book switches, none of which fit an edit inside one book's Explorer.
-    // The snapshot is by uid, not by entry reference, because a rescan rebuilds rows underneath it — and
-    // it refuses outright if the book changed, since save() writes to whatever `selected` is by then.
+    // Undo rides on the toast rather than the nav's undo bar, which belongs to book deletion. The snapshot
+    // is by uid, not by entry reference, because a rescan rebuilds rows underneath it — and it refuses
+    // outright if the book changed, since save() writes to whatever `selected` is by then.
     const bulkClearTerms = async () => {
         const sel = selectedList(); if (!sel.length) return;
         const total = sel.reduce((n, e) => n + (Array.isArray(e.key) ? e.key.length : 0), 0);
@@ -626,8 +592,7 @@ export async function lorebookStudio(preferredBook = null) {
             count,
             barBtn(n === all.length ? 'Select none' : 'Select all', () => { if (n === all.length) consumeSelection(); else { lastSel = null; all.forEach(e => selectedEntries.add(e.uid)); syncSelCheckboxes(); } }),
             // The toggle above only clears once everything visible is ticked; a partial selection needs its
-            // own way out, and clearing by unticking N boxes is not one. Both clears go through
-            // consumeSelection, so an accidental one is a Reselect away.
+            // own way out. Both clears go through consumeSelection, so an accidental one is a Reselect away.
             ...(n === all.length ? [] : [barBtn('Clear', consumeSelection)]),
             sep(),
             barBtn(anyDisabled ? 'Enable' : 'Disable', () => { applyBulk(e => e.disable = !anyDisabled); refreshBulkBar(); }),
@@ -644,61 +609,48 @@ export async function lorebookStudio(preferredBook = null) {
         return wrap;
     };
 
-    // bgDocs rides in the call, not in suggestOpts — that object is persisted to settings, and the
-    // chat would go with it. No chat open = empty = book-only ranking, same as before.
+    // bgDocs rides in the call, not in suggestOpts — that object is persisted to settings, and the chat
+    // would go with it. No chat open = empty = book-only ranking.
     //
-    // The OPEN chat only, and the alternatives were measured rather than assumed (P2). Pooling a
-    // character's other chats looks like a free win, and Aho-Corasick absorbs the size — the pass is
-    // linear in pooled text, not quadratic in term count.
-    //
-    // By CHARACTER is simply wrong — too coarse. Two chats on one card here are entirely different
-    // settings, so one story's vocabulary would vouch for the other's keys.
-    //
-    // By the chat's BOUND LOREBOOK is correct: chats declaring the same book are one story, and it
-    // separates those two settings cleanly. Its VALUE, though, depends on how the book was managed,
-    // and both cases are real: on a book versioned heavily mid-story the pool collapses to the open
-    // chat itself, while on a cleanly bound one it picks up a genuine sibling branch for a modest
-    // gain at roughly double the build time.
-    //
-    // So this is a cost call, not a correctness one: a multi-second synchronous rebuild every time
-    // the Studio opens is a worse trade than the few dead candidates pooling would trim. Worth
-    // revisiting if the build ever moves off the main thread, in which case bound-lorebook is the
-    // key to group on.
+    // The open chat only, and the alternatives were measured (P2). By character is too coarse: two chats on
+    // one card can be entirely different settings, so one story's vocabulary would vouch for the other's
+    // keys. By the chat's bound lorebook is correct — chats declaring the same book are one story — but a
+    // multi-second synchronous rebuild every time the Studio opens is a worse trade than the few dead
+    // candidates pooling would trim. Revisit if the build moves off the main thread; bound-lorebook is then
+    // the key to group on.
     const ensureSuggest = () => suggest ?? (suggest = buildKeySuggest(data,
         { ...suggestOpts, bgDocs: (getContext().chat ?? []).map(m => String(m?.mes ?? '')).filter(Boolean) }));
     const hasKey = (e, term) => Array.isArray(e.key) && e.key.some(k => String(k).toLowerCase().trim() === term.toLowerCase().trim());
 
     /**
-     * The gate every path that writes a key goes through. An ERROR refuses the write and says why; a
-     * WARNING lets it through and says why. Both come from validateSmartKey, so what the Studio blocks
-     * and what the audit flags cannot drift apart — one definition, two surfaces.
+     * The gate every path that writes a key goes through. An error refuses the write and says why; a
+     * warning lets it through and says why. Both come from validateSmartKey, so what the Studio blocks and
+     * what the audit flags cannot drift apart.
      *
-     * Plain keys get no opinion. A regex key gets exactly one: a warning when core would refuse the
-     * pattern and so never activate it. Everything else here is a `?` SmartKey.
+     * Plain keys get no opinion. A regex key gets exactly one: a warning when core would refuse the pattern
+     * and so never activate it. Everything else here is a `?` SmartKey.
      *
-     * Refusing rather than warning on the error tier is the point: these are SmartKeys that cannot do
-     * what their author meant under any text, and the alternative — saving it and flagging it later —
-     * is how a key ends up silently never firing. The author is right here, right now, and can fix it.
+     * Refusing rather than warning on the error tier is the point: these are SmartKeys that cannot do what
+     * their author meant under any text, and saving one to flag later is how a key silently never fires.
      *
      * @returns {boolean} whether the write may proceed
      */
     const keyWriteOk = (term, list = 'key', entry = null) => {
         const problems = validateSmartKey(term);
-        // WHICH codes are fatal depends on the POSITION and, in the secondary position, on the
-        // OPERATOR — both rules live in matcher.mjs and are asked through its own filter rather than
-        // re-listed here, or the editor would refuse a secondary the runtime happily gates on.
-        // `negation-only` is the whole of the difference: a condition an author can mean under
-        // AND_ALL and the NOT_* pair, and one that dissolves the gate under AND_ANY. So the probe
-        // carries the entry's logic — and deliberately NOT its `selective`, which asks a different
-        // question: a switched-off list is still a list an author is entitled to go on writing.
+        // Which codes are fatal depends on the position and, in the secondary position, on the operator —
+        // both rules live in matcher.mjs and are asked through its own filter rather than re-listed here,
+        // or the editor would refuse a secondary the runtime happily gates on. `negation-only` is the whole
+        // of the difference: a condition an author can mean under AND_ALL and the NOT_* pair, and one that
+        // dissolves the gate under AND_ANY. So the probe carries the entry's logic — and deliberately not
+        // its `selective`, which asks a different question: a switched-off list is still a list an author
+        // is entitled to go on writing.
         const usable = list === 'keysecondary'
             ? secondaryKeys({ keysecondary: [term], selectiveLogic: entry?.selectiveLogic }).length
             : usableKeys([term]).length;
         const err = usable ? null : problems.find(p => p.severity === 'error');
         if (err) { toastr.warning(err.message, 'Worlds Apart', { timeOut: 8000 }); return false; }
-        // ONE TOAST PER KIND OF PROBLEM, not one per instance. A key can repeat the same fault dozens of
-        // times — paste an unquoted Zalgo string and it shreds into forty-odd punctuation terms, each
-        // reporting separately — and forty identical toasts is not forty times the information.
+        // One toast per kind of problem, not one per instance: a key can repeat the same fault dozens of
+        // times, and forty identical toasts is not forty times the information.
         const byCode = new Map();
         for (const w of problems) {
             if (w.severity === 'error') continue;   // tolerated in this position; not advice about it
@@ -720,23 +672,18 @@ export async function lorebookStudio(preferredBook = null) {
         return i;
     };
     // Book-level icon: rename / duplicate / delete a whole lorebook, and the same two verbs offered as
-    // repairs in the orphaned-bindings list — same icons there, so they read as operations already
-    // known from the book toolbar.
+    // repairs in the orphaned-bindings list, under the same icons.
     const bookTool = (cls, title, onClick, extra = '') => { const i = document.createElement('i'); i.className = `fa-solid ${cls} wa-book-tool ${extra}`; i.title = title; i.addEventListener('click', onClick); return i; };
 
     /**
      * The per-entry tool row (power / case / whole-word / promote / sticky / trigger % / advanced / copy /
-     * delete).
-     * Shared by the Explorer's entry header and the term tabs' group headers, so an entry exposes the
-     * same controls wherever you meet it — and toggling case or whole-word from Cleanup re-classifies
-     * that entry's keys, since the scan reads those flags live.
-     * @param {object} e Entry
+     * delete). Shared by the Explorer's entry header and the term tabs' group headers, so an entry exposes
+     * the same controls wherever you meet it.
      * @param {(e: object) => void} repaint What to redraw after a change (an entry row, or a term list)
-     * @param {{compact?: boolean}} [opt] compact drops sticky + trigger-%, which govern WHEN an entry
-     *        fires once matched — a different question from whether its keywords are any good, and the
-     *        only two tools carrying badges. Both stay reachable in the gear tray (Timed / Trigger).
-     *        Case and whole-word deliberately survive: the scan reads those flags live, so toggling
-     *        either re-classifies that entry's keys on the spot.
+     * @param {{compact?: boolean}} [opt] compact drops sticky + trigger-%, which govern when an entry fires
+     *        once matched — a different question from whether its keywords are any good. Both stay
+     *        reachable in the gear tray. Case and whole-word deliberately survive: the scan reads those
+     *        flags live, so toggling either re-classifies that entry's keys on the spot.
      */
     const buildEntryTools = (e, repaint, { compact = false } = {}) => {
         const tools = document.createElement('div'); tools.className = 'wa-entry-tools';
@@ -744,7 +691,7 @@ export async function lorebookStudio(preferredBook = null) {
         const delay = Number(e.delay) || 0;
         const cooldown = Number(e.cooldown) || 0;
         const stickyOn = Number(e.sticky) > 0;
-        // Sticky/probability: when active, a plain click DISABLES; when off, click enables/opens the
+        // Sticky/probability: when active, a plain click disables; when off, click enables/opens the
         // editor; shift-click always opens the editor. Cooldown/delay/recursion/budget live in ⚙ Advanced.
         const stickyTool = tool('fa-thumbtack', stickyOn, `Sticky: ${stickyOn ? `on (${e.sticky})` : 'off'} — click ${stickyOn ? 'disables' : 'enables'}, shift-click sets a value`, ev => { if (ev.shiftKey) { editSticky(e); return; } e.sticky = stickyOn ? 0 : 1; save(); repaint(e); });
         if (stickyOn) { stickyTool.classList.add('wa-badge'); stickyTool.dataset.badge = String(e.sticky); }   // show the sticky count
@@ -764,11 +711,9 @@ export async function lorebookStudio(preferredBook = null) {
         if (e.ignoreBudget) advParts.push('ignore budget');
         if (e.scanDepth != null) advParts.push(`scan depth ${e.scanDepth}`);
         const advActive = advParts.length > 0;
-        // When custom, the tooltip lists the non-default values (one per line); otherwise a generic hint.
         const advTool = tool('fa-gear', advOpen.has(e.uid) || advActive, advActive ? advParts.join('\n') : 'Advanced: recursion, budget, timing', () => { advOpen.has(e.uid) ? advOpen.delete(e.uid) : advOpen.add(e.uid); repaint(e); });
-        // Case/whole-word show the EFFECTIVE state (entry override ?? global default). When the value is
-        // inherited from an active global (entry sets no override), the icon is light green instead of blue.
-        // Entry value overrides global (nullish-coalesce in core); global applies only when entry is unset.
+        // Case/whole-word show the effective state (entry override ?? global default, core's own
+        // precedence). When inherited from an active global, the icon is light green instead of blue.
         const flagState = (v, g) => `${(v ?? g) ? 'On' : 'Off'} (${v == null ? 'inherited' : 'entry'})`;
         const effCase = e.caseSensitive ?? world_info_case_sensitive;
         const caseInherit = e.caseSensitive == null && !!world_info_case_sensitive;
@@ -776,20 +721,17 @@ export async function lorebookStudio(preferredBook = null) {
         if (caseInherit) caseTool.style.color = '#8fce8f';
         const effWhole = e.matchWholeWords ?? world_info_match_whole_words;
         const wholeInherit = e.matchWholeWords == null && !!world_info_match_whole_words;
-        // Structural advice about THIS entry's keys under the flag — a narrowing core would not have
-        // applied, or a script with no word boundaries to find. Computed from the entry alone, so it
-        // costs nothing and cannot disagree with the matcher: same module, same rules.
+        // Structural advice about this entry's keys under the flag — a narrowing core would not have
+        // applied, or a script with no word boundaries to find. Same module as the matcher, same rules.
         const wholeAdvice = wholeWordAdvice(e.key, effWhole);
         const wholeTool = tool('[ab]', effWhole, `Match whole words: ${flagState(e.matchWholeWords, world_info_match_whole_words)} · shift-click: inherit${wholeAdvice.map(a => `\n\n${a}`).join('')}`, ev => { e.matchWholeWords = ev.shiftKey ? null : !effWhole; save(); repaint(e); });
         if (wholeInherit) wholeTool.style.color = '#8fce8f';
-        // A badge, not a colour, and not red: both triggers are advisories on entries that may be
-        // working exactly as intended. The tooltip carries the sentence; the badge is what makes
-        // anyone read it. COLOUR IS ALREADY SPOKEN FOR — it is the flag's own state, and tinting here
-        // overwrote the light green that says "inherited from the global", so an advisory entry read
-        // as one that had set the flag itself. Two channels, two questions.
+        // A badge, not a colour, and not red: both triggers are advisories on entries that may be working
+        // exactly as intended. Colour is already spoken for — it carries the flag's inherited/entry state,
+        // and tinting here would read as an entry that had set the flag itself.
         if (wholeAdvice.length) { wholeTool.classList.add('wa-badge'); wholeTool.dataset.badge = '!'; }
-        // PROMOTE: the one tool here that edits CONTENT rather than a field, `@@promote` being a
-        // decorator. The crown is the promoted state, not the act.
+        // Promote edits content rather than a field, `@@promote` being a decorator. The crown is the
+        // promoted state, not the act.
         const promoted = hasPromoteDecorator(e);
         const promoteTool = tool('fa-crown', promoted, promoted
             ? 'Promoted: activation is enough — this entry skips the relevance cut. Click to un-promote.'
@@ -813,7 +755,7 @@ export async function lorebookStudio(preferredBook = null) {
     const clampPct = v => Math.min(100, Math.max(0, Math.floor(Number(v) || 0)));
     /**
      * Tiny number editor: number box + −/+ steppers + a reset button, committed on OK. Sticky and
-     * trigger-% are the same popup under a different step, clamp and reset; what the value MEANS is
+     * trigger-% are the same popup under a different step, clamp and reset; what the value means is
      * `commit`'s, and it is handed the clamped number.
      */
     const stepperPopup = async (e, { value, step, clamp, reset, resetLabel, resetTitle, max, title, commit }) => {
@@ -834,8 +776,7 @@ export async function lorebookStudio(preferredBook = null) {
         reset: 0, resetLabel: '🚫', resetTitle: 'Reset to 0', title: '',
         commit: v => e.sticky = v,
     });
-    // Trigger-probability editor: 0–100% number box + −/+ steppers + a reset to 100 (always fire).
-    // Setting it turns useProbability on; 100 leaves gating enabled but effectively always-fires.
+    // Trigger-probability editor: 0–100%, reset to 100 (always fire). Setting it turns useProbability on.
     const editProbability = e => stepperPopup(e, {
         value: e.probability != null ? clampPct(e.probability) : 100, step: 10, clamp: clampPct, max: 100,
         reset: 100, resetLabel: '🎯', resetTitle: 'Always fire (100%)', title: 'Trigger probability %',
@@ -844,8 +785,8 @@ export async function lorebookStudio(preferredBook = null) {
 
 
     /**
-     * The busy dance every suggestion entry point does: refuse a second click while one is running,
-     * dim the button, and undim on EVERY exit — including a throw, which otherwise leaves the button
+     * The busy dance every suggestion entry point does: refuse a second click while one is running, dim
+     * the button, and undim on every exit — including a throw, which would otherwise leave the button
      * dimmed and refusing clicks for the rest of the session.
      */
     const withBusy = async (btn, dim, fn) => {
@@ -899,9 +840,8 @@ export async function lorebookStudio(preferredBook = null) {
         after(e);
     });
     const acceptSugg = (e, term, after = renderEntry) => {
-        // Through the same gate as everything else. A suggester is not supposed to be able to emit a
-        // `?` or `/re/` key, but the REWORD path beside this one was already gated, so accepting a
-        // candidate verbatim skipped the check that editing it to the same string applied.
+        // Through the same gate as everything else: a suggester is not supposed to be able to emit a `?`
+        // or `/re/` key, but accepting one verbatim must not skip the check the reword path applies.
         if (!keyWriteOk(term)) return;
         if (!Array.isArray(e.key)) e.key = [];
         if (!hasKey(e, term)) e.key.push(term);
@@ -921,23 +861,14 @@ export async function lorebookStudio(preferredBook = null) {
      * The inline "click to edit" every editable label here opens: a .text_pole in place of `anchor`,
      * committing on Enter and blur, cancelling on Escape, and firing `commit` exactly once.
      *
-     * Sized to the text, not a fixed 8em. A SmartKey is routinely longer than that, and a fixed
-     * width made the field scroll internally — so on blur it snapped back to character 0 and the
-     * end of what you had typed went out of view. Capped, because the keyword paragraph wraps and one
-     * very long key should take a line, not the pane. width:auto is load-bearing: .text_pole is
-     * width:100%, which beats `size` and made the field take a whole line of the keyword paragraph
-     * instead of sitting inline with the chips. The title editor overrides both, since it sits on a
-     * line of its own and grows so the ✓ stays under the mouse.
+     * Sized to the text and capped, so one long SmartKey takes a line rather than scrolling internally or
+     * taking the pane. width:auto is load-bearing: .text_pole is width:100%, which beats `size`. The title
+     * editor overrides both, since it sits on its own line and grows so the ✓ stays under the mouse.
      *
-     * `commit(value, ok, viaBlur)` gets the TRIMMED text and returns false to REFUSE, which keeps the
-     * editor open with the text still in it. The commit fires on blur, so discarding a refusal here
-     * meant clicking away silently threw the work out and the chip snapped back — the toast explained
-     * a problem with text that no longer existed. Escape still cancels outright, because ok=false
-     * never reaches the caller's check.
-     *
-     * Focus is only reclaimed on an explicit Enter. Grabbing it back on blur traps the cursor: every
-     * attempt to click away re-fires the blur and yanks it home again. On blur the editor simply
-     * stays where it is, holding the text, and can be returned to or escaped.
+     * `commit(value, ok, viaBlur)` gets the trimmed text and returns false to refuse, which keeps the
+     * editor open with the text still in it — the commit fires on blur, so a refusal must not discard the
+     * work. Escape still cancels outright, because ok=false never reaches the caller's check. Focus is only
+     * reclaimed on an explicit Enter: grabbing it back on blur traps the cursor.
      *
      * @returns {{inp: HTMLInputElement, finish: (ok: boolean, viaBlur?: boolean) => void}} the field
      *          and its one-shot commit, for a caller wiring an extra control (the rename ✓) to it.
@@ -954,7 +885,7 @@ export async function lorebookStudio(preferredBook = null) {
         size();
         inp.addEventListener('input', size);
         let done = false;
-        // done is set BEFORE the commit runs: a commit repaints, which removes this input from the
+        // done is set before the commit runs: a commit repaints, which removes this input from the
         // document, and a browser that fires blur on removal would otherwise re-enter and write twice.
         const finish = (ok, viaBlur) => {
             if (done) return;
@@ -1009,10 +940,9 @@ export async function lorebookStudio(preferredBook = null) {
         }
         if (touched) { save(); renderExplorer(); toastr.success(`Replaced “${key}” → “${next}” in ${touched} ${touched === 1 ? 'entry' : 'entries'}.`, 'Worlds Apart'); }
     };
-    // Adds a SECOND term beside the clicked one, on the entries that already carry it — the alias case
-    // ("Marjorie" is tagged, "Marjorie Jones" should be too). Same hasKey the ➕ and bulkAddTerm use, so
-    // an entry that already has the variant is skipped rather than given a duplicate. No rescan, for
-    // bulkAddTerm's reason: a new key changes no entry's text.
+    // Adds a second term beside the clicked one, on the entries that already carry it — the alias case.
+    // Same hasKey the ➕ and bulkAddTerm use, so an entry that already has the variant is skipped rather
+    // than given a duplicate. No rescan: a new key changes no entry's text.
     const addVariantEverywhere = async key => {
         const hits = kwHits(key);
         const raw = await Popup.show.input('Add variant', `Keyword to add to the ${hits.length} ${hits.length === 1 ? 'entry' : 'entries'} keyed “${key}”:`);
@@ -1044,11 +974,9 @@ export async function lorebookStudio(preferredBook = null) {
 
     // Rebuild one entry's row in place. Two collapse levels: level 1 (the whole entry) shows just the
     // title line when closed; opening it reveals the tools, keywords, and text section. Level 2 is the
-    // text section's own preview↔editor toggle. Tools + body are built only when open, so a big book's
-    // collapsed list stays a light, skimmable set of title lines.
-    // `mount` is the parent for a row that has no predecessor to replace (a fresh list build). The row
-    // must be in the document before syncText, or the editor's autosize measures a detached textarea,
-    // bails, and every open entry paints at the textarea's default two rows.
+    // text section's own preview↔editor toggle. Tools + body are built only when open.
+    // `mount` is the parent for a row that has no predecessor to replace (a fresh list build). The row must
+    // be in the document before syncText, or the editor's autosize measures a detached textarea and bails.
     const renderEntry = (e, mount) => {
         const flagged = scan ? new Map(scan.classifyEntry(e).map(r => [r.key, r])) : null;   // null = not scanned yet
         const open = entryOpen.has(e.uid);
@@ -1078,9 +1006,8 @@ export async function lorebookStudio(preferredBook = null) {
         const chev = document.createElement('i');
         chev.className = 'fa-solid fa-chevron-right wa-chevron' + (open ? ' wa-open' : '');
         chev.title = (open ? 'Collapse entry' : 'Expand entry') + ' — shift-click for all entries';
-        // Chevron owns its own click so shift-click can bulk-toggle; stopPropagation keeps the header's
-        // single-entry toggle from also firing. Shift toggles every OTHER entry (this one is left as-is):
-        // collapse the rest to focus on this one, or re-open them if they're already all closed.
+        // Chevron owns its own click so shift-click can bulk-toggle. Shift toggles every other entry (this
+        // one is left as-is): collapse the rest to focus on this one, or re-open them if all are closed.
         chev.addEventListener('click', ev => {
             ev.stopPropagation();
             if (ev.shiftKey) {
@@ -1105,11 +1032,9 @@ export async function lorebookStudio(preferredBook = null) {
         title.textContent = wiTitleOf(e);
         const keyCount = Array.isArray(e.key) ? e.key.length : 0;
         title.title = keyCount ? `Keywords (${keyCount}): ${e.key.join(', ')}` : 'No keywords';
-        // The title line toggles collapse, so renaming needs its own control: pencil -> inline edit of
-        // the comment (stopPropagation so it doesn't expand). Blank comment falls back to keys/uid.
         // Near-duplicate marker, from the audit scan. Entry-level rather than key-level, so it rides the
         // title instead of the Cleanup list — and it is advisory: it says "these two say the same thing,
-        // pick one", never which one. Absent until an audit has run, like every other scan-derived mark.
+        // pick one", never which one. Absent until an audit has run.
         const twins = scan?.dupes?.get(e.uid);
         const dupMark = twins?.length ? (() => {
             const dup = document.createElement('i');
@@ -1117,8 +1042,7 @@ export async function lorebookStudio(preferredBook = null) {
             if (twins.length > 1) dup.dataset.badge = String(twins.length);
             dup.title = 'Near-duplicate of:\n' + twins.map(t =>
                 `${Math.round(t.sim * 100)}% — ${t.title || `UID ${t.uid}`}${t.disabled ? ' (disabled)' : ''}`).join('\n');
-            // Same scroll-and-flash the duplicate action uses, so "show me the twin" behaves the way
-            // "show me the copy I just made" already does.
+            // Same scroll-and-flash the duplicate action uses.
             dup.addEventListener('click', ev => {
                 ev.stopPropagation();
                 const row = rowEls.get(twins[0].uid);
@@ -1156,17 +1080,16 @@ export async function lorebookStudio(preferredBook = null) {
         meta.title = `trigger probability ${e.useProbability !== false ? prob : 100}% · delay ${delay} · cooldown ${cooldown} (messages)`;
         h.append(selBox, chev, mode, title, ...(dupMark ? [dupMark] : []), pencil, meta);
         // Collapsed-line badge: how many keys the last scan flagged, so problems show without expanding.
-        // Tinted by the most severe flag for glance-triage; unattested-only stays neutral, since it is
-        // low-signal (on a hand-authored book those are mostly deliberate aliases).
-        // COUNTS PROBLEMS, NOT WARNINGS. Yellow is the 0.75x band — "probably not harming, your call" — and
-        // green shorts cannot collide at all, so neither belongs in a number the eye reads as a defect count.
-        // They still appear on expansion with their colour; only the headline excludes them.
+        // Tinted by the most severe flag for glance-triage; unattested-only stays neutral, since on a
+        // hand-authored book those are mostly deliberate aliases. It counts problems, not warnings: yellow
+        // is the 0.75x band and green shorts cannot collide, so neither belongs in a number the eye reads
+        // as a defect count. Both still appear on expansion with their colour.
         const RANK = { '#e06c6c': 3, '#d9b74a': 2, '#7bbf6a': 1 };   // red > yellow > green; '' (dead) = 0
         const SEV = { '#e06c6c': 'severe', '#d9b74a': 'moderate', '#7bbf6a': 'minor' };
         const counted = flagged ? [...flagged.values()].filter(v => { const c = scan.severityOf(v); return c !== '#d9b74a' && c !== '#7bbf6a'; }) : [];
-        // Unusable SECONDARIES count here too, and this is why the badge matters more than the chip:
-        // a key the matcher refuses is invisible until its entry is expanded, and a book has hundreds.
-        // Severe by definition — the entry gates on fewer keys than its author wrote.
+        // Unusable secondaries count here too, and are severe by definition — the entry gates on fewer keys
+        // than its author wrote. This is why the badge matters more than the chip: a key the matcher
+        // refuses is invisible until its entry is expanded.
         const secBad = scan ? scan.unusableKeysOf(e).length : 0;
         if (counted.length + secBad) {
             const badge = document.createElement('span'); badge.className = 'wa-entry-badge';
@@ -1176,7 +1099,7 @@ export async function lorebookStudio(preferredBook = null) {
             if (worst) { badge.style.background = worst; badge.style.color = worst === '#e06c6c' ? '#fff' : '#111'; }
             const softer = (flagged?.size ?? 0) - counted.length;
             // No colour means every counted flag is the uncoloured one, so name it from reasonOf rather
-            // than restating it here — same reason the chip tooltips do.
+            // than restating it here.
             badge.title = `Keywords the last scan flagged — worst: ${SEV[worst] || scan.reasonOf(counted[0]).text}.${secBad ? ` Includes ${secBad} secondary key${secBad === 1 ? '' : 's'} the matcher cannot run.` : ''}${softer ? ` ${softer} more are warnings, not counted here.` : ''} Expand to see which.`;
             h.append(badge);
         }
@@ -1207,8 +1130,6 @@ export async function lorebookStudio(preferredBook = null) {
         const para = document.createElement('div'); para.className = 'wa-kw-para';
         for (const key of (Array.isArray(e.key) ? e.key : [])) {
             const v = flagged?.get(key);
-            // Not scanned -> neutral chip. Scanned + unflagged -> green text. Flagged -> blue chip, white
-            // text (the reason rides along as annotation + tooltip; the old red text read too aggressive).
             let annot = '';
             const item = document.createElement('span'); item.className = 'wa-kw-item';   // chip + reason wrap as one
             const chip = document.createElement('span'); chip.className = 'wa-kw';
@@ -1218,15 +1139,11 @@ export async function lorebookStudio(preferredBook = null) {
             // genuinely good keys (corpus limits), so it gets no label and just a slight dim, not a colour.
             const isDead = v && v.flag === 'unattested';
             const isIgnored = ignoreSet.has(key);
-            // Whitelisted keys are skipped by the scanner (never flagged), so mark them purple to show
-            // they're deliberately spared; otherwise verdict drives the colour (green = no flag, red/yellow
-            // = too-common/short, dead = slight dim, no colour).
-            // The verdict's WORDING comes from reasonOf in every case, dead included. Dead still shows no
-            // visible label — there are too many of them and they are often good keys — but the tooltip
-            // has to carry the real sentence, because it is the only place the Explorer says which
-            // evidence was checked: "not in entry text" and "not in entry text or chat" are different
-            // claims. This line used to hardcode "no entry-text match" for dead keys, a second phrasing
-            // of a verdict the classifier already words, so a chat scan changed nothing visible here.
+            // Whitelisted keys are skipped by the scanner (never flagged), so they get their own marking
+            // rather than a verdict colour. The wording comes from reasonOf in every case, dead included:
+            // dead shows no visible label, but the tooltip must carry the real sentence, because it is the
+            // only place the Explorer says which evidence was checked — "not in entry text" and "not in
+            // entry text or chat" are different claims.
             const why = v && !isIgnored ? scan.reasonOf(v).text : '';
             if (isIgnored) { annot = 'ignored'; chip.classList.add('wa-kw-ignored'); }
             else if (v && !isDead) { const rc = scan.reasonOf(v); annot = why; if (rc.color) { chip.style.borderColor = rc.color; chip.style.background = `color-mix(in srgb, ${rc.color} 18%, transparent)`; } }
@@ -1249,11 +1166,9 @@ export async function lorebookStudio(preferredBook = null) {
             if (annot) { const r = document.createElement('span'); r.className = 'wa-kw-reason'; r.textContent = `(${annot})`; item.append(r); }   // reason outside the chip
             para.append(item);
         }
-        // Candidate chips: ➕ takes the term as-is, clicking the term itself rewords it first (the
-        // ranker's span is sometimes longer than the useful key). Either way it commits on the spot
-        // and reappears as a real keyword chip above, verdict colour and ✕ included — which is the
-        // undo, and the record of what you have already vetted. A checkbox used to stand in for the
-        // ➕: it read as "select for later" while actually committing immediately.
+        // Candidate chips: ➕ takes the term as-is, clicking the term itself rewords it first (the ranker's
+        // span is sometimes longer than the useful key). Either way it commits on the spot and reappears as
+        // a real keyword chip above, verdict colour and ✕ included — which is the undo.
         const g = sugg.get(e.uid);
         if (g) for (const [kind, terms] of [['tfidf', g.tfidf], ['llm', g.llm]]) for (const term of terms) {
             if (hasKey(e, term)) continue;
@@ -1278,14 +1193,12 @@ export async function lorebookStudio(preferredBook = null) {
         para.append(add, boltBtn, llmBtn);   // manual + first, then the suggestion triggers
 
         // --- Secondary keys, on the same footing as the primaries -----------------------------------
-        // They gate the entry, so a broken one changes what fires, and nothing here used to show them
-        // at all: the audit's only surface was a toast, which cannot say WHICH key on a book with two
-        // of them. Rendered only when the entry has any — an empty gate row on every entry is clutter,
-        // and entries carrying secondaries are rare (K12).
+        // They gate the entry, so a broken one changes what fires. Rendered only when the entry has any —
+        // an empty gate row on every entry is clutter, and entries carrying secondaries are rare (K12).
         //
-        // ONLY the `unusable` verdict is painted. The rest of the audit asks whether a key is a good
-        // TRIGGER — english-common, book-common, fragment, short — and a gate is not a trigger: a
-        // common word is a legitimate thing to require, so those flags would be noise here.
+        // Only the `unusable` verdict is painted. The rest of the audit asks whether a key is a good
+        // trigger — english-common, book-common, fragment, short — and a gate is not a trigger: a common
+        // word is a legitimate thing to require, so those flags would be noise here.
         // ponytail: a secondary that matches nowhere is meaningful too, but whether it is a fault
         // depends on the logic (fatal under AND_ALL, harmless under NOT_ANY); wants that read first.
         let secPara = null;
@@ -1295,17 +1208,15 @@ export async function lorebookStudio(preferredBook = null) {
             const sec = document.createElement('div');
             sec.className = 'wa-kw-para wa-kw-sec';
 
-            // The logic is what makes the list readable at all — the same chips mean "must also
-            // contain" or "must not contain" depending on it — so it is a control, not a caption:
-            // this is an editor, and a row whose meaning inverts on a field the author cannot reach
-            // from here is a row they cannot finish editing.
+            // The logic is what makes the list readable at all — the same chips mean "must also contain" or
+            // "must not contain" depending on it — so it is a control, not a caption: a row whose meaning
+            // inverts on a field the author cannot reach from here is a row they cannot finish editing.
             //
-            // OFF is the fifth position and it is `selective`, not a fifth logic. Core's own dropdown
-            // has no such entry — the field is written true by the template and never offered again —
-            // but the state is real (CCv2: `secondary_keys` is "ignored if selective == false"), it
-            // arrives on character cards, and it is the only way to park a gate without deleting the
-            // keys that express it. Switching off leaves `selectiveLogic` alone, so switching back on
-            // restores the author's own operator rather than the default.
+            // OFF is the fifth position and it is `selective`, not a fifth logic. Core's own dropdown has
+            // no such entry, but the state is real (CCv2: `secondary_keys` is "ignored if selective ==
+            // false"), it arrives on character cards, and it is the only way to park a gate without
+            // deleting the keys that express it. Switching off leaves `selectiveLogic` alone, so switching
+            // back on restores the author's own operator rather than the default.
             const logic = document.createElement('select'); logic.className = 'wa-mode';
             for (const [val, word, core] of LOGIC_OPTS) {
                 const o = document.createElement('option'); o.value = val; o.textContent = word; o.title = core; logic.append(o);
@@ -1314,11 +1225,10 @@ export async function lorebookStudio(preferredBook = null) {
             logic.title = gated
                 ? 'How the secondary keys gate the primaries above. They never activate on their own.'
                 : 'Switched off: ST and Worlds Apart both ignore these keys. Pick an operator to gate on them again.';
-            // A negation-only secondary means a different thing under each operator, and switching
-            // between them changes it silently: the chips do not move, only what they do. See
-            // `secondaryKeys` in matcher.mjs for why the key is kept rather than dropped — briefly,
-            // the composition is correct and which operator to write is intent. This is the moment
-            // the meaning moves, so this is where it gets said.
+            // A negation-only secondary means a different thing under each operator, and switching between
+            // them changes it silently: the chips do not move, only what they do. See `secondaryKeys` in
+            // matcher.mjs for why the key is kept rather than dropped. This is the moment the meaning
+            // moves, so this is where it gets said.
             const negOnly = e.keysecondary.filter(k => validateSmartKey(k).some(f => f.code === 'negation-only'));
             logic.addEventListener('change', () => {
                 if (logic.value === 'off') { e.selective = false; }
@@ -1340,11 +1250,10 @@ export async function lorebookStudio(preferredBook = null) {
                 const text = document.createElement('span'); text.className = 'wa-kw-text'; text.textContent = key;
                 const why = v ? `unusable — ${v.code}` : '';
                 if (v) { chip.style.borderColor = WA_RED; chip.style.background = `color-mix(in srgb, ${WA_RED} 18%, transparent)`; }
-                // Green says "this key is doing its job". A switched-off key is not doing a job, and is
-                // not faulty either — it takes the dimmed neutral a disabled entry's title gets, per
-                // chip rather than per paragraph so the operator select stays legible (opacity on the
-                // row would take the control that turns it back on down with it). Still click-to-edit:
-                // a parked key is one an author is entitled to go on writing.
+                // Green says "this key is doing its job". A switched-off key is not doing a job and is not
+                // faulty either — it takes the dimmed neutral, per chip rather than per paragraph so the
+                // operator select that turns it back on stays legible. Still click-to-edit: a parked key
+                // is one an author is entitled to go on writing.
                 else if (scan && gated) chip.style.borderColor = WA_GREEN;
                 text.title = v ? `${key} — ${v.message} (click to edit)` : `${key} (click to edit)`;
                 text.addEventListener('click', () => editKeyInline(e, key, text, 'keysecondary'));
@@ -1379,11 +1288,10 @@ export async function lorebookStudio(preferredBook = null) {
         const full = document.createElement('textarea'); full.className = 'wa-entry-full' + (tall.has(e.uid) ? ' wa-tall' : ''); full.value = String(e.content ?? '');
         const popBtn = document.createElement('i'); popBtn.className = 'wa-full-pop fa-solid ' + (tall.has(e.uid) ? 'fa-compress' : 'fa-expand');
         popBtn.title = tall.has(e.uid) ? 'Collapse editor to 8 rows' : 'Pop out editor to full height';
-        // Size to the RENDERED text height (wrapped prose has few newlines, so counting \n undersizes it).
-        // Height = scrollHeight; CSS max-height caps it (8 rows, or full height when popped out) and
-        // scrolls beyond — no line-height parsing. scrollHeight is only valid once shown, so size on expand.
-        // scrollHeight is only meaningful once the textarea is in the document; sizing it while detached
-        // yields 0 and collapses the editor (the keyword paragraph then paints up over it). Skip until mounted.
+        // Size to the rendered text height (wrapped prose has few newlines, so counting \n undersizes it).
+        // Height = scrollHeight; CSS max-height caps it and scrolls beyond. scrollHeight is only meaningful
+        // once the textarea is in the document — sizing it while detached yields 0 and collapses the editor
+        // — so skip until mounted, and size on expand.
         const autosize = () => { if (!full.isConnected) return; full.style.height = 'auto'; full.style.height = (full.scrollHeight + 2) + 'px'; };
         popBtn.addEventListener('click', () => {
             const isTall = full.classList.toggle('wa-tall');
@@ -1393,9 +1301,8 @@ export async function lorebookStudio(preferredBook = null) {
             autosize();
         });
         full.addEventListener('input', autosize);
-        // Editing the text changes the corpus the ranker was built from, so the next ⚡ has to rebuild —
-        // otherwise it scores the edited entry against the document frequencies of the text it replaced.
-        // The scan is left alone on purpose (see above): its colours are explicitly last-scan, not live.
+        // Editing the text changes the corpus the ranker was built from, so the next ⚡ has to rebuild. The
+        // scan is left alone on purpose: its colours are explicitly last-scan, not live.
         full.addEventListener('blur', () => { if (full.value !== String(e.content ?? '')) { e.content = full.value; save(); suggest = null; preview.textContent = firstLine(e); } });
         fullWrap.append(popBtn, full);
         const syncText = () => { const t = expanded.has(e.uid); tchev.classList.toggle('wa-open', t); preview.style.display = t ? 'none' : ''; fullWrap.style.display = t ? '' : 'none'; if (t) autosize(); };
@@ -1408,9 +1315,8 @@ export async function lorebookStudio(preferredBook = null) {
         row.append(body);
 
         const old = rowEls.get(e.uid);
-        // A repaint builds a fresh textarea, so every keyword edit would jump a scrolled editor back
-        // to the top. Carry the scroll over from the row being replaced (after syncText, whose
-        // autosize resets it).
+        // A repaint builds a fresh textarea, so every keyword edit would jump a scrolled editor back to the
+        // top. Carry the scroll over from the row being replaced (after syncText, whose autosize resets it).
         const st = old?.querySelector('.wa-entry-full')?.scrollTop ?? 0;
         if (old && old.isConnected) old.replaceWith(row); else mount?.append(row);
         rowEls.set(e.uid, row);
@@ -1423,7 +1329,6 @@ export async function lorebookStudio(preferredBook = null) {
      * ⚙ Advanced tray: core WI fields we don't surface as icons — inline like the Tool Settings tray.
      * Edits commit on change (number inputs on blur), then repaint; the tray stays open. Shared by the
      * Explorer and the term tabs, so the gear does the same thing wherever the tool row appears.
-     * @param {object} e Entry
      * @param {(e: object) => void} repaint What to redraw after a change
      */
     const buildAdvancedTray = (e, repaint) => {
@@ -1486,12 +1391,10 @@ export async function lorebookStudio(preferredBook = null) {
     };
 
     /**
-     * New blank entry, from core's template so it carries exactly the field set core would give it —
-     * a hand-rolled object would drift the moment core adds a field.
-     *
-     * Opened, expanded and title-editing on arrival: a blank entry has nothing to look at and its
-     * whole point is that you are about to type into it. Same scroll-and-flash as duplicate, for the
-     * same reason — the new uid sorts wherever it falls, which is often off-screen.
+     * New blank entry, from core's template so it carries exactly the field set core would give it — a
+     * hand-rolled object would drift the moment core adds a field. Opened, expanded and title-editing on
+     * arrival, and scrolled-and-flashed like a duplicate: the new uid sorts wherever it falls, often
+     * off-screen.
      */
     const newEntry = () => {
         const ne = createWorldInfoEntry(selected, data);
@@ -1589,8 +1492,7 @@ export async function lorebookStudio(preferredBook = null) {
     };
     const filterMatch = e => matchSearch(e) && typeMatch(e);
     // Explorer display order: base sort (module SORT_FNS), then the tiered modifier buckets by tierRank
-    // (base order preserved within each bucket) and flattens. Sort vocabulary + tier logic are shared
-    // module-scope (see SORT_FNS / tierRank); this just applies them to the Studio's own state.
+    // (base order preserved within each bucket) and flattens.
     const sortEntries = list => {
         // 'insert' mirrors the durable prompt insertion order (base sort + tiered) from settings; relevance
         // keys have no rest-state score, so they degrade to order-asc for display.
@@ -1604,11 +1506,11 @@ export async function lorebookStudio(preferredBook = null) {
         for (const e of sorted) (buckets[tierRank(e, tierCfg)] ??= []).push(e);
         return buckets.flat();   // sparse holes (empty ranks) are skipped by flat()
     };
-    // Copy an arbitrary book (open or not) to a free "X copy[ n]" name. Returns the new name, or null.
     /** The default duplicate name: "X copy", then "X copy 2", … until one is free. */
     const freeCopyName = src => { const base = `${src} copy`; let name = base, i = 2; while (world_names.includes(name)) name = `${base} ${i++}`; return name; };
     const nameTaken = n => world_names.some(x => x.toLowerCase() === n.toLowerCase());
 
+    // Copy an arbitrary book (open or not) to a free name. Returns the new name, or null.
     const copyBookByName = async (srcName, carryIgnored = false, asName = null) => {
         const src = (srcName === selected) ? data : await loadWorldInfo(srcName);
         if (!src) return null;
@@ -1622,15 +1524,12 @@ export async function lorebookStudio(preferredBook = null) {
     };
 
     /**
-     * Confirm a duplication, asking whether the source's ignored terms come along.
-     *
-     * A copy is usually a continuation of the same curation, so it defaults to carrying them — but a
-     * fork you intend to re-audit from scratch wants a clean slate, and that's not knowable from here.
-     * The question only appears when there is something to carry.
-     * @param {string} prompt Confirmation line
+     * Confirm a duplication, asking whether the source's ignored terms come along. Defaults to carrying
+     * them, since a copy is usually a continuation of the same curation; the question only appears when
+     * there is something to carry.
      * @param {string[]} names Source books
-     * @param {string|null} [defaultName] Editable target name — single-book duplication only; a bulk
-     *        copy has one name per source, so there is nothing for one field to mean.
+     * @param {string|null} [defaultName] Editable target name — single-book duplication only; a bulk copy
+     *        has one name per source, so there is nothing for one field to mean.
      * @returns {Promise<{ok: boolean, carry: boolean, name: string|null}>}
      */
     const confirmDuplicate = async (prompt, names, defaultName = null) => {
@@ -1735,7 +1634,7 @@ export async function lorebookStudio(preferredBook = null) {
         if (restored) toastr.success(`Restored ${restored} ${restored === 1 ? 'lorebook' : 'lorebooks'}.`, 'Worlds Apart');
     };
     /**
-     * Re-points every CLOSED chat bound to `oldName`. The open one is handled by its own metadata save,
+     * Re-points every closed chat bound to `oldName`. The open one is handled by its own metadata save,
      * which is cheaper and does not race ST's in-memory copy.
      *
      * A chat's binding lives in line 0 of its .jsonl, and the only way to change it is to round-trip the
@@ -1743,11 +1642,8 @@ export async function lorebookStudio(preferredBook = null) {
      * ST's own save path, so it backs the file up and integrity-checks against a concurrent edit rather
      * than clobbering; a chat that fails is reported rather than skipped silently.
      *
-     * ponytail: the whole chat crosses the wire per binding, which on a 5MB history is a real pause. It
-     * happens once per rename and the alternative is leaving the chats pointed at a book that no longer
-     * exists, which is silent and permanent. Revisit if ST ever exposes a metadata-only write.
-     *
-     * @returns {Promise<{moved: string[], failed: string[]}>}
+     * ponytail: the whole chat crosses the wire per binding, a real pause on a large history; revisit if
+     * ST ever exposes a metadata-only write.
      */
     const repointOne = async ({ char, avatar, file }, newName) => {
         const name = String(file ?? '').replace(/\.jsonl$/, '');
@@ -1769,16 +1665,14 @@ export async function lorebookStudio(preferredBook = null) {
     };
 
     /**
-     * Re-points every character card whose PRIMARY lorebook is `oldName`.
+     * Re-points every character card whose primary lorebook is `oldName`. ST's renameWorldInfo owns the
+     * field and is not exported, but the write is: /api/characters/merge-attributes takes
+     * `{ avatar, data: { extensions: { world } } }`, deep-merges it into the card and validates before
+     * writing — it is what ST's own /char-set runs.
      *
-     * WA was said not to be able to do this, here and in two other places, on the grounds that ST's
-     * renameWorldInfo owns the field and is not exported. The helper is not, but the write is:
-     * /api/characters/merge-attributes takes `{ avatar, data: { extensions: { world } } }`, deep-merges
-     * it into the card and validates before writing — it is what ST's own /char-set runs.
-     *
-     * Single mode per card rather than the bulk form: a rename touches one or two cards, the shape of
-     * the bulk `data` payload is ambiguous where the single one is exactly what /char-set sends, and a
-     * per-card result says which failed.
+     * Single mode per card rather than the bulk form: a rename touches one or two cards, the bulk `data`
+     * payload's shape is ambiguous where the single one is exactly what /char-set sends, and a per-card
+     * result says which failed.
      */
     const repointCards = async (oldName, newName) => {
         const targets = (characters ?? []).filter(c => c?.avatar && c?.data?.extensions?.world === oldName);
@@ -1814,9 +1708,7 @@ export async function lorebookStudio(preferredBook = null) {
 
     // Rename a book (open or not), then re-point every binding to it: global-select, charLore, all
     // personas, the open chat, every closed chat, and every character card whose primary lorebook it was.
-    // The card case was excluded for a long time on the grounds that ST's renameWorldInfo owns that field
-    // and is not exported — true of the helper, false of the write, which /char-set does through
-    // /api/characters/merge-attributes. WA's rename is now a superset of core's.
+    // WA's rename is a superset of core's.
     const renameBook = async (srcName = selected, prefill = null) => {
         const oldName = srcName;
         const raw = await Popup.show.input('Rename lorebook', 'New name:', prefill ?? oldName);
@@ -1835,9 +1727,9 @@ export async function lorebookStudio(preferredBook = null) {
             if (wasSelected && !selected_world_info.includes(newName)) selected_world_info.push(newName);
             for (const cl of (world_info.charLore ?? [])) { const i = cl.extraBooks?.indexOf(oldName) ?? -1; if (i >= 0) cl.extraBooks[i] = newName; }
             if (wasPersona) power_user.persona_description_lorebook = newName;
-            // Every OTHER persona too, which core's updateWorldInfoLinks does and this did not — the
-            // active persona's binding lives in a different field from the rest, so fixing only that one
-            // looks complete and silently orphans every inactive persona pointed at the book.
+            // Every other persona too, which core's updateWorldInfoLinks does: the active persona's binding
+            // lives in a different field from the rest, so fixing only that one silently orphans every
+            // inactive persona pointed at the book.
             for (const p of Object.keys(power_user.personas ?? {})) {
                 const d = power_user.persona_descriptions?.[p];
                 if (d?.lorebook === oldName) d.lorebook = newName;
@@ -1857,8 +1749,7 @@ export async function lorebookStudio(preferredBook = null) {
         if (oldName === selected) { renderBooks(); openBook(newName); }
         else { renderBooks(); }
         // Closed chats bound to the old name are orphaned by the rename and nothing else will ever fix
-        // them: the binding is a string in a file, and a book that no longer exists produces no error,
-        // just a chat that silently stops receiving it.
+        // them: a book that no longer exists produces no error, just a chat that stops receiving it.
         const { moved, failed } = await repointChats(oldName, newName);
         const cards = await repointCards(oldName, newName);
         const bits = [];
@@ -1906,21 +1797,19 @@ export async function lorebookStudio(preferredBook = null) {
         toastr[n ? 'success' : 'info'](n ? `Model suggestions added to ${n} ${n === 1 ? 'entry' : 'entries'} — review the ✨ chips.` : 'Model returned nothing usable.', 'Worlds Apart');
     });
 
-    // The entry set the term tabs work over: type filter + the shared sort, WITHOUT the Explorer's
+    // The entry set the term tabs work over: type filter + the shared sort, without the Explorer's
     // search — those tabs rank by search match rather than filtering on it (see rankBySearch).
     const visibleEntries = () => sortEntries(Object.values(data?.entries ?? {}).filter(typeMatch));
 
     /**
      * Search semantics for the term tabs, which differ from the Explorer's on purpose.
      *
-     * A query keeps an entry if its TITLE matches, or if one of the terms THIS TAB lists matches
-     * (flagged keys in Cleanup — every key under "Show all terms" — candidates in Suggest), or — if
-     * the Entry scope is ticked — its text.
-     * Title hits sort first, then term hits, then text hits; within a band the normal sort order holds.
+     * A query keeps an entry if its title matches, or if one of the terms this tab lists matches, or — if
+     * the Entry scope is ticked — its text. Title hits sort first, then term hits, then text hits; within
+     * a band the normal sort order holds.
      *
-     * Rows are never filtered. Locating an entry shows ALL of its terms, because deciding about one
-     * term almost always means looking at its siblings — filtering to just the matched row would hide
-     * the context the decision needs.
+     * Rows are never filtered. Locating an entry shows all of its terms, because deciding about one term
+     * almost always means looking at its siblings.
      *
      * @param {Array<{entry: object, rows: Array<{term: string}>}>} groups
      * @returns {Array} the surviving groups, ranked
@@ -1940,9 +1829,8 @@ export async function lorebookStudio(preferredBook = null) {
     };
 
     // --- Shared header controls -----------------------------------------------------------------
-    // Built here rather than inline in one view because all three tabs mount the same search box and
-    // type filter; they read/write the same module state, so a query typed in Explorer still applies
-    // after switching to Cleanup.
+    // All three tabs mount the same search box and type filter, reading and writing the same module
+    // state, so a query typed in Explorer still applies after switching to Cleanup.
     const buildSearchBox = onChange => {
         const wrap = document.createElement('span'); wrap.style.cssText = 'position:relative;display:inline-flex;align-items:center;';
         const search = document.createElement('input'); search.type = 'search'; search.className = 'text_pole wa-filter';
@@ -1972,14 +1860,14 @@ export async function lorebookStudio(preferredBook = null) {
         return wrap;
     };
     /**
-     * Sort control — shared widget (module makeSortControl), and shared STATE: all three tabs read the
-     * same entrySort/tieredMode/tierCfg through sortEntries, so a sort chosen in one applies in the
-     * others. The base sort + tiered toggle are ephemeral view state (persisted per book only as a
-     * convenience); the tier config is durable and shared with the prompt builder.
+     * Sort control — shared widget (module makeSortControl), and shared state: all three tabs read the
+     * same entrySort/tieredMode/tierCfg through sortEntries. The base sort + tiered toggle are ephemeral
+     * view state (persisted per book only as a convenience); the tier config is durable and shared with
+     * the prompt builder.
      *
-     * "Insert Order" (leadItems) mirrors the durable insertion settings; its tiered state reads from
-     * there, and toggling tiered while in it forks to an explicit ephemeral sort (base = the resolved
-     * insertion base, clamped to a valid key).
+     * "Insert Order" (leadItems) mirrors the durable insertion settings; its tiered state reads from there,
+     * and toggling tiered while in it forks to an explicit ephemeral sort (base = the resolved insertion
+     * base, clamped to a valid key).
      * @param {() => void} onChange Repaint after a sort change; the control relabels itself.
      */
     const buildSortControl = onChange => makeSortControl({
@@ -2032,11 +1920,10 @@ export async function lorebookStudio(preferredBook = null) {
     // --- Cleanup / Suggest: shared key-per-row plumbing ------------------------------------------
     // Both tabs render the same shape (entry group header, then one row per term) and differ only in
     // where the rows come from, which way the checkbox defaults, and what the commit button does.
-    // `reg` collects the checkbox elements so a tick can update state in place. Rebuilding the list on
-    // every click would be correct but throws away scroll position, which is unusable on a big book
-    // when the whole job is working down a long list of terms.
-    // `onChange` re-syncs the checkboxes (cheap); `onEntryChange` rebuilds the whole list, which the
-    // entry tools need — toggling case/whole-word/disable changes how the scan classifies that entry.
+    // `reg` collects the checkbox elements so a tick can update state in place: rebuilding the list on
+    // every click throws away scroll position, which is unusable when the job is a long list of terms.
+    // `onChange` re-syncs the checkboxes (cheap); `onEntryChange` rebuilds the whole list, which the entry
+    // tools need — toggling case/whole-word/disable changes how the scan classifies that entry.
     const termGroupHeader = (e, rows, checks, reg, onChange, onEntryChange, extraActs = []) => {
         const head = document.createElement('div'); head.className = 'wa-term-grp';
         const ids = rows.map(r => rowId(e.uid, r.term));
@@ -2060,14 +1947,12 @@ export async function lorebookStudio(preferredBook = null) {
         title.style.cssText = `flex:0 1 auto;min-width:3em;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;${e.disable ? 'opacity:0.5;' : ''}`;
         const meta = document.createElement('span'); meta.className = 'wa-tab-count'; meta.style.flex = '0 0 auto';
         meta.textContent = rows.length ? `${rows.length} term${rows.length === 1 ? '' : 's'}` : 'no candidates';
-        // Reading the entry is what you actually need while judging its terms, so this opens the text in
-        // a popup rather than jumping to the Explorer (which landed you at the top of an unscrolled list).
+        // Reading the entry is what you need while judging its terms, so this opens the text in a popup.
         const view = document.createElement('i'); view.className = 'fa-solid fa-file-lines wa-term-act';
         view.title = 'View this entry\'s text';
         view.addEventListener('click', () => showEntryText(e));
-        // The same tool row the Explorer shows, right-aligned by .wa-entry-tools' margin-left:auto — so
-        // the identity block (title, count, view, ✨) packs left and the tools sit at the far edge, where
-        // they land in the Explorer too.
+        // The same tool row the Explorer shows, right-aligned by .wa-entry-tools' margin-left:auto, so the
+        // identity block packs left and the tools sit at the far edge as they do in the Explorer.
         head.append(glyph, title, meta, view, ...extraActs.map(f => f(e)), buildEntryTools(e, onEntryChange, { compact: true }));
         return head;
     };
@@ -2082,8 +1967,7 @@ export async function lorebookStudio(preferredBook = null) {
         const why = document.createElement('span'); why.className = 'wa-term-why';
         why.textContent = r.why ?? ''; if (r.color) why.style.color = r.color;
         // Per-term actions live in the right-click menu, the same place the Explorer's keyword chips put
-        // them — so there's one way to delete/replace/whitelist a term wherever you meet it, and no row
-        // icon competing with the reason for the same strip of space.
+        // them — one way to delete/replace/whitelist a term wherever you meet it.
         if (onContext) row.addEventListener('contextmenu', ev => { ev.preventDefault(); onContext(e, r, ev.clientX, ev.clientY); });
         row.append(cb, name, why);
         return row;
@@ -2099,10 +1983,9 @@ export async function lorebookStudio(preferredBook = null) {
     };
     const emptyNote = text => { const d = document.createElement('div'); d.style.cssText = 'opacity:0.6;padding:10px 4px;'; d.textContent = text; return d; };
     /**
-     * The book's ignored terms, as removable chips. Pinned in the term tabs rather than left to the
-     * Tool Settings drawer: an ignored term is invisible in these views by construction — it stops
-     * being a row — so with the drawer shut there was nothing on screen saying why a key you remember
-     * flagging isn't listed, or how to get it back.
+     * The book's ignored terms, as removable chips. Pinned in the term tabs rather than left to the Tool
+     * Settings drawer: an ignored term is invisible in these views by construction — it stops being a row
+     * — so with the drawer shut nothing on screen says why a key you remember flagging isn't listed.
      * @param {HTMLElement} host Container to (re)fill
      * @param {() => void} onChange Repaint after un-ignoring
      */
@@ -2123,29 +2006,22 @@ export async function lorebookStudio(preferredBook = null) {
         }
     };
     // --- Cleanup tab ----------------------------------------------------------------------------
-    // One pass over the current chat for every "not in entry text" key at once. Deduped by FOLDED form,
-    // since two keys can fold together (apostrophe normalisation) and the automaton indexes the pattern list
-    // it was handed. Cost is O(chat), independent of key count.
+    // One pass over the current chat for every "not in entry text" key at once. Deduped by folded form,
+    // since two keys can fold together (apostrophe normalisation) and the automaton indexes the pattern
+    // list it was handed. Cost is O(chat), independent of key count.
+    //
+    // Which chats does this book reach? The open chat may have nothing to do with the book being edited,
+    // so scanning it answers the wrong question. A book binds three ways:
+    //   chat-bound       chat_metadata.world_info, line 0 of the .jsonl; /api/characters/chats with
+    //                    metadata:true returns it without transferring any chat body.
+    //   character-bound  characters[i].data.extensions.world — already in memory, free.
+    //   global           selected_world_info, which means every chat. Never pre-ticked: a globally-active
+    //                    book reaches every chat on the install, gigabytes on a real corpus (P1).
     /**
-     * Which chats does THIS BOOK reach? Studio is a lorebook manager, not a chat view — the open chat is
-     * whatever happened to be loaded and may have nothing to do with the book being edited, so scanning it
-     * answers the wrong question. A book binds three ways and they cost very differently to enumerate:
-     *
-     *   chat-bound       chat_metadata.world_info, line 0 of the .jsonl. /api/characters/chats with
-     *                    metadata:true returns it without transferring any chat body.
-     *   character-bound  characters[i].data.extensions.world — already in memory, free.
-     *   global           selected_world_info, which means EVERY chat. Never pre-ticked: a globally-active
-     *                    book reaches every chat on the install, gigabytes on a real corpus (P1).
-     *
-     * Returns candidates with their size so the cost is visible before anything is fetched.
-     */
-    /**
-     * Confirm which chats to scan, with sizes, pre-ticked by binding.
-     *
-     * Shown even when there is one candidate: the whole point is that "0 hits in chat" is only meaningful if
-     * you know which chats produced it. Character-bound chats are pre-ticked with their chat-bound siblings
-     * because both are real bindings; the currently-open chat is offered unticked, since including it by
-     * assumption is exactly the bug this replaces.
+     * Confirm which chats to scan, with sizes, pre-ticked by binding. Shown even for a single candidate:
+     * "0 hits in chat" is only meaningful if you know which chats produced it. Character-bound chats are
+     * pre-ticked with their chat-bound siblings because both are real bindings; the open chat is offered
+     * unticked.
      */
     const pickChats = async candidates => {
         const wrap = document.createElement('div');
@@ -2188,11 +2064,11 @@ export async function lorebookStudio(preferredBook = null) {
     };
 
     // Per-character chat metadata, cached for the Studio session. This is the expensive half of resolution
-    // — one request per character, each streaming line 0 of every chat file — and it is BOOK-INDEPENDENT:
+    // — one request per character, each streaming line 0 of every chat file — and it is book-independent:
     // only the filter below changes when you switch books, so switching costs nothing after the first scan.
     //
-    // ponytail: session-scoped, no invalidation. Binding a book to a chat while Studio is open will not show
-    // up until it is reopened. Refresh-on-demand if that turns out to bite; the cheap fix is closing Studio.
+    // ponytail: session-scoped, no invalidation. Binding a book to a chat while Studio is open will not
+    // show up until it is reopened; the cheap fix is closing Studio.
     let chatIndex = null;   // [{ char, avatar, charWorld, chats: [...] }]
     const loadChatIndex = async () => {
         if (chatIndex) return chatIndex;
@@ -2213,9 +2089,8 @@ export async function lorebookStudio(preferredBook = null) {
     };
 
     const findBookChats = async () => {
-        // Global books are listed in ST's settings, not in the lorebook file — the book itself has no idea.
-        // A globally-active book genuinely applies to every chat, so those are OFFERED but never
-        // pre-ticked — that is every chat on the install, and not everyone runs ST on localhost.
+        // Global books are listed in ST's settings, not in the lorebook file. A globally-active book
+        // genuinely applies to every chat, so those are offered but never pre-ticked.
         const isGlobal = (selected_world_info ?? []).includes(selected);
         const out = [];
         for (const c of await loadChatIndex()) {
@@ -2245,24 +2120,22 @@ export async function lorebookStudio(preferredBook = null) {
     };
 
     /**
-     * Scans a chosen set of chats and installs the result. THE one gatherer — the picker path and the
+     * Scans a chosen set of chats and installs the result. The one gatherer — the picker path and the
      * audit's automatic path both come here, so which button was pressed cannot change the evidence.
      * Returns a summary for the caller to phrase; it does not toast or repaint.
      */
     const scanChats = async (picked, label) => {
-        // LITERALS ONLY. The scan is one Aho-Corasick pass over folded literals, so a `?` SmartKey or a
-        // /regex/ key goes in as the characters it is written with and can never match — it would come
-        // back 0 and be reported as absent from a chat nobody actually asked about it. Omitted from the
-        // map instead, which chatRateOf reads as "not checked": no suppression, and the reason text keeps
-        // saying only that entry text was searched. Evaluating them properly needs countKey per message,
-        // which the server route cannot do — it has the messages but not the matcher — and doing it on
-        // the client path alone would put the two halves back out of step.
+        // Literals only. The scan is one Aho-Corasick pass over folded literals, so a `?` SmartKey or a
+        // /regex/ key would go in as the characters it is written with, never match, and be reported as
+        // absent from a chat nobody asked about it. Omitted from the map instead, which chatRateOf reads
+        // as "not checked". Evaluating them properly needs countKey per message, which the server route
+        // cannot do — it has the messages but not the matcher.
         const keys = bookKeys().filter(k => !k.startsWith('?') && !isRegexKey(k));
         if (!keys.length || !picked?.length) return null;
 
-        // PLUGIN FIRST: it scans the files where they already live and returns only counts, so a
-        // multi-gigabyte history never crosses the wire. The client-side path below is the fallback for an undeployed
-        // plugin — correct, just wasteful, which only matters off localhost.
+        // Plugin first: it scans the files where they already live and returns only counts, so a
+        // multi-gigabyte history never crosses the wire. The client-side path below is the fallback for an
+        // undeployed plugin — correct, just wasteful, which only matters off localhost.
         const onDisk = picked.filter(c => !c.open && c.avatar);
         if (runState.pluginAvailable && onDisk.length === picked.length) {
             const r = await fetch('/api/plugins/worlds-apart/scan-chats', {
@@ -2272,8 +2145,8 @@ export async function lorebookStudio(preferredBook = null) {
             if (r.ok) {
                 const j = await r.json();
                 const seen = Number(j.messages) || 0;
-                // Zero messages means the route resolved no files, not that the chats are silent. Installing
-                // that would set every key's share to undefined-by-division and quietly disable the whole
+                // Zero messages means the route resolved no files, not that the chats are silent.
+                // Installing it would set every key's share to undefined-by-division and disable the whole
                 // signal while the toast claimed a scan had happened.
                 if (!seen) { console.warn('Worlds Apart: /scan-chats read 0 messages', j); return null; }
                 chatHits = new Map(keys.map(k => [k, Number(j.counts?.[k]) || 0]));
@@ -2297,7 +2170,7 @@ export async function lorebookStudio(preferredBook = null) {
         const idxOf = new Map(folded.map((f, i) => [f, i]));
         const aut = buildAutomaton(folded);
         const counts = new Map();
-        // Same accumulator the server route uses — a hit is a MESSAGE, and the two must not drift.
+        // Same accumulator the server route uses — a hit is a message, and the two must not drift.
         for (const t of msgs) addMessageHits(aut, t, counts);
         chatHits = new Map(keys.map(k => [k, counts.get(idxOf.get(fold(k))) ?? 0]));
         chatMsgs = msgs.length;
@@ -2310,9 +2183,8 @@ export async function lorebookStudio(preferredBook = null) {
      *  what the picker is for. */
     const boundChats = async () => {
         let bound = (await findBookChats()).filter(c => c.bound);
-        // The index is cached for the Studio's lifetime (see loadChatIndex), so a chat bound — or a
-        // fixture linked — while it was open reads as absent. Finding nothing is cheap to disbelieve
-        // once: drop the cache and look again, rather than reporting "no bound chats" from a snapshot.
+        // The index is cached for the Studio's lifetime (see loadChatIndex), so a chat bound while it was
+        // open reads as absent. Drop the cache and look again rather than reporting from a stale snapshot.
         if (!bound.length) { chatIndex = null; bound = (await findBookChats()).filter(c => c.bound); }
         return bound;
     };
@@ -2321,8 +2193,7 @@ export async function lorebookStudio(preferredBook = null) {
         if (!scan) { toastr.info('Run the audit first.', 'Worlds Apart'); return; }
         toastr.info('Finding chats that use this book…', 'Worlds Apart', { timeOut: 2000 });
         const found = await findBookChats();
-        // The open chat is offered too, unticked, for the case the metadata does not capture — but it is
-        // never assumed, which was the bug in the first cut of this.
+        // The open chat is offered too, unticked, for the case the metadata does not capture — never assumed.
         const ctx = getContext();
         const openName = String(ctx.chatId ?? '');
         if (openName && !found.some(f => f.file.startsWith(openName))) {
@@ -2343,12 +2214,12 @@ export async function lorebookStudio(preferredBook = null) {
     /**
      * What both audit buttons do: gather the free evidence, then re-derive.
      *
-     * Scans every chat BOUND to this book, through the same gatherer the picker uses — the audits in
-     * the Explorer and in Cleanup have to be identical, so the evidence cannot depend on which button
-     * started it. Skipped once a scan exists, since the user's own pick may be wider than this.
+     * Scans every chat bound to this book, through the same gatherer the picker uses — the audits in the
+     * Explorer and in Cleanup have to be identical, so the evidence cannot depend on which button started
+     * it. Skipped once a scan exists, since the user's own pick may be wider than this.
      *
-     * It reports what it used. The difference between "not in entry text" and "not in entry text or
-     * chat" is otherwise invisible, and indistinguishable from a scan that ran and found nothing.
+     * It reports what it used: the difference between "not in entry text" and "not in entry text or chat"
+     * is otherwise invisible, and indistinguishable from a scan that ran and found nothing.
      */
     const runAudit = async () => {
         let got = null, bound = [];
@@ -2360,9 +2231,8 @@ export async function lorebookStudio(preferredBook = null) {
             }
         }
         rebuildScan();
-        // matchWindow is in here because it reached the classifier for the first time in fefaa62 — the
-        // wrapper had been dropping it, so the audit ran at 'scan' while the setting said otherwise and
-        // nothing on screen disagreed. A setting that silently does nothing is the thing this line is for.
+        // matchWindow is logged because a setting that silently does nothing is otherwise invisible: the
+        // audit can run at 'scan' while the setting says otherwise and nothing on screen disagrees.
         console.log('Worlds Apart: audit evidence —', {
             book: selected, matchWindow: settings().matchWindow, boundChats: bound.length,
             scanned: got?.via ?? 'none', messages: chatMsgs, keys: chatHits?.size ?? 0, firing: got?.live ?? 0,
@@ -2382,16 +2252,13 @@ export async function lorebookStudio(preferredBook = null) {
                 const rc = scan.reasonOf(p);
                 const id = rowId(e.uid, p.key);
                 if (!cleanupChecks.has(id)) cleanupChecks.set(id, scan.defChecked(p));   // pre-tick policy shared with the pruner
-                // Chat evidence used to be applied HERE — a green row and a hit count bolted onto an
-                // `unattested` verdict the classifier had already reached. It lives in the classifier
-                // now, so a chat-attested key never reaches this list to be recoloured, and the reason
-                // text carries what was checked. Nothing local left to add; the denominator is in the
-                // bulk bar, where it is the same for every row.
+                // Chat evidence lives in the classifier, not here: a chat-attested key never reaches this
+                // list to be recoloured, and the reason text carries what was checked. The denominator is
+                // in the bulk bar, where it is the same for every row.
                 return { term: p.key, why: rc.text, color: rc.color, p };
             });
             // Show-all: append the keys classifyEntry didn't return — unflagged, whitelisted, or on an
-            // entry the audit's scope excluded. Flagged rows stay on top, so widening the list never
-            // buries the problems it found.
+            // entry the audit's scope excluded. Flagged rows stay on top.
             if (cleanupShowAll) {
                 const shown = new Set(rows.map(r => r.term));
                 for (const key of (Array.isArray(e.key) ? e.key : [])) {
@@ -2436,7 +2303,7 @@ export async function lorebookStudio(preferredBook = null) {
         save(); rebuildScan(); suggest = null; renderExplorer();
         toastr.success(`Restored ${n} keyword${n === 1 ? '' : 's'}.`, 'Worlds Apart');
     };
-    // Whitelisting is the PERSISTENT form of "don't clean this" — unticking only spares a term for this
+    // Whitelisting is the persistent form of "don't clean this" — unticking only spares a term for this
     // run, while the whitelist survives the session and stops the scanner flagging it at all.
     const ignoreChecked = () => {
         let n = 0;
@@ -2447,10 +2314,9 @@ export async function lorebookStudio(preferredBook = null) {
         persistIgnore(); rebuildScan(); renderExplorer();
         toastr.success(`Now ignoring ${n} term${n === 1 ? '' : 's'} in "${selected}" — they won't be flagged again.`, 'Worlds Apart');
     };
-    // Both term tabs open on a synchronous whole-book pre-pass (the audit scan / the TF-IDF ranker),
-    // which blocks the thread for up to a second on a large book. Paint the tab's shell with a working
-    // note FIRST, yield one turn so the browser actually renders it, then do the work and repaint —
-    // otherwise the click looks like it did nothing at all.
+    // Both term tabs open on a synchronous whole-book pre-pass (the audit scan / the TF-IDF ranker), which
+    // blocks the thread for up to a second on a large book. Paint the tab's shell with a working note
+    // first, yield one turn so the browser renders it, then do the work and repaint.
     const yieldFrame = () => new Promise(r => setTimeout(r, 0));
 
     const renderCleanupView = async pane => {
@@ -2524,7 +2390,7 @@ export async function lorebookStudio(preferredBook = null) {
             else for (const g of groups) {
                 list.append(termGroupHeader(g.entry, g.rows, cleanupChecks, reg, sync, repaint));
                 if (advOpen.has(g.entry.uid)) list.append(buildAdvancedTray(g.entry, repaint));
-                // Cleanup terms ARE live keys, so the Explorer's keyword menu applies unchanged.
+                // Cleanup terms are live keys, so the Explorer's keyword menu applies unchanged.
                 for (const r of g.rows) list.append(termRow(g.entry, r, cleanupChecks, reg, sync,
                     (e, row, x, y) => showKwMenu(row.term, x, y)));
             }
@@ -2536,10 +2402,9 @@ export async function lorebookStudio(preferredBook = null) {
             list.append(emptyNote('Auditing keywords…'));
             await yieldFrame();
             if (!pane.isConnected || tab !== 'cleanup') return;   // switched away while we were blocked
-            // runAudit, not rebuildScan: this is the OTHER place an audit gets built from scratch, and an
-            // audit that gathered no chat evidence is a different audit. Opening Cleanup first and then
-            // switching to the Explorer used to leave the chips reading verdicts from entry text alone,
-            // with the Explorer's own button the only way to get the rest — two surfaces, two audits.
+            // runAudit, not rebuildScan: this is the other place an audit gets built from scratch, and an
+            // audit that gathered no chat evidence is a different audit — the two surfaces would then be
+            // showing verdicts from different evidence.
             await runAudit();
             auditBtn.innerHTML = '<i class="fa-solid fa-stethoscope"></i> Re-audit';
         }
@@ -2579,10 +2444,10 @@ export async function lorebookStudio(preferredBook = null) {
     /**
      * The orphaned-bindings list: what is broken, what it probably meant, and the repairs.
      *
-     * Two book-level repairs, because only the author knows which happened. RENAME the existing book
-     * back — the chats were right and the rename was the mistake — which now re-points everything on the
-     * way past. Or DUPLICATE it under the old name, when both books should exist. Below that, the chats,
-     * tickable, for the case where neither is true and they simply belong to a different book.
+     * Two book-level repairs, because only the author knows which happened. Rename the existing book back
+     * — the chats were right and the rename was the mistake — which re-points everything on the way past.
+     * Or duplicate it under the old name, when both books should exist. Below that, the chats, tickable,
+     * for the case where neither is true and they simply belong to a different book.
      */
     const renderOrphans = () => {
         explorer.innerHTML = '';
@@ -2608,15 +2473,12 @@ export async function lorebookStudio(preferredBook = null) {
                 row.style.cssText = 'display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:6px;';
                 const sug = document.createElement('span'); sug.style.cssText = 'word-break:break-all;';
                 sug.innerHTML = `<span class="opacity50p">might be related to</span> ${escapeHtml(g.nearest)}`;
-                // Both buttons do the same thing — make the missing name exist again — and differ only in
-                // what happens to the existing book. Labelled by that outcome, because naming the OTHER
-                // book made them read as "point the old name at the new one", which is the opposite: it
-                // is the missing name that has to come back, since that is what the chats ask for.
+                // Both buttons make the missing name exist again and differ only in what happens to the
+                // existing book, so they are labelled by that outcome: it is the missing name that has to
+                // come back, since that is what the chats ask for.
                 // "might be related to", not "looks renamed from": the match is a name similarity and
-                // nothing more. A rename is only the likeliest explanation, and stating it as the finding
-                // would put the tool's guess ahead of the evidence in the one place a wrong reading gets
-                // acted on. Same icons the book toolbar uses for the same two verbs — fa-pen renames,
-                // fa-copy duplicates — so they read as operations already known from there.
+                // nothing more, and stating a rename as the finding would put the tool's guess ahead of
+                // the evidence. Same icons the book toolbar uses for the same two verbs.
                 row.append(sug,
                     bookTool('fa-pen', `Rename “${g.nearest}” back to “${g.name}”. The chats resolve immediately, and anything still bound to “${g.nearest}” is re-pointed with it — one book, under the old name.`,
                         async () => { await renameBook(g.nearest, g.name); await refreshOrphans(); }),
@@ -2683,8 +2545,8 @@ export async function lorebookStudio(preferredBook = null) {
             }
 
             if (ticked.length) {
-                // A dropdown, not a typed name: the target is always an EXISTING book, so there is
-                // nothing to type and nothing to mistype. Defaults to the suggestion when there is one.
+                // A dropdown, not a typed name: the target is always an existing book, so there is nothing
+                // to mistype. Defaults to the suggestion when there is one.
                 const bar = document.createElement('div');
                 bar.style.cssText = 'display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-top:8px;';
                 const sel = document.createElement('select'); sel.className = 'text_pole';
@@ -2716,9 +2578,9 @@ export async function lorebookStudio(preferredBook = null) {
 
     const renderExplorer = () => {
         if (orphanView) return renderOrphans();
-        // A full repaint throws away the scrolling list, so anything that redraws the whole Explorer (Suggest
-        // all, audit, expand all, a bulk edit) would dump the user back at the top. Carry the offset over the
-        // rebuild; a book/tab change lands on a list that doesn't exist yet and starts at 0 on its own.
+        // A full repaint throws away the scrolling list, so anything that redraws the whole Explorer would
+        // dump the user back at the top. Carry the offset over the rebuild; a book/tab change lands on a
+        // list that doesn't exist yet and starts at 0 on its own.
         const listTop = explorer.querySelector('.wa-studio-entries')?.scrollTop ?? 0;
         explorer.innerHTML = ''; rowEls.clear();
         // The close button lives in the tab bar (for tab order), so the no-book branch — which paints no
@@ -2759,9 +2621,9 @@ export async function lorebookStudio(preferredBook = null) {
         const scanBtn = document.createElement('button');
         scanBtn.type = 'button'; scanBtn.className = 'menu_button';
         scanBtn.innerHTML = `<i class="fa-solid fa-stethoscope"></i> ${scan ? 'Re-audit' : 'Keyword audit'}`;
-        // The tooltip carries WHICH evidence the verdicts rest on. A chip reading "not in entry text"
-        // and one reading "not in entry text or chat" are different claims, and nothing else on this
-        // screen says whether a chat was searched.
+        // The tooltip carries which evidence the verdicts rest on: "not in entry text" and "not in entry
+        // text or chat" are different claims, and nothing else on this screen says whether a chat was
+        // searched.
         scanBtn.title = chatHits
             ? `Flag dead / common / short keywords — tune under Tool Settings.\nChat evidence: "${chatName}", ${chatMsgs} messages.`
             : 'Flag dead / common / short keywords and colour them by verdict — tune under Tool Settings.\nNo chat searched yet: bind this book to the open chat, or use Cleanup → "Check against chats".';
@@ -2809,21 +2671,18 @@ export async function lorebookStudio(preferredBook = null) {
         globeBtn.style.color = globalTrayOpen ? '#6ea8fe' : '';
         globeBtn.addEventListener('click', () => { globalTrayOpen = !globalTrayOpen; globeBtn.style.color = globalTrayOpen ? '#6ea8fe' : ''; refreshGlobalTray(); });
         row1.append(label, vsep(), filterWrap, sortBtn, spacer(), searchWrap, globeBtn);
-        // Creating an entry had no home in the Studio at all — you could duplicate one but not make one,
-        // so a new book could only be filled from core's editor. Sits far right, away from the batch
-        // actions: authoring one entry at a time is the rarer errand here, and it is the only button on
-        // the row that writes rather than analyses.
+        // Sits far right, away from the batch actions: authoring one entry at a time is the rarer errand
+        // here, and it is the only button on the row that writes rather than analyses.
         const newBtn = document.createElement('button');
         newBtn.type = 'button'; newBtn.className = 'menu_button';
         newBtn.style.cssText = 'width:auto;padding:3px 9px;flex-shrink:0;';
         newBtn.innerHTML = '<i class="fa-solid fa-plus"></i> New entry';
         newBtn.title = 'Add a blank entry to this lorebook';
         newBtn.addEventListener('click', () => newEntry());
-        // A flex spacer rather than margin-left:auto. The row wraps, and an auto-margin still applies on
-        // whatever line the button lands on — so once the row was too narrow, New entry hung alone off
-        // the right of a second line. Line-breaking uses flex-basis, and this basis is 0, so the spacer
-        // never affects where the wrap falls: it grows to push the button right while everything fits,
-        // and once the button wraps it simply starts the next line at the left.
+        // A flex spacer rather than margin-left:auto: the row wraps, and an auto-margin would still apply
+        // on whatever line the button lands on. Line-breaking uses flex-basis, and this basis is 0, so the
+        // spacer never affects where the wrap falls — it grows to push the button right while everything
+        // fits, and once the button wraps it starts the next line at the left.
         const grow = document.createElement('span'); grow.style.cssText = 'flex:1 1 0;min-width:0;';
         row2.append(expandBtn, scanBtn, suggestAllBtn, suggestAllLlmBtn, grow, newBtn);
         head.append(row1, row2);
@@ -2862,10 +2721,9 @@ export async function lorebookStudio(preferredBook = null) {
         const s = settings(); if (!s.keywordIgnore) s.keywordIgnore = {};
         ignoreSet = new Set(s.keywordIgnore[name] ?? []);
         renderExplorer();
-        // The TF-IDF ranker is built lazily on the first ⚡/🪄 (which dims the button and yields a frame
-        // first). We used to warm it here on requestIdleCallback, but buildKeySuggest is synchronous, so
-        // once idle fired it still froze the page ~1s right after open — worse than an honest on-demand
-        // build. Left cold; the first suggestion click pays the cost with a visible spinner.
+        // The TF-IDF ranker is built lazily on the first ⚡/🪄, which dims the button and yields a frame
+        // first. buildKeySuggest is synchronous, so warming it on idle would still freeze the page ~1s
+        // right after open; left cold, the first suggestion click pays the cost with a visible spinner.
     };
 
     const renderBooks = () => {
@@ -2950,9 +2808,9 @@ export async function lorebookStudio(preferredBook = null) {
             nav.append(row);
         }
 
-        // Broken bindings, at the foot and only when there are some. Not a book: it is a fact about
-        // chats, and the selector is the only place in a book-oriented tool where a chat-shaped fact
-        // can hang without interrupting whatever book you are actually working on.
+        // Broken bindings, at the foot and only when there are some. Not a book: it is a fact about chats,
+        // and the selector is the one place a chat-shaped fact can hang without interrupting the book
+        // being worked on.
         if (orphans) {
             const row = document.createElement('div');
             row.className = 'wa-book-row' + (orphanView ? ' wa-sel' : '');
@@ -2972,10 +2830,9 @@ export async function lorebookStudio(preferredBook = null) {
     checkOrphans();   // background; adds a nav row only if something is broken
 
     // Escape dismisses inside Studio; it never closes the window. A close throws away scroll position,
-    // which entries are open, and the selection — too much to lose to a stray keypress when the ✕ is
-    // right there. Bubble phase, so an inline keyword editor or an open context menu handles its own
-    // Escape first (both preventDefault); we only swallow the <dialog>'s close and, failing anything
-    // else to dismiss, drop the selection.
+    // which entries are open, and the selection. Bubble phase, so an inline keyword editor or an open
+    // context menu handles its own Escape first (both preventDefault); we only swallow the <dialog>'s
+    // close and, failing anything else to dismiss, drop the selection.
     root.addEventListener('keydown', ev => {
         if (ev.key !== 'Escape') return;
         const claimed = ev.defaultPrevented;

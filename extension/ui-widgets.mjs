@@ -55,7 +55,6 @@ export const showCtxMenu = (items, x, y, mount = document.body) => {
     window.addEventListener('scroll', closeCtx, true);
 };
 
-// Reorder / enable tiers (shared). Draft a copy, commit on Save. onSaved fires after persistence.
 // Inline tier-precedence editor: ↑/↓ reorder + enable checkbox, committing live via setCfg/onChange.
 // Shared by WA settings (mounted inline) and the Studio's Configure-tiers popup. getCfg returns a fresh
 // array each call, so mutating a copy and handing it to setCfg is safe.
@@ -91,10 +90,10 @@ async function configureTiersPopup(getCfg, setCfg, onSaved) {
 
 // Sort-control button, shared by the Studio header and the settings panel. Opens `leadItems` (special
 // leaves shown first, e.g. the Studio's "Insert Order") + the tiered toggle + Configure tiers… + base
-// sorts + any `extraItems` (e.g. relevance, prompt-only). Callbacks read/write the caller's own state so
-// the same widget drives display order and insertion order. `mount` (fn → element) targets a modal
-// dialog's top layer when needed; omit for document.body. Lead items encapsulate their own tiered state,
-// so the "Tiered · " prefix is suppressed for them.
+// sorts + any `extraItems` (e.g. relevance, prompt-only). Callbacks read/write the caller's own state so the
+// same widget drives display order and insertion order. `mount` (fn → element) targets a modal dialog's top
+// layer; omit for document.body. Lead items encapsulate their own tiered state, so the "Tiered · " prefix
+// is suppressed for them.
 export function makeSortControl({ getSort, setSort, getTiered, setTiered, getTierCfg, setTierCfg, leadItems = [], extraItems = [], onChange, mount, block = false }) {
     const btn = document.createElement('button'); btn.type = 'button'; btn.className = 'menu_button wa-filter';
     btn.title = 'Sort order';
@@ -141,37 +140,27 @@ export function wiTooltip({ item, block }) {
 /**
  * The key-hit lines under a grading row's title: which key fired, how often, and where.
  *
- * COLOUR CARRIES THE DISTINCTIONS, not glyphs. A 🔑 in front of every line is the same mark on every row,
- * so it separates nothing while adding a column of noise to a table read top to bottom; and `×` before the
- * count is a second mark doing work that a colour change and the space already do. What differs between
- * rows is the KEY and how often it fired, so those two are what get marked — the key in blue, the count in
- * amber — and the excerpt stays dim as context for both.
+ * Colour carries the distinctions, not glyphs: what differs between rows is the key and how often it fired,
+ * so those two are what get marked — the key in blue, the count in amber — and the excerpt stays dim as
+ * context for both.
  *
- * THE COUNT IS ALWAYS SHOWN, including 1. It was suppressed below 2 on the grounds that "1" is the boring
- * case, but a key that fired exactly once is a different claim from a key that fired thirteen times, and
- * the reader cannot tell an omitted 1 from an unrecorded count.
+ * The count is always shown, including 1: a key that fired exactly once is a different claim from one that
+ * fired thirteen times, and the reader cannot tell an omitted 1 from an unrecorded count.
  *
- * THE MATCH INSIDE THE EXCERPT IS THE POINT, and keyExcerpts hands over its offsets. They become colour
- * here: `«prototype»s` reads as punctuation the author wrote, and the whole reason to show an
- * excerpt is to see WHERE a key landed — which for a substring or a regex is not deducible from the key.
- * Marked in the key's own colour, because it is the key, in context; the guillemets go, since colour and
- * the surrounding dim text already delimit it.
+ * The match inside the excerpt is the point, and keyExcerpts hands over its offsets; they become colour
+ * here, in the key's own colour, because where a key landed is not deducible from the key for a substring
+ * or a regex.
  *
- * COLOURS COME FROM THE THEME, not from constants. A hard-coded blue is a bet that every user's background
- * is the one it was picked against, and it lost on a black theme. `--SmartThemeQuoteColor` is what ST
- * already uses to make quoted text stand out from body text, which is this exact job, and
- * `--SmartThemeEmColor` is its emphasis pair — both move with the user's theme. Literal fallbacks stay for
- * a theme that defines neither.
- *
- * Colour is reinforcement, not the only cue: position orders the line (key, count, excerpt), and the
- * matched span sits at full opacity inside a dimmed excerpt, so it survives being read without colour.
+ * Colours come from the theme, not from constants: `--SmartThemeQuoteColor` is what ST already uses to make
+ * quoted text stand out from body text, and `--SmartThemeEmColor` is its emphasis pair. Literal fallbacks
+ * stay for a theme that defines neither. Colour is reinforcement, not the only cue: position orders the
+ * line (key, count, excerpt), and the matched span sits at full opacity inside a dimmed excerpt.
  *
  * @param {Array<{key: string, count: number, excerpt?: string}>} why Key hits, as recorded on the row
  * @returns {string} HTML, one line per hit
  */
-// Marks the span keyExcerpts measured, by OFFSET. The delimiters it used to insert were in-band with the
-// data: an entry containing guillemets of its own gave `«no «rut»»`, and the regex that read them back
-// stopped at the first `»` and highlighted the wrong words. Nothing is parsed out of the text now.
+// Marks the span keyExcerpts measured, by offset. In-band delimiters are ambiguous — an entry containing
+// guillemets of its own breaks the read-back — so nothing is parsed out of the text.
 const markExcerpt = ex => (ex && typeof ex === 'object'
     ? escapeHtml(ex.text.slice(0, ex.start))
         + `<span style="color:var(--SmartThemeQuoteColor, #6ea8fe);font-weight:600;opacity:1;">${escapeHtml(ex.text.slice(ex.start, ex.end))}</span>`
@@ -179,8 +168,8 @@ const markExcerpt = ex => (ex && typeof ex === 'object'
     : escapeHtml(String(ex ?? '')));
 
 export const keyHitsHtml = why => (why ?? []).map(w => {
-    // The hover carries EVERY recorded hit, because vetting a key is a question about its spread and the
-    // line has room for one. A title attribute is plain text, so the guillemets earn their keep here —
+    // The hover carries every recorded hit, because vetting a key is a question about its spread and the
+    // line has room for one. A title attribute is plain text, so the guillemets earn their keep here:
     // colour cannot cross into a tooltip, and without a marker the reader loses which span matched.
     const all = (w.contexts ?? []).filter(Boolean);
     const tip = all.length > 1
@@ -194,20 +183,15 @@ export const keyHitsHtml = why => (why ?? []).map(w => {
 /**
  * The fold shown under a grading row: what the entry is keyed on, then its text.
  *
- * KEYS FIRST, because the judgement being made is whether this entry belonged in this scene, and its keys
+ * Keys first, because the judgement being made is whether this entry belonged in this scene and its keys
  * are half the reason it is there — a grader reading only the prose has to infer the trigger. Reads
  * `waKeys` when `key` is empty: the takeover blanks a vectorized entry's keys into the stash, so the live
- * object a grader looks at has none, and reporting "no keys" for an entry that has several is worse than
- * reporting nothing.
+ * object a grader looks at has none.
  *
  * Returns HTML rather than nodes because both grading tables are built as strings; the caller owns the row
- * and the toggle.
+ * and the toggle. The popout re-opens the same showEntryText modal the Studio and the suggester use, since
+ * the inline pane caps at 22em; it is wired by the caller off `data-i`.
  *
- * The popout re-opens the same showEntryText modal the Studio and the suggester use — entries run to
- * thousands of characters and the inline pane caps at 22em, so long content needs somewhere to go. Wired
- * by the caller off `data-i`, like every other per-row control in these tables.
- *
- * @param {object} entry World Info entry
  * @param {number} idx Capture index, for the caller's popout handler
  * @returns {string} Inner HTML for the fold cell
  */
