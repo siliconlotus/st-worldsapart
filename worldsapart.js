@@ -23,7 +23,6 @@ import {
     event_types,
     getRequestHeaders,
     getMaxPromptTokens,
-    generateRaw,
     saveSettingsDebounced,
     substituteParams,
     getExtensionPromptByName,
@@ -31,13 +30,12 @@ import {
 } from '../../../../script.js';
 import { extension_settings, getContext } from '../../../extensions.js';
 
-import { checkWorldInfo, getSortedEntries, getWorldInfoPrompt, loadWorldInfo, saveWorldInfo, reloadEditor, world_names, world_info_include_names, world_info_depth, world_info_budget, world_info_budget_cap, world_info_min_activations, world_info_match_whole_words, world_info_case_sensitive, world_info_recursive, selected_world_info, world_info, METADATA_KEY, scan_state } from '../../../world-info.js';
+import { checkWorldInfo, getSortedEntries, getWorldInfoPrompt, world_names, world_info_include_names, world_info_depth, world_info_min_activations, world_info_match_whole_words, world_info_case_sensitive, world_info_recursive, selected_world_info, world_info, METADATA_KEY, scan_state } from '../../../world-info.js';
 import { power_user } from '../../../power-user.js';
 import { SlashCommandParser } from '../../../slash-commands/SlashCommandParser.js';
 import { SlashCommand } from '../../../slash-commands/SlashCommand.js';
 import { ARGUMENT_TYPE, SlashCommandArgument, SlashCommandNamedArgument } from '../../../slash-commands/SlashCommandArgument.js';
-import { ConnectionManagerRequestService } from '../../shared.js';
-import { getStringHash, escapeHtml, getCharaFilename, uuidv4 } from '../../../utils.js';
+import { getStringHash, escapeHtml, getCharaFilename } from '../../../utils.js';
 import { pluginFingerprint, PLUGIN_FILES } from './plugin/fingerprint.mjs';
 import { admitCeiling } from './plugin/scoring.mjs';
 import * as query from './extension/query.mjs';
@@ -53,10 +51,10 @@ import { oai_settings } from '../../../openai.js';
 
 import { runState, defaultSettings, settings, ensureSettings } from './extension/state.mjs';
 import { ensureStudioStyle, makeSortControl, makeTierEditor, showEntryText, wiGlyph, wiTooltip } from './extension/ui-widgets.mjs';
-import { PRESENTATION_ALIAS, SORT_FNS, normPresentation, presentationBaseLabel, presentationLabel, reconcileTiers, tierRank, wiTitleOf } from './extension/sort.mjs';
+import { PRESENTATION_ALIAS, normPresentation, presentationBaseLabel, reconcileTiers, wiTitleOf } from './extension/sort.mjs';
 import { lorebookStudio } from './extension/studio.mjs';
 import { setCaptureHost, versusCore, gradeScene, superGradeScene, superEvalScene, POOL_ARMS } from './extension/capture-ui.mjs';
-import { isDurable, rowKey, unionArms } from './extension/grading.mjs';
+import { isDurable } from './extension/grading.mjs';
 
 // Chunking is WA's own, not ST's: it is unreachable under node and it determines every stored vector, so an
 // upstream edit would silently invalidate existing indexes. See extension/chunking.mjs.
@@ -176,7 +174,7 @@ async function hasPlugin() {
         const dir = decodeURIComponent(new URL('.', import.meta.url).pathname).replace(/\/$/, '').split('/').pop();
         const response = await fetch('/api/plugins/worlds-apart/ping', { method: 'POST', headers: getRequestHeaders(), body: JSON.stringify({ dir }) });
         runState.pluginAvailable = response.ok;
-        if (response.ok) { try { const d = await response.json(); runState.pluginRoot = d?.root ?? null; runState.pluginHost = d?.hostname ?? null; runState.pluginFP = d?.fingerprint ?? null; runState.pluginWaVersion = d?.waVersion || ''; } catch { /* older plugin: no root/hostname/fingerprint/waVersion fields */ } }
+        if (response.ok) { try { const d = await response.json(); runState.pluginRoot = d?.root ?? null; runState.pluginFP = d?.fingerprint ?? null; runState.pluginWaVersion = d?.waVersion || ''; } catch { /* older plugin: no root/fingerprint/waVersion fields */ } }
     } catch {
         runState.pluginAvailable = false;
     }
@@ -417,25 +415,8 @@ async function syncWorld(world, entries) {
 // Entity filter (gazetteer + proper-noun-weighted term filter) lives in entity.mjs — the tuning
 // layer, so it stays out of the plugin and its fingerprint. buildGazetteer is pure; buildTermWeights
 // takes the proper-noun boost from settings. Rationale/benchmarks are documented in entity.mjs.
-const buildGazetteer = entity.buildGazetteer;
 const buildTermWeights = (queryText, gazetteer) => entity.buildTermWeights(queryText, gazetteer, settings().properNounBoost);
 
-/**
- * Builds the entity-filter term weights for a query — or null when the filter is off, or when the
- * query is a summary (already salience-selected, so filtering it only loses context).
- *
- * ONE owner, because two callers drifted. Retrieval filtered the query; the /wa-query probe did not,
- * and /wa-debug's stage-1 "vector candidates" table IS that probe. So the table reported BM25 from a
- * different term set than the retrieval it was explaining — and since its `gap` and `kept` columns come
- * from fusing those scores, the cutoff it showed could differ from the one live retrieval actually
- * applied. Unfiltered BM25 runs far enough above the filtered value to reorder the ranking the cutoff
- * reads (R19). Anything that scores a query goes through here.
- *
- * @param {string} searchText Query text
- * @param {object} [opts]
- * @param {boolean} [opts.log] Log the kept-term count and (in a verbose run) the surviving terms
- * @returns {Promise<Record<string, number>|null>} Term weights, or null to leave the query unfiltered
- */
 /**
  * Content-lexical indexes, one per book, rebuilt when that book's fingerprint moves.
  *
@@ -449,10 +430,6 @@ const buildTermWeights = (queryText, gazetteer) => entity.buildTermWeights(query
  * @type {Map<string, {fingerprint: string, index: object}>}
  */
 const contentIndexes = new Map();
-
-function contentIndexFor(world, entries) {
-    return bookIndexes(world, entries).index;
-}
 
 /**
  * Both per-book indexes over one book's entries, behind one fingerprint.
@@ -624,6 +601,10 @@ function loadRelevanceModel() {
     return relevanceModel.promise;
 }
 
+/** Every entry of every book in the scan, grouped by book — the population both per-book statistics
+ *  (content-lexical IDF, name df) are statistics OF. */
+const entriesByWorld = async () => Map.groupBy(await getSortedEntries(), e => e.world);
+
 /**
  * Stage 4's relevance column: the two signals the fitted model needs that nothing else computes, then
  * `E[credit]` per entry.
@@ -652,11 +633,7 @@ async function scoreRelevanceColumn(items, windowFor) {
     // Every entry of every book in the scan, which is what df is a statistic OF — not the activated
     // subset, whose population changes every turn and would move an entry's weight because its
     // neighbours did.
-    const byWorld = new Map();
-    for (const entry of await getSortedEntries()) {
-        if (!byWorld.has(entry.world)) byWorld.set(entry.world, []);
-        byWorld.get(entry.world).push(entry);
-    }
+    const byWorld = await entriesByWorld();
 
     const depth = Number(settings().messageDepth || world_info_depth);
     const windowNames = properNames(windowFor(depth, {}).join('\n'));
@@ -734,11 +711,7 @@ async function scoreRelevanceColumn(items, windowFor) {
  */
 async function contentTextScores(query) {
     if (!query) return new Map();
-    const byWorld = new Map();
-    for (const entry of await getSortedEntries()) {
-        if (!byWorld.has(entry.world)) byWorld.set(entry.world, []);
-        byWorld.get(entry.world).push(entry);
-    }
+    const byWorld = await entriesByWorld();
     if (!byWorld.size) return new Map();
 
     const s = settings();
@@ -746,7 +719,7 @@ async function contentTextScores(query) {
     const opts = { k1: s.bm25K1, b: s.bm25B, termWeights, stopwordDf: s.stopwordDocFreq };
     const out = new Map();
     for (const [world, entries] of byWorld) {
-        for (const [key, score] of scoreContent(contentIndexFor(world, entries), query, opts)) {
+        for (const [key, score] of scoreContent(bookIndexes(world, entries).index, query, opts)) {
             const prev = out.get(key);
             if (prev === undefined || score > prev) out.set(key, score);
         }
@@ -754,6 +727,21 @@ async function contentTextScores(query) {
     return out;
 }
 
+/**
+ * Builds the entity-filter term weights for a query — or null when the filter is off.
+ *
+ * ONE owner, because two callers drifted. Retrieval filtered the query; the /wa-query probe did not,
+ * and /wa-debug's stage-1 "vector candidates" table IS that probe. So the table reported BM25 from a
+ * different term set than the retrieval it was explaining — and since its `gap` and `kept` columns come
+ * from fusing those scores, the cutoff it showed could differ from the one live retrieval actually
+ * applied. Unfiltered BM25 runs far enough above the filtered value to reorder the ranking the cutoff
+ * reads (R19). Anything that scores a query goes through here.
+ *
+ * @param {string} searchText Query text
+ * @param {object} [opts]
+ * @param {boolean} [opts.log] Log the kept-term count and (in a verbose run) the surviving terms
+ * @returns {Promise<Record<string, number>|null>} Term weights, or null to leave the query unfiltered
+ */
 async function queryTermWeights(searchText, { log = true } = {}) {
     if (!settings().entityFilter) {
         return null;
@@ -767,7 +755,7 @@ async function queryTermWeights(searchText, { log = true } = {}) {
     const authored = entry => (entry.waKeys || entry.waSecondary)
         ? { ...entry, key: entry.key?.length ? entry.key : (entry.waKeys ?? []), keysecondary: entry.keysecondary?.length ? entry.keysecondary : (entry.waSecondary ?? []) }
         : entry;
-    const gazetteer = buildGazetteer((await getSortedEntries()).map(authored));
+    const gazetteer = entity.buildGazetteer((await getSortedEntries()).map(authored));
     const termWeights = buildTermWeights(searchText, gazetteer);
 
     if (log) {
@@ -783,20 +771,6 @@ async function queryTermWeights(searchText, { log = true } = {}) {
     return termWeights;
 }
 
-// Query building lives in query.mjs; inject depth + ST's substituteParams.
-const buildQuery = (chat) => query.buildQuery(chat, { depth: settings().messageDepth, substituteParams });
-
-/**
- * Runs chunked retrieval and force-activates the winning entries.
- * @param {object[]} chat Chat messages
- */
-/**
- * Scores every vectorized entry against arbitrary query text.
- * Shared by real retrieval and by /wa-query, so calibration exercises the same path
- * generation does rather than an approximation of it.
- * @param {string} searchText Text to search with
- * @returns {Promise<{targets: object[], scores: Map<string, {score: number, chunk: string}>}>}
- */
 /**
  * Serializes retrieval so a second call can't query a half-built index while the
  * first is still inserting. Changing chunk settings triggers a long re-embed, and
@@ -806,6 +780,9 @@ const buildQuery = (chat) => query.buildQuery(chat, { depth: settings().messageD
 let retrievalQueue = Promise.resolve();
 
 /**
+ * Scores every vectorized entry against arbitrary query text.
+ * Shared by real retrieval and by /wa-query, so calibration exercises the same path
+ * generation does rather than an approximation of it.
  * @param {string} searchText Text to search with
  * @returns {Promise<{targets: object[], scores: Map<string, {score: number, chunk: string}>}>}
  */
@@ -840,10 +817,7 @@ async function scoreEntriesUnsafe(searchText) {
         return { targets, scores };
     }
 
-    const byWorld = {};
-    for (const entry of targets) {
-        (byWorld[entry.world] ??= []).push(entry);
-    }
+    const byWorld = Map.groupBy(targets, e => e.world);
 
     const collectionIds = [];
     /**
@@ -861,8 +835,8 @@ async function scoreEntriesUnsafe(searchText) {
      */
     const owners = new Map();
 
-    for (const world of Object.keys(byWorld)) {
-        const synced = await syncWorld(world, byWorld[world]);
+    for (const [world, entries] of byWorld) {
+        const synced = await syncWorld(world, entries);
         collectionIds.push(synced.collectionId);
         synced.owners.forEach((v, k) => owners.set(`${synced.collectionId}${US}${k}`, v));
     }
@@ -884,7 +858,7 @@ async function scoreEntriesUnsafe(searchText) {
     // cosine coefficient needs no refit. (eval/scene.mjs centroidPopulation runs the contrast;
     // 'vectorized' restores this line's old behaviour.)
     const centroidUids = {};
-    for (const [world, entries] of Object.entries(byWorld)) {
+    for (const [world, entries] of byWorld) {
         centroidUids[`wa_${getStringHash(world)}`] = entries.filter(isMemory).map(e => Number(e.uid));
     }
 
@@ -1086,17 +1060,12 @@ async function keywordActivations(chat) {
     // rematches on every recursion and min-activation pass.
     runState.waCandidates = candidates;
 
-    const windowFor = matcher.makeWindowFor(chat.filter(x => x && !x.is_system), {
-        injects: await scanInjects(),
-        sources: scanSources(),
-        matchWindow: settings().matchWindow,
-        includeNames: world_info_include_names,
-    });
+    const { windowFor } = await scanWindowFor(chat);
 
     // Register every key this pass will match up front so the smartkeys automaton is built once — a
     // first-seen key mid-loop dirties it, and the rebuild throws away every cached scan.
     //
-    // SECONDARIES COUNT. countSelective interns their literals too, so leaving them to be primed per
+    // SECONDARIES COUNT. selectiveEval interns their literals too, so leaving them to be primed per
     // entry meant a rebuild for the first entry carrying a novel secondary, and another for the next
     // (K13). Filtered exactly as the matching path filters them, so nothing is registered that will
     // never be asked — and an entry with no usable primary is skipped whole, as activationAdds skips it.
@@ -1107,12 +1076,7 @@ async function keywordActivations(chat) {
         return keys.length ? [...keys, ...matcher.secondaryKeys(e)] : [];
     }));
 
-    return matcher.activationAdds(candidates, windowFor, {
-        messageDepth: settings().messageDepth,
-        fallbackDepth: world_info_depth,
-        caseSensitiveDefault: world_info_case_sensitive,
-        wholeWordsDefault: world_info_match_whole_words,
-    });
+    return matcher.activationAdds(candidates, windowFor, activationOpts());
 }
 
 /** Distinct failures already surfaced this session, keyed stage␟message (US, never NUL — see CLAUDE.md). */
@@ -1207,11 +1171,8 @@ async function selectAndActivate(chat) {
             error);
     }
 
-    // Union provenance: keys WA activated by keyword match alone. Always reassigned (even empty)
-    // so a stale set never outlives its generation; task-4's prune exempts winners ∪ this set.
     const winnerKeys = new Set(winners.map(e => `${e.world}.${e.uid}`));
     const union = adds.filter(e => !winnerKeys.has(`${e.world}.${e.uid}`));
-    runState.lastKeywordAdds = new Set(union.map(e => `${e.world}.${e.uid}`));
 
     const activated = [...winners, ...union];
     if (activated.length) {
@@ -1423,9 +1384,6 @@ function renderWorldPriority() {
 // Keyword scoring (BM25-style) and rank fusion
 // ---------------------------------------------------------------------------
 
-// Keyword occurrence counting lives in matcher.mjs (same signature, no injection).
-const countKey = matcher.countKey;
-
 /**
  * The non-chat texts core's scan buffer can also match against, per entry opt-in flags
  * (matchCharacterDescription, matchScenario, …). "Shane" living in a character card is
@@ -1488,6 +1446,51 @@ async function scanInjects() {
 }
 
 /**
+ * The scan window builder, with the ST-side inputs it was built from.
+ *
+ * ONE BUILDER for every site that needs a window — activation, the scan-loop feed and stage-3 scoring —
+ * because a second copy is where the depth bound gets applied on one path and not the other.
+ *
+ * Core removes hidden/system messages before it scans, then counts depth over what remains; WA filters
+ * them too — otherwise a hidden message in the recent window costs WA a slot core didn't spend, so WA
+ * scans less real history and misses a keyword core matched one message further back.
+ *
+ * The injects are collected once and reused across depths. WHICH of them a given depth scans is
+ * `makeWindowFor`'s call: an inject placed in the chat is bounded by the window, an ambient one is not
+ * (`upstream-st.md` #16). Core appends all of them to every window regardless.
+ *
+ * @param {object[]} chat Scan haystack, unfiltered
+ * @returns {Promise<{windowFor: Function, chat: object[], injects: object[], sources: object}>}
+ */
+async function scanWindowFor(chat) {
+    const scanChat = chat.filter(x => x && !x.is_system);
+    const injects = await scanInjects();
+    const sources = scanSources();
+    return {
+        chat: scanChat,
+        injects,
+        sources,
+        windowFor: matcher.makeWindowFor(scanChat, {
+            injects,
+            sources,
+            matchWindow: settings().matchWindow,
+            includeNames: world_info_include_names,
+        }),
+    };
+}
+
+/**
+ * The match defaults both activation passes read — every value a live setting or an ST global, so it is
+ * read at call time rather than frozen. The scan-loop pass adds only `depthSkew`.
+ */
+const activationOpts = () => ({
+    messageDepth: settings().messageDepth,
+    fallbackDepth: world_info_depth,
+    caseSensitiveDefault: world_info_case_sensitive,
+    wholeWordsDefault: world_info_match_whole_words,
+});
+
+/**
  * The chat WA reads, with the `dropChatTags` elements gone — ONE strip, at the only door.
  *
  * At intake rather than in the window builder because both halves read the same messages: a state
@@ -1512,11 +1515,6 @@ function dropChatTags(chat) {
     });
 }
 
-// withMatchSources and MATCH_SOURCE_FIELDS live in matcher.mjs (pure window assembly, shared
-// by activation and scoring); callers pass settings().matchWindow.
-const withMatchSources = (chatWindow, entry, sources) =>
-    matcher.withMatchSources(chatWindow, entry, sources, settings().matchWindow);
-
 // Keyword scoring lives in matcher.mjs (match semantics), and the layout score in relevance.mjs (the
 // layer). Inject the BM25 k1 + the world-info match defaults for scoring, and the fusion weights
 // for fusion — all from settings.
@@ -1528,11 +1526,6 @@ const keywordScore = (entry, text, keys = entry.key) => matcher.keywordScore(ent
     wholeWordsDefault: world_info_match_whole_words,
 });
 
-/**
- * Ranks everything core activated, applies our budget, and rewrites `order`
- * so assembly emits entries in relevance order.
- * @param {object} args Scan state from world-info.js
- */
 /**
  * Stable per-character key for the priority order — survives switching chats/branches.
  * Null in a character-less context (nothing selected), which makes the feature inert.
@@ -1546,6 +1539,10 @@ function priorityKey() {
 }
 
 
+
+/** Chat messages as `checkWorldInfo`/`getWorldInfoPrompt` want them: the strings core builds at
+ *  script.js's scan site, most-recent-first. */
+const forWI = chat => chat.map(x => (world_info_include_names ? `${x.name}: ${x.mes}` : x.mes)).reverse();
 
 /** The current chat's bound lorebook, or null. The `'chat'` sentinel resolves to this. */
 function chatBook() {
@@ -1682,28 +1679,14 @@ async function feedScanLoop(args) {
         return;
     }
 
-    const windowFor = matcher.makeWindowFor(
-        (runState.scanChat ?? []).filter(x => x && !x.is_system), {
-            injects: await scanInjects(),
-            sources: scanSources(),
-            matchWindow: settings().matchWindow,
-            includeNames: world_info_include_names,
-        });
+    const { windowFor } = await scanWindowFor(runState.scanChat ?? []);
 
     const adds = matcher.activationAdds(candidates,
-        matcher.withExtraTexts(windowFor, runState.waRecursionTexts, settings().matchWindow), {
-            messageDepth: settings().messageDepth,
-            fallbackDepth: world_info_depth,
-            caseSensitiveDefault: world_info_case_sensitive,
-            wholeWordsDefault: world_info_match_whole_words,
-            depthSkew: runState.waMinSkew,
-        });
+        matcher.withExtraTexts(windowFor, runState.waRecursionTexts, settings().matchWindow),
+        { ...activationOpts(), depthSkew: runState.waMinSkew });
 
     if (adds.length) {
-        for (const e of adds) {
-            runState.waMatched.add(`${e.world}.${e.uid}`);
-            runState.lastKeywordAdds.add(`${e.world}.${e.uid}`);
-        }
+        for (const e of adds) runState.waMatched.add(`${e.world}.${e.uid}`);
         console.log(`Worlds Apart: activating ${adds.length} keyword-matched entr${adds.length === 1 ? 'y' : 'ies'} on scan loop ${args?.state?.loopCount} (${newTexts.length ? 'recursion text' : 'min-activations widening'})`);
         await eventSource.emit(event_types.WORLDINFO_FORCE_ACTIVATE, adds);
     }
@@ -1731,20 +1714,6 @@ function recordCoreSet(activated, args, how) {
 }
 
 /**
- * WA against ST core on this turn: core selects for itself and WA diffs the two.
- *
- * `checkWorldInfo` is core's whole selection — inclusion groups, probability, timed effects, its own
- * budget — so nothing here models it. Two things must be undone for the call and are restored after:
- * the `ignoreBudget` takeover WA applies in `onEntriesLoaded` (or core's walk cuts nothing), and
- * re-entry via WORLDINFO_SCAN_DONE, which `inCoreProbe` suppresses.
- *
- * Vector Storage activates World Info from its generate_interceptor, exposed as
- * `globalThis.vectors_rearrangeChat`; calling it leaves force-activations that `checkWorldInfo` then
- * consumes and clears.
- *
- * Emits the union of both sets with content, so a turn can be graded once and scored twice.
- */
-/**
  * What ST core selects for this turn, with WA standing down for the call.
  *
  * `checkWorldInfo` is core's whole selection — inclusion groups, probability, timed effects, its own
@@ -1769,11 +1738,10 @@ async function coreSelection() {
             catch (error) { console.warn('Worlds Apart: Vector Storage declined the probe, core will answer on keywords alone —', error); }
         }
         // ST'S HAYSTACK SHAPE, NOT THE INTERCEPTOR'S. `vectors_rearrangeChat` above is a generate
-        // interceptor and reads message objects; `checkWorldInfo` takes `chatForWI` — the same strings
-        // core builds at script.js's scan site, most-recent-first — and calls .trim() on them. Sources
-        // ride along so the probe scans what WA's own dry run scans rather than core's empty default.
-        const chatForWI = chat.map(x => (world_info_include_names ? `${x.name}: ${x.mes}` : x.mes)).reverse();
-        core = await checkWorldInfo(chatForWI, getMaxPromptTokens(), true, { ...scanSources(), trigger: 'normal' });
+        // interceptor and reads message objects; `checkWorldInfo` takes strings and calls .trim() on
+        // them. Sources ride along so the probe scans what WA's own dry run scans rather than core's
+        // empty default.
+        core = await checkWorldInfo(forWI(chat), getMaxPromptTokens(), true, { ...scanSources(), trigger: 'normal' });
     } finally {
         for (const e of entries) if (e.waIgnoreBudget !== undefined) e.ignoreBudget = true;
         runState.inCoreProbe = false;
@@ -1888,16 +1856,9 @@ async function onScanDone(args) {
         // The stash from intercept IS core's transformed scan haystack — regex scripts
         // applied, file content and titles appended, reasoning merged — so WA matches the
         // text core matched. Raw context chat is the fallback only for a scan no WA entry
-        // point saw. Core removes hidden/system messages before it scans, then counts depth
-        // over what remains; WA filters them too — otherwise a hidden message in the recent
-        // window costs WA a slot core didn't spend, so WA scans less real history and misses
-        // a keyword core matched one message further back.
-        const chat = (runState.scanChat ?? getContext().chat ?? []).filter(x => x && !x.is_system);
-        const sources = scanSources();
-        // Collected once and reused across depths. WHICH of them a given depth scans is makeWindowFor's
-        // call: an inject placed in the chat is bounded by the window, an ambient one is not
-        // (`upstream-st.md` #16). Core appends all of them to every window regardless.
-        const injects = await scanInjects();
+        // point saw.
+        const built = await scanWindowFor(runState.scanChat ?? getContext().chat ?? []);
+        const { chat, injects, sources } = built;
         // Stashed for the capture. The frozen haystack is the CHAT half alone (`windowFor.windows` is
         // chat-only); the injects ride beside it as their own list, so a reader RECONSTRUCTS the window
         // at any depth by admitting them, instead of trying to pick them back out of a joined blob. It
@@ -1906,76 +1867,66 @@ async function onScanDone(args) {
         // Beside them, and RAW: which of the six a capture keeps depends on the books it attaches, so the
         // gate (matcher.usedMatchSources) runs where those are in scope rather than here.
         runState.lastSources = sources;
-        windowFor = matcher.makeWindowFor(chat, {
-            injects,
-            sources,
-            matchWindow: settings().matchWindow,
-            includeNames: world_info_include_names,
-        });
-        if (settings().keywordScoring) {
+        windowFor = built.windowFor;
 
-            // The keys an activated entry is scored on: live keys, else the takeover's stash — blanking was
-            // an activation mechanism, not a scoring opinion.
-            //
-            // EVERY ENTRY'S KEYS ARE SCORED, including a vectorized one's. The value is MEASURED here and
-            // RECORDED in the capture; whether anything acts on it is the model's business, and the shipped
-            // fit does not carry the column (matcher-design.md, *Scoring memory's keys*). A setting that
-            // suppressed the measurement made the column null in every bundle it was off for, which is the
-            // one thing that cannot be recovered later — and left every contributed bundle ambiguous about
-            // whether a blank meant "no keys fired" or "nobody looked".
-            const scoreKeysOf = entry => (entry.key?.length ? entry.key : (entry.waKeys ?? []));
-            // Same restoration for the secondary gate: a blanked entry's secondaries live in
-            // waSecondary, and the per-segment gate must judge the condition the author wrote, not an
-            // empty one. A local view, never a write-back — restoring keys on core's scan copies
-            // mid-scan would hand core's next loop the keys the takeover blanked.
-            const scoringView = entry => (!entry.keysecondary?.length && entry.waSecondary?.length)
-                ? { ...entry, keysecondary: entry.waSecondary }
-                : entry;
+        // The keys an activated entry is scored on: live keys, else the takeover's stash — blanking was
+        // an activation mechanism, not a scoring opinion.
+        //
+        // EVERY ENTRY'S KEYS ARE SCORED, including a vectorized one's. The value is MEASURED here and
+        // RECORDED in the capture; whether anything acts on it is the model's business, and the shipped
+        // fit does not carry the column (matcher-design.md, *Scoring memory's keys*). A setting that
+        // suppressed the measurement made the column null in every bundle it was off for, which is the
+        // one thing that cannot be recovered later — and left every contributed bundle ambiguous about
+        // whether a blank meant "no keys fired" or "nobody looked".
+        const scoreKeysOf = entry => (entry.key?.length ? entry.key : (entry.waKeys ?? []));
+        // Same restoration for the secondary gate: a blanked entry's secondaries live in
+        // waSecondary, and the per-segment gate must judge the condition the author wrote, not an
+        // empty one. A local view, never a write-back — restoring keys on core's scan copies
+        // mid-scan would hand core's next loop the keys the takeover blanked.
+        const scoringView = entry => (!entry.keysecondary?.length && entry.waSecondary?.length)
+            ? { ...entry, keysecondary: entry.waSecondary }
+            : entry;
 
-            // Register every key this pass will score BEFORE the loop, so the smartkeys automaton is
-            // built once — a first-seen key mid-loop would rebuild it and throw away every cached scan.
-            // Secondaries too, off the restored view keywordScore will actually gate against, and only for
-            // entries whose keys are scored at all: keywordScore returns on an empty key list before it
-            // primes anything.
-            registerKeys(items.flatMap(it => {
-                const keys = scoreKeysOf(it.entry);
-                return keys.length ? [...keys, ...matcher.secondaryKeys(scoringView(it.entry))] : [];
-            }));
+        // Register every key this pass will score BEFORE the loop, so the smartkeys automaton is
+        // built once — a first-seen key mid-loop would rebuild it and throw away every cached scan.
+        // Secondaries too, off the restored view keywordScore will actually gate against, and only for
+        // entries whose keys are scored at all: keywordScore returns on an empty key list before it
+        // primes anything.
+        registerKeys(items.flatMap(it => {
+            const keys = scoreKeysOf(it.entry);
+            return keys.length ? [...keys, ...matcher.secondaryKeys(scoringView(it.entry))] : [];
+        }));
 
-            for (const item of items) {
-                // Score keywords over the shared message depth. Per-entry scanDepth still wins
-                // (as in core), so an entry that declares its own window is honoured; otherwise
-                // the unified messageDepth, falling back to core's scan depth only if it's unset.
-                // Nullish on scanDepth: 0 is core's authored "match nothing from chat" (the entry
-                // lives on injects/sources), not an unset value to fall through.
-                const depth = Number(item.entry.scanDepth ?? (settings().messageDepth || world_info_depth));
-                // ONE window builder, not a second copy of it. This open-coded its own memo + inject push +
-                // withMatchSources, which is exactly makeWindowFor — and a second copy is where the depth
-                // bound would have been applied on one path and not the other.
-                const scanText = windowFor(depth, item.entry);
-                const scoreKeys = scoreKeysOf(item.entry);
-                const scored = keywordScore(scoringView(item.entry), scanText, scoreKeys);
-                item.keywordScore = scored.score;
-                item.keywordHits = scored.hits;
-                // Debug-class runs only: WHERE each key matched, for /wa-grade's "why did this pop"
-                // column. Flags mirror the keywordScore call above exactly — same entry overrides,
-                // same defaults — so the excerpt localises the match that was actually scored.
-                item.keywordWhy = runState.verboseRun
-                    ? scored.hits.slice(0, 4).map(h => {
-                        // Every place it landed, not just the first. One excerpt cannot tell a key firing
-                        // thirteen times on one phrase from one firing across thirteen scenes, and that is
-                        // the judgement being made. `excerpt` is contexts[0] rather than a second call, so
-                        // the displayed line and the hover can never disagree.
-                        const contexts = matcher.keyExcerpts(h.key, scanText, item.entry.caseSensitive, item.entry.matchWholeWords);
-                        return { key: h.key, count: h.count, score: h.score, excerpt: contexts[0] ?? null, contexts };
-                    })
-                    : undefined;
-                // Declared for fuseRanks' eligibility normalisation: having keys to score is the chance to
-                // earn the keyword rank, and an entry with none must not be divided by a weight it could
-                // never have collected. Resolved here because this is where the scan has already
-                // decided what `scoreKeys` is.
-                item.keysEligible = scoreKeys.length > 0;
-            }
+        for (const item of items) {
+            // Score keywords over the shared message depth. Per-entry scanDepth still wins
+            // (as in core), so an entry that declares its own window is honoured; otherwise
+            // the unified messageDepth, falling back to core's scan depth only if it's unset.
+            // Nullish on scanDepth: 0 is core's authored "match nothing from chat" (the entry
+            // lives on injects/sources), not an unset value to fall through.
+            const depth = Number(item.entry.scanDepth ?? (settings().messageDepth || world_info_depth));
+            const scanText = windowFor(depth, item.entry);
+            const scoreKeys = scoreKeysOf(item.entry);
+            const scored = keywordScore(scoringView(item.entry), scanText, scoreKeys);
+            item.keywordScore = scored.score;
+            item.keywordHits = scored.hits;
+            // Debug-class runs only: WHERE each key matched, for /wa-grade's "why did this pop"
+            // column. Flags mirror the keywordScore call above exactly — same entry overrides,
+            // same defaults — so the excerpt localises the match that was actually scored.
+            item.keywordWhy = runState.verboseRun
+                ? scored.hits.slice(0, 4).map(h => {
+                    // Every place it landed, not just the first. One excerpt cannot tell a key firing
+                    // thirteen times on one phrase from one firing across thirteen scenes, and that is
+                    // the judgement being made. `excerpt` is contexts[0] rather than a second call, so
+                    // the displayed line and the hover can never disagree.
+                    const contexts = matcher.keyExcerpts(h.key, scanText, item.entry.caseSensitive, item.entry.matchWholeWords);
+                    return { key: h.key, count: h.count, score: h.score, excerpt: contexts[0] ?? null, contexts };
+                })
+                : undefined;
+            // Declared for fuseRanks' eligibility normalisation: having keys to score is the chance to
+            // earn the keyword rank, and an entry with none must not be divided by a weight it could
+            // never have collected. Resolved here because this is where the scan has already
+            // decided what `scoreKeys` is.
+            item.keysEligible = scoreKeys.length > 0;
         }
 
         // The scan text WA actually searched, so a "WA scored 0" mystery is answered by
@@ -2125,11 +2076,9 @@ async function onScanDone(args) {
         }
 
         runState.lastSkipped = skipped;
-        runState.lastDropped = walk.filter(x => !survivors.has(x));
         walk = walk.filter(x => survivors.has(x));
     } else {
         runState.lastSkipped = [];
-        runState.lastDropped = [];
     }
 
     // Selection is done; now lay the survivors out — one flat sort over everything, so
@@ -2163,7 +2112,6 @@ async function onScanDone(args) {
         ...results.map(x => [x, 'dynamic']),
     ]);
     runState.lastPromptOrder = promptOrder.map(item => ({ item, block: blockOf.get(item) ?? 'dynamic' }));
-    runState.lastDropped = runState.lastDropped.map(item => ({ item, block: blockOf.get(item) ?? 'dynamic' }));
     runState.lastSkipped = runState.lastSkipped.map(x => ({ ...x, block: blockOf.get(x.item) ?? 'dynamic' }));
 
     // Reflect the final selection in the active-entries panel. Fires once per scan
@@ -2328,17 +2276,12 @@ async function dryRun(verbose = false) {
     // capture is in here too: a stale candidate list would be graded as if it belonged to this scene,
     // and its `if (!rows.length)` guard cannot see the difference.
     runState.lastPromptOrder = [];
-    runState.lastDropped = [];
     runState.lastSkipped = [];
     runState.lastCandidates = [];
     runState.lastCandidateEntries = [];
     runState.lastQuery = '';
     runState.lastScanChat = [];
     runState.lastQueryChat = [];
-
-    const chatForWI = chat
-        .map(x => (world_info_include_names ? `${x.name}: ${x.mes}` : x.mes))
-        .reverse();
 
     // Print in pipeline order: retrieval → activation ranking → final selection.
     // Stage 1 — vector candidates — is printed by retrieve() below, from the ranking it actually selected
@@ -2351,7 +2294,7 @@ async function dryRun(verbose = false) {
         await selectAndActivate(chat);
 
         // Stage 2 — the scan; onScanDone prints the selection candidates (verbose) as it runs.
-        await getWorldInfoPrompt(chatForWI, getMaxPromptTokens(), true, { ...scanSources(), trigger: 'normal' });
+        await getWorldInfoPrompt(forWI(chat), getMaxPromptTokens(), true, { ...scanSources(), trigger: 'normal' });
 
         // Stage 3 — selection: what survived caps and layout.
         await reportLayout(verbose);
@@ -2365,13 +2308,6 @@ async function dryRun(verbose = false) {
 
     return '';
 }
-
-/** Key in more than this fraction of active entries' content fires almost always — no
- * discrimination, recommend pruning. Flagging is per-key on the key's own text occurrence (df) and
- * does NOT consider whether the key is shared across entries — so a ubiquitous recurring name can be
- * flagged too-common; whitelist it (ban icon) if it's a deliberate continuity trigger. Dead keys
- * (never appearing in any entry's text) are also flagged. */
-
 
 /**
  * Every setting that can change a result, grouped by pipeline stage, as a plain object.
@@ -2445,12 +2381,6 @@ function paramSnapshot() {
     return snap;
 }
 
-/**
- * Names the signal that won an entry its place, for the `why` column.
- * @param {object} item Ranked item
- * @param {string} block Which block it was classified into
- * @returns {string} Short explanation
- */
 function tokenBudgetLabel() {
     const s = settings();
     const parts = [
@@ -2474,7 +2404,7 @@ function tokenBudgetLabel() {
  * @returns {string} Short explanation
  */
 function whySelected(item, block) {
-    if (block === 'constant' || block === 'sticky') {
+    if (isDurable({ block })) {
         return 'always-on';
     }
     // A promoted row still won its place on a signal — the author waived the CUT, not the scoring — so
@@ -2524,15 +2454,10 @@ function whySelected(item, block) {
  * @param {object[]} blockedBy Caps that rejected the entry
  * @returns {string} What to do about it
  */
-function describeFix(blockedBy, tail = false) {
+function describeFix(blockedBy) {
     return blockedBy.map((block) => {
         switch (block.cap) {
             case 'tokens':
-                // In the tail the budget is spent, so per-entry advice is misleading —
-                // shortening one entry when nothing more fits changes nothing.
-                if (tail) {
-                    return `budget spent, ${block.remaining} left`;
-                }
                 return block.slackSpent
                     ? `${block.shortfall} tokens over; slack already used this scan (set slack to "all"?)`
                     : `+${block.shortfall} tokens, or ${block.slackNeeded}% slack, or shorten the entry`;
@@ -2837,20 +2762,6 @@ const SETTINGS_HTML = `
 
             <div class="inline-drawer wa-section">
                 <div class="inline-drawer-toggle inline-drawer-header">
-                    <b>Ranking</b>
-                    <div class="inline-drawer-icon fa-solid fa-circle-chevron-down down"></div>
-                </div>
-                <div class="inline-drawer-content">
-                    <small class="opacity50p">How the lexical (BM25) and vector signals fuse.</small>
-
-
-
-
-                </div>
-            </div>
-
-            <div class="inline-drawer wa-section">
-                <div class="inline-drawer-toggle inline-drawer-header">
                     <b>Selection &amp; budget</b>
                     <div class="inline-drawer-icon fa-solid fa-circle-chevron-down down"></div>
                 </div>
@@ -2963,21 +2874,10 @@ function populateProfiles(notify = false) {
 }
 
 /**
- * A blank field for a 'number?' setting, and anything that does not parse. Both mean null — "unset, follow
- * whatever this setting defers to" — and NaN in particular must never be stored: it is neither null nor
- * undefined, so it survives every `??` downstream and turns a fused score into NaN silently.
- */
-const nullableNumber = (val) => {
-    const n = Number(String(val).trim() || NaN);
-    return Number.isFinite(n) ? n : null;
-};
-
-/**
  * Wires a settings control to its backing value.
  * @param {string} selector Element selector
  * @param {string} key Settings key
- * @param {'checked'|'number'|'number?'|'string'} kind Value type. 'number?' persists a blank or
- *   unparseable field as null ("unset"), for settings whose null means "follow another setting".
+ * @param {'checked'|'number'|'string'} kind Value type
  */
 function bind(selector, key, kind) {
     const $el = $(selector);
@@ -2985,16 +2885,13 @@ function bind(selector, key, kind) {
     if (kind === 'checked') {
         $el.prop('checked', settings()[key]);
     } else {
-        // 'number?' holds null when unset, which must render as an empty field (showing the placeholder)
-        // rather than as the string "null".
-        $el.val(kind === 'number?' ? settings()[key] ?? '' : settings()[key]);
+        $el.val(settings()[key]);
     }
 
     $el.on('input change', () => {
         settings()[key] = kind === 'checked' ? $el.prop('checked')
             : kind === 'number' ? Number($el.val())
-                : kind === 'number?' ? nullableNumber($el.val())
-                    : String($el.val());
+                : String($el.val());
         saveSettingsDebounced();
     });
 }
@@ -3074,7 +2971,7 @@ let initialized = false;
 export async function init() {
     // The capture commands drive the pipeline; they are handed its entry points once, here, so the
     // dependency runs one way and nothing in the pipeline reaches back into the capture UI.
-    setCaptureHost({ chatBook, coreSelection, dryRun, effectiveTokenBudget, paramSnapshot, retrieve, scopedPriority, vectorRequestBody });
+    setCaptureHost({ chatBook, coreSelection, dryRun, effectiveTokenBudget, paramSnapshot, scopedPriority, vectorRequestBody });
     // Both `hooks.activate` and the jQuery bootstrap below can reach here, and
     // whichever loses the race would otherwise duplicate the panel, the event
     // listeners and the slash command.

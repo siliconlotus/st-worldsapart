@@ -2,7 +2,7 @@
 // settings() accessor. Feature modules import this instead of reaching into ST's extension_settings, so
 // there is one owner of what a setting means and one place to read it.
 
-export const MODULE_NAME = 'worldsApart';
+const MODULE_NAME = 'worldsApart';
 
 export const defaultSettings = {
     enabled: true,
@@ -166,8 +166,8 @@ export const defaultSettings = {
      */
     dropChatTags: '',
     /**
-     * How surviving entries are laid out in the prompt:
-     * 'authored' | 'authored-inverse' | 'best-first' | 'best-last'.
+     * How surviving entries are laid out in the prompt: any of `SORT_FNS`' keys (sort.mjs), plus
+     * 'best-first' | 'best-last'.
      *
      * Ranking answers WHICH entries survive; this answers where they go, and the two
      * are not the same question. For a lorebook of scene summaries, authored `order`
@@ -177,8 +177,6 @@ export const defaultSettings = {
     presentationOrder: 'order-asc',
     /** Group insertion order into tiers (constant → sticky → …) before the base sort. Off = flat. */
     presentationTiered: false,
-    /** Score normal entries by keyword match quality and fuse them with the vector ranking. */
-    keywordScoring: true,
     /**
      * Hide memory entries that summarise messages which have not happened yet at this point in the chat.
      *
@@ -369,7 +367,7 @@ export const defaultSettings = {
  */
 const INTERNAL_KEYS = [
     'meanCentered', 'entityFilter', 'properNounBoost', 'stopwordDocFreq',
-    'bm25K1', 'bm25B', 'repeatCurve', 'repeatR', 'keywordScoring',
+    'bm25K1', 'bm25B', 'repeatCurve', 'repeatR',
     'chunkSize', 'chunkMode', 'minChunkSize',
 ];
 
@@ -413,12 +411,10 @@ export const runState = {
     lastQueryChat: [],            // the messages that query was joined from, for offline depth ablation
     scanChat: null,               // the interceptor's chat — core's own scan haystack (regex-scripted,
                                   // files appended); SCAN_DONE consumers read this, not the raw chat
-    lastKeywordAdds: new Set(),   // `${world}.${uid}` of the last union's keyword-only force-activations
     lastScanChat: [],             // scan-eligible messages at capture depth, bundled by /wa-grade
     gradeCutoff: null,            // /wa-grade's candidate-depth cap; null = no capture in flight
     lastCandidates: [],           // selection-candidate rows from the last debug-class run, for /wa-grade
     lastCandidateEntries: [],     // the WI entries behind those rows, aligned by index (for "view text")
-    lastDropped: [],              // entries cut by budget
     lastSkipped: [],              // per-entry budget rejections + the cap that caused each
     attachedWorlds: new Set(),    // books ST currently has active for this chat
     waOwnsScan: false,            // WA intercepted the scan now in flight and owns its
