@@ -1,8 +1,8 @@
 // keyword-tools.mjs — the ST-coupled half of the lorebook keyword analysis feature: the flag-injecting
-// prune-scan wrapper, the LLM generation plumbing, and the Studio's scan/suggest option presets. The
-// pure classifier logic lives in keyword-audit.mjs and the ranker/filter in keyword-suggest.mjs
-// (both ST-free and node-importable); the UI
-// that surfaces it is the Studio (studio.mjs), which replaced the old standalone popup reports.
+// prune-scan wrapper and the LLM generation plumbing. The pure classifier logic lives in
+// keyword-audit.mjs and the ranker/filter in keyword-suggest.mjs (both ST-free and node-importable,
+// and both carrying the Studio's own option presets); the UI that surfaces it is the Studio
+// (studio.mjs), which replaced the old standalone popup reports.
 import { generateRaw } from '../../../../../script.js';
 import { extension_settings } from '../../../../extensions.js';
 import { world_info_case_sensitive, world_info_match_whole_words } from '../../../../world-info.js';
@@ -10,7 +10,7 @@ import { world_info_case_sensitive, world_info_match_whole_words } from '../../.
 import { splitRecursive } from './chunking.mjs';
 import { ConnectionManagerRequestService } from '../../../shared.js';
 import { settings } from './state.mjs';
-import { KEY_BOOK_COMMON, KEY_MIN_LENGTH, KEY_BOOK_SHARED, buildKeyPruneScan as buildKeyPruneScanCore } from './keyword-audit.mjs';
+import { buildKeyPruneScan as buildKeyPruneScanCore } from './keyword-audit.mjs';
 import { buildKeyPrompt, parseKeyList } from './keyword-suggest.mjs';
 
 /** buildKeyPruneScan with core's world-info match flags injected. A wrapper (not a bound value) so
@@ -81,8 +81,3 @@ export async function llmKeyCandidates(content, avoid, chunkSize = 5000) {
     for (const c of chunks) out.push(...parseKeyList(await generateText(buildKeyPrompt(c, avoid), KEY_RESPONSE_TOKENS)));
     return out;
 }
-
-// Studio option presets live beside the tools they configure (pure data, and the evals must read the shipped
-// values rather than a copy). Re-exported so studio.mjs's import site is unchanged.
-export { STUDIO_PRUNE_OPTS } from './keyword-audit.mjs';
-export { STUDIO_SUGGEST_OPTS } from './keyword-suggest.mjs';

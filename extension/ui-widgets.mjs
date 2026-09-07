@@ -1,7 +1,6 @@
 // ui-widgets.mjs — shared UI controls used by the settings panel and the Lorebook Studio:
 // the sort/tier control builders, the floating context menu, entry tooltips + glyph, and the
 // injected stylesheet. DOM-coupled; imports the sort vocabulary from sort.mjs and needs Popup.
-import { settings } from './state.mjs';
 import { escapeHtml } from '../../../../utils.js';
 import { markExcerptText } from './matcher.mjs';
 import { Popup, POPUP_TYPE } from '../../../../popup.js';
@@ -380,8 +379,7 @@ textarea.wa-entry-full.wa-tall { max-height: 62vh; }
     border-top: 1px solid var(--SmartThemeBorderColor, rgba(255,255,255,0.15));
     border-bottom: 1px solid var(--SmartThemeBorderColor, rgba(255,255,255,0.15)); }
 .wa-bulk-count { font-weight: bold; margin-right: 2px; }
-.wa-bulk-btn, .wa-bulk-mode { margin: 0; padding: 3px 10px; font-size: 0.82em; }
-.wa-bulk-mode { padding: 3px 6px; }
+.wa-bulk-btn { margin: 0; padding: 3px 10px; font-size: 0.82em; }
 .wa-bulk-danger { color: #e06c6c; }
 .wa-bulk-sep { align-self: stretch; width: 1px; background: color-mix(in srgb, currentColor 22%, transparent); margin: 0 3px; }
 .wa-book-tools { margin-left: 8px; white-space: nowrap; }

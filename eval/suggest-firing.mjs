@@ -29,7 +29,7 @@
 // got its scope overstated.
 import { readFileSync } from 'node:fs';
 import { basename } from 'node:path';
-import { buildKeySuggest } from '../extension/keyword-suggest.mjs';
+import { buildKeySuggest, STUDIO_SUGGEST_OPTS as OPTS } from '../extension/keyword-suggest.mjs';
 import { countKey } from '../extension/matcher.mjs';
 
 const args = process.argv.slice(2);
@@ -37,10 +37,6 @@ if (!args.length || args.length % 2) {
     console.error('usage: node suggest-firing.mjs <book.json> <chat.jsonl> [<book.json> <chat.jsonl> ...]');
     process.exit(2);
 }
-
-// Mirrors STUDIO_SUGGEST_OPTS in keyword-tools.mjs, which is ST-coupled and so cannot be imported
-// under node. Keep in step with it — measuring options the Studio does not ship is measuring nothing.
-const OPTS = { dfCeil: 0.35, maxN: 4, excludeDates: true, excludeShort: true, onlyActive: false, cap: 30 };
 
 const BANDS = [[0, 0, '0 (dead)'], [1, 3, '1-3'], [4, 20, '4-20'], [21, 100, '21-100'], [101, Infinity, '>100 (broad)']];
 

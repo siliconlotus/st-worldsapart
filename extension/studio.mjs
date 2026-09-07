@@ -10,7 +10,7 @@
 // (context menu, sort control, stylesheet) in ui-widgets.mjs — so the Studio and the wand-menu reports
 // can never drift on what counts as a weak key or how entries order.
 import { saveSettingsDebounced, getRequestHeaders, characters, getCharacters } from '../../../../../script.js';
-import { extension_settings, getContext } from '../../../../extensions.js';
+import { getContext } from '../../../../extensions.js';
 import { loadWorldInfo, saveWorldInfo, reloadEditor, createWorldInfoEntry, duplicateWorldInfoEntry, deleteWorldInfoEntry, getFreeWorldEntryUid, deleteWIOriginalDataValue, deleteWorldInfo, updateWorldInfoList, world_names, world_info_match_whole_words, world_info_case_sensitive, selected_world_info, world_info, METADATA_KEY } from '../../../../world-info.js';
 import { power_user } from '../../../../power-user.js';
 import { escapeHtml } from '../../../../utils.js';
@@ -18,8 +18,10 @@ import { Popup, POPUP_TYPE, POPUP_RESULT } from '../../../../popup.js';
 import { runState, settings } from './state.mjs';
 import { ensureStudioStyle, makeSortControl, showCtxMenu, showEntryText, wiGlyph } from './ui-widgets.mjs';
 import { SORT_FNS, SORT_LABELS, normPresentation, presentationLabel, reconcileTiers, tierRank, wiTitleOf } from './sort.mjs';
-import { buildKeyPruneScan, llmKeyCandidates, STUDIO_PRUNE_OPTS, STUDIO_SUGGEST_OPTS } from './keyword-tools.mjs';
-import { buildKeySuggest, classifyLlmCand } from './keyword-suggest.mjs';
+import { buildKeyPruneScan, llmKeyCandidates } from './keyword-tools.mjs';
+// Option presets come from the modules that define them — pure data the evals read too.
+import { STUDIO_PRUNE_OPTS } from './keyword-audit.mjs';
+import { buildKeySuggest, classifyLlmCand, STUDIO_SUGGEST_OPTS } from './keyword-suggest.mjs';
 import { buildAutomaton, addMessageHits, fold, validateSmartKey } from './smartkeys.mjs';
 import { findOrphanBindings } from './bindings.mjs';
 import { WI_LOGIC, hasPromoteDecorator, isRegexKey, secondaryKeys, usableKeys, wholeWordAdvice, withPromote } from './matcher.mjs';
@@ -266,6 +268,23 @@ export async function lorebookStudio(preferredBook = null) {
     const persistIgnore = () => { const s = settings(); if (!s.keywordIgnore) s.keywordIgnore = {}; s.keywordIgnore[selected] = [...ignoreSet]; saveSettingsDebounced(); };
     const persistOpts = () => { const s = settings(); s.studioScanOpts = studioOpts; s.studioSuggestOpts = suggestOpts; saveSettingsDebounced(); };
 
+    // The two shapes every tray here is built from — a titled column, and a checkbox row. The Tool
+    // Settings tray, the 🌐 global-WI tray and the per-entry ⚙ Advanced tray differ in their class
+    // names and in what a tick MEANS (persist an option, drive one of core's inputs, write the entry
+    // and repaint), so the commit is the caller's; only the row is shared.
+    const trayCol = (colCls, secCls, title, ...kids) => {
+        const c = document.createElement('div'); c.className = colCls;
+        const h = document.createElement('div'); h.className = secCls; h.textContent = title;
+        c.append(h, ...kids); return c;
+    };
+    const trayChk = (rowCls, label, checked, onChange, title = '') => {
+        const l = document.createElement('label'); l.className = 'checkbox_label ' + rowCls; if (title) l.title = title;
+        const cb = document.createElement('input'); cb.type = 'checkbox'; cb.checked = checked;
+        cb.addEventListener('change', () => onChange(cb.checked));
+        const s = document.createElement('span'); s.textContent = label;
+        l.append(cb, s); return l;
+    };
+
     // "⚙ Tool Settings" tray under the explorer header. Scan/prune options apply on the next Scan press;
     // recommender knobs invalidate the cached ranker so the next ⚡/✨ rebuilds with them; the whitelist
     // is this book's prune ignore-set (settings().keywordIgnore, per book). Replaces the old
@@ -281,13 +300,7 @@ export async function lorebookStudio(preferredBook = null) {
         if (!trayOpen) return wrap;
 
         const panel = document.createElement('div'); panel.className = 'wa-tray-panel';
-        const check = (obj, key, label, after) => {
-            const l = document.createElement('label'); l.className = 'checkbox_label wa-tray-opt';
-            const cb = document.createElement('input'); cb.type = 'checkbox'; cb.checked = !!obj[key];
-            cb.addEventListener('change', () => { obj[key] = cb.checked; persistOpts(); after?.(); });
-            const sp = document.createElement('span'); sp.textContent = label;
-            l.append(cb, sp); return l;
-        };
+        const check = (obj, key, label, after) => trayChk('wa-tray-opt', label, !!obj[key], v => { obj[key] = v; persistOpts(); after?.(); });
         const num = (obj, key, before, unit, opt, after) => {
             const { min = 1, max, scale = 1, width = '3.6em' } = opt || {};
             const l = document.createElement('label'); l.className = 'checkbox_label wa-tray-opt wa-tray-num';
@@ -303,11 +316,7 @@ export async function lorebookStudio(preferredBook = null) {
             const u = document.createElement('span'); u.textContent = unit;
             l.append(b, inp, u); return l;
         };
-        const col = (title, ...kids) => {
-            const c = document.createElement('div'); c.className = 'wa-tray-col';
-            const h = document.createElement('div'); h.className = 'wa-tray-sec'; h.textContent = title;
-            c.append(h, ...kids); return c;
-        };
+        const col = (title, ...kids) => trayCol('wa-tray-col', 'wa-tray-sec', title, ...kids);
         // Chips are stashed per entry, so dropping the ranker is enough — the next ⚡ rebuilds it.
         const invSuggest = () => { suggest = null; };
 
@@ -372,7 +381,7 @@ export async function lorebookStudio(preferredBook = null) {
     function renderGlobalTray() {
         if (!globalTrayOpen) return document.createElement('div');   // nothing mounted when closed
         const panel = document.createElement('div'); panel.className = 'wa-tray-panel';
-        const col = (title, ...kids) => { const c = document.createElement('div'); c.className = 'wa-tray-col'; const h = document.createElement('div'); h.className = 'wa-tray-sec'; h.textContent = title; c.append(h, ...kids); return c; };
+        const col = (title, ...kids) => trayCol('wa-tray-col', 'wa-tray-sec', title, ...kids);
         const numRow = (label, backing, unit, title) => {
             const l = document.createElement('label'); l.className = 'wa-tray-opt wa-tray-num'; if (title) l.title = title;
             const b = document.createElement('span'); b.textContent = label;
@@ -381,12 +390,7 @@ export async function lorebookStudio(preferredBook = null) {
             const u = document.createElement('span'); u.textContent = unit || ''; u.style.opacity = '0.6';
             l.append(b, inp, u); return l;
         };
-        const chkRow = (label, backing, title) => {
-            const l = document.createElement('label'); l.className = 'checkbox_label wa-tray-opt'; if (title) l.title = title;
-            const cb = document.createElement('input'); cb.type = 'checkbox'; cb.checked = backing.get();
-            cb.addEventListener('change', () => backing.set(cb.checked));
-            const s = document.createElement('span'); s.textContent = label; l.append(cb, s); return l;
-        };
+        const chkRow = (label, backing, title) => trayChk('wa-tray-opt', label, backing.get(), v => backing.set(v), title);
         // Backings: WA settings (extension_settings, also mirror the main panel's input); core globals (drive
         // core's #world_info_* input so its handler updates the var, counter, mutual-exclusion, and saves).
         // Native dispatchEvent('input') fires core's jQuery-bound handlers — no jQuery dependency here.
@@ -551,10 +555,20 @@ export async function lorebookStudio(preferredBook = null) {
         };
         toastr.success(`Deleted ${total} keyword${total === 1 ? '' : 's'} — click to undo.`, 'Worlds Apart', { timeOut: 20000, extendedTimeOut: 10000, onclick: undo });
     };
+    // Every button in this file: a .menu_button with a label and a click handler. `barBtn` is the one
+    // the bulk/cleanup bars use; the other two callers keep their own class and sizing.
+    const menuBtn = (label, onClick, cls = '', style = '') => {
+        const b = document.createElement('button'); b.type = 'button';
+        b.className = 'menu_button ' + cls;
+        b.textContent = label;
+        if (style) b.style.cssText = style;
+        b.addEventListener('click', onClick); return b;
+    };
+    const barBtn = (label, onClick, extra = '') => menuBtn(label, onClick, 'wa-bulk-btn ' + extra);
+
     const renderBulkBar = () => {
-        const wrap = document.createElement('div'); wrap.className = 'wa-bulk';
+        const wrap = document.createElement('div');
         const n = selectedEntries.size;
-        const mkBtn = (label, onClick, extra = '') => { const b = document.createElement('button'); b.type = 'button'; b.className = 'menu_button wa-bulk-btn ' + extra; b.textContent = label; b.addEventListener('click', onClick); return b; };
         const sep = () => { const s = document.createElement('span'); s.className = 'wa-bulk-sep'; return s; };
         if (!n) {   // nothing selected -> the Reselect offer if a bulk action just spent one, else no footprint
             if (!lastSel?.size) return wrap;
@@ -562,7 +576,7 @@ export async function lorebookStudio(preferredBook = null) {
             const note = document.createElement('span'); note.className = 'wa-bulk-count'; note.textContent = 'Selection cleared';
             const drop = document.createElement('i'); drop.className = 'fa-solid fa-xmark wa-undo-dismiss'; drop.title = 'Dismiss';
             drop.addEventListener('click', () => { lastSel = null; refreshBulkBar(); });
-            wrap.append(note, mkBtn(`Reselect ${lastSel.size}`, () => {
+            wrap.append(note, barBtn(`Reselect ${lastSel.size}`, () => {
                 for (const uid of lastSel) if (data?.entries?.[uid]) selectedEntries.add(uid);   // skip anything deleted since
                 lastSel = null; syncSelCheckboxes();
             }), drop);
@@ -602,30 +616,30 @@ export async function lorebookStudio(preferredBook = null) {
                 { label: 'Scan depth…', fn: bulkScanDepth },
             ];
         };
-        const setBtn = mkBtn('Set… ▾', () => { const r = setBtn.getBoundingClientRect(); showCtxMenu(setItems(), r.left, r.bottom + 2, ctxMount()); });
+        const setBtn = barBtn('Set… ▾', () => { const r = setBtn.getBoundingClientRect(); showCtxMenu(setItems(), r.left, r.bottom + 2, ctxMount()); });
         setBtn.title = 'Set a field on all selected entries';
-        const addTermBtn = mkBtn('Add term…', bulkAddTerm); addTermBtn.title = 'Add one keyword to every selected entry';
-        const reBtn = mkBtn('Renumber…', ev => bulkOrder(ev.shiftKey)); reBtn.title = 'Renumber order — shift-click to also renumber UIDs';
+        const addTermBtn = barBtn('Add term…', bulkAddTerm); addTermBtn.title = 'Add one keyword to every selected entry';
+        const reBtn = barBtn('Renumber…', ev => bulkOrder(ev.shiftKey)); reBtn.title = 'Renumber order — shift-click to also renumber UIDs';
         // One toggle instead of separate Enable/Disable: enable if any selected are off, else disable all.
         const anyDisabled = Object.values(data?.entries ?? {}).some(e => selectedEntries.has(e.uid) && e.disable);
         wrap.append(
             count,
-            mkBtn(n === all.length ? 'Select none' : 'Select all', () => { if (n === all.length) consumeSelection(); else { lastSel = null; all.forEach(e => selectedEntries.add(e.uid)); syncSelCheckboxes(); } }),
+            barBtn(n === all.length ? 'Select none' : 'Select all', () => { if (n === all.length) consumeSelection(); else { lastSel = null; all.forEach(e => selectedEntries.add(e.uid)); syncSelCheckboxes(); } }),
             // The toggle above only clears once everything visible is ticked; a partial selection needs its
             // own way out, and clearing by unticking N boxes is not one. Both clears go through
             // consumeSelection, so an accidental one is a Reselect away.
-            ...(n === all.length ? [] : [mkBtn('Clear', consumeSelection)]),
+            ...(n === all.length ? [] : [barBtn('Clear', consumeSelection)]),
             sep(),
-            mkBtn(anyDisabled ? 'Enable' : 'Disable', () => { applyBulk(e => e.disable = !anyDisabled); refreshBulkBar(); }),
+            barBtn(anyDisabled ? 'Enable' : 'Disable', () => { applyBulk(e => e.disable = !anyDisabled); refreshBulkBar(); }),
             addTermBtn,
             setBtn,
             reBtn,
             sep(),
-            mkBtn('Copy to…', bulkCopyTo),
-            mkBtn('Move to…', bulkMoveTo),
+            barBtn('Copy to…', bulkCopyTo),
+            barBtn('Move to…', bulkMoveTo),
             sep(),
-            mkBtn('Delete all terms', bulkClearTerms, 'wa-bulk-danger'),
-            mkBtn('Delete', bulkDelete, 'wa-bulk-danger'),
+            barBtn('Delete all terms', bulkClearTerms, 'wa-bulk-danger'),
+            barBtn('Delete', bulkDelete, 'wa-bulk-danger'),
         );
         return wrap;
     };
@@ -705,8 +719,11 @@ export async function lorebookStudio(preferredBook = null) {
         i.addEventListener('click', ev => { ev.stopPropagation(); onClick(ev); });
         return i;
     };
+    // Book-level icon: rename / duplicate / delete a whole lorebook, and the same two verbs offered as
+    // repairs in the orphaned-bindings list — same icons there, so they read as operations already
+    // known from the book toolbar.
+    const bookTool = (cls, title, onClick, extra = '') => { const i = document.createElement('i'); i.className = `fa-solid ${cls} wa-book-tool ${extra}`; i.title = title; i.addEventListener('click', onClick); return i; };
 
-    // Tiny sticky editor: number box + −/+ steppers + 🚫 reset-to-0.
     /**
      * The per-entry tool row (power / case / whole-word / promote / sticky / trigger % / advanced / copy /
      * delete).
@@ -792,44 +809,57 @@ export async function lorebookStudio(preferredBook = null) {
         return tools;
     };
 
-    const editSticky = async e => {
+    const clampMsg = v => Math.max(0, Math.floor(Number(v) || 0));
+    const clampPct = v => Math.min(100, Math.max(0, Math.floor(Number(v) || 0)));
+    /**
+     * Tiny number editor: number box + −/+ steppers + a reset button, committed on OK. Sticky and
+     * trigger-% are the same popup under a different step, clamp and reset; what the value MEANS is
+     * `commit`'s, and it is handed the clamped number.
+     */
+    const stepperPopup = async (e, { value, step, clamp, reset, resetLabel, resetTitle, max, title, commit }) => {
         const w = document.createElement('div');
         w.style.cssText = 'display:flex;align-items:center;justify-content:center;gap:6px;';
         const inp = document.createElement('input');
-        inp.type = 'number'; inp.min = '0'; inp.className = 'text_pole'; inp.style.cssText = 'width:5em;text-align:center;margin:0;';
-        inp.value = String(Number(e.sticky) || 0);
-        const step = (d, label) => { const b = document.createElement('button'); b.type = 'button'; b.className = 'menu_button'; b.style.margin = '0'; b.textContent = label; b.addEventListener('click', () => { inp.value = String(Math.max(0, (Number(inp.value) || 0) + d)); }); return b; };
-        const reset = document.createElement('button'); reset.type = 'button'; reset.className = 'menu_button'; reset.style.margin = '0'; reset.textContent = '🚫'; reset.title = 'Reset to 0'; reset.addEventListener('click', () => { inp.value = '0'; });
-        w.append(step(-1, '−'), inp, step(1, '+'), reset);
-        const p = new Popup(w, POPUP_TYPE.CONFIRM, '', { okButton: 'Set', cancelButton: 'Cancel' });
-        if (await p.show() === POPUP_RESULT.AFFIRMATIVE) { e.sticky = Math.max(0, Math.floor(Number(inp.value) || 0)); save(); renderEntry(e); }
+        inp.type = 'number'; inp.min = '0'; if (max != null) inp.max = String(max);
+        inp.className = 'text_pole'; inp.style.cssText = 'width:5em;text-align:center;margin:0;';
+        inp.value = String(value);
+        const stepBtn = (d, label) => { const b = document.createElement('button'); b.type = 'button'; b.className = 'menu_button'; b.style.margin = '0'; b.textContent = label; b.addEventListener('click', () => { inp.value = String(clamp((Number(inp.value) || 0) + d)); }); return b; };
+        const rst = document.createElement('button'); rst.type = 'button'; rst.className = 'menu_button'; rst.style.margin = '0'; rst.textContent = resetLabel; rst.title = resetTitle; rst.addEventListener('click', () => { inp.value = String(reset); });
+        w.append(stepBtn(-step, '−'), inp, stepBtn(step, '+'), rst);
+        const p = new Popup(w, POPUP_TYPE.CONFIRM, title, { okButton: 'Set', cancelButton: 'Cancel' });
+        if (await p.show() === POPUP_RESULT.AFFIRMATIVE) { commit(clamp(inp.value)); save(); renderEntry(e); }
     };
-
+    const editSticky = e => stepperPopup(e, {
+        value: Number(e.sticky) || 0, step: 1, clamp: clampMsg,
+        reset: 0, resetLabel: '🚫', resetTitle: 'Reset to 0', title: '',
+        commit: v => e.sticky = v,
+    });
     // Trigger-probability editor: 0–100% number box + −/+ steppers + a reset to 100 (always fire).
     // Setting it turns useProbability on; 100 leaves gating enabled but effectively always-fires.
-    const editProbability = async e => {
-        const clamp = v => Math.min(100, Math.max(0, Math.floor(Number(v) || 0)));
-        const w = document.createElement('div');
-        w.style.cssText = 'display:flex;align-items:center;justify-content:center;gap:6px;';
-        const inp = document.createElement('input');
-        inp.type = 'number'; inp.min = '0'; inp.max = '100'; inp.className = 'text_pole'; inp.style.cssText = 'width:5em;text-align:center;margin:0;';
-        inp.value = String(e.probability != null ? clamp(e.probability) : 100);
-        const step = (d, label) => { const b = document.createElement('button'); b.type = 'button'; b.className = 'menu_button'; b.style.margin = '0'; b.textContent = label; b.addEventListener('click', () => { inp.value = String(clamp((Number(inp.value) || 0) + d)); }); return b; };
-        const reset = document.createElement('button'); reset.type = 'button'; reset.className = 'menu_button'; reset.style.margin = '0'; reset.textContent = '🎯'; reset.title = 'Always fire (100%)'; reset.addEventListener('click', () => { inp.value = '100'; });
-        w.append(step(-10, '−'), inp, step(10, '+'), reset);
-        const p = new Popup(w, POPUP_TYPE.CONFIRM, 'Trigger probability %', { okButton: 'Set', cancelButton: 'Cancel' });
-        if (await p.show() === POPUP_RESULT.AFFIRMATIVE) { e.probability = clamp(inp.value); e.useProbability = true; save(); renderEntry(e); }
-    };
+    const editProbability = e => stepperPopup(e, {
+        value: e.probability != null ? clampPct(e.probability) : 100, step: 10, clamp: clampPct, max: 100,
+        reset: 100, resetLabel: '🎯', resetTitle: 'Always fire (100%)', title: 'Trigger probability %',
+        commit: v => { e.probability = v; e.useProbability = true; },
+    });
 
+
+    /**
+     * The busy dance every suggestion entry point does: refuse a second click while one is running,
+     * dim the button, and undim on EVERY exit — including a throw, which otherwise leaves the button
+     * dimmed and refusing clicks for the rest of the session.
+     */
+    const withBusy = async (btn, dim, fn) => {
+        if (btn.dataset.busy) return;
+        btn.dataset.busy = '1'; btn.style.opacity = dim;
+        try { return await fn(); } finally { btn.dataset.busy = ''; btn.style.opacity = ''; }
+    };
 
     // ⚡ TF-IDF suggestions for one entry (from the whole-book ranker); ✨ local-model reroll.
     // The first click builds the whole-book ranker (a ~1s pre-pass on big books), so dim the bolt and
     // yield a frame first, letting the dim paint before the synchronous pre-pass blocks the thread.
-    const suggestTfidf = async (e, btn) => {
-        if (btn.dataset.busy) return;
-        if (!suggest) { btn.dataset.busy = '1'; btn.style.opacity = '0.25'; await new Promise(r => setTimeout(r, 0)); }
+    const suggestTfidf = (e, btn) => withBusy(btn, '0.25', async () => {
+        if (!suggest) await new Promise(r => setTimeout(r, 0));
         const s = ensureSuggest();
-        btn.dataset.busy = ''; btn.style.opacity = '';
         const pe = s.perEntry.find(p => String(p.entry.uid) === String(e.uid));
         const fresh = (pe?.newRows ?? []).map(r => r.display).filter(t => !hasKey(e, t));
         if (!fresh.length) { toastr.info('No TF-IDF suggestions for this entry.', 'Worlds Apart'); return; }
@@ -837,7 +867,7 @@ export async function lorebookStudio(preferredBook = null) {
         const seen = new Set([...g.tfidf, ...g.llm].map(t => s.canon(t)));
         for (const t of fresh) { const c = s.canon(t); if (!seen.has(c)) { g.tfidf.push(t); seen.add(c); } }
         renderEntry(e);
-    };
+    });
     // Merge raw model candidates into one entry's ✨ tray via the shared classifyLlmCand — the exact
     // filters the single ✨ applies (dedupe, prompt-echo, generic single word, date-like, too-common).
     // Returns the count added.
@@ -858,18 +888,16 @@ export async function lorebookStudio(preferredBook = null) {
     };
     // `after` is how the caller repaints: the Explorer rebuilds just that entry's row, while a
     // book-wide run repaints the whole list once at the end.
-    const suggestLlm = async (e, btn, after = renderEntry) => {
-        if (btn.dataset.busy) return;
-        btn.dataset.busy = '1'; btn.classList.remove('wa-on'); btn.style.opacity = '0.25';
+    const suggestLlm = (e, btn, after = renderEntry) => withBusy(btn, '0.25', async () => {
+        btn.classList.remove('wa-on');
         const s = ensureSuggest();
         let cands;
         try { cands = await llmKeyCandidates(e.content, s.avoid, suggestOpts.llmChunk); }
-        catch (err) { toastr.warning(`Local model: ${String(err?.message ?? err)}`, 'Worlds Apart'); btn.dataset.busy = ''; btn.style.opacity = ''; return; }
+        catch (err) { toastr.warning(`Local model: ${String(err?.message ?? err)}`, 'Worlds Apart'); return; }
         const added = mergeLlmCands(e, cands, s);
-        btn.dataset.busy = ''; btn.style.opacity = '';
         toastr[added ? 'success' : 'info'](added ? `${wiTitleOf(e)}: +${added} from model` : 'Model returned nothing usable — click ✨ to retry.', 'Worlds Apart');
         after(e);
-    };
+    });
     const acceptSugg = (e, term, after = renderEntry) => {
         // Through the same gate as everything else. A suggester is not supposed to be able to emit a
         // `?` or `/re/` key, but the REWORD path beside this one was already gated, so accepting a
@@ -889,34 +917,60 @@ export async function lorebookStudio(preferredBook = null) {
         acceptSugg(e, newTerm);
     };
 
+    /**
+     * The inline "click to edit" every editable label here opens: a .text_pole in place of `anchor`,
+     * committing on Enter and blur, cancelling on Escape, and firing `commit` exactly once.
+     *
+     * Sized to the text, not a fixed 8em. A SmartKey is routinely longer than that, and a fixed
+     * width made the field scroll internally — so on blur it snapped back to character 0 and the
+     * end of what you had typed went out of view. Capped, because the keyword paragraph wraps and one
+     * very long key should take a line, not the pane. width:auto is load-bearing: .text_pole is
+     * width:100%, which beats `size` and made the field take a whole line of the keyword paragraph
+     * instead of sitting inline with the chips. The title editor overrides both, since it sits on a
+     * line of its own and grows so the ✓ stays under the mouse.
+     *
+     * `commit(value, ok, viaBlur)` gets the TRIMMED text and returns false to REFUSE, which keeps the
+     * editor open with the text still in it. The commit fires on blur, so discarding a refusal here
+     * meant clicking away silently threw the work out and the chip snapped back — the toast explained
+     * a problem with text that no longer existed. Escape still cancels outright, because ok=false
+     * never reaches the caller's check.
+     *
+     * Focus is only reclaimed on an explicit Enter. Grabbing it back on blur traps the cursor: every
+     * attempt to click away re-fires the blur and yanks it home again. On blur the editor simply
+     * stays where it is, holding the text, and can be returned to or escaped.
+     *
+     * @returns {{inp: HTMLInputElement, finish: (ok: boolean, viaBlur?: boolean) => void}} the field
+     *          and its one-shot commit, for a caller wiring an extra control (the rename ✓) to it.
+     */
+    const inlineInput = (anchor, commit, { value = '', placeholder = '',
+        css = 'margin:0;font-size:0.9em;width:auto;',
+        fit = x => Math.min(64, Math.max(8, x.value.length + 2)) } = {}) => {
+        const inp = document.createElement('input');
+        inp.type = 'text'; inp.className = 'text_pole';
+        if (value) inp.value = value;
+        if (placeholder) inp.placeholder = placeholder;
+        inp.style.cssText = css;
+        const size = () => { inp.size = fit(inp); };
+        size();
+        inp.addEventListener('input', size);
+        let done = false;
+        // done is set BEFORE the commit runs: a commit repaints, which removes this input from the
+        // document, and a browser that fires blur on removal would otherwise re-enter and write twice.
+        const finish = (ok, viaBlur) => {
+            if (done) return;
+            done = true;
+            if (commit(inp.value.trim(), ok, viaBlur) === false) { done = false; if (!viaBlur) inp.focus(); }
+        };
+        inp.addEventListener('keydown', ev => { if (ev.key === 'Enter') { ev.preventDefault(); finish(true); } else if (ev.key === 'Escape') { ev.preventDefault(); finish(false); } });
+        inp.addEventListener('blur', () => finish(true, true));
+        anchor.replaceWith(inp); inp.focus(); inp.select();
+        return { inp, finish };
+    };
+
     // Inline "click to edit" for one keyword (commit on Enter/blur, cancel on Escape).
     const editKeyInline = (e, oldKey, span, list = 'key') => {
-        const inp = document.createElement('input');
-        inp.type = 'text'; inp.className = 'text_pole'; inp.value = oldKey;
-        // Sized to the text, not a fixed 8em. A SmartKey is routinely longer than that, and a fixed
-        // width made the field scroll internally — so on blur it snapped back to character 0 and the
-        // end of what you had typed went out of view. Same `size` idiom as the title editor. Capped,
-        // because the keyword paragraph wraps and one very long key should take a line, not the pane.
-        // width:auto is load-bearing: .text_pole is width:100%, which beats `size` and made the field
-        // take a whole line of the keyword paragraph instead of sitting inline with the chips.
-        inp.style.cssText = 'margin:0;font-size:0.9em;width:auto;';
-        const fit = () => { inp.size = Math.min(64, Math.max(8, inp.value.length + 2)); };
-        fit();
-        inp.addEventListener('input', fit);
-        let done = false;
-        const commit = (ok, viaBlur) => {
-            if (done) return;
-            const nv = inp.value.trim();
-            // A REFUSED key keeps the editor open with the text still in it. The commit fires on blur,
-            // so discarding here meant clicking away silently threw the work out and the chip snapped
-            // back — the toast explained a problem with text that no longer existed. Escape still
-            // cancels outright, because ok=false never reaches the check.
-            //
-            // Focus is only reclaimed on an explicit Enter. Grabbing it back on blur traps the cursor:
-            // every attempt to click away re-fires the blur and yanks it home again. On blur the editor
-            // simply stays where it is, holding the text, and can be returned to or escaped.
-            if (ok && nv && nv !== oldKey && !keyWriteOk(nv, list, e)) { if (!viaBlur) inp.focus(); return; }
-            done = true;
+        inlineInput(span, (nv, ok) => {
+            if (ok && nv && nv !== oldKey && !keyWriteOk(nv, list, e)) return false;
             if (ok && nv && nv !== oldKey && Array.isArray(e[list])) {
                 const idx = e[list].indexOf(oldKey);
                 // The dupe test has to skip the key being edited, or a capitalisation fix ("bob" → "Bob")
@@ -924,10 +978,7 @@ export async function lorebookStudio(preferredBook = null) {
                 if (idx >= 0) { if (e[list].some((k, i) => i !== idx && kwNorm(k) === kwNorm(nv))) e[list].splice(idx, 1); else e[list][idx] = nv; save(); }
             }
             renderEntry(e);
-        };
-        inp.addEventListener('keydown', ev => { if (ev.key === 'Enter') { ev.preventDefault(); commit(true); } else if (ev.key === 'Escape') { ev.preventDefault(); commit(false); } });
-        inp.addEventListener('blur', () => commit(true, true));
-        span.replaceWith(inp); inp.focus(); inp.select();
+        }, { value: oldKey });
     };
 
     // Right-click a keyword chip → book-wide ops on that term (case-insensitive, matching core's default
@@ -1001,7 +1052,7 @@ export async function lorebookStudio(preferredBook = null) {
     const renderEntry = (e, mount) => {
         const flagged = scan ? new Map(scan.classifyEntry(e).map(r => [r.key, r])) : null;   // null = not scanned yet
         const open = entryOpen.has(e.uid);
-        const row = document.createElement('div'); row.className = 'wa-entry' + (open ? ' wa-entry-open' : '');
+        const row = document.createElement('div'); row.className = 'wa-entry';
 
         // --- Level 1 header: always shown (select, chevron, mode, title, meta) ---
         const h = document.createElement('div'); h.className = 'wa-entry-head';
@@ -1080,20 +1131,18 @@ export async function lorebookStudio(preferredBook = null) {
         const pencil = document.createElement('i'); pencil.className = 'fa-solid fa-pencil wa-tool wa-title-edit'; pencil.title = 'Rename entry';
         pencil.addEventListener('click', ev => {
             ev.stopPropagation();
-            const inp = document.createElement('input'); inp.type = 'text'; inp.className = 'text_pole'; inp.value = e.comment ?? '';
-            inp.style.cssText = 'margin:0;font-size:0.95em;';
-            const fit = () => { inp.size = Math.max(6, inp.value.length + 2); };   // grow to the text so ✓ stays under the mouse
-            fit();
+            const { inp, finish } = inlineInput(title, (nv, ok) => {
+                if (ok && nv !== (e.comment ?? '')) { e.comment = nv; save(); }
+                renderEntry(e);
+            }, {
+                value: e.comment ?? '', css: 'margin:0;font-size:0.95em;',
+                fit: x => Math.max(6, x.value.length + 2),   // grow to the text so ✓ stays under the mouse
+            });
             inp.addEventListener('click', e2 => e2.stopPropagation());
-            inp.addEventListener('input', fit);
-            let done = false;
-            const commit = ok => { if (done) return; done = true; if (ok) { const nv = inp.value.trim(); if (nv !== (e.comment ?? '')) { e.comment = nv; save(); } } renderEntry(e); };
-            inp.addEventListener('keydown', e2 => { if (e2.key === 'Enter') { e2.preventDefault(); commit(true); } else if (e2.key === 'Escape') { e2.preventDefault(); commit(false); } });
-            inp.addEventListener('blur', () => commit(true));
             const okBtn = document.createElement('i'); okBtn.className = 'fa-solid fa-check wa-tool'; okBtn.title = 'Confirm rename';
             okBtn.addEventListener('mousedown', e2 => e2.preventDefault());   // keep input focus so blur doesn't fire first
-            okBtn.addEventListener('click', e2 => { e2.stopPropagation(); commit(true); });
-            title.replaceWith(inp); inp.after(okBtn); inp.focus(); inp.select();
+            okBtn.addEventListener('click', e2 => { e2.stopPropagation(); finish(true); });
+            inp.after(okBtn);
         });
         const meta = document.createElement('span'); meta.className = 'wa-entry-meta';
         const prob = e.probability != null ? Number(e.probability) : 100;
@@ -1215,46 +1264,17 @@ export async function lorebookStudio(preferredBook = null) {
             const t = document.createElement('span'); t.className = 'wa-sugg-text';
             t.textContent = (kind === 'llm' ? '✨ ' : '⚡ ') + term;
             t.title = `${term} — click to reword, then it's added`;
-            t.addEventListener('click', () => {
-                const inp = document.createElement('input');
-                inp.type = 'text'; inp.className = 'text_pole'; inp.value = term;
-                inp.style.cssText = 'margin:0;font-size:0.9em;width:auto;';
-                const fit = () => { inp.size = Math.min(64, Math.max(8, inp.value.length + 2)); };   // see editKeyInline
-                fit();
-                inp.addEventListener('input', fit);
-                let done = false;
-                const commit = ok => {
-                    if (done) return; done = true;
-                    const nv = inp.value.trim();
-                    if (ok && nv && nv !== term) acceptEdited(e, term, nv); else renderEntry(e);
-                };
-                inp.addEventListener('keydown', ev => { if (ev.key === 'Enter') { ev.preventDefault(); commit(true); } else if (ev.key === 'Escape') { ev.preventDefault(); commit(false); } });
-                inp.addEventListener('blur', () => commit(true));
-                t.replaceWith(inp); inp.focus(); inp.select();
-            });
+            t.addEventListener('click', () => inlineInput(t, (nv, ok) => {
+                if (ok && nv && nv !== term) acceptEdited(e, term, nv); else renderEntry(e);
+            }, { value: term }));
             chip.append(take, t); para.append(chip);
         }
         const add = document.createElement('i'); add.className = 'fa-solid fa-plus wa-tool'; add.title = 'Add a keyword';
-        add.addEventListener('click', () => {
-            const inp = document.createElement('input'); inp.type = 'text'; inp.className = 'text_pole'; inp.placeholder = 'keyword';
-            inp.style.cssText = 'margin:0;font-size:0.9em;width:auto;';
-            const fit = () => { inp.size = Math.min(64, Math.max(8, inp.value.length + 2)); };   // see editKeyInline
-            fit();
-            inp.addEventListener('input', fit);
-            let done = false;
-            const commit = (ok, viaBlur) => {
-                if (done) return;
-                const nv = inp.value.trim();
-                // Keep the editor and the text; reclaim focus only on Enter (see editKeyInline).
-                if (ok && nv && !hasKey(e, nv) && !keyWriteOk(nv)) { if (!viaBlur) inp.focus(); return; }
-                done = true;
-                if (ok && nv && !hasKey(e, nv)) { if (!Array.isArray(e.key)) e.key = []; e.key.push(nv); save(); }
-                renderEntry(e);
-            };
-            inp.addEventListener('keydown', ev => { if (ev.key === 'Enter') { ev.preventDefault(); commit(true); } else if (ev.key === 'Escape') { ev.preventDefault(); commit(false); } });
-            inp.addEventListener('blur', () => commit(true, true));
-            add.replaceWith(inp); inp.focus();
-        });
+        add.addEventListener('click', () => inlineInput(add, (nv, ok) => {
+            if (ok && nv && !hasKey(e, nv) && !keyWriteOk(nv)) return false;
+            if (ok && nv && !hasKey(e, nv)) { if (!Array.isArray(e.key)) e.key = []; e.key.push(nv); save(); }
+            renderEntry(e);
+        }, { placeholder: 'keyword' }));
         para.append(add, boltBtn, llmBtn);   // manual + first, then the suggestion triggers
 
         // --- Secondary keys, on the same footing as the primaries -----------------------------------
@@ -1337,26 +1357,11 @@ export async function lorebookStudio(preferredBook = null) {
                 sec.append(item);
             }
             const addSec = document.createElement('i'); addSec.className = 'fa-solid fa-plus wa-tool'; addSec.title = 'Add a secondary key';
-            addSec.addEventListener('click', () => {
-                const inp = document.createElement('input'); inp.type = 'text'; inp.className = 'text_pole'; inp.placeholder = 'secondary key';
-                inp.style.cssText = 'margin:0;font-size:0.9em;width:auto;';
-                const fit = () => { inp.size = Math.min(64, Math.max(8, inp.value.length + 2)); };
-                fit();
-                inp.addEventListener('input', fit);
-                let done = false;
-                const commit = (ok, viaBlur) => {
-                    if (done) return;
-                    const nv = inp.value.trim();
-                    // Same refusal shape as the primary adder: a rejected key keeps the editor and the text.
-                    if (ok && nv && !keyWriteOk(nv, 'keysecondary', e)) { if (!viaBlur) inp.focus(); return; }
-                    done = true;
-                    if (ok && nv && !e.keysecondary.some(k => kwNorm(k) === kwNorm(nv))) { e.keysecondary.push(nv); save(); }
-                    renderEntry(e);
-                };
-                inp.addEventListener('keydown', ev => { if (ev.key === 'Enter') { ev.preventDefault(); commit(true); } else if (ev.key === 'Escape') { ev.preventDefault(); commit(false); } });
-                inp.addEventListener('blur', () => commit(true, true));
-                addSec.replaceWith(inp); inp.focus();
-            });
+            addSec.addEventListener('click', () => inlineInput(addSec, (nv, ok) => {
+                if (ok && nv && !keyWriteOk(nv, 'keysecondary', e)) return false;
+                if (ok && nv && !e.keysecondary.some(k => kwNorm(k) === kwNorm(nv))) { e.keysecondary.push(nv); save(); }
+                renderEntry(e);
+            }, { placeholder: 'secondary key' }));
             sec.append(addSec);
             secPara = sec;
         }
@@ -1424,68 +1429,60 @@ export async function lorebookStudio(preferredBook = null) {
     const buildAdvancedTray = (e, repaint) => {
         const delay = Number(e.delay) || 0;
         const cooldown = Number(e.cooldown) || 0;
-        {
-            const adv = document.createElement('div'); adv.className = 'wa-adv';
-            const col = (heading, ...rows) => { const c = document.createElement('div'); c.className = 'wa-adv-col'; const hd = document.createElement('div'); hd.className = 'wa-adv-sec'; hd.textContent = heading; c.append(hd, ...rows); return c; };
-            const chk = (label, get, set) => {
-                const l = document.createElement('label'); l.className = 'checkbox_label wa-adv-row';
-                const cb = document.createElement('input'); cb.type = 'checkbox'; cb.checked = get();
-                cb.addEventListener('change', () => { set(cb.checked); save(); repaint(e); });
-                const s = document.createElement('span'); s.textContent = label; l.append(cb, s); return l;
-            };
-            const numRow = (label, get, set, placeholder) => {
-                const l = document.createElement('label'); l.className = 'wa-adv-row';
-                const s = document.createElement('span'); s.textContent = label;
-                const inp = document.createElement('input'); inp.type = 'number'; inp.min = '0'; inp.className = 'text_pole'; inp.value = get(); if (placeholder) inp.placeholder = placeholder;
-                inp.addEventListener('change', () => { set(inp.value); save(); repaint(e); });
-                l.append(s, inp); return l;
-            };
-            const toMsg = v => Math.max(0, Math.floor(Number(v) || 0)) || null;   // 0/blank -> null (off), like core
-            const clampPct = v => Math.min(100, Math.max(0, Math.floor(Number(v) || 0)));
-            const recWarn = () => { const w = document.createElement('div'); w.className = 'wa-adv-warn'; w.innerHTML = '<i class="fa-solid fa-triangle-exclamation"></i> Recursion is off globally — these have no effect.'; return w; };
-            // Tri-state select (Inherit / On / Off) for the nullable match flags — the tray equivalent of the
-            // icon's click (On/Off) + shift-click (Inherit). Inherit resolves to the global default.
-            const triSel = (label, get, set, globalOn) => {
-                const l = document.createElement('label'); l.className = 'wa-adv-row';
-                const s = document.createElement('span'); s.textContent = label; s.style.whiteSpace = 'nowrap';
-                const sel = document.createElement('select'); sel.className = 'text_pole'; sel.style.cssText = 'width:auto;margin:0 0 0 auto;padding:2px 4px;';   // fit the option text, not text_pole's full width
-                for (const [val, txt] of [['', `Inherit (${globalOn ? 'on' : 'off'})`], ['on', 'On'], ['off', 'Off']]) sel.append(new Option(txt, val));
-                const cur = get(); sel.value = cur === true ? 'on' : cur === false ? 'off' : '';
-                sel.addEventListener('change', () => { set(sel.value === '' ? null : sel.value === 'on'); save(); repaint(e); });
-                l.append(s, sel); return l;
-            };
-            const durLevel = (typeof e.delayUntilRecursion === 'number' && e.delayUntilRecursion > 0) ? e.delayUntilRecursion : '';
-            adv.append(
-                // Sticky + probability also have quick icons; the fields here let you set every number at once.
-                col('Timed',
-                    numRow('Sticky', () => (Number(e.sticky) > 0 ? Number(e.sticky) : ''), v => e.sticky = toMsg(v), '0'),
-                    numRow('Cooldown', () => (cooldown || ''), v => e.cooldown = toMsg(v), '0'),
-                    numRow('Delay', () => (delay || ''), v => e.delay = toMsg(v), '0'),
-                ),
-                col('Trigger',
-                    numRow('Probability %', () => (e.probability != null ? Number(e.probability) : 100), v => e.probability = clampPct(v), '100'),
-                    chk('Use probability', () => e.useProbability !== false, v => e.useProbability = v),
-                ),
-                col('Matching',
-                    triSel('Case-sensitive', () => e.caseSensitive, v => e.caseSensitive = v, world_info_case_sensitive),
-                    triSel('Whole words', () => e.matchWholeWords, v => e.matchWholeWords = v, world_info_match_whole_words),
-                ),
-                col('Recursion',
-                    chk('Non-recursable', () => !!e.excludeRecursion, v => e.excludeRecursion = v),
-                    chk('Prevent further recursion', () => !!e.preventRecursion, v => e.preventRecursion = v),
-                    chk('Delay until recursion', () => !!e.delayUntilRecursion, v => e.delayUntilRecursion = v ? (durLevel || true) : false),
-                    numRow('↳ level', () => durLevel, v => { const n = Math.max(0, Math.floor(Number(v) || 0)); e.delayUntilRecursion = n > 0 ? n : (e.delayUntilRecursion ? true : false); }, 'any'),
-                    // These do nothing while global recursion is off — warn instead of silently misleading.
-                    ...(document.querySelector('#world_info_recursive')?.checked ? [] : [recWarn()]),
-                ),
-                col('Budget / scan',
-                    chk('Ignore budget', () => !!e.ignoreBudget, v => e.ignoreBudget = v),
-                    // 0 (or blank) = global — a literal scan depth of 0 is incoherent (disable the entry instead).
-                    numRow('Scan depth', () => (e.scanDepth ? e.scanDepth : ''), v => { const n = Math.floor(Number(v) || 0); e.scanDepth = n > 0 ? n : null; }, 'global'),
-                ),
-            );
-            return adv;
-        }
+        const adv = document.createElement('div'); adv.className = 'wa-adv';
+        const col = (heading, ...rows) => trayCol('wa-adv-col', 'wa-adv-sec', heading, ...rows);
+        const chk = (label, get, set) => trayChk('wa-adv-row', label, get(), v => { set(v); save(); repaint(e); });
+        const numRow = (label, get, set, placeholder) => {
+            const l = document.createElement('label'); l.className = 'wa-adv-row';
+            const s = document.createElement('span'); s.textContent = label;
+            const inp = document.createElement('input'); inp.type = 'number'; inp.min = '0'; inp.className = 'text_pole'; inp.value = get(); if (placeholder) inp.placeholder = placeholder;
+            inp.addEventListener('change', () => { set(inp.value); save(); repaint(e); });
+            l.append(s, inp); return l;
+        };
+        const toMsg = v => Math.max(0, Math.floor(Number(v) || 0)) || null;   // 0/blank -> null (off), like core
+        const recWarn = () => { const w = document.createElement('div'); w.className = 'wa-adv-warn'; w.innerHTML = '<i class="fa-solid fa-triangle-exclamation"></i> Recursion is off globally — these have no effect.'; return w; };
+        // Tri-state select (Inherit / On / Off) for the nullable match flags — the tray equivalent of the
+        // icon's click (On/Off) + shift-click (Inherit). Inherit resolves to the global default.
+        const triSel = (label, get, set, globalOn) => {
+            const l = document.createElement('label'); l.className = 'wa-adv-row';
+            const s = document.createElement('span'); s.textContent = label; s.style.whiteSpace = 'nowrap';
+            const sel = document.createElement('select'); sel.className = 'text_pole'; sel.style.cssText = 'width:auto;margin:0 0 0 auto;padding:2px 4px;';   // fit the option text, not text_pole's full width
+            for (const [val, txt] of [['', `Inherit (${globalOn ? 'on' : 'off'})`], ['on', 'On'], ['off', 'Off']]) sel.append(new Option(txt, val));
+            const cur = get(); sel.value = cur === true ? 'on' : cur === false ? 'off' : '';
+            sel.addEventListener('change', () => { set(sel.value === '' ? null : sel.value === 'on'); save(); repaint(e); });
+            l.append(s, sel); return l;
+        };
+        const durLevel = (typeof e.delayUntilRecursion === 'number' && e.delayUntilRecursion > 0) ? e.delayUntilRecursion : '';
+        adv.append(
+            // Sticky + probability also have quick icons; the fields here let you set every number at once.
+            col('Timed',
+                numRow('Sticky', () => (Number(e.sticky) > 0 ? Number(e.sticky) : ''), v => e.sticky = toMsg(v), '0'),
+                numRow('Cooldown', () => (cooldown || ''), v => e.cooldown = toMsg(v), '0'),
+                numRow('Delay', () => (delay || ''), v => e.delay = toMsg(v), '0'),
+            ),
+            col('Trigger',
+                numRow('Probability %', () => (e.probability != null ? Number(e.probability) : 100), v => e.probability = clampPct(v), '100'),
+                chk('Use probability', () => e.useProbability !== false, v => e.useProbability = v),
+            ),
+            col('Matching',
+                triSel('Case-sensitive', () => e.caseSensitive, v => e.caseSensitive = v, world_info_case_sensitive),
+                triSel('Whole words', () => e.matchWholeWords, v => e.matchWholeWords = v, world_info_match_whole_words),
+            ),
+            col('Recursion',
+                chk('Non-recursable', () => !!e.excludeRecursion, v => e.excludeRecursion = v),
+                chk('Prevent further recursion', () => !!e.preventRecursion, v => e.preventRecursion = v),
+                chk('Delay until recursion', () => !!e.delayUntilRecursion, v => e.delayUntilRecursion = v ? (durLevel || true) : false),
+                numRow('↳ level', () => durLevel, v => { const n = Math.max(0, Math.floor(Number(v) || 0)); e.delayUntilRecursion = n > 0 ? n : (e.delayUntilRecursion ? true : false); }, 'any'),
+                // These do nothing while global recursion is off — warn instead of silently misleading.
+                ...(document.querySelector('#world_info_recursive')?.checked ? [] : [recWarn()]),
+            ),
+            col('Budget / scan',
+                chk('Ignore budget', () => !!e.ignoreBudget, v => e.ignoreBudget = v),
+                // 0 (or blank) = global — a literal scan depth of 0 is incoherent (disable the entry instead).
+                numRow('Scan depth', () => (e.scanDepth ? e.scanDepth : ''), v => { const n = Math.floor(Number(v) || 0); e.scanDepth = n > 0 ? n : null; }, 'global'),
+            ),
+        );
+        return adv;
     };
 
     /**
@@ -1874,10 +1871,9 @@ export async function lorebookStudio(preferredBook = null) {
     };
     // Batch TF-IDF: build the ranker once, drop each entry's suggestions into its ⚡ chips, open those
     // entries so they're reviewable. Yields a frame first so the button can dim before the ~1s build.
-    const suggestAll = async btn => {
-        if (btn.dataset.busy) return;
-        btn.dataset.busy = '1'; btn.style.opacity = '0.5'; await new Promise(r => setTimeout(r, 0));
-        let s; try { s = ensureSuggest(); } catch { btn.dataset.busy = ''; btn.style.opacity = ''; toastr.warning('Couldn\'t build suggestions.', 'Worlds Apart'); return; }
+    const suggestAll = btn => withBusy(btn, '0.5', async () => {
+        await new Promise(r => setTimeout(r, 0));
+        let s; try { s = ensureSuggest(); } catch { toastr.warning('Couldn\'t build suggestions.', 'Worlds Apart'); return; }
         let n = 0;
         for (const pe of s.perEntry) {
             const e = data.entries[pe.entry.uid]; if (!e) continue;
@@ -1888,18 +1884,15 @@ export async function lorebookStudio(preferredBook = null) {
             for (const t of fresh) { const c = s.canon(t); if (!seen.has(c)) { g.tfidf.push(t); seen.add(c); } }
             entryOpen.add(e.uid); n++;
         }
-        btn.dataset.busy = ''; btn.style.opacity = '';
         renderExplorer();
         toastr[n ? 'success' : 'info'](n ? `Suggestions added to ${n} ${n === 1 ? 'entry' : 'entries'} — review the ⚡ chips.` : 'No TF-IDF suggestions to add.', 'Worlds Apart');
-    };
+    });
 
     // Local-model suggest-all: one ✨ pass per visible non-empty entry, sequential (a small model serves
     // one request at a time), with per-entry progress in the button label. Long entries are chunked.
-    const suggestAllLlm = async btn => {
-        if (btn.dataset.busy) return;
+    const suggestAllLlm = btn => withBusy(btn, '0.5', async () => {
         const label = btn.innerHTML;
-        btn.dataset.busy = '1'; btn.style.opacity = '0.5';
-        let s; try { s = ensureSuggest(); } catch { btn.dataset.busy = ''; btn.style.opacity = ''; toastr.warning('Couldn\'t build suggestions.', 'Worlds Apart'); return; }
+        let s; try { s = ensureSuggest(); } catch { toastr.warning('Couldn\'t build suggestions.', 'Worlds Apart'); return; }
         const targets = Object.values(data?.entries ?? {}).filter(filterMatch).filter(e => String(e.content ?? '').trim());
         let n = 0, i = 0;
         for (const e of targets) {
@@ -1908,10 +1901,10 @@ export async function lorebookStudio(preferredBook = null) {
             catch (err) { toastr.warning(`Local model: ${String(err?.message ?? err)}`, 'Worlds Apart'); break; }
             if (mergeLlmCands(e, cands, s)) { n++; entryOpen.add(e.uid); }
         }
-        btn.dataset.busy = ''; btn.style.opacity = ''; btn.innerHTML = label;
+        btn.innerHTML = label;
         renderExplorer();
         toastr[n ? 'success' : 'info'](n ? `Model suggestions added to ${n} ${n === 1 ? 'entry' : 'entries'} — review the ✨ chips.` : 'Model returned nothing usable.', 'Worlds Apart');
-    };
+    });
 
     // The entry set the term tabs work over: type filter + the shared sort, WITHOUT the Explorer's
     // search — those tabs rank by search match rather than filtering on it (see rankBySearch).
@@ -2129,8 +2122,6 @@ export async function lorebookStudio(preferredBook = null) {
             chip.append(t, x); host.append(chip);
         }
     };
-    const barBtn = (label, onClick, extra = '') => { const b = document.createElement('button'); b.type = 'button'; b.className = 'menu_button wa-bulk-btn ' + extra; b.textContent = label; b.addEventListener('click', onClick); return b; };
-
     // --- Cleanup tab ----------------------------------------------------------------------------
     // One pass over the current chat for every "not in entry text" key at once. Deduped by FOLDED form,
     // since two keys can fold together (apostrophe normalisation) and the automaton indexes the pattern list
@@ -2572,9 +2563,6 @@ export async function lorebookStudio(preferredBook = null) {
         return bar;
     };
 
-    // A full repaint throws away the scrolling list, so anything that redraws the whole Explorer (Suggest
-    // all, audit, expand all, a bulk edit) would dump the user back at the top. Carry the offset over the
-    // rebuild; a book/tab change lands on a list that doesn't exist yet and starts at 0 on its own.
     const orphanChecks = new Set();   // `${avatar}\u001F${file}` for chats ticked to re-point
 
     /** Re-run the scan and repaint, after anything that changes a binding. */
@@ -2604,11 +2592,7 @@ export async function lorebookStudio(preferredBook = null) {
         h.innerHTML = '<i class="fa-solid fa-link-slash"></i> Orphaned bindings';
         wrap.append(h);
 
-        const btn = (label, fn, cls = '') => {
-            const b = document.createElement('button'); b.type = 'button'; b.className = 'menu_button ' + cls;
-            b.style.cssText = 'width:auto;padding:2px 8px;'; b.textContent = label;
-            b.addEventListener('click', fn); return b;
-        };
+        const btn = (label, fn) => menuBtn(label, fn, '', 'width:auto;padding:2px 8px;');
 
         for (const g of orphans?.missing ?? []) {
             const box = document.createElement('div');
@@ -2633,17 +2617,10 @@ export async function lorebookStudio(preferredBook = null) {
                 // would put the tool's guess ahead of the evidence in the one place a wrong reading gets
                 // acted on. Same icons the book toolbar uses for the same two verbs — fa-pen renames,
                 // fa-copy duplicates — so they read as operations already known from there.
-                const tool = (cls, title, fn) => {
-                    const i = document.createElement('i');
-                    i.className = `fa-solid ${cls} wa-book-tool`;
-                    i.title = title;
-                    i.addEventListener('click', fn);
-                    return i;
-                };
                 row.append(sug,
-                    tool('fa-pen', `Rename “${g.nearest}” back to “${g.name}”. The chats resolve immediately, and anything still bound to “${g.nearest}” is re-pointed with it — one book, under the old name.`,
+                    bookTool('fa-pen', `Rename “${g.nearest}” back to “${g.name}”. The chats resolve immediately, and anything still bound to “${g.nearest}” is re-pointed with it — one book, under the old name.`,
                         async () => { await renameBook(g.nearest, g.name); await refreshOrphans(); }),
-                    tool('fa-copy', `Copy “${g.nearest}” to a new book called “${g.name}”. Both books exist afterwards with the same contents — for when the rename was deliberate and these chats want the old one.`,
+                    bookTool('fa-copy', `Copy “${g.nearest}” to a new book called “${g.name}”. Both books exist afterwards with the same contents — for when the rename was deliberate and these chats want the old one.`,
                         async () => { await copyBookByName(g.nearest, false, g.name); await updateWorldInfoList(); await refreshOrphans(); }));
                 box.append(row);
             }
@@ -2739,6 +2716,9 @@ export async function lorebookStudio(preferredBook = null) {
 
     const renderExplorer = () => {
         if (orphanView) return renderOrphans();
+        // A full repaint throws away the scrolling list, so anything that redraws the whole Explorer (Suggest
+        // all, audit, expand all, a bulk edit) would dump the user back at the top. Carry the offset over the
+        // rebuild; a book/tab change lands on a list that doesn't exist yet and starts at 0 on its own.
         const listTop = explorer.querySelector('.wa-studio-entries')?.scrollTop ?? 0;
         explorer.innerHTML = ''; rowEls.clear();
         // The close button lives in the tab bar (for tab order), so the no-book branch — which paints no
@@ -2767,7 +2747,6 @@ export async function lorebookStudio(preferredBook = null) {
         const countSpan = document.createElement('span'); countSpan.style.cssText = 'opacity:0.6;margin-left:5px;';
         label.append(nameB, countSpan);
         // Book-level tools: rename / duplicate / delete the whole lorebook.
-        const bookTool = (cls, title, onClick, extra = '') => { const i = document.createElement('i'); i.className = `fa-solid ${cls} wa-book-tool ${extra}`; i.title = title; i.addEventListener('click', onClick); return i; };
         const bookTools = document.createElement('span'); bookTools.className = 'wa-book-tools';
         bookTools.append(
             bookTool('fa-pen', 'Rename this lorebook', () => renameBook()),
@@ -2940,8 +2919,7 @@ export async function lorebookStudio(preferredBook = null) {
                 clr.addEventListener('click', () => { selectedBooks.clear(); bookAnchor = null; renderBooks(); });
                 top.append(cnt, clr);
                 const actions = document.createElement('div'); actions.className = 'wa-bookbulk-actions';
-                const mk = (label, fn, extra = '') => { const b = document.createElement('button'); b.type = 'button'; b.className = 'menu_button ' + extra; b.textContent = label; b.addEventListener('click', fn); return b; };
-                actions.append(mk('Copy', bulkCopyBooks), mk('Delete', bulkDeleteBooks, 'wa-bulk-danger'));
+                actions.append(menuBtn('Copy', bulkCopyBooks), menuBtn('Delete', bulkDeleteBooks, 'wa-bulk-danger'));
                 bar.append(top, actions);
             } else {
                 const hint = document.createElement('div'); hint.className = 'wa-bookbulk-hint'; hint.textContent = 'Tick books to copy or delete.';
