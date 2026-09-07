@@ -47,9 +47,8 @@ eq(Number.isNaN(auc([1, 2, 3], [1, 1, 1])), true, 'one class present is NaN, not
 console.log('ok   logistic fit recovers known coefficients, stays finite under separation, and AUC handles ties');
 
 // --- cumulativeFit: one fit per ordinal boundary, and the boundaries are allowed to disagree -----------
-// Built so the slopes CAN differ (see its header), so the check is that a label whose boundaries genuinely
-// differ produces different slopes rather than one averaged one. g is ordinal on a single feature: the
-// >=1 boundary is separable at x=0, the >=3 boundary is not separable at all (3s are scattered).
+// Built so the slopes CAN differ (see its header): a label whose boundaries genuinely differ must produce
+// different slopes rather than one averaged one.
 {
     const X = [[1, -2], [1, -1], [1, 1], [1, 2], [1, -1.5], [1, 1.5]];
     const g = [0, 0, 2, 3, 3, 0];   // >=1 tracks x; >=3 deliberately does not
@@ -75,7 +74,7 @@ console.log('ok   logistic fit recovers known coefficients, stays finite under s
     // One positive buried under three negatives: AP is 1/4, and AUC would read 0.5-ish on the same rows.
     const buried = prCurve([9, 8, 7, 1], [0, 0, 0, 1]);
     eq(buried.ap, 0.25, 'a positive at rank 4 scores AP 1/4');
-    // THE POINT OF HAVING IT: a rare class can look excellent on AUC and poor on AP.
+    // The point of having it: a rare class can look excellent on AUC and poor on AP.
     const rare = Array.from({ length: 100 }, (_, i) => i);          // scores 0..99
     const ry = rare.map(i => (i === 99 || i === 50 ? 1 : 0));       // one at the top, one mid-pack
     const a = auc(rare, ry), p = prCurve(rare, ry);
@@ -89,9 +88,9 @@ console.log('ok   logistic fit recovers known coefficients, stays finite under s
 // Calibration is checked against constructions whose right answer is arithmetic, because the failure it
 // exists to catch — a model that ranks well and reports wrong numbers — is invisible in AUC and AP.
 {
-    // A predictor that says 0.5 everywhere on a set that is half positive is PERFECTLY calibrated and
-    // completely uninformative. That pair is the whole reason calibration is a separate readout: AUC on
-    // these rows is undefined-by-tie, ECE is 0, and both are correct.
+    // A predictor saying 0.5 everywhere on a half-positive set is perfectly calibrated and completely
+    // uninformative — the whole reason calibration is a separate readout: AUC here is undefined-by-tie,
+    // ECE is 0, and both are correct.
     const flat = reliability(Array(100).fill(0.5), Array.from({ length: 100 }, (_, i) => i % 2));
     eqNear(flat.ece, 0, 'a constant 0.5 on a 50% base rate is perfectly calibrated', 1e-12);
     eq(flat.bins.length, 1, '...in one bin, because ties are never split across bins');
@@ -141,7 +140,7 @@ console.log('ok   logistic fit recovers known coefficients, stays finite under s
     eq(skewed.ece > skewed.eceNull * 2, true, 'a 0.15 bias is well clear of the noise floor');
     eq(skewed.eceP < 0.01, true, '...and the null rejects it');
 
-    // THE SIZE EFFECT the null exists to absorb: the same calibrated predictor on a tenth of the rows
+    // The size effect the null exists to absorb: the same calibrated predictor on a tenth of the rows
     // scores a visibly worse ECE, and the null rises with it rather than staying put.
     const small = reliability(ps.slice(0, 40), ps.slice(0, 40).map(v => (rnd() < v ? 1 : 0)), { nullSamples: 300, seed: 3 });
     eq(small.eceNull > honest.eceNull, true, 'a smaller sample has a higher noise floor, which raw ECE would read as a worse model');

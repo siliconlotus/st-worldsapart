@@ -1,14 +1,13 @@
 // slice-bundles-check.mjs — what a sliced bundle must still be for /wa-super-eval to open it.
 //
 // The slice is the input to a HUMAN grading pass, so a row silently missing from it is a row nobody
-// adjudicates and nobody notices — the reviewer shows what it is given and says nothing about what it
-// was not. Every assertion here is about that: the shortlist's rows survive, everything else is gone,
-// and the shape the reviewer tests for (arms, grades, a dynamic candidate, entry text) is intact.
+// adjudicates and nobody notices. Every assertion here is about that: the shortlist's rows survive,
+// everything else is gone, and the shape the reviewer tests for is intact.
 import assert from 'node:assert';
 import { sliceBundle } from './synthetic-data/slice-bundles.mjs';
 
-/** Unit Separator — the same key slice-bundles builds. It used to join with nothing, so `W`+`11` and
- *  `W1`+`1` were one shortlist entry. */
+/** Unit Separator — the same key slice-bundles builds. Joining with nothing makes `W`+`11` and `W1`+`1`
+ *  one shortlist entry. */
 const US = String.fromCharCode(31);
 const K = (w, u) => `${w}${US}${u}`;
 const cand = (uid) => ({ book: 'W', uid, block: 'dynamic' });

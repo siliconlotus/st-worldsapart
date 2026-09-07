@@ -1,12 +1,9 @@
-// WA'S OWN MATCHER SEMANTICS — the half core has no opinion about.
+// WA's own matcher semantics — the half core has no opinion about: SmartKeys, what a matched expression is
+// WORTH (scoring units, the saturation curve, weights), which keys the matcher refuses, and the excerpt
+// machinery the Studio reads. Core gates activation and never scores, so none of this has anything to be
+// faithful to.
 //
-// SmartKeys, what a matched expression is WORTH (scoring units, the saturation curve, weights), which
-// keys the matcher refuses, and the excerpt machinery the Studio reads. Core gates activation and
-// never scores, so none of this has anything to be faithful to.
-//
-// PARITY AND DIVERGENCE ARE core-matcher-check.mjs: whether an unaltered lorebook behaves under WA as
-// it does under core, and the named places it deliberately does not. A claim that cites core as the
-// authority belongs there, not here.
+// Parity and divergence are core-matcher-check.mjs. A claim that cites core as the authority belongs there.
 //
 // countKey/keywordScore live in matcher.mjs, which is isomorphic — imported directly.
 import { countKey, dropTags, keyExcerpts, keywordScore as rankKeywordScore, markExcerptText, repeatCurveOf, secondaryKeys, usableKeys, usedMatchSources, withMatchSources, WI_LOGIC } from '../extension/matcher.mjs';
@@ -39,13 +36,11 @@ const scored = (e, t, k) => keywordScore(e, t, k).score > 0;
     eq(keywordScore(e(0), T.none, undefined, cfg).hits.length, 0, 'a gated entry reports no hits either');
 }
 
-// Secondary keys are VALIDATED like primaries, minus one code. A fatal key is dropped, so the gate
-// loosens (all-dead secondaries are ungated, as blanks already were) instead of the malformed key
-// poisoning the expression and killing every scan. `negation-only` is the exemption: a secondary
-// never fires on its own — the primary gates activation — so "present unless X" is a condition an
-// author can mean, and usableKeys must go on refusing the same shape as a primary. The exemption is
-// itself exempted under AND_ANY, which is the block below; AND_ALL is used here so this one keeps
-// testing the POSITION rule rather than the operator rule.
+// Secondary keys are validated like primaries, minus one code. A fatal key is dropped, so the gate loosens
+// (all-dead secondaries are ungated, as blanks already were) instead of the malformed key poisoning the
+// expression and killing every scan. `negation-only` is the exemption: a secondary never fires on its own,
+// so "present unless X" is a condition an author can mean, while usableKeys goes on refusing that shape as a
+// primary. AND_ALL here, so this block tests the POSITION rule rather than the operator rule below.
 {
     const cfg = { k1: 1.2, caseSensitiveDefault: false, wholeWordsDefault: false };
     const on = (sec, text, logic = 0) =>
@@ -73,16 +68,15 @@ const scored = (e, t, k) => keywordScore(e, t, k).score > 0;
     eq(on(['? "moon', 'apollo'], 'cosmonaut moon', 3), false, '...and the surviving secondary still has to match');
 }
 
-// WHAT A NEGATION-ONLY SECONDARY DOES DEPENDS ON THE OPERATOR, so AND_ANY is cut out of the tolerance.
-// A negation is satisfied by ABSENCE and AND_ANY ORs its secondaries, so the branch is open on nearly
-// any text: the gate stops gating, which is the same objection that makes the key fatal as a primary.
-// The NOT_* pair keeps the tolerance — there the operator's own negation cancels the key's, turning it
-// into a REQUIREMENT ("unless gagarin" reads "only when gagarin"), which is surprising but is a
-// condition an author can mean and core cannot write.
+// What a negation-only secondary does depends on the operator, so AND_ANY is cut out of the tolerance: a
+// negation is satisfied by ABSENCE and AND_ANY ORs its secondaries, so the branch is open on nearly any text
+// and the gate stops gating — the same objection that makes the key fatal as a primary. The NOT_* pair keeps
+// the tolerance, the operator's own negation cancelling the key's and turning it into a REQUIREMENT, which
+// is a condition an author can mean and core cannot write.
 //
-// Pinned because nothing fails on its own if it drifts: the composition is CORRECT at every position
-// (`NOT (NOT x)` is `x`), so the wrong answer here is a plausible one. The Studio makes the flip one
-// click, and the chips look identical either side of it.
+// Pinned because nothing fails on its own if it drifts: the composition is correct at every position
+// (`NOT (NOT x)` is `x`), so the wrong answer here is a plausible one, and the Studio makes the flip one
+// click.
 {
     const cfg = { k1: 1.2, caseSensitiveDefault: false, wholeWordsDefault: false };
     const on = (sec, logic, text) =>
@@ -112,11 +106,10 @@ const scored = (e, t, k) => keywordScore(e, t, k).score > 0;
     eq(on(['? -gagarin'], 1, ABSENT), false, 'NOT_ALL: the same inversion');
     eq(on(['? -gagarin'], 1, PRESENT), true, '...and the same requirement');
 
-    // The shape AND_ANY refuses is still writable — as ONE primary SmartKey, where the author reads
-    // the OR they are asking for. The ban takes away an operator that produced it by accident, not
-    // the ability to mean it: secondaries are synthesised into the primary's expression anyway, so
-    // this is the same tree by the explicit route, and it validates clean because it has a positive
-    // term. Which is also why `negation-only` here is a verdict about the BRANCH, not the expression.
+    // The shape AND_ANY refuses is still writable as one primary SmartKey, where the author reads the OR
+    // they are asking for: secondaries are synthesised into the primary's expression anyway, so this is
+    // the same tree by the explicit route, and it validates clean because it has a positive term. Which is
+    // why `negation-only` here is a verdict about the BRANCH, not the expression.
     const explicit = '? cosmonaut && (apollo || -gagarin)';
     eq(validateSmartKey(explicit).length, 0, 'the explicit route validates clean');
     eq(countKey(explicit, 'the cosmonaut waited', false, false) > 0, true, '...and reproduces the branch AND_ANY no longer offers');
@@ -127,30 +120,26 @@ eq(scored({ key: ['zzz'] }, 'alpha beta', ['alpha']), true, 'keywordScore honors
 eq(scored({ key: ['alpha'] }, 'alpha beta', ['zzz']), false, 'explicit keys with no hit score zero even when entry.key would match');
 eq(scored({ key: ['alpha'] }, 'alpha beta'), true, 'defaults to entry.key when no list passed');
 eq(scored({ key: ['alpha'] }, 'alpha beta', []), false, 'empty key list (blanked 🔗, option off) scores zero');
-// A key WA calls fatally invalid scores nothing, the same rule stage 2 applies to activation. Only
-// the Studio refuses to write one; core's WI editor and an imported book never ask, so the runtime
-// is where it has to hold. `? -zebra` matches on absence, i.e. nearly always, so unfiltered it fed a
-// full hit into the layout ranking of any entry that got in by some other route.
+// A key WA calls fatally invalid scores nothing, the same rule stage 2 applies to activation. Only the
+// Studio refuses to write one — core's WI editor and an imported book never ask — so the runtime is where it
+// has to hold: `? -zebra` matches on absence, i.e. nearly always, so unfiltered it feeds a full hit into the
+// layout ranking of any entry that got in by some other route.
 eq(keywordScore({ key: ['? -zebra', 'cosmonaut'] }, 'the cosmonaut waited').hits.map(h => h.key).join(','),
     'cosmonaut', 'a validator-error key is dropped from scoring, the valid one is not');
 eq(scored({ key: ['? -zebra'] }, 'the cosmonaut waited'), false, 'an entry keyed only on error keys scores zero');
-// SCORING UNITS. A key's score is the sum over the things it is ABOUT, each saturating on its own
-// pooled occurrences (smartkeys.mjs `evaluate`). AND joins distinct things and their scores add; OR
-// names one thing several ways and its mentions pool into a single saturation; a weight multiplies
-// its unit rather than feeding the curve, so `::2` is twice as important rather than as-if-seen-twice.
+// Scoring units: a key's score is the sum over the things it is ABOUT, each saturating on its own pooled
+// occurrences (smartkeys.mjs `evaluate`). AND joins distinct things and their scores add; OR names one thing
+// several ways and its mentions pool into a single saturation; a weight multiplies its unit rather than
+// feeding the curve, so `::2` is twice as important rather than as-if-seen-twice (K8). None of this is
+// visible to a `score > 0` assertion, which is what the rest of this file mostly makes.
 //
-// EVERY ROW HERE WAS A DEFECT before units. A stricter expression outscored its own left operand, a
-// synonym group collected a saturation budget per spelling, and `::2` survived the curve diluted (K8).
-// None of it was visible to a `score > 0` assertion, which is what the rest of this file mostly makes.
-//
-// Through this file's own `keywordScore` wrapper, so k1 is 2 here and `curve` says so — passing a cfg
-// to that wrapper does nothing, which is how the first draft of this block silently scored at a k1 it
-// was not comparing against.
+// Through this file's own `keywordScore` wrapper, so k1 is 2 here and `curve` says so — passing a cfg to
+// that wrapper does nothing.
 {
     const sc = (key, text) => Number(keywordScore({ key: [key] }, text).score.toFixed(3));
     const curve = n => Number(repeatCurveOf(n, 2).toFixed(3));
 
-    // PRESENCE IS THE UNIT. One matched thing is worth exactly its weight, whatever it is made of.
+    // Presence is the unit: one matched thing is worth exactly its weight, whatever it is made of.
     eq(sc('? moon', 'moon'), 1, 'a matched expression is worth 1');
     eq(sc('moon', 'moon'), 1, '...and a plain key is the same expression');
 
@@ -159,34 +148,32 @@ eq(scored({ key: ['? -zebra'] }, 'the cosmonaut waited'), false, 'an entry keyed
     eq(sc('? moon AND rocket AND launch', 'moon rocket launch'), 3, '...three of them');
     eq(sc('? moon', 'moon rocket launch'), 1, '...against the same text, one thing is still worth one');
 
-    // OR: one thing, several spellings — the mentions pool and saturate ONCE. The bare key is the
-    // control: on equal evidence a synonym group must not out-earn the key it generalises.
+    // OR: one thing, several spellings — the mentions pool and saturate ONCE. The bare key is the control:
+    // on equal evidence a synonym group must not out-earn the key it generalises.
     eq(sc('? (glasses OR spectacles)', 'glasses spectacles'), curve(2), 'OR pools its spellings into one unit');
     eq(sc('? glasses', 'glasses glasses'), curve(2), '...which is exactly what the bare key scores');
     eq(sc('? (glasses OR spectacles)', 'a glasses store called Spectacles, more glasses'), curve(3),
         'three mentions across two spellings is one thing seen three times');
 
-    // WEIGHT MULTIPLIES THE UNIT, so a ratio the author wrote survives to the score.
+    // Weight multiplies the unit, so a ratio the author wrote survives to the score.
     eq(sc('? (everest OR kailash::2)', 'Everest'), 1, 'the unweighted alternative is worth 1');
     eq(sc('? (everest OR kailash::2)', 'Kailash'), 2, '...and ::2 is worth exactly twice it');
     eq(sc('? (everest OR kailash::2) AND mount', 'Mount Everest'), 2, 'the conjunct adds its own unit');
     eq(sc('? (everest OR kailash::2) AND mount', 'Mount Kailash'), 3, '...to either alternative');
 
-    // WEIGHT 0 IS A CONDITION, NOT EVIDENCE: no unit, and excluded from its group's mean rather than
-    // averaged in — or a zero-weight sibling would quietly discount the term the author did mean.
+    // Weight 0 is a condition, not evidence: no unit, and excluded from its group's mean rather than
+    // averaged in, or a zero-weight sibling would quietly discount the term the author did mean.
     eq(sc('? moon AND rocket::0', 'moon rocket'), 1, 'a zero-weight conjunct gates without scoring');
     eq(sc('? (moon OR rocket::0)', 'moon rocket'), 1, '...and does not drag its group\'s mean down');
 
     // A matched expression carrying NO unit is still one hit — countKey's negation-only floor, which
-    // keyUnits reproduces rather than re-deriving, or the two disagree about whether it scored. A
-    // wholly zero-weighted key is the reachable case: negation-only is fatal in a primary (usableKeys
-    // drops it before scoring), so it cannot be tested from here.
+    // keyUnits reproduces rather than re-deriving, or the two disagree about whether it scored. A wholly
+    // zero-weighted key is the reachable case; negation-only is fatal in a primary, so it cannot be tested.
     eq(sc('? moon::0', 'moon'), 1, 'an all-zero-weight key that matches still counts as one');
 
-    // THE TWO SYNTAXES MUST AGREE. keysecondary is rewritten into one expression per primary
-    // (synthesizeSecondary), so the same logic written either way has to score the same — that
-    // agreement is the whole reason the rewrite exists, and it held for the NOT logics only until
-    // secondaries stopped being zero-weighted.
+    // The two syntaxes must agree: keysecondary is rewritten into one expression per primary
+    // (synthesizeSecondary), so the same logic written either way has to score the same. That agreement is
+    // the whole reason the rewrite exists.
     const gated = (logic, sec, text) => Number(keywordScore(
         { key: ['cosmonaut'], keysecondary: sec, selectiveLogic: logic }, text).score.toFixed(3));
     const T = 'cosmonaut apollo soyuz';
@@ -202,12 +189,10 @@ eq(scored({ key: ['? -zebra'] }, 'the cosmonaut waited'), false, 'an entry keyed
         curve(2), 'a unit saturates once across the whole window');
 }
 
-// WHAT A MATCHED EXPRESSION IS WORTH. Core gates activation and never scores, so none of this is a
-// core-parity claim — core-matcher-check.mjs holds those, and these two blocks lived there until the
-// verdict and the count stopped agreeing.
+// What a matched expression is worth. Core gates activation and never scores, so none of this is a
+// core-parity claim — core-matcher-check.mjs holds those.
 //
-// The values below are COUNTS (Σ weighted occurrences) and verdicts, both independent of k1, so they
-// read the same here as they did beside the truth table.
+// The values below are COUNTS (Σ weighted occurrences) and verdicts, both independent of k1.
 {
     const { AND_ANY, NOT_ANY, AND_ALL } = WI_LOGIC;
     /** The primary's hit through the shipped path — `count` is occurrences, `score` is contribution. */
@@ -219,18 +204,15 @@ eq(scored({ key: ['? -zebra'] }, 'the cosmonaut waited'), false, 'an entry keyed
     const keyScore = (...a) => hit(...a)?.score ?? 0;
     const fired = (...a) => (count(...a) > 0 ? 1 : 0);
 
-    // A SECONDARY IS A TERM AND SCORES LIKE ONE. They were zeroed while AND and OR summed into one
-    // count, where a contributing gate would have inflated the primary's; scoring units ended that —
-    // a secondary is its own unit — and what the zeroing left behind was the same logic scoring
-    // differently depending on which of WA's two syntaxes wrote it.
-    //
-    // ONLY THE AND LOGICS EVER SAW THIS: a NOT yields no unit whatever its operand weighs.
+    // A secondary is a term and scores like one — its own unit — or the same logic scores differently
+    // depending on which of WA's two syntaxes wrote it. Only the AND logics ever see this: a NOT yields no
+    // unit whatever its operand weighs.
     eq(count('cosmonaut', ['apollo'], AND_ANY, 'cosmonaut and cosmonaut, with apollo'), 3,
         'the primary\'s two occurrences plus the secondary\'s one');
     eq(count('cosmonaut', ['apollo', 'soyuz'], AND_ALL, 'cosmonaut apollo soyuz'), 3,
         'two matched secondaries contribute their own occurrences');
-    // COUNT AND SCORE ARE DIFFERENT QUESTIONS, and a weighted key is where they part: two terms
-    // appeared once each, and the author's ::5 says what that is worth.
+    // Count and score are different questions, and a weighted key is where they part: two terms appeared
+    // once each, and the author's ::5 says what that is worth.
     eq(count('cosmonaut', ['? apollo::5'], AND_ALL, 'cosmonaut apollo'), 2,
         'count is occurrences: the primary once, the secondary once');
     eq(keyScore('cosmonaut', ['? apollo::5'], AND_ALL, 'cosmonaut apollo'), 6,
@@ -240,9 +222,8 @@ eq(scored({ key: ['? -zebra'] }, 'the cosmonaut waited'), false, 'an entry keyed
     eq(count('? moon mission', ['apollo'], AND_ANY, 'a mission to the moon with apollo'), 3,
         'a spliced `?` primary keeps its own two terms, and the secondary adds its one');
 
-    // A PASSED GATE IS `> 0`, NOT `>= 1`. A matched key is normally worth at least 1, so the two agree
-    // almost everywhere — but a fractional `::weight` is documented (`? whisper::0.3` down-weights
-    // rather than clamping), and two fractional sides total below 1 while having passed.
+    // A passed gate is `> 0`, not `>= 1`: a matched key is normally worth at least 1, but a fractional
+    // `::weight` is documented, and two fractional sides total below 1 while having passed.
     eq(keyScore('? cosmonaut::0.3', ['? apollo::0.2'], AND_ALL, 'cosmonaut apollo'), 0.5,
         'fractional weights on both sides SCORE below 1 — and the gate PASSED');
     eq(count('? cosmonaut::0.3', ['? apollo::0.2'], AND_ALL, 'cosmonaut apollo'), 2,
@@ -255,14 +236,13 @@ eq(scored({ key: ['? -zebra'] }, 'the cosmonaut waited'), false, 'an entry keyed
         'an all-zero-weight key that matched is floored to one, not dropped to nothing');
 }
 
-// OCCURRENCES -> SCORE (repeatCurveOf). k1 is the RATE repeats accrue at; the curve is the SHAPE, and
-// they were one knob until the shape started mattering. 'bm25' is the classic tf term and what every
-// stored capture ran under; 'presence-log' is what ships, and makes presence categorical so a matched
-// key is worth its full weight with only the n-1 repeats accruing.
+// Occurrences -> score (repeatCurveOf). k1 is the RATE repeats accrue at, the curve is the SHAPE. 'bm25' is
+// the classic tf term and what every stored capture ran under; 'presence-log' is what ships, and makes
+// presence categorical so a matched key is worth its full weight with only the n-1 repeats accruing.
 //
-// PINNED AS A TABLE because the difference only shows at counts a synthetic test would not think to
-// use: the busiest real keys reach counts where bm25 has stopped ordering while presence-log still
-// moves (K8). A regression that flattened the tail again would pass every other assertion in this file.
+// Pinned as a table because the difference only shows at counts a synthetic test would not think to use: the
+// busiest real keys reach counts where bm25 has stopped ordering while presence-log still moves (K8). A
+// regression flattening the tail would pass every other assertion in this file.
 {
     const at = (n, c, R = 1) => Number(repeatCurveOf(n, 1.2, c, R).toFixed(3));
 
@@ -299,19 +279,17 @@ eq(countKey('? -zebra', 'the cosmonaut waited', false, false), 1,
     'countKey itself is unfiltered — it answers what the expression does, and the filter is the caller\'s');
 
 
-// keyExcerpt — the /wa-grade "why did this pop" display: the FIRST place a key matched, marked. It
-// shares countKey's machinery but is display-only: called for keys countKey already counted, so these
-// pin (a) agreement with countKey on WHERE, and (b) the substring surface form an author needs for
-// tuning, marked «so».
+// keyExcerpt — the /wa-grade "why did this pop" display: the FIRST place a key matched, marked. Display-only
+// and called for keys countKey already counted, so these pin agreement with countKey on WHERE, and the
+// substring surface form an author needs for tuning, marked «so».
 const keyExcerpt = (key, text, cs, ww, context = 28) => markExcerptText(keyExcerpts(key, text, cs, ww, context, 1)[0]);
 eq(keyExcerpt('thread', 'the curtains were threadbare by then', false, false),
     'the curtains were «thread»bare by then', 'substring: excerpt shows the containing word');
 eq(keyExcerpt('thread', 'the curtains were threadbare by then', false, true),
     null, 'whole-word: same text correctly yields no excerpt (countKey counts 0)');
-// THE EXCERPT IS THE SOURCE TEXT, the match is found in the folded one. Both of these pinned the old
-// behaviour, where the author was shown a lowercased, re-punctuated sentence they never wrote and asked
-// to judge a key against it. Case and typography now survive; the mark still lands on the right span,
-// which is the part that could break, since folding shifts every offset after it.
+// The excerpt is the source text, the match is found in the folded one: case and typography survive, and
+// the mark still lands on the right span, which is the part that could break, since folding shifts every
+// offset after it.
 eq(keyExcerpt('sister', "She's my *sister*, Tim", false, true),
     "She's my *«sister»*, Tim", 'whole-word: excerpt keeps the source casing');
 eq(keyExcerpt("Cap'n", `A ${'Cap’n'} walks in`, false, false),
@@ -322,21 +300,19 @@ eq(keyExcerpt('rut', 'the RUT began… pre-RUT nerves', false, false),
     'the «RUT» began… pre-RUT nerves', 'a fold that lengthens earlier text does not shift the mark');
 eq(keyExcerpt('nerves', 'a — b … c nerves here', false, false),
     'a — b … c «nerves» here', 'em-dash and ellipsis before the match keep it correctly placed');
-// COMBINING MARKS were the case that broke it in the browser: the fold NFC-composes over the whole
-// string, so "e + ́" is two characters before and one after. A per-character walk cannot reproduce that,
-// and every offset past the first such sequence drifted — a hit on `knots` rendered as `H«e kno»ts`.
+// Combining marks: the fold NFC-composes over the whole string, so "e + ́" is two characters before and one
+// after. A per-character walk cannot reproduce that, and every offset past the first such sequence drifts.
 eq(keyExcerpt('knots', 'Cafe\u0301 and Nai\u0308ve. He knots the rope', false, false),
     'Café and Naïve. He «knots» the rope', 'decomposed accents before the match do not shift it');
 // The delimiters are not in the data: an entry with guillemets of its own used to mark the wrong span,
 // because the reader stopped at the first closing one.
 const own = keyExcerpts('rut', 'she said «no rut» today', false, false)[0];
 eq(own.text.slice(own.start, own.end), 'rut', 'offsets select the match even when the source has guillemets');
-// A REGEX runs on the raw segment, so its offsets are already source offsets. Mapping them back through
-// the fold a second time — as the literal paths must — dragged the mark left by one per em-dash and two
-// per ellipsis before the match, which is how `/knot(s|ting)?/` over RP prose rendered as `« He k»nots`.
-// NFC IS THE ONE FOLD A REGEX GETS. Decomposed text is the same characters differently encoded, and no
-// spelling of a pattern covers both forms — unlike case (/i) and orthography (['’]), where the author has
-// an escape. Everything else stays raw, or a pattern written against real text stops working.
+// A regex runs on the raw segment, so its offsets are already source offsets; mapping them back through the
+// fold a second time, as the literal paths must, drags the mark left by one per em-dash and two per ellipsis.
+// NFC is the one fold a regex gets: decomposed text is the same characters differently encoded and no
+// spelling of a pattern covers both forms, unlike case (/i) and orthography (['’]), where the author has an
+// escape. Everything else stays raw, or a pattern written against real text stops working.
 eq(countKey('/café/', 'the cafe\u0301 rope', false, false), 1, 'a regex matches decomposed text after NFC');
 eq(countKey('/—/', 'a — b', false, false), 1, 'orthography is still NOT folded: a pattern can match a real em-dash');
 eq(countKey("/Cap'n/", 'Cap\u2019n', false, false), 0, "and a straight-quote pattern still misses a curly one");
@@ -385,9 +361,9 @@ console.log('ok   keyExcerpt: localises what countKey counted, folded-haystack d
         'a gated capture rebuilds the same window as the full source set');
 }
 
-// dropChatTags: a named element leaves with its CONTENT, and nothing else moves. The setting exists
-// because a state-tracking block puts every name the story ever used into every turn's haystack; the
-// point of naming tags rather than ruling on them is that the same chat renders scene text as markup.
+// dropChatTags: a named element leaves with its CONTENT, and nothing else moves. The setting exists because
+// a state-tracking block puts every name the story ever used into every turn's haystack; tags are named
+// rather than ruled on because the same chat renders scene text as markup.
 {
     const MES = 'She waited.\n<internal_states>\nLocation: Big Sur\nPresent: Kyle, Mara\n</internal_states>\n<div style="border:1px solid">Kyle: are you there?</div>\nShe did not answer.';
     const out = dropTags(MES, 'internal_states');

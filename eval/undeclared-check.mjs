@@ -1,15 +1,13 @@
 // undeclared-check.mjs — names USED in a file but declared nowhere in it and not imported.
 //
-// THE REFACTOR RESIDUE CLASS, and it is invisible to every other check here. A helper moves to another
-// module and its module-scope `let` stays behind; a caller moves out and its import stays behind. Neither
-// is a syntax error, so `node --check` passes, and the ST-coupled half cannot be imported under node at
-// all — so the whole suite runs green while the shipped path throws ReferenceError on its first call.
-// Five of these were live at once when this was written, one of them breaking every /wa-grade capture and
-// one making `relevance-regress.mjs` unrunnable.
+// The refactor-residue class, invisible to every other check here: a helper moves to another module and its
+// module-scope `let` stays behind. Neither is a syntax error, so `node --check` passes, and the ST-coupled
+// half cannot be imported under node at all — so the suite runs green while the shipped path throws
+// ReferenceError on its first call.
 //
-// NO SCOPE ANALYSIS, deliberately. Declarations are collected from the whole file regardless of scope, so
-// shadowing is invisible — the failure hunted here is "declared NOWHERE", and over-approximating the
-// declared set is what keeps this free of false alarms and therefore worth running.
+// No scope analysis, deliberately: declarations are collected from the whole file regardless of scope, so
+// shadowing is invisible. The failure hunted here is "declared NOWHERE", and over-approximating the declared
+// set is what keeps this free of false alarms.
 //
 // acorn resolves out of SillyTavern's own node_modules; nothing is installed for this.
 import { parse } from 'acorn';

@@ -1,16 +1,13 @@
 // Self-check for chunking.mjs — the splitter WA took ownership of from ST.
 //
-// Two halves. The first is pure assertions on the algorithm. The second is the one that matters: it
-// re-chunks a graded sample's EMBEDDED books and compares the result against the `metadata.text` actually
-// stored in that book's live vector index. That is a real-data oracle for byte-identity — the port is only
-// safe if it reproduces indexes that already exist, and no amount of hand-written fixtures can establish
-// that.
+// Two halves. The first is pure assertions on the algorithm. The second re-chunks a graded sample's
+// EMBEDDED books and compares against the `metadata.text` stored in that book's live vector index — a
+// real-data oracle for byte-identity, which no hand-written fixture can establish.
 //
-// The same comparison is a STALENESS DETECTOR, which is why it prints rather than asserts on mismatch: a
-// book edited after it was vectorized no longer chunks to what is stored, and its sample's per-entry cosines
-// therefore describe text the book no longer contains. One existing eval sample really is out of sync this
-// way (P3). That is a fact about the DATA, not a regression in the code, so it must not fail the suite — but it
-// must not be silent either, since a stale index quietly corrupts every number derived from it.
+// The same comparison is a staleness detector, which is why it prints rather than asserts on mismatch: a
+// book edited after it was vectorized no longer chunks to what is stored, so its sample's per-entry cosines
+// describe text the book no longer contains (P3). That is a fact about the DATA, so it must not fail the
+// suite — nor be silent, since a stale index quietly corrupts every number derived from it.
 //
 // Runs clean with no arguments and no eval-data present: the oracle half skips when there is nothing to
 // compare against.
@@ -40,8 +37,8 @@ eq(chunkEntry('  one  \n\n\n  two  ', { ...PARA, minChunkSize: 0 }).join('|'), '
 eq(chunkEntry('', PARA).length, 0, 'empty content yields no chunks');
 eq(chunkEntry('\n\n   \n\n', PARA).length, 0, 'whitespace-only content yields no chunks');
 
-// THE MERGE FLOOR, and its direction — the thing that reads backwards. A short paragraph is glued FORWARD
-// into the next one, so a HIGHER floor means FEWER, LARGER chunks. Nothing is ever split by it.
+// The merge floor reads backwards: a short paragraph is glued FORWARD into the next, so a higher floor
+// means fewer, larger chunks. Nothing is ever split by it.
 const short = 'tiny\n\n' + 'x'.repeat(300);
 eq(chunkEntry(short, { ...PARA, minChunkSize: 0 }).length, 2, 'floor 0: the short paragraph stands alone');
 eq(chunkEntry(short, { ...PARA, minChunkSize: 120 }).length, 1, 'floor 120: the short paragraph is merged forward');
@@ -58,17 +55,17 @@ eq(chunkEntry(long, PARA).join(''), long, 'splitting an oversized paragraph lose
 eq(JSON.stringify(chunkEntry('a\n\nb', { chunkMode: 'length', chunkSize: 800, minChunkSize: 999 })),
     JSON.stringify(splitRecursive('a\n\nb', 800)), "'length' mode is splitRecursive verbatim, floor unused");
 
-// --- THE ORACLE: do we reproduce indexes that already exist? ---
-// A sample records `index` relative to the ST ROOT, because the grid tools are run from there; a check is
-// run from wherever the suite loop happens to sit, which is what evalDataDir() resolves — otherwise the
-// oracle silently skips and the port loses the only evidence that it is exact.
+// --- the oracle: do we reproduce indexes that already exist? ---
+// A sample records `index` relative to the ST ROOT because the grid tools are run from there, while a check
+// runs from wherever the suite loop sits — which is what evalDataDir() resolves, or the oracle silently
+// skips and the port loses the only evidence that it is exact.
 const DATA = evalDataDir();
 const samples = existsSync(DATA) ? readdirSync(DATA).filter(f => f.endsWith('.json')) : [];
 let compared = 0, openable = 0;
 for (const file of samples) {
-    // THROUGH THE READER AND THE RESOLVER, never through field names of its own. A name spelled here goes
-    // stale without failing: the reachability test just stops matching, `compared` stays 0, and the oracle
-    // prints a cheerful `ok ... skipped` on every run forever.
+    // Through the reader and the resolver, never through field names of its own: a name spelled here goes
+    // stale without failing — the reachability test stops matching, `compared` stays 0, and the oracle
+    // prints `ok ... skipped` forever.
     let S;
     try { S = openSample(DATA + file); } catch { continue; }
     if (!S?.books?.[S.primaryBook]) continue;
@@ -80,16 +77,16 @@ for (const file of samples) {
     const book = S.books[S.primaryBook];
     const stored = new Set(JSON.parse(readFileSync(indexFile, 'utf8')).items.map(it => it.metadata.text));
 
-    // MIRROR syncWorld EXACTLY, INCLUDING WHAT IT DOES *AFTER* CHUNKING. Two properties of the real
-    // indexer are invisible in chunkEntry's output and both were, in turn, mistaken for data corruption:
+    // Mirror syncWorld exactly, including what it does AFTER chunking. Two properties of the real indexer
+    // are invisible in chunkEntry's output:
     //
     //   trim + drop empties — syncWorld re-trims every chunk and skips blanks. splitRecursive splitting
     //                         an oversized paragraph on '. ' leaves pieces with edge whitespace.
     //   keyed by hash       — identical text is ONE collection item however many entries produce it.
     //
-    // Comparing per-entry and positionally against a hash-keyed, insertion-ordered store reported a
-    // perfectly-synced collection as mostly stale (P3), so the comparison is set-to-set over the whole
-    // collection, exactly the granularity syncWorld itself works at.
+    // Comparing per-entry and positionally against a hash-keyed, insertion-ordered store reports a synced
+    // collection as mostly stale (P3), so the comparison is set-to-set over the whole collection, the
+    // granularity syncWorld itself works at.
     const vectorized = Object.values(book).filter(e => e.vectorized && !e.disable && typeof e.content === 'string' && e.content);
     const expected = new Set();
     for (const e of vectorized) for (const c of chunkEntry(e.content, chunkCfg)) { const t = c.trim(); if (t) expected.add(t); }
@@ -112,9 +109,8 @@ for (const file of samples) {
     }
 }
 
-// A SKIP IS NOT AN OK. No corpus is a legitimate reason to have nothing to compare — eval-data/ is
-// gitignored, so a fresh checkout has none. Openable bundles with no reachable index is a BROKEN oracle,
-// and it reported success for every run between bundle v3 and this line existing.
+// A skip is not an ok. No corpus is a legitimate reason to have nothing to compare — eval-data/ is
+// gitignored — but openable bundles with no reachable index is a broken oracle reporting success.
 if (!samples.length) {
     console.log('WARN index oracle: no eval-data/ in this checkout, so the chunker is pinned by the unit cases above alone.');
 } else {
@@ -123,11 +119,10 @@ if (!samples.length) {
 
 // ---- the merge floor applies to split fragments too ----------------------------------------------
 //
-// splitRecursive packs greedily from the left, so every run it emits ends in whatever did not fit.
-// Those tails used to be emitted as chunks — a live collection leaked sub-floor fragments this way,
-// including bare `---` rules, a lone `production.` and a title cut mid-word (R25). They are embedded,
-// they enter the corpus mean every centred cosine subtracts, they count toward BM25's document total,
-// and a 3-character chunk's direction is arbitrary enough to win an entry's max-pool against anything.
+// splitRecursive packs greedily from the left, so every run it emits ends in whatever did not fit. Emitting
+// those tails as chunks leaks sub-floor fragments into a live collection (R25): they are embedded, they
+// enter the corpus mean every centred cosine subtracts, they count toward BM25's document total, and a
+// 3-character chunk's direction is arbitrary enough to win an entry's max-pool against anything.
 const CFG = { chunkMode: 'paragraph', chunkSize: 800, minChunkSize: 120 };
 const words = n => Array.from({ length: n }, () => 'word').join(' ');
 const floorCases = [
@@ -139,8 +134,8 @@ const floorCases = [
 for (const [name, text] of floorCases) {
     const out = chunkEntry(text, CFG);
     eq(out.filter(c => c.length < CFG.minChunkSize).length, 0, `no chunk under the floor: ${name}`);
-    // AND NOTHING IS LOST. Whitespace-insensitive, because the merge re-joins with a blank line where
-    // the source had one; every non-space character must survive.
+    // And nothing is lost. Whitespace-insensitive, because the merge re-joins with a blank line where the
+    // source had one; every non-space character must survive.
     eq(out.join('').replace(/\s+/g, ''), text.replace(/\s+/g, ''), `content preserved: ${name}`);
 }
 // A short entry that cannot reach the floor at all is still emitted rather than dropped — losing

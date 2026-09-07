@@ -1,20 +1,16 @@
 // tokens.mjs — token counts that match a live capture's, without a live SillyTavern.
 //
-// WHY A COUNT BELONGS ON EVERY ROW. A bundle exists so a budget of any size can be replayed offline,
-// independent of whatever the capturing machine happened to have configured. `tokens` is the field that
-// makes that possible: without it a harness can only re-run the budget that already ran, which is the one
-// question nobody needs answered. The runtime records it; an offline derivation has to produce the same
+// A count belongs on every row so a budget of any size can be replayed offline, independent of the
+// capturing machine's configuration. The runtime records it; an offline derivation has to produce the same
 // number or the two cannot be compared.
 //
-// THE OFFSET IS THE WHOLE TRICK. WA counts through ST's getTokenCountAsync, which adds a fixed
-// per-message overhead on top of the raw encoding. Measured against captured rows carrying both a
-// recorded count and their entry text, `recorded - cl100k(content)` came out exact, no spread at
-// all (G12). So the offline count is exact rather than approximate, and
-// `tokens-check.mjs` re-derives it from whatever captures are on disk rather than trusting this comment.
+// The offset is the whole trick: WA counts through ST's getTokenCountAsync, which adds a fixed per-message
+// overhead on top of the raw encoding, and `recorded - cl100k(content)` came out exact with no spread
+// (G12). So the offline count is exact rather than approximate, and `tokens-check.mjs` re-derives it from
+// whatever captures are on disk rather than trusting this comment.
 //
-// A tokenizer with no entry here THROWS. The alternative is a silent 0 offset — a per-entry error that
-// nothing would ever surface and that compounds across a prompt's entries.
-// A model not listed has no offline counter; count it against a running SillyTavern instead.
+// A tokenizer with no entry here THROWS; the alternative is a silent 0 offset, a per-entry error nothing
+// would surface that compounds across a prompt. Count an unlisted model against a running SillyTavern.
 import { createRequire } from 'node:module';
 import { stInstall } from './scene.mjs';
 import { armNames, openBundle } from '../extension/grading.mjs';
@@ -70,11 +66,11 @@ export function deriveOffsets(manifests) {
     const acc = new Map();
 
     for (const m of manifests) {
-        // ONE TOKENIZER PER DOCUMENT. It is ST's `getTokenizerModel()`, not a WA knob, so no arm can have
-        // used a different one — looping arms to look it up would be asking a question with one answer.
+        // One tokenizer per document: it is ST's `getTokenizerModel()`, not a WA knob, so no arm can have
+        // used a different one.
         const tok = m.budget?.tokenizer;
         if (!tok) continue;
-        // Candidates ARE per arm, and sit on the arm's SCENE CELL rather than the arm, which is why this
+        // Candidates ARE per arm, and sit on the arm's scene cell rather than the arm, which is why this
         // goes through openBundle rather than walking the nesting here.
         for (const arm of armNames(m)) {
             const S = openBundle(m, arm);

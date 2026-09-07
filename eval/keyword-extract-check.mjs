@@ -1,7 +1,6 @@
 // Guards the keyword classifier + ranker: buildKeyPruneScan / buildKeySuggest live in the pure,
-// node-importable keyword-audit.mjs / keyword-suggest.mjs, so this imports the real shipped code and runs it on a tiny
-// synthetic book — a botched refactor or an edit that changes a verdict fails here instead of
-// silently drifting the prune popup, the suggest popup, and Lorebook Studio.
+// node-importable keyword-audit.mjs / keyword-suggest.mjs, so this runs the real shipped code on a tiny
+// synthetic book rather than letting an edit silently drift the prune popup, the suggest popup and Studio.
 // Run: node eval/keyword-extract-check.mjs
 import assert from 'node:assert';
 import { buildKeyPruneScan, KEY_BOOK_COMMON, KEY_MIN_LENGTH, KEY_MIN_BOOK_COMMON_ENTRIES } from '../extension/keyword-audit.mjs';
@@ -28,12 +27,11 @@ assert.strictEqual(f0.zzzznope, 'unattested', 'a key in no entry text is unattes
 assert.strictEqual(f0.home, 'english common', 'a common English word is flagged as english-common');
 assert.strictEqual(f0.aX, 'short', 'a sub-minLength key is flagged short');
 assert.ok(!('Quillfeather' in f0), 'a real findable name is not flagged');
-// Keys the MATCHER refuses to act on, reported so an imported book's malformed key stops being
-// invisible. A PRIMARY gets the `unusable` flag on its own chip, ahead of every evidence-based verdict
-// — `/[/` used to come back `unattested`, i.e. "never matches", which reads as prose that happens not
-// to use the key rather than a key WA drops. A SECONDARY has no chip, so unusableKeysOf is its only
-// surface — and position matters: `negation-only` is fatal for a primary (it fires on absence alone)
-// and legitimate for a secondary, which never fires by itself because the primary gates activation.
+// Keys the matcher refuses to act on, reported so an imported book's malformed key stops being invisible.
+// A primary gets the `unusable` flag on its own chip ahead of every evidence-based verdict, since
+// `unattested` would read as prose that happens not to use the key rather than a key WA drops. A secondary
+// has no chip, so unusableKeysOf is its only surface — and position matters: `negation-only` is fatal for a
+// primary (it fires on absence alone) and legitimate for a secondary, which the primary gates.
 // The rule lives in matcher.mjs; this only checks the audit reports its outcome.
 {
     const book = { entries: {
@@ -79,9 +77,9 @@ assert.strictEqual(gateFlag(4, 3), undefined, `lorebook-common suppressed below 
 assert.strictEqual(gateFlag(10, 6), 'book common', `book-common fires at/above ${KEY_MIN_BOOK_COMMON_ENTRIES} entries`);
 
 // --- buildKeySuggest -----------------------------------------------------------------------------
-// A distinctive multi-word phrase repeated within one entry (tf>=2) but rare across the book should
-// surface; a generic common word should not. Needs >=5 entries so a term in a single entry stays
-// under the isFunc >30%-df cut (which otherwise strips it from the n-grams as a "function word").
+// A distinctive multi-word phrase repeated within one entry (tf>=2) but rare across the book should surface;
+// a generic common word should not. Needs >=5 entries so a term in a single entry stays under the isFunc
+// >30%-df cut.
 const suggestBook = { entries: {
     0: { uid: 0, key: [], content: 'The brass orrery turned. The brass orrery hummed. The brass orrery gleamed by the home.', comment: 'A' },
     1: { uid: 1, key: [], content: 'A quiet street at home, nothing of note happened here at all today.', comment: 'B' },
@@ -101,9 +99,9 @@ assert.strictEqual(ss.dfSubstr('home'), 5, 'dfSubstr counts entries whose text c
 assert.ok(Array.isArray(ss.avoid), 'avoid list returned for the LLM prompt');
 
 // --- classifyLlmCand: few-shot echoes ------------------------------------------------------------
-// The model regurgitates the prompt's invented examples, and rarely verbatim — a mangled name or half
-// a phrase is the common case, and both used to sail past the exact-phrase test. Entry 1's text has
-// none of the example words; entry 0's has "brass orrery", which must therefore survive.
+// The model regurgitates the prompt's invented examples, rarely verbatim — a mangled name or half a phrase
+// is the common case, and an exact-phrase test misses both. Entry 1's text has none of the example words;
+// entry 0's has "brass orrery", which must therefore survive.
 {
     const llm = (cand, uid) => classifyLlmCand(cand, {
         canon: ss.canon, exampleCanon: ss.exampleCanon, exampleWords: ss.exampleWords,
@@ -121,10 +119,9 @@ assert.ok(Array.isArray(ss.avoid), 'avoid list returned for the LLM prompt');
     console.log('ok   classifyLlmCand: mangled and partial few-shot echoes dropped, attested terms kept');
 }
 
-// Background docs (bgDocs = chat messages) pool into the IDF denominator. On a small book both
-// phrases have df 1, equal tf and rare anchors (both invisible to the Zipf gate), so book-only
-// TF-IDF cannot separate them; a term flooding the chat must be demoted below the one the chat
-// never mentions.
+// Background docs (bgDocs = chat messages) pool into the IDF denominator. On a small book both phrases have
+// df 1, equal tf and rare anchors, so book-only TF-IDF cannot separate them; a term flooding the chat must
+// be demoted below the one the chat never mentions.
 const bgBook = { entries: { ...suggestBook.entries,
     0: { uid: 0, key: [], content: 'The brass orrery turned. The brass orrery hummed. The copper alembic dripped. The copper alembic gleamed.', comment: 'A' },
 } };
@@ -137,12 +134,10 @@ const bgBook = { entries: { ...suggestBook.entries,
     assert.ok(score(withBg, 'brass orrery') > score(withBg, 'copper alembic'), 'a chat-common term is demoted below a chat-absent one');
 }
 
-// Zipf gate, one assertion per key class: an English-common unigram is gated however unique it
-// looks inside a small book ("trash" 4.4, "tavern" 3.6 — in the table = gated for unigrams), and an
-// entry whose every candidate is gated yields nothing at all; an uncommon unigram survives at full
-// weight ("minotaur" 2.8, below the table floor); a common word only ever seen capitalised is a
-// proper noun and survives ("Jeffrey" 3.9); and no phrase bridges a sentence boundary
-// ("comparison. Micah" is not a bigram).
+// Zipf gate, one assertion per key class: an English-common unigram is gated however unique it looks inside
+// a small book, and an entry whose every candidate is gated yields nothing at all; an uncommon unigram
+// survives at full weight; a common word only ever seen capitalised is a proper noun and survives; and no
+// phrase bridges a sentence boundary.
 const zipfBook = { entries: { ...suggestBook.entries,
     // All-common prose deliberately: even the f=1 words must sit in the Zipf table, or one of them
     // ("reeked") surfaces as a legitimate rare-word candidate and the entry is no longer empty.
@@ -252,9 +247,8 @@ const zipfBook = { entries: { ...suggestBook.entries,
     assert.ok(t0.includes('mr lansing'), '"Mr Lansing" survives the title drop');
 }
 
-// Over-shared keys: flagged on how many entries LIST the key, independent of how often it appears in
-// their TEXT. "astronaut" sits in one entry's prose but is keyed on all 12, so the content-frequency
-// flags can't see it. Needs >= KEY_MIN_BOOK_COMMON_ENTRIES entries for the ratio to mean anything.
+// Over-shared keys: flagged on how many entries LIST the key, independent of how often it appears in their
+// TEXT, which the content-frequency flags cannot see. Needs >= KEY_MIN_BOOK_COMMON_ENTRIES for the ratio.
 const sharedBook = { entries: Object.fromEntries([...Array(12)].map((_, i) => [i, {
     uid: i,
     key: i === 0 ? ['astronaut', 'moonwalk'] : ['astronaut'],
@@ -286,9 +280,9 @@ const sharedOpts = { scanKeyword: true, scanVectorized: true, scanConstant: true
     assert.ok(!small.classifyEntry(tiny.entries[0]).some(r => r.flag === 'book shared'), 'skipped below KEY_MIN_BOOK_COMMON_ENTRIES');
 }
 
-// classifyEntry must honour the scan's entry-class scope, not just the returned `entries` list —
-// the Studio explorer iterates its OWN list and asks per entry, so a scope-blind classifier keeps
-// flagging classes the user just told it to skip.
+// classifyEntry must honour the scan's entry-class scope, not just the returned `entries` list: the Studio
+// explorer iterates its own list and asks per entry, so a scope-blind classifier keeps flagging skipped
+// classes.
 const scopeBook = { entries: {
     0: { uid: 0, key: ['zzzdead'], content: 'nothing', constant: true },
     1: { uid: 1, key: ['zzzdead'], content: 'nothing', vectorized: true },
@@ -312,7 +306,7 @@ console.log('keyword-extract-check: ok');
 // --- looksLikeFragment: the clause-fragment flag -------------------------------------------------
 // Machine-written keys are lifted verbatim from an entry's own prose, so they sit in that entry's text
 // (df 1, not "dead"), appear nowhere else (not too-common, not shared) and are long (not short) — every
-// other category misses them. What is decidable from the key alone is COHERENCE, not specificity.
+// other category misses them. What is decidable from the key alone is coherence, not specificity.
 import { looksLikeFragment, FUNCTION_WORDS } from '../extension/keyword-audit.mjs';
 
 // Fires: real auto-generated keys that name nothing.
@@ -322,21 +316,20 @@ for (const k of ['naked for morale', 'try stuff and see', 'web not spoke wheel',
     assert.equal(looksLikeFragment(k), true, `fragment: "${k}"`);
 }
 
-// SPARED, and these are the ones that matter — a key can be hyper-specific and still legitimate,
-// because it NAMES something concrete and might recur. Specificity is not the defect; incoherence is.
+// Spared: a key can be hyper-specific and still legitimate, because it names something concrete and might
+// recur. Specificity is not the defect; incoherence is.
 for (const k of ['dick flag towels', 'epsom salts', 'empty buildings', 'naked house flag', 'Pride flag',
     'occupying space', 'waterproof mattress pad', 'No Contact Order', 'Randy Miller']) {
     assert.equal(looksLikeFragment(k), false, `not a fragment: "${k}"`);
 }
 
-// NON-ENGLISH NAMED ENTITIES MUST SURVIVE. The test is English function words specifically, so a Spanish
-// or French determiner inside a proper name does not trip it. This is the case that would break first if
-// anyone "improved" the predicate by adding a generic stopword list.
+// Non-English named entities must survive: the test is English function words specifically, so a Spanish or
+// French determiner inside a proper name does not trip it. Adding a generic stopword list breaks this first.
 for (const k of ['Dia de los Muertos', 'Cirque du Soleil', 'Coup de Grace']) {
     assert.equal(looksLikeFragment(k), false, `named entity spared: "${k}"`);
 }
 
-// CONSTRUCTED PROPER NOUNS: a capitalised frame with name-particle interior is a name, not a fragment.
+// Constructed proper nouns: a capitalised frame with name-particle interior is a name, not a fragment.
 for (const k of ['Church of the Sun', 'War and Peace', 'House of the Rising Sun', 'The Bali Trip']) {
     assert.equal(looksLikeFragment(k), false, `constructed proper noun spared: "${k}"`);
 }
@@ -367,10 +360,9 @@ const filler = n => Object.fromEntries([...Array(n)].map((_, i) => [20 + i,
     { uid: 20 + i, key: [], content: 'Rain fell on the street tonight, a dull ordinary evening for everyone.' }]));
 const OPTS = { dfCeil: 0.5, maxN: 4, excludeDates: true, excludeShort: true, onlyActive: true, cap: 8 };
 
-// At equal frequency the longer gram used to win outright, on the assumption that longer is more
-// specific. Specificity is worthless if the string never occurs: measured against a real chat, a
-// half of an INCOHESIVE tetragram almost always out-fires the whole (S7). So the longer gram now has
-// to be a unit — count(whole)/(count(halfA)+count(halfB)) >= 0.4 — or the contained gram wins.
+// Specificity is worthless if the string never occurs: half of an incohesive tetragram almost always
+// out-fires the whole against a real chat (S7). So the longer gram at equal frequency has to be a unit —
+// count(whole)/(count(halfA)+count(halfB)) >= 0.4 — or the contained gram wins.
 {
     // Both halves live independently across the book, so the tetragram is an assembly.
     const assembly = { entries: { ...filler(6),
@@ -383,10 +375,9 @@ const OPTS = { dfCeil: 0.5, maxN: 4, excludeDates: true, excludeShort: true, onl
     const t0 = buildKeySuggest(assembly, OPTS).perEntry.find(pe => pe.entry.uid === 0)?.newRows.map(r => r.term) ?? [];
     assert.ok(!t0.includes('bronze minotaur arthur baxter'), 'an incohesive tetragram does not swallow its halves');
     assert.ok(t0.includes('arthur baxter') && t0.includes('bronze minotaur'), 'the halves that live independently are offered instead');
-    // A trigram decomposes into OVERLAPPING bigrams (ABC -> AB + BC), which is what the leading/
-    // trailing bigram pair gives: "Mobius Industries HQ" must lose to "Mobius Industries".
-    // filler(9): with only 6, "industries" sits in 33% of entries and the distributional
-    // function-word cut strips it from every n-gram before subsumption is ever consulted.
+    // A trigram decomposes into OVERLAPPING bigrams (ABC -> AB + BC), which is what the leading/trailing
+    // bigram pair gives. filler(9): with only 6 the shared word sits in 33% of entries and the
+    // distributional function-word cut strips it before subsumption is ever consulted.
     const tri = { entries: { ...filler(9),
         0: { uid: 0, key: [], content: 'They toured Mobius Industries HQ. The badge said Mobius Industries HQ.' },
         1: { uid: 1, key: [], content: 'A courier reached Mobius Industries before noon.' },
@@ -402,9 +393,8 @@ const OPTS = { dfCeil: 0.5, maxN: 4, excludeDates: true, excludeShort: true, onl
     const u0 = buildKeySuggest(unit, OPTS).perEntry.find(pe => pe.entry.uid === 0)?.newRows.map(r => r.term) ?? [];
     assert.ok(u0.includes('pura dalem agung padangtegal'), 'a cohesive tetragram survives');
     assert.ok(!u0.includes('pura dalem'), 'and still subsumes its halves');
-    // Properness has ONE definition: capitalised mid-sentence AND never seen lowercase. Title case
-    // capitalises anything ("Data Under Duress"), so a word that also appears lowercase is not a
-    // name — otherwise it qualified every word of an f=1 phrase and "Kyle under" became a key.
+    // Properness has one definition: capitalised mid-sentence AND never seen lowercase. Title case
+    // capitalises anything, so a word that also appears lowercase is not a name.
     const titled = { entries: { ...filler(6),
         0: { uid: 0, key: [], content: 'Data Under Duress topped the report. Kyle under the awning waited for news.' },
         1: { uid: 1, key: [], content: 'The crate sat under the table for a week.' },
@@ -419,9 +409,9 @@ const OPTS = { dfCeil: 0.5, maxN: 4, excludeDates: true, excludeShort: true, onl
     assert.ok(!at(3).some(t => t.includes('because')), 'a top-500 word cannot ride a name anchor into a phrase');
 }
 console.log('ok   cohesion subsumption prefers live halves; properness needs more than a capital');
-// Non-English particles bind to what follows, so they may LEAD a key and may repeat ("de la
-// Cruz"). The filler floods the particles so the distributional function-word cut would otherwise
-// strip every gram containing them — the positional linker rule is what keeps these whole.
+// Non-English particles bind to what follows, so they may LEAD a key and may repeat. The filler floods the
+// particles so the distributional function-word cut would otherwise strip every gram containing them — the
+// positional linker rule is what keeps these whole.
 {
     const fill = n => Object.fromEntries([...Array(n)].map((_, i) => [30 + i,
         { uid: 30 + i, key: [], content: 'De la mesa, el nombre de la casa, la vida de los otros, un dia de sol.' }]));
@@ -439,9 +429,8 @@ console.log('ok   cohesion subsumption prefers live halves; properness needs mor
     // A LEADING particle gives way to the name it carries: as a substring key "Suleiman" matches
     // every "ibn Suleiman", and the particle contributes nothing to what the key means.
     assert.ok(at(1).includes('Suleiman') && !at(1).includes('ibn Suleiman'), 'a leading particle gives way to the bare name');
-    // ...but only when what remains is distinctive. Stripping is a trade, and the frequency table
-    // prices it: "sacres" is absent from it, while "cruz" 3.5, "santos" 3.6 and "pen" 4.4 are
-    // listed — so "de la Cruz" keeps its particle rather than degrading to a common surname.
+    // ...but only when what remains is distinctive. Stripping is a trade the frequency table prices, so
+    // "de la Cruz" keeps its particle rather than degrading to a common surname.
     const bare = { entries: { ...fill(8),
         0: { uid: 0, key: [], content: 'Everyone feared de Sacres. Nobody spoke to de Sacres.' },
         1: { uid: 1, key: [], content: 'Everyone feared de la Cruz. Nobody spoke to de la Cruz.' },
@@ -450,15 +439,14 @@ console.log('ok   cohesion subsumption prefers live halves; properness needs mor
     const bt = uid => b.perEntry.find(pe => pe.entry.uid === uid)?.newRows.map(r => r.term) ?? [];
     assert.ok(bt(0).includes('sacres') && !bt(0).includes('de sacres'), 'a rare name sheds its particle');
     assert.ok(bt(1).includes('de la cruz'), 'a common one keeps it — "Cruz" alone is a worse key than "de la Cruz"');
-    // Real names, and the reason the vocabulary is broad: each of these fragments into junk under a
-    // list that happens to omit its particle.
+    // Real names, and the reason the vocabulary is broad: each fragments into junk under a list omitting
+    // its particle.
     assert.ok(at(3).includes('Marine le Pen'), 'French "le" mid-name');
     assert.ok(at(4).includes('Giovani dos Santos'), 'Portuguese "dos" mid-name');
 }
 console.log('ok   non-English particles lead and repeat; English linkers stay interior');
-// Display case is the form the text uses MOST, and the evidence is book-wide. A machine-written
-// entry shouts its subject in a markdown header, so the entry that produces the candidate may hold
-// only the shouted spelling while the prose that spells it normally sits in other entries.
+// Display case is the form the text uses MOST, and the evidence is book-wide: a machine-written entry shouts
+// its subject in a markdown header, so the entry producing the candidate may hold only the shouted spelling.
 {
     const filler = n => Object.fromEntries([...Array(n)].map((_, i) => [10 + i,
         { uid: 10 + i, key: [], content: 'Rain fell on the street tonight, a dull ordinary evening for everyone.' }]));
@@ -494,17 +482,14 @@ console.log('ok   display takes the most-used capitalisation, counted book-wide'
     } };
     const t1 = buildKeySuggest(titles, OPTS).perEntry.find(pe => pe.entry.uid === 1)?.newRows.map(r => r.term) ?? [];
     assert.ok(!t1.includes('chairman of the grain'), 'a gram with one possible successor is a truncation');
-    // Only the shoulder a phrase decomposes INTO may replace it. Here the shoulder ("grain
-    // commission", 3 mentions) does not share the title's frequency, so the only equal-frequency
-    // gram inside it is bare "chairman" — which is not what cohesion weighed, so both stand and the
-    // title is not reduced to a job word.
+    // Only the shoulder a phrase decomposes INTO may replace it: here the shoulder does not share the
+    // title's frequency, so both stand and the title is not reduced to a job word.
     assert.ok(t1.includes('chairman of the grain commission'), 'an equal-frequency non-shoulder does not displace the whole title');
 }
 console.log('ok   phrase budget counts content words; truncations do not outrank whole names');
-// A unit phrase swallows contained PHRASES but not a bare word — the word is a broader instrument
-// and often the form the chat actually uses ("Ashworth" fires in chat where "Evelyn Ashworth"
-// barely does — S7), so both are offered. A particle-led name is the exception: "Sacres" occurs only ever
-// inside "de Sacres", and the particle is the structural tell.
+// A unit phrase swallows contained PHRASES but not a bare word: the word is a broader instrument and often
+// the form the chat actually uses (S7), so both are offered. A particle-led name is the exception, the
+// particle being the structural tell.
 {
     const opts = { ...OPTS, cap: 12 };
     const book = { entries: { ...filler(9),
@@ -520,9 +505,9 @@ console.log('ok   phrase budget counts content words; truncations do not outrank
     assert.ok(at(1).includes('vicomtesse de sacres') && at(1).includes('vicomtesse'), 'the full title and its head both stand');
 }
 console.log('ok   phrases keep their bare words, except where a particle says otherwise');
-// Elision writes the particle onto the name ("d'Orléans"), so the tokeniser sees one word and the
-// particle rules never get a look. Same trade on the same terms, plus a check that the bare name
-// stands somewhere on its own — dropping the elided form is only safe if something replaces it.
+// Elision writes the particle onto the name ("d'Orléans"), so the tokeniser sees one word and the particle
+// rules never get a look. Same trade, plus a check that the bare name stands somewhere on its own —
+// dropping the elided form is only safe if something replaces it.
 {
     const fill = n => Object.fromEntries([...Array(n)].map((_, i) => [30 + i,
         { uid: 30 + i, key: [], content: 'Rain fell on the street tonight, a dull ordinary evening for everyone here.' }]));

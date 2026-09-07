@@ -3,8 +3,7 @@
 // survives is that chunk, because its hash and text are what `owners` and the Studio resolve. Getting
 // either wrong is silent — the ranking just shifts.
 //
-// It used to pool INDEPENDENTLY PER SIGNAL, an entry's bm25 coming from a different chunk than its score.
-// Stage 1 is cosine-only now (plugin/scoring.mjs), so there is one maximum and the cases below are about
+// Stage 1 is cosine-only (plugin/scoring.mjs), so there is one maximum and the cases below are about
 // order-independence and identity rather than about two signals disagreeing.
 //
 // Run bare: prints `ok` or throws.
@@ -46,7 +45,7 @@ const orphans = poolEntries([
 ]);
 assert.strictEqual(orphans.length, 2, 'orphan chunks fall back to per-hash keys');
 
-// THE POINT OF THE CHANGE: topK now counts entries. Two entries of 3 chunks each, topK 2, must return both
+// topK counts entries. Two entries of 3 chunks each, topK 2, must return both
 // entries — the old chunk-side cut would have spent its budget inside one entry.
 const many = [chunk(7, 1, 0.9, 0), chunk(7, 2, 0.8, 0), chunk(7, 3, 0.7, 0),
               chunk(8, 4, 0.6, 0), chunk(8, 5, 0.5, 0), chunk(8, 6, 0.4, 0)];
@@ -56,16 +55,15 @@ assert.strictEqual(new Set(selectTopK(poolEntries(many), 2).c1.metadata.map(m =>
 assert.strictEqual(new Set(selectTopK(many, 2).c1.metadata.map(m => m.index)).size, 1,
     'unpooled: topK 2 spends the whole budget inside entry 7 — the bug this fixes');
 
-// WHAT THE CUT GIVES UP, asserted so it is a decision rather than a regression. selectTopK used to union
-// the top-K by cosine with the top-K by BM25, so an entry only the lexical signal liked still reached the
-// client. Stage 1 is cosine-only now: at topK 1 the lexically-strong, semantically-weak entry is gone.
-// plugin/scoring.mjs's header carries why, and why no book here can reach the bound where it matters.
+// What the cut gives up, asserted so it is a decision rather than a regression: with stage 1 cosine-only,
+// at topK 1 the lexically-strong, semantically-weak entry is gone. plugin/scoring.mjs's header carries why,
+// and why no book here can reach the bound where it matters.
 const lexOnly = selectTopK(poolEntries([chunk(7, 1, 0.9), chunk(8, 2, -0.5)]), 1);
 assert.deepStrictEqual(lexOnly.c1.metadata.map(m => m.index), [7],
     'topK 1 keeps the cosine winner alone — no lexical list to union');
 
-// scoreCollection ADMITS EVERYTHING now. Ten orthogonal unit vectors against a query aligned with item 0
-// give ten distinct cosines and, formerly, ten different admission verdicts; every one of them is kept.
+// scoreCollection admits everything. Ten orthogonal unit vectors against a query aligned with item 0 give
+// ten distinct cosines, and every one of them is kept.
 const dim = 10;
 const unit = i => Array.from({ length: dim }, (_, d) => (d === i ? 1 : 0));
 const autoItems = Array.from({ length: dim }, (_, i) => ({ vector: unit(i), metadata: { index: i, hash: i, text: `zz${i}` } }));

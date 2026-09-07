@@ -1,13 +1,11 @@
 // synth-graft-check.mjs — the guards on deriving a bundle and putting old judgements back on it.
 //
-// Both tools are run as PROCESSES against fixtures on disk, not by importing pieces of them. What is being
-// checked is a refusal, and a refusal that has been lifted out of its script is no longer the thing that
-// refuses — the predecessor's equivalent was verified by a person pointing it at the wrong file by hand,
-// which is exactly as durable as it sounds.
+// Both tools are run as PROCESSES against fixtures on disk, not by importing pieces of them: what is being
+// checked is a refusal, and a refusal lifted out of its script is no longer the thing that refuses.
 //
 // The scene guard is the one that matters. A grade is a verdict about a (scene, entry) pair, and the entry
-// half fails loudly on its own — a wrong uid matches nothing. The scene half is the half that can be wrong
-// while looking right, because two bundles can name the same message id and hold different turns.
+// half fails loudly on its own — a wrong uid matches nothing. The scene half can be wrong while looking
+// right, because two bundles can name the same message id and hold different turns.
 import { spawnSync } from 'node:child_process';
 import { mkdtempSync, writeFileSync, readFileSync, existsSync, mkdirSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -75,8 +73,8 @@ const put = (file, obj) => { const p = join(TMP, file); writeFileSync(p, JSON.st
     ok(/entry-retitled\.json\s+2\s+1\s/.test(run('graft-grades.mjs', [retitled, '--from', src]).out),
         'the title is part of what was graded, so changing it orphans too');
 
-    // THE ONE THAT MATTERS: the book hash differs here, and nothing a rater read has moved. A guard keyed on
-    // the book rather than the entry would throw away every grade in the book for one added keyword.
+    // The one that matters: the book hash differs here and nothing a rater read has moved, so a guard keyed
+    // on the book rather than the entry would throw away every grade in the book for one added keyword.
     // A bundle that embeds no entries is malformed, and its grades have no stored text — so nothing can
     // have moved, and comparing against the absence would orphan all of them and blame drift for it.
     const bare = await bundle('scene', { grades: [[1, 4], [2, 0], [3, 0]] });
@@ -181,9 +179,8 @@ ok(!/\b(0|1|[1-4][0-9])\b/.test(String(picks(a1.out)).split(', ')[0]) || Number(
 
 // --- synth: the arm table mirrors the one production pools with ---------------------------------------
 // capture-ui.mjs imports ST, so its POOL_ARMS cannot be loaded under node and is read as text. Names only:
-// the VALUES are in two vocabularies on purpose — settings there, harness here — which is exactly why the
-// mirror needs pinning. A drifted entry derives a differently-configured arm under the right label, and
-// nothing downstream can tell.
+// the VALUES are in two vocabularies on purpose — settings there, harness here — which is why the mirror
+// needs pinning. A drifted entry derives a differently-configured arm under the right label.
 {
     const SRC = readFileSync(join(HERE, 'synth-scenes.mjs'), 'utf8');
     const WA = readFileSync(join(HERE, '..', 'extension', 'capture-ui.mjs'), 'utf8');

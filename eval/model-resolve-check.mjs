@@ -1,10 +1,10 @@
 // Self-check for `resolveModel` and the label it mints — which had no check at all, while its own header
 // records two breakages that a stable-but-wrong label caused.
 //
-// The label is the identity of a set of vectors. It names the collection on disk, keys the query cache,
-// and is what a bundle records and a human retypes, so the load-bearing property is that it RESOLVES BACK
-// to the same model, endpoint and prefixes. Every failure here is a plausible number rather than an
-// error: the wrong endpoint still answers, a dropped instruction prefix still embeds, and either reports
+// The label is the identity of a set of vectors: it names the collection on disk, keys the query cache, and
+// is what a bundle records and a human retypes, so the load-bearing property is that it resolves back to
+// the same model, endpoint and prefixes. Every failure here is a plausible number rather than an error —
+// the wrong endpoint still answers, a dropped instruction prefix still embeds, and either reports
 // a model as worse than it is.
 import { PREFIXES, cachePath, pathSafe, resolveModel } from './reindex.mjs';
 import { PREFIXES as SHIPPED, queryPrefix } from '../extension/relevance.mjs';

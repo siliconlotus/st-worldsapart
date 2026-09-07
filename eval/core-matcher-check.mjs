@@ -1,34 +1,24 @@
-// HOW WA RELATES TO ST CORE ON AN UNMODIFIED LOREBOOK — the whole of it, in one place.
+// How WA relates to ST core on an unmodified lorebook — the whole of it, in one place.
 //
 // "An unaltered lorebook behaves under WA as it does under core; every divergence is a decision"
-// (matcher-design.md) is a single rule, and a divergence only means anything beside the parity it
-// departs from. So both live here: WA matching core's matchKeys and matchSecondaryKeys where it
-// should, and the named places it deliberately does not — the Unicode word boundary, whole-word on
-// multi-word keys, the orthographic fold. Splitting those would put the fold's superset behaviour in
-// one file and the substring default it extends in another.
+// (matcher-design.md) is a single rule, and a divergence only means anything beside the parity it departs
+// from. So both live here: WA matching core's matchKeys and matchSecondaryKeys where it should, and the
+// named places it deliberately does not — the Unicode word boundary, whole-word on multi-word keys, the
+// orthographic fold.
 //
-// WA'S OWN SEMANTICS ARE NOT HERE. SmartKeys, scoring units, the saturation curve and the excerpt
-// machinery are matcher-check.mjs: core has no opinion on any of them, so there is nothing to be
-// faithful to. The two files were tangled until the gate's verdict and the key's count stopped
-// agreeing, which forced the split.
+// WA's own semantics are not here: SmartKeys, scoring units, the saturation curve and the excerpt machinery
+// are matcher-check.mjs, core having no opinion on any of them. Core gates activation and never scores, so
+// what a matched expression is WORTH is a WA question.
 //
 // Selective logic is answered by ONE expression per primary key — `synthesizeSecondary` builds it,
-// `countSelective` evaluates it, `keywordScore` is the only caller. There is no second implementation of the rule left to compare against, which is the point
-// of the conversion: `secondaryOk` was a rival evaluator of the same semantics, and CLAUDE.md's
-// one-matcher rule covers selective logic as much as key matching.
+// `countSelective` evaluates it, `keywordScore` is the only caller. No second implementation of the rule
+// exists to compare against; CLAUDE.md's one-matcher rule covers selective logic as much as key matching.
 //
-// So this is a WRITTEN-DOWN CASE TABLE rather than a fuzz. Every expected value below is a claim
-// about what core's rule says, argued in its own `why`, and the harness runs it through the shipped
-// path (keywordScore) rather than a stand-in.
+// So this is a written-down case table rather than a fuzz. Every expected value is a claim about what core's
+// rule says, argued in its own `why`, and run through the shipped path rather than a stand-in.
 //
-// EVERY CLAIM HERE IS ABOUT CORE'S RULE, and nothing here is about WA's scoring. Core gates
-// activation and never scores, so what a matched expression is WORTH is a WA question and lives in
-// matcher-check.mjs with the rest of it. The two were tangled in this file until the verdict and the
-// count stopped agreeing — a key's count is Σ weighted occurrences over the whole expression, so once
-// secondaries began to score it no longer doubled as the gate's verdict, and the split became forced.
-//
-// Rows are `[primary, secondaries, logic, text, expected, why]`, asserting the VERDICT: 1 when the
-// gate passes, 0 when it refuses, which is the whole of what core's rule decides.
+// Rows are `[primary, secondaries, logic, text, expected, why]`, asserting the VERDICT: 1 when the gate
+// passes, 0 when it refuses, which is the whole of what core's rule decides.
 import { countKey, hasPromoteDecorator, keywordScore, secondaryKeys, setBoundaryMode, wholeWordAdvice, withPromote, WI_LOGIC } from '../extension/matcher.mjs';
 import { synthesizeSecondary } from '../extension/smartkeys.mjs';
 import { eq } from './metrics.mjs';
@@ -53,10 +43,8 @@ const run = rows => {
 
 /** Verdict for a single row, for the blocks that assert one call at a time.
  *
- *  `> 0` AND NOT `>= 1`. A matched key is normally worth at least 1, so the two agree almost
- *  everywhere — but a fractional `::weight` is exactly the case they part on, and it is a documented
- *  shape (`? whisper::0.3` down-weights rather than clamping to 1). A fractionally weighted primary
- *  alongside a fractionally weighted secondary totals below 1 while having passed its gate, so
+ *  `> 0` and not `>= 1`: a fractional `::weight` is a documented shape, and a fractionally weighted
+ *  primary alongside a fractionally weighted secondary totals below 1 while having passed its gate, so
  *  `>= 1` would read a pass as a refusal. Pinned below, since nothing else here weighs a key. */
 const fired = (...args) => (count(...args) > 0 ? 1 : 0);
 
@@ -100,10 +88,9 @@ run([
         'a `?` primary splices in as a subtree rather than being refused'],
     ['cosmonaut', ['? apollo soyuz'], AND_ALL, 'cosmonaut apollo soyuz', 1, 'a `?` secondary is a subtree too'],
     ['cosmonaut', ['? apollo soyuz'], AND_ALL, 'cosmonaut apollo', 0, '...evaluated by its own rules'],
-    // The floor, reached through a key that is LEGAL. A purely negated primary would also accumulate
-    // no weight, but `negation-only` is a validator error and keywordScore drops those before they
-    // arrive; `all-zero-weights` is a warn, and is documented as meaning "gate on this, do not rank
-    // on it" — which is exactly a matched expression that must still count as one hit.
+    // The floor, reached through a key that is LEGAL: `negation-only` is a validator error keywordScore
+    // drops before it arrives, while `all-zero-weights` is a warn documented as "gate on this, do not rank
+    // on it" — exactly a matched expression that must still count as one hit.
     ['? fire::0', ['apollo'], AND_ANY, 'fire near apollo', 1,
         'a matched expression carrying no weight still counts as one hit'],
 ]);
@@ -130,10 +117,9 @@ run([
     [`Cap${CURLY}n`, ['apollo'], AND_ANY, "Cap'n Joe flew apollo", 1, '...on the primary side too'],
 ]);
 
-// --- ENTRY FLAGS reach the synthesised nodes -------------------------------------------------------
-// The thing the string route could not do at all: countKey returns from its `?` branch before it
-// reads the flag arguments, so a synthesised string was always evaluated flags-off. The fuzz this
-// file replaced never caught it, because it only ever ran with both flags off (K3).
+// --- entry flags reach the synthesised nodes -------------------------------------------------------
+// countKey returns from its `?` branch before it reads the flag arguments, so a synthesised string is
+// always evaluated flags-off — invisible to a fuzz that only ever runs with both flags off (K3).
 {
     const cs = { caseSensitive: true };
     const ww = { matchWholeWords: true };
@@ -150,11 +136,10 @@ run([
 }
 
 // --- blanks, and keys that cannot fire -------------------------------------------------------------
-// Blanks and UNUSABLE keys are both dropped BEFORE the logic (matcher.mjs secondaryKeys), so a list of
-// them is ungated rather than impossible. A key carrying a fatal validator error used to reach the tree
-// and evaluate as never-matching, which silently killed the entry under AND_ALL — accurate, but nobody
-// authors a malformed key to mean "never", and the author had nothing to look at. A key that PARSES and
-// simply does not occur is the different thing: that is a verdict the logic still has to see.
+// Blanks and UNUSABLE keys are both dropped BEFORE the logic (matcher.mjs secondaryKeys), so a list of them
+// is ungated rather than impossible: a fatal key reaching the tree evaluates as never-matching and silently
+// kills the entry under AND_ALL, which nobody authors a malformed key to mean. A key that PARSES and simply
+// does not occur is the different thing — a verdict the logic still has to see.
 run([
     ['cosmonaut', ['', '   '], AND_ALL, 'the cosmonaut waited', 1, 'blank secondaries drop out, leaving no gate'],
     ['cosmonaut', ['', '   '], NOT_ANY, 'the cosmonaut waited', 1, '...under every logic, since the list is empty'],
@@ -179,13 +164,11 @@ run([
 
 console.log('ok   core parity: keysecondary\'s four logics, entry flags, literals, no refusals');
 
-// `selective: false` TURNS THE LIST OFF, and core reads the field (`entry.selective && ...`,
-// world-info.js) — WA gated where core does not, which is the one accident in a section where every
-// other difference is a decision. CCv2 specifies the switch: `secondary_keys` is "ignored if
-// selective == false". `convertCharacterBook` is the only producer, writing `selective || false`
-// beside the converted `secondary_keys`, and it saves that to disk — so it is character cards, not
-// authored books, that carry the shape, and the false survives every later load because
-// `addMissingWorldInfoFields` fills only ABSENT fields.
+// `selective: false` turns the list off, and core reads the field (`entry.selective && ...`, world-info.js).
+// CCv2 specifies the switch: `secondary_keys` is "ignored if selective == false". `convertCharacterBook` is
+// the only producer, writing `selective || false` beside the converted `secondary_keys` and saving that to
+// disk — so it is character cards, not authored books, that carry the shape, and the false survives every
+// later load because `addMissingWorldInfoFields` fills only ABSENT fields.
 {
     const cfg = { k1: 1.2, caseSensitiveDefault: false, wholeWordsDefault: false };
     const on = (sel, logic, text) => keywordScore(
@@ -234,11 +217,11 @@ eq(countKey('/jubi\\w+/i', 'the Jubilees came', false, true), 1, 'regex key with
 eq(countKey('nope', 'nothing here', false, false), 0, 'no match is zero');
 
 // --- Match Whole Words means what it says -----------------------------------------------------------
-// Core under-applies its own label twice: it skips any key containing a space, and it stops at an
-// affix. WA applies it in both directions, and which characters count as "inside a word" is the
-// wordBoundary setting rather than a rule, because both readings are defensible.
+// Core under-applies its own label twice: it skips any key containing a space, and it stops at an affix. WA
+// applies it in both directions, and which characters count as "inside a word" is the wordBoundary setting
+// rather than a rule, because both readings are defensible.
 {
-    // THE MULTI-WORD HALF, unconditional — a space in the key is not an exemption.
+    // The multi-word half, unconditional — a space in the key is not an exemption.
     eq(countKey('satyr camp', 'the satyr camps burned', false, true), 0, 'a multi-word key is NOT exempt from whole-word');
     eq(countKey('satyr camp', 'the satyr camp burned', false, true), 1, '...and still matches standing alone');
     eq(countKey('satyr camp', 'the satyr camps burned', false, false), 1, 'substring mode is where the plural still counts');
@@ -255,7 +238,7 @@ eq(countKey('nope', 'nothing here', false, false), 0, 'no match is zero');
     // as a real mark — which \p{L} alone would read as a boundary.
     eq(countKey('x', 'the x\u0301 mark', false, true), 0, 'a combining mark is inside the word, not a boundary');
 
-    // THE SETTING. Strict is the default; permissive is core's own reading of an affix.
+    // The setting: strict is the default, permissive is core's own reading of an affix.
     setBoundaryMode('permissive');
     eq(countKey('Joe', "that is Joe's coat", false, true), 1, 'permissive: an apostrophe is a boundary, so a possessive matches');
     eq(countKey('hot tub', 'the hot tub-side chair', false, true), 1, 'permissive: a hyphen is a boundary too');
@@ -272,8 +255,8 @@ eq(countKey('nope', 'nothing here', false, false), 0, 'no match is zero');
 
     setBoundaryMode('nonsense');
     eq(countKey('Joe', "that is Joe's coat", false, true), 0, 'an unknown mode falls back to the default');
-    // An inherited name is an unknown mode too. `in` accepted these, and the fallback that makes the
-    // line above pass never ran — the class became a Function and every whole-word key answered 0.
+    // An inherited name is an unknown mode too: `in` accepts these, the fallback never runs, the class
+    // becomes a Function and every whole-word key answers 0.
     setBoundaryMode('constructor');
     eq(countKey('Joe', 'Joe arrived', false, true), 1, 'a prototype property name is not a mode');
     setBoundaryMode('strict');
@@ -306,10 +289,9 @@ console.log('ok   whole words: multi-word keys included, _ excluded, permissive/
 console.log('ok   whole-word advisory: structural, two triggers, names the script it found');
 
 // --- a doubled hyphen is a boundary, in both modes ------------------------------------------------
-// Strict counts `-` as inside a word so a compound does not match its head. `normalizeOrthography`
-// folds an em dash to `--` so `wait--no` matches `wait—no`. Composed without an exception, an ordinary
-// dash reads as word-internal and swallows the boundary — which is prose punctuation, not a compound,
-// and cost four of the seven spacings real text uses.
+// Strict counts `-` as inside a word so a compound does not match its head, and `normalizeOrthography` folds
+// an em dash to `--` so `wait--no` matches `wait—no`. Composed without an exception, an ordinary dash reads
+// as word-internal and swallows the boundary — prose punctuation, not a compound.
 {
     const SARA = 'Sara';
     const em = [
@@ -341,10 +323,9 @@ console.log('ok   whole-word advisory: structural, two triggers, names the scrip
 console.log('ok   doubled hyphen: an em dash is a boundary, a compound hyphen is not');
 
 // --- apostrophe normalisation ---------------------------------------------------------------------
-// A key typed with ASCII ' never matched prose written with U+2019, and nothing surfaced it: the key just
-// never fired. Models emit typographic apostrophes constantly, so this silently killed possessive and
-// contraction keys against chat as well as against entry text. Both directions occur in real books.
-// CURLY is declared at the top of this file — the fold's own tests and the synthesis's share it.
+// A key typed with ASCII ' must match prose written with U+2019 and back: models emit typographic
+// apostrophes constantly, so otherwise possessive and contraction keys silently never fire. Both directions
+// occur in real books. CURLY is declared at the top of this file, shared with the fold's own tests.
 
 eq(countKey("Cap'n Joe", `the ${CURLY}n is silent at Cap${CURLY}n Joe${CURLY}s`, false, false), 1, 'straight key matches curly text');
 eq(countKey(`Cap${CURLY}n Joe`, "docked at Cap'n Joe's", false, false), 1, 'curly key matches straight text');
@@ -368,8 +349,8 @@ for (const [name, ch] of [['double prime', '″'], ['modifier letter double prim
     eq(countKey('6" pipe', `a 6${ch} pipe`, false, false), 1, `${name} normalises`);
 }
 eq(countKey(`5'10"`, '5′10″ barefoot', false, false), 1, 'both primes fold, so a height key matches typeset prose');
-// FINER-GRAINED, not variants: these partition what " collapses, so folding them would erase a
-// distinction in the haystack that no key could ask back.
+// Finer-grained, not variants: these partition what " collapses, so folding them would erase a distinction
+// in the haystack that no key could ask back.
 eq(countKey('"title"', '《title》', false, false), 0, 'CJK angle brackets are NOT folded');
 eq(countKey('"spoken"', '「spoken」', false, false), 0, 'CJK corner brackets are NOT folded');
 // Orthographic variants normalise; anything that could carry meaning does not (see normalizeOrthography).
@@ -400,12 +381,12 @@ eq(countKey('sister', 'It is called sisterhood', false, true), 0, '...which the 
 console.log('ok   markdown in the scan text: whole-word emphasis fine, in-word emphasis is a known limit');
 
 // --- `@@promote`, read under core's decorator grammar ------------------------------------------------
-// WHY IT IS HERE AND NOT IN matcher-check: the name is WA's, but everything that makes it WORK is a fact
-// about core. `parseDecorators` (world-info.js) reads decorators only from LEADING `@@` lines, stops at
-// the first line that is not one, treats `@@@name` as the fallback form — and records only the two names
-// in KNOWN_DECORATORS. So an unknown decorator is stripped from the injected content for free and never
-// reaches `entry.decorators`, which is why WA reads it at WORLDINFO_ENTRIES_LOADED, where raw content
-// still exists, and stashes the answer. Any of these rules changing upstream silently unpromotes a book.
+// Here rather than in matcher-check because the name is WA's but everything that makes it work is a fact
+// about core. `parseDecorators` (world-info.js) reads decorators only from LEADING `@@` lines, stops at the
+// first line that is not one, treats `@@@name` as the fallback form, and records only the two names in
+// KNOWN_DECORATORS — so an unknown decorator is stripped from the injected content and never reaches
+// `entry.decorators`, which is why WA reads it at WORLDINFO_ENTRIES_LOADED and stashes the answer. Any of
+// these rules changing upstream silently unpromotes a book.
 const promo = content => hasPromoteDecorator({ content });
 eq(promo('@@promote\nThe villa'), true, 'a leading @@promote is read');
 eq(promo('@@promote'), true, '...with no content after it');
@@ -414,12 +395,10 @@ eq(promo('The villa\n@@promote'), false, 'a decorator after content is not a dec
 eq(promo('@@promote\n@@dont_activate\nx'), true, 'order among the leading lines does not matter');
 eq(promo(''), false, 'empty content promotes nothing');
 eq(promo('Nothing here'), false, '...and neither does ordinary content');
-// THE FALLBACK FORM. Core strips the leading `@` and tests the remainder, so `@@@promote` is the same
-// name. WA mirrors that rather than treating it as a distinct decorator.
+// The fallback form: core strips the leading `@` and tests the remainder, so `@@@promote` is the same name.
 eq(promo('@@@promote\nx'), true, 'the @@@ fallback form is the same decorator');
-// EXACT, WHERE CORE IS PREFIX. Core tests its own two names with startsWith, which is safe for a closed
-// list it owns; the decorator namespace is open and applications are told to add snake_case names of
-// their own, so a prefix test here would claim every future @@promote_* as this one.
+// Exact, where core is prefix: core tests its own two names with startsWith, safe for a closed list it owns,
+// but the namespace is open and a prefix test here would claim every future @@promote_* as this one.
 eq(promo('@@promoted_by_hand\nx'), false, 'a longer name that merely starts with promote is a different decorator');
 eq(promo('@@promote 2\nx'), true, '...but an argument after the name is the same decorator');
 console.log('ok   @@promote: core\'s leading-line grammar and fallback form, with an exact name test');

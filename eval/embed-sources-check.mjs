@@ -4,14 +4,12 @@
 // exports only `router`, and no route returns a raw vector, so WA cannot call it and a copy is the only
 // way to support more than the handful of sources whose settings it happens to know.
 //
-// A COPY OF A PRIVATE FUNCTION DRIFTS, and this one drifts silently: a source ST adds or renames arrives
-// here as "that provider quietly gets no cosine", and since stage 3 now falls back to the noCosine fit,
-// nothing downstream looks broken. So the check reads ST's SOURCES array from its own file and asserts the
-// switch still covers every entry. ST maintains that array deliberately — its own comment says "Don't
-// forget to add new sources to the SOURCES array" — which is what makes it a sound thing to read.
+// A copy of a private function drifts silently: a source ST adds or renames arrives here as "that provider
+// quietly gets no cosine", and stage 3 falls back to the noCosine fit, so nothing downstream looks broken.
+// The check reads ST's SOURCES array from its own file and asserts the switch still covers every entry —
+// ST maintains that array deliberately, which is what makes it sound to read.
 //
-// SKIPS WITHOUT AN ST INSTALL rather than guessing, the same contract stInstall() has everywhere else: on
-// a standalone clone there is no file to compare against and a failure would say nothing about this repo.
+// Skips without an ST install rather than guessing, the same contract stInstall() has everywhere else.
 import { readFileSync, existsSync } from 'node:fs';
 import { stInstall } from './scene.mjs';
 import { eq } from './metrics.mjs';

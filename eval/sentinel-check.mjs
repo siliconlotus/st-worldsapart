@@ -1,11 +1,9 @@
 // The sentinel book + chat: a fixture where every audit verdict has a known right answer, so a change
 // that silently disconnects one is caught here instead of by squinting at a tooltip.
 //
-// WHY IT EXISTS. Three separate faults shipped behind a green suite because every check called the
-// classifier directly, one layer below what the Studio uses: a wrapper that dropped its options, a
-// hardcoded verdict string, and an audit path that gathered no evidence. This exercises the same
-// inputs the Studio produces — a real world-info file, a real .jsonl with a hidden message in it —
-// and asserts the verdicts rather than the internals.
+// It exists because faults ship behind a green suite when every check calls the classifier directly, one
+// layer below what the Studio uses. This exercises the same inputs the Studio produces — a real world-info
+// file, a real .jsonl with a hidden message in it — and asserts the verdicts rather than the internals.
 //
 // The files are also importable into SillyTavern, which is the point: the half that cannot be tested
 // from node (chips, tooltips, colours) is eyeballed against a book whose every answer is written down.
@@ -70,12 +68,10 @@ eq(msgs.length, 11, 'the hidden message is dropped, as core and WA both drop it'
     eq(v.morning?.sev, RED, 'a common word the chat confirms fires broadly is severe');
     eq(v.mother?.sev !== RED, true, 'a common word the chat says is quiet stays a warning');
     eq(v['? thornwick brambleshaw'], undefined, 'at scan the query is attested by its own entry text');
-    // A `?` key is not in the automaton's alphabet, so the chat scan cannot speak to it. Where it IS
-    // dead — paragraph mode splits its two terms apart — it must keep the weaker claim rather than be
-    // credited with a search that never covered it.
-    // A dead QUERY reads "never matches" rather than "not in entry text" — it evaluated false, which is
-    // a different sentence — and that wording carries no claim about the chat, which is correct here:
-    // the automaton could not see it either.
+    // A `?` key is not in the automaton's alphabet, so the chat scan cannot speak to it: where it IS dead
+    // it must keep the weaker claim rather than be credited with a search that never covered it. A dead
+    // query reads "never matches" rather than "not in entry text" — it evaluated false — and that wording
+    // carries no claim about the chat, which is correct here.
     const p = verdicts(chatRate(), 'paragraph')['? thornwick brambleshaw'];
     eq(p?.why, 'never matches', 'a dead query says it evaluated false, claiming nothing about the chat');
 }
@@ -130,9 +126,8 @@ console.log('ok   sentinel: every audit verdict matches its written-down answer'
     eq(adds.includes(8), false, 'the false winner does not match under WA — never added');
 
     // uid 8 is the group's false winner under CORE's rules (its key matches only on the \W boundary
-    // divergence above). WA's matcher runs BEFORE the group filter, so core never sees uid 8 as a
-    // candidate and uid 9 takes the group — the ordering the takeover buys, where the 1.5 union could
-    // only delete uid 8 afterwards and leave the group empty.
+    // divergence above). WA's matcher runs BEFORE the group filter, so core never sees uid 8 as a candidate
+    // and uid 9 takes the group — the ordering the takeover buys.
 }
 
 // --- timed effects, recursion, delay: what WA emits, and what core's gates do with it -----------
@@ -149,11 +144,10 @@ console.log('ok   sentinel: every audit verdict matches its written-down answer'
     eq(adds.includes(11), true, 'cooldown entry: union adds; core gates cooldown BEFORE external activations, so a force cannot break it');
     eq(adds.includes(12), true, 'recursion source fires from chat');
     eq(adds.includes(13), false, 'recursion target has no chat evidence — only the recursion pass admits it');
-    // BLIND: WA emits a delayUntilRecursion entry whose keys match and leaves the timing to core, which
-    // checks both delay gates before the external-activation branch. With core's matcher blanked,
-    // declining to emit would leave no route in at all. Whether core ever admits it is core's own
-    // question and this book is the case where it does not — one delay level, recursion off, so no
-    // RECURSION pass is scheduled (see the entry's own comment).
+    // Blind: WA emits a delayUntilRecursion entry whose keys match and leaves the timing to core, which
+    // checks both delay gates before the external-activation branch — with core's matcher blanked,
+    // declining to emit would leave no route in at all. Whether core admits it is core's own question, and
+    // this book is the case where it does not.
     eq(adds.includes(14), true, 'delayUntilRecursion IS emitted; core decides when, or whether, to admit it');
 
     // Sticky persistence is core's and WA cannot see it offline: at messageDepth 2 "cold frame"
@@ -163,10 +157,9 @@ console.log('ok   sentinel: every audit verdict matches its written-down answer'
     eq(activationAdds([data.entries['10']], windowFor, narrow).length, 0,
         'sticky entry with its key out of the window is not re-emitted — core\'s timed effect is what carries it');
 
-    // uid 15's GATE. Its three secondaries are one of each kind, and the entry activating is what
-    // certifies that the unusable one was DROPPED rather than evaluated: under AND_ALL a
-    // never-matching secondary can never be satisfied, so a regression there kills the entry silently
-    // — which is the exact failure this whole rule exists to stop.
+    // uid 15's gate: its three secondaries are one of each kind, and the entry activating certifies that
+    // the unusable one was DROPPED rather than evaluated — under AND_ALL a never-matching secondary can
+    // never be satisfied, so a regression there kills the entry silently.
     eq(adds.includes(15), true, 'AND_ALL gate passes: the usable secondaries hold and the malformed one is dropped');
 
     const gated = (text) => keywordScore(data.entries['15'], [text], undefined,

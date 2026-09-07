@@ -35,7 +35,7 @@ eq(byScore.findIndex(x => x.row.t === 'stickyOld') > byScore.findIndex(x => x.ro
 // it is also not a reason to promote a row a grader cannot rank.
 eq(byScore.map(x => x.row.t).indexOf('dynNull'), 2, 'a null score sinks inside its own block, not out of it');
 
-// THE INDEX IS THE CAPTURE INDEX, NOT THE DISPLAY POSITION. Every data-i in both grading tables indexes
+// The index is the capture index, not the display position. Every data-i in both grading tables indexes
 // back into the capture-ordered rows/entries arrays, so returning display positions would misattribute
 // every grade to the wrong entry — silently, and in a way no green suite would catch.
 eq(byScore.map(x => x.i).join(','), '3,2,4,1,0', 'pairs carry the original capture index');

@@ -1,7 +1,7 @@
 // Orphaned bindings: chats and character cards naming a lorebook that no longer exists.
 //
 // The detection is pure and lives in bindings.mjs precisely so it can be tested — the Studio view that
-// renders it cannot be. Today's lesson, applied before rather than after.
+// renders it cannot be.
 import { findOrphanBindings, nearestWorld, normalizeWorldName, editDistance } from '../extension/bindings.mjs';
 import { eq } from './metrics.mjs';
 

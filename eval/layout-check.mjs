@@ -1,6 +1,5 @@
-// Guards STAGE 3's product, the layout order (extension/layout.mjs). Every input is a parameter, so
-// this runs on literal rows with no ST and no corpus — which is the point of the module existing: the
-// ordering lived inside onScanDone and could not be checked at all.
+// Guards stage 3's product, the layout order (extension/layout.mjs). Every input is a parameter, so this
+// runs on literal rows with no ST and no corpus — which is the point of the module existing.
 // Run: node layout-check.mjs
 import { layoutOrder, layoutScore } from '../extension/layout.mjs';
 

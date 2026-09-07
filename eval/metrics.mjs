@@ -4,13 +4,11 @@
 /**
  * "ok <label>" / "FAIL <label>: got (want …)".
  *
- * A mismatch sets `process.exitCode`, so a FAILING CHECK AND A CRASH ARE THE SAME SIGNAL and the
- * suite is `for f in eval/*-check.mjs; do node "$f" || …; done`. It used to print FAIL and exit 0,
- * which meant the runner had to grep stdout for `^FAIL` — and that missed thrown errors, since a
- * stack trace contains no such line. One broken check shipped green exactly that way.
+ * A mismatch sets `process.exitCode`, so a failing check and a crash are the same signal and the suite is
+ * `for f in eval/*-check.mjs; do node "$f" || …; done` — grepping stdout for `^FAIL` misses thrown errors,
+ * since a stack trace contains no such line.
  *
- * `exitCode`, not `exit()`: the run finishes and reports every failure, rather than stopping at the
- * first one.
+ * `exitCode`, not `exit()`: the run finishes and reports every failure rather than stopping at the first.
  */
 const report = (ok, got, want, label) => {
     if (!ok) process.exitCode = 1;
@@ -25,9 +23,9 @@ export const eqNear = (got, want, label, tol = 1e-9) => report(Math.abs(got - wa
 
 /**
  * The value after `k` in `argv`, or `d`. Absent flag and flag-with-no-value are both the default, so a
- * harness REFUSING when a required setting is unsupplied tests one thing (CLAUDE.md, *A harness may
- * contain no literal that has an authoritative home*). `argv` is passed rather than read off
- * `process.argv` here, because the callers disagree about whether it is sliced.
+ * harness refusing when a required setting is unsupplied tests one thing (CLAUDE.md, *A harness may contain
+ * no literal that has an authoritative home*). `argv` is passed rather than read off `process.argv`,
+ * because the callers disagree about whether it is sliced.
  */
 export const arg = (argv, k, d = null) => { const i = argv.indexOf(k); return i >= 0 ? argv[i + 1] : d; };
 
@@ -38,18 +36,17 @@ export const mean = xs => (xs.length ? xs.reduce((a, b) => a + b, 0) / xs.length
 export const fmt3 = x => (Number.isFinite(x) ? x.toFixed(3) : '—');
 
 /**
- * PRECISION CREDIT for one delivered entry, on the 0-4 anchors (extension/grading.mjs GRADE_ANCHORS).
+ * Precision credit for one delivered entry, on the 0-4 anchors (extension/grading.mjs GRADE_ANCHORS).
  *
  * A 3 or 4 is "should likely / should absolutely be included", so delivering one is fully correct. A 2 is
- * "Weakly relevant; 50/50 on inclusion" — the grader declined to call it, so the metric must not call it
- * either: HALF credit leaves precision drifting toward 0.5 as 2s are added rather than toward 1. Counting a
- * 2 as a full hit made padding with ambiguous entries raise the score, which contradicts delivering as many
- * as are relevant AND NO MORE. Dropping 2s from the denominator instead was rejected for the mirror reason:
- * it lets a configuration shrink what it is judged on by delivering ambiguity.
+ * "Weakly relevant; 50/50 on inclusion" — the grader declined to call it, so half credit leaves precision
+ * drifting toward 0.5 as 2s are added rather than toward 1. Full credit would let padding with ambiguous
+ * entries raise the score, against delivering as many as are relevant and no more; dropping 2s from the
+ * denominator fails for the mirror reason, letting a configuration shrink what it is judged on.
  *
- * BANDED, NOT INTERPOLATED. A grader may type 2.5, and it credits 0.5 like any other 2 — the credit follows
- * the anchors, which are the wording inter-rater agreement was measured on, not a continuum between them.
- * Whether half-grades should carry their own weight is a separate decision, unmade.
+ * Banded, not interpolated: a grader may type 2.5 and it credits 0.5 like any other 2, since the credit
+ * follows the anchors inter-rater agreement was measured on. Whether half-grades should carry their own
+ * weight is a separate decision, unmade.
  */
 export const gradeCredit = g => (g >= 3 ? 1 : g >= 2 ? 0.5 : 0);
 
@@ -61,8 +58,8 @@ export { gradeValue } from '../extension/grading.mjs';
 /**
  * F-beta. beta > 1 weights recall; the harness passes RECALL_WEIGHT.
  *
- * Spelled out rather than hardcoded as F2's (5pr)/(4p+r), because the exponent is a JUDGEMENT about relative
- * cost and a pair of magic constants hides which decision was made.
+ * Spelled out rather than hardcoded as F2's (5pr)/(4p+r), because the exponent is a judgement about
+ * relative cost and a pair of magic constants hides which decision was made.
  */
 export const fbeta = (precision, recall, beta = 2) => {
     const b2 = beta * beta;
@@ -70,32 +67,28 @@ export const fbeta = (precision, recall, beta = 2) => {
 };
 
 /**
- * How much worse a lost relevant entry is than a gained irrelevant one. ASSERTED, not measured: the author's
+ * How much worse a lost relevant entry is than a gained irrelevant one. Asserted, not measured: the author's
  * stated preference is that missing something relevant costs at least twice what delivering something
- * irrelevant does. Everything downstream of it inherits that, so it is named here rather than left as a
- * literal at the call site.
+ * irrelevant does. Named here rather than left as a literal at the call site.
  *
- * Note it is NOT the same lever as gradeCredit. That one decides what counts as an error at all; this one
- * sets the exchange rate between the two kinds.
+ * Not the same lever as gradeCredit: that one decides what counts as an error at all, this one sets the
+ * exchange rate between the two kinds.
  */
 export const RECALL_WEIGHT = 2;
 
 /**
  * Exact two-sided sign test over paired per-scene deltas.
  *
- * THE ESTIMATOR FOR SINGLE-DIGIT n. Absolute nDCG varies far more between scenes than between parameter
- * settings (H10), so averaging
- * absolute scores across scenes mostly measures which scenes you happened to grade. Pairing each scene
- * against its own baseline cancels that variance, and what survives is the DIRECTION of the change, which is
- * the only thing a handful of scenes can support.
+ * The estimator for single-digit n: absolute nDCG varies far more between scenes than between parameter
+ * settings (H10), so averaging absolute scores mostly measures which scenes you happened to grade. Pairing
+ * each scene against its own baseline cancels that variance, leaving the DIRECTION of the change.
  *
  * Deliberately the sign test and not a t-test: n is single-digit, nDCG deltas are bounded and skewed, and
- * normality is not available to assume. Exact binomial, so the p-value is not an approximation. Ties (|delta|
- * <= eps) are dropped, which is the standard treatment and is conservative — it shrinks n.
+ * normality is not available to assume. Exact binomial, so the p-value is not an approximation. Ties
+ * (|delta| <= eps) are dropped, the standard treatment, and conservative — it shrinks n.
  *
- * Read the floor honestly: 6/6 one-way is p=0.031, 5/5 is 0.063, 4/4 is 0.125, 3/3 is 0.25. Below about six
- * scenes NO result reaches conventional significance, so the honest report is the direction, the count and
- * the effect size — never a bare winner.
+ * Below about six scenes no result reaches conventional significance (6/6 one-way is p=0.031), so the
+ * honest report is the direction, the count and the effect size — never a bare winner.
  *
  * @param {number[]} deltas Per-scene (arm - baseline) differences
  * @param {number} [eps] Below this magnitude a delta is a tie
@@ -121,10 +114,10 @@ export const signTest = (deltas, eps = 1e-9) => {
 /**
  * Jaccard overlap of two sets. |A∩B| / |A∪B|; two empty sets are 0, not NaN.
  *
- * Used on graded scenes' RELEVANT sets to detect pseudo-replication. nDCG is driven almost entirely by where
- * the grade>=3 entries land, so two scenes that agree on which entries are relevant will move in lockstep
- * under every parameter change — they are one observation, and a sign test that counts them as two is
- * inventing power it does not have.
+ * Used on graded scenes' RELEVANT sets to detect pseudo-replication: nDCG is driven almost entirely by
+ * where the grade>=3 entries land, so two scenes agreeing on which entries are relevant move in lockstep
+ * under every parameter change. They are one observation, and a sign test counting them as two invents
+ * power it does not have.
  */
 export const jaccard = (a, b) => {
     const A = a instanceof Set ? a : new Set(a), B = b instanceof Set ? b : new Set(b);
@@ -137,10 +130,10 @@ export const jaccard = (a, b) => {
 /**
  * Spearman rank correlation, tie-corrected.
  *
- * MIDRANKS, NOT THE SHORTCUT. The familiar `1 - 6*sum(d^2)/(n(n^2-1))` is only valid when no value repeats,
- * and graded scenes repeat constantly — half a pool is typically grade 0. With ties the shortcut silently
- * depends on how the sort happened to break them, which makes the coefficient partly an artifact of array
- * order. So tied values get the average of the ranks they span, and the coefficient is Pearson over those.
+ * Midranks, not the shortcut: `1 - 6*sum(d^2)/(n(n^2-1))` is only valid when no value repeats, and graded
+ * scenes repeat constantly. With ties the shortcut depends on how the sort happened to break them, making
+ * the coefficient partly an artifact of array order. Tied values get the average of the ranks they span,
+ * and the coefficient is Pearson over those.
  *
  * Absent signals are the caller's problem to encode: pass 0 (or any floor) for "this signal did not fire",
  * because not firing on a relevant entry is the signal being wrong, not missing data to be dropped.
@@ -174,13 +167,12 @@ export const spearman = (x, y) => {
 /**
  * Quadratic weighted kappa over the 0-4 grade anchors — inter-rater agreement corrected for chance.
  *
- * WEIGHTED because the anchors are ordered: 3-vs-4 is not the same error as 0-vs-4, and unweighted kappa
- * cannot say so. `pairs` is [[a, b], …] of two raters' grades for the same rows.
+ * Weighted because the anchors are ordered: 3-vs-4 is not the same error as 0-vs-4. `pairs` is [[a, b], …]
+ * of two raters' grades for the same rows.
  *
- * It is an agreement statistic, so it answers one narrow question — do two raters put rows in the same
- * band — and NOT whether either is right. Against grades produced under a superseded rubric it measures
- * a changed construct as much as rater drift (CLAUDE.md, "Graded scenes"), which is why the tools that
- * print it print the band counts beside it.
+ * An agreement statistic answers whether two raters put rows in the same band, never whether either is
+ * right. Against grades produced under a superseded rubric it measures a changed construct as much as rater
+ * drift (CLAUDE.md, "Graded scenes"), which is why the tools that print it print the band counts beside it.
  */
 export const qwk = (pairs, k = 5) => {
     const n = pairs.length;
@@ -201,22 +193,18 @@ export const qwk = (pairs, k = 5) => {
 /**
  * The leading principal components of a set of vectors, about `mean`.
  *
- * WHY THIS EXISTS. Mean-centering subtracts ONE direction, and most of that direction is not the book's
- * own — the rest is the component every book shares (model plus narrative-domain anisotropy). So the
- * operation that is supposed to make
- * "magic is unremarkable in a fantasy book" cheap spends most of its effect on something no book is
- * distinguished by, and it spends the LEAST book-specific effort on the long memory books that most need
- * it (R15). A mean is only the first moment, and
- * what is unremarkable in a book is plausibly several directions — the setting, the recurring cast, the
- * genre furniture — which one vector cannot carry. This is the standard treatment for that (all-but-the-
- * top): remove the mean, then project out the leading components.
+ * Mean-centering subtracts one direction, and most of that direction is not the book's own but the
+ * component every book shares (R15), so it spends the least book-specific effort on the long memory books
+ * that most need it. What is unremarkable in a book is plausibly several directions, which one vector
+ * cannot carry; this is the standard all-but-the-top treatment — remove the mean, then project out the
+ * leading components.
  *
- * Power iteration with deflation, because k is small (1-8 against dim 1024) and a full SVD would pull in
- * a dependency to compute 1016 components nobody reads.
+ * Power iteration with deflation, because k is small (1-8 against dim 1024) and a full SVD would pull in a
+ * dependency to compute components nobody reads.
  *
- * DETERMINISTIC, and it has to be: an arm whose result moves between runs cannot be paired against a
- * baseline. The seed vector is a fixed pattern rather than anything random, so the same corpus always
- * yields the same components down to sign — and sign does not matter, since only the projection is used.
+ * Deterministic, and it has to be: an arm whose result moves between runs cannot be paired against a
+ * baseline. The seed vector is a fixed pattern, so the same corpus always yields the same components down
+ * to sign — and sign does not matter, since only the projection is used.
  *
  * @param {Array<{vector: number[]}>} items Vectors to decompose
  * @param {number} k How many components
@@ -233,11 +221,9 @@ export const topComponents = (items, k, mean, iters = 40) => {
     const start = energy();
     const out = [];
     for (let c = 0; c < k; c++) {
-        // FEWER THAN k WHEN THE RESIDUAL IS DEAD, never a made-up direction. Deflation can exhaust the
-        // data's actual rank, and power iteration on a zero residual converges to nothing and leaves the
-        // SEED vector — a unit vector pointing wherever the seed pattern happened to point. Returning it
-        // would project an arbitrary direction out of every document and query, silently deleting real
-        // signal, and it would still look like a component. Callers read the length.
+        // Fewer than k when the residual is dead, never a made-up direction: deflation can exhaust the
+        // data's actual rank, and power iteration on a zero residual leaves the SEED vector, which would
+        // project an arbitrary direction out of every document and query. Callers read the length.
         if (energy() <= start * 1e-12) break;
         // Fixed seed pattern, varied by component so a deflated residual is not seeded orthogonally to
         // its own leading direction by coincidence.
@@ -286,12 +272,11 @@ export const componentScales = (vectors, comps, mean) => comps.map(c => {
  *  direction outright, 1 leaves it alone, and the interior shrinks it. Applied to the query and to every
  *  document alike; doing it to one side only would compare vectors in different spaces.
  *
- *  WHITENING AND TOP-K REMOVAL ARE THE SAME OPERATION at different weights, which is the reason for one
- *  function rather than two. Removing a component is weight 0 — it deletes the direction along with
- *  whatever real signal sits on it, and is violently sensitive to how many you take. Whitening instead
- *  down-weights a direction in proportion to how much the corpus spreads along it, on the argument that a
- *  direction a book varies along is by construction not discriminating WITHIN that book. Weights default to
- *  0, so an omitted argument is the removal behaviour every earlier caller expects. */
+ *  Whitening and top-k removal are the same operation at different weights, hence one function: removal is
+ *  weight 0, deleting the direction along with whatever real signal sits on it and violently sensitive to
+ *  how many you take, while whitening down-weights a direction in proportion to how much the corpus spreads
+ *  along it — a direction a book varies along is by construction not discriminating WITHIN that book.
+ *  Weights default to 0, so an omitted argument is the removal behaviour. */
 export const projectOut = (vector, mean, comps, weights = null) => {
     const D = mean.length;
     const v = Float64Array.from({ length: D }, (_, i) => vector[i] - mean[i]);

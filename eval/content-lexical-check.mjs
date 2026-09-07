@@ -22,7 +22,7 @@ const book = [
 const idx = buildContentIndex(book, CFG);
 ok(idx.entryCount === 3, `only enabled entries with content are indexed (${idx.entryCount} of 5)`);
 
-// THE WHOLE POINT: a non-vectorized entry is in the index. Before this module only `vectorized` entries
+// The whole point: a non-vectorized entry is in the index. Before this module only `vectorized` entries
 // were indexed anywhere, so a keyword entry's body was invisible to every scorer.
 const hits = scoreContent(idx, 'obsidian spire');
 ok(hits.has(entryKey(book[0])), 'a NON-vectorized entry earns a text score');
@@ -38,10 +38,9 @@ const rare = scoreContent(idfCorpus, 'spire').get('B.1') ?? 0;
 ok(rare > common * 3, `a term in every document is worth far less than a rare one (${rare.toFixed(3)} vs ${common.toFixed(3)})`);
 
 // --- pooling ----------------------------------------------------------------------------------------
-// MAX, not sum. A long entry repeating a term across many chunks must not outrank a short entry that says
-// it once and means it — that length bias is what BM25's `b` already controls, and summing reintroduces it.
-// The paragraph must clear minChunkSize or chunkEntry joins it with the next one, which changes tf and
-// document length and tests something else entirely — that is what the first draft of this check did.
+// Max, not sum: a long entry repeating a term across many chunks must not outrank a short entry that says
+// it once, that length bias being what BM25's `b` already controls. The paragraph must clear minChunkSize
+// or chunkEntry joins it with the next, changing tf and document length and testing something else.
 const PARA = 'The obsidian spire looms over the drowned quarter tonight and every night after, and the harbour bells answer it from the far bank until the tide turns again.';
 const pooled = buildContentIndex([e(1, [PARA, PARA, PARA].join('\n\n')), e(2, PARA)], CFG);
 const ps = scoreContent(pooled, 'spire quarter');

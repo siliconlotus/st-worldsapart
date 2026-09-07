@@ -3,28 +3,25 @@
 //
 // Five claims, each of which fails as a plausible number rather than as an error.
 //
-//   UIDS DO NOT COLLIDE. Books number their entries from 0, so uid 1 exists in both. A bare-uid map —
-//   the candidate set, the pool, the grade join, the token lookup — silently hands one book's row the
-//   other's entry, grade or cosine, and the ranking still prints.
+//   Uids do not collide. Books number their entries from 0, so a bare-uid map — the candidate set, the
+//   pool, the grade join, the token lookup — hands one book's row the other's entry, grade or cosine.
 //
-//   BOTH BOOKS COMPETE IN ONE RANKING. `poolEntries` keys on (collection, uid) and `selectTopK` sorts
-//   across collections; a per-book top-K instead would let a weak book's best chunk in ahead of a strong
-//   book's second.
+//   Both books compete in one ranking. `poolEntries` keys on (collection, uid) and `selectTopK` sorts
+//   across collections; a per-book top-K would let a weak book's best chunk in ahead of a strong book's
+//   second.
 //
-//   EACH BOOK IS CENTERED ON ITS OWN CORPUS, which is the plugin's per-collection mean. Sharing one mean
-//   across books would move every cosine in both, and nothing downstream could tell.
+//   Each book is centered on its own corpus, the plugin's per-collection mean. Sharing one mean across
+//   books would move every cosine in both, and nothing downstream could tell.
 //
-//   A SECOND BOOK'S GRADE IS IN SCOPE. It used to be dropped by `excludeTitles` — a title list whose
-//   predicate was "not the primary book". Scope is now whether the book was embedded, so a stale
-//   `excludeTitles` naming a book that IS here must no longer remove anything.
+//   A second book's grade is in scope. Scope is whether the book was embedded, so a stale `excludeTitles`
+//   naming a book that IS here must remove nothing.
 //
-//   THE PER-BOOK CAP FIRES. `applyBudget`'s `capOf` had no offline caller at all while one book was
-//   ranked, so nothing said whether the harness wires it to `entry.world`.
+//   The per-book cap fires. `applyBudget`'s `capOf` has no other offline caller, so nothing else says
+//   whether the harness wires it to `entry.world`.
 //
-// No ollama and no real book: hand-written vectors, since none of the above is a question about
-// embeddings. The second book's collection is placed where `indexPath` derives it (vectors dir, hashed
-// book name) rather than passed in — there is one indexFile and N books, so that resolution IS the thing
-// under test for every book but the primary.
+// No ollama and no real book: hand-written vectors, since none of the above is a question about embeddings.
+// The second book's collection is placed where `indexPath` derives it rather than passed in — there is one
+// indexFile and N books, so that resolution IS the thing under test for every book but the primary.
 import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, dirname } from 'node:path';
@@ -60,9 +57,8 @@ const sample = () => ({
     },
     query: 'text B1',
     scanChat: [],
-    // In `params`, not in an override: both are read when the collection is split, so scoreScene refuses
-    // to sweep them against a preloaded scene. denseAllEntries off keeps this fixture to the ordinary
-    // vectorized-only collections it writes.
+    // In `params`, not in an override: both are read when the collection is split, so scoreScene refuses to
+    // sweep them against a preloaded scene. denseAllEntries off keeps this fixture to ordinary collections.
     params: { denseAllEntries: false, centroidPopulation: 'vectorized' },
     // Graded rows in BOTH books, at uids the other one also has, and disagreeing — so a uid-keyed join
     // resolves to the wrong verdict rather than to none.
@@ -115,9 +111,9 @@ const top2 = makeCandidateSet({ ...scene, params: P, topK: 2 })(P.K1, P.B, null,
 eq(top2.length, 2, 'topK counts entries across every collection, not per collection');
 
 // --- stage 4's per-book quota ------------------------------------------------------------------------
-// No capture records a cap (it lives on the live world priority list), so it is a param. Without the
-// wiring this returns all four rows and reads as "the cap does nothing".
-// `relevanceFit` NAMES THE FIT: `check-embed` is a synthetic 3-dimensional embedder with none, and
+// No capture records a cap (it lives on the live world priority list), so it is a param. Without the wiring
+// this returns all four rows and reads as "the cap does nothing".
+// `relevanceFit` names the fit: `check-embed` is a synthetic 3-dimensional embedder with none, and
 // `modelsFor` refuses rather than borrowing. Which fit is arbitrary — this checks the per-book quota.
 const delivered = async (overrides) => {
     const r = await scoreScene({ sample: sample(), overrides: { budgetTokens: 100000, relevanceFit: 'bge-m3', ...overrides }, scene, qv: QV });

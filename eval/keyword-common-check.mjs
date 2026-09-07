@@ -1,7 +1,6 @@
-// Guards the English-commonness cut used by the keyword-prune too-common flag: the deliberated words
-// must land on the expected side of the one list. ONE LIST, not two — an entry's stickiness does not
-// enter, since sticky is about an armed entry persisting and says nothing about whether a key is a
-// good trigger.
+// Guards the English-commonness cut used by the keyword-prune too-common flag: the deliberated words must
+// land on the expected side of the one list. One list, not two — an entry's stickiness does not enter,
+// since sticky is about an armed entry persisting and says nothing about whether a key is a good trigger.
 // Run: node keyword-common-check.mjs
 import assert from 'node:assert';
 import { COMMON_WORDS } from '../plugin/commonwords.js';

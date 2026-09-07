@@ -47,8 +47,7 @@ setBoundaryMode('strict');
 eq(matches('? =Joe', "that is Joe's coat"), false, 'strict: = treats it as inside the word, like a plain key');
 eq(countKey('Joe', "that is Joe's coat", false, true), 0, '...which is the same answer the plain key gives');
 // --- regex TERMS ------------------------------------------------------------------------------------
-// A `/re/` key is a pattern everywhere else it appears; inside a SmartKey it used to be five literal
-// characters, which fell out of a lexer that did not know regexes exist. `? "/re/"` keeps the literal.
+// A `/re/` key is a pattern everywhere it appears, inside a SmartKey included. `? "/re/"` keeps the literal.
 {
     const codes = k => validateSmartKey(k).map(p => `${p.severity}:${p.code}`).join(' ');
     eq(matches('? /co(l|s)monaut/ walked', 'the cosmonaut walked in'), true, 'a regex term matches as a pattern');
@@ -61,9 +60,8 @@ eq(countKey('Joe', "that is Joe's coat", false, true), 0, '...which is the same 
     // Only at token start — the rule " and -/!/+ already follow.
     eq(matches('? and/or', 'an and/or clause'), true, 'a slash mid-token is ordinary text');
     eq(matches('? 3/4', 'in 3/4 time'), true, '...including a fraction');
-    // LEFTMOST QUALIFYING close, tracking escape and class. Greedy over the whole source would
-    // collapse `? /a/ /b/` into one pattern; stopping at the first delimiter regardless would cut
-    // a pattern that legitimately contains one.
+    // Leftmost qualifying close, tracking escape and class: greedy over the whole source would collapse
+    // `? /a/ /b/` into one pattern, and stopping at the first delimiter would cut a pattern containing one.
     eq(countKey('? /a/ /b/', 'a and b', false, false), 3, 'two patterns stay two, and both count');
     eq(matches('? /[/]/ x', 'the /x path'), true, 'the delimiter does not close inside a character class');
     eq(matches('? /a\\/b/', 'an a/b split'), true, '\\/ writes a literal slash');
@@ -79,20 +77,17 @@ eq(countKey('Joe', "that is Joe's coat", false, true), 0, '...which is the same 
     eq(codes('? /re/'), '', 'a lone regex is not no-terms');
     eq(codes('? /re/ -drill'), '', 'a regex is a positive contributor, so this is not negation-only');
     eq(codes('? /(/'), 'error:regex-invalid', 'a well-formed pattern new RegExp refuses is an error');
-    // NO SHAPE, NO FAULT. `/re` and `//` are not broken patterns, they are literal terms — which is
-    // exactly what the BARE keys `/re` and `//` are, so reporting a fault here would have been the
-    // divergence. regex-unterminated and regex-empty went with the shape they described.
+    // No shape, no fault: `/re` and `//` are literal terms, exactly as the bare keys `/re` and `//` are, so
+    // reporting a fault here would be the divergence.
     eq(codes('? /re'), '', 'an unterminated pattern is simply not a pattern');
     eq(codes('? //g'), '', '...and neither is an empty one');
     eq(countKey('? /re', 'anything /re', false, false), 1, '...it matches the characters, as the bare key does');
     eq(countKey('/re', 'anything /re', false, false), 1, '...which is the bare key it now agrees with');
     // Value-reading checks skip it: a pattern is punctuation by nature.
     eq(codes('? /[^"]+/'), '', 'punctuation-term and stray-quote do not read a pattern');
-    // A TERM READS AS THE WHOLE KEY READS. The plain-key rule is "the entire string is /…/flags";
-    // when a term IS the entire key this scanner's accept test is that same test, so the two can no
-    // longer disagree. Asserted on the TOKENS, because a count cannot tell two lexings apart: the old
-    // reading of `? /home/user/file` was the pattern `/home/` plus the term `user/file`, and it
-    // counted 2 against the text below for reasons that had nothing to do with the key.
+    // A term reads as the whole key reads: the plain-key rule is "the entire string is /…/flags", and this
+    // scanner's accept test is that same test, so the two cannot disagree. Asserted on the TOKENS, because
+    // a count cannot tell two lexings apart.
     const tok = k => tokenize(k)
         .map(t => t.type === 'REGEX' ? `re:${t.value}` : t.type === 'TERM' ? `term:${t.value}` : t.type).join(' ');
     const plainReads = k => (isRegexKey(k) ? `re:${k}` : `term:${k}`);
@@ -114,10 +109,10 @@ eq(countKey('Joe', "that is Joe's coat", false, true), 0, '...which is the same 
     eq(countKey('? /home/user/file', '/home/user/file', false, false), 1, 'a path is one literal term');
     eq(matches('? /home/user/file', 'the home user file'), false, '...so the bare-word reading is gone');
 
-    // A BARE regex key core reads differently. WA runs it as a pattern; core refuses any pattern whose
-    // delimiter is unescaped inside it and matches the whole string as literal text instead, which no
-    // prose contains — so the key never activates and nothing says so. The matcher is unchanged; this
-    // is the only thing validateSmartKey has to say about a key with no `?`.
+    // A bare regex key core reads differently: WA runs it as a pattern, while core refuses any pattern whose
+    // delimiter is unescaped inside it and matches the whole string as literal text, which no prose
+    // contains. The matcher is unchanged; this is the only thing validateSmartKey says about a key with
+    // no `?`.
     eq(codes('/and/or/'), 'warn:regex-core-refuses', 'a bare regex core will refuse is flagged');
     eq(codes('/24/7/'), 'warn:regex-core-refuses', '...whatever the pattern is; the slash is the fault');
     eq(codes('/and\\/or/'), '', '...and escaping the inner slash clears it, because core then reads it');
@@ -131,8 +126,8 @@ eq(countKey('Joe', "that is Joe's coat", false, true), 0, '...which is the same 
     // bare form keeps its quotes as characters and matches neither reading.
     eq(countKey('? "/and/or/"', 'the config at /and/or/ is set', false, false), 1, '? "…" is the literal hatch');
     eq(countKey('"/and/or/"', 'the config at /and/or/ is set', false, false), 0, '...and a bare "…" is not one');
-    // The warning names the term as TYPED, and the hatch it names has to be typeable. JSON.stringify
-    // rendered `/a\/b/c/` as `/a\\/b/c/`, so the sentence told the author to type a different key.
+    // The warning names the term as TYPED, and the hatch it names has to be typeable: JSON.stringify would
+    // render `/a\/b/c/` as `/a\\/b/c/`, telling the author to type a different key.
     const msg = k => validateSmartKey(k)[0].message;
     eq(msg('/a\\/b/c/').includes('use ? "/a\\/b/c/".'), true, 'the hatch quotes the term as typed, not JSON-escaped');
     eq(countKey('? "/a\\/b/c/"', 'path /a\\/b/c/ here', false, false), 1, '...and that hatch matches the literal');
@@ -170,9 +165,9 @@ eq(matches('? hers she', 'the ushers she saw'), true, 'unflagged substring terms
     const entry = { key: ['cat', 'Jubilee', 'hot tub', 'nope'] };
     const { score, hits: h } = keywordScore(entry, text, entry.key, { k1: 2, caseSensitiveDefault: false, wholeWordsDefault: false });
     eq(h.map(x => `${x.key}:${x.count}`).join(' '), 'cat:3 Jubilee:1 hot tub:1', 'primed counts equal naive substring counts');
-    // The claim is that the automaton's counts reach the scorer unchanged, so the expectation is built
-    // from those counts through the shared curve rather than from an inlined formula — otherwise this
-    // fails whenever the curve moves, reporting a scoring change as an Aho-Corasick fault.
+    // The claim is that the automaton's counts reach the scorer unchanged, so the expectation is built from
+    // those counts through the shared curve rather than an inlined formula — otherwise a curve change
+    // reports as an Aho-Corasick fault.
     eq(score.toFixed(3), (repeatCurveOf(3, 2) + repeatCurveOf(1, 2) + repeatCurveOf(1, 2)).toFixed(3),
         'saturation unchanged by the fast path');
     // Same primed text, flagged variants must fall through to the exact walk.
@@ -196,10 +191,9 @@ eq(countKey('? fire::3 XOR flood', 'a fire burns', false, false), 3, 'XOR still 
     eq(evaluate({ type: 'NOT', operand: T('alpha') }, 'alpha', empty).matched, true, 'acHits forwarded through NOT');
 }
 
-// Smart keys are NOT exempt from the audit — they are audited on df, like any other key. Neither of
-// these queries can match "nothing relevant", and they are dead for DIFFERENT reasons: the first
-// evaluates false against this text, the second is a key the matcher refuses to run at all. The
-// verdicts have to say which, since only one of them would change were the text different.
+// Smart keys are audited on df like any other key. These two are dead for different reasons — the first
+// evaluates false against this text, the second is a key the matcher refuses to run at all — and the
+// verdicts have to say which, since only one would change were the text different.
 {
     const data = { entries: { 0: { uid: 0, key: ['? moon mission', '? -apollo'], content: 'nothing relevant' } } };
     const opts = { scanKeyword: true, scanVectorized: true, scanConstant: true, includeInactive: true, pruneUnattested: true, pruneCommon: true, pruneShort: true, ignoreProper: false, bookCommon: 0.5, minLength: 4 };
@@ -207,9 +201,8 @@ eq(countKey('? fire::3 XOR flood', 'a fire burns', false, false), 3, 'XOR still 
     eq(classifyEntry(data.entries[0]).map(f => f.flag).join(','), 'unattested,unusable', 'a dead query is flagged; a negation-only one is flagged unusable, not dead');
 }
 
-// NEITHER IS A REGEX KEY, for the same reason and by the same machinery. `classify` used to discard
-// both, so a pattern firing on every entry — `/\n/` against multi-line prose — drew not one word from
-// any tool WA had, while runBatch had been computing its df all along.
+// Neither is a regex key, for the same reason and by the same machinery: a `classify` that discarded both
+// would leave a pattern firing on every entry — `/\n/` against multi-line prose — unreported by every tool.
 {
     const entries = {};
     for (let i = 1; i <= 12; i++) entries[i] = { uid: i, key: [], content: `Marjorie walked on.\nShe paused, number ${i}.` };
@@ -234,11 +227,10 @@ const ast = parse(tokenize('? a (b OR c)'));
 eq(ast.type, 'AND', 'adjacent primaries get implicit AND');
 eq(evaluate(ast, 'a c').matched, true, 'evaluates the injected AND');
 
-// Malformed operator POSITIONS are typos, not instructions. Building the node anyway made the whole
-// key dead — AND(x, null) can never match — so the most idiomatic Lucene form of all, `+fire +water`,
-// matched nothing. A prefix binary operator is Lucene's per-term required-marker, which an implicit
-// AND already says; a dangling one keeps whichever side exists. The Studio validator is what tells
-// the author the key is malformed; the matcher's job is not to silently refuse to fire.
+// Malformed operator POSITIONS are typos, not instructions: building the node anyway makes the whole key
+// dead, since AND(x, null) can never match, which would kill the idiomatic Lucene form `+fire +water`. A
+// prefix binary operator is Lucene's per-term required-marker, which an implicit AND already says; a
+// dangling one keeps whichever side exists. The Studio validator tells the author the key is malformed.
 {
     const T = 'fire and water everywhere';
     eq(matches('? +fire +water', T), true, 'leading + on every term (Lucene required-marker)');
@@ -256,9 +248,8 @@ eq(evaluate(ast, 'a c').matched, true, 'evaluates the injected AND');
 }
 console.log('ok   malformed operator positions degrade to no-ops, not dead keys');
 
-// The delimiter is `::`, so a single colon is ordinary text. With one colon, "Judges 3:16" parsed as
-// the term "3" weighted 16 -- silent, absurd, and escapable only by quoting a construction nobody
-// expects to need quoting. Times, verse refs, sequel titles and URLs now tokenise as written.
+// The delimiter is `::`, so a single colon is ordinary text: with one colon "Judges 3:16" parses as the term
+// "3" weighted 16, escapable only by quoting. Times, verse refs, sequel titles and URLs tokenise as written.
 {
     const terms = q => tokenize(q).filter(t => t.type === 'TERM').map(t => `${t.value}@${t.weight}`).join(' ');
     eq(terms('? fire::2'), 'fire@2', ':: introduces a weight');
@@ -288,8 +279,8 @@ console.log('ok   weight delimiter is ::, single colon is ordinary text');
     eq(codes('? '), 'error:no-terms', 'an empty query can never match');
     eq(codes('? ()'), 'error:no-terms', 'an empty group has no terms');
     eq(codes('? fire "water'), 'error:stray-quote', 'an unclosed quote leaves the quote in the term');
-    // ...and ONLY an unclosed one. An inch mark, a seconds mark or a closing quote mid-term is
-    // ordinary text — the lexer only ever puts a `"` FIRST when the quoted branch failed to close.
+    // ...and only an unclosed one: an inch mark, a seconds mark or a closing quote mid-term is ordinary
+    // text, the lexer only putting a `"` first when the quoted branch failed to close.
     eq(codes('? 6" copper pipe'), '', 'an inch mark is text, not a broken quote');
     eq(codes('? 5\'10" barefoot'), '', 'feet and inches together are text');
     eq(codes('? say"what'), '', 'a quote inside a bare word is text');

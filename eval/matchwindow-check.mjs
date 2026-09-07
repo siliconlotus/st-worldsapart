@@ -80,10 +80,9 @@ eq(typeof scanWindow(chat, { depth: 10 }), 'string', 'scanWindow still returns t
 
 console.log('ok   matchWindow: scan is the old behaviour, narrower settings scope both signs');
 
-// The audit asks the runtime's question. A key whose terms never land in one paragraph will never
-// fire at that setting, so reporting it as attested would be the audit telling the author it works.
-// A LITERAL key is slice-invariant either way — measured over the books on disk, no literal key's
-// df or occurrence total moves, because no literal spans a paragraph break (K5).
+// The audit asks the runtime's question: a key whose terms never land in one paragraph will never fire at
+// that setting, so reporting it as attested would tell the author it works. A literal key is
+// slice-invariant either way — no literal spans a paragraph break, so no literal's df moves (K5).
 {
     const book = {
         entries: {
@@ -166,12 +165,10 @@ console.log('ok   a key the chat scan never covered is not reported as chat-chec
 }
 console.log('ok   a chat hit is one message, shared by the browser and the server');
 
-// The Studio does not call buildKeyPruneScan directly — keyword-tools.mjs wraps it to inject ST's
-// match-flag globals. That wrapper took a FIXED 4th argument and built it itself, so every option the
-// Studio passed (matchWindow, chatRate) was discarded: the audit ran at the default match window with
-// no chat evidence however much was gathered, and the only symptom was a verdict that never changed.
-// String-sliced rather than imported because the wrapper pulls in ST (see bulk-reorder-check for the
-// same trick) — a shape check, but this shape is what silently disconnected two features.
+// The Studio does not call buildKeyPruneScan directly — keyword-tools.mjs wraps it to inject ST's match-flag
+// globals. A wrapper that builds a fixed 4th argument itself discards every option the Studio passed
+// (matchWindow, chatRate), and the only symptom is a verdict that never changes. String-sliced rather than
+// imported because the wrapper pulls in ST (see bulk-reorder-check for the same trick).
 {
     const src = await import('node:fs').then(fs => fs.readFileSync(new URL('../extension/keyword-tools.mjs', import.meta.url), 'utf8'));
     const m = src.match(/export const buildKeyPruneScan = \(([^)]*)\)([\s\S]*?)\n\n/);

@@ -7,9 +7,9 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { archiveContract, contractBody, contractHash, readContract, CONTRACT_DIR } from './synthetic-data/contract.mjs';
 
-// THE FRONTMATTER IS NOT THE CONTRACT. Claude Code reads it to discover the agent and the prompt strips it,
-// so the model never sees it — and hashing it once moved BOTH rubric hashes for an edit to a
-// `description` line, while neither instruction block changed by a byte (G9). Hash what is sent.
+// The frontmatter is not the contract: Claude Code reads it to discover the agent and the prompt strips it,
+// so the model never sees it, and hashing it moves both rubric hashes for a `description` edit while
+// neither instruction block changes by a byte (G9). Hash what is sent.
 const withFm = d => `---\nname: r\ndescription: ${d}\n---\n\nYou are the judge.\nGrade 0-4.\n`;
 eq(contractBody(withFm('one')).trim(), 'You are the judge.\nGrade 0-4.', 'the frontmatter is stripped, leaving what is sent');
 eq(contractHash(contractBody(withFm('one'))), contractHash(contractBody(withFm('a completely different description'))),

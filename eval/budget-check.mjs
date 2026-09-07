@@ -82,9 +82,9 @@ const exemptDynSet = new Set([...exemptDyn, ...dynamic]);
 r = await run({ walk: [...exemptDyn, ...dynamic], isDynamic: item => exemptDynSet.has(item), maxDynamic: 5 });
 eq(r.survivors.size, 9, 'exempt dynamic entries do not consume the dynamic cap');
 
-// EXEMPT MEANS EXEMPT, on tokens as on the count caps. maxTokens is a cost guard rather than a limit
-// anything downstream enforces, so charging a mandatory entry against it would collapse retrieval to pay
-// for entries the author marked must-have, at flat cost — the same failure the count caps refuse.
+// Exempt means exempt, on tokens as on the count caps: maxTokens is a cost guard rather than a limit
+// anything downstream enforces, so charging a mandatory entry against it collapses retrieval to pay for
+// entries the author marked must-have.
 const withVip = [mk('vip2', 40, { ignoreBudget: true }), ...dynamic];
 r = await run({ walk: withVip, isDynamic: () => true, maxTokens: 60 });
 eq(r.budgeted, 60, 'the exempt entry does not spend the budget');
@@ -104,8 +104,7 @@ eq(r.inPrompt, 100, 'but 100 tokens still reach the prompt — 60 budgeted, 40 e
 eq(r.survivors.size, 7, 'so six budgeted entries fit instead of two');
 
 // --- budget slack: keeps the entry genuinely next in line from losing its slot ---
-// Budget 400. Entries in rank order: 300, 250, 100, 100. After the 300 there are 100
-// tokens left, so the 250 does not fit — without slack it is skipped and the 100 behind
+// Budget 400, entries in rank order 300, 250, 100, 100: without slack the 250 is skipped and the 100 behind
 // it takes the slot, which is a worse entry beating a better one.
 const boundary = [mk('a', 300), mk('big', 250), mk('s1', 100), mk('s2', 100)];
 const budgetRun = (opts) => run({ walk: boundary, isDynamic: () => true, maxTokens: 400, ...opts });
@@ -193,10 +192,10 @@ eq(r.survivors.has(withConstant[0]), true, 'the constant is not counted against 
 r = await run({ walk: [mk('a', 10), mk('b', 10), mk('c', 10)], isDynamic: () => true, maxTotal: 1 });
 eq(r.skipped.every(x => x.tail), true, 'count cap rejections are always tail');
 
-// Sticky rows ride at the HEAD of the walk (onScanDone partitions sticky, then constant, then
-// results — always-on by authorial intent), so a token squeeze exhausts the budget on them first
-// and the cut lands entirely in the retrieved block. Sticky's timed-effect detection is ST-side;
-// what is pure — and what this pins — is that head placement IS the protection.
+// Sticky rows ride at the HEAD of the walk (onScanDone partitions sticky, then constant, then results), so
+// a token squeeze exhausts the budget on them first and the cut lands entirely in the retrieved block.
+// Sticky's timed-effect detection is ST-side; what is pure, and what this pins, is that head placement IS
+// the protection.
 {
     const sticky = Array.from({ length: 3 }, (_, i) => mk(`s${i + 1}`, 10));
     const walk = [...sticky, ...constants, ...dynamic];
@@ -232,17 +231,14 @@ v = await runV({ maxVectorEntries: 2 });
 eq(v.skipped.some(s => s.blockedBy.some(b => b.cap === 'vector')), true, 'a vector-blocked row names the vector cap');
 eq(v.skipped.filter(s => s.blockedBy.some(b => b.cap === 'vector')).length, 4, 'the 4 vector rows past the cap are each reported');
 
-// A vectorized CONSTANT is not dynamic, so no entry cap may reject it — the vector cap included.
-// isVector reads the entry's own flag and answers true for one, which is exactly why the block clause
-// guards on isDynamic rather than trusting the predicate.
+// A vectorized CONSTANT is not dynamic, so no entry cap may reject it, the vector cap included. isVector
+// reads the entry's own flag and answers true for one, which is why the block clause guards on isDynamic
+// rather than trusting the predicate.
 //
-// The shared walk (constants then dynamic) cannot exercise this: applyBudget always walks
-// constants before dynamic, so `vector` is still 0 throughout the constant block on any ordering a
-// caller actually produces, and the guard is never reached either way. This local order — two
-// vector rows exhausting the cap, THEN a constant, which no caller produces — exists only to pin
-// that the function holds vector ⊆ dynamic itself rather than inheriting it from walk order. Do not
-// "fix" this to match production order; that would delete the only case that tells the guard apart
-// from the counter.
+// The local order here — two vector rows exhausting the cap, THEN a constant, which no caller produces —
+// exists only to pin that the function holds vector ⊆ dynamic itself rather than inheriting it from walk
+// order. Do not "fix" it to match production order: that deletes the only case telling the guard apart from
+// the counter.
 const constantAfterVectorCap = [dynamic[0], dynamic[1], constants[0]];
 const vAfterCap = await run({ walk: constantAfterVectorCap, isVector: () => true, maxVectorEntries: 2 });
 eq(vAfterCap.survivors.has(constants[0]), true, 'a constant walked after the vector cap is spent still survives — the block clause checks isDynamic, not just the counter');
@@ -257,16 +253,16 @@ const res = [row('r1', 9), row('r2', 8.9), row('r3', 8.8), row('r4', 1)];
 const stick = [row('s1', 0.1)];
 const cons = [row('k1', 0)];
 
-// CONSTANT BEFORE STICKY: constant means always, so a world rule only loses its place when constants
-// alone overflow the budget. The walk order is a prefix cut, so whichever class leads is served first.
+// Constant before sticky: constant means always, so a world rule only loses its place when constants alone
+// overflow the budget. The walk order is a prefix cut, so whichever class leads is served first.
 eq(walkOrder({ sticky: [row('s1', 0.9)], constant: [row('k1', 0.1)], results: [] })[0].key, 'k1',
     'a constant is walked before an armed sticky, whatever their fused scores');
 eq(walkOrder({ sticky: stick, constant: cons, results: res }).map(x => x.key).join(','), 'k1,s1,r1,r2,r3,r4',
     'constant and sticky lead, then the dynamic block in retention order');
 eq(walkOrder({ sticky: stick, constant: cons, results: res }).length, 6,
     'nothing is dropped on the way in — every cut at this stage is applyBudget s');
-// PROMOTED SITS BETWEEN. An author declaring an entry belongs outranks relevance choosing one and does
-// not outrank always-on, so the block goes behind both durable classes and ahead of the dynamic one.
+// Promoted sits between: an author declaring an entry belongs outranks relevance choosing one and does not
+// outrank always-on, so the block goes behind both durable classes and ahead of the dynamic one.
 eq(walkOrder({ sticky: stick, constant: cons, promoted: [row('p1', 0.5)], results: res }).map(x => x.key).join(','),
     'k1,s1,p1,r1,r2,r3,r4', 'promoted rows walk behind both durable blocks and ahead of the dynamic one');
 eq(walkOrder({ sticky: stick, constant: cons, results: res }).map(x => x.key).join(','), 'k1,s1,r1,r2,r3,r4',

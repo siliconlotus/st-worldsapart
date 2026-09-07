@@ -1,14 +1,12 @@
 // Logistic regression by IRLS, and the matrix solve it needs. Library, no CLI.
 //
-// Split from its caller for the same reason the gazetteer and the scorers are: the fit is what a relevance
-// claim rests on, and a second copy of it in a second tool would let the two disagree about a coefficient
-// while both printed one. Small enough to read in full, which is the point — a fitted weight nobody can
-// check is not evidence.
+// Split from its caller for the same reason the gazetteer and the scorers are: a second copy of the fit
+// would let two tools disagree about a coefficient while both printed one.
 //
-// IRLS RATHER THAN GRADIENT DESCENT because the standard errors come free. Newton's method already forms
-// (X'WX)^-1 at every step, and its diagonal at convergence IS the coefficient covariance — so "the BM25
-// weight moved" can be read against the interval it moved inside, instead of being asserted from two point
-// estimates. A gradient method would have to bootstrap for the same thing.
+// IRLS rather than gradient descent because the standard errors come free: Newton's method already forms
+// (X'WX)^-1 at every step, and its diagonal at convergence IS the coefficient covariance, so a moved
+// coefficient can be read against the interval it moved inside rather than asserted from two point
+// estimates.
 
 /** Gauss-Jordan inverse with partial pivoting. n is the feature count (single digits here), so the cubic
  *  cost is irrelevant and the clarity is not. Returns null for a singular matrix — a collinear feature set,
@@ -38,9 +36,9 @@ export const sigmoid = z => 1 / (1 + Math.exp(-z));
 /**
  * Fits P(y=1) = sigmoid(X·beta) by iteratively reweighted least squares.
  *
- * RIDGE BY DEFAULT, small. Graded pools are mostly zeros and an eligibility indicator can be constant
- * within one arm's rows, which is exactly the separation that sends a coefficient to infinity and reports
- * it as a finding. A 1e-6 penalty leaves an identified fit untouched at the printed precision and keeps an
+ * Ridge by default, small: graded pools are mostly zeros and an eligibility indicator can be constant
+ * within one arm's rows, which is the separation that sends a coefficient to infinity and reports it as a
+ * finding. A 1e-6 penalty leaves an identified fit untouched at the printed precision and keeps an
  * unidentified one finite and visibly huge.
  *
  * @param {number[][]} X Rows of features. The caller prepends its own intercept column if it wants one.
@@ -111,12 +109,10 @@ export function auc(scores, y) {
 /**
  * The cumulative-logit family: one binary fit per boundary of an ordinal label, P(g >= k) for each cut.
  *
- * SEPARATE SLOPES PER BOUNDARY, WHICH IS NOT PROPORTIONAL ODDS — deliberately. Proportional odds shares
- * one slope vector across every cut and buys efficiency with that assumption; here the assumption IS the
- * question. Fitting each boundary alone lets the slopes be compared: if they agree, proportional odds is
- * justified and can be fitted later for the tighter intervals; if a boundary's slope collapses or inverts,
- * that is the signals failing to see a distinction the scale asserts, which a shared slope would average
- * away into the boundaries that do work.
+ * Separate slopes per boundary, which is not proportional odds — deliberately: proportional odds shares one
+ * slope vector across every cut and buys efficiency with that assumption, and here the assumption is the
+ * question. Fitting each boundary alone lets the slopes be compared, so a collapsed or inverted slope shows
+ * the signals failing to see a distinction the scale asserts rather than being averaged away.
  *
  * The caller supplies the design matrix once — the features do not change with the cut, only the label —
  * so this is K-1 fits over one X, and whatever intercept columns the caller built are reused as they
@@ -142,10 +138,9 @@ export function cumulativeFit(X, g, cuts, opts = {}) {
 /**
  * Precision-recall readout: average precision, and precision at chosen recall levels.
  *
- * AUC IS THE WRONG HEADLINE FOR A THRESHOLDED SCORE. It is prevalence-independent, which makes it the
- * right thing for comparing signals and the wrong thing for asking what a threshold would deliver: at a
- * 1% base rate an AUC near 0.98 can still mean most of what clears the bar is wrong. AP is the area under
- * the precision-recall curve and moves with prevalence, so it answers the operational question — and the
+ * AUC is the wrong headline for a thresholded score: it is prevalence-independent, which makes it right for
+ * comparing signals and wrong for asking what a threshold would deliver. AP is the area under the
+ * precision-recall curve and moves with prevalence, so it answers the operational question, and the
  * precision-at-recall rows answer it in the units a bar is actually chosen in.
  *
  * AP by the step-sum (precision summed at each positive, divided by the positive count) rather than by
@@ -173,43 +168,33 @@ export function prCurve(scores, y, recalls = [0.5, 0.75, 0.9]) {
 }
 
 /**
- * Reliability: do the predicted probabilities MEAN what they say. AP and AUC read the ordering, and a
- * monotone rescaling leaves both untouched — so a model can rank perfectly and still be wrong about
- * every number it reports. A bar argued in probability terms ("ship above 0.3") rests on the numbers,
- * not the order, and nothing here checked them.
+ * Reliability: do the predicted probabilities mean what they say. AP and AUC read the ordering, which a
+ * monotone rescaling leaves untouched, so a model can rank perfectly and still be wrong about every number
+ * it reports — and a bar argued in probability terms rests on the numbers, not the order.
  *
- * READ IT OUT OF FOLD OR IT MEASURES NOTHING. A logistic fit with an intercept satisfies
- * sum(p) == sum(y) at convergence — that is one of its score equations — so in-sample the global
- * calibration is zero by construction and the bins only show how the residual redistributes. The
- * in-sample row is worth printing precisely so a near-zero ECE there is recognised as arithmetic
- * rather than read as evidence.
+ * Read it out of fold or it measures nothing: a logistic fit with an intercept satisfies sum(p) == sum(y)
+ * at convergence, so in-sample the global calibration is zero by construction and the bins only show how
+ * the residual redistributes. The in-sample row is printed so a near-zero ECE there is recognised as
+ * arithmetic rather than read as evidence.
  *
- * QUANTILE BINS, NOT EQUAL WIDTH. Prevalence here is low (F39), so predictions pile up near zero: ten
- * equal-width bins put nine rows in ten into the first and leave the upper tail — the only region a
- * bar is ever drawn in — with a handful of rows each, where the observed rate is noise. Equal-count
- * bins spend the same n on every point of the curve. The cost is that bin EDGES move between runs,
- * so compare ECE across models rather than bin against bin.
+ * Quantile bins, not equal width: prevalence here is low (F39), so predictions pile up near zero and
+ * equal-width bins leave the upper tail — the only region a bar is ever drawn in — with a handful of rows
+ * each. The cost is that bin EDGES move between runs, so compare ECE across models rather than bin against
+ * bin. Ties are kept together, since splitting a run of identical probabilities would invent a distinction
+ * the model did not make, so bins are approximately rather than exactly equal in size.
  *
- * Ties are kept together: a run of identical probabilities in one bin is a real property of the
- * predictor, and splitting it to hit a target count would invent a distinction the model did not make.
- * So bins are approximately, not exactly, equal in size.
+ * ECE is the n-weighted mean gap, MCE the worst single bin: ECE is what the average prediction is off by,
+ * MCE what the worst region is off by, and a bar sits in one region rather than on the average.
  *
- * ECE is the n-weighted mean gap, MCE the worst single bin. Both are reported because they answer
- * different questions: ECE is what the average prediction is off by, MCE is what the worst region is
- * off by, and a bar sits in one region rather than on the average.
+ * An ECE is meaningless without its null. A bin of n rows at probability p scatters around p by
+ * ~sqrt(p(1-p)/n) whatever the model does, so a perfectly calibrated predictor reports a positive ECE and a
+ * smaller sample reports a larger one — comparing two tiers of very different size on raw ECE reads sample
+ * size as miscalibration, and the tiers do differ enormously in row count (F30). `nullSamples` draws labels
+ * from the model's own probabilities and recomputes ECE, giving `eceNull` and the share of null draws at
+ * least as extreme (`eceP`). A parametric bootstrap rather than a closed form, because the bins are
+ * quantile-cut and tie-merged and so data-dependent in size.
  *
- * AN ECE IS MEANINGLESS WITHOUT ITS NULL. A bin of n rows at probability p has an observed rate that
- * scatters around p by ~sqrt(p(1-p)/n) whatever the model does, so a PERFECTLY calibrated predictor
- * reports a positive ECE, and a smaller sample reports a larger one. Comparing two tiers of very
- * different size on raw ECE therefore reads sample size as miscalibration — which is not a hypothetical
- * here: the two tiers differ enormously in row count (F30). `nullSamples` draws labels from the model's OWN
- * probabilities and recomputes ECE, giving the value a well-calibrated model of this size and shape
- * would produce (`eceNull`) and the share of null draws at least as extreme (`eceP`). A parametric
- * bootstrap rather than a closed form because the bins are quantile-cut and tie-merged, so their sizes
- * are data-dependent and no textbook expression describes them.
- *
- * SEEDED, because a check that moves between runs cannot fail. The generator is inlined for the same
- * reason the fit is: three lines nobody has to trust.
+ * Seeded, because a check that moves between runs cannot fail.
  *
  * @param {number[]} p Predicted probabilities in [0,1]
  * @param {number[]} y Labels, 0 or 1

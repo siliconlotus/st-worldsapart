@@ -1,7 +1,6 @@
 // Self-check for grading.mjs — the /wa-grade sample assembler. The UI half can't be exercised offline, so
-// this pins the part that decides what a sample CONTAINS: book fidelity, the settings mapping, the
-// reference tier, and the foreign-book exclusion. A sample that silently loses a field is a graded scene
-// that can't be re-run, which is the whole failure this feature exists to prevent.
+// this pins what a sample CONTAINS: book fidelity, the settings mapping, the reference tier, and the
+// foreign-book exclusion. A sample that silently loses a field is a graded scene that can't be re-run.
 import { buildSample, bundleSamples, captureParams, hashBooks, keyByUid, stRelative, isDurable, mergeGrades, openBundle, passKey, rowKey, sampleFile, sceneDiff, searchedBook, setGrades, splitGraded, unionArms } from '../extension/grading.mjs';
 import { eq, gradeValue } from './metrics.mjs';
 import * as query from '../extension/query.mjs';
@@ -21,9 +20,7 @@ eq(Object.keys(keyByUid(Object.values(book))).length, 2, 'an array of entries is
 const s = { bm25K1: 1.2, bm25B: 0.75, properNounBoost: 3, stopwordDocFreq: 0.25,  maxVectorEntries: 10, suppressVectorKeys: true, entityFilter: true };
 const p = captureParams(s, { caseSensitive: false, wholeWords: false, includeNames: true, allowWIScan: true });
 eq(p.K1, 1.2, 'bm25K1 -> K1');
-// NO FUSION PARAMS. K/LEXW/KEYW/weightByOrder described RRF over the layout, which no longer exists —
-// E[credit] orders the dynamic block and reads the signals directly. Absent, not null: a null would say
-// the capture ran with fusion off, where the truth is the question stopped being asked.
+// Absent, not null: a null would say the capture ran with fusion off, where the question stopped being asked.
 eq('K' in p || 'LEXW' in p || 'KEYW' in p || 'weightByOrder' in p, false,
     'a capture records no fusion parameters, because there is no fusion');
 eq(p.stopwordDf, 0.25, 'stopwordDocFreq -> stopwordDf');
@@ -31,10 +28,9 @@ eq('threshold' in p, false, 'no admission threshold is captured — stage 1 has 
 eq('vectorCutoff' in p, false, 'no cliff mode is captured — the relevance cut reads the relevanceCutoff setting, which the settings dump already carries');
 eq(p.includeNames, true, 'ST world-info globals are carried, not guessed');
 eq('retrievalMode' in captureParams(s, {}), false, 'the capture records no retrieval mode');
-// "Include in World Info Scanning" changes what the haystack CONTAINS — with it on, the Author's Note and
-// the character's depth prompt enter the scan through the inject buffer, the latter for EVERY entry rather
-// than only those setting `matchCharacterDepthPrompt`. An ST global like the other three, so it is recorded
-// beside them: two captures of one scene under different settings of it activate differently.
+// "Include in World Info Scanning" changes what the haystack CONTAINS — the Author's Note and the
+// character's depth prompt enter the scan through the inject buffer, the latter for EVERY entry — so two
+// captures of one scene under different settings of it activate differently.
 eq(p.allowWIScan, true, 'whether the Author\'s Note is in the scan is recorded, not assumed off');
 eq(captureParams(s, {}).allowWIScan, undefined, 'and an injector that does not say leaves it absent rather than guessing');
 eq('commonWordWeight' in p, false, 'no general-English down-weight is captured — BM25 no longer takes one');
@@ -42,23 +38,20 @@ eq('suppressVectorKeys' in p, false, 'no key-suppression flag is captured — th
 
 // --- reference tier: constants and CONFIGURED stickies are not relevance results ---
 eq(isDurable({ block: 'constant', sticky: 0 }), true, 'constant is durable');
-// ARMED, not configured: a sticky entry whose effect no turn has armed is ordinary content competing for
-// selection, and `block` is where the runtime records that it armed one. The configured value says nothing
-// about this turn — reading it deleted whole reference tiers from the ranked population.
+// Armed, not configured: a sticky entry whose effect no turn has armed is ordinary content competing for
+// selection, and `block` is where the runtime records that it armed one.
 eq(isDurable({ block: 'dynamic', sticky: 3 }), false, 'configured sticky with no armed effect is gradeable');
 eq(isDurable({ block: 'sticky', sticky: 3 }), true, 'an ARMED sticky row is durable');
 eq(isDurable({ block: 'sticky', sticky: 0 }), true, '...read off block, not the setting');
 eq(isDurable({ block: 'dynamic', sticky: 0 }), false, 'a plain dynamic row is gradeable');
-// A PROMOTED ROW IS GRADED. `@@promote` waives the relevance CUT, not the judgement — and the exemption
-// is what a grade on it measures. Every "is this gradeable" test reads !isDurable for this reason; the
-// capture UI tested `block === 'dynamic'` and silently listed promoted rows as ungradeable scaffolding.
+// `@@promote` waives the relevance cut, not the judgement, so every "is this gradeable" test reads
+// !isDurable rather than `block === 'dynamic'`.
 eq(isDurable({ block: 'promoted', sticky: 0 }), false, 'a promoted row is gradeable — it is exempt from the cut, not from judgement');
 eq(isDurable({ block: 'promoted', sticky: 3 }), false, '...and a configured sticky value does not change that');
 
 // --- searchedBook: which collection the harness must load ---
-// The case that motivated it: the chat's bound book contributed ONE retrieved row, another book contributed
-// three. Keying the sample to the chat book would point the harness at a collection that contributed almost
-// nothing, and rank the three against the wrong centroid.
+// Keying the sample to the chat's bound book points the harness at a collection that may have contributed
+// almost nothing, and ranks the rest against the wrong centroid.
 const rows = [
     { book: 'Chat', cosine: 0.9, block: 'dynamic' },
     { book: 'Lore', cosine: 0.8, block: 'dynamic' },
@@ -91,9 +84,8 @@ eq(sample.scanChat[0].mes, 'w', 'the scan MESSAGES are frozen into the sample, a
 // Without the chat path a sample cannot re-derive its query at another depth, so --depths is impossible.
 eq(sample.chat, 'chats/c.jsonl', 'chat provenance is carried (needed by --depths)');
 eq(sample.grades.length, 2, 'all grades kept');
-// The interleaved-books case: a graded entry from a second attached book is kept as an ordinary grade and
-// nothing is declared about it. The harness ranks every book the document embeds, so scope is `books`
-// membership — which is why the sample must record every attached book and not only the primary.
+// The harness ranks every book the document embeds, so scope is `books` membership — which is why the
+// sample must record every attached book and not only the primary.
 eq(sample.grades.some(g => g.book === 'Other'), true, 'a second book\'s grade is an ordinary grade, not an excluded one');
 eq('excludeTitles' in sample, false, 'nothing is declared out of scope by title');
 eq(Object.keys(sample.books).length, 2, 'every attached book is recorded');
@@ -104,10 +96,8 @@ eq(JSON.parse(content).name, 'scene9', 'content is valid JSON');
 eq(sampleFile({ name: 'my scene/../x' }).filename, 'my-scene-..-x.json'.replace('..-', '..-'), 'name is slugged for the filesystem');
 eq(sampleFile({}).filename, 'scene.json', 'missing name falls back');
 
-// ROUND-TRIP: every field handed to buildSample must come back out. Three fields have been silently
-// dropped this way (`chat`, twice, and `gradedCandidates`) because the return object is written by hand and
-// a missing line is invisible — the sample just quietly lacks a field the harness later reports as absent.
-// Asserting per-field caught them one at a time; this catches the next one for free.
+// Round-trip: every field handed to buildSample must come back out. The return object is written by hand,
+// so a missing line is invisible — the sample just quietly lacks a field.
 const IN = {
     name: 'rt', notes: 'n', query: 'q', queryChat: [{ name: 'A', mes: 'm' }], scanChat: [{ name: 'A', mes: 'w' }], depth: 20,
     chat: 'chats/c.jsonl', book: 'worlds/Main.json', index: 'i.json', primaryBook: 'Main', embedModel: 'bge-m3',
@@ -150,21 +140,20 @@ for (const d of [1, 2, 3]) {
 }
 
 // --- delta pooling (/wa-super-grade) ---
-// The failure this guards: uid alone is ambiguous across books, so a same-uid entry in a DIFFERENT book must
-// not be mistaken for an already-graded one and skipped.
+// uid alone is ambiguous across books, so a same-uid entry in a different book must not be mistaken for an
+// already-graded one and skipped.
 eq(rowKey({ book: 'A', uid: 7 }) === rowKey({ book: 'B', uid: 7 }), false, 'rowKey separates same uid in different books');
 
 // --- the scene guard (sceneDiff) -------------------------------------------------------------------
-// rowKey is book + uid, so pooling prior grades WITHOUT this attaches one scene's verdicts to another —
-// which is what put one scene's rows onto a scene captured minutes later (G9). The
-// same-book case is the one a book test misses, so it is the case asserted first.
+// rowKey is book + uid, so pooling prior grades without this attaches one scene's verdicts to another (G9).
+// The same-book case is the one a book test misses, so it is asserted first.
 const SCENE = { query: 'q', scanChat: [{ name: 'N', mes: 'Ketheric raised his glass' }], depth: 2 };
 eq(sceneDiff(SCENE, { ...SCENE }).join(','), '', 'the same scene differs in nothing');
 eq(sceneDiff(SCENE, { ...SCENE, scanChat: [{ name: 'N', mes: 'a different turn entirely' }] }).join(','), 'scanChat',
     'two scenes of ONE book are told apart by their messages — the case book+uid cannot see');
 eq(sceneDiff(SCENE, { ...SCENE, query: 'other' }).join(','), 'query', 'a different query is a different scene');
-// Depth is part of the scene, not metadata beside it: relevance is a property of the (entry, WINDOW)
-// pair, so ablating turns can remove the reference that earned the grade.
+// Depth is part of the scene: relevance is a property of the (entry, WINDOW) pair, so ablating turns can
+// remove the reference that earned the grade.
 eq(sceneDiff(SCENE, { ...SCENE, depth: 5 }).join(','), 'depth', 'the same messages read at another depth are another window, so another scene');
 // Trailing whitespace: refused by default, accepted only when asked for (graft-grades --allow-whitespace-drift).
 const WS = { ...SCENE, scanChat: [{ name: 'N', mes: 'Ketheric raised his glass   ' }] };
@@ -190,10 +179,8 @@ const armB = {
 };
 
 const u = unionArms([armA, armB]);
-// THE UNION IS THE COMPLETE PACKAGE. Durable rows are kept and deduped like any other — a sample records
-// what the run selected, and whether a row is offered for grading is the popup's call (it renders these
-// uneditable, as /wa-grade does). Dropping them here made capture a function of display intent, and left
-// super-grade samples with zero constant/sticky rows where a plain /wa-grade of the same scene had them.
+// The union is the complete package: durable rows are kept and deduped like any other, because a sample
+// records what the run selected and whether a row is offered for grading is the popup's call.
 eq(u.rows.length, 4, 'union dedupes across arms and KEEPS durable rows');
 eq(u.rows.some(r => r.uid === 2), true, 'the constant is captured, not dropped');
 eq(u.rows.filter(r => r.uid === 2).length, 1, 'the constant is deduped like any other row, so N arms do not list it N times');
@@ -202,9 +189,8 @@ eq(JSON.stringify(u.rows.find(r => r.uid === 3).arms), '["shipped","no-filter"]'
 eq(u.rows.find(r => r.uid === 3).scores.cosine, 0.5, 'a duplicate keeps the FIRST arm\'s signals, never a blend');
 eq(u.rows.find(r => r.uid === 3).from, 'shipped', 'the row records which arm supplied its numbers');
 
-// ABSENT-FILL, and the line it must not cross. `keys` is unmeasurable with scoreVectorKeys off, so a later
-// arm that CAN measure it fills the hole and says where it came from. A signal the first arm already
-// measured is never overwritten — that would be the blend this function exists to refuse.
+// Absent-fill, and the line it must not cross: a later arm that can measure a signal fills the hole and says
+// where it came from, but a signal the first arm already measured is never overwritten.
 const armKeys = {
     arm: 'keys-live',
     rows: [
@@ -221,8 +207,7 @@ eq(villa.scores.cosine, 0.9, 'a signal the first arm measured is NOT overwritten
 eq(villa.filled.cosine, undefined, 'and is not marked as filled');
 eq(villa.from, 'shipped', 'the base row still names its own arm');
 
-// `why` follows the keys value it explains, from the same arm — a filled score with no visible cause
-// is what the fill produced before this.
+// `why` follows the keys value it explains, from the same arm, or a filled score has no visible cause.
 const armWhy = {
     arm: 'keys-live',
     rows: [{ title: 'Villa', book: 'W', uid: 1, block: 'dynamic', sticky: 0, index: 0, scores: { keys: 2.5 }, why: [{ key: 'villa', count: 2 }] }],
@@ -231,11 +216,9 @@ const armWhy = {
 const uw = unionArms([armA, armWhy]);
 eq(uw.rows.find(r => r.uid === 1).why?.[0]?.key, 'villa', 'why travels with the keys value it explains');
 eq(unionArms([armWhy, armA]).rows.find(r => r.uid === 1).why?.[0]?.key, 'villa', 'and a base row that has its own why keeps it');
-// THE UNION SPEAKS THE SCHEMA'S SHAPE. A row read back out of a bundle carries its signals under
-// `scores` (grading.mjs toCandidate), and /wa-super-eval renders those columns straight off the union —
-// so a union that only understands the flat runtime shape shows an empty table against every stored
-// bundle while the live path looks fine. Both the display and the cross-arm fill are asserted on the
-// stored shape for that reason.
+// The union speaks the schema's shape: a row read back out of a bundle carries its signals under `scores`
+// (grading.mjs toCandidate), so a union that only understands the flat runtime shape shows an empty table
+// against every stored bundle while the live path looks fine.
 const armStored = {
     arm: 'shipped',
     rows: [{ title: 'Villa', book: 'W', uid: 1, block: 'dynamic', sticky: 0, index: 0, scores: { cosine: 0.9, text: 12.5, keys: null } }],
@@ -256,10 +239,8 @@ eq(us.filled.cosine, undefined, 'a stored signal the first arm measured is not m
 eq(u.rows.map(r => r.uid).join(','), '1,3,2,4', 'union is ordered by best rank achieved across arms');
 eq(u.entries.map(e => e.uid).join(','), '1,3,2,4', 'entries stay aligned with rows after dedupe + sort');
 
-// Round 2: entries 1 and 3 were graded last round. splitGraded answers ONE question — does a prior grade
-// exist — so the ungraded constant (uid 2) lands in `fresh` alongside 4. That is not a bug and must not be
-// "fixed" here: the durable filter belongs to the popup, which renders those rows uneditable and counts
-// only the gradeable ones. Teaching splitGraded about durable rows would put the same rule in two places.
+// splitGraded answers one question — does a prior grade exist — so the ungraded constant lands in `fresh`.
+// The durable filter belongs to the popup; teaching splitGraded about it would put one rule in two places.
 const prior = [{ title: 'Villa', book: 'W', uid: 1, grade: 5 }, { title: 'Maren', book: 'W', uid: 3, grade: 4 }];
 const split = splitGraded(u.rows, prior);
 eq(split.fresh.map(r => r.uid).join(','), '2,4', 'splitGraded splits on prior grades alone, durable rows included');
@@ -275,8 +256,8 @@ const ROUND2 = { user: 'me@host', now: '2026-07-02' };
 const first = mergeGrades([], prior, ROUND1);
 const merged = mergeGrades(first, [{ title: 'Ironhold', book: 'W', uid: 4, grade: 3 }, { title: 'Villa', book: 'W', uid: 1, grade: 2 }], ROUND2);
 eq(merged.length, 3, 'merge accumulates without duplicating rows');
-// NOTHING IS EVER OVERWRITTEN. A regrade joins the record beside the verdict it disagrees with — that
-// comparison is the only thing that says whether a rater moved, and last-writer-wins deleted it.
+// Nothing is ever overwritten: a regrade joins the record beside the verdict it disagrees with, and that
+// comparison is the only thing that says whether a rater moved.
 eq(merged.find(g => g.uid === 1).grades.map(v => v.grade).join(','), '5,2', 'a regrade appends beside the earlier round');
 eq(gradeValue(merged.find(g => g.uid === 1)), 2, '...and the later verdict is the one in force');
 eq(gradeValue(merged.find(g => g.uid === 3)), 4, 'a prior grade this round did not revisit survives');
@@ -286,10 +267,10 @@ eq(mergeGrades(first, [{ book: 'W', uid: 1, grade: 5 }], ROUND1).find(g => g.uid
 // The accumulation property that makes iterative pooling terminate: N rounds of deltas equal one big grading.
 eq(mergeGrades(first, [{ book: 'W', uid: 4, grade: 3 }], ROUND2).length, 3, 'delta rounds compose');
 
-// --- rater provenance: WHICH RATER A VERDICT NAMES -------------------------------------------------------
-// The distinction nothing else can recover. An llm-graded row and a human-graded one are structurally
-// identical apart from the rater named, so once they are written without one there is no guard, filename
-// or stamp that can tell an unreviewed row from one a human reviewed and agreed with.
+// --- rater provenance: which rater a verdict names -------------------------------------------------------
+// Nothing else can recover this: an llm-graded row and a human-graded one are structurally identical apart
+// from the rater named, so without one no guard, filename or stamp tells an unreviewed row from a reviewed
+// and agreed one.
 const H = g => ({ kind: 'human', id: 'u1', grade: g });
 const L = g => ({ kind: 'llm', model: 'gemma4:31b-mlx', rubric: 'r', grade: g });
 eq(gradeValue({ grades: [L(3)] }), 3, 'an llm-only row grades at its llm verdict');
@@ -297,15 +278,15 @@ eq(gradeValue({ grades: [L(3), H(2)] }), 2, 'a reviewed row grades at the HUMAN 
 eq(gradeValue({ grades: [L(3), H(0)] }), 0, 'a human 0 is a verdict, not an absent value');
 eq(Number.isNaN(gradeValue({})), true, 'an ungraded row is NaN, so a caller s || 0 or isFinite still works');
 eq(gradeValue({ grades: [L(0)] }), 0, 'an llm 0 is a measurement, not an absence');
-// AMONG LLM VERDICTS, THE MEDIAN once three exist — a later pass is not a better one, and latest-wins
-// silently resolves noise in favour of whichever pass ran last.
+// Among llm verdicts, the median once three exist: a later pass is not a better one, and latest-wins
+// resolves noise in favour of whichever pass ran last.
 eq(gradeValue({ grades: [L(0), L(4), L(3)] }), 3, 'three llm verdicts resolve to their median');
 eq(gradeValue({ grades: [L(0), L(4)] }), 4, 'two that disagree cannot be resolved, so the latest stands');
-// A BARE `grade` IS A FRESHLY TYPED HUMAN VERDICT — the value a grading UI holds before it becomes a
-// verdict in `grades`. It is the live path, not a legacy one.
+// A bare `grade` is a freshly typed human verdict — the value a grading UI holds before it becomes a verdict
+// in `grades`. The live path, not a legacy one.
 eq(gradeValue({ grade: 2 }), 2, 'a bare grade reads as the value in force');
-// The superseded scalar has NO path. Nothing on disk predates v3, so a reader that still honoured
-// `llmGrade` would be resolving a field no writer emits — and silently outranking a real verdict.
+// The superseded scalar has no path: nothing on disk predates v3, so honouring `llmGrade` would resolve a
+// field no writer emits and silently outrank a real verdict.
 eq(Number.isNaN(gradeValue({ llmGrade: 3 })), true, 'a v2 llmGrade scalar is not read at all');
 eq(gradeValue({ grade: 2, llmGrade: 3 }), 2, '...and cannot displace the value that is');
 
@@ -317,22 +298,19 @@ eq((untouched2[0].grades ?? []).some(v => v.kind === 'human'), false, 'a row no 
 eq(untouched2[0].grades[0].why, 'because', 'and keeps the llm s reasoning');
 const reviewed = mergeGrades(judged, [{ book: 'W', uid: 7, title: 'J', grade: 1 }], ROUND1);
 eq(gradeValue(reviewed[0]), 1, 'a human edit becomes the verdict in force');
-// A PASS IS THE RATER PLUS ITS KNOBS PLUS THE DAY — not the rater alone. Re-sampling one model at another
-// seed is the SAME rater giving a second verdict, which is how a third vote for the median is reached; if
-// the knobs were folded into the rater id that would read as consulting a different model, and if they
-// were left out of the dedup key the second verdict would be dropped as a repeat.
+// A pass is the rater plus its knobs plus the day, not the rater alone: re-sampling one model at another
+// seed is the SAME rater giving a second verdict, which is how a third vote for the median is reached.
 const P = (t, params, g) => ({ kind: 'llm', id: 'm\u001fr', params, grade: g, gradedAt: t });
 const T1 = '2026-08-21T14:03:02.481Z', T2 = '2026-08-21T18:41:55.002Z';
 eq(passKey(P(T1, { seed: 7 }, 3)) === passKey(P(T1, { seed: 7 }, 4)), true, 'one rater at one instant is one pass, whatever it graded');
 eq(passKey(P(T1, { seed: 7 }, 3)) === passKey(P(T2, { seed: 7 }, 3)), false, 'a later pass is another pass, so it appends rather than colliding');
-// PARAMS ARE NOT IN THE KEY. Dedup runs over one entry's verdicts and a pass grades each row once, so two
-// verdicts on a row always came from two dispatches and differ by their stamp. Keying on params would make
-// identity depend on how completely a writer recorded the knobs.
+// Params are not in the key: dedup runs over one entry's verdicts and a pass grades each row once, so two
+// verdicts on a row came from two dispatches and differ by their stamp. Keying on params would make identity
+// depend on how completely a writer recorded the knobs.
 eq(passKey(P(T1, { seed: 7 }, 3)) === passKey(P(T1, { seed: 8, effort: 'high' }, 3)), true,
     'recording more knobs does not make an old verdict stop matching its own re-merge');
-// A HOSTED PASS HAS NO PARAMS AT ALL, so the timestamp is the whole of what separates two of them. At day
-// granularity a second adjudication pass over the same rows would read as the first merged twice and be
-// dropped — which is the case a second pass exists for.
+// A hosted pass has no params at all, so the timestamp is the whole of what separates two of them: at day
+// granularity a second adjudication pass would read as the first merged twice and be dropped.
 const hosted = t => ({ kind: 'llm', id: 'claude-sonnet-5\u001fr', gradedAt: t });
 eq(passKey(hosted('2026-08-21T14:03:02Z')) === passKey(hosted('2026-08-21T18:41:55Z')), false,
     'two hosted passes on one day are two passes, because the stamp carries the time');
@@ -342,13 +320,10 @@ eq(passKey(hosted('2026-08-21T14:03:02Z')) === passKey(hosted('2026-08-21T14:03:
 eq(reviewed[0].grades.filter(v => v.kind === 'llm').length, 1, 'and the llm verdict is still there underneath it, which is what IRR reads');
 
 // --- multi-arm bundles (one download instead of N) ---
-// The failure to guard: hoisting a per-arm field into the shared block. The summary arm has a DIFFERENT
-// query and a lexical-only arm can retrieve from a different book, so a field shared by accident would make
-// one arm silently score another arm's scene.
-// ANY extension that injects with `scan: true`, not just the Author's Note — the capture iterates every
-// extension prompt rather than naming known ones, so Summarize ('1_memory') and anything else a user
-// installs are carried the same way. Both position classes are represented: Summarize offers "In-chat @
-// Depth" as well as the ambient placements, so both branches of the depth rule arise in practice.
+// The failure to guard is hoisting a per-arm field into the shared block: arms differ in query and in which
+// book they retrieve from, so a field shared by accident makes one arm score another arm's scene.
+// Any extension that injects with `scan: true`, not just the Author's Note — the capture iterates every
+// extension prompt — and both position classes are represented, ambient and in-chat at depth.
 const INJECTS = [
     { key: 'NOTE', text: 'a note', ambient: false, depth: 2 },
     { key: '1_memory', text: 'a running summary', ambient: true, depth: 0 },
@@ -369,8 +344,8 @@ const scene0 = bundle.scenes[0];
 
 eq(bundle.schemaVersion, 3, 'the document stamps its schema version');
 eq(bundle.scenes.length, 1, 'one scene is a one-element list, not a special shape');
-// A SCENE IS THE GRADED MOMENT, so its id names the message it ends at — not the span, which is what an
-// arm chose to read and varies between arms of one scene.
+// A scene is the graded moment, so its id names the message it ends at — not the span, which is what an arm
+// chose to read and varies between arms of one scene.
 eq(scene0.id, 'c-msg-100', 'the scene id is composed from the chat and the moment it ends at');
 eq(scene0.sceneChat, 'chats/c.jsonl', 'and names the chat it was taken from');
 eq(scene0.arms, undefined, 'a scene carries no arms — an arm is a configuration and spans scenes');
@@ -378,7 +353,7 @@ eq(bundle.arms.length, 3, 'every arm is carried, at document level');
 eq(bundle.arms.every(a => a.scenes[scene0.id]), true, '...each with its capture of this scene');
 eq(bundle.captureId, 'cap-test', 'the document carries an id that survives a rename');
 
-// FIELD ORDER IS PART OF THE SCHEMA: the bulk goes last so everything ahead of it is reachable with head.
+// Field order is part of the schema: the bulk goes last so everything ahead of it is reachable with head.
 const order = Object.keys(bundle);
 eq(order.slice(order.indexOf('sceneChats')).join(','), 'sceneChats,sceneInjects,books',
     'the haystack inputs and the books are the trailing block, books last as the largest');
@@ -386,19 +361,18 @@ eq(order.indexOf('scenes') < order.indexOf('sceneChats'), true, 'and every scene
 
 eq(bundle.books !== undefined, true, 'the books are hoisted to the document');
 eq(bundle.arms.every(a => a.books === undefined), true, 'the books are NOT duplicated per arm — that is the whole point');
-// THE MESSAGES, not a window: a window is fixed at one depth, matchWindow and includeNames, and cannot be
+// The messages, not a window: a window is fixed at one depth, matchWindow and includeNames, and cannot be
 // narrowed. These rebuild any of them, so arms reading one moment at different depths share one input.
 eq(JSON.stringify(bundle.sceneChats[scene0.id]), '[{"name":"A","mes":"w"}]',
     'the scan MESSAGES are hoisted out of the scene, keyed by its id');
 eq(bundle.arms.every(a => a.scenes[scene0.id].scanChat === undefined), true, 'so no capture carries a copy of them');
-// THE INPUTS, NOT THE PRODUCT. Injects are stored beside the chat half rather than joined into it, so a
-// reader admits them per depth and rebuilds the window — a joined blob cannot be taken apart again. Once
-// per scene, because every arm of a capture scans the same injects.
+// The inputs, not the product: injects are stored beside the chat half rather than joined into it, so a
+// reader admits them per depth and rebuilds the window. Once per scene — every arm scans the same injects.
 eq(JSON.stringify(bundle.sceneInjects[scene0.id]), JSON.stringify(INJECTS), 'the injects are hoisted beside it, unjoined');
 eq(bundle.arms.every(a => a.scenes[scene0.id].injects === undefined), true, 'and no capture carries a copy of those either');
 eq(JSON.stringify(bundle.sceneChats[scene0.id]).includes('a note'), false, 'the messages do not contain the inject text');
 
-// THE RECORD, NOT A RESOLUTION. A typed grade becomes a human verdict naming its rater; no scalar is
+// The record, not a resolution: a typed grade becomes a human verdict naming its rater, and no scalar is
 // stored beside it, because a stored resolution is indistinguishable from a verdict someone gave.
 eq(scene0.entries.length, 1, 'one entry per candidate carrying verdicts');
 eq(JSON.stringify(scene0.entries[0]),
@@ -406,10 +380,9 @@ eq(JSON.stringify(scene0.entries[0]),
     'a typed grade becomes a verdict naming its rater by index, with a date and no reduced scalar');
 eq(scene0.entries[0].grade === undefined && scene0.entries[0].llmGrade === undefined, true,
     'and nothing writes the value in force into the file');
-// A UUID says two verdicts are different people and nothing else, so the label rides ONCE per document,
-// keyed by the id. Never on the verdict: a label is not an identity, and a reader joins on the id.
-// WHO THE INDEX NAMES, once per document. A rater is whoever passed a verdict; `kind` is [human, llm] and
-// `id` is ONE canonical field either way, so grouping raters is a plain key comparison.
+// A rater is spelled out once per document, keyed by the id, never on the verdict: a label is not an
+// identity. `kind` is [human, llm] and `id` is one canonical field either way, so grouping raters is a plain
+// key comparison.
 eq(JSON.stringify(bundle.raters), '[{"rater":0,"kind":"human","id":"f47ac10b-58cc-4372-a567-0e02b2c3d479"}]',
     'a rater is spelled out once, in a table the verdicts index into');
 eq('id' in scene0.entries[0].grades[0], false, '...and never repeated on the verdict itself');
@@ -418,8 +391,8 @@ eq('id' in scene0.entries[0].grades[0], false, '...and never repeated on the ver
 eq(scene0.entries[0].book, 'Main', 'identity carries the book as its own field');
 eq(bundle.arms[0].scenes[scene0.id].candidates[0].book, 'Main', 'and so does a candidate');
 
-// Per-arm fields must stay per-arm or an arm scores the wrong scene.
-// WHAT VARIES WITH BOTH COORDINATES IS ON THE CELL; what varies with the configuration alone is on the arm.
+// Per-arm fields must stay per-arm or an arm scores the wrong scene. What varies with both coordinates is on
+// the cell; what varies with the configuration alone is on the arm.
 for (const f of ['query', 'candidates', 'cutoff', 'index', 'primaryBook', 'gradedCandidates', 'sceneStart', 'depth']) {
     eq(bundle[f] === undefined && bundle.arms.every(a => a.scenes[scene0.id][f] !== undefined), true, `"${f}" is on the cell`);
 }
@@ -468,19 +441,14 @@ eq(bundleThrew, true, 'an unknown arm throws rather than falling back');
 let sceneThrew = false;
 try { openBundle(bundle, null, 'nope'); } catch { sceneThrew = true; }
 eq(sceneThrew, true, 'and so does naming a missing scene');
-// THE HAYSTACK IS THE SCENE. Two arms covering different spans are two scenes — they belong in `scenes`
-// as two elements, each with its own id and verdicts — so packing them as one scene's arms is refused
-// rather than hoisted over. Both halves of "the span" say it: the window itself, and the depth that
-// produced it.
-// ARMS MAY NOW READ THE SAME MOMENT AT DIFFERENT DEPTHS. The guard that refused them is gone, because
-// what is hoisted is the MESSAGES: each arm's window is rebuilt from them at its own depth, so there is
-// no first-arm window for a second to silently inherit.
+// Arms may read the same moment at different depths, because what is hoisted is the MESSAGES: each arm's
+// window is rebuilt from them at its own depth, so there is no first-arm window for a second to inherit.
 const twoDepths = await bundleSamples([mk('a', {}), { arm: 'b', sample: { ...mk('b', {}).sample, depth: 20 } }], { start: 0, end: 1 });
 eq(twoDepths.arms.map(a => a.scenes['c-msg-1'].depth).join(','), '5,20', 'two arms may read one moment at different depths');
 eq(Object.keys(twoDepths.sceneChats).length, 1, '...sharing one stored set of messages between them');
 
-// splitGraded pre-fills from the value IN FORCE. Reading a human verdict alone made /wa-super-eval blind
-// to every llm-graded row — which is nearly the whole corpus.
+// splitGraded pre-fills from the value IN FORCE: reading a human verdict alone is blind to every llm-graded
+// row, which is nearly the whole corpus.
 {
     // Prior rows arrive from `openBundle().entries`, so they carry verdict arrays rather than scalars.
     const L = g => ({ kind: 'llm', id: 'm\u001fr', grade: g });
@@ -496,8 +464,8 @@ eq(Object.keys(twoDepths.sceneChats).length, 1, '...sharing one stored set of me
 }
 
 // --- book content identity ------------------------------------------------------------------------------
-// The field answers "did these two captures grade the same book" ACROSS INSTALLS, so the two things that
-// must hold are that irrelevant serialisation differences do not move it and relevant content differences do.
+// The field answers "did these two captures grade the same book" ACROSS INSTALLS, so irrelevant
+// serialisation differences must not move it and relevant content differences must.
 {
     const entry = { uid: 1, comment: 'A', content: 'text', keys: ['k'] };
     const reordered = { keys: ['k'], content: 'text', comment: 'A', uid: 1 };
@@ -513,8 +481,8 @@ eq(Object.keys(twoDepths.sceneChats).length, 1, '...sharing one stored set of me
     const edited = await hashBooks({ W: { 1: { ...entry, content: 'text.' } } });
     eq(edited.W === a.W, false, 'a one-character content edit moves the hash');
 
-    // ST sets `entry.world` on some paths and not others, and it only ever restates the book name that
-    // already keys the map. Left in, the same lorebook hashed two ways depending on how it was captured.
+    // ST sets `entry.world` on some paths and not others, and it only restates the book name that already
+    // keys the map, so leaving it in hashes one lorebook two ways depending on how it was captured.
     const located = await hashBooks({ W: { 1: { ...entry, world: 'W' } } });
     eq(located.W, a.W, 'ST\'s entry.world back-pointer is location, not content, so it does not move the hash');
 
@@ -524,8 +492,8 @@ eq(Object.keys(twoDepths.sceneChats).length, 1, '...sharing one stored set of me
 
 
 // --- stRelative: a stored path names the install, never the machine -------------------------------------
-// An absolute path is the author's home directory. No reader can use it — scene.mjs skips a stored `index`
-// that is not local and derives its own — and every reader can be identified by it.
+// An absolute path is the author's home directory: no reader can use it (scene.mjs skips a stored `index`
+// that is not local) and every reader can identify its author by it.
 {
     const B = String.fromCharCode(92);
     eq(stRelative('/Users/someone/SillyTavern-launcher/SillyTavern/data/default-user/chats/A/x.jsonl'),
@@ -556,12 +524,11 @@ eq(Object.keys(twoDepths.sceneChats).length, 1, '...sharing one stored set of me
     eq(withPaths.book, 'data/default-user/worlds/B.json', '...and the book path, so no writer has to remember');
 }
 
-// --- the writer against the schema: STRUCTURAL keys are closed ---------------------------------------
+// --- the writer against the schema: structural keys are closed ---------------------------------------
 // bundle-schema.md lists every document, scene, arm and cell key, and the open maps (`scores`, `params`,
-// `paramSnapshot.settings`, `books`, `bookHashes`, the `scene*` maps) are excluded from that by name. So a
+// `paramSnapshot.settings`, `books`, `bookHashes`, the `scene*` maps) are excluded from that by name. A
 // structural key the schema does not carry is a writer the document has not caught up with, and the only
-// way that stays true is if adding one fails here. It has drifted once already: paramSnapshot was written
-// per SCENE while the schema said per ARM, which sent two readers looking in the wrong place.
+// way that stays true is if adding one fails here.
 const { bundleSamples: bundleForSchema } = await import('../extension/grading.mjs');
 const schemaFixture = {
     name: 'n', notes: 'x', createdAt: '2026-08-24', createdBy: 'me', bookPriority: [], gradeScale: {},
@@ -581,9 +548,8 @@ eq(keys(built),
     'document keys are the schema\'s');
 eq(keys(built.scenes[0]), 'entries,id,query,queryChat,sceneChat,sceneEnd', 'scene keys are the schema\'s — query and queryChat hoisted, the arms all agreeing');
 eq(keys(built.arms[0]), 'name,paramSnapshot,params,scenes,stVersion,waVersion', 'arm keys are the schema\'s — paramSnapshot among them, not in the cell');
-// The fixture above sets everything, so the sets are exact. A capture that omits an EMITTED-WHEN-PRESENT
-// field is still conformant — most arms on disk predate the version pair and many cells the `book`,
-// and nothing can recover them (G8). What must never appear is a key outside
+// The fixture above sets everything, so the sets are exact. A capture that omits an emitted-when-present
+// field is still conformant, and nothing can recover them (G8); what must never appear is a key outside
 // these four lists.
 const bare = { ...schemaFixture };
 for (const k of ['waVersion', 'stVersion', 'paramSnapshot', 'book', 'gradedCandidates', 'queryChat', 'gradeScale', 'invalidConfiguration']) delete bare[k];
@@ -591,14 +557,12 @@ const thin = await bundleForSchema([{ arm: 'shipped', sample: bare }], { start: 
 eq(keys(thin.arms[0]), 'name,params,scenes', 'an arm omitting every optional field carries no stray key');
 eq(keys(Object.values(thin.arms[0].scenes)[0]), 'candidates,cutoff,depth,index,primaryBook,sceneStart', '...and neither does its cell');
 
-// --- THE ROUND-TRIP INVARIANT: openBundle -> setGrades must reproduce the rater table -----------------
-// The assertion above is on a HUMAN rater, whose id IS raterKey's whole output, so it cannot fail. An
-// llm's id is JOINED from the model half and the rubric, and only the join is stored — so a deref that
-// hands back `{id, modelName}` lets re-indexing recompose `modelName + <empty rubric>` and drop the
-// rubric. Observed on a real bundle: `claude-sonnet-5<US>scene-relevance@b49449ef` came back as
-// `claude-sonnet-5<US>` (G9). graft-grades.mjs and grade-pending.mjs are both exactly this round trip, so the
-// loss reached every bundle either one wrote. Asserted on the TABLE, not on a field, because the failure
-// is a changed identity and nothing downstream can tell one rater from another once it has moved.
+// --- the round-trip invariant: openBundle -> setGrades must reproduce the rater table -----------------
+// A human rater's id IS raterKey's whole output, so the assertion above cannot fail. An llm's id is JOINED
+// from the model half and the rubric, and only the join is stored, so a deref handing back `{id, modelName}`
+// lets re-indexing recompose `modelName + <empty rubric>` and drop the rubric (G9). graft-grades.mjs and
+// grade-pending.mjs are both exactly this round trip. Asserted on the TABLE, not on a field, because the
+// failure is a changed identity and nothing downstream can tell one rater from another once it has moved.
 {
     const withLlm = await bundleForSchema([{
         arm: 'shipped',
@@ -625,10 +589,10 @@ eq(keys(Object.values(built.arms[0].scenes)[0]),
     'book,candidates,cutoff,depth,gradedCandidates,index,invalidConfiguration,primaryBook,sceneStart',
     'cell keys are the schema\'s');
 
-// --- THE TWO HOISTS: bulk out of the cell, and a reader that cannot tell -----------------------------
+// --- the two hoists: bulk out of the cell, and a reader that cannot tell -----------------------------
 // `why` and the query pair leave the arms block so the file's head carries the scene, the params and the
 // verdicts rather than matched-key excerpts. Both are writer-side only: openBundle must hand back exactly
-// what a caller handed in, or every grade UI reading `c.why` goes blank and no test says so.
+// what a caller handed in, or every grade UI reading `c.why` goes blank.
 {
     const withWhy = await bundleForSchema([{
         arm: 'shipped',
@@ -653,8 +617,8 @@ eq(keys(Object.values(built.arms[0].scenes)[0]),
     eq(openBundle(structuredClone(again)).candidates[0].why[0].key, 'villa', 'and a round trip through both is stable');
 }
 {
-    // Arms that DISAGREE keep their own copies — `queryMode` moves the query, and hoisting a summary arm's
-    // query onto the scene would report every other arm as having run on text it never saw.
+    // Arms that DISAGREE keep their own copies: hoisting a summary arm's query onto the scene would report
+    // every other arm as having run on text it never saw.
     const split = await bundleForSchema([
         { arm: 'shipped', sample: schemaFixture },
         { arm: 'summary', sample: { ...schemaFixture, query: 'a summary' } },

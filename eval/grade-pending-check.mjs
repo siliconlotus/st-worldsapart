@@ -1,10 +1,9 @@
 // grade-pending build/merge round-trip: does a row reach the bundle it came from?
 //
-// The case that matters is two bundles sharing a `name`, which is not hypothetical — a scene captured
-// under a second book carries the same name as the original. Keyed on name, build overwrites one
-// bundle's jobs with the other's and merge resolves the target back through the same collision, so a
-// grade lands in a bundle whose `books` do not contain that world. It merged clean and the pool gap
-// simply failed to close; nothing in the uid diff can see it, because each job matched its own result.
+// The case that matters is two bundles sharing a `name` — a scene captured under a second book carries the
+// same name as the original. Keyed on name, build overwrites one bundle's jobs with the other's and merge
+// resolves the target back through the same collision, so a grade lands in a bundle whose `books` do not
+// contain that world. It merges clean and the pool gap simply fails to close, invisibly to the uid diff.
 import { mkdtempSync, writeFileSync, readFileSync, readdirSync, rmSync, existsSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import { tmpdir } from 'node:os';

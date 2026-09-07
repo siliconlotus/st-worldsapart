@@ -1,9 +1,8 @@
 // The offline token count must equal what the runtime recorded, or a replayed budget is not the budget.
 //
-// Re-derives the offset from every capture on disk that carries both a recorded `tokens` and its entry
-// text, and asserts it against the table in tokens.mjs. That is what keeps TOKENIZER_OFFSET a measurement
-// rather than a comment: if ST's counter changes, or a bundle appears under a tokenizer nobody calibrated,
-// this fails instead of silently mis-costing every entry by a constant.
+// Re-derives the offset from every capture on disk carrying both a recorded `tokens` and its entry text,
+// and asserts it against the table in tokens.mjs — what keeps TOKENIZER_OFFSET a measurement rather than a
+// comment when ST's counter changes or a bundle appears under an uncalibrated tokenizer.
 //
 // Skips cleanly when no such capture is present — the synthetic bundles carry no recorded counts, and a
 // checkout without eval-data has none at all. Absence is not a failure; disagreement is.

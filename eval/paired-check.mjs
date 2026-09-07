@@ -37,11 +37,10 @@ eq(signTest([1e-12, -1e-12, 0.5]).ties, 2, 'sub-epsilon deltas are ties, not dir
 eq(Math.abs(signTest([0, 0, 0.03]).mean - 0.01) < 1e-12, true, 'mean delta includes tied scenes');
 
 // --- bookFingerprint: drift detection for the books a bundle's gazetteer was built from ----------------
-// TWO HASHES because the failure modes are different: `gaz` covers key/keysecondary/comment (what
-// buildGazetteer reads, hence which query terms survive the filter) and `content` covers the bodies (what
-// BM25 and the embeddings see). A lumped hash would say "something changed" about a defect that was
-// specifically gazetteer-layer. Weak by design — an edit preserving every hashed byte slips through, the
-// same trade indexFingerprint takes.
+// Two hashes because the failure modes differ: `gaz` covers key/keysecondary/comment (what buildGazetteer
+// reads, hence which query terms survive the filter) and `content` covers the bodies (what BM25 and the
+// embeddings see), where a lumped hash would only say "something changed". Weak by design — an edit
+// preserving every hashed byte slips through, the same trade indexFingerprint takes.
 const fpEntry = (uid, o) => ({ uid, key: [], keysecondary: [], comment: '', content: '', ...o });
 const fpBook = { 1: fpEntry(1, { key: ['alpha'], comment: 'A', content: 'body one' }), 2: fpEntry(2, { content: 'body two' }) };
 const fp0 = bookFingerprint(fpBook);
@@ -61,10 +60,9 @@ eq(JSON.stringify(bookFingerprint({ 2: fpBook[2], 1: fpBook[1] })), JSON.stringi
 eq(Number.isFinite(bookFingerprint({}).gaz), true, 'an existing but empty book still fingerprints');
 
 // --- tierRecall: the guard that catches a selection trading a hard class for an easy one ---------------
-// memory and reference have very different base rates (F39), so an arm that favours
-// the denser class raises every pooled metric while delivering less of what the system retrieves. This
-// splits delivered recall so that shows up. Ungraded counts as not relevant, matching the `?? 0` rule the
-// windows use; identity comparison, since kept holds the same row objects the population does.
+// memory and reference have very different base rates (F39), so an arm favouring the denser class raises
+// every pooled metric while delivering less of what the system retrieves. Ungraded counts as not relevant,
+// matching the `?? 0` rule the windows use; identity comparison, since kept holds the same row objects.
 const memRow = (uid, grade) => ({ uid, grade, entry: { uid, stmemorybooks: {} } });
 const refRow = (uid, grade) => ({ uid, grade, entry: { uid } });
 const pop = [memRow(1, 4), memRow(2, 3), memRow(3, 0), refRow(4, 3), refRow(5, 3), refRow(6, 1)];
@@ -89,10 +87,9 @@ eq(sceneParams(S, { K1: 3 }).LEXW, 1.5, 'an arm override leaves other params on 
 eq(sceneParams({}).entityFilter, true, 'a view with no params still gets a full param set');
 
 // --- the arm-reuse guard: reusing a loaded scene is only valid while the gazetteer is unchanged ---
-// gazetteerSource is baked in at load time, and a stale gazetteer has already cost this project a real
-// scoring error (R22), so sweeping it against a preloaded scene must throw rather than quietly mislead. Asserted
-// on the MESSAGE, not merely on throwing: a preloaded stub throws for a dozen other reasons, and this
-// test passed against one of them while the guard it names was not firing at all.
+// gazetteerSource is baked in at load time and a stale gazetteer has already cost a real scoring error
+// (R22), so sweeping it against a preloaded scene must throw rather than quietly mislead. Asserted on the
+// MESSAGE, not merely on throwing: a preloaded stub throws for a dozen other reasons.
 let threw = '';
 try {
     await scoreScene({ sample: S, overrides: { gazetteerSource: 'keys' }, scene: { fake: true }, qv: [0] });
@@ -138,8 +135,8 @@ eq(byUid({ key: 1, title: 'anything' }), 5, 'retrieval rows keyed by `key` resol
 eq(makeGradeOf([{ title: 'Villa', grade: 5, uid: 1 }, { title: 'Other', grade: 3 }], inScope)({ uid: 9, title: 'Other Thing' }), 3,
     'a grade set missing uids resolves every row by title');
 
-// (book, uid) IS THE KEY, not uid. Two books number their entries from 0, so a bare-uid map hands one
-// book's row the other book's grade — which is the whole reason the pool and the join changed shape.
+// (book, uid) is the key, not uid: two books number their entries from 0, so a bare-uid map hands one book's
+// row the other book's grade.
 const twoBooks = makeGradeOf(
     [{ title: 'Alpha Biology', grade: 4, uid: 1, book: 'omegaverse' }, { title: 'Sommers Pack Rules', grade: 0, uid: 1, book: 'B' }],
     inScope,
@@ -150,9 +147,7 @@ eq(twoBooks({ uid: 1, entry: { world: 'omegaverse' }, title: 'x' }), 4, 'a score
 eq(twoBooks({ uid: 1, title: 'x' }), 0, 'a row naming no book is the primary\'s, as every reader here assumes');
 
 // --- keyword scoring honours production's key suppression (worldsapart.js suppressKeys) ---
-// Samples embed books raw, so vectorized entries still carry keys the live scan would have blanked; scoring
-// them gave vectorized entries a keys signal production can never produce.
-// EVERY entry's keys are scored, vectorized or not: the value is measured and recorded, and whether the
+// Every entry's keys are scored, vectorized or not: the value is measured and recorded, and whether the
 // model reads it is a question about the feature set (`--without keys`), not about the entry.
 const kwP = makeKeywordScore(sceneParams({}));
 eq(kwP({ vectorized: true, key: ['villa'] }, 'meet me at the villa', 1.2) > 0, true, 'a vectorized entry\'s keys are scored, as the live scan scores them');
@@ -179,7 +174,7 @@ eq(spearman([1, 2, 3], [1, 2, 3]), 1, 'identical order -> +1');
 eq(spearman([1, 2, 3], [3, 2, 1]), -1, 'reversed order -> -1');
 eq(Number.isNaN(spearman([1, 1, 1], [1, 2, 3])), true, 'no variance -> NaN, not a fake 0');
 eq(Number.isNaN(spearman([1], [1])), true, 'n<2 -> NaN');
-// THE TIE PROPERTY: a tied block must not depend on input order. Same data, permuted, same answer.
+// The tie property: a tied block must not depend on input order. Same data, permuted, same answer.
 const tx = [0, 0, 0, 1, 2], ty = [0, 1, 0, 2, 3];
 const px = [0, 1, 0, 0, 2], py = [0, 2, 1, 0, 3];
 eq(Math.abs(spearman(tx, ty) - spearman(px, py)) < 1e-12, true, 'tied blocks are order-independent (midranks)');
@@ -188,13 +183,10 @@ eq(spearman([0, 0, 1, 2], [0, 1, 2, 3]) < 1, true, 'ties on one side cap the coe
 eq(spearman([0, 0, 1, 2], [0, 1, 2, 3]) > 0.8, true, '...but still reports a strong positive');
 eq(Math.abs(spearman([1, 2, 3, 4], [2, 4, 6, 8]) - 1), 0, 'monotone rescaling is still +1');
 
-// --- the fusion assertions are RETIRED, with their subject ---
-// Everything here pinned RRF: how lexicalWeight and keywordWeight combined, the keyword-only tilt, what
-// rank a keyword entry could clear a vector entry from. E[credit] replaced all of it — the model reads
-// the signals directly and the layout is ordered by the same number the cut thresholds — so these
-// assertions had nothing left to be about. What replaces them is relevance-model-check.
+// --- the fusion assertions are retired, with their subject: E[credit] reads the signals directly and the
+// layout is ordered by the same number the cut thresholds. relevance-model-check replaces them.
 
-// --- SET METRICS. The half-credit rule and the exchange rate are two separate judgements (metrics.mjs), and
+// --- Set metrics. The half-credit rule and the exchange rate are two separate judgements (metrics.mjs), and
 // the failure worth catching is the one that inverts an incentive rather than one that throws.
 eq(gradeCredit(4), 1, 'a 4 is delivered correctly');
 eq(gradeCredit(3), 1, 'a 3 is too — the bar for "should be included"');
@@ -204,8 +196,8 @@ eq(gradeCredit(1.5), 0, '...and below 2 nothing is earned');
 eq(gradeCredit(1), 0, 'a 1 is filler');
 eq(gradeCredit(0), 0, 'a 0 is an error');
 
-// THE INCENTIVE, which is the whole point of the half: adding a 2 to a delivered set must not raise
-// precision. Under the old `>= 2` full-credit count it did, so padding with ambiguity scored better.
+// The incentive, which is the whole point of the half: adding a 2 to a delivered set must not raise
+// precision, or padding with ambiguity scores better.
 const prec = grades => grades.reduce((s, x) => s + gradeCredit(x), 0) / grades.length;
 eq(prec([4, 3]) === 1, true, 'two confident hits are precision 1');
 eq(prec([4, 3, 2]) < prec([4, 3]), true, 'adding a 2 LOWERS precision from 1 — ambiguity is not a win');
@@ -213,12 +205,10 @@ eq(prec([2, 2, 2]), 0.5, 'a set of nothing but 2s sits at 0.5, neither rewarded 
 eq(prec([4, 3, 0]) < prec([4, 3, 2]), true, '...and a 0 still costs more than a 2');
 eq(prec([1, 2]) > prec([1, 1]), true, 'a 2 beats a 1, so the bands stay ordered');
 
-// THE FIXED POINT IS THE SEMANTIC CLAIM. Adding a 2 pulls precision toward 0.5 from either side, so a set
-// already better than 50/50 is hurt by one and a set worse than 50/50 is helped. That neutral point is
-// what the anchor's "50/50 on inclusion" means, expressed as arithmetic — and it is the whole difference
-// between this rule and its two neighbours: full credit has its fixed point at 1.0 and so rewards padding
-// with ambiguous entries at every realistic level, and a hard >=3 bar has none below 1 and so punishes a
-// 2 as if it were an error. Pin it, because either neighbour is a one-character edit away.
+// The fixed point is the semantic claim: adding a 2 pulls precision toward 0.5 from either side, which is
+// what the anchor's "50/50 on inclusion" means expressed as arithmetic. It is the whole difference from the
+// two neighbours — full credit's fixed point is 1.0 and so rewards padding, a hard >=3 bar has none below 1
+// and so punishes a 2 as an error. Pinned, because either neighbour is a one-character edit away.
 eq(prec([4, 4, 3, 3]) > prec([4, 4, 3, 3, 2, 2]), true, 'a 2 LOWERS precision on a set above 50/50');
 eq(prec([3, 1, 0, 0]) < prec([3, 1, 0, 0, 2, 2]), true, '...and RAISES it on a set below');
 eqNear(prec([4, 3, 1, 0]), prec([4, 3, 1, 0, 2, 2]), 'and does nothing at exactly 50/50 — the fixed point');
@@ -260,8 +250,7 @@ eq(dropUnavailable(mkSample(500)).entries.length, 3, 'past the entry\'s own rang
 eq(dropUnavailable(mkSample(100)).entries.some(g => g.uid === 3), true, 'an entry with no STMB range is reference, always available');
 // A live /wa-grade capture records no generatedFrom.msg and cannot contain a future entry by construction.
 eq(dropUnavailable(mkSample(null)).entries.length, 3, 'no scene message index -> no-op, not a silent drop of everything');
-// It used to have to walk `arms` itself, and filtering only the first was a real bug. openBundle now
-// hands out ONE arm's view, so there is no second list here to forget — the guard moved into the shape.
+// openBundle hands out ONE arm's view, so there is no second list here to forget — the guard is in the shape.
 eq('arms' in dropUnavailable(mkSample(100)), false, 'the filter sees one arm\'s view, never a list of them');
 // The books are the half that matters: makeCandidateSet re-derives the pool from them, so an entry left
 // there returns as an UNJUDGED row holding a rank. Missing this half once collapsed measured precision (F28).
@@ -270,9 +259,9 @@ eq(Object.keys(booked.books.W).length, 2, 'a post-dating entry leaves the BOOK, 
 eq(booked.books.W['2'], undefined, '...and it is the post-dating uid that goes');
 eq(Object.keys(dropUnavailable(mkSample(500)).books.W).length, 3, 'nothing leaves the book when the scene is past every range');
 eq(Object.keys(dropUnavailable(mkSample(null)).books.W).length, 3, 'no scene index -> the book is untouched');
-// THE PRISTINE COPY, which is what reindex.mjs ensureIndex builds a collection from. Without it the index
+// The pristine copy, which is what reindex.mjs ensureIndex builds a collection from: without it the index
 // carries one scene's message cutoff and every other scene of that book reads the shortfall as its own
-// collection — silently, because a smaller book scores fine.
+// collection, silently, because a smaller book scores fine.
 eq(Object.keys(booked.pristineBooks.W).length, 3, 'the post-dating entry survives in pristineBooks');
 eq(booked.pristineBooks.W['2'].uid, 2, '...as the whole entry, not a marker');
 eq(booked.books.W['2'], undefined, '...while the filtered view still drops it');
@@ -282,8 +271,8 @@ const stashed = mkSample(100);
 dropUnavailable(stashed); dropUnavailable(stashed);
 eq(Object.keys(stashed.pristineBooks.W).length, 3, 'a second pass does not overwrite the stash with the filtered book');
 // Idempotent, because a sweep calls loadScene repeatedly on the SAME sample object and the filter mutates
-// it. Without the guard skip, pass two compares the stripped book against the pristine fingerprint and
-// throws on a bundle nobody edited — measured: relevance-regress died on fold 1 of a gazetteerSource sweep.
+// it: without the guard skip, pass two compares the stripped book against the pristine fingerprint and
+// throws on a bundle nobody edited.
 const twice = mkSample(100);
 dropUnavailable(twice); dropUnavailable(twice);
 eq(Object.keys(twice.books.W).length, 2, 'filtering twice removes the same entries, not more');
@@ -291,9 +280,9 @@ eq(twice.entries.length, 2, '...and the grade list is stable across a second pas
 
 
 // --- haystackFor: the reader COMPOSES a window, it does not read one ------------------------------------
-// A document stores the scan messages, the injects and the opted-in sources SEPARATELY, because a joined
-// blob is fixed at one depth, one matchWindow and one includeNames and cannot be taken apart. All three of
-// the things that vary do so PER ENTRY, so one window for every entry silently drops all three.
+// A document stores the scan messages, the injects and the opted-in sources separately, because a joined
+// blob is fixed at one depth, one matchWindow and one includeNames. All three vary PER ENTRY, so one window
+// for every entry silently drops all three.
 {
     const { haystackFor, sceneParams } = await import('./scene.mjs');
     const S = {
@@ -331,9 +320,9 @@ eq(twice.entries.length, 2, '...and the grade list is stable across a second pas
 }
 
 // --- principal components: the all-but-the-top arm for centering (metrics.mjs topComponents) ---------
-// Mean-centering removes one direction, and most of it is shared across books rather than the book's own.
-// This is the machinery for removing several. Checked on a synthetic corpus with KNOWN axes, because a power iteration that has
-// silently converged to the wrong direction still returns a unit vector and still scores.
+// Mean-centering removes one direction, and most of it is shared across books rather than the book's own;
+// this is the machinery for removing several. Checked on a synthetic corpus with KNOWN axes, because a
+// power iteration that has converged to the wrong direction still returns a unit vector and still scores.
 const V = (...xs) => ({ vector: xs });
 // Spread along axis 0 dominates, axis 1 is second, axis 2 is flat. Mean is deliberately non-zero so the
 // components are of the CENTERED data, which is what the arm subtracts.
@@ -360,9 +349,8 @@ eq(near(projectOut(pts[0].vector, MU, [])[0], pts[0].vector[0] - MU[0]), true, '
 eq(JSON.stringify([...topComponents(pts, 2, MU)[0]]), JSON.stringify([...topComponents(pts, 2, MU)[0]]), 'the same corpus yields the same component every run');
 
 // --- lineages: two versions of one book are one book (scene.mjs lineagesOf) ------------------------
-// The real instance this exists for: an LTM file is named after the CHARACTER CARD, and one card carries
-// several stories, so "Isekai Adventure" was byte-identical to Ascensus while sharing almost nothing with
-// Time Whore — the other story on that same card (C11). Names are not evidence in either direction.
+// An LTM file is named after the CHARACTER CARD and one card carries several stories, so names are not
+// evidence in either direction (C11).
 // --- the query embedding cache: keyed by (label, exact text), tolerant of a torn append ------------
 // Retraining re-embeds the same scene queries every run, so they are memoised to disk. Two ways that goes
 // wrong silently: a hit across MODELS hands back a vector from another embedding space, and a torn last
@@ -450,9 +438,8 @@ eq(lineagesOf({ Empty: {}, Solo: bk('x') }).get('Empty'), 'Empty', 'a book with 
 
 // --- the two-mean decomposition is a no-op, which is why it cannot be an arm -------------------------
 // "Extract the pooled centroid, THEN the book centroid" sounds like two removals and is one: the book's
-// centroid OF THE RESIDUAL is (bookMean - globalMean), so subtracting both leaves v - bookMean, exactly
-// what one subtraction of the book mean gives. Only component removal can make the stages differ. Asserted
-// rather than argued, because the whole two-stage design was built on the assumption it was not true.
+// centroid OF THE RESIDUAL is (bookMean - globalMean), so subtracting both leaves v - bookMean. Only
+// component removal can make the stages differ. Asserted rather than argued.
 const G = [0.3, -0.1, 0.5];
 const vs = [[1, 2, 3], [2, 0, 1], [-1, 4, 0]];
 const bookMean = [0, 1, 2].map(i => vs.reduce((a, v) => a + v[i], 0) / vs.length);
