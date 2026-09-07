@@ -12,21 +12,10 @@ import { COMMON_WORDS } from '../plugin/commonwords.js';
 import { NAME_PARTICLES } from './relevance.mjs';
 import { ZIPF_EN } from './zipf-en.js';
 import { countKey, escapeRegex, isRegexKey, secondaryKeys, segment, usableKeys } from './matcher.mjs';
-import { buildAutomaton, scanAutomaton, createScanScope, parse, primeScan, tokenize, validateSmartKey } from './smartkeys.mjs';
+import { createScanScope, parse, primeScan, tokenize, validateSmartKey } from './smartkeys.mjs';
 
 
 export const KEY_BOOK_COMMON = 0.5;
-
-/**
- * Fold a term into the form the frequency tables are keyed by. SUBTLEX writes contractions with a
- * straight apostrophe ("isn't" z=4.8, "don't" 5.6); roleplay prose writes U+2019, and so does
- * anything that has been through a smart-quote filter, which is most model output. Unfolded,
- * "isn’t" missed ZIPF_EN and every POS set, scored as maximally rare — the exact inverse of the
- * truth — and reached a real book's suggestions as a heavily-firing key (K14).
- *
- * Lookup only. The term itself must keep the apostrophe it was written with: "Kal'thas" is a name
- * rather than a contraction, and the elision rule reads both apostrophes on purpose.
- */
 
 /** The df-based lorebook-common flag needs a corpus big enough for the ratio to mean something — in a
  * handful of entries "in >37.5% of them" is a coin flip and mislabels genuinely good keys. Below this
@@ -147,7 +136,7 @@ export function looksProper(key) {
  * @param {(term: string) => boolean} isLoose
  * @returns {string|null} the loose term the key reduces to, for the reason text
  */
-export function commonSurfaceOf(node, isLoose) {
+function commonSurfaceOf(node, isLoose) {
     if (!node) return null;
     switch (node.type) {
         // A quoted phrase is a phrase, whatever its words are: `"your husband"` is selective.
@@ -177,28 +166,14 @@ export function commonSurfaceOf(node, isLoose) {
 }
 
 /** `commonSurfaceOf` from the raw key, or null when it does not parse or is not a SmartKey. */
-export function commonSmartKey(raw, isLoose) {
+function commonSmartKey(raw, isLoose) {
     if (!String(raw ?? '').trim().startsWith('?')) return null;
     try { return commonSurfaceOf(parse(tokenize(String(raw))), isLoose); } catch { return null; }
 }
 
 /** A single word from the English list — the predicate the English-common flag walks with. */
-export const isEnglishCommon = (list) => (v) => !/\s/.test(v) && list.has(v.toLowerCase());
+const isEnglishCommon = (list) => (v) => !/\s/.test(v) && list.has(v.toLowerCase());
 
-/**
- * Flag-aware keyword prune analysis for one loaded lorebook — one classifier shared by the Lorebook
- * Studio audit and the offline eval/keyword-audit.mjs, so the audit and the runtime never drift.
- * Returns live closures (classifyEntry re-reads each entry's flags), so a flag toggle just re-runs
- * them; the caches key on (key, caseSensitive, wholeWord) so re-analysis after a toggle is cheap.
- *
- * @param {object} data       loaded world-info object (from loadWorldInfo)
- * @param {object} opts        scan/prune options (see keyword-tools STUDIO_PRUNE_OPTS)
- * @param {Set<string>} ignoreSet  keys whitelisted for this book (skipped by classifyEntry)
- * @param {{caseSensitiveDefault?: boolean, wholeWordsDefault?: boolean}} [matchDefaults]  book-level
- *        match-flag defaults for entries that don't set their own (the extension injects ST's
- *        world-info globals here; harnesses pass nothing and get false/false)
- * @returns {{entries:object[], nE:number, classifyEntry:Function, reasonOf:Function, defChecked:Function, effCase:Function, effWhole:Function}}
- */
 /** Share of messages a key must match before chat evidence calls it chat-common. Not a fitted
  * threshold — a bound, sitting above the known-good ceiling a curation event established, with
  * margin (K14). It is deliberately loose because what lives above it is mostly legitimate — largely
@@ -214,15 +189,28 @@ export const isEnglishCommon = (list) => (v) => !/\s/.test(v) && list.has(v.toLo
 export const KEY_CHAT_COMMON = 0.20;
 
 /**
+ * Flag-aware keyword prune analysis for one loaded lorebook — one classifier shared by the Lorebook
+ * Studio audit and the offline eval/keyword-audit.mjs, so the audit and the runtime never drift.
+ * Returns live closures (classifyEntry re-reads each entry's flags), so a flag toggle just re-runs
+ * them; the caches key on (key, caseSensitive, wholeWord) so re-analysis after a toggle is cheap.
+ *
  * NAMES SAY WHICH CORPUS, because there are two and the old ones did not. `bookContent` and
  * `bookListed` are COUNTS of entries, over `nBook`; `chatRate` is a RATE, already divided by the
  * message total. Nothing here holds a book-side rate — those divisions are inline and read as
  * divisions — so a bare identifier is always a count and anything ending `Rate` is always a share.
  *
+ * @param {object} data       loaded world-info object (from loadWorldInfo)
+ * @param {object} opts        scan/prune options (see keyword-tools STUDIO_PRUNE_OPTS)
+ * @param {Set<string>} ignoreSet  keys whitelisted for this book (skipped by classifyEntry)
+ * @param {{caseSensitiveDefault?: boolean, wholeWordsDefault?: boolean}} [matchDefaults]  book-level
+ *        match-flag defaults for entries that don't set their own (the extension injects ST's
+ *        world-info globals here; harnesses pass nothing and get false/false)
  * @param {{messagesWith: Map<string, number>, messages: number}} [chatScan] Per-key counts of MESSAGES
  *   CONTAINING the key, and the denominator — never occurrences, which is the drift `addMessageHits`
  *   exists to prevent. Absent = no chat evidence, and every flag behaves as it did before the signal
  *   existed: this is opt-in evidence the user asked for, not a verdict the tool imposes.
+ * @returns {{entries:object[], nE:number, classifyEntry:Function, reasonOf:Function, defChecked:Function,
+ *   severityOf:Function, effCase:Function, effWhole:Function, dupes:Map, unusableKeysOf:Function}}
  */
 export function buildKeyPruneScan(data, opts, ignoreSet, { caseSensitiveDefault = false, wholeWordsDefault = false, matchWindow = 'scan', chatScan } = {}) {
     // Share of the chat a key matches. THREE states, and the last two must not collapse:
@@ -379,7 +367,6 @@ export function buildKeyPruneScan(data, opts, ignoreSet, { caseSensitiveDefault 
         const chatRate = chatRateOf(k);
         // A common-English single word over-fires against chat regardless of lorebook df, so it
         // outranks dead (a word absent from the book's own text still floods it from the chat).
-        // Sticky gets the shorter head-of-list cut; keyword/vector test the whole list.
         //
         // `eng` is the ASSERTION that it over-fires; a chat scan is the evidence. Measured on
         // uncurated books, very few English-flagged keys actually fire broadly (K14) — the rest are

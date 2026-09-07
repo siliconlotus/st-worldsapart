@@ -89,7 +89,7 @@ export const wordChar = () => BOUNDARY_CLASSES[boundaryMode];
  * nothing.
  *
  * ZERO-WIDTH, not a consumed character class: the pattern runs under `g` to COUNT occurrences and
- * keyExcerpt reads the match offsets, so eating a boundary character would both hide the next adjacent
+ * keyExcerpts reads the match offsets, so eating a boundary character would both hide the next adjacent
  * match and mis-highlight the span.
  */
 export const boundaryBefore = () => `(?:(?<!${wordChar()})|(?<=--))`;
@@ -626,36 +626,6 @@ export function countKey(key, text, caseSensitive, wholeWords, scope) {
 }
 
 /**
- * WHERE a key matched, for display — the first occurrence as a folded-text excerpt with the match
- * marked «so». Exists for /wa-grade's "why did this pop": a substring key's surface form ("thread"
- * inside "threadbare") is what the author needs to see to tune it, and countKey only counts.
- *
- * Shares countKey's exact machinery (foldedHay/fold, wordChar() boundary, regex precedence) rather
- * than re-deriving match rules — but it is DISPLAY, not a matcher: only ever called for keys
- * countKey already counted, so a disagreement can misplace an excerpt, never invent or hide a
- * firing. Excerpts read from the ORIGINAL text: matches are found in the folded haystack, then the
- * offsets are walked back through a per-character fold, so the author sees the sentence they wrote.
- *
- * A SINGLE-TERM SmartKey gets an excerpt; a compound one does not. `? =rut` or `? /Cap'n/i` has exactly
- * one thing that can have matched, and it is the case where the excerpt is worth most — a bare count
- * cannot tell an author where `=rut` landed, and for a regex the surface form is not deducible from the
- * key at all. A conjunction, alternation or negation has no single answer, so it keeps returning null
- * rather than picking a limb and implying it was the reason. The term's OWN flags apply, never the
- * entry's: a `?` key is self-describing, so `? nasa` in a caseSensitive entry is still
- * insensitive.
- * @param {string} key The key that matched
- * @param {string|string[]} text Scan window — a string or segments, as keywordScore takes
- * @param {boolean} caseSensitive Resolved entry flag
- * @param {boolean} wholeWords Resolved entry flag
- * @param {number} [context] Characters of context either side
- * @returns {string|null} One marked excerpt, or null (no match found / smartkey)
- */
-export function keyExcerpt(key, text, caseSensitive, wholeWords, context = 28) {
-    const first = keyExcerpts(key, text, caseSensitive, wholeWords, context, 1)[0];
-    return first ? markExcerptText(first) : null;
-}
-
-/**
  * An excerpt rendered as plain text with the match in guillemets.
  *
  * For places that cannot carry markup — a `title` tooltip, a console table, a check's expectation. The
@@ -670,14 +640,27 @@ export const markExcerptText = ex => (ex
     : null);
 
 /**
- * EVERY place a key matched, for vetting rather than diagnosis — up to `limit`.
+ * EVERY place a key matched — up to `limit` — as folded-text excerpts with the match offsets, for
+ * display. Two questions, one function: "did this land where I think" wants the first occurrence
+ * (/wa-grade's "why did this pop" — a substring key's surface form, "thread" inside "threadbare", is
+ * what the author needs to see to tune it, and countKey only counts); "is this key any good" wants the
+ * SPREAD, since one excerpt cannot distinguish a term that fires thirteen times on the same phrase from
+ * one firing across thirteen different scenes, and that difference is the whole judgement about a key.
  *
- * keyExcerpt answers "did this land where I think"; this answers "is this key any good", which needs the
- * spread: one excerpt cannot distinguish a term that fires thirteen times on the same phrase from one
- * firing across thirteen different scenes, and that difference is the whole judgement about a key.
+ * Shares countKey's exact machinery (foldedHay/fold, wordChar() boundary, regex precedence) rather
+ * than re-deriving match rules — but it is DISPLAY, not a matcher: only ever called for keys
+ * countKey already counted, so a disagreement can misplace an excerpt, never invent or hide a
+ * firing. Excerpts read from the ORIGINAL text: matches are found in the folded haystack, then the
+ * offsets are walked back through a per-character fold, so the author sees the sentence they wrote.
+ *
+ * A SINGLE-TERM SmartKey gets excerpts; a compound one does not. `? =rut` or `? /Cap'n/i` has exactly
+ * one thing that can have matched, and it is the case where the excerpt is worth most — a bare count
+ * cannot tell an author where `=rut` landed, and for a regex the surface form is not deducible from the
+ * key at all. A conjunction, alternation or negation has no single answer, so it returns nothing
+ * rather than picking a limb and implying it was the reason. The term's OWN flags apply, never the
+ * entry's: a `?` key is self-describing, so `? nasa` in a caseSensitive entry is still insensitive.
  *
  * Capped because it is display: twenty is more than a reader will scan and bounds what a sample carries.
- * Same machinery and same rules as the single-excerpt path, which is the point of it being one function.
  *
  * @param {string} key The key that matched
  * @param {string|string[]} text Scan window — a string or segments
@@ -861,8 +844,10 @@ export const secondaryKeys = (entry) => {
 };
 
 /**
- * One primary key's occurrences under the entry's selective logic — countKey, with core's
- * secondary-key condition folded into the same expression rather than evaluated beside it.
+ * One primary key evaluated under the entry's selective logic — countKey's machinery, with core's
+ * secondary-key condition folded into the same expression rather than evaluated beside it. Undivided,
+ * because keywordScore wants the units and building the tree twice would be two cache entries for one
+ * expression.
  *
  * WHY ONE EXPRESSION AND NOT TWO EVALUATORS. `secondaryOk` was a second WA implementation of core's
  * matchSecondaryKeys, standing next to the one in `synthesizeSecondary`, and CLAUDE.md's one-matcher
@@ -871,22 +856,13 @@ export const secondaryKeys = (entry) => {
  * survivor because it is the one that can carry the ENTRY FLAGS — the string route returned from
  * countKey's `?` branch before the flag arguments were ever read.
  *
- * Score-neutral by construction: the gate's nodes carry weight 0, so the value here is the primary's
- * own contribution exactly as countKey computes it, and 0 when the gate fails. The floor mirrors
- * countKey's `?` branch — a matched expression built purely from negation accumulates no weight and
- * must still count as one hit.
+ * Score-neutral by construction: the gate's nodes carry weight 0, so what comes back is the primary's
+ * own contribution exactly as countKey computes it, and nothing when the gate fails.
  *
  * The cache id joins every input the tree depends on with US, because registerTerms stamps
  * scope-local pattern indices onto it and a mis-keyed hit would evaluate the wrong expression.
  */
 const SELECTIVE_SEP = '\u001f';
-export function countSelective(entry, key, text, caseSensitive, wholeWords, sec = secondaryKeys(entry)) {
-    const { matched, scoreBoost } = selectiveEval(entry, key, text, caseSensitive, wholeWords, sec);
-    return matched ? (scoreBoost > 0 ? scoreBoost : 1) : 0;
-}
-
-/** countSelective's evaluation, undivided — countKey's caller wants the scalar, keywordScore wants
- *  the units, and building the tree twice would be two cache entries for one expression. */
 function selectiveEval(entry, key, text, caseSensitive, wholeWords, sec) {
     const logic = entry?.selectiveLogic ?? WI_LOGIC.AND_ANY;
     const id = [key, logic, caseSensitive ? 1 : 0, wholeWords ? 1 : 0, ...sec].join(SELECTIVE_SEP);
@@ -1014,7 +990,7 @@ export function keywordScore(entry, text, keys = entry.key, { k1, caseSensitiveD
         // force-activated entry was never checked at all. Either way the score is WA's claim about this
         // text, so it is WA's job to make it true of this text.
         //
-        // The gate is INSIDE countSelective's expression rather than a separate pass over the segment,
+        // The gate is INSIDE selectiveEval's expression rather than a separate pass over the segment,
         // so "did this key match" stays one question with one evaluator (see there).
         for (const key of keys) {
             const units = keyUnits(entry, key, segment, caseSensitive, wholeWords, sec);
@@ -1075,10 +1051,30 @@ export function keywordScore(entry, text, keys = entry.key, { k1, caseSensitiveD
 // ---------------------------------------------------------------------------
 
 /**
- * Whether the entry carries a decorator, by core's rules (world-info.js parseDecorators):
+ * The decorator lines of a raw content string, by core's rules (world-info.js parseDecorators):
  * read only when content STARTS with `@@`, one decorator per leading line, stopping at the first
- * non-`@@` line; a `@@@name` line is the fallback form of `@@name`, and core's own test is a
- * bare startsWith on the name.
+ * non-`@@` line. Returned RAW, because withPromote rewrites the run and must preserve the spelling of
+ * the lines it keeps; `bareDecorator` is the unescape every reader of a NAME wants first.
+ *
+ * ponytail: the `@@@` fallback-chain nuance (it only applies after an unknown decorator) is not
+ * mirrored, so callers over-detect fallback lines — which errs safe in all three: over-detecting
+ * `@@dont_activate` under-adds, over-detecting `@@activate` under-deletes, and over-detecting
+ * `@@promote` only drops a line a toggle is rewriting anyway.
+ */
+function leadingDecorators(content) {
+    const text = String(content ?? '');
+    if (!text.startsWith('@@')) return [];
+    const lines = text.split('\n');
+    let end = 0;
+    while (end < lines.length && lines[end].startsWith('@@')) end += 1;
+    return lines.slice(0, end);
+}
+
+/** A `@@@name` line is the fallback form of `@@name`; core's own test is a bare startsWith on the name. */
+const bareDecorator = line => (line.startsWith('@@@') ? line.slice(1) : line);
+
+/**
+ * Whether the entry carries a decorator.
  *
  * Two entry shapes reach this: raw entries (the ENTRIES_LOADED buckets, fixtures) carry the `@@`
  * lines in `content`; parsed entries (getSortedEntries output — what activationAdds/Prunes see at
@@ -1086,22 +1082,12 @@ export function keywordScore(entry, text, keys = entry.key, { k1, caseSensitiveD
  * would always miss. The array is authoritative when present — without this check the runtime guards
  * are inert: `activationAdds` stops seeing `@@dont_activate`, and the takeover blanks a keyed
  * `@@activate` entry's keys, which core's inclusion-group filter reads through `getScore`.
- * ponytail: the `@@@` fallback-chain nuance (it only applies after an unknown decorator) is not
- * mirrored, so this over-detects fallback lines — which errs safe in both callers: over-detecting
- * `@@dont_activate` under-adds, over-detecting `@@activate` under-deletes.
  */
 export function hasDecorator(entry, name) {
     if (Array.isArray(entry?.decorators)) {
         return entry.decorators.some(d => String(d).startsWith(name));
     }
-    const content = String(entry?.content ?? '');
-    if (!content.startsWith('@@')) return false;
-    for (const line of content.split('\n')) {
-        if (!line.startsWith('@@')) break;
-        const bare = line.startsWith('@@@') ? line.slice(1) : line;
-        if (bare.startsWith(name)) return true;
-    }
-    return false;
+    return leadingDecorators(entry?.content).some(l => bareDecorator(l).startsWith(name));
 }
 
 /**
@@ -1114,18 +1100,12 @@ export function hasDecorator(entry, name) {
  * EXACT, not `startsWith`. Core tests its own closed list by prefix; this namespace is open, so a prefix
  * test would claim every future `@@promote_*`. A trailing argument is allowed.
  */
-export const isPromoteDecorator = line => /^@@promote(\s|$)/.test(String(line ?? ''));
+const isPromoteDecorator = line => /^@@promote(\s|$)/.test(String(line ?? ''));
 
 /** Whether the author promoted this entry, read off RAW content (the ENTRIES_LOADED shape). Returns
  *  false for a parsed entry, whose content core has already stripped — the runtime reads the stash. */
 export function hasPromoteDecorator(entry) {
-    const content = String(entry?.content ?? '');
-    if (!content.startsWith('@@')) return false;
-    for (const line of content.split('\n')) {
-        if (!line.startsWith('@@')) break;
-        if (isPromoteDecorator(line.startsWith('@@@') ? line.slice(1) : line)) return true;
-    }
-    return false;
+    return leadingDecorators(entry?.content).some(l => isPromoteDecorator(bareDecorator(l)));
 }
 
 /**
@@ -1136,14 +1116,10 @@ export function hasPromoteDecorator(entry) {
  * means nothing to core, and a stable position keeps a toggle's diff to one line.
  */
 export function withPromote(content, on) {
-    const text = String(content ?? '');
-    const lines = text.split('\n');
-    let end = 0;
-    while (end < lines.length && lines[end].startsWith('@@')) end += 1;
-    const head = lines.slice(0, end).filter(l => !isPromoteDecorator(l.startsWith('@@@') ? l.slice(1) : l));
-    const rest = lines.slice(end);
+    const run = leadingDecorators(content);
+    const head = run.filter(l => !isPromoteDecorator(bareDecorator(l)));
     if (on) head.unshift('@@promote');
-    return [...head, ...rest].join('\n');
+    return [...head, ...String(content ?? '').split('\n').slice(run.length)].join('\n');
 }
 
 /**

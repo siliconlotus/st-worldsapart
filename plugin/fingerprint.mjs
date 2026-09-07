@@ -16,7 +16,7 @@ export const PLUGIN_FILES = [
 ];
 
 /** Non-cryptographic string hash (djb2, 32-bit). Only used to fingerprint files — not a security primitive. */
-export function hashText(str) {
+function hashText(str) {
     let h = 5381;
     for (let i = 0; i < str.length; i++) h = ((h << 5) + h + str.charCodeAt(i)) | 0;
     return (h >>> 0).toString(16).padStart(8, '0');

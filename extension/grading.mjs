@@ -575,11 +575,6 @@ const SHARED_FIELDS = ['name', 'notes', 'createdAt', 'createdBy', 'bookPriority'
 /** Per-arm fields that are the SCENE's, not the arm's, and so move onto the scene rather than repeating. */
 const SCENE_FIELDS = ['chat', 'scanChat', 'injects', 'sources'];   // a sample's names for sceneChat / sceneChats / sceneInjects / sceneSources
 
-/** Every field `bundleSamples` reads off a sample and places itself. A caller assembling samples out of an
- *  older document uses this to tell the document's own fields from an arm's: anything NOT here and not
- *  already on the arm is document-level and belongs in `extra`, or it repeats once per arm. */
-export const DOC_FIELDS = [...SHARED_FIELDS, ...SCENE_FIELDS, 'books', 'grades'];
-
 /** Per-candidate fields that are numeric SIGNAL VALUES, and so live under `scores`. Everything else on a
  *  candidate — identity, index, tokens, the fused score, the ranks, the budget verdict — stays flat beside
  *  it, because `scores` is "whatever the capture recorded, keyed by the feature's own name" and a fitted
@@ -602,7 +597,7 @@ export const SCHEMA_VERSION = 3;
  * @param {number} end The message the scene ends at — the graded moment
  * @returns {string} Scene id
  */
-export const sceneId = (chat, end) => {
+const sceneId = (chat, end) => {
     const base = String(chat ?? '').split(/[\\/]/).pop().replace(/\.[^.]*$/, '');
     return `${base.replace(/[^A-Za-z0-9_]+/g, '-')}-msg-${end}`;
 };
@@ -760,7 +755,7 @@ const deref = (entries, raters = []) => (entries ?? []).map(e => ({
  * @param {{user?: string, now?: string}} [who] Rater identity for a bare `grade`, and the date to stamp
  * @returns {object[]} Scene entries
  */
-export function gradeEntries(grades, { user, now } = {}) {
+function gradeEntries(grades, { user, now } = {}) {
     const out = [];
     for (const g of grades ?? []) {
         if (!g || g.uid === undefined) continue;

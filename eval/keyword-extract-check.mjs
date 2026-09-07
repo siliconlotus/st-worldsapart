@@ -361,14 +361,17 @@ assert.equal(FUNCTION_WORDS.has('de') || FUNCTION_WORDS.has('los'), false, 'no n
 console.log('ok   looksLikeFragment: fires on clause fragments, spares concrete names and non-English entities');
 
 // --- cohesion subsumption + properness --------------------------------------------------------
+// Padding entries so a term's df stays under the distributional function-word cut, and the suggest
+// options the blocks below share — hoisted because a per-block copy is a per-block chance to drift.
+const filler = n => Object.fromEntries([...Array(n)].map((_, i) => [20 + i,
+    { uid: 20 + i, key: [], content: 'Rain fell on the street tonight, a dull ordinary evening for everyone.' }]));
+const OPTS = { dfCeil: 0.5, maxN: 4, excludeDates: true, excludeShort: true, onlyActive: true, cap: 8 };
+
 // At equal frequency the longer gram used to win outright, on the assumption that longer is more
 // specific. Specificity is worthless if the string never occurs: measured against a real chat, a
 // half of an INCOHESIVE tetragram almost always out-fires the whole (S7). So the longer gram now has
 // to be a unit — count(whole)/(count(halfA)+count(halfB)) >= 0.4 — or the contained gram wins.
 {
-    const filler = n => Object.fromEntries([...Array(n)].map((_, i) => [20 + i,
-        { uid: 20 + i, key: [], content: 'Rain fell on the street tonight, a dull ordinary evening for everyone.' }]));
-    const opts = { dfCeil: 0.5, maxN: 4, excludeDates: true, excludeShort: true, onlyActive: true, cap: 8 };
     // Both halves live independently across the book, so the tetragram is an assembly.
     const assembly = { entries: { ...filler(6),
         0: { uid: 0, key: [], content: 'The bronze minotaur Arthur Baxter guarded it. Again the bronze minotaur Arthur Baxter stood watch.' },
@@ -377,7 +380,7 @@ console.log('ok   looksLikeFragment: fires on clause fragments, spares concrete 
         3: { uid: 3, key: [], content: 'The bronze minotaur sat alone in the hall.' },
         4: { uid: 4, key: [], content: 'They polished the bronze minotaur every spring without fail.' },
     } };
-    const t0 = buildKeySuggest(assembly, opts).perEntry.find(pe => pe.entry.uid === 0)?.newRows.map(r => r.term) ?? [];
+    const t0 = buildKeySuggest(assembly, OPTS).perEntry.find(pe => pe.entry.uid === 0)?.newRows.map(r => r.term) ?? [];
     assert.ok(!t0.includes('bronze minotaur arthur baxter'), 'an incohesive tetragram does not swallow its halves');
     assert.ok(t0.includes('arthur baxter') && t0.includes('bronze minotaur'), 'the halves that live independently are offered instead');
     // A trigram decomposes into OVERLAPPING bigrams (ABC -> AB + BC), which is what the leading/
@@ -389,14 +392,14 @@ console.log('ok   looksLikeFragment: fires on clause fragments, spares concrete 
         1: { uid: 1, key: [], content: 'A courier reached Mobius Industries before noon.' },
         2: { uid: 2, key: [], content: 'Nobody at Mobius Industries answered the phone.' },
     } };
-    const y0 = buildKeySuggest(tri, opts).perEntry.find(pe => pe.entry.uid === 0)?.newRows.map(r => r.term) ?? [];
+    const y0 = buildKeySuggest(tri, OPTS).perEntry.find(pe => pe.entry.uid === 0)?.newRows.map(r => r.term) ?? [];
     assert.ok(!y0.includes('mobius industries hq'), 'an incohesive trigram does not swallow its leading bigram');
     assert.ok(y0.includes('mobius industries'), 'the bigram that lives independently is offered instead');
     // Same shape, but nothing inside it ever occurs apart — a unit, which still wins the tie.
     const unit = { entries: { ...filler(6),
         0: { uid: 0, key: [], content: 'They met at Pura Dalem Agung Padangtegal. Later, Pura Dalem Agung Padangtegal again.' },
     } };
-    const u0 = buildKeySuggest(unit, opts).perEntry.find(pe => pe.entry.uid === 0)?.newRows.map(r => r.term) ?? [];
+    const u0 = buildKeySuggest(unit, OPTS).perEntry.find(pe => pe.entry.uid === 0)?.newRows.map(r => r.term) ?? [];
     assert.ok(u0.includes('pura dalem agung padangtegal'), 'a cohesive tetragram survives');
     assert.ok(!u0.includes('pura dalem'), 'and still subsumes its halves');
     // Properness has ONE definition: capitalised mid-sentence AND never seen lowercase. Title case
@@ -410,7 +413,7 @@ console.log('ok   looksLikeFragment: fires on clause fragments, spares concrete 
         // ("Arthur because") unless the phrase also has a commonness ceiling.
         3: { uid: 3, key: [], content: 'Arthur because of the rain stayed. Arthur because of the wind left.' },
     } };
-    const ts = buildKeySuggest(titled, opts).perEntry;
+    const ts = buildKeySuggest(titled, OPTS).perEntry;
     const at = uid => ts.find(pe => pe.entry.uid === uid)?.newRows.map(r => r.term) ?? [];
     assert.ok(!at(0).includes('kyle under'), 'a title-cased common word is not properness evidence');
     assert.ok(!at(3).some(t => t.includes('because')), 'a top-500 word cannot ride a name anchor into a phrase');
@@ -475,15 +478,12 @@ console.log('ok   display takes the most-used capitalisation, counted book-wide'
 // maxN counts CONTENT words, so a name padded with grammar still fits the budget, and a gram that
 // has exactly one possible next word is a prefix rather than a unit.
 {
-    const filler = n => Object.fromEntries([...Array(n)].map((_, i) => [20 + i,
-        { uid: 20 + i, key: [], content: 'Rain fell on the street tonight, a dull ordinary evening for everyone.' }]));
-    const opts = { dfCeil: 0.5, maxN: 4, excludeDates: true, excludeShort: true, onlyActive: true, cap: 8 };
     // Seven tokens, three of which mean anything — under a token-counted budget of 4 this name can
     // only ever be seen through a window across its middle.
     const book = { entries: { ...filler(9),
         0: { uid: 0, key: [], content: 'They sailed to the Island of the Dome of the Slate. Nobody returns from the Island of the Dome of the Slate.' },
     } };
-    const t0 = buildKeySuggest(book, opts).perEntry.find(pe => pe.entry.uid === 0)?.newRows.map(r => r.display) ?? [];
+    const t0 = buildKeySuggest(book, OPTS).perEntry.find(pe => pe.entry.uid === 0)?.newRows.map(r => r.display) ?? [];
     assert.ok(t0.includes('Island of the Dome of the Slate'), 'linkers do not consume the phrase budget');
     assert.ok(!t0.some(t => t !== 'Island of the Dome of the Slate' && /^Island of the Dome/.test(t)), 'and its truncations do not compete with it');
     // "grain commission" always follows "chairman of the", so the window stopping at "grain" is a
@@ -492,7 +492,7 @@ console.log('ok   display takes the most-used capitalisation, counted book-wide'
         0: { uid: 0, key: [], content: 'He chairs the Grain Commission board. The Grain Commission met at noon.' },
         1: { uid: 1, key: [], content: 'Every Chairman of the Grain Commission speaks last, and each Chairman of the Grain Commission signs. The Grain Commission adjourned.' },
     } };
-    const t1 = buildKeySuggest(titles, opts).perEntry.find(pe => pe.entry.uid === 1)?.newRows.map(r => r.term) ?? [];
+    const t1 = buildKeySuggest(titles, OPTS).perEntry.find(pe => pe.entry.uid === 1)?.newRows.map(r => r.term) ?? [];
     assert.ok(!t1.includes('chairman of the grain'), 'a gram with one possible successor is a truncation');
     // Only the shoulder a phrase decomposes INTO may replace it. Here the shoulder ("grain
     // commission", 3 mentions) does not share the title's frequency, so the only equal-frequency
@@ -506,9 +506,7 @@ console.log('ok   phrase budget counts content words; truncations do not outrank
 // barely does — S7), so both are offered. A particle-led name is the exception: "Sacres" occurs only ever
 // inside "de Sacres", and the particle is the structural tell.
 {
-    const filler = n => Object.fromEntries([...Array(n)].map((_, i) => [20 + i,
-        { uid: 20 + i, key: [], content: 'Rain fell on the street tonight, a dull ordinary evening for everyone.' }]));
-    const opts = { dfCeil: 0.5, maxN: 4, excludeDates: true, excludeShort: true, onlyActive: true, cap: 12 };
+    const opts = { ...OPTS, cap: 12 };
     const book = { entries: { ...filler(9),
         0: { uid: 0, key: [], content: 'The envoy Evelyn Ashworth spoke first. Nobody interrupted Evelyn Ashworth.' },
         1: { uid: 1, key: [], content: 'They bowed to Vicomtesse de Sacres. The room watched Vicomtesse de Sacres depart.' },

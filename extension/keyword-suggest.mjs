@@ -7,13 +7,16 @@
 // top. keyword-suggest-design.md carries the live definition work behind it.
 import { COMMON_WORDS } from '../plugin/commonwords.js';
 import { ZIPF_EN, POS_VA, POS_VA_STRICT, POS_ADJ } from './zipf-en.js';
-import { countKey } from './matcher.mjs';
-import { buildAutomaton, scanAutomaton, parse } from './smartkeys.mjs';
+import { buildAutomaton, scanAutomaton } from './smartkeys.mjs';
 // ONE JUNK VOCABULARY, and one too-common line, so the two tools cannot disagree about what to refuse.
 import { FUNCTION_WORDS, KEY_BOOK_COMMON } from './keyword-audit.mjs';
 
-// Curly apostrophes are folded to straight ones before a ZIPF_EN lookup: the table is keyed straight,
-// and "isn’t" missing it scored as maximally rare — the exact inverse of the truth.
+// Curly apostrophes are folded to straight ones before a ZIPF_EN lookup: the table is keyed straight
+// (SUBTLEX writes "isn't" z=4.8, "don't" 5.6) and roleplay prose writes U+2019, as does anything
+// through a smart-quote filter. Unfolded, "isn’t" missed ZIPF_EN and every POS set and scored as
+// maximally rare — the exact inverse of the truth — reaching a real book's suggestions as a
+// heavily-firing key (K14). LOOKUP ONLY: the term itself keeps the apostrophe it was written with,
+// "Kal'thas" being a name rather than a contraction, and the elision rule reads both on purpose.
 const tblKey = w => w.includes('’') ? w.replace(/’/g, "'") : w;
 
 // Few-shot examples, shared so the LLM post-filter can drop them unconditionally: a cold small model
@@ -75,7 +78,7 @@ export function parseKeyList(raw) {
 // month-name test requires an adjacent digit so a month word alone survives — "may day gala" stays,
 // "may 1" goes. Spelled-out days ("december twenty five") slip through; rare enough to ignore.
 const MONTH_RE = /\b(?:jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|jul(?:y)?|aug(?:ust)?|sep(?:t(?:ember)?)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)\b/;
-export function isDateLike(term) {
+function isDateLike(term) {
     const t = String(term).toLowerCase();
     if (/\b(?:19|20)\d{2}\b/.test(t)) return true;                     // a 4-digit year
     if (/\b\d{1,2}[/.-]\d{1,2}[/.-]\d{2,4}\b/.test(t)) return true;    // numeric date 8/1/2024

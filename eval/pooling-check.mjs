@@ -9,7 +9,7 @@
 //
 // Run bare: prints `ok` or throws.
 import assert from 'node:assert';
-import { poolEntries, quantile, scoreCollection, selectTopK } from '../plugin/scoring.mjs';
+import { poolEntries, scoreCollection, selectTopK } from '../plugin/scoring.mjs';
 
 const chunk = (index, hash, score) => ({ collectionId: 'c1', score, metadata: { index, hash, text: `t${hash}` } });
 
@@ -63,12 +63,6 @@ assert.strictEqual(new Set(selectTopK(many, 2).c1.metadata.map(m => m.index)).si
 const lexOnly = selectTopK(poolEntries([chunk(7, 1, 0.9), chunk(8, 2, -0.5)]), 1);
 assert.deepStrictEqual(lexOnly.c1.metadata.map(m => m.index), [7],
     'topK 1 keeps the cosine winner alone — no lexical list to union');
-
-// quantile is no longer wired to admission (nothing is), but the harnesses cut with it, so it stays correct.
-assert.strictEqual(quantile([], 0.9), 0, 'empty → 0');
-assert.strictEqual(quantile([5], 0.9), 5, 'single value');
-assert.strictEqual(quantile([3, 1, 2], 0.5), 2, 'median, unsorted input');
-assert.strictEqual(quantile([0, 10], 0.9), 9, 'linear interpolation');
 
 // scoreCollection ADMITS EVERYTHING now. Ten orthogonal unit vectors against a query aligned with item 0
 // give ten distinct cosines and, formerly, ten different admission verdicts; every one of them is kept.

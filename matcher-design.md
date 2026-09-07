@@ -233,7 +233,7 @@ rewrites an em dash to `--` so `wait--no` matches `wait—no`; strict counts `-`
 A single hyphen joins a compound; `--` is the ASCII spelling of the dash the fold just rewrote and is
 never inside a word. So the assertion is "the neighbour is not a word character, OR it is a doubled
 hyphen" — `boundaryBefore`/`boundaryAfter`, still zero-width, because the pattern counts under `g` and
-`keyExcerpt` reads its offsets, so consuming the boundary would hide adjacent matches and mis-highlight
+`keyExcerpts` reads its offsets, so consuming the boundary would hide adjacent matches and mis-highlight
 the span.
 
 Default **strict**, because the escapes are asymmetric: a regex key with `\b` recovers permissive
@@ -552,7 +552,7 @@ emits `WORLDINFO_FORCE_ACTIVATE` for anything newly matched.
 ### Selective logic (`keysecondary`)
 
 Core's `(key, keysecondary, selectiveLogic)` is answered by ONE expression per primary key:
-`synthesizeSecondary` builds the AST, `countSelective` evaluates it, `keywordScore` is the only caller.
+`synthesizeSecondary` builds the AST, `selectiveEval` evaluates it, `keywordScore` is the only caller.
 One-matcher covers selective logic as much as key matching.
 
 Synthesis builds the AST, not a string, and therefore has no refusals — every one was an artifact of

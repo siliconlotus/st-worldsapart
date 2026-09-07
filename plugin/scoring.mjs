@@ -22,16 +22,6 @@
 // not a present one. If a book ever approaches the ceiling, this is the decision to revisit first.
 import { centeredCosineScores } from './vector.mjs';
 
-/** Linear-interpolated quantile. No longer used by admission; kept for the eval harnesses' own cuts. */
-export function quantile(xs, q) {
-    if (!xs.length) return 0;
-    const s = [...xs].sort((a, b) => a - b);
-    const i = (s.length - 1) * q;
-    const lo = Math.floor(i);
-    const hi = Math.min(lo + 1, s.length - 1);
-    return s[lo] + (s[hi] - s[lo]) * (i - lo);
-}
-
 /** Score one collection's chunks against a query vector by mean-centered cosine, and return them ALL.
  *  This is the plugin's /query-multi per-collection loop.
  *

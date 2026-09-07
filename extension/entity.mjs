@@ -10,12 +10,12 @@
 // It lives with the extension, NOT the plugin: a change here is a browser refresh, never a plugin
 // redeploy, and it is never copied into /plugins, so it stays out of the plugin fingerprint.
 
-// The matcher's fold, because the tokens built here are BM25 QUERY TERMS: buildTermWeights' keys feed
-// bm25Scores directly, so they must be tokenized exactly as the index is (lexical.mjs tokenize)
-// or an accented query term shatters on this side and silently matches nothing. Same word-character
-// core too (\p{L}\p{N}\p{M} + apostrophe); a private [^A-Za-z0-9'] split was how "Möbius" indexed as
-// "bius" — see the tokenize header for the measurement.
-import { fold, normalizeOrthography } from '../plugin/automaton.mjs';
+// The INDEX's tokenizer, imported rather than restated, because the tokens built here are BM25 QUERY
+// TERMS: buildTermWeights' keys feed bm25Scores directly, so they must be tokenized exactly as the
+// index is or an accented query term shatters on this side and silently matches nothing. A private
+// [^A-Za-z0-9'] split was how "Möbius" indexed as "bius" — see the tokenize header for the measurement.
+import { tokenize } from './lexical.mjs';
+import { normalizeOrthography } from '../plugin/automaton.mjs';
 // THE PROJECT'S DEFINITION OF A NAME, imported rather than restated. relevance.mjs owns every name
 // rule; a second regex here is the drift that one exists to prevent.
 import { properNounsOf } from './relevance.mjs';
@@ -52,11 +52,7 @@ export function buildGazetteer(entries) {
     for (const entry of entries) {
         const sources = [...(entry.key ?? []), ...(entry.keysecondary ?? []), entry.comment ?? ''];
         for (const source of sources) {
-            for (const token of fold(source).split(/[^\p{L}\p{N}\p{M}']+/u)) {
-                if (token.length > 1) {
-                    terms.add(token);
-                }
-            }
+            for (const token of tokenize(source)) terms.add(token);
         }
     }
 

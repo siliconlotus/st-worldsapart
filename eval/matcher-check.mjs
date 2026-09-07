@@ -9,7 +9,7 @@
 // authority belongs there, not here.
 //
 // countKey/keywordScore live in matcher.mjs, which is isomorphic — imported directly.
-import { countKey, dropTags, keyExcerpt, keyExcerpts, keywordScore as rankKeywordScore, repeatCurveOf, secondaryKeys, usableKeys, usedMatchSources, withMatchSources, WI_LOGIC } from '../extension/matcher.mjs';
+import { countKey, dropTags, keyExcerpts, keywordScore as rankKeywordScore, markExcerptText, repeatCurveOf, secondaryKeys, usableKeys, usedMatchSources, withMatchSources, WI_LOGIC } from '../extension/matcher.mjs';
 import { validateSmartKey } from '../extension/smartkeys.mjs';
 import { eq } from './metrics.mjs';
 
@@ -299,9 +299,11 @@ eq(countKey('? -zebra', 'the cosmonaut waited', false, false), 1,
     'countKey itself is unfiltered — it answers what the expression does, and the filter is the caller\'s');
 
 
-// keyExcerpt — the /wa-grade "why did this pop" display. It shares countKey's machinery but is
-// display-only: called for keys countKey already counted, so these pin (a) agreement with countKey
-// on WHERE, and (b) the substring surface form an author needs for tuning, marked «so».
+// keyExcerpt — the /wa-grade "why did this pop" display: the FIRST place a key matched, marked. It
+// shares countKey's machinery but is display-only: called for keys countKey already counted, so these
+// pin (a) agreement with countKey on WHERE, and (b) the substring surface form an author needs for
+// tuning, marked «so».
+const keyExcerpt = (key, text, cs, ww, context = 28) => markExcerptText(keyExcerpts(key, text, cs, ww, context, 1)[0]);
 eq(keyExcerpt('thread', 'the curtains were threadbare by then', false, false),
     'the curtains were «thread»bare by then', 'substring: excerpt shows the containing word');
 eq(keyExcerpt('thread', 'the curtains were threadbare by then', false, true),
