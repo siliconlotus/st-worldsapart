@@ -2016,8 +2016,8 @@ export async function lorebookStudio(preferredBook = null) {
     };
 
     // --- Keyword Lab: any keys against any text, with no entry and no book behind them ---
-    /** Distinct hues by the golden angle, so a key's colour depends only on its position in the list. */
-    const LAB_HUES = Array.from({ length: 8 }, (_, i) => Math.round((i * 137.5) % 360));
+    /** A key's colour is its position in the list. Spread for adjacent keys, and clear of red, which is severity here. */
+    const LAB_HUES = [205, 145, 275, 40, 175, 310, 95, 240];
     const labColor = (h, a) => `hsl(${h} 75% 55%${a < 1 ? ` / ${a}` : ''})`;
 
     /** The haystack with every span wrapped, each in its key's hue. Offsets are keyExcerpts', which are into the NFC form. */
