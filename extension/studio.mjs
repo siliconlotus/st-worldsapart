@@ -2070,8 +2070,9 @@ export async function lorebookStudio(preferredBook = null) {
         const out = document.createElement('div');
         out.style.cssText = 'flex:0 0 auto;max-height:40%;overflow:auto;padding:0 8px 8px;';
         const repaint = () => {
-            // Split as core's key field does, so a regex keeps its commas; a newline is one more separator.
-            const keys = splitKeywordsAndRegexes(labKeys.replace(/\n/g, ','));
+            // Split as core's key field does, so a regex keeps its commas. A newline is one more separator, but only after
+            // the blank lines and trailing commas go: core reads `a,,` as the single term `a,`, which then matches nothing.
+            const keys = splitKeywordsAndRegexes(labKeys.split('\n').map(l => l.trim().replace(/,+$/, '')).filter(Boolean).join(','));
             const hue = key => LAB_HUES[Math.max(0, keys.indexOf(key)) % LAB_HUES.length];
             const rows = keyHits(keys, labHay, labCase, labWhole, { context: 30 });
             // A hit row takes the colour of the key it sits under, which is the last row that named one.
