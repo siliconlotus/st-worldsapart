@@ -268,7 +268,11 @@ console.log('ok   keyHits: a row per key and per hit, leaves named for compounds
 // --- keySpans: where to mark the haystack itself — source offsets, in order, never overlapping
 const spans = keySpans(['gagarin', '? (armstrong gagarin)', 'neil armstrong'], space, false, true);
 eq(spans.map(sp => `${sp.key}@${sp.start}`).join(' '), 'gagarin@27 neil armstrong@64 gagarin@87',
-    'a word already marked by an earlier key is not marked again — markup cannot nest two spans');
+    'overlapping matches become one span, at the extent of the one that starts first');
+eq(spans[0].keys.map(k => k.key).join(' + '), 'gagarin + ? (armstrong gagarin)',
+    'and that span names every key that reached it, for the tooltip');
+eq(spans[1].keys.map(k => k.term ?? k.key).join(' + '), 'neil armstrong + armstrong',
+    'a compound listed there names its leaf, not the whole key');
 eq(space.slice(spans[1].start, spans[1].end), 'Neil Armstrong', 'the offsets index the text itself, not an excerpt');
 eq(keySpans(['? (armstrong gagarin)'], space, false, true).map(sp => `${sp.term}@${sp.start}`).join(' '),
     'gagarin@27 armstrong@69', 'a compound names the leaf that produced each span');

@@ -377,16 +377,23 @@ function compoundExcerpts(node, text, context, limit) {
     return out;
 }
 
-/** Where every one of `keys` matched in `text`, as `{ key, term, start, end }` in source order, for a caller marking up the text
- *  itself. Overlaps are resolved first-come, since a span cannot be nested in the markup; a later key losing a span still has its
- *  own count from keyHits. Single-segment: `text` is one string, so the offsets are into it. */
+/** Where every one of `keys` matched in `text`, as `{ key, term, start, end, keys }` in source order, for a caller marking up
+ *  the text itself. A span cannot nest in the markup, so overlapping matches become one span at the first one's extent, with
+ *  every key that reached it listed in `keys`; `key` and `term` are the first of those. Single-segment: `text` is one string,
+ *  so the offsets are into it. */
 export function keySpans(keys, text, caseSensitive, wholeWords, limit = 200) {
+    const out = [];
     const spans = (Array.isArray(keys) ? keys : [])
         .map(k => String(k ?? '').trim()).filter(Boolean)
         .flatMap(key => keyExcerpts(key, text, caseSensitive, wholeWords, 0, limit)
             .map(e => ({ key, term: e.term, start: e.at, end: e.to })))
         .sort((a, b) => a.start - b.start || b.end - a.end);
-    return spans.filter((sp, i) => !spans.slice(0, i).some(p => p.end > sp.start && p.start < sp.end));
+    for (const { key, term, start, end } of spans) {
+        const last = out[out.length - 1];
+        if (last && last.end > start) last.keys.push({ key, term });
+        else out.push({ key, term, start, end, keys: [{ key, term }] });
+    }
+    return out;
 }
 
 /** What each of `keys` did to `text`, as the rows keyHitsHtml renders. One row per key with its count, then one `\u21b3` row

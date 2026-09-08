@@ -2020,14 +2020,15 @@ export async function lorebookStudio(preferredBook = null) {
     const LAB_HUES = [205, 145, 275, 40, 175, 310, 95, 240];
     const labColor = (h, a) => `hsl(${h} 75% 55%${a < 1 ? ` / ${a}` : ''})`;
 
-    /** The haystack with every span wrapped, each in its key's hue. Offsets are keyExcerpts', which are into the NFC form. */
+    /** The haystack with every span wrapped, in the hue of the first key that reached it; the rest are named in the tooltip.
+     *  Offsets are keyExcerpts', which are into the NFC form. */
     const markedHtml = (text, spans, hue) => {
         const src = String(text).normalize('NFC');
         let html = '', at = 0;
         for (const sp of spans) {
             const h = hue(sp.key);
             html += escapeHtml(src.slice(at, sp.start))
-                + `<span title="${escapeHtml(sp.term ? `${sp.key} \u2014 ${sp.term}` : sp.key)}"`
+                + `<span title="${escapeHtml(sp.keys.map(k => (k.term ? `${k.key} \u2014 ${k.term}` : k.key)).join('\n'))}"`
                 + ` style="background:${labColor(h, 0.28)};border-bottom:2px solid ${labColor(h, 1)};">${escapeHtml(src.slice(sp.start, sp.end))}</span>`;
             at = sp.end;
         }
