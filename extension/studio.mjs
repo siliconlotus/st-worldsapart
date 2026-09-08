@@ -2016,8 +2016,9 @@ export async function lorebookStudio(preferredBook = null) {
     };
 
     // --- Keyword Lab: any keys against any text, with no entry and no book behind them ---
-    /** A key's colour is its position in the list. Spread for adjacent keys, and clear of red, which is severity here. */
-    const LAB_HUES = [205, 145, 275, 40, 175, 310, 95, 240];
+    /** A key's colour is its position in the list: one hue per family — blue, green, magenta, orange, cyan, violet, yellow —
+     *  since two hues from one family are hard to tell apart however far apart the numbers are. Clear of red, severity here. */
+    const LAB_HUES = [215, 120, 305, 35, 180, 265, 58];
     const labColor = (h, a) => `hsl(${h} 75% 55%${a < 1 ? ` / ${a}` : ''})`;
 
     /** The haystack with every span wrapped, in the hue of the first key that reached it; the rest are named in the tooltip.
