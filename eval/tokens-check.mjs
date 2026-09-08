@@ -1,11 +1,4 @@
-// The offline token count must equal what the runtime recorded, or a replayed budget is not the budget.
-//
-// Re-derives the offset from every capture on disk carrying both a recorded `tokens` and its entry text,
-// and asserts it against the table in tokens.mjs — what keeps TOKENIZER_OFFSET a measurement rather than a
-// comment when ST's counter changes or a bundle appears under an uncalibrated tokenizer.
-//
-// Skips cleanly when no such capture is present — the synthetic bundles carry no recorded counts, and a
-// checkout without eval-data has none at all. Absence is not a failure; disagreement is.
+// The offline token count must equal what the runtime recorded: re-derives TOKENIZER_OFFSET from every capture carrying both and asserts it against tokens.mjs. Skips when none is present.
 import { readFileSync, readdirSync, existsSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -37,11 +30,7 @@ for (const [tok, d] of derived) {
     ok(TOKENIZER_OFFSET[tok] === d.offset, `"${tok}": TOKENIZER_OFFSET says ${TOKENIZER_OFFSET[tok]}, captures say ${d.offset}`);
 }
 
-// End to end on one real row: the counter reproduces a recorded number exactly, which is the claim the
-// offset table exists to support.
-// One real row end to end: the counter reproduces a recorded number exactly, which is the claim the offset
-// table exists to support. THROUGH openBundle — `paramSnapshot` and `candidates` are on the arm's scene
-// cell, and reading them off the arm made this block unreachable and the check silently vacuous.
+// THROUGH openBundle: `paramSnapshot` and `candidates` are on the arm's scene cell, and reading them off the arm made this block vacuous.
 const armWith = m => (m.budget?.tokenizer
     ? armNames(m).map(a => openBundle(m, a)).find(S => (S.candidates ?? []).some(c => Number(c.tokens) > 0))
     : null);

@@ -1,16 +1,6 @@
-// Logistic regression by IRLS, and the matrix solve it needs. Library, no CLI.
-//
-// Split from its caller for the same reason the gazetteer and the scorers are: a second copy of the fit
-// would let two tools disagree about a coefficient while both printed one.
-//
-// IRLS rather than gradient descent because the standard errors come free: Newton's method already forms
-// (X'WX)^-1 at every step, and its diagonal at convergence IS the coefficient covariance, so a moved
-// coefficient can be read against the interval it moved inside rather than asserted from two point
-// estimates.
+// logistic.mjs — logistic regression by IRLS and the matrix solve it needs. Library, no CLI; the only copy of the fit.
 
-/** Gauss-Jordan inverse with partial pivoting. n is the feature count (single digits here), so the cubic
- *  cost is irrelevant and the clarity is not. Returns null for a singular matrix — a collinear feature set,
- *  which the caller reports rather than papers over. */
+/** Gauss-Jordan inverse with partial pivoting; null for a singular matrix, which the caller reports. */
 export function inverse(A) {
     const n = A.length;
     const M = A.map((row, i) => [...row, ...Array.from({ length: n }, (_, j) => (i === j ? 1 : 0))]);
@@ -34,19 +24,9 @@ export function inverse(A) {
 export const sigmoid = z => 1 / (1 + Math.exp(-z));
 
 /**
- * Fits P(y=1) = sigmoid(X·beta) by iteratively reweighted least squares.
- *
- * Ridge by default, small: graded pools are mostly zeros and an eligibility indicator can be constant
- * within one arm's rows, which is the separation that sends a coefficient to infinity and reports it as a
- * finding. A 1e-6 penalty leaves an identified fit untouched at the printed precision and keeps an
- * unidentified one finite and visibly huge.
- *
- * @param {number[][]} X Rows of features. The caller prepends its own intercept column if it wants one.
- * @param {number[]} y Labels, 0 or 1
- * @param {object} [opts]
- * @param {number} [opts.ridge] L2 penalty (1e-6)
- * @param {number} [opts.iterations] Max Newton steps (50)
- * @returns {{beta: number[], se: number[], iterations: number, converged: boolean, logLoss: number}}
+ * Fits P(y=1) = sigmoid(X·beta) by IRLS. Ridge is small by default (1e-6): it keeps a separated fit finite and visibly
+ * huge without moving an identified one at printed precision.
+ * @param {number[][]} X Rows of features; the caller prepends its own intercept column
  */
 export function logisticFit(X, y, { ridge = 1e-6, iterations = 50 } = {}) {
     const n = X.length, p = X[0].length;
@@ -56,8 +36,7 @@ export function logisticFit(X, y, { ridge = 1e-6, iterations = 50 } = {}) {
     for (; iter < iterations; iter++) {
         const eta = X.map(row => row.reduce((s, x, j) => s + x * beta[j], 0));
         const mu = eta.map(sigmoid);
-        // Weights floor at 1e-8: a saturated probability contributes no curvature, and dividing by it is
-        // how a fit that has already converged turns into NaN on the next step.
+        // Weights floor at 1e-8: a saturated probability has no curvature, and dividing by it turns a converged fit into NaN.
         const w = mu.map(m => Math.max(m * (1 - m), 1e-8));
 
         const H = Array.from({ length: p }, (_, a) => Array.from({ length: p }, (_, b) => (a === b ? ridge : 0)));
@@ -84,12 +63,7 @@ export function logisticFit(X, y, { ridge = 1e-6, iterations = 50 } = {}) {
     return { beta, se: cov.map((row, j) => Math.sqrt(Math.max(row[j], 0))), iterations: iter, converged, logLoss };
 }
 
-/**
- * Area under the ROC curve, by the rank-sum identity. Ties get averaged ranks, the same correction
- * metrics.mjs spearman applies and for the same reason: a graded pool is mostly zeros, so an arm that
- * gives many rows an identical score would otherwise score differently depending on sort order.
- * @returns {number} AUC, or NaN when one class is absent
- */
+/** Area under the ROC curve by the rank-sum identity, ties at averaged ranks; NaN when one class is absent. */
 export function auc(scores, y) {
     const pos = y.reduce((s, v) => s + v, 0), neg = y.length - pos;
     if (!pos || !neg) return NaN;
@@ -106,24 +80,9 @@ export function auc(scores, y) {
     return (sumPos - pos * (pos + 1) / 2) / (pos * neg);
 }
 
-/**
- * The cumulative-logit family: one binary fit per boundary of an ordinal label, P(g >= k) for each cut.
- *
- * Separate slopes per boundary, which is not proportional odds — deliberately: proportional odds shares one
- * slope vector across every cut and buys efficiency with that assumption, and here the assumption is the
- * question. Fitting each boundary alone lets the slopes be compared, so a collapsed or inverted slope shows
- * the signals failing to see a distinction the scale asserts rather than being averaged away.
- *
- * The caller supplies the design matrix once — the features do not change with the cut, only the label —
- * so this is K-1 fits over one X, and whatever intercept columns the caller built are reused as they
- * are. A cut with one class absent is skipped rather than fitted: it has no boundary to find.
- *
- * @param {number[][]} X Rows of features, intercept columns included by the caller
- * @param {number[]} g Ordinal labels (need not be integers; the cut is `>= k`)
- * @param {number[]} cuts Boundaries to fit, e.g. [1, 2, 3, 4]
- * @param {object} [opts] Passed through to logisticFit
- * @returns {Array<{cut: number, n: number, pos: number, fit: object|null, auc: number}>}
- */
+/** The cumulative-logit family: one binary fit per boundary of an ordinal label, P(g >= k) for each of `cuts`, over one
+ *  X (intercept columns included by the caller). Separate slopes per boundary, deliberately NOT proportional odds; a
+ *  cut with one class absent is skipped. */
 export function cumulativeFit(X, g, cuts, opts = {}) {
     return cuts.map(cut => {
         const y = g.map(v => (v >= cut ? 1 : 0));
@@ -135,23 +94,7 @@ export function cumulativeFit(X, g, cuts, opts = {}) {
     });
 }
 
-/**
- * Precision-recall readout: average precision, and precision at chosen recall levels.
- *
- * AUC is the wrong headline for a thresholded score: it is prevalence-independent, which makes it right for
- * comparing signals and wrong for asking what a threshold would deliver. AP is the area under the
- * precision-recall curve and moves with prevalence, so it answers the operational question, and the
- * precision-at-recall rows answer it in the units a bar is actually chosen in.
- *
- * AP by the step-sum (precision summed at each positive, divided by the positive count) rather than by
- * interpolating the curve: no trapezoid can be drawn through a step function without inventing points
- * between the ones the data has.
- *
- * @param {number[]} scores Higher = more likely positive
- * @param {number[]} y Labels, 0 or 1
- * @param {number[]} [recalls] Recall levels to report precision at
- * @returns {{ap: number, pos: number, n: number, at: Record<number, {precision: number, admitted: number}>}}
- */
+/** Precision-recall readout: average precision by the step-sum, and precision at each of `recalls`. */
 export function prCurve(scores, y, recalls = [0.5, 0.75, 0.9]) {
     const pos = y.reduce((a, b) => a + b, 0);
     const at = {};
@@ -168,42 +111,10 @@ export function prCurve(scores, y, recalls = [0.5, 0.75, 0.9]) {
 }
 
 /**
- * Reliability: do the predicted probabilities mean what they say. AP and AUC read the ordering, which a
- * monotone rescaling leaves untouched, so a model can rank perfectly and still be wrong about every number
- * it reports — and a bar argued in probability terms rests on the numbers, not the order.
- *
- * Read it out of fold or it measures nothing: a logistic fit with an intercept satisfies sum(p) == sum(y)
- * at convergence, so in-sample the global calibration is zero by construction and the bins only show how
- * the residual redistributes. The in-sample row is printed so a near-zero ECE there is recognised as
- * arithmetic rather than read as evidence.
- *
- * Quantile bins, not equal width: prevalence here is low (F39), so predictions pile up near zero and
- * equal-width bins leave the upper tail — the only region a bar is ever drawn in — with a handful of rows
- * each. The cost is that bin EDGES move between runs, so compare ECE across models rather than bin against
- * bin. Ties are kept together, since splitting a run of identical probabilities would invent a distinction
- * the model did not make, so bins are approximately rather than exactly equal in size.
- *
- * ECE is the n-weighted mean gap, MCE the worst single bin: ECE is what the average prediction is off by,
- * MCE what the worst region is off by, and a bar sits in one region rather than on the average.
- *
- * An ECE is meaningless without its null. A bin of n rows at probability p scatters around p by
- * ~sqrt(p(1-p)/n) whatever the model does, so a perfectly calibrated predictor reports a positive ECE and a
- * smaller sample reports a larger one — comparing two tiers of very different size on raw ECE reads sample
- * size as miscalibration, and the tiers do differ enormously in row count (F30). `nullSamples` draws labels
- * from the model's own probabilities and recomputes ECE, giving `eceNull` and the share of null draws at
- * least as extreme (`eceP`). A parametric bootstrap rather than a closed form, because the bins are
- * quantile-cut and tie-merged and so data-dependent in size.
- *
- * Seeded, because a check that moves between runs cannot fail.
- *
- * @param {number[]} p Predicted probabilities in [0,1]
- * @param {number[]} y Labels, 0 or 1
- * @param {number} [bins] Target bin count
- * @param {number} [nullSamples] Parametric-bootstrap draws for the calibrated-model null; 0 skips it
- * @param {number} [seed] PRNG seed, so the null is reproducible
- * @returns {{bins: Array<{n: number, meanP: number, observed: number, lo: number, hi: number}>,
- *            ece: number, mce: number, meanP: number, observed: number, n: number,
- *            eceNull: number, eceP: number}}
+ * Reliability of predicted probabilities: quantile bins (ties kept together), ECE, MCE and a seeded parametric-bootstrap
+ * null (`eceNull`, `eceP`) — an ECE is meaningless without it (F30). Read it OUT OF FOLD: in-sample, an intercept fit
+ * has zero global calibration by construction.
+ * @param {number} [nullSamples] Bootstrap draws for the calibrated-model null; 0 skips it
  */
 export function reliability(p, y, { bins = 10, nullSamples = 0, seed = 1 } = {}) {
     const n = p.length;
@@ -226,9 +137,7 @@ export function reliability(p, y, { bins = 10, nullSamples = 0, seed = 1 } = {})
     const ece = eceOf(out);
     const mce = out.reduce((a, b) => Math.max(a, Math.abs(b.meanP - b.observed)), 0);
 
-    // The null: keep every bin exactly as cut, redraw each row's label from its own predicted
-    // probability, and recompute. That is what this predictor would score if it were perfectly
-    // calibrated, so it is the floor the observed value has to clear to mean anything.
+    // The null: every bin as cut, each row's label redrawn from its own predicted probability.
     let eceNull = NaN, eceP = NaN;
     if (nullSamples > 0) {
         let state = seed >>> 0;

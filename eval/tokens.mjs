@@ -1,40 +1,22 @@
-// tokens.mjs — token counts that match a live capture's, without a live SillyTavern.
-//
-// A count belongs on every row so a budget of any size can be replayed offline, independent of the
-// capturing machine's configuration. The runtime records it; an offline derivation has to produce the same
-// number or the two cannot be compared.
-//
-// The offset is the whole trick: WA counts through ST's getTokenCountAsync, which adds a fixed per-message
-// overhead on top of the raw encoding, and `recorded - cl100k(content)` came out exact with no spread
-// (G12). So the offline count is exact rather than approximate, and `tokens-check.mjs` re-derives it from
-// whatever captures are on disk rather than trusting this comment.
-//
-// A tokenizer with no entry here THROWS; the alternative is a silent 0 offset, a per-entry error nothing
-// would surface that compounds across a prompt. Count an unlisted model against a running SillyTavern.
+// tokens.mjs — token counts that match a live capture's, without a live SillyTavern: cl100k plus a per-tokenizer
+// offset measured off captures (G12). An unlisted tokenizer THROWS; count it against a running SillyTavern.
 import { createRequire } from 'node:module';
 import { stInstall } from './scene.mjs';
 import { armNames, openBundle } from '../extension/grading.mjs';
 
-/** Offsets are MEASURED, not chosen; tokens-check.mjs is what keeps them honest. */
+/** Offsets are MEASURED, not chosen; tokens-check.mjs re-derives them. */
 export const TOKENIZER_OFFSET = {
     'gpt-3.5-turbo': 6,
 };
 
-/** tiktoken lives in SillyTavern's node_modules, which is an ancestor of this file — but only when the
- *  caller runs from inside the install. Resolved through stInstall so a tool run from elsewhere fails with
- *  a sentence rather than a module-not-found stack. */
+/** tiktoken is resolved out of the ST install's node_modules through stInstall, from any cwd. */
 const requireST = () => {
     const st = stInstall();
     if (!st) throw new Error('no SillyTavern install found from here — tiktoken is resolved out of its node_modules');
     return createRequire(`${st.root}/`);
 };
 
-/**
- * A counter for one tokenizer, matching what the runtime would have recorded.
- *
- * @param {string} tokenizer The name from the document's `budget.tokenizer`
- * @returns {{ count: (text: string) => number, tokenizer: string, offset: number, free: () => void }}
- */
+/** A counter for one tokenizer (the document's `budget.tokenizer`), matching what the runtime recorded. */
 export function offlineTokenCounter(tokenizer) {
     const offset = TOKENIZER_OFFSET[tokenizer];
     if (offset === undefined) {
@@ -50,15 +32,7 @@ export function offlineTokenCounter(tokenizer) {
     };
 }
 
-/**
- * Re-derives the offset from captures that carry BOTH a recorded count and their entry text.
- *
- * Returns the spread, not just the middle: an offset is only usable if it is the SAME on every row. A
- * tokenizer whose residual varies is not a constant-offset encoder, and averaging it would bury that.
- *
- * @param {object[]} manifests Parsed bundles
- * @returns {Map<string, {offset: number, min: number, max: number, n: number, constant: boolean}>}
- */
+/** Each tokenizer's offset re-derived from captures carrying BOTH a recorded count and entry text; `constant` false means the residual varies and the offset is unusable. */
 export function deriveOffsets(manifests) {
     const req = requireST();
     const tiktoken = req('tiktoken');
@@ -66,12 +40,10 @@ export function deriveOffsets(manifests) {
     const acc = new Map();
 
     for (const m of manifests) {
-        // One tokenizer per document: it is ST's `getTokenizerModel()`, not a WA knob, so no arm can have
-        // used a different one.
+        // One tokenizer per document: it is ST's getTokenizerModel(), not a WA knob.
         const tok = m.budget?.tokenizer;
         if (!tok) continue;
-        // Candidates ARE per arm, and sit on the arm's scene cell rather than the arm, which is why this
-        // goes through openBundle rather than walking the nesting here.
+        // Candidates sit on the arm's scene cell, so go through openBundle rather than walking the nesting.
         for (const arm of armNames(m)) {
             const S = openBundle(m, arm);
             const byUid = new Map();

@@ -1,10 +1,5 @@
-// Runs the genre vocabulary cases against the real suggester. Self-checking: prints ok/FAIL and
-// exits non-zero on any failure, so it belongs in the same sweep as the other *-check.mjs files.
-//   node eval/genre-check.mjs           all cases
-//   node eval/genre-check.mjs court     only that genre (substring match on genre or shape)
-//
-// A failure prints the case's whole candidate list, because the useful question is never just
-// "which term is missing" but "what did it offer instead".
+// Runs the genre vocabulary cases (genre-cases.mjs) against the real suggester; a failure prints the whole candidate list.
+//   node eval/genre-check.mjs [filter]   filter is a substring match on genre or shape
 import { buildKeySuggest } from '../extension/keyword-suggest.mjs';
 import { GENRE_CASES, SUGGEST_OPTS, paddedBook } from './genre-cases.mjs';
 

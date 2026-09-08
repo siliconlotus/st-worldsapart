@@ -1,7 +1,4 @@
-// gazetteerSource selects WHICH FIELDS the gazetteer reads (scene.mjs) — the one place an arm can silently
-// widen or narrow the BM25 term set with nothing visible in a run's output (R22), so the field selection is
-// asserted rather than eyeballed. Tokenization is not re-derived here: every arm goes through
-// buildGazetteer, so a fold change moves all five together and this check stays about selection.
+// gazetteerSource selects WHICH FIELDS the gazetteer reads (scene.mjs); field selection is asserted, tokenization is not re-derived (R22).
 import { loadScene, sceneParams } from './scene.mjs';
 import { eq } from './metrics.mjs';
 
@@ -9,15 +6,12 @@ const entry = (uid, extra) => ({ world: 'B', uid, comment: `titleword${uid}`, co
 const S = {
     primaryBook: 'B',
     embedModel: 'check-embed',
-    // Entry 2 is vectorized. That no longer changes what the gazetteer reads: production restores the
-    // takeover's stash before building it, so the vocabulary is the AUTHORED one either way.
     books: { B: { 1: entry(1), 2: entry(2, { vectorized: true }) } },
     params: {},
     grades: [], candidates: [],
 };
 
-// No vectorized entry has content here, so loadScene's missing-collection guard does not fire and no index
-// is needed; the gazetteer is built before anything reads one.
+// Blanked so loadScene's missing-collection guard does not fire; the gazetteer is built before anything reads an index.
 S.books.B[2].content = '';
 // denseAllEntries off: this fixture has no collection at all, and the gazetteer is what is under test.
 const gazOf = source => loadScene(S, { indexFile: '(no collection)', params: sceneParams(S, { gazetteerSource: source, denseAllEntries: false }) }).gaz;
@@ -32,8 +26,6 @@ has('titles', ['keyword1', false], ['titleword1', true], ['bodyword1', false]);
 has('bodies', ['keyword1', true], ['titleword1', true], ['bodyword1', true]);
 eq(gazOf('none').size, 0, 'none: empty gazetteer, so buildTermWeights keeps only proper nouns');
 
-// A vectorized entry contributes exactly as any other does — the gazetteer reads what the author wrote,
-// not what the scan's blanking happened to leave in place when it was asked.
 has('keys+titles', ['keyword2', true], ['titleword2', true]);
 has('keys', ['keyword2', true]);
 

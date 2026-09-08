@@ -1,18 +1,4 @@
-// Self-check for the denseAllEntries arm — a cosine for the entries the vector collection has no row for.
-//
-// Three claims carry it, and each fails silently rather than loudly.
-//
-//   The baseline must not move. The --all index holds every entry's chunks and loadScene keeps the
-//   vectorized ones as stage 1's collection and its corpus mean; a leak — extra chunks in the mean or in
-//   the candidate set — shifts every vectorized entry's cosine and reports it as a parameter effect.
-//
-//   It may not activate. A dense score is stage 3, so an entry no key fired for must still get no row, or
-//   the arm surfaces unjudged entries and its delta becomes a pool-biased lower bound.
-//
-//   The arm must actually fire. Pointed at an ordinary index it scores every entry at its production value
-//   and reports flat — the one failure that looks like a result — so that combination throws.
-//
-// No ollama and no real book: hand-written vectors, since none of the above is a question about embeddings.
+// Self-check for the denseAllEntries arm: a cosine for entries the vector collection has no row for, without moving the baseline or admitting anything. Hand-written vectors.
 import { mkdtempSync, writeFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -49,13 +35,7 @@ const ORDINARY = write('ordinary.json', [1, 5]);
 const ALL = write('all.json', [1, 5, 2, 3]);
 const QV = [0.7, 0.7, 0.1];
 const rowsOf = (indexFile, overrides) => {
-    // The ORDINARY form has to be asked for now that production's split is the default — this check
-    // contrasts the two, so neither may come from a default.
-    //
-    // centroidPopulation is pinned, because the claim here — the vectorized half of an --all build leaves
-    // every baseline cosine byte-identical — is stated against the VECTORIZED centroid. This fixture's book
-    // carries no STMB markers, so under production's 'memory' default it falls back to the whole
-    // collection, giving the --all form a different mean than the ordinary one.
+    // Neither form may come from a default; centroidPopulation is pinned because this book has no STMB markers, so 'memory' would fall back to the whole collection.
     const P = sceneParams(S, { denseAllEntries: false, centroidPopulation: 'vectorized', ...overrides });
     const scene = loadScene(S, { indexFile, params: P });
     const rows = makeCandidateSet({ ...scene, params: P })(2, 0.75, null, QV, 'text of entry', () => ['the spire looms over the quarter']);
@@ -84,10 +64,6 @@ eq(base.byUid.get(2).vectorEligible, false, 'and is not ranked as though it lost
 eq(Number.isFinite(dense.byUid.get(2).score), true, 'dense-all: it earns one');
 eq(dense.byUid.get(2).vectorEligible, true, 'and becomes eligible, so the vector weight enters its denominator');
 eq(dense.byUid.get(2).keywordScore > 0, true, 'its keys still score — the cosine is added evidence, not a replacement');
-
-// --- the fourth-column form is retired, with fuseRanks: E[credit] reads the signals directly, so a
-// below-average cosine is a low value of a feature the model already weights. The only form left is the one
-// above, which puts the cosine in `score`.
 
 // --- pointed at the wrong collection ---------------------------------------------------------------
 let threw = false;

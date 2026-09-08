@@ -1,14 +1,4 @@
-// index-resolve-check.mjs — where a scene looks for its vector collection, and what it does when there
-// isn't one.
-//
-// Both failures are silent and report a number instead of an error. A sample's `index` and the hash-derived
-// path are recorded with ST's `data/` prefix, so testing them against the CWD asks a question whose answer
-// moves with the launch directory (H2); and a book whose collection is simply absent — the state every
-// exported bundle is in on someone else's machine — scores keyword-and-BM25-only and looks plausible.
-//
-// The keyword-only case must stay silent, though: a book with nothing to index legitimately has no
-// collection (Foxbridge), so the guard keys on the same gate reindex.mjs buildItems does rather than on
-// whether a file happens to exist.
+// index-resolve-check.mjs — where a scene looks for its vector collection, and what a missing one means: the CWD is not an input (H2), and a book with nothing to index legitimately has none.
 import { chdir, cwd } from 'node:process';
 import { indexPath, loadScene, sceneParams, stInstall } from './scene.mjs';
 import { dirname, isAbsolute } from 'node:path';
@@ -30,16 +20,13 @@ const sample = (vectorized, extra = {}) => ({
     ...extra,
 });
 
-// denseAllEntries off: these fixtures build a vectorized-only collection, and index RESOLUTION is what
-// is under test — the split would only add a precondition this check has no reason to satisfy.
+// denseAllEntries off: index RESOLUTION is under test, and the split would only add a precondition.
 const load = S => loadScene(S, { indexFile: indexPath(S), params: sceneParams(S, { denseAllEntries: false }) });
 
-// --- resolution -------------------------------------------------------------------------------------
 eq(indexPath(sample(true), { index: '/explicit/path.json' }), '/explicit/path.json',
     'an explicit index wins over every candidate');
 
-// The CWD must not be an input. Both candidates are absent for this made-up book, so resolution lands on
-// the rebuild cache — the point is that it lands on the SAME place from anywhere.
+// Both candidates are absent for this made-up book, so resolution lands on the rebuild cache from anywhere.
 const here = cwd();
 const fromRoot = indexPath(sample(true));
 const stHere = stInstall();
@@ -48,8 +35,6 @@ const fromElsewhere = indexPath(sample(true));
 const stThere = stInstall();
 chdir(here);
 eq(fromElsewhere, fromRoot, 'resolution does not move with the working directory');
-// The candidate paths themselves, which is the half that actually moved: a sample's `index` carries ST's
-// `data/` prefix, and testing it raw resolves against the CWD. Skipped where no install is reachable.
 if (stHere && stThere) {
     eq(stThere.resolve('data/default-user/vectors/x'), stHere.resolve('data/default-user/vectors/x'),
         "a sample's recorded data/ path resolves to one place regardless of the working directory");
@@ -66,7 +51,6 @@ throws(() => load(sample(true)), 'reindex.mjs',
 eq(load(sample(false)).items.length, 0,
     'a book with nothing to index scores without a collection — no vectors is a configuration, not a fault');
 
-// A disabled or empty entry is not indexed either (reindex.mjs buildItems), so it cannot demand a collection.
 eq(load(sample(true, { books: { 'Check Book': { 1: { uid: 1, comment: 'One', content: 'alpha', vectorized: true, disable: true } } } })).items.length, 0,
     'a disabled vectorized entry does not demand a collection');
 eq(load(sample(true, { books: { 'Check Book': { 1: { uid: 1, comment: 'One', content: '', vectorized: true } } } })).items.length, 0,

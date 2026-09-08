@@ -1,11 +1,5 @@
-// synth-graft-check.mjs — the guards on deriving a bundle and putting old judgements back on it.
-//
-// Both tools are run as PROCESSES against fixtures on disk, not by importing pieces of them: what is being
-// checked is a refusal, and a refusal lifted out of its script is no longer the thing that refuses.
-//
-// The scene guard is the one that matters. A grade is a verdict about a (scene, entry) pair, and the entry
-// half fails loudly on its own — a wrong uid matches nothing. The scene half can be wrong while looking
-// right, because two bundles can name the same message id and hold different turns.
+// synth-graft-check — the guards on deriving a bundle (synth-scenes.mjs) and grafting old judgements onto it (graft-grades.mjs).
+// Both run as PROCESSES against fixtures on disk: a refusal lifted out of its script is no longer the thing that refuses.
 import { spawnSync } from 'node:child_process';
 import { mkdtempSync, writeFileSync, readFileSync, existsSync, mkdirSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -18,11 +12,7 @@ const TMP = mkdtempSync(join(tmpdir(), 'wa-synth-check-'));
 let bad = 0;
 const ok = (cond, msg) => { console.log(`${cond ? 'ok  ' : 'FAIL'} ${msg}`); if (!cond) bad++; };
 
-/**
- * Runs a tool the way a person would. Returns exit code and BOTH streams — these tools report refusals and
- * warnings on stderr and results on stdout, so reading one of them makes half their output invisible to a
- * check while it still looks like it passed.
- */
+/** Runs a tool as a person would; returns BOTH streams, since refusals go to stderr and results to stdout. */
 function run(script, args, env = {}) {
     const r = spawnSync('node', [join(HERE, script), ...args], { encoding: 'utf8', env: { ...process.env, ...env } });
     return { code: r.status ?? 1, out: `${r.stdout ?? ''}${r.stderr ?? ''}` };
@@ -52,15 +42,12 @@ const bundle = async (name, { query = 'Q', scanText = 'S', depth = 10, cands = [
         grades: (grades ?? []).map(([uid, grade]) => ({ uid, grade, title: ENTRIES[uid]?.comment ?? `gone-${uid}`, book: world })),
     };
     if (grades) { sample.gradeScale = 4; sample.createdBy = 'a-judge'; }
-    // Built through the real assembler rather than by hand, so the fixture cannot drift from the schema the
-    // tools read — the whole reason grading.mjs is ST-free.
+    // Through the real assembler, so the fixture cannot drift from the schema the tools read.
     return await bundleSamples([{ arm: 'shipped', sample }], { start: 90, end: 99 }, { population: 'ranked' });
 };
 const put = (file, obj) => { const p = join(TMP, file); writeFileSync(p, JSON.stringify(obj)); return p; };
 
 // --- graft: the entry guard -----------------------------------------------------------------------------
-// A book gets edited outside ST between captures, so book+uid can name a row whose TEXT has moved since a
-// rater read it. The book hash says whether to look; what decides is the title and content themselves.
 {
     const src = put('entry-src.json', await bundle('scene', { grades: [[1, 4], [2, 0], [3, 0]] }));
 
@@ -73,10 +60,7 @@ const put = (file, obj) => { const p = join(TMP, file); writeFileSync(p, JSON.st
     ok(/entry-retitled\.json\s+2\s+1\s/.test(run('graft-grades.mjs', [retitled, '--from', src]).out),
         'the title is part of what was graded, so changing it orphans too');
 
-    // The one that matters: the book hash differs here and nothing a rater read has moved, so a guard keyed
-    // on the book rather than the entry would throw away every grade in the book for one added keyword.
-    // A bundle that embeds no entries is malformed, and its grades have no stored text — so nothing can
-    // have moved, and comparing against the absence would orphan all of them and blame drift for it.
+    // The book hash differs and nothing a rater read has moved; a source embedding no entries has no stored text to compare.
     const bare = await bundle('scene', { grades: [[1, 4], [2, 0], [3, 0]] });
     bare.books = { [WORLD]: {} }; bare.bookHashes = { [WORLD]: 'empty' };
     const noBook = put('entry-nobook.json', bare);
@@ -110,7 +94,6 @@ const wsSrc = put('ws-graded.json', await bundle('scene', { scanText: 'S\nT', gr
 ok(run('graft-grades.mjs', [ws, '--from', wsSrc]).code !== 0, 'trailing whitespace still refuses by default');
 r = run('graft-grades.mjs', [ws, '--from', wsSrc, '--allow-whitespace-drift']);
 ok(r.code === 0 && /whitespace only/.test(r.out), '--allow-whitespace-drift accepts it, and says it did');
-// A space in the MIDDLE is a different scene, not drift, and the flag must not reach it.
 const mid = put('mid.json', await bundle('scene', { scanText: 'S T' }));
 ok(run('graft-grades.mjs', [mid, '--from', wsSrc, '--allow-whitespace-drift']).code !== 0,
     'the flag does not excuse a difference anywhere but at a line end');
@@ -127,9 +110,6 @@ ok(written.grading?.graftedAt && written.createdBy !== 'a-judge', 'generation pr
 ok(!existsSync(same.replace(/\.json$/, '-pending.json')), 'the ungraded remainder is reported, not written — grade-pending takes a row list');
 
 // --- graft: a renamed world ------------------------------------------------------------------------------
-// rowKey is world+uid, so a book renamed between grading and generation orphans every grade while the uids
-// still line up perfectly. That is why the mapping is explicit: "the uids overlap" is also true of a
-// wrong-book control, and a uid-only fallback would graft one silently.
 const renamed = put('renamed.json', await bundle('scene', { world: 'New Name' }));
 r = run('graft-grades.mjs', [renamed, '--from', graded]);
 ok(r.code === 0 && /\s+0\s+3\s/.test(r.out), 'without --rename-book a renamed book orphans every grade');
@@ -139,8 +119,6 @@ r = run('graft-grades.mjs', [renamed, '--from', graded, '--rename-book', 'no-equ
 ok(r.code !== 0, 'a malformed --rename-book is refused rather than ignored');
 
 // --- graft: orphans are classified, not counted -----------------------------------------------------------
-// Only "rankable, but nothing surfaced it" says the population moved; the others are classification facts
-// about the entry and carry no information about retrieval.
 const wide = put('wide.json', await bundle('scene', { cands: [1, 2] }));
 const wideGrades = put('wide-graded.json', await bundle('scene', { grades: [[1, 4], [3, 0], [4, 2], [5, 3], [6, 3], [99, 1]] }));
 r = run('graft-grades.mjs', [wide, '--from', wideGrades]);
@@ -167,7 +145,7 @@ ok(r.code !== 0, 'a message id past the end of the chat is refused');
 r = run('synth-scenes.mjs', ['--chat', 'data/default-user/chats/C/c.jsonl', '--book', 'No Such Book', '--msgs', '60', '--model', 'check-embed'], ENV);
 ok(r.code !== 0 && /no world file/.test(r.out), 'a book with no world file is refused by name');
 
-// Sampling is seeded, so a set can be reproduced. Read off the plan line, which prints before any embedding.
+// Read off the plan line, which prints before any embedding.
 const picks = out => (out.match(/generating \d+ scene\(s\) at depth \d+: (.+)/) ?? [])[1];
 const a1 = run('synth-scenes.mjs', [...synth, '--n', '3', '--seed', '7'], ENV);
 const a2 = run('synth-scenes.mjs', [...synth, '--n', '3', '--seed', '7'], ENV);
@@ -178,9 +156,7 @@ ok(!/\b(0|1|[1-4][0-9])\b/.test(String(picks(a1.out)).split(', ')[0]) || Number(
     'a sampled turn has the required history behind it');
 
 // --- synth: the arm table mirrors the one production pools with ---------------------------------------
-// capture-ui.mjs imports ST, so its POOL_ARMS cannot be loaded under node and is read as text. Names only:
-// the VALUES are in two vocabularies on purpose — settings there, harness here — which is why the mirror
-// needs pinning. A drifted entry derives a differently-configured arm under the right label.
+// capture-ui.mjs imports ST, so its POOL_ARMS is read as text. Names only: the VALUES are in two vocabularies on purpose.
 {
     const SRC = readFileSync(join(HERE, 'synth-scenes.mjs'), 'utf8');
     const WA = readFileSync(join(HERE, '..', 'extension', 'capture-ui.mjs'), 'utf8');

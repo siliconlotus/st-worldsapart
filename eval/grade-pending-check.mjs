@@ -1,9 +1,4 @@
-// grade-pending build/merge round-trip: does a row reach the bundle it came from?
-//
-// The case that matters is two bundles sharing a `name` — a scene captured under a second book carries the
-// same name as the original. Keyed on name, build overwrites one bundle's jobs with the other's and merge
-// resolves the target back through the same collision, so a grade lands in a bundle whose `books` do not
-// contain that world. It merges clean and the pool gap simply fails to close, invisibly to the uid diff.
+// grade-pending build/merge round-trip: does a row reach the bundle it came from, when two bundles share a `name`?
 import { mkdtempSync, writeFileSync, readFileSync, readdirSync, rmSync, existsSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
@@ -18,8 +13,7 @@ const TOOL = resolve(HERE, 'synthetic-data', 'grade-pending.mjs');
 let fails = 0;
 const ok = (cond, what) => { console.log(`${cond ? 'ok  ' : 'FAIL'}  ${what}`); if (!cond) fails++; };
 
-// The tool reads eval-data/ beside itself, so the fixture is installed there and removed after. Named
-// with a prefix nothing else uses, and every file it writes is tracked for cleanup.
+// The tool reads eval-data/ beside itself, so the fixture is installed there and removed after.
 const DATA = resolve(HERE, 'eval-data');
 const TAG = 'zz-gpcheck';
 const JOBS = mkdtempSync(`${tmpdir()}/gpcheck-`);
@@ -28,11 +22,7 @@ const put = (name, obj) => { const p = `${DATA}/${name}`; writeFileSync(p, JSON.
 
 const entry = (uid, text) => ({ uid, comment: `entry ${uid}`, content: text });
 const bundle = (book, uid) => ({
-    // BOTH bundles carry this same name on purpose — that is the whole case — and the name is bundle A's
-    // OWN filename, which is what production looked like: the -null-book variant took its name from the
-    // original. That detail decides the failure mode. A shared name matching no file makes merge SKIP and
-    // the rows vanish; a shared name matching a real file makes merge write one bundle's rows INTO the
-    // other, which is the case worth catching and the one that happened.
+    // Both bundles carry this name on purpose, and it is bundle A's own filename: a shared name matching a real file is the case that happened.
     name: `${TAG}-a`,
     books: { [book]: { [uid]: entry(uid, `content for ${book} uid ${uid}`) } },
     chat: 'data/chat.jsonl', scanText: 'the scene text', depth: 10,
@@ -45,7 +35,6 @@ const doc = async (book, uid) => await bundleSamples([{ arm: 'shipped', sample: 
 try {
     put(`${TAG}-a.json`, await doc('book-A', 11));
     put(`${TAG}-b.json`, await doc('book-B', 22));
-    // The input is a row list naming its bundle per row — the only build input there is.
     const rows = put(`${TAG}-rows.json`, [
         { bundle: `${TAG}-a.json`, book: 'book-A', uid: 11 },
         { bundle: `${TAG}-b.json`, book: 'book-B', uid: 22 },
@@ -55,12 +44,10 @@ try {
     const jobFiles = readdirSync(JOBS).filter(f => f.endsWith('.json'));
     ok(jobFiles.length === 2, `two same-named bundles produce two job files, not one (got ${jobFiles.length})`);
 
-    // Answer each job with the grade its own candidates ask for; the judge is not what is under test.
+    // Answer each job with the grade its own candidates ask for; the judge is not under test.
     for (const jf of jobFiles) {
         const job = JSON.parse(readFileSync(`${JOBS}/${jf}`, 'utf8'));
-        // The result carries WHAT PRODUCED IT, as grade-local writes it: the model resolved against the
-        // backend, and the knobs the pass ran under. Merge must prefer this over its own --model flag,
-        // which can only repeat what someone typed.
+        // The result carries what produced it, as grade-local writes it; merge must prefer this over its own --model flag.
         writeFileSync(job.out, JSON.stringify({
             rater: { modelDigest: 'a'.repeat(64), modelName: 'gemma4:e4b-mxfp8', family: 'gemma4', quant: 'mxfp8', modelParams: '8.1B', rubric: 'scene-relevance@deadbeef' },
             params: { seed: 7, temperature: 0, num_ctx: 65536, think: false },
@@ -73,19 +60,14 @@ try {
     const b = openBundle(JSON.parse(readFileSync(`${DATA}/${TAG}-b.json`, 'utf8')));
     ok(a.entries.length === 1 && a.entries[0]?.book === 'book-A' && a.entries[0]?.uid === 11, 'bundle A gets its own row and only its own');
     ok(b.entries.length === 1 && b.entries[0]?.book === 'book-B' && b.entries[0]?.uid === 22, 'bundle B gets its own row and only its own');
-    // The failure this check exists for: a row whose world the bundle does not hold. Asserted per bundle
-    // against ITS OWN books — a flat scan over both bundles' rows passes while one of them is empty.
+    // Asserted per bundle against ITS OWN books: a flat scan over both bundles' rows passes while one of them is empty.
     const stray = [a, b].flatMap(bu => (bu.entries ?? []).filter(g => !bu.books[g.book]));
     ok(stray.length === 0, `no grade lands in a document whose books lack that book (${stray.length} stray)`);
-    // THE RATER A VERDICT NAMES IS ITS PROVENANCE. An llm pass writes verdicts of kind `llm` and no
-    // other, so a row no human has seen stays distinguishable from one a human reviewed and agreed with.
     const v = a.entries[0]?.grades ?? [];
     ok(v.length === 1 && v[0].kind === 'llm', 'the pass writes one verdict, of kind llm and no other kind');
     const rater = openBundle(JSON.parse(readFileSync(`${DATA}/${TAG}-a.json`, 'utf8'))).raters?.[v[0].rater]
         ?? JSON.parse(readFileSync(`${DATA}/${TAG}-a.json`, 'utf8')).raters[0];
     const who = raterParts(rater);
-    // RESOLVED, NOT REPEATED. The digest is what the result said, not the --model flag this run defaulted
-    // to, and `isDigest` is the difference between a rater pinned to weights and one pinned to a name.
     ok(who.isDigest, 'the rater id carries the digest the result resolved, not the name the flag defaulted to');
     ok(who.rubric === 'scene-relevance@deadbeef', '...and the rubric the result graded under');
     ok(rater.family === 'gemma4' && rater.quant === 'mxfp8' && rater.modelParams === '8.1B',
@@ -97,9 +79,6 @@ try {
         'and its rater id decomposes to the model that ran and the rubric it ran under');
     ok(gradeValue(a.entries[0]) === 3, 'which the reader resolves to the value in force');
 
-    // A HOSTED model has no digest to resolve, so its NAME stands in — flagged, because that id is not
-    // stable the way a manifest digest is. The same split raterParts makes on the digest above, on the
-    // other side of it: the field says which of the two an id holds.
     const hosted = raterParts({ kind: 'llm', id: `claude-sonnet-5${US}scene-relevance@deadbeef` });
     ok(hosted.isDigest === false, 'a served model is opaque, so its id is a name and isDigest says so');
     ok(hosted.modelId === 'claude-sonnet-5' && hosted.rubric === 'scene-relevance@deadbeef',

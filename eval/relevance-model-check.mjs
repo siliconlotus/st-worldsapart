@@ -1,9 +1,4 @@
-// relevance-model-check — the stage-4 relevance prediction's pure half.
-//
-// Every claim here is about WA's own semantics, so none of it belongs in core-matcher-check: what a name
-// is worth, what corpus df counts, and how a fitted model file becomes one number per entry. The
-// arithmetic is pinned against closed forms computed by hand rather than against a second implementation,
-// because a second implementation is the drift this codebase keeps paying for.
+// relevance-model-check — the stage-4 relevance prediction's pure half (relevance.mjs, selection.mjs relevanceCut).
 import { properNames, buildNameDf, properShared, properDensity, scoreRelevance, postDates, modelKey } from '../extension/relevance.mjs';
 import { relevanceCut } from '../extension/selection.mjs';
 import { eq } from './metrics.mjs';
@@ -11,19 +6,14 @@ import fs from 'node:fs';
 
 // ---- properNames -------------------------------------------------------------------------------
 
-// Sentence-initial capitals are not names: "Then" opens both sentences and is capitalised nowhere else.
 eq([...properNames('Then Maren left. Then she returned.')].sort().join(','), 'maren',
     'a name is a capital that is not sentence-initial');
 
-// Common English is dropped even when it passes the capitalisation rule. Proper nouns are not in the
-// stoplist (generated minus SUBTLEX Name-dominant tokens), so "London" counts as the name it is.
 eq(properNames('We met at Home today.').has('home'), false,
     'a common English word is not counted as a name even mid-sentence');
 eq(properNames('We met in London today.').has('london'), true,
     'a proper noun is never stoplisted');
 
-// Orthography is normalised before detection, which is what makes the entry side and the window side
-// intersectable at all.
 eq(properNames('At Maren’s Gap').has([...properNames("At Maren's Gap")][0]), true,
     'a curly and a straight apostrophe produce the same name');
 
@@ -37,21 +27,16 @@ const book = [
 ];
 const idx = buildNameDf(book);
 
-// ndoc counts entries, and the contentless one is not a document — 4 entries, 3 with text.
 eq(idx.ndoc, 3, 'ndoc counts entries with content, not chunks and not blank entries');
 eq(idx.names.has('B.3'), false, 'a contentless entry contributes no name set');
 
-// Disabled entries are in the corpus (matcher-design.md): excluding them measured worse (F27).
+// Disabled entries stay in the corpus (matcher-design.md; F27).
 eq(idx.df.get('maren'), 2, 'a disabled entry still contributes to df');
 eq(idx.df.get('brackenmoor'), 1, 'a name in one entry has df 1');
 
 // ---- properShared ------------------------------------------------------------------------------
 
-// The closed form, by hand: ndoc 3, brackenmoor df 1 -> log(4/2), kesh is not in the window so it pays
-// nothing, and maren at df 2 -> log(4/3) is worth less than the name only one entry uses.
-//
-// The window obeys the same sentence-initial rule, which is not a detail of the fixture: the intersection
-// is over names as BOTH sides detect them.
+// By hand: ndoc 3; brackenmoor df 1 -> log(4/2), maren df 2 -> log(4/3); kesh is not in the window.
 const win = properNames('Smoke rose as Brackenmoor burned while Maren watched.');
 const rare = Math.log(4 / 2), common = Math.log(4 / 3);
 eq(properShared(idx.names.get('B.1'), win, idx).toFixed(10), (rare + common).toFixed(10),
@@ -63,56 +48,40 @@ eq(properShared(idx.names.get('B.1'), properNames('Brackenmoor burned alone.'), 
 
 // ---- properDensity -----------------------------------------------------------------------------
 
-// Names per 100 tokens, pinned to a literal rather than recomputed from properNames — an assertion calling
-// the same function on both sides passes whatever that function does.
+// Pinned to a literal, not recomputed from properNames: the same function on both sides passes whatever it does.
 eq(properDensity('Word said Maren met Kesh here.').toFixed(4), (200 / 6).toFixed(4),
     'density is names per 100 tokens of the entry');
 eq(properDensity(''), 0, 'an empty entry has no density rather than a division by zero');
 
 // ---- scoreRelevance ----------------------------------------------------------------------------
 
-// A hand-computed model. One feature, two rows: the column is [0, 2], so standardised it is [-1, +1]. With
-// intercept 0 and slope 1 at both boundaries, row 0 gets sigmoid(-1) at each and row 1 sigmoid(+1).
+// One feature, two rows: [0, 2] standardises to [-1, +1]; intercept 0, slope 1 at both boundaries.
 const toy = { features: ['cosine'], beta: { ge2: [0, 1], ge3: [0, 1] } };
 const sig = x => 1 / (1 + Math.exp(-x));
 const got = scoreRelevance(toy, [{ cosine: 0 }, { cosine: 2 }]);
 eq(got[0].toFixed(10), sig(-1).toFixed(10), 'a row is standardised within the scene, not against a stored scale');
 eq(got[1].toFixed(10), sig(1).toFixed(10), 'the high row takes the same curve on the other side');
 
-// Standardisation is within the scene, so the same raw value scores differently beside different
-// neighbours — the property that makes an entry-level cache wrong by construction.
 const alone = scoreRelevance(toy, [{ cosine: 0 }, { cosine: 100 }]);
 eq(alone[0].toFixed(10), sig(-1).toFixed(10), 'the scale is the scene\'s own spread, so 0-vs-100 lands where 0-vs-2 did');
 
-// A constant column standardises to 0 rather than dividing by zero — the `sd || 1` guard, which has to
-// match the fit's or a signal carrying no information here would meet a slope fitted on other books.
 const flat = scoreRelevance(toy, [{ cosine: 7 }, { cosine: 7 }]);
 eq(flat.every(v => Math.abs(v - sig(0)) < 1e-12), true, 'a within-scene constant column contributes nothing');
 
-// The clamp: ge3 is given a large positive intercept so P(>=3) would exceed P(>=2) on every row; clamped,
-// E[credit] can never exceed P(>=2), which is what makes the pair a coherent probability.
+// ge3's intercept of 5 would put P(>=3) above P(>=2) on every row.
 const inverted = { features: ['cosine'], beta: { ge2: [0, 0], ge3: [5, 0] } };
 const clamped = scoreRelevance(inverted, [{ cosine: 1 }, { cosine: 3 }]);
 eq(clamped.every(v => Math.abs(v - 0.5) < 1e-12), true, 'P(>=3) is clamped to P(>=2), so E[credit] stays at P(>=2)');
 
-// A missing feature reads 0, not NaN: the column is a question about the FEATURE SET, and a row carrying no
-// value for one still has to be scored beside its neighbours.
 eq(Number.isFinite(scoreRelevance(toy, [{}, { cosine: 1 }])[0]), true, 'a row missing a signal still scores');
 
-// A coefficient vector of the wrong length is a file from another design, and must throw rather than return
-// plausible numbers — the one failure mode here that would produce a result instead of an error.
 let threw = false;
 try { scoreRelevance({ features: ['cosine', 'text'], beta: { ge2: [0, 1], ge3: [0, 1] } }, [{ cosine: 1 }, { cosine: 2 }]); }
 catch { threw = true; }
 eq(threw, true, 'a model whose beta does not match its feature count throws');
 
-// ---- the shipped model file --------------------------------------------------------------------
+// ---- the shipped model file: one fit per embedding model, keyed by modelKey; the contract holds for EVERY entry (E14)
 
-// The checked-in file is the contract the consumer reads, so its shape is pinned here rather than trusted:
-// a file carrying one beta vector at a boundary the cutoff was not chosen on goes unnoticed at runtime.
-// One fit per embedding model, keyed by relevance.mjs `modelKey`. Coefficients are fitted against one
-// embedder's cosines and measurably do not transfer across embedders (E14), so the artifact is a map and
-// the contract below has to hold for EVERY entry in it.
 const file = JSON.parse(fs.readFileSync(new URL('../extension/relevance-model-memory.json', import.meta.url), 'utf8'));
 eq(file.tier, 'memory', 'the shipped artifact is the memory tier');
 eq(Object.keys(file.byModel ?? {}).length > 0, true, 'it carries at least one fit, keyed by embedding model');
@@ -129,12 +98,8 @@ for (const [key, shipped] of Object.entries(file.byModel)) {
     eq(shipped.layout.join(','), ['intercept', ...shipped.features.map(f => `${f}.z`)].join(','),
         `${key}: layout names the design the coefficients are in, intercept first`);
     eq(shipped.cutoff > 0 && shipped.cutoff < 1, true, `${key}: the operating point ships with the coefficients`);
-    // The two features this module exists to compute must actually be in the design, or the runtime
-    // would be building signals nothing reads.
     eq(shipped.features.includes('properNouns') && shipped.features.includes('density'), true,
         `${key}: the design carries the two signals relevance.mjs computes`);
-    // Scores end to end through the real file, which is the only assertion here that would catch a
-    // coefficient layout change the shape checks above accept.
     const live = scoreRelevance(shipped, [
         Object.fromEntries(shipped.features.map(f => [f, 0])),
         Object.fromEntries(shipped.features.map(f => [f, 1])),
@@ -146,8 +111,6 @@ for (const [key, shipped] of Object.entries(file.byModel)) {
 
 // ---- the relevance cut -------------------------------------------------------------------------
 
-// Stage 4's only relevance decision. Checked here rather than in budget-check because it is a question
-// about the MODEL's verdict, not about the caps: the caps ask how many and how much, this asks whether.
 const cutRows = [
     { t: 'clears',      e: 0.50, tier: 'memory' },
     { t: 'below',       e: 0.02, tier: 'memory' },
@@ -164,50 +127,32 @@ eq(cutKept.map(r => r.t).join(','), 'clears,exactly-at,unscored,no-fit-tier',
     'the cut keeps what clears its tier cutoff, and everything it cannot judge');
 eq(cutOut.map(r => r.t).join(','), 'below', 'only a row scored below its own tier cutoff is cut');
 
-// At the cutoff is IN: the sweep that chose it scored the delivered set as `e >= cut`, so a strict
-// comparison here would deliver a different set than the number was chosen on.
 eq(cutKept.some(r => r.t === 'exactly-at'), true, 'a row exactly at the cutoff is delivered');
 
-// Per tier, and the tiers do not share a number: 0.12 clears memory's 0.10 and fails reference's 0.17, so
-// one score lands on both sides depending only on which fit covers it.
 const tiered = relevanceCut([{ t: 'm', e: 0.12, tier: 'memory' }, { t: 'r', e: 0.12, tier: 'reference' }],
     { scoreOf: r => r.e, cutoffOf: r => CUTOFFS[r.tier] });
 eq(tiered.kept.map(r => r.t).join(','), 'm', 'the same score is delivered on one tier and cut on the other');
 
-// The set is the point: nothing is reordered, and every row lands in exactly one of the two lists.
 eq(cutKept.length + cutOut.length, cutRows.length, 'every row is either kept or cut, never both or neither');
 
 
 // ---- postDates: what the book had not written yet ------------------------------------------------
-//
-// Shared by the harness's dropUnavailable and the runtime's setting, so the two cannot drift on what "not
-// yet written" means. The boundary is the END: a summary exists once the messages it covers have happened,
-// so an entry spanning the turn could not be in the book either, and straddling positives dominate the head
-// of their scenes where clean positives do not (F28).
 eq(postDates({ STMB_start: 90, STMB_end: 110 }, 100), true, 'an entry straddling the turn had not been written');
 eq(postDates({ STMB_start: 80, STMB_end: 100 }, 100), true, '...including one ending exactly at it, which needs the turn to have happened');
 eq(postDates({ STMB_start: 80, STMB_end: 99 }, 100), false, '...but not one that ends the message before');
 eq(postDates({ STMB_start: 10, STMB_end: 40 }, 100), false, 'an entry entirely earlier is available');
 eq(postDates({ STMB_start: 150 }, 100), true, 'with no end, a later start still post-dates');
 eq(postDates({ STMB_start: 50 }, 100), false, '...and an earlier one does not');
-// A missing range reads as AVAILABLE. Right for a reference sheet, silently inert on a memory entry
-// that lost the field — the predicate cannot tell those apart and does not pretend to.
 eq(postDates({}, 100), false, 'an entry with no range is available, which is what a reference sheet is');
 eq(postDates({ STMB_start: 150 }, NaN), false, 'with no current position nothing is post-dated, so the filter is off rather than total');
 
 // ---- fitsNamed ---------------------------------------------------------------------------------
-//
-// Scores one scene through another model's coefficients. Its dangerous failure is silent — a name
-// resolving to nothing would report the fallback as the arm's result — so the contract is that it throws.
 const { fitsNamed, modelsFor } = await import('./scene.mjs');
 const { UNFITTED_FALLBACK } = await import('../extension/relevance.mjs');
 eq(fitsNamed('noCosine').memory.features.includes('cosine'), false, 'the noCosine fit carries no cosine feature');
 eq(fitsNamed('bge-m3').memory.features.includes('cosine'), true, '...where a model fit does');
-// Same object as the production path for the model's own name, or the control arm in a fit screen is not a
-// control: `fit=<own model>` has to reproduce the baseline exactly rather than merely closely.
 eq(fitsNamed('bge-m3').memory === modelsFor('bge-m3').memory, true, 'a name resolves to the same fit the embedding model does');
-// The harness refuses an unfitted model; production borrows. Asserted because the asymmetry reads as a bug
-// from either side, and "fixing" it in either direction is wrong.
+// The harness refuses an unfitted model and production borrows; the asymmetry is deliberate in both directions.
 let unfittedThrew = false;
 try { modelsFor('no-such-embedder-anywhere'); } catch { unfittedThrew = true; }
 eq(unfittedThrew, true, 'the harness refuses an embedding model it has no fit for');

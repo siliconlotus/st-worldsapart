@@ -1,27 +1,4 @@
-// Self-check for ranking every attached book at once — what `scoreEntriesUnsafe` and the plugin's
-// /query-multi loop do, and what this harness did not do until now.
-//
-// Five claims, each of which fails as a plausible number rather than as an error.
-//
-//   Uids do not collide. Books number their entries from 0, so a bare-uid map — the candidate set, the
-//   pool, the grade join, the token lookup — hands one book's row the other's entry, grade or cosine.
-//
-//   Both books compete in one ranking. `poolEntries` keys on (collection, uid) and `selectTopK` sorts
-//   across collections; a per-book top-K would let a weak book's best chunk in ahead of a strong book's
-//   second.
-//
-//   Each book is centered on its own corpus, the plugin's per-collection mean. Sharing one mean across
-//   books would move every cosine in both, and nothing downstream could tell.
-//
-//   A second book's grade is in scope. Scope is whether the book was embedded, so a stale `excludeTitles`
-//   naming a book that IS here must remove nothing.
-//
-//   The per-book cap fires. `applyBudget`'s `capOf` has no other offline caller, so nothing else says
-//   whether the harness wires it to `entry.world`.
-//
-// No ollama and no real book: hand-written vectors, since none of the above is a question about embeddings.
-// The second book's collection is placed where `indexPath` derives it rather than passed in — there is one
-// indexFile and N books, so that resolution IS the thing under test for every book but the primary.
+// Ranking every attached book at once, as scoreEntriesUnsafe and /query-multi do: (book, uid) identity, one pooled ranking, per-book centering, scope, the per-book cap. Hand-written vectors; B's collection sits where indexPath derives it.
 import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, dirname } from 'node:path';
@@ -29,8 +6,6 @@ import { getStringHash, loadScene, makeCandidateSet, makeGradeOf, sceneParams, s
 import { eq } from './metrics.mjs';
 
 const DIR = mkdtempSync(join(tmpdir(), 'wa-multibook-'));
-// A's chunks sit near [1,0,0], B's near [0,1,0]. Centering subtracts each book's own centroid, so what a
-// cosine means is only comparable across the two because each was taken against its own.
 const VEC = {
     A: { 1: [1, 0, 0], 2: [0.8, 0.6, 0] },
     B: { 1: [0, 1, 0], 2: [0.2, 0.9, 0.3] },
@@ -46,7 +21,6 @@ const write = (book) => {
 const A_INDEX = write('A');
 write('B');
 
-// The same uid in both books, with different titles and different content — which is the collision.
 const entry = (uid, book, extra) => ({ uid, comment: `${book}-${uid}`, content: `text ${book}${uid}`, key: [], vectorized: true, ...extra });
 const sample = () => ({
     primaryBook: 'A',
@@ -57,17 +31,14 @@ const sample = () => ({
     },
     query: 'text B1',
     scanChat: [],
-    // In `params`, not in an override: both are read when the collection is split, so scoreScene refuses to
-    // sweep them against a preloaded scene. denseAllEntries off keeps this fixture to ordinary collections.
+    // In `params`, not an override: scoreScene refuses to sweep these against a preloaded scene.
     params: { denseAllEntries: false, centroidPopulation: 'vectorized' },
-    // Graded rows in BOTH books, at uids the other one also has, and disagreeing — so a uid-keyed join
-    // resolves to the wrong verdict rather than to none.
     entries: [
         { title: 'B-1', book: 'B', uid: 1, grades: [{ kind: 'human', grade: 4, user: 'x', at: '2026-01-01' }] },
         { title: 'A-1', book: 'A', uid: 1, grades: [{ kind: 'human', grade: 0, user: 'x', at: '2026-01-01' }] },
     ],
     candidates: [{ title: 'B-1', book: 'B', uid: 1 }, { title: 'A-1', book: 'A', uid: 1 }],
-    // Stale: this named the rows a single-book harness could not rank. Both books are here now.
+    // Deliberately stale: both books are embedded, so this must remove nothing.
     excludeTitles: ['B-1'],
 });
 
@@ -80,7 +51,6 @@ eq(scene.books.join(','), 'A,B', 'every embedded book is loaded, primary first')
 eq(scene.loaded.length, 2, 'one collection per book, not one concatenated index');
 eq(scene.loaded.map(L => L.book).join(','), 'A,B', '...in the same order');
 eq(scene.loaded.map(L => L.items.length).join(','), '2,2', 'each holds only its own chunks');
-// A's centroid leans x, B's leans y. One shared mean would put both at the same vector.
 eq([...scene.loaded[0].mean].map(x => x.toFixed(2)).join(','), '0.90,0.30,0.00', "A is centered on A's chunks");
 eq([...scene.loaded[1].mean].map(x => x.toFixed(2)).join(','), '0.10,0.95,0.15', "...and B on B's, which is the plugin's per-collection mean");
 eq(scene.entries.length, 4, 'the entry list spans both books');
@@ -99,22 +69,16 @@ eq(gradeOf({ book: 'B', uid: 1 }), 4, 'a second book\'s row resolves to its own 
 eq(gradeOf({ book: 'A', uid: 1 }), 0, '...and the primary\'s uid 1 keeps the disagreeing one');
 
 // --- one ranking, both books ------------------------------------------------------------------------
-// The query points at B1, so B's entries should score high — but A's must be present and ordered against
-// them, not held in a separate list.
 const QV = [0.1, 0.95, 0.15];
 const rows = makeCandidateSet({ ...scene, params: P })(P.K1, P.B, null, QV, 'text B1', () => ['']);
 eq(rows.length, 4, 'every entry of every book is a candidate');
 eq(rows.map(r => `${r.book}.${r.uid}`).sort().join(' '), 'A.1 A.2 B.1 B.2', 'each row names its own book');
 eq(rows.every(r => r.book === r.entry.world), true, 'a row\'s book is its entry\'s world, which is what capOf reads');
-// One pooled top-K, so a small K cuts across books rather than per book.
 const top2 = makeCandidateSet({ ...scene, params: P, topK: 2 })(P.K1, P.B, null, QV, 'text B1', () => ['']);
 eq(top2.length, 2, 'topK counts entries across every collection, not per collection');
 
 // --- stage 4's per-book quota ------------------------------------------------------------------------
-// No capture records a cap (it lives on the live world priority list), so it is a param. Without the wiring
-// this returns all four rows and reads as "the cap does nothing".
-// `relevanceFit` names the fit: `check-embed` is a synthetic 3-dimensional embedder with none, and
-// `modelsFor` refuses rather than borrowing. Which fit is arbitrary — this checks the per-book quota.
+// relevanceFit is named because check-embed has no fit and modelsFor refuses to borrow; which fit is arbitrary.
 const delivered = async (overrides) => {
     const r = await scoreScene({ sample: sample(), overrides: { budgetTokens: 100000, relevanceFit: 'bge-m3', ...overrides }, scene, qv: QV });
     return r.atBudget.n;

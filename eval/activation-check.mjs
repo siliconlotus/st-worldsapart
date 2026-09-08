@@ -1,8 +1,4 @@
-// Verifies the stage-2 activation verdicts (matcher.mjs activationAdds) — the
-// union and prune halves of stage-2 activation, and the takeover extensions (blind
-// emission, min-activation depth skew, the recursion rematch window). Guards the candidacy rules
-// the runtime and the tools must share: which keys may carry an activation, which entries are
-// never judged, and that the verdict is keywordScore's over the entry's resolved-depth window.
+// Stage-2 activation verdicts (matcher.mjs activationAdds): candidacy, depth resolution, scanDepth 0, segmentation, the recursion rematch window.
 import { activationAdds, makeWindowFor, scanSegments, withExtraTexts } from '../extension/matcher.mjs';
 import { eq } from './metrics.mjs';
 
@@ -69,8 +65,7 @@ const addedUids = (entries, text, o = {}) =>
     console.log('ok   activationAdds: depth resolves as stage 3 rules it, 0 included');
 }
 
-// scanDepth 0 end to end, through the real window assembly (makeWindowFor): no chat window,
-// but injects and opted-in sources can still carry the match — mirroring core's buffer.
+// scanDepth 0 through makeWindowFor: no chat window, but injects and opted-in sources still carry the match.
 {
     const chat = [{ name: 'A', mes: 'the cosmonaut waited' }];
     eq(scanSegments(chat, { depth: 0 }).join('|'), '', 'scanSegments at depth 0 yields no chat text');
@@ -79,13 +74,9 @@ const addedUids = (entries, text, o = {}) =>
     const zero = { uid: 1, key: ['cosmonaut'], scanDepth: 0, content: 'x' };
     eq(activationAdds([zero], makeWindowFor(chat, { matchWindow: 'message' }), { ...OPTS }).length, 0,
         'scanDepth-0 entry cannot activate from chat');
-    // AMBIENT injects still carry it: `scanDepth: 0` says "match nothing from CHAT", and a prompt with no
-    // chat position was never chat. This is the case the setting exists for — an entry living on injects.
     eq(activationAdds([zero], makeWindowFor(chat, { matchWindow: 'message', injects: [{ text: 'cosmonaut log', ambient: true }] }),
         { ...OPTS }).length, 1,
     'scanDepth-0 entry still activates from an ambient inject');
-    // An inject PLACED IN THE CHAT is chat, so the same setting excludes it — the rule reaches injects
-    // and messages by the same test rather than exempting one of them.
     eq(activationAdds([zero], makeWindowFor(chat, { matchWindow: 'message', injects: [{ text: 'cosmonaut log', ambient: false, depth: 4 }] }),
         { ...OPTS }).length, 0,
     'scanDepth-0 entry does NOT activate from an inject placed in the chat');
@@ -100,8 +91,7 @@ const addedUids = (entries, text, o = {}) =>
     console.log('ok   scanDepth 0 + makeWindowFor: scan-nothing honoured, injects and sources still matchable');
 }
 
-// The window's segmentation is the matcher's: a key split across segments is not a match,
-// and the entry's own secondary gate applies per segment.
+// The window's segmentation is the matcher's, and the secondary gate applies per segment.
 {
     const e = { uid: 1, key: ['red rain'], content: 'x' };
     eq(addedUids([e], ['the red', 'rain fell']), '', 'key split across segments does not match');
@@ -114,9 +104,7 @@ const addedUids = (entries, text, o = {}) =>
     console.log('ok   activationAdds: verdict is keywordScore\'s — segmentation and secondary gating included');
 }
 
-// The recursion rematch window (withExtraTexts): chat segments plus each pass's new entry
-// content, re-segmented — so recursion text carries activations, and whether a conjunction may
-// span the chat/recursion seam follows the match window exactly as it follows the message seam.
+// withExtraTexts: chat segments plus each recursion pass's new content, re-segmented under the match window.
 {
     const chat = [{ name: 'A', mes: 'the cosmonaut waited' }];
     const compose = (texts, matchWindow) =>
