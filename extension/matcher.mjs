@@ -1,7 +1,7 @@
 // matcher.mjs — countKey and everything a match verdict rests on: the fold, boundaries, regex keys, SmartKeys
 // dispatch, secondary keys, the scan window, stage-2 activation. ST-free; core parity is asserted in core-matcher-check, worth in matcher-check.
 
-import { cachedCount, evaluateAst, evaluateSmartKey, fold, normalizeOrthography, parse, primeScan, synthesizeSecondary, tokenize, validateSmartKey } from './smartkeys.mjs';
+import { cachedCount, evaluate, evaluateAst, evaluateSmartKey, fold, normalizeOrthography, parse, primeScan, synthesizeSecondary, tokenize, validateSmartKey } from './smartkeys.mjs';
 
 export function escapeRegex(str) { return String(str).replace(/[.*+?^${}()|[\]\\]/g, '\\$&'); }
 
@@ -271,7 +271,8 @@ export function keyExcerpts(key, text, caseSensitive, wholeWords, context = 28, 
     if (raw.startsWith('?')) {
         let node = null;
         try { node = parse(tokenize(raw)); } catch { return out; }
-        if (!node || (node.type !== 'TERM' && node.type !== 'REGEX')) return out;
+        if (!node) return out;
+        if (node.type !== 'TERM' && node.type !== 'REGEX') return compoundExcerpts(node, text, context, limit);
         raw = String(node.value ?? '').trim();
         if (!raw) return out;
         caseSensitive = node.type === 'REGEX' ? caseSensitive : !!node.isCaseSensitive;
@@ -292,7 +293,7 @@ export function keyExcerpts(key, text, caseSensitive, wholeWords, context = 28, 
         const head = `${from > 0 ? '…' : ''}${src.slice(from, start)}`.replace(/\s+/g, ' ');
         const hit = src.slice(start, end).replace(/\s+/g, ' ');
         const tail = `${src.slice(end, to)}${to < src.length ? '…' : ''}`.replace(/\s+/g, ' ');
-        return { text: head + hit + tail, start: head.length, end: head.length + hit.length };
+        return { text: head + hit + tail, start: head.length, end: head.length + hit.length, at: start };
     };
     const mark = (raw0, index, length) => {
         const src = raw0.normalize('NFC');
@@ -330,6 +331,32 @@ export function keyExcerpts(key, text, caseSensitive, wholeWords, context = 28, 
         }
         for (let i = hay.indexOf(needle); i !== -1; i = hay.indexOf(needle, i + needle.length)) {
             if (push(segment, i, needle.length)) return out;
+        }
+    }
+    return out;
+}
+
+/** Every leaf a compound SmartKey's match credited, first hit each, ordered by position; `term` is the leaf and `n` its
+ *  occurrences in that segment. A leaf the match did not credit — under a NOT, or the unmatched side of an OR — is absent. */
+function compoundExcerpts(node, text, context, limit) {
+    const out = [];
+    for (const segment of Array.isArray(text) ? text : [text]) {
+        if (!segment) continue;
+        const leaves = [];
+        // A pooled unit carries the alternation, its children under `parts`; only the leaves have a term to search for.
+        const walk = us => { for (const u of us) { if (u.parts) walk(u.parts); else leaves.push(u); } };
+        walk(evaluate(node, segment).units);
+        const found = [];
+        for (const { id, n } of leaves) {
+            const value = String(id?.value ?? '');
+            const isRegex = id?.type === 'REGEX';
+            const [ex] = keyExcerpts(value, segment, !isRegex && !!id.isCaseSensitive, !isRegex && !!id.isExact, context, 1);
+            if (ex) found.push({ ...ex, term: value, n });
+        }
+        found.sort((a, b) => a.at - b.at);
+        for (const ex of found) {
+            out.push(ex);
+            if (out.length >= limit) return out;
         }
     }
     return out;

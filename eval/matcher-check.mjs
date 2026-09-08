@@ -229,12 +229,23 @@ eq(keyExcerpt('/knot(s|ting)?/', 'She paused — then again — and sighed… He
     '…then again — and sighed… He «knots» the rope', 'a regex hit is not walked back through the fold');
 eq(keyExcerpt('/th\\w+bare/', 'the curtains were threadbare by then', false, false),
     'the curtains were «threadbare» by then', 'regex key: excerpt from the raw text via the pattern');
-eq(keyExcerpt('? thread & curtains', 'threadbare curtains', false, false),
-    null, 'smartkey: no excerpt — a SmartKey is not a substring');
 eq(keyExcerpt('ghost', 'no such word here', false, false), null, 'no match, no excerpt');
 eq(keyExcerpt('bare', ['first segment', 'the threadbare one'], false, false),
     'the thread«bare» one', 'segments: later segment searched when earlier ones miss');
-console.log('ok   keyExcerpt: localises what countKey counted, folded-haystack display, smartkeys excluded');
+console.log('ok   keyExcerpt: localises what countKey counted, folded-haystack display');
+
+
+// --- a compound SmartKey excerpts one leaf per credited unit, in TEXT order, each carrying its own occurrence count
+const space = 'the Russian cosmonaut Yuri Gagarin flew; the American astronaut Neil Armstrong walked. Gagarin again.';
+const leaves = k => keyExcerpts(k, space, false, true).map(e => `${e.term}:${e.n}`);
+eq(leaves('? (armstrong gagarin)').join(' '), 'gagarin:2 armstrong:1', 'AND: both leaves, ordered by position, not by the AST');
+eq(leaves('? (apple | gagarin | coconut)').join(' '), 'gagarin:2', 'OR: only the side that hit, and the pooled n is that side\'s own');
+eq(leaves('? (gagarin -banana)').join(' '), 'gagarin:2', 'NOT: the negated term has no span to show');
+eq(keyExcerpts('? (gagarin banana)', space, false, true).length, 0, 'a key that did not match excerpts nothing');
+eq(markExcerptText(keyExcerpts('? (armstrong gagarin)', space, false, true, 12)[0]),
+    '…monaut Yuri «Gagarin» flew; the A…', 'a leaf excerpt is the ordinary one, at the caller\'s context width');
+eq(leaves('? (/Gagar\\w+/ armstrong)').join(' '), '/Gagar\\w+/:2 armstrong:1', 'a regex leaf reports the pattern as its term, and is case-sensitive without /i');
+console.log('ok   keyExcerpt: compound SmartKeys excerpt every credited leaf, with per-leaf counts');
 
 
 // --- usedMatchSources: what a capture is allowed to freeze

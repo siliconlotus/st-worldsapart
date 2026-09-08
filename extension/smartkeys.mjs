@@ -342,8 +342,9 @@ function ensureScan(scope, text) {
 
 /** A scoring unit: `n` occurrences carrying `wsum` = weight x count. AND's operands are separate units, OR's pool into one; a condition yields none, as does weight 0. `id` is the interned node. */
 const unit = (id, wsum, n) => (wsum > 0 && n > 0 ? [{ id, wsum, n }] : []);
+// `parts` is the pooled children, for display only: wsum and n stay the alternation's, so boostOf is unchanged.
 const pool = (id, units) => (units.length
-    ? unit(id, units.reduce((a, u) => a + u.wsum, 0), units.reduce((a, u) => a + u.n, 0))
+    ? unit(id, units.reduce((a, u) => a + u.wsum, 0), units.reduce((a, u) => a + u.n, 0)).map(u => ({ ...u, parts: units }))
     : []);
 /** Σ weighted occurrences — the same scalar under every operator, so countKey's contract is unaffected by the unit split. */
 const boostOf = units => units.reduce((a, u) => a + u.wsum, 0);
