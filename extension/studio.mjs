@@ -2017,20 +2017,23 @@ export async function lorebookStudio(preferredBook = null) {
 
     // --- Keyword Lab: any keys against any text, with no entry and no book behind them ---
     /** A key's colour is its position in the list: one hue per family — blue, green, magenta, orange, cyan, violet, yellow —
-     *  since two hues from one family are hard to tell apart however far apart the numbers are. Clear of red, severity here. */
+     *  since two hues from one family are hard to tell apart however far apart the numbers are. Clear of red, severity here.
+     *  A second pass over the same hues in pastel gives fourteen before a colour repeats. */
     const LAB_HUES = [215, 120, 305, 35, 180, 265, 58];
-    const labColor = (h, a) => `hsl(${h} 75% 55%${a < 1 ? ` / ${a}` : ''})`;
+    const labInk = (i, a = 1) => {
+        const pastel = i % (LAB_HUES.length * 2) >= LAB_HUES.length;
+        return `hsl(${LAB_HUES[i % LAB_HUES.length]} ${pastel ? 45 : 80}% ${pastel ? 68 : 50}%${a < 1 ? ` / ${a}` : ''})`;
+    };
 
-    /** The haystack with every span wrapped, in the hue of the first key that reached it; the rest are named in the tooltip.
+    /** The haystack with every span wrapped, in the colour of the first key that reached it; the rest are named in the tooltip.
      *  Offsets are keyExcerpts', which are into the NFC form. */
-    const markedHtml = (text, spans, hue) => {
+    const markedHtml = (text, spans, ink) => {
         const src = String(text).normalize('NFC');
         let html = '', at = 0;
         for (const sp of spans) {
-            const h = hue(sp.key);
             html += escapeHtml(src.slice(at, sp.start))
                 + `<span title="${escapeHtml(sp.keys.map(k => (k.term ? `${k.key} \u2014 ${k.term}` : k.key)).join('\n'))}"`
-                + ` style="background:${labColor(h, 0.28)};border-bottom:2px solid ${labColor(h, 1)};">${escapeHtml(src.slice(sp.start, sp.end))}</span>`;
+                + ` style="background:${ink(sp.key, 0.28)};border-bottom:2px solid ${ink(sp.key)};">${escapeHtml(src.slice(sp.start, sp.end))}</span>`;
             at = sp.end;
         }
         return html + escapeHtml(src.slice(at));
@@ -2072,17 +2075,17 @@ export async function lorebookStudio(preferredBook = null) {
         out.style.cssText = 'flex:0 0 auto;max-height:40%;overflow:auto;padding:0 8px 8px;';
         const repaint = () => {
             const keys = splitKeys(labKeys);
-            const hue = key => LAB_HUES[Math.max(0, keys.indexOf(key)) % LAB_HUES.length];
+            const ink = (key, a) => labInk(Math.max(0, keys.indexOf(key)), a);
             const rows = keyHits(keys, labHay, labCase, labWhole, { context: 30 });
             // A hit row takes the colour of the key it sits under, which is the last row that named one.
             for (let i = 0, parent = ''; i < rows.length; i++) {
                 if (!rows[i].key.startsWith('\u21b3')) parent = rows[i].key;
-                rows[i].color = labColor(hue(parent), 1);
+                rows[i].color = ink(parent);
             }
             out.innerHTML = rows.length
                 ? keyHitsHtml(rows)
                 : '<div style="opacity:0.6;padding:6px 0;">Keys you type on the right are matched against the text on the left.</div>';
-            marked.innerHTML = markedHtml(labHay, keySpans(keys, labHay, labCase, labWhole), hue);
+            marked.innerHTML = markedHtml(labHay, keySpans(keys, labHay, labCase, labWhole), ink);
         };
         repaint();
         pane.append(panes, opts, marked, out);
