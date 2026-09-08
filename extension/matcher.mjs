@@ -362,19 +362,22 @@ function compoundExcerpts(node, text, context, limit) {
     return out;
 }
 
-/** What each of `keys` did to `text`, as the rows keyHitsHtml renders: `{ key, count, excerpt, contexts }`, or `{ key, excerpt: message }`
- *  for a SmartKey that can never match. A compound SmartKey's own count is its weight, not occurrences, so its excerpts are emitted
- *  as one `\u21b3 leaf` row each, carrying that leaf's occurrence count. */
-export function keyHits(keys, text, caseSensitive, wholeWords) {
-    return (Array.isArray(keys) ? keys : String(keys ?? '').split('\n'))
+/** What each of `keys` did to `text`, as the rows keyHitsHtml renders. One row per key — its count, and every hit on one line
+ *  elided between them — then one `\u21b3` row per hit beneath it, or per credited leaf with its own count for a compound
+ *  SmartKey, whose own number is a weight rather than an occurrence count. A key that can never fire gets a message
+ *  where the excerpt goes. `context` and `limit` are keyExcerpts'. */
+export function keyHits(keys, text, caseSensitive, wholeWords, { context = 28, limit = 20 } = {}) {
+    return (Array.isArray(keys) ? keys : [])
         .map(k => String(k ?? '').trim()).filter(Boolean)
         .flatMap(key => {
             const bad = key.startsWith('?') ? validateSmartKey(key).find(v => v.severity === 'error') : null;
             if (bad) return [{ key, excerpt: bad.message }];
             const count = countKey(key, text, caseSensitive, wholeWords);
-            const hits = keyExcerpts(key, text, caseSensitive, wholeWords);
-            if (hits[0]?.term) return [{ key, count }, ...hits.map(e => ({ key: `\u21b3 ${e.term}`, count: e.n, excerpt: e }))];
-            return [{ key, count, excerpt: hits[0], contexts: hits }];
+            const hits = keyExcerpts(key, text, caseSensitive, wholeWords, context, limit);
+            // Plain text, since an excerpt object marks one span and the joined line has several.
+            const head = { key, count, excerpt: hits.map(markExcerptText).join(' \u2026 ') };
+            if (hits.length < 2 && !hits[0]?.term) return [{ ...head, excerpt: hits[0] }];
+            return [head, ...hits.map(e => ({ key: e.term ? `\u21b3 ${e.term}` : '\u21b3', count: e.n, excerpt: e }))];
         });
 }
 

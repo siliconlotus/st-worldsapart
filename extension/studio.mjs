@@ -2,7 +2,7 @@
 // selected book's entries on the right. DOM- and ST-coupled; the logic it stands on is the shared pure modules.
 import { saveSettingsDebounced, getRequestHeaders, characters, getCharacters } from '../../../../../script.js';
 import { getContext } from '../../../../extensions.js';
-import { loadWorldInfo, saveWorldInfo, reloadEditor, createWorldInfoEntry, duplicateWorldInfoEntry, deleteWorldInfoEntry, getFreeWorldEntryUid, deleteWIOriginalDataValue, deleteWorldInfo, updateWorldInfoList, world_names, world_info_match_whole_words, world_info_case_sensitive, selected_world_info, world_info, METADATA_KEY } from '../../../../world-info.js';
+import { loadWorldInfo, saveWorldInfo, reloadEditor, createWorldInfoEntry, duplicateWorldInfoEntry, deleteWorldInfoEntry, getFreeWorldEntryUid, deleteWIOriginalDataValue, deleteWorldInfo, updateWorldInfoList, world_names, world_info_match_whole_words, world_info_case_sensitive, selected_world_info, splitKeywordsAndRegexes, world_info, METADATA_KEY } from '../../../../world-info.js';
 import { power_user } from '../../../../power-user.js';
 import { escapeHtml } from '../../../../utils.js';
 import { Popup, POPUP_TYPE, POPUP_RESULT } from '../../../../popup.js';
@@ -2021,7 +2021,7 @@ export async function lorebookStudio(preferredBook = null) {
 
     const renderLabView = pane => {
         const panes = document.createElement('div');
-        panes.style.cssText = 'display:flex;gap:6px;padding:8px 8px 0;flex:0 0 auto;height:36%;min-height:110px;';
+        panes.style.cssText = 'display:flex;gap:6px;padding:8px 8px 0;flex:0 0 auto;height:45%;min-height:180px;';
         const box = (placeholder, get, set) => {
             const t = document.createElement('textarea'); t.className = 'text_pole';
             t.placeholder = placeholder; t.value = get();
@@ -2031,7 +2031,7 @@ export async function lorebookStudio(preferredBook = null) {
         };
         panes.append(
             box('Paste any text to match against…', () => labHay, v => { labHay = v; }),
-            box('One key per line — plain, /regex/flags or ?SmartKey', () => labKeys, v => { labKeys = v; }),
+            box('Keys, comma- or newline-separated — plain, /regex/flags or ?SmartKey', () => labKeys, v => { labKeys = v; }),
         );
         const opts = document.createElement('div');
         opts.style.cssText = 'display:flex;gap:14px;padding:6px 8px;flex:0 0 auto;opacity:0.8;font-size:0.9em;';
@@ -2049,7 +2049,8 @@ export async function lorebookStudio(preferredBook = null) {
         const out = document.createElement('div');
         out.style.cssText = 'flex:1 1 auto;overflow:auto;padding:0 8px 8px;min-height:0;';
         const repaint = () => {
-            const rows = keyHits(labKeys, labHay, labCase, labWhole);
+            // Split as core's key field does, so a regex keeps its commas; a newline is one more separator.
+            const rows = keyHits(splitKeywordsAndRegexes(labKeys.replace(/\n/g, ',')), labHay, labCase, labWhole, { context: 60 });
             out.innerHTML = rows.length
                 ? keyHitsHtml(rows)
                 : '<div style="opacity:0.6;padding:6px 0;">Keys you type on the right are matched against the text on the left.</div>';

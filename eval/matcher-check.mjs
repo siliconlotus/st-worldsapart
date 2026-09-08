@@ -248,20 +248,21 @@ eq(leaves('? (/Gagar\\w+/ armstrong)').join(' '), '/Gagar\\w+/:2 armstrong:1', '
 console.log('ok   keyExcerpt: compound SmartKeys excerpt every credited leaf, with per-leaf counts');
 
 
-// --- keyHits: the Keyword Lab's rows — one per key, a leaf row per credited unit, a message for a key that can never fire
+// --- keyHits: the Keyword Lab's rows — a key, then a row per hit, and a message for a key that can never fire
 const rows = keyHits(['gagarin', '? (armstrong gagarin)', '? -banana', 'nobody'], space, false, true);
-eq(rows.map(r => r.key).join(' | '), 'gagarin | ? (armstrong gagarin) | \u21b3 gagarin | \u21b3 armstrong | ? -banana | nobody',
-    'a compound expands into leaf rows after its own, a plain key stays one row');
+eq(rows.map(r => r.key).join(' | '), 'gagarin | \u21b3 | \u21b3 | ? (armstrong gagarin) | \u21b3 gagarin | \u21b3 armstrong | ? -banana | nobody',
+    'every hit gets its own row under the key; a compound names the leaf that produced each');
 eq(rows[0].count, 2, 'a plain key reports occurrences');
-eq(rows[0].contexts.length, 2, 'and carries every excerpt, for the tooltip');
-eq(rows[1].excerpt, undefined, 'a compound has no excerpt of its own — its number is a weight, not a count');
-eq(rows[2].count, 2, 'the leaf rows carry the counts');
-eq(rows[4].count, undefined, 'a negation-only SmartKey is reported as unusable...');
-eq(typeof rows[4].excerpt, 'string', '...by a message where the excerpt goes');
-eq(rows[5].count, 0, 'a key that simply did not match is a zero, not an error');
-eq(keyHits('gagarin\n\n  armstrong  ', space, false, true).map(r => r.key).join(','), 'gagarin,armstrong',
-    'a newline-separated string is accepted and trimmed, as the Lab pane hands it over');
-console.log('ok   keyHits: one row per key, leaf rows for compounds, a message for a key that can never fire');
+eq(rows[1].excerpt.at < rows[2].excerpt.at, true, 'the hit rows are in the order they occur in the text');
+eq(rows[3].excerpt, 'the Russian cosmonaut Yuri «Gagarin» flew; the American astronau… … …the American astronaut Neil «Armstrong» walked. Gagarin again.',
+    'the key row reads as its groups on one line, elided between them');
+eq(rows[4].count, 2, 'a compound\'s leaf rows carry that leaf\'s own count');
+eq(rows[6].count, undefined, 'a negation-only SmartKey is reported as unusable...');
+eq(typeof rows[6].excerpt, 'string', '...by a message where the excerpt goes');
+eq(rows[7].count, 0, 'a key that simply did not match is a zero, not an error');
+eq(keyHits(['gagarin', '', '  armstrong  '], space, false, true).map(r => r.key).join(','), 'gagarin,\u21b3,\u21b3,armstrong',
+    'blanks are dropped and keys trimmed; splitting the caller\'s text into keys is the caller\'s business');
+console.log('ok   keyHits: a row per key and per hit, leaves named for compounds, a message for a key that cannot fire');
 
 
 // --- usedMatchSources: what a capture is allowed to freeze
