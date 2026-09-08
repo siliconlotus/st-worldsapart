@@ -1,30 +1,9 @@
-// Does sampling temperature change what the ✨ LLM keyword suggester proposes, and how?
-//
-// The temperature setting (state.mjs llmTemperature) carries an assertion, not a measurement: the claim
-// that low values suit this job was inherited from the withdrawn query summarizer, where a stable query
-// mattered. The suggester feeds a candidate set to the Zipf/df gates and a human review, so recall is the
-// generator's half and precision the filter's, and breadth may be worth more there than stability.
-//
-// What is and is not measurable here: agreement with a book's existing keys is a relative measure across
-// arms and nothing more. Curation is evidence about precision and never about recall (eval-data/README.md),
-// so a candidate absent from the book may be a bad key or a good one nobody considered. What this can do is
-// hold the reference fixed while temperature moves — the bias is constant across the ladder, so the
-// direction of a change is interpretable even though the absolute level is not a quality score. The three
-// books are the ones whose provenance supports even that much; uncurated books are output, not judgement,
-// and are deliberately excluded.
-//
-// Shipped code, not a reimplementation: the prompt is buildKeyPrompt, the parse is parseKeyList, the
-// avoid-list and canonicaliser come from buildKeySuggest, attestation goes through countKey, and the
-// options are STUDIO_SUGGEST_OPTS, so a prompt or gate change moves this too. Only the transport is local
-// (keyword-tools.mjs generateText imports ST and cannot load in node).
-//
+// Does sampling temperature change what the LLM keyword suggester proposes, and how? Agreement with a book's own keys is relative across arms only.
 // Usage:
 //   node temp-ladder.mjs --dump-prompts prompts.json          # exact prompts, for cross-model parity
 //   node temp-ladder.mjs --model gemma3:4b --temps 0,0.3,0.7,1.0 --repeats 3 --entries 8
 //   node temp-ladder.mjs --score-only --extra haiku.json,sonnet.json
-//
-// Responses are cached to temp-ladder-cache.json keyed by (model, temp, repeat, prompt), so adding a
-// model or a rung never re-pays for the ones already run.
+// Responses are cached to temp-ladder-cache.json keyed by (model, temp, repeat, prompt); a re-run resumes rather than re-paying.
 import { readFileSync, writeFileSync, existsSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 import { buildKeySuggest, buildKeyPrompt, parseKeyList, STUDIO_SUGGEST_OPTS } from '../extension/keyword-suggest.mjs';
@@ -36,8 +15,7 @@ const CACHE_PATH = `${HERE}eval-data/temp-ladder-cache.json`;
 const OLLAMA = process.env.OLLAMA_URL ?? 'http://localhost:11434';
 const WORLDS = `${HERE}../../../../../../data/default-user/worlds`;
 
-// Provenance is the entry criterion: only hand-written or manually-curated books can stand as a
-// reference at all (eval-data/README.md). Order is fixed so the entry sample is reproducible.
+// Only hand-written or curated books can stand as a reference (eval-data/README.md); order fixed so the sample is reproducible.
 const BOOKS = [
     ['foxbridge', 'Foxbridge.json', 'hand-written'],
     ['sommers', 'Sommers_Pack__v22.json', 'manually curated'],
@@ -54,11 +32,7 @@ const hash = s => createHash('sha1').update(s).digest('hex').slice(0, 16);
 const cache = existsSync(CACHE_PATH) ? JSON.parse(readFileSync(CACHE_PATH, 'utf8')) : {};
 const saveCache = () => writeFileSync(CACHE_PATH, JSON.stringify(cache));
 
-/**
- * The sampled entries, identical for every model and every rung. Deterministic by construction: a
- * fixed content-length floor, then uid order, then an even stride across the book — no RNG, so a
- * later run adds models to the same population rather than a fresh draw of it.
- */
+/** The sampled entries, identical for every model and rung: no RNG, so a later run adds models to the same population. */
 function sampleEntries(data, n) {
     const all = Object.values(data?.entries ?? {})
         .filter(e => e && !e.disable && String(e.content ?? '').trim().length >= 400)
@@ -76,8 +50,7 @@ function prepBook([slug, file, provenance], nEntries) {
     const suggest = buildKeySuggest(data, { ...STUDIO_SUGGEST_OPTS, bgDocs: [] });
     const entries = sampleEntries(data, nEntries).map(e => {
         const content = String(e.content ?? '');
-        // Long entries are chunked in production (llmKeyCandidates). The ladder measures the
-        // generator, not the chunker, so it takes the first chunk-sized slice and says so.
+        // The first chunk-sized slice, as llmKeyCandidates chunks; the ladder measures the generator, not the chunker.
         const text = content.slice(0, STUDIO_SUGGEST_OPTS.llmChunk);
         return {
             book: slug, uid: e.uid, title: e.comment ?? '', text,
@@ -90,14 +63,8 @@ function prepBook([slug, file, provenance], nEntries) {
 }
 
 /**
- * num_predict 400 mirrors llmKeyCandidates' hardcoded responseLength, so the ladder is measuring the
- * budget production actually gives the model.
- *
- * `think: false` is required, not a tuning choice: a thinking model spends the whole budget reasoning and
- * returns `done_reason: length` with an empty response, a silent zero that scores as "the model proposed
- * nothing" rather than as a failure (H6). A no-op for non-thinking models, so setting it uniformly keeps
- * the arms comparable. The shipped path has no equivalent escape, and its 400-token cap makes every
- * thinking model return nothing.
+ * num_predict 400 mirrors llmKeyCandidates' responseLength.
+ * `think: false` is required: a thinking model spends the budget reasoning and returns an empty response with done_reason length, a silent zero (H6).
  */
 async function askOllama(model, prompt, temperature) {
     const r = await fetch(`${OLLAMA}/api/generate`, {
@@ -107,8 +74,7 @@ async function askOllama(model, prompt, temperature) {
     if (!r.ok) throw new Error(`ollama ${r.status}: ${await r.text()}`);
     const j = await r.json();
     const text = String(j.response ?? '').trim();
-    // An empty body with done_reason 'length' is a budget failure, not an empty candidate set.
-    // Throwing keeps it out of the cache so a re-run retries it, instead of freezing a false zero.
+    // Throwing keeps a budget failure out of the cache, so a re-run retries it instead of freezing a false zero.
     if (!text && j.done_reason === 'length') throw new Error(`${model}: no output in ${j.eval_count} tokens (thinking overrun?)`);
     return text;
 }
@@ -121,14 +87,7 @@ const jaccard = (a, b) => {
     return inter / (a.size + b.size - inter);
 };
 
-/**
- * Per-arm statistics over one book's entries.
- *
- * `agree*` compare against the book's own keys and are relative-only (see the header). `stability` is the
- * mean pairwise Jaccard between repeats of the same entry at the same rung — the one metric here with no
- * reference-bias caveat, since it asks only whether the generator repeats itself. `grounded` is the
- * set-level predicate: does any candidate occur in the entry text.
- */
+/** Per-arm statistics over one book's entries; agree* are relative-only, stability (mean pairwise Jaccard between repeats) has no reference-bias caveat. */
 function scoreArm(book, runs) {
     const canon = book.canon;
     const perEntry = [], stabilities = [], unions = [];
@@ -137,10 +96,7 @@ function scoreArm(book, runs) {
         if (!reps.length) continue;
         const refs = new Set(e.keys.map(canon).filter(Boolean));
 
-        // Union across repeats — the breadth measure, and the production-relevant one: the Studio merges
-        // each ✨ click into the entry's existing chips (mergeLlmCands), so what a user accumulates is the
-        // union of their retries. It is the only metric that can pay off a temperature above 0, since at
-        // T=0 the repeats are identical and the union is the single response.
+        // Union across repeats: what the Studio accumulates over ✨ clicks (mergeLlmCands), and the only metric that can pay off T > 0.
         const union = new Set(reps.flatMap(s => [...s]));
         let uhit = 0;
         for (const x of union) if (refs.has(x)) uhit++;
@@ -175,7 +131,6 @@ function scoreArm(book, runs) {
     };
 }
 
-// ---------------------------------------------------------------------------
 
 const nEntries = Number(arg('entries', '8'));
 const books = BOOKS.map(b => prepBook(b, nEntries));
@@ -195,10 +150,8 @@ const temps = String(arg('temps', '0,0.3,0.7,1.0')).split(',').map(Number);
 const repeats = Number(arg('repeats', '3'));
 const model = arg('model');
 
-// Extra arms from outside ollama (subagent runs, an ST-routed profile): a JSON array of
-// {id, model, cands[]} or {id, model, raw} — one object per response, repeated ids meaning repeats.
-// `raw` is preferred where the transport can give it, so the shipped parseKeyList does the splitting and an
-// arm collected in the browser is scored by production's parser. `temp` labels a rung if the arm has one.
+// Extra arms from outside ollama: a JSON array of {id, model, cands[]} or {id, model, raw}, one object per response, repeated ids meaning repeats.
+// raw is preferred, so the shipped parseKeyList does the splitting; temp labels a rung if the arm has one.
 const extraArms = new Map();
 for (const path of String(arg('extra', '')).split(',').filter(Boolean)) {
     for (const row of JSON.parse(readFileSync(path, 'utf8'))) {
@@ -282,16 +235,9 @@ for (const r of rows) {
     console.log(`${pad(r.arm, 24)}${pad(r.book, 12)}${lpad(r.n, 5)}${lpad(r.yield.toFixed(1), 7)}${lpad(fmt(r.agreeOfRef), 11)}${lpad(fmt(r.agreeOfCand), 12)}${lpad(fmt(r.attested), 10)}${lpad(fmt(r.grounded), 10)}${lpad(fmt(r.stability), 11)}${lpad(r.unionYield.toFixed(1), 9)}${lpad(fmt(r.unionRef), 8)}`);
 }
 
-// --- paired contrast against the T=0 rung ------------------------------------
-//
-// The pooled means above cannot support a claim on their own: entries vary far more than rungs do, and an
-// unpaired mean hides that. So contrast each rung against the same entry's T=0 result and sign-test the
-// per-entry deltas, the discipline param-screen.mjs applies to scenes. n is entries, not responses —
-// repeats are averaged first, because several samples of one entry are not independent observations.
+// --- paired contrast against the T=0 rung: n is entries, not responses — repeats are averaged first.
 if (has('paired')) {
-    // Every arm's per-entry candidate sets in one shape, so the ollama rungs and the outside arms
-    // (an ST-routed profile ladder, a subagent) get the same treatment. Keyed arm -> "book.uid" ->
-    // one Set per repeat.
+    // arm -> "book.uid" -> one Set per repeat.
     const armSets = new Map();
     const put = (arm, book, uid, set) => {
         if (!armSets.has(arm)) armSets.set(arm, new Map());
@@ -320,8 +266,7 @@ if (has('paired')) {
         }
     }
 
-    // An arm's baseline is its own model's lowest rung — across models this would be a model contrast,
-    // not a temperature one.
+    // Baseline is each model's own lowest rung; across models it would be a model contrast.
     const familyOf = a => a.replace(/@.*$/, '');
     const rungOf = a => Number(String(a.split('@')[1] ?? '').replace(/^T/, ''));
     const refsFor = new Map();
@@ -372,7 +317,6 @@ if (has('paired')) {
     }
 }
 
-// Books pooled per arm — the per-book rows above are what says whether a trend is book-specific.
 console.log('');
 console.log(`${pad('arm (all books)', 24)}${pad('', 12)}${lpad('resp', 5)}${lpad('yield', 7)}${lpad('agree/ref', 11)}${lpad('agree/cand', 12)}${lpad('attested', 10)}${lpad('grounded', 10)}${lpad('stability', 11)}${lpad('u-yield', 9)}${lpad('u-ref', 8)}`);
 for (const arm of [...new Set(rows.map(r => r.arm))]) {

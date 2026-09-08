@@ -1,21 +1,4 @@
-// Delivered-set F over the arms of a graded capture bundle.
-//
-// An arm's delivered set is `!cut`, which is how every v3 capture records what reached the prompt. Nothing
-// here is specific to a WA-against-core capture — that is two arms whose `params` differ, and the selector
-// one of them used is a field in there like any other.
-//
-// The bars are stage 4's: recall counts grade >= 3, precision credits a 3 or 4 in full and a 2 at half
-// (metrics.mjs gradeCredit), F at RECALL_WEIGHT. No window is imposed — choosing the set is what is being
-// scored, so a fixed k would hand every arm the count that is half of what they disagree about.
-//
-// Not param-screen or graded-scene-grid: both re-derive a ranking offline from the frozen query, which is
-// what lets them sweep parameters. An arm whose selector is ST core cannot be re-derived — inclusion
-// groups, probability rolls, timed effects and its own budget walk are only what checkWorldInfo did on the
-// turn — so for that arm the capture is the measurement, and this reads it rather than redoing it.
-//
-// Tokens sit beside F and are never folded into it. A cheaper set that scores the same is better, and no
-// F-beta says so.
-//
+// versus-score.mjs — delivered-set F2 (stage 4's bars: recall at >= 3, gradeCredit precision, no window) over the arms of a graded v3 capture, read off `!cut` rather than re-derived, since an arm ST core selected cannot be; tokens sit beside F and are never folded in.
 // Usage (any cwd):
 //   node eval/versus-score.mjs <graded-bundle.json> [more.json ...]
 import { readFileSync } from 'node:fs';
@@ -29,8 +12,7 @@ if (!files.length) {
 
 const US = "\u001f";
 
-/** The verdict in force. A versus capture is graded in one pass, so the last one is it; a re-grade appends
- *  beside the one it disagrees with rather than replacing it (bundle-schema.md, Verdict elements). */
+/** The last verdict: a re-grade appends beside the one it disagrees with (bundle-schema.md, Verdict elements). */
 const gradeOf = row => {
     const gs = row?.grades ?? [];
     return gs.length ? Number(gs[gs.length - 1].grade) : null;
@@ -51,8 +33,6 @@ for (const file of files) {
     }
     if (!Array.isArray(doc.scenes) || !(doc.arms ?? []).length) { console.error(`${file}: not a v3 capture bundle`); continue; }
     for (const scene of doc.scenes) {
-        // Verdicts live on the scene and delivered sets on the arms, which is what lets every arm be judged
-        // against the same grades.
         const grades = new Map((scene.entries ?? []).map(e => [`${e.book}${US}${e.uid}`, gradeOf(e)]));
         if (!grades.size) { console.error(`${file}: scene "${scene.id ?? '?'}" is ungraded — skipped`); continue; }
         const rel = new Set([...grades].filter(([, g]) => g >= 3).map(([k]) => k));
@@ -80,10 +60,7 @@ for (const scene of per) {
     }
 }
 
-// Paired, for the reason param-screen is: between-scene variance swamps between-arm variance, so each
-// scene has to be its own control or four scenes say nothing.
-// Paired against the first arm in the file, which is the one the bundle writer put first — no name is
-// privileged, because an arm is only ever "the baseline" by the writer's ordering.
+// Paired against the first arm in the file: no arm name is privileged, the writer's ordering is.
 const baseName = per[0].arms[0].arm;
 const names = [...new Set(per.flatMap(s => s.arms.map(a => a.arm)))].filter(n => n !== baseName);
 console.log(`\n${per.length} scene(s), paired against arm "${baseName}"`);

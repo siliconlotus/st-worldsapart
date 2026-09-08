@@ -1,24 +1,9 @@
-// apply-review.mjs — writes a /wa-super-eval multi-scene review back into eval-data.
-//
-// The review file is a list of {captureId, file, grades}: which bundle it came from and that section's
-// rows. Resolution is by id — a basename is a name a user may change, and a review that lands on the wrong
-// bundle is not recoverable, since the grades look native once written. Dry by default for the same reason.
-//
-// A human verdict is one of kind `human`, and it appends beside whatever an llm said and whatever an earlier
-// reviewer said, so a row no human has touched carries only llm verdicts — which is what makes "no human has
-// looked at this" readable off the record alone.
-//
-// `entryText` is the one field dropped: the review carries it so it can be read on its own, and a second
-// copy on the grade row goes stale the moment the entry is edited. The bundle is otherwise untouched —
-// arms, captures, params and books stay byte-identical.
-//
+// apply-review.mjs — writes a /wa-super-eval multi-scene review ({captureId, file, grades} sections) back into eval-data, each section resolved by captureId alone; the bundle is otherwise untouched.
 // Usage (any cwd):
-//   node eval/synthetic-data/apply-review.mjs            # newest review-*.json from ~/Downloads, dry
-//   node eval/synthetic-data/apply-review.mjs --write    # ...and apply it
+//   node eval/synthetic-data/apply-review.mjs [review.json] [--data <dir>] [--user <rater id>] [--write]   (no file: the newest review-*.json in eval-data, ~/Downloads or cwd; dry by default)
 import { readFileSync, writeFileSync, existsSync, readdirSync, statSync, openSync, readSync, closeSync } from 'node:fs';
 
-/** Enough of a document to hold everything ahead of the bulk. `captureId` is the second key. */
-const HEAD_BYTES = 4096;
+const HEAD_BYTES = 4096;   // enough to hold everything ahead of the bulk; captureId is the second key
 import { basename, dirname, resolve as resolvePath } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { openBundle, passKey, setGrades } from '../../extension/grading.mjs';
@@ -27,18 +12,7 @@ import { arg } from '../metrics.mjs';
 const HERE = dirname(fileURLToPath(import.meta.url));
 
 /**
- * Where a review section's bundle is, by capture id and nothing else.
- *
- * There is no fallback to `file`: a name that exists is not evidence it is the right bundle, since two
- * captures of one turn under different books share both basename and scene id. A mis-landed review is not
- * recoverable, so an unresolvable section refuses and the run reports it.
- *
- * Read from the head — `captureId` is the second key a writer emits, ahead of the bulk, which is what the
- * schema's field-order rule is for. A head read is far cheaper than parsing every document whole and finds
- * the same ids (G14).
- *
- * @param {Array<{captureId?: string, file?: string}>} sections The review's sections
- * @param {string} dir eval-data
+ * Where each section's bundle is, by captureId alone — no fallback to `file`: two captures of one turn under different books share basename and scene id, and a mis-landed review is not recoverable. Reads the head only; `captureId` is the second key a writer emits (G14).
  * @returns {Map<object, {path: string, renamedFrom?: string}|{error: string}>} section -> where it resolved
  */
 export function resolveSections(sections, dir) {
@@ -51,9 +25,7 @@ export function resolveSections(sections, dir) {
             const len = readSync(fd, buf, 0, HEAD_BYTES, 0);
             closeSync(fd);
             const head = buf.subarray(0, len).toString('utf8');
-            // A document, not any JSON that mentions an id: eval-data also holds review files, which carry
-            // their sections' captureIds and would make every bundle they name ambiguous. `schemaVersion`
-            // is the first key a writer emits, so the opening brace settles it.
+            // A document only: review files in eval-data carry their sections' captureIds too, and schemaVersion is the first key a writer emits.
             if (!/^\s*\{\s*"schemaVersion"\s*:/.test(head)) continue;
             const hit = /"captureId":\s*"([^"]+)"/.exec(head);
             if (!hit || !wanted.has(hit[1])) continue;
@@ -75,20 +47,7 @@ const US = String.fromCharCode(31);
 export const rowKey = r => `${r.book ?? ''}${US}${r.uid}`;
 
 /**
- * One section's human verdicts merged onto one scene's rows, keyed by book+uid.
- *
- * A human re-grading appends; nothing overwrites. The reviewer's verdict joins `grades` beside whatever a
- * judge said and whatever an earlier reviewer said, because the file holds the record and the reader decides
- * which verdict counts. Rows the review does not mention are left alone — absence is not a grade — and a row
- * it mentions with no `grade` is the same absence.
- *
- * The only question is therefore what counts as a repeat: same rater, same day is one review pass, so
- * re-applying the file appends nothing, and that is the whole of the exemption. A different day is a person
- * looking again; a different rater is a second opinion. Both append. Same rule grade-pending.mjs applies to
- * a judge (rubric + model + day), so the two writers agree about what a repeated pass is.
- *
- * @param {object[]} bundleGrades Rows as openBundle hands them out
- * @param {object[]} sectionGrades The review section's rows
+ * One section's human verdicts appended onto one scene's rows, keyed by book+uid; a row the review does not mention, or mentions with no `grade`, is left alone. Same rater, same day is one pass and appends nothing — the repeat rule grade-pending applies to a judge.
  * @param {{user?: string, now?: string, tool?: string}} [who] The reviewer, when, and what produced the file
  * @returns {{grades: object[], added: number, changed: number, untouched: number}}
  */
@@ -96,17 +55,14 @@ export function mergeReview(bundleGrades, sectionGrades, who = {}) {
     const by = new Map((bundleGrades ?? []).map(g => [rowKey(g), g]));
     let added = 0, changed = 0;
     for (const raw of sectionGrades ?? []) {
-        // `entryText` travels in the review so a section reads standalone; the books already hold the
-        // entry, and a duplicate on the row goes stale silently.
+        // entryText is dropped: a copy on the row goes stale the moment the entry is edited.
         const { entryText, grade, why, llmGrade, llmGrades, humanGrades, grades: _g, by: _by, at: _at, world, ...rest } = raw;
         const r = { ...rest, book: rest.book ?? world };
         if (!Number.isFinite(Number(grade))) continue;
         const verdict = {
             kind: 'human',
             ...(who.user ? { id: who.user } : {}),
-            // Which tool produced it: a human grade can arrive three ways — `/wa-grade`, a merge from
-            // `/wa-super-grade`, or `/wa-super-eval` writing a review back — and without this a batch of
-            // review verdicts reads as an llm pass's (G9). Provenance of the pass, so it rides with it.
+            // params.tool: without it a batch of review verdicts reads as an llm pass's (G9).
             ...(who.tool ? { params: { tool: who.tool } } : {}),
             grade: Number(grade),
             ...(who.now ? { gradedAt: who.now } : {}),
@@ -116,8 +72,7 @@ export function mergeReview(bundleGrades, sectionGrades, who = {}) {
         const prior = by.get(k);
         if (!prior) { added++; by.set(k, { ...r, grades: [verdict] }); continue; }
         if ((prior.grades ?? []).some(v => v.kind === 'human' && passKey(v) === passKey(verdict))) continue;
-        // A new row, never a mutated one: the caller's rows come straight out of openBundle and a second
-        // merge over the same input would otherwise see this run's verdict as prior state.
+        // A new row, never a mutated one: a second merge over the same openBundle rows would otherwise see this run's verdict as prior state.
         by.set(k, { ...prior, grades: [...(prior.grades ?? []), verdict] });
         changed++;
     }
@@ -129,15 +84,9 @@ export function mergeReview(bundleGrades, sectionGrades, who = {}) {
 if (import.meta.url === `file://${process.argv[1]}`) {
     const argv = process.argv.slice(2);
     const WRITE = argv.includes('--write');
-    // When the human reviewed, taken from the review file. This tool's own run time is a poor fallback: a
-    // review applied a week later would record the verdict as passed then, and two reviews applied in one
-    // invocation would share a stamp and collapse into one pass.
-    const RAN_AT = new Date().toISOString();
+    const RAN_AT = new Date().toISOString();   // fallback only: two reviews applied in one invocation would share it and collapse into one pass
     const DATA = resolvePath(arg(argv, '--data', resolvePath(HERE, '..', 'eval-data')));
-    // No arguments is the normal case: the newest review-*.json across eval-data, Downloads and the cwd.
-    // A flag's value is not a positional, so every flag that takes one is listed here — special-casing a
-    // single flag is how the next flag added reintroduces the bug.
-    const VALUE_FLAGS = new Set(['--data', '--user']);
+    const VALUE_FLAGS = new Set(['--data', '--user']);   // every flag that takes a value, or its value is read as the positional
     const named = argv.find((a, i) => !a.startsWith('--') && !VALUE_FLAGS.has(argv[i - 1]));
     const newestReview = () => {
         const dirs = [DATA, process.env.HOME ? `${process.env.HOME}/Downloads` : null, process.cwd()].filter(Boolean);
@@ -160,9 +109,7 @@ if (import.meta.url === `file://${process.argv[1]}`) {
     }
     if (!named) console.log(`using ${REVIEW}`);
     const review = JSON.parse(readFileSync(resolvePath(REVIEW), 'utf8'));
-    // Who passed these verdicts, off the review itself; `--user` overrides for a review exported before
-    // /wa-super-eval recorded it. There is no empty default, because a verdict signed as nobody is neither
-    // attributable nor idempotent — its pass key is rater + instant, so the whole review appends again.
+    // No empty default: a verdict signed as nobody is neither attributable nor idempotent.
     const USER = arg(argv, '--user', review.user ?? '');
     if (!USER) {
         console.error(`${REVIEW} records no rater, and one cannot be inferred — pass --user <your rater id>`);

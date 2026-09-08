@@ -1,23 +1,7 @@
-// judge-agree.mjs — compares two judges' answers to the same grade jobs, row by row.
-//
-// Both sides are `-graded.json` result directories, so the comparison never touches an eval-data bundle:
-// `grade-pending.mjs merge` makes the last pass merged the value in force, so merging a trial judge to
-// compare it would hand every downstream eval that judge's grades. A judge is audited from its raw answers
-// and merged only once it is the judge you want.
-//
-// Rows join on job id plus world/uid, so only jobs both sides answered are counted; a job one side failed
-// is reported as unmatched rather than dropped silently.
-//
-// What to read, in order of what it decides:
-//   - the >= 3 band. Every selection criterion in this project is defined on that line (CLAUDE.md,
-//     "Four stages"), so agreement there is the number that matters and overall accuracy is not.
-//   - mean grade and the per-scene harsher/lenient split, which is where a judge drifts first.
-//   - exact / within-1 agreement and QWK, read against the reference line printed at the end. The contract
-//     does not reproduce evenly — exact agreement against itself falls at the head of the pool (G3) — so a
-//     candidate near the incumbent is inside its noise rather than worse.
-//
+// judge-agree.mjs — two judges' answers to the same grade jobs, row by row, from their -graded.json directories and never from a merged bundle (merge makes the last pass the value in force); a job one side failed is reported as unmatched.
 // Usage (any cwd):
 //   node eval/judge-agree.mjs <refDir> <candDir> [--labels sonnet,gemma]
+// Read the >= 3 band first — every selection criterion is defined on it — and the agreement numbers against the contract-vs-itself reference printed at the end (G3).
 import { readFileSync, readdirSync, existsSync } from 'node:fs';
 import { resolve as resolvePath } from 'node:path';
 import { qwk, mean, arg } from './metrics.mjs';
@@ -37,9 +21,7 @@ const load = dir => {
     for (const f of readdirSync(dir).filter(x => x.endsWith('-graded.json'))) {
         const id = f.replace(/-graded\.json$/, '');
         let j; try { j = JSON.parse(readFileSync(`${dir}/${f}`, 'utf8')); } catch { continue; }
-        // `book`, the name a judge result actually uses (grade-pending's merge reads `g.book`). Under the
-        // superseded `world` every row keyed to `id|undefined|uid`, so one file's grades collapsed onto one
-        // entry per uid and the agreement was computed over whatever landed last.
+        // book, not world: the field a judge result uses; keyed on a missing field, one file's grades collapse onto one entry per uid.
         for (const g of j.grades ?? []) out.set(`${id}|${g.book}|${g.uid}`, Number(g.grade));
     }
     return out;
@@ -66,8 +48,6 @@ const exact = keys.filter((k, i) => av[i] === bv[i]).length;
 const within1 = keys.filter((k, i) => Math.abs(av[i] - bv[i]) <= 1).length;
 const pct = n => `${(100 * n / keys.length).toFixed(1)}%`;
 
-// The >= 3 band, with the reference judge as the standard — not because it is right, but because it is
-// the judge whose grades the shipped scores are computed from.
 const relA = keys.filter((k, i) => av[i] >= 3), relB = keys.filter((k, i) => bv[i] >= 3);
 const both = relB.filter(k => a.get(k) >= 3).length;
 const f1 = (2 * both) / (relA.length + relB.length || 1);
@@ -85,8 +65,7 @@ console.log(`\nconfusion (rows ${LA}, cols ${LB})`);
 console.log('     ' + [0, 1, 2, 3, 4].map(j => String(j).padStart(6)).join(''));
 for (let i = 0; i < N; i++) console.log(`  ${i}  ` + O[i].map(v => String(v).padStart(6)).join(''));
 
-// Per-scene direction. n is small and the scenes are not independent draws, so this is a description of
-// where the disagreement sits, not a test.
+// Per-scene direction: a description of where the disagreement sits, not a test (n is small, scenes are not independent draws).
 const perScene = new Map();
 for (let i = 0; i < keys.length; i++) {
     const s = keys[i].split('|')[0].replace(/-[br]\d+(-p\d+)?$/, '');
@@ -100,6 +79,5 @@ for (const [s, d] of [...deltas.slice(0, 3), ...deltas.slice(-3)].filter((v, i, 
     console.log(`  ${d >= 0 ? '+' : ''}${d.toFixed(2)}  ${s}`);
 }
 
-// The only scale on which the agreement numbers mean anything: the contract re-graded against itself.
 console.log(`\nreference: the contract vs itself is 87.7% exact / 98.3% within-1 overall, but 79% at the`);
 console.log(`head of a pool, and 4 of 13 rows originally >= 3 came back below it (CLAUDE.md, "Graded scenes").`);

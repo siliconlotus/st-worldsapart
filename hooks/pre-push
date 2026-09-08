@@ -1,14 +1,6 @@
 #!/bin/sh
-# pre-push — on `main` only: refuse a push whose tip carries no tag matching manifest.json's version.
-#
-# A bundle records `<branch>@<git describe>`, so a version becomes a fact about a commit only when a tag
-# says so; a declared version with no tag behind it silently produces captures labelled by sha. main is
-# the one branch where that matters, because a release is one squashed commit and its identity is meant
-# to be exactly a version (bundle-schema.md, "The version fields").
-#
-# Every other branch pushes untouched — a feature branch labelling its captures by commit is correct.
-#
-# git feeds pre-push one line per ref: <local ref> <local sha> <remote ref> <remote sha>.
+# pre-push — on main only: refuse a push whose tip carries no tag matching manifest.json's version, since a bundle records <branch>@<git describe> and a release is meant to be exactly a version (bundle-schema.md, "The version fields"). Every other branch pushes untouched.
+# git feeds one line per ref: <local ref> <local sha> <remote ref> <remote sha>.
 ZERO=0000000000000000000000000000000000000000
 status=0
 
@@ -16,8 +8,7 @@ while read -r _local_ref local_sha remote_ref _remote_sha; do
     [ "$remote_ref" = "refs/heads/main" ] || continue
     [ "$local_sha" = "$ZERO" ] && continue   # deleting the branch is not a release
 
-    # Read the manifest out of the commit being pushed, not the worktree: pushing main from a feature
-    # branch is the normal case, and the worktree's version then belongs to the branch, not to main.
+    # Out of the commit being pushed, not the worktree: pushing main from a feature branch is the normal case.
     version=$(git show "$local_sha:manifest.json" | sed -n 's/.*"version"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' | head -1)
     if [ -z "$version" ]; then
         echo "pre-push: no version in manifest.json" >&2

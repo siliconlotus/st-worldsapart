@@ -1,22 +1,6 @@
-// The count-instruction sweep against a hosted OpenAI-compatible endpoint, with a bounded
-// concurrency pool. Companion to count-sweep.mjs, which does the same arms locally against ollama.
-//
-// Two things the local runner cannot answer: thinking cannot be disabled on a hosted model, so the only
-// way to price reasoning is to compare a model against its own `:thinking` variant; and local inference
-// serialises on one GPU, so it cannot show what the feature feels like for users on hosted models.
-//
-// Concurrency: a pool measured a near-linear speedup with no rate-limit errors (H5), against a stated
-// provider ceiling of 10, so the default here is 8. This is also the shape a shipped worker pool would
-// take, so the numbers double as a feasibility check for parallelising the Studio's suggest-all.
-//
-// Follows CLAUDE.md's harness rules: appends one JSONL line per response as it lands, resumes from
-// whatever is already on disk, and queues tasks entry-outermost so a partial run is a balanced
-// sample of every arm rather than a complete sample of one.
-//
-// Credentials come from the environment and are never read, logged or written:
-//   NANO_API_KEY=... node nano-sweep.mjs --model google/gemma-4-26b-a4b-it
-//
-// Flags: --model <id>  --concurrency 8  --out <file>  --variants all|shipped  --score-only
+// The count-instruction sweep (count-sweep.mjs's arms) against a hosted OpenAI-compatible endpoint through a bounded concurrency pool; the credentials come from the environment and are never logged or written.
+// Usage:  NANO_API_KEY=... node nano-sweep.mjs --model google/gemma-4-26b-a4b-it [--concurrency 8] [--out <file>] [--variants all|shipped] [--score-only]
+// Appends one JSONL line per response as it lands and resumes from what is on disk; the queue is entry-outermost, so a partial run covers every arm.
 import { readFileSync, appendFileSync, existsSync } from 'node:fs';
 import { buildKeySuggest, parseKeyList, STUDIO_SUGGEST_OPTS } from '../extension/keyword-suggest.mjs';
 import { mean, fmt3 as fmt } from './metrics.mjs';
@@ -40,8 +24,7 @@ const VARIANTS = {
     'atleast-15': 'Output at least 15 keywords',
     'confident': 'Output as many keywords as you are confident about',
 };
-// `shipped` is the anchor the variants are substituted over, so it must track buildKeyPrompt — currently
-// the self-selecting wording, which makes `range-5-10` a counterfactual arm rather than the default.
+// SHIPPED must track buildKeyPrompt's wording: it is the anchor the variants are substituted over.
 const SHIPPED = 'Output as many keywords as you are confident about';
 const useVariants = arg('variants', 'all') === 'shipped' ? { 'range-5-10': SHIPPED } : VARIANTS;
 
@@ -70,7 +53,6 @@ if (!has('score-only')) {
     const KEY = process.env.NANO_API_KEY;
     if (!KEY) { console.error('NANO_API_KEY not set in the environment.'); process.exit(2); }
 
-    // Entry-outermost queue: a partial run covers every arm for the entries it reached.
     const queue = [];
     for (const p of prompts) {
         for (const [variant, phrase] of Object.entries(useVariants)) {
@@ -85,13 +67,7 @@ if (!has('score-only')) {
     const t0 = Date.now();
     const sleep = ms => new Promise(res => setTimeout(res, ms));
 
-    /**
-     * A 429 is back-pressure, not a failure: the provider's documented ceiling is a rate, not a count of
-     * open connections, so a pool has to respond to the signal rather than cap connections and hope (H5).
-     * Exponential backoff with jitter, retried up to 5 times; anything that is not a 429 fails immediately,
-     * since retrying an auth error or a bad model id just wastes calls. A shipped worker pool needs the
-     * same behaviour — the Studio's loop aborts the whole run on any error.
-     */
+    /** A 429 is back-pressure, not a failure: exponential backoff with jitter, up to 5 retries; anything else fails at once (H5). */
     const fetchWithBackoff = async (task) => {
         for (let attempt = 0; ; attempt++) {
             const r = await fetch(`${BASE}/chat/completions`, {

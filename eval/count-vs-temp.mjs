@@ -1,26 +1,5 @@
-// Is temperature's only benefit just "more candidates", obtainable more cheaply by asking for more?
-//
-// The temperature ladder found no per-response quality effect and exactly one positive result: the union
-// across repeats reaches more of a book's own keys at T=1 than at T=0 (S1). Part of that is arithmetic — at
-// T=0 the repeats are identical, so the union is the single response — so "temperature buys coverage" and
-// "any source of extra candidates buys coverage" are not distinguished by it.
-//
-// The prompt already governs yield: it says "Output 5 to 10 keywords", and measured responses sit at the
-// instruction, nowhere near the token budget (S1). So raising the instruction is a second route to more
-// candidates, one call instead of three and deterministic at T=0.
-//
-//   base   T=0, "5 to 10"   x3   — deterministic; union == single response
-//   temp   T=1, "5 to 10"   x3   — the temperature route to more candidates
-//   count  T=0, "15 to 25"  x3   — the prompt route, one call, reproducible
-//
-// The comparison that matters is `temp` union against `count` single: if one deterministic call matches
-// three sampled ones, temperature is strictly dominated for this purpose.
-//
-// base and temp are read from temp-ladder-cache.json, so they are already paid for; only `count` makes new
-// calls. The count variant rewrites buildKeyPrompt's instruction line rather than parameterising the
-// shipped function — the shipped prompt should not grow a knob before a finding earns it one.
-//
-// Usage:  node count-vs-temp.mjs --model gemma3:4b [--count "15 to 25"] [--repeats 3]
+// Is temperature's only benefit "more candidates", obtainable more cheaply by asking for more? base (T=0) and temp (T=1) are read from temp-ladder-cache.json, already paid for; only count (T=0, the instruction line rewritten to --count) makes calls. The comparison is temp's union against count's single response.
+// Usage:  node count-vs-temp.mjs --model gemma3:4b [--count "15 to 25"] [--repeats 3] [--seed N]
 import { readFileSync, writeFileSync, existsSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 import { buildKeySuggest, parseKeyList, STUDIO_SUGGEST_OPTS } from '../extension/keyword-suggest.mjs';
@@ -40,9 +19,7 @@ const arg = (n, d = null) => {
 const MODEL = arg('model', 'gemma3:4b');
 const COUNT = arg('count', '15 to 25');   // substituted into COUNT_LINE's slot
 const REPEATS = Number(arg('repeats', '3'));
-// A fixed seed makes sampling reproducible at ANY temperature, so "deterministic" and "T=0" are not
-// the same requirement — with a seed, a prompt change is the only thing that can move the output,
-// which is what prompt tweaking actually needs. Unset by default so existing caches stay valid.
+// Unset by default so existing caches stay valid; the cache key carries it.
 const SEED = arg('seed') !== null ? Number(arg('seed')) : null;
 
 const hash = s => createHash('sha1').update(s).digest('hex').slice(0, 16);
@@ -59,10 +36,7 @@ for (const [slug, f] of Object.entries(files)) {
 
 const prompts = JSON.parse(readFileSync(`${HERE}eval-data/ladder-prompts-small.json`, 'utf8'));
 const TEXT = Object.fromEntries(prompts.map(p => [p.id, p.prompt]));
-// The shipped instruction line, verbatim from buildKeyPrompt. Asserting it is present keeps this
-// from silently measuring an unmodified prompt if that wording ever changes.
-// `shipped` is the anchor the variants are substituted over, so it must track buildKeyPrompt — currently
-// the self-selecting wording, which makes `range-5-10` a counterfactual arm rather than the default.
+// Verbatim from buildKeyPrompt, and asserted present: a changed wording would otherwise measure an unmodified prompt.
 const COUNT_LINE = '- Output as many keywords as you are confident about,';
 const recount = p => {
     if (!p.includes(COUNT_LINE)) throw new Error('buildKeyPrompt instruction line not found — update COUNT_LINE');
@@ -114,8 +88,7 @@ for (const [arm, M] of Object.entries(arms)) {
             single.push(c.size);
             singleRef.push(share(c));
             if (!c.size) continue;
-            // precision = share of proposals that are already book keys; attested = share occurring
-            // in the entry text. Together they say whether extra candidates are junk or real.
+            // precision: share of proposals already book keys; attested: share occurring in the entry text.
             let hit = 0;
             for (const x of c) if (refs.has(x)) hit++;
             prec.push(hit / c.size);

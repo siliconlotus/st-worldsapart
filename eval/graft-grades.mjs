@@ -1,21 +1,6 @@
-// graft-grades.mjs — puts existing judgements back onto a freshly derived bundle.
-//
-// A grade is a verdict about a (scene, entry) pair, so grafting is only meaningful where both halves are the
-// same. The entry half is a row identity, book + uid. The scene half is the turn, and it is the one that can
-// look right while being wrong: two bundles can name the same message id and hold different scenes, because
-// the id is a position in a file that gets branched, edited and replayed, and because the query is built at
-// a depth that is itself a parameter. So the scene is compared by its frozen text, not by its id, and a
-// mismatch refuses rather than warns (G9).
-//
-// Orphans are reported by reason, not counted. Four of the five reasons are classification facts and carry
-// no information about retrieval — an entry that is durable, disabled, reference tier, or deleted was never
-// going to be in a ranked pool. Only "rankable, but nothing surfaced it" says the population moved.
-//
+// graft-grades.mjs — puts existing judgements back onto a freshly derived bundle; refuses unless the frozen scene TEXT matches (a message id is a position in a file that gets branched and replayed, G9), and reports orphans by reason — only "rankable, but nothing surfaced it" says the population moved.
 // Usage (any cwd):
-//   node eval/graft-grades.mjs <fresh.json ...> --from <graded.json> [--write]
-//   node eval/graft-grades.mjs <fresh.json ...> --from-dir <dir> [--rename-book "old=new"] [--write]
-// Dry by default. Writes the grafted bundle in place. The ungraded remainder is reported, not written:
-// grade-pending takes a row list ({bundle, book, uid}), which says everything a pending file did.
+//   node eval/graft-grades.mjs <fresh.json ...> (--from <graded.json> | --from-dir <dir>) [--rename-book "old=new"] [--allow-whitespace-drift] [--write]   (dry by default; writes in place; the ungraded remainder is reported, not written)
 import { readFileSync, writeFileSync, existsSync } from 'node:fs';
 import { basename, resolve as resolvePath } from 'node:path';
 import { armNames, openBundle, rowKey, sceneDiff, setGrades } from '../extension/grading.mjs';
@@ -39,9 +24,7 @@ if (!files.length || (!FROM && !FROM_DIR)) {
     process.exit(2);
 }
 
-/** A book renamed between grading and generation. rowKey is book+uid, so without this every grade orphans
- *  while the uids line up perfectly — named explicitly because "the uids overlap" is also true of a book's
- *  wrong-book control, and a uid-only fallback would graft that silently. */
+/** --rename-book old=new: rowKey is book+uid, so a rename between grading and generation orphans every grade; no uid-only fallback, since the wrong-book control shares uids too. */
 const RENAME = (() => {
     const raw = arg(argv, '--rename-book');
     if (!raw) return null;
@@ -50,8 +33,6 @@ const RENAME = (() => {
     return { from: raw.slice(0, i), to: raw.slice(i + 1) };
 })();
 
-/** One arm as a flat sample. Every read of a bundle here goes through openBundle, so this tool never
- *  learns where in the document a query, a haystack or a verdict lives — v3 moved all three. */
 const armOf = b => openBundle(b);
 const isMemoryTitle = t => /^\s*\[?\s*ARC\s*[-—]?\s*\d+/i.test(String(t)) || /^\s*\d+[A-Za-z]?\s*[-—.:]/.test(String(t));
 
@@ -63,16 +44,10 @@ for (const path of files) {
     if (!existsSync(srcPath)) { console.error(`!! ${basename(path)}: no graded source at ${srcPath}`); failed++; continue; }
     const src = JSON.parse(readFileSync(srcPath, 'utf8'));
 
-    // --- the scene guard, before anything is read out of the source -----------------------------------
-    // The rule lives in grading.mjs, because the browser's prior-sample loader needs the same one — a
-    // loader without a guard puts one scene's rows onto another's bundle (G9).
+    // sceneDiff lives in grading.mjs: the browser's prior-sample loader needs the same guard (G9).
     const a = armOf(fresh), b = armOf(src);
     let diff = sceneDiff(a, b);
-    // Trailing whitespace only, and only when asked for. Some captures record a scanText one character
-    // shorter than the window rebuilt from the same turn (G9); production reads `mes` raw into scanSegments,
-    // so the rebuilt window is the faithful one, and under strict word boundaries a space before a newline
-    // is a boundary either way. A flag rather than the default, because a guard that quietly normalises its
-    // input stops being able to tell you the scene changed.
+    // Trailing whitespace only, and only under the flag: a guard that quietly normalises cannot say the scene changed (G9).
     let drifted = false;
     if (diff.length && WS_DRIFT) {
         const still = sceneDiff(a, b, { ignoreTrailingWhitespace: true });
@@ -92,27 +67,19 @@ for (const path of files) {
         continue;
     }
 
-    // --- the entry half -------------------------------------------------------------------------------
     const key = r => rowKey(RENAME && r.book === RENAME.from ? { ...r, book: RENAME.to } : r);
     const pool = new Map();
     for (const name of armNames(fresh)) for (const c of openBundle(fresh, name).candidates) if (!pool.has(rowKey(c))) pool.set(rowKey(c), c);
     const grades = (armOf(src).entries ?? []).map(g => (RENAME && g.book === RENAME.from ? { ...g, book: RENAME.to } : g));
 
-    // The entry half is a name too: book + uid says the row is the same row, not that the entry still says
-    // what it said when it was graded. Books are edited outside ST between captures, so a grade can land on
-    // text its rater never read. A relevance verdict is about the title and content the rater saw, so those
-    // are what must match; a new key, a changed order or a flipped flag does not invalidate it. The book
-    // hash is the fast path — equal books cannot have moved an entry — and a missing hash on either side
-    // compares anyway, since absence is not proof of sameness.
+    // book + uid says the row is the same row, not that the entry still says what it did: the title and content the rater saw must match. Equal book hashes are the fast path; a missing hash compares anyway.
     const srcName = n => (RENAME && n === RENAME.to ? RENAME.from : n);
     const settled = n => {
         const a = src.bookHashes?.[srcName(n)], b = fresh.bookHashes?.[n];
         return Boolean(a && b && a === b);
     };
     const textOf = e => (e ? `${e.comment ?? ''}${US}${e.content ?? ''}` : null);
-    // Both sides or no verdict: a conforming bundle embeds its books, so a missing entry means the text was
-    // never recorded rather than that the entry moved, and comparing against that absence would orphan
-    // every grade in it and report the malformation as drift.
+    // Both sides or no verdict: a missing embedded entry means the text was never recorded, not that it moved.
     const rewritten = g => {
         if (settled(g.book)) return false;
         const was = src.books?.[srcName(g.book)]?.[String(g.uid)];
@@ -128,8 +95,7 @@ for (const path of files) {
     const reasonOf = g => {
         const e = entries.get(Number(g.uid));
         if (!e) return 'uid gone from the book';
-        // Ahead of the classification facts, because it is the one that says the grade is stale rather than
-        // that the entry was never rankable. Re-grading recovers it; nothing recovers the others.
+        // First: the one reason re-grading recovers.
         if (rewritten(g)) return 'entry text changed since it was graded';
         if (e.disable) return 'disabled';
         if (e.constant || Number(e.sticky) > 0) return 'durable (constant/sticky)';
@@ -156,8 +122,6 @@ for (const path of files) {
         const out = setGrades(fresh, grades);
         Object.assign(out, {
             gradeScale: src.gradeScale,
-            // Grading provenance, separate from the generation provenance synth-scenes wrote: different
-            // events by different agents, and only one of them is repeatable.
             grading: {
                 from: basename(srcPath),
                 by: src.grading?.by ?? src.createdBy ?? null,

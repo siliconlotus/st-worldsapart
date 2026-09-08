@@ -1,23 +1,7 @@
-// pool-extend.mjs — find the entries an offline arm would surface that nobody has graded, and ask for them.
-//
-// Separate from /wa-super-grade, which widens the judged pool by capturing several live configurations and
-// so cannot reach the chunk settings: changing chunkSize or minChunkSize changes what gets embedded, which
-// would mean re-vectorizing the lorebook mid-capture against the user's real collection. So every chunk arm
-// in param-screen.mjs is scored against a pool collected under one chunking, and any entry a different
-// chunking surfaces counts as irrelevant because nobody looked at it — a downward bias that grows with
-// distance from the live settings, which is the region the sweep exists to explore (H9).
-//
-// The fix is the same iterative pooling loop driven by rebuilt indexes: score each dose offline, take the
-// top-k it would deploy, union across doses, subtract what is already judged, and emit the remainder as a
-// grading request. /wa-super-grade's file picker accepts the emitted file and folds those entries into its
-// table. Re-run this afterwards and the list should be empty.
-//
+// pool-extend.mjs — the entries an offline chunk arm would put in its top-k that nobody has graded, written as <name>-pending.json for /wa-super-grade's picker; re-run after grading and the list should be empty.
 // Usage (from SillyTavern root):
-//   node .../pool-extend.mjs <sample.json> [more.json ...] [--arms chunkSize=200,chunkSize=400] [--k 10]
-//                            [--out-dir <dir>] [--dry]
-//
-// Defaults to the whole chunk ladder, since that is the part live pooling cannot cover. Building the indexes
-// is the slow step; they are cached by book + model + chunk settings, so a second run is nearly free.
+//   node .../pool-extend.mjs <sample.json> [more.json ...] [--arms chunkSize=200,chunkSize=400] [--k 10] [--out-dir <dir>] [--dry]
+// Chunk arms only: live pooling cannot re-vectorize mid-capture, so a chunk cell is otherwise scored against a pool that never saw its population (H9). Indexes are cached by book + model + chunk settings.
 import { readFileSync, writeFileSync, mkdirSync } from 'node:fs';
 import { dirname, basename } from 'node:path';
 import { entryKey } from '../extension/content-lexical.mjs';
@@ -28,17 +12,12 @@ import { arg } from './metrics.mjs';
 const argv = process.argv.slice(2);
 const samples = argv.filter(a => a.endsWith('.json') && !a.startsWith('--'));
 
-// The doses live pooling can't reach. Same values as param-screen.mjs's ladder — they have to match, or the
-// pool would be extended for configurations nobody is going to score.
+// Must match param-screen.mjs's chunk ladder, or the pool is extended for configurations nobody scores.
 const CHUNK_ARMS = {
     ...Object.fromEntries([200, 300, 400, 600, 1200, 1600, 2400].map(v => [`chunkSize=${v}`, { chunkSize: v }])),
     ...Object.fromEntries([0, 60, 120, 200, 300, 500].map(v => [`minChunk=${v}`, { minChunkSize: v }])),
     'chunkMode=length': { chunkMode: 'length' },
 };
-
-// No query-time arms: the KEYW/LEXW set described the RRF fusion, which no longer exists, so those arms
-// could only ever surface the baseline's own rows. Chunk arms are what live pooling cannot reach, and they
-// are the whole of this tool's default set.
 
 if (!samples.length) {
     console.error('need at least one sample: node pool-extend.mjs <sample.json> [more.json ...] [--arms a,b] [--k 10] [--out-dir <dir>] [--dry]');
@@ -50,11 +29,7 @@ const unknown = picked.filter(a => !CHUNK_ARMS[a]);
 if (unknown.length) { console.error(`unknown arm(s): ${unknown.join(', ')} — known: ${Object.keys(CHUNK_ARMS).join(', ')}`); process.exit(2); }
 
 const K = Number(arg(argv, '--k') ?? 10);
-// The model is a spec, resolved once (reindex.mjs resolveModel): the label names collections and bases, the
-// rest says how to call the model, including the task prefix a prefix-trained family needs. A bare name is
-// an ollama model. Falls back to the bundle's own model, never a hardcoded name — a hardcoded one resolves
-// collections that exist for a corpus that has moved on, so nothing errors and the previous model is
-// quietly measured (H3).
+// Falls back to the bundle's own model, never a hardcoded name (H3).
 const MODEL = process.env.WA_EMBED_MODEL ?? openSample(samples[0], arg(argv, '--arm')).embedModel;
 if (!MODEL) { console.error(`${samples[0]} records no embedModel — set WA_EMBED_MODEL`); process.exit(2); }
 const EM = resolveModel(MODEL);
@@ -66,15 +41,12 @@ const DRY = argv.includes('--dry');
     for (const path of samples) {
         const S = openSample(path, arg(argv, '--arm'));
         if (!Object.keys(S.books?.[S.primaryBook] ?? {}).length) { console.error(`${path}: no embedded entries for "${S.primaryBook}" — a bundle that does not embed its books is malformed`); continue; }
-        // `all` from the scene's own params, which default it on: a denseAllEntries scene cannot be scored
-        // against a vectorized-only build.
+        // all from the scene's own params: a denseAllEntries scene cannot be scored against a vectorized-only build.
         const P = sceneParams(S);
         const scene = loadScene(S, { indexFile: indexPath(S, { model: EM.label, all: P.denseAllEntries }), indexOpts: { model: EM.label }, params: P });
         const qv = await embed(EM.query + S.query, { ollama: OLLAMA, model: EM.model, label: EM.label, endpoint: EM.endpoint, url: EM.endpoint === 'ollama' ? OLLAMA : EM.url });
 
-        // (book, uid) -> { title, doses[], bestRank }. Keyed the way a grade is keyed — every attached book
-        // is ranked and two books number their uids from 0, so a bare-uid map merges two entries into one
-        // pending row. The title is carried for the human and is not the identity.
+        // (book, uid) -> { title, doses[], bestRank }, keyed as a grade is: two attached books number uids from 0, so a bare-uid map merges two entries into one row.
         const wanted = new Map();
         const note = (rows, arm) => {
             for (const r of rows) {
@@ -86,8 +58,7 @@ const DRY = argv.includes('--dry');
             }
         };
 
-        // The sample's own configuration counts as a dose: its top-k can contain unjudged rows too (a
-        // re-derived ranking is not the captured one), and those are the cheapest coverage to buy.
+        // The baseline is a dose too: a re-derived ranking is not the captured one, so its top-k can hold unjudged rows.
         const base = await scoreScene({ sample: S, k: K, scene, qv });
         note(base.unjudgedRows, 'baseline');
 

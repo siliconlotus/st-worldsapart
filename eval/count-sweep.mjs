@@ -1,21 +1,4 @@
-// How should buildKeyPrompt ask for a count? The instruction turned out to be the largest lever
-// found so far — raising it moved agreement with the books' own keys substantially on both models
-// tried (S1) — and its current wording, "Output 5 to 10 keywords", has never been compared against
-// any alternative.
-//
-// Two hypotheses, both testable here:
-//   1. A model given a range hugs the bottom of it. If so, "5 to 10" is really "5", and an open floor
-//      ("at least 5") should behave differently from a closed range with the same floor.
-//   2. A high floor inflates on entries that have few good keys — the model pads rather than stops, which
-//      shows up as precision falling further on sparse entries than on rich ones.
-// The open-ended variant tests whether the model can self-select a count at all, which is what you would
-// want if (2) holds.
-//
-// A fixed seed is what makes this cheap: output is pinned, so repeats of the same (prompt, variant, seed)
-// are byte-identical and the calls go to more entries instead, which is where the power is. Every variant
-// sees the same entries at the same seed, so a difference between variants is the wording and nothing
-// else. Local only: hosted reasoning models ignore both seed and temperature (H1).
-//
+// How should buildKeyPrompt ask for a count? Five wordings substituted over the shipped phrase, every entry at one fixed seed, so a difference between variants is the wording alone; local only, since hosted models honour neither seed nor temperature (H1).
 // Usage:  node count-sweep.mjs --model gemma3:4b [--seed 42] [--temp 1]
 import { readFileSync, writeFileSync, existsSync } from 'node:fs';
 import { createHash } from 'node:crypto';
@@ -36,7 +19,6 @@ const MODEL = arg('model', 'gemma3:4b');
 const SEED = Number(arg('seed', '42'));
 const TEMP = Number(arg('temp', '1'));
 
-// Keyed by the shipped phrasing so `range-5-10` is literally what production sends today.
 const VARIANTS = {
     'range-5-10': 'Output 5 to 10 keywords',
     'atleast-5': 'Output at least 5 keywords',
@@ -44,8 +26,7 @@ const VARIANTS = {
     'atleast-15': 'Output at least 15 keywords',
     'confident': 'Output as many keywords as you are confident about',
 };
-// `shipped` is the anchor the variants are substituted over, so it must track buildKeyPrompt — currently
-// the self-selecting wording, which makes `range-5-10` a counterfactual arm rather than the default.
+// SHIPPED must track buildKeyPrompt's wording: it is the anchor the variants are substituted over.
 const SHIPPED = 'Output as many keywords as you are confident about';
 
 const hash = s => createHash('sha1').update(s).digest('hex').slice(0, 16);
@@ -81,9 +62,7 @@ const results = {};   // variant -> id -> {yield, ref, prec, att}
 let done = 0;
 const total = Object.keys(VARIANTS).length * prompts.length;
 
-// Entry outermost, variant innermost — CLAUDE.md's sweep-ordering rule. Variant-outermost leaves the last
-// arm with no coverage until the run is nearly done and biases every partial cell to whichever books sort
-// first; this way a partial run is a smaller balanced sample rather than a skewed one.
+// Entry-outermost, variant-innermost: a partial run is a balanced sample of every arm.
 for (const name of Object.keys(VARIANTS)) results[name] = {};
 for (const p of prompts) {
     for (const [name, phrase] of Object.entries(VARIANTS)) {
@@ -116,7 +95,6 @@ for (const name of Object.keys(VARIANTS)) {
         + `${f(mean(rs.map(r => r.att).filter(Number.isFinite))).padStart(10)}`);
 }
 
-// H1 — does a range hug its floor? Compare each range against the open floor with the same number.
 console.log('\nH1  range vs open floor (does a closed range pull toward its bottom?)');
 for (const [lo, hi] of [['atleast-5', 'range-5-10'], ['atleast-15', 'range-15-20']]) {
     const a = mean(Object.values(results[lo]).map(r => r.yield));
@@ -124,8 +102,6 @@ for (const [lo, hi] of [['atleast-5', 'range-5-10'], ['atleast-15', 'range-15-20
     console.log(`  ${lo.padEnd(12)} ${f(a, 1)}   vs   ${hi.padEnd(12)} ${f(b, 1)}   diff ${f(a - b, 1)}`);
 }
 
-// H2 — does a high floor pad on entries that have little to give? Split entries by how many keys
-// their author wrote: if inflation is real, precision should fall further on the sparse half.
 console.log('\nH2  padding on sparse entries (precision by how many keys the author wrote)');
 const ids = prompts.map(p => p.id);
 const med = [...ids.map(i => results['range-5-10'][i].refCount)].sort((a, b) => a - b)[Math.floor(ids.length / 2)];
@@ -141,7 +117,6 @@ for (const name of Object.keys(VARIANTS)) {
         + `${f(mean(rich.map(i => results[name][i].yield)), 1).padStart(11)}`);
 }
 
-// Does the open-ended variant actually adapt, or just pick a number and stick to it?
 const cy = Object.values(results['confident']).map(r => r.yield);
 const sd = Math.sqrt(mean(cy.map(y => (y - mean(cy)) ** 2)));
 console.log(`\n"confident" yield spread: mean ${f(mean(cy), 1)}, sd ${f(sd, 2)}, range ${Math.min(...cy)}-${Math.max(...cy)}`);

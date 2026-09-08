@@ -1,23 +1,6 @@
-// repair-markers.mjs — reconciles a bundle's embedded books with what its entries actually are.
-//
-// Two fields decide how scene.mjs treats an entry and both drift through ordinary editing (F47). The STMB
-// marker says memory-or-reference (scene.mjs's isMemory reads its presence, never the range), and
-// `vectorized` says which route can reach the entry at all. Neither is repairable from the other, but on
-// this corpus the title convention settles it: an STMB entry is titled with a number, or ARC + number. That
-// convention is the author's, not a property of World Info, so it lives here as a repair rule over data and
-// must not become a predicate in scene.mjs or matcher.mjs — those keep testing fields.
-//
-// Durable entries are left alone: a constant or sticky entry is included by authorial assertion, so this
-// pass neither vectorizes it nor changes its flags.
-//
-// Takes either a bundle or a live world file. Repairing the book itself is what makes every future capture
-// correct; repairing a bundle only patches one fixture, and the two then disagree about what ST would
-// activate. A world is written back at ST's own 4-space indent so the file stays diffable and ST's next
-// save is not a whole-file rewrite.
-//
+// repair-markers.mjs — reconciles a bundle's or world file's embedded books with what its entries are (F47): the STMB marker off the title convention, and `vectorized` on memory entries; durable entries are left alone.
 // Usage (any cwd):
-//   node eval/repair-markers.mjs <bundle.json | world.json ...> [--write]
-// Dry by default. A repaired world needs its collection re-synced; a repaired bundle needs re-deriving.
+//   node eval/repair-markers.mjs <bundle.json | world.json ...> [--write]   (dry by default; a repaired world needs its collection re-synced, a repaired bundle re-deriving)
 import { readFileSync, writeFileSync } from 'node:fs';
 import { basename } from 'node:path';
 import { cachePath, chunkConfig } from './reindex.mjs';
@@ -32,7 +15,7 @@ if (!files.length) {
     process.exit(2);
 }
 
-/** This corpus only: an STMB entry is titled with a number, or ARC + number. Letter suffix = a manual split. */
+/** This corpus only: an STMB entry is titled with a number, or ARC + number; letter suffix = a manual split. A repair rule over data, never a predicate in scene.mjs or matcher.mjs, which keep testing fields. */
 const isMemoryTitle = t => /^\s*\[?\s*ARC\s*[-—]?\s*\d+/i.test(String(t)) || /^\s*\d+[A-Za-z]?\s*[-—.:]/.test(String(t));
 const marked = e => ('stmemorybooks' in e) || ('STMB_start' in e);
 const durable = e => Boolean(e.constant) || Number(e.sticky) > 0;
@@ -47,16 +30,10 @@ let touched = 0;
 
 for (const path of files) {
     const m = JSON.parse(readFileSync(path, 'utf8'));
-    // A world file is `{ entries, name }`; a document is `{ books: { book: entries }, scenes }`. Normalising to
-    // the bundle's shape means one repair rule serves both rather than two copies drifting apart.
     const isWorld = !m.books && Boolean(m.entries);
-    // The filename is the world's identity, not the `name` inside it: ST addresses a book by file and hashes
-    // that name into the collection id, while the embedded `name` is whatever the file was last copied from
-    // and goes stale silently.
+    // The filename, not the embedded name: ST hashes the filename into the collection id, and name goes stale silently.
     const books = isWorld ? { [basename(path, '.json')]: m.entries } : (m.books ?? {});
-    // primaryBook and paramSnapshot live on the ARM, not at the root, so the read goes through the same
-    // adapter openSample uses. Reading them off the root silently yields undefined, which is a book name
-    // that matches nothing and a chunk config that falls back to defaults.
+    // primaryBook and paramSnapshot live on the arm: read off the root they are silently undefined.
     const view = isWorld ? m : openBundle(m);
     let dirty = false;
     for (const [book, entries] of Object.entries(books)) {
@@ -66,16 +43,14 @@ for (const path of files) {
             const acts = [];
             if (marked(e) && !memory) { acts.push('strip-marker'); }
             if (!marked(e) && memory) { acts.push('add-marker'); }
-            // Read `memory`, not the marker: an entry being repaired into memory this pass needs its vector
-            // decided on the same footing as one that always was.
+            // memory, not the marker: an entry repaired into memory this pass needs its vector decided too.
             if (memory && !e.vectorized && indexable(e) && !durable(e)) acts.push('vectorize');
             if (!acts.length) continue;
             log.set(Number(e.uid), { acts: acts.join('+'), title: title(e) });
             if (acts.includes('vectorize') && book === view.primaryBook) vectorized.add(path);
             if (WRITE) {
                 if (acts.includes('strip-marker')) { delete e.stmemorybooks; delete e.STMB_start; delete e.STMB_end; }
-                // Presence is the whole signal — scene.mjs's isMemory and keyword-suggest's `generated` both test
-                // for it and never read the range, which a repair has no way to recover anyway.
+                // Presence is the whole signal: scene.mjs isMemory and keyword-suggest's generated never read the range.
                 if (acts.includes('add-marker')) e.stmemorybooks = true;
                 if (acts.includes('vectorize')) e.vectorized = true;
                 dirty = true;
@@ -83,22 +58,15 @@ for (const path of files) {
             touched++;
         }
     }
-    // A repaired book outgrows its recorded collection: the live ST collection holds chunks for the entries
-    // vectorized when it was synced, entries vectorized here have none, and loadScene gives a row with no
-    // item no cosine at all — so re-deriving against the old path scores as if the repair had not happened.
-    // Repoint at the rebuild cache, which keys on book + model + chunk settings and so names the same file
-    // on any machine.
+    // Entries vectorized here have no chunks in the live collection, so every arm's index is repointed at the rebuild cache, which keys on book + model + chunk settings.
     if (!isWorld && vectorized.has(path)) {
         if (!m.embedModel) throw new Error(`${path}: marker records no embedModel — cannot name its rebuild cache`);
         const target = cachePath(view, chunkConfig(view), m.embedModel);
-        // Every arm, whichever schema: the repair changed the book, so no arm's recorded collection is
-        // current any more.
         for (const a of (m.scenes?.[0]?.arms ?? (Array.isArray(m.arms) ? m.arms : [m]))) a.index = target;
         if (!m.scenes && !Array.isArray(m.arms)) m.index = target;
         dirty = true;
     }
-    // ST writes worlds pretty-printed at 4 spaces; bundles are minified. Match whichever this was,
-    // so a repair is a small diff rather than a whole-file reformat.
+    // ST writes worlds at 4 spaces and bundles minified; match whichever this was, so a repair is a small diff.
     if (WRITE && dirty) writeFileSync(path, isWorld ? `${JSON.stringify(m, null, 4)}\n` : JSON.stringify(m));
 }
 

@@ -1,29 +1,6 @@
-// Should a long entry be chunked, or sent whole? "Can" and "should" are different questions and the
-// shipped code answers only the first one implicitly.
-//
-// llmKeyCandidates splits an entry at llmChunk characters and runs one call per chunk, for a behavioural
-// reason rather than a context limit — the longest entry on disk fits inside every declared context and
-// ollama ingests it whole without truncating (S20).
-//
-// Three arms over the same entries, same prompt builder, same parser:
-//   whole    — the entry in one call. What "the model can take it" would imply.
-//   chunked  — splitRecursive at llmChunk, one call per chunk, candidates unioned. Production.
-//   first    — first chunk only. The temp-ladder's approximation, here to size its own bias.
-//
-// Restricted to entries above the chunk size, since for anything shorter all three arms are the same call
-// and would only dilute the contrast. A substantial share of enabled entries qualifies on the big books
-// (S20), so this is the normal path there.
-//
-// What would favour each: chunking buys coverage mechanically, and the generator's job is recall since the
-// Zipf/df gates and a human supply precision. Whole-entry buys global choice — the model can see which
-// terms discriminate the entry instead of picking locally-salient ones per slice, and cannot repeat itself
-// across slices — and costs one call against N, so a tie is a win for whole.
-//
-// Agreement with the books' own keys is relative only, as in temp-ladder.mjs: curation is evidence about
-// precision, never recall (eval-data/README.md). The arms share one fixed reference, so the contrast is
-// interpretable; the level is not a quality score.
-//
+// Should a long entry be chunked or sent whole? Three arms over entries longer than llmChunk, same prompt builder and parser: whole (one call), chunked (production — splitRecursive at llmChunk, one call per chunk, unioned), first (first chunk only, the temp-ladder's approximation).
 // Usage:  node chunk-vs-whole.mjs --model gemma3:4b [--temp 0] [--entries 6]
+// Agreement with the books' own keys is relative across arms only: curation is evidence about precision, never recall (eval-data/README.md).
 import { readFileSync, writeFileSync, existsSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 import { buildKeySuggest, buildKeyPrompt, parseKeyList, STUDIO_SUGGEST_OPTS } from '../extension/keyword-suggest.mjs';
@@ -54,12 +31,7 @@ const model = arg('model', 'gemma3:4b');
 const temp = Number(arg('temp', '0'));
 const perBook = Number(arg('entries', '6'));
 
-/**
- * num_predict 400 per call, mirroring llmKeyCandidates. The one place the arms are not on equal footing
- * and cannot be: chunked gets 400 tokens per chunk and whole gets 400 total. That asymmetry is
- * production's, so removing it would measure a system nobody ships — but a yield win for chunked is
- * partly a budget win, which the report says out loud.
- */
+/** num_predict 400 per call, as llmKeyCandidates sends: chunked gets 400 per chunk and whole 400 total — production's asymmetry, so a yield win for chunked is partly a budget win. */
 async function ask(prompt) {
     const key = `${model}\x1f${temp}\x1f${hash(prompt)}`;
     if (cache[key] !== undefined) return cache[key];
@@ -127,7 +99,6 @@ for (const arm of ['whole', 'chunked', 'first']) {
     console.log(`${pad(arm, 10)}${lp(g('calls').toFixed(1), 7)}${lp(g('yield').toFixed(1), 8)}${lp(fmt(g('agreeOfRef')), 11)}${lp(fmt(g('agreeOfCand')), 12)}${lp(fmt(g('attested')), 10)}`);
 }
 
-// Sign test, chunked vs whole, per entry — same discipline as temp-ladder's paired section.
 const binomP = (k, n) => {
     if (!n) return NaN;
     const c = (a, b) => { let r = 1; for (let i = 0; i < b; i++) r = r * (a - i) / (i + 1); return r; };

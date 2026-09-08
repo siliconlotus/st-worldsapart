@@ -1,24 +1,4 @@
-// slice-bundles.mjs — cuts graded bundles down to a shortlist of rows, so /wa-super-eval renders those
-// rows and nothing else.
-//
-// The reviewer draws its rows from `arms[].candidates`, and a scene carries far more of them than any
-// review touches (G10), so adjudicating a handful of rows in a whole bundle is hunting with no marker on
-// the ones that matter. Dropping the other candidates is the whole mechanism.
-//
-// One pack file, not one file per scene: the reviewer reads a top-level array as one section per element,
-// so a shortlist spanning many scenes is one pick and one save.
-//
-// Each element carries its source basename in `file`, which is what makes the round trip work: the review
-// records that name, and apply-review.mjs resolves it against eval-data and writes to the real bundle. The
-// pack is a disposable input to the picker, never a thing to keep.
-//
-// `books` are cut to the entries the kept rows name — they are all of the weight, and a section only
-// renders text for its own rows. `grades` are copied whole, so the reviewer still pre-fills with what the
-// judges said.
-//
-// The shortlist is a JSON array of {bundle, book, uid}; anything else on the row (grader scores, notes)
-// is ignored, so a contested-rows dump can be passed as-is.
-//
+// slice-bundles.mjs — cuts graded bundles down to a shortlist of rows ({bundle, book, uid}; other fields ignored) as one disposable review pack for /wa-super-eval; each element carries its source basename in `file`, which apply-review's round trip resolves. Books are cut to the kept rows, grades copied whole.
 // Usage (any cwd):
 //   node eval/synthetic-data/slice-bundles.mjs contested45.json [--data eval/eval-data] [--out <file>]
 import { readFileSync, writeFileSync, existsSync } from 'node:fs';
@@ -39,31 +19,22 @@ if (CLI && !LIST) {
 const DATA = resolvePath(arg(argv, '--data', resolvePath(HERE, '..', 'eval-data')));
 const OUT = resolvePath(arg(argv, '--out', resolvePath(DATA, 'review-pack.json')));
 
-/**
- * One bundle cut to `keys` (a Set of `world` + `uid` strings).
- *
- * @returns {{sliced: object, dyn: Set<string>, lost: string[]}} the cut bundle, the keys that survived as
- *   gradeable rows, and the keys that did not.
- */
-/** Unit Separator — see CLAUDE.md. Without it `W`+`11` and `W1`+`1` are the same shortlist entry. Same key
- *  and same separator as `rowKey` in grading.mjs. */
+/** Unit Separator, the same key and separator as rowKey in grading.mjs; without it W+11 and W1+1 collide. */
 const US = String.fromCharCode(31);
 
+/** One bundle cut to `keys` (a Set of book+US+uid strings); `dyn` is the keys that survived as gradeable rows, `lost` those that did not. */
 export function sliceBundle(m, keys) {
     if (!Array.isArray(m?.scenes)) throw new Error('sliceBundle expects a graded-scene document — no `scenes`');
     const key = c => `${c.book ?? ''}${US}${c.uid}`;
     const cut = cell => (cell.candidates ?? []).filter(c => keys.has(key(c)));
-    // Arms are at document level and hold one cell per scene they captured, so the cut walks the cells.
     const sliced = { ...m, arms: (m.arms ?? []).map(a => ({
         ...a,
         scenes: Object.fromEntries(Object.entries(a.scenes ?? {}).map(([id, cell]) => [id, { ...cell, candidates: cut(cell) }])),
     })) };
     const kept = (sliced.arms ?? []).flatMap(a => Object.values(a.scenes ?? {}));
-    // The reviewer grades the dynamic block only, and refuses a section with none — a constant row is in
-    // the prompt whatever it scores, so a shortlist naming one yields a section that cannot be opened.
+    // The reviewer grades the dynamic block only and refuses a section with none, so durable rows are reported as lost.
     const dyn = new Set(kept.flatMap(a => (a.candidates ?? []).filter(c => !isDurable(c)).map(key)));
-    // Books down to the kept rows. Entries are keyed by their own uid in the book map, but the row's uid
-    // is what is authoritative, so the match is on the entry rather than on the key.
+    // Match on the entry's own uid, not the book map's key.
     const need = new Map();
     for (const a of kept) for (const c of (a.candidates ?? [])) {
         if (!need.has(c.book)) need.set(c.book, new Set());
@@ -72,8 +43,7 @@ export function sliceBundle(m, keys) {
     sliced.books = Object.fromEntries(Object.entries(m.books ?? {}).map(([w, bk]) => [
         w, Object.fromEntries(Object.entries(bk).filter(([, e]) => need.get(w)?.has(Number(e?.uid)))),
     ]));
-    // The pack's books are a subset, so the capture's content hashes no longer describe them. Dropped rather
-    // than recomputed: a shortlist is not a capture and nothing downstream asks it what book it holds.
+    // bookHashes no longer describe a subset; dropped rather than recomputed.
     delete sliced.bookHashes;
     return { sliced, dyn, lost: [...keys].filter(k => !dyn.has(k)) };
 }

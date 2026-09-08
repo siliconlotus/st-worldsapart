@@ -1,17 +1,4 @@
-// diff-delivered.mjs — what two arms actually deliver differently, entry by entry.
-//
-// F2 says an arm is better; it never says which entries changed hands, and a set-based score can improve
-// while dropping something a reader would have wanted. This prints the two cuts against each other: the
-// rows one arm delivers and the other does not, split by grade, with each arm's score on the row and the
-// per-column values behind it.
-//
-// The relevant drops are the point. An arm that trades recall for a smaller set pays in grade >= 3 rows,
-// and the paired F2 test cannot show what they were, so those are listed individually and everything else
-// is counted — a scene's only entry about its subject is not interchangeable with a 0.
-//
-// Each arm at its own best cutoff, as --cutoff reports them, so this is a diff of what ships and not of two
-// rankings at one threshold.
-//
+// diff-delivered.mjs — the rows one arm delivers and the other does not, by grade, each arm at its own best cutoff as --cutoff reports them; the grade >= 3 drops are listed row by row under the scene text, everything else counted.
 // Usage (any cwd):
 //   node eval/diff-delivered.mjs <baseline-rows.json> <arm-rows.json> [--limit 40] [--scene <substr>] [--scene-chars 700]
 import fs from 'node:fs';
@@ -25,7 +12,7 @@ if (files.length !== 2) {
 }
 const LIMIT = Number(arg(argv, '--limit', 40));
 const ONLY = arg(argv, '--scene');
-// How much of the scene text to print above its rows. The tail, because that is the current turn.
+// The tail of the scene text: that is the current turn.
 const QCHARS = Number(arg(argv, '--scene-chars', 700));
 const [A, B] = files.map(p => JSON.parse(fs.readFileSync(p, 'utf8')));
 const label = x => (x.with?.length ? x.with.join('+') : 'three signals');
@@ -34,9 +21,7 @@ const byScene = x => new Map(x.scenes.map(sc => [sc.name, sc]));
 const [ma, mb] = [byScene(A), byScene(B)];
 const shared = [...ma.keys()].filter(n => mb.has(n) && (!ONLY || n.includes(ONLY)));
 
-// Always the arm's feature values, never the baseline's: the baseline has no column for what the arm
-// added, so showing its row would print the diff without the numbers that explain it. Scores are always
-// printed baseline -> arm regardless of which direction the row moved.
+// The arm's feature values, never the baseline's, which has no column for what the arm added; scores print baseline -> arm whichever way the row moved.
 const fmt = d => {
     const f = Object.entries(d.row.feats).map(([k, v]) => `${k} ${Number(v).toFixed(2)}`).join('  ');
     return `      g${d.row.g}${d.row.ungraded ? '?' : ' '} ${String(d.row.title).slice(0, 50).padEnd(50)} ${d.eBase.toFixed(3)} -> ${d.eArm.toFixed(3)}   ${f}`;
@@ -61,8 +46,7 @@ for (const name of shared) {
 console.log(`${label(B)} against ${label(A)}, ${shared.length} scenes, ${A.tier} tier`);
 console.log(`  cutoffs ${A.cut.toFixed(2)} -> ${B.cut.toFixed(2)}   delivered ${(aCount / shared.length).toFixed(1)} -> ${(bCount / shared.length).toFixed(1)} per scene   ${sameCount} rows delivered by both\n`);
 
-// What the arm's columns look like on what it cut versus what it kept — the listing shows individual
-// rows, this shows whether the cut has the shape the coefficients predict.
+// Whether the cut has the shape the coefficients predict.
 const stat = (rows, k) => { const v = rows.map(d => Number(d.row.feats[k])).filter(Number.isFinite); return v.length ? v.reduce((a, b) => a + b, 0) / v.length : NaN; };
 const keptRows = [];
 for (const name of shared) for (const r of mb.get(name).rows) if (r.delivered) keptRows.push({ row: r });
@@ -75,13 +59,7 @@ if (armOnly.length) {
     console.log();
 }
 
-// The haystack is what makes a drop legible: a relevant row cut from a scene that still delivers four
-// others is redundancy, the same row cut from a scene that then has none is a failure the F2 mean cannot
-// show, since one scene's collapse averages away against every scene that improved.
-//
-// Ungraded is its own column, never folded into g0: those rows are scored 0 by the delivery convention
-// (scene.mjs) rather than judged 0, so counting them as irrelevant would report the pool's depth as the
-// arm's precision.
+// Ungraded is its own column, never folded into g0: those rows are scored 0 by the delivery convention (scene.mjs), not judged 0.
 const compose = (x) => {
     const h = { ungraded: 0 }, per = [];
     for (const sc of x.scenes) {
@@ -118,9 +96,6 @@ for (const [title, rows] of [['DROPPED (delivered by the baseline, cut by the ar
     const relevant = rows.filter(d => d.row.g >= 3).sort((x, y) => y.row.g - x.row.g || y.eBase - x.eBase);
     if (!relevant.length) { console.log('    none at grade >= 3\n'); continue; }
     console.log(`    grade >= 3 (${relevant.length}), score under baseline -> under arm:`);
-    // Grouped by scene, with the scene's own text above its rows: relevance is a property of the pair, so
-    // a list of titles is unreadable — whether a drop was a mistake is a question about what the scene was
-    // about.
     const groups = new Map();
     for (const d of relevant) groups.set(d.name, [...(groups.get(d.name) ?? []), d]);
     let shown = 0;

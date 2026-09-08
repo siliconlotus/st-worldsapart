@@ -1,25 +1,5 @@
-// divergence-audit.mjs — the analysis tool for keyword-only books' graded samples.
-//
-// A book with every entry keyed or constant and nothing vectorized has no retrieval channel, so activation
-// is delivery and core's scan window is the book's entire memory horizon. The graded-scene machinery does
-// not apply to them twice over: scene.mjs needs a vector index and these books have none (loadScene throws
-// ENOENT), and ranking metrics are definitionally empty here, since reference-entry relevance is
-// presence-declared by the author's keys rather than prose-discoverable. Set metrics are the only ones that
-// mean anything.
-//
-// What a graded sample of such a book measures is the keys: did each firing deserve to fire (the grades),
-// and what should have fired but did not. This reads the frozen bundle directly — candidates, grades,
-// sceneChats, embedded book — plus countKey, and reports the divergences in three classes:
-//   key miss        — no key of a relevant entry occurs anywhere; fix the keys (suggester).
-//   window miss     — a key occurs in the sample's scan window (WA's) but the entry did not
-//                     fire, i.e. core's shallower scan expired it; fix is depth/persistence
-//                     (WA's messageDepth supersedes core's depth).
-//   over-fire       — a fired row graded 0-1; fix the keys (prune / tighten).
-// This tool finds window misses mechanically and lists candidates for the other two; "relevant but
-// unfired" beyond the window class needs a judge, since ungraded unfired entries have no grades.
-//
-// Usage: node eval/divergence-audit.mjs <sample.json> [more samples...]
-// Needs a conforming bundle: one that does not embed its books has no entry text to match against.
+// divergence-audit.mjs — for a keyword-only book's graded bundle (no vector index, so scene.mjs cannot load it): over-fires (fired, graded 0-1) and window misses (unfired, though a key occurs in WA's frozen scan window — core's shallower scan expired it). Key misses beyond the window need a judge.
+// Usage: node eval/divergence-audit.mjs <sample.json> [more samples...]   (needs a bundle that embeds its books)
 import { readFileSync } from 'node:fs';
 import * as matcher from '../extension/matcher.mjs';
 import { countKey } from '../extension/matcher.mjs';
@@ -54,24 +34,18 @@ for (const file of files) {
     const rel = [...gradeOf.values()].filter(g => g >= 3).length;
     console.log(`fired-set precision: ${(rel / gradeOf.size).toFixed(2)} at grade>=3, ${((rel + dist[2]) / gradeOf.size).toFixed(2)} at grade>=2`);
 
-    // over-fires: fired and judged irrelevant — a key that matched on the wrong evidence.
     for (const [uid, g] of gradeOf) if (g <= 1) {
         const why = (j.candidates.find(r => Number(r.uid) === uid)?.why ?? [])
             .map(w => `${w.key}${w.excerpt ? ` (${w.excerpt})` : ''}`).join('; ');
         console.log(`  OVER-FIRE  uid=${uid} grade=${g} "${(byUid.get(uid)?.comment ?? '').slice(0, 40)}"${why ? ' — ' + why : ''}`);
     }
 
-    // window misses: unfired, but a key occurs in the frozen scan window (WA's) — evidence was
-    // in reach and core's shallower scan expired it. The real matcher decides, not a re-derivation.
+    // countKey decides, never a re-derivation.
     if (!entries.length || entries.every(e => !e.content)) {
         console.log('  (book embeds no entry text — malformed bundle; unfired analysis skipped)');
         continue;
     }
-    // Same stage-2 guard as scene.mjs makeCandidateSet: a vectorized entry under suppressVectorKeys
-    // has blanked keys, so core could never keyword-fire it — it is not a window miss, it has no
-    // keyword door at all. Matters only when this tool is pointed at a mixed book.
-    // paramSnapshot's current shape is a scalar dump under `settings`; the flat read beside it was the
-    // pre-v3 layout and is gone.
+    // scene.mjs makeCandidateSet's stage-2 guard: keys blanked under suppressVectorKeys could never fire, so that is no window miss. paramSnapshot is a scalar dump under settings.
     const suppress = j.params?.suppressVectorKeys ?? j.paramSnapshot?.settings?.suppressVectorKeys;
     let eligible = 0, misses = 0;
     for (const e of entries) {

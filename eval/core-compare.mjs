@@ -1,43 +1,8 @@
-// core-compare.mjs — WA against ST core, scored on the set each one ships.
-//
-// The budget has to be in the loop. Every other readout here scores the set a rule nominates, which for core
-// is a claim about a prompt that does not fit: core nominates far more than the budget ships, and a large
-// slice of the nominated recall is cut by `entry.order`, a sort key that knows nothing about the turn (R14).
-//
-// What core is, here — two activation routes unioned, exactly as an install runs them:
-//   keywords  — every entry whose keys fire, including vectorized ones. Core has no cosine opinion, and a
-//               large share of vectorized rows carry a keyword hit (R14), which is why core's delivered set
-//               is so large and so imprecise.
-//   vectors   — ST's Vector Storage extension force-activates its top `max_entries` above
-//               `score_threshold`. Modelled as top-K by cosine, which overstates it: ST hashes whole
-//               entries where this pools an entry's best chunk, and the threshold would cut some of K.
-// Then the walk: `entry.order` descending, filled until the budget is gone. Ties keep insertion order.
-//
-// Still an upper bound: no probability rolls, inclusion groups, delay/cooldown, character or tag filters,
-// `@@dont_activate`, `delayUntilRecursion` or recursion, every one of which only removes entries.
-// `--core-uids` takes a real install's answer when you have it.
-//
-// Two configurations are worth comparing and they are not the same baseline. Core at default is what ST
-// ships once a user turns vector WI on at all (max_entries 5, score_threshold 0.25, world_info_budget 25%,
-// world_info_depth 2, `order` untouched), which the defaults here match: --core-top-k 5 --core-order oldest
-// --core-depth 2. Core as configured is one author's tuning, measurably worth F2 to core (R14) — so quoting
-// it as "core" understates a stock install and quoting the default overstates a tuned one. Say which.
-//
-// Scan depth is core's alone here, and shallower is better for core for a reason that is not a
-// recommendation: at depth 2 most grade-4 entries never have their keys fire at all (R14), and core's
-// delivered recall is carried by the vector route, which does not read the scan window. So depth 2 helps
-// core by suppressing core's own worst behaviour, and says nothing about what depth suits a system that can
-// rank what it activates. WA's window is not varied here.
-//
-// The threshold is not modelled, top-K is: `score_threshold` is a single global applied to raw cosine, and
-// raw similarity on a single-story corpus sits compressed in a narrow band (R9). At 0.25 almost everything
-// passes and max_entries is the only real constraint; at a raised threshold this overstates core's vector
-// route.
-//
+// core-compare.mjs — WA against ST core, F2 scored on the set each one ships under a token budget.
+// Core here is its keyword route at --core-depth unioned with top-K by cosine (the threshold is not modelled), walked by --core-order until the budget is gone: an upper bound, with no probability rolls, inclusion groups, delay/cooldown, filters, decorators or recursion. --core-uids takes a real install's answer instead (WA disabled, read what ST inserted).
 // Usage (from SillyTavern root):
-//   node .../core-compare.mjs <sample.json> [...] [--tier memory|reference|all] [--budget 25083,37624]
-//        [--core-top-k 5] [--core-order order|newest|oldest] [--core-depth 2] [--core-uids 1,2,3]
-//        [--tokenizer gpt-3.5-turbo]
+//   node .../core-compare.mjs <sample.json> [...] [--tier memory|reference|all] [--budget 25083,37624] [--core-top-k 5] [--core-order order|newest|oldest] [--core-depth 2] [--core-uids 1,2,3] [--tokenizer gpt-3.5-turbo]
+// The defaults are a stock install (max_entries 5, depth 2, order untouched); a tuned install scores measurably higher (R14), so say which is being quoted.
 import fs from 'node:fs';
 import { haystackFor, indexPath, isMemory, loadScene, makeCandidateSet, makeGradeOf, openSample, sceneParams, makeLayoutOrder, sceneLabel } from './scene.mjs';
 import { gradeCredit, fbeta, RECALL_WEIGHT, arg } from './metrics.mjs';
@@ -55,9 +20,7 @@ const TIER = arg(argv, '--tier') ?? 'memory';
 if (!['memory', 'reference', 'all'].includes(TIER)) { console.error(`--tier must be memory|reference|all, got ${TIER}`); process.exit(2); }
 const BUDGETS = String(arg(argv, '--budget') ?? '5000,10000,15000,25000,40000').split(',').map(Number).filter(Number.isFinite);
 const TOP_K = Number(arg(argv, '--core-top-k') ?? 5);
-// A hand-tuned `order` is one author's workaround; uid is story order on an STMB book and stands in for a
-// book nobody tuned. Both extremes are offered because an untuned book leaves every order equal, and which
-// way the tie falls is ST's business rather than something to assume — the direction is worth real F2 (R14).
+// uid is story order on an STMB book; both tie directions are offered because an untuned book leaves every order equal, and the direction is worth real F2 (R14).
 const CORE_ORDER = arg(argv, '--core-order') ?? 'oldest';
 const ORDERS = {
     order: (a, b) => (Number(b.entry?.order ?? 0) - Number(a.entry?.order ?? 0)) || (Number(a.uid) - Number(b.uid)),
@@ -65,11 +28,7 @@ const ORDERS = {
     oldest: (a, b) => Number(a.uid) - Number(b.uid),
 };
 if (!ORDERS[CORE_ORDER]) { console.error(`--core-order must be order|newest|oldest, got ${CORE_ORDER}`); process.exit(2); }
-// A real install's answer, when you have one: run with WA disabled and read the entries ST inserted. It
-// replaces the model entirely for that scene, the only way to retire the approximations above.
-// Core scans its own depth: ST's world_info_depth defaults to 2 against WA's messageDepth of 10, and a
-// shallower window fires far fewer keys, so scoring core's keyword route on WA's window would hand it
-// activations it never had.
+// Core scans its own depth (ST's default 2 against WA's 10); scoring its keyword route on WA's window would hand it activations it never had.
 const CORE_DEPTH = arg(argv, '--core-depth') === null ? 2 : Number(arg(argv, '--core-depth'));
 const CORE_UIDS = arg(argv, '--core-uids') ? new Set(String(arg(argv, '--core-uids')).split(',').map(Number)) : null;
 const MODEL = process.env.WA_EMBED_MODEL ?? null;   // per-sample: the bundle's own record unless overridden
@@ -93,9 +52,7 @@ const scenes = [];
 for (const file of samples) {
     let S; try { S = openSample(file); } catch (e) { console.error(`  ${file}: ${e.message}`); continue; }
     const P = sceneParams(S);
-    // denseAllEntries is production's split and the harness default, so the collection wanted is the
-    // --all one. ensureIndex returns an existing build rather than re-embedding; a book without one says
-    // so and names the command, which is better than silently scoring the ordinary collection.
+    // ensureIndex returns an existing --all build rather than re-embedding; a book without one names the command rather than scoring the ordinary collection.
     let indexFile;
     try {
         const em = resolveModel(MODEL ?? S.embedModel);
@@ -107,9 +64,6 @@ for (const file of samples) {
     const build = makeCandidateSet({ ...scene, params: P });
     const rows = build(P.K1, P.B, null, [], S.query, haystackFor(S, P));
     if (!rows.length) continue;
-    // A depth deeper than the capture is not reachable: the document stores the scan messages, so any depth
-    // up to the captured one re-segments honestly and anything beyond it returns the captured window,
-    // reporting a deeper scan's result under a shallower scan's window.
     if (Number.isFinite(CORE_DEPTH) && CORE_DEPTH > Number(S.depth)) {
         console.error(`  ${sceneLabel(S) || file}: --core-depth ${CORE_DEPTH} exceeds the ${S.depth} messages this capture stored; skipped rather than scored at ${S.depth}`);
         continue;
@@ -141,8 +95,6 @@ const coreNominate = (rows) => {
     for (const r of [...rows].sort((a, b) => (b.score ?? -Infinity) - (a.score ?? -Infinity)).slice(0, TOP_K)) picked.add(r);
     return [...picked].sort(ORDERS[CORE_ORDER]);
 };
-// WA nominates what clears its tier's cutoff and walks it in the same quantity — which is what makes the
-// budget a prefix cut rather than a second opinion.
 const waNominate = rows => rows.filter(r => Number.isFinite(r.eCredit) && Number.isFinite(r.cutoff) && r.eCredit >= r.cutoff);
 
 console.log(`${scenes.length} scene(s), ${TIER} tier, ${tk.tokenizer} tokens; core: top-${TOP_K}, scan depth ${CORE_DEPTH}, walked by ${CORE_UIDS ? "a real install's answer" : CORE_ORDER}`);
@@ -153,11 +105,8 @@ for (const budget of [...BUDGETS, Infinity]) {
     const w = scenes.map(s => scoreSet(fill(waNominate(s.rows), budget), s.relevant));
     const lbl = budget === Infinity ? 'none' : String(budget);
     console.log(`${lbl.padStart(7)}    ${mean(c.map(x => x.f)).toFixed(4)}   ${(100 * mean(c.map(x => x.precision))).toFixed(1).padStart(5)}%   ${(100 * mean(c.map(x => x.recall))).toFixed(1).padStart(5)}%  ${mean(c.map(x => x.n)).toFixed(1).padStart(5)}  ${Math.round(mean(c.map(x => x.tokens))).toString().padStart(8)} |   ${mean(w.map(x => x.f)).toFixed(4)}   ${(100 * mean(w.map(x => x.precision))).toFixed(1).padStart(5)}%   ${(100 * mean(w.map(x => x.recall))).toFixed(1).padStart(5)}%  ${mean(w.map(x => x.n)).toFixed(1).padStart(5)}  ${Math.round(mean(w.map(x => x.tokens))).toString().padStart(7)}`);
-    // Relevant material per token, the comparison a budget actually poses and the one no F-beta makes: a
-    // rule that finds more by spending more has not necessarily done better.
     const per = (x, s2) => (mean(x.map(y => y.recall)) * mean(s2.map(z => z.relevant)) / Math.max(1, mean(x.map(y => y.tokens))) * 1000).toFixed(3);
     console.log(`${' '.repeat(11)}relevant entries per 1k tokens — core ${per(c, scenes)}, WA ${per(w, scenes)}`);
 }
-// At unbounded budget core can score worse than under one, which is not a bug in the walk: truncation
-// removes low-precision entries it should never have nominated, so the constraint partly rescues it.
+// Core scoring worse at unbounded budget than under one is not a bug in the walk: truncation removes entries it should never have nominated.
 tk.free();

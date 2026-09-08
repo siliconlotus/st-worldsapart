@@ -1,26 +1,6 @@
-// Does a suggested key actually fire? Scores buildKeySuggest's candidates against a real chat and buckets
-// them by how many messages they would match, alongside the book's own existing keys as the baseline.
-//
-// Utility is parabolic in firing rate, not monotonic: a key matching 0 messages can never do anything, one
-// matching most of them carries no information about which message. So "% dead" and "% in 4-100" are the
-// two numbers worth moving, and a candidate set that beats the book's hand-written keys on both is doing
-// its job.
-//
-// Matching goes through countKey, the same matcher ST core uses, which is what lets existing keys be scored
-// at all — a book's keys can include /regex/ and ?SmartKeys a substring test has to skip. Existing keys are
-// matched under their own entry's case/whole-word flags; candidates under the defaults a newly added key
-// would get.
-//
-// Both denominators are printed: per-row counts what the user is offered, unique counts distinct strings,
-// and the two diverge enough on one key set to invert a comparison (S11). Either is defensible, mixing them
-// is not, so neither is allowed to be the only one on screen.
-//
-// The chat doubles as bgDocs, exactly as the Studio passes the open chat, so this measures shipped
-// behaviour. Scoring against the same chat that informed the ranking is not circular — "would these keys
-// fire in the conversation the user is having" is the question.
-//
-// Usage:  node suggest-firing.mjs <book.json> <chat.jsonl> [<book.json> <chat.jsonl> ...]
-// Pairs are independent; pass several, since n=1 book overstates the scope of any finding.
+// Does a suggested key fire? Buckets buildKeySuggest's candidates by how many messages of a real chat they match (countKey, so /regex/ and ?SmartKeys score too), beside the book's own keys under their entries' flags; the chat doubles as bgDocs, exactly as the Studio passes it.
+// Usage:  node suggest-firing.mjs <book.json> <chat.jsonl> [<book.json> <chat.jsonl> ...]   (pass several pairs; n=1 book overstates any finding)
+// Both denominators are printed: per-row and unique diverge enough to invert a comparison (S11), so neither may be the only one on screen.
 import { readFileSync } from 'node:fs';
 import { basename } from 'node:path';
 import { buildKeySuggest, STUDIO_SUGGEST_OPTS as OPTS } from '../extension/keyword-suggest.mjs';
@@ -42,11 +22,7 @@ const quant = (rows, q) => {
     return v[Math.floor(q * (v.length - 1))];
 };
 
-/**
- * Messages this key fires in. `flags` is [caseSensitive, wholeWords]. Memoised because the same
- * string is commonly suggested for several entries and shared triggers are listed by many, and the
- * naive walk over thousands of messages is the whole runtime.
- */
+/** Messages this key fires in; `flags` is [caseSensitive, wholeWords]. Memoised: the naive walk is the whole runtime. */
 const fireCache = new Map();
 const firesIn = (key, msgs, [cs, ww] = [false, false]) => {
     const ck = `${key}${cs}${ww}`;
@@ -57,16 +33,12 @@ const firesIn = (key, msgs, [cs, ww] = [false, false]) => {
     return n;
 };
 
-/**
- * Distinct strings, keeping each one's hit count. Scoped by pair: the same string measured against
- * two different chats is two different observations, so an aggregate must not fold them together.
- */
+/** Distinct strings per pair: the same string against two chats is two observations. */
 const uniqueBy = rows => [...new Map(rows.map(r => [`${r.pair}${r.term.toLowerCase()}`, r])).values()];
 
 const summarise = (label, rows) => {
     const inBand = BANDS.map(([lo, hi]) => rows.filter(r => r.hits >= lo && r.hits <= hi).length);
-    // Bands are exhaustive and disjoint by construction; if that ever stops being true every
-    // percentage printed below is wrong, and silently so.
+    // Bands must stay exhaustive and disjoint, or every percentage below is silently wrong.
     console.assert(inBand.reduce((a, b) => a + b, 0) === rows.length, `${label}: bands do not partition ${rows.length} rows`);
     return {
         label, rows,
@@ -105,8 +77,7 @@ for (let i = 0; i < args.length; i += 2) {
     const suggest = buildKeySuggest(data, { ...OPTS, bgDocs: msgs });
     const cand = suggest.perEntry.flatMap(pe => pe.newRows.map(r => ({ pair, term: r.display, n: r.n, hits: firesIn(r.display, msgs) })));
 
-    // An existing key is scored once per entry that lists it: a key shared by five entries is five
-    // chances to fire, and averaging it away would understate a deliberate shared trigger.
+    // Once per entry that lists it: a key shared by five entries is five chances to fire.
     const keys = entries.flatMap(e => (Array.isArray(e.key) ? e.key : [])
         .filter(k => String(k ?? '').trim())
         .map(k => ({ pair, term: String(k), hits: firesIn(String(k), msgs, [!!e.caseSensitive, !!e.matchWholeWords]) })));

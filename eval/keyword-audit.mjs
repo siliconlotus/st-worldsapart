@@ -1,17 +1,5 @@
-// Offline batch version of the Studio's keyword audit: audits every entry's keys. Same classifier
-// (keyword-audit buildKeyPruneScan / KEY_BOOK_COMMON), so this and the in-app audit never drift.
-//
-// Per key:  dfContent — entries whose content contains the key (firing commonness)
-//           bookListedBy — entries that list the key (shared-memory span; not a defect)
-// A key is prunable (*) when dead (dfContent 0, never findable) or too common (in >BOOK_COMMON of entries,
-// so it fires almost always and discriminates nothing). Shared triggers carry continuous memory of a
-// person or event, so they are never flagged.
-//
-// Usage:  node keyword-audit.mjs [path/to/index.json] [path/to/lorebook.json] [--json out.json]
-//
-// --json writes the flagged key strings as a flat array, which is what scene.mjs `dropKeys` takes: it
-// simulates the book edit this audit recommends without editing the book, so a curation pass can be scored
-// before anyone spends days on it.
+// Offline batch version of the Studio's keyword audit, on the same classifier (keyword-audit.mjs KEY_BOOK_COMMON) so the two never drift: per key, dfContent (entries whose content contains it) and bookListedBy (entries listing it); prunable when dead or in > BOOK_COMMON of entries. Shared triggers are never flagged.
+// Usage:  node keyword-audit.mjs <index.json> <lorebook.json> [--json out.json]   (--json writes the flagged strings as a flat array, what scene.mjs dropKeys takes)
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { isRegexKey } from '../extension/matcher.mjs';
 // The threshold has an authoritative home; a restated 0.50 here is how this and the in-app audit drift.
@@ -83,8 +71,7 @@ for (const e of flaggedEntries) {
 }
 
 if (JSON_OUT) {
-    // Deduped by exact string, because dropKeys matches exactly and the same key is listed by many
-    // entries — a shared trigger flagged once is flagged everywhere it appears.
+    // Deduped by exact string: dropKeys matches exactly, and a shared trigger flagged once is flagged everywhere.
     const keys = [...new Set(flaggedEntries.flatMap(e => e.marks.filter(m => m.prune).map(m => m.key)))];
     writeFileSync(JSON_OUT, JSON.stringify(keys, null, 1));
     console.log(`\n${keys.length} distinct flagged key strings -> ${JSON_OUT}`);
