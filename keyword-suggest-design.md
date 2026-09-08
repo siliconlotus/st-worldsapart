@@ -1,64 +1,52 @@
 # Keyword suggestion — what is being built and how it will be judged
 
-Status: **live, unsettled.** Started 2026-08-01. This is the definition work for a rebuilt keyword
-suggester, written down before any measurement exists, because every previous attempt to tune
-`buildKeySuggest` was scored against something that turned out not to bear the weight.
-
-Nothing here is implemented. The "Open" section at the bottom is the actual state of play.
+Status: **live, unsettled.** Started 2026-08-01. The definition work for a rebuilt keyword suggester,
+written before any measurement, because every previous attempt to tune `buildKeySuggest` was scored
+against something that did not bear the weight. Nothing here is implemented; *Open* is the state of
+play. Vocabulary and claim discipline: `CLAUDE.md`. The matcher's half: `matcher-design.md`. Claim
+IDs: `eval/eval-data/measured-claims.md`.
 
 ## The goal
 
-Keys that are selective enough not to over-trigger and flood the injection context, and common enough
-to fire when characters refer to the entry's material.
+Keys selective enough not to over-trigger and flood the injection context, and common enough to fire
+when characters refer to the entry's material.
 
 ## Scope: two systems, one boundary
 
 - **Keys that reliably represent their entry material** — this system.
 - **Relevant entries being associated with the generation** — the ranker.
 
-Drawing this line retired an entire apparatus that had been assembled first: a per-window relevance
-predicate `J(entry, window)`, scan windows, firings-as-definition, want-sets, judgment pooling, and a
-retrievability flag. Those all belong to the ranker's evaluation and were imported into the wrong
-problem. If they reappear in a discussion of *keys*, the boundary has been crossed again.
+The per-window relevance predicate `J(entry, window)` and everything built on it belong to the
+ranker's evaluation; if it reappears in a discussion of keys, the boundary has been crossed.
 
 ## The primitive
 
     R(key k, entry E, chat C) — does k reliably represent E's material AND LITTLE ELSE,
                                and is it likely to be present in C?
 
-Three components: **denotation**, **exclusivity**, **realizability**.
-
-Keys optimize precision; the ranker optimizes recall. Both matter to both — it is a priority, not an
-exclusivity. A key like "rut" that denotes forty sibling memory entries is therefore *outranked*, not
-disqualified: choosing among the forty is the ranker's job. "Little else" means material outside the
-entry's subject ("maintenance" also denoting car maintenance), not sibling entries covering the same
-subject.
+Three components: **denotation**, **exclusivity**, **realizability**. Keys optimize precision; the
+ranker optimizes recall — a priority, not an exclusivity. A key denoting many sibling entries ("rut"
+across forty memory entries) is outranked, not disqualified; "little else" means material outside the
+entry's subject, not sibling entries on the same subject.
 
 ### Precision splits in two
 
 - **Semantic** — the term denotes material broader than the entry. Needs judgment.
-- **Orthographic** — the term is a substring of unrelated words ("rut" inside "truth", "brutal").
-  Mechanical, computable, no annotation required.
-
-Treating these as one thing is what made precision look wholly subjective. It isn't.
+- **Orthographic** — the term is a substring of unrelated words ("rut" inside "truth"). Mechanical.
 
 ### Ubiquity is not vagueness
 
 "Kyle" is a bad key because the protagonist is on stage in nearly every window, not because the name
-is imprecise. So the proper-noun prior needs qualifying: a proper noun is a good key when it names a
-specific entity and a bad one when it names an ever-present principal.
+is imprecise: a proper noun is a good key when it names a specific entity and a bad one when it names
+an ever-present principal.
 
 ### Realizability is prospective
 
-"Likely to appear in C" is not "appeared in C". A location sheet for somewhere the story has not
-reached, and the alias people will use once they stop being formal, both read as zero occurrences and
-are both realizable. Any metric built on observed firing counts is biased against exactly the keys
-that are absent-but-coming — including the dead band in `eval/suggest-firing.mjs`.
-
-This is measurable anyway, by grounding it in anchors: variants and synonyms of a known-good seed
-**inherit its realizability**. Nothing has to be scored against an imaginary set of all possible good
-keys. A useful consequence is that anchors need only be *some* defensible keys per entry, never
-complete sets — a far thinner vetting pass than curating a book.
+"Likely to appear in C" is not "appeared in C": a location the story has not reached and an alias
+people will use later both read as zero occurrences and are realizable, so any metric built on
+observed firing counts is biased against them, including the dead band in `eval/suggest-firing.mjs`.
+It is measurable through anchors: variants and synonyms of a known-good seed **inherit its
+realizability**, so anchors need only be *some* defensible keys per entry, never complete sets.
 
 ## Three stages
 
@@ -66,135 +54,88 @@ complete sets — a far thinner vetting pass than curating a book.
 2. **Expander** — seed → family. Morphological forms plus synonyms in the entry's sense.
 3. **Renderer** — family + collision statistics + portability policy → keys.
 
-Realizability is inherited across morphology and **not** across synonymy — a form of a word people use
-is a form people use, but a synonym is a different word with its own frequency.
+Realizability is inherited across morphology and **not** across synonymy: a synonym is a different
+word with its own frequency. Synonymy in the entry's sense needs world knowledge, so it is the one
+piece with no local fallback and where an LLM is load-bearing rather than merely better.
 
-Synonym expansion is the only piece with no local fallback: statistical seeding exists today,
-morphological expansion is rule-work, but synonymy in the entry's sense needs world knowledge. That is
-where an LLM is load-bearing rather than merely better.
+The two arms are **independent tracks**, not stages of one pipeline: "Suggest terms" (lexical, local)
+and "Suggest terms LLM" (a local small model or a paid API), neither assuming the other has run. The
+expander runs over whichever produced the seeds, and the renderer over the expander's output.
 
-The two arms are **independent tracks**, not stages of one pipeline — the UI offers "Suggest terms"
-(lexical, local by definition) or "Suggest terms LLM" (a local small model or a paid API), and neither
-assumes the other has run. The expander runs over whichever produced the seeds; an LLM-emitted synonym
-still needs its plural, and that plural still goes to the renderer for collapse.
-
-The renderer runs the backoff: the longest collision-free common substring of the family as a single
-literal where one exists ("thaumaturg" covers thaumaturgy, thaumaturge and thaumaturges, portably and
-with no enumeration); exact-plus-enumeration or a SmartKey mix where that substring collides ("rut");
-separate keys where the family shares nothing usable (scry and scried share only "scr"). So stage 3
-can collapse a whole family back into one key, which is why the expander's output is not the keyset.
-
-Where a word-form and a stem are equally good, the renderer prefers the word-form. A stem is not a
-word, and a user reviewing suggestions may not recognise it as a good key even when it is. That is an
-acceptance cost rather than a correctness one, and this is the cheapest place to pay it.
+The renderer runs the backoff: the longest collision-free common substring of the family as one
+literal where one exists (`thaumaturg` covers thaumaturgy, thaumaturge, thaumaturges);
+exact-plus-enumeration or a SmartKey mix where that substring collides (`rut`); separate keys where
+the family shares nothing usable (scry, scried). So the expander's output is not the keyset. Where a
+word-form and a stem are equally good, the renderer prefers the word-form: a stem is not a word, and a
+reviewer may not recognise it as a good key.
 
 ### Allowing patterns changes the metric
 
-A stem string-matches none of the curated keys it covers, so the superset standard has to be
-**behavioural**: for each curated key, does the produced keyset fire where that key fires? That is
-`countKey` against the same text — the existing one-matcher doctrine, no judgement and no new
-machinery. It also repairs a defect the string comparison had anyway, which would have scored case and
-whole-word differences as misses. Breadth cannot game it, because coverage is only the recall half: a
-maximally broad key dies on the orthographic side, which is mechanical.
+A stem string-matches none of the curated keys it covers, so the superset standard is **behavioural**:
+for each curated key, does the produced keyset fire where that key fires — `countKey` against the same
+text. A broad key cannot game it, because coverage is only the recall half.
 
 ## What makes a seed
 
 A seed is a term that:
 
-1. **The entry carries information about, rather than merely naming.** Topicality is the wrong test.
-   "What the entry is about" wrongly excludes the Porsche bought during a scene whose subject is
-   something else — that entry is still where the Porsche comes from. The same test excludes
-   "thaumaturgy" from Foxbridge's "specialty" entry, which names it in a list of a dozen disciplines
-   and says nothing about it.
+1. **The entry carries information about, rather than merely naming.** Topicality is the wrong test:
+   it excludes the Porsche bought during a scene about something else, though that entry is where the
+   Porsche comes from, and admits a discipline an entry only lists among a dozen others.
 2. **Is not defeated by orthographic collision.** Mechanical, and regime-dependent.
-3. **Has affirmative reason to be typed.** The evidence is asymmetric: presence in the chat confirms,
-   absence does not disqualify. That is what "prospective" means operationally.
+3. **Has affirmative reason to be typed.** Presence in the chat confirms; absence does not disqualify.
 
-**Seed count is unbounded** — whatever passes the gates. Not a quota, and not the same quantity as the
-number of candidates offered, which `cap` governs as a display budget.
+**Seed count is unbounded** — whatever passes the gates. It is not the number of candidates offered,
+which `cap` governs as a display budget.
 
 ### Two axes, and only one of them gates
 
 - **Referent persistence** — does the thing keep mattering.
 - **Discourse recurrence** — do people type the words.
 
-Both are continua, not tests. The Grove sits high on both; the Cloud sofa lower on the second but not
-at zero, since it is a named object people do occasionally mention; the mudroom's slate-look tile at
-zero, present only so the floor does not change every turn. **Only discourse recurrence gates seeds**,
-and what it gates on is whether the thing has a form people use to refer to it — which is why an
-entry's descriptive material is not key material even when its subject is. Referent persistence enters
-as evidence about *where* the seed is: a cluster of persistent-but-undiscussed detail is the signature
-of a continuity entry, and its seed is the container that owns the detail — the Grove, not the tile.
-Foxbridge's "witch levels" has the same shape (thesis projects and their disciplines, none of them
-keys) and all of its human keys are container terms (S17): witch, wizard, mage, magician, sorceror,
-practitioner, qualification, specialty.
-
-An entry low on both — scene-bounded detail — yields few or no seeds. That is the honest version
-of what the texture/skip machinery in `entry-vocabulary.md` was groping at: not "this entry should not
-exist", but "this entry's content is mostly things nobody will name".
-
-**Entry content and key material are different questions.** The tile belongs in the entry, because it
-is what stops the mudroom floor changing on every generation. It is simply not a key. Collapsing the
-two is how a realizability judgement gets mistaken for an argument about what an entry should contain.
+Both are continua. **Only discourse recurrence gates seeds**, on whether the thing has a form people
+use to refer to it — so an entry's descriptive material is not key material even when its subject is.
+Referent persistence says *where* the seed is: a cluster of persistent-but-undiscussed detail is the
+signature of a continuity entry, whose seed is the container that owns the detail — the Grove, not its
+tile. Foxbridge's "witch levels" has that shape and all of its human keys are container terms (S17).
+An entry low on both — scene-bounded detail — yields few or no seeds. **Entry content and key material
+are different questions**: the tile belongs in the entry, because it stops the floor changing every
+generation, and it is not a key.
 
 ### Realizability evidence: retrospective and frontier
 
-Most entries are not at the frontier. In a 286-entry memory book, entry 3 has 283 entries' worth of
-subsequent chat, so whether a term recurred is a lookup rather than a prediction. The first-mention
-problem bites only at the newest entries and on a new book.
+Most entries are not at the frontier: whether an early entry's term recurred is a lookup. The
+first-mention problem bites only at the newest entries and on a new book.
 
-**Retrospective** — posterior chat exists:
+**Retrospective** — occurrence in chat after the entry's own scene. Not a proxy for recurrence; it is
+recurrence. A memory entry's own source span must not supply its own evidence, or every piece of
+scene furniture passes — and **masking the span is not how that is handled, and nothing replaces it**:
+under a count test a span of a few dozen messages against a chat of thousands changes no verdict. A
+term whose occurrences all sit in one contiguous stretch has located its own source scene, which does
+not distinguish scene furniture from a memorable one-off. If anything reads `STMB_start`/`STMB_end`:
+they are per-chat indices, and **a range shared by dozens of entries is a sentinel, not data**.
 
-- Occurrence in chat after the entry's own scene. Not a proxy for recurrence; it is recurrence.
+**Frontier** — priors only, strongest first: proper-nounhood (names attach to things that persist);
+rarity *combined with* entity-ness (rarity alone fails — "olfactory" is rare and is not a thing);
+within-entry re-mention (weak, and mostly what TF already picks up). Measuring against the same chat
+that informs the ranking is not circular; `eval/suggest-firing.mjs` takes that position deliberately.
 
-A memory entry's own source span must not supply its own evidence, or every piece of scene furniture
-passes. **Masking the span is not how that gets handled, and nothing replaces it** — the problem stops
-mattering once the test is a count rather than a presence check. A source span is a few dozen messages
-against a chat of thousands, so subtracting it changes no verdict for a term appearing several times
-across the book. Masking is only load-bearing under a binary "does it appear at all" test, and that
-test is wrong on its own terms.
-
-Separately, and not as a gate: a term whose occurrences all sit in one contiguous stretch has located
-its own source scene, without the metadata. That is useful for knowing *where* the scene is. It does
-not distinguish scene furniture from a memorable one-off, which look identical by any count.
-
-If anything ever does read `STMB_start`/`STMB_end`: they are per-chat indices, and **a range shared by
-dozens of entries is a sentinel, not data** — offline editing drops the metadata and something backfills
-it.
-
-**Frontier** — priors only, strongest first:
-
-- Proper-nounhood. Names attach to things that persist.
-- Rarity *combined with* entity-ness. Rarity alone fails — "olfactory" is rare and is not a thing — so
-  it needs the PoS side that the Zipf work already has.
-- Within-entry re-mention. A thing referred to more than once is being tracked rather than passed over.
-  Weak, and mostly what TF already picks up.
-
-Measuring against the same chat that informs the ranking is not circular; it is the position
-`eval/suggest-firing.mjs` already takes deliberately.
-
-**Consequence for the two arms.** The LLM's advantage is concentrated at the frontier and on new books.
-On a mature book with a long chat the lexical arm has direct evidence of recurrence, and the gap should
-be at its narrowest there. That is testable, and it says where the paid arm earns its cost rather than
-assuming it wins everywhere.
+**Consequence for the two arms.** The LLM's advantage is concentrated at the frontier and on new books;
+on a mature book with a long chat the lexical arm has direct evidence of recurrence. Testable, and it
+says where the paid arm earns its cost.
 
 ## Expansion correctness
 
-Annotate all the forms denoting the seed's material — that is a fact about language and does not move.
-The **required forms** are the subset the matcher will not reach from the seed on its own, and they are
-derived rather than annotated: under substring matching, does the seed occur in the variant; under
-whole-word, does it occur as a word. `wolf` does not occur in `wolves`, so `wolves` is required; `rut`
-occurs in `ruts`, so `ruts` is not. Deriving rather than storing is what lets the gold survive a regime
-change or a SmartKeys decision.
+Annotate all the forms denoting the seed's material. The **required forms** are the subset the matcher
+will not reach from the seed on its own, derived rather than annotated: under substring matching, does
+the seed occur in the variant; under whole-word, does it occur as a word. `wolf` does not occur in
+`wolves`, so `wolves` is required; `rut` occurs in `ruts`, so `ruts` is not. Deriving is what lets the
+gold survive a regime change or a SmartKeys decision. Core's boundary is `(?<!\w)…(?!\w)`
+(`extension/matcher.mjs`), so hyphens do not block: `rut` reaches `pre-rut` under both regimes and
+`ruts` only under substring. Suffixed forms are the regime-sensitive ones.
 
-Core's boundary is `(?<!\w)…(?!\w)` (`extension/matcher.mjs`), so hyphens do not block: "rut"
-reaches "pre-rut" under *both* regimes and reaches "ruts" only under substring. Prefixed and hyphenated
-compounds are free almost everywhere; suffixed forms are the regime-sensitive ones.
-
-**Verbs are out of scope.** Verbs make poor keys, so tense is not expanded — and that removes the whole
-inflection-homograph problem with them, since every instance of it is a verb form (rise→rose, see→saw,
-find→found, grind→ground, fall→fell, leave→left, speak→spoke, wind→wound). It was an artifact of
-expanding verbs, not a class needing machinery.
+**Verbs are out of scope.** Verbs make poor keys, so tense is not expanded, and every inflection
+homograph (rise→rose, find→found) is a verb form, so that problem goes with them.
 
 ### What each class is gated on
 
@@ -207,338 +148,195 @@ Each class is tested on exactly what it does not inherit.
 | **synonym** | gate | gate | gate | see below |
 
 Morphology inherits meaning and re-earns the string; synonymy inherits reference and re-earns the
-meaning. Neither inherits the string — "rut" and "ruts" have identical denotation and wildly different
-collision profiles.
+meaning. Neither inherits the string.
 
-**Exclusivity fails as hypernymy** — the key names a superordinate of the entry's subject. "dog" on a
-hellhound entry, "magic" for thaumaturgy. The relation is entry-relative, so no property of the string
-alone implements it; the Zipf gate is the proxy, and it works because a hypernym is usually the commoner
-word. It breaks where the entry's subject *is* the superordinate — a dog entry keyed "dog" — since
-there the two signals come apart.
+**Exclusivity fails as hypernymy** — the key names a superordinate of the entry's subject ("dog" on a
+hellhound entry). The relation is entry-relative, so no property of the string implements it; the Zipf
+gate is the proxy, because a hypernym is usually the commoner word, and it breaks where the entry's
+subject *is* the superordinate. **Propriolization** is the other way a string carries meaning outside
+the entry: a common noun's plural or possessive coinciding with a proper name (`chili` → `Chili's`).
+No signal but capitalisation, and `stems()` does not strip `'s`. Rare, and unhandled. Embedding drift
+detection does not work: seed-variant cosine reads surface overlap about twice as strongly as meaning,
+so no threshold separates a variant from a collision (S15).
 
-The other way a string can carry meaning outside the entry is **propriolization**: a common noun's
-plural or possessive coinciding with an established proper name, `chili` → `Chili's`,
-`rolling stone` → `Rolling Stones`. No signal but capitalisation, and `stems()` does not strip `'s`,
-so it is not reached by anything above. Rare, and unhandled.
+**Realizability for synonyms** is not gated: a lorebook is upstream of its chat, and the entry is a
+sample of prose about its subject, so occurrence in it confirms and absence from one short sample
+proves nearly nothing. The cut is `countKey(k, entryText) > 0` — weak for a memory entry (a lossy
+summary), possibly empty for a reference entry (which can share no vocabulary with the chat). The
+set-level predicate `any(countKey(k, entryText) > 0 for k in candidates)` is the useful one:
+hallucination detection for the LLM arm, vacuous for the lexical arm, whose candidates come from that text.
 
-Embedding-based drift detection was tried and does not work: seed-variant cosine reads surface overlap
-about twice as strongly as it reads meaning, so no threshold separates a real variant from a
-collision (S15). The distributional
-version is dead a priori — it needs contexts for a variant that by definition is not attested yet.
-
-**Realizability for synonyms** is not gated, and the reason is not inheritance. A lorebook is upstream
-of its chat: an injected entry supplies vocabulary the model then writes, so a term the entry declares
-is realizable in a way an inferred one is not. More directly, **the entry is a sample of prose about
-its subject** — the only one that exists before the chat does — so occurrence in it is a real frequency
-observation, and absence from one short sample proves nearly nothing. That is why presence confirms and
-absence does not disqualify. The cut is mechanical: `countKey(k, entryText) > 0`.
-
-Two limits on that. For a memory entry the entry text is a lossy summary of chat the term came from, so
-the observation is weak; for a reference entry the entry may share no vocabulary with the chat at all
-(Foxbridge's expository register). And **the set-level predicate is the useful one**:
-`any(countKey(k, entryText) > 0 for k in candidates)` asks whether the candidate set is grounded in the
-entry at all, which is hallucination detection for the LLM arm rather than evidence about any one term.
-It is vacuous for the lexical arm, whose candidates are extracted from that text by construction.
-
-**Denotation has no test.** For a synonym it is an unchecked assertion by whatever produced the term;
-the gates above catch particular ways it can be wrong, not the claim itself.
+**Denotation has no test.** For a synonym it is an unchecked assertion by whatever produced the term.
 
 ### Truncations are candidates too
 
-Curated keys are sometimes over-specified — `Julian Vargas` where the chat says `Julian`,
-`Pera Palace Hotel` where it says `Pera Palace` — so a seed's truncations are candidates alongside its
-variants, gated the same way.
+Curated keys are sometimes over-specified (`Julian Vargas` where the chat says `Julian`), so a seed's
+truncations are candidates alongside its variants, gated the same way. **A truncation is only valid
+when the shorter form still names the same referent** — `Bourdain` does, `Sur` does not name Big Sur —
+so truncation is *not* a purely local operation: the gates catch only the truncations that also
+collide orthographically and pass the rest under whole-word matching. The same limit applies to
+compounds that are not names (`Human Disinterest` → `Disinterest`).
 
-**A truncation is only valid when the shorter form still names the same referent.** `Bourdain` names the
-man; `Sur` does not name Big Sur, it is a fragment that belongs to other places entirely. That is a
-semantic judgement, not a mechanical one, so this is *not* a purely local operation — the gates catch
-only the truncations that also collide orthographically (`Sur` inside *sure*), and would pass the rest
-under whole-word matching. The same limit applies to compounds that are not names at all:
-`Human Disinterest` → `Disinterest` clears every gate while being half of a coined concept.
-
-The verdict has a rule: **referent recurrence decides truncation**. A recurring subject earns its
-short form (`Joe Pagliani` → `Joe`, `Julian Vargas` → `Julian`), a disposable one keeps the full name
-(`Karen Halloway` — many Sommers entries, no bare `Karen`). Two vetoes sit above it: the player
-persona is excluded outright, and orthographic collision changes the *rendering* rather than the
-verdict (`Sara` survives beside `Sarah Olusanmokun` as `? =^Sara`). Measured against the finished
-Sommers curation, which applies it throughout — arc-local cast earn bare names the same way the main
-cast do (S13). Richard predates the rule and is over-specified against it (`Joe Pagliani` throughout,
-bare `Joe` nowhere).
-
-Evidence is thin, and the count depends on where attestation is read — but read either way, nearly
-every zero-attestation gold key in Richard has a live shorter form, so zero attestation reads as a
-form-error signal rather than a frontier signal there (S13). One book.
-Both worth re-testing against the public books, which need no chat.
+**Referent recurrence decides truncation.** A recurring subject earns its short form; a disposable one
+keeps the full name. Two vetoes sit above it: the player persona is excluded outright, and orthographic
+collision changes the *rendering* rather than the verdict (`Sara` beside `Sarah Olusanmokun` renders
+as `? =^Sara`). The finished Sommers curation applies it throughout; Richard predates it and is
+over-specified against it, and there nearly every zero-attestation gold key has a live shorter form,
+so zero attestation reads as a form-error signal rather than a frontier one (S13). One book; worth
+re-testing against the public books, which need no chat.
 
 ## Matching mechanics that constrain the design
 
-**Morphology is matcher-relative.** With substring matching, "rut" already catches "ruts" and
-"rutting" — no variant needed. Only stem-changing forms must be enumerated (thaumaturgy → thaumaturge,
-scry → scried). Whole-word matching inverts this: collisions vanish, and every variant must be spelled
-out. It is one knob with two faces, and no key needs both workstreams.
+**Morphology is matcher-relative.** Under substring matching `rut` already catches `ruts` and
+`rutting`, and only stem-changing forms need enumerating; whole-word matching inverts this — collisions
+vanish and every variant must be spelled out. No key needs both workstreams.
 
-**`matchWholeWords` is per entry** (`extension/keyword-audit.mjs`), so a keyset would have to be
-internally coherent under one regime — except that **SmartKeys make matching semantics per key**: `=`
-is word-boundary, `^` is case-sensitive, combinable, per term (`extension/smartkeys.mjs:70`). So
-`? =rut` and a loose `thaumaturg` can coexist on one entry.
+**`matchWholeWords` is per entry** (`extension/keyword-audit.mjs`), but **SmartKeys make matching
+semantics per key**: `=` is word-boundary, `^` case-sensitive, combinable, per term
+(`extension/smartkeys.mjs`), so `? =rut` and a loose `thaumaturg` can coexist on one entry.
 
 **SmartKeys should degrade, not fuse.** `? =rut|=ruts` as one key plus a plain literal `rutting` as
-another beats a single `? =rut OR =ruts OR =rutting`: an un-extended ST core silently drops the
-SmartKey and still fires on the literal. The split is decided by substring-vs-exact statistics, which
-means the surviving literals are exactly the non-colliding ones — so **degradation loses recall and
-preserves precision**, which is the right failure direction.
+another beats a single `? =rut OR =ruts OR =rutting`: an un-extended core drops the SmartKey and still
+fires on the literal, and the surviving literals are the non-colliding ones — **degradation loses
+recall and preserves precision**. So the expander emits a seed plus its forms, each tagged with its
+collision measurement; rendering as literal, whole-word, SmartKey or a mix is a downstream pass, where
+portability policy is applied.
 
-The expander's output shape follows: a seed plus its forms, each tagged with its collision
-measurement. Rendering as literal, whole-word, SmartKey or a mix is a downstream formatting pass, and
-that pass is where portability policy is applied rather than baked in.
-
-**Measure against the text runtime actually searches.** Entries can opt into scanning the persona
-description, character description, personality, depth prompt, scenario or creator notes, so when a flag
-is set that text joins the search text — and a rate computed over it correctly reports "fires always",
-which is how you discover an entry that wanted `constant`. Hidden messages (`is_system`) are not in the
-prompt, so no key can fire on them; they stay evidence for realizability, which asks a different
-question of the same file.
-
-Same principle as harness priming below: a measurement that diverges from runtime is measuring a system
-nobody runs.
+**Measure against the text runtime actually searches.** An entry can opt into scanning the persona
+description, character description, personality, depth prompt, scenario or creator notes, and that
+text then joins the search text — a rate over it correctly reports "fires always". Nothing on disk
+sets one (S21), so nothing handles them yet. Hidden messages (`is_system`) are not in the prompt, so
+no key fires on them; they are ordinary narrative prose and stay evidence for realizability.
 
 ## Code facts established while working this out
 
-- The Aho-Corasick trie is flag-blind: it always yields the folded substring count, and exact is
-  computed afterward only where the flags demand it — **on the primed path**. Unprimed *and* whole-word
-  goes straight to a lookaround regex (`matcher.mjs`) that produces no substring count at all.
-- Production always primes (`matcher.mjs`, `keyword-audit.mjs`). `cachedCount`'s three
-  undefined branches are for out-of-band callers, never live matching.
-- The exact/substring ratio already exists: `keyword-audit.mjs` computes `strictClean` against
-  `scan(k, cs, false).total`, read by `severityOf` — currently gated to short keys only. Generalizing
-  it is caller-side work, no `countKey` surgery.
-- The case for changing `countKey`'s signature to `(exactCount, substringCount, weight)` is uniformity
-  across key *types*, not the ratio: SmartKeys return a weight and no counts (`matcher.mjs`), regex
-  returns a raw match count (`:295`). That is the blind spot that makes SmartKeys unmeasurable.
-- `eval/suggest-firing.mjs` uses the real matcher but enters on the unprimed branch, which production
-  never takes. Same function, different branch — the "countKey is the only matcher" rule catches the
-  first kind of drift and is silent about the second. Fixing it needs a loop inversion (register the key
-  universe once, prime per message), and it is a prerequisite for trusting any collision number the
-  harness reports.
-- **ONE AUDIT, TWO DISPLAYS.** The Explorer and Cleanup reach identical verdicts for identical keys —
-  same classifier, same chat evidence, same key set — and differ only in presentation: coloured chips
-  in place against rows with reasons and a selection. The only legitimate difference is the checkbox
-  state, which the Explorer has no equivalent of because it has no bulk removal. Treat any other
-  divergence as a bug in whichever side computed something instead of reading it: the chat evidence
-  was gathered from `visibleEntries()` on one path and the whole book on the other, which made a
-  verdict depend on what was on screen when the scan ran.
-- **THE EXPLORER IS THE PRIMARY CURATION SURFACE; CLEANUP IS SECONDARY.** Curation happens key by key
-  against the entry, in the Explorer's inline chips — which colour from `reasonOf`/`severityOf` via
-  `classifyEntry`, same as everything else. Cleanup is the bulk sweep, typically run once per book if
-  at all. Two consequences for anything the audit learns. It must reach the CLASSIFIER, not the cleanup
-  display layer, or it is invisible where the work happens — the chat-hit annotation
-  (`studio.mjs:1957`) is painted after classification and so appears on one tab only. And a finding
-  about `defChecked`, the pre-tick, is a finding about the rarely-visited screen: real, worth fixing,
-  never the first thing to fix.
-- **`generated()` (`keyword-audit.mjs`) tests field *presence*** — `stmemorybooks`, `STMB_start`,
-  `stmbArc` — and is used only in `defChecked` (`:300`), the pre-tick state in the prune popup. It does
-  not affect scanning; scope is `inScope` (`:109-113`), which knows nothing about STMB. Since
-  `severityOf` returns `''` for `unattested`, that clause is the only route by which a dead key arrives
-  pre-ticked — so a miss costs manual ticking on the secondary path, and nothing else.
-- **`is_system` means hidden from the prompt, not "not story"** — the messages are ordinary narrative
-  prose, and a chat can be mostly them. Filtering them as noise silently discards most of a chat.
-- **Chat header identity fields are deprecated** — newer files write a literal `"unused"`. The
-  per-message `name` on `is_user` turns is authoritative in both formats.
-- **`matchPersonaDescription` and its siblings join that text to the search text** when set. Nothing on
-  disk sets one (S21), which is why nothing handles them yet.
+- The Aho-Corasick trie is flag-blind: it yields the folded substring count, and exact is computed
+  afterward on the primed path only; unprimed whole-word goes to a lookaround regex with no substring
+  count (`matcher.mjs`). Production always primes.
+- The exact/substring ratio exists: `keyword-audit.mjs` computes `strictClean` against
+  `scan(k, cs, false).total`, read by `severityOf` for short keys only. Generalizing it is caller-side.
+- SmartKeys return a weight and no counts, regex a raw match count (`matcher.mjs`) — what makes
+  SmartKeys unmeasurable, and the case for a `(exactCount, substringCount, weight)` signature.
+- `eval/suggest-firing.mjs` uses the real matcher on the unprimed branch, which production never takes.
+  Fixing it is a loop inversion (register the key universe once, prime per message) and a prerequisite
+  for trusting any collision number it reports.
+- The Explorer is the primary curation surface and Cleanup the once-per-book sweep. Both read the same
+  classifier over the whole book and differ only in presentation and checkbox state — any other
+  divergence is a bug — so anything the audit learns must reach the classifier (`classifyEntry`,
+  `reasonOf`/`severityOf`) or it is invisible where the work happens; a finding about `defChecked`, the
+  pre-tick, is about the secondary screen.
+- `generated()` (`keyword-audit.mjs`) tests STMB field presence and is used only in `defChecked`; scope
+  is `inScope`. A miss costs manual ticking on Cleanup and nothing else.
+- Chat header identity fields are deprecated; the per-message `name` on `is_user` turns is
+  authoritative.
 
 ## Populations
 
-**Reference entries in general match the chat less than memory entries do, and the reason is
-structural.** A memory entry is derived from the chat — a summarizer read those messages and wrote it —
-so it shares vocabulary by construction. A reference entry is authored independently, usually before
-the chat exists, in an expository register the chat never uses. Overlap there is incidental rather than
-guaranteed.
+**Reference entries match the chat less than memory entries do** — a memory entry is derived from the
+chat, a reference entry authored independently in a register the chat never uses. On the matched pair
+(`grounded omegaverse` against Sommers' memory entries) reference sits below memory on both
+entry-to-chat cosine and term recurrence; counting presence rather than recurrence, or comparing chats
+of different lengths, reverses it (S16).
 
-Measured on the pair that isolates it — `grounded omegaverse` against `Sommers_Pack__v22`'s memory
-entries, same story and chat: reference sits below memory on both entry-to-chat cosine and term
-recurrence (S16), with Foxbridge, Albion and Gladiator in the same band. Counting presence rather
-than recurrence, or comparing chats of different lengths, reverses it.
+**They are not a distinct class for keying.** Characters, concepts and places are all keyed the same
+way — the subject's canonical name, its morphological variants, and the common noun people say instead
+of it — and the key counts of the two populations overlap completely (S17). What varies is **subject
+ubiquity**, a continuum: peripheral NPCs earn role nouns, principals get a bare first name and nothing
+else. Degeneracy to a name tracks how central the subject is, not that it is a person; its
+consequence, an entry whose only good key fires in nearly every window, is an activation and
+precedence question and the ranker's side of the boundary. For a reference entry the **title is a
+first-class seed source**, because it names its subject; a memory entry's title is a generated
+editorial label ("003 - Post-Rut Domesticity") and weaker. Asserted, not measured.
 
-**They are not a distinct class for keying.** Checked against Foxbridge (human-curated, reference-only)
-and Sommers' reference minority: characters, concepts and places are all keyed the same way — the
-subject's canonical name, its morphological variants, and the common noun people say instead of it.
+Reference entries are a small minority living *inside* memory books, and those books are a handful of
+stories (S17), so any memory/reference branch must be per entry, as the pruner's `generated()` split
+is. Book size does not identify a population. **`generated()` under-detects**, because offline editing
+strips the STMB metadata. The fallback: read the numbering pattern off the book's *own* tagged entries
+and treat an untagged entry as generated if its title continues the series. Where STMB's serial
+prefix is off there is no series, so it degrades to silence; requiring *continuation* rather than
+*looking numbered* biases it toward misses, the right direction — a false positive pre-ticks
+deliberate aliases on a hand-written entry, a false negative costs a few clicks on Cleanup.
 
-    necromancy                  necromancy, necromancer, demiurge, medium
-    Arnold Atkins               Arnold, Atkins, sherriff, police, cop
-    Miss Roberta's Boarding House   boarding house, Miss Roberta, guest rooms
+**Do not compare key counts across populations.** Reference entries carry far fewer keys, but that is
+who *wrote* them — memory keys LLM-generated, reference keys hand-written, the same split within one
+book. Genuine entry-type differences survive regardless of key authorship: register, `entryText ⊂
+chatText` for memory and possibly disjoint for reference, titles that name versus label, source spans
+existing at all, sibling density.
 
-Same shape three times, and the key counts of the two populations overlap completely — Foxbridge's
-own extremes land on a character and a concept, so neither class brackets the other (S17).
-
-What varies is **subject ubiquity**, which is a continuum rather than a class. Foxbridge's peripheral
-NPCs earn role nouns; Sommers' principals get a bare first name and nothing else — Jeffrey Sommers
-`[Jeffrey]`, Shane Sommers `[Shane]`, Micah Henry `[Micah]`. Degeneracy to a name tracks how central
-the subject is, not that it is a person, which is the "Kyle" observation appearing in curated data. Its
-consequence — an entry whose only good key fires in nearly every window, so the entry is *effectively*
-constant — is an activation and precedence question, and therefore the ranker's side of the boundary,
-not this system's.
-
-A consequence for seeding: for a reference entry the **title is a first-class seed source**, because a
-reference title names its subject (Foxbridge: "witch levels", "thaumaturgy", "scrying"). A memory
-entry's title is a generated editorial label — "003 - Post-Rut Domesticity" — which describes rather
-than names, and is correspondingly weaker.
-
-Asserted, not measured.
-
-The books on disk collapse to far fewer book lines — versions of one book match on entry titles, not
-on entry text, since re-summarizing rewrites every entry and keeps the scene list. Every large book
-is overwhelmingly STMemoryBooks entries, so reference entries are a small minority living *inside*
-memory books; but those books are a handful of stories, most of them snapshots of one, so this has
-the same n as the rates below and not the corpus's (S17). Any memory/reference branch must therefore
-be per entry, as the pruner's `generated()` split already is. Book size does not identify a
-population: pure-reference book sizes here overlap the memory books'.
-
-**That share is a `generated()` count, and `generated()` under-detects**, because offline editing —
-dropping a lorebook into a model chat to clean it up, which anyone invested enough to run STMB will
-eventually do — strips the metadata. Books that have been through that carry scene summaries with no
-STMB fields at all, and they read as reference.
-
-The fallback is self-calibrating and needs no format assumption: read the numbering pattern off the
-book's *own* tagged entries, and treat an untagged entry as generated if its title continues the series.
-STMB's serial-number prefix is a default that can be toggled off, and where it is off there is no series
-to continue, so the heuristic degrades to silence rather than to a wrong answer. Requiring
-*continuation* rather than merely *looking numbered* biases it toward misses, which is the right
-direction: a false positive pre-ticks the deliberate aliases on a hand-written entry, a false negative
-costs a few clicks — and both land on Cleanup, not on the Explorer where curation actually happens. Gaps in the merged series are deleted entries, free.
-
-**Do not compare key counts across populations.** Reference entries carry far fewer keys than memory
-entries, but that is who *wrote* the keys, not what the entries are — memory keys are LLM-generated,
-reference keys usually hand-written, and the same split appears *within* a single book. Genuine
-entry-type differences are the ones that survive regardless of key authorship: register,
-`entryText ⊂ chatText` for memory and possibly disjoint for reference, titles that name the subject
-versus editorial labels, source spans existing at all, and sibling density.
-
-**The player persona is never a key.** ST injects the Persona Description every turn, so the persona
-has no lorebook entry — but its name still turns up as a candidate on episodic entries (`Alex Nichols`
-was removed by hand from Richard; `Richard Ryder` went too, but that is the character, and it belongs
-with the ubiquity bracket below). Hard exclusion, no threshold: collect the
-distinct `name` values on `is_user` turns and reject those strings and their tokens. Note it is
-per-chat, not global — the same user runs `Kyle Parsons` on one book and `Niall` on another — and that
-token-level rejection also kills a shared surname (`Kyle Sommers` → `Sommers`, shared with Jeffrey and
-Shane), which is probably desirable but arrives by accident.
-
-Persona names must also be kept out of any threshold calibration, because their rate measures POV
-rather than salience. Sommers is narrated in second person, so `Kyle` appears only in dialogue and
-scores a modest share of assistant turns while being present in essentially every scene (S14); a
-third-person chat would score the identical persona two or three times higher.
+**The player persona is never a key.** Hard exclusion, no threshold: collect the distinct `name`
+values on `is_user` turns and reject those strings and their tokens. Per chat, not global; token-level
+rejection also kills a shared surname (`Kyle Sommers` → `Sommers`), which is probably desirable.
+Persona names also stay out of any threshold calibration, because their rate measures POV rather than
+salience: second-person Sommers scores `Kyle` at a modest share of assistant turns while present in
+essentially every scene (S14).
 
 ## The books are not an eval set
 
 The lorebooks on disk are a blend of human curation and weaker-LLM generation whose mixture varies per
 book, so agreement with their keys is not a score. Nothing may use them as a denominator until anchor
-provenance (below) establishes which subset is trustworthy.
+provenance (below) establishes which subset is trustworthy. **An unkeyed entry is not a negative
+example**, and the causes are mechanically separable:
 
-**An unkeyed entry is not a negative example**, and the causes are mechanically separable:
-
-- **`constant`** — always injected, so keys are inert. Authoring scaffolding and arcs. Out of scope for
-  suggestion, and adding keys here buys nothing measurable.
-- **`vectorized`** — activates by embedding. That keys help anyway is **asserted, not measured**, and
-  the two routes are not interchangeable: `suppressVectorKeys: false` lets core activate on the keys and
-  so can add an entry nothing else reaches, while `scoreVectorKeys` only re-ranks candidates already
-  retrieved — and is dead whenever the first is off. **These are the suggestion targets.**
-- **neither** — cannot activate at all. A **free diagnostic with no false positives**, and the Studio
-  should say so. Rare in practice, so oversights are not a meaningful ceiling on the superset standard.
+- **`constant`** — always injected, so keys are inert. Out of scope for suggestion.
+- **`vectorized`** — activates by embedding. That keys help anyway is asserted, not measured. **These
+  are the suggestion targets.**
+- **neither** — cannot activate at all. A free diagnostic with no false positives, and the Studio
+  should say so. Rare.
 
 ### The gold sets
 
-Three books are now curated and usable (S18). **Foxbridge** — hand-authored end to end with no LLM
-involvement, pure reference, several chats attached under character-card binding. **Richard** —
-curated by hand through the Explorer. **Sommers** — by far the largest, and the first gold set
-carrying memory entries and a chat long enough to measure firing against.
+Three curated books (S18): **Foxbridge** — hand-authored end to end, pure reference, several chats
+attached under character-card binding; **Richard** — curated by hand through the Explorer;
+**Sommers** — by far the largest, the first gold set carrying memory entries and a chat long enough to
+measure firing against.
 
-Richard's provenance matters and should travel with any number derived from it. Curation was
-**entry-grounded**: judged against entry text, not against the chat, which matches the scope boundary
-above rather than smuggling the ranker's question into the gold. It is therefore largely silent on
-realizability by construction — except where synonyms were added (`VSOE` beside the full name), which
-is a realizability claim. Two acknowledged uses of outside knowledge: `Joe` → Joe Pagliani, `Mr. Stern`
-→ Marty Stern.
-
-**Labelled negatives** come with it (S18), recovered from the pre-edit book preserved inside the
-`richard-syn-*` grade bundles. Three cautions on consuming them. They are **(entry, key) pairs, not bad
-strings** — the same term is a negative on one entry and a positive on nine others, because the
-judgement is about the entry. Some are **form corrections rather than rejections** (`TMZ leak` → `TMZ`),
-and separating those from true rejections has not been attempted. And the keys on the one deleted entry
-are excluded and unlabelled.
-
-Sommers was curated to the same **entry-grounded** standard — judged against the edited entry text,
-supplemented by author memory — so it is silent on realizability by construction in the same way. It
-carries its own **labelled negatives** (S18), recovered from the `sommers-syn-*` bundles, under all
-three of the cautions above. Author memory is an input the entry text does not carry, so superset recall against
-this gold has a ceiling below 100% that is not a suggester defect.
+Richard and Sommers were curated **entry-grounded**: judged against entry text (Sommers supplemented
+by author memory), not the chat, so both are largely silent on realizability by construction — except
+where synonyms were added (`VSOE` beside the full name), which is a realizability claim. Author memory
+is an input the entry text does not carry, so superset recall against Sommers has a ceiling below
+100% that is not a suggester defect. Both carry **labelled negatives** (S18), recovered from the
+pre-edit books inside the `richard-syn-*` and `sommers-syn-*` grade bundles. Three cautions: they are
+**(entry, key) pairs, not bad strings**; some are **form corrections rather than rejections**
+(`TMZ leak` → `TMZ`), not yet separated; keys on deleted entries are unlabelled.
 
 Anything a suggester proposes that is in neither set is unjudged, so this measures superset recall and
-known-junk precision, not precision generally. And **provenance decays**: a key vetted before these
+known-junk precision, not precision generally. **Provenance decays**: a key vetted before these
 definitions existed was vetted against a different standard, so "already approved" is not a shortcut
 for the anchor pass.
 
-Foxbridge carries **several chat lineages** with no shared prefixes (S18) — but continuation, separate
-story and ephemeral repeat all look alike from a zero-length prefix, so that is not the same as
-independence.
-Only the **lorebook binding** distinguishes same-story from separate-story, and it has three sources:
-`chat_metadata.world_info` per chat, the character card, and — rarely —
-`settings.json` → `world_info_settings.world_info.charLore`.
+Foxbridge carries **several chat lineages** with no shared prefixes (S18), which is not independence.
+Only the **lorebook binding** distinguishes same-story from separate-story, from three sources:
+`chat_metadata.world_info` per chat, the character card, and — rarely — `settings.json` →
+`world_info_settings.world_info.charLore`.
 
 ### Findings so far, and what they are worth
 
-**The activation ceiling, bracketed** (S14). Whole-word rates over assistant turns, personas excluded,
-against your own verdicts, climb from Dylan kept ("grew, never crested") through Arthur undecided
-(still being tagged) to Liam crossed ("good until he wasn't") and Richard long gone. The most
-informative point is Arthur, because the threshold sits where a human cannot call it either. Gold
-positives in Richard top out far below the bracket, so nothing human-approved lives high in the range.
+**All of it is n=1 curator.** ST mechanics travel; rates do not, until shown otherwise. The public
+books are the control for form-level findings, and none has a chat.
 
-**The suggester does not beat curated keys, and the finding that it did was an artifact of the
-book** (S11). `suggest-firing.mjs` over Sommers × its own chat, per-row dead rate: against the
-pre-curation book, candidates and the book's own keys are level; against the same book curated, the
-book's dead rate roughly halves while the candidates' stays put. Both sides read only entry text, so
-the gap is like-for-like. Read it as a bound, not a score: `cap: 30` offers candidate rows at a
-multiple of the book's key count, and a dead rate at that volume flatters the smaller set.
-
-**This is n=1 curator.** The genre spread is wide, which controls vocabulary and entry structure, but
-only a handful of books carry memory entries and the bracket came from two of them. ST mechanics
-travel; rates do not, until shown otherwise. The public books are the available control for form-level
-findings — none has a chat, so activation cannot be checked against them at all.
-
-### What the curation diffs measured
-
-Pre/post diff of Sommers — union of the eval-bundle snapshots against the finished book, replicated
-on Richard (S12). Same n=1 curator caveat as above.
-
-- **The form divide is the proper-noun prior, twice.** Kept keys are mostly capitalized and at one
-  or two words; removals mostly all-lowercase and phrase-heavy. Richard splits the same way.
-- **Scene furniture is the dominant removal class** — lowercase multiword one-off
-  props and actions ("granola bar", "water fight"; Richard: "garlic bread", "pancetta") — plus
-  quote fragments ("the morning is mine"). Discourse-recurrence gating, observed in gold.
-- **The player character is keyed nowhere.** Kyle on no entry at all; `Richard Ryder` stripped
-  from Richard's episodic entries the same way.
-- **Truncation ran one way**: corrections shortened over-specified keys ("Halloween party" →
-  "Halloween", "Mr. Sterling" → "Sterling" — the article or honorific blocks the substring).
-- **Attestation was not required**: a sizeable share of kept keys never fire in the frozen chat,
-  and many of the curator's own additions are unattested in the entry text (author memory).
-- **Collision was always rescued, never fatal**: every SmartKey in Sommers post-dates the
-  curation (`? =^Sara`, `? =DP`, `? =Huber`, alternation families like `? (your|my|Kyle's) heat`).
-  Practice diverges from the degradation principle above: most carry no plain-literal fallback, so
-  un-extended core loses the entry. Unresolved.
-- **Variants and aliases were enumerated by hand** — `three inch inseam` beside
-  `three-inch inseam`, `Quins` beside `Harlequins` — the expander's job, observed in gold.
-- **Nested bare+full name pairs are deliberate and systematic**, not occasional: full names added
-  beside existing bare names across a broad slice of entries (near-universally for `Teddy O'Neill`),
-  part term-weighting, part instrumentation. Open item 0 is understated; the collapse diagnostic must stay advisory.
-- **Title-case is not proper-nounhood.** LLM-capitalized generics were removed ("Kitchen",
-  "Certifications", "Lime Green"), and one-scene proper nouns ("West Elm", "Brenda") fail
-  recurrence despite the capital.
+- **The activation ceiling is bracketed** by the curator's own verdicts — whole-word rates over
+  assistant turns, personas excluded — and Richard's gold positives top out far below the bracket (S14).
+- **The suggester does not beat curated keys**: against the pre-curation book, candidates and the
+  book's keys are level on dead rate; curation roughly halves the book's rate while the candidates'
+  stays put (S11). A bound, not a score — `cap: 30` offers rows at a multiple of the book's key count.
+- **The Sommers curation diff**, replicated on Richard (S12). Kept keys are mostly capitalized and at
+  one or two words, removals lowercase and phrase-heavy — the proper-noun prior, twice. Scene furniture
+  (lowercase multiword one-off props and actions, quote fragments) is the dominant removal class —
+  discourse-recurrence gating, observed in gold. The player character is keyed nowhere. Truncation ran
+  one way, shortening over-specified keys ("Mr. Sterling" → "Sterling"). Attestation was not required:
+  a sizeable share of kept keys never fire in the frozen chat, and many of the curator's own additions
+  are unattested in the entry text. Collision was always rescued, never fatal: every SmartKey
+  post-dates the curation, and most carry no plain-literal fallback, against the degradation principle
+  — unresolved. Variants and aliases were enumerated by hand — the expander's job. Nested bare+full
+  name pairs are deliberate and systematic, so the collapse diagnostic stays advisory (open item 0).
+  Title-case is not proper-nounhood: LLM-capitalized generics were removed, and one-scene proper nouns
+  fail recurrence despite the capital.
 
 ## Why a key over-fires — four classes, four remedies
 
-Measured against the standard chat corpus (see `eval/eval-data/README.md`). The point of the split is
-that only one class means "delete this key"; the other three mean the entry is configured wrong, which
-is a more useful thing to say than *too common*. It has to say it on the **Explorer's key chips** —
-that is where curation happens; Cleanup is the once-per-book sweep.
+Measured against the standard chat corpus (`eval/eval-data/README.md`). Only one class means "delete
+this key"; the other three mean the entry is configured wrong, and it has to be said on the
+**Explorer's key chips**, where curation happens.
 
 | diagnostic | class | remedy |
 |---|---|---|
@@ -547,166 +345,101 @@ that is where curation happens; Cleanup is the once-per-book sweep.
 | high rate, survives, entry is premise-level | the concept is always relevant | `constant` |
 | moderate rate, survives, word denotes nothing | actually a bad key | remove |
 
-**The collapse ratio is the sharp instrument**, and it is threshold-free: colliding keys collapse to
-near zero under whole-word while keys that are merely frequent do not move, and it catches the
-moderate-rate cases a rate band set high enough to be safe would miss (K15). The usual cause is a **short form nesting inside its own long form** (`Kim`⊂`Kimberly`,
-`Rich`⊂`Richard`), so the diagnostic is per ENTRY rather than per key: the message is "this entry has
-a key inside another of its keys", and the fix is one checkbox for the entry.
+**The collapse ratio is the sharp instrument**, threshold-free: colliding keys collapse to near zero
+under whole-word while merely frequent keys do not move, it catches the moderate-rate cases a safe
+rate band misses, and random high-Zipf words used as keys fire at real rates yet almost never
+collapse, so the class is separable (K15). The usual cause is a **short form nesting inside its own
+long form** (`Kim` ⊂ `Kimberly`), so the diagnostic is per entry — "this entry has a key inside
+another of its keys" — and the fix is one checkbox.
 
-**A firing-rate band is not the sharp instrument, and nearly everything it catches is legitimate**
-(K16). Much of what it flags sits on vectorized entries where `suppressVectorKeys` blanks the keys,
-and most of the rest are main-cast names on sticky sheets. In Sommers the high band has a zero
-removal rate against a substantial curation baseline, and every key curation removed fired below the
-band.
+**A firing-rate band is not the sharp instrument, and nearly everything it catches is legitimate**:
+much of what it flags sits on vectorized entries or is main-cast names on sticky sheets, Sommers'
+high band has a zero removal rate against a substantial curation baseline, and every key curation
+removed fired below the band (K16). That zero is by design — the band was retained as a hold-out —
+and it measured flat, paired (F41): neither removing the band, uniform cast placement, nor both is
+distinguishable from baseline, so the band stays retained because nothing argues for moving it. Two
+limits: the graded samples embed the pre-curation book, and the contrast ran on memory-tier
+re-ranking while the band's keys sit mostly on reference entries — the two-score work in
+`matcher-design.md` is what would let it be asked of the ranking that arbitrates.
 
-**The Sommers zero is by design, and the designed test has now run.** Every key above the band — the
-main-cast names — was deliberately retained through curation as a hold-out, so keep-vs-remove could
-be measured in ranking rather than called by intuition. **Measured flat** (F41): neither removing the
-band, nor uniform cast placement, nor both together is distinguishable from its own baseline, which
-per the arm's own reading rule is "not better, not worse" and licenses nothing beyond itself. The
-band stays retained because nothing argues for moving it, not because keeping it was shown to win.
+**Three signals, and none supersedes another.** `ENGLISH_COMMON` says the word denotes nothing in
+particular and needs no chat (roughly half the books have none); chat firing rate says how much a key
+matches; the collapse ratio says it matches the wrong thing. The overlap between the first two is
+nearly empty, and where `ENGLISH_COMMON` is wrong is proper nouns that collide with common words
+(`River`, `Paris`) — most of the high-Zipf population in real books — where chat rate is right (K16).
 
-Two things this result cannot do. The graded samples embed the pre-curation book, so what the baseline
-calls "selective" placement is the generator's, not the finished curation's. And nDCG here excludes
-the reference tier while the band's keys sit on entries that mostly ARE reference, so the contrast
-runs on memory-tier re-ranking alone — the two-score work in `matcher-design.md` is what would let it
-be asked of the ranking that actually arbitrates.
-
-**Three signals, not one, and none supersedes another.** `ENGLISH_COMMON` says the word denotes
-nothing in particular and needs no chat, which matters because roughly half the books on disk have
-none. Chat firing rate says how much a key matches. The collapse ratio says it matches the wrong
-thing. Measured overlap between the first two is nearly empty (K16).
-
-**Where `ENGLISH_COMMON` is wrong is proper nouns that collide with common words** — `River`, `Blue`,
-`Angel`, `Jack`, `Paris`, `Red`, `Mark`. That is most of the high-Zipf population in real books, not
-an edge case (K16), and chat rate is right about them where the word list is not. Synthetic control —
-random high-Zipf words used as keys fire at real rates yet almost never collapse under whole-word, so
-the class is real and separable when it occurs (K15).
-
-**Ruled: `chat common` raises its own flag.** Chat rate was confirm-only — it could redden
-`english common` and never speak alone — so a key that floods the chat without being a common English
-word or frequent in the book's own prose went unflagged entirely. `magic` on a Foxbridge entry is the
-shape: not on the word list, and a small book of encyclopedia prose will never clear the `book common`
-ratio.
-
-**It claims something about the KEY against this chat, not about the entry's wiring.** That is what
-decides the exemptions, and it is a narrower claim than "this entry is effectively a constant" — which
-was the phrasing considered first and would have made every exemption a question about whether the
-entry can currently fire.
-
-**Exempt: `constant` and `sticky`.** Both are author declarations that the entry is meant to be
-ubiquitous. This stands on its own: the audit's own sticky exemptions (`stickySkipCommon`, the
-top-1000 `COMMON_HEAD`) are deleted, so there is no precedent beside it.
-
-**Not exempt: vectorized, and therefore not the memory tier.** `suppressVectorKeys` blanks those keys
-so they cannot activate — but it is a WA setting, and stock SillyTavern matches them normally, so a key
-inert on this machine is a latent flood in the same book opened anywhere else. Suppressing on wiring
-would hide precisely the case the author cannot see for themselves. Revisit if the volume proves to
-drown the flags worth acting on; the noise argument is real and the correctness one is not.
-
-**Advisory: it colours, it never pre-ticks**, as `KEY_DUPE_MIN` already does. Its remedies are
-`constant` or a narrower key, so it does not belong in a tick-to-remove list — a warning means nothing
-until someone chooses to act on it, which is also why showing it costs little.
-
-**Open: the threshold.** `KEY_CHAT_COMMON` is 20% and was set deliberately loose for the confirm role,
-sized against a population dominated by the entries this flag does not exempt. It wants re-reading
-against what the flag actually surfaces rather than inheriting a bound calibrated for a different job.
+**Ruled: `chat common` raises its own flag.** Chat rate was confirm-only (it could redden
+`english common` and never speak alone), so a key that floods the chat without being a common English
+word or frequent in the book's own prose went unflagged — `magic` on a Foxbridge entry. The flag
+claims something about the key against this chat, not about the entry's wiring, and that decides the
+exemptions: **exempt `constant` and `sticky`**, author declarations that the entry is meant to be
+ubiquitous (the audit's own sticky exemptions are deleted, so this stands alone); **not exempt
+vectorized**, and therefore not the memory tier — revisit if the volume drowns the flags worth acting
+on. **Advisory: it colours, it never pre-ticks**, as `KEY_DUPE_MIN` does; its remedies are `constant`
+or a narrower key, so it does not belong in a tick-to-remove list. **Open: the threshold.**
+`KEY_CHAT_COMMON` is 20%, set loose for the confirm role; it wants re-reading against what the flag
+actually surfaces.
 
 ## Open
 
 Blocking the definition:
 
-0. **Nested short forms are sometimes deliberate.** `Kim` inside `Kimberly` reads as the substring
-   defect above, but some Sommers entries carry the short form ON PURPOSE, to weight the term rather
-   than to match a nickname. So the per-entry collapse diagnostic must be an advisory, not a fix
-   applied for the author — and whether term weighting is better served this way than by an explicit
-   weight is its own experiment, not ruled on here.
+0. **Nested short forms are sometimes deliberate** — `Kim` beside `Kimberly` to weight the term, not
+   to match a nickname — so the per-entry collapse diagnostic is an advisory, never a fix applied for
+   the author. Whether an explicit weight serves term weighting better is its own experiment.
+1. **The renderer's two thresholds.** *How clean is clean enough*: the quantity is
+   `strictClean(k) / scan(k, cs, false).total`, banded by `severityOf` at 1.0 / ⅓ for short keys;
+   whether a stem reuses those bands or earns its own is settled by running the backoff over the gold
+   families. *How short is too short*: the floor interacts with `KEY_MIN_LENGTH` (4) and probably
+   wants stating as a collision bound rather than a length bound, which folds it into the first.
 
-
-1. **The renderer's two thresholds.** The backoff picks "the longest collision-free common substring
-   of the family", and neither word in that phrase has a number yet.
-   - *How clean is clean enough.* The quantity exists: `strictClean(k) / scan(k, cs, false).total`,
-     already computed at `keyword-audit.mjs` and banded by `severityOf` at 1.0 / ⅓ for short keys.
-     The open question is whether a stem reuses those bands or earns its own, since a stem is
-     deliberately not a word and will never score 1.0 the way a short key can. Settled by running the
-     backoff over the gold families and reading the cases where it picks a stem you would reject.
-   - *How short is too short.* "scry" and "scried" share only "scr", which is unusable; `thaumaturg`
-     at nine characters is fine. The floor interacts with `KEY_MIN_LENGTH` (4) and probably should not
-     be a raw character count, since three characters of a rare coinage collide less than five of a
-     common word — so it likely wants stating as a collision bound rather than a length bound, which
-     folds it into the previous item. Same run answers both.
-
-**Closed.** *Does a drift table need to exist* — no. Table membership is the unigram cut, and every
-lexicalised plural's base noun is in `ZIPF_EN`, so the plural can only come from a seed the gate already
-killed. Coinages are unaffected. Propriolization is untouched by this and stays unhandled.
+**Closed.** A drift table does not need to exist: table membership is the unigram cut and every
+lexicalised plural's base noun is in `ZIPF_EN`, so the plural can only come from a seed the gate
+already killed. Propriolization stays unhandled.
 
 Blocking measurement:
 
-2. **Anchor provenance** for books beyond the two gold sets — and it cannot read "already approved" as
-   a decision, since provenance decays against a moving standard.
+2. **Anchor provenance** for books beyond the gold sets; "already approved" is not a decision.
 3. **LLM-as-proxy validation** — model-generated keys must clear Foxbridge and Richard before standing
-   in for human keys anywhere else. Note the ordering problem: the lexical generator's unique value
-   cannot be measured against a badly-configured LLM arm, because "lexical-only" would then mean
-   "unreached by a cheap prompt". Pool across several LLM configurations and treat the residue as a
-   lower bound, exactly as `/wa-super-grade` pools retrieval arms.
-4. **Harness priming** — see the code facts above.
+   in for human keys elsewhere. The lexical arm's unique value cannot be measured against one
+   badly-configured LLM arm, so pool across several and treat the residue as a lower bound, as
+   `/wa-super-grade` pools retrieval arms.
+4. **Harness priming** — the code fact above.
 
 Accepted as follow-on:
 
 5. **SmartKeys emission.** Portability policy is a judgement call, and the quality gates exempt `?`
-   keys entirely (`keyword-audit.mjs`), so they would enter precisely where nothing can see them.
+   keys entirely (`keyword-audit.mjs`), so they would enter where nothing can see them.
 6. **`countKey` signature change.**
-7. **`generated()` fallback** — the numbering-series heuristic in Populations. Low stakes (a checkbox
-    default), so "fairly safe" is the proportionate standard.
-8. **The surviving hypothesis**: reference entries may be reachable by lexical-statistical means on the
-    entry plus a chat backstop, while memory entries need more. Untested — and the flat probes above say
-    nothing about it either way. The Populations note cuts against it in one direction and for it in
-    another: if reference bodies overlap the chat least, the backstop supplies least exactly there — but
-    a reference entry's subject is usually sitting in its title, so the seed may not need the body at all.
-9. **Chat corpus assembly** — union a book's bound chats and dedupe shared branch prefixes. Correct for
-    every branch semantics (continuation, separate story, true fork, ephemeral repeat) without needing
-    to classify them, since only the case that would corrupt it is the detectable one.
+7. **`generated()` fallback** — the numbering-series heuristic in *Populations*. Low stakes, so
+   "fairly safe" is the proportionate standard.
+8. **The surviving hypothesis**: reference entries may be reachable by lexical-statistical means on
+   the entry plus a chat backstop, while memory entries need more. Untested. *Populations* cuts both
+   ways: reference bodies overlap the chat least, so the backstop supplies least there, but a
+   reference entry's subject usually sits in its title.
+9. **Chat corpus assembly** — union a book's bound chats and dedupe shared branch prefixes, without
+   classifying branch semantics, since only the corrupting case is the detectable one.
 
-**Waiting on the Sommers curation to finish**, because both want a labelled set and Richard is n=1:
+Wanting a labelled set beyond Richard's:
 
-10. **The collapse diagnostic.** Ship "this entry has a key matching inside other words" as an advisory
-    on the Explorer chips, per ENTRY. The rule and its evidence are in the four-classes section above;
-    what is missing is precision and recall against human judgement rather than against examples. A
-    finished Sommers gives a second curation event on a far larger book (S18), and its removed set is
-    a clean negative label — the author's own asymmetry, that presence proves nothing in a partial
-    pass but removal is a reviewed rejection. Until then, the risk is shipping a red flag calibrated on anecdote.
-    Note item 0: some nesting is deliberate, so this advises and never repairs.
-11. **Whether the pre-tick is calibrated well enough to be the default.** Not whether the tool should
-    recommend — a pre-tick IS a recommendation, and the bulk bar's "suggestions, not verified problems"
-    states its confidence rather than disowning it. The question is only whether the recommendation is
-    good enough to arrive ticked, and that moves as the heuristics are refined: `eng` stopped being
-    unconditional red once chat evidence could condition it, which takes the least-calibrated input out
-    of `defChecked` on its own.
-    The measurement is the override rate over a finished pass. High means recalibrate or drop the
-    default; low means it is earning its place and should stay — it is NOT redundant with Select all,
-    which ticks the yellow band too and so cannot reproduce a red-only selection. What the asymmetry
-    argument settles is how much calibration is enough, not whether to have a default at all: an
-    un-vetted removal is silent and self-concealing where an un-vetted retention just reappears next
-    audit, so the bar sits higher than it would for a reversible action. It governs Cleanup, the
-    secondary path, so nothing is blocked by waiting.
+10. **The collapse diagnostic.** Ship "this entry has a key matching inside other words" as a
+    per-entry advisory on the Explorer chips. Missing is precision and recall against human judgement;
+    a finished curation's removed set is a clean negative label. Advises, never repairs (item 0).
+11. **Whether the pre-tick is calibrated well enough to be the default.** A pre-tick is a
+    recommendation; the measurement is the override rate over a finished pass — high means recalibrate
+    or drop the default, low means it stays (it is not redundant with Select all, which ticks the
+    yellow band too). The bar sits higher than for a reversible action, because an un-vetted removal is
+    silent where an un-vetted retention reappears next audit. Governs Cleanup, so nothing is blocked.
 
-Retired, recorded so they are not re-derived:
-
-- **Key-set overlap as the score.** Superseded by the behavioural standard — for each curated key, does
-  the produced keyset fire where it fires.
-- **`J(entry, window)` and its apparatus** — scan windows, want-sets, pooling, an identifiability flag.
-  All ranker-side; relevance of an entry to a window was never this system's question.
-- **Span masking** — not replaced; the problem it solved does not arise under a count test.
-- **Embedding drift detection** — reads surface overlap rather than meaning.
-- **Breadth by co-occurrence** — the Zipf gate is the proxy instead.
+Retired, recorded so they are not re-derived: **key-set overlap as the score** (superseded by the
+behavioural standard); **`J(entry, window)` and its apparatus** (ranker-side); **span masking** (not
+replaced; the problem does not arise under a count test); **embedding drift detection** (reads
+surface overlap rather than meaning, S15); **hypernymy by co-occurrence** (the Zipf gate is the proxy).
 
 ## Related
 
 `.claude/agents/entry-vocabulary.md` is a first attempt at the LLM half, committed as a revert point
-rather than a settled design — it is over-engineered for the task, and its entry-kind
-branch prose predates the scope boundary above. Its texture/skip machinery is superseded by "an entry
-with neither axis yields few or no seeds", and it should shrink to the referring-expression question,
-an instruction to emit base forms, the no-frequency-judgement rule, and the output shape. Ask the model
-for terms and let the expander dedupe redundant forms mechanically, rather than asking it to reason
-about which forms English morphology will already reach — that is the instruction a small model will
-half-follow.
+rather than a settled design; its entry-kind prose predates the scope boundary and its texture/skip
+machinery is superseded by "an entry with neither axis yields few or no seeds". It should shrink to
+the referring-expression question, an instruction to emit base forms, the no-frequency-judgement
+rule, and the output shape — ask the model for terms and let the expander dedupe forms mechanically.
