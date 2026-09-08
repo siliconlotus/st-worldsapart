@@ -2045,6 +2045,39 @@ export async function lorebookStudio(preferredBook = null) {
     // `scan` here; it is still offered, and still stored, because it is the setting the Lab is standing in for.
     let labWindow = settings().matchWindow;
 
+    /** The rows and the colour they share with the marks, from whatever the panes hold now. */
+    const scanLab = () => {
+        const keys = splitKeys(labKeys);
+        const ink = (key, a) => labInk(Math.max(0, keys.indexOf(key)), a);
+        const rows = keyHits(keys, labHay, labCase, labWhole, { context: 30, matchWindow: labWindow });
+        // A hit row takes the colour of the key it sits under, which is the last row that named one.
+        for (let i = 0, parent = ''; i < rows.length; i++) {
+            if (!rows[i].key.startsWith('\u21b3')) parent = rows[i].key;
+            rows[i].color = ink(parent);
+        }
+        return { keys, ink, rows };
+    };
+
+    /** The haystack at full width with every match marked, and the digest under it. The tab keeps only the digest: the
+     *  marked text needs the room, and the pane above it already shows the same characters unmarked. */
+    const showMarkedText = () => {
+        const { keys, ink, rows } = scanLab();
+        const wrap = document.createElement('div');
+        wrap.style.cssText = 'text-align:left;width:100%;';
+        const body = document.createElement('div');
+        body.style.cssText = 'white-space:pre-wrap;line-height:1.6;max-height:55vh;overflow:auto;font-size:0.95em;';
+        body.innerHTML = markedHtml(labHay, keySpans(keys, labHay, labCase, labWhole, { matchWindow: labWindow }), ink)
+            || '<span style="opacity:0.6;">(no text)</span>';
+        const digest = document.createElement('div');
+        digest.style.cssText = 'margin-top:10px;padding-top:8px;border-top:1px solid color-mix(in srgb, currentColor 15%, transparent);max-height:25vh;overflow:auto;';
+        digest.innerHTML = keyHitsHtml(rows);
+        wrap.append(body, digest);
+        const vp = new Popup(wrap, POPUP_TYPE.TEXT, '', { large: true, allowVerticalScrolling: true });
+        vp.dlg.style.setProperty('width', 'calc(var(--sheldWidth, 90vw) * 0.7)', 'important');
+        vp.dlg.style.setProperty('max-width', 'calc(100dvw - 2em)', 'important');
+        vp.show();
+    };
+
     const renderLabView = pane => {
         const panes = document.createElement('div');
         panes.style.cssText = 'display:flex;gap:6px;padding:8px 8px 0;flex:0 0 auto;height:45%;min-height:180px;';
@@ -2083,27 +2116,21 @@ export async function lorebookStudio(preferredBook = null) {
         }
         win.addEventListener('change', () => { labWindow = win.value; repaint(); });
         winLabel.append(document.createTextNode('Match window'), win);
-        opts.append(winLabel);
-        const marked = document.createElement('div');
-        marked.style.cssText = 'flex:1 1 auto;overflow:auto;padding:6px 8px;min-height:0;white-space:pre-wrap;line-height:1.5;';
+        const pop = document.createElement('i');
+        pop.className = 'fa-solid fa-expand'; pop.title = 'Show the text with every match marked';
+        pop.style.cssText = 'cursor:pointer;margin-left:auto;padding:2px 4px;opacity:0.7;';
+        pop.addEventListener('click', () => showMarkedText());
+        opts.append(winLabel, pop);
         const out = document.createElement('div');
-        out.style.cssText = 'flex:0 0 auto;max-height:40%;overflow:auto;padding:0 8px 8px;';
+        out.style.cssText = 'flex:1 1 auto;overflow:auto;padding:0 8px 8px;min-height:0;';
         const repaint = () => {
-            const keys = splitKeys(labKeys);
-            const ink = (key, a) => labInk(Math.max(0, keys.indexOf(key)), a);
-            const rows = keyHits(keys, labHay, labCase, labWhole, { context: 30, matchWindow: labWindow });
-            // A hit row takes the colour of the key it sits under, which is the last row that named one.
-            for (let i = 0, parent = ''; i < rows.length; i++) {
-                if (!rows[i].key.startsWith('\u21b3')) parent = rows[i].key;
-                rows[i].color = ink(parent);
-            }
+            const { rows } = scanLab();
             out.innerHTML = rows.length
                 ? keyHitsHtml(rows)
                 : '<div style="opacity:0.6;padding:6px 0;">Keys you type on the right are matched against the text on the left.</div>';
-            marked.innerHTML = markedHtml(labHay, keySpans(keys, labHay, labCase, labWhole, { matchWindow: labWindow }), ink);
         };
         repaint();
-        pane.append(panes, opts, marked, out);
+        pane.append(panes, opts, out);
     };
 
     const TABS = [['explorer', 'Explorer'], ['cleanup', 'Cleanup'], ['lab', 'Keyword Lab']];
