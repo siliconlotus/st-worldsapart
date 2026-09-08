@@ -1,61 +1,35 @@
 # Graded bundle schema, v3
 
-A bundle holds **one or more graded scenes**: for each, a span of chat, the entries that were candidates
+A bundle holds one or more graded scenes: for each, a span of chat, the entries that were candidates
 for it, and every verdict anyone has passed on those entries — plus the chat text and the books, shared
-across the whole document. It is self-contained: a reader needs nothing else on disk to interpret it.
-
-**One scene is a one-element `scenes` list.** There is no single-scene shape, so a reader that handles the
-list handles everything and a writer never chooses between two layouts.
-
-`schemaVersion: 3`. One version exists and nothing on disk predates it; there is no compatibility to carry.
+across the whole document. A reader needs nothing else on disk to interpret it. One scene is a
+one-element `scenes` list; there is no single-scene shape. `schemaVersion: 3`, and nothing on disk
+predates it.
 
 ## The bundle presents the record. It does not resolve it.
 
-Every verdict ever passed is in the file, in the order it was passed. **No field holds a reduced value** —
+Every verdict ever passed is in the file, in the order it was passed. No field holds a reduced value —
 no grade in force, no resolved scalar, no note of how a disagreement was settled, and no bundle-level
-label standing in for a row's own. Which verdict counts is the reader's question (`metrics.mjs`), and two
-readers may answer it differently without either being wrong about what the file says.
-
-A reduced value stored beside the record is indistinguishable from a verdict someone gave.
+label standing in for a row's own. Which verdict counts is the reader's question (`metrics.mjs`).
 
 ## Identity is `book` + `uid`, as two fields
 
-`uid` is unique within a book and nowhere else, and a scene routinely draws on more than one book. The two
-are never joined into one string in the file: lorebook names are filenames, and **measured** (G8) they
-already contain spaces, commas, apostrophes, parentheses, `#` and `@` — so no printable
-separator is safe. Code needing a single key joins them in memory with US (`\x1f`), as the rest of the
-codebase does.
+`uid` is unique within a book and nowhere else. The two are never joined into one string in the file:
+lorebook names are filenames and already contain every printable separator (G8). Code needing a single
+key joins them in memory with US (`\x1f`).
 
 ## A scene's id is composed, not opaque
 
-`<normalized chat>-msg-<end>` — `sommers_example-msg-1044`. The MOMENT, not the span. Normalized is the
-chat's basename without extension, with every run of anything outside `[A-Za-z0-9_]` collapsed to `-`;
-that is also what makes the id safe to compose at all, since chat names are filenames.
+`<normalized chat>-msg-<end>` — `sommers_example-msg-1044`: the moment, not the span. Normalized is the
+chat's basename without extension, every run outside `[A-Za-z0-9_]` collapsed to `-`. It keys
+`sceneChats`, `sceneInjects` and every arm's `scenes` map. A different depth over the same moment is
+the same scene, so `sceneStart` and `depth` sit on the arm's cell, not in the id; one capture has one
+haystack, so arms at different depths belong in separate documents. Message indices are chat file
+record indices — the jsonl's own line numbers, header at 0 — and `sceneStart` is read off the window,
+which drops empty and hidden messages, not computed as `end - depth + 1`.
 
-Composing it means a reader reasons from the id alone, and that it can be checked against the fields it
-was built from — a cheap guard against a mis-extracted scene. It is the key into `sceneChats`,
-`sceneInjects` and every arm's `scenes` map, and the handle anything outside the document refers to a
-scene by.
-
-**A different depth over the same moment is the SAME scene**, read more or less widely.
-`graded-scene-grid`'s depth sweep holds the grades fixed while it varies the window, because widening
-reaches further back from one graded moment rather than moving to another. So `sceneStart` and `depth`
-belong to the arm's capture of the scene, not to the scene — which is why neither is in the id.
-
-**One capture has one haystack.** `sceneChats` is hoisted per scene, so arms reading different windows
-would silently share the first one's, and every count taken over it. A writer refuses to pack those as one
-capture; until the haystack is stored per cell, arms at different depths belong in separate documents.
-
-**Message indices are CHAT FILE RECORD indices**, the jsonl's own line numbers, header included at 0. The
-alternative is ST's in-memory chat array, which is the same list minus that header — off by one, and a
-runtime object rather than the artifact `sceneChat` names. The arm's `sceneStart` is read off the window
-rather than computed as `end - depth + 1`: the window drops empty and hidden messages, so the two differ
-exactly when a scene contains any.
-
-**A SCENE ID IS NOT UNIQUE, and `captureId` is.** Two captures of one turn under different books share a
-scene id and a `name` — the corpus holds such a pair, and its only distinguishing mark was its filename.
-`captureId` is minted per capture, survives a rename, and is what a pointer between artifacts should
-carry.
+A scene id is not unique; `captureId` is. Two captures of one turn under different books share a scene
+id and a `name`; `captureId` survives a rename and is what a pointer between artifacts carries.
 
 ## Shape
 
@@ -179,112 +153,53 @@ carry.
 
 ## Field order is part of the schema
 
-`candidateWhy`, `sceneChats`, `sceneInjects` and `books` go LAST, in that order, and every writer emits
-them so — books last, being the largest by a wide margin. `bookHashes` sits just AHEAD of them: it
-describes the bulk but is two lines, and putting it in front is what makes "same book?" answerable with
-`head`. They are almost all of a bundle's bytes, so anything ahead of them is reachable with `head` —
-every scene, every param, every grade — and anything behind them is not.
+`candidateWhy`, `sceneChats`, `sceneInjects` and `books` go last, in that order, with `bookHashes` just
+ahead of them, so everything else — every scene, param and grade, and "same book?" — is reachable with
+`head`. `why` lives in `candidateWhy`, keyed arm -> scene and aligned by position with the cell's
+`candidates`, because matched-key excerpts are the heaviest thing after the books (G8); `openBundle`
+re-attaches it, so a reader still says `c.why`. Haystacks are hoisted off their scenes for the same
+reason.
 
-**`why` is in that block rather than on the candidate it describes.** A row's matched-key excerpts are the
-heaviest thing in a bundle after the books themselves, many times the weight of every scene field and
-verdict combined (G8), so inline they put the bulk ahead of everything the order exists to keep reachable.
-`candidateWhy` is keyed arm -> scene and aligned by POSITION with that cell's `candidates`; `openBundle`
-re-attaches it, so a reader still says `c.why` and nothing downstream knows where it was stored.
-
-**`sceneSources` carries only what an entry opted into.** There are eight things that can enter a
-haystack: five character-card fields and the persona description, each gated by a per-entry `matchXxx`
-flag, plus the chat and character Author's Notes, which ST merges into one injection and gates globally on
-`note.allowWIScan`. The Author's Notes need nothing here — they arrive as injects like any other
-scan-enabled extension prompt. The other six are `scanSources()`, and a capture keeps only the fields some
-entry actually names (`matcher.usedMatchSources`), because a source no entry names determined nothing and
-these are the most personal text a shareable document could carry. Absent when no entry opts in.
-
-Two of them have a second route, which is why the flag is not the only thing to look at: the persona
-description is spliced INTO the Author's Note when its position is `TOP_AN`/`BOTTOM_AN`, and the character
-depth prompt is injected separately under `allowWIScan` for every entry rather than only those opting in.
-Both then arrive as injects, and both are captured that way.
-
-**An absent `sceneInjects` means no injects.** **Measured** (G8): every haystack on disk ends at its own
-last chat message, so none has inject text folded into it — the only scan-enabled prompt on the
-capturing install was the built-in summarizer, which carries `scan: true` by default but had no value, and
-an empty prompt is never pushed.
-
-**This is why the haystacks are hoisted rather than kept on their scenes.** A `sceneText` inside each
-scene puts the bulk between scene 1 and scene 2, so a fifteen-scene bundle is unskimmable no matter what
-order a scene's own fields are in.
+`sceneSources` carries only what an entry opted into: the six `scanSources()` fields — five
+character-card fields and the persona description — each gated by a per-entry `matchXxx` flag, kept
+only when some entry names them (`matcher.usedMatchSources`). The Author's Notes (`note.allowWIScan`),
+the persona description at `TOP_AN`/`BOTTOM_AN` and the character depth prompt under `allowWIScan`
+arrive as injects, in `sceneInjects`; absent `sceneInjects` means no injects (G8).
 
 ## Candidate order is the layout order
 
-`arms[].candidates` is written in the order the arm laid the entries out, and that is load-bearing rather
-than incidental. Every stage-5 cap is a prefix cut, so a reader can replay the budget walk over the array
-as it stands — take entries until a cap or the token budget is spent — and see exactly what would have
-shipped under a different budget without re-running retrieval.
+`arms[].candidates` is written in the order the arm laid the entries out. Every stage-5 cap is a prefix
+cut, so a reader replays the budget walk over the array as it stands; `tokens` on each candidate is
+what makes that possible, and `index` is the witness a reordered file fails. `budget` is therefore
+document-level — stage 5's caps and `tokenizer`, the name the counts were produced under — because a
+budget arm is swept offline through `delivery.mjs` `applyBudget` and no arm carries a variant (G8).
+`tokenizer` is ST's `getTokenizerModel()`, an environment fact, so it sits beside `embedModel` rather
+than in `paramSnapshot`, which is per-arm and does vary (G8).
 
-That is what `tokens` on each candidate is for: without it the walk cannot be simulated at all, only
-described, and re-tokenizing offline gives a different answer than the tokenizer that made the decision.
+Required fields are written by every capture and their absence is a defect. Emitted only when they have
+a value: `waVersion` and `stVersion` (`waVersion` is empty with no server plugin), `book`,
+`gradedCandidates`, `gradeScale`, `paramSnapshot`, `candidateWhy`, `invalidConfiguration`, and the
+`query`/`queryChat` pair, on the scene or the cell but never both. Every bundle on disk is structurally
+clean (G8).
 
-**`budget` is DOCUMENT-LEVEL, and that is a consequence of the above.** It holds stage 5's caps — the entry
-maxes, the token budget, the slack mode — and `tokenizer`, the name those per-candidate counts were produced
-under. No arm carries a variant, because none is ever captured: a budget arm is a prefix cut over a layout
-ranking that is already recorded, so it is swept OFFLINE through `delivery.mjs` `applyBudget` instead of
-costing a capture. `tokenizer` could not vary in any case — it is ST's `getTokenizerModel()`, an environment
-fact WA does not set, which is why it sits beside `embedModel` rather than inside `paramSnapshot`. **Measured**
-(G8): no multi-arm document on disk varies any field of it.
-
-**REQUIRED VERSUS EMITTED-WHEN-PRESENT.** A structural field is one of two things, and the difference is
-what makes conformance checkable at all. REQUIRED fields are written by every capture and their absence is a
-defect. The rest are emitted only when they have a value, and their absence is silence rather than damage —
-`waVersion` and `stVersion` (older captures recorded neither, and `waVersion` is empty with no server
-plugin), `book` and `gradedCandidates`, `gradeScale`, `paramSnapshot`, `candidateWhy`, `invalidConfiguration`
-— which by construction appears only on a configuration that is not real — and the `query`/`queryChat` pair,
-which sits on the scene or on the cell but never on both. **Measured** (G8): every bundle on disk is structurally clean, and every
-remaining gap is an optional field an older capture never had. None of that is recoverable and none of it
-is a defect.
-
-**SOME OBJECTS HERE ARE OPEN MAPS AND ARE MEANT TO GROW.** `candidates[].scores`, `params`,
-`paramSnapshot.settings`, `books`, `bookHashes` and the `scene*` maps are keyed by whatever the capturing
-version computed or attached, so a key this file does not list is expected rather than a drift. Every
-STRUCTURAL field — the document, scene, arm and cell keys — is closed and listed: one absent from here is a
-writer this document has not caught up with, and that is the failure this section exists to make visible.
-
-`paramSnapshot` stays per-arm and does vary — `scoring`, `matchText`, `vectors` and `nonDefaults` all
-genuinely differ between arms in captures on disk (G8). It is the settings the arm ran under; `budget` is
-what the whole capture was budgeted by.
-
-A writer that sorts candidates by anything else produces a valid bundle that silently answers budget
-questions wrongly, and array order is the only record of layout — so `index` restates it as the one
-witness a reader can check the order against. Without it a reordered file is undetectable.
-
-`scores.length` is `log(tokens)` and so derivable from the `tokens` beside it. It is kept for the same
-reason: the two should always agree, and the capture where they do not is the one worth knowing about.
+`candidates[].scores`, `params`, `paramSnapshot.settings`, `books`, `bookHashes` and the `scene*` maps
+are open maps keyed by whatever the capturing version computed, so an unlisted key is expected. Every
+structural field — document, scene, arm and cell keys — is closed and listed here. `scores.length` is
+`log(tokens)`; it is kept so the capture where the two disagree can be found.
 
 ## `scores` is a capture record, not a schema
 
-Its keys are whatever the capturing version computed, named as the model names them — `relevance-model-memory.json`
-lists `features`, and those strings index into `scores` directly. That is why the scores are a nested
-object rather than `cosineScore`, `textScore` and so on: a reader looks up a literal feature name instead
-of composing a key, and a feature that arrives or leaves changes nothing structural.
-
-The same holds for `arms[].params`. A fixed list would have to be revised for every new knob, and a
-bundle written before the revision would read as malformed rather than as older.
-
-A reader that needs a score it cannot find has met an older capture, not a broken file — which is what
-`waVersion` and `stVersion` on the arm are for.
-
-**Both are RESOLVED, never declared.** `waVersion` is `<branch>@<git describe --tags --always --dirty>`
-over the extension directory, which the browser cannot compute — it comes off the server plugin's `/ping`,
-the extension supplying its own `third-party/<name>` folder since that name varies per clone. With no
-plugin the field is empty rather than falling back to `manifest.json`: a manifest names the next release,
-and only a tag makes a version a fact about a commit, so a capture naming no version reads as unknown
-where one naming the wrong version reads as a fact. `sourceFP` is the stronger drift signal for WA anyway,
-being a hash of the code rather than a name for it. `stVersion` comes from ST's own `/version`
-(`<branch>@<short HEAD>`, no tags and no dirty flag) — the thinner form of the same convention, not a
-different one.
+Its keys are whatever the capturing version computed, named as the model names them —
+`relevance-model-memory.json` lists `features`, and those strings index into `scores` directly; the same
+holds for `arms[].params`. A score a reader cannot find means an older capture, which is what
+`waVersion` and `stVersion` on the arm are for. Only measured signal values go in it: a rank and the
+fused `score` are an arm's own and sit flat on the candidate with `index`, `tokens` and the
+classification fields.
 
 ## A row's block
 
-`block` is the activation class the runtime put the row in, and it is the only categorical field on a
-candidate. Four values, and the distinction that matters to a reader is DURABLE versus not:
+`block` is the activation class the runtime put the row in, and the only categorical field on a
+candidate. The distinction that matters to a reader is durable versus not:
 
 | block | in the prompt because | graded |
 |---|---|---|
@@ -293,46 +208,26 @@ candidate. Four values, and the distinction that matters to a reader is DURABLE 
 | `promoted` | it activated and the author declared that sufficient (`@@promote`) | yes |
 | `dynamic` | it activated and relevance selected it | yes |
 
-**`isDurable` (`extension/grading.mjs`) is the predicate, and it is `constant || sticky`.** The two
-durable classes are in the prompt by intent rather than because ranking chose them, so grading them
-would put an authoring call into a ranker metric — they are listed and not graded. The other two are
-this turn's activations and both are graded: a promoted row is exempt from the relevance CUT, not from
-being judged, and that exemption is precisely what a grade on it measures. Anything asking "is this
-row gradeable" reads `!isDurable(row)`; testing `block === 'dynamic'` drops promoted rows out of the
-pool.
-
-**A row with `sticky` CONFIGURED that fired this turn reads `dynamic`**, the effect not yet being armed.
-`block` is the runtime state, `sticky` the authored value, and they answer different questions.
-
-**Only measured SIGNAL VALUES go in it.** A rank is a position within one arm's ordering and the fused
-`score` is that arm's own composite, so neither is a feature and neither is something a model indexes by
-name; they sit flat on the candidate with `index`, `tokens` and the classification fields. The test is
-whether a feature list could legitimately name it.
+`isDurable` (`extension/grading.mjs`) is `constant || sticky`: durable rows are in the prompt by intent,
+so they are listed and not graded; a promoted row is exempt from the relevance cut, not from being
+judged. Anything asking "is this row gradeable" reads `!isDurable(row)`; testing `block === 'dynamic'`
+drops promoted rows out of the pool. A row with `sticky` configured that fired this turn reads
+`dynamic`: `block` is the runtime state, `sticky` the authored value.
 
 ## Every stored path is relative to the ST install
 
 `chat`, `sceneChat`, `index`, `book` and `generatedFrom.chat` are written from the install root down —
-`data/default-user/chats/…`, `public/scripts/extensions/…` — never absolute. `grading.mjs` `stRelative`
-cuts at the FIRST of ST's own top-level directories, which is how the browser produces one without knowing
-where the root is; first rather than last, because a chat folder may itself be named `data`.
-
-**An absolute path is machine identity and nothing else.** No reader can use one — `eval/scene.mjs` skips a
-stored `index` that does not exist locally and derives its own, which is the normal case for a scene
-somebody else captured — while it does carry the author's OS username, in a document meant to be shared.
-**Measured** before the rule existed (G8): nearly every document on disk held one, across more than one
-username.
-
-The reader half already assumed this. `stInstall().resolve` maps a `data/` prefix through the install's own
-`config.yaml` `dataRoot` and anything else through the root, and returns an absolute path untouched — which
-is exactly how absolutes went on working on the machine that wrote them while defeating the design
-everywhere else.
-
-A path naming no ST directory is stored unchanged rather than guessed at.
+`data/default-user/chats/…`, `public/scripts/extensions/…` — never absolute, which is machine identity
+carrying the author's OS username. `grading.mjs` `stRelative` cuts at the first of ST's top-level
+directories, first because a chat folder may itself be named `data`; a path naming none is stored
+unchanged. `stInstall().resolve` maps a `data/` prefix through `config.yaml` `dataRoot` and anything
+else through the root; `eval/scene.mjs` skips a stored `index` that does not exist locally and derives
+its own.
 
 ## The version fields record what was resolved, not what was declared
 
-Both are `<branch>@<git describe --tags --always --dirty='+dirty'>`, and the two projects use the one rule
-because a reader comparing captures should not have to know which field follows which convention.
+Both are `<branch>@<git describe --tags --always --dirty='+dirty'>`, one rule for both projects, on the
+arm because arms of one scene are captured at different times.
 
 ```
 main@0.2.0                    on a tag: the identity IS the version
@@ -341,60 +236,32 @@ main@0.2.0-1-g6cbcecf         past the tag: version, distance, commit
 matcher-and-studio@7cd7496    no tags reachable: the commit alone
 ```
 
-**The branch is not decoration.** ST's declared version only advances on pushes to `main`, so a staging
-checkout reports a number with nothing to do with the tree that ran — this one's `package.json` says
-`1.18.0` while its tree sits far past `1.17.0` (G8). `staging` and `release` are different software, and
-the branch is what says which.
-
-**On `main` the identity is always exactly a version**, because a release is one squashed commit carrying
-one tag. The distance form therefore only appears off main, and a capture from a release can be read as a
-version string with nothing parsed off it.
-
-**A declared version is never read.** `manifest.json` and `package.json` say what the next release will be
-called, not what ran; only a tag makes a version a fact about a commit. A capture on an untagged commit
-records the commit, which is honest — and the version bump that has no tag behind it is a thing to catch
-at push time, not to paper over here.
-
-**A `+dirty` suffix means the tree had uncommitted changes.** Neither a version nor a commit identifies
-uncommitted code, so without it a capture from a working tree is indistinguishable from one made at that
-commit, and the suffix is what says the capture cannot be reproduced from the version alone. It is
-deliberately not a description of what differed: a diff would not survive in a field anyone reads, and
-knowing the run is unreproducible is the whole of what a reader can act on.
-
-`+dirty` is SemVer BUILD METADATA, which annotates a version without changing its precedence — `0.2.0+dirty`
-compares equal to `0.2.0`, which is what a dirty tree is. Git's own default marker is `-dirty`, and that
-would be a SemVer PRE-RELEASE sorting BELOW `0.2.0` — backwards, since a dirty tree is that version plus
-changes rather than a candidate for it.
-
-A suffix rather than a prefix so that a series filter like `0.2.*` INCLUDES dirty captures. Excluding them
-should be an explicit act — a filter that silently drops the unreproducible rows is how an analysis loses
-data without anyone seeing it happen.
-
-They sit on the ARM rather than the bundle: arms of one scene are captured at different times, and a
-re-capture months later is the case where the version matters most.
+The branch says which software ran: ST's declared version only advances on pushes to `main`, so a
+staging `package.json` names a release its tree is not (G8); on `main` a release is one squashed commit
+carrying one tag, so the identity is exactly a version. `manifest.json` and `package.json` are never
+read — only a tag makes a version a fact about a commit. `waVersion` comes off the server plugin's
+`/ping` and is empty without one (`sourceFP`, a hash of the code, is the stronger drift signal);
+`stVersion` comes from ST's `/version` (`<branch>@<short HEAD>`, no tags, no dirty flag). `+dirty`
+means uncommitted changes, so the capture cannot be reproduced from the version alone; it is SemVer
+build metadata, equal to `0.2.0` rather than sorting below it as git's `-dirty` would, and a suffix so
+that a `0.2.*` filter includes dirty captures and excluding them is an explicit act.
 
 ## `invalidConfiguration` marks a capture that is not a real configuration
 
-A control — a wrong-book capture, a deliberately broken parameter — looks exactly like a real scene, and
-pooled with real ones it is scored as if someone meant it. The field carries the REASON rather than a
-bare `true`, because "this is not valid" without saying why is a fact nobody can act on:
+A control — a wrong-book capture, a deliberately broken parameter — looks exactly like a real scene. The
+field carries the reason, never a bare `true`:
 
 ```jsonc
 "invalidConfiguration": "wrong-book control: primaryBook set to an unrelated book, to measure the floor"
 ```
 
-Absent means valid. Nothing infers it — `-null-book` in a filename is a note to the author and no
-guarantee, and a renamed file loses it.
-
-**It does not make the capture unreadable.** A control exists to be looked at; grids print it and carry
-on. What it must never do is enter a pooled set silently, which is the whole reason it is on the document
-rather than in the name.
+Absent means valid; nothing infers it from a filename. Grids print a control and carry on; what it must
+never do is enter a pooled set silently.
 
 ## An entry absent from `entries` is ungraded
 
 `arms[].candidates` is what an arm surfaced; `entries` is what carries verdicts. A candidate with no row
-in `entries` simply has not been scored — not an inconsistency, and not something a writer should
-manufacture an empty row for.
+in `entries` has not been scored, and a writer does not manufacture an empty row for it.
 
 ## Verdict elements
 
@@ -421,52 +288,23 @@ manufacture an empty row for.
 }
 ```
 
-`rater` is an index; nothing else on the element says who passed it, because the table is where an identity
-is spelled out.
+`rater` is an index into `raters[]`; nothing else on the element says who passed it. `params` is what a
+pass ran under, never who ran it, and is not normalised across backends: `think: true` and `effort:
+high` are different facts, and a model with no thinking capability records no `think`. Why a pass ran is
+not who ran it either: an adjudication verdict is another verdict, and its position says so.
 
-**`params` is what a pass RAN under, never who ran it**, and it is not normalised across backends: it
-exists so a pass can be reproduced, and `reasoning: high` cannot say whether to send `think: true` or
-`effort: high`. Those are different facts — a capability declined against a level — so a cross-backend
-reading belongs beside `gradeValue`, with the other reader-side questions.
+No verdict is ever overwritten; a re-grade appends beside the verdict it disagrees with. The single
+exemption is a repeated pass, so re-running a merge is idempotent: a pass is rater + `gradedAt`
+(`passKey` in `extension/grading.mjs`). `params` is not in it — two verdicts on a row always came from
+two dispatches and already differ in their stamp.
 
-Absence is legible. A model with no thinking capability records no `think`, which is a different fact from
-one that has it and declined; a positional id would collapse unsupported, unset and unrecorded into one
-empty string, which is why the knobs are here and not there.
-
-**Why a pass ran is not who ran it.** An adjudication verdict is another verdict, and its position in the
-array already says so; nothing records the reason, and it is never a suffix on the rater's name.
-
-**NOTHING IS EVER OVERWRITTEN.** A re-grade appends beside the verdict it disagrees with, whoever gave
-either — that comparison is the only thing that says whether a rater or a rubric moved, and a
-last-writer-wins merge deletes it.
-
-The single exemption is a repeated PASS, so that re-running a merge is idempotent. A pass is
-**rater + `gradedAt`** (`passKey` in `extension/grading.mjs`) — who, and when to the millisecond.
-
-`params` is deliberately NOT in it. Dedup runs over one entry's verdicts and a pass grades each row
-exactly once, so two verdicts on a row always came from two dispatches and already differ in their stamp;
-keying on params would only make identity depend on how completely a writer recorded the knobs, so
-recording one more later would stop an old verdict matching its own re-merge.
-
-**Every `…At` field is `toISOString()` — UTC, `Z`, milliseconds, and the SAME precision throughout.**
-`createdAt`, `gradedAt`, `reviewedAt`, `graftedAt` and `frozenAt` all record an instant; a reader wanting a
-day slices one. Truncating at write time is the same error as freezing a joined haystack — it discards
-what cannot be recovered to save a step that costs nothing. It also had a live consequence: a document's
-`createdAt` stamps the human verdicts captured with it, so a day-granularity `createdAt` made two
-`/wa-grade` sessions in one day one pass.
-
-Not merely "ISO 8601": a local-offset spelling like `2026-08-21T15:03:02.481+01:00` breaks both of the
-properties the format is chosen for. Sorting stamps as STRINGS gives chronological order, and slicing one
-gives a bucket at any precision — `.slice(0,4)` year, `,7)` month, `,10)` day, `,13)` hour. Mixed
-precision is safe: a day-only stamp from a migrated capture sorts before any time on that day and slices
-identically. Unix milliseconds would separate two sequential passes just as well and lose both.
-
-**`gradedAt` is named for the moment rather than the calendar**, because four writers read a field called
-`gradeDate` and truncated it to one. A second pass over the same rows on the same day is the adjudication
-case — and a hosted rater has no `params` at all, so the stamp is the whole of what separates
-two of them. At day granularity that second pass reads as the first merged twice and is dropped. It
-records when the PASS RAN, taken from the result itself or from when the result file was written; merge
-time is a last resort and cannot separate two passes filed in one invocation.
+Every `…At` field is `toISOString()` — UTC, `Z`, milliseconds — `createdAt`, `gradedAt`, `reviewedAt`,
+`graftedAt` and `frozenAt` alike; a reader wanting a day slices one, which a local-offset spelling would
+break along with string-sort chronology. `gradedAt` is when the pass ran, from the result or the result
+file's write time; merge time is a last resort that cannot separate two passes filed in one invocation.
+The stamp is all that separates two passes by a hosted rater, which has no `params`, and a document's
+`createdAt` stamps the human verdicts captured with it, so its precision separates two `/wa-grade`
+sessions in one day.
 
 ## A rater is whoever passed a verdict
 
@@ -491,60 +329,33 @@ time is a last resort and cannot separate two passes filed in one invocation.
 | `modelId` | the backend's manifest digest where it has one, else the invoked name | empty |
 | `rubric` | the contract graded under — `scene-relevance@8460b922`, resolvable in `eval/contracts/` | a named pass, or empty |
 
-**Where a version cannot be named, name the pass by what IS known** — never by what is not. A pass whose
-instructions were never an artifact still has an identity, and a hole named `unknown` folds the next such
-pass into the same rater.
+Name a pass by what is known, never by what is not: a hole named `unknown` folds the next such pass into
+the same rater. The corpus holds rater rows named `scene-relevance@fable-inline-1`, graded before any
+rubric was a file (G8); the name does not resolve in `eval/contracts/` and must not.
 
-**Measured** (G8): the corpus holds rater rows named `scene-relevance@fable-inline-1` — a round graded
-inline by claude-fable-5 before any rubric was a file. The lineage is real: `scene-relevance.md` was
-recovered from that session. Such a name does not resolve in `eval/contracts/` and must not.
+Only Ollama surfaces a digest (`/api/tags`), with `/api/show` giving `details.family`,
+`.quantization_level`, `.parameter_size` and `capabilities` — the last is what lets an absent `think`
+mean unsupported rather than unrecorded. oMLX's `/v1/models` gives only the repo id's tail, without the
+org, and the local models span several publishing accounts (G8); `~/.omlx/models/` is `<org>/<name>`
+for anything oMLX downloaded, so the org is resolvable, and nothing reads it yet. Nothing is parsed out
+of a name; `config.json` `architectures` is `family` resolved. A hosted model has none of it.
 
-Only Ollama surfaces one. `/api/tags` gives `digest` (sha256, 64 hex) and `/api/show` gives
-`details.family`, `.quantization_level`, `.parameter_size` and `capabilities` — the last being what makes an
-absent `think` mean "unsupported" rather than "unrecorded".
+Three facts the block cannot carry:
 
-**oMLX's API surfaces neither the digest nor the org.** Its OpenAI-shaped `/v1/models` carries `id`,
-`created`, `owned_by` and `max_model_len` and nothing else, with no per-model route, and the `id` is the
-repo id's TAIL — its own UI shows `mlx-community/gemma-4-31B-it-qat-mxfp4` and hands over the bare name.
-The org is not decoration: **measured** (G8), the local models span several publishing accounts, so two
-publishing one tail would record as one rater.
-
-Its STORE has it, though. `~/.omlx/models/` is `<org>/<name>` for anything oMLX downloaded and flat for a
-model copied in from elsewhere — so the org is resolvable rather than guessable, at the cost of reading
-the filesystem beside the API. Nothing reads this yet.
-
-Names often encode size and quantisation (`gemma-4-31B-it-MLX-8bit`), and parsing that IS guessing, so
-those fields stay absent — but a local model's `config.json` names its `architectures`, which is `family`
-resolved rather than parsed. A hosted model has none of any of it.
-
-Three facts the block above cannot carry:
-
-- **US, not a printable separator.** **Measured** (G8): every Ollama model name carries a `:`, an MLX
-  model's identity is an HF repo id carrying a `/`, and `@` already appears inside a rubric.
+- US, not a printable separator: every Ollama name carries `:`, an HF repo id `/`, and a rubric `@` (G8).
   `raterKey`/`raterParts` in `extension/grading.mjs` are the only join and split.
-- **A digest, because a name is not an identity.** `bge-m3:latest` is whatever was pulled most recently,
-  so two captures months apart record one string for different weights.
-- **Weights and contract only.** Knobs live on the verdict: the same weights under the same rubric sampled
-  twice is ONE rater giving two verdicts, which is how a third vote for a median is reached.
+- A digest, because a name is not an identity: `bge-m3:latest` is whatever was pulled most recently.
+- Weights and contract only; knobs live on the verdict. The same weights under the same rubric sampled
+  twice is one rater giving two verdicts.
 
 ## One `grades` array, in the order passed
 
-Not one array per kind. The file promises every verdict "in the order it was passed", and two arrays
-cannot express that ACROSS kinds — a human grading, an llm re-grading under a corrected rubric, then the
-human revising is exactly the sequence the review flow produces, and split arrays record it as two
-unrelated orders.
-
-Provenance is not lost by merging them: it moves from which array a verdict sits in to which rater it
-names, which is structural either way. The collapse the split guarded against was one FIELD holding both
-kinds at one value with nothing saying which; nothing here can be written without naming a rater.
-
-**A verdict names its rater by INDEX**, and the table says who that is. Spelled out per verdict these are
-the same handful of strings repeated tens of thousands of times — **measured** (G8) — and unreadable by
-eye, which is most of what anyone does with a bundle. `openBundle` resolves the index back to the whole rater, so every reader and writer works in
-identities and only the file is indexed; unlike a joined blob, an index can always be followed.
-
-**The table is per DOCUMENT, so an index is document-local.** Pooling several documents means remapping
-through each one's own table — which is why the id, not the index, is the identity.
+Not one array per kind: a human grading, an llm re-grading under a corrected rubric, then the human
+revising is one sequence, and two arrays cannot express it. Provenance is which rater a verdict names. A
+verdict names its rater by index — spelled out, the same few strings would repeat tens of thousands of
+times (G8) — and `openBundle` resolves it, so readers and writers work in identities and only the file
+is indexed. The table is per document, so pooling documents means remapping through each one's table;
+the id, not the index, is the identity.
 
 ## Reader-side, not in the file
 
@@ -553,12 +364,8 @@ through each one's own table — which is why the id, not the index, is the iden
 - Availability — whether an entry could have existed at `sceneEnd`.
 
 The rule WA states is `extension/grading.mjs` `gradeValue`, re-exported by `eval/metrics.mjs` so every
-reader shares one copy of it: the latest human verdict if any — a person re-grading has seen the earlier
-one and replaced it — else the judges' MEDIAN once three exist, else the latest judge. Newest-first among
-judges is only defensible when a later pass is known to be better, and it is not: re-grading the same rows
-with the same model under a corrected rubric moved a large share of the relevant set out (G7). **Measured**
-(G7): this rule reproduces every stored v2 `llmGrade` scalar, which is what made moving the resolution out
-of the file lossless rather than a silent re-labelling.
+reader shares one copy: the latest human verdict if any, else the judges' median once three exist, else
+the latest judge. A later judge pass is not a better one (G7).
 
 ## Open
 
