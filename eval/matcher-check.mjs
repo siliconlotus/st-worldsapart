@@ -1,6 +1,6 @@
 // WA's own matcher semantics, which core has no opinion about: SmartKeys, scoring units, the saturation curve, key refusals, excerpts.
 // A claim that cites core as the authority belongs in core-matcher-check.mjs.
-import { countKey, dropTags, keyExcerpts, keywordScore as rankKeywordScore, markExcerptText, repeatCurveOf, secondaryKeys, usableKeys, usedMatchSources, withMatchSources, WI_LOGIC } from '../extension/matcher.mjs';
+import { countKey, dropTags, keyExcerpts, keyHits, keywordScore as rankKeywordScore, markExcerptText, repeatCurveOf, secondaryKeys, usableKeys, usedMatchSources, withMatchSources, WI_LOGIC } from '../extension/matcher.mjs';
 import { validateSmartKey } from '../extension/smartkeys.mjs';
 import { eq } from './metrics.mjs';
 
@@ -246,6 +246,22 @@ eq(markExcerptText(keyExcerpts('? (armstrong gagarin)', space, false, true, 12)[
     '…monaut Yuri «Gagarin» flew; the A…', 'a leaf excerpt is the ordinary one, at the caller\'s context width');
 eq(leaves('? (/Gagar\\w+/ armstrong)').join(' '), '/Gagar\\w+/:2 armstrong:1', 'a regex leaf reports the pattern as its term, and is case-sensitive without /i');
 console.log('ok   keyExcerpt: compound SmartKeys excerpt every credited leaf, with per-leaf counts');
+
+
+// --- keyHits: the Keyword Lab's rows — one per key, a leaf row per credited unit, a message for a key that can never fire
+const rows = keyHits(['gagarin', '? (armstrong gagarin)', '? -banana', 'nobody'], space, false, true);
+eq(rows.map(r => r.key).join(' | '), 'gagarin | ? (armstrong gagarin) | \u21b3 gagarin | \u21b3 armstrong | ? -banana | nobody',
+    'a compound expands into leaf rows after its own, a plain key stays one row');
+eq(rows[0].count, 2, 'a plain key reports occurrences');
+eq(rows[0].contexts.length, 2, 'and carries every excerpt, for the tooltip');
+eq(rows[1].excerpt, undefined, 'a compound has no excerpt of its own — its number is a weight, not a count');
+eq(rows[2].count, 2, 'the leaf rows carry the counts');
+eq(rows[4].count, undefined, 'a negation-only SmartKey is reported as unusable...');
+eq(typeof rows[4].excerpt, 'string', '...by a message where the excerpt goes');
+eq(rows[5].count, 0, 'a key that simply did not match is a zero, not an error');
+eq(keyHits('gagarin\n\n  armstrong  ', space, false, true).map(r => r.key).join(','), 'gagarin,armstrong',
+    'a newline-separated string is accepted and trimmed, as the Lab pane hands it over');
+console.log('ok   keyHits: one row per key, leaf rows for compounds, a message for a key that can never fire');
 
 
 // --- usedMatchSources: what a capture is allowed to freeze

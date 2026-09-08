@@ -362,6 +362,22 @@ function compoundExcerpts(node, text, context, limit) {
     return out;
 }
 
+/** What each of `keys` did to `text`, as the rows keyHitsHtml renders: `{ key, count, excerpt, contexts }`, or `{ key, excerpt: message }`
+ *  for a SmartKey that can never match. A compound SmartKey's own count is its weight, not occurrences, so its excerpts are emitted
+ *  as one `\u21b3 leaf` row each, carrying that leaf's occurrence count. */
+export function keyHits(keys, text, caseSensitive, wholeWords) {
+    return (Array.isArray(keys) ? keys : String(keys ?? '').split('\n'))
+        .map(k => String(k ?? '').trim()).filter(Boolean)
+        .flatMap(key => {
+            const bad = key.startsWith('?') ? validateSmartKey(key).find(v => v.severity === 'error') : null;
+            if (bad) return [{ key, excerpt: bad.message }];
+            const count = countKey(key, text, caseSensitive, wholeWords);
+            const hits = keyExcerpts(key, text, caseSensitive, wholeWords);
+            if (hits[0]?.term) return [{ key, count }, ...hits.map(e => ({ key: `\u21b3 ${e.term}`, count: e.n, excerpt: e }))];
+            return [{ key, count, excerpt: hits[0], contexts: hits }];
+        });
+}
+
 /** `selectiveLogic` values; must match core's `world_info_logic` (world-info.js). */
 export const WI_LOGIC = { AND_ANY: 0, NOT_ALL: 1, NOT_ANY: 2, AND_ALL: 3 };
 

@@ -7,14 +7,14 @@ import { power_user } from '../../../../power-user.js';
 import { escapeHtml } from '../../../../utils.js';
 import { Popup, POPUP_TYPE, POPUP_RESULT } from '../../../../popup.js';
 import { runState, settings } from './state.mjs';
-import { ensureStudioStyle, makeSortControl, showCtxMenu, showEntryText, wiGlyph } from './ui-widgets.mjs';
+import { ensureStudioStyle, keyHitsHtml, makeSortControl, showCtxMenu, showEntryText, wiGlyph } from './ui-widgets.mjs';
 import { SORT_FNS, SORT_LABELS, normPresentation, presentationLabel, reconcileTiers, tierRank, wiTitleOf } from './sort.mjs';
 import { buildKeyPruneScan, llmKeyCandidates } from './keyword-tools.mjs';
 import { STUDIO_PRUNE_OPTS } from './keyword-audit.mjs';
 import { buildKeySuggest, classifyLlmCand, STUDIO_SUGGEST_OPTS } from './keyword-suggest.mjs';
 import { buildAutomaton, addMessageHits, fold, validateSmartKey } from './smartkeys.mjs';
 import { findOrphanBindings } from './bindings.mjs';
-import { WI_LOGIC, hasPromoteDecorator, isRegexKey, secondaryKeys, usableKeys, wholeWordAdvice, withPromote } from './matcher.mjs';
+import { WI_LOGIC, hasPromoteDecorator, isRegexKey, keyHits, secondaryKeys, usableKeys, wholeWordAdvice, withPromote } from './matcher.mjs';
 
 const WA_GREEN = '#7bbf6a';   // "no prune" — a keyword the scan doesn't flag
 const WA_RED = '#e06c6c';     // severe — same value keyword-audit's severityOf hands back
@@ -88,7 +88,7 @@ export async function lorebookStudio(preferredBook = null) {
     const advOpen = new Set();       // entry uids with the Advanced tray (recursion/budget/timing) expanded
     const sugg = new Map();          // uid -> { tfidf:string[], llm:string[] } transient suggestion chips
     const rowEls = new Map();        // uid -> entry row element, so one edit re-renders just that entry
-    let tab = 'explorer';            // 'explorer' | 'cleanup'
+    let tab = 'explorer';            // 'explorer' | 'cleanup' | 'lab'
     const cleanupChecks = new Map();   // rowId -> bool, defaulting from scan.defChecked; survives rescans and tab switches on purpose
     let cleanupUndo = null;            // [{uid, key}] from the last prune, restorable until the next one
     let cleanupShowAll = false;        // Cleanup lists every key on the visible entries, not only the flagged ones
@@ -2015,7 +2015,50 @@ export async function lorebookStudio(preferredBook = null) {
         repaint();
     };
 
-    const TABS = [['explorer', 'Explorer'], ['cleanup', 'Cleanup']];
+    // --- Keyword Lab: any keys against any text, with no entry and no book behind them ---
+    let labHay = '', labKeys = '';
+    let labCase = !!world_info_case_sensitive, labWhole = !!world_info_match_whole_words;
+
+    const renderLabView = pane => {
+        const panes = document.createElement('div');
+        panes.style.cssText = 'display:flex;gap:6px;padding:8px 8px 0;flex:0 0 auto;height:36%;min-height:110px;';
+        const box = (placeholder, get, set) => {
+            const t = document.createElement('textarea'); t.className = 'text_pole';
+            t.placeholder = placeholder; t.value = get();
+            t.style.cssText = 'flex:1 1 0;resize:none;font-family:var(--monoFontFamily);overflow:auto;';
+            t.addEventListener('input', () => { set(t.value); repaint(); });
+            return t;
+        };
+        panes.append(
+            box('Paste any text to match against…', () => labHay, v => { labHay = v; }),
+            box('One key per line — plain, /regex/flags or ?SmartKey', () => labKeys, v => { labKeys = v; }),
+        );
+        const opts = document.createElement('div');
+        opts.style.cssText = 'display:flex;gap:14px;padding:6px 8px;flex:0 0 auto;opacity:0.8;font-size:0.9em;';
+        const flag = (label, get, set) => {
+            const l = document.createElement('label'); l.style.cssText = 'display:flex;gap:4px;align-items:center;cursor:pointer;';
+            const c = document.createElement('input'); c.type = 'checkbox'; c.checked = get();
+            c.addEventListener('change', () => { set(c.checked); repaint(); });
+            l.append(c, document.createTextNode(label));
+            return l;
+        };
+        opts.append(
+            flag('Case sensitive', () => labCase, v => { labCase = v; }),
+            flag('Match whole words', () => labWhole, v => { labWhole = v; }),
+        );
+        const out = document.createElement('div');
+        out.style.cssText = 'flex:1 1 auto;overflow:auto;padding:0 8px 8px;min-height:0;';
+        const repaint = () => {
+            const rows = keyHits(labKeys, labHay, labCase, labWhole);
+            out.innerHTML = rows.length
+                ? keyHitsHtml(rows)
+                : '<div style="opacity:0.6;padding:6px 0;">Keys you type on the right are matched against the text on the left.</div>';
+        };
+        repaint();
+        pane.append(panes, opts, out);
+    };
+
+    const TABS = [['explorer', 'Explorer'], ['cleanup', 'Cleanup'], ['lab', 'Keyword Lab']];
     const renderTabBar = () => {
         const bar = document.createElement('div'); bar.className = 'wa-tabs';
         for (const [id, label] of TABS) {
@@ -2177,6 +2220,7 @@ export async function lorebookStudio(preferredBook = null) {
         explorer.append(pane);
         // Cleanup is async (paints a note, then blocks) and repaints itself; nothing awaits it.
         if (tab === 'cleanup') { renderCleanupView(pane); return; }
+        if (tab === 'lab') { renderLabView(pane); return; }
         renderExplorerView(pane);
         if (listTop) { const l = explorer.querySelector('.wa-studio-entries'); if (l) l.scrollTop = listTop; }
     };
