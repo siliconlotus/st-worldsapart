@@ -95,9 +95,9 @@ inclusion groups, delay and cooldown, character and tag filters, `@@dont_activat
 `delayUntilRecursion`, triggers. Matching is WA's and `scene.mjs` models it through the same
 `keywordScore` that fires at runtime.
 
-**`humanGrades` holds a person's verdicts; `llmGrades` holds a judge's. Nothing writes into both.** Read
-the value in force through `metrics.mjs` `gradeValue` (NaN when ungraded) and the rater off which array a
-verdict sits in. Nothing else can recover this: a judge's bundle and a human's are structurally identical.
+**One `grades` array per row; each verdict names its rater, and `raters[].kind` says whether that rater
+is a human or a judge** (`bundle-schema.md`). Nothing in the file holds a reduced value: read the value
+in force through `grading.mjs` `gradeValue` (NaN when ungraded), never a stored scalar.
 
 **No verdict is ever overwritten** (`bundle-schema.md`, *Verdict elements*). A re-grade appends beside
 the one it disagrees with. The one exemption is a repeated pass, so a re-run of a merge is idempotent:
