@@ -883,7 +883,7 @@ export async function superEvalScene() {
     }
 
     // One standalone file: each section carries its scene, each graded row its entry text and the judge verdicts it was weighed against.
-    // `captureId` is what apply-review resolves on (a basename can be renamed); `humanGrades` and `llmGrades` are never both written, the judge's re-attached from the source.
+    // `captureId` is what apply-review resolves on (a basename can be renamed); the judge's prior verdicts ride along for the reviewer and apply-review strips them.
     const reviewed = done.sections.map((sec, si) => {
         const src = openBundle(secs[si].manifest);
         const priorOf = new Map((src.entries ?? []).map(g => [rowKey(g), g]));
@@ -900,7 +900,7 @@ export async function superEvalScene() {
                 const entry = secs[si].entryOf(g.book, g.uid);
                 return {
                     ...g,
-                    ...(p.llmGrades ? { llmGrades: p.llmGrades } : {}),
+                    ...(p.grades?.length ? { grades: p.grades } : {}),
                     // `entryText` is for the reviewer; apply-review strips it, the bundle's books being where entry text lives.
                     ...(entry?.content ? { entryText: String(entry.content) } : {}),
                 };
@@ -908,7 +908,7 @@ export async function superEvalScene() {
         };
     });
     const all = reviewed.flatMap(r => r.grades);
-    const rel = all.filter(g => gradeValue(g) >= 3).length;
+    const rel = all.filter(g => Number(g.grade) >= 3).length;
     // To the millisecond: apply-review stamps every verdict with this, and a pass key is rater + instant.
     const reviewedAt = new Date().toISOString();
     const stamp = reviewedAt.slice(0, 10);
@@ -918,9 +918,9 @@ export async function superEvalScene() {
     // `createdBy` and `user` travel with the file: apply-review's `--user` defaults to empty, and a pass key of nobody + instant matches nothing on a re-run.
     download(JSON.stringify({ reviewed, gradeScale: GRADE_SCALE, createdBy: 'wa-super-eval', user: raterId(), reviewedAt }, null, 1), filename, 'application/json');
 
-    // Agreement over the rows carrying both kinds of verdict; each side resolved by its own rule, human latest vs judge median.
-    const both = all.filter(g => (g.llmGrades ?? []).length && (g.humanGrades ?? []).length);
-    const pairs = both.map(g => [gradeValue({ humanGrades: g.humanGrades }), gradeValue({ llmGrades: g.llmGrades })]);
+    // Agreement over the rows a human graded that also carry judge verdicts; the judge side resolves by gradeValue's median rule.
+    const both = all.filter(g => g.grade !== undefined && (g.grades ?? []).some(v => v.kind === 'llm'));
+    const pairs = both.map(g => [Number(g.grade), gradeValue({ grades: g.grades.filter(v => v.kind === 'llm') })]);
     const irr = pairs.length
         ? ` LLM agreement: ${pairs.filter(([h, j]) => h === j).length}/${pairs.length} exact, ${pairs.filter(([h, j]) => Math.abs(h - j) <= 1).length}/${pairs.length} within 1.`
         : '';
