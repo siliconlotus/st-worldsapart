@@ -2,7 +2,7 @@
 // selected book's entries on the right. DOM- and ST-coupled; the logic it stands on is the shared pure modules.
 import { saveSettingsDebounced, getRequestHeaders, characters, getCharacters } from '../../../../../script.js';
 import { getContext } from '../../../../extensions.js';
-import { loadWorldInfo, saveWorldInfo, reloadEditor, createWorldInfoEntry, duplicateWorldInfoEntry, deleteWorldInfoEntry, getFreeWorldEntryUid, deleteWIOriginalDataValue, deleteWorldInfo, updateWorldInfoList, world_names, world_info_match_whole_words, world_info_case_sensitive, selected_world_info, splitKeywordsAndRegexes, world_info, METADATA_KEY } from '../../../../world-info.js';
+import { loadWorldInfo, saveWorldInfo, reloadEditor, createWorldInfoEntry, duplicateWorldInfoEntry, deleteWorldInfoEntry, getFreeWorldEntryUid, deleteWIOriginalDataValue, deleteWorldInfo, updateWorldInfoList, world_names, world_info_match_whole_words, world_info_case_sensitive, selected_world_info, world_info, METADATA_KEY } from '../../../../world-info.js';
 import { power_user } from '../../../../power-user.js';
 import { escapeHtml } from '../../../../utils.js';
 import { Popup, POPUP_TYPE, POPUP_RESULT } from '../../../../popup.js';
@@ -14,7 +14,7 @@ import { STUDIO_PRUNE_OPTS } from './keyword-audit.mjs';
 import { buildKeySuggest, classifyLlmCand, STUDIO_SUGGEST_OPTS } from './keyword-suggest.mjs';
 import { buildAutomaton, addMessageHits, fold, validateSmartKey } from './smartkeys.mjs';
 import { findOrphanBindings } from './bindings.mjs';
-import { WI_LOGIC, hasPromoteDecorator, isRegexKey, keyHits, keySpans, secondaryKeys, usableKeys, wholeWordAdvice, withPromote } from './matcher.mjs';
+import { WI_LOGIC, hasPromoteDecorator, isRegexKey, keyHits, keySpans, secondaryKeys, splitKeys, usableKeys, wholeWordAdvice, withPromote } from './matcher.mjs';
 
 const WA_GREEN = '#7bbf6a';   // "no prune" — a keyword the scan doesn't flag
 const WA_RED = '#e06c6c';     // severe — same value keyword-audit's severityOf hands back
@@ -2070,11 +2070,7 @@ export async function lorebookStudio(preferredBook = null) {
         const out = document.createElement('div');
         out.style.cssText = 'flex:0 0 auto;max-height:40%;overflow:auto;padding:0 8px 8px;';
         const repaint = () => {
-            // Split as core's key field does, so a regex keeps its commas. A newline is one more separator, but only after
-            // the blank lines and trailing commas go: core reads `a,,` as the single term `a,`, which then matches nothing.
-            // `, ` and not `,`: core's tokenizer skips the character right after a comma, so a `/re/` there is never seen
-            // as one and swallows the key behind it (upstream-st.md #17).
-            const keys = splitKeywordsAndRegexes(labKeys.split('\n').map(l => l.trim().replace(/,+$/, '')).filter(Boolean).join(', '));
+            const keys = splitKeys(labKeys);
             const hue = key => LAB_HUES[Math.max(0, keys.indexOf(key)) % LAB_HUES.length];
             const rows = keyHits(keys, labHay, labCase, labWhole, { context: 30 });
             // A hit row takes the colour of the key it sits under, which is the last row that named one.

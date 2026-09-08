@@ -1,6 +1,6 @@
 // WA's own matcher semantics, which core has no opinion about: SmartKeys, scoring units, the saturation curve, key refusals, excerpts.
 // A claim that cites core as the authority belongs in core-matcher-check.mjs.
-import { countKey, dropTags, keyExcerpts, keyHits, keySpans, keywordScore as rankKeywordScore, markExcerptText, repeatCurveOf, secondaryKeys, usableKeys, usedMatchSources, withMatchSources, WI_LOGIC } from '../extension/matcher.mjs';
+import { countKey, dropTags, keyExcerpts, keyHits, keySpans, splitKeys, keywordScore as rankKeywordScore, markExcerptText, repeatCurveOf, secondaryKeys, usableKeys, usedMatchSources, withMatchSources, WI_LOGIC } from '../extension/matcher.mjs';
 import { validateSmartKey } from '../extension/smartkeys.mjs';
 import { eq } from './metrics.mjs';
 
@@ -247,6 +247,20 @@ eq(markExcerptText(keyExcerpts('? (armstrong gagarin)', space, false, true, 12)[
     '…monaut Yuri «Gagarin» flew; the A…', 'a leaf excerpt is the ordinary one, at the caller\'s context width');
 eq(leaves('? (/Gagar\\w+/ armstrong)').join(' '), '/Gagar\\w+/:2 armstrong:1', 'a regex leaf reports the pattern as its term, and is case-sensitive without /i');
 console.log('ok   keyExcerpt: compound SmartKeys excerpt every credited leaf, with per-leaf counts');
+
+
+// --- splitKeys: commas and newlines both separate, and a regex or a quoted term keeps its own commas
+eq(splitKeys('Russian,\n? cosmonaut astronaut,\nhand,\n\n/(cosmo|astro|taiko)naut/,\negg ').join(' | '),
+    'Russian | ? cosmonaut astronaut | hand | /(cosmo|astro|taiko)naut/ | egg',
+    'a pane of keys: blank lines, trailing commas and surrounding space all go');
+eq(splitKeys('/a{1,3}/,cat').join(' | '), '/a{1,3}/ | cat', 'a regex keeps the commas inside it — core\'s own rule');
+eq(splitKeys('? "hot, tub", cat').join(' | '), '? "hot, tub" | cat', 'and so does a quoted term');
+eq(splitKeys('and/or, cat').join(' | '), 'and/or | cat', 'a slash mid-token is an ordinary character, not a regex opening');
+eq(splitKeys('/unclosed,cat').join(' | '), '/unclosed | cat', 'a regex that never closes is split back up rather than left holding the comma');
+eq(splitKeys('/a/,/b/').join(' | '), '/a/ | /b/', 'a regex straight after a comma is seen (upstream-st.md #17: core misses it)');
+eq(splitKeys('a,,b\n\n').join(' | '), 'a | b', 'empty tokens are dropped, not kept as blanks');
+eq(splitKeys('').length, 0, 'nothing in, nothing out');
+console.log('ok   splitKeys: comma and newline separate; regexes and quoted terms keep their commas');
 
 
 // --- keyHits: the Keyword Lab's rows — a key, then a row per hit, and a message for a key that can never fire

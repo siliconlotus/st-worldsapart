@@ -54,6 +54,33 @@ export function wholeWordAdvice(keys, wholeWords) {
 export const REGEX_KEY_RE = /^\/([\s\S]+)\/([gimsuy]*)$/;
 export const isRegexKey = k => REGEX_KEY_RE.test(String(k));
 
+/** A key list as written in a field or a pane: commas and newlines both separate. A `/regex/` or a "quoted" term keeps its
+ *  commas, and a `/` mid-token is an ordinary character, not an opening; an unclosed one is re-split, as core's tokenizer
+ *  recovers. Diverges from core's customTokenizer, which skips the character after every comma (upstream-st.md #17). */
+export function splitKeys(input) {
+    const out = [];
+    let cur = '', inRegex = false, inQuote = false;
+    const push = () => {
+        const t = cur.trim();
+        // A token that opened a regex and never closed one is not a key: core splits it back up rather than keep the commas.
+        if (t.startsWith('/') && !isRegexKey(t)) out.push(...t.split(',').map(x => x.trim()).filter(Boolean));
+        else if (t) out.push(t);
+        cur = '';
+    };
+    const src = String(input ?? '');
+    for (let i = 0; i < src.length; i++) {
+        const c = src[i];
+        if (c === '\\') { cur += c + (src[i + 1] ?? ''); i++; continue; }
+        if (c === '\n') { inRegex = false; inQuote = false; push(); continue; }
+        if (c === '"' && !inRegex) inQuote = !inQuote;
+        else if (c === '/' && !inQuote && (inRegex || !cur.trim())) inRegex = !inRegex;
+        else if (c === ',' && !inRegex && !inQuote) { push(); continue; }
+        cur += c;
+    }
+    push();
+    return out;
+}
+
 /** Core's reading of a regex key (`parseRegexFromString`), which refuses an unescaped `/` in the body. Not a matcher: only validateSmartKey reads it. */
 const CORE_REGEX_KEY_RE = /^\/([\w\W]+?)\/([gimsuy]*)$/;
 export function coreReadsAsRegex(k) {
