@@ -1,22 +1,16 @@
-// keyword-tools.mjs — the ST-coupled half of the lorebook keyword analysis feature: the flag-injecting
-// prune-scan wrapper and the LLM generation plumbing. The pure classifier lives in keyword-audit.mjs
-// and the ranker/filter in keyword-suggest.mjs (both ST-free and node-importable, and both carrying the
-// Studio's own option presets); the UI that surfaces it is the Studio (studio.mjs).
+// keyword-tools.mjs — the ST-coupled half of keyword analysis: the prune-scan wrapper that injects core's match flags, and the LLM plumbing.
 import { generateRaw } from '../../../../../script.js';
 import { extension_settings } from '../../../../extensions.js';
 import { world_info_case_sensitive, world_info_match_whole_words } from '../../../../world-info.js';
-// Same splitter the indexer uses — one copy, so a scan window is cut the way a chunk is (see chunking.mjs).
 import { splitRecursive } from './chunking.mjs';
 import { ConnectionManagerRequestService } from '../../../shared.js';
 import { settings } from './state.mjs';
 import { buildKeyPruneScan as buildKeyPruneScanCore } from './keyword-audit.mjs';
 import { buildKeyPrompt, parseKeyList } from './keyword-suggest.mjs';
 
-/** buildKeyPruneScan with core's world-info match flags injected. A wrapper (not a bound value) so
- * the flags are read at call time — they're live ST settings. */
+/** buildKeyPruneScan with core's match flags injected; a wrapper rather than a bound value, so the flags are read live. */
 export const buildKeyPruneScan = (data, opts, ignoreSet, extra = {}) =>
-    // Forward the caller's options (matchWindow, chatScan): building this object here instead drops them
-    // silently. ST's globals stay as defaults, so a caller can still override them.
+    // `...extra` spreads the caller's matchWindow/chatScan over ST's defaults; a fixed object here drops them silently (matchwindow-check).
     buildKeyPruneScanCore(data, opts, ignoreSet, {
         caseSensitiveDefault: world_info_case_sensitive,
         wholeWordsDefault: world_info_match_whole_words,
@@ -24,10 +18,6 @@ export const buildKeyPruneScan = (data, opts, ignoreSet, extra = {}) =>
     });
 
 
-/**
- * One-shot text generation over WA's configured LLM profile (or the current API). Callers handle
- * failure themselves; nothing here caches or retries.
- */
 async function generateText(prompt, responseLength) {
     const s = settings();
     const profileId = s.llmProfile;
@@ -35,12 +25,7 @@ async function generateText(prompt, responseLength) {
     if (profile) {
         const temp = String(s.llmTemperature ?? '').trim();
         const overridePayload = temp === '' ? {} : { temperature: Number(temp) };
-        // includePreset is always false, and that is business logic rather than a setting. A preset
-        // contributes sampling parameters only here — sendRequest maps it onto an oai_settings clone, the
-        // messages stay ours, and the prompt manager is never called — and a roleplay preset's samplers are
-        // tuned for prose variety where this is an extraction wanting the opposite. Forced rather than
-        // offered because the failure is asymmetric: a bypassed utility profile loses samplers
-        // llmTemperature can restore, an included roleplay one has no escape.
+        // includePreset stays false, not a setting: a roleplay preset's samplers are tuned for prose variety, the opposite of an extraction.
         const result = await ConnectionManagerRequestService.sendRequest(profileId, prompt, responseLength, { includePreset: false }, overridePayload);
         const content = String(result?.content ?? '').trim();
         if (!content && result?.reasoning) throw new Error(`profile "${profile.name}" is a reasoning model (returned reasoning, no content). Pick a profile without ":thinking".`);
@@ -49,15 +34,8 @@ async function generateText(prompt, responseLength) {
     return String(await generateRaw({ prompt, responseLength })).trim();
 }
 
-/**
- * Response cap per call. A runaway guard, not a budget: you pay for tokens generated, not tokens allowed,
- * so a tight cap buys nothing — and it must clear a thinking model's reasoning, which spends this same
- * budget and otherwise returns an empty string the Studio can only report as unusable.
- */
+/** Response cap per call. A thinking model's reasoning spends this same budget; too tight and it returns an empty string. */
 const KEY_RESPONSE_TOKENS = 4000;
-
-// One pass per chunk, concatenating the raw candidate lines (callers dedupe/filter). Whether chunking
-// beats sending the entry whole, and what size is right, are open; eval/chunk-vs-whole.mjs is the harness.
 
 export async function llmKeyCandidates(content, avoid, chunkSize = 5000) {
     const text = String(content ?? '');

@@ -1,6 +1,5 @@
-// ui-widgets.mjs — shared UI controls used by the settings panel and the Lorebook Studio:
-// the sort/tier control builders, the floating context menu, entry tooltips + glyph, and the
-// injected stylesheet. DOM-coupled; imports the sort vocabulary from sort.mjs and needs Popup.
+// ui-widgets.mjs — DOM controls shared by the settings panel and the Lorebook Studio: sort/tier controls, the
+// floating context menu, entry tooltip and fold, and the injected stylesheet.
 import { escapeHtml } from '../../../../utils.js';
 import { markExcerptText } from './matcher.mjs';
 import { Popup, POPUP_TYPE } from '../../../../popup.js';
@@ -9,9 +8,7 @@ import { wiTitleOf, TIER_DEFS, SORT_LABELS, SORT_MENU } from './sort.mjs';
 export const wiGlyph = e => e.constant ? '🔵' : (e.vectorized ? '🔗' : '🟢');
 
 
-// --- Shared floating context menu (submenus) ---------------------------------------------------------
-// Each item is a leaf {label, fn, danger, active} or a parent {label, children:[…]} that flies out on
-// hover. `mount` is where panels attach (a modal's <dialog> to stack in its top layer, else document.body).
+// Floating context menu: items are leaves {label, fn, danger, active} or parents {label, children}; `mount` is a modal's <dialog> (its top layer) or document.body.
 let ctxPanels = [];   // open panels, root at 0; a submenu at depth d replaces anything deeper
 const closeCtx = () => {
     for (const m of ctxPanels) m.remove(); ctxPanels = [];
@@ -22,7 +19,7 @@ const closeCtx = () => {
 const ctxDown = ev => { if (!ctxPanels.some(m => m.contains(ev.target))) closeCtx(); };
 const ctxKey = ev => { if (ev.key === 'Escape') { ev.preventDefault(); closeCtx(); } };
 const buildCtxPanel = (items, x, y, depth, mount) => {
-    while (ctxPanels.length > depth) ctxPanels.pop().remove();   // drop this level + deeper before reopening
+    while (ctxPanels.length > depth) ctxPanels.pop().remove();
     const menu = document.createElement('div'); menu.className = 'wa-ctx';
     for (const it of items) {
         const row = document.createElement('div'); row.className = 'wa-ctx-item' + (it.danger ? ' wa-ctx-danger' : '') + (it.children ? ' wa-ctx-parent' : '') + (it.active ? ' wa-ctx-active' : '');
@@ -33,16 +30,15 @@ const buildCtxPanel = (items, x, y, depth, mount) => {
             row.addEventListener('mouseenter', open);
             row.addEventListener('click', ev => { ev.stopPropagation(); open(); });   // click also opens (touch / diagonal-miss)
         } else {
-            row.addEventListener('mouseenter', () => { while (ctxPanels.length > depth + 1) ctxPanels.pop().remove(); });   // entering a childless row drops any open submenu
-            // Panels mount on document.body, so a bubbling click reads as "outside the drawer" to ST's
-            // autoclose handler and collapses the Extensions panel. Stop here (parent rows already do).
+            row.addEventListener('mouseenter', () => { while (ctxPanels.length > depth + 1) ctxPanels.pop().remove(); });
+            // Without stopPropagation the click bubbles to ST's autoclose handler and collapses the Extensions drawer.
             row.addEventListener('click', ev => { ev.stopPropagation(); closeCtx(); it.fn?.(); });
         }
         menu.append(row);
     }
     mount.append(menu);
     ctxPanels[depth] = menu;
-    const r = menu.getBoundingClientRect();   // clamp so it never opens off-screen
+    const r = menu.getBoundingClientRect();
     menu.style.left = Math.max(6, Math.min(x, innerWidth - r.width - 6)) + 'px';
     menu.style.top = Math.max(6, Math.min(y, innerHeight - r.height - 6)) + 'px';
     return menu;
@@ -55,9 +51,8 @@ export const showCtxMenu = (items, x, y, mount = document.body) => {
     window.addEventListener('scroll', closeCtx, true);
 };
 
-// Inline tier-precedence editor: ↑/↓ reorder + enable checkbox, committing live via setCfg/onChange.
-// Shared by WA settings (mounted inline) and the Studio's Configure-tiers popup. getCfg returns a fresh
-// array each call, so mutating a copy and handing it to setCfg is safe.
+/** Tier-precedence editor (↑/↓ and an enable checkbox), committing live through setCfg/onChange. `getCfg` must
+ * return a fresh array each call: the editor mutates it before handing it to setCfg. */
 export function makeTierEditor(getCfg, setCfg, onChange) {
     const wrap = document.createElement('div');
     const commit = next => { setCfg(next); onChange?.(); render(); };
@@ -79,7 +74,6 @@ export function makeTierEditor(getCfg, setCfg, onChange) {
     render();
     return wrap;
 }
-// Studio's Configure-tiers…: the same inline editor in a popup (live-commit; Close when done).
 async function configureTiersPopup(getCfg, setCfg, onSaved) {
     const wrap = document.createElement('div'); wrap.style.textAlign = 'left';
     const hint = document.createElement('div'); hint.style.cssText = 'opacity:0.7;margin-bottom:8px;font-size:0.9em;';
@@ -88,16 +82,11 @@ async function configureTiersPopup(getCfg, setCfg, onSaved) {
     await new Popup(wrap, POPUP_TYPE.TEXT, '', { okButton: 'Close' }).show();
 }
 
-// Sort-control button, shared by the Studio header and the settings panel. Opens `leadItems` (special
-// leaves shown first, e.g. the Studio's "Insert Order") + the tiered toggle + Configure tiers… + base
-// sorts + any `extraItems` (e.g. relevance, prompt-only). Callbacks read/write the caller's own state so the
-// same widget drives display order and insertion order. `mount` (fn → element) targets a modal dialog's top
-// layer; omit for document.body. Lead items encapsulate their own tiered state, so the "Tiered · " prefix
-// is suppressed for them.
+/** Sort-control button shared by the Studio header and the settings panel; the menu is `leadItems`, the tiered
+ * toggle, Configure tiers…, the base sorts, then `extraItems`. `mount` is a fn returning the element the menu attaches to. */
 export function makeSortControl({ getSort, setSort, getTiered, setTiered, getTierCfg, setTierCfg, leadItems = [], extraItems = [], onChange, mount, block = false }) {
     const btn = document.createElement('button'); btn.type = 'button'; btn.className = 'menu_button wa-filter';
     btn.title = 'Sort order';
-    // block = full-width, select-like (label left, caret right) for settings; else compact icon-wide (toolbar).
     btn.style.cssText = block
         ? 'display:flex;align-items:center;gap:6px;width:100%;justify-content:flex-start;white-space:nowrap;'
         : 'display:inline-flex;align-items:center;gap:5px;width:auto;white-space:nowrap;';
@@ -137,40 +126,16 @@ export function wiTooltip({ item, block }) {
     return lines.join('\n');
 }
 
-/**
- * The key-hit lines under a grading row's title: which key fired, how often, and where.
- *
- * Colour carries the distinctions, not glyphs: what differs between rows is the key and how often it fired,
- * so those two are what get marked — the key in blue, the count in amber — and the excerpt stays dim as
- * context for both.
- *
- * The count is always shown, including 1: a key that fired exactly once is a different claim from one that
- * fired thirteen times, and the reader cannot tell an omitted 1 from an unrecorded count.
- *
- * The match inside the excerpt is the point, and keyExcerpts hands over its offsets; they become colour
- * here, in the key's own colour, because where a key landed is not deducible from the key for a substring
- * or a regex.
- *
- * Colours come from the theme, not from constants: `--SmartThemeQuoteColor` is what ST already uses to make
- * quoted text stand out from body text, and `--SmartThemeEmColor` is its emphasis pair. Literal fallbacks
- * stay for a theme that defines neither. Colour is reinforcement, not the only cue: position orders the
- * line (key, count, excerpt), and the matched span sits at full opacity inside a dimmed excerpt.
- *
- * @param {Array<{key: string, count: number, excerpt?: string}>} why Key hits, as recorded on the row
- * @returns {string} HTML, one line per hit
- */
-// Marks the span keyExcerpts measured, by offset. In-band delimiters are ambiguous — an entry containing
-// guillemets of its own breaks the read-back — so nothing is parsed out of the text.
+// Marks the span by keyExcerpts' offsets; nothing is parsed back out of the text, which can hold guillemets of its own.
 const markExcerpt = ex => (ex && typeof ex === 'object'
     ? escapeHtml(ex.text.slice(0, ex.start))
         + `<span style="color:var(--SmartThemeQuoteColor, #6ea8fe);font-weight:600;opacity:1;">${escapeHtml(ex.text.slice(ex.start, ex.end))}</span>`
         + escapeHtml(ex.text.slice(ex.end))
     : escapeHtml(String(ex ?? '')));
 
+/** The key-hit lines under a grading row's title: key, count, and the excerpt with the matched span coloured. */
 export const keyHitsHtml = why => (why ?? []).map(w => {
-    // The hover carries every recorded hit, because vetting a key is a question about its spread and the
-    // line has room for one. A title attribute is plain text, so the guillemets earn their keep here:
-    // colour cannot cross into a tooltip, and without a marker the reader loses which span matched.
+    // A title attribute is plain text, so the tooltip marks spans with markExcerptText's guillemets, not colour.
     const all = (w.contexts ?? []).filter(Boolean);
     const tip = all.length > 1
         ? ` title="${escapeHtml(all.map(markExcerptText).join('\n'))}"`
@@ -180,21 +145,8 @@ export const keyHitsHtml = why => (why ?? []).map(w => {
         + `${w.excerpt ? ` <span style="opacity:0.6;cursor:${all.length > 1 ? 'help' : 'default'};"${tip}>${markExcerpt(w.excerpt)}</span>` : ''}</small>`;
 }).join('');
 
-/**
- * The fold shown under a grading row: what the entry is keyed on, then its text.
- *
- * Keys first, because the judgement being made is whether this entry belonged in this scene and its keys
- * are half the reason it is there — a grader reading only the prose has to infer the trigger. Reads
- * `waKeys` when `key` is empty: the takeover blanks a vectorized entry's keys into the stash, so the live
- * object a grader looks at has none.
- *
- * Returns HTML rather than nodes because both grading tables are built as strings; the caller owns the row
- * and the toggle. The popout re-opens the same showEntryText modal the Studio and the suggester use, since
- * the inline pane caps at 22em; it is wired by the caller off `data-i`.
- *
- * @param {number} idx Capture index, for the caller's popout handler
- * @returns {string} Inner HTML for the fold cell
- */
+/** The fold under a grading row, as HTML: the entry's keys, then its text. Reads `waKeys`/`waSecondary` when `key`
+ * is empty — the takeover stashes a vectorized entry's keys there. `idx` becomes `data-i` for the caller's popout. */
 export function entryFoldHtml(entry, idx) {
     const live = list => (list ?? []).filter(k => String(k).trim());
     const keys = live(entry?.key?.length ? entry.key : entry?.waKeys);
@@ -211,7 +163,6 @@ export function entryFoldHtml(entry, idx) {
         + `<div style="white-space:pre-wrap;max-height:22em;overflow:auto;opacity:0.9;border-left:2px solid var(--SmartThemeBorderColor);padding-left:0.6em;">${escapeHtml(String(entry?.content ?? '') || '(empty)')}</div></div>`;
 }
 
-// Same "view entry text" popup the keyword suggester opens.
 export function showEntryText(entry) {
     const body = document.createElement('div');
     body.style.cssText = 'white-space:pre-wrap;text-align:left;max-height:65vh;overflow:auto;font-size:0.95em;';
@@ -226,7 +177,6 @@ export function showEntryText(entry) {
     vp.show();
 }
 
-// One-time stylesheet for Lorebook Studio (hover states can't be inlined).
 let studioStyled = false;
 export function ensureStudioStyle() {
     if (studioStyled) return;
