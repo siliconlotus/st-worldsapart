@@ -140,8 +140,12 @@ export const keyHitsHtml = why => (why ?? []).map(w => {
     const tip = all.length > 1
         ? ` title="${escapeHtml(all.map(markExcerptText).join('\n'))}"`
         : '';
-    const color = w.color || 'var(--SmartThemeQuoteColor, #6ea8fe)';
-    return `<br><small style="opacity:0.75;text-align:left;"><span style="color:${escapeHtml(color)};font-weight:600;">${escapeHtml(w.key)}</span>`
+    // A `color` makes the key a wa-kw chip in that colour, as the Studio's keyword paragraph draws one; the caller's `\u21b3` stays outside it.
+    const label = w.color
+        ? `${w.key.startsWith('\u21b3') ? '\u21b3 ' : ''}<span class="wa-kw" style="border-color:${escapeHtml(w.color)};`
+            + `background:color-mix(in srgb, ${escapeHtml(w.color)} 18%, transparent);">${escapeHtml(w.key.replace(/^\u21b3 ?/, ''))}</span>`
+        : `<span style="color:var(--SmartThemeQuoteColor, #6ea8fe);font-weight:600;">${escapeHtml(w.key)}</span>`;
+    return `<br><small style="opacity:0.75;text-align:left;">${label}`
         + `${Number.isFinite(w.count) ? ` <span style="color:var(--SmartThemeEmColor, #d9a441);font-weight:600;">${w.count}</span>` : ''}`
         + `${w.excerpt ? ` <span style="opacity:0.6;cursor:${all.length > 1 ? 'help' : 'default'};"${tip}>${markExcerpt(w.excerpt)}</span>` : ''}</small>`;
 }).join('');
