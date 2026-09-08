@@ -140,7 +140,8 @@ export const keyHitsHtml = why => (why ?? []).map(w => {
     const tip = all.length > 1
         ? ` title="${escapeHtml(all.map(markExcerptText).join('\n'))}"`
         : '';
-    return `<br><small style="opacity:0.75;text-align:left;"><span style="color:var(--SmartThemeQuoteColor, #6ea8fe);font-weight:600;">${escapeHtml(w.key)}</span>`
+    const color = w.color || 'var(--SmartThemeQuoteColor, #6ea8fe)';
+    return `<br><small style="opacity:0.75;text-align:left;"><span style="color:${escapeHtml(color)};font-weight:600;">${escapeHtml(w.key)}</span>`
         + `${Number.isFinite(w.count) ? ` <span style="color:var(--SmartThemeEmColor, #d9a441);font-weight:600;">${w.count}</span>` : ''}`
         + `${w.excerpt ? ` <span style="opacity:0.6;cursor:${all.length > 1 ? 'help' : 'default'};"${tip}>${markExcerpt(w.excerpt)}</span>` : ''}</small>`;
 }).join('');

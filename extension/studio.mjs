@@ -14,7 +14,7 @@ import { STUDIO_PRUNE_OPTS } from './keyword-audit.mjs';
 import { buildKeySuggest, classifyLlmCand, STUDIO_SUGGEST_OPTS } from './keyword-suggest.mjs';
 import { buildAutomaton, addMessageHits, fold, validateSmartKey } from './smartkeys.mjs';
 import { findOrphanBindings } from './bindings.mjs';
-import { WI_LOGIC, hasPromoteDecorator, isRegexKey, keyHits, secondaryKeys, usableKeys, wholeWordAdvice, withPromote } from './matcher.mjs';
+import { WI_LOGIC, hasPromoteDecorator, isRegexKey, keyHits, keySpans, secondaryKeys, usableKeys, wholeWordAdvice, withPromote } from './matcher.mjs';
 
 const WA_GREEN = '#7bbf6a';   // "no prune" — a keyword the scan doesn't flag
 const WA_RED = '#e06c6c';     // severe — same value keyword-audit's severityOf hands back
@@ -2016,6 +2016,24 @@ export async function lorebookStudio(preferredBook = null) {
     };
 
     // --- Keyword Lab: any keys against any text, with no entry and no book behind them ---
+    /** Distinct hues by the golden angle, so a key's colour depends only on its position in the list. */
+    const LAB_HUES = Array.from({ length: 8 }, (_, i) => Math.round((i * 137.5) % 360));
+    const labColor = (h, a) => `hsl(${h} 75% 55%${a < 1 ? ` / ${a}` : ''})`;
+
+    /** The haystack with every span wrapped, each in its key's hue. Offsets are keyExcerpts', which are into the NFC form. */
+    const markedHtml = (text, spans, hue) => {
+        const src = String(text).normalize('NFC');
+        let html = '', at = 0;
+        for (const sp of spans) {
+            const h = hue(sp.key);
+            html += escapeHtml(src.slice(at, sp.start))
+                + `<span title="${escapeHtml(sp.term ? `${sp.key} \u2014 ${sp.term}` : sp.key)}"`
+                + ` style="background:${labColor(h, 0.28)};border-bottom:2px solid ${labColor(h, 1)};">${escapeHtml(src.slice(sp.start, sp.end))}</span>`;
+            at = sp.end;
+        }
+        return html + escapeHtml(src.slice(at));
+    };
+
     let labHay = '', labKeys = '';
     let labCase = !!world_info_case_sensitive, labWhole = !!world_info_match_whole_words;
 
@@ -2046,17 +2064,27 @@ export async function lorebookStudio(preferredBook = null) {
             flag('Case sensitive', () => labCase, v => { labCase = v; }),
             flag('Match whole words', () => labWhole, v => { labWhole = v; }),
         );
+        const marked = document.createElement('div');
+        marked.style.cssText = 'flex:1 1 auto;overflow:auto;padding:6px 8px;min-height:0;white-space:pre-wrap;line-height:1.5;';
         const out = document.createElement('div');
-        out.style.cssText = 'flex:1 1 auto;overflow:auto;padding:0 8px 8px;min-height:0;';
+        out.style.cssText = 'flex:0 0 auto;max-height:40%;overflow:auto;padding:0 8px 8px;';
         const repaint = () => {
             // Split as core's key field does, so a regex keeps its commas; a newline is one more separator.
-            const rows = keyHits(splitKeywordsAndRegexes(labKeys.replace(/\n/g, ',')), labHay, labCase, labWhole, { context: 200 });
+            const keys = splitKeywordsAndRegexes(labKeys.replace(/\n/g, ','));
+            const hue = key => LAB_HUES[Math.max(0, keys.indexOf(key)) % LAB_HUES.length];
+            const rows = keyHits(keys, labHay, labCase, labWhole, { context: 30 });
+            // A hit row takes the colour of the key it sits under, which is the last row that named one.
+            for (let i = 0, parent = ''; i < rows.length; i++) {
+                if (!rows[i].key.startsWith('\u21b3')) parent = rows[i].key;
+                rows[i].color = labColor(hue(parent), 1);
+            }
             out.innerHTML = rows.length
                 ? keyHitsHtml(rows)
                 : '<div style="opacity:0.6;padding:6px 0;">Keys you type on the right are matched against the text on the left.</div>';
+            marked.innerHTML = markedHtml(labHay, keySpans(keys, labHay, labCase, labWhole), hue);
         };
         repaint();
-        pane.append(panes, opts, out);
+        pane.append(panes, opts, marked, out);
     };
 
     const TABS = [['explorer', 'Explorer'], ['cleanup', 'Cleanup'], ['lab', 'Keyword Lab']];

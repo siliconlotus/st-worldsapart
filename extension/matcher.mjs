@@ -293,7 +293,7 @@ export function keyExcerpts(key, text, caseSensitive, wholeWords, context = 28, 
         const head = `${from > 0 ? '…' : ''}${src.slice(from, start)}`.replace(/\s+/g, ' ');
         const hit = src.slice(start, end).replace(/\s+/g, ' ');
         const tail = `${src.slice(end, to)}${to < src.length ? '…' : ''}`.replace(/\s+/g, ' ');
-        return { text: head + hit + tail, start: head.length, end: head.length + hit.length, at: start };
+        return { text: head + hit + tail, start: head.length, end: head.length + hit.length, at: start, to: end };
     };
     const mark = (raw0, index, length) => {
         const src = raw0.normalize('NFC');
@@ -362,10 +362,22 @@ function compoundExcerpts(node, text, context, limit) {
     return out;
 }
 
-/** What each of `keys` did to `text`, as the rows keyHitsHtml renders. One row per key — its count, and every hit on one line
- *  elided between them — then one `\u21b3` row per hit beneath it, or per credited leaf with its own count for a compound
+/** Where every one of `keys` matched in `text`, as `{ key, term, start, end }` in source order, for a caller marking up the text
+ *  itself. Overlaps are resolved first-come, since a span cannot be nested in the markup; a later key losing a span still has its
+ *  own count from keyHits. Single-segment: `text` is one string, so the offsets are into it. */
+export function keySpans(keys, text, caseSensitive, wholeWords, limit = 200) {
+    const spans = (Array.isArray(keys) ? keys : [])
+        .map(k => String(k ?? '').trim()).filter(Boolean)
+        .flatMap(key => keyExcerpts(key, text, caseSensitive, wholeWords, 0, limit)
+            .map(e => ({ key, term: e.term, start: e.at, end: e.to })))
+        .sort((a, b) => a.start - b.start || b.end - a.end);
+    return spans.filter((sp, i) => !spans.slice(0, i).some(p => p.end > sp.start && p.start < sp.end));
+}
+
+/** What each of `keys` did to `text`, as the rows keyHitsHtml renders. One row per key with its count, then one `\u21b3` row
+ *  per hit beneath it, or per credited leaf with its own count for a compound
  *  SmartKey, whose own number is a weight rather than an occurrence count. A key that can never fire gets a message
- *  where the excerpt goes. `context` and `limit` are keyExcerpts'. */
+ *  where the excerpt goes. A key with one hit and nothing to name stays a single row. `context` and `limit` are keyExcerpts'. */
 export function keyHits(keys, text, caseSensitive, wholeWords, { context = 28, limit = 20 } = {}) {
     return (Array.isArray(keys) ? keys : [])
         .map(k => String(k ?? '').trim()).filter(Boolean)
@@ -374,10 +386,8 @@ export function keyHits(keys, text, caseSensitive, wholeWords, { context = 28, l
             if (bad) return [{ key, excerpt: bad.message }];
             const count = countKey(key, text, caseSensitive, wholeWords);
             const hits = keyExcerpts(key, text, caseSensitive, wholeWords, context, limit);
-            // Plain text, since an excerpt object marks one span and the joined line has several.
-            const head = { key, count, excerpt: hits.map(markExcerptText).join(' \u2026 ') };
-            if (hits.length < 2 && !hits[0]?.term) return [{ ...head, excerpt: hits[0] }];
-            return [head, ...hits.map(e => ({ key: e.term ? `\u21b3 ${e.term}` : '\u21b3', count: e.n, excerpt: e }))];
+            if (hits.length < 2 && !hits[0]?.term) return [{ key, count, excerpt: hits[0] }];
+            return [{ key, count }, ...hits.map(e => ({ key: e.term ? `\u21b3 ${e.term}` : '\u21b3', count: e.n, excerpt: e }))];
         });
 }
 

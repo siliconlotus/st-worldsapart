@@ -1,6 +1,6 @@
 // WA's own matcher semantics, which core has no opinion about: SmartKeys, scoring units, the saturation curve, key refusals, excerpts.
 // A claim that cites core as the authority belongs in core-matcher-check.mjs.
-import { countKey, dropTags, keyExcerpts, keyHits, keywordScore as rankKeywordScore, markExcerptText, repeatCurveOf, secondaryKeys, usableKeys, usedMatchSources, withMatchSources, WI_LOGIC } from '../extension/matcher.mjs';
+import { countKey, dropTags, keyExcerpts, keyHits, keySpans, keywordScore as rankKeywordScore, markExcerptText, repeatCurveOf, secondaryKeys, usableKeys, usedMatchSources, withMatchSources, WI_LOGIC } from '../extension/matcher.mjs';
 import { validateSmartKey } from '../extension/smartkeys.mjs';
 import { eq } from './metrics.mjs';
 
@@ -254,8 +254,7 @@ eq(rows.map(r => r.key).join(' | '), 'gagarin | \u21b3 | \u21b3 | ? (armstrong g
     'every hit gets its own row under the key; a compound names the leaf that produced each');
 eq(rows[0].count, 2, 'a plain key reports occurrences');
 eq(rows[1].excerpt.at < rows[2].excerpt.at, true, 'the hit rows are in the order they occur in the text');
-eq(rows[3].excerpt, 'the Russian cosmonaut Yuri «Gagarin» flew; the American astronau… … …the American astronaut Neil «Armstrong» walked. Gagarin again.',
-    'the key row reads as its groups on one line, elided between them');
+eq(rows[3].excerpt, undefined, 'the key row carries no excerpt of its own — the hit rows below it are the excerpts');
 eq(rows[4].count, 2, 'a compound\'s leaf rows carry that leaf\'s own count');
 eq(rows[6].count, undefined, 'a negation-only SmartKey is reported as unusable...');
 eq(typeof rows[6].excerpt, 'string', '...by a message where the excerpt goes');
@@ -263,6 +262,16 @@ eq(rows[7].count, 0, 'a key that simply did not match is a zero, not an error');
 eq(keyHits(['gagarin', '', '  armstrong  '], space, false, true).map(r => r.key).join(','), 'gagarin,\u21b3,\u21b3,armstrong',
     'blanks are dropped and keys trimmed; splitting the caller\'s text into keys is the caller\'s business');
 console.log('ok   keyHits: a row per key and per hit, leaves named for compounds, a message for a key that cannot fire');
+
+
+// --- keySpans: where to mark the haystack itself — source offsets, in order, never overlapping
+const spans = keySpans(['gagarin', '? (armstrong gagarin)', 'neil armstrong'], space, false, true);
+eq(spans.map(sp => `${sp.key}@${sp.start}`).join(' '), 'gagarin@27 neil armstrong@64 gagarin@87',
+    'a word already marked by an earlier key is not marked again — markup cannot nest two spans');
+eq(space.slice(spans[1].start, spans[1].end), 'Neil Armstrong', 'the offsets index the text itself, not an excerpt');
+eq(keySpans(['? (armstrong gagarin)'], space, false, true).map(sp => `${sp.term}@${sp.start}`).join(' '),
+    'gagarin@27 armstrong@69', 'a compound names the leaf that produced each span');
+console.log('ok   keySpans: source offsets for marking the haystack, ordered and disjoint');
 
 
 // --- usedMatchSources: what a capture is allowed to freeze
