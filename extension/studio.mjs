@@ -2072,15 +2072,18 @@ export async function lorebookStudio(preferredBook = null) {
             flag('Case sensitive', () => labCase, v => { labCase = v; }),
             flag('Match whole words', () => labWhole, v => { labWhole = v; }),
         );
+        const winLabel = document.createElement('label');
+        winLabel.style.cssText = 'display:flex;gap:6px;align-items:center;';
+        winLabel.title = 'The unit a key has to match within, as the Match window setting has it';
         const win = document.createElement('select'); win.className = 'text_pole';
         win.style.cssText = 'width:auto;margin:0;';
-        win.title = 'The unit a key has to match within, as the Match window setting has it';
         for (const [v, label] of [['paragraph', 'Paragraph'], ['message', 'Message'], ['scan', 'Whole scan window']]) {
             const o = document.createElement('option'); o.value = v; o.textContent = label; o.selected = labWindow === v;
             win.append(o);
         }
         win.addEventListener('change', () => { labWindow = win.value; repaint(); });
-        opts.append(win);
+        winLabel.append(document.createTextNode('Match window'), win);
+        opts.append(winLabel);
         const marked = document.createElement('div');
         marked.style.cssText = 'flex:1 1 auto;overflow:auto;padding:6px 8px;min-height:0;white-space:pre-wrap;line-height:1.5;';
         const out = document.createElement('div');
