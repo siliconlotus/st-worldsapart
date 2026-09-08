@@ -2025,7 +2025,7 @@ export async function lorebookStudio(preferredBook = null) {
         const box = (placeholder, get, set) => {
             const t = document.createElement('textarea'); t.className = 'text_pole';
             t.placeholder = placeholder; t.value = get();
-            t.style.cssText = 'flex:1 1 0;resize:none;font-family:var(--monoFontFamily);overflow:auto;';
+            t.style.cssText = 'flex:1 1 0;height:100%;min-height:0;resize:none;font-family:var(--monoFontFamily);overflow:auto;';
             t.addEventListener('input', () => { set(t.value); repaint(); });
             return t;
         };
@@ -2050,7 +2050,7 @@ export async function lorebookStudio(preferredBook = null) {
         out.style.cssText = 'flex:1 1 auto;overflow:auto;padding:0 8px 8px;min-height:0;';
         const repaint = () => {
             // Split as core's key field does, so a regex keeps its commas; a newline is one more separator.
-            const rows = keyHits(splitKeywordsAndRegexes(labKeys.replace(/\n/g, ',')), labHay, labCase, labWhole, { context: 60 });
+            const rows = keyHits(splitKeywordsAndRegexes(labKeys.replace(/\n/g, ',')), labHay, labCase, labWhole, { context: 200 });
             out.innerHTML = rows.length
                 ? keyHitsHtml(rows)
                 : '<div style="opacity:0.6;padding:6px 0;">Keys you type on the right are matched against the text on the left.</div>';
