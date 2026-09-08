@@ -336,16 +336,31 @@ export function keyExcerpts(key, text, caseSensitive, wholeWords, context = 28, 
     return out;
 }
 
-/** Every leaf a compound SmartKey's match credited, first hit each, ordered by position; `term` is the leaf and `n` its
- *  occurrences in that segment. A leaf the match did not credit — under a NOT, or the unmatched side of an OR — is absent. */
+/** The leaves a compound SmartKey would search for: those not under an odd number of NOTs, in source order. */
+function positiveLeaves(node, negated = false, out = []) {
+    if (!node) return out;
+    if (node.type === 'TERM' || node.type === 'REGEX') { if (!negated) out.push(node); return out; }
+    if (node.type === 'NOT') return positiveLeaves(node.operand, !negated, out);
+    positiveLeaves(node.left, negated, out);
+    return positiveLeaves(node.right, negated, out);
+}
+
+/** Every leaf of a compound SmartKey that hit, first occurrence each, ordered by position; `term` is the leaf and `n` its
+ *  occurrences in that segment. A key whose verdict is false still reports its leaves — which branch is failing is the
+ *  question a group is tuned against — so only a leaf under a NOT, a condition rather than a thing, is absent. */
 function compoundExcerpts(node, text, context, limit) {
     const out = [];
     for (const segment of Array.isArray(text) ? text : [text]) {
         if (!segment) continue;
-        const leaves = [];
+        const credited = [];
         // A pooled unit carries the alternation, its children under `parts`; only the leaves have a term to search for.
-        const walk = us => { for (const u of us) { if (u.parts) walk(u.parts); else leaves.push(u); } };
+        const walk = us => { for (const u of us) { if (u.parts) walk(u.parts); else credited.push(u); } };
         walk(evaluate(node, segment).units);
+        const leaves = credited.length
+            ? credited
+            : positiveLeaves(node)
+                .map(id => ({ id, n: countKey(String(id.value ?? ''), segment, !!id.isCaseSensitive, !!id.isExact) }))
+                .filter(u => u.n > 0);
         const found = [];
         for (const { id, n } of leaves) {
             const value = String(id?.value ?? '');

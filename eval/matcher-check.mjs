@@ -241,7 +241,8 @@ const leaves = k => keyExcerpts(k, space, false, true).map(e => `${e.term}:${e.n
 eq(leaves('? (armstrong gagarin)').join(' '), 'gagarin:2 armstrong:1', 'AND: both leaves, ordered by position, not by the AST');
 eq(leaves('? (apple | gagarin | coconut)').join(' '), 'gagarin:2', 'OR: only the side that hit, and the pooled n is that side\'s own');
 eq(leaves('? (gagarin -banana)').join(' '), 'gagarin:2', 'NOT: the negated term has no span to show');
-eq(keyExcerpts('? (gagarin banana)', space, false, true).length, 0, 'a key that did not match excerpts nothing');
+eq(leaves('? (gagarin banana)').join(' '), 'gagarin:2', 'a key whose verdict is false still shows the branch that hit — the group is tuned against that');
+eq(leaves('? (apple | banana)').join(' '), '', 'a key nothing in it hit shows nothing');
 eq(markExcerptText(keyExcerpts('? (armstrong gagarin)', space, false, true, 12)[0]),
     '…monaut Yuri «Gagarin» flew; the A…', 'a leaf excerpt is the ordinary one, at the caller\'s context width');
 eq(leaves('? (/Gagar\\w+/ armstrong)').join(' '), '/Gagar\\w+/:2 armstrong:1', 'a regex leaf reports the pattern as its term, and is case-sensitive without /i');
