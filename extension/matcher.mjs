@@ -178,6 +178,22 @@ export function segment(texts, matchWindow) {
     return out.filter(t => t.trim());
 }
 
+/** One text cut into the units a key must match within, each with its offset into the NFC form of that text — `segment` for a
+ *  caller that must map a result back onto the source. `message` cannot subdivide a single text, so only `paragraph` does. */
+export function textSegments(text, matchWindow) {
+    const src = String(text ?? '').normalize('NFC');
+    if (matchWindow !== 'paragraph') return src.trim() ? [{ text: src, at: 0 }] : [];
+    const out = [];
+    const re = new RegExp(PARAGRAPH_BREAK.source, 'g');
+    let last = 0;
+    for (let m = re.exec(src); m; m = re.exec(src)) {
+        out.push({ text: src.slice(last, m.index), at: last });
+        last = m.index + m[0].length;
+    }
+    out.push({ text: src.slice(last), at: last });
+    return out.filter(sg => sg.text.trim());
+}
+
 /** Entry match-flag -> scan-sources field, as core's buffer does. */
 export const MATCH_SOURCE_FIELDS = {
     matchPersonaDescription: 'personaDescription',
@@ -406,14 +422,23 @@ function compoundExcerpts(node, text, context, limit) {
 
 /** Where every one of `keys` matched in `text`, as `{ key, term, start, end, keys }` in source order, for a caller marking up
  *  the text itself. A span cannot nest in the markup, so overlapping matches become one span at the first one's extent, with
- *  every key that reached it listed in `keys`; `key` and `term` are the first of those. Single-segment: `text` is one string,
- *  so the offsets are into it. */
-export function keySpans(keys, text, caseSensitive, wholeWords, limit = 200) {
+ *  every key that reached it listed in `keys`; `key` and `term` are the first of those. Offsets are into the NFC form of the
+ *  whole text, `matchWindow` and all — a key matched within its segment, but a caller marks up one string. */
+/** The segments `key` matched in, or all of them when it matched in none — a failed key still reports the branch that hit,
+ *  but only where nothing can read the report as a match. */
+const liveSegments = (key, segs, caseSensitive, wholeWords) => {
+    const live = segs.filter(sg => countKey(key, sg.text, caseSensitive, wholeWords) > 0);
+    return live.length ? live : segs;
+};
+
+export function keySpans(keys, text, caseSensitive, wholeWords, { limit = 200, matchWindow = 'scan' } = {}) {
     const out = [];
+    const segs = textSegments(text, matchWindow);
     const spans = (Array.isArray(keys) ? keys : [])
         .map(k => String(k ?? '').trim()).filter(Boolean)
-        .flatMap(key => keyExcerpts(key, text, caseSensitive, wholeWords, 0, limit)
-            .map(e => ({ key, term: e.term, start: e.at, end: e.to })))
+        .flatMap(key => liveSegments(key, segs, caseSensitive, wholeWords)
+            .flatMap(sg => keyExcerpts(key, sg.text, caseSensitive, wholeWords, 0, limit)
+                .map(e => ({ key, term: e.term, start: e.at + sg.at, end: e.to + sg.at }))))
         .sort((a, b) => a.start - b.start || b.end - a.end);
     for (const { key, term, start, end } of spans) {
         const last = out[out.length - 1];
@@ -427,14 +452,17 @@ export function keySpans(keys, text, caseSensitive, wholeWords, limit = 200) {
  *  per hit beneath it, or per credited leaf with its own count for a compound
  *  SmartKey, whose own number is a weight rather than an occurrence count. A key that can never fire gets a message
  *  where the excerpt goes. A key with one hit and nothing to name stays a single row. `context` and `limit` are keyExcerpts'. */
-export function keyHits(keys, text, caseSensitive, wholeWords, { context = 28, limit = 20 } = {}) {
+export function keyHits(keys, text, caseSensitive, wholeWords, { context = 28, limit = 20, matchWindow = 'scan' } = {}) {
+    const segs = textSegments(text, matchWindow);
     return (Array.isArray(keys) ? keys : [])
         .map(k => String(k ?? '').trim()).filter(Boolean)
         .flatMap(key => {
             const bad = key.startsWith('?') ? validateSmartKey(key).find(v => v.severity === 'error') : null;
             if (bad) return [{ key, excerpt: bad.message }];
-            const count = countKey(key, text, caseSensitive, wholeWords);
-            const hits = keyExcerpts(key, text, caseSensitive, wholeWords, context, limit);
+            // Per segment and summed, as the audit counts: a key is matched within its unit, never across the join.
+            const count = segs.reduce((a, sg) => a + countKey(key, sg.text, caseSensitive, wholeWords), 0);
+            const hits = liveSegments(key, segs, caseSensitive, wholeWords)
+                .flatMap(sg => keyExcerpts(key, sg.text, caseSensitive, wholeWords, context, limit)).slice(0, limit);
             if (hits.length < 2 && !hits[0]?.term) return [{ key, count, excerpt: hits[0] }];
             return [{ key, count }, ...hits.map(e => ({ key: e.term ? `\u21b3 ${e.term}` : '\u21b3', count: e.n, excerpt: e }))];
         });

@@ -1,6 +1,6 @@
 // WA's own matcher semantics, which core has no opinion about: SmartKeys, scoring units, the saturation curve, key refusals, excerpts.
 // A claim that cites core as the authority belongs in core-matcher-check.mjs.
-import { countKey, dropTags, keyExcerpts, keyHits, keySpans, splitKeys, keywordScore as rankKeywordScore, markExcerptText, repeatCurveOf, secondaryKeys, usableKeys, usedMatchSources, withMatchSources, WI_LOGIC } from '../extension/matcher.mjs';
+import { countKey, dropTags, keyExcerpts, keyHits, keySpans, splitKeys, textSegments, keywordScore as rankKeywordScore, markExcerptText, repeatCurveOf, secondaryKeys, usableKeys, usedMatchSources, withMatchSources, WI_LOGIC } from '../extension/matcher.mjs';
 import { validateSmartKey } from '../extension/smartkeys.mjs';
 import { eq } from './metrics.mjs';
 
@@ -277,6 +277,23 @@ eq(rows[7].count, 0, 'a key that simply did not match is a zero, not an error');
 eq(keyHits(['gagarin', '', '  armstrong  '], space, false, true).map(r => r.key).join(','), 'gagarin,\u21b3,\u21b3,armstrong',
     'blanks are dropped and keys trimmed; splitting the caller\'s text into keys is the caller\'s business');
 console.log('ok   keyHits: a row per key and per hit, leaves named for compounds, a message for a key that cannot fire');
+
+
+// --- matchWindow: a key is matched within its unit, and the offsets still land on the whole text
+const paras = 'Russian cosmonaut Yuri Gagarin met the American astronaut Neil Armstrong.\n\nThe cosmonaut, hero of the Soviet Union, was vacationing.';
+eq(textSegments(paras, 'paragraph').map(sg => sg.at).join(','), '0,75', 'a segment carries its offset into the whole text');
+eq(textSegments(paras, 'scan').length, 1, 'any other window leaves the text whole');
+eq(textSegments('   ', 'scan').length, 0, 'blank text has no segments to match in');
+const win = w => keyHits(['? cosmonaut -astronaut'], paras, false, true, { matchWindow: w }).map(r => `${r.key}:${r.count ?? ''}`);
+eq(win('scan').join(' '), '? cosmonaut -astronaut:0 \u21b3 cosmonaut:2',
+    'across the whole text the negation kills it, and the branch that hit is what is left to report');
+eq(win('paragraph').join(' '), '? cosmonaut -astronaut:1 \u21b3 cosmonaut:1',
+    'by paragraph it matches the one the astronaut is absent from, and reports only that');
+eq(paras.slice(...(sp => [sp.start, sp.end])(keySpans(['? cosmonaut -astronaut'], paras, false, true, { matchWindow: 'paragraph' })[0])), 'cosmonaut',
+    'and marks it there');
+eq(keySpans(['? cosmonaut -astronaut'], paras, false, true, { matchWindow: 'paragraph' }).map(sp => sp.start).join(), '79',
+    'the span is offset onto the whole text, not the segment it was found in');
+console.log('ok   matchWindow: keys match within their unit, spans are offset back onto the whole text');
 
 
 // --- keySpans: where to mark the haystack itself — source offsets, in order, never overlapping

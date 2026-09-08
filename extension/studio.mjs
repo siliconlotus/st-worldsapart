@@ -2041,6 +2041,9 @@ export async function lorebookStudio(preferredBook = null) {
 
     let labHay = '', labKeys = '';
     let labCase = !!world_info_case_sensitive, labWhole = !!world_info_match_whole_words;
+    // The unit a key must match within, as the running setting has it. A pasted text has no messages, so `message` is
+    // `scan` here; it is still offered, and still stored, because it is the setting the Lab is standing in for.
+    let labWindow = settings().matchWindow;
 
     const renderLabView = pane => {
         const panes = document.createElement('div');
@@ -2069,6 +2072,15 @@ export async function lorebookStudio(preferredBook = null) {
             flag('Case sensitive', () => labCase, v => { labCase = v; }),
             flag('Match whole words', () => labWhole, v => { labWhole = v; }),
         );
+        const win = document.createElement('select'); win.className = 'text_pole';
+        win.style.cssText = 'width:auto;margin:0;';
+        win.title = 'The unit a key has to match within, as the Match window setting has it';
+        for (const [v, label] of [['paragraph', 'Paragraph'], ['message', 'Message'], ['scan', 'Whole scan window']]) {
+            const o = document.createElement('option'); o.value = v; o.textContent = label; o.selected = labWindow === v;
+            win.append(o);
+        }
+        win.addEventListener('change', () => { labWindow = win.value; repaint(); });
+        opts.append(win);
         const marked = document.createElement('div');
         marked.style.cssText = 'flex:1 1 auto;overflow:auto;padding:6px 8px;min-height:0;white-space:pre-wrap;line-height:1.5;';
         const out = document.createElement('div');
@@ -2076,7 +2088,7 @@ export async function lorebookStudio(preferredBook = null) {
         const repaint = () => {
             const keys = splitKeys(labKeys);
             const ink = (key, a) => labInk(Math.max(0, keys.indexOf(key)), a);
-            const rows = keyHits(keys, labHay, labCase, labWhole, { context: 30 });
+            const rows = keyHits(keys, labHay, labCase, labWhole, { context: 30, matchWindow: labWindow });
             // A hit row takes the colour of the key it sits under, which is the last row that named one.
             for (let i = 0, parent = ''; i < rows.length; i++) {
                 if (!rows[i].key.startsWith('\u21b3')) parent = rows[i].key;
@@ -2085,7 +2097,7 @@ export async function lorebookStudio(preferredBook = null) {
             out.innerHTML = rows.length
                 ? keyHitsHtml(rows)
                 : '<div style="opacity:0.6;padding:6px 0;">Keys you type on the right are matched against the text on the left.</div>';
-            marked.innerHTML = markedHtml(labHay, keySpans(keys, labHay, labCase, labWhole), ink);
+            marked.innerHTML = markedHtml(labHay, keySpans(keys, labHay, labCase, labWhole, { matchWindow: labWindow }), ink);
         };
         repaint();
         pane.append(panes, opts, marked, out);
