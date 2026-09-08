@@ -1,75 +1,28 @@
-// automaton.mjs — the Aho-Corasick literal matcher and the text fold it matches on. Pure, no imports,
-// and shared by both sides: the extension's smartkeys.mjs re-exports it for keyword matching, and the
-// server plugin uses it to scan chat histories without shipping them to the browser.
-//
-// It lives under plugin/ because that is the half that gets deployed, and the extension can import
-// across but not the reverse. One copy, per the one-matcher rule: two would drift, and the drift
-// surfaces as a scoring difference nobody can trace back.
+// automaton.mjs — the Aho-Corasick literal matcher and the text fold it matches on. No imports; shared by the
+// extension (via smartkeys.mjs) and the server plugin. One copy, or the browser and the server disagree.
 
-/** Single-quote variants that authors and models mix freely: right/left single quotes, the low and
- *  high-reversed forms, the modifier letters, prime, acute, grave and the single guillemets. All
- *  collapse to ASCII ' before matching. */
 const APOSTROPHES = /[‘’‚‛ʼʹ´`′‹›]/g;
-/** Typographic double quotes, the same family one level up: curly, low, high-reversed, double prime,
- *  its modifier letter, and the guillemets. A key field takes the straight one; prose arrives typeset. */
 const DOUBLE_QUOTES = /[“”„‟″ʺ«»]/g;
-/** Combining marks — the signal that a string may be decomposed (NFD). Guarding the NFC pass on this
- *  makes it free where it is not needed: it only costs when it has something to do. */
 const COMBINING = /[̀-ͯ᪰-᫿᷀-᷿⃐-⃿︠-︯]/;
 
-/**
- * Normalises orthography without touching case: the same character in a different encoding. A key typed
- * with a straight apostrophe otherwise dies silently against typeset prose, and real books carry
- * apostrophe-form keys mismatched in both directions (K10), as they do every other form here.
- *
- * Strictly orthography, and that boundary is the whole point: none of these rewrites can destroy a
- * distinction anyone means. Anything that can carry meaning — a hyphen against a space, a case
- * difference — does not belong here, because folding it into the scan text erases it for every key at
- * once and no flag can ask it back. Case gets away with it only because `^` exists to opt out.
- *
- * NFC composition is the same argument in its purest form — "José" and "José" are one name in
- * two encodings, measured absent from this corpus (K10) and included anyway because the exposure is
- * asymmetric: text pasted from another source arrives decomposed, and the guard above makes the check
- * free when it is not needed.
- *
- * A character joins the quote classes if it is a typographic variant of the ASCII form, and not if it is
- * finer-grained than it. A variant collapses nothing; a finer-grained mark imports a distinction its
- * writing system draws and ASCII cannot express, and that loss lands in the haystack where no key can
- * ask it back. So 《》 (titles) and 「」 (speech) stay out: they partition what " collapses.
- *
- * Not included, measured absent (K10): zero-width characters, ligatures, U+2212 minus. Fullwidth forms
- * occur in chat but only as punctuation, which is already non-word.
- */
+/** Orthography without case: apostrophe and quote variants, dashes, ellipsis, NBSP, NFC. Never anything that can carry meaning (a hyphen against a space); 《》 and 「」 stay out, they partition what " collapses (K10). */
 export const normalizeOrthography = s => {
     s = String(s ?? '');
     if (COMBINING.test(s)) s = s.normalize('NFC');
     return s
         .replace(APOSTROPHES, "'")
         .replace(DOUBLE_QUOTES, '"')
-        // An em-dash's ASCII form is TWO hyphens; an en-dash's is one. They must not collapse together —
-        // the em-dash separates clauses and the en-dash joins, so a key meaning one must not match the other.
+        // An em-dash is TWO hyphens and an en-dash one; they must not collapse together.
         .replace(/—/g, '--')
         .replace(/–/g, '-')
         .replace(/…/g, '...')
         .replace(/ /g, ' ');
 };
 
-/**
- * The one folding used for every match: orthography-normalised and case-folded.
- *
- * Must be the only fold: countKey short-circuits on a 0 from the automaton, so normalising the naive
- * walk alone would change nothing — the trie would still report a miss and return before the walk ran.
- * Registry, scan and fallback all go through here or they silently disagree.
- */
+/** The one fold every match uses; registry, scan and fallback all go through it or they silently disagree. */
 export const fold = s => normalizeOrthography(s).toLowerCase();
 
-/**
- * Pass 1 — Aho-Corasick automaton over the case-folded literals of every registered term.
- * One scan of the text yields the set of terms present as substrings; per-key evaluation
- * then never re-walks the text (except to verify =/^ flags on candidate terms).
- * @param {string[]} patterns Case-folded literals
- * @returns {{next: Map[], fail: number[], out: Set[]}}
- */
+/** Aho-Corasick automaton over folded literals: `{next, fail, out, len}`. */
 export function buildAutomaton(patterns) {
     const next = [new Map()], fail = [0], out = [new Set()];
     for (let p = 0; p < patterns.length; p++) {
@@ -84,8 +37,6 @@ export function buildAutomaton(patterns) {
         }
         out[node].add(p);
     }
-    // Failure links, breadth-first: fail[v] is the longest proper suffix of v's path that is
-    // also a path in the trie; outputs propagate along it so nested patterns still report.
     const queue = [...next[0].values()];
     while (queue.length) {
         const u = queue.shift();
@@ -100,12 +51,7 @@ export function buildAutomaton(patterns) {
     return { next, fail, out, len: patterns.map(p => p.length) };
 }
 
-/**
- * Scans case-folded text through the automaton, counting NON-overlapping occurrences per
- * pattern (greedy left-to-right) — exact parity with countKey's indexOf loop, where "aa"
- * in "aaa" counts once.
- * @returns {Map<number, number>} pattern index -> occurrence count (present patterns only)
- */
+/** NON-overlapping occurrences per pattern present, greedy left-to-right — parity with countKey's indexOf loop ("aa" in "aaa" counts once). */
 export function scanAutomaton(aut, foldedText) {
     const counts = new Map();
     const lastEnd = new Map();
@@ -124,19 +70,7 @@ export function scanAutomaton(aut, foldedText) {
     return counts;
 }
 
-/**
- * Accumulates a chat scan: one text, counted as one hit per pattern present.
- *
- * Messages containing, never occurrences, which is why this exists rather than being written at each
- * call site — the browser and the server both scan chats for the Studio's key evidence, and a share
- * needs numerator and denominator to count the same thing. `messages` is the denominator, so a hit is a
- * message. Occurrence counts are available per text from scanAutomaton directly; nothing that compares
- * against a message total may use them.
- *
- * @param {object} aut Automaton from buildAutomaton
- * @param {string} text One message, unfolded
- * @param {Map<number, number>} totals Accumulator, pattern index -> messages containing it
- */
+/** Adds one hit per pattern PRESENT in `text` to `totals`: messages containing, never occurrences, which anything compared against a message total must count. */
 export function addMessageHits(aut, text, totals) {
     for (const [i] of scanAutomaton(aut, fold(text))) totals.set(i, (totals.get(i) ?? 0) + 1);
 }

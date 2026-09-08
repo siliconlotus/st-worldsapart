@@ -1,26 +1,10 @@
-// lexical.mjs — lexical similarity: tokenization and BM25 over entry content. Pure and isomorphic
-// (no DOM/fs), imported by content-lexical.mjs and the offline harnesses.
-//
-// It runs in the browser, over every entry's content; the plugin scores no text at all. It still
-// imports the fold from plugin/automaton.mjs, which the server does run, so both sides tokenize
-// identically.
-//
-// This is what dense retrieval can't do on a single-story corpus: IDF automatically discounts terms
-// that appear everywhere (a cast name in most chunks earns almost no weight), which is exactly the
-// discrimination that's lost when every embedding shares a common direction.
+// lexical.mjs — tokenization and BM25 over chunk texts. Pure; the fold is the matcher's (plugin/automaton.mjs),
+// so both sides tokenize identically.
 import { fold } from '../plugin/automaton.mjs';
 
 export const DEFAULT_K1 = 1.2, DEFAULT_B = 0.75;
 
-/**
- * Folded tokens (len > 1): the matcher's fold (plugin/automaton.mjs — NFC, orthography, case), then split on
- * anything outside the matcher's word-character core (\p{L}\p{N}\p{M}, plus apostrophe as before).
- *
- * The fold is the matcher's, never a lookalike: a private notion of sameness makes BM25 disagree with
- * every match verdict in the system — an ASCII-only split treats an accented letter as a separator, so
- * "Möbius" indexes as "bius" and matches nothing (K9). What the fold deliberately does not do is strip
- * diacritics, é vs e being a distinction an author can write — the same verdict countKey gives.
- */
+/** Folded tokens (len > 1): the matcher's fold, then split outside \p{L}\p{N}\p{M} and apostrophe — never an ASCII split, or "Möbius" indexes as "bius" (K9). */
 export function tokenize(text) {
     return fold(text).split(/[^\p{L}\p{N}\p{M}']+/u).filter(t => t.length > 1);
 }
@@ -43,8 +27,7 @@ export function buildLexical(items) {
     return { postings, idf, docLen, avgdl: total / Math.max(1, N) };
 }
 
-/** Per-document BM25. termWeights (entity mode) pre-filters + weights query terms; stopwordDf drops
- *  corpus-common terms. */
+/** Per-document BM25; `termWeights` pre-filters and weights the query terms, `stopwordDf` drops terms in more than that share of docs. */
 export function bm25Scores(lexical, queryText, docCount, k1 = DEFAULT_K1, b = DEFAULT_B, termWeights = null, stopwordDf = 0) {
     const scores = new Float64Array(docCount);
     const maxDocs = stopwordDf > 0 ? stopwordDf * docCount : Infinity;

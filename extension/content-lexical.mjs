@@ -1,43 +1,12 @@
-// content-lexical.mjs — BM25 over EVERY entry's content, not just the vectorized ones.
-//
-// What it fixes: only vectorized entries reach the vector collection, and the plugin builds its BM25
-// index over exactly those chunks, so a keyword entry earned `keywordScore` alone while a vectorized
-// entry earned three signals. This gives it a second.
-//
-// The orientations are opposite and both are wanted: keywordScore treats the entry's keys as the query
-// and the chat as the document, where this treats the entry's content as the document and the query as
-// the query. They answer different questions, so an entry scoring on both is not double-counting.
-//
-// Scoring only, never admission: any lexical overlap admitting an entry would bypass the author's key
-// declarations. Enforced by where this is called rather than by a flag — it runs at stage 3 over
-// already-activated entries, and stage 1 never consults it.
-//
-// One index for both classes. BM25 is IDF-weighted, so a score only means something relative to the
-// corpus its statistics came from; two indexes would merge two scales into one rank list and report the
-// seam as a parameter effect. So this covers every entry with content and is the source for every
-// stage-3 text score — which also means "common" is no longer defined by the memory entries alone,
-// moving every BM25 figure measured on a vectorized-only corpus (bm25K1, bm25B, lexicalWeight,
-// stopwordDocFreq's 25% bar).
+// content-lexical.mjs — stage 3's text signal: BM25 over EVERY entry's content, chunked as syncWorld chunks.
+// Scoring only, never admission; stage 1 never consults it.
 import { buildLexical, bm25Scores, DEFAULT_K1, DEFAULT_B } from './lexical.mjs';
 import { chunkEntry } from './chunking.mjs';
 
 /** ST core's key format for an activated entry — `${world}.${uid}`, not our US-separated rowKey. */
 export const entryKey = e => `${e.world}.${e.uid}`;
 
-/**
- * Chunks every entry with content and indexes it.
- *
- * Chunked the same way syncWorld chunks, so a vectorized entry's documents here are the documents the
- * vector collection holds. A different split would give the two classes different length normalisation
- * (BM25's `b` term divides by average document length) and favour whichever was chopped finer.
- *
- * Disabled entries are excluded: core never activates one, so a score for it could only ever mislead a
- * reader of the index, and its tokens would still move every other entry's IDF.
- *
- * @param {object[]} entries Live entries, each with `world`, `uid`, `content`, `disable`
- * @param {{chunkMode: string, chunkSize: number, minChunkSize: number}} chunkCfg
- * @returns {{lexical: object, keys: string[], docCount: number, entryCount: number}}
- */
+/** Chunks every enabled entry with content (chunkEntry, the split syncWorld uses) and indexes it; `keys[i]` is chunk i's entryKey. */
 export function buildContentIndex(entries, chunkCfg) {
     const items = [];
     const keys = [];
@@ -54,15 +23,7 @@ export function buildContentIndex(entries, chunkCfg) {
     return { lexical: buildLexical(items), keys, docCount: items.length, entryCount: new Set(keys).size };
 }
 
-/**
- * BM25 of one query against the index, pooled to the best chunk per entry.
- *
- * Max, not sum — the same pooling the vector path applies (`poolEntries` keeps an entry's best chunk).
- * Summing would make a long entry outscore a sharper short one for having more places to match, which is
- * the length bias `b` already exists to control.
- *
- * @returns {Map<string, number>} `${world}.${uid}` -> best chunk score. Absent when nothing matched.
- */
+/** BM25 of one query, max-pooled to the best chunk per entry: entryKey -> score, absent when nothing matched. */
 export function scoreContent(index, queryText, { k1 = DEFAULT_K1, b = DEFAULT_B, termWeights = null, stopwordDf = 0 } = {}) {
     const out = new Map();
     if (!index?.docCount) return out;
@@ -76,12 +37,6 @@ export function scoreContent(index, queryText, { k1 = DEFAULT_K1, b = DEFAULT_B,
     return out;
 }
 
-/**
- * Cheap fingerprint of what the index was built from. Entry count, total content length and the chunk
- * settings move on every change that alters a document; an edit preserving length exactly is the one
- * case it misses, and that costs a stale score rather than a wrong activation, since nothing here
- * admits.
- */
 export const indexFingerprint = (entries, { chunkMode, chunkSize, minChunkSize }) => {
     let n = 0, chars = 0;
     for (const e of entries ?? []) {

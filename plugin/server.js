@@ -1,22 +1,5 @@
-/**
- * Worlds Apart — server plugin (source).
- *
- * `/plugins/worlds-apart/` is a generated copy: run `node deploy-plugin.mjs` to materialise it. Do not
- * hand-edit the copy — edit here and redeploy.
- *
- * Adds a mean-centered vector query over the collections the client extension populates through ST's own
- * /api/vector/insert; it mounts at /api/plugins/worlds-apart and modifies nothing in SillyTavern. The
- * retrieval math is imported from ./scoring.mjs, the single source shared with the extension and the
- * offline harnesses, so the reproductions cannot drift from what the server runs.
- *
- * Why centering: in a single-story corpus every chunk shares a large common direction that carries most
- * of every embedding's mass and compresses all similarities into a narrow band (R9). Subtracting the
- * mean leaves the topical variance that discriminates.
- *
- * It imports ST internals (src/vectors/*) by relative path resolved from the deployed location. That is
- * not a public API and may move between ST versions; the client falls back to the stock endpoint when
- * this plugin is unavailable.
- */
+// server.js — Worlds Apart server plugin (source); /plugins/worlds-apart/ is the generated copy, so edit here and
+// `node deploy-plugin.mjs`. Mounts at /api/plugins/worlds-apart; imports ST internals (src/vectors/*) by relative path.
 
 import path from 'node:path';
 import fs from 'node:fs';
@@ -36,32 +19,18 @@ import { getExtrasVector } from '../../src/vectors/extras-vectors.js';
 import { getMakerSuiteVector, getVertexVector } from '../../src/vectors/google-vectors.js';
 import { getConfigValue } from '../../src/util.js';
 import { scoreCollection, poolEntries, selectTopK } from './scoring.mjs';
-// Same matcher and text fold the extension uses for keyword hits — shared, not copied, so a chat scan and a
-// live keyword match can never disagree about what a key matches.
 import { buildAutomaton, addMessageHits, fold } from './automaton.mjs';
 import { norm, corpusMean } from './vector.mjs';
 import { pluginFingerprint, PLUGIN_FILES } from './fingerprint.mjs';
 
-// This file sits at <root>/plugins/worlds-apart/index.js once deployed.
+// Deployed location: <root>/plugins/worlds-apart/index.js.
 const PLUGIN_DIR = path.dirname(fileURLToPath(import.meta.url));
-// SillyTavern root: /ping hands this to the extension so its settings panel can show a fully-
-// absolute deploy command (the browser only knows the URL path, not the server's filesystem root).
 const ST_ROOT = path.resolve(PLUGIN_DIR, '..', '..');
-// Fingerprint of this deployed copy, computed from its own files. The extension compares it against
-// the same hash over its source files to detect a /plugins copy that wasn't redeployed after a change.
+// The deployed copy's own fingerprint; the extension compares it with the same hash over its source files.
 const readDeployed = f => { try { return fs.readFileSync(path.join(PLUGIN_DIR, f), 'utf8'); } catch { return ''; } };
 const FINGERPRINT = pluginFingerprint(...PLUGIN_FILES.map(([, deployed]) => readDeployed(deployed)));
 
-/**
- * A checked-out directory's RESOLVED version: `<branch>@<git describe --tags --always --dirty>`.
- *
- * The same string `eval/synth-scenes.mjs` writes, so a browser capture and a node-side one are the same
- * fact rather than two conventions. `+dirty` rather than git's `-dirty` because it is SemVer BUILD
- * metadata: `0.2.0+dirty` compares equal to `0.2.0`, which is what a dirty tree is.
- *
- * Empty when the directory is not a repo or git is absent — an absent version reads as a thinner capture,
- * where a guessed one reads as a fact.
- */
+/** `<branch>@<git describe --tags --always --dirty>` of a checkout, '' when not a repo; must match eval/synth-scenes.mjs. `+dirty`, not `-dirty`: SemVer build metadata. */
 const gitVersion = (dir) => {
     const git = (...a) => execFileSync('git', ['-C', dir, ...a], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim();
     try {
@@ -75,37 +44,13 @@ export const info = {
     description: 'Mean-centered vector search for World Info retrieval.',
 };
 
-/**
- * Cached corpus statistics (items included — listItems() re-parses the whole index file, so it
- * only runs when index.json's mtime changes), keyed by index path.
- * @type {Map<string, { items: object[], mean: Float64Array, mtimeMs: number, size: number }>}
- */
+/** Corpus statistics per index path, reloaded when index.json's mtime or size changes.
+ *  @type {Map<string, { items: object[], mean: Float64Array, mtimeMs: number, size: number }>} */
 const meanCache = new Map();
 
-/**
- * Embeds the query, for every source SillyTavern can address.
- *
- * A mirror of ST's own `getVector` and `getSourceSettings`, both module-private in
- * src/endpoints/vectors.js — that file exports only `router`, and no route hands a caller a raw vector,
- * so WA cannot route the query embedding through ST even though the collections were built through it.
- *
- * What is copied is routing, not plumbing: every per-source function here is ST's own export and reads
- * its API key from `directories` itself, so no credential is duplicated and no provider request is
- * reimplemented. The two `urlOverride` constructions are copied because they live in `getSourceSettings`
- * rather than in the exported functions; the model defaults are `modelScope`'s.
- *
- * It will drift silently — a source ST adds or renames lands here as "that provider gets no cosine" —
- * so `eval/embed-sources-check.mjs` reads ST's own SOURCES array and fails when this switch stops
- * covering it. Delete this whole function the day ST exports `getVector` (upstream-st.md).
- *
- * @param {string} source Vector source
- * @param {object} s Provider settings, as the client sends them, with `model` resolved by modelScope
- * @param {string} text Text to embed
- * @param {object} directories User directories
- * @param {object} request The plugin's own Express request — Google's vectors read credentials off it,
- *   which is what ST passes them as `sourceSettings.request`.
- * @returns {Promise<number[]>} Embedding
- */
+/** Embeds the QUERY for every source ST can address — a mirror of ST's module-private `getVector` and `getSourceSettings`
+ *  (src/endpoints/vectors.js); eval/embed-sources-check.mjs fails when ST's SOURCES outgrows this switch. `request` is the
+ *  plugin's own Express request, which Google's vectors read credentials off. */
 async function embed(source, s, text, directories, request) {
     const openAiish = (urlOverride = null) => getOpenAIVector(text, source, directories, String(s.model), urlOverride);
     switch (source) {
@@ -114,7 +59,7 @@ async function embed(source, s, text, directories, request) {
         case 'extras':       return await getExtrasVector(text, s.extrasUrl, s.extrasKey);
         case 'palm':         return await getMakerSuiteVector(text, String(s.model), request);
         case 'vertexai':     return await getVertexVector(text, String(s.model), request);
-        // isQuery is true: this function only ever embeds the QUERY, never a document.
+        // isQuery is true: this only ever embeds the QUERY.
         case 'cohere':       return await getCohereVector(text, true, directories, String(s.model));
         case 'llamacpp':     return await getLlamaCppVector(text, s.apiUrl, directories);
         case 'vllm':         return await getVllmVector(text, s.apiUrl, String(s.model), directories);
@@ -127,8 +72,7 @@ async function embed(source, s, text, directories, request) {
                 : null);
         }
         case 'webllm': case 'koboldcpp':
-            // Vector Storage embeds these in the browser and hands ST the vectors; nothing here can. Thrown
-            // so the client falls back, rather than failing inside getOpenAIVector as an unknown provider.
+            // Vector Storage embeds these in the browser; thrown so the client falls back.
             throw new Error(`Worlds Apart: source "${source}" embeds in the browser — the plugin cannot embed a query for it.`);
         case 'openai': case 'togetherai': case 'mistral': case 'chutes': case 'electronhub': case 'nanogpt': case 'openrouter':
             return await openAiish();
@@ -138,15 +82,7 @@ async function embed(source, s, text, directories, request) {
     }
 }
 
-/**
- * The model scope ST wrote the collection under — `getSourceSettings(source).model` — which keys the index
- * path and is what the query is embedded with. Mirrored because ST resolves it SERVER-SIDE for several
- * sources and the client sends nothing: reading the client's field alone named a directory ST never wrote,
- * which loads as an empty collection — a 200 with no scores, not a fallback.
- * @param {string} source Vector source
- * @param {object} s Provider settings, as the client sends them
- * @returns {string} Model scope
- */
+/** The model scope ST wrote the collection under (`getSourceSettings(source).model`); several sources resolve it SERVER-SIDE, so the client's field alone names a directory ST never wrote. */
 function modelScope(source, s) {
     switch (source) {
         case 'transformers': return getConfigValue('extensions.models.embedding', '');
@@ -163,31 +99,12 @@ function modelScope(source, s) {
     }
 }
 
-/**
- * Resolves the on-disk index path, matching ST's own layout.
- * @param {object} directories User directories
- * @param {string} collectionId Collection ID
- * @param {string} source Vector source
- * @param {string} model Model name
- * @returns {string} Index path
- */
 function getIndexPath(directories, collectionId, source, model) {
-    // Must match src/endpoints/vectors.js getIndex() exactly, or we'd read a different
-    // directory than the one ST wrote to.
+    // Must match src/endpoints/vectors.js getIndex() exactly, or this reads a directory ST never wrote to.
     return path.join(directories.vectors, sanitize(source), sanitize(collectionId), sanitize(String(model ?? '')));
 }
 
-/**
- * The centroid over a named subset of a loaded collection, memoised on the loaded object.
- *
- * Cached per uid set rather than recomputed per query: the set is the book's vectorized entries, which
- * changes only when the author changes a flag, while a query arrives every generation. The cache dies
- * with the loaded collection, so an index rewrite drops it along with the items it described.
- *
- * @param {{items: object[], mean: Float64Array}} loaded
- * @param {number[]|undefined} uids Entries that define the corpus; absent or empty means all of them
- * @returns {Float64Array}
- */
+/** The centroid over `uids` (absent or empty = all), memoised on the loaded object; an empty subset falls back to the full mean rather than NaN. */
 function centroidFor(loaded, uids) {
     if (!Array.isArray(uids) || !uids.length) return loaded.mean;
     const key = uids.join(',');
@@ -196,24 +113,14 @@ function centroidFor(loaded, uids) {
     if (hit) return hit;
     const wanted = new Set(uids.map(Number));
     const subset = loaded.items.filter(it => wanted.has(Number(it.metadata?.index)));
-    // An empty subset would divide by zero and return NaNs, which score as nothing and look like a bad
-    // model rather than a bad request. Falling back to the full corpus is the old behaviour.
     const mean = subset.length ? corpusMean(subset) : loaded.mean;
     loaded.subsetMeans.set(key, mean);
     console.log(`[Worlds Apart] centroid over ${subset.length}/${loaded.items.length} chunks (${wanted.size} entries define the corpus)`);
     return mean;
 }
 
-/**
- * Loads an index's items and its cached corpus mean. The mean is recomputed when index.json changes on
- * disk, which covers inserts and deletes without an explicit invalidation hook.
- * @param {string} indexPath Path to the index
- * @returns {Promise<{items: object[], mean: Float64Array} | null>}
- */
+/** An index's items and corpus mean, cached per path on mtime AND size: two writes can share an mtime tick. */
 async function loadCentered(indexPath) {
-    // Validity key is mtime and size: two rapid writes can land in one mtime tick (or a coarse-mtime
-    // mount can hide one entirely), and serving a stale item set would silently drop chunks from
-    // retrieval. Size catches the realistic case, a changed chunk count.
     const stat = fs.statSync(path.join(indexPath, 'index.json'), { throwIfNoEntry: false });
     const mtimeMs = stat?.mtimeMs ?? 0;
     const size = stat?.size ?? 0;
@@ -236,7 +143,6 @@ async function loadCentered(indexPath) {
     }
 
     const mean = corpusMean(items);
-    // No lexical index: stage 1 is cosine-only, so building postings here was work nothing read.
     const loaded = { items, mean, mtimeMs, size };
 
     meanCache.set(indexPath, loaded);
@@ -245,9 +151,6 @@ async function loadCentered(indexPath) {
     return loaded;
 }
 
-/**
- * @param {import('express').Router} router Plugin router
- */
 export async function init(router) {
     router.post('/query-multi', async (request, response) => {
         try {
@@ -259,25 +162,13 @@ export async function init(router) {
 
             const topK = Number(request.body.topK) || 10;
             const settings = { ...sourceSettings, model: modelScope(String(source), sourceSettings ?? {}) };
-            // Stage 1 is cosine-only (scoring.mjs header). The lexical fields a client may still send —
-            // threshold, bm25K1, bm25B, termWeights, stopwordDf — are ignored rather than rejected: an
-            // extension and a deployed plugin drift across a redeploy, and a stricter reading here would
-            // turn that ordinary skew into a 400 on every query.
+            // Lexical fields a client may still send (threshold, bm25K1, bm25B, termWeights, stopwordDf) are ignored, not rejected: a stricter reading turns redeploy skew into a 400.
             const opts = {
                 centered: request.body.centered !== false,
             };
-            // Which entries define the centroid, per collection: `{ collectionId: [uid, ...] }`.
-            //
-            // The corpus and the scored set are not the same: a collection holds every entry with
-            // content, so that a keyword-activated entry has a cosine at stage 3, but the centroid must
-            // stay the admitted corpus or every fitted coefficient and every cosine measured against it
-            // moves. Mean-centering subtracts a vector carrying most of an embedding's mass.
-            //
-            // Absent means everything counts, which is what an older client sends — so a plugin and an
-            // extension drifting across a redeploy costs nothing rather than recentering the corpus.
+            // `{ collectionId: [uid, ...] }` defining each collection's centroid; absent means every chunk, which is what an older client sends.
             const centroidUids = request.body.centroidUids ?? {};
 
-            // The disk loads and the embed round-trip are independent — run them concurrently.
             const loading = Promise.all(collectionIds.map(collectionId =>
                 loadCentered(getIndexPath(request.user.directories, String(collectionId), String(source), settings.model))));
             loading.catch(() => {});   // surfaced by the await below; without this an embed failure leaves an unhandled rejection
@@ -293,13 +184,11 @@ export async function init(router) {
                     continue;
                 }
 
-                // Score this collection with the shared math: centered cosine, every chunk kept.
                 const mean = centroidFor(loaded, centroidUids[String(collectionId)]);
                 results.push(...scoreCollection(String(collectionId), mean === loaded.mean ? loaded : { ...loaded, mean }, queryVector, opts));
             }
 
-            // Pool each entry's best chunk FIRST, then cut. Pooling before the cut is what makes topK a
-            // count of entries and the per-entry maxima exact — see poolEntries.
+            // Pool to entries FIRST, then cut, so topK counts entries.
             return response.send(selectTopK(poolEntries(results), topK));
         } catch (error) {
             console.error('[Worlds Apart] query failed:', error);
@@ -307,19 +196,8 @@ export async function init(router) {
         }
     });
 
-    /**
-     * Scan chat histories for a set of literal keys, returning only counts.
-     *
-     * Server-side because the chats are the largest thing SillyTavern owns, gigabytes on a real corpus
-     * (P1), and a served instance would pull all of it over the network to answer a question whose
-     * answer is a few hundred integers. The keys go up, the counts come back, the histories never move.
-     *
-     * Streams line by line: a chat is JSONL, so this never holds a whole history in memory, and one
-     * Aho-Corasick pass per message keeps the cost O(text) regardless of how many keys are checked.
-     *
-     * Body: { keys: string[], chats: [{ dir, file }] }  — dir is the character directory (avatar minus .png)
-     * Reply: { counts: { key: n }, messages, scanned, missing }
-     */
+    /** Counts of MESSAGES containing each literal key across chat histories, streamed line by line server-side (P1).
+     *  Body `{ keys: string[], chats: [{ dir, file }] }` (dir is the character directory), reply `{ counts, messages, scanned, missing }`. */
     router.post('/scan-chats', async (request, response) => {
         try {
             const keys = Array.isArray(request.body?.keys) ? request.body.keys.map(String).filter(Boolean) : [];
@@ -328,8 +206,7 @@ export async function init(router) {
                 return response.status(400).send({ error: 'keys and chats are required' });
             }
 
-            // Deduped by folded form: two keys can fold together, and the automaton indexes the list it
-            // is given.
+            // Deduped by folded form: two keys can fold together, and the automaton indexes the list it is given.
             const folded = [...new Set(keys.map(fold))];
             const idxOf = new Map(folded.map((f, i) => [f, i]));
             const automaton = buildAutomaton(folded);
@@ -367,16 +244,7 @@ export async function init(router) {
         }
     });
 
-    /**
-     * Every chat's lorebook binding, and nothing else.
-     *
-     * ST's /api/characters/chats streams every line of every chat to count messages and grab the last
-     * one, even when the caller asked only for metadata — orders of magnitude more work than reading the
-     * one line the binding lives on (P1), per Studio session.
-     *
-     * Returns [{ dir, file, world_info }] for every chat that names a book. The caller pairs it with
-     * the character list it already has in memory for card bindings.
-     */
+    /** `[{ dir, file, world_info }]` for every chat naming a book, reading only line 0 of each (P1). */
     router.post('/chat-bindings', async (request, response) => {
         try {
             const root = request.user.directories.chats;
@@ -393,7 +261,7 @@ export async function init(router) {
                         const rl = readline.createInterface({ input: fs.createReadStream(path.join(dirPath, file)), crlfDelay: Infinity });
                         let done = false;
                         const finish = v => { if (!done) { done = true; rl.close(); resolve(v); } };
-                        // Line 0 is the metadata header; stop there rather than streaming the chat.
+                        // Line 0 is the metadata header; stop there.
                         rl.on('line', line => { try { finish(JSON.parse(line)?.chat_metadata?.world_info ?? null); } catch { finish(null); } });
                         rl.on('close', () => finish(null));
                         rl.on('error', () => finish(null));
@@ -408,14 +276,7 @@ export async function init(router) {
         }
     });
 
-    // What is on disk, so the client can tell it from what is still claimed. WA's collections are
-    // `vectors/<source>/wa_<hash(world)>/<model>/` and nothing removes one: chunk-level pruning only
-    // fires for a book being synced, so a renamed, deleted or detached book — or a switch of embedding
-    // source or model — leaves a whole collection behind.
-    //
-    // Reports, never deletes: these are vectors somebody paid embedding time for, and the client cannot
-    // always tell a dead collection from one whose book is simply not attached right now. Size and mtime
-    // only, because counting chunks means parsing an index.json that runs to hundreds of MB.
+    // Every WA collection on disk (`vectors/<source>/wa_<hash>/<model>/`), size and mtime only; reports, never deletes.
     router.post('/collections', (request, response) => {
         try {
             const root = request.user.directories.vectors;
@@ -442,11 +303,7 @@ export async function init(router) {
         }
     });
 
-    // What WA is, resolved rather than declared — the one thing the extension cannot answer for itself:
-    // it runs in the browser and cannot read git, and manifest.json names the next release rather than
-    // the tree serving the page. The extension supplies its own third-party folder name, since ST clones
-    // into `third-party/<repo name>` and that name varies per install. Sanitized because it arrives from
-    // the page — one path component, never a traversal out of third-party/.
+    // `dir` is the extension's third-party folder name, sanitized to one path component; waVersion is resolved from git, not manifest.json.
     router.post('/ping', (request, response) => {
         const dir = sanitize(String(request.body?.dir ?? ''));
         const waVersion = dir ? gitVersion(path.join(ST_ROOT, 'public', 'scripts', 'extensions', 'third-party', dir)) : '';
