@@ -432,6 +432,8 @@ textarea.wa-entry-full.wa-tall { max-height: 62vh; }
 /* A chip that is only text, in a column narrower than some keys and most entry titles: it wraps, and a long unbroken
    term breaks rather than overflowing. inline, not inline-flex, since there is no ✕ beside it to lay out. */
 .wa-kw-wrap { display: inline; white-space: normal; overflow-wrap: anywhere; }
+/* A digest line that jumps to its hit in the text beside it. */
+.wa-studio [data-jump] { cursor: pointer; }
 /* The gate row reads under the keys it gates, so it needs a rule to be a second row at all — two
    paragraphs of chips run together and the secondaries read as more primaries. currentColor for the
    same reason the chips use it: a fixed border colour vanishes on near-black themes. */

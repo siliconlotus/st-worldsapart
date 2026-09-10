@@ -2069,11 +2069,14 @@ export async function lorebookStudio(preferredBook = null) {
 
     /** The Lab's mark: its key's colour, or WA_RED for a span that vetoed one rather than matching it. */
     const labMark = ink => (sp, text) => {
-        const fill = sp.negated ? `color-mix(in srgb, ${WA_RED} 28%, transparent)` : ink(sp.key, 0.28);
+        const fill = sp.negated ? `color-mix(in srgb, ${WA_RED} 40%, transparent)` : ink(sp.key, 0.4);
         const edge = sp.negated ? WA_RED : ink(sp.key);
         const label = k => `${k.negated ? '\u2212 ' : ''}${k.term && k.term !== k.key ? `${k.key} \u2014 ${k.term}` : k.key}`;
+        // An outline, not just a wash: a preset's GFX block sets its own background, and 28% of a hue over #121212 is
+        // invisible. The outline is opaque and does not affect layout, so it reads over anything the text sits on.
         return `<span data-at="${sp.start}" data-to="${sp.end}" title="${escapeHtml(sp.keys.map(label).join('\n'))}"`
-            + ` style="background:${fill};border-bottom:2px solid ${edge};color:inherit;">${escapeHtml(text)}</span>`;
+            + ` style="background:${fill};outline:1px solid ${edge};border-radius:2px;`
+            + `border-bottom:2px solid ${edge};color:inherit;">${escapeHtml(text)}</span>`;
     };
 
     /** The haystack rendered as a message, with every span marked in its key's colour. Offsets are keyExcerpts', into NFC. */
@@ -2267,6 +2270,22 @@ export async function lorebookStudio(preferredBook = null) {
         }).join('');
     };
 
+    /** A digest line jumps to its hit in `textEl`. The offset may land inside a span that starts earlier — an overlap folds
+     *  to one mark — so the mark that contains it is the target, not one that begins at it. */
+    const bindJump = (digestEl, textEl) => {
+        digestEl.addEventListener('click', ev => {
+            const line = ev.target.closest('[data-jump]');
+            if (!line || !textEl?.isConnected) return;
+            const n = Number(line.dataset.jump);
+            const mark = [...textEl.querySelectorAll('[data-at]')].find(x => Number(x.dataset.at) <= n && n < Number(x.dataset.to));
+            if (!mark) return;
+            mark.scrollIntoView({ block: 'center', behavior: 'smooth' });
+            const was = mark.style.outline;
+            mark.style.outline = '2px solid currentColor';
+            setTimeout(() => { mark.style.outline = was; }, 1200);
+        });
+    };
+
     /** The rows and the colour they share with the marks, from whatever the panes hold now. */
     const scanLab = () => {
         const keys = splitKeys(labKeys);
@@ -2293,20 +2312,7 @@ export async function lorebookStudio(preferredBook = null) {
             + 'padding-left:12px;border-left:1px solid color-mix(in srgb, currentColor 15%, transparent);';
         digest.innerHTML = rows.map(r => labKeyHtml(r, r.color)).join('');
         bindCollapse(digest);
-        // A digest line jumps to its hit in the text beside it. The offset may land inside a span that starts earlier — an
-        // overlap folds to one mark — so the mark that contains it is the target, not one that begins at it.
-        digest.querySelectorAll('[data-jump]').forEach(el => { el.style.cursor = 'pointer'; });
-        digest.addEventListener('click', ev => {
-            const line = ev.target.closest('[data-jump]');
-            if (!line) return;
-            const n = Number(line.dataset.jump);
-            const mark = [...body.querySelectorAll('[data-at]')].find(x => Number(x.dataset.at) <= n && n < Number(x.dataset.to));
-            if (!mark) return;
-            mark.scrollIntoView({ block: 'center', behavior: 'smooth' });
-            const was = mark.style.outline;
-            mark.style.outline = '2px solid currentColor';
-            setTimeout(() => { mark.style.outline = was; }, 1200);
-        });
+        bindJump(digest, body);
         wrap.append(body, digest);
         const vp = new Popup(wrap, POPUP_TYPE.TEXT, '', { large: true, allowVerticalScrolling: true });
         vp.dlg.style.setProperty('width', 'calc(var(--sheldWidth, 90vw) * 0.9)', 'important');
@@ -2488,6 +2494,9 @@ export async function lorebookStudio(preferredBook = null) {
             }
         };
         labRepaint = repaint;
+        // Once, not per repaint: the listener is on `out`, which survives its own innerHTML. Lands only while the marked
+        // view is up, hayRead holding no marks otherwise.
+        bindJump(out, hayRead);
         repaint();
         growKeys();   // the pane keeps its text across a tab switch, so it is not always empty on the first paint
         const body = document.createElement('div');
