@@ -2093,7 +2093,9 @@ export async function lorebookStudio(preferredBook = null) {
     let labCommitted = false;
     let labRepaint = null;   // the Lab's repaint, claimed by renderLabView: an applied run is triggered from outside it
     let labRun = null;   // an applied book: { book, entries: [{ entry, rows }] }, shown in place of the typed keys' result
-    let labShowMarkup = false;   // the source behind the rendering: every tag, entity and delimiter shown at once
+    let labShowMarkup = false;
+    let labSkipVector = false;   // entries meant to arrive by cosine, left out of a run
+    let labRunSource = null;     // what the last run ran over, so a setting change re-runs it rather than needing the button   // the source behind the rendering: every tag, entity and delimiter shown at once
     // The secondary condition, in core's own terms: a term list and one of world_info_logic's four operators, gating every key.
     let labSec = '', labLogic = String(WI_LOGIC.AND_ANY);
 
@@ -2220,10 +2222,12 @@ export async function lorebookStudio(preferredBook = null) {
 
     /** Runs `entries` against the haystack and shows the result; `label` names what ran, for the header. */
     const applyEntries = (label, entries) => {
+        labRunSource = { label, entries };
         const run = runBook(entries, labHay, {
             matchWindow: labWindow,
             context: 30,
             defaults: { caseSensitive: world_info_case_sensitive, wholeWords: world_info_match_whole_words },
+            skipVectorized: labSkipVector,
         });
         labRun = { label, ...run };
         toastr.info(`${run.entries.length} of ${run.scanned} keyed ${run.scanned === 1 ? 'entry' : 'entries'} matched`, 'Keyword Lab');
@@ -2282,6 +2286,9 @@ export async function lorebookStudio(preferredBook = null) {
             if (mark) revealIn(mark);
         });
     };
+
+    /** Re-runs the last applied book, for a setting that changes what a run would find. */
+    const rerunLab = () => { if (labRunSource) applyEntries(labRunSource.label, labRunSource.entries); };
 
     /** Scrolls `el` into view and rings it briefly, opening whatever it is folded inside. */
     const revealIn = el => {
@@ -2434,6 +2441,7 @@ export async function lorebookStudio(preferredBook = null) {
         opts.append(
             flag('Case sensitive', () => labCase, v => { labCase = v; }),
             flag('Match whole words', () => labWhole, v => { labWhole = v; }),
+            flag('Skip vector entries', () => labSkipVector, v => { labSkipVector = v; rerunLab(); }),
         );
         const winLabel = document.createElement('label');
         winLabel.style.cssText = 'display:flex;gap:6px;align-items:center;';
@@ -2444,7 +2452,7 @@ export async function lorebookStudio(preferredBook = null) {
             const o = document.createElement('option'); o.value = v; o.textContent = label; o.selected = labWindow === v;
             win.append(o);
         }
-        win.addEventListener('change', () => { labWindow = win.value; repaint(); });
+        win.addEventListener('change', () => { labWindow = win.value; rerunLab(); repaint(); });
         winLabel.append(document.createTextNode('Match window'), win);
         const labTool = (icon, title, onClick, marginLeft) => {
             const i = document.createElement('i');

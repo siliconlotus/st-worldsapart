@@ -40,6 +40,12 @@ eq(run.entries.map(h => h.entry.uid).join(), '1,2,3', 'the entries that fired, i
 eq(run.entries[1].rows[0].count, 1, 'a gated entry fires only where its secondary is in the same window');
 eq(run.books.join(), 'B,C', 'the books scanned, deduped in encounter order');
 eq(run.keyList.join(), 'breath,slow', 'the run\'s distinct keys — one key two entries found is one term to colour');
+// Core keyword-matches a vectorized entry like any other, so leaving it out is the reader's option, not a rule.
+const withVec = [...entries, { uid: 7, world: 'B', key: ['breath'], vectorized: true }];
+eq(runBook(withVec, text, para).scanned, 5, 'a vectorized entry is scanned like any other by default');
+eq(runBook(withVec, text, { ...para, skipVectorized: true }).scanned, 4, 'and left out when the reader is tuning keys');
+eq(runBook(withVec, text, { ...para, skipVectorized: true }).entries.some(h => h.entry.uid === 7), false,
+    'so it cannot appear among the hits either');
 eq(runBook(entries, 'a quiet room', para).entries.length, 0, 'a text no key matches yields no entries...');
 eq(runBook(entries, 'a quiet room', para).scanned, 4, '...and still reports what was scanned');
 

@@ -18,9 +18,14 @@ export const entryFlags = (entry, { caseSensitive = false, wholeWords = false } 
 /** Which of `entries` the text would activate on keys alone, with what. Disabled entries are out, as core has them; every
  *  other gate core applies — probability, inclusion groups, delay, cooldown, character and tag filters, decorators,
  *  recursion — is not modelled, so this is the keyword half of activation and not a prediction. `keyList` is the run's
- *  distinct keys, which is what a caller colours by: one key two entries both found is one term. */
-export function runBook(entries, text, { matchWindow = 'scan', context = 28, defaults } = {}) {
-    const keyed = (entries ?? []).filter(e => e && !e.disable && usableKeys(e.key).length);
+ *  distinct keys, which is what a caller colours by: one key two entries both found is one term.
+ *
+ *  `skipVectorized` leaves out the entries meant to arrive by cosine. Core keyword-matches them like any other, so this is
+ *  the reader's question — am I tuning keys or looking at everything — and not a correctness rule. */
+export function runBook(entries, text, { matchWindow = 'scan', context = 28, defaults, skipVectorized = false } = {}) {
+    const keyed = (entries ?? [])
+        .filter(e => e && !e.disable && usableKeys(e.key).length)
+        .filter(e => !(skipVectorized && e.vectorized));
     const hits = [];
     for (const entry of keyed) {
         const { caseSensitive, wholeWords } = entryFlags(entry, defaults);
