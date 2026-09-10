@@ -1185,8 +1185,12 @@ export async function lorebookStudio(preferredBook = null, open = null) {
         const wrap = document.createElement('div');
         const lbl = document.createElement('div'); lbl.textContent = prompt; lbl.style.marginBottom = '6px';
         const sel = document.createElement('select'); sel.className = 'text_pole'; sel.style.width = '100%';
+        const attached = new Set(attachedBookNames());
         for (const n of others) {
-            const o = document.createElement('option'); o.value = n; o.textContent = n; o.selected = n === selected;
+            const o = document.createElement('option'); o.value = n; o.selected = n === selected;
+            // A select cannot carry the nav's accent, so an attached book is marked in the text it does carry.
+            o.textContent = attached.has(n) ? `${n} \u2014 attached` : n;
+            if (attached.has(n)) o.style.color = 'var(--SmartThemeQuoteColor)';
             sel.append(o);
         }
         wrap.append(lbl, sel);
@@ -3049,9 +3053,10 @@ export async function lorebookStudio(preferredBook = null, open = null) {
             nav.append(bar);
         }
 
+        const attached = new Set(attachedBookNames());
         for (const name of names) {
             const row = document.createElement('div');
-            row.className = 'wa-book-row' + (name === selected ? ' wa-sel' : '');
+            row.className = 'wa-book-row' + (name === selected ? ' wa-sel' : '') + (attached.has(name) ? ' wa-attached' : '');
             if (bookBulkMode) {
                 const cb = document.createElement('input'); cb.type = 'checkbox'; cb.className = 'wa-book-sel'; cb.checked = selectedBooks.has(name);
                 cb.addEventListener('click', ev => {
@@ -3065,7 +3070,8 @@ export async function lorebookStudio(preferredBook = null, open = null) {
                 cb.addEventListener('change', () => { cb.checked ? selectedBooks.add(name) : selectedBooks.delete(name); renderBooks(); });
                 row.append(cb);
             }
-            const nm = document.createElement('span'); nm.className = 'wa-book-name'; nm.textContent = name; nm.title = name;
+            const nm = document.createElement('span'); nm.className = 'wa-book-name'; nm.textContent = name;
+            nm.title = attached.has(name) ? `${name}\n\nAttached to this chat` : name;
             row.append(nm);
             row.addEventListener('click', () => { if (name !== selected) openBook(name); });
             nav.append(row);

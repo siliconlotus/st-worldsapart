@@ -353,6 +353,10 @@ dialog.popup:has(.wa-studio), .wa-studio-nav, .wa-studio-explorer, .wa-studio-en
 .wa-book-row:hover { background: var(--white20a, rgba(255,255,255,0.08)); }
 .wa-book-row.wa-sel { background: var(--white30a, rgba(255,255,255,0.14)); font-weight: bold; }
 .wa-book-name { overflow: hidden; text-overflow: ellipsis; }
+/* Attached to this chat: the books core would scan, so the ones an applied run reads and the ones an edit is felt in. The
+   theme's accent, not WA_GREEN — green already means "no prune" on a keyword chip, and a second meaning would read as one. */
+.wa-book-row.wa-attached .wa-book-name { color: var(--SmartThemeQuoteColor); }
+.wa-book-row.wa-attached { box-shadow: inset 2px 0 0 var(--SmartThemeQuoteColor); }
 /* Bulk-select mode: size the nav to its content (capped) so full book titles are readable. */
 .wa-studio-nav.wa-nav-wide { flex: 0 0 auto; width: max-content; min-width: 200px; max-width: 55%; overflow: auto; }
 .wa-nav-wide .wa-book-row { overflow: visible; }
