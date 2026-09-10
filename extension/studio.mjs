@@ -16,6 +16,7 @@ import { buildAutomaton, addMessageHits, fold, validateSmartKey } from './smartk
 import { findOrphanBindings } from './bindings.mjs';
 import { WI_LOGIC, dropTags, hasPromoteDecorator, isRegexKey, scanSegments, secondaryKeys, splitKeys, usableKeys, wholeWordAdvice, withPromote } from './matcher.mjs';
 import { labScan, runBook } from './lab.mjs';
+import { addVariant, deleteKey, hasKey, keyHolders, kwNorm, renameKeyOn, replaceKey } from './keyedit.mjs';
 
 const WA_GREEN = '#7bbf6a';   // "no prune" — a keyword the scan doesn't flag
 const WA_RED = '#e06c6c';     // severe — same value keyword-audit's severityOf hands back
@@ -519,7 +520,6 @@ export async function lorebookStudio(preferredBook = null) {
     // bgDocs rides in the call, not in suggestOpts, which is persisted to settings; the open chat only (P2).
     const ensureSuggest = () => suggest ?? (suggest = buildKeySuggest(data,
         { ...suggestOpts, bgDocs: (getContext().chat ?? []).map(m => String(m?.mes ?? '')).filter(Boolean) }));
-    const hasKey = (e, term) => Array.isArray(e.key) && e.key.some(k => String(k).toLowerCase().trim() === term.toLowerCase().trim());
 
     /**
      * The gate every key write goes through: an error refuses the write, a warning lets it through; both from validateSmartKey.
@@ -738,37 +738,24 @@ export async function lorebookStudio(preferredBook = null) {
     const editKeyInline = (e, oldKey, span, list = 'key') => {
         inlineInput(span, (nv, ok) => {
             if (ok && nv && nv !== oldKey && !keyWriteOk(nv, list, e)) return false;
-            if (ok && nv && nv !== oldKey && Array.isArray(e[list])) {
-                const idx = e[list].indexOf(oldKey);
-                // The dupe test skips the key being edited, or a case fix collides with itself and merges the key away.
-                if (idx >= 0) { if (e[list].some((k, i) => i !== idx && kwNorm(k) === kwNorm(nv))) e[list].splice(idx, 1); else e[list][idx] = nv; save(); }
-            }
+            if (ok && nv && nv !== oldKey && renameKeyOn(e, oldKey, nv, list)) save();
             renderEntry(e);
         }, { value: oldKey });
     };
 
     // Book-wide ops on a keyword chip, case-insensitive like core's default scan; primary keys only.
-    const kwNorm = k => String(k).toLowerCase().trim();
-    const kwHits = key => { const n = kwNorm(key); return Object.values(data.entries).filter(e => Array.isArray(e.key) && e.key.some(k => kwNorm(k) === n)); };
+    const kwHits = key => keyHolders(Object.values(data.entries), key);
     const deleteKeyEverywhere = async key => {
         const hits = kwHits(key);
         if (hits.length > 1 && !await Popup.show.confirm(`Delete “${key}” from ${hits.length} entries?`, 'Removes the keyword everywhere it appears in this book.')) return;
-        const n = kwNorm(key); let touched = 0;
-        for (const e of hits) { const b = e.key.length; e.key = e.key.filter(k => kwNorm(k) !== n); if (e.key.length !== b) touched++; }
+        const touched = deleteKey(Object.values(data.entries), key);
         if (touched) { save(); renderExplorer(); toastr.success(`Deleted “${key}” from ${touched} ${touched === 1 ? 'entry' : 'entries'}.`, 'Worlds Apart'); }
     };
     const replaceKeyEverywhere = async key => {
         const next = (await Popup.show.input('Replace keyword', `Replace “${key}” across all entries with:`, key))?.trim();
         if (!next || next === key) return;   // exact-match only: a case-only rewrite is a real edit, not a no-op
         if (!keyWriteOk(next)) return;
-        const n = kwNorm(key), nn = kwNorm(next); let touched = 0;
-        for (const e of kwHits(key)) {
-            const idx = e.key.findIndex(k => kwNorm(k) === n);
-            if (idx < 0) continue;
-            // not against the key being replaced, or a case fix collides with itself
-            if (e.key.some((k, i) => i !== idx && kwNorm(k) === nn)) e.key.splice(idx, 1); else e.key[idx] = next;
-            touched++;
-        }
+        const touched = replaceKey(Object.values(data.entries), key, next);
         if (touched) { save(); renderExplorer(); toastr.success(`Replaced “${key}” → “${next}” in ${touched} ${touched === 1 ? 'entry' : 'entries'}.`, 'Worlds Apart'); }
     };
     // A second term on every entry keyed `key` — the alias case.
@@ -777,8 +764,7 @@ export async function lorebookStudio(preferredBook = null) {
         const raw = await Popup.show.input('Add variant', `Keyword to add to the ${hits.length} ${hits.length === 1 ? 'entry' : 'entries'} keyed “${key}”:`);
         const term = String(raw ?? '').trim();
         if (!term || !keyWriteOk(term)) return;
-        let added = 0;
-        for (const e of hits) if (!hasKey(e, term)) { e.key.push(term); added++; }
+        const added = addVariant(Object.values(data.entries), key, term);
         if (added) { save(); renderExplorer(); }
         toastr[added ? 'success' : 'info'](added
             ? `“${term}” added to ${added} ${added === 1 ? 'entry' : 'entries'} keyed “${key}”.`
