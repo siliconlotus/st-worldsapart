@@ -1138,7 +1138,7 @@ async function onScanDone(args) {
     if (activated.size === 0) {
         skip('core activated nothing');
         runState.lastPromptOrder = [];
-        if (!args?.state?.next) renderWiPanel([]);
+        if (!args?.state?.next) renderDeliveryPanel([]);
         return;
     }
 
@@ -1336,7 +1336,7 @@ async function onScanDone(args) {
     runState.lastSkipped = runState.lastSkipped.map(x => ({ ...x, block: blockOf.get(x.item) ?? 'dynamic' }));
 
     // Only the last loop (no further state) is the real prompt.
-    if (!args?.state?.next) renderWiPanel(runState.lastPromptOrder);
+    if (!args?.state?.next) renderDeliveryPanel(runState.lastPromptOrder);
 
     if (runState.verboseRun) {
         // The pre-cut, pre-budget population, `cut`/`cutBy` recording which side each row fell on. candidates=N caps
@@ -1908,66 +1908,72 @@ function bind(selector, key, kind) {
 
 
 
-// Active-entries panel: a book icon (bottom-left) expanding into the list WA selected, refreshed from runState.lastPromptOrder.
-let wiTrigger = null, wiPanel = null;
-function ensureWiPanel() {
-    if (wiTrigger) return;
+// The Delivery panel: a book icon (bottom-left) expanding into what stage 5 delivered last turn, in prompt order, refreshed
+// from runState.lastPromptOrder. Named for the stage, since "what is in the prompt" is exactly what it answers.
+let deliveryTrigger = null, deliveryPanel = null;
+function ensureDeliveryPanel() {
+    if (deliveryTrigger) return;
     const style = document.createElement('style');
     style.textContent = `
-.wa-wi-trigger { position: fixed; left: 10px; bottom: 10px; z-index: 100000; width: 28px; height: 28px;
+.wa-delivery-trigger { position: fixed; left: 10px; bottom: 10px; z-index: 100000; width: 28px; height: 28px;
     line-height: 28px; text-align: center; cursor: pointer; opacity: 0.6; border-radius: 6px;
     background: var(--SmartThemeBlurTintColor, rgba(0,0,0,0.4)); }
-.wa-wi-trigger:hover { opacity: 1; }
-.wa-wi-trigger[data-count]:not([data-count="0"])::after { content: attr(data-count); position: absolute;
+.wa-delivery-trigger:hover { opacity: 1; }
+.wa-delivery-trigger[data-count]:not([data-count="0"])::after { content: attr(data-count); position: absolute;
     top: -6px; right: -6px; min-width: 14px; height: 14px; line-height: 14px; padding: 0 3px; font-size: 9px;
     text-align: center; color: #fff; background: var(--crimson70a, #b33); border-radius: 8px; }
-.wa-wi-panel { position: fixed; left: 10px; bottom: 46px; z-index: 100000; display: none; flex-direction: column;
+.wa-delivery-panel { position: fixed; left: 10px; bottom: 46px; z-index: 100000; display: none; flex-direction: column;
     gap: 2px; width: 320px; max-width: calc(100vw - 20px); max-height: 60vh; overflow-y: auto; padding: 6px;
     border-radius: 8px; font-size: 0.85em; background: var(--SmartThemeBlurTintColor, rgba(20,20,20,0.92));
     border: 1px solid var(--SmartThemeBorderColor, rgba(255,255,255,0.15)); }
-.wa-wi-panel.wa-wi-open { display: flex; }
-.wa-wi-entry { display: flex; align-items: baseline; gap: 6px; padding: 3px 5px; border-radius: 5px; cursor: pointer; }
-.wa-wi-entry:hover { background: var(--white20a, rgba(255,255,255,0.1)); }
-.wa-wi-glyph { flex: 0 0 auto; }
-.wa-wi-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.wa-wi-empty { opacity: 0.6; padding: 4px; }`;
+.wa-delivery-panel.wa-delivery-open { display: flex; }
+.wa-delivery-entry { display: flex; align-items: baseline; gap: 6px; padding: 3px 5px; border-radius: 5px; cursor: pointer; }
+.wa-delivery-entry:hover { background: var(--white20a, rgba(255,255,255,0.1)); }
+.wa-delivery-glyph { flex: 0 0 auto; }
+.wa-delivery-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.wa-delivery-empty { opacity: 0.6; padding: 4px; }`;
     document.head.append(style);
 
-    wiTrigger = document.createElement('div');
-    wiTrigger.className = 'wa-wi-trigger fa-solid fa-fw fa-book-atlas';
-    wiTrigger.title = 'Worlds Apart — active entries';
-    wiTrigger.dataset.count = '0';
-    wiPanel = document.createElement('div');
-    wiPanel.className = 'wa-wi-panel';
-    wiTrigger.addEventListener('click', () => wiPanel.classList.toggle('wa-wi-open'));
-    document.body.append(wiTrigger, wiPanel);
+    deliveryTrigger = document.createElement('div');
+    deliveryTrigger.className = 'wa-delivery-trigger fa-solid fa-fw fa-book-atlas';
+    deliveryTrigger.title = 'Worlds Apart — delivered this turn';
+    deliveryTrigger.dataset.count = '0';
+    deliveryPanel = document.createElement('div');
+    deliveryPanel.className = 'wa-delivery-panel';
+    deliveryTrigger.addEventListener('click', () => deliveryPanel.classList.toggle('wa-delivery-open'));
+    document.body.append(deliveryTrigger, deliveryPanel);
 }
 
-function renderWiPanel(layout) {
-    ensureWiPanel();
-    wiTrigger.dataset.count = String(layout.length);
-    wiPanel.innerHTML = '';
+function renderDeliveryPanel(layout) {
+    ensureDeliveryPanel();
+    deliveryTrigger.dataset.count = String(layout.length);
+    deliveryPanel.innerHTML = '';
     if (!layout.length) {
         const empty = document.createElement('div');
-        empty.className = 'wa-wi-empty';
-        empty.textContent = 'No active entries';
-        wiPanel.append(empty);
+        empty.className = 'wa-delivery-empty';
+        empty.textContent = 'Nothing delivered';
+        deliveryPanel.append(empty);
         return;
     }
     for (const row of layout) {
         const e = row.item.entry;
         const el = document.createElement('div');
-        el.className = 'wa-wi-entry';
-        el.title = wiTooltip(row);
+        el.className = 'wa-delivery-entry';
+        el.title = `${wiTooltip(row)}\n\nClick: open in the Keyword Lab · Shift-click: show the text`;
         const g = document.createElement('span');
-        g.className = 'wa-wi-glyph';
+        g.className = 'wa-delivery-glyph';
         g.textContent = wiGlyph(e);
         const t = document.createElement('span');
-        t.className = 'wa-wi-title';
+        t.className = 'wa-delivery-title';
         t.textContent = wiTitleOf(e);
         el.append(g, t);
-        el.addEventListener('click', () => showEntryText(e));
-        wiPanel.append(el);
+        // Click opens the Keyword Lab on this entry, against the window WA scanned — why did this fire. Shift-click is the
+        // entry's text, which is what the row used to do on its own.
+        el.addEventListener('click', ev => {
+            if (ev.shiftKey) { showEntryText(e); return; }
+            lorebookStudio(e.world ?? chatBook(), { world: e.world, uid: e.uid });
+        });
+        deliveryPanel.append(el);
     }
 }
 
@@ -2091,7 +2097,7 @@ export async function init() {
     // Wrapped, not passed by reference: CHAT_CHANGED emits the chat id, which would land in resetSmartKeys's `scope`.
     eventSource.on(event_types.CHAT_CHANGED, () => resetSmartKeys());
     // The panel survives dry-run scans untouched, so it would carry the previous chat's selection across a switch.
-    eventSource.on(event_types.CHAT_CHANGED, () => { runState.lastPromptOrder = []; renderWiPanel([]); });
+    eventSource.on(event_types.CHAT_CHANGED, () => { runState.lastPromptOrder = []; renderDeliveryPanel([]); });
     refreshAttached();
     eventSource.on(event_types.WORLDINFO_SCAN_DONE, onScanDone);
     // After onScanDone, so the feed sees the flag while the scan is live. Cleared on the final loop, not only at
@@ -2100,7 +2106,7 @@ export async function init() {
         if (!args?.state?.next) runState.waOwnsScan = false;
     });
 
-    if (settings().enabled) renderWiPanel(runState.lastPromptOrder);
+    if (settings().enabled) renderDeliveryPanel(runState.lastPromptOrder);
 
     SlashCommandParser.addCommandObject(SlashCommand.fromProps({
         name: 'wa-versus',

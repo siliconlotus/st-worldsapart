@@ -48,8 +48,10 @@ function planUidReindex(entries, orderedUids, start, desc) {
 /**
  * Lorebook Studio (/wa-studio).
  * @param {string|null} preferredBook Opened if it still exists; else the first attached book, else nothing selected
+ * @param {{world: string, uid: number|string}|null} focus An entry to open the Keyword Lab on, applied against the last
+ *   scan window: the Delivery panel hands one over so a reader can see why that entry fired
  */
-export async function lorebookStudio(preferredBook = null) {
+export async function lorebookStudio(preferredBook = null, focus = null) {
     if (!(world_names ?? []).length) { toastr.warning('No lorebooks found.', 'Worlds Apart'); return ''; }
     ensureStudioStyle();
 
@@ -2258,7 +2260,8 @@ export async function lorebookStudio(preferredBook = null) {
                 + `<small style="opacity:0.6;"> ${rows.length} key${rows.length === 1 ? '' : 's'}</small>`;
             // The book on its own line, since a run spans every attached one and two books can hold the same title.
             const from = entry.world ? `<div><small style="opacity:0.45;">${escapeHtml(entry.world)}</small></div>` : '';
-            return `<details open style="margin-bottom:8px;"><summary style="cursor:pointer;">${title}${from}</summary>`
+            return `<details open data-entry-uid="${escapeHtml(String(entry.uid))}" data-entry-world="${escapeHtml(entry.world ?? '')}"`
+                + ` style="margin-bottom:8px;"><summary style="cursor:pointer;">${title}${from}</summary>`
                 + `<div style="margin-left:10px;">${rows.map(r => labKeyHtml(r, labInk(Math.max(0, keyList.indexOf(r.key))), entry)).join('')}</div></details>`;
         }).join('');
     };
@@ -2388,6 +2391,33 @@ export async function lorebookStudio(preferredBook = null) {
                 ? bookWideOps(key, `all ${attached.length} attached books`, editInAttached)
                 : []),
         ], x, y, ctxMount());
+    };
+
+    /** The window WA last scanned, as the Lab's haystack: the messages it kept are post-dropChatTags and at capture depth,
+     *  so this is the text the entry actually fired against rather than a fresh read of the chat. */
+    const scannedHaystack = () => {
+        const chat = runState.lastScanChat ?? [];
+        if (!chat.length) return chatHaystack();
+        return scanSegments(chat, {
+            depth: chat.length,
+            includeNames: world_info_include_names,
+            matchWindow: 'message',
+        }).join(`\n\n${'-'.repeat(24)}\n\n`);
+    };
+
+    /** Opens the Lab on one entry: the scanned window, the attached books applied to it, and that entry's block brought into
+     *  view. What the Delivery panel hands over, so "why did this fire" is one click. */
+    const focusLabOn = async ({ world, uid }) => {
+        labHay = scannedHaystack();
+        labCommitted = true;
+        labRun = null;
+        tab = 'lab';
+        renderExplorer();
+        await applyAttached();
+        const block = [...explorer.querySelectorAll('details[data-entry-uid]')]
+            .find(d => String(d.dataset.entryUid) === String(uid) && (!world || d.dataset.entryWorld === world));
+        if (block) revealIn(block);
+        else toastr.info('That entry has no keyword hit in the last scan window — it came in another way.', 'Keyword Lab');
     };
 
     /** Re-runs the last applied books, re-reading them: an edit or a setting change is what asks for this. */
@@ -3046,6 +3076,8 @@ export async function lorebookStudio(preferredBook = null) {
     if (selected) await openBook(selected);
     else renderExplorer();
     checkOrphans();   // background; adds a nav row only if something is broken
+    // After the book is open, so the Lab's run can use `data` for whichever attached book that is.
+    if (focus) focusLabOn(focus);
 
     // Escape never closes the window: it swallows the <dialog>'s close and, if nothing else claimed it, drops the selection.
     root.addEventListener('keydown', ev => {
