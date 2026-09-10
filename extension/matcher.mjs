@@ -278,13 +278,25 @@ export function withExtraTexts(windowFor, texts, matchWindow) {
     return (depth, entry) => segment([...windowFor(depth, entry), ...texts], matchWindow);
 }
 
+/** Markup blanked out, one space per character, so a literal key cannot match inside a tag or a comment: `font-size` is not
+ *  the author writing about size. Length-preserving, so every offset a caller marks or excerpts by still lands. A regex key
+ *  is the opt-in and sees the raw text (matcher-design.md, *Divergences from ST core*). */
+export const maskMarkup = text => String(text).replace(/<!--[\s\S]*?-->|<\/?[A-Za-z][^>]*>/g, m => ' '.repeat(m.length));
+
+let maskMemoIn = null, maskMemoOut = null;
+const maskedHay = text => {
+    if (text !== maskMemoIn) { maskMemoIn = text; maskMemoOut = maskMarkup(text); }
+    return maskMemoOut;
+};
+
 let foldMemoIn = null, foldMemoOut = null, orthMemoIn = null, orthMemoOut = null;
 export const foldedHay = (text, caseSensitive) => {
+    const hay = maskedHay(text);
     if (caseSensitive) {
-        if (text !== orthMemoIn) { orthMemoIn = text; orthMemoOut = normalizeOrthography(text); }
+        if (hay !== orthMemoIn) { orthMemoIn = hay; orthMemoOut = normalizeOrthography(hay); }
         return orthMemoOut;
     }
-    if (text !== foldMemoIn) { foldMemoIn = text; foldMemoOut = fold(text); }
+    if (hay !== foldMemoIn) { foldMemoIn = hay; foldMemoOut = fold(hay); }
     return foldMemoOut;
 };
 
@@ -361,12 +373,14 @@ export function keyExcerpts(key, text, caseSensitive, wholeWords, context = 28, 
     }
     // Folded -> source offset, folding one character at a time; the source must be NFC first or offsets drift.
     const srcIndex = (src, target) => {
+        // The masked form, since foldedHay folds that: same length, so an index into one is an index into the other.
+        const walk = maskMarkup(src);
         let acc = 0;
-        for (let i = 0; i < src.length; i++) {
+        for (let i = 0; i < walk.length; i++) {
             if (acc >= target) return i;
-            acc += (caseSensitive ? normalizeOrthography(src[i]) : fold(src[i])).length;
+            acc += (caseSensitive ? normalizeOrthography(walk[i]) : fold(walk[i])).length;
         }
-        return src.length;
+        return walk.length;
     };
     const markAt = (src, start, end) => {
         let from = Math.max(0, start - context);

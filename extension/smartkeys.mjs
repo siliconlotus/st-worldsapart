@@ -9,7 +9,7 @@
 //   ? M*A*S*H   ? ~5                * and ~ are literals; a /regex/ term is the only pattern syntax
 //   ? "hot tub"                     quoting is the one escape: operators, weights, parens and wildcards off. `? hot tub` is two terms.
 
-import { coreReadsAsRegex, countRegexKey, escapeRegex, foldedHay, isRegexKey, REGEX_KEY_RE, boundaryAfter, boundaryBefore, wordChar } from './matcher.mjs';
+import { coreReadsAsRegex, countRegexKey, escapeRegex, foldedHay, isRegexKey, maskMarkup, REGEX_KEY_RE, boundaryAfter, boundaryBefore, wordChar } from './matcher.mjs';
 // Re-exported: matcher.mjs, keyword-tools.mjs and studio.mjs import these from here. One copy, or the browser and the server disagree.
 import { buildAutomaton, scanAutomaton, fold, normalizeOrthography, addMessageHits } from '../plugin/automaton.mjs';
 export { buildAutomaton, scanAutomaton, fold, normalizeOrthography, addMessageHits };
@@ -333,7 +333,8 @@ function ensureScan(scope, text) {
     }
     let counts = scope.scans.get(text);
     if (counts === undefined) {
-        counts = scanAutomaton(scope.automaton, fold(text));
+        // Masked, as foldedHay masks: the prescan and the walk have to agree on what the haystack is.
+        counts = scanAutomaton(scope.automaton, fold(maskMarkup(text)));
         scope.scans.set(text, counts);
         while (scope.scans.size > scope.scanMax) scope.scans.delete(scope.scans.keys().next().value);
     }

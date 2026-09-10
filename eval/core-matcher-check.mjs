@@ -165,6 +165,14 @@ eq(countKey('Kyle', 'kyle KYLE Kyle', false, false), 3, 'case-insensitive by def
 eq(countKey('Kyle', 'kyle KYLE', true, false), 0, 'case-sensitive when asked');
 eq(countKey('/jubi\\w+/i', 'the Jubilees came', false, true), 1, 'regex key with flags overrides options');
 eq(countKey('nope', 'nothing here', false, false), 0, 'no match is zero');
+// --- markup is masked for a literal key, where core matches inside a tag: a named divergence, not parity
+eq(countKey('size', '<div style="font-size:13px;">a minotaur</div>', false, false), 0,
+    'a literal key does not match inside a tag — core would count this 1');
+eq(countKey('div', '<div>a minotaur</div>', false, false), 0, 'nor the tag name itself');
+eq(countKey('minotaur', '<div style="font-size:13px;">a minotaur</div>', false, false), 1, 'the text between tags matches as ever');
+eq(countKey('/font-size/', '<div style="font-size:13px;">a minotaur</div>', false, false), 1,
+    'a regex key is the opt-in and sees the raw text');
+eq(countKey('gfx', '<!-- GFX_START -->', false, false), 0, 'a comment is markup too');
 
 // --- Match Whole Words: multi-word keys included, and the boundary class is the wordBoundary setting ------
 {

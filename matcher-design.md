@@ -521,6 +521,13 @@ core's intent, not to its bugs.
   directions. The documented contract is preserved exactly — `king` matches "long live the king" and
   not "it's not to my liking" under core, permissive and strict alike. Every divergence lives in
   territory core never described.
+- **Markup is masked for every literal matcher.** `maskMarkup` blanks a tag or an HTML comment to spaces
+  — length-preserving, so every offset a caller marks or excerpts by still lands — before `foldedHay` and
+  before the Aho-Corasick prescan, which have to agree on what the haystack is. A `/regex/` key, and a
+  SmartKey's REGEX leaf, see the raw text: a pattern is the opt-in for someone who means the markup.
+  Core matches inside tags, so `size` fires on `font-size` there and not here. The rule is that a key is
+  matched against what the author is saying, not against how a preset drew it — the same argument as a
+  block element ending a window.
 - **The boundary class** (`wordChar()`) against core's `\W`, which diverges both ways. Fixes
   `upstream-st.md` #1 — core's whole-word test is ASCII-only.
 - **A scanned inject is bounded by the window it was placed in.** Core appends every `scan: true`

@@ -248,6 +248,18 @@ is a no-op there and `hot tub` goes on matching `hot tubs`. WA applies the label
 `hot tub` matches *hot tub* and not *hot tubs*, and `? ="hot tub"` behaves identically. If you want
 the plural too, key it — or leave the box off, which is the default.
 
+**Markup is not text.** A tag or an HTML comment is blanked out before a literal key is matched, so
+`size` does not fire on `<div style="font-size:13px">` and `div` does not fire on the tag that wrote
+it. It is what the author is saying that a key is matched against, not how a preset drew it. A
+`/regex/` key is the opt-in and sees the raw text, tags and all — so `/font-size/` finds the
+attribute, and that is the only way to reach one. SillyTavern core matches inside tags.
+
+**Block elements end a match window**, like a blank line. A preset that writes chat bubbles or a
+tracker panel as `<div>`s is writing one unit per element, so a conjunction cannot span two of them at
+the default *Paragraph* setting — `? apple banana` needs both inside the same bubble. Inline elements
+(`<b>`, `<em>`, `<span>`) are inside a thought and end nothing, and `<br>` is a line break rather than
+an end.
+
 **What counts as *inside* a word is the Word boundary setting**, in the WA panel:
 
 | | inside a word | so `Joe` matches |
