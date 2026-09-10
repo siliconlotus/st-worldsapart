@@ -451,6 +451,14 @@ const gateNodeFor = (gate, caseSensitive, wholeWords) => {
     return key => synthesizeSecondary(key, sec, logic, { caseSensitive, wholeWords });
 };
 
+/** The AST a key is matched by: its gate's if it has one, its own if it is a `?` key, and none at all if it is a plain term. */
+const astFor = (key, gateOf) => {
+    const gated = gateOf(key);
+    if (gated) return gated;
+    if (!key.startsWith('?')) return null;
+    try { return parse(tokenize(key)); } catch { return null; }
+};
+
 /** The segments `key` matched in, or all of them when it matched in none — a failed key still reports the branch that hit,
  *  but only where nothing can read the report as a match. */
 const liveSegments = (key, segs, caseSensitive, wholeWords, node = null) => {
@@ -477,46 +485,45 @@ export function keySpans(keys, text, caseSensitive, wholeWords, { limit = 200, m
     return out;
 }
 
-/** What each of `keys` did to `text`, as the rows keyHitsHtml renders. One row per key with its count, then one `\u21b3` row
- *  per hit beneath it, or per credited leaf with its own count for a compound
- *  SmartKey, whose own number is a weight rather than an occurrence count. A key that can never fire gets a message
- *  where the excerpt goes. A key with one hit and nothing to name stays a single row. `gate` is a secondary-key condition —
- *  `{ keys, logic }` in core's terms — applied to every key, as an entry's keysecondary gates each of its primaries. `context` and `limit` are keyExcerpts'. */
+/** What each of `keys` did to `text`, grouped the way it was matched: one entry per key, and inside it one entry per segment
+ *  the key has anything to say about — `leaves` being every branch of the key and its gate with that segment's count, `negated`
+ *  marking a branch that vetoes rather than matches, and `excerpts` the first occurrence of each branch that fired. `matched`
+ *  is the verdict for that segment. A key that can never fire carries `message` instead. `gate` is a secondary-key condition,
+ *  `{ keys, logic }` in core's terms, applied to every key as an entry's keysecondary gates each of its primaries. */
 export function keyHits(keys, text, caseSensitive, wholeWords, { context = 28, limit = 20, matchWindow = 'scan', gate } = {}) {
     const segs = textSegments(text, matchWindow);
     const gateOf = gateNodeFor(gate, caseSensitive, wholeWords);
     return (Array.isArray(keys) ? keys : [])
         .map(k => String(k ?? '').trim()).filter(Boolean)
-        .flatMap(key => {
+        .map(key => {
             const bad = key.startsWith('?') ? validateSmartKey(key).find(v => v.severity === 'error') : null;
-            if (bad) return [{ key, excerpt: bad.message }];
-            const node = gateOf(key);
-            const perSeg = segs.map(sg => ({
-                matched: countKey(key, sg.text, caseSensitive, wholeWords, undefined, node) > 0,
-                own: countKey(key, sg.text, caseSensitive, wholeWords),
-                excerpts: keyExcerpts(key, sg.text, caseSensitive, wholeWords, context, limit, node),
-            }));
-            // Per segment and summed, as the audit counts: a key is matched within its unit, never across the join. Under a
-            // gate the number is still the key's own occurrences, in the segments the gate let through — not the gate's weight.
-            const count = perSeg.reduce((a, sg) => a + (sg.matched ? sg.own : 0), 0);
-            const anyMatch = perSeg.some(sg => sg.matched);
-            // Where the key matched, its own branches; where it matched nowhere, every segment's, since that is the tuning case.
-            const hits = perSeg.filter(sg => sg.matched || !anyMatch)
-                .flatMap(sg => sg.excerpts.filter(e => !e.negated));
-            // A veto is reported once for the whole text, not per segment: the segments it fires in are the ones the key is
-            // missing, and those are exactly the segments its own branches are not reported from.
-            const vetoes = new Map();
-            for (const sg of perSeg) {
-                for (const e of sg.excerpts) {
-                    if (!e.negated) continue;
-                    const prev = vetoes.get(e.term);
-                    if (!prev) vetoes.set(e.term, { ...e });
-                    else { prev.n += e.n; if (!prev.text && e.text) Object.assign(prev, e, { n: prev.n }); }
+            if (bad) return { key, message: bad.message, segments: [] };
+
+            const node = astFor(key, gateOf);
+            // A plain key with no gate is its own single branch; anything else is the leaves of the AST it evaluates as.
+            const branches = node
+                ? leafNodes(node).map(l => ({ id: l.node, negated: l.negated }))
+                : [{ id: { type: 'TERM', value: key, isCaseSensitive: caseSensitive, isExact: wholeWords }, negated: false }];
+
+            const segments = [];
+            let count = 0;
+            for (const sg of segs) {
+                const matched = countKey(key, sg.text, caseSensitive, wholeWords, undefined, node) > 0;
+                if (matched) count += countKey(key, sg.text, caseSensitive, wholeWords);
+                const leaves = branches.map(b => ({ term: String(b.id?.value ?? ''), n: leafCount(b.id, sg.text), negated: b.negated }));
+                if (!leaves.some(l => l.n > 0)) continue;   // nothing of this key is in this segment
+                const excerpts = [];
+                for (const b of branches) {
+                    if (!leafCount(b.id, sg.text)) continue;
+                    const isRegex = b.id?.type === 'REGEX';
+                    const [ex] = keyExcerpts(String(b.id?.value ?? ''), sg.text,
+                        !isRegex && !!b.id.isCaseSensitive, !isRegex && !!b.id.isExact, context, 1);
+                    if (ex) excerpts.push({ ...ex, term: String(b.id?.value ?? ''), negated: b.negated });
                 }
+                segments.push({ at: sg.at, matched, leaves, excerpts });
+                if (segments.length >= limit) break;
             }
-            const all = [...hits, ...vetoes.values()].slice(0, limit);
-            if (all.length < 2 && !all[0]?.term) return [{ key, count, excerpt: all[0] }];
-            return [{ key, count }, ...all.map(e => ({ key: e.term ? `\u21b3 ${e.term}` : '\u21b3', count: e.n, excerpt: e.text ? e : undefined }))];
+            return { key, count, segments };
         });
 }
 

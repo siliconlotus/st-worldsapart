@@ -7,7 +7,7 @@ import { power_user } from '../../../../power-user.js';
 import { escapeHtml } from '../../../../utils.js';
 import { Popup, POPUP_TYPE, POPUP_RESULT } from '../../../../popup.js';
 import { runState, settings } from './state.mjs';
-import { ensureStudioStyle, keyHitsHtml, makeSortControl, showCtxMenu, showEntryText, wiGlyph } from './ui-widgets.mjs';
+import { ensureStudioStyle, makeSortControl, showCtxMenu, showEntryText, wiGlyph } from './ui-widgets.mjs';
 import { SORT_FNS, SORT_LABELS, normPresentation, presentationLabel, reconcileTiers, tierRank, wiTitleOf } from './sort.mjs';
 import { buildKeyPruneScan, llmKeyCandidates } from './keyword-tools.mjs';
 import { STUDIO_PRUNE_OPTS } from './keyword-audit.mjs';
@@ -2076,17 +2076,28 @@ export async function lorebookStudio(preferredBook = null) {
         return { keys: usableKeys(e?.key), sec, logic: String(e?.selectiveLogic ?? WI_LOGIC.AND_ANY) };
     };
 
+    /** One key's result as HTML: the key as a chip with its count, then a block per segment — every branch with that segment's
+     *  count, and under it the first place each branch that fired landed. A segment the key failed in is dimmed. */
+    const labKeyHtml = (r, color) => {
+        const chip = `<span class="wa-kw" style="border-color:${escapeHtml(color)};background:color-mix(in srgb, ${escapeHtml(color)} 18%, transparent);">${escapeHtml(r.key)}</span>`;
+        const num = n => `<span style="color:var(--SmartThemeEmColor, #d9a441);font-weight:600;">${n}</span>`;
+        if (r.message) return `<div style="margin-bottom:8px;">${chip} <small style="opacity:0.75;">${escapeHtml(r.message)}</small></div>`;
+        const seg = sg => `<div style="margin:3px 0 0 14px;${sg.matched ? '' : 'opacity:0.55;'}">`
+            + `<small>${sg.leaves.map(l => `${escapeHtml(l.negated ? `-${l.term}` : l.term)} ${num(l.n)}`).join(', ')}</small>`
+            + sg.excerpts.map(e => `<div style="margin-left:14px;"><small style="opacity:0.75;">${escapeHtml(e.text.slice(0, e.start))}`
+                + `<span style="color:${escapeHtml(color)};font-weight:600;">${escapeHtml(e.text.slice(e.start, e.end))}</span>`
+                + `${escapeHtml(e.text.slice(e.end))}</small></div>`).join('')
+            + '</div>';
+        return `<div style="margin-bottom:8px;">${chip} ${num(r.count)}${r.segments.map(seg).join('')}</div>`;
+    };
+
     /** The rows and the colour they share with the marks, from whatever the panes hold now. */
     const scanLab = () => {
         const keys = splitKeys(labKeys);
         const ink = (key, a) => labInk(Math.max(0, keys.indexOf(key)), a);
         const gate = { keys: splitKeys(labSec), logic: Number(labLogic) };
         const rows = keyHits(keys, labHay, labCase, labWhole, { context: 30, matchWindow: labWindow, gate });
-        // A hit row takes the colour of the key it sits under, which is the last row that named one.
-        for (let i = 0, parent = ''; i < rows.length; i++) {
-            if (!rows[i].key.startsWith('\u21b3')) parent = rows[i].key;
-            rows[i].color = ink(parent);
-        }
+        for (const r of rows) r.color = ink(r.key);
         return { keys, ink, rows, gate };
     };
 
@@ -2102,7 +2113,7 @@ export async function lorebookStudio(preferredBook = null) {
             || '<span style="opacity:0.6;">(no text)</span>';
         const digest = document.createElement('div');
         digest.style.cssText = 'margin-top:10px;padding-top:8px;border-top:1px solid color-mix(in srgb, currentColor 15%, transparent);max-height:25vh;overflow:auto;';
-        digest.innerHTML = keyHitsHtml(rows);
+        digest.innerHTML = rows.map(r => labKeyHtml(r, r.color)).join('');
         wrap.append(body, digest);
         const vp = new Popup(wrap, POPUP_TYPE.TEXT, '', { large: true, allowVerticalScrolling: true });
         vp.dlg.style.setProperty('width', 'calc(var(--sheldWidth, 90vw) * 0.7)', 'important');
@@ -2195,7 +2206,7 @@ export async function lorebookStudio(preferredBook = null) {
         const repaint = () => {
             const { rows } = scanLab();
             out.innerHTML = rows.length
-                ? keyHitsHtml(rows)
+                ? rows.map(r => labKeyHtml(r, r.color)).join('')
                 : '<div style="opacity:0.6;padding:6px 0;">Keys you type on the right are matched against the text on the left.</div>';
         };
         repaint();

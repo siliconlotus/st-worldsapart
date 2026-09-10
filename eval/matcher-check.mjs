@@ -249,22 +249,27 @@ eq(leaves('? (/Gagar\\w+/ armstrong)').join(' '), '/Gagar\\w+/:2 armstrong:1', '
 console.log('ok   keyExcerpt: compound SmartKeys excerpt every credited leaf, with per-leaf counts');
 
 
-// --- a negated leaf is reported too: whether the thing vetoing the key fires at all is the same tuning question
-const negs = k => keyHits([k], space, false, true).map(r => `${r.key}:${r.count ?? ''}`).join(' ');
-eq(negs('? cosmonaut -astronaut'), '? cosmonaut -astronaut:0 \u21b3 cosmonaut:1 \u21b3 -astronaut:1',
-    'the veto is named with its count, so a key reading 0 says what stopped it');
-eq(negs('? cosmonaut -astronuat'), '? cosmonaut -astronuat:1 \u21b3 cosmonaut:1 \u21b3 -astronuat:0',
+// One key's result as a line per segment: `leaf n, leaf n | first excerpt of each that fired`, dead segments marked `!`.
+const digest = (k, text, opts = {}) => {
+    const [r] = keyHits([k], text, opts.cs ?? false, opts.ww ?? true, opts);
+    if (r.message) return `${r.key} !! ${r.message}`;
+    return [`${r.key}:${r.count}`, ...r.segments.map(sg => `${sg.matched ? '' : '!'}${sg.leaves.map(l => `${l.negated ? '-' : ''}${l.term} ${l.n}`).join(', ')}`)].join(' | ');
+};
+
+// --- every branch is reported per segment, negated ones included: a broken negative is invisible otherwise
+eq(digest('? cosmonaut -astronaut', space), '? cosmonaut -astronaut:0 | !cosmonaut 1, -astronaut 1',
+    'the veto is named with its count in the segment it fired in, so a key reading 0 says what stopped it');
+eq(digest('? cosmonaut -astronuat', space), '? cosmonaut -astronuat:1 | cosmonaut 1, -astronuat 0',
     'a negative that never fires reads 0 — a misspelt one is invisible otherwise');
-eq(keyHits(['? cosmonaut -astronuat'], space, false, true)[2].excerpt, undefined,
-    'a leaf that did not fire has no excerpt to show');
+eq(keyHits(['? cosmonaut -astronuat'], space, false, true)[0].segments[0].excerpts.length, 1,
+    'only a branch that fired has a place to show');
 eq(keySpans(['? cosmonaut -astronaut'], space, false, true).length, 1,
     'and a negated leaf is never marked in the text: a mark means a match');
-const vetoed = keyHits(['breath'], 'He drew a breath.\n\nA slow breath, held.\n\nAnother breath.', false, true,
-    { matchWindow: 'paragraph', gate: { keys: ['slow'], logic: WI_LOGIC.NOT_ANY } });
-eq(vetoed.map(r => `${r.key}:${r.count ?? ''}`).join(' '), 'breath:2 \u21b3 breath:1 \u21b3 breath:1 \u21b3 -slow:1',
-    'a veto is counted over the whole text, since it fires in the segments the key\'s own rows are not reported from');
-eq(typeof vetoed[3].excerpt, 'object', 'and shows where, which is the segment the key is missing');
-console.log('ok   keyExcerpt: negated leaves are counted and named, and never marked');
+const breaths = 'He drew a breath.\n\nA slow breath, held.\n\nAnother breath.';
+eq(digest('breath', breaths, { matchWindow: 'paragraph', gate: { keys: ['slow'], logic: WI_LOGIC.NOT_ANY } }),
+    'breath:2 | breath 1, -slow 0 | !breath 1, -slow 1 | breath 1, -slow 0',
+    'paragraph by paragraph: the one the veto took is marked dead, and says which branch took it');
+console.log('ok   keyHits: every branch per segment, negated ones counted, and never marked in the text');
 
 
 // --- gate: a secondary condition in core's own terms, firing exactly where the entry's key does
@@ -276,8 +281,7 @@ console.log('ok   keyExcerpt: negated leaves are counted and named, and never ma
         const entry = { key: keys, keysecondary: sec, selective: true, selectiveLogic: logic };
         for (const text of texts) {
             const fired = new Set(rankKeywordScore(entry, text, entry.key, opts).hits.map(h => h.key));
-            const gated = keyHits(keys, text, false, false, { gate: { keys: sec, logic } })
-                .filter(r => !r.key.startsWith('\u21b3'));
+            const gated = keyHits(keys, text, false, false, { gate: { keys: sec, logic } });
             eq(gated.map(r => r.count > 0).join(), keys.map(k => fired.has(k)).join(),
                 `logic ${logic} on "${text}": the gate fires exactly where the entry's own secondary keys do`);
         }
@@ -285,8 +289,8 @@ console.log('ok   keyExcerpt: negated leaves are counted and named, and never ma
     const gate = { keys: sec, logic: WI_LOGIC.AND_ANY };
     eq(keyHits(['apple'], 'apple apple computer', false, false, { gate })[0].count, 2,
         'the number under a gate is the key\'s own occurrences, not the gate\'s weight');
-    eq(keyHits(['apple'], 'apple alone', false, false, { gate }).map(r => `${r.key}:${r.count ?? ''}`).join(' '),
-        'apple:0 \u21b3 apple:1', 'a key the gate refused counts 0, and still shows where it hit');
+    eq(digest('apple', 'apple alone', { ww: false, gate }), 'apple:0 | !apple 1, computer 0, tablet 0',
+        'a key the gate refused counts 0, and still shows every branch of the condition');
     eq(keyHits(['apple'], 'apple on a tablet', false, false, {}).length, 1, 'no gate, no condition');
     eq(keySpans(['apple'], 'apple alone. apple and a tablet', false, false, { gate, matchWindow: 'scan' }).length, 2,
         'the marks follow the gate, over whatever unit the window makes');
@@ -308,37 +312,19 @@ eq(splitKeys('').length, 0, 'nothing in, nothing out');
 console.log('ok   splitKeys: comma and newline separate; regexes and quoted terms keep their commas');
 
 
-// --- keyHits: the Keyword Lab's rows — a key, then a row per hit, and a message for a key that can never fire
+// --- keyHits: one entry per key, whatever the key is
 const rows = keyHits(['gagarin', '? (armstrong gagarin)', '? -banana', 'nobody'], space, false, true);
-eq(rows.map(r => r.key).join(' | '), 'gagarin | \u21b3 | \u21b3 | ? (armstrong gagarin) | \u21b3 gagarin | \u21b3 armstrong | ? -banana | nobody',
-    'every hit gets its own row under the key; a compound names the leaf that produced each');
-eq(rows[0].count, 2, 'a plain key reports occurrences');
-eq(rows[1].excerpt.at < rows[2].excerpt.at, true, 'the hit rows are in the order they occur in the text');
-eq(rows[3].excerpt, undefined, 'the key row carries no excerpt of its own — the hit rows below it are the excerpts');
-eq(rows[4].count, 2, 'a compound\'s leaf rows carry that leaf\'s own count');
-eq(rows[6].count, undefined, 'a negation-only SmartKey is reported as unusable...');
-eq(typeof rows[6].excerpt, 'string', '...by a message where the excerpt goes');
-eq(rows[7].count, 0, 'a key that simply did not match is a zero, not an error');
-eq(keyHits(['gagarin', '', '  armstrong  '], space, false, true).map(r => r.key).join(','), 'gagarin,\u21b3,\u21b3,armstrong',
+eq(rows.map(r => r.key).join(' | '), 'gagarin | ? (armstrong gagarin) | ? -banana | nobody', 'one entry per key, in the order given');
+eq(rows[0].count, 2, 'a plain key reports its occurrences');
+eq(rows[0].segments[0].excerpts.length, 1, 'one excerpt per branch that fired — a plain key has the one branch');
+eq(rows[1].segments[0].leaves.map(l => `${l.term} ${l.n}`).join(', '), 'armstrong 1, gagarin 2', 'a compound reports every leaf');
+eq(rows[2].count, undefined, 'a negation-only SmartKey can never fire...');
+eq(typeof rows[2].message, 'string', '...so it carries a message instead of a count');
+eq(rows[3].count, 0, 'a key that simply did not match is a zero, not an error');
+eq(rows[3].segments.length, 0, 'and has no segment to report');
+eq(keyHits(['gagarin', '', '  armstrong  '], space, false, true).map(r => r.key).join(','), 'gagarin,armstrong',
     'blanks are dropped and keys trimmed; splitting the caller\'s text into keys is the caller\'s business');
-console.log('ok   keyHits: a row per key and per hit, leaves named for compounds, a message for a key that cannot fire');
-
-
-// --- matchWindow: a key is matched within its unit, and the offsets still land on the whole text
-const paras = 'Russian cosmonaut Yuri Gagarin met the American astronaut Neil Armstrong.\n\nThe cosmonaut, hero of the Soviet Union, was vacationing.';
-eq(textSegments(paras, 'paragraph').map(sg => sg.at).join(','), '0,75', 'a segment carries its offset into the whole text');
-eq(textSegments(paras, 'scan').length, 1, 'any other window leaves the text whole');
-eq(textSegments('   ', 'scan').length, 0, 'blank text has no segments to match in');
-const win = w => keyHits(['? cosmonaut -astronaut'], paras, false, true, { matchWindow: w }).map(r => `${r.key}:${r.count ?? ''}`);
-eq(win('scan').join(' '), '? cosmonaut -astronaut:0 \u21b3 cosmonaut:2 \u21b3 -astronaut:1',
-    'across the whole text the negation kills it, and both sides say why');
-eq(win('paragraph').join(' '), '? cosmonaut -astronaut:1 \u21b3 cosmonaut:1 \u21b3 -astronaut:1',
-    'by paragraph it matches the paragraph the astronaut is absent from, and the veto reports the one it took');
-eq(paras.slice(...(sp => [sp.start, sp.end])(keySpans(['? cosmonaut -astronaut'], paras, false, true, { matchWindow: 'paragraph' })[0])), 'cosmonaut',
-    'and marks it there');
-eq(keySpans(['? cosmonaut -astronaut'], paras, false, true, { matchWindow: 'paragraph' }).map(sp => sp.start).join(), '79',
-    'the span is offset onto the whole text, not the segment it was found in');
-console.log('ok   matchWindow: keys match within their unit, spans are offset back onto the whole text');
+console.log('ok   keyHits: one entry per key, its segments, and a message for a key that cannot fire');
 
 
 // --- keySpans: where to mark the haystack itself — source offsets, in order, never overlapping
