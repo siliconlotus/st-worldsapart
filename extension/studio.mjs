@@ -2223,7 +2223,14 @@ export async function lorebookStudio(preferredBook = null) {
             if (rows.length) hits.push({ entry, rows });
         }
         // In encounter order, which for the attached set is core's own: global, character, chat, persona.
-        labRun = { label, entries: hits, scanned: keyed.length, books: [...new Set(keyed.map(e => e.world).filter(Boolean))] };
+        labRun = {
+            label,
+            entries: hits,
+            scanned: keyed.length,
+            books: [...new Set(keyed.map(e => e.world).filter(Boolean))],
+            // Colour is per term, as it is in the key list: one key found by two entries is one colour in both.
+            keyList: [...new Set(hits.flatMap(h => h.rows.map(r => r.key)))],
+        };
         toastr.info(`${hits.length} of ${keyed.length} keyed ${keyed.length === 1 ? 'entry' : 'entries'} matched`, 'Keyword Lab');
         labRepaint?.();
     };
@@ -2249,7 +2256,7 @@ export async function lorebookStudio(preferredBook = null) {
 
     /** An applied book's result: a line saying what was matched and what was not, then one collapsible entry per hit. */
     const labRunHtml = () => {
-        const { label, entries, scanned, books } = labRun;
+        const { label, entries, scanned, books, keyList } = labRun;
         const where = books.length > 1 ? `${books.length} books` : (books[0] ?? label);
         const head = `<div style="margin-bottom:8px;"><b>${entries.length}/${scanned}</b>`
             + `<small style="opacity:0.6;"> ${scanned === 1 ? 'entry' : 'entries'} in ${escapeHtml(where)}</small>`
@@ -2257,16 +2264,15 @@ export async function lorebookStudio(preferredBook = null) {
         // Nothing keyed at all is a different answer from nothing matching, and 0/0 does not say which.
         if (!scanned) return `${head}<div style="opacity:0.6;">No entry there has a key to match with.</div>`;
         if (!entries.length) return head;
-        return head + entries.map(({ entry, rows }, i) => {
-            const color = labInk(i);
-            // No lozenge: a chip reads as a term, and the entry is the heading the terms sit under. Its colour is the one
-            // its keys wear below it.
-            const title = `<b style="color:${escapeHtml(color)};overflow-wrap:anywhere;">${escapeHtml(wiTitleOf(entry))}</b>`
+        return head + entries.map(({ entry, rows }) => {
+            // No lozenge and no colour: a chip reads as a term and a colour belongs to one, where the entry is the heading
+            // the terms sit under.
+            const title = `<b style="overflow-wrap:anywhere;">${escapeHtml(wiTitleOf(entry))}</b>`
                 + `<small style="opacity:0.6;"> ${rows.length} key${rows.length === 1 ? '' : 's'}</small>`;
             // The book on its own line, since a run spans every attached one and two books can hold the same title.
             const from = entry.world ? `<div><small style="opacity:0.45;">${escapeHtml(entry.world)}</small></div>` : '';
             return `<details open style="margin-bottom:8px;"><summary style="cursor:pointer;">${title}${from}</summary>`
-                + `<div style="margin-left:10px;">${rows.map(r => labKeyHtml(r, color)).join('')}</div></details>`;
+                + `<div style="margin-left:10px;">${rows.map(r => labKeyHtml(r, labInk(Math.max(0, keyList.indexOf(r.key))))).join('')}</div></details>`;
         }).join('');
     };
 
@@ -2290,16 +2296,16 @@ export async function lorebookStudio(preferredBook = null) {
     const scanLab = () => {
         // An applied run marks with the entries it ran, coloured by entry, not with the keys pane it is not using.
         if (labRun) {
-            const spans = mergeSpans(labRun.entries.flatMap(({ entry }, i) => {
+            const spans = mergeSpans(labRun.entries.flatMap(({ entry }) => {
                 const sec = entry.selective ? secondaryKeys(entry) : [];
                 return keySpans(usableKeys(entry.key), labHay,
                     entry.caseSensitive ?? world_info_case_sensitive, entry.matchWholeWords ?? world_info_match_whole_words,
                     {
                         matchWindow: labWindow,
                         gate: sec.length ? { keys: sec, logic: Number(entry.selectiveLogic ?? WI_LOGIC.AND_ANY) } : undefined,
-                    }).map(sp => ({ ...sp, entry: i, key: wiTitleOf(entry) }));
+                    });
             }));
-            return { keys: [], ink: (sp, a) => labInk(sp.entry ?? 0, a), rows: [], spans };
+            return { keys: labRun.keyList, ink: (sp, a) => labInk(Math.max(0, labRun.keyList.indexOf(sp.key)), a), rows: [], spans };
         }
         const keys = splitKeys(labKeys);
         const ink = (sp, a) => labInk(Math.max(0, keys.indexOf(sp.key)), a);
