@@ -2094,12 +2094,16 @@ export async function lorebookStudio(preferredBook = null) {
                 + `${escapeHtml(e.text.slice(e.end))}</small></div>`).join('')
             + '</div>';
         // <details> so the open/shut state is the element's own; labCollapsed carries it across the repaint that rebuilds this.
-        // Windows, not occurrences: a key's fate is decided per window, and the occurrence counts are on the lines below.
-        // Disjoint and summing to the windows the key was in the running for, so neither number needs a total to read.
+        // A key with one positive branch and nothing gating it cannot be filtered, so the window is not the interesting unit:
+        // its number is occurrences. Anything with branches — an AND group, a gate — is decided per window, so it counts those.
+        const oneBranch = r.segments.every(sg => sg.leaves.length === 1 && !sg.leaves[0].negated);
         const filtered = r.segments.filter(sg => !sg.matched).length;
+        const tally = oneBranch
+            ? num(r.count)
+            // Disjoint, and summing to the windows the key was in the running for, so neither number needs a total to read.
+            : `${num(`${r.segments.length - filtered} matched`)}${filtered ? `<small style="opacity:0.5;">, ${filtered} filtered</small>` : ''}`;
         return `<details${labCollapsed.has(r.key) ? '' : ' open'} data-k="${escapeHtml(r.key)}" style="margin-bottom:8px;">`
-            + `<summary style="cursor:pointer;">${chip} ${num(`${r.segments.length - filtered} matched`)}`
-            + `${filtered ? `<small style="opacity:0.5;">, ${filtered} filtered</small>` : ''}</summary>`
+            + `<summary style="cursor:pointer;">${chip} ${tally}</summary>`
             + `${r.segments.map(seg).join('')}</details>`;
     };
 
