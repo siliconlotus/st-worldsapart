@@ -314,7 +314,9 @@ export function ensureStudioStyle() {
     if (studioStyled) return;
     studioStyled = true;
     const style = document.createElement('style');
+    // --wa-severe is the audit's red, as a variable: the script side has it in SEVERITY_COLOR and a sheet cannot read that.
     style.textContent = `
+.wa-studio, .wa-ctx-menu, .wa-bulkbar { --wa-severe: #e06c6c; }
 /* Focus has to land somewhere when a nested popup (Replace all…, a confirm) closes, and with no OK
    button left it falls to the dialog, then to whichever pane Chrome counts as focusable — it makes
    scroll containers focusable, so the nav or the entry list gets ringed. None of these are controls;
@@ -369,7 +371,8 @@ dialog.popup:has(.wa-studio), .wa-studio-nav, .wa-studio-explorer, .wa-studio-en
     border: none; background: transparent; color: inherit; font-family: inherit;
     border-bottom: 2px solid transparent; margin-bottom: -1px; }
 .wa-tab:hover { opacity: 0.9; background: var(--white20a, rgba(255,255,255,0.06)); }
-.wa-tab.wa-tab-on { opacity: 1; font-weight: bold; color: #6ea8fe; border-bottom-color: #6ea8fe; }
+.wa-tab.wa-tab-on { opacity: 1; font-weight: bold; color: var(--SmartThemeQuoteColor, #6ea8fe);
+    border-bottom-color: var(--SmartThemeQuoteColor, #6ea8fe); }
 .wa-tab-count { opacity: 0.6; font-weight: normal; margin-left: 5px; font-size: 0.9em; }
 /* Key-per-row tables shared by Cleanup and Suggest. */
 /* Pinned strip of the book's ignored terms, above the term list. Wraps rather than scrolls — the set is
@@ -418,11 +421,12 @@ textarea.wa-entry-full.wa-tall { max-height: 62vh; }
 .wa-entry-tools { display: flex; align-items: center; gap: 2px; margin-left: auto; }
 .wa-tool { cursor: pointer; padding: 3px 4px; border-radius: 4px; opacity: 0.55; font-style: normal; }
 .wa-tool:hover { opacity: 1; background: var(--white20a, rgba(255,255,255,0.1)); }
-.wa-tool.wa-on { opacity: 1; color: #6ea8fe; }
+.wa-tool.wa-on { opacity: 1; color: var(--SmartThemeQuoteColor, #6ea8fe); }
 .wa-tool.wa-badge { position: relative; }
 .wa-tool.wa-badge::after { content: attr(data-badge); position: absolute; top: -3px; right: -4px;
     font-size: 0.6em; font-style: normal; font-weight: bold; line-height: 1.4; padding: 0 3px;
-    border-radius: 8px; background: #16305c; color: #fff; }
+    border-radius: 8px; background: color-mix(in srgb, var(--SmartThemeQuoteColor) 30%, var(--SmartThemeBlurTintColor));
+    color: var(--SmartThemeBodyColor); }
 .wa-title-edit { font-size: 0.82em; opacity: 0.4; }
 .wa-mode { margin: 0; padding: 1px 2px; font-size: 0.95em; background: transparent;
     border: 1px solid var(--SmartThemeBorderColor, rgba(255,255,255,0.15)); border-radius: 4px; cursor: pointer; }
@@ -465,15 +469,16 @@ textarea.wa-entry-full.wa-tall { max-height: 62vh; }
     border-bottom: 1px solid var(--SmartThemeBorderColor, rgba(255,255,255,0.15)); }
 .wa-bulk-count { font-weight: bold; margin-right: 2px; }
 .wa-bulk-btn { margin: 0; padding: 3px 10px; font-size: 0.82em; }
-.wa-bulk-danger { color: #e06c6c; }
+.wa-bulk-danger { color: var(--wa-severe); }
 .wa-bulk-sep { align-self: stretch; width: 1px; background: color-mix(in srgb, currentColor 22%, transparent); margin: 0 3px; }
 .wa-book-tools { margin-left: 8px; white-space: nowrap; }
 .wa-book-tool { cursor: pointer; opacity: 0.5; padding: 3px 5px; border-radius: 4px; font-size: 0.9em; }
 .wa-book-tool:hover { opacity: 1; background: var(--white20a, rgba(255,255,255,0.1)); }
-.wa-book-tool-danger:hover { color: #e06c6c; }
+.wa-book-tool-danger:hover { color: var(--wa-severe); }
 .wa-filter { margin: 0; padding: 3px 6px; font-size: 0.82em; }
 .wa-undo-bar { display: flex; flex-direction: column; gap: 5px; margin: 4px 0 6px; padding: 6px 8px; border-radius: 5px;
-    font-size: 0.85em; background: color-mix(in srgb, #e0a86c 15%, transparent); border: 1px solid color-mix(in srgb, #e0a86c 45%, transparent); }
+    font-size: 0.85em; background: color-mix(in srgb, var(--golden, #e0a86c) 15%, transparent);
+    border: 1px solid color-mix(in srgb, var(--golden, #e0a86c) 45%, transparent); }
 .wa-undo-top { display: flex; align-items: center; gap: 6px; }
 .wa-undo-text { flex: 1; min-width: 0; opacity: 0.8; }
 .wa-undo-name { font-weight: bold; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -498,12 +503,12 @@ textarea.wa-entry-full.wa-tall { max-height: 62vh; }
     background: var(--SmartThemeBlurTintColor, rgba(30,30,38,0.96));
     backdrop-filter: blur(calc(var(--SmartThemeBlurStrength, 10) * 1px));
     border: 1px solid var(--SmartThemeBorderColor, rgba(255,255,255,0.18));
-    box-shadow: 0 6px 20px rgba(0,0,0,0.45); font-size: 0.9em; }
+    box-shadow: 0 6px 20px var(--SmartThemeShadowColor, rgba(0,0,0,0.45)); font-size: 0.9em; }
 .wa-ctx-item { display: flex; align-items: center; gap: 14px; padding: 5px 11px; border-radius: 4px; cursor: pointer; white-space: nowrap; }
 .wa-ctx-item:hover { background: var(--white20a, rgba(255,255,255,0.12)); }
-.wa-ctx-danger:hover { color: #e06c6c; }
+.wa-ctx-danger:hover { color: var(--wa-severe); }
 .wa-ctx-caret { margin-left: auto; opacity: 0.55; font-size: 1.15em; line-height: 1; }
-.wa-ctx-active { color: #6ea8fe; font-weight: 600; }
+.wa-ctx-active { color: var(--SmartThemeQuoteColor, #6ea8fe); font-weight: 600; }
 .wa-sugg { display: inline-flex; align-items: center; gap: 3px; margin: 0 0.7em 0.2em 0; white-space: nowrap; opacity: 0.9; }
 /* ➕ takes the candidate as-is; the text rewords it first. Both commit, so both look clickable. */
 .wa-sugg-add { cursor: pointer; opacity: 0.55; font-size: 0.85em; }
@@ -517,7 +522,8 @@ textarea.wa-entry-full.wa-tall { max-height: 62vh; }
 .wa-adv-row { display: flex; align-items: center; gap: 6px; font-size: 0.9em; margin: 0; }
 .wa-adv-row input[type=number] { width: 4.5em; margin: 0 0 0 auto; padding: 2px 5px; }
 .wa-adv-warn { display: flex; align-items: center; gap: 5px; margin-top: 5px; padding: 4px 6px; border-radius: 4px; font-size: 0.8em;
-    background: color-mix(in srgb, #e0a86c 15%, transparent); border: 1px solid color-mix(in srgb, #e0a86c 45%, transparent); }
-.wa-adv-warn i { color: #e0a86c; }`;
+    background: color-mix(in srgb, var(--golden, #e0a86c) 15%, transparent);
+    border: 1px solid color-mix(in srgb, var(--golden, #e0a86c) 45%, transparent); }
+.wa-adv-warn i { color: var(--golden, #e0a86c); }`;
     document.head.append(style);
 }

@@ -17,7 +17,7 @@ const OPTS = {
     pruneUnattested: true, pruneCommon: true, pruneShort: true, pruneShared: true, pruneFragment: true,
     ignoreProper: false, bookCommon: 0.5, minLength: 4, bookShared: 0.75,
 };
-const RED = '#e06c6c';
+const RED = 'severe';
 const entries = Object.values(data.entries);
 const keys = [...new Set(entries.flatMap(e => e.key.map(k => String(k).trim())))];
 

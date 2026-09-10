@@ -10,7 +10,7 @@ import { runState, settings } from './state.mjs';
 import { ensureStudioStyle, makeSortControl, renderMessageHtml, showCtxMenu, showEntryText, wiGlyph } from './ui-widgets.mjs';
 import { SORT_FNS, SORT_LABELS, normPresentation, presentationLabel, reconcileTiers, tierRank, wiTitleOf } from './sort.mjs';
 import { buildKeyPruneScan, llmKeyCandidates } from './keyword-tools.mjs';
-import { STUDIO_PRUNE_OPTS } from './keyword-audit.mjs';
+import { SEVERE, STUDIO_PRUNE_OPTS } from './keyword-audit.mjs';
 import { buildKeySuggest, classifyLlmCand, STUDIO_SUGGEST_OPTS } from './keyword-suggest.mjs';
 import { buildAutomaton, addMessageHits, fold, validateSmartKey } from './smartkeys.mjs';
 import { findOrphanBindings } from './bindings.mjs';
@@ -18,8 +18,16 @@ import { WI_LOGIC, dropTags, hasPromoteDecorator, isRegexKey, scanSegments, seco
 import { labScan, runBook } from './lab.mjs';
 import { addVariant, deleteKey, hasKey, keyHolders, kwNorm, renameKeyOn, replaceKey } from './keyedit.mjs';
 
-const WA_GREEN = '#7bbf6a';   // "no prune" — a keyword the scan doesn't flag
-const WA_RED = '#e06c6c';     // severe — same value keyword-audit's severityOf hands back
+// The audit's three severities, drawn. Red-amber-green is the reading, so these do NOT follow the theme's accent; the
+// mapping lives here because the audit reports a severity by name and has no business holding a colour.
+const SEVERITY_COLOR = { severe: '#e06c6c', moderate: '#d9b74a', minor: '#7bbf6a' };
+const SEVERITY_RANK = { severe: 3, moderate: 2, minor: 1 };
+// Everything else follows the theme, so a user's palette reaches WA's own controls: the accent for an active one, and a
+// desaturated body colour for a flag that is showing an inherited value rather than one the entry set.
+const ACCENT = 'var(--SmartThemeQuoteColor)';
+const INHERIT_TINT = 'color-mix(in srgb, var(--SmartThemeBodyColor) 55%, transparent)';
+const WA_GREEN = SEVERITY_COLOR.minor;   // "no prune" — a keyword the scan doesn't flag
+const WA_RED = SEVERITY_COLOR.severe;
 // Core's world_info_logic, worded as the sentence the chips beside it complete.
 const LOGIC_LABEL = { 0: 'only if any of', 1: 'unless all of', 2: 'unless any of', 3: 'only if all of' };
 /** The secondary-key operator select, under core's names. OFF is a fifth position that writes `selective`, not `selectiveLogic`. */
@@ -360,8 +368,9 @@ export async function lorebookStudio(preferredBook = null, open = null) {
         const curOrder = presentationLabel(settings());
         const w = document.createElement('div'); w.style.textAlign = 'left';
         w.innerHTML = (advanced
-            ? '<div style="display:flex;align-items:center;gap:8px;margin-bottom:10px;padding:7px 10px;border-radius:5px;background:#5a1f1f;border:1px solid #e06c6c;color:#ffd9d9;">'
-                + '<i class="fa-solid fa-triangle-exclamation" style="color:#e06c6c;"></i>'
+            ? `<div style="display:flex;align-items:center;gap:8px;margin-bottom:10px;padding:7px 10px;border-radius:5px;`
+                + `background:color-mix(in srgb, ${SEVERITY_COLOR.severe} 25%, transparent);border:1px solid ${SEVERITY_COLOR.severe};">`
+                + `<i class="fa-solid fa-triangle-exclamation" style="color:${SEVERITY_COLOR.severe};"></i>`
                 + '<span>Don\'t do this unless you really know what you\'re doing.</span></div>'
             : '')
             + (advanced
@@ -591,12 +600,12 @@ export async function lorebookStudio(preferredBook = null, open = null) {
         const effCase = e.caseSensitive ?? world_info_case_sensitive;
         const caseInherit = e.caseSensitive == null && !!world_info_case_sensitive;
         const caseTool = tool('Aa', effCase, `Case-sensitive: ${flagState(e.caseSensitive, world_info_case_sensitive)} · shift-click: inherit`, ev => { e.caseSensitive = ev.shiftKey ? null : !effCase; save(); repaint(e); });
-        if (caseInherit) caseTool.style.color = '#8fce8f';
+        if (caseInherit) caseTool.style.color = INHERIT_TINT;
         const effWhole = e.matchWholeWords ?? world_info_match_whole_words;
         const wholeInherit = e.matchWholeWords == null && !!world_info_match_whole_words;
         const wholeAdvice = wholeWordAdvice(e.key, effWhole);
         const wholeTool = tool('[ab]', effWhole, `Match whole words: ${flagState(e.matchWholeWords, world_info_match_whole_words)} · shift-click: inherit${wholeAdvice.map(a => `\n\n${a}`).join('')}`, ev => { e.matchWholeWords = ev.shiftKey ? null : !effWhole; save(); repaint(e); });
-        if (wholeInherit) wholeTool.style.color = '#8fce8f';
+        if (wholeInherit) wholeTool.style.color = INHERIT_TINT;
         // A badge, not a tint: colour already carries the inherited/entry state.
         if (wholeAdvice.length) { wholeTool.classList.add('wa-badge'); wholeTool.dataset.badge = '!'; }
         // Promote is a content decorator (@@promote), not a field.
@@ -891,20 +900,25 @@ export async function lorebookStudio(preferredBook = null, open = null) {
         meta.title = `trigger probability ${e.useProbability !== false ? prob : 100}% · delay ${delay} · cooldown ${cooldown} (messages)`;
         h.append(selBox, chev, mode, title, ...(dupMark ? [dupMark] : []), pencil, meta);
         // Collapsed-line badge: flagged-key count tinted by the worst flag; counts problems, not warnings (yellow, green).
-        const RANK = { '#e06c6c': 3, '#d9b74a': 2, '#7bbf6a': 1 };   // red > yellow > green; '' (dead) = 0
-        const SEV = { '#e06c6c': 'severe', '#d9b74a': 'moderate', '#7bbf6a': 'minor' };
-        const counted = flagged ? [...flagged.values()].filter(v => { const c = scan.severityOf(v); return c !== '#d9b74a' && c !== '#7bbf6a'; }) : [];
+        const counted = flagged ? [...flagged.values()].filter(v => scan.severityOf(v) === SEVERE) : [];
         // Unusable secondaries count too, as severe: the entry gates on fewer keys than written.
         const secBad = scan ? scan.unusableKeysOf(e).length : 0;
         if (counted.length + secBad) {
             const badge = document.createElement('span'); badge.className = 'wa-entry-badge';
             badge.textContent = `${counted.length + secBad} flagged`;
-            let worst = secBad ? WA_RED : '';
-            for (const v of counted) { const c = scan.severityOf(v); if ((RANK[c] ?? 0) > (RANK[worst] ?? 0)) worst = c; }
-            if (worst) { badge.style.background = worst; badge.style.color = worst === '#e06c6c' ? '#fff' : '#111'; }
+            let worst = secBad ? SEVERE : '';
+            for (const v of counted) {
+                const sev = scan.severityOf(v);
+                if ((SEVERITY_RANK[sev] ?? 0) > (SEVERITY_RANK[worst] ?? 0)) worst = sev;
+            }
+            if (worst) {
+                badge.style.background = SEVERITY_COLOR[worst];
+                // Black on amber and green, white on red: the badge's ground is the severity, so its text is what reads on it.
+                badge.style.color = worst === SEVERE ? '#fff' : '#111';
+            }
             const softer = (flagged?.size ?? 0) - counted.length;
             // No colour means the uncoloured flag; name it from reasonOf.
-            badge.title = `Keywords the last scan flagged — worst: ${SEV[worst] || scan.reasonOf(counted[0]).text}.${secBad ? ` Includes ${secBad} secondary key${secBad === 1 ? '' : 's'} the matcher cannot run.` : ''}${softer ? ` ${softer} more are warnings, not counted here.` : ''} Expand to see which.`;
+            badge.title = `Keywords the last scan flagged — worst: ${worst || scan.reasonOf(counted[0]).text}.${secBad ? ` Includes ${secBad} secondary key${secBad === 1 ? '' : 's'} the matcher cannot run.` : ''}${softer ? ` ${softer} more are warnings, not counted here.` : ''} Expand to see which.`;
             h.append(badge);
         }
         h.addEventListener('click', () => { open ? entryOpen.delete(e.uid) : entryOpen.add(e.uid); renderEntry(e); });
@@ -939,7 +953,11 @@ export async function lorebookStudio(preferredBook = null, open = null) {
             // Tooltip wording comes from reasonOf even for dead: "not in entry text" and "not in entry text or chat" are different claims.
             const why = v && !isIgnored ? scan.reasonOf(v).text : '';
             if (isIgnored) { annot = 'ignored'; chip.classList.add('wa-kw-ignored'); }
-            else if (v && !isDead) { const rc = scan.reasonOf(v); annot = why; if (rc.color) { chip.style.borderColor = rc.color; chip.style.background = `color-mix(in srgb, ${rc.color} 18%, transparent)`; } }
+            else if (v && !isDead) {
+                const rc = scan.reasonOf(v); annot = why;
+                const c = SEVERITY_COLOR[rc.severity];
+                if (c) { chip.style.borderColor = c; chip.style.background = `color-mix(in srgb, ${c} 18%, transparent)`; }
+            }
             else if (isDead) chip.classList.add('wa-kw-dead');
             else if (flagged) chip.style.borderColor = WA_GREEN;
             text.title = isIgnored ? `${key} — ignored (click to edit; shift-click ✕ to un-ignore)` : (v ? `${key} — ${why} (click to edit)` : `${key} (click to edit)`);
@@ -1885,7 +1903,7 @@ export async function lorebookStudio(preferredBook = null, open = null) {
                 const rc = scan.reasonOf(p);
                 const id = rowId(e.uid, p.key);
                 if (!cleanupChecks.has(id)) cleanupChecks.set(id, scan.defChecked(p));   // pre-tick policy shared with the pruner
-                return { term: p.key, why: rc.text, color: rc.color, p };
+                return { term: p.key, why: rc.text, color: SEVERITY_COLOR[rc.severity] ?? '', p };
             });
             // Show-all appends the keys classifyEntry did not return; flagged rows stay on top.
             if (cleanupShowAll) {
@@ -2922,8 +2940,8 @@ export async function lorebookStudio(preferredBook = null, open = null) {
         const globeBtn = document.createElement('button'); globeBtn.type = 'button'; globeBtn.className = 'menu_button wa-filter';
         globeBtn.title = 'Global World Info settings'; globeBtn.style.cssText = 'width:auto;margin-left:auto;padding:3px 8px;flex-shrink:0;';
         globeBtn.innerHTML = '<i class="fa-solid fa-globe"></i>';
-        globeBtn.style.color = globalTrayOpen ? '#6ea8fe' : '';
-        globeBtn.addEventListener('click', () => { globalTrayOpen = !globalTrayOpen; globeBtn.style.color = globalTrayOpen ? '#6ea8fe' : ''; refreshGlobalTray(); });
+        globeBtn.style.color = globalTrayOpen ? ACCENT : '';
+        globeBtn.addEventListener('click', () => { globalTrayOpen = !globalTrayOpen; globeBtn.style.color = globalTrayOpen ? ACCENT : ''; refreshGlobalTray(); });
         row1.append(label, vsep(), filterWrap, sortBtn, spacer(), searchWrap, globeBtn);
         const newBtn = document.createElement('button');
         newBtn.type = 'button'; newBtn.className = 'menu_button';

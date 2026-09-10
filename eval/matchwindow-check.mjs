@@ -105,15 +105,15 @@ console.log('ok   the audit segments like the runtime, and literals are slice-in
     eq(none.zzznope.flag, 'unattested', 'no chat: a key absent from entry text is dead');
     eq(none.zzznope.why, 'not in entry text', '...and says only what it checked');
     eq(none.mother.flag, 'english common', 'no chat: the English list still flags a generic word');
-    eq(none.mother.sev !== '#e06c6c', true, '...but unevidenced it is no longer red');
+    eq(none.mother.sev !== 'severe', true, '...but unevidenced it is no longer severe');
 
     const quiet = run({ messagesWith: new Map([['mother', 2], ['zzznope', 0]]), messages: 100 });
     eq(quiet.zzznope.why, 'not in entry text or chat', 'chat checked and silent: the claim gets stronger');
-    eq(quiet.mother.sev !== '#e06c6c', true, 'a quiet common word stays flagged, not red');
+    eq(quiet.mother.sev !== 'severe', true, 'a quiet common word stays flagged, not severe');
 
     const live = run({ messagesWith: new Map([['mother', 40], ['zzznope', 12]]), messages: 100 });
     eq(live.zzznope, undefined, 'a key the CHAT uses is not dead — the flag is suppressed, not recoloured');
-    eq(live.mother.sev, '#e06c6c', 'a common word the chat confirms over-fires goes red');
+    eq(live.mother.sev, 'severe', 'a common word the chat confirms over-fires is severe');
     eq(live.mother.why, `english common · 40% of chat`, '...and shows the evidence, not just the assertion');
     eq(KEY_CHAT_COMMON, 0.2, 'the chat-common threshold is a named bound, not a literal');
 }

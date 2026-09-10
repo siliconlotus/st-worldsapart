@@ -79,6 +79,9 @@ export const KEY_CHAT_COMMON = 0.20;
  * @param {{messagesWith: Map<string, number>, messages: number}} [chatScan] MESSAGES containing each key (addMessageHits), never occurrences; absent = no chat evidence
  * @returns {{entries, nE, classifyEntry, reasonOf, defChecked, severityOf, effCase, effWhole, dupes, unusableKeysOf}}
  */
+/** The audit's three severities, by name. The colours they are drawn in belong to the display, and the order to RANK there. */
+export const SEVERE = 'severe', MODERATE = 'moderate', MINOR = 'minor';
+
 export function buildKeyPruneScan(data, opts, ignoreSet, { caseSensitiveDefault = false, wholeWordsDefault = false, matchWindow = 'scan', chatScan } = {}) {
     // undefined: no scan, or a scan that did not cover this key; 0: scanned and silent. chatChecked reads the difference.
     const chatRateOf = key => {
@@ -86,7 +89,6 @@ export function buildKeyPruneScan(data, opts, ignoreSet, { caseSensitiveDefault 
         const n = chatScan.messagesWith?.get(key);
         return n === undefined ? undefined : n / chatScan.messages;
     };
-    const RED = '#e06c6c', YEL = '#d9b74a', GRN = '#7bbf6a';
 
     const inScope = e => {
         if (!opts.includeInactive && e.disable) return false;
@@ -213,37 +215,38 @@ export function buildKeyPruneScan(data, opts, ignoreSet, { caseSensitiveDefault 
         }
         return out;
     };
-    // Shared by reasonOf, defChecked and the Studio badge, so colour, pre-tick and problem status agree.
+    // Shared by reasonOf, defChecked and the Studio badge, so severity, pre-tick and problem status agree. A name, not a
+    // colour: a caller comparing shades breaks the moment one is retuned, and this module has no business holding either.
     const severityOf = p => {
         if (p.flag === 'unattested') return '';
-        if (p.flag === 'unusable') return RED;
-        if (p.flag === 'english common') return p.chatRate >= (opts.chatCommon ?? KEY_CHAT_COMMON) ? RED : YEL;
-        if (p.flag === 'book common') return p.bookContent / nBook >= opts.bookCommon ? RED : YEL;
-        if (p.flag === 'book shared') return p.bookListed / nBook >= opts.bookShared ? RED : YEL;
-        if (p.flag === 'fragment') return RED;
+        if (p.flag === 'unusable') return SEVERE;
+        if (p.flag === 'english common') return p.chatRate >= (opts.chatCommon ?? KEY_CHAT_COMMON) ? SEVERE : MODERATE;
+        if (p.flag === 'book common') return p.bookContent / nBook >= opts.bookCommon ? SEVERE : MODERATE;
+        if (p.flag === 'book shared') return p.bookListed / nBook >= opts.bookShared ? SEVERE : MODERATE;
+        if (p.flag === 'fragment') return SEVERE;
         const ratio = p.total ? p.clean / p.total : 0;
-        return ratio >= 1 ? GRN : ratio <= 1 / 3 ? RED : YEL;
+        return ratio >= 1 ? MINOR : ratio <= 1 / 3 ? SEVERE : MODERATE;
     };
     const reasonOf = p => {
-        const color = severityOf(p);
+        const severity = severityOf(p);
         // A SmartKey or a pattern is not "absent from the text": it evaluated false everywhere.
         if (p.flag === 'unattested') {
-            return { text: !p.literal ? 'never matches' : (p.chatChecked ? 'not in entry text or chat' : 'not in entry text'), color };
+            return { text: !p.literal ? 'never matches' : (p.chatChecked ? 'not in entry text or chat' : 'not in entry text'), severity };
         }
-        if (p.flag === 'unusable') return { text: p.code ? `unusable — ${p.code}` : 'unusable', color };
-        if (p.flag === 'book common') return { text: `book common${p.term ? ` · ${p.term}` : ''} (${Math.round(100 * p.bookContent / nBook)}%)`, color };
+        if (p.flag === 'unusable') return { text: p.code ? `unusable — ${p.code}` : 'unusable', severity };
+        if (p.flag === 'book common') return { text: `book common${p.term ? ` · ${p.term}` : ''} (${Math.round(100 * p.bookContent / nBook)}%)`, severity };
         if (p.flag === 'english common') {
             const which = p.term ? ` · ${p.term}` : '';
-            return { text: p.chatRate === undefined ? `english common${which}` : `english common${which} · ${Math.round(100 * p.chatRate)}% of chat`, color };
+            return { text: p.chatRate === undefined ? `english common${which}` : `english common${which} · ${Math.round(100 * p.chatRate)}% of chat`, severity };
         }
-        if (p.flag === 'book shared') return { text: `book shared (${Math.round(100 * p.bookListed / nBook)}%)`, color };
-        if (p.flag === 'fragment') return { text: 'phrase fragment', color };
-        return { text: `short (${p.clean}/${p.total} clean)`, color };
+        if (p.flag === 'book shared') return { text: `book shared (${Math.round(100 * p.bookListed / nBook)}%)`, severity };
+        if (p.flag === 'fragment') return { text: 'phrase fragment', severity };
+        return { text: `short (${p.clean}/${p.total} clean)`, severity };
     };
     // Pre-ticked: the red tier, plus unattested on machine-written entries only (K14). Unusable is red but wants a correction, not a deletion.
     const generated = e => e?.stmemorybooks !== undefined || e?.STMB_start !== undefined || e?.stmbArc !== undefined;
     const byUid = new Map(allEntries.map(e => [String(e.uid), e]));
-    const defChecked = p => p.flag !== 'unusable' && (severityOf(p) === RED || (p.flag === 'unattested' && generated(byUid.get(String(p.uid)))));
+    const defChecked = p => p.flag !== 'unusable' && (severityOf(p) === SEVERE || (p.flag === 'unattested' && generated(byUid.get(String(p.uid)))));
 
     // Near-duplicates: Jaccard over rare vocabulary; an arc and its member scene are skipped. Advisory only.
     const isArc = e => e?.stmbArc === true || /^\s*\[?\s*arc\b/i.test(String(e?.comment ?? ''));

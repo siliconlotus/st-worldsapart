@@ -181,7 +181,7 @@ function renderPluginSetup() {
         const stale = runState.sourceFP && runState.pluginFP !== runState.sourceFP;
         if (stale) {
             const warn = '⚠ Server plugin out of date — the deployed copy differs from this extension\'s source. Redeploy and restart:';
-            alert.append($('<div style="margin:0 0 8px;padding:6px 8px;border-radius:5px;font-size:0.9em;background:color-mix(in srgb, #e0a86c 15%, transparent);border:1px solid color-mix(in srgb, #e0a86c 45%, transparent);"></div>')
+            alert.append($('<div style="margin:0 0 8px;padding:6px 8px;border-radius:5px;font-size:0.9em;background:color-mix(in srgb, var(--golden, #e0a86c) 15%, transparent);border:1px solid color-mix(in srgb, var(--golden, #e0a86c) 45%, transparent);"></div>')
                 .append($('<div style="color:var(--warning,#d80);"></div>').text(warn), row(deployCmd)));
             box.append($('<div style="color:var(--warning,#d80);"></div>').text(warn));
             box.append(row(deployCmd));

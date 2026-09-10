@@ -33,7 +33,7 @@ assert.ok(!('Quillfeather' in f0), 'a real findable name is not flagged');
     assert.deepStrictEqual(prim.map(f => `${f.key}:${f.flag}:${f.code ?? ''}`),
         ['? -zebra:unusable:negation-only', '/[/:unusable:regex-invalid'],
         'an unusable primary is flagged as such, with the validator\'s own code, not as unattested');
-    assert.ok(prim.every(f => scan.reasonOf(f).text.startsWith('unusable') && scan.reasonOf(f).color),
+    assert.ok(prim.every(f => scan.reasonOf(f).text.startsWith('unusable') && scan.reasonOf(f).severity),
         'it reads as unusable on the chip and carries a severity colour');
     assert.ok(prim.every(f => !scan.defChecked(f)),
         'and is NOT pre-ticked for deletion — the fix is a correction, not a removal');
@@ -199,7 +199,7 @@ const sharedOpts = { scanKeyword: true, scanVectorized: true, scanConstant: true
     assert.strictEqual(row.flag, 'book shared', 'flagged as book-shared, not as book-common');
     assert.strictEqual(row.bookListed, 12, 'bookListed counts entries that LIST the key');
     assert.strictEqual(s.reasonOf(row).text, 'book shared (100%)', 'reason names the corpus and reports the share');
-    assert.strictEqual(s.reasonOf(row).color, s.reasonOf({ flag: 'book common', bookContent: 12 }).color, 'severity banding matches book common');
+    assert.strictEqual(s.reasonOf(row).severity, s.reasonOf({ flag: 'book common', bookContent: 12 }).severity, 'severity banding matches book common');
     assert.ok(!s.classifyEntry(sharedBook.entries[0]).some(r => r.key === 'moonwalk' && r.flag === 'book shared'), 'a key on one entry is not over-shared');
 }
 {
@@ -208,7 +208,7 @@ const sharedOpts = { scanKeyword: true, scanVectorized: true, scanConstant: true
 }
 {
     const hi = buildKeyPruneScan(sharedBook, { ...sharedOpts, bookShared: 1 }, new Set());
-    assert.strictEqual(hi.reasonOf(hi.classifyEntry(sharedBook.entries[5])[0]).color, '#e06c6c', '100% share at threshold 100% is red');
+    assert.strictEqual(hi.reasonOf(hi.classifyEntry(sharedBook.entries[5])[0]).severity, 'severe', '100% share at threshold 100% is severe');
     const tiny = { entries: Object.fromEntries([...Array(9)].map((_, i) => [i, { uid: i, key: ['astronaut'], content: 'x' }])) };
     const small = buildKeyPruneScan(tiny, sharedOpts, new Set());
     assert.ok(!small.classifyEntry(tiny.entries[0]).some(r => r.flag === 'book shared'), 'skipped below KEY_MIN_BOOK_COMMON_ENTRIES');
