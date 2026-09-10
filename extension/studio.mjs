@@ -2271,7 +2271,11 @@ export async function lorebookStudio(preferredBook = null) {
         const secBox = box('Secondary keys', () => labSec, v => { labSec = v; });
         secBox.style.cssText += 'flex:0 0 auto;height:4.4em;';
         gateBox.append(logicSel, secBox);
-        keyBox.style.cssText += 'flex:0 0 auto;height:8.8em;';   // six lines, at secBox's 4.4em for three
+        // Two lines to start, growing with what is typed to six and scrolling after: min/max do the clamping, so the
+        // handler only ever asks for the content's own height.
+        keyBox.style.cssText += 'flex:0 0 auto;min-height:3em;max-height:8.8em;height:3em;';
+        const growKeys = () => { keyBox.style.height = 'auto'; keyBox.style.height = `${keyBox.scrollHeight}px`; };
+        keyBox.addEventListener('input', growKeys);
         panes.append(hayWrap, keyBox, gateBox);
 
         const opts = document.createElement('div');
@@ -2325,6 +2329,7 @@ export async function lorebookStudio(preferredBook = null) {
                 labSec = picked.sec.join(', ');
                 labLogic = picked.logic;
                 keyBox.value = labKeys; secBox.value = labSec; logicSel.value = labLogic;
+                growKeys();
                 if (picked.sec.length) gateBox.open = true;   // an imported gate must not land shut and invisible
                 repaint();
             }),
@@ -2358,6 +2363,7 @@ export async function lorebookStudio(preferredBook = null) {
             }
         };
         repaint();
+        growKeys();   // the pane keeps its text across a tab switch, so it is not always empty on the first paint
         const body = document.createElement('div');
         body.style.cssText = 'flex:1 1 auto;display:flex;gap:10px;padding:0 8px 8px;min-height:0;';
         body.append(panes, out);
