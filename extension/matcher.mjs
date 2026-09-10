@@ -259,12 +259,19 @@ export const foldedHay = (text, caseSensitive) => {
 };
 
 /** Occurrences of `key` — a keyword, /regex/flags, or a `?` SmartKey, which returns its weight — following core's matchKeys
- *  for flags and regex precedence and diverging on orthography, which normalizeOrthography folds and core does not. */
-export function countKey(key, text, caseSensitive, wholeWords, scope) {
+ *  for flags and regex precedence and diverging on orthography, which normalizeOrthography folds and core does not.
+ *  `node` is a pre-built AST for `key`, which then decides the verdict: how a secondary-gated key is counted. */
+export function countKey(key, text, caseSensitive, wholeWords, scope, node = null) {
     const raw = String(key ?? '').trim();
 
     if (!raw || !text) {
         return 0;
+    }
+
+    // A caller-supplied AST is the key under a condition (a secondary gate); its weight is the score, as a `?` key's is.
+    if (node) {
+        const { matched, scoreBoost } = evaluate(node, text);
+        return matched ? (scoreBoost > 0 ? scoreBoost : 1) : 0;
     }
 
     if (raw.startsWith('?')) {
@@ -307,7 +314,8 @@ export const markExcerptText = ex => (ex
     : null);
 
 /** Every place a key matched, up to `limit`, as excerpts with match offsets; display only. A compound SmartKey returns nothing; a single-term one uses its own flags. */
-export function keyExcerpts(key, text, caseSensitive, wholeWords, context = 28, limit = 20) {
+export function keyExcerpts(key, text, caseSensitive, wholeWords, context = 28, limit = 20, node = null) {
+    if (node) return compoundExcerpts(node, text, context, limit);
     const out = [];
     let raw = String(key ?? '').trim();
     if (!raw || limit < 1) return out;
@@ -424,20 +432,30 @@ function compoundExcerpts(node, text, context, limit) {
  *  the text itself. A span cannot nest in the markup, so overlapping matches become one span at the first one's extent, with
  *  every key that reached it listed in `keys`; `key` and `term` are the first of those. Offsets are into the NFC form of the
  *  whole text, `matchWindow` and all — a key matched within its segment, but a caller marks up one string. */
+/** `key -> AST` for a `{ keys, logic }` secondary condition, or `key -> null` when there is none. One node per key, as core
+ *  gates each primary separately (`keyUnits`); the gate applies to a `?` or `/re/` key too, as keysecondary does. */
+const gateNodeFor = (gate, caseSensitive, wholeWords) => {
+    const sec = (Array.isArray(gate?.keys) ? gate.keys : []).map(k => String(k ?? '').trim()).filter(Boolean);
+    if (!sec.length) return () => null;
+    const logic = Number(gate?.logic ?? WI_LOGIC.AND_ANY);
+    return key => synthesizeSecondary(key, sec, logic, { caseSensitive, wholeWords });
+};
+
 /** The segments `key` matched in, or all of them when it matched in none — a failed key still reports the branch that hit,
  *  but only where nothing can read the report as a match. */
-const liveSegments = (key, segs, caseSensitive, wholeWords) => {
-    const live = segs.filter(sg => countKey(key, sg.text, caseSensitive, wholeWords) > 0);
+const liveSegments = (key, segs, caseSensitive, wholeWords, node = null) => {
+    const live = segs.filter(sg => countKey(key, sg.text, caseSensitive, wholeWords, undefined, node) > 0);
     return live.length ? live : segs;
 };
 
-export function keySpans(keys, text, caseSensitive, wholeWords, { limit = 200, matchWindow = 'scan' } = {}) {
+export function keySpans(keys, text, caseSensitive, wholeWords, { limit = 200, matchWindow = 'scan', gate } = {}) {
     const out = [];
     const segs = textSegments(text, matchWindow);
+    const gateOf = gateNodeFor(gate, caseSensitive, wholeWords);
     const spans = (Array.isArray(keys) ? keys : [])
         .map(k => String(k ?? '').trim()).filter(Boolean)
-        .flatMap(key => liveSegments(key, segs, caseSensitive, wholeWords)
-            .flatMap(sg => keyExcerpts(key, sg.text, caseSensitive, wholeWords, 0, limit)
+        .flatMap(key => liveSegments(key, segs, caseSensitive, wholeWords, gateOf(key))
+            .flatMap(sg => keyExcerpts(key, sg.text, caseSensitive, wholeWords, 0, limit, gateOf(key))
                 .map(e => ({ key, term: e.term, start: e.at + sg.at, end: e.to + sg.at }))))
         .sort((a, b) => a.start - b.start || b.end - a.end);
     for (const { key, term, start, end } of spans) {
@@ -451,18 +469,24 @@ export function keySpans(keys, text, caseSensitive, wholeWords, { limit = 200, m
 /** What each of `keys` did to `text`, as the rows keyHitsHtml renders. One row per key with its count, then one `\u21b3` row
  *  per hit beneath it, or per credited leaf with its own count for a compound
  *  SmartKey, whose own number is a weight rather than an occurrence count. A key that can never fire gets a message
- *  where the excerpt goes. A key with one hit and nothing to name stays a single row. `context` and `limit` are keyExcerpts'. */
-export function keyHits(keys, text, caseSensitive, wholeWords, { context = 28, limit = 20, matchWindow = 'scan' } = {}) {
+ *  where the excerpt goes. A key with one hit and nothing to name stays a single row. `gate` is a secondary-key condition —
+ *  `{ keys, logic }` in core's terms — applied to every key, as an entry's keysecondary gates each of its primaries. `context` and `limit` are keyExcerpts'. */
+export function keyHits(keys, text, caseSensitive, wholeWords, { context = 28, limit = 20, matchWindow = 'scan', gate } = {}) {
     const segs = textSegments(text, matchWindow);
+    const gateOf = gateNodeFor(gate, caseSensitive, wholeWords);
     return (Array.isArray(keys) ? keys : [])
         .map(k => String(k ?? '').trim()).filter(Boolean)
         .flatMap(key => {
             const bad = key.startsWith('?') ? validateSmartKey(key).find(v => v.severity === 'error') : null;
             if (bad) return [{ key, excerpt: bad.message }];
-            // Per segment and summed, as the audit counts: a key is matched within its unit, never across the join.
-            const count = segs.reduce((a, sg) => a + countKey(key, sg.text, caseSensitive, wholeWords), 0);
-            const hits = liveSegments(key, segs, caseSensitive, wholeWords)
-                .flatMap(sg => keyExcerpts(key, sg.text, caseSensitive, wholeWords, context, limit)).slice(0, limit);
+            const node = gateOf(key);
+            // Per segment and summed, as the audit counts: a key is matched within its unit, never across the join. Under a
+            // gate the number is still the key's own occurrences, in the segments the gate let through — not the gate's weight.
+            const count = segs.reduce((a, sg) => (node && !countKey(key, sg.text, caseSensitive, wholeWords, undefined, node)
+                ? a
+                : a + countKey(key, sg.text, caseSensitive, wholeWords)), 0);
+            const hits = liveSegments(key, segs, caseSensitive, wholeWords, node)
+                .flatMap(sg => keyExcerpts(key, sg.text, caseSensitive, wholeWords, context, limit, node)).slice(0, limit);
             if (hits.length < 2 && !hits[0]?.term) return [{ key, count, excerpt: hits[0] }];
             return [{ key, count }, ...hits.map(e => ({ key: e.term ? `\u21b3 ${e.term}` : '\u21b3', count: e.n, excerpt: e }))];
         });

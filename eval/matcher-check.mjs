@@ -249,6 +249,33 @@ eq(leaves('? (/Gagar\\w+/ armstrong)').join(' '), '/Gagar\\w+/:2 armstrong:1', '
 console.log('ok   keyExcerpt: compound SmartKeys excerpt every credited leaf, with per-leaf counts');
 
 
+// --- gate: a secondary condition in core's own terms, firing exactly where the entry's key does
+{
+    const texts = ['apple on a tablet', 'apple alone', 'banana and computer', 'nothing here', 'apple computer tablet'];
+    const opts = { k1: 1.2, caseSensitiveDefault: false, wholeWordsDefault: false };
+    const keys = ['apple', 'banana'], sec = ['computer', 'tablet'];
+    for (const logic of [WI_LOGIC.AND_ANY, WI_LOGIC.AND_ALL, WI_LOGIC.NOT_ANY, WI_LOGIC.NOT_ALL]) {
+        const entry = { key: keys, keysecondary: sec, selective: true, selectiveLogic: logic };
+        for (const text of texts) {
+            const fired = new Set(rankKeywordScore(entry, text, entry.key, opts).hits.map(h => h.key));
+            const gated = keyHits(keys, text, false, false, { gate: { keys: sec, logic } })
+                .filter(r => !r.key.startsWith('\u21b3'));
+            eq(gated.map(r => r.count > 0).join(), keys.map(k => fired.has(k)).join(),
+                `logic ${logic} on "${text}": the gate fires exactly where the entry's own secondary keys do`);
+        }
+    }
+    const gate = { keys: sec, logic: WI_LOGIC.AND_ANY };
+    eq(keyHits(['apple'], 'apple apple computer', false, false, { gate })[0].count, 2,
+        'the number under a gate is the key\'s own occurrences, not the gate\'s weight');
+    eq(keyHits(['apple'], 'apple alone', false, false, { gate }).map(r => `${r.key}:${r.count ?? ''}`).join(' '),
+        'apple:0 \u21b3 apple:1', 'a key the gate refused counts 0, and still shows where it hit');
+    eq(keyHits(['apple'], 'apple on a tablet', false, false, {}).length, 1, 'no gate, no condition');
+    eq(keySpans(['apple'], 'apple alone. apple and a tablet', false, false, { gate, matchWindow: 'scan' }).length, 2,
+        'the marks follow the gate, over whatever unit the window makes');
+    console.log('ok   gate: a secondary condition on every key, counted as the key and verdicted as the entry');
+}
+
+
 // --- splitKeys: commas and newlines both separate, and a regex or a quoted term keeps its own commas
 eq(splitKeys('Russian,\n? cosmonaut astronaut,\nhand,\n\n/(cosmo|astro|taiko)naut/,\negg ').join(' | '),
     'Russian | ? cosmonaut astronaut | hand | /(cosmo|astro|taiko)naut/ | egg',

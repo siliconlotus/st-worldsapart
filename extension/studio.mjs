@@ -2044,6 +2044,8 @@ export async function lorebookStudio(preferredBook = null) {
     // The unit a key must match within, as the running setting has it. A pasted text has no messages, so `message` is
     // `scan` here; it is still offered, and still stored, because it is the setting the Lab is standing in for.
     let labWindow = settings().matchWindow;
+    // The secondary condition, in core's own terms: a term list and one of world_info_logic's four operators, gating every key.
+    let labSec = '', labLogic = String(WI_LOGIC.AND_ANY);
 
     /** The chat as WA reads it for a scan: is_system gone, dropChatTags applied, the depth setting's last messages, names
      *  included as core would. Joined with a blank line, so the paragraph window breaks at a message boundary as it does live. */
@@ -2056,7 +2058,8 @@ export async function lorebookStudio(preferredBook = null) {
         return scanSegments(chat, { depth, includeNames: world_info_include_names, matchWindow: 'message' }).join('\n\n');
     };
 
-    /** The primary keys of one entry of the selected book, chosen from a list. Secondaries are a gate, not terms, so they stay out. */
+    /** One entry of the selected book, as the Lab's key list plus its secondary condition — the entry's own spelling, not a
+     *  SmartKey rewrite of it. Returns null when nothing was chosen. */
     const pickEntryKeys = async () => {
         const entries = Object.values(data?.entries ?? {}).filter(e => usableKeys(e?.key).length);
         if (!entries.length) { toastr.info('No entry in this book has keys to import.', 'Worlds Apart'); return null; }
@@ -2068,32 +2071,34 @@ export async function lorebookStudio(preferredBook = null) {
             + '</select></div>';
         const p = new Popup(w, POPUP_TYPE.CONFIRM, '', { okButton: 'Import keys', cancelButton: 'Cancel' });
         if (await p.show() !== POPUP_RESULT.AFFIRMATIVE) return null;
-        const uid = w.querySelector('.wa-lab-entry').value;
-        return usableKeys(data.entries[uid]?.key);
+        const e = data.entries[w.querySelector('.wa-lab-entry').value];
+        const sec = e?.selective ? secondaryKeys(e) : [];
+        return { keys: usableKeys(e?.key), sec, logic: String(e?.selectiveLogic ?? WI_LOGIC.AND_ANY) };
     };
 
     /** The rows and the colour they share with the marks, from whatever the panes hold now. */
     const scanLab = () => {
         const keys = splitKeys(labKeys);
         const ink = (key, a) => labInk(Math.max(0, keys.indexOf(key)), a);
-        const rows = keyHits(keys, labHay, labCase, labWhole, { context: 30, matchWindow: labWindow });
+        const gate = { keys: splitKeys(labSec), logic: Number(labLogic) };
+        const rows = keyHits(keys, labHay, labCase, labWhole, { context: 30, matchWindow: labWindow, gate });
         // A hit row takes the colour of the key it sits under, which is the last row that named one.
         for (let i = 0, parent = ''; i < rows.length; i++) {
             if (!rows[i].key.startsWith('\u21b3')) parent = rows[i].key;
             rows[i].color = ink(parent);
         }
-        return { keys, ink, rows };
+        return { keys, ink, rows, gate };
     };
 
     /** The haystack at full width with every match marked, and the digest under it. The tab keeps only the digest: the
      *  marked text needs the room, and the pane above it already shows the same characters unmarked. */
     const showMarkedText = () => {
-        const { keys, ink, rows } = scanLab();
+        const { keys, ink, rows, gate } = scanLab();
         const wrap = document.createElement('div');
         wrap.style.cssText = 'text-align:left;width:100%;';
         const body = document.createElement('div');
         body.style.cssText = 'white-space:pre-wrap;line-height:1.6;max-height:55vh;overflow:auto;font-size:0.95em;';
-        body.innerHTML = markedHtml(labHay, keySpans(keys, labHay, labCase, labWhole, { matchWindow: labWindow }), ink)
+        body.innerHTML = markedHtml(labHay, keySpans(keys, labHay, labCase, labWhole, { matchWindow: labWindow, gate }), ink)
             || '<span style="opacity:0.6;">(no text)</span>';
         const digest = document.createElement('div');
         digest.style.cssText = 'margin-top:10px;padding-top:8px;border-top:1px solid color-mix(in srgb, currentColor 15%, transparent);max-height:25vh;overflow:auto;';
@@ -2116,8 +2121,24 @@ export async function lorebookStudio(preferredBook = null) {
             return t;
         };
         const hayBox = box('Paste any text to match against…', () => labHay, v => { labHay = v; });
+        hayBox.style.flex = '2 1 0';
         const keyBox = box('Keys, comma- or newline-separated — plain, /regex/flags or ?SmartKey', () => labKeys, v => { labKeys = v; });
-        panes.append(hayBox, keyBox);
+        const gatePane = document.createElement('div');
+        gatePane.style.cssText = 'flex:1 1 0;display:flex;flex-direction:column;gap:4px;min-width:0;';
+        const logicSel = document.createElement('select'); logicSel.className = 'text_pole';
+        logicSel.style.cssText = 'width:100%;margin:0;flex:0 0 auto;';
+        // Core's own operator names and the sentence each completes, as the entry editor shows them. OFF is not offered: an
+        // empty pane is already off.
+        for (const [v, name, hint] of LOGIC_OPTS.filter(([id]) => id !== 'off')) {
+            const o = document.createElement('option'); o.value = v; o.textContent = `${name} — ${hint}`; o.title = hint;
+            o.selected = labLogic === v;
+            logicSel.append(o);
+        }
+        logicSel.addEventListener('change', () => { labLogic = logicSel.value; repaint(); });
+        const secBox = box('Secondary keys — every key in the middle pane has to pass these too', () => labSec, v => { labSec = v; });
+        gatePane.append(logicSel, secBox);
+        panes.append(hayBox, keyBox, gatePane);
+
         const opts = document.createElement('div');
         opts.style.cssText = 'display:flex;gap:14px;padding:6px 8px;flex:0 0 auto;opacity:0.8;font-size:0.9em;';
         const flag = (label, get, set) => {
@@ -2156,11 +2177,13 @@ export async function lorebookStudio(preferredBook = null) {
                 hayBox.value = labHay;
                 repaint();
             }, true),
-            tool('fa-key', 'Take the keys of an entry in this book', async () => {
-                const keys = await pickEntryKeys();
-                if (!keys?.length) return;
-                labKeys = keys.join('\n');
-                keyBox.value = labKeys;
+            tool('fa-key', 'Take the keys of an entry in this book, secondary condition and all', async () => {
+                const picked = await pickEntryKeys();
+                if (!picked?.keys.length) return;
+                labKeys = picked.keys.join('\n');
+                labSec = picked.sec.join(', ');
+                labLogic = picked.logic;
+                keyBox.value = labKeys; secBox.value = labSec; logicSel.value = labLogic;
                 repaint();
             }),
             tool('fa-expand', 'Show the text with every match marked', () => showMarkedText()),
