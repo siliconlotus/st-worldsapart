@@ -2086,6 +2086,7 @@ export async function lorebookStudio(preferredBook = null) {
     let labWindow = settings().matchWindow;
     // Editing or reading: committed, the haystack pane shows the marked text in place of the box it was typed in.
     let labCommitted = false;
+    let labRepaint = null;   // the Lab's repaint, claimed by renderLabView: an applied run is triggered from outside it
     let labRun = null;   // an applied book: { book, entries: [{ entry, rows }] }, shown in place of the typed keys' result
     let labShowMarkup = false;   // the source behind the rendering: every tag, entity and delimiter shown at once
     // The secondary condition, in core's own terms: a term list and one of world_info_logic's four operators, gating every key.
@@ -2213,7 +2214,8 @@ export async function lorebookStudio(preferredBook = null) {
         }
         // In encounter order, which for the attached set is core's own: global, character, chat, persona.
         labRun = { label, entries: hits, scanned: keyed.length, books: [...new Set(keyed.map(e => e.world).filter(Boolean))] };
-        repaint();
+        toastr.info(`${hits.length} of ${keyed.length} keyed ${keyed.length === 1 ? 'entry' : 'entries'} matched`, 'Keyword Lab');
+        labRepaint?.();
     };
 
     /** One book by name, for the arbitrary-book path; the open one is already loaded. */
@@ -2478,6 +2480,7 @@ export async function lorebookStudio(preferredBook = null) {
                 hayRead.scrollTop = top;
             }
         };
+        labRepaint = repaint;
         repaint();
         growKeys();   // the pane keeps its text across a tab switch, so it is not always empty on the first paint
         const body = document.createElement('div');
