@@ -504,7 +504,8 @@ export function keySpans(keys, text, caseSensitive, wholeWords, { limit = 200, m
 /** What each of `keys` did to `text`, grouped the way it was matched: one entry per key, and inside it one entry per segment
  *  the key could have matched in — one holding no positive branch is not a window the key is decided in, whatever its
  *  negatives do — `leaves` being every branch of the key and its gate with that segment's count, `negated`
- *  marking a branch that vetoes rather than matches, and `excerpts` the first occurrence of each branch that fired. `matched`
+ *  marking a branch that vetoes rather than matches, `excerpts` the first occurrence of each branch that fired and `text` the
+ *  window itself, whose offsets those excerpts' `at`/`to` are. `matched`
  *  is the verdict for that segment. A key that is a single positive branch carries every occurrence in `excerpts`, since no
  *  window can filter it; anything with branches carries the first of each. A key that can never fire carries `message` instead. `gate` is a secondary-key condition,
  *  `{ keys, logic }` in core's terms, applied to every key as an entry's keysecondary gates each of its primaries. */
@@ -537,7 +538,7 @@ export function keyHits(keys, text, caseSensitive, wholeWords, { context = 28, l
                         excerpts.push({ ...ex, term: String(b.id?.value ?? ''), negated: b.negated });
                     }
                 }
-                segments.push({ at: sg.at, matched, leaves, excerpts });
+                segments.push({ at: sg.at, text: sg.text, matched, leaves, excerpts });
                 if (segments.length >= limit) break;
             }
             return { key, count, segments };

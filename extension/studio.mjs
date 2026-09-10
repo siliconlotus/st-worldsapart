@@ -14,7 +14,7 @@ import { STUDIO_PRUNE_OPTS } from './keyword-audit.mjs';
 import { buildKeySuggest, classifyLlmCand, STUDIO_SUGGEST_OPTS } from './keyword-suggest.mjs';
 import { buildAutomaton, addMessageHits, fold, validateSmartKey } from './smartkeys.mjs';
 import { findOrphanBindings } from './bindings.mjs';
-import { WI_LOGIC, dropTags, hasPromoteDecorator, isRegexKey, keyHits, keySpans, scanSegments, textSegments, secondaryKeys, splitKeys, usableKeys, wholeWordAdvice, withPromote } from './matcher.mjs';
+import { WI_LOGIC, dropTags, hasPromoteDecorator, isRegexKey, keyHits, keySpans, scanSegments, secondaryKeys, splitKeys, usableKeys, wholeWordAdvice, withPromote } from './matcher.mjs';
 
 const WA_GREEN = '#7bbf6a';   // "no prune" — a keyword the scan doesn't flag
 const WA_RED = '#e06c6c';     // severe — same value keyword-audit's severityOf hands back
@@ -2025,37 +2025,35 @@ export async function lorebookStudio(preferredBook = null) {
         return `hsl(${LAB_HUES[i % LAB_HUES.length]} ${pastel ? 45 : 80}% ${pastel ? 68 : 50}%${a < 1 ? ` / ${a}` : ''})`;
     };
 
-    /** The window a span fell in, with every span in it guillemeted — a title attribute is plain text, so the hits are marked
-     *  the way markExcerptText marks them rather than coloured. A long window is clipped around the span it is for. */
-    const windowTip = (src, sp, spans, segs) => {
-        const sg = segs.find(x => sp.start >= x.at && sp.start < x.at + x.text.length) ?? { at: 0, text: src };
-        const end = sg.at + sg.text.length;
-        const wide = end - sg.at > 320;
-        const from = wide ? Math.max(sg.at, sp.start - 110) : sg.at;
-        const to = wide ? Math.min(end, sp.end + 110) : end;
+    /** One window with every hit in it guillemeted, for the title of a digest line — a title attribute is plain text, so the
+     *  hits are marked the way markExcerptText marks them rather than coloured. A long window is clipped around `ex`. */
+    const windowTip = (sg, ex) => {
+        const src = String(sg.text ?? '');
+        const wide = src.length > 320;
+        const from = wide ? Math.max(0, ex.at - 110) : 0;
+        const to = wide ? Math.min(src.length, ex.to + 110) : src.length;
         let out = '', at = from;
-        for (const x of spans.filter(x => x.start >= from && x.end <= to)) {
-            out += `${src.slice(at, x.start)}\u00ab${src.slice(x.start, x.end)}\u00bb`;
-            at = x.end;
+        for (const x of [...sg.excerpts].sort((a, b) => a.at - b.at)) {
+            if (x.at < from || x.to > to) continue;
+            out += `${src.slice(at, x.at)}\u00ab${src.slice(x.at, x.to)}\u00bb`;
+            at = x.to;
         }
         out = `${out}${src.slice(at, to)}`.replace(/\s+/g, ' ').trim();
-        return `${from > sg.at ? '\u2026' : ''}${out}${to < end ? '\u2026' : ''}`;
+        return `${from > 0 ? '\u2026' : ''}${out}${to < src.length ? '\u2026' : ''}`;
     };
 
     /** The haystack with every span wrapped, in the colour of the first key that reached it; the rest are named in the tooltip,
-     *  which also carries the window the span was matched in. Offsets are keyExcerpts', which are into the NFC form. */
-    const markedHtml = (text, spans, ink, matchWindow) => {
+     *  Offsets are keyExcerpts', which are into the NFC form. */
+    const markedHtml = (text, spans, ink) => {
         const src = String(text).normalize('NFC');
-        const segs = textSegments(src, matchWindow);
         let html = '', at = 0;
         for (const sp of spans) {
             // A negated span is what stopped a key, not what matched it: WA_RED, the same colour severity wears in the Explorer.
             const fill = sp.negated ? `color-mix(in srgb, ${WA_RED} 28%, transparent)` : ink(sp.key, 0.28);
             const edge = sp.negated ? WA_RED : ink(sp.key);
             const label = k => `${k.negated ? '\u2212 ' : ''}${k.term && k.term !== k.key ? `${k.key} \u2014 ${k.term}` : k.key}`;
-            const tip = `${sp.keys.map(label).join('\n')}\n\n${windowTip(src, sp, spans, segs)}`;
             html += escapeHtml(src.slice(at, sp.start))
-                + `<span title="${escapeHtml(tip)}"`
+                + `<span title="${escapeHtml(sp.keys.map(label).join('\n'))}"`
                 + ` style="background:${fill};border-bottom:2px solid ${edge};">${escapeHtml(src.slice(sp.start, sp.end))}</span>`;
             at = sp.end;
         }
@@ -2106,12 +2104,13 @@ export async function lorebookStudio(preferredBook = null) {
         const num = n => `<span style="color:var(--SmartThemeEmColor, #d9a441);font-weight:600;">${n}</span>`;
         if (r.message) return `<div style="margin-bottom:8px;">${chip} <small style="opacity:0.75;">${escapeHtml(r.message)}</small></div>`;
         if (!r.segments.length) return `<div style="margin-bottom:8px;">${chip} ${num(r.count)}</div>`;
-        const span = e => `<div style="margin-left:14px;"><small style="opacity:0.75;">${escapeHtml(e.text.slice(0, e.start))}`
+        const span = (e, sg) => `<div style="margin-left:14px;" title="${escapeHtml(windowTip(sg, e))}">`
+            + `<small style="opacity:0.75;">${escapeHtml(e.text.slice(0, e.start))}`
             + `<span style="color:${e.negated ? WA_RED : escapeHtml(color)};font-weight:600;">${escapeHtml(e.text.slice(e.start, e.end))}</span>`
             + `${escapeHtml(e.text.slice(e.end))}</small></div>`;
         const seg = sg => `<div style="margin:3px 0 0 14px;${sg.matched ? '' : 'opacity:0.55;'}">`
             + `<small>${sg.leaves.map(l => `${escapeHtml(l.negated ? `-${l.term}` : l.term)} ${num(l.n)}`).join(', ')}</small>`
-            + sg.excerpts.map(span).join('')
+            + sg.excerpts.map(e => span(e, sg)).join('')
             + '</div>';
         // <details> so the open/shut state is the element's own; labCollapsed carries it across the repaint that rebuilds this.
         // A key with one positive branch and nothing gating it cannot be filtered, so the window is not the interesting unit:
@@ -2124,7 +2123,7 @@ export async function lorebookStudio(preferredBook = null) {
             : `${num(`${r.segments.length - filtered} matched`)}${filtered ? `<small style="opacity:0.5;">, ${filtered} filtered</small>` : ''}`;
         // A single-branch key reads hit by hit: the window it fell in decided nothing, so grouping by one says nothing.
         const body = oneBranch
-            ? r.segments.flatMap(sg => sg.excerpts).map(span).join('')
+            ? r.segments.flatMap(sg => sg.excerpts.map(e => span(e, sg))).join('')
             : r.segments.map(seg).join('');
         return `<details${labCollapsed.has(r.key) ? '' : ' open'} data-k="${escapeHtml(r.key)}" style="margin-bottom:8px;">`
             + `<summary style="cursor:pointer;">${chip} ${tally}</summary>${body}</details>`;
