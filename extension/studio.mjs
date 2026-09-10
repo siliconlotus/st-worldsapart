@@ -2218,7 +2218,7 @@ export async function lorebookStudio(preferredBook = null) {
         hayRead.style.cssText = 'flex:1 1 auto;height:100%;min-height:0;margin:0;overflow:auto;white-space:pre-wrap;line-height:1.5;';
         // The pencil sits over the box, not inside its scroller, or it would scroll away from the text it acts on.
         const hayWrap = document.createElement('div');
-        hayWrap.style.cssText = 'flex:3 1 0;position:relative;display:flex;min-height:0;margin:5px 0;';
+        hayWrap.style.cssText = 'flex:3 1 0;position:relative;display:flex;min-height:0;overflow:hidden;margin:5px 0;';
         const hayPencil = document.createElement('i');
         hayPencil.className = 'fa-solid fa-pen';
         hayPencil.title = 'Edit the text';
