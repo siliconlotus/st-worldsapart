@@ -429,6 +429,9 @@ textarea.wa-entry-full.wa-tall { max-height: 62vh; }
 .wa-kw { display: inline-flex; align-items: center; gap: 4px; padding: 0 8px;
     white-space: nowrap; border: 1px solid color-mix(in srgb, currentColor 40%, transparent); border-radius: 11px; }
 .wa-kw-dead .wa-kw-text { opacity: 0.8; }
+/* A chip that is only text, in a column narrower than some keys and most entry titles: it wraps, and a long unbroken
+   term breaks rather than overflowing. inline, not inline-flex, since there is no ✕ beside it to lay out. */
+.wa-kw-wrap { display: inline; white-space: normal; overflow-wrap: anywhere; }
 /* The gate row reads under the keys it gates, so it needs a rule to be a second row at all — two
    paragraphs of chips run together and the secondaries read as more primaries. currentColor for the
    same reason the chips use it: a fixed border colour vanishes on near-black themes. */
