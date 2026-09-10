@@ -2078,14 +2078,15 @@ export async function lorebookStudio(preferredBook = null) {
     let labSec = '', labLogic = String(WI_LOGIC.AND_ANY);
 
     /** The chat as WA reads it for a scan: is_system gone, dropChatTags applied, the depth setting's last messages, names
-     *  included as core would. Separated by a rule, which is how the Lab's message window knows where a message ended. */
-    const chatHaystack = () => {
+     *  included as core would, and `override` messages deep rather than the setting's. Separated by a rule, which is how the
+     *  Lab's message window knows where a message ended. */
+    const chatHaystack = (override) => {
         const spec = settings().dropChatTags;
         const raw = getContext().chat ?? [];
         const chat = raw
             .filter(m => m && !m.is_system)
             .map(m => (spec?.trim() ? { ...m, mes: dropTags(String(m.mes ?? ''), spec) } : m));
-        const depth = Number(settings().messageDepth || world_info_depth);
+        const depth = Number(override ?? (settings().messageDepth || world_info_depth));
         const messages = scanSegments(chat, { depth, includeNames: world_info_include_names, matchWindow: 'message' });
         // Says which of the three numbers is the small one: the depth setting, or the hidden messages core and WA both drop.
         const hidden = raw.length - chat.length;
@@ -2304,11 +2305,17 @@ export async function lorebookStudio(preferredBook = null) {
         };
         opts.append(
             winLabel,
-            labTool('fa-comments', 'Load the current chat, as deep as the message-depth setting reads', () => {
-                labHay = chatHaystack();
-                hayBox.value = labHay;
-                repaint();
-            }),
+            labTool('fa-comments', 'Load the current chat, as deep as the message-depth setting reads — shift-click for a depth',
+                async ev => {
+                    const depth = ev.shiftKey
+                        ? await numberPrompt('Load chat', 'How many messages deep?', settings().messageDepth || world_info_depth, 1)
+                        : undefined;
+                    if (ev.shiftKey && depth == null) return;
+                    labHay = chatHaystack(depth);
+                    hayBox.value = labHay;
+                    labCommitted = false;   // new text, and the marked view would be of the old
+                    repaint();
+                }),
             labTool('fa-key', 'Take the keys of an entry in any book, secondary condition and all', async () => {
                 const picked = await pickEntryKeys();
                 if (!picked?.keys.length) return;
