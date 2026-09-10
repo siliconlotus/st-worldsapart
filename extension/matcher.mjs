@@ -62,7 +62,7 @@ export function splitKeys(input) {
     let cur = '', inRegex = false, inQuote = false;
     const push = () => {
         const t = cur.trim();
-        // A token that opened a regex and never closed one is not a key: core splits it back up rather than keep the commas.
+        // A token that opened a regex without closing it: core splits it on its commas.
         if (t.startsWith('/') && !isRegexKey(t)) out.push(...t.split(',').map(x => x.trim()).filter(Boolean));
         else if (t) out.push(t);
         cur = '';
@@ -194,8 +194,8 @@ export function segment(texts, matchWindow) {
 const MESSAGE_BREAK = /^[ \t]*-{3,}[ \t]*$/;
 
 /** Subdivides `parts` on `re`, each piece keeping its offset into the original text. */
-const cutOn = (parts, source) => parts.flatMap(p => {
-    const re = new RegExp(source, 'gm');
+const cutOn = (parts, pattern) => parts.flatMap(p => {
+    const re = new RegExp(pattern, 'gm');
     const out = [];
     let last = 0;
     for (let m = re.exec(p.text); m; m = re.exec(p.text)) {
@@ -298,17 +298,16 @@ export const foldedHay = (text, caseSensitive) => {
 
 /** Occurrences of `key` — a keyword, /regex/flags, or a `?` SmartKey, which returns its weight — following core's matchKeys
  *  for flags and regex precedence and diverging on orthography, which normalizeOrthography folds and core does not.
- *  `node` is a pre-built AST for `key`, which then decides the verdict: how a secondary-gated key is counted. */
-export function countKey(key, text, caseSensitive, wholeWords, scope, node = null) {
+ *  `gateAst`, when given, is the AST `key` is evaluated as: how a secondary-gated key is counted. */
+export function countKey(key, text, caseSensitive, wholeWords, scope, gateAst = null) {
     const raw = String(key ?? '').trim();
 
     if (!raw || !text) {
         return 0;
     }
 
-    // With `node`, the verdict is the AST's and the count is its weight, as for a `?` key.
-    if (node) {
-        const { matched, scoreBoost } = evaluate(node, text);
+    if (gateAst) {
+        const { matched, scoreBoost } = evaluate(gateAst, text);
         return matched ? (scoreBoost > 0 ? scoreBoost : 1) : 0;
     }
 
@@ -352,8 +351,8 @@ export const markExcerptText = ex => (ex
     : null);
 
 /** Every place a key matched, up to `limit`, as excerpts with match offsets; display only. A compound SmartKey returns nothing; a single-term one uses its own flags. */
-export function keyExcerpts(key, text, caseSensitive, wholeWords, context = 28, limit = 20, node = null) {
-    if (node) return compoundExcerpts(node, text, context, limit);
+export function keyExcerpts(key, text, caseSensitive, wholeWords, context = 28, limit = 20, gateAst = null) {
+    if (gateAst) return compoundExcerpts(gateAst, text, context, limit);
     const out = [];
     let raw = String(key ?? '').trim();
     if (!raw || limit < 1) return out;
@@ -460,7 +459,7 @@ function compoundExcerpts(node, text, context, limit) {
     for (const segment of Array.isArray(text) ? text : [text]) {
         if (!segment) continue;
         const credited = [];
-        // A pooled unit carries the alternation, its children under `parts`; only the leaves have a term to search for.
+        // A pooled unit is the alternation, its children under `parts`; only leaves carry a term.
         const walk = us => { for (const u of us) { if (u.parts) walk(u.parts); else credited.push(u); } };
         walk(evaluate(node, segment).units);
         const positive = credited.length
@@ -479,7 +478,7 @@ function compoundExcerpts(node, text, context, limit) {
             const value = String(id?.value ?? '');
             const n = leafCount(id, segment);
             const [ex] = n ? keyExcerpts(value, segment, !isRegex && !!id.isCaseSensitive, !isRegex && !!id.isExact, context, 1) : [];
-            // No hit, no offset: sorted last, since there is no place in the text to sort it by.
+            // No hit, no offset: sorted last.
             found.push({ ...(ex ?? { at: Number.MAX_SAFE_INTEGER, to: Number.MAX_SAFE_INTEGER }), term: value, n, negated: true });
         }
         found.sort((a, b) => a.at - b.at);
@@ -520,8 +519,8 @@ const astFor = (key, gateOf) => {
 };
 
 /** The segments `key` matched in; all of them when it matched in none. */
-const liveSegments = (key, segs, caseSensitive, wholeWords, node = null) => {
-    const live = segs.filter(sg => countKey(key, sg.text, caseSensitive, wholeWords, undefined, node) > 0);
+const liveSegments = (key, segs, caseSensitive, wholeWords, gateAst = null) => {
+    const live = segs.filter(sg => countKey(key, sg.text, caseSensitive, wholeWords, undefined, gateAst) > 0);
     return live.length ? live : segs;
 };
 
@@ -569,14 +568,14 @@ export function keyHits(keys, text, caseSensitive, wholeWords, { context = 28, l
             const bad = key.startsWith('?') ? validateSmartKey(key).find(v => v.severity === 'error') : null;
             if (bad) return { key, message: bad.message, segments: [] };
 
-            const node = astFor(key, gateOf);
-            const branches = branchesOf(key, node, caseSensitive, wholeWords);
+            const ast = astFor(key, gateOf);
+            const branches = branchesOf(key, ast, caseSensitive, wholeWords);
             const single = branches.length === 1 && !branches[0].negated;
 
             const segments = [];
             let count = 0;
             for (const sg of segs) {
-                const matched = countKey(key, sg.text, caseSensitive, wholeWords, undefined, node) > 0;
+                const matched = countKey(key, sg.text, caseSensitive, wholeWords, undefined, ast) > 0;
                 if (matched) count += countKey(key, sg.text, caseSensitive, wholeWords);
                 const leaves = branches.map(b => ({ term: String(b.id?.value ?? ''), n: leafCount(b.id, sg.text), negated: b.negated }));
                 // No positive branch in this window: skipped, whatever its negatives count.

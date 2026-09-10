@@ -16,12 +16,12 @@ export const keyHolders = (entries, key, list = 'key') =>
  *  already holds deletes `oldKey` instead of duplicating it. The collision test skips the index being renamed, or a
  *  case-only rename matches itself and deletes the key. */
 export function renameKeyOn(entry, oldKey, next, list = 'key') {
-    const list_ = entry?.[list];
-    if (!Array.isArray(list_)) return false;
-    const idx = list_.indexOf(oldKey);
+    const keys = entry?.[list];
+    if (!Array.isArray(keys)) return false;
+    const idx = keys.indexOf(oldKey);
     if (idx < 0) return false;
-    if (list_.some((k, i) => i !== idx && kwNorm(k) === kwNorm(next))) list_.splice(idx, 1);
-    else list_[idx] = next;
+    if (keys.some((k, i) => i !== idx && kwNorm(k) === kwNorm(next))) keys.splice(idx, 1);
+    else keys[idx] = next;
     return true;
 }
 

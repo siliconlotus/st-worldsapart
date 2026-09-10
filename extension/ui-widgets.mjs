@@ -226,7 +226,6 @@ const proseRanges = src => {
         out.push({ start: m.index, end: m.index + m[0].length, tag: 'q' });
     }
     for (const m of src.matchAll(HTML_RANGE)) out.push({ start: m.index, end: m.index + m[0].length, tag: 'html' });
-    // Block first: its marker is hidden the same way, and its span is what the inline markup then sits inside.
     for (const [re, tag, body] of BLOCK_MARKUP) {
         for (const m of src.matchAll(re)) {
             const [start, end] = [m.index, m.index + m[0].length];
@@ -241,10 +240,8 @@ const proseRanges = src => {
     for (const [re, tag, d] of INLINE_MARKUP) {
         for (const m of src.matchAll(re)) {
             const [start, end] = [m.index, m.index + m[0].length];
-            // Already claimed, unless by a block range or a quote, which an inline span sits inside rather than beside.
+            // A block range and a quote may contain an inline one; two inline ranges may not overlap.
             if (out.some(r => r.tag !== 'q' && !BLOCK_TAGS.has(r.tag) && start < r.end && r.start < end)) continue;
-            // The delimiters are hidden, as chat consumes them — but only while nothing matched them: a marked one is
-            // shown, or the mark would have nothing to land on.
             out.push({ start, end, tag }, { start, end: start + d, tag: 'delim' }, { start: end - d, end, tag: 'delim' });
         }
     }
@@ -259,9 +256,8 @@ export function renderMessageHtml(text, { spans = [], markSpan = null, showMarku
     const src = String(text).normalize('NFC');
     // The blank lines around a thematic break are consumed with it: the container is pre-wrap, so they would render as
     // blank lines on top of the rule's margins.
-    const plain = t => escapeHtml(t).replace(/(?:\r?\n)*^[ \t]*-{3,}[ \t]*$(?:\r?\n)*/gm,
-        // No border and no colour: ST's own `hr` is a transparent-to-body-colour-to-transparent gradient, and setting
-        // either would flatten the taper. Only the margin and the opacity, which at 0.2 is too faint to read as a break.
+    const escapedWithRules = t => escapeHtml(t).replace(/(?:\r?\n)*^[ \t]*-{3,}[ \t]*$(?:\r?\n)*/gm,
+        // No border and no colour: ST's `hr` is a gradient, which either would flatten.
         '<hr style="margin:15px 0;opacity:0.75;">');
     const prose = proseRanges(src);
     // Whole-range, not per cut: emitting `<!-- ` alone opens a comment that swallows the mark after it.
@@ -270,20 +266,16 @@ export function renderMessageHtml(text, { spans = [], markSpan = null, showMarku
     const cuts = [...new Set([0, src.length, ...spans.flatMap(sp => [sp.start, sp.end]), ...prose.flatMap(r => [r.start, r.end])])]
         .sort((a, b) => a - b);
     let html = '';
-    // One <code> per revealed range, not per piece: ST's `code` carries a border and 0 3px, so a range cut into three around
-    // a mark would pay for all of it three times and read as spaced-out text.
     let codeOpen = null;
     const closeCode = () => { if (codeOpen) { html += '</code>'; codeOpen = null; } };
     for (let i = 0; i + 1 < cuts.length; i++) {
         const [a, b] = [cuts[i], cuts[i + 1]];
         if (a >= b) continue;
-        // q outside em, as a message nests them; a piece is inside a range only if the range covers all of it.
-        const covering = prose.filter(r => r.start <= a && b <= r.end);
+            const covering = prose.filter(r => r.start <= a && b <= r.end);
         const sp = markSpan ? spans.find(x => x.start <= a && b <= x.end) : null;
-        // A delimiter nothing matched is display only, and chat does not display it.
+        // A delimiter no span overlaps is not rendered, as chat does not render it.
         if (covering.some(r => r.tag === 'delim') && !sp && !showMarkup) continue;
-        // Markup nothing matched renders; markup something matched is shown as the text it is, or the mark would vanish
-        // into an attribute — or, for a comment, into markup that displays nothing at all.
+        // A span overlapping markup shows it as text: a mark inside an attribute, or inside a comment, renders nothing.
         const asMarkup = covering.find(r => r.tag === 'html');
         if (asMarkup) {
             if (!revealed.has(asMarkup)) { closeCode(); html += src.slice(a, b); continue; }
@@ -295,7 +287,7 @@ export function renderMessageHtml(text, { spans = [], markSpan = null, showMarku
         closeCode();
         const tags = covering.filter(r => r.tag !== 'delim').map(r => r.tag)
             .sort((x, y) => TAG_ORDER.indexOf(x) - TAG_ORDER.indexOf(y));
-        html += `${tags.map(t => TAG_HTML[t][0]).join('')}${sp ? markSpan(sp, src.slice(a, b)) : plain(src.slice(a, b))}`
+        html += `${tags.map(t => TAG_HTML[t][0]).join('')}${sp ? markSpan(sp, src.slice(a, b)) : escapedWithRules(src.slice(a, b))}`
             + `${[...tags].reverse().map(t => TAG_HTML[t][1]).join('')}`;
     }
     closeCode();

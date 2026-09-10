@@ -18,10 +18,9 @@ import { WI_LOGIC, dropTags, hasPromoteDecorator, isRegexKey, scanSegments, seco
 import { labScan, runBook } from './lab.mjs';
 import { addVariant, deleteKey, hasKey, keyHolders, kwNorm, renameKeyOn, replaceKey } from './keyedit.mjs';
 
-// The audit's severities as colours. Fixed, not theme variables: severity is read by hue.
+// Fixed, not theme variables: severity is read by hue.
 const SEVERITY_COLOR = { severe: '#e06c6c', moderate: '#d9b74a', minor: '#7bbf6a' };
 const SEVERITY_RANK = { severe: 3, moderate: 2, minor: 1 };
-// A control that is on, and a flag showing an inherited value rather than the entry's own.
 const ACCENT = 'var(--SmartThemeQuoteColor)';
 const INHERIT_TINT = 'color-mix(in srgb, var(--SmartThemeBodyColor) 55%, transparent)';
 const WA_GREEN = SEVERITY_COLOR.minor;   // "no prune" — a keyword the scan doesn't flag
@@ -909,7 +908,7 @@ export async function lorebookStudio(preferredBook = null, open = null) {
             }
             if (worst) {
                 badge.style.background = SEVERITY_COLOR[worst];
-                // The badge's ground is the severity colour; these are the readable text colours on those three.
+                // Against SEVERITY_COLOR as the ground.
                 badge.style.color = worst === SEVERE ? '#fff' : '#111';
             }
             const softer = (flagged?.size ?? 0) - counted.length;
@@ -1202,7 +1201,6 @@ export async function lorebookStudio(preferredBook = null, open = null) {
         const attached = new Set(attachedBookNames());
         for (const n of others) {
             const o = document.createElement('option'); o.value = n; o.selected = n === selected;
-            // A select option carries no border, so the mark goes in its text.
             o.textContent = attached.has(n) ? `${n} \u2014 attached` : n;
             if (attached.has(n)) o.style.color = 'var(--SmartThemeQuoteColor)';
             sel.append(o);
@@ -2064,7 +2062,6 @@ export async function lorebookStudio(preferredBook = null, open = null) {
         let out = '', at = from;
         for (const x of [...sg.excerpts].sort((a, b) => a.at - b.at)) {
             if (x.at < from || x.to > to) continue;
-            // Inverted for a negative.
             const [open, close] = x.negated ? ['\u00bb', '\u00ab'] : ['\u00ab', '\u00bb'];
             out += `${src.slice(at, x.at)}${open}${src.slice(x.at, x.to)}${close}`;
             at = x.to;
@@ -2078,8 +2075,7 @@ export async function lorebookStudio(preferredBook = null, open = null) {
         const fill = sp.negated ? `color-mix(in srgb, ${WA_RED} 40%, transparent)` : ink(sp, 0.4);
         const edge = sp.negated ? WA_RED : ink(sp);
         const label = k => `${k.negated ? '\u2212 ' : ''}${k.term && k.term !== k.key ? `${k.key} \u2014 ${k.term}` : k.key}`;
-        // The outline as well as the wash: rendered HTML in the text can set its own background, which a translucent
-        // wash disappears into. An outline takes no layout space.
+        // Outline as well as wash: rendered HTML in the text sets its own background, which the wash disappears into.
         return `<span data-at="${sp.start}" data-to="${sp.end}" data-key="${escapeHtml(sp.key)}"`
             + ` title="${escapeHtml(sp.keys.map(label).join('\n'))}"`
             + ` style="background:${fill};outline:1px solid ${edge};border-radius:2px;`
@@ -2091,9 +2087,8 @@ export async function lorebookStudio(preferredBook = null, open = null) {
 
     let labHay = '', labKeys = '';
     let labCase = !!world_info_case_sensitive, labWhole = !!world_info_match_whole_words;
-    // The match window, from the setting. `message` cuts on MESSAGE_BREAK lines, which the chat import writes.
+    // `message` cuts on MESSAGE_BREAK lines, which the chat import writes.
     let labWindow = settings().matchWindow;
-    // Committed: the haystack pane shows the marked text instead of the textarea.
     let labCommitted = false;
     let labRepaint = null;   // the Lab's repaint, claimed by renderLabView: an applied run is triggered from outside it
     let labRun = null;   // an applied book: { book, entries: [{ entry, rows }] }, shown in place of the typed keys' result
@@ -2101,7 +2096,6 @@ export async function lorebookStudio(preferredBook = null, open = null) {
     let labSkipVector = false;   // entries meant to arrive by cosine, left out of a run
     let labRunSource = null;     // how to re-read what the last run ran over: `{ label, load }`, so a re-run sees the books
                                  // as they are now: a snapshot taken at apply time would still hold a key since deleted   // the source behind the rendering: every tag, entity and delimiter shown at once
-    // The secondary condition applied to every key: a term list and one of world_info_logic's four operators.
     let labSec = '', labLogic = String(WI_LOGIC.AND_ANY);
 
     /** The chat as WA reads it for a scan: is_system dropped, dropChatTags applied, the last `messageDepth` messages —
@@ -2114,7 +2108,7 @@ export async function lorebookStudio(preferredBook = null, open = null) {
             .map(m => (spec?.trim() ? { ...m, mes: dropTags(String(m.mes ?? ''), spec) } : m));
         const depth = Number(override ?? (settings().messageDepth || world_info_depth));
         const messages = scanSegments(chat, { depth, includeNames: world_info_include_names, matchWindow: 'message' });
-        // The depth used and the is_system messages dropped: both change the count, and neither is visible in the pane.
+        // Reports depth and the is_system drop: neither is visible in the pane, and both change the count.
         const hidden = raw.length - chat.length;
         toastr.info(`${messages.length} message${messages.length === 1 ? '' : 's'} at depth ${depth}`
             + `${hidden ? `, ${hidden} hidden message${hidden === 1 ? '' : 's'} skipped` : ''}`
@@ -2175,27 +2169,24 @@ export async function lorebookStudio(preferredBook = null, open = null) {
             + `<small style="opacity:0.75;">${escapeHtml(e.text.slice(0, e.start))}`
             + `<span style="color:${e.negated ? WA_RED : escapeHtml(color)};font-weight:600;">${escapeHtml(e.text.slice(e.start, e.end))}</span>`
             + `${escapeHtml(e.text.slice(e.end))}</small></div>`;
-        // A rule between windows, not before the first.
         const seg = (sg, i) => `<div style="margin:5px 0 0 6px;${i ? 'padding-top:5px;border-top:1px solid color-mix(in srgb, currentColor 12%, transparent);' : ''}`
             + `${sg.matched ? '' : 'opacity:0.55;'}">`
             + `<small>${sg.leaves.map(l => `${escapeHtml(l.negated ? `-${l.term}` : l.term)} ${num(l.n)}`).join(', ')}</small>`
             + sg.excerpts.map(e => span(e, sg)).join('')
             + '</div>';
         // labExpanded carries the open state across the repaint that rebuilds this element.
-        // A key with one positive branch cannot be filtered by a window, so its tally is occurrences; anything with more
-        // branches tallies matched and filtered windows.
+        // A key with one positive branch cannot be filtered by a window, so its tally is occurrences.
         const oneBranch = r.segments.every(sg => sg.leaves.length === 1 && !sg.leaves[0].negated);
         const filtered = r.segments.filter(sg => !sg.matched).length;
         const tally = oneBranch
             ? num(r.count)
-            // Disjoint: the two sum to segments.length.
             : `${num(`${r.segments.length - filtered} matched`)}${filtered ? `<small style="opacity:0.5;">, ${filtered} filtered</small>` : ''}`;
-        // A single-branch key's excerpts are listed flat: keyHits gives every occurrence, not one per window.
+        // keyHits gives a single-branch key every occurrence, so these are listed flat rather than per window.
         const body = oneBranch
             ? r.segments.flatMap(sg => sg.excerpts.map(e => span(e, sg))).join('')
             : r.segments.map((sg, i) => seg(sg, i)).join('');
-        const from = entry ? ` data-uid="${escapeHtml(String(entry.uid))}" data-world="${escapeHtml(entry.world ?? '')}"` : '';
-        return `<details${labExpanded.has(r.key) ? ' open' : ''} data-k="${escapeHtml(r.key)}"${from} style="margin-bottom:8px;">`
+        const entryAttrs = entry ? ` data-uid="${escapeHtml(String(entry.uid))}" data-world="${escapeHtml(entry.world ?? '')}"` : '';
+        return `<details${labExpanded.has(r.key) ? ' open' : ''} data-k="${escapeHtml(r.key)}"${entryAttrs} style="margin-bottom:8px;">`
             + `<summary style="cursor:pointer;">${chip} ${tally}</summary>${body}</details>`;
     };
 
@@ -2210,8 +2201,7 @@ export async function lorebookStudio(preferredBook = null, open = null) {
             const sum = d.querySelector('summary');
             if (!sum) continue;
             sum.title = 'Shift-click for every other key';
-            // Shift toggles every OTHER block, as the Explorer's chevron does: preventDefault leaves this one as it was,
-            // and setting `open` fires each block's own toggle, which records it.
+            // preventDefault leaves the clicked block as it was; setting `open` fires each other block's own toggle.
             sum.addEventListener('click', ev => {
                 if (!ev.shiftKey) return;
                 ev.preventDefault();
@@ -2265,13 +2255,10 @@ export async function lorebookStudio(preferredBook = null, open = null) {
         if (!scanned) return `${head}<div style="opacity:0.6;">No entry there has a key to match with.</div>`;
         if (!entries.length) return head;
         return head + entries.map(({ entry, rows }) => {
-            // No lozenge and no colour: a chip reads as a term and a colour belongs to one, where the entry is the heading
-            // the terms sit under.
             const title = `<b style="overflow-wrap:anywhere;">${escapeHtml(wiTitleOf(entry))}</b>`
                 + `<small style="opacity:0.6;"> ${rows.length} key${rows.length === 1 ? '' : 's'}</small>`;
-            // The book on its own line, since a run spans every attached one and two books can hold the same title.
-            const from = entry.world ? `<div><small style="opacity:0.45;">${escapeHtml(entry.world)}</small></div>` : '';
-            return `<details open style="margin-bottom:8px;"><summary style="cursor:pointer;">${title}${from}</summary>`
+            const bookLine = entry.world ? `<div><small style="opacity:0.45;">${escapeHtml(entry.world)}</small></div>` : '';
+            return `<details open style="margin-bottom:8px;"><summary style="cursor:pointer;">${title}${bookLine}</summary>`
                 + `<div style="margin-left:10px;">${rows.map(r => labKeyHtml(r, labInk(Math.max(0, keyList.indexOf(r.key))), entry)).join('')}</div></details>`;
         }).join('');
     };
@@ -2305,8 +2292,7 @@ export async function lorebookStudio(preferredBook = null, open = null) {
         if (!book?.entries) { toastr.warning(`Could not load “${world}”.`, 'Worlds Apart'); return 0; }
         const touched = mutate(Object.values(book.entries), book);
         if (!touched) return 0;
-        // The Explorer rebuilds on its own when the tab is next opened, so rebuilding it from under the Lab would only
-        // throw away the Lab's own state to repaint something nobody is looking at.
+        // Not while the Lab is up: renderExplorer rebuilds the tab, discarding the Lab's panes and run.
         if (isOpen) { save(); if (tab !== 'lab') renderExplorer(); } else await saveWorldInfo(world, book, true);
         return touched;
     };
@@ -2326,43 +2312,42 @@ export async function lorebookStudio(preferredBook = null, open = null) {
         return n;
     };
 
-    /** The three book-wide operations at one scope. `apply(mutate)` is what makes it a book or the attached set, so the two
-     *  scopes cannot behave differently; `where` names it in every label and prompt. */
-    const bookWideOps = (key, where, apply) => [
+    /** The three book-wide operations at one scope: `apply(mutate)` runs it over a book or over the attached set. */
+    const bookWideOps = (key, scopeLabel, apply) => [
         {
-            label: `Delete across ${where}…`,
+            label: `Delete across ${scopeLabel}…`,
             danger: true,
-            // No count in the label: knowing it means loading the books, and the confirm and the toast both report it.
+            // No count: it would take loading every book to know.
             fn: async () => {
-                if (!await Popup.show.confirm(`Delete “${key}” from every entry in ${where}?`,
+                if (!await Popup.show.confirm(`Delete “${key}” from every entry in ${scopeLabel}?`,
                     'Removes the keyword everywhere it appears there.')) return;
                 const n = await apply(es => deleteKey(es, key));
                 toastr[n ? 'success' : 'info'](n
                     ? `Deleted “${key}” from ${n} ${n === 1 ? 'entry' : 'entries'}.`
-                    : `Nothing in ${where} is keyed “${key}”.`, 'Worlds Apart');
+                    : `Nothing in ${scopeLabel} is keyed “${key}”.`, 'Worlds Apart');
             },
         },
         {
-            label: `Replace across ${where}…`,
+            label: `Replace across ${scopeLabel}…`,
             fn: async () => {
-                const next = (await Popup.show.input('Replace keyword', `Replace “${key}” across ${where} with:`, key))?.trim();
+                const next = (await Popup.show.input('Replace keyword', `Replace “${key}” across ${scopeLabel} with:`, key))?.trim();
                 if (!next || next === key || !keyWriteOk(next)) return;
                 const n = await apply(es => replaceKey(es, key, next));
                 toastr[n ? 'success' : 'info'](n
                     ? `Replaced “${key}” → “${next}” in ${n} ${n === 1 ? 'entry' : 'entries'}.`
-                    : `Nothing in ${where} is keyed “${key}”.`, 'Worlds Apart');
+                    : `Nothing in ${scopeLabel} is keyed “${key}”.`, 'Worlds Apart');
             },
         },
         {
-            label: `Add variant across ${where}…`,
+            label: `Add variant across ${scopeLabel}…`,
             fn: async () => {
-                const raw = await Popup.show.input('Add variant', `Keyword to add to every entry in ${where} keyed “${key}”:`);
+                const raw = await Popup.show.input('Add variant', `Keyword to add to every entry in ${scopeLabel} keyed “${key}”:`);
                 const term = String(raw ?? '').trim();
                 if (!term || !keyWriteOk(term)) return;
                 const n = await apply(es => addVariant(es, key, term));
                 toastr[n ? 'success' : 'info'](n
                     ? `“${term}” added to ${n} ${n === 1 ? 'entry' : 'entries'} keyed “${key}”.`
-                    : `Every entry in ${where} keyed “${key}” already has “${term}”.`, 'Worlds Apart');
+                    : `Every entry in ${scopeLabel} keyed “${key}” already has “${term}”.`, 'Worlds Apart');
             },
         },
     ];
@@ -2396,7 +2381,7 @@ export async function lorebookStudio(preferredBook = null, open = null) {
                 },
             },
             ...bookWideOps(key, `“${world}”`, mutate => editInBook(world, mutate)),
-            // Only where it is a wider scope than the book above: with one attached book the two are the same operation.
+            // Omitted at one attached book, where it repeats the scope above.
             ...(attached.length > 1
                 ? bookWideOps(key, `all ${attached.length} attached books`, editInAttached)
                 : []),
@@ -2467,7 +2452,6 @@ export async function lorebookStudio(preferredBook = null, open = null) {
             run: labRun,
             defaults: { caseSensitive: world_info_case_sensitive, wholeWords: world_info_match_whole_words },
         });
-        // Colour is the display half, and it is per term in both modes: a key's place in the list it came from.
         const ink = (sp, a) => labInk(Math.max(0, r.keys.indexOf(sp.key)), a);
         for (const row of r.rows) row.color = ink({ key: row.key });
         return { ...r, ink };
@@ -2499,8 +2483,6 @@ export async function lorebookStudio(preferredBook = null, open = null) {
     };
 
     const renderLabView = pane => {
-        // The inputs stack down the left — haystack, keys, the operator, the secondaries it gates them by — with the results
-        // beside them at full height, so a long digest is read without the panes shrinking.
         const panes = document.createElement('div');
         panes.style.cssText = 'flex:5 1 0;display:flex;flex-direction:column;gap:6px;min-width:0;min-height:0;';
         const box = (placeholder, get, set) => {
@@ -2516,12 +2498,10 @@ export async function lorebookStudio(preferredBook = null, open = null) {
         // margin beat .text_pole's `fit-content` and `5px 0`, which would let it hug its content and never scroll.
         const hayRead = document.createElement('div'); hayRead.className = 'text_pole wa-marked';
         hayRead.style.cssText = 'flex:1 1 auto;height:100%;min-height:0;margin:0;overflow:auto;white-space:pre-wrap;line-height:1.5;'
-            // Dashed and unfilled, so it does not read as a field.
-            + 'border-style:dashed;background-color:transparent;cursor:default;';
+                + 'border-style:dashed;background-color:transparent;cursor:default;';
         const hayWrap = document.createElement('div');
         hayWrap.style.cssText = 'flex:3 1 0;position:relative;display:flex;min-height:0;overflow:hidden;margin:5px 0;';
-        // One corner control in one place: a tick to mark the text up, a pencil to go back to typing it. Over the box rather
-        // than inside its scroller, or it would scroll away from the text it acts on.
+        // Outside hayRead, which scrolls: a child of it would scroll away from the text.
         const hayToggle = document.createElement('i');
         hayToggle.style.cssText = 'position:absolute;top:5px;right:9px;cursor:pointer;opacity:0.6;padding:3px 5px;border-radius:4px;'
             + 'background:var(--black30a, rgba(0,0,0,0.3));font-size:0.85em;z-index:1;';
