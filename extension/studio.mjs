@@ -2530,6 +2530,13 @@ export async function lorebookStudio(preferredBook = null) {
         const bookList = document.createElement('div'); bookList.className = 'text_pole';
         bookList.style.cssText = 'flex:0 0 auto;margin:5px 0;max-height:6em;overflow:auto;font-size:0.9em;'
             + 'border-style:dashed;background-color:transparent;cursor:default;height:auto;';
+        // The same ✕ as the digest header's: the list is where you look to see what a run is matching with, so it is where
+        // you reach to stop.
+        bookList.addEventListener('click', ev => {
+            if (!ev.target.closest('.wa-run-clear')) return;
+            labRun = null;
+            repaint();
+        });
         panes.append(hayWrap, keyBox, gateBox, bookList);
 
         const opts = document.createElement('div');
@@ -2625,7 +2632,10 @@ export async function lorebookStudio(preferredBook = null) {
             keyBox.style.display = running ? 'none' : '';
             gateBox.style.display = running ? 'none' : '';
             bookList.style.display = running ? '' : 'none';
-            if (running) bookList.textContent = labRun.books.join(', ') || labRun.label;
+            if (running) {
+                bookList.innerHTML = `${escapeHtml(labRun.books.join(', ') || labRun.label)}`
+                    + ' <i class="fa-solid fa-xmark wa-run-clear" title="Back to the typed keys" style="cursor:pointer;opacity:0.6;"></i>';
+            }
             hayToggle.className = `fa-solid ${reading ? 'fa-pen' : 'fa-check'}`;
             hayToggle.title = reading ? 'Edit the text' : 'Mark up the text';
             hayToggle.style.display = labHay.trim() ? '' : 'none';
