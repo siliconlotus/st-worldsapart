@@ -2269,7 +2269,7 @@ export async function lorebookStudio(preferredBook = null) {
         const secBox = box('Secondary keys', () => labSec, v => { labSec = v; });
         secBox.style.cssText += 'flex:0 0 auto;height:4.4em;';
         gateBox.append(logicSel, secBox);
-        keyBox.style.flex = '2 1 0';
+        keyBox.style.cssText += 'flex:0 0 auto;height:8.8em;';   // six lines, at secBox's 4.4em for three
         panes.append(hayWrap, keyBox, gateBox);
 
         const opts = document.createElement('div');
