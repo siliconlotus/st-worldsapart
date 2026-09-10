@@ -230,22 +230,29 @@ with its content from every message before WA reads it — `matcher.mjs` `dropTa
 
 ### Witness spans
 
-**Ruled, unimplemented.** `keyExcerpts` answers only for a lone `TERM` or `REGEX` and returns null for
-every compound key.
+Where a key landed, for a caller marking up the text it matched. `keyExcerpts` answers for a compound key
+as well as a lone `TERM` or `REGEX`; `keySpans` gives offsets instead of excerpts, and `keyHits` gives the
+per-window report the Keyword Lab draws.
 
-- A key's spans are the leaves that contributed — the rule `evaluate` already applies to
-  `scoreBoost`. `OR` concatenates, a matched `AND` keeps both operands, `XOR` keeps the winner, and a
-  failed `AND` branch inside a matched `OR` retracts. A negation has an empty extension, so
-  `? (a | b | c) -d` is fully excerptable.
-- Collection rides on `evaluate` rather than mirroring it: an optional accumulator, absent on the hot
-  path, with `AND` and `XOR` recording its length before descending and truncating on failure.
-- Below a negation the algebra is existence, not extension; the collector never descends into a `NOT`.
-- Counts belong to the result, never to the node: `astCache` interns a tree by its raw key, so a count
-  on the node leaks between entries. Weight is the node's.
-- The display takes occurrences and ignores weight; per-leaf counts come from the leaf's own count,
-  not `spans.length`, which is capped for display.
-- Overlapping context windows are one window, rendered as one excerpt with both spans marked.
-- An `AND`'s leaf spans are already restricted to segments that fired.
+- A key's spans are its leaves, walked off the AST rather than collected inside `evaluate`: the units
+  `evaluate` returns are gated on the verdict, and a key that failed is exactly when a reader needs to
+  see which branch did fire.
+- **A negated leaf is reported too**, flagged rather than omitted. Whether the term that vetoes a key
+  fires at all is the same tuning question, and a misspelt negative is invisible otherwise. It carries no
+  span when it did not fire, and a caller marking text must draw it as a veto, not a match.
+- **A veto's count is over the whole text, not the window it fired in.** A veto only fires in the windows
+  the key failed in, and those are the windows the key's own branches are not reported from.
+- **The match window is the unit.** A window with no positive branch is not one the key is decided in,
+  whatever its negatives do, so nothing is reported or marked there.
+- The display takes occurrences and ignores weight; per-leaf counts come from the leaf's own count, and
+  the digest shows one span per branch per window where the marked text shows every occurrence.
+- Overlapping spans fold to one (`mergeSpans`), at the extent of the one that starts first and naming
+  every key that reached it: a span cannot nest in markup. A caller marking with more than one flag set —
+  an entry at a time — merges the union through it rather than folding per call.
+- Offsets are into the NFC form of the text, which is what a caller must slice by.
+
+**Unimplemented, and separable:** proximity (`(…)~N`), whose classes these spans are what would tell
+apart, and merging two overlapping context windows into one excerpt with both spans marked.
 
 ---
 
@@ -794,11 +801,10 @@ Ordered by whether a user can see the difference.
 1. **Recursion scoring** — buffer scoring plus trigger-depth weighting, one change (*Stage 3*). Ships
    on reasoning rather than evidence: `world_info_recursive` is off here and no book in the corpus
    exercises it, so it waits on a recursion-using book.
-2. **Witness spans**, then **proximity** — they share one collector, and the display half lands first
-   because it is what tells a proximity key's classes apart.
-3. **`probeKeys`** (pure: keys × segments → verdict, count, witnesses), then the **Keyword Lab** tab
-   (paste text or pick an entry/chat, see what hits), then wiring the same function into `scanChats`
-   so `?` and `/re/` keys get chat evidence.
+2. **Proximity** (`(…)~N`) — witness spans shipped without it, and they are what tells a proximity key's
+   classes apart, so the display half of the pair is no longer in the way.
+3. **`?` and `/re/` keys in `scanChats`**, so a chat-rate flag can see them: the Lab reports them against
+   any text, but the audit's chat evidence still only counts literals.
 4. **`chat common` as a raising flag** — `KEY_CHAT_COMMON` can only confirm another flag. It needs the
    structural exclusion (constant/sticky) decided and the 20% re-read against what survives.
 5. **Key-side variant expansion**: hyphen ↔ space, since compounds are written both ways and prose
@@ -819,9 +825,10 @@ Ordered by whether a user can see the difference.
    Essentially nothing on disk depends on the current reading (K12). Until it lands, a bare `::N` or
    `^N` term is a silently dead key of the same class as `~N`.
 10. **A firing-rate diagnostic for loose reference keys.** Reference entries are never cut, so a key
-    that fires too easily costs budget on every turn it wins and nothing warns anybody; the per-entry
-    firing rate over a real chat belongs beside the keyword audit. Not blocking: an over-firing
-    reference entry is a budget cost, where a wrongly cut one is missing material.
+    that fires too easily costs budget on every turn it wins and nothing warns anybody. The Lab answers
+    it for a chat a reader loads by hand — apply the attached books to the scan window and read the
+    counts — so what is left is the standing per-entry rate, beside the keyword audit. Not blocking: an
+    over-firing reference entry is a budget cost, where a wrongly cut one is missing material.
 11. **A signal's within-scene SD varies by book**, and the two books `keys` costs are its extremes
     (F45). Standardisation divides by the scene's own SD, so a near-constant column has its few small
     differences amplified into large z against a slope fitted on other books. No use proposed; it is a
