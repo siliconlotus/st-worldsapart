@@ -2215,6 +2215,16 @@ export async function lorebookStudio(preferredBook = null) {
         // The same box, read-only and marked: text_pole so it keeps the border and padding the textarea had.
         const hayRead = document.createElement('div'); hayRead.className = 'text_pole';
         hayRead.style.cssText = 'flex:3 1 0;min-height:0;overflow:auto;white-space:pre-wrap;line-height:1.5;';
+        // On the box it acts on, not in the options row: it switches this pane between typing and reading.
+        const markLabel = document.createElement('label');
+        markLabel.style.cssText = 'display:flex;gap:5px;align-items:center;cursor:pointer;flex:0 0 auto;font-size:0.85em;opacity:0.8;';
+        const markToggle = document.createElement('input'); markToggle.type = 'checkbox';
+        markToggle.addEventListener('change', () => {
+            labCommitted = markToggle.checked;
+            repaint();
+            if (!labCommitted) hayBox.focus();
+        });
+        markLabel.append(markToggle, document.createTextNode('Show marks'));
         const keyBox = box('Keys, comma- or newline-separated — plain, /regex/flags or ?SmartKey', () => labKeys, v => { labKeys = v; });
         const logicSel = document.createElement('select'); logicSel.className = 'text_pole';
         logicSel.style.cssText = 'width:100%;margin:0;flex:0 0 auto;';
@@ -2229,7 +2239,7 @@ export async function lorebookStudio(preferredBook = null) {
         const secBox = box('Secondary keys', () => labSec, v => { labSec = v; });
         secBox.style.cssText += 'flex:0 0 auto;height:4.4em;';
         keyBox.style.flex = '2 1 0';
-        panes.append(hayBox, hayRead, keyBox, logicSel, secBox);
+        panes.append(hayBox, hayRead, markLabel, keyBox, logicSel, secBox);
 
         const opts = document.createElement('div');
         opts.style.cssText = 'display:flex;gap:14px;padding:6px 8px;flex:0 0 auto;opacity:0.8;font-size:0.9em;';
@@ -2262,16 +2272,8 @@ export async function lorebookStudio(preferredBook = null) {
             i.addEventListener('click', onClick);
             return i;
         };
-        // The haystack pane's two states in one control: mark it up, or go back to the box it was typed in.
-        const commitTool = labTool('fa-highlighter', '', () => {
-            if (!labHay.trim() && !labCommitted) return;
-            labCommitted = !labCommitted;
-            repaint();
-            if (!labCommitted) hayBox.focus();
-        }, true);
         opts.append(
             winLabel,
-            commitTool,
             labTool('fa-comments', 'Load the current chat, as deep as the message-depth setting reads', () => {
                 labHay = chatHaystack();
                 hayBox.value = labHay;
@@ -2291,7 +2293,7 @@ export async function lorebookStudio(preferredBook = null) {
         const out = document.createElement('div');
         out.style.cssText = 'flex:1 1 0;overflow:auto;min-width:0;min-height:0;';
         const repaint = () => {
-            const { rows } = scanLab();
+            const { keys, ink, rows, gate } = scanLab();
             out.innerHTML = rows.length
                 ? rows.map(r => labKeyHtml(r, r.color)).join('')
                 : '<div style="opacity:0.6;padding:6px 0;">Keys you type on the right are matched against the text on the left.</div>';
@@ -2300,9 +2302,9 @@ export async function lorebookStudio(preferredBook = null) {
             const reading = labCommitted && !!labHay.trim();
             hayBox.style.display = reading ? 'none' : '';
             hayRead.style.display = reading ? '' : 'none';
-            commitTool.className = `fa-solid ${reading ? 'fa-pen' : 'fa-highlighter'}`;
-            commitTool.title = reading ? 'Edit the text again' : 'Mark up the text in place of the box it was typed in';
-            commitTool.style.opacity = labHay.trim() ? '0.7' : '0.25';
+            markToggle.checked = reading;
+            markToggle.disabled = !labHay.trim();
+            markLabel.style.opacity = labHay.trim() ? '0.8' : '0.4';
             if (reading) {
                 const top = hayRead.scrollTop;
                 hayRead.innerHTML = markedHtml(labHay, keySpans(keys, labHay, labCase, labWhole, { matchWindow: labWindow, gate }), ink);
