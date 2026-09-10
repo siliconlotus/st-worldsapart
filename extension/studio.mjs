@@ -2048,7 +2048,7 @@ export async function lorebookStudio(preferredBook = null) {
 
     /** The spans ST colours in a message — quoted passages and *emphasis* — as offsets into `src`. The delimiters stay in the
      *  text rather than being consumed as markdown — what the Lab shows has to be exactly what was matched — so an emphasis
-     *  marker also reports its two asterisks, which the renderer dims. */
+     *  marker also reports its two asterisks, which the renderer hides unless a key matched one. */
     const proseRanges = src => {
         const out = [];
         for (const m of src.matchAll(/"[^"\n]*"|\u201C[^\u201D\n]*\u201D|\u00AB[^\u00BB\n]*\u00BB/g)) {
@@ -2056,9 +2056,9 @@ export async function lorebookStudio(preferredBook = null) {
         }
         for (const m of src.matchAll(/(?<![\w*])\*(?!\s)[^*\n]+?(?<!\s)\*(?![\w*])/g)) {
             const [start, end] = [m.index, m.index + m[0].length];
-            // The asterisks are dimmed rather than dropped: chat consumes them, but a character that was matched has to stay
-            // on screen for its mark to land on something.
-            out.push({ start, end, tag: 'em' }, { start, end: start + 1, tag: 'dim' }, { start: end - 1, end, tag: 'dim' });
+            // The asterisks are hidden, as chat consumes them — but only while nothing matched them: a marked one is shown,
+            // or the mark would have nothing to land on.
+            out.push({ start, end, tag: 'em' }, { start, end: start + 1, tag: 'delim' }, { start: end - 1, end, tag: 'delim' });
         }
         return out;
     };
@@ -2088,13 +2088,13 @@ export async function lorebookStudio(preferredBook = null) {
             const [a, b] = [cuts[i], cuts[i + 1]];
             if (a >= b) continue;
             // q outside em, as a message nests them; a piece is inside a range only if the range covers all of it.
-            const order = { q: 0, em: 1, dim: 2 };
-            const tags = prose.filter(r => r.start <= a && b <= r.end).map(r => r.tag).sort((x, y) => order[x] - order[y]);
-            const open = t => (t === 'dim' ? '<span style="opacity:0.35;">' : `<${t}>`);
-            const close = t => (t === 'dim' ? '</span>' : `</${t}>`);
+            const covering = prose.filter(r => r.start <= a && b <= r.end);
             const sp = spans.find(x => x.start <= a && b <= x.end);
-            html += `${tags.map(open).join('')}${sp ? mark(sp, src.slice(a, b)) : plain(src.slice(a, b))}`
-                + `${[...tags].reverse().map(close).join('')}`;
+            // A delimiter nothing matched is display only, and chat does not display it.
+            if (covering.some(r => r.tag === 'delim') && !sp) continue;
+            const tags = covering.filter(r => r.tag !== 'delim').map(r => r.tag).sort(x => (x === 'q' ? -1 : 1));
+            html += `${tags.map(t => `<${t}>`).join('')}${sp ? mark(sp, src.slice(a, b)) : plain(src.slice(a, b))}`
+                + `${[...tags].reverse().map(t => `</${t}>`).join('')}`;
         }
         return html;
     };
