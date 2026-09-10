@@ -2081,7 +2081,8 @@ export async function lorebookStudio(preferredBook = null) {
     let labRun = null;   // an applied book: { book, entries: [{ entry, rows }] }, shown in place of the typed keys' result
     let labShowMarkup = false;
     let labSkipVector = false;   // entries meant to arrive by cosine, left out of a run
-    let labRunSource = null;     // what the last run ran over, so a setting change re-runs it rather than needing the button   // the source behind the rendering: every tag, entity and delimiter shown at once
+    let labRunSource = null;     // how to re-read what the last run ran over: `{ label, load }`, so a re-run sees the books
+                                 // as they are now — an edit is the reason to re-run, and a snapshot would still hold the old key   // the source behind the rendering: every tag, entity and delimiter shown at once
     // The secondary condition, in core's own terms: a term list and one of world_info_logic's four operators, gating every key.
     let labSec = '', labLogic = String(WI_LOGIC.AND_ANY);
 
@@ -2208,9 +2209,9 @@ export async function lorebookStudio(preferredBook = null) {
     };
 
     /** Runs `entries` against the haystack and shows the result; `label` names what ran, for the header. */
-    const applyEntries = (label, entries) => {
-        labRunSource = { label, entries };
-        const run = runBook(entries, labHay, {
+    const applyFrom = async (label, load) => {
+        labRunSource = { label, load };
+        const run = runBook(await load(), labHay, {
             matchWindow: labWindow,
             context: 30,
             defaults: { caseSensitive: world_info_case_sensitive, wholeWords: world_info_match_whole_words },
@@ -2225,7 +2226,7 @@ export async function lorebookStudio(preferredBook = null) {
     const bookEntries = async name => Object.values((name === selected ? data : await loadWorldInfo(name))?.entries ?? {})
         .map(e => ({ ...e, world: e.world ?? name }));
 
-    const applyOneBook = async name => applyEntries(name, await bookEntries(name));
+    const applyOneBook = async name => applyFrom(name, () => bookEntries(name));
 
     /** Every book ST has active for this chat, which is the set core scans. Falls back to the picker when nothing is
      *  attached, since an empty run and a run with no hits look the same otherwise. */
@@ -2236,8 +2237,8 @@ export async function lorebookStudio(preferredBook = null) {
             if (name) await applyOneBook(name);
             return;
         }
-        const lists = await Promise.all(names.map(bookEntries));
-        applyEntries(`${names.length} attached ${names.length === 1 ? 'book' : 'books'}`, lists.flat());
+        await applyFrom(`${names.length} attached ${names.length === 1 ? 'book' : 'books'}`,
+            async () => (await Promise.all(names.map(bookEntries))).flat());
     };
 
     /** An applied book's result: a line saying what was matched and what was not, then one collapsible entry per hit. */
@@ -2389,8 +2390,8 @@ export async function lorebookStudio(preferredBook = null) {
         ], x, y, ctxMount());
     };
 
-    /** Re-runs the last applied book, for a setting that changes what a run would find. */
-    const rerunLab = () => { if (labRunSource) applyEntries(labRunSource.label, labRunSource.entries); };
+    /** Re-runs the last applied books, re-reading them: an edit or a setting change is what asks for this. */
+    const rerunLab = () => { if (labRunSource) applyFrom(labRunSource.label, labRunSource.load); };
 
     /** Scrolls `el` into view and rings it briefly, opening whatever it is folded inside. */
     const revealIn = el => {
