@@ -2123,21 +2123,23 @@ export async function lorebookStudio(preferredBook = null) {
         const hayBox = box('Paste any text to match against…', () => labHay, v => { labHay = v; });
         hayBox.style.flex = '2 1 0';
         const keyBox = box('Keys, comma- or newline-separated — plain, /regex/flags or ?SmartKey', () => labKeys, v => { labKeys = v; });
-        const gatePane = document.createElement('div');
-        gatePane.style.cssText = 'flex:1 1 0;display:flex;flex-direction:column;gap:4px;min-width:0;';
+        // Keys, the operator, then the secondaries it gates them by — one column, reading downward as the condition does.
+        const keyCol = document.createElement('div');
+        keyCol.style.cssText = 'flex:1 1 0;display:flex;flex-direction:column;gap:4px;min-width:0;min-height:0;';
         const logicSel = document.createElement('select'); logicSel.className = 'text_pole';
         logicSel.style.cssText = 'width:100%;margin:0;flex:0 0 auto;';
         // Core's own operator names and the sentence each completes, as the entry editor shows them. OFF is not offered: an
-        // empty pane is already off.
+        // empty secondary pane is already off.
         for (const [v, name, hint] of LOGIC_OPTS.filter(([id]) => id !== 'off')) {
             const o = document.createElement('option'); o.value = v; o.textContent = `${name} — ${hint}`; o.title = hint;
             o.selected = labLogic === v;
             logicSel.append(o);
         }
         logicSel.addEventListener('change', () => { labLogic = logicSel.value; repaint(); });
-        const secBox = box('Secondary keys — every key in the middle pane has to pass these too', () => labSec, v => { labSec = v; });
-        gatePane.append(logicSel, secBox);
-        panes.append(hayBox, keyBox, gatePane);
+        const secBox = box('Secondary keys', () => labSec, v => { labSec = v; });
+        secBox.style.cssText += 'flex:0 0 auto;height:4.4em;';
+        keyCol.append(keyBox, logicSel, secBox);
+        panes.append(hayBox, keyCol);
 
         const opts = document.createElement('div');
         opts.style.cssText = 'display:flex;gap:14px;padding:6px 8px;flex:0 0 auto;opacity:0.8;font-size:0.9em;';
