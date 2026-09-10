@@ -1959,7 +1959,7 @@ function renderDeliveryPanel(layout) {
         const e = row.item.entry;
         const el = document.createElement('div');
         el.className = 'wa-delivery-entry';
-        el.title = `${wiTooltip(row)}\n\nClick: open in the Keyword Lab · Shift-click: show the text`;
+        el.title = `${wiTooltip(row)}\n\nClick: open the Keyword Lab on this scan · Shift-click: show the text`;
         const g = document.createElement('span');
         g.className = 'wa-delivery-glyph';
         g.textContent = wiGlyph(e);
@@ -1967,8 +1967,8 @@ function renderDeliveryPanel(layout) {
         t.className = 'wa-delivery-title';
         t.textContent = wiTitleOf(e);
         el.append(g, t);
-        // Click opens the Keyword Lab on this entry, against the window WA scanned — why did this fire. Shift-click is the
-        // entry's text, which is what the row used to do on its own.
+        // Click opens the Keyword Lab on the window WA scanned, at this entry where its keys caught something. Shift-click
+        // is the entry's text, which is what the row used to do on its own.
         el.addEventListener('click', ev => {
             if (ev.shiftKey) { showEntryText(e); return; }
             lorebookStudio(e.world ?? chatBook(), { world: e.world, uid: e.uid });

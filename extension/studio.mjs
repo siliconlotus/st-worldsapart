@@ -48,8 +48,8 @@ function planUidReindex(entries, orderedUids, start, desc) {
 /**
  * Lorebook Studio (/wa-studio).
  * @param {string|null} preferredBook Opened if it still exists; else the first attached book, else nothing selected
- * @param {{world: string, uid: number|string}|null} focus An entry to open the Keyword Lab on, applied against the last
- *   scan window: the Delivery panel hands one over so a reader can see why that entry fired
+ * @param {{world: string, uid: number|string}|null} focus Open on the Keyword Lab with the last scan window applied, at
+ *   this entry if the run found it — what the Delivery panel asks for, so a reader can see what its keys caught
  */
 export async function lorebookStudio(preferredBook = null, focus = null) {
     if (!(world_names ?? []).length) { toastr.warning('No lorebooks found.', 'Worlds Apart'); return ''; }
@@ -2405,19 +2405,20 @@ export async function lorebookStudio(preferredBook = null, focus = null) {
         }).join(`\n\n${'-'.repeat(24)}\n\n`);
     };
 
-    /** Opens the Lab on one entry: the scanned window, the attached books applied to it, and that entry's block brought into
-     *  view. What the Delivery panel hands over, so "why did this fire" is one click. */
-    const focusLabOn = async ({ world, uid }) => {
+    /** Opens the Lab on the scanned window with the attached books applied, at `focus` if the run found it. A constant, a
+     *  sticky or a vector entry is not required to have a keyword hit — but nothing stops it having one, so this looks rather
+     *  than assuming, and a run without it simply opens at the top. */
+    const openLabOnScan = async focus => {
         labHay = scannedHaystack();
         labCommitted = true;
         labRun = null;
         tab = 'lab';
         renderExplorer();
         await applyAttached();
+        if (!focus) return;
         const block = [...explorer.querySelectorAll('details[data-entry-uid]')]
-            .find(d => String(d.dataset.entryUid) === String(uid) && (!world || d.dataset.entryWorld === world));
+            .find(d => String(d.dataset.entryUid) === String(focus.uid) && (!focus.world || d.dataset.entryWorld === focus.world));
         if (block) revealIn(block);
-        else toastr.info('That entry has no keyword hit in the last scan window — it came in another way.', 'Keyword Lab');
     };
 
     /** Re-runs the last applied books, re-reading them: an edit or a setting change is what asks for this. */
@@ -3077,7 +3078,7 @@ export async function lorebookStudio(preferredBook = null, focus = null) {
     else renderExplorer();
     checkOrphans();   // background; adds a nav row only if something is broken
     // After the book is open, so the Lab's run can use `data` for whichever attached book that is.
-    if (focus) focusLabOn(focus);
+    if (focus) openLabOnScan(focus);
 
     // Escape never closes the window: it swallows the <dialog>'s close and, if nothing else claimed it, drops the selection.
     root.addEventListener('keydown', ev => {
