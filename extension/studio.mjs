@@ -2071,7 +2071,9 @@ export async function lorebookStudio(preferredBook = null) {
         // The message break is a line of dashes in the pane, where it has to be typable; here it can be the rule it stands for.
         // The blank lines around it go too: the container is pre-wrap, so they would stack on top of the rule's own margins.
         const plain = t => escapeHtml(t).replace(/(?:\r?\n)*^[ \t]*-{3,}[ \t]*$(?:\r?\n)*/gm,
-            '<hr style="border:none;border-top:1px solid currentColor;opacity:0.85;margin:15px 0;">');
+            // No border and no colour: ST's own `hr` is a transparent-to-body-colour-to-transparent gradient, and setting
+            // either would flatten the taper. Only the margin and the opacity, which at 0.2 is too faint to read as a break.
+            '<hr style="margin:15px 0;opacity:0.75;">');
         const mark = (sp, t) => {
             // A negated span is what stopped a key, not what matched it: WA_RED, the same colour severity wears in the Explorer.
             const fill = sp.negated ? `color-mix(in srgb, ${WA_RED} 28%, transparent)` : ink(sp.key, 0.28);
