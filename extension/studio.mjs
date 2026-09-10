@@ -2164,18 +2164,19 @@ export async function lorebookStudio(preferredBook = null) {
     const showMarkedText = () => {
         const { keys, ink, rows, gate } = scanLab();
         const wrap = document.createElement('div');
-        wrap.style.cssText = 'text-align:left;width:100%;';
+        wrap.style.cssText = 'text-align:left;width:100%;display:flex;gap:12px;align-items:stretch;';
         const body = document.createElement('div');
-        body.style.cssText = 'white-space:pre-wrap;line-height:1.6;max-height:55vh;overflow:auto;font-size:0.95em;';
+        body.style.cssText = 'flex:1.6 1 0;white-space:pre-wrap;line-height:1.6;max-height:65vh;overflow:auto;font-size:0.95em;min-width:0;';
         body.innerHTML = markedHtml(labHay, keySpans(keys, labHay, labCase, labWhole, { matchWindow: labWindow, gate }), ink)
             || '<span style="opacity:0.6;">(no text)</span>';
         const digest = document.createElement('div');
-        digest.style.cssText = 'margin-top:10px;padding-top:8px;border-top:1px solid color-mix(in srgb, currentColor 15%, transparent);max-height:25vh;overflow:auto;';
+        digest.style.cssText = 'flex:1 1 0;max-height:65vh;overflow:auto;min-width:0;'
+            + 'padding-left:12px;border-left:1px solid color-mix(in srgb, currentColor 15%, transparent);';
         digest.innerHTML = rows.map(r => labKeyHtml(r, r.color)).join('');
         bindCollapse(digest);
         wrap.append(body, digest);
         const vp = new Popup(wrap, POPUP_TYPE.TEXT, '', { large: true, allowVerticalScrolling: true });
-        vp.dlg.style.setProperty('width', 'calc(var(--sheldWidth, 90vw) * 0.7)', 'important');
+        vp.dlg.style.setProperty('width', 'calc(var(--sheldWidth, 90vw) * 0.9)', 'important');
         vp.dlg.style.setProperty('max-width', 'calc(100dvw - 2em)', 'important');
         vp.show();
     };
