@@ -2291,7 +2291,9 @@ export async function lorebookStudio(preferredBook = null) {
         if (!book?.entries) { toastr.warning(`Could not load “${world}”.`, 'Worlds Apart'); return 0; }
         const touched = mutate(Object.values(book.entries), book);
         if (!touched) return 0;
-        if (isOpen) { save(); renderExplorer(); } else await saveWorldInfo(world, book, true);
+        // The Explorer rebuilds on its own when the tab is next opened, so rebuilding it from under the Lab would only
+        // throw away the Lab's own state to repaint something nobody is looking at.
+        if (isOpen) { save(); if (tab !== 'lab') renderExplorer(); } else await saveWorldInfo(world, book, true);
         return touched;
     };
 
@@ -2598,12 +2600,14 @@ export async function lorebookStudio(preferredBook = null) {
         out.style.cssText = 'flex:2 1 0;overflow:auto;min-width:0;min-height:0;';
         const repaint = () => {
             const { ink, rows, spans } = scanLab();
+            const digestTop = out.scrollTop;   // an edit repaints the digest, and the row acted on is wherever it was
             out.innerHTML = labRun
                 ? labRunHtml()
                 : (rows.length
                     ? rows.map(r => labKeyHtml(r, r.color)).join('')
                     : '<div style="opacity:0.6;padding:6px 0;">Keys you type on the right are matched against the text on the left.</div>');
             bindCollapse(out);
+            out.scrollTop = digestTop;
             out.querySelector('.wa-run-clear')?.addEventListener('click', () => { labRun = null; repaint(); });
             // Committed with nothing in the box would leave no way back, so an empty haystack is always the editable one.
             const reading = labCommitted && !!labHay.trim();
