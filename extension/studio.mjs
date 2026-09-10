@@ -2141,7 +2141,9 @@ export async function lorebookStudio(preferredBook = null) {
             + `<small style="opacity:0.75;">${escapeHtml(e.text.slice(0, e.start))}`
             + `<span style="color:${e.negated ? WA_RED : escapeHtml(color)};font-weight:600;">${escapeHtml(e.text.slice(e.start, e.end))}</span>`
             + `${escapeHtml(e.text.slice(e.end))}</small></div>`;
-        const seg = sg => `<div style="margin:3px 0 0 6px;${sg.matched ? '' : 'opacity:0.55;'}">`
+        // A rule between windows, not before the first: without it the branch lines of one window run into the next's.
+        const seg = (sg, i) => `<div style="margin:5px 0 0 6px;${i ? 'padding-top:5px;border-top:1px solid color-mix(in srgb, currentColor 12%, transparent);' : ''}`
+            + `${sg.matched ? '' : 'opacity:0.55;'}">`
             + `<small>${sg.leaves.map(l => `${escapeHtml(l.negated ? `-${l.term}` : l.term)} ${num(l.n)}`).join(', ')}</small>`
             + sg.excerpts.map(e => span(e, sg)).join('')
             + '</div>';
@@ -2157,7 +2159,7 @@ export async function lorebookStudio(preferredBook = null) {
         // A single-branch key reads hit by hit: the window it fell in decided nothing, so grouping by one says nothing.
         const body = oneBranch
             ? r.segments.flatMap(sg => sg.excerpts.map(e => span(e, sg))).join('')
-            : r.segments.map(seg).join('');
+            : r.segments.map((sg, i) => seg(sg, i)).join('');
         return `<details${labCollapsed.has(r.key) ? '' : ' open'} data-k="${escapeHtml(r.key)}" style="margin-bottom:8px;">`
             + `<summary style="cursor:pointer;">${chip} ${tally}</summary>${body}</details>`;
     };
