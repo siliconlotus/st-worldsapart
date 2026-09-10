@@ -2,9 +2,9 @@
 // selected book's entries on the right. DOM- and ST-coupled; the logic it stands on is the shared pure modules.
 import { saveSettingsDebounced, getRequestHeaders, characters, getCharacters } from '../../../../../script.js';
 import { getContext } from '../../../../extensions.js';
-import { getSortedEntries, loadWorldInfo, saveWorldInfo, reloadEditor, createWorldInfoEntry, duplicateWorldInfoEntry, deleteWorldInfoEntry, getFreeWorldEntryUid, deleteWIOriginalDataValue, deleteWorldInfo, updateWorldInfoList, world_names, world_info_depth, world_info_include_names, world_info_match_whole_words, world_info_case_sensitive, selected_world_info, world_info, METADATA_KEY } from '../../../../world-info.js';
+import { loadWorldInfo, saveWorldInfo, reloadEditor, createWorldInfoEntry, duplicateWorldInfoEntry, deleteWorldInfoEntry, getFreeWorldEntryUid, deleteWIOriginalDataValue, deleteWorldInfo, updateWorldInfoList, world_names, world_info_depth, world_info_include_names, world_info_match_whole_words, world_info_case_sensitive, selected_world_info, world_info, METADATA_KEY } from '../../../../world-info.js';
 import { power_user } from '../../../../power-user.js';
-import { escapeHtml } from '../../../../utils.js';
+import { escapeHtml, getCharaFilename } from '../../../../utils.js';
 import { Popup, POPUP_TYPE, POPUP_RESULT } from '../../../../popup.js';
 import { runState, settings } from './state.mjs';
 import { ensureStudioStyle, makeSortControl, renderMessageHtml, showCtxMenu, showEntryText, wiGlyph } from './ui-widgets.mjs';
@@ -2205,25 +2205,34 @@ export async function lorebookStudio(preferredBook = null) {
 
     const applyOneBook = async name => applyEntries(name, await bookEntries(name));
 
-    /** Every book attached to this chat — global, character, chat and persona lore, which is the set core scans. Falls back
-     *  to the picker when nothing is attached, since an empty run and a run with no hits look the same otherwise. */
+    /** The books ST has active for this chat, by name — global, the character's own and its extra lore, the chat's, the
+     *  persona's. Mirrors what getGlobalLore/getCharacterLore/getChatLore/getPersonaLore resolve, because those four are
+     *  private and getSortedEntries, which is exported, emits WORLDINFO_ENTRIES_LOADED as a side effect (upstream-st.md #18).
+     *  Names only: a Set drops the duplicate core also skips, and the entries are loaded the same way core loads them. */
+    const attachedBookNames = () => {
+        const ctx = getContext();
+        const names = new Set(selected_world_info ?? []);
+        const character = characters?.[ctx.characterId];
+        if (character?.data?.extensions?.world) names.add(character.data.extensions.world);
+        const file = ctx.characterId != null ? getCharaFilename(ctx.characterId) : null;
+        for (const b of (file && world_info.charLore?.find(e => e.name === file)?.extraBooks) ?? []) names.add(b);
+        const chatWorld = ctx.chatMetadata?.[METADATA_KEY];
+        if (chatWorld) names.add(chatWorld);
+        if (power_user.persona_description_lorebook) names.add(power_user.persona_description_lorebook);
+        return [...names].filter(Boolean).filter(n => world_names.includes(n));
+    };
+
+    /** Every book ST has active for this chat, which is the set core scans. Falls back to the picker when nothing is
+     *  attached, since an empty run and a run with no hits look the same otherwise. */
     const applyAttached = async () => {
-        // WA's own record of the active set, filled by its last scan — no event emitted and nothing re-read. getSortedEntries
-        // is the fallback, since attachedWorlds is empty until WA has run once in this session.
-        const known = [...runState.attachedWorlds].filter(w => world_names.includes(w));
-        if (known.length) {
-            const lists = await Promise.all(known.map(bookEntries));
-            applyEntries(`${known.length} attached ${known.length === 1 ? 'book' : 'books'}`, lists.flat());
-            return;
-        }
-        const attached = await getSortedEntries();
-        if (!attached.length) {
+        const names = attachedBookNames();
+        if (!names.length) {
             const name = await pickBook('Nothing is attached to this chat. Apply which lorebook?', true);
             if (name) await applyOneBook(name);
             return;
         }
-        const books = new Set(attached.map(e => e?.world).filter(Boolean));
-        applyEntries(`${books.size} attached ${books.size === 1 ? 'book' : 'books'}`, attached);
+        const lists = await Promise.all(names.map(bookEntries));
+        applyEntries(`${names.length} attached ${names.length === 1 ? 'book' : 'books'}`, lists.flat());
     };
 
     /** An applied book's result: a line saying what was matched and what was not, then one collapsible entry per hit. */
