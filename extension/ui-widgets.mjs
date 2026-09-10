@@ -183,9 +183,10 @@ export function showEntryText(entry) {
     vp.show();
 }
 
-/** A tag, a comment or a doctype in the source — rendered as markup rather than shown, since a preset's `<div>` block is
- *  meant to be seen. Ranges, like every other piece of markup here, so a key that matched inside one still shows it. */
-const HTML_RANGE = /<!--[\s\S]*?-->|<\/?[A-Za-z][^>]*>/g;
+/** A tag, a comment or a character entity in the source — rendered as markup rather than shown, since a preset's `<div>`
+ *  block is meant to be seen and its `&nbsp;` is meant to be a space. Ranges like every other piece of markup here, so a key
+ *  that matched inside one still shows it: matching reads `&nbsp;` as its six characters, and a hit on them must be visible. */
+const HTML_RANGE = /<!--[\s\S]*?-->|<\/?[A-Za-z][^>]*>|&(?:#\d{1,7}|#[xX][0-9a-fA-F]{1,6}|[A-Za-z][A-Za-z0-9]{1,30});/g;
 
 /** How each range's tag opens and closes. Block tags come first in the sort, so a heading wraps its quotes and emphasis. */
 const TAG_HTML = {
