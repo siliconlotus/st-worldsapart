@@ -237,7 +237,7 @@ console.log('ok   keyExcerpt: localises what countKey counted, folded-haystack d
 
 // --- a compound SmartKey excerpts one leaf per credited unit, in TEXT order, each carrying its own occurrence count
 const space = 'the Russian cosmonaut Yuri Gagarin flew; the American astronaut Neil Armstrong walked. Gagarin again.';
-const leaves = k => keyExcerpts(k, space, false, true).map(e => `${e.term}:${e.n}`);
+const leaves = k => keyExcerpts(k, space, false, true).map(e => `${e.negated ? '-' : ''}${e.term}:${e.n}`);
 eq(leaves('? (armstrong gagarin)').join(' '), 'gagarin:2 armstrong:1', 'AND: both leaves, ordered by position, not by the AST');
 eq(leaves('? (apple | gagarin | coconut)').join(' '), 'gagarin:2', 'OR: only the side that hit, and the pooled n is that side\'s own');
 eq(leaves('? (gagarin -banana)').join(' '), 'gagarin:2 -banana:0', 'NOT: a negative that never fires is named at 0');
@@ -263,9 +263,12 @@ eq(digest('? cosmonaut -astronuat', space), '? cosmonaut -astronuat:1 | cosmonau
     'a negative that never fires reads 0 — a misspelt one is invisible otherwise');
 eq(keyHits(['? cosmonaut -astronuat'], space, false, true)[0].segments[0].excerpts.length, 1,
     'only a branch that fired has a place to show');
-eq(keySpans(['? cosmonaut -astronaut'], space, false, true).length, 1,
-    'and a negated leaf is never marked in the text: a mark means a match');
+eq(keySpans(['? cosmonaut -astronaut'], space, false, true).map(sp => `${sp.term}${sp.negated ? '!' : ''}`).join(' '),
+    'cosmonaut astronaut!', 'the veto is marked too, flagged so a caller can draw it as what stopped the key');
 const breaths = 'He drew a breath.\n\nA slow breath, held.\n\nAnother breath.';
+eq(keySpans(['? breath -slow'], breaths, false, true, { matchWindow: 'paragraph' })
+    .map(sp => `${sp.term}${sp.negated ? '!' : ''}`).join(' '), 'breath slow! breath breath',
+    'a branch that hit is marked wherever it hit, including the segment the veto took');
 eq(digest('breath', breaths, { matchWindow: 'paragraph', gate: { keys: ['slow'], logic: WI_LOGIC.NOT_ANY } }),
     'breath:2 | breath 1, -slow 0 | !breath 1, -slow 1 | breath 1, -slow 0',
     'paragraph by paragraph: the one the veto took is marked dead, and says which branch took it');

@@ -402,7 +402,7 @@ const leafCount = (id, text) => countKey(String(id?.value ?? ''), text,
 
 /** Every leaf of a compound SmartKey, first occurrence each, ordered by position; `term` is the leaf and `n` its occurrences
  *  in that segment. A key whose verdict is false still reports its leaves — which branch is failing is the question a group is
- *  tuned against. A negated leaf is reported too, `term` written `-x` and `negated` set: whether the thing that vetoes the key
+ *  tuned against. A negated leaf is reported too, with `negated` set: whether the thing that vetoes the key
  *  fires at all is the same question, and a negative that never fires is invisible otherwise. It carries no span when it did
  *  not fire, and a caller marking up the text must skip it — a mark means a match. */
 function compoundExcerpts(node, text, context, limit) {
@@ -431,7 +431,7 @@ function compoundExcerpts(node, text, context, limit) {
             const n = leafCount(id, segment);
             const [ex] = n ? keyExcerpts(value, segment, !isRegex && !!id.isCaseSensitive, !isRegex && !!id.isExact, context, 1) : [];
             // No hit, no offset: sorted last, since there is no place in the text to sort it by.
-            found.push({ ...(ex ?? { at: Number.MAX_SAFE_INTEGER, to: Number.MAX_SAFE_INTEGER }), term: `-${value}`, n, negated: true });
+            found.push({ ...(ex ?? { at: Number.MAX_SAFE_INTEGER, to: Number.MAX_SAFE_INTEGER }), term: value, n, negated: true });
         }
         found.sort((a, b) => a.at - b.at);
         for (const ex of found) {
@@ -472,15 +472,15 @@ export function keySpans(keys, text, caseSensitive, wholeWords, { limit = 200, m
     const gateOf = gateNodeFor(gate, caseSensitive, wholeWords);
     const spans = (Array.isArray(keys) ? keys : [])
         .map(k => String(k ?? '').trim()).filter(Boolean)
-        .flatMap(key => liveSegments(key, segs, caseSensitive, wholeWords, gateOf(key))
+        .flatMap(key => segs
             .flatMap(sg => keyExcerpts(key, sg.text, caseSensitive, wholeWords, 0, limit, gateOf(key))
-                .filter(e => !e.negated)
-                .map(e => ({ key, term: e.term, start: e.at + sg.at, end: e.to + sg.at }))))
+                .map(e => ({ key, term: e.term, negated: !!e.negated, start: e.at + sg.at, end: e.to + sg.at }))))
+        .filter(sp => sp.end > sp.start)
         .sort((a, b) => a.start - b.start || b.end - a.end);
-    for (const { key, term, start, end } of spans) {
+    for (const { key, term, negated, start, end } of spans) {
         const last = out[out.length - 1];
-        if (last && last.end > start) last.keys.push({ key, term });
-        else out.push({ key, term, start, end, keys: [{ key, term }] });
+        if (last && last.end > start) last.keys.push({ key, term, negated });
+        else out.push({ key, term, negated, start, end, keys: [{ key, term, negated }] });
     }
     return out;
 }

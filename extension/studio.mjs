@@ -2031,9 +2031,13 @@ export async function lorebookStudio(preferredBook = null) {
         const src = String(text).normalize('NFC');
         let html = '', at = 0;
         for (const sp of spans) {
+            // A negated span is what stopped a key, not what matched it: WA_RED, the same colour severity wears in the Explorer.
+            const fill = sp.negated ? `color-mix(in srgb, ${WA_RED} 28%, transparent)` : ink(sp.key, 0.28);
+            const edge = sp.negated ? WA_RED : ink(sp.key);
+            const label = k => `${k.negated ? '\u2212 ' : ''}${k.term && k.term !== k.key ? `${k.key} \u2014 ${k.term}` : k.key}`;
             html += escapeHtml(src.slice(at, sp.start))
-                + `<span title="${escapeHtml(sp.keys.map(k => (k.term ? `${k.key} \u2014 ${k.term}` : k.key)).join('\n'))}"`
-                + ` style="background:${ink(sp.key, 0.28)};border-bottom:2px solid ${ink(sp.key)};">${escapeHtml(src.slice(sp.start, sp.end))}</span>`;
+                + `<span title="${escapeHtml(sp.keys.map(label).join('\n'))}"`
+                + ` style="background:${fill};border-bottom:2px solid ${edge};">${escapeHtml(src.slice(sp.start, sp.end))}</span>`;
             at = sp.end;
         }
         return html + escapeHtml(src.slice(at));
@@ -2085,7 +2089,7 @@ export async function lorebookStudio(preferredBook = null) {
         const seg = sg => `<div style="margin:3px 0 0 14px;${sg.matched ? '' : 'opacity:0.55;'}">`
             + `<small>${sg.leaves.map(l => `${escapeHtml(l.negated ? `-${l.term}` : l.term)} ${num(l.n)}`).join(', ')}</small>`
             + sg.excerpts.map(e => `<div style="margin-left:14px;"><small style="opacity:0.75;">${escapeHtml(e.text.slice(0, e.start))}`
-                + `<span style="color:${escapeHtml(color)};font-weight:600;">${escapeHtml(e.text.slice(e.start, e.end))}</span>`
+                + `<span style="color:${e.negated ? WA_RED : escapeHtml(color)};font-weight:600;">${escapeHtml(e.text.slice(e.start, e.end))}</span>`
                 + `${escapeHtml(e.text.slice(e.end))}</small></div>`).join('')
             + '</div>';
         return `<div style="margin-bottom:8px;">${chip} ${num(r.count)}${r.segments.map(seg).join('')}</div>`;
