@@ -2150,7 +2150,7 @@ export async function lorebookStudio(preferredBook = null) {
         .replace(/ &amp; /g, '<wbr> &amp;\u00a0')
         .replace(/ (?=[-!+(])/g, '<wbr> ');
 
-    const labKeyHtml = (r, color) => {
+    const labKeyHtml = (r, color, entry = null) => {
         const chip = `<span class="wa-kw wa-kw-wrap" style="border-color:${escapeHtml(color)};background:color-mix(in srgb, ${escapeHtml(color)} 18%, transparent);">${keyChipText(r.key)}</span>`;
         const num = n => `<span style="color:var(--SmartThemeEmColor, #d9a441);font-weight:600;">${n}</span>`;
         if (r.message) return `<div style="margin-bottom:8px;">${chip} <small style="opacity:0.75;">${escapeHtml(r.message)}</small></div>`;
@@ -2178,7 +2178,8 @@ export async function lorebookStudio(preferredBook = null) {
         const body = oneBranch
             ? r.segments.flatMap(sg => sg.excerpts.map(e => span(e, sg))).join('')
             : r.segments.map((sg, i) => seg(sg, i)).join('');
-        return `<details${labExpanded.has(r.key) ? ' open' : ''} data-k="${escapeHtml(r.key)}" style="margin-bottom:8px;">`
+        const from = entry ? ` data-uid="${escapeHtml(String(entry.uid))}" data-world="${escapeHtml(entry.world ?? '')}"` : '';
+        return `<details${labExpanded.has(r.key) ? ' open' : ''} data-k="${escapeHtml(r.key)}"${from} style="margin-bottom:8px;">`
             + `<summary style="cursor:pointer;">${chip} ${tally}</summary>${body}</details>`;
     };
 
@@ -2257,12 +2258,20 @@ export async function lorebookStudio(preferredBook = null) {
             // The book on its own line, since a run spans every attached one and two books can hold the same title.
             const from = entry.world ? `<div><small style="opacity:0.45;">${escapeHtml(entry.world)}</small></div>` : '';
             return `<details open style="margin-bottom:8px;"><summary style="cursor:pointer;">${title}${from}</summary>`
-                + `<div style="margin-left:10px;">${rows.map(r => labKeyHtml(r, labInk(Math.max(0, keyList.indexOf(r.key))))).join('')}</div></details>`;
+                + `<div style="margin-left:10px;">${rows.map(r => labKeyHtml(r, labInk(Math.max(0, keyList.indexOf(r.key))), entry)).join('')}</div></details>`;
         }).join('');
     };
 
     /** A digest line jumps to its hit in `textEl`. The offset may land inside a span that starts earlier — an overlap folds
      *  to one mark — so the mark that contains it is the target, not one that begins at it. */
+    /** Right-click a key block that came from an entry: the operations, on that entry's book. */
+    const bindKwMenu = digestEl => digestEl.addEventListener('contextmenu', ev => {
+        const block = ev.target.closest('details[data-k][data-world]');
+        if (!block) return;
+        ev.preventDefault();
+        showLabKwMenu(block.dataset.k, block.dataset.uid, block.dataset.world, ev.clientX, ev.clientY);
+    });
+
     const bindJump = (digestEl, textEl) => {
         digestEl.addEventListener('click', ev => {
             const line = ev.target.closest('[data-jump]');
@@ -2271,6 +2280,81 @@ export async function lorebookStudio(preferredBook = null) {
             const mark = [...textEl.querySelectorAll('[data-at]')].find(x => Number(x.dataset.at) <= n && n < Number(x.dataset.to));
             if (mark) revealIn(mark);
         });
+    };
+
+    /** Loads the book `world`, hands its entries to `mutate`, and saves it if anything changed. The open book is the one in
+     *  hand — mutating a fresh copy of it would be lost the next time the Explorer saves — and any other is read and written
+     *  on its own. `mutate` returns how many entries it touched. */
+    const editInBook = async (world, mutate) => {
+        const isOpen = world === selected;
+        const book = isOpen ? data : await loadWorldInfo(world);
+        if (!book?.entries) { toastr.warning(`Could not load “${world}”.`, 'Worlds Apart'); return 0; }
+        const touched = mutate(Object.values(book.entries), book);
+        if (!touched) return 0;
+        if (isOpen) { save(); renderExplorer(); } else await saveWorldInfo(world, book, true);
+        rerunLab();
+        return touched;
+    };
+
+    /** The Explorer's chip operations, scoped to the book the entry came from. No Ignore: that is the pruner's whitelist,
+     *  and this view is a list of hits rather than a verdict on a key. */
+    const showLabKwMenu = (key, uid, world, x, y) => {
+        const inThis = fn => async () => { await editInBook(world, fn); };
+        showCtxMenu([
+            {
+                label: 'Edit…',
+                fn: async () => {
+                    const next = (await Popup.show.input('Edit keyword', `Rename “${key}” in this entry:`, key))?.trim();
+                    if (!next || next === key || !keyWriteOk(next)) return;
+                    const n = await editInBook(world, es => {
+                        const e = es.find(x => String(x.uid) === String(uid));
+                        const held = e?.key?.find(k => kwNorm(k) === kwNorm(key));
+                        return held && renameKeyOn(e, held, next) ? 1 : 0;
+                    });
+                    if (n) toastr.success(`“${key}” → “${next}”.`, 'Worlds Apart');
+                },
+            },
+            {
+                label: 'Delete from this entry',
+                danger: true,
+                fn: inThis(es => {
+                    const e = es.find(x => String(x.uid) === String(uid));
+                    return e ? deleteKey([e], key) : 0;
+                }),
+            },
+            {
+                // No count in the label: knowing it means loading the book, and the confirm and the toast both report it.
+                label: `Delete from “${world}”…`,
+                danger: true,
+                fn: async () => {
+                    if (!await Popup.show.confirm(`Delete “${key}” from every entry in “${world}”?`,
+                        'Removes the keyword everywhere it appears in that book.')) return;
+                    const n = await editInBook(world, es => deleteKey(es, key));
+                    if (n) toastr.success(`Deleted “${key}” from ${n} ${n === 1 ? 'entry' : 'entries'}.`, 'Worlds Apart');
+                },
+            },
+            {
+                label: 'Replace all…',
+                fn: async () => {
+                    const next = (await Popup.show.input('Replace keyword', `Replace “${key}” across “${world}” with:`, key))?.trim();
+                    if (!next || next === key || !keyWriteOk(next)) return;
+                    const n = await editInBook(world, es => replaceKey(es, key, next));
+                    if (n) toastr.success(`Replaced “${key}” → “${next}” in ${n} ${n === 1 ? 'entry' : 'entries'}.`, 'Worlds Apart');
+                },
+            },
+            {
+                label: 'Add variant…',
+                fn: async () => {
+                    const raw = await Popup.show.input('Add variant', `Keyword to add to every entry in “${world}” keyed “${key}”:`);
+                    const term = String(raw ?? '').trim();
+                    if (!term || !keyWriteOk(term)) return;
+                    const n = await editInBook(world, es => addVariant(es, key, term));
+                    toastr[n ? 'success' : 'info'](n
+                        ? `“${term}” added to ${n} ${n === 1 ? 'entry' : 'entries'} keyed “${key}”.`
+                        : `Every entry keyed “${key}” already has “${term}”.`, 'Worlds Apart');
+                },
+            },
+        ], x, y, ctxMount());
     };
 
     /** Re-runs the last applied book, for a setting that changes what a run would find. */
@@ -2337,6 +2421,7 @@ export async function lorebookStudio(preferredBook = null) {
         bindCollapse(digest);
         bindJump(digest, body);
         bindMarkJump(body, digest);
+        bindKwMenu(digest);
         wrap.append(body, digest);
         const vp = new Popup(wrap, POPUP_TYPE.TEXT, '', { large: true, allowVerticalScrolling: true });
         vp.dlg.style.setProperty('width', 'calc(var(--sheldWidth, 90vw) * 0.9)', 'important');
@@ -2524,6 +2609,7 @@ export async function lorebookStudio(preferredBook = null) {
         // view is up, hayRead holding no marks otherwise.
         bindJump(out, hayRead);
         bindMarkJump(hayRead, out);
+        bindKwMenu(out);
         repaint();
         growKeys();   // the pane keeps its text across a tab switch, so it is not always empty on the first paint
         const body = document.createElement('div');
