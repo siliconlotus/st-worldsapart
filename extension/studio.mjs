@@ -2194,18 +2194,28 @@ export async function lorebookStudio(preferredBook = null) {
             const rows = entryHits(entry);
             if (rows.length) hits.push({ entry, rows });
         }
-        labRun = { label, entries: hits, scanned: keyed.length };
+        // In encounter order, which for the attached set is core's own: global, character, chat, persona.
+        labRun = { label, entries: hits, scanned: keyed.length, books: [...new Set(keyed.map(e => e.world).filter(Boolean))] };
         repaint();
     };
 
     /** One book by name, for the arbitrary-book path; the open one is already loaded. */
-    const applyOneBook = async name => {
-        applyEntries(name, Object.values((name === selected ? data : await loadWorldInfo(name))?.entries ?? {}));
-    };
+    const bookEntries = async name => Object.values((name === selected ? data : await loadWorldInfo(name))?.entries ?? {})
+        .map(e => ({ ...e, world: e.world ?? name }));
+
+    const applyOneBook = async name => applyEntries(name, await bookEntries(name));
 
     /** Every book attached to this chat — global, character, chat and persona lore, which is the set core scans. Falls back
      *  to the picker when nothing is attached, since an empty run and a run with no hits look the same otherwise. */
     const applyAttached = async () => {
+        // WA's own record of the active set, filled by its last scan — no event emitted and nothing re-read. getSortedEntries
+        // is the fallback, since attachedWorlds is empty until WA has run once in this session.
+        const known = [...runState.attachedWorlds].filter(w => world_names.includes(w));
+        if (known.length) {
+            const lists = await Promise.all(known.map(bookEntries));
+            applyEntries(`${known.length} attached ${known.length === 1 ? 'book' : 'books'}`, lists.flat());
+            return;
+        }
         const attached = await getSortedEntries();
         if (!attached.length) {
             const name = await pickBook('Nothing is attached to this chat. Apply which lorebook?', true);
@@ -2350,7 +2360,12 @@ export async function lorebookStudio(preferredBook = null) {
         keyBox.style.cssText += 'flex:0 0 auto;min-height:3em;max-height:8.8em;height:3em;';
         const growKeys = () => { keyBox.style.height = 'auto'; keyBox.style.height = `${keyBox.scrollHeight}px`; };
         keyBox.addEventListener('input', growKeys);
-        panes.append(hayWrap, keyBox, gateBox);
+        // What an applied run is matching with, in place of the keys pane it is not using. Dashed and unfilled like the
+        // committed haystack, since it states what ran rather than taking input.
+        const bookList = document.createElement('div'); bookList.className = 'text_pole';
+        bookList.style.cssText = 'flex:0 0 auto;margin:5px 0;max-height:6em;overflow:auto;font-size:0.9em;'
+            + 'border-style:dashed;background-color:transparent;cursor:default;height:auto;';
+        panes.append(hayWrap, keyBox, gateBox, bookList);
 
         const opts = document.createElement('div');
         opts.style.cssText = 'display:flex;gap:14px;padding:6px 8px;flex:0 0 auto;opacity:0.8;font-size:0.9em;';
@@ -2436,6 +2451,12 @@ export async function lorebookStudio(preferredBook = null) {
                 ? `Secondary keys — ${logicSel.selectedOptions[0]?.textContent.split(' \u2014 ')[0] ?? ''}, ${secN} term${secN === 1 ? '' : 's'}`
                 : 'Secondary keys';
             gateSum.style.opacity = secN ? '1' : '0.6';
+            // An applied run matches with books, not with what is typed, so the keys and the gate step aside for the list.
+            const running = !!labRun;
+            keyBox.style.display = running ? 'none' : '';
+            gateBox.style.display = running ? 'none' : '';
+            bookList.style.display = running ? '' : 'none';
+            if (running) bookList.textContent = labRun.books.join(', ') || labRun.label;
             hayToggle.className = `fa-solid ${reading ? 'fa-pen' : 'fa-check'}`;
             hayToggle.title = reading ? 'Edit the text' : 'Mark up the text';
             hayToggle.style.display = labHay.trim() ? '' : 'none';
