@@ -2285,21 +2285,76 @@ export async function lorebookStudio(preferredBook = null) {
     /** Loads the book `world`, hands its entries to `mutate`, and saves it if anything changed. The open book is the one in
      *  hand — mutating a fresh copy of it would be lost the next time the Explorer saves — and any other is read and written
      *  on its own. `mutate` returns how many entries it touched. */
-    const editInBook = async (world, mutate) => {
+    const applyToBook = async (world, mutate) => {
         const isOpen = world === selected;
         const book = isOpen ? data : await loadWorldInfo(world);
         if (!book?.entries) { toastr.warning(`Could not load “${world}”.`, 'Worlds Apart'); return 0; }
         const touched = mutate(Object.values(book.entries), book);
         if (!touched) return 0;
         if (isOpen) { save(); renderExplorer(); } else await saveWorldInfo(world, book, true);
-        rerunLab();
         return touched;
     };
 
-    /** The Explorer's chip operations, scoped to the book the entry came from. No Ignore: that is the pruner's whitelist,
-     *  and this view is a list of hits rather than a verdict on a key. */
+    /** One book, then a re-run so the digest and the text agree with what is now on disk. */
+    const editInBook = async (world, mutate) => {
+        const n = await applyToBook(world, mutate);
+        if (n) rerunLab();
+        return n;
+    };
+
+    /** Every attached book in turn, and one re-run at the end rather than one per book. */
+    const editInAttached = async mutate => {
+        let n = 0;
+        for (const world of attachedBookNames()) n += await applyToBook(world, mutate);
+        if (n) rerunLab();
+        return n;
+    };
+
+    /** The three book-wide operations at one scope. `apply(mutate)` is what makes it a book or the attached set, so the two
+     *  scopes cannot behave differently; `where` names it in every label and prompt. */
+    const bookWideOps = (key, where, apply) => [
+        {
+            label: `Delete across ${where}…`,
+            danger: true,
+            // No count in the label: knowing it means loading the books, and the confirm and the toast both report it.
+            fn: async () => {
+                if (!await Popup.show.confirm(`Delete “${key}” from every entry in ${where}?`,
+                    'Removes the keyword everywhere it appears there.')) return;
+                const n = await apply(es => deleteKey(es, key));
+                toastr[n ? 'success' : 'info'](n
+                    ? `Deleted “${key}” from ${n} ${n === 1 ? 'entry' : 'entries'}.`
+                    : `Nothing in ${where} is keyed “${key}”.`, 'Worlds Apart');
+            },
+        },
+        {
+            label: `Replace across ${where}…`,
+            fn: async () => {
+                const next = (await Popup.show.input('Replace keyword', `Replace “${key}” across ${where} with:`, key))?.trim();
+                if (!next || next === key || !keyWriteOk(next)) return;
+                const n = await apply(es => replaceKey(es, key, next));
+                toastr[n ? 'success' : 'info'](n
+                    ? `Replaced “${key}” → “${next}” in ${n} ${n === 1 ? 'entry' : 'entries'}.`
+                    : `Nothing in ${where} is keyed “${key}”.`, 'Worlds Apart');
+            },
+        },
+        {
+            label: `Add variant across ${where}…`,
+            fn: async () => {
+                const raw = await Popup.show.input('Add variant', `Keyword to add to every entry in ${where} keyed “${key}”:`);
+                const term = String(raw ?? '').trim();
+                if (!term || !keyWriteOk(term)) return;
+                const n = await apply(es => addVariant(es, key, term));
+                toastr[n ? 'success' : 'info'](n
+                    ? `“${term}” added to ${n} ${n === 1 ? 'entry' : 'entries'} keyed “${key}”.`
+                    : `Every entry in ${where} keyed “${key}” already has “${term}”.`, 'Worlds Apart');
+            },
+        },
+    ];
+
+    /** The Explorer's chip operations, scoped to the book the entry came from and to the attached set. No Ignore: that is the
+     *  pruner's whitelist, and this view is a list of hits rather than a verdict on a key. */
     const showLabKwMenu = (key, uid, world, x, y) => {
-        const inThis = fn => async () => { await editInBook(world, fn); };
+        const attached = attachedBookNames();
         showCtxMenu([
             {
                 label: 'Edit…',
@@ -2317,44 +2372,18 @@ export async function lorebookStudio(preferredBook = null) {
             {
                 label: 'Delete from this entry',
                 danger: true,
-                fn: inThis(es => {
-                    const e = es.find(x => String(x.uid) === String(uid));
-                    return e ? deleteKey([e], key) : 0;
-                }),
-            },
-            {
-                // Every book-wide label names the book, since a run spans several and the entry's is not the open one.
-                // No count: knowing it means loading the book, and the confirm and the toast both report it.
-                label: `Delete across “${world}”…`,
-                danger: true,
                 fn: async () => {
-                    if (!await Popup.show.confirm(`Delete “${key}” from every entry in “${world}”?`,
-                        'Removes the keyword everywhere it appears in that book.')) return;
-                    const n = await editInBook(world, es => deleteKey(es, key));
-                    if (n) toastr.success(`Deleted “${key}” from ${n} ${n === 1 ? 'entry' : 'entries'}.`, 'Worlds Apart');
+                    await editInBook(world, es => {
+                        const e = es.find(x => String(x.uid) === String(uid));
+                        return e ? deleteKey([e], key) : 0;
+                    });
                 },
             },
-            {
-                label: `Replace across “${world}”…`,
-                fn: async () => {
-                    const next = (await Popup.show.input('Replace keyword', `Replace “${key}” across “${world}” with:`, key))?.trim();
-                    if (!next || next === key || !keyWriteOk(next)) return;
-                    const n = await editInBook(world, es => replaceKey(es, key, next));
-                    if (n) toastr.success(`Replaced “${key}” → “${next}” in ${n} ${n === 1 ? 'entry' : 'entries'}.`, 'Worlds Apart');
-                },
-            },
-            {
-                label: `Add variant across “${world}”…`,
-                fn: async () => {
-                    const raw = await Popup.show.input('Add variant', `Keyword to add to every entry in “${world}” keyed “${key}”:`);
-                    const term = String(raw ?? '').trim();
-                    if (!term || !keyWriteOk(term)) return;
-                    const n = await editInBook(world, es => addVariant(es, key, term));
-                    toastr[n ? 'success' : 'info'](n
-                        ? `“${term}” added to ${n} ${n === 1 ? 'entry' : 'entries'} keyed “${key}”.`
-                        : `Every entry keyed “${key}” already has “${term}”.`, 'Worlds Apart');
-                },
-            },
+            ...bookWideOps(key, `“${world}”`, mutate => editInBook(world, mutate)),
+            // Only where it is a wider scope than the book above: with one attached book the two are the same operation.
+            ...(attached.length > 1
+                ? bookWideOps(key, `all ${attached.length} attached books`, editInAttached)
+                : []),
         ], x, y, ctxMount());
     };
 
