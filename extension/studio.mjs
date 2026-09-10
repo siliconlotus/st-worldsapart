@@ -14,7 +14,7 @@ import { STUDIO_PRUNE_OPTS } from './keyword-audit.mjs';
 import { buildKeySuggest, classifyLlmCand, STUDIO_SUGGEST_OPTS } from './keyword-suggest.mjs';
 import { buildAutomaton, addMessageHits, fold, validateSmartKey } from './smartkeys.mjs';
 import { findOrphanBindings } from './bindings.mjs';
-import { WI_LOGIC, dropTags, hasPromoteDecorator, isRegexKey, keyHits, keySpans, scanSegments, secondaryKeys, splitKeys, usableKeys, wholeWordAdvice, withPromote } from './matcher.mjs';
+import { WI_LOGIC, dropTags, hasPromoteDecorator, isRegexKey, keyHits, keySpans, scanSegments, textSegments, secondaryKeys, splitKeys, usableKeys, wholeWordAdvice, withPromote } from './matcher.mjs';
 
 const WA_GREEN = '#7bbf6a';   // "no prune" — a keyword the scan doesn't flag
 const WA_RED = '#e06c6c';     // severe — same value keyword-audit's severityOf hands back
@@ -2025,18 +2025,37 @@ export async function lorebookStudio(preferredBook = null) {
         return `hsl(${LAB_HUES[i % LAB_HUES.length]} ${pastel ? 45 : 80}% ${pastel ? 68 : 50}%${a < 1 ? ` / ${a}` : ''})`;
     };
 
-    /** The haystack with every span wrapped, in the colour of the first key that reached it; the rest are named in the tooltip.
-     *  Offsets are keyExcerpts', which are into the NFC form. */
-    const markedHtml = (text, spans, ink) => {
+    /** The window a span fell in, with every span in it guillemeted — a title attribute is plain text, so the hits are marked
+     *  the way markExcerptText marks them rather than coloured. A long window is clipped around the span it is for. */
+    const windowTip = (src, sp, spans, segs) => {
+        const sg = segs.find(x => sp.start >= x.at && sp.start < x.at + x.text.length) ?? { at: 0, text: src };
+        const end = sg.at + sg.text.length;
+        const wide = end - sg.at > 320;
+        const from = wide ? Math.max(sg.at, sp.start - 110) : sg.at;
+        const to = wide ? Math.min(end, sp.end + 110) : end;
+        let out = '', at = from;
+        for (const x of spans.filter(x => x.start >= from && x.end <= to)) {
+            out += `${src.slice(at, x.start)}\u00ab${src.slice(x.start, x.end)}\u00bb`;
+            at = x.end;
+        }
+        out = `${out}${src.slice(at, to)}`.replace(/\s+/g, ' ').trim();
+        return `${from > sg.at ? '\u2026' : ''}${out}${to < end ? '\u2026' : ''}`;
+    };
+
+    /** The haystack with every span wrapped, in the colour of the first key that reached it; the rest are named in the tooltip,
+     *  which also carries the window the span was matched in. Offsets are keyExcerpts', which are into the NFC form. */
+    const markedHtml = (text, spans, ink, matchWindow) => {
         const src = String(text).normalize('NFC');
+        const segs = textSegments(src, matchWindow);
         let html = '', at = 0;
         for (const sp of spans) {
             // A negated span is what stopped a key, not what matched it: WA_RED, the same colour severity wears in the Explorer.
             const fill = sp.negated ? `color-mix(in srgb, ${WA_RED} 28%, transparent)` : ink(sp.key, 0.28);
             const edge = sp.negated ? WA_RED : ink(sp.key);
             const label = k => `${k.negated ? '\u2212 ' : ''}${k.term && k.term !== k.key ? `${k.key} \u2014 ${k.term}` : k.key}`;
+            const tip = `${sp.keys.map(label).join('\n')}\n\n${windowTip(src, sp, spans, segs)}`;
             html += escapeHtml(src.slice(at, sp.start))
-                + `<span title="${escapeHtml(sp.keys.map(label).join('\n'))}"`
+                + `<span title="${escapeHtml(tip)}"`
                 + ` style="background:${fill};border-bottom:2px solid ${edge};">${escapeHtml(src.slice(sp.start, sp.end))}</span>`;
             at = sp.end;
         }
