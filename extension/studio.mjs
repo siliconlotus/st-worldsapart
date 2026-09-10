@@ -2046,6 +2046,28 @@ export async function lorebookStudio(preferredBook = null) {
         return `${from > 0 ? '\u2026' : ''}${out}${to < src.length ? '\u2026' : ''}`;
     };
 
+    /** How each range's tag opens and closes. Block tags come first in the sort, so a heading wraps its quotes and emphasis. */
+    const TAG_HTML = {
+        h: ['<strong style="font-size:1.15em;">', '</strong>'],
+        quote: ['<span style="border-left:2px solid currentColor;padding-left:7px;opacity:0.85;">', '</span>'],
+        pre: ['<code style="white-space:pre-wrap;">', '</code>'],
+        q: ['<q>', '</q>'],
+        strong: ['<strong>', '</strong>'],
+        s: ['<s>', '</s>'],
+        em: ['<em>', '</em>'],
+        code: ['<code>', '</code>'],
+    };
+    const TAG_ORDER = Object.keys(TAG_HTML);
+    const BLOCK_TAGS = new Set(['h', 'quote', 'pre', 'delim']);
+
+    /** Block markup: the whole line (or fenced block) is the range, its marker the delimiter. A list marker is left alone —
+     *  it is content, where a heading's hashes are notation. */
+    const BLOCK_MARKUP = [
+        [/^```[^\n]*\n[\s\S]*?^```[ \t]*$/gm, 'pre', m => [m[0].indexOf('\n') + 1, m[0].length - 3]],
+        [/^#{1,6}[ \t]+[^\n]*$/gm, 'h', m => [/^#{1,6}[ \t]+/.exec(m[0])[0].length, m[0].length]],
+        [/^[ \t]*>[ \t]?[^\n]*$/gm, 'quote', m => [/^[ \t]*>[ \t]?/.exec(m[0])[0].length, m[0].length]],
+    ];
+
     /** The inline markup ST renders in a message, longest delimiter first; `d` is how many characters the delimiter is. */
     const INLINE_MARKUP = [
         [/(?<![\w*])\*\*(?!\s)[^\n]+?(?<!\s)\*\*(?![\w*])/g, 'strong', 2],
@@ -2063,11 +2085,23 @@ export async function lorebookStudio(preferredBook = null) {
         for (const m of src.matchAll(/"[^"\n]*"|\u201C[^\u201D\n]*\u201D|\u00AB[^\u00BB\n]*\u00BB/g)) {
             out.push({ start: m.index, end: m.index + m[0].length, tag: 'q' });
         }
+        // Block first: its marker is hidden the same way, and its span is what the inline markup then sits inside.
+        for (const [re, tag, body] of BLOCK_MARKUP) {
+            for (const m of src.matchAll(re)) {
+                const [start, end] = [m.index, m.index + m[0].length];
+                if (out.some(r => start < r.end && r.start < end)) continue;
+                const [from, to] = body(m);
+                out.push({ start, end, tag });
+                if (from > 0) out.push({ start, end: start + from, tag: 'delim' });
+                if (to < m[0].length) out.push({ start: start + to, end, tag: 'delim' });
+            }
+        }
         // Longest delimiter first, so `**bold**` is not read as emphasis of `*bold*`.
         for (const [re, tag, d] of INLINE_MARKUP) {
             for (const m of src.matchAll(re)) {
                 const [start, end] = [m.index, m.index + m[0].length];
-                if (out.some(r => r.tag !== 'q' && start < r.end && r.start < end)) continue;   // already claimed
+                // Already claimed, unless by a block range or a quote, which an inline span sits inside rather than beside.
+                if (out.some(r => r.tag !== 'q' && !BLOCK_TAGS.has(r.tag) && start < r.end && r.start < end)) continue;
                 // The delimiters are hidden, as chat consumes them — but only while nothing matched them: a marked one is
                 // shown, or the mark would have nothing to land on.
                 out.push({ start, end, tag }, { start, end: start + d, tag: 'delim' }, { start: end - d, end, tag: 'delim' });
@@ -2107,9 +2141,10 @@ export async function lorebookStudio(preferredBook = null) {
             const sp = spans.find(x => x.start <= a && b <= x.end);
             // A delimiter nothing matched is display only, and chat does not display it.
             if (covering.some(r => r.tag === 'delim') && !sp) continue;
-            const tags = covering.filter(r => r.tag !== 'delim').map(r => r.tag).sort(x => (x === 'q' ? -1 : 1));
-            html += `${tags.map(t => `<${t}>`).join('')}${sp ? mark(sp, src.slice(a, b)) : plain(src.slice(a, b))}`
-                + `${[...tags].reverse().map(t => `</${t}>`).join('')}`;
+            const tags = covering.filter(r => r.tag !== 'delim').map(r => r.tag)
+                .sort((x, y) => TAG_ORDER.indexOf(x) - TAG_ORDER.indexOf(y));
+            html += `${tags.map(t => TAG_HTML[t][0]).join('')}${sp ? mark(sp, src.slice(a, b)) : plain(src.slice(a, b))}`
+                + `${[...tags].reverse().map(t => TAG_HTML[t][1]).join('')}`;
         }
         return html;
     };
