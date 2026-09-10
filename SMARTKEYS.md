@@ -234,9 +234,9 @@ meant. The last row applies to a bare `/regex/` key as well.
 | **warn** | a `/pattern/` with an unescaped `/` inside — vanilla SillyTavern will not run it (above) |
 
 Whether a term ever occurs in your book is a different question, and the audit answers it. The Studio's
-Keyword Lab answers it against any text you paste or load, reporting keyword hits alone: no probability
-roll, delay, cooldown, inclusion group, character or tag filter, decorator, recursion or vector
-retrieval enters it, so a key that hits there has not necessarily activated its entry.
+Keyword Lab answers it against any text you paste or load. It reports keyword hits only — probability,
+delay, cooldown, inclusion groups, character and tag filters, decorators, recursion and vector retrieval
+are not applied — so a key that hits there has not necessarily activated its entry.
 
 ---
 
@@ -251,17 +251,15 @@ is a no-op there and `hot tub` goes on matching `hot tubs`. WA applies the label
 `hot tub` matches *hot tub* and not *hot tubs*, and `? ="hot tub"` behaves identically. If you want
 the plural too, key it — or leave the box off, which is the default.
 
-**Markup is not text.** A tag or an HTML comment is blanked out before a literal key is matched, so
-`size` does not fire on `<div style="font-size:13px">` and `div` does not fire on the tag that wrote
-it. It is what the author is saying that a key is matched against, not how a preset drew it. A
-`/regex/` key is the opt-in and sees the raw text, tags and all — so `/font-size/` finds the
-attribute, and that is the only way to reach one. SillyTavern core matches inside tags.
+**Tags and HTML comments are blanked out before a literal key is matched.** `size` does not match
+`<div style="font-size:13px">`, and `div` does not match the tag itself. A `/regex/` key matches the raw
+text instead, so `/font-size/` finds the attribute — that is the only way to reach one. SillyTavern core
+matches inside tags.
 
-**Block elements end a match window**, like a blank line. A preset that writes chat bubbles or a
-tracker panel as `<div>`s is writing one unit per element, so a conjunction cannot span two of them at
-the default *Paragraph* setting — `? apple banana` needs both inside the same bubble. Inline elements
-(`<b>`, `<em>`, `<span>`) are inside a thought and end nothing, and `<br>` is a line break rather than
-an end.
+**A block element's open or close ends a match window**, as a blank line does. So at the default
+*Paragraph* setting, `? apple banana` needs both terms inside the same `<div>`: a preset that writes chat
+bubbles or a tracker panel as `<div>`s gives each one its own window. `<b>`, `<em>`, `<span>` and `<br>`
+do not end one.
 
 **What counts as *inside* a word is the Word boundary setting**, in the WA panel:
 

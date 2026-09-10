@@ -185,10 +185,8 @@ concatenating, not an evaluator mode: `scanWindow` returns segments and `scan` i
 
 - Uniform across every matching rule — SmartKey conjunctions, selective logic, all of it.
   `keysecondary` inherits the scope from `keywordScore`'s per-segment loop.
-- **A block element's edge is a paragraph break**, since a paragraph is one unit and a block element is where
-  markup carries one: a preset writing bubbles as `<div>`s writes units, and a blank line is the prose form of
-  the same thing. `BLOCK_TAGS` names them; an inline element is inside a thought and `br` is a line break
-  rather than an end. The cut is zero-width, so the tag stays in the text a key matches against.
+- **A block element's open or close ends a paragraph**, as a blank line does. `BLOCK_TAGS` lists them; inline
+  elements and `br` do not. The cut is zero-width, so the tag stays in the text and a key can still match it.
 - Both signs scoped: a negation is a segment-local veto.
 - Primary keys are unaffected at any setting except an anchored regex: `^` and `$` are
   segment-relative, and `/m` is the setting-independent form.
@@ -230,29 +228,24 @@ with its content from every message before WA reads it — `matcher.mjs` `dropTa
 
 ### Witness spans
 
-Where a key landed, for a caller marking up the text it matched. `keyExcerpts` answers for a compound key
-as well as a lone `TERM` or `REGEX`; `keySpans` gives offsets instead of excerpts, and `keyHits` gives the
-per-window report the Keyword Lab draws.
+Where a key landed. `keyExcerpts` answers for a compound key as well as a lone `TERM` or `REGEX`;
+`keySpans` returns offsets instead of excerpts; `keyHits` returns the per-window report.
 
-- A key's spans are its leaves, walked off the AST rather than collected inside `evaluate`: the units
-  `evaluate` returns are gated on the verdict, and a key that failed is exactly when a reader needs to
-  see which branch did fire.
-- **A negated leaf is reported too**, flagged rather than omitted. Whether the term that vetoes a key
-  fires at all is the same tuning question, and a misspelt negative is invisible otherwise. It carries no
-  span when it did not fire, and a caller marking text must draw it as a veto, not a match.
-- **A veto's count is over the whole text, not the window it fired in.** A veto only fires in the windows
-  the key failed in, and those are the windows the key's own branches are not reported from.
-- **The match window is the unit.** A window with no positive branch is not one the key is decided in,
-  whatever its negatives do, so nothing is reported or marked there.
-- The display takes occurrences and ignores weight; per-leaf counts come from the leaf's own count, and
-  the digest shows one span per branch per window where the marked text shows every occurrence.
-- Overlapping spans fold to one (`mergeSpans`), at the extent of the one that starts first and naming
-  every key that reached it: a span cannot nest in markup. A caller marking with more than one flag set —
-  an entry at a time — merges the union through it rather than folding per call.
-- Offsets are into the NFC form of the text, which is what a caller must slice by.
+- Spans are the AST's leaves, walked directly, **not** `evaluate`'s units: those are gated on the verdict,
+  so a key that failed would report nothing.
+- **A negated leaf is reported**, with `negated` set. At count 0 it carries no offsets — that is the
+  reading for a negative that can never fire.
+- **A negated leaf's count is over the whole text**, not per window: it only fires in the windows the key
+  failed in, which are the windows the key's own branches are not reported from.
+- **A window with no positive branch is skipped**, whatever its negatives count.
+- Counts are occurrences, not weight. `keyHits` gives one excerpt per branch per window, except for a key
+  that is a single positive branch, which gives every occurrence.
+- `mergeSpans` folds overlapping spans to one at the first one's extent, listing the rest in `keys`; a
+  caller producing spans in several passes merges the union once, not per pass.
+- Offsets index the NFC form of the text.
 
-**Unimplemented, and separable:** proximity (`(…)~N`), whose classes these spans are what would tell
-apart, and merging two overlapping context windows into one excerpt with both spans marked.
+**Unimplemented:** proximity (`(…)~N`), which these spans would display, and merging two overlapping
+context windows into one excerpt carrying both.
 
 ---
 
@@ -528,13 +521,11 @@ core's intent, not to its bugs.
   directions. The documented contract is preserved exactly — `king` matches "long live the king" and
   not "it's not to my liking" under core, permissive and strict alike. Every divergence lives in
   territory core never described.
-- **Markup is masked for every literal matcher.** `maskMarkup` blanks a tag or an HTML comment to spaces
-  — length-preserving, so every offset a caller marks or excerpts by still lands — before `foldedHay` and
-  before the Aho-Corasick prescan, which have to agree on what the haystack is. A `/regex/` key, and a
-  SmartKey's REGEX leaf, see the raw text: a pattern is the opt-in for someone who means the markup.
-  Core matches inside tags, so `size` fires on `font-size` there and not here. The rule is that a key is
-  matched against what the author is saying, not against how a preset drew it — the same argument as a
-  block element ending a window.
+- **Markup is masked for every literal matcher.** `maskMarkup` replaces a tag or an HTML comment with
+  spaces, one per character, before `foldedHay` and before the Aho-Corasick prescan — both, or the prescan
+  and the walk disagree on the haystack. Length-preserving, so excerpt and span offsets still index the
+  source. `/regex/` keys and a SmartKey's REGEX leaf match the raw text, which is the only route to a tag.
+  Core matches inside tags: `size` counts 1 on `font-size` there and 0 here.
 - **The boundary class** (`wordChar()`) against core's `\W`, which diverges both ways. Fixes
   `upstream-st.md` #1 — core's whole-word test is ASCII-only.
 - **A scanned inject is bounded by the window it was placed in.** Core appends every `scan: true`
@@ -801,10 +792,9 @@ Ordered by whether a user can see the difference.
 1. **Recursion scoring** — buffer scoring plus trigger-depth weighting, one change (*Stage 3*). Ships
    on reasoning rather than evidence: `world_info_recursive` is off here and no book in the corpus
    exercises it, so it waits on a recursion-using book.
-2. **Proximity** (`(…)~N`) — witness spans shipped without it, and they are what tells a proximity key's
-   classes apart, so the display half of the pair is no longer in the way.
-3. **`?` and `/re/` keys in `scanChats`**, so a chat-rate flag can see them: the Lab reports them against
-   any text, but the audit's chat evidence still only counts literals.
+2. **Proximity** (`(…)~N`). Witness spans shipped, so the display it needs exists.
+3. **`?` and `/re/` keys in `scanChats`**, so a chat-rate flag can see them; the audit's chat evidence
+   counts literals only.
 4. **`chat common` as a raising flag** — `KEY_CHAT_COMMON` can only confirm another flag. It needs the
    structural exclusion (constant/sticky) decided and the 20% re-read against what survives.
 5. **Key-side variant expansion**: hyphen ↔ space, since compounds are written both ways and prose
@@ -825,10 +815,9 @@ Ordered by whether a user can see the difference.
    Essentially nothing on disk depends on the current reading (K12). Until it lands, a bare `::N` or
    `^N` term is a silently dead key of the same class as `~N`.
 10. **A firing-rate diagnostic for loose reference keys.** Reference entries are never cut, so a key
-    that fires too easily costs budget on every turn it wins and nothing warns anybody. The Lab answers
-    it for a chat a reader loads by hand — apply the attached books to the scan window and read the
-    counts — so what is left is the standing per-entry rate, beside the keyword audit. Not blocking: an
-    over-firing reference entry is a budget cost, where a wrongly cut one is missing material.
+    that fires too easily costs budget on every turn it wins and nothing warns anybody. The Lab answers it
+    for one text at a time; what is missing is the standing per-entry rate, beside the keyword audit. Not
+    blocking: an over-firing reference entry is a budget cost, where a wrongly cut one is missing material.
 11. **A signal's within-scene SD varies by book**, and the two books `keys` costs are its extremes
     (F45). Standardisation divides by the scene's own SD, so a near-constant column has its few small
     differences amplified into large z against a slope fitted on other books. No use proposed; it is a
