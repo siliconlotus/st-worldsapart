@@ -1949,18 +1949,18 @@ function renderDeliveryPanel(layout) {
     deliveryTrigger.dataset.count = String(layout.length);
     deliveryPanel.innerHTML = '';
     // One control for the whole delivery, since the Lab's run reports every entry whose keys caught something in the window.
+    // Last, not first: the panel opens upward from its icon, so the bottom of the list is the end nearest the pointer.
     const lab = document.createElement('div');
     lab.className = 'wa-delivery-entry';
     lab.title = 'Open the Keyword Lab on the window this scan read, with the attached books applied';
     lab.innerHTML = '<span class="wa-delivery-glyph fa-solid fa-flask"></span>'
         + '<span class="wa-delivery-title">Open the Keyword Lab</span>';
     lab.addEventListener('click', () => lorebookStudio(chatBook(), { lab: true }));
-    deliveryPanel.append(lab);
     if (!layout.length) {
         const empty = document.createElement('div');
         empty.className = 'wa-delivery-empty';
         empty.textContent = 'Nothing delivered';
-        deliveryPanel.append(empty);
+        deliveryPanel.append(empty, lab);
         return;
     }
     for (const row of layout) {
@@ -1983,6 +1983,7 @@ function renderDeliveryPanel(layout) {
         });
         deliveryPanel.append(el);
     }
+    deliveryPanel.append(lab);
 }
 
 let initialized = false;
