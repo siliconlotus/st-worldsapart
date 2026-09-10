@@ -2323,8 +2323,9 @@ export async function lorebookStudio(preferredBook = null) {
                 }),
             },
             {
-                // No count in the label: knowing it means loading the book, and the confirm and the toast both report it.
-                label: `Delete from “${world}”…`,
+                // Every book-wide label names the book, since a run spans several and the entry's is not the open one.
+                // No count: knowing it means loading the book, and the confirm and the toast both report it.
+                label: `Delete across “${world}”…`,
                 danger: true,
                 fn: async () => {
                     if (!await Popup.show.confirm(`Delete “${key}” from every entry in “${world}”?`,
@@ -2334,7 +2335,7 @@ export async function lorebookStudio(preferredBook = null) {
                 },
             },
             {
-                label: 'Replace all…',
+                label: `Replace across “${world}”…`,
                 fn: async () => {
                     const next = (await Popup.show.input('Replace keyword', `Replace “${key}” across “${world}” with:`, key))?.trim();
                     if (!next || next === key || !keyWriteOk(next)) return;
@@ -2343,7 +2344,7 @@ export async function lorebookStudio(preferredBook = null) {
                 },
             },
             {
-                label: 'Add variant…',
+                label: `Add variant across “${world}”…`,
                 fn: async () => {
                     const raw = await Popup.show.input('Add variant', `Keyword to add to every entry in “${world}” keyed “${key}”:`);
                     const term = String(raw ?? '').trim();
