@@ -2049,18 +2049,21 @@ export async function lorebookStudio(preferredBook = null) {
      *  Offsets are keyExcerpts', which are into the NFC form. */
     const markedHtml = (text, spans, ink) => {
         const src = String(text).normalize('NFC');
+        // The message break is a line of dashes in the pane, where it has to be typable; here it can be the rule it stands for.
+        const plain = t => escapeHtml(t).replace(/^[ \t]*-{3,}[ \t]*$/gm,
+            '<hr style="border:none;border-top:1px solid color-mix(in srgb, currentColor 30%, transparent);margin:8px 0;">');
         let html = '', at = 0;
         for (const sp of spans) {
             // A negated span is what stopped a key, not what matched it: WA_RED, the same colour severity wears in the Explorer.
             const fill = sp.negated ? `color-mix(in srgb, ${WA_RED} 28%, transparent)` : ink(sp.key, 0.28);
             const edge = sp.negated ? WA_RED : ink(sp.key);
             const label = k => `${k.negated ? '\u2212 ' : ''}${k.term && k.term !== k.key ? `${k.key} \u2014 ${k.term}` : k.key}`;
-            html += escapeHtml(src.slice(at, sp.start))
+            html += plain(src.slice(at, sp.start))
                 + `<span title="${escapeHtml(sp.keys.map(label).join('\n'))}"`
                 + ` style="background:${fill};border-bottom:2px solid ${edge};">${escapeHtml(src.slice(sp.start, sp.end))}</span>`;
             at = sp.end;
         }
-        return html + escapeHtml(src.slice(at));
+        return html + plain(src.slice(at));
     };
 
     let labHay = '', labKeys = '';
