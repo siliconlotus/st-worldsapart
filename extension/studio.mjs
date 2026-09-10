@@ -14,7 +14,7 @@ import { STUDIO_PRUNE_OPTS } from './keyword-audit.mjs';
 import { buildKeySuggest, classifyLlmCand, STUDIO_SUGGEST_OPTS } from './keyword-suggest.mjs';
 import { buildAutomaton, addMessageHits, fold, validateSmartKey } from './smartkeys.mjs';
 import { findOrphanBindings } from './bindings.mjs';
-import { WI_LOGIC, dropTags, hasPromoteDecorator, isRegexKey, keyHits, keySpans, scanSegments, secondaryKeys, splitKeys, usableKeys, wholeWordAdvice, withPromote } from './matcher.mjs';
+import { WI_LOGIC, dropTags, hasPromoteDecorator, isRegexKey, keyHits, keySpans, mergeSpans, scanSegments, secondaryKeys, splitKeys, usableKeys, wholeWordAdvice, withPromote } from './matcher.mjs';
 
 const WA_GREEN = '#7bbf6a';   // "no prune" — a keyword the scan doesn't flag
 const WA_RED = '#e06c6c';     // severe — same value keyword-audit's severityOf hands back
@@ -2069,8 +2069,8 @@ export async function lorebookStudio(preferredBook = null) {
 
     /** The Lab's mark: its key's colour, or WA_RED for a span that vetoed one rather than matching it. */
     const labMark = ink => (sp, text) => {
-        const fill = sp.negated ? `color-mix(in srgb, ${WA_RED} 40%, transparent)` : ink(sp.key, 0.4);
-        const edge = sp.negated ? WA_RED : ink(sp.key);
+        const fill = sp.negated ? `color-mix(in srgb, ${WA_RED} 40%, transparent)` : ink(sp, 0.4);
+        const edge = sp.negated ? WA_RED : ink(sp);
         const label = k => `${k.negated ? '\u2212 ' : ''}${k.term && k.term !== k.key ? `${k.key} \u2014 ${k.term}` : k.key}`;
         // An outline, not just a wash: a preset's GFX block sets its own background, and 28% of a hue over #121212 is
         // invisible. The outline is opaque and does not affect layout, so it reads over anything the text sits on.
@@ -2288,29 +2288,41 @@ export async function lorebookStudio(preferredBook = null) {
 
     /** The rows and the colour they share with the marks, from whatever the panes hold now. */
     const scanLab = () => {
+        // An applied run marks with the entries it ran, coloured by entry, not with the keys pane it is not using.
+        if (labRun) {
+            const spans = mergeSpans(labRun.entries.flatMap(({ entry }, i) => {
+                const sec = entry.selective ? secondaryKeys(entry) : [];
+                return keySpans(usableKeys(entry.key), labHay,
+                    entry.caseSensitive ?? world_info_case_sensitive, entry.matchWholeWords ?? world_info_match_whole_words,
+                    {
+                        matchWindow: labWindow,
+                        gate: sec.length ? { keys: sec, logic: Number(entry.selectiveLogic ?? WI_LOGIC.AND_ANY) } : undefined,
+                    }).map(sp => ({ ...sp, entry: i, key: wiTitleOf(entry) }));
+            }));
+            return { keys: [], ink: (sp, a) => labInk(sp.entry ?? 0, a), rows: [], spans };
+        }
         const keys = splitKeys(labKeys);
-        const ink = (key, a) => labInk(Math.max(0, keys.indexOf(key)), a);
+        const ink = (sp, a) => labInk(Math.max(0, keys.indexOf(sp.key)), a);
         const gate = { keys: splitKeys(labSec), logic: Number(labLogic) };
         const rows = keyHits(keys, labHay, labCase, labWhole, { context: 30, matchWindow: labWindow, gate });
-        for (const r of rows) r.color = ink(r.key);
-        return { keys, ink, rows, gate };
+        for (const r of rows) r.color = ink({ key: r.key });
+        return { keys, ink, rows, gate, spans: keySpans(keys, labHay, labCase, labWhole, { matchWindow: labWindow, gate }) };
     };
 
     /** The haystack at full width with every match marked, and the digest under it. The tab keeps only the digest: the
      *  marked text needs the room, and the pane above it already shows the same characters unmarked. */
     const showMarkedText = () => {
-        const { keys, ink, rows, gate } = scanLab();
+        const { ink, rows, spans } = scanLab();
         const wrap = document.createElement('div');
         wrap.style.cssText = 'text-align:left;width:100%;display:flex;gap:12px;align-items:stretch;';
         const body = document.createElement('div');
         body.className = 'wa-marked';
         body.style.cssText = 'flex:1.6 1 0;white-space:pre-wrap;line-height:1.6;max-height:78vh;overflow:auto;font-size:0.95em;min-width:0;';
-        body.innerHTML = markedHtml(labHay, keySpans(keys, labHay, labCase, labWhole, { matchWindow: labWindow, gate }), ink)
-            || '<span style="opacity:0.6;">(no text)</span>';
+        body.innerHTML = markedHtml(labHay, spans, ink) || '<span style="opacity:0.6;">(no text)</span>';
         const digest = document.createElement('div');
         digest.style.cssText = 'flex:1 1 0;max-height:78vh;overflow:auto;min-width:0;'
             + 'padding-left:12px;border-left:1px solid color-mix(in srgb, currentColor 15%, transparent);';
-        digest.innerHTML = rows.map(r => labKeyHtml(r, r.color)).join('');
+        digest.innerHTML = labRun ? labRunHtml() : rows.map(r => labKeyHtml(r, r.color)).join('');
         bindCollapse(digest);
         bindJump(digest, body);
         wrap.append(body, digest);
@@ -2457,7 +2469,7 @@ export async function lorebookStudio(preferredBook = null) {
         const out = document.createElement('div');
         out.style.cssText = 'flex:2 1 0;overflow:auto;min-width:0;min-height:0;';
         const repaint = () => {
-            const { keys, ink, rows, gate } = scanLab();
+            const { ink, rows, spans } = scanLab();
             out.innerHTML = labRun
                 ? labRunHtml()
                 : (rows.length
@@ -2489,7 +2501,7 @@ export async function lorebookStudio(preferredBook = null) {
             srcToggle.title = labShowMarkup ? 'Hide the markup again' : 'Show every tag, entity and marker in the text';
             if (reading) {
                 const top = hayRead.scrollTop;
-                hayRead.innerHTML = markedHtml(labHay, keySpans(keys, labHay, labCase, labWhole, { matchWindow: labWindow, gate }), ink);
+                hayRead.innerHTML = markedHtml(labHay, spans, ink);
                 hayRead.scrollTop = top;
             }
         };

@@ -500,8 +500,20 @@ const liveSegments = (key, segs, caseSensitive, wholeWords, node = null) => {
     return live.length ? live : segs;
 };
 
-export function keySpans(keys, text, caseSensitive, wholeWords, { limit = 200, matchWindow = 'scan', gate } = {}) {
+/** Overlapping spans folded into one each, in source order: a span cannot nest in the markup, so the first to start keeps
+ *  its extent and every span that reached it is listed in `keys`. Callers that mark with more than one flag set — an entry
+ *  at a time, say — merge their results through this rather than folding twice. */
+export function mergeSpans(spans) {
     const out = [];
+    for (const sp of [...spans].sort((a, b) => a.start - b.start || b.end - a.end)) {
+        const last = out[out.length - 1];
+        if (last && last.end > sp.start) last.keys.push(sp);
+        else out.push({ ...sp, keys: [sp] });
+    }
+    return out;
+}
+
+export function keySpans(keys, text, caseSensitive, wholeWords, { limit = 200, matchWindow = 'scan', gate } = {}) {
     const segs = textSegments(text, matchWindow);
     const gateOf = gateNodeFor(gate, caseSensitive, wholeWords);
     const spans = (Array.isArray(keys) ? keys : [])
@@ -515,13 +527,8 @@ export function keySpans(keys, text, caseSensitive, wholeWords, { limit = 200, m
                 return found.some(e => !e.negated) ? found : [];
             });
         })
-        .sort((a, b) => a.start - b.start || b.end - a.end);
-    for (const { key, term, negated, start, end } of spans) {
-        const last = out[out.length - 1];
-        if (last && last.end > start) last.keys.push({ key, term, negated });
-        else out.push({ key, term, negated, start, end, keys: [{ key, term, negated }] });
-    }
-    return out;
+        ;
+    return mergeSpans(spans);
 }
 
 /** What each of `keys` did to `text`, grouped the way it was matched: one entry per key, and inside it one entry per segment

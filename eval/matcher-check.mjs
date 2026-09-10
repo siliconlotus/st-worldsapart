@@ -1,6 +1,6 @@
 // WA's own matcher semantics, which core has no opinion about: SmartKeys, scoring units, the saturation curve, key refusals, excerpts.
 // A claim that cites core as the authority belongs in core-matcher-check.mjs.
-import { countKey, dropTags, keyExcerpts, keyHits, keySpans, splitKeys, textSegments, keywordScore as rankKeywordScore, markExcerptText, repeatCurveOf, secondaryKeys, usableKeys, usedMatchSources, withMatchSources, WI_LOGIC } from '../extension/matcher.mjs';
+import { countKey, dropTags, keyExcerpts, keyHits, keySpans, mergeSpans, splitKeys, textSegments, keywordScore as rankKeywordScore, markExcerptText, repeatCurveOf, secondaryKeys, usableKeys, usedMatchSources, withMatchSources, WI_LOGIC } from '../extension/matcher.mjs';
 import { validateSmartKey } from '../extension/smartkeys.mjs';
 import { eq } from './metrics.mjs';
 
@@ -379,6 +379,10 @@ eq(spans[1].keys.map(k => k.term ?? k.key).join(' + '), 'neil armstrong + armstr
 eq(space.slice(spans[1].start, spans[1].end), 'Neil Armstrong', 'the offsets index the text itself, not an excerpt');
 eq(keySpans(['? (armstrong gagarin)'], space, false, true).map(sp => `${sp.term}@${sp.start}`).join(' '),
     'gagarin@27 armstrong@69 gagarin@87', 'a compound names the leaf that produced each span, at every occurrence');
+eq(mergeSpans([{ start: 5, end: 9, key: 'b' }, { start: 0, end: 7, key: 'a' }]).map(sp => `${sp.key}@${sp.start}-${sp.end}`).join(),
+    'a@0-7', 'mergeSpans folds an overlap into the span that starts first, whatever order they arrive in');
+eq(mergeSpans([{ start: 5, end: 9, key: 'b' }, { start: 0, end: 7, key: 'a' }])[0].keys.map(k => k.key).join('+'), 'a+b',
+    'and lists both, so a caller marking one flag set at a time can merge them');
 console.log('ok   keySpans: source offsets for marking the haystack, ordered and disjoint');
 
 
