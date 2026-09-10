@@ -275,6 +275,10 @@ export function renderMessageHtml(text, { spans = [], markSpan = null, showMarku
     const cuts = [...new Set([0, src.length, ...spans.flatMap(sp => [sp.start, sp.end]), ...prose.flatMap(r => [r.start, r.end])])]
         .sort((a, b) => a - b);
     let html = '';
+    // One <code> per revealed range, not per piece: ST's `code` carries a border and 0 3px, so a range cut into three around
+    // a mark would pay for all of it three times and read as spaced-out text.
+    let codeOpen = null;
+    const closeCode = () => { if (codeOpen) { html += '</code>'; codeOpen = null; } };
     for (let i = 0; i + 1 < cuts.length; i++) {
         const [a, b] = [cuts[i], cuts[i + 1]];
         if (a >= b) continue;
@@ -287,17 +291,19 @@ export function renderMessageHtml(text, { spans = [], markSpan = null, showMarku
         // into an attribute — or, for a comment, into markup that displays nothing at all.
         const asMarkup = covering.find(r => r.tag === 'html');
         if (asMarkup) {
-            // Revealed, it is source rather than prose, so it wears <code>: adjacent pieces of one range run together.
-            html += revealed.has(asMarkup)
-                ? `<code>${sp ? markSpan(sp, src.slice(a, b)) : escapeHtml(src.slice(a, b))}</code>`
-                : src.slice(a, b);
+            if (!revealed.has(asMarkup)) { closeCode(); html += src.slice(a, b); continue; }
+            // Revealed, it is source rather than prose, so it wears <code> — one element spanning the whole of it.
+            if (codeOpen !== asMarkup) { closeCode(); html += '<code>'; codeOpen = asMarkup; }
+            html += sp ? markSpan(sp, src.slice(a, b)) : escapeHtml(src.slice(a, b));
             continue;
         }
+        closeCode();
         const tags = covering.filter(r => r.tag !== 'delim').map(r => r.tag)
             .sort((x, y) => TAG_ORDER.indexOf(x) - TAG_ORDER.indexOf(y));
         html += `${tags.map(t => TAG_HTML[t][0]).join('')}${sp ? markSpan(sp, src.slice(a, b)) : plain(src.slice(a, b))}`
             + `${[...tags].reverse().map(t => TAG_HTML[t][1]).join('')}`;
     }
+    closeCode();
     // A whitelist, not a blacklist, and ST's own: what a message may contain is what the Lab may show. Our own attributes
     // are added back, since the marks are the point.
     return DOMPurify.sanitize(html, { MESSAGE_SANITIZE: true, ADD_ATTR: ['data-at', 'data-to'] });
