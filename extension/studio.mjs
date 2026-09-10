@@ -2239,16 +2239,14 @@ export async function lorebookStudio(preferredBook = null) {
 
     /** An applied book's result: a line saying what was matched and what was not, then one collapsible entry per hit. */
     const labRunHtml = () => {
-        const { label, entries, scanned } = labRun;
-        const head = `<div style="margin-bottom:8px;"><b>${escapeHtml(label)}</b>`
-            + `<small style="opacity:0.6;"> — ${entries.length} of ${scanned} ${scanned === 1 ? 'entry' : 'entries'} on keys alone</small>`
+        const { label, entries, scanned, books } = labRun;
+        const where = books.length > 1 ? `${books.length} books` : (books[0] ?? label);
+        const head = `<div style="margin-bottom:8px;"><b>${entries.length}/${scanned}</b>`
+            + `<small style="opacity:0.6;"> ${scanned === 1 ? 'entry' : 'entries'} in ${escapeHtml(where)}</small>`
             + ' <i class="fa-solid fa-xmark wa-run-clear" title="Back to the typed keys" style="cursor:pointer;opacity:0.6;"></i></div>';
-        // The scanned count is what separates "no hits" from "nothing ran", which are otherwise the same empty pane.
-        if (!entries.length) {
-            return `${head}<div style="opacity:0.6;">${scanned
-                ? `No key in those ${scanned} entries matches this text.`
-                : 'None of those entries has a key to match with.'}</div>`;
-        }
+        // Nothing keyed at all is a different answer from nothing matching, and 0/0 does not say which.
+        if (!scanned) return `${head}<div style="opacity:0.6;">No entry there has a key to match with.</div>`;
+        if (!entries.length) return head;
         return head + entries.map(({ entry, rows }, i) => {
             const color = labInk(i);
             const title = `<span class="wa-kw" style="border-color:${escapeHtml(color)};background:color-mix(in srgb, ${escapeHtml(color)} 18%, transparent);">${escapeHtml(wiTitleOf(entry))}</span>`;
