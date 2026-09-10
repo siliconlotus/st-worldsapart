@@ -2,7 +2,7 @@
 // selected book's entries on the right. DOM- and ST-coupled; the logic it stands on is the shared pure modules.
 import { saveSettingsDebounced, getRequestHeaders, characters, getCharacters } from '../../../../../script.js';
 import { getContext } from '../../../../extensions.js';
-import { loadWorldInfo, saveWorldInfo, reloadEditor, createWorldInfoEntry, duplicateWorldInfoEntry, deleteWorldInfoEntry, getFreeWorldEntryUid, deleteWIOriginalDataValue, deleteWorldInfo, updateWorldInfoList, world_names, world_info_depth, world_info_include_names, world_info_match_whole_words, world_info_case_sensitive, selected_world_info, world_info, METADATA_KEY } from '../../../../world-info.js';
+import { getSortedEntries, loadWorldInfo, saveWorldInfo, reloadEditor, createWorldInfoEntry, duplicateWorldInfoEntry, deleteWorldInfoEntry, getFreeWorldEntryUid, deleteWIOriginalDataValue, deleteWorldInfo, updateWorldInfoList, world_names, world_info_depth, world_info_include_names, world_info_match_whole_words, world_info_case_sensitive, selected_world_info, world_info, METADATA_KEY } from '../../../../world-info.js';
 import { power_user } from '../../../../power-user.js';
 import { escapeHtml } from '../../../../utils.js';
 import { Popup, POPUP_TYPE, POPUP_RESULT } from '../../../../popup.js';
@@ -1171,13 +1171,17 @@ export async function lorebookStudio(preferredBook = null) {
         save(); suggest = null; if (scan) rebuildScan(); sugg.delete(e.uid); rowEls.delete(e.uid); renderExplorer();
     };
     // Picks a target lorebook (any but the open one); null = cancelled.
-    const pickBook = async prompt => {
-        const others = [...world_names].filter(n => n !== selected).sort((a, b) => a.localeCompare(b));
+    // `withSelected` for a picker that acts on a book rather than moving something into one: there the open book is a candidate.
+    const pickBook = async (prompt, withSelected = false) => {
+        const others = [...world_names].filter(n => withSelected || n !== selected).sort((a, b) => a.localeCompare(b));
         if (!others.length) { toastr.info('No other lorebook to target.', 'Worlds Apart'); return null; }
         const wrap = document.createElement('div');
         const lbl = document.createElement('div'); lbl.textContent = prompt; lbl.style.marginBottom = '6px';
         const sel = document.createElement('select'); sel.className = 'text_pole'; sel.style.width = '100%';
-        for (const n of others) { const o = document.createElement('option'); o.value = n; o.textContent = n; sel.append(o); }
+        for (const n of others) {
+            const o = document.createElement('option'); o.value = n; o.textContent = n; o.selected = n === selected;
+            sel.append(o);
+        }
         wrap.append(lbl, sel);
         const p = new Popup(wrap, POPUP_TYPE.CONFIRM, '', { okButton: 'OK', cancelButton: 'Cancel' });
         return (await p.show()) === POPUP_RESULT.AFFIRMATIVE ? sel.value : null;
@@ -2168,40 +2172,68 @@ export async function lorebookStudio(preferredBook = null) {
         d.addEventListener('toggle', () => (d.open ? labCollapsed.delete(d.dataset.k) : labCollapsed.add(d.dataset.k)));
     });
 
-    /** Which of `book`'s entries the haystack would activate on keys alone, and on what. Disabled entries are out, as core
-     *  has them; every other gate core applies — probability, inclusion groups, delay, cooldown, character and tag filters,
-     *  decorators, recursion — is not modelled here, so this is the keyword half of activation and not a prediction. */
-    const applyBook = async name => {
-        const book = name === selected ? data : await loadWorldInfo(name);
-        const entries = Object.values(book?.entries ?? {}).filter(e => !e.disable && usableKeys(e?.key).length);
+    /** One key run for one entry, under the entry's own gate and match flags, as core reads them. */
+    const entryHits = entry => {
+        const sec = entry.selective ? secondaryKeys(entry) : [];
+        return keyHits(usableKeys(entry.key), labHay,
+            entry.caseSensitive ?? world_info_case_sensitive, entry.matchWholeWords ?? world_info_match_whole_words,
+            {
+                context: 30,
+                matchWindow: labWindow,
+                gate: sec.length ? { keys: sec, logic: Number(entry.selectiveLogic ?? WI_LOGIC.AND_ANY) } : undefined,
+            }).filter(r => r.count > 0);
+    };
+
+    /** Which of `entries` the haystack would activate on keys alone. Disabled entries are out, as core has them; every other
+     *  gate core applies — probability, inclusion groups, delay, cooldown, character and tag filters, decorators, recursion —
+     *  is not modelled here, so this is the keyword half of activation and not a prediction. */
+    const applyEntries = (label, entries) => {
+        const keyed = entries.filter(e => e && !e.disable && usableKeys(e.key).length);
         const hits = [];
-        for (const entry of entries) {
-            const sec = entry.selective ? secondaryKeys(entry) : [];
-            const rows = keyHits(usableKeys(entry.key), labHay,
-                entry.caseSensitive ?? world_info_case_sensitive, entry.matchWholeWords ?? world_info_match_whole_words,
-                {
-                    context: 30,
-                    matchWindow: labWindow,
-                    gate: sec.length ? { keys: sec, logic: Number(entry.selectiveLogic ?? WI_LOGIC.AND_ANY) } : undefined,
-                });
-            const fired = rows.filter(r => r.count > 0);
-            if (fired.length) hits.push({ entry, rows: fired });
+        for (const entry of keyed) {
+            const rows = entryHits(entry);
+            if (rows.length) hits.push({ entry, rows });
         }
-        labRun = { book: name, entries: hits, scanned: entries.length };
+        labRun = { label, entries: hits, scanned: keyed.length };
         repaint();
+    };
+
+    /** One book by name, for the arbitrary-book path; the open one is already loaded. */
+    const applyOneBook = async name => {
+        applyEntries(name, Object.values((name === selected ? data : await loadWorldInfo(name))?.entries ?? {}));
+    };
+
+    /** Every book attached to this chat — global, character, chat and persona lore, which is the set core scans. Falls back
+     *  to the picker when nothing is attached, since an empty run and a run with no hits look the same otherwise. */
+    const applyAttached = async () => {
+        const attached = await getSortedEntries();
+        if (!attached.length) {
+            const name = await pickBook('Nothing is attached to this chat. Apply which lorebook?', true);
+            if (name) await applyOneBook(name);
+            return;
+        }
+        const books = new Set(attached.map(e => e?.world).filter(Boolean));
+        applyEntries(`${books.size} attached ${books.size === 1 ? 'book' : 'books'}`, attached);
     };
 
     /** An applied book's result: a line saying what was matched and what was not, then one collapsible entry per hit. */
     const labRunHtml = () => {
-        const { book, entries, scanned } = labRun;
-        const head = `<div style="margin-bottom:8px;"><b>${escapeHtml(book)}</b>`
+        const { label, entries, scanned } = labRun;
+        const head = `<div style="margin-bottom:8px;"><b>${escapeHtml(label)}</b>`
             + `<small style="opacity:0.6;"> — ${entries.length} of ${scanned} ${scanned === 1 ? 'entry' : 'entries'} on keys alone</small>`
             + ' <i class="fa-solid fa-xmark wa-run-clear" title="Back to the typed keys" style="cursor:pointer;opacity:0.6;"></i></div>';
-        if (!entries.length) return `${head}<div style="opacity:0.6;">Nothing in this book matches the text.</div>`;
+        // The scanned count is what separates "no hits" from "nothing ran", which are otherwise the same empty pane.
+        if (!entries.length) {
+            return `${head}<div style="opacity:0.6;">${scanned
+                ? `No key in those ${scanned} entries matches this text.`
+                : 'None of those entries has a key to match with.'}</div>`;
+        }
         return head + entries.map(({ entry, rows }, i) => {
             const color = labInk(i);
             const title = `<span class="wa-kw" style="border-color:${escapeHtml(color)};background:color-mix(in srgb, ${escapeHtml(color)} 18%, transparent);">${escapeHtml(wiTitleOf(entry))}</span>`;
-            return `<details open style="margin-bottom:8px;"><summary style="cursor:pointer;">${title}`
+            // The book too, since an applied run spans every attached one and two books can hold the same title.
+            const from = entry.world ? `<small style="opacity:0.45;"> ${escapeHtml(entry.world)}</small>` : '';
+            return `<details open style="margin-bottom:8px;"><summary style="cursor:pointer;">${title}${from}`
                 + `<small style="opacity:0.6;"> ${rows.length} key${rows.length === 1 ? '' : 's'}</small></summary>`
                 + `<div style="margin-left:10px;">${rows.map(r => labKeyHtml(r, color)).join('')}</div></details>`;
         }).join('');
@@ -2375,11 +2407,11 @@ export async function lorebookStudio(preferredBook = null) {
                 if (picked.sec.length) gateBox.open = true;   // an imported gate must not land shut and invisible
                 repaint();
             }),
-            labTool('fa-book', 'Apply a lorebook: every entry in it against this text, hits only — shift-click to choose the book',
+            labTool('fa-book', 'Apply the books attached to this chat, hits only — shift-click to pick any book instead',
                 async ev => {
-                    const name = ev.shiftKey ? await pickBook() : selected;
-                    if (!name) return;
-                    await applyBook(name);
+                    if (!ev.shiftKey) { await applyAttached(); return; }
+                    const name = await pickBook('Apply which lorebook?', true);
+                    if (name) await applyOneBook(name);
                 }),
             labTool('fa-expand', 'Show the text with every match marked', () => showMarkedText()),
         );
