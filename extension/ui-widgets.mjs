@@ -285,8 +285,9 @@ export function renderMessageHtml(text, { spans = [], markSpan = null } = {}) {
         // into an attribute — or, for a comment, into markup that displays nothing at all.
         const asMarkup = covering.find(r => r.tag === 'html');
         if (asMarkup) {
+            // Revealed, it is source rather than prose, so it wears <code>: adjacent pieces of one range run together.
             html += revealed.has(asMarkup)
-                ? (sp ? markSpan(sp, src.slice(a, b)) : escapeHtml(src.slice(a, b)))
+                ? `<code>${sp ? markSpan(sp, src.slice(a, b)) : escapeHtml(src.slice(a, b))}</code>`
                 : src.slice(a, b);
             continue;
         }
