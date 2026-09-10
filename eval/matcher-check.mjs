@@ -217,6 +217,9 @@ eq(keyExcerpt('nerves', 'a — b … c nerves here', false, false),
     'a — b … c «nerves» here', 'em-dash and ellipsis before the match keep it correctly placed');
 eq(keyExcerpt('knots', 'Cafe\u0301 and Nai\u0308ve. He knots the rope', false, false),
     'Café and Naïve. He «knots» the rope', 'decomposed accents before the match do not shift it');
+eq(keyExcerpt('flushing', "it. He doesn't need to. He's flushing dark all down his chest, and it keeps going.", false, true, 30),
+    "it. He doesn't need to. He's «flushing» dark all down his chest, and…",
+    'a window opens and closes on a word boundary, never mid-word');
 const own = keyExcerpts('rut', 'she said «no rut» today', false, false)[0];
 eq(own.text.slice(own.start, own.end), 'rut', 'offsets select the match even when the source has guillemets');
 eq(countKey('/café/', 'the cafe\u0301 rope', false, false), 1, 'a regex matches decomposed text after NFC');
@@ -226,7 +229,7 @@ eq(countKey("/Cap['\u2019]n/", 'Cap\u2019n', false, false), 1, 'which the author
 eq(keyExcerpt('/café/', 'He knots the cafe\u0301 rope', false, false),
     'He knots the «café» rope', 'the excerpt marks the composed form it searched');
 eq(keyExcerpt('/knot(s|ting)?/', 'She paused — then again — and sighed… He knots the rope', false, false),
-    '…then again — and sighed… He «knots» the rope', 'a regex hit is not walked back through the fold');
+    '…again — and sighed… He «knots» the rope', 'a regex hit is not walked back through the fold');
 eq(keyExcerpt('/th\\w+bare/', 'the curtains were threadbare by then', false, false),
     'the curtains were «threadbare» by then', 'regex key: excerpt from the raw text via the pattern');
 eq(keyExcerpt('ghost', 'no such word here', false, false), null, 'no match, no excerpt');
@@ -244,7 +247,7 @@ eq(leaves('? (gagarin -banana)').join(' '), 'gagarin:2 -banana:0', 'NOT: a negat
 eq(leaves('? (gagarin banana)').join(' '), 'gagarin:2', 'a key whose verdict is false still shows the branch that hit — the group is tuned against that');
 eq(leaves('? (apple | banana)').join(' '), '', 'a key nothing in it hit shows nothing');
 eq(markExcerptText(keyExcerpts('? (armstrong gagarin)', space, false, true, 12)[0]),
-    '…monaut Yuri «Gagarin» flew; the A…', 'a leaf excerpt is the ordinary one, at the caller\'s context width');
+    '…Yuri «Gagarin» flew; the…', 'a leaf excerpt is the ordinary one, at the caller\'s context width');
 eq(leaves('? (/Gagar\\w+/ armstrong)').join(' '), '/Gagar\\w+/:2 armstrong:1', 'a regex leaf reports the pattern as its term, and is case-sensitive without /i');
 console.log('ok   keyExcerpt: compound SmartKeys excerpt every credited leaf, with per-leaf counts');
 

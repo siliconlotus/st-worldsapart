@@ -351,8 +351,19 @@ export function keyExcerpts(key, text, caseSensitive, wholeWords, context = 28, 
         return src.length;
     };
     const markAt = (src, start, end) => {
-        const from = Math.max(0, start - context);
-        const to = Math.min(src.length, end + context);
+        let from = Math.max(0, start - context);
+        let to = Math.min(src.length, end + context);
+        // Snap inward to whole words, within a word's reach, so a window does not open or close mid-word. Never past the
+        // match itself: an excerpt that cut into what it is marking would be a lie about where the key landed.
+        if (from > 0) {
+            const head = /\s/.exec(src.slice(from, Math.min(start, from + 24)));
+            if (head) from += head.index + 1;
+        }
+        if (to < src.length) {
+            const at = Math.max(end, to - 24);
+            const tail = /\s\S*$/.exec(src.slice(at, to));
+            if (tail) to = at + tail.index;
+        }
         const head = `${from > 0 ? '…' : ''}${src.slice(from, start)}`.replace(/\s+/g, ' ');
         const hit = src.slice(start, end).replace(/\s+/g, ' ');
         const tail = `${src.slice(end, to)}${to < src.length ? '…' : ''}`.replace(/\s+/g, ' ');

@@ -2137,11 +2137,11 @@ export async function lorebookStudio(preferredBook = null) {
         const num = n => `<span style="color:var(--SmartThemeEmColor, #d9a441);font-weight:600;">${n}</span>`;
         if (r.message) return `<div style="margin-bottom:8px;">${chip} <small style="opacity:0.75;">${escapeHtml(r.message)}</small></div>`;
         if (!r.segments.length) return `<div style="margin-bottom:8px;">${chip} ${num(r.count)}</div>`;
-        const span = (e, sg) => `<div style="margin-left:14px;" data-jump="${sg.at + e.at}" title="${escapeHtml(windowTip(sg, e))}">`
+        const span = (e, sg) => `<div style="margin-left:8px;" data-jump="${sg.at + e.at}" title="${escapeHtml(windowTip(sg, e))}">`
             + `<small style="opacity:0.75;">${escapeHtml(e.text.slice(0, e.start))}`
             + `<span style="color:${e.negated ? WA_RED : escapeHtml(color)};font-weight:600;">${escapeHtml(e.text.slice(e.start, e.end))}</span>`
             + `${escapeHtml(e.text.slice(e.end))}</small></div>`;
-        const seg = sg => `<div style="margin:3px 0 0 14px;${sg.matched ? '' : 'opacity:0.55;'}">`
+        const seg = sg => `<div style="margin:3px 0 0 6px;${sg.matched ? '' : 'opacity:0.55;'}">`
             + `<small>${sg.leaves.map(l => `${escapeHtml(l.negated ? `-${l.term}` : l.term)} ${num(l.n)}`).join(', ')}</small>`
             + sg.excerpts.map(e => span(e, sg)).join('')
             + '</div>';
@@ -2313,7 +2313,7 @@ export async function lorebookStudio(preferredBook = null) {
                     if (ev.shiftKey && depth == null) return;
                     labHay = chatHaystack(depth);
                     hayBox.value = labHay;
-                    labCommitted = false;   // new text, and the marked view would be of the old
+                    labCommitted = true;   // imported text is for reading, not editing
                     repaint();
                 }),
             labTool('fa-key', 'Take the keys of an entry in any book, secondary condition and all', async () => {
