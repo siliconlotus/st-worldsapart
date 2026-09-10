@@ -240,13 +240,26 @@ const space = 'the Russian cosmonaut Yuri Gagarin flew; the American astronaut N
 const leaves = k => keyExcerpts(k, space, false, true).map(e => `${e.term}:${e.n}`);
 eq(leaves('? (armstrong gagarin)').join(' '), 'gagarin:2 armstrong:1', 'AND: both leaves, ordered by position, not by the AST');
 eq(leaves('? (apple | gagarin | coconut)').join(' '), 'gagarin:2', 'OR: only the side that hit, and the pooled n is that side\'s own');
-eq(leaves('? (gagarin -banana)').join(' '), 'gagarin:2', 'NOT: the negated term has no span to show');
+eq(leaves('? (gagarin -banana)').join(' '), 'gagarin:2 -banana:0', 'NOT: a negative that never fires is named at 0');
 eq(leaves('? (gagarin banana)').join(' '), 'gagarin:2', 'a key whose verdict is false still shows the branch that hit — the group is tuned against that');
 eq(leaves('? (apple | banana)').join(' '), '', 'a key nothing in it hit shows nothing');
 eq(markExcerptText(keyExcerpts('? (armstrong gagarin)', space, false, true, 12)[0]),
     '…monaut Yuri «Gagarin» flew; the A…', 'a leaf excerpt is the ordinary one, at the caller\'s context width');
 eq(leaves('? (/Gagar\\w+/ armstrong)').join(' '), '/Gagar\\w+/:2 armstrong:1', 'a regex leaf reports the pattern as its term, and is case-sensitive without /i');
 console.log('ok   keyExcerpt: compound SmartKeys excerpt every credited leaf, with per-leaf counts');
+
+
+// --- a negated leaf is reported too: whether the thing vetoing the key fires at all is the same tuning question
+const negs = k => keyHits([k], space, false, true).map(r => `${r.key}:${r.count ?? ''}`).join(' ');
+eq(negs('? cosmonaut -astronaut'), '? cosmonaut -astronaut:0 \u21b3 cosmonaut:1 \u21b3 -astronaut:1',
+    'the veto is named with its count, so a key reading 0 says what stopped it');
+eq(negs('? cosmonaut -astronuat'), '? cosmonaut -astronuat:1 \u21b3 cosmonaut:1 \u21b3 -astronuat:0',
+    'a negative that never fires reads 0 — a misspelt one is invisible otherwise');
+eq(keyHits(['? cosmonaut -astronuat'], space, false, true)[2].excerpt, undefined,
+    'a leaf that did not fire has no excerpt to show');
+eq(keySpans(['? cosmonaut -astronaut'], space, false, true).length, 1,
+    'and a negated leaf is never marked in the text: a mark means a match');
+console.log('ok   keyExcerpt: negated leaves are counted and named, and never marked');
 
 
 // --- gate: a secondary condition in core's own terms, firing exactly where the entry's key does
@@ -312,10 +325,10 @@ eq(textSegments(paras, 'paragraph').map(sg => sg.at).join(','), '0,75', 'a segme
 eq(textSegments(paras, 'scan').length, 1, 'any other window leaves the text whole');
 eq(textSegments('   ', 'scan').length, 0, 'blank text has no segments to match in');
 const win = w => keyHits(['? cosmonaut -astronaut'], paras, false, true, { matchWindow: w }).map(r => `${r.key}:${r.count ?? ''}`);
-eq(win('scan').join(' '), '? cosmonaut -astronaut:0 \u21b3 cosmonaut:2',
-    'across the whole text the negation kills it, and the branch that hit is what is left to report');
-eq(win('paragraph').join(' '), '? cosmonaut -astronaut:1 \u21b3 cosmonaut:1',
-    'by paragraph it matches the one the astronaut is absent from, and reports only that');
+eq(win('scan').join(' '), '? cosmonaut -astronaut:0 \u21b3 cosmonaut:2 \u21b3 -astronaut:1',
+    'across the whole text the negation kills it, and both sides say why');
+eq(win('paragraph').join(' '), '? cosmonaut -astronaut:1 \u21b3 cosmonaut:1 \u21b3 -astronaut:0',
+    'by paragraph it matches the one the astronaut is absent from, where the veto does not fire');
 eq(paras.slice(...(sp => [sp.start, sp.end])(keySpans(['? cosmonaut -astronaut'], paras, false, true, { matchWindow: 'paragraph' })[0])), 'cosmonaut',
     'and marks it there');
 eq(keySpans(['? cosmonaut -astronaut'], paras, false, true, { matchWindow: 'paragraph' }).map(sp => sp.start).join(), '79',

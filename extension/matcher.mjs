@@ -387,37 +387,51 @@ export function keyExcerpts(key, text, caseSensitive, wholeWords, context = 28, 
     return out;
 }
 
-/** The leaves a compound SmartKey would search for: those not under an odd number of NOTs, in source order. */
-function positiveLeaves(node, negated = false, out = []) {
+/** Every leaf of a compound SmartKey's AST with whether it sits under an odd number of NOTs, in source order. */
+function leafNodes(node, negated = false, out = []) {
     if (!node) return out;
-    if (node.type === 'TERM' || node.type === 'REGEX') { if (!negated) out.push(node); return out; }
-    if (node.type === 'NOT') return positiveLeaves(node.operand, !negated, out);
-    positiveLeaves(node.left, negated, out);
-    return positiveLeaves(node.right, negated, out);
+    if (node.type === 'TERM' || node.type === 'REGEX') { out.push({ node, negated }); return out; }
+    if (node.type === 'NOT') return leafNodes(node.operand, !negated, out);
+    leafNodes(node.left, negated, out);
+    return leafNodes(node.right, negated, out);
 }
 
-/** Every leaf of a compound SmartKey that hit, first occurrence each, ordered by position; `term` is the leaf and `n` its
- *  occurrences in that segment. A key whose verdict is false still reports its leaves — which branch is failing is the
- *  question a group is tuned against — so only a leaf under a NOT, a condition rather than a thing, is absent. */
+/** One leaf's occurrences in `text` under its own flags; a REGEX leaf carries its flags in the pattern. */
+const leafCount = (id, text) => countKey(String(id?.value ?? ''), text,
+    id?.type !== 'REGEX' && !!id?.isCaseSensitive, id?.type !== 'REGEX' && !!id?.isExact);
+
+/** Every leaf of a compound SmartKey, first occurrence each, ordered by position; `term` is the leaf and `n` its occurrences
+ *  in that segment. A key whose verdict is false still reports its leaves — which branch is failing is the question a group is
+ *  tuned against. A negated leaf is reported too, `term` written `-x` and `negated` set: whether the thing that vetoes the key
+ *  fires at all is the same question, and a negative that never fires is invisible otherwise. It carries no span when it did
+ *  not fire, and a caller marking up the text must skip it — a mark means a match. */
 function compoundExcerpts(node, text, context, limit) {
     const out = [];
+    const leaves = leafNodes(node);
     for (const segment of Array.isArray(text) ? text : [text]) {
         if (!segment) continue;
         const credited = [];
         // A pooled unit carries the alternation, its children under `parts`; only the leaves have a term to search for.
         const walk = us => { for (const u of us) { if (u.parts) walk(u.parts); else credited.push(u); } };
         walk(evaluate(node, segment).units);
-        const leaves = credited.length
+        const positive = credited.length
             ? credited
-            : positiveLeaves(node)
-                .map(id => ({ id, n: countKey(String(id.value ?? ''), segment, !!id.isCaseSensitive, !!id.isExact) }))
+            : leaves.filter(l => !l.negated)
+                .map(l => ({ id: l.node, n: leafCount(l.node, segment) }))
                 .filter(u => u.n > 0);
         const found = [];
-        for (const { id, n } of leaves) {
-            const value = String(id?.value ?? '');
+        for (const { id, n } of positive) {
             const isRegex = id?.type === 'REGEX';
-            const [ex] = keyExcerpts(value, segment, !isRegex && !!id.isCaseSensitive, !isRegex && !!id.isExact, context, 1);
-            if (ex) found.push({ ...ex, term: value, n });
+            const [ex] = keyExcerpts(String(id?.value ?? ''), segment, !isRegex && !!id.isCaseSensitive, !isRegex && !!id.isExact, context, 1);
+            if (ex) found.push({ ...ex, term: String(id?.value ?? ''), n });
+        }
+        for (const { node: id } of leaves.filter(l => l.negated)) {
+            const isRegex = id?.type === 'REGEX';
+            const value = String(id?.value ?? '');
+            const n = leafCount(id, segment);
+            const [ex] = n ? keyExcerpts(value, segment, !isRegex && !!id.isCaseSensitive, !isRegex && !!id.isExact, context, 1) : [];
+            // No hit, no offset: sorted last, since there is no place in the text to sort it by.
+            found.push({ ...(ex ?? { at: Number.MAX_SAFE_INTEGER, to: Number.MAX_SAFE_INTEGER }), term: `-${value}`, n, negated: true });
         }
         found.sort((a, b) => a.at - b.at);
         for (const ex of found) {
@@ -428,10 +442,6 @@ function compoundExcerpts(node, text, context, limit) {
     return out;
 }
 
-/** Where every one of `keys` matched in `text`, as `{ key, term, start, end, keys }` in source order, for a caller marking up
- *  the text itself. A span cannot nest in the markup, so overlapping matches become one span at the first one's extent, with
- *  every key that reached it listed in `keys`; `key` and `term` are the first of those. Offsets are into the NFC form of the
- *  whole text, `matchWindow` and all — a key matched within its segment, but a caller marks up one string. */
 /** `key -> AST` for a `{ keys, logic }` secondary condition, or `key -> null` when there is none. One node per key, as core
  *  gates each primary separately (`keyUnits`); the gate applies to a `?` or `/re/` key too, as keysecondary does. */
 const gateNodeFor = (gate, caseSensitive, wholeWords) => {
@@ -456,6 +466,7 @@ export function keySpans(keys, text, caseSensitive, wholeWords, { limit = 200, m
         .map(k => String(k ?? '').trim()).filter(Boolean)
         .flatMap(key => liveSegments(key, segs, caseSensitive, wholeWords, gateOf(key))
             .flatMap(sg => keyExcerpts(key, sg.text, caseSensitive, wholeWords, 0, limit, gateOf(key))
+                .filter(e => !e.negated)
                 .map(e => ({ key, term: e.term, start: e.at + sg.at, end: e.to + sg.at }))))
         .sort((a, b) => a.start - b.start || b.end - a.end);
     for (const { key, term, start, end } of spans) {
@@ -488,7 +499,7 @@ export function keyHits(keys, text, caseSensitive, wholeWords, { context = 28, l
             const hits = liveSegments(key, segs, caseSensitive, wholeWords, node)
                 .flatMap(sg => keyExcerpts(key, sg.text, caseSensitive, wholeWords, context, limit, node)).slice(0, limit);
             if (hits.length < 2 && !hits[0]?.term) return [{ key, count, excerpt: hits[0] }];
-            return [{ key, count }, ...hits.map(e => ({ key: e.term ? `\u21b3 ${e.term}` : '\u21b3', count: e.n, excerpt: e }))];
+            return [{ key, count }, ...hits.map(e => ({ key: e.term ? `\u21b3 ${e.term}` : '\u21b3', count: e.n, excerpt: e.text ? e : undefined }))];
         });
 }
 
