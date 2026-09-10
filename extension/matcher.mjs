@@ -491,15 +491,32 @@ export function keyHits(keys, text, caseSensitive, wholeWords, { context = 28, l
             const bad = key.startsWith('?') ? validateSmartKey(key).find(v => v.severity === 'error') : null;
             if (bad) return [{ key, excerpt: bad.message }];
             const node = gateOf(key);
+            const perSeg = segs.map(sg => ({
+                matched: countKey(key, sg.text, caseSensitive, wholeWords, undefined, node) > 0,
+                own: countKey(key, sg.text, caseSensitive, wholeWords),
+                excerpts: keyExcerpts(key, sg.text, caseSensitive, wholeWords, context, limit, node),
+            }));
             // Per segment and summed, as the audit counts: a key is matched within its unit, never across the join. Under a
             // gate the number is still the key's own occurrences, in the segments the gate let through — not the gate's weight.
-            const count = segs.reduce((a, sg) => (node && !countKey(key, sg.text, caseSensitive, wholeWords, undefined, node)
-                ? a
-                : a + countKey(key, sg.text, caseSensitive, wholeWords)), 0);
-            const hits = liveSegments(key, segs, caseSensitive, wholeWords, node)
-                .flatMap(sg => keyExcerpts(key, sg.text, caseSensitive, wholeWords, context, limit, node)).slice(0, limit);
-            if (hits.length < 2 && !hits[0]?.term) return [{ key, count, excerpt: hits[0] }];
-            return [{ key, count }, ...hits.map(e => ({ key: e.term ? `\u21b3 ${e.term}` : '\u21b3', count: e.n, excerpt: e.text ? e : undefined }))];
+            const count = perSeg.reduce((a, sg) => a + (sg.matched ? sg.own : 0), 0);
+            const anyMatch = perSeg.some(sg => sg.matched);
+            // Where the key matched, its own branches; where it matched nowhere, every segment's, since that is the tuning case.
+            const hits = perSeg.filter(sg => sg.matched || !anyMatch)
+                .flatMap(sg => sg.excerpts.filter(e => !e.negated));
+            // A veto is reported once for the whole text, not per segment: the segments it fires in are the ones the key is
+            // missing, and those are exactly the segments its own branches are not reported from.
+            const vetoes = new Map();
+            for (const sg of perSeg) {
+                for (const e of sg.excerpts) {
+                    if (!e.negated) continue;
+                    const prev = vetoes.get(e.term);
+                    if (!prev) vetoes.set(e.term, { ...e });
+                    else { prev.n += e.n; if (!prev.text && e.text) Object.assign(prev, e, { n: prev.n }); }
+                }
+            }
+            const all = [...hits, ...vetoes.values()].slice(0, limit);
+            if (all.length < 2 && !all[0]?.term) return [{ key, count, excerpt: all[0] }];
+            return [{ key, count }, ...all.map(e => ({ key: e.term ? `\u21b3 ${e.term}` : '\u21b3', count: e.n, excerpt: e.text ? e : undefined }))];
         });
 }
 

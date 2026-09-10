@@ -259,6 +259,11 @@ eq(keyHits(['? cosmonaut -astronuat'], space, false, true)[2].excerpt, undefined
     'a leaf that did not fire has no excerpt to show');
 eq(keySpans(['? cosmonaut -astronaut'], space, false, true).length, 1,
     'and a negated leaf is never marked in the text: a mark means a match');
+const vetoed = keyHits(['breath'], 'He drew a breath.\n\nA slow breath, held.\n\nAnother breath.', false, true,
+    { matchWindow: 'paragraph', gate: { keys: ['slow'], logic: WI_LOGIC.NOT_ANY } });
+eq(vetoed.map(r => `${r.key}:${r.count ?? ''}`).join(' '), 'breath:2 \u21b3 breath:1 \u21b3 breath:1 \u21b3 -slow:1',
+    'a veto is counted over the whole text, since it fires in the segments the key\'s own rows are not reported from');
+eq(typeof vetoed[3].excerpt, 'object', 'and shows where, which is the segment the key is missing');
 console.log('ok   keyExcerpt: negated leaves are counted and named, and never marked');
 
 
@@ -327,8 +332,8 @@ eq(textSegments('   ', 'scan').length, 0, 'blank text has no segments to match i
 const win = w => keyHits(['? cosmonaut -astronaut'], paras, false, true, { matchWindow: w }).map(r => `${r.key}:${r.count ?? ''}`);
 eq(win('scan').join(' '), '? cosmonaut -astronaut:0 \u21b3 cosmonaut:2 \u21b3 -astronaut:1',
     'across the whole text the negation kills it, and both sides say why');
-eq(win('paragraph').join(' '), '? cosmonaut -astronaut:1 \u21b3 cosmonaut:1 \u21b3 -astronaut:0',
-    'by paragraph it matches the one the astronaut is absent from, where the veto does not fire');
+eq(win('paragraph').join(' '), '? cosmonaut -astronaut:1 \u21b3 cosmonaut:1 \u21b3 -astronaut:1',
+    'by paragraph it matches the paragraph the astronaut is absent from, and the veto reports the one it took');
 eq(paras.slice(...(sp => [sp.start, sp.end])(keySpans(['? cosmonaut -astronaut'], paras, false, true, { matchWindow: 'paragraph' })[0])), 'cosmonaut',
     'and marks it there');
 eq(keySpans(['? cosmonaut -astronaut'], paras, false, true, { matchWindow: 'paragraph' }).map(sp => sp.start).join(), '79',
