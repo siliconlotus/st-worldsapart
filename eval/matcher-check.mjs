@@ -353,8 +353,8 @@ eq(textSegments(msgs, 'paragraph').map(sg => sg.text.trim()).join(' | '), 'Kyle:
     'paragraph cuts those again on the blank lines, as the runtime subdivides each message');
 eq(textSegments(msgs, 'paragraph').map(sg => sg.at).join(','), '0,12,30', 'and every piece keeps its offset into the whole');
 eq(textSegments('a --- b', 'message').length, 1, 'a rule inside a line is text, not a boundary');
-eq(textSegments(`one\n\n${'-'.repeat(48)}\n\ntwo`, 'message').length, 2,
-    'three dashes or forty-eight: the import writes a rule long enough to find in a small box');
+eq(textSegments(`one\n\n${'-'.repeat(24)}\n\ntwo`, 'message').length, 2,
+    'three dashes or twenty-four: the import writes a rule long enough to find, short enough not to wrap');
 eq(digest('? cosmonaut -astronaut', paras, { matchWindow: 'scan' }), '? cosmonaut -astronaut:0 | !cosmonaut 2, -astronaut 1',
     'across the whole text the negation kills it, and both sides say why');
 eq(digest('? cosmonaut -astronaut', paras, { matchWindow: 'paragraph' }),

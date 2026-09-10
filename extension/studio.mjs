@@ -2088,7 +2088,7 @@ export async function lorebookStudio(preferredBook = null) {
         const hidden = raw.length - chat.length;
         toastr.info(`${messages.length} message${messages.length === 1 ? '' : 's'} at depth ${depth}`
             + `${hidden ? `, ${hidden} hidden message${hidden === 1 ? '' : 's'} skipped` : ''}`, 'Keyword Lab');
-        return messages.join(`\n\n${'-'.repeat(48)}\n\n`);
+        return messages.join(`\n\n${'-'.repeat(24)}\n\n`);
     };
 
     /** One entry of the selected book, as the Lab's key list plus its secondary condition — the entry's own spelling, not a
