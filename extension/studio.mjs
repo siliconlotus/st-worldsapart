@@ -2075,11 +2075,17 @@ export async function lorebookStudio(preferredBook = null) {
      *  included as core would. Separated by a `---` line, which is how the Lab's message window knows where a message ended. */
     const chatHaystack = () => {
         const spec = settings().dropChatTags;
-        const chat = (getContext().chat ?? [])
+        const raw = getContext().chat ?? [];
+        const chat = raw
             .filter(m => m && !m.is_system)
             .map(m => (spec?.trim() ? { ...m, mes: dropTags(String(m.mes ?? ''), spec) } : m));
         const depth = Number(settings().messageDepth || world_info_depth);
-        return scanSegments(chat, { depth, includeNames: world_info_include_names, matchWindow: 'message' }).join('\n\n---\n\n');
+        const messages = scanSegments(chat, { depth, includeNames: world_info_include_names, matchWindow: 'message' });
+        // Says which of the three numbers is the small one: the depth setting, or the hidden messages core and WA both drop.
+        const hidden = raw.length - chat.length;
+        toastr.info(`${messages.length} message${messages.length === 1 ? '' : 's'} at depth ${depth}`
+            + `${hidden ? `, ${hidden} hidden message${hidden === 1 ? '' : 's'} skipped` : ''}`, 'Keyword Lab');
+        return messages.join('\n\n---\n\n');
     };
 
     /** One entry of the selected book, as the Lab's key list plus its secondary condition — the entry's own spelling, not a
