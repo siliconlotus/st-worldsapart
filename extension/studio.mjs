@@ -2072,14 +2072,14 @@ export async function lorebookStudio(preferredBook = null) {
     let labSec = '', labLogic = String(WI_LOGIC.AND_ANY);
 
     /** The chat as WA reads it for a scan: is_system gone, dropChatTags applied, the depth setting's last messages, names
-     *  included as core would. Joined with a blank line, so the paragraph window breaks at a message boundary as it does live. */
+     *  included as core would. Separated by a `---` line, which is how the Lab's message window knows where a message ended. */
     const chatHaystack = () => {
         const spec = settings().dropChatTags;
         const chat = (getContext().chat ?? [])
             .filter(m => m && !m.is_system)
             .map(m => (spec?.trim() ? { ...m, mes: dropTags(String(m.mes ?? ''), spec) } : m));
         const depth = Number(settings().messageDepth || world_info_depth);
-        return scanSegments(chat, { depth, includeNames: world_info_include_names, matchWindow: 'message' }).join('\n\n');
+        return scanSegments(chat, { depth, includeNames: world_info_include_names, matchWindow: 'message' }).join('\n\n---\n\n');
     };
 
     /** One entry of the selected book, as the Lab's key list plus its secondary condition — the entry's own spelling, not a
@@ -2183,7 +2183,7 @@ export async function lorebookStudio(preferredBook = null) {
             t.addEventListener('input', () => { set(t.value); repaint(); });
             return t;
         };
-        const hayBox = box('Paste any text to match against…', () => labHay, v => { labHay = v; });
+        const hayBox = box('Paste any text to match against… a line of --- separates one message from the next', () => labHay, v => { labHay = v; });
         hayBox.style.flex = '3 1 0';
         const keyBox = box('Keys, comma- or newline-separated — plain, /regex/flags or ?SmartKey', () => labKeys, v => { labKeys = v; });
         const logicSel = document.createElement('select'); logicSel.className = 'text_pole';

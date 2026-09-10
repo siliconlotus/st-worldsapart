@@ -340,6 +340,29 @@ eq(keyHits(['gagarin', '', '  armstrong  '], space, false, true).map(r => r.key)
 console.log('ok   keyHits: one entry per key, its segments, and a message for a key that cannot fire');
 
 
+// --- textSegments: the unit a key must match within, each piece keeping its offset into the whole
+const paras = 'Russian cosmonaut Yuri Gagarin met the American astronaut Neil Armstrong.\n\nThe cosmonaut, hero of the Soviet Union, was vacationing.';
+eq(textSegments(paras, 'paragraph').map(sg => sg.at).join(','), '0,75', 'a segment carries its offset into the whole text');
+eq(textSegments(paras, 'scan').length, 1, 'the scan window leaves the text whole');
+eq(textSegments('   ', 'scan').length, 0, 'blank text has no segments to match in');
+// A pasted text has no messages, so a `---` line is where one ended: the chat import writes them, and a reader can type them.
+const msgs = 'Kyle: One.\n\nStill Kyle.\n\n---\n\nMara: Two.';
+eq(textSegments(msgs, 'message').map(sg => sg.text.trim()).join(' | '), 'Kyle: One.\n\nStill Kyle. | Mara: Two.',
+    'message cuts on the --- lines and nothing else');
+eq(textSegments(msgs, 'paragraph').map(sg => sg.text.trim()).join(' | '), 'Kyle: One. | Still Kyle. | Mara: Two.',
+    'paragraph cuts those again on the blank lines, as the runtime subdivides each message');
+eq(textSegments(msgs, 'paragraph').map(sg => sg.at).join(','), '0,12,30', 'and every piece keeps its offset into the whole');
+eq(textSegments('a --- b', 'message').length, 1, 'a --- inside a line is text, not a boundary');
+eq(digest('? cosmonaut -astronaut', paras, { matchWindow: 'scan' }), '? cosmonaut -astronaut:0 | !cosmonaut 2, -astronaut 1',
+    'across the whole text the negation kills it, and both sides say why');
+eq(digest('? cosmonaut -astronaut', paras, { matchWindow: 'paragraph' }),
+    '? cosmonaut -astronaut:1 | !cosmonaut 1, -astronaut 1 | cosmonaut 1, -astronaut 0',
+    'by paragraph the veto takes the first and the second stands');
+eq(keySpans(['? cosmonaut -astronaut'], paras, false, true, { matchWindow: 'paragraph' }).map(sp => sp.start).join(),
+    '8,48,79', 'a span is offset onto the whole text, not the segment it was found in');
+console.log('ok   textSegments: --- cuts messages, blank lines cut paragraphs, offsets survive both');
+
+
 // --- keySpans: where to mark the haystack itself — source offsets, in order, never overlapping
 const spans = keySpans(['gagarin', '? (armstrong gagarin)', 'neil armstrong'], space, false, true);
 eq(spans.map(sp => `${sp.key}@${sp.start}`).join(' '), 'gagarin@27 neil armstrong@64 gagarin@87',

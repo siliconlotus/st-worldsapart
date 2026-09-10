@@ -178,20 +178,32 @@ export function segment(texts, matchWindow) {
     return out.filter(t => t.trim());
 }
 
-/** One text cut into the units a key must match within, each with its offset into the NFC form of that text — `segment` for a
- *  caller that must map a result back onto the source. `message` cannot subdivide a single text, so only `paragraph` does. */
-export function textSegments(text, matchWindow) {
-    const src = String(text ?? '').normalize('NFC');
-    if (matchWindow !== 'paragraph') return src.trim() ? [{ text: src, at: 0 }] : [];
+/** A message boundary in a pasted text: a line holding nothing but `---`. Chat has no such thing — this is how a caller that
+ *  has only one string says where its messages ended, and the chat import writes it. */
+const MESSAGE_BREAK = /^[ \t]*---[ \t]*$/;
+
+/** Subdivides `parts` on `re`, each piece keeping its offset into the original text. */
+const cutOn = (parts, source) => parts.flatMap(p => {
+    const re = new RegExp(source, 'gm');
     const out = [];
-    const re = new RegExp(PARAGRAPH_BREAK.source, 'g');
     let last = 0;
-    for (let m = re.exec(src); m; m = re.exec(src)) {
-        out.push({ text: src.slice(last, m.index), at: last });
+    for (let m = re.exec(p.text); m; m = re.exec(p.text)) {
+        out.push({ text: p.text.slice(last, m.index), at: p.at + last });
         last = m.index + m[0].length;
     }
-    out.push({ text: src.slice(last), at: last });
-    return out.filter(sg => sg.text.trim());
+    out.push({ text: p.text.slice(last), at: p.at + last });
+    return out;
+});
+
+/** One text cut into the units a key must match within, each with its offset into the NFC form of that text — `segment` for a
+ *  caller that must map a result back onto the source. `message` cuts on the `---` lines, and `paragraph` cuts those again on
+ *  the blank lines, as the runtime's paragraph window subdivides each message. */
+export function textSegments(text, matchWindow) {
+    const src = String(text ?? '').normalize('NFC');
+    if (matchWindow !== 'paragraph' && matchWindow !== 'message') return src.trim() ? [{ text: src, at: 0 }] : [];
+    let parts = cutOn([{ text: src, at: 0 }], MESSAGE_BREAK.source);
+    if (matchWindow === 'paragraph') parts = cutOn(parts, PARAGRAPH_BREAK.source);
+    return parts.filter(sg => sg.text.trim());
 }
 
 /** Entry match-flag -> scan-sources field, as core's buffer does. */
