@@ -2083,7 +2083,10 @@ export async function lorebookStudio(preferredBook = null) {
         // Says which of the three numbers is the small one: the depth setting, or the hidden messages core and WA both drop.
         const hidden = raw.length - chat.length;
         toastr.info(`${messages.length} message${messages.length === 1 ? '' : 's'} at depth ${depth}`
-            + `${hidden ? `, ${hidden} hidden message${hidden === 1 ? '' : 's'} skipped` : ''}`, 'Keyword Lab');
+            + `${hidden ? `, ${hidden} hidden message${hidden === 1 ? '' : 's'} skipped` : ''}`
+            // Named, because dropChatTags takes the element WITH its contents: a tracker block leaves a gap where it was,
+            // and a reader looking for it needs to know the setting removed it rather than the Lab losing it.
+            + `${spec?.trim() ? `. Dropped, with contents: ${escapeHtml(spec)}` : ''}`, 'Keyword Lab');
         return messages.join(`\n\n${'-'.repeat(24)}\n\n`);
     };
 
