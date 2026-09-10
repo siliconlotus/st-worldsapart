@@ -2056,7 +2056,7 @@ export async function lorebookStudio(preferredBook = null) {
     };
 
     /** The haystack rendered as a message, with every span marked in its key's colour. Offsets are keyExcerpts', into NFC. */
-    const markedHtml = (text, spans, ink) => renderMessageHtml(text, { spans, markSpan: labMark(ink) });
+    const markedHtml = (text, spans, ink) => renderMessageHtml(text, { spans, markSpan: labMark(ink), showMarkup: labShowMarkup });
 
     let labHay = '', labKeys = '';
     let labCase = !!world_info_case_sensitive, labWhole = !!world_info_match_whole_words;
@@ -2065,6 +2065,7 @@ export async function lorebookStudio(preferredBook = null) {
     let labWindow = settings().matchWindow;
     // Editing or reading: committed, the haystack pane shows the marked text in place of the box it was typed in.
     let labCommitted = false;
+    let labShowMarkup = false;   // the source behind the rendering: every tag, entity and delimiter shown at once
     // The secondary condition, in core's own terms: a term list and one of world_info_logic's four operators, gating every key.
     let labSec = '', labLogic = String(WI_LOGIC.AND_ANY);
 
@@ -2243,7 +2244,13 @@ export async function lorebookStudio(preferredBook = null) {
             repaint();
             if (!labCommitted) hayBox.focus();
         });
-        hayWrap.append(hayBox, hayRead, hayToggle);
+        // Beside the pencil, and only while the marked view is up: there is no rendering to see behind in a textarea.
+        const srcToggle = document.createElement('i');
+        srcToggle.className = 'fa-solid fa-code';
+        srcToggle.style.cssText = 'position:absolute;top:5px;right:34px;cursor:pointer;padding:3px 5px;border-radius:4px;'
+            + 'background:var(--black30a, rgba(0,0,0,0.3));font-size:0.85em;z-index:1;';
+        srcToggle.addEventListener('click', () => { labShowMarkup = !labShowMarkup; repaint(); });
+        hayWrap.append(hayBox, hayRead, srcToggle, hayToggle);
         const keyBox = box('Keys, comma- or newline-separated — plain, /regex/flags or ?SmartKey', () => labKeys, v => { labKeys = v; });
         const gateBox = document.createElement('details');
         gateBox.style.cssText = 'flex:0 0 auto;margin-bottom:4px;';
@@ -2348,6 +2355,9 @@ export async function lorebookStudio(preferredBook = null) {
             hayToggle.className = `fa-solid ${reading ? 'fa-pen' : 'fa-check'}`;
             hayToggle.title = reading ? 'Edit the text' : 'Mark up the text';
             hayToggle.style.display = labHay.trim() ? '' : 'none';
+            srcToggle.style.display = reading ? '' : 'none';
+            srcToggle.style.opacity = labShowMarkup ? '1' : '0.5';
+            srcToggle.title = labShowMarkup ? 'Hide the markup again' : 'Show every tag, entity and marker in the text';
             if (reading) {
                 const top = hayRead.scrollTop;
                 hayRead.innerHTML = markedHtml(labHay, keySpans(keys, labHay, labCase, labWhole, { matchWindow: labWindow, gate }), ink);

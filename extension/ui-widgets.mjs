@@ -257,8 +257,9 @@ const proseRanges = src => {
  *  `spans` marked in it. A delimiter is hidden until something matched it, and markup something matched is shown as the text
  *  it is: what is displayed may be restyled, never removed, or a mark would have nothing to land on. `markSpan(span, text)`
  *  builds one mark, so its colours belong to the caller; `spans` carry `start`/`end` offsets into the NFC form of `text`,
- *  which is what a caller must slice by. The container wants class `wa-marked` for the palette. */
-export function renderMessageHtml(text, { spans = [], markSpan = null } = {}) {
+ *  which is what a caller must slice by. `showMarkup` reveals all of it at once, which is the source behind the rendering.
+ *  The container wants class `wa-marked` for the palette. */
+export function renderMessageHtml(text, { spans = [], markSpan = null, showMarkup = false } = {}) {
     const src = String(text).normalize('NFC');
     // Markdown's thematic break, which is also how a caller with one string says where its messages ended. The blank lines
     // around it go with it: the container is pre-wrap, so they would stack on top of the rule's own margins.
@@ -269,7 +270,8 @@ export function renderMessageHtml(text, { spans = [], markSpan = null } = {}) {
     const prose = proseRanges(src);
     // Whole-range, not per piece: a tag or comment cut in half round a mark emits `<!-- ` on its own, which opens a comment
     // the mark then disappears into. If anything matched inside one, all of it is shown as the text it is.
-    const revealed = new Set(prose.filter(r => r.tag === 'html' && spans.some(sp => sp.start < r.end && r.start < sp.end)));
+    const revealed = new Set(prose.filter(r => r.tag === 'html'
+        && (showMarkup || spans.some(sp => sp.start < r.end && r.start < sp.end))));
     const cuts = [...new Set([0, src.length, ...spans.flatMap(sp => [sp.start, sp.end]), ...prose.flatMap(r => [r.start, r.end])])]
         .sort((a, b) => a - b);
     let html = '';
@@ -280,7 +282,7 @@ export function renderMessageHtml(text, { spans = [], markSpan = null } = {}) {
         const covering = prose.filter(r => r.start <= a && b <= r.end);
         const sp = markSpan ? spans.find(x => x.start <= a && b <= x.end) : null;
         // A delimiter nothing matched is display only, and chat does not display it.
-        if (covering.some(r => r.tag === 'delim') && !sp) continue;
+        if (covering.some(r => r.tag === 'delim') && !sp && !showMarkup) continue;
         // Markup nothing matched renders; markup something matched is shown as the text it is, or the mark would vanish
         // into an attribute — or, for a comment, into markup that displays nothing at all.
         const asMarkup = covering.find(r => r.tag === 'html');
