@@ -2065,6 +2065,7 @@ export async function lorebookStudio(preferredBook = null) {
     let labWindow = settings().matchWindow;
     // Editing or reading: committed, the haystack pane shows the marked text in place of the box it was typed in.
     let labCommitted = false;
+    let labRun = null;   // an applied book: { book, entries: [{ entry, rows }] }, shown in place of the typed keys' result
     let labShowMarkup = false;   // the source behind the rendering: every tag, entity and delimiter shown at once
     // The secondary condition, in core's own terms: a term list and one of world_info_logic's four operators, gating every key.
     let labSec = '', labLogic = String(WI_LOGIC.AND_ANY);
@@ -2166,6 +2167,45 @@ export async function lorebookStudio(preferredBook = null) {
     const bindCollapse = host => host.querySelectorAll('details[data-k]').forEach(d => {
         d.addEventListener('toggle', () => (d.open ? labCollapsed.delete(d.dataset.k) : labCollapsed.add(d.dataset.k)));
     });
+
+    /** Which of `book`'s entries the haystack would activate on keys alone, and on what. Disabled entries are out, as core
+     *  has them; every other gate core applies — probability, inclusion groups, delay, cooldown, character and tag filters,
+     *  decorators, recursion — is not modelled here, so this is the keyword half of activation and not a prediction. */
+    const applyBook = async name => {
+        const book = name === selected ? data : await loadWorldInfo(name);
+        const entries = Object.values(book?.entries ?? {}).filter(e => !e.disable && usableKeys(e?.key).length);
+        const hits = [];
+        for (const entry of entries) {
+            const sec = entry.selective ? secondaryKeys(entry) : [];
+            const rows = keyHits(usableKeys(entry.key), labHay,
+                entry.caseSensitive ?? world_info_case_sensitive, entry.matchWholeWords ?? world_info_match_whole_words,
+                {
+                    context: 30,
+                    matchWindow: labWindow,
+                    gate: sec.length ? { keys: sec, logic: Number(entry.selectiveLogic ?? WI_LOGIC.AND_ANY) } : undefined,
+                });
+            const fired = rows.filter(r => r.count > 0);
+            if (fired.length) hits.push({ entry, rows: fired });
+        }
+        labRun = { book: name, entries: hits, scanned: entries.length };
+        repaint();
+    };
+
+    /** An applied book's result: a line saying what was matched and what was not, then one collapsible entry per hit. */
+    const labRunHtml = () => {
+        const { book, entries, scanned } = labRun;
+        const head = `<div style="margin-bottom:8px;"><b>${escapeHtml(book)}</b>`
+            + `<small style="opacity:0.6;"> — ${entries.length} of ${scanned} ${scanned === 1 ? 'entry' : 'entries'} on keys alone</small>`
+            + ' <i class="fa-solid fa-xmark wa-run-clear" title="Back to the typed keys" style="cursor:pointer;opacity:0.6;"></i></div>';
+        if (!entries.length) return `${head}<div style="opacity:0.6;">Nothing in this book matches the text.</div>`;
+        return head + entries.map(({ entry, rows }, i) => {
+            const color = labInk(i);
+            const title = `<span class="wa-kw" style="border-color:${escapeHtml(color)};background:color-mix(in srgb, ${escapeHtml(color)} 18%, transparent);">${escapeHtml(wiTitleOf(entry))}</span>`;
+            return `<details open style="margin-bottom:8px;"><summary style="cursor:pointer;">${title}`
+                + `<small style="opacity:0.6;"> ${rows.length} key${rows.length === 1 ? '' : 's'}</small></summary>`
+                + `<div style="margin-left:10px;">${rows.map(r => labKeyHtml(r, color)).join('')}</div></details>`;
+        }).join('');
+    };
 
     /** The rows and the colour they share with the marks, from whatever the panes hold now. */
     const scanLab = () => {
@@ -2335,16 +2375,25 @@ export async function lorebookStudio(preferredBook = null) {
                 if (picked.sec.length) gateBox.open = true;   // an imported gate must not land shut and invisible
                 repaint();
             }),
+            labTool('fa-book', 'Apply a lorebook: every entry in it against this text, hits only — shift-click to choose the book',
+                async ev => {
+                    const name = ev.shiftKey ? await pickBook() : selected;
+                    if (!name) return;
+                    await applyBook(name);
+                }),
             labTool('fa-expand', 'Show the text with every match marked', () => showMarkedText()),
         );
         const out = document.createElement('div');
         out.style.cssText = 'flex:2 1 0;overflow:auto;min-width:0;min-height:0;';
         const repaint = () => {
             const { keys, ink, rows, gate } = scanLab();
-            out.innerHTML = rows.length
-                ? rows.map(r => labKeyHtml(r, r.color)).join('')
-                : '<div style="opacity:0.6;padding:6px 0;">Keys you type on the right are matched against the text on the left.</div>';
+            out.innerHTML = labRun
+                ? labRunHtml()
+                : (rows.length
+                    ? rows.map(r => labKeyHtml(r, r.color)).join('')
+                    : '<div style="opacity:0.6;padding:6px 0;">Keys you type on the right are matched against the text on the left.</div>');
             bindCollapse(out);
+            out.querySelector('.wa-run-clear')?.addEventListener('click', () => { labRun = null; repaint(); });
             // Committed with nothing in the box would leave no way back, so an empty haystack is always the editable one.
             const reading = labCommitted && !!labHay.trim();
             hayBox.style.display = reading ? 'none' : '';
