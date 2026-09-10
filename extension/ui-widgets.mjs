@@ -201,6 +201,13 @@ dialog.popup:has(.wa-studio), .wa-studio-nav, .wa-studio-explorer, .wa-studio-en
     padding: 4px 7px; border-radius: 4px; font-size: 1.15em;
     background: none; border: none; color: inherit; line-height: 1; }
 .wa-studio-close:hover { opacity: 1; background: var(--white20a, rgba(255,255,255,0.1)); }
+/* The Lab's rendered haystack, coloured as ST colours a message: the tags are the same, so a custom theme reaches it too.
+   The auto-quotes go, since the quote characters are kept in the text — what is shown has to be what was matched. */
+.wa-marked q { color: var(--SmartThemeQuoteColor); }
+.wa-marked em { color: var(--SmartThemeEmColor); }
+.wa-marked u { color: var(--SmartThemeUnderlineColor); }
+.wa-marked q em, .wa-marked q i, .wa-marked q u { color: inherit; }
+.wa-marked q::before, .wa-marked q::after { content: ''; }
 .wa-studio-nav { flex: 0 0 20%; min-width: 170px; max-width: 320px; overflow-y: auto;
     border-right: 1px solid var(--SmartThemeBorderColor, rgba(255,255,255,0.15)); padding-right: 6px; }
 /* Collapsed to a rail: the chevron has to stay in it, or there is no way back. min-width beats the rule above. */

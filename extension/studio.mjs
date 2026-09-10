@@ -2046,27 +2046,50 @@ export async function lorebookStudio(preferredBook = null) {
         return `${from > 0 ? '\u2026' : ''}${out}${to < src.length ? '\u2026' : ''}`;
     };
 
-    /** The haystack with every span wrapped, in the colour of the first key that reached it; the rest are named in the tooltip,
-     *  Offsets are keyExcerpts', which are into the NFC form. */
+    /** The spans ST colours in a message — quoted passages and *emphasis* — as offsets into `src`. The delimiters stay in the
+     *  text rather than being consumed as markdown: what the Lab shows has to be exactly what was matched. */
+    const proseRanges = src => {
+        const out = [];
+        for (const m of src.matchAll(/"[^"\n]*"|\u201C[^\u201D\n]*\u201D|\u00AB[^\u00BB\n]*\u00BB/g)) {
+            out.push({ start: m.index, end: m.index + m[0].length, tag: 'q' });
+        }
+        for (const m of src.matchAll(/(?<![\w*])\*(?!\s)[^*\n]+?(?<!\s)\*(?![\w*])/g)) {
+            out.push({ start: m.index, end: m.index + m[0].length, tag: 'em' });
+        }
+        return out;
+    };
+
+    /** The haystack with every span wrapped, in the colour of the first key that reached it; the rest are named in the tooltip.
+     *  Offsets are keyExcerpts', which are into the NFC form. Cut at every boundary — a mark's and a quote's alike — so a
+     *  quote holding a match is still a quote, and the tags around each piece are whatever covers it. */
     const markedHtml = (text, spans, ink) => {
         const src = String(text).normalize('NFC');
         // The message break is a line of dashes in the pane, where it has to be typable; here it can be the rule it stands for.
-        // The blank lines around the rule go with it: the container is pre-wrap, so leaving them would stack their own height
-        // on top of the rule's margins.
+        // The blank lines around it go too: the container is pre-wrap, so they would stack on top of the rule's own margins.
         const plain = t => escapeHtml(t).replace(/(?:\r?\n)*^[ \t]*-{3,}[ \t]*$(?:\r?\n)*/gm,
             '<hr style="border:none;border-top:1px solid currentColor;opacity:0.85;margin:15px 0;">');
-        let html = '', at = 0;
-        for (const sp of spans) {
+        const mark = (sp, t) => {
             // A negated span is what stopped a key, not what matched it: WA_RED, the same colour severity wears in the Explorer.
             const fill = sp.negated ? `color-mix(in srgb, ${WA_RED} 28%, transparent)` : ink(sp.key, 0.28);
             const edge = sp.negated ? WA_RED : ink(sp.key);
             const label = k => `${k.negated ? '\u2212 ' : ''}${k.term && k.term !== k.key ? `${k.key} \u2014 ${k.term}` : k.key}`;
-            html += plain(src.slice(at, sp.start))
-                + `<span data-at="${sp.start}" data-to="${sp.end}" title="${escapeHtml(sp.keys.map(label).join('\n'))}"`
-                + ` style="background:${fill};border-bottom:2px solid ${edge};">${escapeHtml(src.slice(sp.start, sp.end))}</span>`;
-            at = sp.end;
+            return `<span data-at="${sp.start}" data-to="${sp.end}" title="${escapeHtml(sp.keys.map(label).join('\n'))}"`
+                + ` style="background:${fill};border-bottom:2px solid ${edge};color:inherit;">${escapeHtml(t)}</span>`;
+        };
+        const prose = proseRanges(src);
+        const cuts = [...new Set([0, src.length, ...spans.flatMap(sp => [sp.start, sp.end]), ...prose.flatMap(r => [r.start, r.end])])]
+            .sort((a, b) => a - b);
+        let html = '';
+        for (let i = 0; i + 1 < cuts.length; i++) {
+            const [a, b] = [cuts[i], cuts[i + 1]];
+            if (a >= b) continue;
+            // q outside em, as a message nests them; a piece is inside a range only if the range covers all of it.
+            const tags = prose.filter(r => r.start <= a && b <= r.end).map(r => r.tag).sort(x => (x === 'q' ? -1 : 1));
+            const sp = spans.find(x => x.start <= a && b <= x.end);
+            html += `${tags.map(t => `<${t}>`).join('')}${sp ? mark(sp, src.slice(a, b)) : plain(src.slice(a, b))}`
+                + `${[...tags].reverse().map(t => `</${t}>`).join('')}`;
         }
-        return html + plain(src.slice(at));
+        return html;
     };
 
     let labHay = '', labKeys = '';
@@ -2191,6 +2214,7 @@ export async function lorebookStudio(preferredBook = null) {
         const wrap = document.createElement('div');
         wrap.style.cssText = 'text-align:left;width:100%;display:flex;gap:12px;align-items:stretch;';
         const body = document.createElement('div');
+        body.className = 'wa-marked';
         body.style.cssText = 'flex:1.6 1 0;white-space:pre-wrap;line-height:1.6;max-height:78vh;overflow:auto;font-size:0.95em;min-width:0;';
         body.innerHTML = markedHtml(labHay, keySpans(keys, labHay, labCase, labWhole, { matchWindow: labWindow, gate }), ink)
             || '<span style="opacity:0.6;">(no text)</span>';
@@ -2236,7 +2260,7 @@ export async function lorebookStudio(preferredBook = null) {
         hayBox.style.flex = '1 1 auto';
         // The same box, read-only and marked: text_pole so it keeps the border and padding the textarea had. height and
         // margin beat .text_pole's `fit-content` and `5px 0`, which would let it hug its content and never scroll.
-        const hayRead = document.createElement('div'); hayRead.className = 'text_pole';
+        const hayRead = document.createElement('div'); hayRead.className = 'text_pole wa-marked';
         hayRead.style.cssText = 'flex:1 1 auto;height:100%;min-height:0;margin:0;overflow:auto;white-space:pre-wrap;line-height:1.5;'
             // Not a field: dashed and unfilled, so a screenful with no match in it still reads as the committed view.
             + 'border-style:dashed;background-color:transparent;cursor:default;';
