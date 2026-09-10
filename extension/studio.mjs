@@ -2094,9 +2094,13 @@ export async function lorebookStudio(preferredBook = null) {
                 + `${escapeHtml(e.text.slice(e.end))}</small></div>`).join('')
             + '</div>';
         // <details> so the open/shut state is the element's own; labCollapsed carries it across the repaint that rebuilds this.
+        // Disjoint, and summing to the windows this key was in the running for: "2 matched, 2 filtered" needs no total to read.
+        // Not "hits" — the number beside the chip is occurrences, and one word for both would collide.
+        const filtered = r.segments.filter(sg => !sg.matched).length;
+        const tally = `${r.segments.length - filtered} matched${filtered ? `, ${filtered} filtered` : ''}`;
         return `<details${labCollapsed.has(r.key) ? '' : ' open'} data-k="${escapeHtml(r.key)}" style="margin-bottom:8px;">`
             + `<summary style="cursor:pointer;">${chip} ${num(r.count)}`
-            + `<small style="opacity:0.5;"> in ${r.segments.length} window${r.segments.length === 1 ? '' : 's'}</small></summary>`
+            + `<small style="opacity:0.5;"> ${tally}</small></summary>`
             + `${r.segments.map(seg).join('')}</details>`;
     };
 
