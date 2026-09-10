@@ -1,27 +1,25 @@
-// lab.mjs — the Keyword Lab's model: what a haystack yields for a typed key list or for a book applied to it.
-// ST-free and node-importable; the Studio supplies the settings and does the drawing.
+// lab.mjs — the Keyword Lab's model: a text against a typed key list, or against a book's entries. ST-free; the Studio
+// injects the settings.
 
 import { keyHits, keySpans, mergeSpans, secondaryKeys, splitKeys, usableKeys, WI_LOGIC } from './matcher.mjs';
 
-/** The secondary condition an entry gates its keys by, or undefined when it has none. */
+/** An entry's secondary condition as `keyHits`/`keySpans` take it, or undefined when it has none. Blank secondaries are
+ *  dropped and `selective` is read: core ignores keysecondary without it. */
 export const entryGate = (entry) => {
     const keys = entry?.selective ? secondaryKeys(entry).map(k => String(k ?? '').trim()).filter(Boolean) : [];
     return keys.length ? { keys, logic: Number(entry.selectiveLogic ?? WI_LOGIC.AND_ANY) } : undefined;
 };
 
-/** An entry's resolved match flags: its own where it has them, else the defaults (ST's globals, which the caller reads). */
+/** An entry's match flags with the caller's defaults filled in. Nullish, not falsy: `caseSensitive: false` is authored. */
 export const entryFlags = (entry, { caseSensitive = false, wholeWords = false } = {}) => ({
     caseSensitive: entry?.caseSensitive ?? caseSensitive,
     wholeWords: entry?.matchWholeWords ?? wholeWords,
 });
 
-/** Which of `entries` the text would activate on keys alone, with what. Disabled entries are out, as core has them; every
- *  other gate core applies — probability, inclusion groups, delay, cooldown, character and tag filters, decorators,
- *  recursion — is not modelled, so this is the keyword half of activation and not a prediction. `keyList` is the run's
- *  distinct keys, which is what a caller colours by: one key two entries both found is one term.
- *
- *  `skipVectorized` leaves out the entries meant to arrive by cosine. Core keyword-matches them like any other, so this is
- *  the reader's question — am I tuning keys or looking at everything — and not a correctness rule. */
+/** `{ entries: [{ entry, rows }], scanned, books, keyList }` for the entries of `entries` whose keys hit `text`, each under
+ *  its own gate and flags. Skips `disable`, and `vectorized` when `skipVectorized` — core keyword-matches those. Models no
+ *  other gate core applies: probability, inclusion groups, delay, cooldown, character and tag filters, decorators,
+ *  recursion. `scanned` counts the entries tested, `books` their worlds, `keyList` their hit keys deduped. */
 export function runBook(entries, text, { matchWindow = 'scan', context = 28, defaults, skipVectorized = false } = {}) {
     const keyed = (entries ?? [])
         .filter(e => e && !e.disable && usableKeys(e.key).length)
@@ -41,8 +39,8 @@ export function runBook(entries, text, { matchWindow = 'scan', context = 28, def
     };
 }
 
-/** Where a run's entries landed in `text`, folded once over the union: each entry is matched under its own flags, so a word
- *  two of them found is one span naming both rather than two spans nested in the markup. */
+/** A run's spans over `text`, merged across its entries in one pass. Per-entry merging would leave two spans on a word two
+ *  entries both hit, which cannot nest in markup. */
 export function runSpans(run, text, { matchWindow = 'scan', defaults } = {}) {
     return mergeSpans((run?.entries ?? []).flatMap(({ entry }) => {
         const { caseSensitive, wholeWords } = entryFlags(entry, defaults);
@@ -50,8 +48,8 @@ export function runSpans(run, text, { matchWindow = 'scan', defaults } = {}) {
     }));
 }
 
-/** The Lab's result, in one shape whichever mode it is in: `keys` to colour by, `rows` for a typed list (a run's rows hang
- *  off the run itself, per entry), `gate` as the panes have it, and `spans` to mark the text with. */
+/** `{ keys, rows, gate, spans }` for either mode. With `run` set, `rows` is empty (a run's rows are per entry, on the run)
+ *  and `gate` is null (each entry carries its own). Both fields are present either way: a caller destructures one shape. */
 export function labScan({ hay = '', keys = '', sec = '', logic = WI_LOGIC.AND_ANY, matchWindow = 'scan',
     caseSensitive = false, wholeWords = false, context = 28, run = null, defaults } = {}) {
     if (run) {

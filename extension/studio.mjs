@@ -18,12 +18,10 @@ import { WI_LOGIC, dropTags, hasPromoteDecorator, isRegexKey, scanSegments, seco
 import { labScan, runBook } from './lab.mjs';
 import { addVariant, deleteKey, hasKey, keyHolders, kwNorm, renameKeyOn, replaceKey } from './keyedit.mjs';
 
-// The audit's three severities, drawn. Red-amber-green is the reading, so these do NOT follow the theme's accent; the
-// mapping lives here because the audit reports a severity by name and has no business holding a colour.
+// The audit's severities as colours. Fixed, not theme variables: severity is read by hue.
 const SEVERITY_COLOR = { severe: '#e06c6c', moderate: '#d9b74a', minor: '#7bbf6a' };
 const SEVERITY_RANK = { severe: 3, moderate: 2, minor: 1 };
-// Everything else follows the theme, so a user's palette reaches WA's own controls: the accent for an active one, and a
-// desaturated body colour for a flag that is showing an inherited value rather than one the entry set.
+// A control that is on, and a flag showing an inherited value rather than the entry's own.
 const ACCENT = 'var(--SmartThemeQuoteColor)';
 const INHERIT_TINT = 'color-mix(in srgb, var(--SmartThemeBodyColor) 55%, transparent)';
 const WA_GREEN = SEVERITY_COLOR.minor;   // "no prune" — a keyword the scan doesn't flag
@@ -57,17 +55,15 @@ function planUidReindex(entries, orderedUids, start, desc) {
  * Lorebook Studio (/wa-studio).
  * @param {string|null} preferredBook Opened if it still exists; else the first attached book, else nothing selected
  * @param {{lab?: boolean, entry?: {world: string, uid: number|string}}|null} open Where to land: `lab` opens the Keyword
- *   Lab on the last scan window with the attached books applied, `entry` opens that entry in the Explorer. Both are the
- *   Delivery panel's — one asks what the keys caught, the other what the entry says.
+ *   Lab on the last scan window with the attached books applied, `entry` opens that entry in the Explorer.
  */
 export async function lorebookStudio(preferredBook = null, open = null) {
     if (!(world_names ?? []).length) { toastr.warning('No lorebooks found.', 'Worlds Apart'); return ''; }
     ensureStudioStyle();
 
-    /** The books ST has active for this chat, by name — global, the character's own and its extra lore, the chat's, the
-     *  persona's. Mirrors what getGlobalLore/getCharacterLore/getChatLore/getPersonaLore resolve, because those four are
-     *  private and getSortedEntries, which is exported, emits WORLDINFO_ENTRIES_LOADED as a side effect (upstream-st.md #18).
-     *  Names only: a Set drops the duplicate core also skips, and the entries are loaded the same way core loads them. */
+    /** The books ST has active for this chat: global, the character's own and its charLore extras, the chat's, the persona's.
+     *  Mirrors getGlobalLore/getCharacterLore/getChatLore/getPersonaLore, which are private, because the exported
+     *  getSortedEntries emits WORLDINFO_ENTRIES_LOADED (upstream-st.md #18). The Set drops the duplicate core also skips. */
     const attachedBookNames = () => {
         const ctx = getContext();
         const names = new Set(selected_world_info ?? []);
@@ -913,7 +909,7 @@ export async function lorebookStudio(preferredBook = null, open = null) {
             }
             if (worst) {
                 badge.style.background = SEVERITY_COLOR[worst];
-                // Black on amber and green, white on red: the badge's ground is the severity, so its text is what reads on it.
+                // The badge's ground is the severity colour; these are the readable text colours on those three.
                 badge.style.color = worst === SEVERE ? '#fff' : '#111';
             }
             const softer = (flagged?.size ?? 0) - counted.length;
@@ -1196,7 +1192,7 @@ export async function lorebookStudio(preferredBook = null, open = null) {
         save(); suggest = null; if (scan) rebuildScan(); sugg.delete(e.uid); rowEls.delete(e.uid); renderExplorer();
     };
     // Picks a target lorebook (any but the open one); null = cancelled.
-    // `withSelected` for a picker that acts on a book rather than moving something into one: there the open book is a candidate.
+    // `withSelected` includes the open book, which a copy/move target must not offer.
     const pickBook = async (prompt, withSelected = false) => {
         const others = [...world_names].filter(n => withSelected || n !== selected).sort((a, b) => a.localeCompare(b));
         if (!others.length) { toastr.info('No other lorebook to target.', 'Worlds Apart'); return null; }
@@ -1206,7 +1202,7 @@ export async function lorebookStudio(preferredBook = null, open = null) {
         const attached = new Set(attachedBookNames());
         for (const n of others) {
             const o = document.createElement('option'); o.value = n; o.selected = n === selected;
-            // A select cannot carry the nav's accent, so an attached book is marked in the text it does carry.
+            // A select option carries no border, so the mark goes in its text.
             o.textContent = attached.has(n) ? `${n} \u2014 attached` : n;
             if (attached.has(n)) o.style.color = 'var(--SmartThemeQuoteColor)';
             sel.append(o);
@@ -2049,19 +2045,17 @@ export async function lorebookStudio(preferredBook = null, open = null) {
         repaint();
     };
 
-    // --- Keyword Lab: any keys against any text, with no entry and no book behind them ---
-    /** A key's colour is its position in the list: one hue per family — blue, green, magenta, orange, cyan, violet, yellow —
-     *  since two hues from one family are hard to tell apart however far apart the numbers are. Clear of red, severity here.
-     *  A second pass over the same hues in pastel gives fourteen before a colour repeats. */
+    // --- Keyword Lab ---
+    /** Seven hues, one per colour family, none in the red band SEVERITY_COLOR uses. labInk indexes them and desaturates on
+     *  the second pass, so fourteen positions run before a colour repeats. */
     const LAB_HUES = [215, 120, 305, 35, 180, 265, 58];
     const labInk = (i, a = 1) => {
         const pastel = i % (LAB_HUES.length * 2) >= LAB_HUES.length;
         return `hsl(${LAB_HUES[i % LAB_HUES.length]} ${pastel ? 45 : 80}% ${pastel ? 68 : 50}%${a < 1 ? ` / ${a}` : ''})`;
     };
 
-    /** One window with every hit in it guillemeted, for the title of a digest line — a title attribute is plain text, so the
-     *  hits are marked the way markExcerptText marks them rather than coloured, a negative wearing them inverted. A long
-     *  window is clipped around `ex`. */
+    /** `sg`'s window text with every hit in it guillemeted, «so» for a positive and »so« for a negative, for a title
+     *  attribute, which takes no markup. Over 320 characters it is clipped to 110 either side of `ex`. */
     const windowTip = (sg, ex) => {
         const src = String(sg.text ?? '');
         const wide = src.length > 320;
@@ -2070,7 +2064,7 @@ export async function lorebookStudio(preferredBook = null, open = null) {
         let out = '', at = from;
         for (const x of [...sg.excerpts].sort((a, b) => a.at - b.at)) {
             if (x.at < from || x.to > to) continue;
-            // A negative wears the guillemets inverted — »so« — which is the one distinction a plain-text tooltip can carry.
+            // Inverted for a negative.
             const [open, close] = x.negated ? ['\u00bb', '\u00ab'] : ['\u00ab', '\u00bb'];
             out += `${src.slice(at, x.at)}${open}${src.slice(x.at, x.to)}${close}`;
             at = x.to;
@@ -2079,13 +2073,13 @@ export async function lorebookStudio(preferredBook = null, open = null) {
         return `${from > 0 ? '\u2026' : ''}${out}${to < src.length ? '\u2026' : ''}`;
     };
 
-    /** The Lab's mark: its key's colour, or WA_RED for a span that vetoed one rather than matching it. */
+    /** A markSpan for renderMessageHtml: the key's ink, or SEVERITY_COLOR.severe for a negated span. */
     const labMark = ink => (sp, text) => {
         const fill = sp.negated ? `color-mix(in srgb, ${WA_RED} 40%, transparent)` : ink(sp, 0.4);
         const edge = sp.negated ? WA_RED : ink(sp);
         const label = k => `${k.negated ? '\u2212 ' : ''}${k.term && k.term !== k.key ? `${k.key} \u2014 ${k.term}` : k.key}`;
-        // An outline, not just a wash: a preset's GFX block sets its own background, and 28% of a hue over #121212 is
-        // invisible. The outline is opaque and does not affect layout, so it reads over anything the text sits on.
+        // The outline as well as the wash: rendered HTML in the text can set its own background, which a translucent
+        // wash disappears into. An outline takes no layout space.
         return `<span data-at="${sp.start}" data-to="${sp.end}" data-key="${escapeHtml(sp.key)}"`
             + ` title="${escapeHtml(sp.keys.map(label).join('\n'))}"`
             + ` style="background:${fill};outline:1px solid ${edge};border-radius:2px;`
@@ -2097,23 +2091,21 @@ export async function lorebookStudio(preferredBook = null, open = null) {
 
     let labHay = '', labKeys = '';
     let labCase = !!world_info_case_sensitive, labWhole = !!world_info_match_whole_words;
-    // The unit a key must match within, as the running setting has it. A pasted text has no messages, so `message` is
-    // `scan` here; it is still offered, and still stored, because it is the setting the Lab is standing in for.
+    // The match window, from the setting. `message` cuts on MESSAGE_BREAK lines, which the chat import writes.
     let labWindow = settings().matchWindow;
-    // Editing or reading: committed, the haystack pane shows the marked text in place of the box it was typed in.
+    // Committed: the haystack pane shows the marked text instead of the textarea.
     let labCommitted = false;
     let labRepaint = null;   // the Lab's repaint, claimed by renderLabView: an applied run is triggered from outside it
     let labRun = null;   // an applied book: { book, entries: [{ entry, rows }] }, shown in place of the typed keys' result
     let labShowMarkup = false;
     let labSkipVector = false;   // entries meant to arrive by cosine, left out of a run
     let labRunSource = null;     // how to re-read what the last run ran over: `{ label, load }`, so a re-run sees the books
-                                 // as they are now — an edit is the reason to re-run, and a snapshot would still hold the old key   // the source behind the rendering: every tag, entity and delimiter shown at once
-    // The secondary condition, in core's own terms: a term list and one of world_info_logic's four operators, gating every key.
+                                 // as they are now: a snapshot taken at apply time would still hold a key since deleted   // the source behind the rendering: every tag, entity and delimiter shown at once
+    // The secondary condition applied to every key: a term list and one of world_info_logic's four operators.
     let labSec = '', labLogic = String(WI_LOGIC.AND_ANY);
 
-    /** The chat as WA reads it for a scan: is_system gone, dropChatTags applied, the depth setting's last messages, names
-     *  included as core would, and `override` messages deep rather than the setting's. Separated by a rule, which is how the
-     *  Lab's message window knows where a message ended. */
+    /** The chat as WA reads it for a scan: is_system dropped, dropChatTags applied, the last `messageDepth` messages —
+     *  `override` messages instead when given — names included per world_info_include_names. Joined on MESSAGE_BREAK rules. */
     const chatHaystack = (override) => {
         const spec = settings().dropChatTags;
         const raw = getContext().chat ?? [];
@@ -2122,18 +2114,16 @@ export async function lorebookStudio(preferredBook = null, open = null) {
             .map(m => (spec?.trim() ? { ...m, mes: dropTags(String(m.mes ?? ''), spec) } : m));
         const depth = Number(override ?? (settings().messageDepth || world_info_depth));
         const messages = scanSegments(chat, { depth, includeNames: world_info_include_names, matchWindow: 'message' });
-        // Says which of the three numbers is the small one: the depth setting, or the hidden messages core and WA both drop.
+        // The depth used and the is_system messages dropped: both change the count, and neither is visible in the pane.
         const hidden = raw.length - chat.length;
         toastr.info(`${messages.length} message${messages.length === 1 ? '' : 's'} at depth ${depth}`
             + `${hidden ? `, ${hidden} hidden message${hidden === 1 ? '' : 's'} skipped` : ''}`
-            // Named, because dropChatTags takes the element WITH its contents: a tracker block leaves a gap where it was,
-            // and a reader looking for it needs to know the setting removed it rather than the Lab losing it.
+            // dropChatTags removes the named element WITH its contents, so a tracker block leaves a gap in the pane.
             + `${spec?.trim() ? `. Dropped, with contents: ${escapeHtml(spec)}` : ''}`, 'Keyword Lab');
         return messages.join(`\n\n${'-'.repeat(24)}\n\n`);
     };
 
-    /** One entry of any book, as the Lab's key list plus its secondary condition — the entry's own spelling, not a
-     *  SmartKey rewrite of it. Returns null when nothing was chosen. */
+    /** `{ keys, sec, logic }` from an entry of any book, as the entry spells them. Null when nothing was chosen. */
     const pickEntryKeys = async () => {
         const w = document.createElement('div');
         w.style.cssText = 'text-align:left;';
@@ -2149,7 +2139,7 @@ export async function lorebookStudio(preferredBook = null, open = null) {
         let book = null;
         const fill = async () => {
             entrySel.innerHTML = '<option value="">Loading…</option>';
-            // The selected book is already in hand; any other is fetched, which is why this is a picker and not a flat list.
+            // `data` for the open book; any other is loaded on the change.
             book = bookSel.value === selected ? data : await loadWorldInfo(bookSel.value);
             const entries = Object.values(book?.entries ?? {}).filter(e => usableKeys(e?.key).length).sort(SORT_FNS['title-asc']);
             entrySel.innerHTML = entries.length
@@ -2167,10 +2157,10 @@ export async function lorebookStudio(preferredBook = null, open = null) {
         return { keys: usableKeys(e.key), sec, logic: String(e.selectiveLogic ?? WI_LOGIC.AND_ANY) };
     };
 
-    /** One key's result as HTML: the key as a chip with its count, then a block per segment — every branch with that segment's
-     *  count, and under it the first place each branch that fired landed. A segment the key failed in is dimmed. */
-    /** A key as chip text, breaking before an operator rather than after it — PEP 8's rule, and the readable half of a long
-     *  SmartKey. `<wbr>` offers the break, the nbsp after the operator refuses the one the space would otherwise allow. */
+    /** One keyHits row as HTML: a chip, its tally, and a block per window holding that window's branch counts and
+     *  excerpts. A window the key did not match in is dimmed. `entry` stamps data-uid/data-world for the chip menu. */
+    /** Key text with a break opportunity before each operator and a non-breaking space after it, so a wrapped SmartKey
+     *  starts its line on the operator. */
     const keyChipText = key => escapeHtml(key)
         .replace(/ \| /g, '<wbr> |\u00a0')
         .replace(/ &amp; /g, '<wbr> &amp;\u00a0')
@@ -2185,22 +2175,22 @@ export async function lorebookStudio(preferredBook = null, open = null) {
             + `<small style="opacity:0.75;">${escapeHtml(e.text.slice(0, e.start))}`
             + `<span style="color:${e.negated ? WA_RED : escapeHtml(color)};font-weight:600;">${escapeHtml(e.text.slice(e.start, e.end))}</span>`
             + `${escapeHtml(e.text.slice(e.end))}</small></div>`;
-        // A rule between windows, not before the first: without it the branch lines of one window run into the next's.
+        // A rule between windows, not before the first.
         const seg = (sg, i) => `<div style="margin:5px 0 0 6px;${i ? 'padding-top:5px;border-top:1px solid color-mix(in srgb, currentColor 12%, transparent);' : ''}`
             + `${sg.matched ? '' : 'opacity:0.55;'}">`
             + `<small>${sg.leaves.map(l => `${escapeHtml(l.negated ? `-${l.term}` : l.term)} ${num(l.n)}`).join(', ')}</small>`
             + sg.excerpts.map(e => span(e, sg)).join('')
             + '</div>';
-        // <details> so the open/shut state is the element's own; labExpanded carries it across the repaint that rebuilds this.
-        // A key with one positive branch and nothing gating it cannot be filtered, so the window is not the interesting unit:
-        // its number is occurrences. Anything with branches — an AND group, a gate — is decided per window, so it counts those.
+        // labExpanded carries the open state across the repaint that rebuilds this element.
+        // A key with one positive branch cannot be filtered by a window, so its tally is occurrences; anything with more
+        // branches tallies matched and filtered windows.
         const oneBranch = r.segments.every(sg => sg.leaves.length === 1 && !sg.leaves[0].negated);
         const filtered = r.segments.filter(sg => !sg.matched).length;
         const tally = oneBranch
             ? num(r.count)
-            // Disjoint, and summing to the windows the key was in the running for, so neither number needs a total to read.
+            // Disjoint: the two sum to segments.length.
             : `${num(`${r.segments.length - filtered} matched`)}${filtered ? `<small style="opacity:0.5;">, ${filtered} filtered</small>` : ''}`;
-        // A single-branch key reads hit by hit: the window it fell in decided nothing, so grouping by one says nothing.
+        // A single-branch key's excerpts are listed flat: keyHits gives every occurrence, not one per window.
         const body = oneBranch
             ? r.segments.flatMap(sg => sg.excerpts.map(e => span(e, sg))).join('')
             : r.segments.map((sg, i) => seg(sg, i)).join('');
@@ -2209,8 +2199,7 @@ export async function lorebookStudio(preferredBook = null, open = null) {
             + `<summary style="cursor:pointer;">${chip} ${tally}</summary>${body}</details>`;
     };
 
-    /** Keys the reader has opened, by key text: shut is the default, since the summary already carries the count and a long
-     *  run is unreadable otherwise. Survives the repaint on every keystroke, and both views share it. */
+    /** Key texts the reader has opened; shut is the default. Survives the repaint, and the tab and popout share it. */
     const labExpanded = new Set();
 
     /** Re-attaches the collapse state to a freshly painted digest, and the Explorer's shift-click-for-all to its summaries. */
@@ -2221,8 +2210,8 @@ export async function lorebookStudio(preferredBook = null, open = null) {
             const sum = d.querySelector('summary');
             if (!sum) continue;
             sum.title = 'Shift-click for every other key';
-            // Shift toggles every OTHER block and leaves this one as-is, as the Explorer's chevron does — so the default is
-            // prevented rather than followed, and `open` fires each block's own toggle to record it.
+            // Shift toggles every OTHER block, as the Explorer's chevron does: preventDefault leaves this one as it was,
+            // and setting `open` fires each block's own toggle, which records it.
             sum.addEventListener('click', ev => {
                 if (!ev.shiftKey) return;
                 ev.preventDefault();
@@ -2253,8 +2242,7 @@ export async function lorebookStudio(preferredBook = null, open = null) {
 
     const applyOneBook = async name => applyFrom(name, () => bookEntries(name));
 
-    /** Every book ST has active for this chat, which is the set core scans. Falls back to the picker when nothing is
-     *  attached, since an empty run and a run with no hits look the same otherwise. */
+    /** Applies every attached book. Falls back to the picker when none is attached. */
     const applyAttached = async () => {
         const names = attachedBookNames();
         if (!names.length) {
@@ -2266,14 +2254,14 @@ export async function lorebookStudio(preferredBook = null, open = null) {
             async () => (await Promise.all(names.map(bookEntries))).flat());
     };
 
-    /** An applied book's result: a line saying what was matched and what was not, then one collapsible entry per hit. */
+    /** labRun as HTML: a tally line, then a collapsible block per hit entry holding its keys' rows. */
     const labRunHtml = () => {
         const { label, entries, scanned, books, keyList } = labRun;
         const where = books.length > 1 ? `${books.length} books` : (books[0] ?? label);
         const head = `<div style="margin-bottom:8px;"><b>${entries.length}/${scanned}</b>`
             + `<small style="opacity:0.6;"> ${scanned === 1 ? 'entry' : 'entries'} in ${escapeHtml(where)}</small>`
             + ' <i class="fa-solid fa-xmark wa-run-clear" title="Back to the typed keys" style="cursor:pointer;opacity:0.6;"></i></div>';
-        // Nothing keyed at all is a different answer from nothing matching, and 0/0 does not say which.
+        // scanned 0 and entries 0 both read as 0/0, so the no-keys case says so.
         if (!scanned) return `${head}<div style="opacity:0.6;">No entry there has a key to match with.</div>`;
         if (!entries.length) return head;
         return head + entries.map(({ entry, rows }) => {
@@ -2416,7 +2404,7 @@ export async function lorebookStudio(preferredBook = null, open = null) {
     };
 
     /** The window WA last scanned, as the Lab's haystack: the messages it kept are post-dropChatTags and at capture depth,
-     *  so this is the text the entry actually fired against rather than a fresh read of the chat. */
+     *  so it is the text the entry fired against, not a fresh read of the chat. */
     const scannedHaystack = () => {
         const chat = runState.lastScanChat ?? [];
         if (!chat.length) return chatHaystack();
@@ -2428,7 +2416,7 @@ export async function lorebookStudio(preferredBook = null, open = null) {
     };
 
     /** Opens the Lab on the scanned window with the attached books applied. Whole-delivery, not per entry: the run reports
-     *  every entry whose keys caught something, which is the question, and one row of it is not. */
+     *  every entry whose keys caught something. */
     const openLabOnScan = async () => {
         labHay = scannedHaystack();
         labCommitted = true;
@@ -2528,7 +2516,7 @@ export async function lorebookStudio(preferredBook = null, open = null) {
         // margin beat .text_pole's `fit-content` and `5px 0`, which would let it hug its content and never scroll.
         const hayRead = document.createElement('div'); hayRead.className = 'text_pole wa-marked';
         hayRead.style.cssText = 'flex:1 1 auto;height:100%;min-height:0;margin:0;overflow:auto;white-space:pre-wrap;line-height:1.5;'
-            // Not a field: dashed and unfilled, so a screenful with no match in it still reads as the committed view.
+            // Dashed and unfilled, so it does not read as a field.
             + 'border-style:dashed;background-color:transparent;cursor:default;';
         const hayWrap = document.createElement('div');
         hayWrap.style.cssText = 'flex:3 1 0;position:relative;display:flex;min-height:0;overflow:hidden;margin:5px 0;';

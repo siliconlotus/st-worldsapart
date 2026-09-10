@@ -1,5 +1,4 @@
-// lab-check.mjs — the Keyword Lab's model: an entry's gate and flags, a book applied to a text, and the one result shape
-// both modes return. Self-checking; run with no arguments.
+// lab-check.mjs — lab.mjs: entryGate, entryFlags, runBook, runSpans, labScan. Self-checking; run with no arguments.
 
 import { entryFlags, entryGate, labScan, runBook, runSpans } from '../extension/lab.mjs';
 import { WI_LOGIC } from '../extension/matcher.mjs';
@@ -40,7 +39,7 @@ eq(run.entries.map(h => h.entry.uid).join(), '1,2,3', 'the entries that fired, i
 eq(run.entries[1].rows[0].count, 1, 'a gated entry fires only where its secondary is in the same window');
 eq(run.books.join(), 'B,C', 'the books scanned, deduped in encounter order');
 eq(run.keyList.join(), 'breath,slow', 'the run\'s distinct keys — one key two entries found is one term to colour');
-// Core keyword-matches a vectorized entry like any other, so leaving it out is the reader's option, not a rule.
+// Core keyword-matches a vectorized entry, so skipVectorized is a filter the caller asks for, not a default.
 const withVec = [...entries, { uid: 7, world: 'B', key: ['breath'], vectorized: true }];
 eq(runBook(withVec, text, para).scanned, 5, 'a vectorized entry is scanned like any other by default');
 eq(runBook(withVec, text, { ...para, skipVectorized: true }).scanned, 4, 'and left out when the reader is tuning keys');

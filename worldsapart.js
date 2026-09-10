@@ -1908,8 +1908,8 @@ function bind(selector, key, kind) {
 
 
 
-// The Delivery panel: a book icon (bottom-left) expanding into what stage 5 delivered last turn, in prompt order, refreshed
-// from runState.lastPromptOrder. Named for the stage, since "what is in the prompt" is exactly what it answers.
+// The Delivery panel: a bottom-left icon expanding into stage 5's delivered set, in prompt order, from
+// runState.lastPromptOrder.
 let deliveryTrigger = null, deliveryPanel = null;
 function ensureDeliveryPanel() {
     if (deliveryTrigger) return;
@@ -1948,8 +1948,7 @@ function renderDeliveryPanel(layout) {
     ensureDeliveryPanel();
     deliveryTrigger.dataset.count = String(layout.length);
     deliveryPanel.innerHTML = '';
-    // One control for the whole delivery, since the Lab's run reports every entry whose keys caught something in the window.
-    // Last, not first: the panel opens upward from its icon, so the bottom of the list is the end nearest the pointer.
+    // Appended last: the panel opens upward, so the bottom row is nearest the icon.
     const lab = document.createElement('div');
     lab.className = 'wa-delivery-entry';
     lab.title = 'Open the Keyword Lab on the window this scan read, with the attached books applied';
@@ -1975,8 +1974,7 @@ function renderDeliveryPanel(layout) {
         t.className = 'wa-delivery-title';
         t.textContent = wiTitleOf(e);
         el.append(g, t);
-        // Click opens the entry in the Explorer — the text and the fields, which is what the row's tooltip cannot show.
-        // Shift-click is the text alone, the quick look the row used to do on its own.
+        // Click opens the entry in the Explorer; shift-click shows its text alone.
         el.addEventListener('click', ev => {
             if (ev.shiftKey) { showEntryText(e); return; }
             lorebookStudio(e.world ?? chatBook(), { entry: { world: e.world, uid: e.uid } });
@@ -2117,8 +2115,7 @@ export async function init() {
 
     if (settings().enabled) renderDeliveryPanel(runState.lastPromptOrder);
 
-    /** Registers a WA command under its name and under the `wa=` twin of it: `=` is shift-`-`, so it is the typo of every
-     *  one of them. Aliases the parser already knows are kept. */
+    /** Registers a command under its name plus the `wa=` twin of it, keeping any aliases the props already carry. */
     const addWaCommand = props => SlashCommandParser.addCommandObject(SlashCommand.fromProps({
         ...props,
         aliases: [...(props.aliases ?? []), props.name.replace(/^wa-/, 'wa=')],

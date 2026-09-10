@@ -252,7 +252,7 @@ eq(leaves('? (/Gagar\\w+/ armstrong)').join(' '), '/Gagar\\w+/:2 armstrong:1', '
 console.log('ok   keyExcerpt: compound SmartKeys excerpt every credited leaf, with per-leaf counts');
 
 
-// One key's result as a line per segment: `leaf n, leaf n | first excerpt of each that fired`, dead segments marked `!`.
+// keyHits as one string: `key:count | leaf n, leaf n | ...`, one field per window, `!` prefixing an unmatched one.
 const digest = (k, text, opts = {}) => {
     const [r] = keyHits([k], text, opts.cs ?? false, opts.ww ?? true, opts);
     if (r.message) return `${r.key} !! ${r.message}`;
@@ -268,7 +268,7 @@ eq(keyHits(['? cosmonaut -astronuat'], space, false, true)[0].segments[0].excerp
     'only a branch that fired has a place to show');
 eq(keySpans(['? cosmonaut -astronaut'], space, false, true).map(sp => `${sp.term}${sp.negated ? '!' : ''}`).join(' '),
     'cosmonaut astronaut!', 'the veto is marked too, flagged so a caller can draw it as what stopped the key');
-// The model in one case: a window with no positive is not a window the key is decided in, however its negatives read.
+// A window with no positive branch is skipped, however its negatives read.
 const windows = 'His breath is fast and heavy.\n\nHe looks at you slowly, closing his eyes.\n\nHis breath hitches before slowly leveling out. Catch my breath.';
 eq(digest('? breath -slow', windows, { matchWindow: 'paragraph' }),
     '? breath -slow:1 | breath 1, -slow 0 | !breath 2, -slow 1',
@@ -348,7 +348,7 @@ const paras = 'Russian cosmonaut Yuri Gagarin met the American astronaut Neil Ar
 eq(textSegments(paras, 'paragraph').map(sg => sg.at).join(','), '0,75', 'a segment carries its offset into the whole text');
 eq(textSegments(paras, 'scan').length, 1, 'the scan window leaves the text whole');
 eq(textSegments('   ', 'scan').length, 0, 'blank text has no segments to match in');
-// A pasted text has no messages, so a `---` line is where one ended: the chat import writes them, and a reader can type them.
+// MESSAGE_BREAK: a line of three or more dashes.
 const msgs = 'Kyle: One.\n\nStill Kyle.\n\n---\n\nMara: Two.';
 eq(textSegments(msgs, 'message').map(sg => sg.text.trim()).join(' | '), 'Kyle: One.\n\nStill Kyle. | Mara: Two.',
     'message cuts on the --- lines and nothing else');
@@ -356,7 +356,7 @@ eq(textSegments(msgs, 'paragraph').map(sg => sg.text.trim()).join(' | '), 'Kyle:
     'paragraph cuts those again on the blank lines, as the runtime subdivides each message');
 eq(textSegments(msgs, 'paragraph').map(sg => sg.at).join(','), '0,12,30', 'and every piece keeps its offset into the whole');
 eq(textSegments('a --- b', 'message').length, 1, 'a rule inside a line is text, not a boundary');
-// A block element carries a unit of its own: it is what a blank line is in prose, and a preset writes whole bubbles that way.
+// BLOCK_EDGE: a block element's open and close both cut a paragraph.
 const gfx = 'Prose.\n\n<div style="a">\n<div>one thing</div>\n<div>two thing</div>\n</div>\n\nAfter.';
 eq(textSegments(gfx, 'paragraph').map(sg => sg.text.trim()).join(' | '),
     'Prose. | <div style="a"> | <div>one thing</div> | <div>two thing</div> | </div> | After.',

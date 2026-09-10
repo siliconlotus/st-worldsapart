@@ -1,4 +1,5 @@
-// keyedit-check.mjs — the key-list edits behind the Studio's chips. Self-checking; run with no arguments.
+// keyedit-check.mjs — keyedit.mjs: kwNorm, hasKey, keyHolders, renameKeyOn, deleteKey, replaceKey, addVariant.
+// Self-checking; run with no arguments.
 
 import { addVariant, deleteKey, hasKey, keyHolders, kwNorm, renameKeyOn, replaceKey } from '../extension/keyedit.mjs';
 

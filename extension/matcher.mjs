@@ -54,9 +54,9 @@ export function wholeWordAdvice(keys, wholeWords) {
 export const REGEX_KEY_RE = /^\/([\s\S]+)\/([gimsuy]*)$/;
 export const isRegexKey = k => REGEX_KEY_RE.test(String(k));
 
-/** A key list as written in a field or a pane: commas and newlines both separate. A `/regex/` or a "quoted" term keeps its
- *  commas, and a `/` mid-token is an ordinary character, not an opening; an unclosed one is re-split, as core's tokenizer
- *  recovers. Diverges from core's customTokenizer, which skips the character after every comma (upstream-st.md #17). */
+/** Splits a key list on commas and newlines. A `/regex/` and a "quoted" term keep their commas; a `/` that is not the first
+ *  character of a token is literal; a token that opens a regex without closing it is re-split on its commas. Diverges from
+ *  core's customTokenizer, which skips the character after every comma (upstream-st.md #17). */
 export function splitKeys(input) {
     const out = [];
     let cur = '', inRegex = false, inQuote = false;
@@ -108,16 +108,15 @@ export function scanWindow(chat, cfg) {
 /** A paragraph break: a blank line, tolerating trailing whitespace above. Not a single newline (K7). */
 const PARAGRAPH_BREAK = /\n[ \t]*\n/;
 
-/** The elements that carry a unit of their own — the markup answer to what a blank line does in prose. Inline elements are
- *  inside a thought and never break one; `br` is a line break rather than an end. */
+/** Block-level element names, alternated for a regex. Excludes inline elements and `br`, which do not end a paragraph. */
 const BLOCK_TAGS = 'address|article|aside|blockquote|details|div|dd|dl|dt|fieldset|figcaption|figure|footer|form'
     + '|h[1-6]|header|hr|li|main|nav|ol|p|pre|section|summary|table|tbody|td|tfoot|th|thead|tr|ul';
 
-/** Where a block element opens or closes, as a zero-width cut: the tag itself stays in the text, since a key may match it. */
+/** A zero-width cut before a block open tag and after a block close tag. Zero-width so the tag stays in the text, which a
+ *  key can still match. */
 const BLOCK_EDGE = new RegExp(`(?=<(?:${BLOCK_TAGS})\\b[^>]*>)|(?<=<\\/(?:${BLOCK_TAGS})\\s*>)`, 'gi');
 
-/** Cuts each of `texts` at every block-element edge, keeping the tags. Zero-width, so nothing is consumed and a caller
- *  tracking offsets adds the lengths back. */
+/** Splits each of `texts` at every BLOCK_EDGE. Consumes nothing, so a caller tracking offsets sums the piece lengths. */
 const cutBlocks = texts => texts.flatMap(t => String(t).split(BLOCK_EDGE));
 
 /** Removes named elements, tag and content, from one message; `spec` is a comma/space-separated list or an array. An unclosed element runs to its parent's close tag, or to the end (K6). */
@@ -191,8 +190,7 @@ export function segment(texts, matchWindow) {
     return out.filter(t => t.trim());
 }
 
-/** A message boundary in a pasted text: a line holding nothing but dashes, three or more. Chat has no such thing — this is how
- *  a caller that has only one string says where its messages ended. Three so it can be typed, more so it can be seen. */
+/** A message boundary in a single string: a line of three or more dashes and nothing else. */
 const MESSAGE_BREAK = /^[ \t]*-{3,}[ \t]*$/;
 
 /** Subdivides `parts` on `re`, each piece keeping its offset into the original text. */
@@ -208,9 +206,8 @@ const cutOn = (parts, source) => parts.flatMap(p => {
     return out;
 });
 
-/** One text cut into the units a key must match within, each with its offset into the NFC form of that text — `segment` for a
- *  caller that must map a result back onto the source. `message` cuts on the dashed lines, and `paragraph` cuts those again on
- *  the blank lines and the block-element edges, as the runtime's paragraph window subdivides each message. */
+/** `segment` with offsets: `[{ text, at }]`, `at` being the index into the NFC form of `text`. `message` cuts on
+ *  MESSAGE_BREAK; `paragraph` cuts those again on PARAGRAPH_BREAK and BLOCK_EDGE; any other window returns one piece. */
 export function textSegments(text, matchWindow) {
     const src = String(text ?? '').normalize('NFC');
     if (matchWindow !== 'paragraph' && matchWindow !== 'message') return src.trim() ? [{ text: src, at: 0 }] : [];
@@ -278,9 +275,8 @@ export function withExtraTexts(windowFor, texts, matchWindow) {
     return (depth, entry) => segment([...windowFor(depth, entry), ...texts], matchWindow);
 }
 
-/** Markup blanked out, one space per character, so a literal key cannot match inside a tag or a comment: `font-size` is not
- *  the author writing about size. Length-preserving, so every offset a caller marks or excerpts by still lands. A regex key
- *  is the opt-in and sees the raw text (matcher-design.md, *Divergences from ST core*). */
+/** Tags and HTML comments replaced by spaces, one per character, so a literal key cannot match inside one. Every offset is
+ *  preserved. Regex keys bypass this and match the raw text (matcher-design.md, *Divergences from ST core*). */
 export const maskMarkup = text => String(text).replace(/<!--[\s\S]*?-->|<\/?[A-Za-z][^>]*>/g, m => ' '.repeat(m.length));
 
 let maskMemoIn = null, maskMemoOut = null;
@@ -310,7 +306,7 @@ export function countKey(key, text, caseSensitive, wholeWords, scope, node = nul
         return 0;
     }
 
-    // A caller-supplied AST is the key under a condition (a secondary gate); its weight is the score, as a `?` key's is.
+    // With `node`, the verdict is the AST's and the count is its weight, as for a `?` key.
     if (node) {
         const { matched, scoreBoost } = evaluate(node, text);
         return matched ? (scoreBoost > 0 ? scoreBoost : 1) : 0;
@@ -373,7 +369,7 @@ export function keyExcerpts(key, text, caseSensitive, wholeWords, context = 28, 
     }
     // Folded -> source offset, folding one character at a time; the source must be NFC first or offsets drift.
     const srcIndex = (src, target) => {
-        // The masked form, since foldedHay folds that: same length, so an index into one is an index into the other.
+        // The masked form, which is what foldedHay folded. Same length, so the indexes agree.
         const walk = maskMarkup(src);
         let acc = 0;
         for (let i = 0; i < walk.length; i++) {
@@ -385,8 +381,8 @@ export function keyExcerpts(key, text, caseSensitive, wholeWords, context = 28, 
     const markAt = (src, start, end) => {
         let from = Math.max(0, start - context);
         let to = Math.min(src.length, end + context);
-        // Snap inward to whole words, within a word's reach, so a window does not open or close mid-word. Never past the
-        // match itself: an excerpt that cut into what it is marking would be a lie about where the key landed.
+        // Move the ends to a whitespace boundary within 24 characters, so the window does not open or close mid-word.
+        // Bounded by `start` and `end`: the window must not cut into the match.
         if (from > 0) {
             const head = /\s/.exec(src.slice(from, Math.min(start, from + 24)));
             if (head) from += head.index + 1;
@@ -455,11 +451,9 @@ function leafNodes(node, negated = false, out = []) {
 const leafCount = (id, text) => countKey(String(id?.value ?? ''), text,
     id?.type !== 'REGEX' && !!id?.isCaseSensitive, id?.type !== 'REGEX' && !!id?.isExact);
 
-/** Every leaf of a compound SmartKey, first occurrence each, ordered by position; `term` is the leaf and `n` its occurrences
- *  in that segment. A key whose verdict is false still reports its leaves — which branch is failing is the question a group is
- *  tuned against. A negated leaf is reported too, with `negated` set: whether the thing that vetoes the key
- *  fires at all is the same question, and a negative that never fires is invisible otherwise. It carries no span when it did
- *  not fire, and a caller marking up the text must skip it — a mark means a match. */
+/** One excerpt per leaf that fired, at its first occurrence, ordered by position: `term` is the leaf's value and `n` its
+ *  occurrences in that segment. Reports leaves whatever the key's verdict — a false key's leaves come off the AST, since
+ *  evaluate returns no units then. A negated leaf is reported with `negated` set, and at n 0 carries no offsets. */
 function compoundExcerpts(node, text, context, limit) {
     const out = [];
     const leaves = leafNodes(node);
@@ -497,8 +491,8 @@ function compoundExcerpts(node, text, context, limit) {
     return out;
 }
 
-/** `key -> AST` for a `{ keys, logic }` secondary condition, or `key -> null` when there is none. One node per key, as core
- *  gates each primary separately (`keyUnits`); the gate applies to a `?` or `/re/` key too, as keysecondary does. */
+/** `key -> AST` for a `{ keys, logic }` gate, or `key -> null` without one. One node per key, as keyUnits builds one per
+ *  primary; applies to `?` and `/re/` keys too. */
 const gateNodeFor = (gate, caseSensitive, wholeWords) => {
     const sec = (Array.isArray(gate?.keys) ? gate.keys : []).map(k => String(k ?? '').trim()).filter(Boolean);
     if (!sec.length) return () => null;
@@ -506,7 +500,7 @@ const gateNodeFor = (gate, caseSensitive, wholeWords) => {
     return key => synthesizeSecondary(key, sec, logic, { caseSensitive, wholeWords });
 };
 
-/** The branches a key is decided by: the leaves of its AST, or the key itself when it is a plain term with no gate. */
+/** The leaves of the key's AST, or one synthetic TERM branch for a plain key with no gate. */
 const branchesOf = (key, node, caseSensitive, wholeWords) => (node
     ? leafNodes(node).map(l => ({ id: l.node, negated: l.negated }))
     : [{ id: { type: 'TERM', value: key, isCaseSensitive: caseSensitive, isExact: wholeWords }, negated: false }]);
@@ -525,16 +519,14 @@ const astFor = (key, gateOf) => {
     try { return parse(tokenize(key)); } catch { return null; }
 };
 
-/** The segments `key` matched in, or all of them when it matched in none — a failed key still reports the branch that hit,
- *  but only where nothing can read the report as a match. */
+/** The segments `key` matched in; all of them when it matched in none. */
 const liveSegments = (key, segs, caseSensitive, wholeWords, node = null) => {
     const live = segs.filter(sg => countKey(key, sg.text, caseSensitive, wholeWords, undefined, node) > 0);
     return live.length ? live : segs;
 };
 
-/** Overlapping spans folded into one each, in source order: a span cannot nest in the markup, so the first to start keeps
- *  its extent and every span that reached it is listed in `keys`. Callers that mark with more than one flag set — an entry
- *  at a time, say — merge their results through this rather than folding twice. */
+/** Overlapping spans folded to one, in source order: the first to start keeps its extent and every span it swallowed is
+ *  listed in `keys`. A caller producing spans in several passes merges the union here, not each pass. */
 export function mergeSpans(spans) {
     const out = [];
     for (const sp of [...spans].sort((a, b) => a.start - b.start || b.end - a.end)) {
@@ -555,7 +547,7 @@ export function keySpans(keys, text, caseSensitive, wholeWords, { limit = 200, m
             return segs.flatMap(sg => {
                 const found = branches.flatMap(b => branchExcerpts(b.id, sg.text, 0, limit)
                     .map(e => ({ key, term: String(b.id?.value ?? ''), negated: b.negated, start: e.at + sg.at, end: e.to + sg.at })));
-                // Same rule as keyHits: a window with no positive branch is not one this key is decided in, so nothing is marked in it.
+                // As keyHits: no positive branch in the window, nothing marked in it.
                 return found.some(e => !e.negated) ? found : [];
             });
         })
@@ -563,14 +555,11 @@ export function keySpans(keys, text, caseSensitive, wholeWords, { limit = 200, m
     return mergeSpans(spans);
 }
 
-/** What each of `keys` did to `text`, grouped the way it was matched: one entry per key, and inside it one entry per segment
- *  the key could have matched in — one holding no positive branch is not a window the key is decided in, whatever its
- *  negatives do — `leaves` being every branch of the key and its gate with that segment's count, `negated`
- *  marking a branch that vetoes rather than matches, `excerpts` the first occurrence of each branch that fired and `text` the
- *  window itself, whose offsets those excerpts' `at`/`to` are. `matched`
- *  is the verdict for that segment. A key that is a single positive branch carries every occurrence in `excerpts`, since no
- *  window can filter it; anything with branches carries the first of each. A key that can never fire carries `message` instead. `gate` is a secondary-key condition,
- *  `{ keys, logic }` in core's terms, applied to every key as an entry's keysecondary gates each of its primaries. */
+/** One entry per key: `{ key, count, segments }`, or `{ key, message }` for a key validateSmartKey rejects. `segments` holds
+ *  the windows with at least one positive branch hit, each `{ at, text, matched, leaves, excerpts }` — `matched` the key's
+ *  verdict there, `leaves` every branch with that window's count and a `negated` flag, `excerpts` one per branch that fired
+ *  (every occurrence when the key is a single positive branch), whose `at`/`to` index `text`. `count` sums the key's own
+ *  occurrences over matched windows. `gate` is `{ keys, logic }`, applied to every key as keysecondary gates a primary. */
 export function keyHits(keys, text, caseSensitive, wholeWords, { context = 28, limit = 20, matchWindow = 'scan', gate } = {}) {
     const segs = textSegments(text, matchWindow);
     const gateOf = gateNodeFor(gate, caseSensitive, wholeWords);
@@ -590,10 +579,9 @@ export function keyHits(keys, text, caseSensitive, wholeWords, { context = 28, l
                 const matched = countKey(key, sg.text, caseSensitive, wholeWords, undefined, node) > 0;
                 if (matched) count += countKey(key, sg.text, caseSensitive, wholeWords);
                 const leaves = branches.map(b => ({ term: String(b.id?.value ?? ''), n: leafCount(b.id, sg.text), negated: b.negated }));
-                // A window with no positive branch is not a window this key is being decided in, whatever its negatives do.
+                // No positive branch in this window: skipped, whatever its negatives count.
                 if (!leaves.some(l => l.n > 0 && !l.negated)) continue;
-                // One excerpt per branch that fired, the first of them — except for a key that is a single positive branch,
-                // which cannot be filtered and so is read hit by hit rather than window by window.
+                // First occurrence per branch, except for a single-positive-branch key, which carries every occurrence.
                 const excerpts = [];
                 for (const b of branches) {
                     for (const ex of branchExcerpts(b.id, sg.text, context, single ? limit : 1)) {

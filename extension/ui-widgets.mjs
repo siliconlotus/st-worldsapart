@@ -141,7 +141,7 @@ export const keyHitsHtml = why => (why ?? []).map(w => {
     const tip = all.length > 1
         ? ` title="${escapeHtml(all.map(markExcerptText).join('\n'))}"`
         : '';
-    // A `color` makes the key a wa-kw chip in that colour, as the Studio's keyword paragraph draws one; the caller's `\u21b3` stays outside it.
+    // With `color`, the key is drawn as a wa-kw chip; a leading `\u21b3` stays outside it.
     const label = w.color
         ? `${w.key.startsWith('\u21b3') ? '\u21b3 ' : ''}<span class="wa-kw" style="border-color:${escapeHtml(w.color)};`
             + `background:color-mix(in srgb, ${escapeHtml(w.color)} 18%, transparent);">${escapeHtml(w.key.replace(/^\u21b3 ?/, ''))}</span>`
@@ -183,12 +183,11 @@ export function showEntryText(entry) {
     vp.show();
 }
 
-/** A tag, a comment or a character entity in the source — rendered as markup rather than shown, since a preset's `<div>`
- *  block is meant to be seen and its `&nbsp;` is meant to be a space. Ranges like every other piece of markup here, so a key
- *  that matched inside one still shows it: matching reads `&nbsp;` as its six characters, and a hit on them must be visible. */
+/** A tag, an HTML comment or a character entity. A range like the markdown ones, so one a span overlaps can be shown as
+ *  text instead of rendered: matching reads `&nbsp;` as six characters, and a mark on them needs somewhere to land. */
 const HTML_RANGE = /<!--[\s\S]*?-->|<\/?[A-Za-z][^>]*>|&(?:#\d{1,7}|#[xX][0-9a-fA-F]{1,6}|[A-Za-z][A-Za-z0-9]{1,30});/g;
 
-/** How each range's tag opens and closes. Block tags come first in the sort, so a heading wraps its quotes and emphasis. */
+/** Open and close HTML per range tag. Sorted by this order, so a block tag wraps the inline tags inside it. */
 const TAG_HTML = {
     h: ['<strong style="font-size:1.15em;">', '</strong>'],
     quote: ['<span style="border-left:2px solid currentColor;padding-left:7px;opacity:0.85;">', '</span>'],
@@ -202,15 +201,15 @@ const TAG_HTML = {
 const TAG_ORDER = Object.keys(TAG_HTML);
 const BLOCK_TAGS = new Set(['h', 'quote', 'pre', 'delim', 'html']);
 
-/** Block markup: the whole line (or fenced block) is the range, its marker the delimiter. A list marker is left alone —
- *  it is content, where a heading's hashes are notation. */
+/** `[regex, tag, m => [from, to]]`: the match is the range, `from`/`to` bound its content, the rest being delimiter.
+ *  No list markers: they stay visible. */
 const BLOCK_MARKUP = [
     [/^```[^\n]*\n[\s\S]*?^```[ \t]*$/gm, 'pre', m => [m[0].indexOf('\n') + 1, m[0].length - 3]],
     [/^#{1,6}[ \t]+[^\n]*$/gm, 'h', m => [/^#{1,6}[ \t]+/.exec(m[0])[0].length, m[0].length]],
     [/^[ \t]*>[ \t]?[^\n]*$/gm, 'quote', m => [/^[ \t]*>[ \t]?/.exec(m[0])[0].length, m[0].length]],
 ];
 
-/** The inline markup ST renders in a message, longest delimiter first; `d` is how many characters the delimiter is. */
+/** `[regex, tag, d]`, longest delimiter first so `**` is not read as `*`; `d` is the delimiter length at each end. */
 const INLINE_MARKUP = [
     [/(?<![\w*])\*\*(?!\s)[^\n]+?(?<!\s)\*\*(?![\w*])/g, 'strong', 2],
     [/(?<![\w~])~~(?!\s)[^\n]+?(?<!\s)~~(?![\w~])/g, 's', 2],
@@ -219,9 +218,8 @@ const INLINE_MARKUP = [
     [/`[^`\n]+`/g, 'code', 1],
 ];
 
-/** The spans ST renders in a message — quoted passages and inline markup — as offsets into `src`. The delimiters stay in the
- *  text rather than being consumed as markdown — what the Lab shows has to be exactly what was matched — so an emphasis
- *  marker also reports its two asterisks, which the renderer hides unless a key matched one. */
+/** Every markup range in `src` as offsets: quotes, HTML, block and inline markdown, plus a `delim` range over each
+ *  delimiter. Delimiters are ranges rather than removed text, so offsets keep indexing the matched string. */
 const proseRanges = src => {
     const out = [];
     for (const m of src.matchAll(/"[^"\n]*"|\u201C[^\u201D\n]*\u201D|\u00AB[^\u00BB\n]*\u00BB/g)) {
@@ -253,23 +251,20 @@ const proseRanges = src => {
     return out;
 };
 
-/** One text rendered as ST renders a message — quotes, inline and block markdown, and the HTML a preset writes — with
- *  `spans` marked in it. A delimiter is hidden until something matched it, and markup something matched is shown as the text
- *  it is: what is displayed may be restyled, never removed, or a mark would have nothing to land on. `markSpan(span, text)`
- *  builds one mark, so its colours belong to the caller; `spans` carry `start`/`end` offsets into the NFC form of `text`,
- *  which is what a caller must slice by. `showMarkup` reveals all of it at once, which is the source behind the rendering.
- *  The container wants class `wa-marked` for the palette. */
+/** `text` as HTML, rendering quotes, markdown and the HTML in it, with `spans` marked. A delimiter or a tag that no span
+ *  overlaps is hidden or rendered; one a span overlaps is shown as text, so the mark has characters to cover. `markSpan(span,
+ *  text)` returns the HTML for one mark. `spans` carry `start`/`end` into the NFC form of `text`. `showMarkup` shows every
+ *  tag, entity and delimiter. Output is DOMPurify-sanitised; the container needs class `wa-marked` for the tag colours. */
 export function renderMessageHtml(text, { spans = [], markSpan = null, showMarkup = false } = {}) {
     const src = String(text).normalize('NFC');
-    // Markdown's thematic break, which is also how a caller with one string says where its messages ended. The blank lines
-    // around it go with it: the container is pre-wrap, so they would stack on top of the rule's own margins.
+    // The blank lines around a thematic break are consumed with it: the container is pre-wrap, so they would render as
+    // blank lines on top of the rule's margins.
     const plain = t => escapeHtml(t).replace(/(?:\r?\n)*^[ \t]*-{3,}[ \t]*$(?:\r?\n)*/gm,
         // No border and no colour: ST's own `hr` is a transparent-to-body-colour-to-transparent gradient, and setting
         // either would flatten the taper. Only the margin and the opacity, which at 0.2 is too faint to read as a break.
         '<hr style="margin:15px 0;opacity:0.75;">');
     const prose = proseRanges(src);
-    // Whole-range, not per piece: a tag or comment cut in half round a mark emits `<!-- ` on its own, which opens a comment
-    // the mark then disappears into. If anything matched inside one, all of it is shown as the text it is.
+    // Whole-range, not per cut: emitting `<!-- ` alone opens a comment that swallows the mark after it.
     const revealed = new Set(prose.filter(r => r.tag === 'html'
         && (showMarkup || spans.some(sp => sp.start < r.end && r.start < sp.end))));
     const cuts = [...new Set([0, src.length, ...spans.flatMap(sp => [sp.start, sp.end]), ...prose.flatMap(r => [r.start, r.end])])]
@@ -292,7 +287,7 @@ export function renderMessageHtml(text, { spans = [], markSpan = null, showMarku
         const asMarkup = covering.find(r => r.tag === 'html');
         if (asMarkup) {
             if (!revealed.has(asMarkup)) { closeCode(); html += src.slice(a, b); continue; }
-            // Revealed, it is source rather than prose, so it wears <code> — one element spanning the whole of it.
+            // One <code> per range, not per cut: ST's `code` has a border and padding, which would repeat per piece.
             if (codeOpen !== asMarkup) { closeCode(); html += '<code>'; codeOpen = asMarkup; }
             html += sp ? markSpan(sp, src.slice(a, b)) : escapeHtml(src.slice(a, b));
             continue;
@@ -304,8 +299,7 @@ export function renderMessageHtml(text, { spans = [], markSpan = null, showMarku
             + `${[...tags].reverse().map(t => TAG_HTML[t][1]).join('')}`;
     }
     closeCode();
-    // A whitelist, not a blacklist, and ST's own: what a message may contain is what the Lab may show. Our own attributes
-    // are added back, since the marks are the point.
+    // ST's own config, so this admits what a message admits. data-at/data-to are added: DOMPurify drops unknown attributes.
     return DOMPurify.sanitize(html, { MESSAGE_SANITIZE: true, ADD_ATTR: ['data-at', 'data-to'] });
 }
 
@@ -330,8 +324,8 @@ dialog.popup:has(.wa-studio), .wa-studio-nav, .wa-studio-explorer, .wa-studio-en
     padding: 4px 7px; border-radius: 4px; font-size: 1.15em;
     background: none; border: none; color: inherit; line-height: 1; }
 .wa-studio-close:hover { opacity: 1; background: var(--white20a, rgba(255,255,255,0.1)); }
-/* The Lab's rendered haystack, coloured as ST colours a message: the tags are the same, so a custom theme reaches it too.
-   The auto-quotes go, since the quote characters are kept in the text — what is shown has to be what was matched. */
+/* renderMessageHtml's output, coloured as .mes_text colours a message. <q>'s auto-quotes are off: the quote characters
+   are in the text already. */
 .wa-marked q { color: var(--SmartThemeQuoteColor); }
 .wa-marked em { color: var(--SmartThemeEmColor); }
 .wa-marked u { color: var(--SmartThemeUnderlineColor); }
@@ -340,7 +334,7 @@ dialog.popup:has(.wa-studio), .wa-studio-nav, .wa-studio-explorer, .wa-studio-en
 .wa-marked q::before, .wa-marked q::after { content: ''; }
 .wa-studio-nav { flex: 0 0 20%; min-width: 170px; max-width: 320px; overflow-y: auto;
     border-right: 1px solid var(--SmartThemeBorderColor, rgba(255,255,255,0.15)); padding-right: 6px; }
-/* Collapsed to a rail: the chevron has to stay in it, or there is no way back. min-width beats the rule above. */
+/* Collapsed to a rail holding the chevron. min-width overrides the rule above. */
 .wa-studio-nav.wa-nav-collapsed { flex: 0 0 22px; min-width: 22px; padding-right: 0; overflow: hidden; }
 /* Explorer = pinned header/drawer (wa-studio-fixed) + a single scrolling entry list (wa-studio-entries),
    so the header and the Tool Settings drawer stay put (MUI persistent top drawer: docked, pushes the
@@ -355,8 +349,7 @@ dialog.popup:has(.wa-studio), .wa-studio-nav, .wa-studio-explorer, .wa-studio-en
 .wa-book-row:hover { background: var(--white20a, rgba(255,255,255,0.08)); }
 .wa-book-row.wa-sel { background: var(--white30a, rgba(255,255,255,0.14)); font-weight: bold; }
 .wa-book-name { overflow: hidden; text-overflow: ellipsis; }
-/* Attached to this chat: the books core would scan, so the ones an applied run reads and the ones an edit is felt in. The
-   theme's accent, not WA_GREEN — green already means "no prune" on a keyword chip, and a second meaning would read as one. */
+/* Books attached to this chat. The theme accent, not WA_GREEN, which means "no prune" on a keyword chip. */
 .wa-book-row.wa-attached .wa-book-name { color: var(--SmartThemeQuoteColor); }
 .wa-book-row.wa-attached { box-shadow: inset 2px 0 0 var(--SmartThemeQuoteColor); }
 /* Bulk-select mode: size the nav to its content (capped) so full book titles are readable. */
@@ -437,10 +430,9 @@ textarea.wa-entry-full.wa-tall { max-height: 62vh; }
 .wa-kw { display: inline-flex; align-items: center; gap: 4px; padding: 0 8px;
     white-space: nowrap; border: 1px solid color-mix(in srgb, currentColor 40%, transparent); border-radius: 11px; }
 .wa-kw-dead .wa-kw-text { opacity: 0.8; }
-/* A chip that is only text, in a column narrower than some keys and most entry titles: it wraps, and a long unbroken
-   term breaks rather than overflowing. inline, not inline-flex, since there is no ✕ beside it to lay out. */
+/* A text-only chip: wraps, and breaks a term with no break opportunity in it. inline, since it has no ✕ to lay out. */
 .wa-kw-wrap { display: inline; white-space: normal; overflow-wrap: anywhere; }
-/* Either half jumps to the other: a digest line to its hit in the text, a mark to what reported it. */
+/* Both jump targets. */
 .wa-studio [data-jump], .wa-marked [data-at] { cursor: pointer; }
 /* The gate row reads under the keys it gates, so it needs a rule to be a second row at all — two
    paragraphs of chips run together and the secondaries read as more primaries. currentColor for the

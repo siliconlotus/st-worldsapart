@@ -1,19 +1,20 @@
-// keyedit.mjs — the key-list edits behind the Studio's keyword chips: rename, delete, replace, add a variant, across
-// whatever entries the caller hands over. ST-free; every function mutates the entries given and reports what it touched.
+// keyedit.mjs — rename, delete, replace and add-variant over a key list. ST-free; each function mutates the entries passed
+// and returns how many it changed.
 
-/** Core's default scan is case-insensitive, so two keys differing only in case are the same key to it. */
+/** Lowercased and trimmed, which is how core's default scan compares two keys. Never stored: keys keep their own case. */
 export const kwNorm = k => String(k ?? '').toLowerCase().trim();
 
-/** Whether `entry` already carries `term` in `list`, under that same reading. */
+/** Whether `entry[list]` holds `term` under kwNorm. */
 export const hasKey = (entry, term, list = 'key') =>
     Array.isArray(entry?.[list]) && entry[list].some(k => kwNorm(k) === kwNorm(term));
 
-/** The entries of `entries` that carry `key` in `list`. */
+/** The entries of `entries` whose `list` holds `key` under kwNorm. */
 export const keyHolders = (entries, key, list = 'key') =>
     (entries ?? []).filter(e => Array.isArray(e?.[list]) && e[list].some(k => kwNorm(k) === kwNorm(key)));
 
-/** Renames one entry's key. A rename onto a key the entry already has is a merge, not a duplicate — and the collision test
- *  skips the key being renamed, or a case fix collides with itself and deletes the key away. */
+/** Renames `oldKey` to `next` in `entry[list]`; false when the entry does not hold it. Renaming onto a key the entry
+ *  already holds deletes `oldKey` instead of duplicating it. The collision test skips the index being renamed, or a
+ *  case-only rename matches itself and deletes the key. */
 export function renameKeyOn(entry, oldKey, next, list = 'key') {
     const list_ = entry?.[list];
     if (!Array.isArray(list_)) return false;
@@ -24,7 +25,7 @@ export function renameKeyOn(entry, oldKey, next, list = 'key') {
     return true;
 }
 
-/** Removes `key` from every entry that has it. Returns how many entries changed. */
+/** Removes `key` from every holder. Returns the number of entries whose list got shorter. */
 export function deleteKey(entries, key, list = 'key') {
     let touched = 0;
     for (const e of keyHolders(entries, key, list)) {
@@ -35,14 +36,14 @@ export function deleteKey(entries, key, list = 'key') {
     return touched;
 }
 
-/** Rewrites `key` to `next` in every entry that has it, merging where the entry already carries `next`. */
+/** Renames `key` to `next` in every holder, by renameKeyOn, so a holder that already has `next` loses `key`. */
 export function replaceKey(entries, key, next, list = 'key') {
     let touched = 0;
     for (const e of keyHolders(entries, key, list)) if (renameKeyOn(e, e[list].find(k => kwNorm(k) === kwNorm(key)), next, list)) touched++;
     return touched;
 }
 
-/** Adds `term` to every entry keyed `key` that lacks it. Returns how many gained it. */
+/** Appends `term` to every holder of `key` that lacks it under kwNorm. Returns how many gained it. */
 export function addVariant(entries, key, term, list = 'key') {
     let added = 0;
     for (const e of keyHolders(entries, key, list)) if (!hasKey(e, term, list)) { e[list].push(term); added++; }
