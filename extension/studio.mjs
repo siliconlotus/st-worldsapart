@@ -2026,7 +2026,8 @@ export async function lorebookStudio(preferredBook = null) {
     };
 
     /** One window with every hit in it guillemeted, for the title of a digest line — a title attribute is plain text, so the
-     *  hits are marked the way markExcerptText marks them rather than coloured. A long window is clipped around `ex`. */
+     *  hits are marked the way markExcerptText marks them rather than coloured, a negative wearing them inverted. A long
+     *  window is clipped around `ex`. */
     const windowTip = (sg, ex) => {
         const src = String(sg.text ?? '');
         const wide = src.length > 320;
@@ -2035,7 +2036,9 @@ export async function lorebookStudio(preferredBook = null) {
         let out = '', at = from;
         for (const x of [...sg.excerpts].sort((a, b) => a.at - b.at)) {
             if (x.at < from || x.to > to) continue;
-            out += `${src.slice(at, x.at)}\u00ab${src.slice(x.at, x.to)}\u00bb`;
+            // A negative wears the guillemets inverted — »so« — which is the one distinction a plain-text tooltip can carry.
+            const [open, close] = x.negated ? ['\u00bb', '\u00ab'] : ['\u00ab', '\u00bb'];
+            out += `${src.slice(at, x.at)}${open}${src.slice(x.at, x.to)}${close}`;
             at = x.to;
         }
         out = `${out}${src.slice(at, to)}`.replace(/\s+/g, ' ').trim();
