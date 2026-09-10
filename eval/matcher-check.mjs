@@ -265,6 +265,14 @@ eq(keyHits(['? cosmonaut -astronuat'], space, false, true)[0].segments[0].excerp
     'only a branch that fired has a place to show');
 eq(keySpans(['? cosmonaut -astronaut'], space, false, true).map(sp => `${sp.term}${sp.negated ? '!' : ''}`).join(' '),
     'cosmonaut astronaut!', 'the veto is marked too, flagged so a caller can draw it as what stopped the key');
+// The model in one case: a window with no positive is not a window the key is decided in, however its negatives read.
+const windows = 'His breath is fast and heavy.\n\nHe looks at you slowly, closing his eyes.\n\nHis breath hitches before slowly leveling out. Catch my breath.';
+eq(digest('? breath -slow', windows, { matchWindow: 'paragraph' }),
+    '? breath -slow:1 | breath 1, -slow 0 | !breath 2, -slow 1',
+    'the middle window holds only the negative, so it is skipped; the counts are that window\'s own');
+eq(keySpans(['? breath -slow'], windows, false, true, { matchWindow: 'paragraph' }).map(sp => sp.negated ? `-${sp.term}` : sp.term).join(' '),
+    'breath breath -slow breath', 'and nothing in it is marked, where both breaths of the failing window are');
+
 const breaths = 'He drew a breath.\n\nA slow breath, held.\n\nAnother breath.';
 eq(keySpans(['? breath -slow'], breaths, false, true, { matchWindow: 'paragraph' })
     .map(sp => `${sp.term}${sp.negated ? '!' : ''}`).join(' '), 'breath slow! breath breath',
@@ -295,8 +303,9 @@ console.log('ok   keyHits: every branch per segment, negated ones counted, and n
     eq(digest('apple', 'apple alone', { ww: false, gate }), 'apple:0 | !apple 1, computer 0, tablet 0',
         'a key the gate refused counts 0, and still shows every branch of the condition');
     eq(keyHits(['apple'], 'apple on a tablet', false, false, {}).length, 1, 'no gate, no condition');
-    eq(keySpans(['apple'], 'apple alone. apple and a tablet', false, false, { gate, matchWindow: 'scan' }).length, 2,
-        'the marks follow the gate, over whatever unit the window makes');
+    eq(keySpans(['apple'], 'apple alone. apple and a tablet', false, false, { gate, matchWindow: 'scan' })
+        .map(sp => sp.term).join(' '), 'apple apple tablet',
+        'every occurrence of every branch is marked, the gate\'s terms included');
     console.log('ok   gate: a secondary condition on every key, counted as the key and verdicted as the entry');
 }
 
@@ -340,7 +349,7 @@ eq(spans[1].keys.map(k => k.term ?? k.key).join(' + '), 'neil armstrong + armstr
     'a compound listed there names its leaf, not the whole key');
 eq(space.slice(spans[1].start, spans[1].end), 'Neil Armstrong', 'the offsets index the text itself, not an excerpt');
 eq(keySpans(['? (armstrong gagarin)'], space, false, true).map(sp => `${sp.term}@${sp.start}`).join(' '),
-    'gagarin@27 armstrong@69', 'a compound names the leaf that produced each span');
+    'gagarin@27 armstrong@69 gagarin@87', 'a compound names the leaf that produced each span, at every occurrence');
 console.log('ok   keySpans: source offsets for marking the haystack, ordered and disjoint');
 
 

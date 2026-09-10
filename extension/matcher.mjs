@@ -451,6 +451,17 @@ const gateNodeFor = (gate, caseSensitive, wholeWords) => {
     return key => synthesizeSecondary(key, sec, logic, { caseSensitive, wholeWords });
 };
 
+/** The branches a key is decided by: the leaves of its AST, or the key itself when it is a plain term with no gate. */
+const branchesOf = (key, node, caseSensitive, wholeWords) => (node
+    ? leafNodes(node).map(l => ({ id: l.node, negated: l.negated }))
+    : [{ id: { type: 'TERM', value: key, isCaseSensitive: caseSensitive, isExact: wholeWords }, negated: false }]);
+
+/** Every place one branch landed in `text`, under its own flags; a REGEX branch carries its flags in the pattern. */
+const branchExcerpts = (id, text, context, limit) => {
+    const isRegex = id?.type === 'REGEX';
+    return keyExcerpts(String(id?.value ?? ''), text, !isRegex && !!id?.isCaseSensitive, !isRegex && !!id?.isExact, context, limit);
+};
+
 /** The AST a key is matched by: its gate's if it has one, its own if it is a `?` key, and none at all if it is a plain term. */
 const astFor = (key, gateOf) => {
     const gated = gateOf(key);
@@ -472,10 +483,15 @@ export function keySpans(keys, text, caseSensitive, wholeWords, { limit = 200, m
     const gateOf = gateNodeFor(gate, caseSensitive, wholeWords);
     const spans = (Array.isArray(keys) ? keys : [])
         .map(k => String(k ?? '').trim()).filter(Boolean)
-        .flatMap(key => segs
-            .flatMap(sg => keyExcerpts(key, sg.text, caseSensitive, wholeWords, 0, limit, gateOf(key))
-                .map(e => ({ key, term: e.term, negated: !!e.negated, start: e.at + sg.at, end: e.to + sg.at }))))
-        .filter(sp => sp.end > sp.start)
+        .flatMap(key => {
+            const branches = branchesOf(key, astFor(key, gateOf), caseSensitive, wholeWords);
+            return segs.flatMap(sg => {
+                const found = branches.flatMap(b => branchExcerpts(b.id, sg.text, 0, limit)
+                    .map(e => ({ key, term: String(b.id?.value ?? ''), negated: b.negated, start: e.at + sg.at, end: e.to + sg.at })));
+                // Same rule as keyHits: a window with no positive branch is not one this key is decided in, so nothing is marked in it.
+                return found.some(e => !e.negated) ? found : [];
+            });
+        })
         .sort((a, b) => a.start - b.start || b.end - a.end);
     for (const { key, term, negated, start, end } of spans) {
         const last = out[out.length - 1];
@@ -486,7 +502,8 @@ export function keySpans(keys, text, caseSensitive, wholeWords, { limit = 200, m
 }
 
 /** What each of `keys` did to `text`, grouped the way it was matched: one entry per key, and inside it one entry per segment
- *  the key has anything to say about — `leaves` being every branch of the key and its gate with that segment's count, `negated`
+ *  the key could have matched in — one holding no positive branch is not a window the key is decided in, whatever its
+ *  negatives do — `leaves` being every branch of the key and its gate with that segment's count, `negated`
  *  marking a branch that vetoes rather than matches, and `excerpts` the first occurrence of each branch that fired. `matched`
  *  is the verdict for that segment. A key that can never fire carries `message` instead. `gate` is a secondary-key condition,
  *  `{ keys, logic }` in core's terms, applied to every key as an entry's keysecondary gates each of its primaries. */
@@ -500,10 +517,7 @@ export function keyHits(keys, text, caseSensitive, wholeWords, { context = 28, l
             if (bad) return { key, message: bad.message, segments: [] };
 
             const node = astFor(key, gateOf);
-            // A plain key with no gate is its own single branch; anything else is the leaves of the AST it evaluates as.
-            const branches = node
-                ? leafNodes(node).map(l => ({ id: l.node, negated: l.negated }))
-                : [{ id: { type: 'TERM', value: key, isCaseSensitive: caseSensitive, isExact: wholeWords }, negated: false }];
+            const branches = branchesOf(key, node, caseSensitive, wholeWords);
 
             const segments = [];
             let count = 0;
@@ -511,13 +525,12 @@ export function keyHits(keys, text, caseSensitive, wholeWords, { context = 28, l
                 const matched = countKey(key, sg.text, caseSensitive, wholeWords, undefined, node) > 0;
                 if (matched) count += countKey(key, sg.text, caseSensitive, wholeWords);
                 const leaves = branches.map(b => ({ term: String(b.id?.value ?? ''), n: leafCount(b.id, sg.text), negated: b.negated }));
-                if (!leaves.some(l => l.n > 0)) continue;   // nothing of this key is in this segment
+                // A window with no positive branch is not a window this key is being decided in, whatever its negatives do.
+                if (!leaves.some(l => l.n > 0 && !l.negated)) continue;
+                // One excerpt per branch that fired — the first, the digest being a summary and not the text itself.
                 const excerpts = [];
                 for (const b of branches) {
-                    if (!leafCount(b.id, sg.text)) continue;
-                    const isRegex = b.id?.type === 'REGEX';
-                    const [ex] = keyExcerpts(String(b.id?.value ?? ''), sg.text,
-                        !isRegex && !!b.id.isCaseSensitive, !isRegex && !!b.id.isExact, context, 1);
+                    const [ex] = branchExcerpts(b.id, sg.text, context, 1);
                     if (ex) excerpts.push({ ...ex, term: String(b.id?.value ?? ''), negated: b.negated });
                 }
                 segments.push({ at: sg.at, matched, leaves, excerpts });
