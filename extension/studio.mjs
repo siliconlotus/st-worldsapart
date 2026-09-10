@@ -2177,7 +2177,7 @@ export async function lorebookStudio(preferredBook = null) {
             + `<small>${sg.leaves.map(l => `${escapeHtml(l.negated ? `-${l.term}` : l.term)} ${num(l.n)}`).join(', ')}</small>`
             + sg.excerpts.map(e => span(e, sg)).join('')
             + '</div>';
-        // <details> so the open/shut state is the element's own; labCollapsed carries it across the repaint that rebuilds this.
+        // <details> so the open/shut state is the element's own; labExpanded carries it across the repaint that rebuilds this.
         // A key with one positive branch and nothing gating it cannot be filtered, so the window is not the interesting unit:
         // its number is occurrences. Anything with branches — an AND group, a gate — is decided per window, so it counts those.
         const oneBranch = r.segments.every(sg => sg.leaves.length === 1 && !sg.leaves[0].negated);
@@ -2198,10 +2198,25 @@ export async function lorebookStudio(preferredBook = null) {
      *  run is unreadable otherwise. Survives the repaint on every keystroke, and both views share it. */
     const labExpanded = new Set();
 
-    /** Re-attaches the collapse state to a freshly painted digest. */
-    const bindCollapse = host => host.querySelectorAll('details[data-k]').forEach(d => {
-        d.addEventListener('toggle', () => (d.open ? labExpanded.add(d.dataset.k) : labExpanded.delete(d.dataset.k)));
-    });
+    /** Re-attaches the collapse state to a freshly painted digest, and the Explorer's shift-click-for-all to its summaries. */
+    const bindCollapse = host => {
+        const blocks = [...host.querySelectorAll('details[data-k]')];
+        for (const d of blocks) {
+            d.addEventListener('toggle', () => (d.open ? labExpanded.add(d.dataset.k) : labExpanded.delete(d.dataset.k)));
+            const sum = d.querySelector('summary');
+            if (!sum) continue;
+            sum.title = 'Shift-click for every other key';
+            // Shift toggles every OTHER block and leaves this one as-is, as the Explorer's chevron does — so the default is
+            // prevented rather than followed, and `open` fires each block's own toggle to record it.
+            sum.addEventListener('click', ev => {
+                if (!ev.shiftKey) return;
+                ev.preventDefault();
+                const others = blocks.filter(x => x !== d);
+                const anyOpen = others.some(x => x.open);
+                for (const x of others) x.open = !anyOpen;
+            });
+        }
+    };
 
     /** Runs `entries` against the haystack and shows the result; `label` names what ran, for the header. */
     const applyEntries = (label, entries) => {
