@@ -233,9 +233,8 @@ meant. The last row applies to a bare `/regex/` key as well.
 | **warn** | when all terms in an expression are weighted 0, the key ranks on nothing. In the secondary box that is a deliberate gate; as a key of its own it still counts as one thing present |
 | **warn** | a `/pattern/` with an unescaped `/` inside — vanilla SillyTavern will not run it (above) |
 
-Whether a term ever occurs in your book is a different question, and the audit answers it. Whether it
-occurs in *this* chat is a third, and the Studio's Keyword Lab answers that: paste or load any text, put
-keys against it, and every rule below is visible in it — which is what it is for.
+Whether a term ever occurs in your book is a different question, and the audit answers it; against any
+text you paste or load, the Studio's Keyword Lab does.
 
 ---
 
