@@ -2086,14 +2086,27 @@ export async function lorebookStudio(preferredBook = null) {
         const chip = `<span class="wa-kw" style="border-color:${escapeHtml(color)};background:color-mix(in srgb, ${escapeHtml(color)} 18%, transparent);">${escapeHtml(r.key)}</span>`;
         const num = n => `<span style="color:var(--SmartThemeEmColor, #d9a441);font-weight:600;">${n}</span>`;
         if (r.message) return `<div style="margin-bottom:8px;">${chip} <small style="opacity:0.75;">${escapeHtml(r.message)}</small></div>`;
+        if (!r.segments.length) return `<div style="margin-bottom:8px;">${chip} ${num(r.count)}</div>`;
         const seg = sg => `<div style="margin:3px 0 0 14px;${sg.matched ? '' : 'opacity:0.55;'}">`
             + `<small>${sg.leaves.map(l => `${escapeHtml(l.negated ? `-${l.term}` : l.term)} ${num(l.n)}`).join(', ')}</small>`
             + sg.excerpts.map(e => `<div style="margin-left:14px;"><small style="opacity:0.75;">${escapeHtml(e.text.slice(0, e.start))}`
                 + `<span style="color:${e.negated ? WA_RED : escapeHtml(color)};font-weight:600;">${escapeHtml(e.text.slice(e.start, e.end))}</span>`
                 + `${escapeHtml(e.text.slice(e.end))}</small></div>`).join('')
             + '</div>';
-        return `<div style="margin-bottom:8px;">${chip} ${num(r.count)}${r.segments.map(seg).join('')}</div>`;
+        // <details> so the open/shut state is the element's own; labCollapsed carries it across the repaint that rebuilds this.
+        return `<details${labCollapsed.has(r.key) ? '' : ' open'} data-k="${escapeHtml(r.key)}" style="margin-bottom:8px;">`
+            + `<summary style="cursor:pointer;">${chip} ${num(r.count)}`
+            + `<small style="opacity:0.5;"> in ${r.segments.length} window${r.segments.length === 1 ? '' : 's'}</small></summary>`
+            + `${r.segments.map(seg).join('')}</details>`;
     };
+
+    /** Keys the reader has shut, by key text. Survives the repaint on every keystroke, and both views share it. */
+    const labCollapsed = new Set();
+
+    /** Re-attaches the collapse state to a freshly painted digest. */
+    const bindCollapse = host => host.querySelectorAll('details[data-k]').forEach(d => {
+        d.addEventListener('toggle', () => (d.open ? labCollapsed.delete(d.dataset.k) : labCollapsed.add(d.dataset.k)));
+    });
 
     /** The rows and the colour they share with the marks, from whatever the panes hold now. */
     const scanLab = () => {
@@ -2118,6 +2131,7 @@ export async function lorebookStudio(preferredBook = null) {
         const digest = document.createElement('div');
         digest.style.cssText = 'margin-top:10px;padding-top:8px;border-top:1px solid color-mix(in srgb, currentColor 15%, transparent);max-height:25vh;overflow:auto;';
         digest.innerHTML = rows.map(r => labKeyHtml(r, r.color)).join('');
+        bindCollapse(digest);
         wrap.append(body, digest);
         const vp = new Popup(wrap, POPUP_TYPE.TEXT, '', { large: true, allowVerticalScrolling: true });
         vp.dlg.style.setProperty('width', 'calc(var(--sheldWidth, 90vw) * 0.7)', 'important');
@@ -2212,6 +2226,7 @@ export async function lorebookStudio(preferredBook = null) {
             out.innerHTML = rows.length
                 ? rows.map(r => labKeyHtml(r, r.color)).join('')
                 : '<div style="opacity:0.6;padding:6px 0;">Keys you type on the right are matched against the text on the left.</div>';
+            bindCollapse(out);
         };
         repaint();
         pane.append(panes, opts, out);
