@@ -14,7 +14,8 @@ import { STUDIO_PRUNE_OPTS } from './keyword-audit.mjs';
 import { buildKeySuggest, classifyLlmCand, STUDIO_SUGGEST_OPTS } from './keyword-suggest.mjs';
 import { buildAutomaton, addMessageHits, fold, validateSmartKey } from './smartkeys.mjs';
 import { findOrphanBindings } from './bindings.mjs';
-import { WI_LOGIC, dropTags, hasPromoteDecorator, isRegexKey, keyHits, keySpans, mergeSpans, scanSegments, secondaryKeys, splitKeys, usableKeys, wholeWordAdvice, withPromote } from './matcher.mjs';
+import { WI_LOGIC, dropTags, hasPromoteDecorator, isRegexKey, scanSegments, secondaryKeys, splitKeys, usableKeys, wholeWordAdvice, withPromote } from './matcher.mjs';
+import { labScan, runBook } from './lab.mjs';
 
 const WA_GREEN = '#7bbf6a';   // "no prune" — a keyword the scan doesn't flag
 const WA_RED = '#e06c6c';     // severe — same value keyword-audit's severityOf hands back
@@ -2200,38 +2201,15 @@ export async function lorebookStudio(preferredBook = null) {
         d.addEventListener('toggle', () => (d.open ? labCollapsed.delete(d.dataset.k) : labCollapsed.add(d.dataset.k)));
     });
 
-    /** One key run for one entry, under the entry's own gate and match flags, as core reads them. */
-    const entryHits = entry => {
-        const sec = entry.selective ? secondaryKeys(entry) : [];
-        return keyHits(usableKeys(entry.key), labHay,
-            entry.caseSensitive ?? world_info_case_sensitive, entry.matchWholeWords ?? world_info_match_whole_words,
-            {
-                context: 30,
-                matchWindow: labWindow,
-                gate: sec.length ? { keys: sec, logic: Number(entry.selectiveLogic ?? WI_LOGIC.AND_ANY) } : undefined,
-            }).filter(r => r.count > 0);
-    };
-
-    /** Which of `entries` the haystack would activate on keys alone. Disabled entries are out, as core has them; every other
-     *  gate core applies — probability, inclusion groups, delay, cooldown, character and tag filters, decorators, recursion —
-     *  is not modelled here, so this is the keyword half of activation and not a prediction. */
+    /** Runs `entries` against the haystack and shows the result; `label` names what ran, for the header. */
     const applyEntries = (label, entries) => {
-        const keyed = entries.filter(e => e && !e.disable && usableKeys(e.key).length);
-        const hits = [];
-        for (const entry of keyed) {
-            const rows = entryHits(entry);
-            if (rows.length) hits.push({ entry, rows });
-        }
-        // In encounter order, which for the attached set is core's own: global, character, chat, persona.
-        labRun = {
-            label,
-            entries: hits,
-            scanned: keyed.length,
-            books: [...new Set(keyed.map(e => e.world).filter(Boolean))],
-            // Colour is per term, as it is in the key list: one key found by two entries is one colour in both.
-            keyList: [...new Set(hits.flatMap(h => h.rows.map(r => r.key)))],
-        };
-        toastr.info(`${hits.length} of ${keyed.length} keyed ${keyed.length === 1 ? 'entry' : 'entries'} matched`, 'Keyword Lab');
+        const run = runBook(entries, labHay, {
+            matchWindow: labWindow,
+            context: 30,
+            defaults: { caseSensitive: world_info_case_sensitive, wholeWords: world_info_match_whole_words },
+        });
+        labRun = { label, ...run };
+        toastr.info(`${run.entries.length} of ${run.scanned} keyed ${run.scanned === 1 ? 'entry' : 'entries'} matched`, 'Keyword Lab');
         labRepaint?.();
     };
 
@@ -2292,27 +2270,24 @@ export async function lorebookStudio(preferredBook = null) {
         });
     };
 
-    /** The rows and the colour they share with the marks, from whatever the panes hold now. */
+    /** The Lab's result plus the colour to draw it in, from whatever the panes hold now. */
     const scanLab = () => {
-        // An applied run marks with the entries it ran, coloured by entry, not with the keys pane it is not using.
-        if (labRun) {
-            const spans = mergeSpans(labRun.entries.flatMap(({ entry }) => {
-                const sec = entry.selective ? secondaryKeys(entry) : [];
-                return keySpans(usableKeys(entry.key), labHay,
-                    entry.caseSensitive ?? world_info_case_sensitive, entry.matchWholeWords ?? world_info_match_whole_words,
-                    {
-                        matchWindow: labWindow,
-                        gate: sec.length ? { keys: sec, logic: Number(entry.selectiveLogic ?? WI_LOGIC.AND_ANY) } : undefined,
-                    });
-            }));
-            return { keys: labRun.keyList, ink: (sp, a) => labInk(Math.max(0, labRun.keyList.indexOf(sp.key)), a), rows: [], spans };
-        }
-        const keys = splitKeys(labKeys);
-        const ink = (sp, a) => labInk(Math.max(0, keys.indexOf(sp.key)), a);
-        const gate = { keys: splitKeys(labSec), logic: Number(labLogic) };
-        const rows = keyHits(keys, labHay, labCase, labWhole, { context: 30, matchWindow: labWindow, gate });
-        for (const r of rows) r.color = ink({ key: r.key });
-        return { keys, ink, rows, gate, spans: keySpans(keys, labHay, labCase, labWhole, { matchWindow: labWindow, gate }) };
+        const r = labScan({
+            hay: labHay,
+            keys: labKeys,
+            sec: labSec,
+            logic: labLogic,
+            matchWindow: labWindow,
+            caseSensitive: labCase,
+            wholeWords: labWhole,
+            context: 30,
+            run: labRun,
+            defaults: { caseSensitive: world_info_case_sensitive, wholeWords: world_info_match_whole_words },
+        });
+        // Colour is the display half, and it is per term in both modes: a key's place in the list it came from.
+        const ink = (sp, a) => labInk(Math.max(0, r.keys.indexOf(sp.key)), a);
+        for (const row of r.rows) row.color = ink({ key: row.key });
+        return { ...r, ink };
     };
 
     /** The haystack at full width with every match marked, and the digest under it. The tab keeps only the digest: the

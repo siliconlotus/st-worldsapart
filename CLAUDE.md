@@ -215,7 +215,7 @@ matched expression is worth goes in the second.
 
 ## Pure vs ST-coupled
 
-`matcher.mjs`, `entity.mjs`, `query.mjs`, `keyword-audit.mjs`, `keyword-suggest.mjs`, `layout.mjs`,
+`matcher.mjs`, `entity.mjs`, `query.mjs`, `keyword-audit.mjs`, `keyword-suggest.mjs`, `lab.mjs`, `layout.mjs`,
 `selection.mjs`, `delivery.mjs`, `smartkeys.mjs`, `sort.mjs`, `lexical.mjs`, `relevance.mjs` and
 `plugin/*.mjs` are ST-free and node-importable, so the evals exercise the shipped code. Settings and ST
 globals are injected by the caller, never imported. The ST/DOM half is `worldsapart.js`,
