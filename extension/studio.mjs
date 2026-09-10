@@ -2054,7 +2054,7 @@ export async function lorebookStudio(preferredBook = null) {
         // The blank lines around the rule go with it: the container is pre-wrap, so leaving them would stack their own height
         // on top of the rule's margins.
         const plain = t => escapeHtml(t).replace(/(?:\r?\n)*^[ \t]*-{3,}[ \t]*$(?:\r?\n)*/gm,
-            '<hr style="border:none;border-top:1px solid color-mix(in srgb, currentColor 60%, transparent);margin:7px 0;">');
+            '<hr style="border:none;border-top:1px solid currentColor;opacity:0.85;margin:15px 0;">');
         let html = '', at = 0;
         for (const sp of spans) {
             // A negated span is what stopped a key, not what matched it: WA_RED, the same colour severity wears in the Explorer.
