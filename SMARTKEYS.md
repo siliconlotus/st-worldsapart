@@ -233,8 +233,10 @@ meant. The last row applies to a bare `/regex/` key as well.
 | **warn** | when all terms in an expression are weighted 0, the key ranks on nothing. In the secondary box that is a deliberate gate; as a key of its own it still counts as one thing present |
 | **warn** | a `/pattern/` with an unescaped `/` inside — vanilla SillyTavern will not run it (above) |
 
-Whether a term ever occurs in your book is a different question, and the audit answers it; against any
-text you paste or load, the Studio's Keyword Lab does.
+Whether a term ever occurs in your book is a different question, and the audit answers it. The Studio's
+Keyword Lab answers it against any text you paste or load, reporting keyword hits alone: no probability
+roll, delay, cooldown, inclusion group, character or tag filter, decorator, recursion or vector
+retrieval enters it, so a key that hits there has not necessarily activated its entry.
 
 ---
 
