@@ -2220,7 +2220,7 @@ export async function lorebookStudio(preferredBook = null) {
         // The inputs stack down the left — haystack, keys, the operator, the secondaries it gates them by — with the results
         // beside them at full height, so a long digest is read without the panes shrinking.
         const panes = document.createElement('div');
-        panes.style.cssText = 'flex:3 1 0;display:flex;flex-direction:column;gap:6px;min-width:0;min-height:0;';
+        panes.style.cssText = 'flex:5 1 0;display:flex;flex-direction:column;gap:6px;min-width:0;min-height:0;';
         const box = (placeholder, get, set) => {
             const t = document.createElement('textarea'); t.className = 'text_pole';
             t.placeholder = placeholder; t.value = get();
@@ -2329,7 +2329,7 @@ export async function lorebookStudio(preferredBook = null) {
             labTool('fa-expand', 'Show the text with every match marked', () => showMarkedText()),
         );
         const out = document.createElement('div');
-        out.style.cssText = 'flex:1 1 0;overflow:auto;min-width:0;min-height:0;';
+        out.style.cssText = 'flex:2 1 0;overflow:auto;min-width:0;min-height:0;';
         const repaint = () => {
             const { keys, ink, rows, gate } = scanLab();
             out.innerHTML = rows.length
