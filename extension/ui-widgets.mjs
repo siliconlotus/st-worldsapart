@@ -267,6 +267,9 @@ export function renderMessageHtml(text, { spans = [], markSpan = null } = {}) {
         // either would flatten the taper. Only the margin and the opacity, which at 0.2 is too faint to read as a break.
         '<hr style="margin:15px 0;opacity:0.75;">');
     const prose = proseRanges(src);
+    // Whole-range, not per piece: a tag or comment cut in half round a mark emits `<!-- ` on its own, which opens a comment
+    // the mark then disappears into. If anything matched inside one, all of it is shown as the text it is.
+    const revealed = new Set(prose.filter(r => r.tag === 'html' && spans.some(sp => sp.start < r.end && r.start < sp.end)));
     const cuts = [...new Set([0, src.length, ...spans.flatMap(sp => [sp.start, sp.end]), ...prose.flatMap(r => [r.start, r.end])])]
         .sort((a, b) => a - b);
     let html = '';
@@ -279,9 +282,12 @@ export function renderMessageHtml(text, { spans = [], markSpan = null } = {}) {
         // A delimiter nothing matched is display only, and chat does not display it.
         if (covering.some(r => r.tag === 'delim') && !sp) continue;
         // Markup nothing matched renders; markup something matched is shown as the text it is, or the mark would vanish
-        // into an attribute. Sanitised at the end, once, over the whole thing.
-        if (covering.some(r => r.tag === 'html')) {
-            html += sp ? markSpan(sp, src.slice(a, b)) : src.slice(a, b);
+        // into an attribute — or, for a comment, into markup that displays nothing at all.
+        const asMarkup = covering.find(r => r.tag === 'html');
+        if (asMarkup) {
+            html += revealed.has(asMarkup)
+                ? (sp ? markSpan(sp, src.slice(a, b)) : escapeHtml(src.slice(a, b)))
+                : src.slice(a, b);
             continue;
         }
         const tags = covering.filter(r => r.tag !== 'delim').map(r => r.tag)
