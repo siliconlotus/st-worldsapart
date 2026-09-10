@@ -2487,8 +2487,9 @@ export async function lorebookStudio(preferredBook = null) {
             const reading = labCommitted && !!labHay.trim();
             hayBox.style.display = reading ? 'none' : '';
             hayRead.style.display = reading ? '' : 'none';
-            // A shut gate must still say it is filtering, or a key reading 0 has no visible cause.
-            const secN = gate.keys.length;
+            // A shut gate must still say it is filtering, or a key reading 0 has no visible cause. Read off the pane, not off
+            // scanLab, whose applied-run branch has no gate to report.
+            const secN = splitKeys(labSec).length;
             gateSum.textContent = secN
                 ? `Secondary keys — ${logicSel.selectedOptions[0]?.textContent.split(' \u2014 ')[0] ?? ''}, ${secN} term${secN === 1 ? '' : 's'}`
                 : 'Secondary keys';
