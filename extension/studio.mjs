@@ -2,7 +2,7 @@
 // selected book's entries on the right. DOM- and ST-coupled; the logic it stands on is the shared pure modules.
 import { saveSettingsDebounced, getRequestHeaders, characters, getCharacters } from '../../../../../script.js';
 import { getContext } from '../../../../extensions.js';
-import { loadWorldInfo, saveWorldInfo, reloadEditor, createWorldInfoEntry, duplicateWorldInfoEntry, deleteWorldInfoEntry, getFreeWorldEntryUid, deleteWIOriginalDataValue, deleteWorldInfo, updateWorldInfoList, world_names, world_info_match_whole_words, world_info_case_sensitive, selected_world_info, world_info, METADATA_KEY } from '../../../../world-info.js';
+import { loadWorldInfo, saveWorldInfo, reloadEditor, createWorldInfoEntry, duplicateWorldInfoEntry, deleteWorldInfoEntry, getFreeWorldEntryUid, deleteWIOriginalDataValue, deleteWorldInfo, updateWorldInfoList, world_names, world_info_depth, world_info_include_names, world_info_match_whole_words, world_info_case_sensitive, selected_world_info, world_info, METADATA_KEY } from '../../../../world-info.js';
 import { power_user } from '../../../../power-user.js';
 import { escapeHtml } from '../../../../utils.js';
 import { Popup, POPUP_TYPE, POPUP_RESULT } from '../../../../popup.js';
@@ -14,7 +14,7 @@ import { STUDIO_PRUNE_OPTS } from './keyword-audit.mjs';
 import { buildKeySuggest, classifyLlmCand, STUDIO_SUGGEST_OPTS } from './keyword-suggest.mjs';
 import { buildAutomaton, addMessageHits, fold, validateSmartKey } from './smartkeys.mjs';
 import { findOrphanBindings } from './bindings.mjs';
-import { WI_LOGIC, hasPromoteDecorator, isRegexKey, keyHits, keySpans, secondaryKeys, splitKeys, usableKeys, wholeWordAdvice, withPromote } from './matcher.mjs';
+import { WI_LOGIC, dropTags, hasPromoteDecorator, isRegexKey, keyHits, keySpans, scanSegments, secondaryKeys, splitKeys, usableKeys, wholeWordAdvice, withPromote } from './matcher.mjs';
 
 const WA_GREEN = '#7bbf6a';   // "no prune" — a keyword the scan doesn't flag
 const WA_RED = '#e06c6c';     // severe — same value keyword-audit's severityOf hands back
@@ -2045,6 +2045,33 @@ export async function lorebookStudio(preferredBook = null) {
     // `scan` here; it is still offered, and still stored, because it is the setting the Lab is standing in for.
     let labWindow = settings().matchWindow;
 
+    /** The chat as WA reads it for a scan: is_system gone, dropChatTags applied, the depth setting's last messages, names
+     *  included as core would. Joined with a blank line, so the paragraph window breaks at a message boundary as it does live. */
+    const chatHaystack = () => {
+        const spec = settings().dropChatTags;
+        const chat = (getContext().chat ?? [])
+            .filter(m => m && !m.is_system)
+            .map(m => (spec?.trim() ? { ...m, mes: dropTags(String(m.mes ?? ''), spec) } : m));
+        const depth = Number(settings().messageDepth || world_info_depth);
+        return scanSegments(chat, { depth, includeNames: world_info_include_names, matchWindow: 'message' }).join('\n\n');
+    };
+
+    /** The primary keys of one entry of the selected book, chosen from a list. Secondaries are a gate, not terms, so they stay out. */
+    const pickEntryKeys = async () => {
+        const entries = Object.values(data?.entries ?? {}).filter(e => usableKeys(e?.key).length);
+        if (!entries.length) { toastr.info('No entry in this book has keys to import.', 'Worlds Apart'); return null; }
+        entries.sort(SORT_FNS['title-asc']);
+        const w = document.createElement('div');
+        w.style.cssText = 'text-align:left;';
+        w.innerHTML = 'Take the keys of<div style="margin-top:8px;"><select class="wa-lab-entry text_pole" style="width:100%;">'
+            + entries.map(e => `<option value="${escapeHtml(String(e.uid))}">${escapeHtml(wiTitleOf(e))} — ${escapeHtml(usableKeys(e.key).join(', '))}</option>`).join('')
+            + '</select></div>';
+        const p = new Popup(w, POPUP_TYPE.CONFIRM, '', { okButton: 'Import keys', cancelButton: 'Cancel' });
+        if (await p.show() !== POPUP_RESULT.AFFIRMATIVE) return null;
+        const uid = w.querySelector('.wa-lab-entry').value;
+        return usableKeys(data.entries[uid]?.key);
+    };
+
     /** The rows and the colour they share with the marks, from whatever the panes hold now. */
     const scanLab = () => {
         const keys = splitKeys(labKeys);
@@ -2088,10 +2115,9 @@ export async function lorebookStudio(preferredBook = null) {
             t.addEventListener('input', () => { set(t.value); repaint(); });
             return t;
         };
-        panes.append(
-            box('Paste any text to match against…', () => labHay, v => { labHay = v; }),
-            box('Keys, comma- or newline-separated — plain, /regex/flags or ?SmartKey', () => labKeys, v => { labKeys = v; }),
-        );
+        const hayBox = box('Paste any text to match against…', () => labHay, v => { labHay = v; });
+        const keyBox = box('Keys, comma- or newline-separated — plain, /regex/flags or ?SmartKey', () => labKeys, v => { labKeys = v; });
+        panes.append(hayBox, keyBox);
         const opts = document.createElement('div');
         opts.style.cssText = 'display:flex;gap:14px;padding:6px 8px;flex:0 0 auto;opacity:0.8;font-size:0.9em;';
         const flag = (label, get, set) => {
@@ -2116,11 +2142,29 @@ export async function lorebookStudio(preferredBook = null) {
         }
         win.addEventListener('change', () => { labWindow = win.value; repaint(); });
         winLabel.append(document.createTextNode('Match window'), win);
-        const pop = document.createElement('i');
-        pop.className = 'fa-solid fa-expand'; pop.title = 'Show the text with every match marked';
-        pop.style.cssText = 'cursor:pointer;margin-left:auto;padding:2px 4px;opacity:0.7;';
-        pop.addEventListener('click', () => showMarkedText());
-        opts.append(winLabel, pop);
+        const tool = (icon, title, onClick, marginLeft) => {
+            const i = document.createElement('i');
+            i.className = `fa-solid ${icon}`; i.title = title;
+            i.style.cssText = `cursor:pointer;padding:2px 4px;opacity:0.7;${marginLeft ? 'margin-left:auto;' : ''}`;
+            i.addEventListener('click', onClick);
+            return i;
+        };
+        opts.append(
+            winLabel,
+            tool('fa-comments', 'Load the current chat, as deep as the message-depth setting reads', () => {
+                labHay = chatHaystack();
+                hayBox.value = labHay;
+                repaint();
+            }, true),
+            tool('fa-key', 'Take the keys of an entry in this book', async () => {
+                const keys = await pickEntryKeys();
+                if (!keys?.length) return;
+                labKeys = keys.join('\n');
+                keyBox.value = labKeys;
+                repaint();
+            }),
+            tool('fa-expand', 'Show the text with every match marked', () => showMarkedText()),
+        );
         const out = document.createElement('div');
         out.style.cssText = 'flex:1 1 auto;overflow:auto;padding:0 8px 8px;min-height:0;';
         const repaint = () => {
