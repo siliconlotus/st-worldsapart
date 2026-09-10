@@ -2072,6 +2072,8 @@ export async function lorebookStudio(preferredBook = null) {
     // The unit a key must match within, as the running setting has it. A pasted text has no messages, so `message` is
     // `scan` here; it is still offered, and still stored, because it is the setting the Lab is standing in for.
     let labWindow = settings().matchWindow;
+    // Editing or reading: committed, the haystack pane shows the marked text in place of the box it was typed in.
+    let labCommitted = false;
     // The secondary condition, in core's own terms: a term list and one of world_info_logic's four operators, gating every key.
     let labSec = '', labLogic = String(WI_LOGIC.AND_ANY);
 
@@ -2210,6 +2212,9 @@ export async function lorebookStudio(preferredBook = null) {
         };
         const hayBox = box('Paste any text to match against… a line of dashes separates one message from the next', () => labHay, v => { labHay = v; });
         hayBox.style.flex = '3 1 0';
+        // The same box, read-only and marked: text_pole so it keeps the border and padding the textarea had.
+        const hayRead = document.createElement('div'); hayRead.className = 'text_pole';
+        hayRead.style.cssText = 'flex:3 1 0;min-height:0;overflow:auto;white-space:pre-wrap;line-height:1.5;';
         const keyBox = box('Keys, comma- or newline-separated — plain, /regex/flags or ?SmartKey', () => labKeys, v => { labKeys = v; });
         const logicSel = document.createElement('select'); logicSel.className = 'text_pole';
         logicSel.style.cssText = 'width:100%;margin:0;flex:0 0 auto;';
@@ -2224,7 +2229,7 @@ export async function lorebookStudio(preferredBook = null) {
         const secBox = box('Secondary keys', () => labSec, v => { labSec = v; });
         secBox.style.cssText += 'flex:0 0 auto;height:4.4em;';
         keyBox.style.flex = '2 1 0';
-        panes.append(hayBox, keyBox, logicSel, secBox);
+        panes.append(hayBox, hayRead, keyBox, logicSel, secBox);
 
         const opts = document.createElement('div');
         opts.style.cssText = 'display:flex;gap:14px;padding:6px 8px;flex:0 0 auto;opacity:0.8;font-size:0.9em;';
@@ -2250,21 +2255,29 @@ export async function lorebookStudio(preferredBook = null) {
         }
         win.addEventListener('change', () => { labWindow = win.value; repaint(); });
         winLabel.append(document.createTextNode('Match window'), win);
-        const tool = (icon, title, onClick, marginLeft) => {
+        const labTool = (icon, title, onClick, marginLeft) => {
             const i = document.createElement('i');
             i.className = `fa-solid ${icon}`; i.title = title;
             i.style.cssText = `cursor:pointer;padding:2px 4px;opacity:0.7;${marginLeft ? 'margin-left:auto;' : ''}`;
             i.addEventListener('click', onClick);
             return i;
         };
+        // The haystack pane's two states in one control: mark it up, or go back to the box it was typed in.
+        const commitTool = labTool('fa-highlighter', '', () => {
+            if (!labHay.trim() && !labCommitted) return;
+            labCommitted = !labCommitted;
+            repaint();
+            if (!labCommitted) hayBox.focus();
+        }, true);
         opts.append(
             winLabel,
-            tool('fa-comments', 'Load the current chat, as deep as the message-depth setting reads', () => {
+            commitTool,
+            labTool('fa-comments', 'Load the current chat, as deep as the message-depth setting reads', () => {
                 labHay = chatHaystack();
                 hayBox.value = labHay;
                 repaint();
-            }, true),
-            tool('fa-key', 'Take the keys of an entry in this book, secondary condition and all', async () => {
+            }),
+            labTool('fa-key', 'Take the keys of an entry in this book, secondary condition and all', async () => {
                 const picked = await pickEntryKeys();
                 if (!picked?.keys.length) return;
                 labKeys = picked.keys.join('\n');
@@ -2273,7 +2286,7 @@ export async function lorebookStudio(preferredBook = null) {
                 keyBox.value = labKeys; secBox.value = labSec; logicSel.value = labLogic;
                 repaint();
             }),
-            tool('fa-expand', 'Show the text with every match marked', () => showMarkedText()),
+            labTool('fa-expand', 'Show the text with every match marked', () => showMarkedText()),
         );
         const out = document.createElement('div');
         out.style.cssText = 'flex:1 1 0;overflow:auto;min-width:0;min-height:0;';
@@ -2283,6 +2296,18 @@ export async function lorebookStudio(preferredBook = null) {
                 ? rows.map(r => labKeyHtml(r, r.color)).join('')
                 : '<div style="opacity:0.6;padding:6px 0;">Keys you type on the right are matched against the text on the left.</div>';
             bindCollapse(out);
+            // Committed with nothing in the box would leave no way back, so an empty haystack is always the editable one.
+            const reading = labCommitted && !!labHay.trim();
+            hayBox.style.display = reading ? 'none' : '';
+            hayRead.style.display = reading ? '' : 'none';
+            commitTool.className = `fa-solid ${reading ? 'fa-pen' : 'fa-highlighter'}`;
+            commitTool.title = reading ? 'Edit the text again' : 'Mark up the text in place of the box it was typed in';
+            commitTool.style.opacity = labHay.trim() ? '0.7' : '0.25';
+            if (reading) {
+                const top = hayRead.scrollTop;
+                hayRead.innerHTML = markedHtml(labHay, keySpans(keys, labHay, labCase, labWhole, { matchWindow: labWindow, gate }), ink);
+                hayRead.scrollTop = top;
+            }
         };
         repaint();
         const body = document.createElement('div');
