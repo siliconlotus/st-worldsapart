@@ -328,7 +328,8 @@ console.log('ok   splitKeys: comma and newline separate; regexes and quoted term
 const rows = keyHits(['gagarin', '? (armstrong gagarin)', '? -banana', 'nobody'], space, false, true);
 eq(rows.map(r => r.key).join(' | '), 'gagarin | ? (armstrong gagarin) | ? -banana | nobody', 'one entry per key, in the order given');
 eq(rows[0].count, 2, 'a plain key reports its occurrences');
-eq(rows[0].segments[0].excerpts.length, 1, 'one excerpt per branch that fired — a plain key has the one branch');
+eq(rows[0].segments[0].excerpts.length, 2, 'a single-branch key carries every occurrence: no window can filter it');
+eq(rows[1].segments[0].excerpts.length, 2, 'a branching key carries the first of each branch instead');
 eq(rows[1].segments[0].leaves.map(l => `${l.term} ${l.n}`).join(', '), 'armstrong 1, gagarin 2', 'a compound reports every leaf');
 eq(rows[2].count, undefined, 'a negation-only SmartKey can never fire...');
 eq(typeof rows[2].message, 'string', '...so it carries a message instead of a count');

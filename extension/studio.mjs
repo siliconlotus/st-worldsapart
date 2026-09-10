@@ -2087,11 +2087,12 @@ export async function lorebookStudio(preferredBook = null) {
         const num = n => `<span style="color:var(--SmartThemeEmColor, #d9a441);font-weight:600;">${n}</span>`;
         if (r.message) return `<div style="margin-bottom:8px;">${chip} <small style="opacity:0.75;">${escapeHtml(r.message)}</small></div>`;
         if (!r.segments.length) return `<div style="margin-bottom:8px;">${chip} ${num(r.count)}</div>`;
+        const span = e => `<div style="margin-left:14px;"><small style="opacity:0.75;">${escapeHtml(e.text.slice(0, e.start))}`
+            + `<span style="color:${e.negated ? WA_RED : escapeHtml(color)};font-weight:600;">${escapeHtml(e.text.slice(e.start, e.end))}</span>`
+            + `${escapeHtml(e.text.slice(e.end))}</small></div>`;
         const seg = sg => `<div style="margin:3px 0 0 14px;${sg.matched ? '' : 'opacity:0.55;'}">`
             + `<small>${sg.leaves.map(l => `${escapeHtml(l.negated ? `-${l.term}` : l.term)} ${num(l.n)}`).join(', ')}</small>`
-            + sg.excerpts.map(e => `<div style="margin-left:14px;"><small style="opacity:0.75;">${escapeHtml(e.text.slice(0, e.start))}`
-                + `<span style="color:${e.negated ? WA_RED : escapeHtml(color)};font-weight:600;">${escapeHtml(e.text.slice(e.start, e.end))}</span>`
-                + `${escapeHtml(e.text.slice(e.end))}</small></div>`).join('')
+            + sg.excerpts.map(span).join('')
             + '</div>';
         // <details> so the open/shut state is the element's own; labCollapsed carries it across the repaint that rebuilds this.
         // A key with one positive branch and nothing gating it cannot be filtered, so the window is not the interesting unit:
@@ -2102,9 +2103,12 @@ export async function lorebookStudio(preferredBook = null) {
             ? num(r.count)
             // Disjoint, and summing to the windows the key was in the running for, so neither number needs a total to read.
             : `${num(`${r.segments.length - filtered} matched`)}${filtered ? `<small style="opacity:0.5;">, ${filtered} filtered</small>` : ''}`;
+        // A single-branch key reads hit by hit: the window it fell in decided nothing, so grouping by one says nothing.
+        const body = oneBranch
+            ? r.segments.flatMap(sg => sg.excerpts).map(span).join('')
+            : r.segments.map(seg).join('');
         return `<details${labCollapsed.has(r.key) ? '' : ' open'} data-k="${escapeHtml(r.key)}" style="margin-bottom:8px;">`
-            + `<summary style="cursor:pointer;">${chip} ${tally}</summary>`
-            + `${r.segments.map(seg).join('')}</details>`;
+            + `<summary style="cursor:pointer;">${chip} ${tally}</summary>${body}</details>`;
     };
 
     /** Keys the reader has shut, by key text. Survives the repaint on every keystroke, and both views share it. */

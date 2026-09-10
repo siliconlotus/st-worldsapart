@@ -505,7 +505,8 @@ export function keySpans(keys, text, caseSensitive, wholeWords, { limit = 200, m
  *  the key could have matched in — one holding no positive branch is not a window the key is decided in, whatever its
  *  negatives do — `leaves` being every branch of the key and its gate with that segment's count, `negated`
  *  marking a branch that vetoes rather than matches, and `excerpts` the first occurrence of each branch that fired. `matched`
- *  is the verdict for that segment. A key that can never fire carries `message` instead. `gate` is a secondary-key condition,
+ *  is the verdict for that segment. A key that is a single positive branch carries every occurrence in `excerpts`, since no
+ *  window can filter it; anything with branches carries the first of each. A key that can never fire carries `message` instead. `gate` is a secondary-key condition,
  *  `{ keys, logic }` in core's terms, applied to every key as an entry's keysecondary gates each of its primaries. */
 export function keyHits(keys, text, caseSensitive, wholeWords, { context = 28, limit = 20, matchWindow = 'scan', gate } = {}) {
     const segs = textSegments(text, matchWindow);
@@ -518,6 +519,7 @@ export function keyHits(keys, text, caseSensitive, wholeWords, { context = 28, l
 
             const node = astFor(key, gateOf);
             const branches = branchesOf(key, node, caseSensitive, wholeWords);
+            const single = branches.length === 1 && !branches[0].negated;
 
             const segments = [];
             let count = 0;
@@ -527,11 +529,13 @@ export function keyHits(keys, text, caseSensitive, wholeWords, { context = 28, l
                 const leaves = branches.map(b => ({ term: String(b.id?.value ?? ''), n: leafCount(b.id, sg.text), negated: b.negated }));
                 // A window with no positive branch is not a window this key is being decided in, whatever its negatives do.
                 if (!leaves.some(l => l.n > 0 && !l.negated)) continue;
-                // One excerpt per branch that fired — the first, the digest being a summary and not the text itself.
+                // One excerpt per branch that fired, the first of them — except for a key that is a single positive branch,
+                // which cannot be filtered and so is read hit by hit rather than window by window.
                 const excerpts = [];
                 for (const b of branches) {
-                    const [ex] = branchExcerpts(b.id, sg.text, context, 1);
-                    if (ex) excerpts.push({ ...ex, term: String(b.id?.value ?? ''), negated: b.negated });
+                    for (const ex of branchExcerpts(b.id, sg.text, context, single ? limit : 1)) {
+                        excerpts.push({ ...ex, term: String(b.id?.value ?? ''), negated: b.negated });
+                    }
                 }
                 segments.push({ at: sg.at, matched, leaves, excerpts });
                 if (segments.length >= limit) break;
