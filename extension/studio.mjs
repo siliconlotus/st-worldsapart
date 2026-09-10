@@ -2150,8 +2150,15 @@ export async function lorebookStudio(preferredBook = null) {
 
     /** One key's result as HTML: the key as a chip with its count, then a block per segment — every branch with that segment's
      *  count, and under it the first place each branch that fired landed. A segment the key failed in is dimmed. */
+    /** A key as chip text, breaking before an operator rather than after it — PEP 8's rule, and the readable half of a long
+     *  SmartKey. `<wbr>` offers the break, the nbsp after the operator refuses the one the space would otherwise allow. */
+    const keyChipText = key => escapeHtml(key)
+        .replace(/ \| /g, '<wbr> |\u00a0')
+        .replace(/ &amp; /g, '<wbr> &amp;\u00a0')
+        .replace(/ (?=[-!+(])/g, '<wbr> ');
+
     const labKeyHtml = (r, color) => {
-        const chip = `<span class="wa-kw wa-kw-wrap" style="border-color:${escapeHtml(color)};background:color-mix(in srgb, ${escapeHtml(color)} 18%, transparent);">${escapeHtml(r.key)}</span>`;
+        const chip = `<span class="wa-kw wa-kw-wrap" style="border-color:${escapeHtml(color)};background:color-mix(in srgb, ${escapeHtml(color)} 18%, transparent);">${keyChipText(r.key)}</span>`;
         const num = n => `<span style="color:var(--SmartThemeEmColor, #d9a441);font-weight:600;">${n}</span>`;
         if (r.message) return `<div style="margin-bottom:8px;">${chip} <small style="opacity:0.75;">${escapeHtml(r.message)}</small></div>`;
         if (!r.segments.length) return `<div style="margin-bottom:8px;">${chip} ${num(r.count)}</div>`;
