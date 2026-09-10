@@ -45,15 +45,32 @@ function planUidReindex(entries, orderedUids, start, desc) {
 
 /**
  * Lorebook Studio (/wa-studio).
- * @param {string|null} preferredBook Opened if it still exists; else any attached world, else nothing selected
+ * @param {string|null} preferredBook Opened if it still exists; else the first attached book, else nothing selected
  */
 export async function lorebookStudio(preferredBook = null) {
     if (!(world_names ?? []).length) { toastr.warning('No lorebooks found.', 'Worlds Apart'); return ''; }
     ensureStudioStyle();
 
+    /** The books ST has active for this chat, by name — global, the character's own and its extra lore, the chat's, the
+     *  persona's. Mirrors what getGlobalLore/getCharacterLore/getChatLore/getPersonaLore resolve, because those four are
+     *  private and getSortedEntries, which is exported, emits WORLDINFO_ENTRIES_LOADED as a side effect (upstream-st.md #18).
+     *  Names only: a Set drops the duplicate core also skips, and the entries are loaded the same way core loads them. */
+    const attachedBookNames = () => {
+        const ctx = getContext();
+        const names = new Set(selected_world_info ?? []);
+        const character = characters?.[ctx.characterId];
+        if (character?.data?.extensions?.world) names.add(character.data.extensions.world);
+        const file = ctx.characterId != null ? getCharaFilename(ctx.characterId) : null;
+        for (const b of (file && world_info.charLore?.find(e => e.name === file)?.extraBooks) ?? []) names.add(b);
+        const chatWorld = ctx.chatMetadata?.[METADATA_KEY];
+        if (chatWorld) names.add(chatWorld);
+        if (power_user.persona_description_lorebook) names.add(power_user.persona_description_lorebook);
+        return [...names].filter(Boolean).filter(n => world_names.includes(n));
+    };
+
     let sortAsc = true;
     let selected = (world_names.includes(preferredBook) ? preferredBook : null)
-        ?? [...runState.attachedWorlds].find(w => world_names.includes(w)) ?? null;
+        ?? attachedBookNames()[0] ?? null;
     let data = null;                 // loaded world-info for `selected`
     let scan = null;                 // buildKeyPruneScan result for `data` (keyword colouring)
     let suggest = null;              // buildKeySuggest result, built lazily on first ⚡/🪄
@@ -2204,23 +2221,6 @@ export async function lorebookStudio(preferredBook = null) {
         .map(e => ({ ...e, world: e.world ?? name }));
 
     const applyOneBook = async name => applyEntries(name, await bookEntries(name));
-
-    /** The books ST has active for this chat, by name — global, the character's own and its extra lore, the chat's, the
-     *  persona's. Mirrors what getGlobalLore/getCharacterLore/getChatLore/getPersonaLore resolve, because those four are
-     *  private and getSortedEntries, which is exported, emits WORLDINFO_ENTRIES_LOADED as a side effect (upstream-st.md #18).
-     *  Names only: a Set drops the duplicate core also skips, and the entries are loaded the same way core loads them. */
-    const attachedBookNames = () => {
-        const ctx = getContext();
-        const names = new Set(selected_world_info ?? []);
-        const character = characters?.[ctx.characterId];
-        if (character?.data?.extensions?.world) names.add(character.data.extensions.world);
-        const file = ctx.characterId != null ? getCharaFilename(ctx.characterId) : null;
-        for (const b of (file && world_info.charLore?.find(e => e.name === file)?.extraBooks) ?? []) names.add(b);
-        const chatWorld = ctx.chatMetadata?.[METADATA_KEY];
-        if (chatWorld) names.add(chatWorld);
-        if (power_user.persona_description_lorebook) names.add(power_user.persona_description_lorebook);
-        return [...names].filter(Boolean).filter(n => world_names.includes(n));
-    };
 
     /** Every book ST has active for this chat, which is the set core scans. Falls back to the picker when nothing is
      *  attached, since an empty run and a run with no hits look the same otherwise. */
