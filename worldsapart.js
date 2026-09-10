@@ -2117,7 +2117,14 @@ export async function init() {
 
     if (settings().enabled) renderDeliveryPanel(runState.lastPromptOrder);
 
-    SlashCommandParser.addCommandObject(SlashCommand.fromProps({
+    /** Registers a WA command under its name and under the `wa=` twin of it: `=` is shift-`-`, so it is the typo of every
+     *  one of them. Aliases the parser already knows are kept. */
+    const addWaCommand = props => SlashCommandParser.addCommandObject(SlashCommand.fromProps({
+        ...props,
+        aliases: [...(props.aliases ?? []), props.name.replace(/^wa-/, 'wa=')],
+    }));
+
+    addWaCommand({
         name: 'wa-versus',
         callback: async (named) => { await versusCore(named); return ''; },
         namedArgumentList: [
@@ -2125,9 +2132,9 @@ export async function init() {
         ],
         helpString: 'Worlds Apart: what WA delivered on this turn against what ST core + Vector Storage would have, at their own budgets. Runs /wa-debug first, prints the difference, and downloads an ordinary two-arm capture bundle \u2014 grade it with Review bundles, apply with eval/synthetic-data/apply-review.mjs, then score with eval/versus-score.mjs.',
         returns: 'nothing',
-    }));
+    });
 
-    SlashCommandParser.addCommandObject(SlashCommand.fromProps({
+    addWaCommand({
         name: 'wa-core',
         callback: () => {
             const c = runState.lastCoreSet;
@@ -2140,23 +2147,23 @@ export async function init() {
         },
         helpString: 'Worlds Apart: what ST core selected on its own, with WA standing down. Captured from ST\u2019s dry runs, where interceptors are skipped and core runs its own budget \u2014 so it is core\u2019s shipped set, keyword route only. Console.',
         returns: 'nothing',
-    }));
+    });
 
-    SlashCommandParser.addCommandObject(SlashCommand.fromProps({
+    addWaCommand({
         name: 'wa-dry',
         callback: () => dryRun(false),
         helpString: 'Worlds Apart: run retrieval and a World Info scan without generating. Reports the settings used and what got selected, in prompt order. Console.',
         returns: 'nothing',
-    }));
+    });
 
-    SlashCommandParser.addCommandObject(SlashCommand.fromProps({
+    addWaCommand({
         name: 'wa-debug',
         callback: () => dryRun(true),
         helpString: 'Worlds Apart: same as /wa-dry plus every intermediate — query text, surviving term weights, per-signal scores, and the full vector-candidate ranking past the cut. Console.',
         returns: 'nothing',
-    }));
+    });
 
-    SlashCommandParser.addCommandObject(SlashCommand.fromProps({
+    addWaCommand({
         name: 'wa-grade',
         callback: gradeScene,
         namedArgumentList: [
@@ -2166,9 +2173,9 @@ export async function init() {
         ],
         helpString: 'Worlds Apart: grade this scene for the offline evals. Runs /wa-debug, then opens a window listing every activated entry with the query text and per-signal scores, for grading 0-5 (constants and stickies are listed but not graded — relevance never chose them). Saving downloads a self-contained sample: query text, settings snapshot, candidate ranking, grades, and copies of every attached lorebook, so later chat/lorebook/settings edits cannot move the numbers. Drop it in eval/eval-data/ and run eval/graded-scene-grid.mjs --sample.',
         returns: 'nothing',
-    }));
+    });
 
-    SlashCommandParser.addCommandObject(SlashCommand.fromProps({
+    addWaCommand({
         name: 'wa-super-grade',
         callback: superGradeScene,
         namedArgumentList: [
@@ -2179,24 +2186,24 @@ export async function init() {
         ],
         helpString: 'Worlds Apart: grade this scene against SEVERAL configurations at once, for a pool that isn\'t biased toward the current defaults. Runs /wa-debug once per arm (arms change which entries get surfaced — entity filter, retrieval mode, threshold, key suppression, summary queries), unions the entries they surfaced, dedupes, and opens one grading window over the union with a "surfaced by" column. Load earlier rounds\' samples into the file picker and their grades are subtracted, so each round only judges what is new. Saves one sample per arm — each with its own params and candidate rows, all sharing the pooled grades. Drop them in eval/eval-data/, run eval/graded-scene-grid.mjs --sample on each, and add arms until the judged@10 column stops showing gaps.',
         returns: 'nothing',
-    }));
+    });
 
-    SlashCommandParser.addCommandObject(SlashCommand.fromProps({
+    addWaCommand({
         name: 'wa-super-eval',
         callback: superEvalScene,
         helpString: 'Worlds Apart: review graded samples/bundles from their FILES, chat-independent — nothing live is read, so scenes captured offline or graded by an LLM judge open without loading their chat. Pick several and each becomes a section with its own query text; stored grades arrive pre-filled and editable, entry text comes from the embedded books. Save downloads ONE review file for the whole run; apply it with node eval/synthetic-data/apply-review.mjs <file> --write.',
         returns: 'nothing',
-    }));
+    });
 
-    SlashCommandParser.addCommandObject(SlashCommand.fromProps({
+    addWaCommand({
         name: 'wa-studio',
         // Wrapped: ST hands callbacks (namedArgs, unnamedArgs), which would land in preferredBook.
         callback: () => lorebookStudio(chatBook()),
         helpString: 'Worlds Apart: open Lorebook Studio — a wide two-pane manager listing every lorebook on the left and the selected book\'s entries on the right. Per-entry tools (mode, flags, sticky, ⚡/✨ keyword suggestions, prune-scan colouring, duplicate/delete), a Tool Settings drawer, bulk selection + actions (enable/disable, mode, sticky, trigger %, renumber, delete), and book tools (rename, duplicate, delete, type filter, suggest-all). Also on the extensions (wand) menu.',
         returns: 'nothing',
-    }));
+    });
 
-    SlashCommandParser.addCommandObject(SlashCommand.fromProps({
+    addWaCommand({
         name: 'wa-query',
         callback: probeQuery,
         helpString: 'Worlds Apart: score entries against arbitrary text without activating anything. Usage: /wa-query your query text here',
@@ -2208,7 +2215,7 @@ export async function init() {
                 isRequired: true,
             }),
         ],
-    }));
+    });
 
     console.log('Worlds Apart: ready');
 }
