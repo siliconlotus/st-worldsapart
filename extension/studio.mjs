@@ -2059,7 +2059,7 @@ export async function lorebookStudio(preferredBook = null) {
             const edge = sp.negated ? WA_RED : ink(sp.key);
             const label = k => `${k.negated ? '\u2212 ' : ''}${k.term && k.term !== k.key ? `${k.key} \u2014 ${k.term}` : k.key}`;
             html += plain(src.slice(at, sp.start))
-                + `<span title="${escapeHtml(sp.keys.map(label).join('\n'))}"`
+                + `<span data-at="${sp.start}" data-to="${sp.end}" title="${escapeHtml(sp.keys.map(label).join('\n'))}"`
                 + ` style="background:${fill};border-bottom:2px solid ${edge};">${escapeHtml(src.slice(sp.start, sp.end))}</span>`;
             at = sp.end;
         }
@@ -2116,7 +2116,7 @@ export async function lorebookStudio(preferredBook = null) {
         const num = n => `<span style="color:var(--SmartThemeEmColor, #d9a441);font-weight:600;">${n}</span>`;
         if (r.message) return `<div style="margin-bottom:8px;">${chip} <small style="opacity:0.75;">${escapeHtml(r.message)}</small></div>`;
         if (!r.segments.length) return `<div style="margin-bottom:8px;">${chip} ${num(r.count)}</div>`;
-        const span = (e, sg) => `<div style="margin-left:14px;" title="${escapeHtml(windowTip(sg, e))}">`
+        const span = (e, sg) => `<div style="margin-left:14px;" data-jump="${sg.at + e.at}" title="${escapeHtml(windowTip(sg, e))}">`
             + `<small style="opacity:0.75;">${escapeHtml(e.text.slice(0, e.start))}`
             + `<span style="color:${e.negated ? WA_RED : escapeHtml(color)};font-weight:600;">${escapeHtml(e.text.slice(e.start, e.end))}</span>`
             + `${escapeHtml(e.text.slice(e.end))}</small></div>`;
@@ -2174,6 +2174,20 @@ export async function lorebookStudio(preferredBook = null) {
             + 'padding-left:12px;border-left:1px solid color-mix(in srgb, currentColor 15%, transparent);';
         digest.innerHTML = rows.map(r => labKeyHtml(r, r.color)).join('');
         bindCollapse(digest);
+        // A digest line jumps to its hit in the text beside it. The offset may land inside a span that starts earlier — an
+        // overlap folds to one mark — so the mark that contains it is the target, not one that begins at it.
+        digest.querySelectorAll('[data-jump]').forEach(el => { el.style.cursor = 'pointer'; });
+        digest.addEventListener('click', ev => {
+            const line = ev.target.closest('[data-jump]');
+            if (!line) return;
+            const n = Number(line.dataset.jump);
+            const mark = [...body.querySelectorAll('[data-at]')].find(x => Number(x.dataset.at) <= n && n < Number(x.dataset.to));
+            if (!mark) return;
+            mark.scrollIntoView({ block: 'center', behavior: 'smooth' });
+            const was = mark.style.outline;
+            mark.style.outline = '2px solid currentColor';
+            setTimeout(() => { mark.style.outline = was; }, 1200);
+        });
         wrap.append(body, digest);
         const vp = new Popup(wrap, POPUP_TYPE.TEXT, '', { large: true, allowVerticalScrolling: true });
         vp.dlg.style.setProperty('width', 'calc(var(--sheldWidth, 90vw) * 0.9)', 'important');
