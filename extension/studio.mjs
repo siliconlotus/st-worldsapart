@@ -2190,16 +2190,17 @@ export async function lorebookStudio(preferredBook = null) {
         const body = oneBranch
             ? r.segments.flatMap(sg => sg.excerpts.map(e => span(e, sg))).join('')
             : r.segments.map((sg, i) => seg(sg, i)).join('');
-        return `<details${labCollapsed.has(r.key) ? '' : ' open'} data-k="${escapeHtml(r.key)}" style="margin-bottom:8px;">`
+        return `<details${labExpanded.has(r.key) ? ' open' : ''} data-k="${escapeHtml(r.key)}" style="margin-bottom:8px;">`
             + `<summary style="cursor:pointer;">${chip} ${tally}</summary>${body}</details>`;
     };
 
-    /** Keys the reader has shut, by key text. Survives the repaint on every keystroke, and both views share it. */
-    const labCollapsed = new Set();
+    /** Keys the reader has opened, by key text: shut is the default, since the summary already carries the count and a long
+     *  run is unreadable otherwise. Survives the repaint on every keystroke, and both views share it. */
+    const labExpanded = new Set();
 
     /** Re-attaches the collapse state to a freshly painted digest. */
     const bindCollapse = host => host.querySelectorAll('details[data-k]').forEach(d => {
-        d.addEventListener('toggle', () => (d.open ? labCollapsed.delete(d.dataset.k) : labCollapsed.add(d.dataset.k)));
+        d.addEventListener('toggle', () => (d.open ? labExpanded.add(d.dataset.k) : labExpanded.delete(d.dataset.k)));
     });
 
     /** Runs `entries` against the haystack and shows the result; `label` names what ran, for the header. */
