@@ -2249,11 +2249,13 @@ export async function lorebookStudio(preferredBook = null) {
         if (!entries.length) return head;
         return head + entries.map(({ entry, rows }, i) => {
             const color = labInk(i);
-            const title = `<span class="wa-kw wa-kw-wrap" style="border-color:${escapeHtml(color)};background:color-mix(in srgb, ${escapeHtml(color)} 18%, transparent);">${escapeHtml(wiTitleOf(entry))}</span>`;
-            // The book too, since an applied run spans every attached one and two books can hold the same title.
-            const from = entry.world ? `<small style="opacity:0.45;"> ${escapeHtml(entry.world)}</small>` : '';
-            return `<details open style="margin-bottom:8px;"><summary style="cursor:pointer;">${title}${from}`
-                + `<small style="opacity:0.6;"> ${rows.length} key${rows.length === 1 ? '' : 's'}</small></summary>`
+            // No lozenge: a chip reads as a term, and the entry is the heading the terms sit under. Its colour is the one
+            // its keys wear below it.
+            const title = `<b style="color:${escapeHtml(color)};overflow-wrap:anywhere;">${escapeHtml(wiTitleOf(entry))}</b>`
+                + `<small style="opacity:0.6;"> ${rows.length} key${rows.length === 1 ? '' : 's'}</small>`;
+            // The book on its own line, since a run spans every attached one and two books can hold the same title.
+            const from = entry.world ? `<div><small style="opacity:0.45;">${escapeHtml(entry.world)}</small></div>` : '';
+            return `<details open style="margin-bottom:8px;"><summary style="cursor:pointer;">${title}${from}</summary>`
                 + `<div style="margin-left:10px;">${rows.map(r => labKeyHtml(r, color)).join('')}</div></details>`;
         }).join('');
     };
