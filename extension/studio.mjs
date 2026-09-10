@@ -2172,8 +2172,10 @@ export async function lorebookStudio(preferredBook = null) {
     };
 
     const renderLabView = pane => {
+        // The inputs stack down the left — haystack, keys, the operator, the secondaries it gates them by — with the results
+        // beside them at full height, so a long digest is read without the panes shrinking.
         const panes = document.createElement('div');
-        panes.style.cssText = 'display:flex;gap:6px;padding:8px 8px 0;flex:0 0 auto;height:45%;min-height:180px;';
+        panes.style.cssText = 'flex:1 1 0;display:flex;flex-direction:column;gap:6px;min-width:0;min-height:0;';
         const box = (placeholder, get, set) => {
             const t = document.createElement('textarea'); t.className = 'text_pole';
             t.placeholder = placeholder; t.value = get();
@@ -2182,11 +2184,8 @@ export async function lorebookStudio(preferredBook = null) {
             return t;
         };
         const hayBox = box('Paste any text to match against…', () => labHay, v => { labHay = v; });
-        hayBox.style.flex = '2 1 0';
+        hayBox.style.flex = '3 1 0';
         const keyBox = box('Keys, comma- or newline-separated — plain, /regex/flags or ?SmartKey', () => labKeys, v => { labKeys = v; });
-        // Keys, the operator, then the secondaries it gates them by — one column, reading downward as the condition does.
-        const keyCol = document.createElement('div');
-        keyCol.style.cssText = 'flex:1 1 0;display:flex;flex-direction:column;gap:4px;min-width:0;min-height:0;';
         const logicSel = document.createElement('select'); logicSel.className = 'text_pole';
         logicSel.style.cssText = 'width:100%;margin:0;flex:0 0 auto;';
         // Core's own operator names and the sentence each completes, as the entry editor shows them. OFF is not offered: an
@@ -2199,8 +2198,8 @@ export async function lorebookStudio(preferredBook = null) {
         logicSel.addEventListener('change', () => { labLogic = logicSel.value; repaint(); });
         const secBox = box('Secondary keys', () => labSec, v => { labSec = v; });
         secBox.style.cssText += 'flex:0 0 auto;height:4.4em;';
-        keyCol.append(keyBox, logicSel, secBox);
-        panes.append(hayBox, keyCol);
+        keyBox.style.flex = '2 1 0';
+        panes.append(hayBox, keyBox, logicSel, secBox);
 
         const opts = document.createElement('div');
         opts.style.cssText = 'display:flex;gap:14px;padding:6px 8px;flex:0 0 auto;opacity:0.8;font-size:0.9em;';
@@ -2252,7 +2251,7 @@ export async function lorebookStudio(preferredBook = null) {
             tool('fa-expand', 'Show the text with every match marked', () => showMarkedText()),
         );
         const out = document.createElement('div');
-        out.style.cssText = 'flex:1 1 auto;overflow:auto;padding:0 8px 8px;min-height:0;';
+        out.style.cssText = 'flex:1 1 0;overflow:auto;min-width:0;min-height:0;';
         const repaint = () => {
             const { rows } = scanLab();
             out.innerHTML = rows.length
@@ -2261,7 +2260,10 @@ export async function lorebookStudio(preferredBook = null) {
             bindCollapse(out);
         };
         repaint();
-        pane.append(panes, opts, out);
+        const body = document.createElement('div');
+        body.style.cssText = 'flex:1 1 auto;display:flex;gap:10px;padding:0 8px 8px;min-height:0;';
+        body.append(panes, out);
+        pane.append(opts, body);
     };
 
     const TABS = [['explorer', 'Explorer'], ['cleanup', 'Cleanup'], ['lab', 'Keyword Lab']];
