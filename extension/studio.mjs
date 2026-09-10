@@ -5,6 +5,7 @@ import { getContext } from '../../../../extensions.js';
 import { loadWorldInfo, saveWorldInfo, reloadEditor, createWorldInfoEntry, duplicateWorldInfoEntry, deleteWorldInfoEntry, getFreeWorldEntryUid, deleteWIOriginalDataValue, deleteWorldInfo, updateWorldInfoList, world_names, world_info_depth, world_info_include_names, world_info_match_whole_words, world_info_case_sensitive, selected_world_info, world_info, METADATA_KEY } from '../../../../world-info.js';
 import { power_user } from '../../../../power-user.js';
 import { escapeHtml } from '../../../../utils.js';
+import { DOMPurify } from '../../../../../lib.js';
 import { Popup, POPUP_TYPE, POPUP_RESULT } from '../../../../popup.js';
 import { runState, settings } from './state.mjs';
 import { ensureStudioStyle, makeSortControl, showCtxMenu, showEntryText, wiGlyph } from './ui-widgets.mjs';
@@ -2046,6 +2047,10 @@ export async function lorebookStudio(preferredBook = null) {
         return `${from > 0 ? '\u2026' : ''}${out}${to < src.length ? '\u2026' : ''}`;
     };
 
+    /** A tag, a comment or a doctype in the source — rendered as markup rather than shown, since a preset's `<div>` block is
+     *  meant to be seen. Ranges, like every other piece of markup here, so a key that matched inside one still shows it. */
+    const HTML_RANGE = /<!--[\s\S]*?-->|<\/?[A-Za-z][^>]*>/g;
+
     /** How each range's tag opens and closes. Block tags come first in the sort, so a heading wraps its quotes and emphasis. */
     const TAG_HTML = {
         h: ['<strong style="font-size:1.15em;">', '</strong>'],
@@ -2058,7 +2063,7 @@ export async function lorebookStudio(preferredBook = null) {
         code: ['<code>', '</code>'],
     };
     const TAG_ORDER = Object.keys(TAG_HTML);
-    const BLOCK_TAGS = new Set(['h', 'quote', 'pre', 'delim']);
+    const BLOCK_TAGS = new Set(['h', 'quote', 'pre', 'delim', 'html']);
 
     /** Block markup: the whole line (or fenced block) is the range, its marker the delimiter. A list marker is left alone —
      *  it is content, where a heading's hashes are notation. */
@@ -2085,6 +2090,7 @@ export async function lorebookStudio(preferredBook = null) {
         for (const m of src.matchAll(/"[^"\n]*"|\u201C[^\u201D\n]*\u201D|\u00AB[^\u00BB\n]*\u00BB/g)) {
             out.push({ start: m.index, end: m.index + m[0].length, tag: 'q' });
         }
+        for (const m of src.matchAll(HTML_RANGE)) out.push({ start: m.index, end: m.index + m[0].length, tag: 'html' });
         // Block first: its marker is hidden the same way, and its span is what the inline markup then sits inside.
         for (const [re, tag, body] of BLOCK_MARKUP) {
             for (const m of src.matchAll(re)) {
@@ -2141,12 +2147,20 @@ export async function lorebookStudio(preferredBook = null) {
             const sp = spans.find(x => x.start <= a && b <= x.end);
             // A delimiter nothing matched is display only, and chat does not display it.
             if (covering.some(r => r.tag === 'delim') && !sp) continue;
+            // Markup nothing matched renders; markup something matched is shown as the text it is, or the mark would vanish
+            // into an attribute. Sanitised at the end, once, over the whole thing.
+            if (covering.some(r => r.tag === 'html')) {
+                html += sp ? mark(sp, src.slice(a, b)) : src.slice(a, b);
+                continue;
+            }
             const tags = covering.filter(r => r.tag !== 'delim').map(r => r.tag)
                 .sort((x, y) => TAG_ORDER.indexOf(x) - TAG_ORDER.indexOf(y));
             html += `${tags.map(t => TAG_HTML[t][0]).join('')}${sp ? mark(sp, src.slice(a, b)) : plain(src.slice(a, b))}`
                 + `${[...tags].reverse().map(t => TAG_HTML[t][1]).join('')}`;
         }
-        return html;
+        // A whitelist, not a blacklist, and ST's own: what a message may contain is what the Lab may show. Our own attributes
+        // are added back, since the marks are the point.
+        return DOMPurify.sanitize(html, { MESSAGE_SANITIZE: true, ADD_ATTR: ['data-at', 'data-to'] });
     };
 
     let labHay = '', labKeys = '';
