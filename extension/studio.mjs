@@ -2094,22 +2094,39 @@ export async function lorebookStudio(preferredBook = null) {
         return messages.join(`\n\n${'-'.repeat(24)}\n\n`);
     };
 
-    /** One entry of the selected book, as the Lab's key list plus its secondary condition — the entry's own spelling, not a
+    /** One entry of any book, as the Lab's key list plus its secondary condition — the entry's own spelling, not a
      *  SmartKey rewrite of it. Returns null when nothing was chosen. */
     const pickEntryKeys = async () => {
-        const entries = Object.values(data?.entries ?? {}).filter(e => usableKeys(e?.key).length);
-        if (!entries.length) { toastr.info('No entry in this book has keys to import.', 'Worlds Apart'); return null; }
-        entries.sort(SORT_FNS['title-asc']);
         const w = document.createElement('div');
         w.style.cssText = 'text-align:left;';
-        w.innerHTML = 'Take the keys of<div style="margin-top:8px;"><select class="wa-lab-entry text_pole" style="width:100%;">'
-            + entries.map(e => `<option value="${escapeHtml(String(e.uid))}">${escapeHtml(wiTitleOf(e))} — ${escapeHtml(usableKeys(e.key).join(', '))}</option>`).join('')
-            + '</select></div>';
+        w.innerHTML = 'Take the keys of an entry in'
+            + '<div style="margin-top:8px;"><select class="wa-lab-book text_pole" style="width:100%;">'
+            + [...world_names].sort((a, b) => a.localeCompare(b))
+                .map(n => `<option value="${escapeHtml(n)}"${n === selected ? ' selected' : ''}>${escapeHtml(n)}</option>`).join('')
+            + '</select></div>'
+            + '<div style="margin-top:8px;"><select class="wa-lab-entry text_pole" style="width:100%;"></select></div>';
+        const bookSel = w.querySelector('.wa-lab-book');
+        const entrySel = w.querySelector('.wa-lab-entry');
+
+        let book = null;
+        const fill = async () => {
+            entrySel.innerHTML = '<option value="">Loading…</option>';
+            // The selected book is already in hand; any other is fetched, which is why this is a picker and not a flat list.
+            book = bookSel.value === selected ? data : await loadWorldInfo(bookSel.value);
+            const entries = Object.values(book?.entries ?? {}).filter(e => usableKeys(e?.key).length).sort(SORT_FNS['title-asc']);
+            entrySel.innerHTML = entries.length
+                ? entries.map(e => `<option value="${escapeHtml(String(e.uid))}">${escapeHtml(wiTitleOf(e))} \u2014 ${escapeHtml(usableKeys(e.key).join(', '))}</option>`).join('')
+                : '<option value="">(no entry in this book has keys)</option>';
+        };
+        bookSel.addEventListener('change', () => { fill(); });
+        await fill();
+
         const p = new Popup(w, POPUP_TYPE.CONFIRM, '', { okButton: 'Import keys', cancelButton: 'Cancel' });
         if (await p.show() !== POPUP_RESULT.AFFIRMATIVE) return null;
-        const e = data.entries[w.querySelector('.wa-lab-entry').value];
-        const sec = e?.selective ? secondaryKeys(e) : [];
-        return { keys: usableKeys(e?.key), sec, logic: String(e?.selectiveLogic ?? WI_LOGIC.AND_ANY) };
+        const e = book?.entries?.[entrySel.value];
+        if (!e) return null;
+        const sec = e.selective ? secondaryKeys(e) : [];
+        return { keys: usableKeys(e.key), sec, logic: String(e.selectiveLogic ?? WI_LOGIC.AND_ANY) };
     };
 
     /** One key's result as HTML: the key as a chip with its count, then a block per segment — every branch with that segment's
@@ -2292,7 +2309,7 @@ export async function lorebookStudio(preferredBook = null) {
                 hayBox.value = labHay;
                 repaint();
             }),
-            labTool('fa-key', 'Take the keys of an entry in this book, secondary condition and all', async () => {
+            labTool('fa-key', 'Take the keys of an entry in any book, secondary condition and all', async () => {
                 const picked = await pickEntryKeys();
                 if (!picked?.keys.length) return;
                 labKeys = picked.keys.join('\n');
