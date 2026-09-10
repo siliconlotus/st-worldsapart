@@ -206,7 +206,8 @@ dialog.popup:has(.wa-studio), .wa-studio-nav, .wa-studio-explorer, .wa-studio-en
 .wa-marked q { color: var(--SmartThemeQuoteColor); }
 .wa-marked em { color: var(--SmartThemeEmColor); }
 .wa-marked u { color: var(--SmartThemeUnderlineColor); }
-.wa-marked q em, .wa-marked q i, .wa-marked q u { color: inherit; }
+.wa-marked q em, .wa-marked q i, .wa-marked q u, .wa-marked q strong { color: inherit; }
+.wa-marked code { font-family: var(--monoFontFamily); font-size: 0.92em; }
 .wa-marked q::before, .wa-marked q::after { content: ''; }
 .wa-studio-nav { flex: 0 0 20%; min-width: 170px; max-width: 320px; overflow-y: auto;
     border-right: 1px solid var(--SmartThemeBorderColor, rgba(255,255,255,0.15)); padding-right: 6px; }

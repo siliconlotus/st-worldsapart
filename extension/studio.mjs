@@ -2046,7 +2046,16 @@ export async function lorebookStudio(preferredBook = null) {
         return `${from > 0 ? '\u2026' : ''}${out}${to < src.length ? '\u2026' : ''}`;
     };
 
-    /** The spans ST colours in a message — quoted passages and *emphasis* — as offsets into `src`. The delimiters stay in the
+    /** The inline markup ST renders in a message, longest delimiter first; `d` is how many characters the delimiter is. */
+    const INLINE_MARKUP = [
+        [/(?<![\w*])\*\*(?!\s)[^\n]+?(?<!\s)\*\*(?![\w*])/g, 'strong', 2],
+        [/(?<![\w~])~~(?!\s)[^\n]+?(?<!\s)~~(?![\w~])/g, 's', 2],
+        [/(?<![\w*])\*(?!\s)[^*\n]+?(?<!\s)\*(?![\w*])/g, 'em', 1],
+        [/(?<![\w_])_(?!\s)[^_\n]+?(?<!\s)_(?![\w_])/g, 'em', 1],
+        [/`[^`\n]+`/g, 'code', 1],
+    ];
+
+    /** The spans ST renders in a message — quoted passages and inline markup — as offsets into `src`. The delimiters stay in the
      *  text rather than being consumed as markdown — what the Lab shows has to be exactly what was matched — so an emphasis
      *  marker also reports its two asterisks, which the renderer hides unless a key matched one. */
     const proseRanges = src => {
@@ -2054,11 +2063,15 @@ export async function lorebookStudio(preferredBook = null) {
         for (const m of src.matchAll(/"[^"\n]*"|\u201C[^\u201D\n]*\u201D|\u00AB[^\u00BB\n]*\u00BB/g)) {
             out.push({ start: m.index, end: m.index + m[0].length, tag: 'q' });
         }
-        for (const m of src.matchAll(/(?<![\w*])\*(?!\s)[^*\n]+?(?<!\s)\*(?![\w*])/g)) {
-            const [start, end] = [m.index, m.index + m[0].length];
-            // The asterisks are hidden, as chat consumes them — but only while nothing matched them: a marked one is shown,
-            // or the mark would have nothing to land on.
-            out.push({ start, end, tag: 'em' }, { start, end: start + 1, tag: 'delim' }, { start: end - 1, end, tag: 'delim' });
+        // Longest delimiter first, so `**bold**` is not read as emphasis of `*bold*`.
+        for (const [re, tag, d] of INLINE_MARKUP) {
+            for (const m of src.matchAll(re)) {
+                const [start, end] = [m.index, m.index + m[0].length];
+                if (out.some(r => r.tag !== 'q' && start < r.end && r.start < end)) continue;   // already claimed
+                // The delimiters are hidden, as chat consumes them — but only while nothing matched them: a marked one is
+                // shown, or the mark would have nothing to land on.
+                out.push({ start, end, tag }, { start, end: start + d, tag: 'delim' }, { start: end - d, end, tag: 'delim' });
+            }
         }
         return out;
     };
