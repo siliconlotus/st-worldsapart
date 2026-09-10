@@ -108,6 +108,18 @@ export function scanWindow(chat, cfg) {
 /** A paragraph break: a blank line, tolerating trailing whitespace above. Not a single newline (K7). */
 const PARAGRAPH_BREAK = /\n[ \t]*\n/;
 
+/** The elements that carry a unit of their own — the markup answer to what a blank line does in prose. Inline elements are
+ *  inside a thought and never break one; `br` is a line break rather than an end. */
+const BLOCK_TAGS = 'address|article|aside|blockquote|details|div|dd|dl|dt|fieldset|figcaption|figure|footer|form'
+    + '|h[1-6]|header|hr|li|main|nav|ol|p|pre|section|summary|table|tbody|td|tfoot|th|thead|tr|ul';
+
+/** Where a block element opens or closes, as a zero-width cut: the tag itself stays in the text, since a key may match it. */
+const BLOCK_EDGE = new RegExp(`(?=<(?:${BLOCK_TAGS})\\b[^>]*>)|(?<=<\\/(?:${BLOCK_TAGS})\\s*>)`, 'gi');
+
+/** Cuts each of `texts` at every block-element edge, keeping the tags. Zero-width, so nothing is consumed and a caller
+ *  tracking offsets adds the lengths back. */
+const cutBlocks = texts => texts.flatMap(t => String(t).split(BLOCK_EDGE));
+
 /** Removes named elements, tag and content, from one message; `spec` is a comma/space-separated list or an array. An unclosed element runs to its parent's close tag, or to the end (K6). */
 export function dropTags(text, spec) {
     const tags = (Array.isArray(spec) ? spec : String(spec ?? '').split(/[\s,]+/))
@@ -169,11 +181,12 @@ export function scanSegments(chat, { depth, includeNames = true, matchWindow = '
     return segment(messages, matchWindow);
 }
 
-/** Applies the match window to already-separated texts: paragraph mode may subdivide a text, no mode merges two. */
+/** Applies the match window to already-separated texts: paragraph mode may subdivide a text, at a blank line or a block
+ *  element's edge; no mode merges two. */
 export function segment(texts, matchWindow) {
     if (matchWindow === 'scan') return [texts.join('\n')];
     const out = matchWindow === 'paragraph'
-        ? texts.flatMap(t => String(t).split(PARAGRAPH_BREAK))
+        ? cutBlocks(texts.flatMap(t => String(t).split(PARAGRAPH_BREAK)))
         : texts.map(String);
     return out.filter(t => t.trim());
 }
@@ -197,12 +210,17 @@ const cutOn = (parts, source) => parts.flatMap(p => {
 
 /** One text cut into the units a key must match within, each with its offset into the NFC form of that text — `segment` for a
  *  caller that must map a result back onto the source. `message` cuts on the dashed lines, and `paragraph` cuts those again on
- *  the blank lines, as the runtime's paragraph window subdivides each message. */
+ *  the blank lines and the block-element edges, as the runtime's paragraph window subdivides each message. */
 export function textSegments(text, matchWindow) {
     const src = String(text ?? '').normalize('NFC');
     if (matchWindow !== 'paragraph' && matchWindow !== 'message') return src.trim() ? [{ text: src, at: 0 }] : [];
     let parts = cutOn([{ text: src, at: 0 }], MESSAGE_BREAK.source);
-    if (matchWindow === 'paragraph') parts = cutOn(parts, PARAGRAPH_BREAK.source);
+    if (matchWindow === 'paragraph') {
+        parts = cutOn(parts, PARAGRAPH_BREAK.source).flatMap(p => {
+            let at = p.at;
+            return cutBlocks([p.text]).map(text => { const piece = { text, at }; at += text.length; return piece; });
+        });
+    }
     return parts.filter(sg => sg.text.trim());
 }
 

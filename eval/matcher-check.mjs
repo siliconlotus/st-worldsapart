@@ -1,6 +1,6 @@
 // WA's own matcher semantics, which core has no opinion about: SmartKeys, scoring units, the saturation curve, key refusals, excerpts.
 // A claim that cites core as the authority belongs in core-matcher-check.mjs.
-import { countKey, dropTags, keyExcerpts, keyHits, keySpans, mergeSpans, splitKeys, textSegments, keywordScore as rankKeywordScore, markExcerptText, repeatCurveOf, secondaryKeys, usableKeys, usedMatchSources, withMatchSources, WI_LOGIC } from '../extension/matcher.mjs';
+import { countKey, dropTags, keyExcerpts, segment, keyHits, keySpans, mergeSpans, splitKeys, textSegments, keywordScore as rankKeywordScore, markExcerptText, repeatCurveOf, secondaryKeys, usableKeys, usedMatchSources, withMatchSources, WI_LOGIC } from '../extension/matcher.mjs';
 import { validateSmartKey } from '../extension/smartkeys.mjs';
 import { eq } from './metrics.mjs';
 
@@ -356,6 +356,17 @@ eq(textSegments(msgs, 'paragraph').map(sg => sg.text.trim()).join(' | '), 'Kyle:
     'paragraph cuts those again on the blank lines, as the runtime subdivides each message');
 eq(textSegments(msgs, 'paragraph').map(sg => sg.at).join(','), '0,12,30', 'and every piece keeps its offset into the whole');
 eq(textSegments('a --- b', 'message').length, 1, 'a rule inside a line is text, not a boundary');
+// A block element carries a unit of its own: it is what a blank line is in prose, and a preset writes whole bubbles that way.
+const gfx = 'Prose.\n\n<div style="a">\n<div>one thing</div>\n<div>two thing</div>\n</div>\n\nAfter.';
+eq(textSegments(gfx, 'paragraph').map(sg => sg.text.trim()).join(' | '),
+    'Prose. | <div style="a"> | <div>one thing</div> | <div>two thing</div> | </div> | After.',
+    'paragraph cuts at a block element\'s edges, keeping the tags, so two bubbles are two windows');
+eq(textSegments(gfx, 'paragraph').map(sg => sg.at).join(), '0,8,24,45,65,74', 'and the cut is zero-width, so offsets still land');
+eq(segment(['a <b>bold</b> word'], 'paragraph').join(), 'a <b>bold</b> word',
+    'an inline element is inside a thought and breaks nothing');
+eq(segment(['one<br>two'], 'paragraph').join(), 'one<br>two', 'nor does br, which is a line break and not an end');
+eq(segment(['<li>one</li><li>two</li>'], 'paragraph').join(' | '), '<li>one</li> | <li>two</li>',
+    'list items are units, and a run of them on one line is still a run of them');
 eq(textSegments(`one\n\n${'-'.repeat(24)}\n\ntwo`, 'message').length, 2,
     'three dashes or twenty-four: the import writes a rule long enough to find, short enough not to wrap');
 eq(digest('? cosmonaut -astronaut', paras, { matchWindow: 'scan' }), '? cosmonaut -astronaut:0 | !cosmonaut 2, -astronaut 1',

@@ -185,6 +185,10 @@ concatenating, not an evaluator mode: `scanWindow` returns segments and `scan` i
 
 - Uniform across every matching rule — SmartKey conjunctions, selective logic, all of it.
   `keysecondary` inherits the scope from `keywordScore`'s per-segment loop.
+- **A block element's edge is a paragraph break**, since a paragraph is one unit and a block element is where
+  markup carries one: a preset writing bubbles as `<div>`s writes units, and a blank line is the prose form of
+  the same thing. `BLOCK_TAGS` names them; an inline element is inside a thought and `br` is a line break
+  rather than an end. The cut is zero-width, so the tag stays in the text a key matches against.
 - Both signs scoped: a negation is a segment-local veto.
 - Primary keys are unaffected at any setting except an anchored regex: `^` and `$` are
   segment-relative, and `/m` is the setting-independent form.
