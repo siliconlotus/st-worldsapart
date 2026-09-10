@@ -2075,7 +2075,8 @@ export async function lorebookStudio(preferredBook = null) {
         const label = k => `${k.negated ? '\u2212 ' : ''}${k.term && k.term !== k.key ? `${k.key} \u2014 ${k.term}` : k.key}`;
         // An outline, not just a wash: a preset's GFX block sets its own background, and 28% of a hue over #121212 is
         // invisible. The outline is opaque and does not affect layout, so it reads over anything the text sits on.
-        return `<span data-at="${sp.start}" data-to="${sp.end}" title="${escapeHtml(sp.keys.map(label).join('\n'))}"`
+        return `<span data-at="${sp.start}" data-to="${sp.end}" data-key="${escapeHtml(sp.key)}"`
+            + ` title="${escapeHtml(sp.keys.map(label).join('\n'))}"`
             + ` style="background:${fill};outline:1px solid ${edge};border-radius:2px;`
             + `border-bottom:2px solid ${edge};color:inherit;">${escapeHtml(text)}</span>`;
     };
@@ -2262,11 +2263,31 @@ export async function lorebookStudio(preferredBook = null) {
             if (!line || !textEl?.isConnected) return;
             const n = Number(line.dataset.jump);
             const mark = [...textEl.querySelectorAll('[data-at]')].find(x => Number(x.dataset.at) <= n && n < Number(x.dataset.to));
-            if (!mark) return;
-            mark.scrollIntoView({ block: 'center', behavior: 'smooth' });
-            const was = mark.style.outline;
-            mark.style.outline = '2px solid currentColor';
-            setTimeout(() => { mark.style.outline = was; }, 1200);
+            if (mark) revealIn(mark);
+        });
+    };
+
+    /** Scrolls `el` into view and rings it briefly, opening whatever it is folded inside. */
+    const revealIn = el => {
+        for (let d = el.closest('details'); d; d = d.parentElement?.closest('details')) d.open = true;
+        el.scrollIntoView({ block: 'center', behavior: 'smooth' });
+        const was = el.style.outline;
+        el.style.outline = '2px solid currentColor';
+        setTimeout(() => { el.style.outline = was; }, 1200);
+    };
+
+    /** The other direction: a mark in the text jumps to what reported it. The key names the block, and the hit line inside it
+     *  is the one whose offset falls in the mark — a key with many hits has a line per window, and any of them may be the one. */
+    const bindMarkJump = (textEl, digestEl) => {
+        textEl.addEventListener('click', ev => {
+            const mark = ev.target.closest('[data-at]');
+            if (!mark || !digestEl?.isConnected) return;
+            const [at, to] = [Number(mark.dataset.at), Number(mark.dataset.to)];
+            const block = [...digestEl.querySelectorAll('details[data-k]')].find(d => d.dataset.k === mark.dataset.key);
+            if (block) block.open = true;
+            const scope = block ?? digestEl;
+            const line = [...scope.querySelectorAll('[data-jump]')].find(x => Number(x.dataset.jump) >= at && Number(x.dataset.jump) < to);
+            revealIn(line ?? block?.querySelector('summary') ?? block ?? digestEl);
         });
     };
 
@@ -2306,6 +2327,7 @@ export async function lorebookStudio(preferredBook = null) {
         digest.innerHTML = labRun ? labRunHtml() : rows.map(r => labKeyHtml(r, r.color)).join('');
         bindCollapse(digest);
         bindJump(digest, body);
+        bindMarkJump(body, digest);
         wrap.append(body, digest);
         const vp = new Popup(wrap, POPUP_TYPE.TEXT, '', { large: true, allowVerticalScrolling: true });
         vp.dlg.style.setProperty('width', 'calc(var(--sheldWidth, 90vw) * 0.9)', 'important');
@@ -2491,6 +2513,7 @@ export async function lorebookStudio(preferredBook = null) {
         // Once, not per repaint: the listener is on `out`, which survives its own innerHTML. Lands only while the marked
         // view is up, hayRead holding no marks otherwise.
         bindJump(out, hayRead);
+        bindMarkJump(hayRead, out);
         repaint();
         growKeys();   // the pane keeps its text across a tab switch, so it is not always empty on the first paint
         const body = document.createElement('div');
