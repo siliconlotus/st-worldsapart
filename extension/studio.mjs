@@ -2211,32 +2211,33 @@ export async function lorebookStudio(preferredBook = null) {
             return t;
         };
         const hayBox = box('Paste any text to match against… a line of dashes separates one message from the next', () => labHay, v => { labHay = v; });
-        hayBox.style.flex = '3 1 0';
-        // The same box, read-only and marked: text_pole so it keeps the border and padding the textarea had.
+        hayBox.style.flex = '1 1 auto';
+        // The same box, read-only and marked: text_pole so it keeps the border and padding the textarea had. height and
+        // margin beat .text_pole's `fit-content` and `5px 0`, which would let it hug its content and never scroll.
         const hayRead = document.createElement('div'); hayRead.className = 'text_pole';
-        // height and margin beat .text_pole's `fit-content` and `5px 0`, which would let it hug its content and never scroll.
-        hayRead.style.cssText = 'flex:1 1 auto;height:100%;min-height:0;margin:0;overflow:auto;white-space:pre-wrap;line-height:1.5;';
-        // The pencil sits over the box, not inside its scroller, or it would scroll away from the text it acts on.
+        hayRead.style.cssText = 'flex:1 1 auto;height:100%;min-height:0;margin:0;overflow:auto;white-space:pre-wrap;line-height:1.5;'
+            // Not a field: dashed and unfilled, so a screenful with no match in it still reads as the committed view.
+            + 'border-style:dashed;background-color:transparent;cursor:default;';
         const hayWrap = document.createElement('div');
         hayWrap.style.cssText = 'flex:3 1 0;position:relative;display:flex;min-height:0;overflow:hidden;margin:5px 0;';
-        const hayPencil = document.createElement('i');
-        hayPencil.className = 'fa-solid fa-pen';
-        hayPencil.title = 'Edit the text';
-        hayPencil.style.cssText = 'position:absolute;top:5px;right:9px;cursor:pointer;opacity:0.6;padding:3px 4px;border-radius:4px;'
-            + 'background:var(--black30a, rgba(0,0,0,0.3));font-size:0.85em;';
-        hayPencil.addEventListener('click', () => { labCommitted = false; repaint(); hayBox.focus(); });
-        hayWrap.append(hayRead, hayPencil);
-        // On the box it acts on, not in the options row: it switches this pane between typing and reading.
-        const markLabel = document.createElement('label');
-        markLabel.style.cssText = 'display:flex;gap:5px;align-items:center;cursor:pointer;flex:0 0 auto;font-size:0.85em;opacity:0.8;';
-        const markToggle = document.createElement('input'); markToggle.type = 'checkbox';
-        markToggle.addEventListener('change', () => {
-            labCommitted = markToggle.checked;
+        // One corner control in one place: a tick to mark the text up, a pencil to go back to typing it. Over the box rather
+        // than inside its scroller, or it would scroll away from the text it acts on.
+        const hayToggle = document.createElement('i');
+        hayToggle.style.cssText = 'position:absolute;top:5px;right:9px;cursor:pointer;opacity:0.6;padding:3px 5px;border-radius:4px;'
+            + 'background:var(--black30a, rgba(0,0,0,0.3));font-size:0.85em;z-index:1;';
+        hayToggle.addEventListener('click', () => {
+            if (!labHay.trim()) return;
+            labCommitted = !labCommitted;
             repaint();
             if (!labCommitted) hayBox.focus();
         });
-        markLabel.append(markToggle, document.createTextNode('Show marks'));
+        hayWrap.append(hayBox, hayRead, hayToggle);
         const keyBox = box('Keys, comma- or newline-separated — plain, /regex/flags or ?SmartKey', () => labKeys, v => { labKeys = v; });
+        const gateBox = document.createElement('details');
+        gateBox.style.cssText = 'flex:0 0 auto;margin-bottom:4px;';
+        const gateSum = document.createElement('summary');
+        gateSum.style.cssText = 'cursor:pointer;font-size:0.9em;opacity:0.8;padding:2px 0;';
+        gateBox.append(gateSum);
         const logicSel = document.createElement('select'); logicSel.className = 'text_pole';
         logicSel.style.cssText = 'width:100%;margin:0;flex:0 0 auto;';
         // Core's own operator names and the sentence each completes, as the entry editor shows them. OFF is not offered: an
@@ -2249,8 +2250,9 @@ export async function lorebookStudio(preferredBook = null) {
         logicSel.addEventListener('change', () => { labLogic = logicSel.value; repaint(); });
         const secBox = box('Secondary keys', () => labSec, v => { labSec = v; });
         secBox.style.cssText += 'flex:0 0 auto;height:4.4em;';
+        gateBox.append(logicSel, secBox);
         keyBox.style.flex = '2 1 0';
-        panes.append(hayBox, hayWrap, markLabel, keyBox, logicSel, secBox);
+        panes.append(hayWrap, keyBox, gateBox);
 
         const opts = document.createElement('div');
         opts.style.cssText = 'display:flex;gap:14px;padding:6px 8px;flex:0 0 auto;opacity:0.8;font-size:0.9em;';
@@ -2297,6 +2299,7 @@ export async function lorebookStudio(preferredBook = null) {
                 labSec = picked.sec.join(', ');
                 labLogic = picked.logic;
                 keyBox.value = labKeys; secBox.value = labSec; logicSel.value = labLogic;
+                if (picked.sec.length) gateBox.open = true;   // an imported gate must not land shut and invisible
                 repaint();
             }),
             labTool('fa-expand', 'Show the text with every match marked', () => showMarkedText()),
@@ -2312,10 +2315,16 @@ export async function lorebookStudio(preferredBook = null) {
             // Committed with nothing in the box would leave no way back, so an empty haystack is always the editable one.
             const reading = labCommitted && !!labHay.trim();
             hayBox.style.display = reading ? 'none' : '';
-            hayWrap.style.display = reading ? '' : 'none';
-            markToggle.checked = reading;
-            markToggle.disabled = !labHay.trim();
-            markLabel.style.opacity = labHay.trim() ? '0.8' : '0.4';
+            hayRead.style.display = reading ? '' : 'none';
+            // A shut gate must still say it is filtering, or a key reading 0 has no visible cause.
+            const secN = gate.keys.length;
+            gateSum.textContent = secN
+                ? `Secondary keys — ${logicSel.selectedOptions[0]?.textContent.split(' \u2014 ')[0] ?? ''}, ${secN} term${secN === 1 ? '' : 's'}`
+                : 'Secondary keys';
+            gateSum.style.opacity = secN ? '1' : '0.6';
+            hayToggle.className = `fa-solid ${reading ? 'fa-pen' : 'fa-check'}`;
+            hayToggle.title = reading ? 'Edit the text' : 'Mark up the text';
+            hayToggle.style.display = labHay.trim() ? '' : 'none';
             if (reading) {
                 const top = hayRead.scrollTop;
                 hayRead.innerHTML = markedHtml(labHay, keySpans(keys, labHay, labCase, labWhole, { matchWindow: labWindow, gate }), ink);
