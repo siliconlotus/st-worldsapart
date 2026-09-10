@@ -178,9 +178,9 @@ export function segment(texts, matchWindow) {
     return out.filter(t => t.trim());
 }
 
-/** A message boundary in a pasted text: a line holding nothing but `---`. Chat has no such thing — this is how a caller that
- *  has only one string says where its messages ended, and the chat import writes it. */
-const MESSAGE_BREAK = /^[ \t]*---[ \t]*$/;
+/** A message boundary in a pasted text: a line holding nothing but dashes, three or more. Chat has no such thing — this is how
+ *  a caller that has only one string says where its messages ended. Three so it can be typed, more so it can be seen. */
+const MESSAGE_BREAK = /^[ \t]*-{3,}[ \t]*$/;
 
 /** Subdivides `parts` on `re`, each piece keeping its offset into the original text. */
 const cutOn = (parts, source) => parts.flatMap(p => {
@@ -196,7 +196,7 @@ const cutOn = (parts, source) => parts.flatMap(p => {
 });
 
 /** One text cut into the units a key must match within, each with its offset into the NFC form of that text — `segment` for a
- *  caller that must map a result back onto the source. `message` cuts on the `---` lines, and `paragraph` cuts those again on
+ *  caller that must map a result back onto the source. `message` cuts on the dashed lines, and `paragraph` cuts those again on
  *  the blank lines, as the runtime's paragraph window subdivides each message. */
 export function textSegments(text, matchWindow) {
     const src = String(text ?? '').normalize('NFC');
