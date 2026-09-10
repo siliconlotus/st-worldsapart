@@ -143,6 +143,7 @@ export async function lorebookStudio(preferredBook = null) {
         } catch (err) { console.warn('[WA] orphan check', err); }
     };
 
+    let navCollapsed = false;   // view state for this session, like `tab`; the rail keeps the way back visible
     const root = document.createElement('div');
     root.className = 'wa-studio';
     const nav = document.createElement('div'); nav.className = 'wa-studio-nav';
@@ -2570,7 +2571,15 @@ export async function lorebookStudio(preferredBook = null) {
 
     const renderBooks = () => {
         nav.innerHTML = '';
-        nav.classList.toggle('wa-nav-wide', bookBulkMode);   // widen to show full titles while selecting
+        nav.classList.toggle('wa-nav-wide', bookBulkMode && !navCollapsed);   // widen to show full titles while selecting
+        nav.classList.toggle('wa-nav-collapsed', navCollapsed);
+        const navToggle = document.createElement('i');
+        navToggle.className = `fa-solid ${navCollapsed ? 'fa-angles-right' : 'fa-angles-left'}`;
+        navToggle.title = navCollapsed ? 'Show the lorebook list' : 'Collapse the lorebook list';
+        navToggle.style.cssText = 'cursor:pointer;opacity:0.6;padding:2px;';
+        navToggle.addEventListener('click', () => { navCollapsed = !navCollapsed; renderBooks(); });
+        // Collapsed, the rail holds nothing but the way back.
+        if (navCollapsed) { nav.append(navToggle); return; }
         const head = document.createElement('div');
         head.className = 'wa-studio-navhead';
         head.style.cssText = 'display:flex;align-items:center;justify-content:space-between;gap:6px;';
@@ -2586,7 +2595,7 @@ export async function lorebookStudio(preferredBook = null) {
         bulkToggle.style.cssText = `cursor:pointer;opacity:${bookBulkMode ? '1' : '0.6'};`;
         bulkToggle.addEventListener('click', () => { bookBulkMode = !bookBulkMode; if (!bookBulkMode) { selectedBooks.clear(); bookAnchor = null; } renderBooks(); });
         const navtools = document.createElement('span'); navtools.style.cssText = 'display:flex;align-items:center;gap:9px;';
-        navtools.append(bulkToggle, sortBtn);
+        navtools.append(bulkToggle, sortBtn, navToggle);
         head.append(ttl, navtools);
         nav.append(head);
 

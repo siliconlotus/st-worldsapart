@@ -203,6 +203,8 @@ dialog.popup:has(.wa-studio), .wa-studio-nav, .wa-studio-explorer, .wa-studio-en
 .wa-studio-close:hover { opacity: 1; background: var(--white20a, rgba(255,255,255,0.1)); }
 .wa-studio-nav { flex: 0 0 20%; min-width: 170px; max-width: 320px; overflow-y: auto;
     border-right: 1px solid var(--SmartThemeBorderColor, rgba(255,255,255,0.15)); padding-right: 6px; }
+/* Collapsed to a rail: the chevron has to stay in it, or there is no way back. min-width beats the rule above. */
+.wa-studio-nav.wa-nav-collapsed { flex: 0 0 22px; min-width: 22px; padding-right: 0; overflow: hidden; }
 /* Explorer = pinned header/drawer (wa-studio-fixed) + a single scrolling entry list (wa-studio-entries),
    so the header and the Tool Settings drawer stay put (MUI persistent top drawer: docked, pushes the
    list down) while only the entries scroll beneath. */
