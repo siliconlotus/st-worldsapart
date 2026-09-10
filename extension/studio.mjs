@@ -48,10 +48,11 @@ function planUidReindex(entries, orderedUids, start, desc) {
 /**
  * Lorebook Studio (/wa-studio).
  * @param {string|null} preferredBook Opened if it still exists; else the first attached book, else nothing selected
- * @param {{world: string, uid: number|string}|null} focus Open on the Keyword Lab with the last scan window applied, at
- *   this entry if the run found it — what the Delivery panel asks for, so a reader can see what its keys caught
+ * @param {{lab?: boolean, entry?: {world: string, uid: number|string}}|null} open Where to land: `lab` opens the Keyword
+ *   Lab on the last scan window with the attached books applied, `entry` opens that entry in the Explorer. Both are the
+ *   Delivery panel's — one asks what the keys caught, the other what the entry says.
  */
-export async function lorebookStudio(preferredBook = null, focus = null) {
+export async function lorebookStudio(preferredBook = null, open = null) {
     if (!(world_names ?? []).length) { toastr.warning('No lorebooks found.', 'Worlds Apart'); return ''; }
     ensureStudioStyle();
 
@@ -2260,8 +2261,7 @@ export async function lorebookStudio(preferredBook = null, focus = null) {
                 + `<small style="opacity:0.6;"> ${rows.length} key${rows.length === 1 ? '' : 's'}</small>`;
             // The book on its own line, since a run spans every attached one and two books can hold the same title.
             const from = entry.world ? `<div><small style="opacity:0.45;">${escapeHtml(entry.world)}</small></div>` : '';
-            return `<details open data-entry-uid="${escapeHtml(String(entry.uid))}" data-entry-world="${escapeHtml(entry.world ?? '')}"`
-                + ` style="margin-bottom:8px;"><summary style="cursor:pointer;">${title}${from}</summary>`
+            return `<details open style="margin-bottom:8px;"><summary style="cursor:pointer;">${title}${from}</summary>`
                 + `<div style="margin-left:10px;">${rows.map(r => labKeyHtml(r, labInk(Math.max(0, keyList.indexOf(r.key))), entry)).join('')}</div></details>`;
         }).join('');
     };
@@ -2405,20 +2405,15 @@ export async function lorebookStudio(preferredBook = null, focus = null) {
         }).join(`\n\n${'-'.repeat(24)}\n\n`);
     };
 
-    /** Opens the Lab on the scanned window with the attached books applied, at `focus` if the run found it. A constant, a
-     *  sticky or a vector entry is not required to have a keyword hit — but nothing stops it having one, so this looks rather
-     *  than assuming, and a run without it simply opens at the top. */
-    const openLabOnScan = async focus => {
+    /** Opens the Lab on the scanned window with the attached books applied. Whole-delivery, not per entry: the run reports
+     *  every entry whose keys caught something, which is the question, and one row of it is not. */
+    const openLabOnScan = async () => {
         labHay = scannedHaystack();
         labCommitted = true;
         labRun = null;
         tab = 'lab';
         renderExplorer();
         await applyAttached();
-        if (!focus) return;
-        const block = [...explorer.querySelectorAll('details[data-entry-uid]')]
-            .find(d => String(d.dataset.entryUid) === String(focus.uid) && (!focus.world || d.dataset.entryWorld === focus.world));
-        if (block) revealIn(block);
     };
 
     /** Re-runs the last applied books, re-reading them: an edit or a setting change is what asks for this. */
@@ -2958,6 +2953,22 @@ export async function lorebookStudio(preferredBook = null, focus = null) {
         applyFilter();
     };
 
+    /** Opens one entry in the Explorer: its book if that is not the open one, then the entry expanded, scrolled to and
+     *  flashed. Its book may not be the one the Studio landed on, since a delivered entry comes from any attached book. */
+    const revealEntry = async ({ world, uid }) => {
+        if (world && world !== selected && world_names.includes(world)) await openBook(world);
+        const entry = Object.values(data?.entries ?? {}).find(e => String(e.uid) === String(uid));
+        if (!entry) return;
+        tab = 'explorer';
+        entryOpen.add(entry.uid);
+        renderExplorer();
+        const row = rowEls.get(entry.uid);
+        if (!row) return;
+        row.scrollIntoView({ block: 'center', behavior: 'smooth' });
+        row.classList.add('wa-flash');
+        setTimeout(() => row.classList.remove('wa-flash'), 1200);
+    };
+
     const openBook = async name => {
         orphanView = false;
         if (dirty && selected) { reloadEditor(selected); dirty = false; }   // refresh the outgoing book's editor
@@ -3077,8 +3088,10 @@ export async function lorebookStudio(preferredBook = null, focus = null) {
     if (selected) await openBook(selected);
     else renderExplorer();
     checkOrphans();   // background; adds a nav row only if something is broken
-    // After the book is open, so the Lab's run can use `data` for whichever attached book that is.
-    if (focus) openLabOnScan(focus);
+    // After the book is open: the Lab's run reads `data` for whichever attached book that is, and an entry reveal needs its
+    // book loaded and its row painted.
+    if (open?.lab) openLabOnScan();
+    else if (open?.entry) await revealEntry(open.entry);
 
     // Escape never closes the window: it swallows the <dialog>'s close and, if nothing else claimed it, drops the selection.
     root.addEventListener('keydown', ev => {

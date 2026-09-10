@@ -1948,6 +1948,14 @@ function renderDeliveryPanel(layout) {
     ensureDeliveryPanel();
     deliveryTrigger.dataset.count = String(layout.length);
     deliveryPanel.innerHTML = '';
+    // One control for the whole delivery, since the Lab's run reports every entry whose keys caught something in the window.
+    const lab = document.createElement('div');
+    lab.className = 'wa-delivery-entry';
+    lab.title = 'Open the Keyword Lab on the window this scan read, with the attached books applied';
+    lab.innerHTML = '<span class="wa-delivery-glyph fa-solid fa-flask"></span>'
+        + '<span class="wa-delivery-title">Open the Keyword Lab</span>';
+    lab.addEventListener('click', () => lorebookStudio(chatBook(), { lab: true }));
+    deliveryPanel.append(lab);
     if (!layout.length) {
         const empty = document.createElement('div');
         empty.className = 'wa-delivery-empty';
@@ -1959,7 +1967,7 @@ function renderDeliveryPanel(layout) {
         const e = row.item.entry;
         const el = document.createElement('div');
         el.className = 'wa-delivery-entry';
-        el.title = `${wiTooltip(row)}\n\nClick: open the Keyword Lab on this scan · Shift-click: show the text`;
+        el.title = `${wiTooltip(row)}\n\nClick: open in the Explorer · Shift-click: show the text`;
         const g = document.createElement('span');
         g.className = 'wa-delivery-glyph';
         g.textContent = wiGlyph(e);
@@ -1967,11 +1975,11 @@ function renderDeliveryPanel(layout) {
         t.className = 'wa-delivery-title';
         t.textContent = wiTitleOf(e);
         el.append(g, t);
-        // Click opens the Keyword Lab on the window WA scanned, at this entry where its keys caught something. Shift-click
-        // is the entry's text, which is what the row used to do on its own.
+        // Click opens the entry in the Explorer — the text and the fields, which is what the row's tooltip cannot show.
+        // Shift-click is the text alone, the quick look the row used to do on its own.
         el.addEventListener('click', ev => {
             if (ev.shiftKey) { showEntryText(e); return; }
-            lorebookStudio(e.world ?? chatBook(), { world: e.world, uid: e.uid });
+            lorebookStudio(e.world ?? chatBook(), { entry: { world: e.world, uid: e.uid } });
         });
         deliveryPanel.append(el);
     }
