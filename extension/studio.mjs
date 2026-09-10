@@ -2051,8 +2051,10 @@ export async function lorebookStudio(preferredBook = null) {
     const markedHtml = (text, spans, ink) => {
         const src = String(text).normalize('NFC');
         // The message break is a line of dashes in the pane, where it has to be typable; here it can be the rule it stands for.
-        const plain = t => escapeHtml(t).replace(/^[ \t]*-{3,}[ \t]*$/gm,
-            '<hr style="border:none;border-top:1px solid color-mix(in srgb, currentColor 30%, transparent);margin:8px 0;">');
+        // The blank lines around the rule go with it: the container is pre-wrap, so leaving them would stack their own height
+        // on top of the rule's margins.
+        const plain = t => escapeHtml(t).replace(/(?:\r?\n)*^[ \t]*-{3,}[ \t]*$(?:\r?\n)*/gm,
+            '<hr style="border:none;border-top:1px solid color-mix(in srgb, currentColor 30%, transparent);margin:7px 0;">');
         let html = '', at = 0;
         for (const sp of spans) {
             // A negated span is what stopped a key, not what matched it: WA_RED, the same colour severity wears in the Explorer.
