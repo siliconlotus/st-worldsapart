@@ -2214,7 +2214,17 @@ export async function lorebookStudio(preferredBook = null) {
         hayBox.style.flex = '3 1 0';
         // The same box, read-only and marked: text_pole so it keeps the border and padding the textarea had.
         const hayRead = document.createElement('div'); hayRead.className = 'text_pole';
-        hayRead.style.cssText = 'flex:3 1 0;min-height:0;overflow:auto;white-space:pre-wrap;line-height:1.5;';
+        hayRead.style.cssText = 'flex:1 1 auto;min-height:0;overflow:auto;white-space:pre-wrap;line-height:1.5;';
+        // The pencil sits over the box, not inside its scroller, or it would scroll away from the text it acts on.
+        const hayWrap = document.createElement('div');
+        hayWrap.style.cssText = 'flex:3 1 0;position:relative;display:flex;min-height:0;';
+        const hayPencil = document.createElement('i');
+        hayPencil.className = 'fa-solid fa-pen';
+        hayPencil.title = 'Edit the text';
+        hayPencil.style.cssText = 'position:absolute;top:5px;right:9px;cursor:pointer;opacity:0.6;padding:3px 4px;border-radius:4px;'
+            + 'background:var(--black30a, rgba(0,0,0,0.3));font-size:0.85em;';
+        hayPencil.addEventListener('click', () => { labCommitted = false; repaint(); hayBox.focus(); });
+        hayWrap.append(hayRead, hayPencil);
         // On the box it acts on, not in the options row: it switches this pane between typing and reading.
         const markLabel = document.createElement('label');
         markLabel.style.cssText = 'display:flex;gap:5px;align-items:center;cursor:pointer;flex:0 0 auto;font-size:0.85em;opacity:0.8;';
@@ -2239,7 +2249,7 @@ export async function lorebookStudio(preferredBook = null) {
         const secBox = box('Secondary keys', () => labSec, v => { labSec = v; });
         secBox.style.cssText += 'flex:0 0 auto;height:4.4em;';
         keyBox.style.flex = '2 1 0';
-        panes.append(hayBox, hayRead, markLabel, keyBox, logicSel, secBox);
+        panes.append(hayBox, hayWrap, markLabel, keyBox, logicSel, secBox);
 
         const opts = document.createElement('div');
         opts.style.cssText = 'display:flex;gap:14px;padding:6px 8px;flex:0 0 auto;opacity:0.8;font-size:0.9em;';
@@ -2301,7 +2311,7 @@ export async function lorebookStudio(preferredBook = null) {
             // Committed with nothing in the box would leave no way back, so an empty haystack is always the editable one.
             const reading = labCommitted && !!labHay.trim();
             hayBox.style.display = reading ? 'none' : '';
-            hayRead.style.display = reading ? '' : 'none';
+            hayWrap.style.display = reading ? '' : 'none';
             markToggle.checked = reading;
             markToggle.disabled = !labHay.trim();
             markLabel.style.opacity = labHay.trim() ? '0.8' : '0.4';
