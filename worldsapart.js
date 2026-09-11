@@ -1958,7 +1958,7 @@ function renderDeliveryPanel(layout) {
     if (!layout.length) {
         const empty = document.createElement('div');
         empty.className = 'wa-delivery-empty';
-        empty.textContent = 'Nothing delivered';
+        empty.textContent = 'Nothing delivered yet';
         deliveryPanel.append(empty, lab);
         return;
     }
