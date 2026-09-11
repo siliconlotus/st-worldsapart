@@ -10,7 +10,7 @@ import { runState, settings } from './state.mjs';
 import { ensureStudioStyle, makeSortControl, renderMessageHtml, showCtxMenu, showEntryText, wiGlyph } from './ui-widgets.mjs';
 import { SORT_FNS, SORT_LABELS, normPresentation, presentationLabel, reconcileTiers, tierRank, wiTitleOf } from './sort.mjs';
 import { buildKeyPruneScan, llmKeyCandidates } from './keyword-tools.mjs';
-import { SEVERE, STUDIO_PRUNE_OPTS } from './keyword-audit.mjs';
+import { FLAG_PRIORITY, SEVERE, STUDIO_PRUNE_OPTS } from './keyword-audit.mjs';
 import { buildKeySuggest, classifyLlmCand, STUDIO_SUGGEST_OPTS } from './keyword-suggest.mjs';
 import { validateSmartKey } from './smartkeys.mjs';
 import { findOrphanBindings } from './bindings.mjs';
@@ -1656,7 +1656,7 @@ export async function lorebookStudio(preferredBook = null, open = null) {
         const head = document.createElement('div'); head.className = 'wa-term-grp';
         const ids = rows.map(r => rowId(e.uid, r.term));
         if (ids.length) {
-            const cb = document.createElement('input'); cb.type = 'checkbox'; cb.style.margin = '0';
+            const cb = document.createElement('input'); cb.type = 'checkbox'; cb.style.margin = '0'; cb.className = 'wa-tri';
             cb.addEventListener('change', () => { for (const id of ids) checks.set(id, cb.checked); onChange(); });
             reg.grp.push({ cb, ids });
             head.append(cb);
@@ -1957,7 +1957,7 @@ export async function lorebookStudio(preferredBook = null, open = null) {
                 const rc = scan.reasonOf(p);
                 const id = rowId(e.uid, p.key);
                 if (!cleanupChecks.has(id)) cleanupChecks.set(id, scan.defChecked(p));   // pre-tick policy shared with the pruner
-                return { term: p.key, why: rc.text, color: SEVERITY_COLOR[rc.severity] ?? '', p };
+                return { term: p.key, why: rc.text, color: SEVERITY_COLOR[rc.severity] ?? '', sev: rc.severity, p };
             });
             // Show-all appends the keys classifyEntry did not return; flagged rows stay on top.
             if (cleanupShowAll) {
@@ -2036,21 +2036,22 @@ export async function lorebookStudio(preferredBook = null, open = null) {
         trayEl = renderTray();
         const bar = document.createElement('div'); bar.className = 'wa-bulk-on';
         const ignStrip = document.createElement('div'); ignStrip.className = 'wa-ign-strip';
-        fixed.append(head, trayEl, bar, ignStrip);
+        const flagStrip = document.createElement('div'); flagStrip.className = 'wa-ign-strip';
+        fixed.append(head, trayEl, bar, flagStrip, ignStrip);
         const list = document.createElement('div'); list.className = 'wa-studio-entries';
         pane.append(fixed, list);
 
         let groups = [], allIds = [], reg = { row: new Map(), grp: [] };
         // Repaints the list, not just the bar: it changes which rows exist.
         const showAllBtn = () => {
-            const b = barBtn(cleanupShowAll ? 'Flagged only' : 'Show all terms', () => { cleanupShowAll = !cleanupShowAll; repaint(); });
+            const b = barBtn(cleanupShowAll ? 'Flagged only' : 'Show all', () => { cleanupShowAll = !cleanupShowAll; repaint(); });
             b.title = cleanupShowAll ? 'List only the keys the audit flagged' : 'List every key on every visible entry, flagged or not';
             return b;
         };
         const chatScanBtn = () => {
-            const b = barBtn(chatHits ? 'Re-check chats' : 'Check against chats',
+            const b = barBtn(chatHits ? 'Rescan chats' : 'Scan chats',
                 ev => runChatScan(ev?.shiftKey).catch(e => { console.error('Worlds Apart: chat scan failed', e); toastr.error(String(e?.message ?? e), 'Worlds Apart'); }));
-            b.title = 'Scan the chats this book is bound to.\nShift-click to pick from every chat on this install instead.';
+            b.title = 'Count how many chat messages each key matches, over the chats this book is bound to.\nShift-click to pick from every chat on this install instead.';
             return b;
         };
         const paintBar = () => {
@@ -2058,15 +2059,15 @@ export async function lorebookStudio(preferredBook = null, open = null) {
             const allOn = allIds.length > 0 && on === allIds.length;
             bar.innerHTML = '';
             const count = document.createElement('span'); count.className = 'wa-bulk-count';
-            count.textContent = `${on} of ${allIds.length} ${cleanupShowAll ? '' : 'flagged '}term${allIds.length === 1 ? '' : 's'} selected`;
+            count.textContent = `${on}/${allIds.length} selected`;
             count.title = 'Pre-ticked terms are suggestions, not verified problems. "Not in entry text" means exactly that — keys match against the chat, so a key your story uses but your prose never spells out reads as dead and is usually worth keeping. Review before applying.';
             bar.append(count,
                 barBtn(allOn ? 'Select none' : 'Select all', () => {
                     for (const id of allIds) cleanupChecks.set(id, !allOn);
                     sync();
                 }),
-                barBtn('Prune selected', pruneChecked, 'wa-bulk-danger'),
-                barBtn('Ignore selected', ignoreChecked),
+                barBtn('Prune', pruneChecked, 'wa-bulk-danger'),
+                barBtn('Ignore', ignoreChecked),
                 showAllBtn(),
                 chatScanBtn(),
             );
@@ -2079,7 +2080,44 @@ export async function lorebookStudio(preferredBook = null, open = null) {
             }
             if (cleanupUndo?.length) bar.append(barBtn(`Undo (${cleanupUndo.length})`, undoPrune));
         };
-        const sync = () => { syncTermChecks(cleanupChecks, reg); paintBar(); };
+        /** One tri-state box per verdict present, in the classifier's own priority order, so triage runs a flag at a time. */
+        const paintFlags = () => {
+            flagStrip.innerHTML = '';
+            const buckets = new Map();
+            for (const g of groups) for (const r of g.rows) {
+                const name = r.p?.flag ?? r.why;   // show-all rows carry no verdict: "not flagged", or "ignored"
+                if (!buckets.has(name)) buckets.set(name, []);
+                buckets.get(name).push({ id: rowId(g.entry.uid, r.term), sev: r.sev });
+            }
+            if (buckets.size < 2) { flagStrip.style.display = 'none'; return; }   // one flag is the Select all button
+            flagStrip.style.display = 'flex';
+            const lbl = document.createElement('span');
+            lbl.style.cssText = 'opacity:0.7;font-size:0.85em;white-space:nowrap;';
+            lbl.textContent = 'Flags:';
+            flagStrip.append(lbl);
+            const rank = n => { const i = FLAG_PRIORITY.indexOf(n); return i < 0 ? FLAG_PRIORITY.length : i; };
+            for (const name of [...buckets.keys()].sort((a, b) => rank(a) - rank(b) || a.localeCompare(b))) {
+                const rows = buckets.get(name);
+                const on = rows.filter(r => cleanupChecks.get(r.id)).length;
+                const wrap = document.createElement('label');
+                wrap.className = 'checkbox_label';
+                wrap.style.cssText = 'display:flex;gap:0.35em;align-items:center;margin:0;white-space:nowrap;';
+                const cb = document.createElement('input');
+                cb.type = 'checkbox';
+                cb.className = 'wa-tri';
+                cb.checked = on > 0 && on === rows.length;
+                cb.indeterminate = on > 0 && on < rows.length;
+                cb.addEventListener('change', () => { for (const r of rows) cleanupChecks.set(r.id, cb.checked); sync(); });
+                const txt = document.createElement('span');
+                let worst = '';
+                for (const r of rows) if ((SEVERITY_RANK[r.sev] ?? 0) > (SEVERITY_RANK[worst] ?? 0)) worst = r.sev;
+                if (SEVERITY_COLOR[worst]) txt.style.color = SEVERITY_COLOR[worst];
+                txt.innerHTML = `${escapeHtml(name)} <small style="opacity:0.6;">${on}/${rows.length}</small>`;
+                wrap.append(cb, txt);
+                flagStrip.append(wrap);
+            }
+        };
+        const sync = () => { syncTermChecks(cleanupChecks, reg); paintBar(); paintFlags(); };
         const repaint = () => {
             paintIgnoredStrip(ignStrip, repaint);   // classifyEntry reads ignoreSet live — no rescan needed
             groups = cleanupGroups();
@@ -2921,7 +2959,7 @@ export async function lorebookStudio(preferredBook = null, open = null) {
         scanBtn.innerHTML = `<i class="fa-solid fa-stethoscope"></i> ${scan ? 'Re-audit' : 'Keyword audit'}`;
         scanBtn.title = chatHits
             ? `Flag dead / common / short keywords — tune under Tool Settings.\nChat evidence: ${chatLabel()}, ${chatMsgs} messages.`
-            : 'Flag dead / common / short keywords and colour them by verdict — tune under Tool Settings.\nNo chat searched yet: bind this book to the open chat, or use Bulk Cleanup → "Check against chats".';
+            : 'Flag dead / common / short keywords and colour them by verdict — tune under Tool Settings.\nNo chat searched yet.';
         scanBtn.addEventListener('click', async () => { await withBusy(scanBtn, '0.5', runAudit, '<i class="fa-solid fa-spinner fa-spin"></i> Auditing…'); renderExplorer(); });
         const allOpen = entries.length > 0 && entries.every(x => entryOpen.has(x.uid));
         const expandBtn = document.createElement('button');

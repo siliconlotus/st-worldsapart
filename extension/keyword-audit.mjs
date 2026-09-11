@@ -80,6 +80,9 @@ export const KEY_CHAT_COMMON = 0.20;
 /** The audit's three severities, by name. The colours they are drawn in belong to the display, and the order to RANK there. */
 export const SEVERE = 'severe', MODERATE = 'moderate', MINOR = 'minor';
 
+/** The order `classify` tests its branches in, so a display can rank verdicts without re-deriving them. */
+export const FLAG_PRIORITY = ['unusable', 'english common', 'unattested', 'book shared', 'fragment', 'short'];
+
 export function buildKeyPruneScan(data, opts, ignoreSet, { caseSensitiveDefault = false, wholeWordsDefault = false, matchWindow = 'scan', chatScan } = {}) {
     // undefined: no scan, or a scan that did not cover this key; 0: scanned and silent. chatChecked reads the difference.
     const chatRateOf = key => {
@@ -171,7 +174,7 @@ export function buildKeyPruneScan(data, opts, ignoreSet, { caseSensitiveDefault 
     };
     const effCase = e => e.caseSensitive ?? caseSensitiveDefault;
     const effWhole = e => e.matchWholeWords ?? wholeWordsDefault;
-    // Priority: unusable, english common, unattested, book shared, fragment, short.
+    // Tested in FLAG_PRIORITY order; the first hit wins, so moving a branch changes what a key reports.
     const classify = (key, cs, ww) => {
         const k = String(key).trim();
         if (!k) return null;
