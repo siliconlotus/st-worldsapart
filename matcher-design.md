@@ -459,20 +459,29 @@ there latches on the wrong turn and holds. Exempting it would hide only a handfu
 weight, tilt or fusion change is a recall lever, only a precision one. `scoreVectorKeys` is stage 3:
 keys re-rank vector entries and never admit one.
 
-**Open — a recursed entry cannot currently compete.** Stage 3 builds its scan window from chat plus
-injects plus opted-in match sources, never the recursion buffer, so an entry whose key matched another
-entry's content scores `keys: 0` and the budget drops it first — and the budget binds on every graded
-scene measured (F4). Ruled: stage 3 scores the recursion buffer via the existing
-`matcher.withExtraTexts` on `runState.waRecursionTexts`, each recursion content its own segment, as
-match sources and injects already are.
+### Trigger depth
 
-**Open — trigger-depth weighting.** An entry reached at the third recursion pass should not score as
-though the conversation had named it. The weight is a per-entry scalar stamped where a newly-matched
-entry joins `waMatched`; the counter advances on recursion passes only
-(`args.state.next === scan_state.MIN_ACTIVATIONS` distinguishes them), because a min-activation match
-was found in the chat. Depth is a property of the moment, not of the entry. The two halves are one
-change: without the weight, buffer scoring admits a depth-3 entry at full strength on text WA itself
-injected.
+**Stage 3 scores the recursion buffer.** The scan window is chat plus injects plus opted-in match
+sources, wrapped by `matcher.withExtraTexts` over `runState.waRecursionTexts` — each recursion content
+its own segment, as match sources and injects already are. Keyword scoring only: the buffer is text WA
+injected, so it stays out of the window `properNouns` is counted over. Without it an entry whose key
+matched another entry's content scores `keys: 0` and the budget drops it first, and the budget binds on
+every graded scene measured (F4).
+
+**An `excludeRecursion` entry is scored against the chat window alone.** Core's gate runs before
+`getExternallyActivated` (*The seam*), so stage 2 inherits it; stage 3 is WA's own loop and core is not
+in it, so the exclusion is applied there by hand.
+
+**An entry reached at recursion pass `d` scores `keys / (1 + d)`.** `waTriggerDepth` is a per-entry
+scalar stamped where a newly-matched entry joins `waMatched`; the counter advances on recursion passes
+only, `args.state.next === scan_state.MIN_ACTIVATIONS` marking a min-activations widening, whose match
+was found in the chat. Depth is a property of the moment, not of the entry, and depth 0 is unweighted,
+so a book that wires no recursion does not move. The curve is an assertion: no book in the corpus
+exercises recursion, and the sentinel is a verdict fixture, not a measurement.
+
+**`eval/scene.mjs` does not model the buffer**, so a scene captured from a recursion-using chat scores
+`keys` lower offline than the runtime did. Both the buffer and the depth are deterministic from the
+scene's own `scanChat`, entries and params, so neither is a capture field: the fixpoint recomputes them.
 
 ---
 
@@ -795,9 +804,13 @@ fit serves both settings, the keys-live one; unticking blanks the keys and the c
 
 Ordered by whether a user can see the difference.
 
-1. **Recursion scoring** — buffer scoring plus trigger-depth weighting, one change (*Stage 3*). Ships
-   on reasoning rather than evidence: `world_info_recursive` is off here and no book in the corpus
-   exercises it, so it waits on a recursion-using book.
+1. **Recursion parity in the harness.** Runtime scores the recursion buffer (*Stage 3*); `eval/scene.mjs`
+   runs one keyword pass, so a scene captured from a recursion-using chat scores `keys` lower offline
+   than the runtime did. `makeCandidateSet`'s keyword loop becomes a fixpoint — chat, then chat plus the
+   non-`preventRecursion` content of what each pass admitted, skipping `excludeRecursion` entries —
+   stamping depth as it goes, and `haystackFor` takes the accumulated buffer. Nothing is captured: both
+   are deterministic from `scanChat`, the entries and the params. Which emits core's gates would have
+   admitted stays the standing offline divergence. Blocks the first recursion-wired book, not the setting.
 2. **Proximity** (`(…)~N`). Witness spans shipped, so the display it needs exists.
 3. **`chat common` as a raising flag** — `KEY_CHAT_COMMON` can only confirm another flag. It needs the
    structural exclusion (constant/sticky) decided and the 20% re-read against what survives.

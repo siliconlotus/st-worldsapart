@@ -711,6 +711,7 @@ async function selectAndActivate(chat) {
     runState.waOwnsScan = false;
     runState.waMatched = new Set();
     runState.waRecursionTexts = [];
+    runState.waRecursionDepth = 0;
     runState.waMinSkew = 0;
     runState.waCandidates = null;
 
@@ -1043,6 +1044,8 @@ async function feedScanLoop(args) {
     // Mirrors core's advanceScan: one message wider per min-activation pass.
     const skewed = args?.state?.next === scan_state.MIN_ACTIVATIONS;
     if (skewed) runState.waMinSkew++;
+    // Depth is a property of the pass, not of the entry: a min-activations widening found its match in the chat.
+    else if (newTexts.length) runState.waRecursionDepth++;
 
     if (!newTexts.length && !skewed) {
         return;
@@ -1060,7 +1063,10 @@ async function feedScanLoop(args) {
         { ...activationOpts(), depthSkew: runState.waMinSkew });
 
     if (adds.length) {
-        for (const e of adds) runState.waMatched.add(`${e.world}.${e.uid}`);
+        for (const e of adds) {
+            runState.waMatched.add(`${e.world}.${e.uid}`);
+            e.waTriggerDepth = runState.waRecursionDepth;
+        }
         console.log(`Worlds Apart: activating ${adds.length} keyword-matched entr${adds.length === 1 ? 'y' : 'ies'} on scan loop ${args?.state?.loopCount} (${newTexts.length ? 'recursion text' : 'min-activations widening'})`);
         await eventSource.emit(event_types.WORLDINFO_FORCE_ACTIVATE, adds);
     }
@@ -1170,7 +1176,7 @@ async function onScanDone(args) {
     const scanWorlds = new Set(items.map(it => it.entry.world));
     ensureWorldConfigs(scanWorlds);
 
-    // One window, unconditional: the relevance column needs the window keyword scoring uses (eval/scene.mjs `haystackFor`).
+    // One window, unconditional: the relevance column needs the chat window (eval/scene.mjs `haystackFor`); keyword scoring wraps it.
     let windowFor = null;
     {
         // scanChat is core's transformed haystack; raw context chat only for a scan no WA entry point saw.
@@ -1181,6 +1187,12 @@ async function onScanDone(args) {
         // Raw; the gate (matcher.usedMatchSources) runs where the attached books are in scope.
         runState.lastSources = sources;
         windowFor = built.windowFor;
+        // Keyword scoring only: the buffer is text WA injected, so it must not enter the window properNouns is counted over.
+        // excludeRecursion honoured here because core's gate is not in this loop — stage 2 inherits it, stage 3 must not.
+        const buffered = runState.waRecursionTexts?.length
+            ? matcher.withExtraTexts(windowFor, runState.waRecursionTexts, settings().matchWindow)
+            : windowFor;
+        const keywordWindowFor = (depth, entry) => (entry?.excludeRecursion ? windowFor : buffered)(depth, entry);
 
         // Live keys, else the takeover's stash; every entry's keys are scored, vectorized included (matcher-design.md, *Scoring memory's keys*).
         const scoreKeysOf = entry => (entry.key?.length ? entry.key : (entry.waKeys ?? []));
@@ -1198,10 +1210,11 @@ async function onScanDone(args) {
         for (const item of items) {
             // Per-entry scanDepth wins, as in core. Nullish, not `||`: 0 is core's authored "match nothing from chat".
             const depth = Number(item.entry.scanDepth ?? (settings().messageDepth || world_info_depth));
-            const scanText = windowFor(depth, item.entry);
+            const scanText = keywordWindowFor(depth, item.entry);
             const scoreKeys = scoreKeysOf(item.entry);
             const scored = keywordScore(scoringView(item.entry), scanText, scoreKeys);
-            item.keywordScore = scored.score;
+            // An entry reached at recursion pass d did not have the conversation name it (matcher-design.md, *Trigger depth*).
+            item.keywordScore = scored.score / (1 + (Number(item.entry.waTriggerDepth) || 0));
             item.keywordHits = scored.hits;
             // Verbose runs only: where each key matched, for /wa-grade's why column. Flags mirror the keywordScore call above exactly.
             item.keywordWhy = runState.verboseRun

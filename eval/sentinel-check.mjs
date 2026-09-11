@@ -2,7 +2,7 @@
 // Also importable into ST (install-sentinel.mjs), for the half node cannot see: chips, tooltips, colours.
 import fs from 'node:fs';
 import { buildKeyPruneScan } from '../extension/keyword-audit.mjs';
-import { keywordScore, scanSegments, countKey, countChatHits, activationAdds, makeWindowFor } from '../extension/matcher.mjs';
+import { keywordScore, scanSegments, countKey, countChatHits, activationAdds, makeWindowFor, withExtraTexts } from '../extension/matcher.mjs';
 import { buildKeyPruneScan as _pruneScan } from '../extension/keyword-audit.mjs';
 import { eq } from './metrics.mjs';
 
@@ -118,6 +118,15 @@ console.log('ok   sentinel: every audit verdict matches its written-down answer'
     const narrow = { ...opts, messageDepth: 2 };
     eq(activationAdds([data.entries['10']], windowFor, narrow).length, 0,
         'sticky entry with its key out of the window is not re-emitted — core\'s timed effect is what carries it');
+
+    // Stage 3 over the recursion buffer: the target's key is in no message, only in uid 12's content.
+    const keys13 = (win) => keywordScore(data.entries['13'], win(20, data.entries['13']), undefined,
+        { k1: 1.2, caseSensitiveDefault: false, wholeWordsDefault: false }).score;
+    eq(keys13(windowFor), 0, 'recursion target scores keys 0 against chat alone — the budget drops it first');
+    const buffered = withExtraTexts(windowFor, [data.entries['12'].content], 'paragraph');
+    eq(keys13(buffered) > 0, true, 'the recursion buffer carries the key, so stage 3 can score it');
+    // The weight onScanDone applies; depth 1 is one recursion pass.
+    eq(keys13(buffered) / (1 + 1) < keys13(buffered), true, 'trigger-depth weighting discounts a buffer-only match');
 
     // uid 15's three secondaries are one of each kind: usable, negation-only, malformed.
     eq(adds.includes(15), true, 'AND_ALL gate passes: the usable secondaries hold and the malformed one is dropped');
