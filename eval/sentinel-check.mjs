@@ -36,8 +36,8 @@ eq(msgs.length, 11, 'the hidden message is dropped, as core and WA both drop it'
 {
     const v = verdicts(undefined);
     eq(v.quarkspindle, undefined, 'a key in its own entry text is not flagged');
-    eq(v.zzunattested?.why, 'not in entry text', 'dead, and says only that entry text was checked');
-    eq(v.glimmerwort?.why, 'not in entry text', 'chat-only key reads dead when no chat was searched');
+    eq(v.zzunattested?.why, 'unattested (book)', 'dead, and says only that the book was checked');
+    eq(v.glimmerwort?.why, 'unattested (book)', 'chat-only key reads dead when no chat was searched');
     eq(v.mother?.flag, 'english common', 'the English list flags a generic word with no chat needed');
     eq(v.mother?.sev !== RED, true, '...but unevidenced it is not severe');
 }
@@ -46,7 +46,7 @@ eq(msgs.length, 11, 'the hidden message is dropped, as core and WA both drop it'
 {
     const v = verdicts(chatRate());
     eq(v.glimmerwort, undefined, 'a key the chat uses is not dead — the flag is dropped');
-    eq(v.zzunattested?.why, 'not in entry text or chat', 'still dead, and now says both were checked');
+    eq(v.zzunattested?.why, 'unattested (book/chat)', 'still dead, and now says both were checked');
     eq(v.morning?.sev, RED, 'a common word the chat confirms fires broadly is severe');
     eq(v.mother?.sev !== RED, true, 'a common word the chat says is quiet stays a warning');
     eq(v['? thornwick brambleshaw'], undefined, 'at scan the query is attested by its own entry text');

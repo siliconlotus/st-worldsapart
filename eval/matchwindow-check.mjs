@@ -118,12 +118,12 @@ console.log('ok   a key and its case variant count one entry once');
     };
     const none = run(undefined);
     eq(none.zzznope.flag, 'unattested', 'no chat: a key absent from entry text is dead');
-    eq(none.zzznope.why, 'not in entry text', '...and says only what it checked');
+    eq(none.zzznope.why, 'unattested (book)', '...and says only what it checked');
     eq(none.mother.flag, 'english common', 'no chat: the English list still flags a generic word');
     eq(none.mother.sev !== 'severe', true, '...but unevidenced it is no longer severe');
 
     const quiet = run({ messagesWith: new Map([['mother', 2], ['zzznope', 0]]), messages: 100 });
-    eq(quiet.zzznope.why, 'not in entry text or chat', 'chat checked and silent: the claim gets stronger');
+    eq(quiet.zzznope.why, 'unattested (book/chat)', 'chat checked and silent: the claim gets stronger');
     eq(quiet.mother.sev !== 'severe', true, 'a quiet common word stays flagged, not severe');
 
     const live = run({ messagesWith: new Map([['mother', 40], ['zzznope', 12]]), messages: 100 });
@@ -141,9 +141,9 @@ console.log('ok   chat evidence reaches the classifier and conditions severity')
         const s = buildKeyPruneScan(book, opts, new Set(), { chatScan });
         return s.reasonOf(s.classifyEntry(book.entries[0])[0]).text;
     };
-    eq(why({ messagesWith: new Map([['zzznope', 0]]), messages: 100 }), 'not in entry text or chat',
+    eq(why({ messagesWith: new Map([['zzznope', 0]]), messages: 100 }), 'unattested (book/chat)',
         'in the scan and silent: both were checked');
-    eq(why({ messagesWith: new Map([['somethingelse', 3]]), messages: 100 }), 'not in entry text',
+    eq(why({ messagesWith: new Map([['somethingelse', 3]]), messages: 100 }), 'unattested (book)',
         'scan ran but skipped this key: claim no more than was checked');
 }
 console.log('ok   a key the chat scan never covered is not reported as chat-checked');
@@ -164,8 +164,8 @@ console.log('ok   a key the chat scan never covered is not reported as chat-chec
         const sc = buildKeyPruneScan(book, opts, new Set(), { chatScan });
         return sc.reasonOf(sc.classifyEntry(book.entries[0])[0]).text;
     };
-    eq(why(undefined), 'never matches', 'a dead query claims only what was checked');
-    eq(why(got), 'never matches entry text or chat', '...and says so when the chat was checked too');
+    eq(why(undefined), 'never matches (book)', 'a dead query claims only what was checked');
+    eq(why(got), 'never matches (book/chat)', '...and says so when the chat was checked too');
 }
 console.log('ok   the chat scan evaluates `?` and /re/ keys, not just literals');
 

@@ -168,7 +168,7 @@ eq(countKey('? fire::3 XOR flood', 'a fire burns', false, false), 3, 'XOR still 
     const flags = new Map(classifyEntry(entries[1]).map(f => [String(f.key), f]));
     eq(flags.has('/\\n/'), false, 'a pattern that fires on every entry draws nothing: ubiquity in entry text is not a key defect');
     eq(flags.get('/zzznope/')?.flag, 'unattested', '...and one that fires nowhere is flagged dead');
-    eq(reasonOf(flags.get('/zzznope/')).text, 'never matches', '...worded as evaluating false, not as absent text');
+    eq(reasonOf(flags.get('/zzznope/')).text, 'never matches (book)', '...worded as evaluating false, not as absent text');
     eq(flags.has('/by the door/i'), false, 'a pattern that fires in exactly one entry draws nothing');
     eq(flags.get('/zzznope/')?.flag !== 'short', true, 'short-key never reads a pattern');
     eq(flags.get('x')?.flag, 'unattested', '...while a genuine literal is judged on its characters as before');
@@ -251,7 +251,7 @@ console.log('ok   SmartKey structural validation');
     const sc = buildKeyPruneScan({ entries }, opts, new Set(), { caseSensitiveDefault: false, wholeWordsDefault: false });
     const verdict = uid => { const f = sc.classifyEntry(entries[uid])[0]; return f ? `${f.flag}|${sc.reasonOf(f).text}` : ''; };
 
-    eq(verdict(2), 'unattested|never matches', 'a query that evaluates false everywhere is flagged dead');
+    eq(verdict(2), 'unattested|never matches (book)', 'a query that evaluates false everywhere is flagged dead');
     eq(verdict(1), verdict(3), 'a SmartKey and the equivalent plain key get the same verdict');
     eq(verdict(1), '', '...and a key in every entry draws none, so the SmartKey is not judged as a string either');
     eq(verdict(4), 'english common|english common · the', 'a query reducing to a common word earns the English-common flag');

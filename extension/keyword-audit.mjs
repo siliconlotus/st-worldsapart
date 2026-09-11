@@ -228,8 +228,9 @@ export function buildKeyPruneScan(data, opts, ignoreSet, { caseSensitiveDefault 
         const severity = severityOf(p);
         // A SmartKey or a pattern is not "absent from the text": it evaluated false everywhere.
         if (p.flag === 'unattested') {
-            if (!p.literal) return { text: p.chatChecked ? 'never matches entry text or chat' : 'never matches', severity };
-            return { text: p.chatChecked ? 'not in entry text or chat' : 'not in entry text', severity };
+            const where = p.chatChecked ? '(book/chat)' : '(book)';
+            // A SmartKey or a pattern is not absent from the text: it evaluated false everywhere it was run.
+            return { text: `${p.literal ? 'unattested' : 'never matches'} ${where}`, severity };
         }
         if (p.flag === 'unusable') return { text: p.code ? `unusable — ${p.code}` : 'unusable', severity };
         if (p.flag === 'english common') {

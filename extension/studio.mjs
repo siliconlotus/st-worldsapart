@@ -133,6 +133,9 @@ export async function lorebookStudio(preferredBook = null, open = null) {
     let chatHits = null;        // Map<key, count> from the chat scan, null until one has run; survives a rescan, cleared on book change
     let chatMsgs = 0;
     let chatName = '';          // WHICH chat produced those counts — see runChatScan
+    let chatNames = [];         // the same, unabbreviated: chatName collapses to "N chats" and only the tooltip can name them
+    // Quoted only when it IS a name: quotes around "2 chats" read as scare quotes.
+    const chatLabel = () => (chatNames.length === 1 ? `"${chatName}"` : chatName);
     const rowId = (uid, term) => `${uid}${term}`;
     let termRepaint = null;   // the active term tab's list repaint; null in the Explorer, whose rerenderKeys walks rowEls instead
     const afterIgnoreChange = keys => {
@@ -206,7 +209,7 @@ export async function lorebookStudio(preferredBook = null, open = null) {
     const bookKeys = () => [...new Set(Object.values(data?.entries ?? {})
         .flatMap(e => (Array.isArray(e.key) ? e.key : []).map(k => String(k).trim())).filter(Boolean))];
 
-    const clearChatScan = () => { chatHits = null; chatMsgs = 0; chatName = ''; };
+    const clearChatScan = () => { chatHits = null; chatMsgs = 0; chatName = ''; chatNames = []; };
     // Repaints the entries carrying any of `keys`; classifyEntry reads ignoreSet live, so whitelisting needs no rescan.
     const rerenderKeys = keys => { const set = new Set(keys); for (const e of Object.values(data?.entries ?? {})) if ((Array.isArray(e.key) ? e.key : []).some(k => set.has(k))) renderEntry(e); };
 
@@ -664,15 +667,19 @@ export async function lorebookStudio(preferredBook = null, open = null) {
 
 
     /** Refuses a re-entrant click and dims the button; undims on every exit, a throw included. */
-    const withBusy = async (btn, dim, fn) => {
+    const yieldFrame = () => new Promise(r => setTimeout(r, 0));
+    /** Dims `btn` while `fn` runs, re-entrant-guarded; `label` also swaps its content for the duration. The yield is
+     *  load-bearing: these bodies block the thread for seconds, so without it neither the dim nor the label paints. */
+    const withBusy = async (btn, dim, fn, label = null) => {
         if (btn.dataset.busy) return;
         btn.dataset.busy = '1'; btn.style.opacity = dim;
-        try { return await fn(); } finally { btn.dataset.busy = ''; btn.style.opacity = ''; }
+        const was = label === null ? null : btn.innerHTML;
+        if (label !== null) btn.innerHTML = label;
+        try { await yieldFrame(); return await fn(); }
+        finally { btn.dataset.busy = ''; btn.style.opacity = ''; if (was !== null) btn.innerHTML = was; }
     };
 
-    // Yields a frame before the synchronous ranker build so the dim paints first.
     const suggestTfidf = (e, btn) => withBusy(btn, '0.25', async () => {
-        if (!suggest) await new Promise(r => setTimeout(r, 0));
         const s = ensureSuggest();
         const pe = s.perEntry.find(p => String(p.entry.uid) === String(e.uid));
         const fresh = (pe?.newRows ?? []).map(r => r.display).filter(t => !hasKey(e, t));
@@ -957,7 +964,7 @@ export async function lorebookStudio(preferredBook = null, open = null) {
             // Dead is dimmed with no label; ignored gets its own marking.
             const isDead = v && v.flag === 'unattested';
             const isIgnored = ignoreSet.has(key);
-            // Tooltip wording comes from reasonOf even for dead: "not in entry text" and "not in entry text or chat" are different claims.
+            // Tooltip wording comes from reasonOf even for dead: the (book) and (book/chat) scopes are different claims.
             const why = v && !isIgnored ? scan.reasonOf(v).text : '';
             if (isIgnored) { annot = 'ignored'; chip.classList.add('wa-kw-ignored'); }
             else if (v && !isDead) {
@@ -1508,7 +1515,6 @@ export async function lorebookStudio(preferredBook = null, open = null) {
     };
     // Batch TF-IDF into every entry's ⚡ chips; yields a frame first so the button can dim before the build.
     const suggestAll = btn => withBusy(btn, '0.5', async () => {
-        await new Promise(r => setTimeout(r, 0));
         let s; try { s = ensureSuggest(); } catch { toastr.warning('Couldn\'t build suggestions.', 'Worlds Apart'); return; }
         let n = 0;
         for (const pe of s.perEntry) {
@@ -1720,8 +1726,7 @@ export async function lorebookStudio(preferredBook = null, open = null) {
         const wrap = document.createElement('div');
         // Scrolls: the shift-click list is every chat on the install, which is hundreds of rows on a real one (P1).
         wrap.style.cssText = 'text-align:left;max-width:44rem;max-height:60vh;overflow-y:auto;';
-        wrap.innerHTML = `<h3 style="margin:0 0 0.3em;">Check keys against which chats?</h3>`
-            + `<small style="display:block;opacity:0.75;margin-bottom:0.6em;">Keys flagged “not in entry text” are checked against these. A key that fires somewhere is doing its job — usually an alias your prose never spells out. Only the chats you tick are read.</small>`;
+        wrap.innerHTML = `<h3 style="margin:0 0 0.6em;">Check keys against which chats?</h3>`;
         // Grouped by card, keyed on the avatar: two cards can carry the same name, and a chat belongs to the file it lives beside.
         const groups = new Map();
         const keyFor = c => {
@@ -1889,6 +1894,7 @@ export async function lorebookStudio(preferredBook = null, open = null) {
         chatHits = totals;
         chatMsgs = seen;
         chatName = label;
+        chatNames = picked.map(c => String(c.file).replace(/\.jsonl$/, ''));
         return { keys, live: [...totals.values()].filter(n => n > 0).length, via };
     };
 
@@ -1911,20 +1917,16 @@ export async function lorebookStudio(preferredBook = null, open = null) {
             found.push({ char: ctx.name2 ?? '', avatar: null, file: openName, size: `${(ctx.chat ?? []).length} msgs`, why: 'currently open', open: true });
         }
         if (!found.length) {
-            toastr.warning(all
-                ? 'No chats found for any character on this install.'
-                : `No chat uses "${selected}" — it is not bound to any chat or character, and not globally active. Bind it, or open a chat that uses it, or shift-click to pick any chat.`,
+            toastr.warning(all ? 'No chats found.' : `No chat is bound to "${selected}". Shift-click to pick any chat.`,
                 'Worlds Apart', { timeOut: 9000 });
             return;
         }
-        if (!all && !found.some(f => f.bound) && !found.isGlobal) { toastr.info(`"${selected}" is not bound to any chat; only the open one is offered. Shift-click to pick from every chat.`, 'Worlds Apart', { timeOut: 6000 }); }
 
         const picked = await pickChats(found);
         if (!picked?.length) return;
         const label = picked.length === 1 ? picked[0].file.replace(/\.jsonl$/, '') : `${picked.length} chats`;
         const got = await scanChats(picked, label);
         if (!got) { toastr.warning('Those chats returned no messages.', 'Worlds Apart'); return; }
-        toastr.success(`${got.live} of ${got.keys.length} fire in "${label}" (${chatMsgs} messages, scanned ${got.via}-side).`, 'Worlds Apart', { timeOut: 6000 });
         afterChatScan(got.keys);
     };
 
@@ -1943,11 +1945,8 @@ export async function lorebookStudio(preferredBook = null, open = null) {
             book: selected, matchWindow: settings().matchWindow, boundChats: bound.length,
             scanned: got?.via ?? 'none', messages: chatMsgs, keys: chatHits?.size ?? 0, firing: got?.live ?? 0,
         });
-        if (got) {
-            toastr.success(`Audited against entry text + "${chatName}" — ${got.live} of ${got.keys.length} keys fire in its ${chatMsgs} messages.`, 'Worlds Apart', { timeOut: 6000 });
-        } else if (!chatHits) {
-            toastr.info(`Audited against entry text only — no chat is bound to "${selected}". Cleanup → "Check against chats" can search the open chat, or every chat if the book is globally active.`, 'Worlds Apart', { timeOut: 8000 });
-        }
+        // Only the absence is worth saying: the bulk bar carries the counts when there are any.
+        if (!got && !chatHits) toastr.info(`Audited against entry text only — no chat is bound to "${selected}".`, 'Worlds Apart', { timeOut: 6000 });
     };
 
     const cleanupGroups = () => {
@@ -2016,7 +2015,6 @@ export async function lorebookStudio(preferredBook = null, open = null) {
         toastr.success(`Now ignoring ${n} term${n === 1 ? '' : 's'} in "${selected}" — they won't be flagged again.`, 'Worlds Apart');
     };
     // Both term tabs paint a working note, yield a frame, then run the synchronous pre-pass.
-    const yieldFrame = () => new Promise(r => setTimeout(r, 0));
 
     const renderCleanupView = async pane => {
         const head = document.createElement('div'); head.className = 'wa-studio-exphead';
@@ -2028,9 +2026,9 @@ export async function lorebookStudio(preferredBook = null, open = null) {
         const auditBtn = document.createElement('button'); auditBtn.type = 'button'; auditBtn.className = 'menu_button';
         auditBtn.innerHTML = `<i class="fa-solid fa-stethoscope"></i> ${scan ? 'Re-audit' : 'Run audit'}`;
         auditBtn.title = chatHits
-            ? `Re-run the keyword audit with the current Tool Settings.\nChat evidence: "${chatName}", ${chatMsgs} messages.`
+            ? `Re-run the keyword audit with the current Tool Settings.\nChat evidence: ${chatLabel()}, ${chatMsgs} messages.`
             : 'Re-run the keyword audit with the current Tool Settings.\nNo chat searched yet.';
-        auditBtn.addEventListener('click', async () => { await runAudit(); renderExplorer(); });
+        auditBtn.addEventListener('click', async () => { await withBusy(auditBtn, '0.5', runAudit, '<i class="fa-solid fa-spinner fa-spin"></i> Auditing…'); renderExplorer(); });
         // Search repaints only the list: rebuilding the header would drop the input's focus mid-keystroke.
         row1.append(auditBtn, buildFilterBtn(renderExplorer), buildSortControl(() => repaint()), buildSearchBox(() => repaint()));
         head.append(row1);
@@ -2074,8 +2072,9 @@ export async function lorebookStudio(preferredBook = null, open = null) {
             );
             if (chatHits) {
                 const note = document.createElement('span'); note.className = 'wa-bulk-count';
-                note.textContent = `· ${[...chatHits.values()].filter(n => n > 0).length}/${chatHits.size} fire in "${chatName}" (${chatMsgs} msgs)`;
-                note.title = `Counts come from "${chatName}" only. A key with 0 hits there may still be used in another chat that shares this book — check each one.`;
+                note.textContent = `· ${[...chatHits.values()].filter(n => n > 0).length}/${chatHits.size} fire in ${chatLabel()} (${chatMsgs} msgs)`;
+                // Only when the label collapsed them; at one chat the note already says which.
+                if (chatNames.length > 1) note.title = chatNames.slice(0, 20).join('\n') + (chatNames.length > 20 ? `\n+${chatNames.length - 20} more` : '');
                 bar.append(note);
             }
             if (cleanupUndo?.length) bar.append(barBtn(`Undo (${cleanupUndo.length})`, undoPrune));
@@ -2731,7 +2730,7 @@ export async function lorebookStudio(preferredBook = null, open = null) {
         pane.append(opts, body);
     };
 
-    const TABS = [['explorer', 'Explorer'], ['cleanup', 'Cleanup'], ['lab', 'Keyword Lab']];
+    const TABS = [['explorer', 'Explorer'], ['cleanup', 'Bulk Cleanup'], ['lab', 'Keyword Lab']];
     const renderTabBar = () => {
         const bar = document.createElement('div'); bar.className = 'wa-tabs';
         for (const [id, label] of TABS) {
@@ -2921,9 +2920,9 @@ export async function lorebookStudio(preferredBook = null, open = null) {
         scanBtn.type = 'button'; scanBtn.className = 'menu_button';
         scanBtn.innerHTML = `<i class="fa-solid fa-stethoscope"></i> ${scan ? 'Re-audit' : 'Keyword audit'}`;
         scanBtn.title = chatHits
-            ? `Flag dead / common / short keywords — tune under Tool Settings.\nChat evidence: "${chatName}", ${chatMsgs} messages.`
-            : 'Flag dead / common / short keywords and colour them by verdict — tune under Tool Settings.\nNo chat searched yet: bind this book to the open chat, or use Cleanup → "Check against chats".';
-        scanBtn.addEventListener('click', async () => { await runAudit(); renderExplorer(); });
+            ? `Flag dead / common / short keywords — tune under Tool Settings.\nChat evidence: ${chatLabel()}, ${chatMsgs} messages.`
+            : 'Flag dead / common / short keywords and colour them by verdict — tune under Tool Settings.\nNo chat searched yet: bind this book to the open chat, or use Bulk Cleanup → "Check against chats".';
+        scanBtn.addEventListener('click', async () => { await withBusy(scanBtn, '0.5', runAudit, '<i class="fa-solid fa-spinner fa-spin"></i> Auditing…'); renderExplorer(); });
         const allOpen = entries.length > 0 && entries.every(x => entryOpen.has(x.uid));
         const expandBtn = document.createElement('button');
         expandBtn.type = 'button'; expandBtn.className = 'menu_button';
@@ -2932,7 +2931,7 @@ export async function lorebookStudio(preferredBook = null, open = null) {
         expandBtn.title = `${allOpen ? 'Collapse' : 'Expand'} all entries — shift-click expands only entries with flagged keywords`;
         expandBtn.addEventListener('click', async ev => {
             if (ev.shiftKey) {   // expand only flagged entries (scan first if needed), collapse the rest
-                if (!scan) await runAudit();   // building an audit here means building the SAME audit
+                if (!scan) await withBusy(expandBtn, '0.5', runAudit);   // building an audit here means building the SAME audit
                 entryOpen.clear();
                 for (const x of entries) if (scan.classifyEntry(x).length) entryOpen.add(x.uid);
                 renderExplorer(); return;
