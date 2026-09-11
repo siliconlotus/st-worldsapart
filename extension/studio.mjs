@@ -2407,7 +2407,8 @@ export async function lorebookStudio(preferredBook = null, open = null) {
      *  so it is the text the entry fired against, not a fresh read of the chat. */
     const scannedHaystack = () => {
         const chat = runState.lastScanChat ?? [];
-        if (!chat.length) return chatHaystack();
+        // Empty, not the live chat: reading that is the chat tool's job, on a click, at the depth setting.
+        if (!chat.length) return '';
         return scanSegments(chat, {
             depth: chat.length,
             includeNames: world_info_include_names,
@@ -2418,12 +2419,12 @@ export async function lorebookStudio(preferredBook = null, open = null) {
     /** Opens the Lab on the scanned window with the attached books applied. Whole-delivery, not per entry: the run reports
      *  every entry whose keys caught something. */
     const openLabOnScan = async () => {
-        labHay = scannedHaystack();
-        labCommitted = true;
-        labRun = null;
+        const hay = scannedHaystack();
+        // Nothing scanned yet: open on whatever the panes hold rather than replacing it.
+        if (hay) { labHay = hay; labCommitted = true; labRun = null; }
         tab = 'lab';
         renderExplorer();
-        await applyAttached();
+        if (labHay.trim()) await applyAttached();
     };
 
     /** Re-runs the last applied books, re-reading them: an edit or a setting change is what asks for this. */
