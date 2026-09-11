@@ -2,7 +2,7 @@
 // around grading.mjs; drives the pipeline through `host` and is called back by nothing in it.
 
 import { getContext, extension_settings } from '../../../../extensions.js';
-import { loadWorldInfo, world_info_budget, world_info_budget_cap, world_info_case_sensitive, world_info_depth, world_info_include_names, world_info_match_whole_words } from '../../../../world-info.js';
+import { loadWorldInfo, world_info_budget, world_info_budget_cap, world_info_case_sensitive, world_info_depth, world_info_include_names, world_info_match_whole_words, world_info_max_recursion_steps, world_info_recursive } from '../../../../world-info.js';
 import { Popup, POPUP_TYPE, POPUP_RESULT } from '../../../../popup.js';
 import { escapeHtml, getCharaFilename, getStringHash, download, uuidv4 } from '../../../../utils.js';
 import { getRequestHeaders, saveSettingsDebounced } from '../../../../../script.js';
@@ -32,6 +32,8 @@ const stParams = () => ({
     wholeWords: world_info_match_whole_words,
     includeNames: world_info_include_names,
     allowWIScan: Boolean(extension_settings.note?.allowWIScan),
+    recursive: world_info_recursive,
+    maxRecursionSteps: world_info_max_recursion_steps,
 });
 
 /** The message span this capture covers, as chat file record indices (+1 for the jsonl header); read off the query window, since `last - depth` differs when the span holds an empty or hidden message. */

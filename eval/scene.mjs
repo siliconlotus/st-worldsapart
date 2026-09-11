@@ -249,6 +249,10 @@ export const sceneParams = (S, overrides = {}) => ({
     dropKeys: null,
     // Per-book quota for stage 5 (applyBudget capOf), as {book: cap}; null = no cap. No bundle records the live setting.
     bookCaps: null,
+    // ST core's two recursion settings, by their own names. Off is what every capture predating this was made under,
+    // so the default must stay false or their keys scores move. maxRecursionSteps 0 is core's "no cap", not "no passes".
+    recursive: false,
+    maxRecursionSteps: 0,
     ...(S.params ?? {}), ...overrides,
 });
 
@@ -504,8 +508,47 @@ export function makeCandidateSet({ loaded, byKey, entries, params: P, chunkCfg, 
         const rows = [];
         // --- STAGE 2, retrieval route. Disabled entries drop here, not from `entries`: the gazetteer and BM25 corpus must still see them (F49).
         for (const [key, s] of per) { const e = byKey.get(key); if (e && !e.disable) rows.push({ uid: Number(e.uid), book: e.world, entry: e, title: wiTitle(e), score: s.score, textScore: contentText.get(entryKey(e)) ?? 0, keywordScore: keywordScore(e, haystackFor(e), k1), vectorEligible: !!e.vectorized, textEligible: hasContent(e), keysEligible: scoringKeys(e, P).length > 0 }); }
-        // --- STAGE 2: activation, keyword route. May admit only what core could activate, so never a disabled entry (F49).
-        for (const e of entries) { const key = entryKey(e); if (per.has(key) || e.disable) continue; const kw = keywordScore(e, haystackFor(e), k1); if (kw > 0) rows.push({ uid: Number(e.uid), book: e.world, entry: e, title: wiTitle(e), score: dense.get(key), textScore: contentText.get(key) ?? 0, keywordScore: kw, vectorEligible: dense.has(key) || !!e.vectorized, textEligible: hasContent(e), keysEligible: true }); }
+        // --- STAGE 2: activation, keyword route, run to a fixpoint. May admit only what core could activate, so never a
+        // disabled entry (F49), and on the initial pass never a delayUntilRecursion one. Its LEVEL is not modelled:
+        // core walks distinct levels (world-info.js currentRecursionDelayLevel), this admits at the first pass.
+        const admitted = new Set(rows.map(r => entryKey(r.entry)));
+        // The retrieval winners feed recursion too: WA force-activates them, so core counts them in new.successful.
+        const feeds = e => P.recursive && !e.preventRecursion && Boolean(String(e.content ?? '').trim());
+        const buffer = rows.map(r => r.entry).filter(feeds).map(e => String(e.content).trim());
+        const withBuffer = () => matcher.withExtraTexts((_d, e) => haystackFor(e), buffer, P.matchWindow);
+        const depthOf = new Map();
+        // Termination is the buffer standing still, not a pass admitting nothing: the retrieval winners seed the buffer
+        // and the depth-0 pass matches chat only, so a pass that admits nothing can still leave text for the next one.
+        let scanned = 0;
+        for (let depth = 0; ; depth++) {
+            if (depth > 0) {
+                if (!P.recursive || (P.maxRecursionSteps && depth > P.maxRecursionSteps)) break;
+                if (buffer.length === scanned) break;
+                scanned = buffer.length;
+            }
+            const hay = depth === 0 ? haystackFor : (e => withBuffer()(0, e));
+            const found = [];
+            for (const e of entries) {
+                const key = entryKey(e);
+                if (admitted.has(key) || e.disable) continue;
+                if (depth === 0 ? e.delayUntilRecursion : e.excludeRecursion) continue;
+                if (keywordScore(e, hay(e), k1) > 0) found.push(e);
+            }
+            for (const e of found) {
+                const key = entryKey(e);
+                admitted.add(key);
+                depthOf.set(key, depth);
+                rows.push({ uid: Number(e.uid), book: e.world, entry: e, title: wiTitle(e), score: dense.get(key), textScore: contentText.get(key) ?? 0, keywordScore: 0, vectorEligible: dense.has(key) || !!e.vectorized, textEligible: hasContent(e), keysEligible: true });
+            }
+            for (const e of found) if (feeds(e)) buffer.push(String(e.content).trim());
+        }
+        // --- STAGE 3, keys. Once, over the COMPLETE buffer, as onScanDone runs after core's last loop.
+        const finalHay = buffer.length ? withBuffer() : null;
+        for (const r of rows) {
+            const hay = (finalHay && !r.entry.excludeRecursion) ? finalHay(0, r.entry) : haystackFor(r.entry);
+            r.triggerDepth = depthOf.get(entryKey(r.entry)) ?? 0;
+            r.keywordScore = keywordScore(r.entry, hay, k1) / (1 + r.triggerDepth);
+        }
         return rows;
     };
 }

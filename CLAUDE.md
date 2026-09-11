@@ -198,7 +198,9 @@ user's sort over the survivors (`runState.lastPromptOrder`). A change to the lay
 surface an entry retrieval did not return, so no scoring change is a recall lever, only a precision one.
 
 `eval/scene.mjs` models stages 1 and 3; the keyword loop in `makeCandidateSet` is stage 2 and may only
-admit what core could have activated — not disabled entries.
+admit what core could have activated — not disabled entries, not a `delayUntilRecursion` one on the
+initial pass, not an `excludeRecursion` one on a later one. It runs to a fixpoint when the scene records
+`recursive`; a scene that does not record it is read as recursion off.
 
 ## countKey is the only matcher
 

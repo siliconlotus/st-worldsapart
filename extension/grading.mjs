@@ -20,7 +20,7 @@ export function keyByUid(entries) {
 }
 
 /** WA's live settings under the harness's parameter names; the four ST globals (case, whole-word, includeNames, allowWIScan) are injected. */
-export function captureParams(s, { caseSensitive, wholeWords, includeNames, allowWIScan }) {
+export function captureParams(s, { caseSensitive, wholeWords, includeNames, allowWIScan, recursive, maxRecursionSteps }) {
     return {
         K1: s.bm25K1,
         chunkMode: s.chunkMode,
@@ -41,6 +41,9 @@ export function captureParams(s, { caseSensitive, wholeWords, includeNames, allo
         includeNames,
         // "Include in World Info Scanning" on the Author's Note panel: puts the note and the depth prompt into the scan for every entry.
         allowWIScan,
+        // Core's two, by their own names. Absent means the capture predates the field, which eval/scene.mjs reads as off.
+        recursive,
+        maxRecursionSteps,
     };
 }
 

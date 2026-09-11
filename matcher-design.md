@@ -479,9 +479,20 @@ was found in the chat. Depth is a property of the moment, not of the entry, and 
 so a book that wires no recursion does not move. The curve is an assertion: no book in the corpus
 exercises recursion, and the sentinel is a verdict fixture, not a measurement.
 
-**`eval/scene.mjs` does not model the buffer**, so a scene captured from a recursion-using chat scores
-`keys` lower offline than the runtime did. Both the buffer and the depth are deterministic from the
-scene's own `scanChat`, entries and params, so neither is a capture field: the fixpoint recomputes them.
+**`eval/scene.mjs` recomputes the buffer rather than replaying one.** `makeCandidateSet`'s keyword route
+runs to a fixpoint: chat first, then chat plus the content of what each pass admitted, the retrieval
+winners seeding it because WA force-activates them into `new.successful`. `preventRecursion` decides who
+feeds it, `excludeRecursion` who it may reach, and a `delayUntilRecursion` entry is held out of the
+initial pass — its LEVEL is not modelled, core walking distinct levels rather than passes. Termination is
+the buffer standing still, not a pass admitting nothing: the depth-0 pass matches chat only, so a pass
+that admits nothing can still leave text for the next. Both the buffer and the depth are deterministic
+from the scene's own `scanChat`, entries and params, so neither is a capture field.
+
+**Core's two settings are, though, and a capture that does not carry them reads as off.** `recursive` and
+`maxRecursionSteps` go in under core's own names, `maxRecursionSteps` 0 meaning no cap. Off is the state
+every capture predating the fields was made under, so it is the only default that leaves their `keys`
+scores where they were. Which emits core's gates would have admitted stays the standing offline
+divergence.
 
 ---
 
@@ -804,42 +815,35 @@ fit serves both settings, the keys-live one; unticking blanks the keys and the c
 
 Ordered by whether a user can see the difference.
 
-1. **Recursion parity in the harness.** Runtime scores the recursion buffer (*Stage 3*); `eval/scene.mjs`
-   runs one keyword pass, so a scene captured from a recursion-using chat scores `keys` lower offline
-   than the runtime did. `makeCandidateSet`'s keyword loop becomes a fixpoint — chat, then chat plus the
-   non-`preventRecursion` content of what each pass admitted, skipping `excludeRecursion` entries —
-   stamping depth as it goes, and `haystackFor` takes the accumulated buffer. Nothing is captured: both
-   are deterministic from `scanChat`, the entries and the params. Which emits core's gates would have
-   admitted stays the standing offline divergence. Blocks the first recursion-wired book, not the setting.
-2. **Proximity** (`(…)~N`). Witness spans shipped, so the display it needs exists.
-3. **`chat common` as a raising flag** — `KEY_CHAT_COMMON` can only confirm another flag. It needs the
+1. **Proximity** (`(…)~N`). Witness spans shipped, so the display it needs exists.
+2. **`chat common` as a raising flag** — `KEY_CHAT_COMMON` can only confirm another flag. It needs the
    structural exclusion (constant/sticky) decided and the 20% re-read against what survives.
-4. **Key-side variant expansion**: hyphen ↔ space, since compounds are written both ways and prose
+3. **Key-side variant expansion**: hyphen ↔ space, since compounds are written both ways and prose
    picks per term. Quoting suppresses generation.
-5. **Orthographic expansion for regex keys**, in that pass and not the fold — a pattern is code, so
+4. **Orthographic expansion for regex keys**, in that pass and not the fold — a pattern is code, so
    rewriting `…` to `...` turns a literal into three wildcards. Only 1→1 substitutions are generated
    (the apostrophe family, the double-quote family, en-dash ↔ hyphen, nbsp ↔ space): a one-character
    swap splices into a class as an ordinary member, where `a--?b` needs a parse a substitution pass
    does not have. Em-dash and ellipsis are the author's. Real chats mix apostrophe forms within one
    chat (K11), so the expansion should exist before the keys do.
-6. **`reportFailure`: retrieval failure is a failure, not a degradation.** A retrieval outage costs the
+5. **`reportFailure`: retrieval failure is a failure, not a degradation.** A retrieval outage costs the
    vector and text signals on every entry it was the only source for.
-7. **Suggester i18n, none of it started.** `ZIPF_EN` scores non-English function words as maximally
+6. **Suggester i18n, none of it started.** `ZIPF_EN` scores non-English function words as maximally
    rare, so the suggester should detect that its priors do not apply and stand down rather than invert.
    Accent variants belong here too (`Gérard`/`Gerard`), with a human in the loop.
-8. **Group weights, `(...)::N`.** A weight is per unit and a conjunction has one intent, but
+7. **Group weights, `(...)::N`.** A weight is per unit and a conjunction has one intent, but
    `? (copper pipe)::3` tokenizes to `(copper AND pipe) AND TERM("::3")` and the validator passes it.
    Essentially nothing on disk depends on the current reading (K12). Until it lands, a bare `::N` or
    `^N` term is a silently dead key of the same class as `~N`.
-9. **A firing-rate diagnostic for loose reference keys.** Reference entries are never cut, so a key
+8. **A firing-rate diagnostic for loose reference keys.** Reference entries are never cut, so a key
    that fires too easily costs budget on every turn it wins and nothing warns anybody. The Lab answers it
    for one text at a time; what is missing is the standing per-entry rate, beside the keyword audit. Not
    blocking: an over-firing reference entry is a budget cost, where a wrongly cut one is missing material.
-10. **A signal's within-scene SD varies by book**, and the two books `keys` costs are its extremes
+9. **A signal's within-scene SD varies by book**, and the two books `keys` costs are its extremes
     (F45). Standardisation divides by the scene's own SD, so a near-constant column has its few small
     differences amplified into large z against a slope fitted on other books. No use proposed; it is a
     property a book can be measured for, where curation is a label someone applies.
-11. **Reference is centred on the memory tier's centroid, and nothing has asked whether it should
+10. **Reference is centred on the memory tier's centroid, and nothing has asked whether it should
     be.** The memory centroid all but coincides with the collection's mean while the reference centroid
     sits well off it (F44), and cosine is the reference fit's largest coefficient. Candidates, none
     screened: a per-tier centroid, reference on raw cosine, or leaving it. Deferred deliberately —

@@ -28,6 +28,7 @@ eq(p.includeNames, true, 'ST world-info globals are carried, not guessed');
 eq('retrievalMode' in captureParams(s, {}), false, 'the capture records no retrieval mode');
 eq(p.allowWIScan, true, 'whether the Author\'s Note is in the scan is recorded, not assumed off');
 eq(captureParams(s, {}).allowWIScan, undefined, 'and an injector that does not say leaves it absent rather than guessing');
+eq(captureParams(s, {}).recursive, undefined, 'a capture predating the recursion fields leaves them absent; scene.mjs reads absent as off');
 eq('commonWordWeight' in p, false, 'no general-English down-weight is captured — BM25 no longer takes one');
 eq('suppressVectorKeys' in p, false, 'no key-suppression flag is captured — the takeover blanks every keyword-activating entry');
 
