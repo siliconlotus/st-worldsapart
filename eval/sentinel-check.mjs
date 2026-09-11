@@ -2,9 +2,8 @@
 // Also importable into ST (install-sentinel.mjs), for the half node cannot see: chips, tooltips, colours.
 import fs from 'node:fs';
 import { buildKeyPruneScan } from '../extension/keyword-audit.mjs';
-import { keywordScore, scanSegments, countKey, isRegexKey, activationAdds, makeWindowFor } from '../extension/matcher.mjs';
+import { keywordScore, scanSegments, countKey, countChatHits, activationAdds, makeWindowFor } from '../extension/matcher.mjs';
 import { buildKeyPruneScan as _pruneScan } from '../extension/keyword-audit.mjs';
-import { buildAutomaton, addMessageHits, fold } from '../extension/smartkeys.mjs';
 import { eq } from './metrics.mjs';
 
 const here = new URL('./fixtures/', import.meta.url);
@@ -15,23 +14,14 @@ const msgs = fs.readFileSync(new URL('sentinel-chat.jsonl', here), 'utf8').split
 const OPTS = {
     scanKeyword: true, scanVectorized: true, scanConstant: true, includeInactive: true,
     pruneUnattested: true, pruneCommon: true, pruneShort: true, pruneShared: true, pruneFragment: true,
-    ignoreProper: false, bookCommon: 0.5, minLength: 4, bookShared: 0.75,
+    ignoreProper: false, minLength: 4, bookShared: 0.75,
 };
 const RED = 'severe';
 const entries = Object.values(data.entries);
 const keys = [...new Set(entries.flatMap(e => e.key.map(k => String(k).trim())))];
 
-/** The chat scan exactly as the Studio's client path builds it. */
-const chatRate = () => {
-    const literals = keys.filter(k => !k.startsWith('?') && !isRegexKey(k));
-    const folded = [...new Set(literals.map(fold))];
-    const idxOf = new Map(folded.map((f, i) => [f, i]));
-    const aut = buildAutomaton(folded);
-    const counts = new Map();
-    for (const t of msgs) addMessageHits(aut, t, counts);
-    // Literals only, as scanChats does: a `?` key is left OUT of the map, not recorded as 0 — absent means unchecked.
-    return { messagesWith: new Map(literals.map(k => [k, counts.get(idxOf.get(fold(k))) ?? 0])), messages: msgs.length };
-};
+/** The chat scan through the function the Studio's client path calls. */
+const chatRate = () => countChatHits(keys, msgs);
 
 const verdicts = (chat, matchWindow = 'scan') => {
     const s = buildKeyPruneScan(data, OPTS, new Set(), { chatScan: chat, matchWindow });
@@ -60,8 +50,8 @@ eq(msgs.length, 11, 'the hidden message is dropped, as core and WA both drop it'
     eq(v.morning?.sev, RED, 'a common word the chat confirms fires broadly is severe');
     eq(v.mother?.sev !== RED, true, 'a common word the chat says is quiet stays a warning');
     eq(v['? thornwick brambleshaw'], undefined, 'at scan the query is attested by its own entry text');
-    const p = verdicts(chatRate(), 'paragraph')['? thornwick brambleshaw'];
-    eq(p?.why, 'never matches', 'a dead query says it evaluated false, claiming nothing about the chat');
+    eq(verdicts(chatRate(), 'paragraph')['? thornwick brambleshaw'], undefined,
+        'and at paragraph, where its own text cannot attest it, the chat does — the scan evaluates `?` keys too');
 }
 
 // --- the match window reaches the audit -------------------------------------------------------

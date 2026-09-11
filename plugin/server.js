@@ -19,7 +19,8 @@ import { getExtrasVector } from '../../src/vectors/extras-vectors.js';
 import { getMakerSuiteVector, getVertexVector } from '../../src/vectors/google-vectors.js';
 import { getConfigValue } from '../../src/util.js';
 import { scoreCollection, poolEntries, selectTopK } from './scoring.mjs';
-import { buildAutomaton, addMessageHits, fold } from './automaton.mjs';
+// Deployed flat beside this file from extension/ (fingerprint.mjs's manifest), so the server matches on the shipped matcher.
+import { countChatHits, setBoundaryMode } from './matcher.mjs';
 import { norm, corpusMean } from './vector.mjs';
 import { pluginFingerprint, PLUGIN_FILES } from './fingerprint.mjs';
 
@@ -196,8 +197,9 @@ export async function init(router) {
         }
     });
 
-    /** Counts of MESSAGES containing each literal key across chat histories, streamed line by line server-side (P1).
-     *  Body `{ keys: string[], chats: [{ dir, file }] }` (dir is the character directory), reply `{ counts, messages, scanned, missing }`. */
+    /** Counts of MESSAGES containing each key across chat histories, read line by line server-side so no chat crosses the
+     *  wire (P1). Every key kind: countChatHits is the shipped matcher, deployed beside this file.
+     *  Body `{ keys: string[], chats: [{ dir, file }], wordBoundary }` (dir is the character directory), reply `{ counts, messages, scanned, missing }`. */
     router.post('/scan-chats', async (request, response) => {
         try {
             const keys = Array.isArray(request.body?.keys) ? request.body.keys.map(String).filter(Boolean) : [];
@@ -205,11 +207,13 @@ export async function init(router) {
             if (!keys.length || !chats.length) {
                 return response.status(400).send({ error: 'keys and chats are required' });
             }
+            // The caller's setting, required: a default here would disagree with the browser silently.
+            // ponytail: boundaryMode is module-level in matcher.mjs and this handler awaits, so a second user's scan can
+            // land between the set and the count. Pass the mode through countKey before two tenants ever share an install.
+            const wordBoundary = String(request.body?.wordBoundary ?? '');
+            if (!wordBoundary) return response.status(400).send({ error: 'wordBoundary is required' });
+            setBoundaryMode(wordBoundary);
 
-            // Deduped by folded form: two keys can fold together, and the automaton indexes the list it is given.
-            const folded = [...new Set(keys.map(fold))];
-            const idxOf = new Map(folded.map((f, i) => [f, i]));
-            const automaton = buildAutomaton(folded);
             const totals = new Map();
             let messages = 0, scanned = 0, missing = 0;
 
@@ -220,23 +224,26 @@ export async function init(router) {
                 const full = path.join(request.user.directories.chats, dir, file.endsWith('.jsonl') ? file : `${file}.jsonl`);
                 if (!fs.existsSync(full)) { missing++; continue; }
                 scanned++;
+                const texts = [];
                 await new Promise(resolve => {
                     const rl = readline.createInterface({ input: fs.createReadStream(full), crlfDelay: Infinity });
                     rl.on('line', line => {
                         if (!line) return;
                         let text = '';
                         try { text = String(JSON.parse(line)?.mes ?? ''); } catch { return; }   // line 0 is metadata
-                        if (!text) return;
-                        messages++;
-                        addMessageHits(automaton, text, totals);
+                        if (text) texts.push(text);
                     });
                     rl.on('close', resolve);
                     rl.on('error', resolve);   // an unreadable chat is skipped, not fatal
                 });
+                // One file at a time, then merged: a hit is per message, so where the scan is split cannot change the total.
+                const got = countChatHits(keys, texts);
+                for (const [k, n] of got.messagesWith) totals.set(k, (totals.get(k) ?? 0) + n);
+                messages += got.messages;
             }
 
             const counts = {};
-            for (const k of keys) counts[k] = totals.get(idxOf.get(fold(k))) ?? 0;
+            for (const k of keys) counts[k] = totals.get(k) ?? 0;
             return response.send({ counts, messages, scanned, missing });
         } catch (error) {
             console.error('Worlds Apart: /scan-chats failed', error);

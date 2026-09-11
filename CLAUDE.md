@@ -217,7 +217,7 @@ matched expression is worth goes in the second.
 
 `matcher.mjs`, `entity.mjs`, `query.mjs`, `keyedit.mjs`, `keyword-audit.mjs`, `keyword-suggest.mjs`, `lab.mjs`, `layout.mjs`,
 `selection.mjs`, `delivery.mjs`, `smartkeys.mjs`, `sort.mjs`, `lexical.mjs`, `relevance.mjs` and
-`plugin/*.mjs` are ST-free and node-importable, so the evals exercise the shipped code. Settings and ST
+`automaton.mjs` and `plugin/*.mjs` are ST-free and node-importable, so the evals exercise the shipped code. Settings and ST
 globals are injected by the caller, never imported. The ST/DOM half is `worldsapart.js`,
 `keyword-tools.mjs`, `studio.mjs`, `ui-widgets.mjs`, `capture-ui.mjs`. `state.mjs` binds ST's store
 rather than importing it, so the harness can read the shipped value of every knob.
@@ -256,3 +256,8 @@ deploy prints the fingerprint.
 **`PLUGIN_FILES` is the whole contents, not just what gets copied.** The deploy removes any top-level
 file the manifest no longer names, so retiring a plugin module is one edit to `fingerprint.mjs`.
 Directories are left alone.
+
+**The matcher deploys into the plugin, so editing `matcher.mjs`, `smartkeys.mjs` or `automaton.mjs`
+needs a redeploy too.** The manifest names them with `../extension/` paths and copies them FLAT beside
+`index.js`: they may import each other only by bare `./name`, and nothing else in `extension/`.
+`eval/plugin-deploy-check.mjs` is what fails when that breaks — the server would otherwise fail at load.

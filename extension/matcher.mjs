@@ -1,7 +1,7 @@
 // matcher.mjs — countKey and everything a match verdict rests on: the fold, boundaries, regex keys, SmartKeys
 // dispatch, secondary keys, the scan window, stage-2 activation. ST-free; core parity is asserted in core-matcher-check, worth in matcher-check.
 
-import { cachedCount, evaluate, evaluateAst, evaluateSmartKey, fold, normalizeOrthography, parse, primeScan, synthesizeSecondary, tokenize, validateSmartKey } from './smartkeys.mjs';
+import { addMessageHits, buildAutomaton, cachedCount, createScanScope, evaluate, evaluateAst, evaluateSmartKey, fold, normalizeOrthography, parse, primeScan, synthesizeSecondary, tokenize, validateSmartKey } from './smartkeys.mjs';
 
 export function escapeRegex(str) { return String(str).replace(/[.*+?^${}()|[\]\\]/g, '\\$&'); }
 
@@ -295,6 +295,31 @@ export const foldedHay = (text, caseSensitive) => {
     if (hay !== foldMemoIn) { foldMemoIn = hay; foldMemoOut = fold(hay); }
     return foldMemoOut;
 };
+
+/** MESSAGES containing each key, never occurrences — the Studio's chat evidence, and the shape buildKeyPruneScan's
+ *  `chatScan` takes. Literals go through one automaton pass; a `?` or `/re/` key is evaluated per message, under its
+ *  own flags rather than an entry's. `messages` may be any iterable, so the server route streams a chat file into it.
+ *  Merge two results by summing both fields: a hit is per message, so the split point cannot matter. */
+export function countChatHits(keys, messages) {
+    const all = [...new Set(keys.map(k => String(k ?? '').trim()).filter(Boolean))];
+    const isLiteral = k => !k.startsWith('?') && !isRegexKey(k);
+    const literals = all.filter(isLiteral), rest = all.filter(k => !isLiteral(k));
+    const folded = [...new Set(literals.map(fold))];
+    const idxOf = new Map(folded.map((f, i) => [f, i]));
+    const aut = buildAutomaton(folded);
+    const counts = new Map();
+    const messagesWith = new Map(rest.map(k => [k, 0]));
+    // Its own scope: the live one carries the active books' vocabulary, and a whole book's keys would swamp it.
+    const scope = createScanScope();
+    let seen = 0;
+    for (const t of messages) {
+        seen++;
+        addMessageHits(aut, t, counts);
+        for (const k of rest) if (countKey(k, t, false, false, scope) > 0) messagesWith.set(k, messagesWith.get(k) + 1);
+    }
+    for (const k of literals) messagesWith.set(k, counts.get(idxOf.get(fold(k))) ?? 0);
+    return { messagesWith, messages: seen };
+}
 
 /** Occurrences of `key` — a keyword, /regex/flags, or a `?` SmartKey, which returns its weight — following core's matchKeys
  *  for flags and regex precedence and diverging on orthography, which normalizeOrthography folds and core does not.

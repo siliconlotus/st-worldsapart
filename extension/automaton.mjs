@@ -1,5 +1,5 @@
-// automaton.mjs — the Aho-Corasick literal matcher and the text fold it matches on. No imports; shared by the
-// extension (via smartkeys.mjs) and the server plugin. One copy, or the browser and the server disagree.
+// automaton.mjs — the Aho-Corasick literal matcher and the text fold it matches on. No imports; deployed into the
+// server plugin alongside matcher.mjs, so both halves match on one copy of the fold.
 
 const APOSTROPHES = /[‘’‚‛ʼʹ´`′‹›]/g;
 const DOUBLE_QUOTES = /[“”„‟″ʺ«»]/g;

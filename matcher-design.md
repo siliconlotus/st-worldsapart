@@ -196,7 +196,7 @@ concatenating, not an evaluator mode: `scanWindow` returns segments and `scan` i
 - Match sources and injects are each their own segment, so a conjunction cannot span the seam.
   `segment()` is idempotent.
 - Split, do not track positions — it costs essentially nothing over one join (K5), so `scanAutomaton`
-  keeps its counts-Map return and `plugin/automaton.mjs` never changes.
+  keeps its counts-Map return and `extension/automaton.mjs` never changes.
 - The audit segments the same way, so `unattested` means not attested in any segment. df still counts
   entries, not segments.
 - Paragraph splits on `\n[ \t]*\n`; a message with single newlines only degenerates to
@@ -224,7 +224,9 @@ with its content from every message before WA reads it — `matcher.mjs` `dropTa
 - The parent is found by balance, not by parsing: scanning forward, the first close with no matching
   open inside the span ends the element. A stray close tag is left alone; same-tag nesting is tracked.
 - Not the Studio's chat-rate scan, which counts key hits across whole chat files through the plugin
-  route.
+  route: `countChatHits` runs there, on the deployed matcher, so a chat is read where it lives and only
+  the counts cross the wire. It falls back to the browser when the plugin is absent, or when the scan
+  includes the open chat, which is not on disk.
 
 ### Witness spans
 
@@ -445,11 +447,11 @@ times. `score` is what the key contributed, and is where weights and saturation 
 settings. A bounded curve stops discriminating above a modest count (K8).
 
 **No frequency discount, deliberately.** A ubiquitous key is an author declaration; a badly chosen one
-is reported by the audit, where the author can act on it, and an entry whose key fires broadly but whose
-content does not fit still ranks low on the other signals. A discount here would be that judgement
-taken a second time, silently.
+is reported by the audit against the chat, where the author can act on it, and an entry whose key fires
+broadly but whose content does not fit still ranks low on the other signals. A discount here would be
+that judgement taken a second time, silently.
 
-**Sticky is audited like any other entry** — the whole English list, no book-common reprieve. `sticky`
+**Sticky is audited like any other entry** — the whole English list, no breadth reprieve. `sticky`
 declares only that an entry persists once fired, a claim about duration and not breadth, so a broad key
 there latches on the wrong turn and holds. Exempting it would hide only a handful of flags (K12).
 
@@ -797,36 +799,34 @@ Ordered by whether a user can see the difference.
    on reasoning rather than evidence: `world_info_recursive` is off here and no book in the corpus
    exercises it, so it waits on a recursion-using book.
 2. **Proximity** (`(…)~N`). Witness spans shipped, so the display it needs exists.
-3. **`?` and `/re/` keys in `scanChats`**, so a chat-rate flag can see them; the audit's chat evidence
-   counts literals only.
-4. **`chat common` as a raising flag** — `KEY_CHAT_COMMON` can only confirm another flag. It needs the
+3. **`chat common` as a raising flag** — `KEY_CHAT_COMMON` can only confirm another flag. It needs the
    structural exclusion (constant/sticky) decided and the 20% re-read against what survives.
-5. **Key-side variant expansion**: hyphen ↔ space, since compounds are written both ways and prose
+4. **Key-side variant expansion**: hyphen ↔ space, since compounds are written both ways and prose
    picks per term. Quoting suppresses generation.
-6. **Orthographic expansion for regex keys**, in that pass and not the fold — a pattern is code, so
+5. **Orthographic expansion for regex keys**, in that pass and not the fold — a pattern is code, so
    rewriting `…` to `...` turns a literal into three wildcards. Only 1→1 substitutions are generated
    (the apostrophe family, the double-quote family, en-dash ↔ hyphen, nbsp ↔ space): a one-character
    swap splices into a class as an ordinary member, where `a--?b` needs a parse a substitution pass
    does not have. Em-dash and ellipsis are the author's. Real chats mix apostrophe forms within one
    chat (K11), so the expansion should exist before the keys do.
-7. **`reportFailure`: retrieval failure is a failure, not a degradation.** A retrieval outage costs the
+6. **`reportFailure`: retrieval failure is a failure, not a degradation.** A retrieval outage costs the
    vector and text signals on every entry it was the only source for.
-8. **Suggester i18n, none of it started.** `ZIPF_EN` scores non-English function words as maximally
+7. **Suggester i18n, none of it started.** `ZIPF_EN` scores non-English function words as maximally
    rare, so the suggester should detect that its priors do not apply and stand down rather than invert.
    Accent variants belong here too (`Gérard`/`Gerard`), with a human in the loop.
-9. **Group weights, `(...)::N`.** A weight is per unit and a conjunction has one intent, but
+8. **Group weights, `(...)::N`.** A weight is per unit and a conjunction has one intent, but
    `? (copper pipe)::3` tokenizes to `(copper AND pipe) AND TERM("::3")` and the validator passes it.
    Essentially nothing on disk depends on the current reading (K12). Until it lands, a bare `::N` or
    `^N` term is a silently dead key of the same class as `~N`.
-10. **A firing-rate diagnostic for loose reference keys.** Reference entries are never cut, so a key
-    that fires too easily costs budget on every turn it wins and nothing warns anybody. The Lab answers it
-    for one text at a time; what is missing is the standing per-entry rate, beside the keyword audit. Not
-    blocking: an over-firing reference entry is a budget cost, where a wrongly cut one is missing material.
-11. **A signal's within-scene SD varies by book**, and the two books `keys` costs are its extremes
+9. **A firing-rate diagnostic for loose reference keys.** Reference entries are never cut, so a key
+   that fires too easily costs budget on every turn it wins and nothing warns anybody. The Lab answers it
+   for one text at a time; what is missing is the standing per-entry rate, beside the keyword audit. Not
+   blocking: an over-firing reference entry is a budget cost, where a wrongly cut one is missing material.
+10. **A signal's within-scene SD varies by book**, and the two books `keys` costs are its extremes
     (F45). Standardisation divides by the scene's own SD, so a near-constant column has its few small
     differences amplified into large z against a slope fitted on other books. No use proposed; it is a
     property a book can be measured for, where curation is a label someone applies.
-12. **Reference is centred on the memory tier's centroid, and nothing has asked whether it should
+11. **Reference is centred on the memory tier's centroid, and nothing has asked whether it should
     be.** The memory centroid all but coincides with the collection's mean while the reference centroid
     sits well off it (F44), and cosine is the reference fit's largest coefficient. Candidates, none
     screened: a per-tier centroid, reference on raw cosine, or leaving it. Deferred deliberately —
@@ -836,8 +836,9 @@ Ordered by whether a user can see the difference.
 
 ## Standing caveats
 
-- **`plugin/` changes need `node deploy-plugin.mjs` and an ST restart.** The fold lives in
-  `plugin/automaton.mjs`, so orthography and NFC are not live on the server half until then.
+- **`plugin/` changes need `node deploy-plugin.mjs` and an ST restart** — and so does a change to
+  `matcher.mjs`, `smartkeys.mjs` or `automaton.mjs`, which the manifest deploys into the plugin so the
+  server matches through the shipped `countKey`. Until the redeploy the two halves match differently.
 - **The check suite is run by exit code.** `eq()` sets `process.exitCode`, so a failed assertion and a
   thrown error are the same signal: `for f in eval/*-check.mjs; do node "$f" || …; done`. Grepping for
   `^FAIL` alone misses thrown errors.

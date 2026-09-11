@@ -26,7 +26,7 @@ for (const [from, to] of PLUGIN_FILES) {
     const dst = path.join(DEST, to);
     fs.rmSync(dst, { force: true });
     fs.copyFileSync(src, dst);
-    console.log(`copied  plugin/${from}  ->  plugins/worlds-apart/${to}`);
+    console.log(`copied  ${path.relative(SRC, src)}  ->  plugins/worlds-apart/${to}`);
 }
 
 fs.writeFileSync(path.join(DEST, 'package.json'), PACKAGE_JSON);

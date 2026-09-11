@@ -2,7 +2,7 @@
 // it. Read at stage 3 only (content-lexical): it can reweight what an activated entry scores, never admit one.
 
 import { tokenize } from './lexical.mjs';
-import { normalizeOrthography } from '../plugin/automaton.mjs';
+import { normalizeOrthography } from './automaton.mjs';
 import { properNounsOf } from './relevance.mjs';
 
 /** Every term in an entry's keys or title, lowercased. Do not "fix" the missing keys: at the production call site the takeover has already blanked them, and the gazetteer source measured flat, empty included (R20). */

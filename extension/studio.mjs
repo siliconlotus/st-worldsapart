@@ -12,9 +12,9 @@ import { SORT_FNS, SORT_LABELS, normPresentation, presentationLabel, reconcileTi
 import { buildKeyPruneScan, llmKeyCandidates } from './keyword-tools.mjs';
 import { SEVERE, STUDIO_PRUNE_OPTS } from './keyword-audit.mjs';
 import { buildKeySuggest, classifyLlmCand, STUDIO_SUGGEST_OPTS } from './keyword-suggest.mjs';
-import { buildAutomaton, addMessageHits, fold, validateSmartKey } from './smartkeys.mjs';
+import { validateSmartKey } from './smartkeys.mjs';
 import { findOrphanBindings } from './bindings.mjs';
-import { WI_LOGIC, dropTags, hasPromoteDecorator, isRegexKey, scanSegments, secondaryKeys, splitKeys, usableKeys, wholeWordAdvice, withPromote } from './matcher.mjs';
+import { WI_LOGIC, countChatHits, dropTags, hasPromoteDecorator, isRegexKey, scanSegments, secondaryKeys, splitKeys, usableKeys, wholeWordAdvice, withPromote } from './matcher.mjs';
 import { labScan, runBook } from './lab.mjs';
 import { addVariant, deleteKey, hasKey, keyHolders, kwNorm, renameKeyOn, replaceKey } from './keyedit.mjs';
 
@@ -283,8 +283,7 @@ export async function lorebookStudio(preferredBook = null, open = null) {
                 check(studioOpts, 'scanConstant', 'Scan Constant (🔵)'),
                 check(studioOpts, 'includeInactive', 'Include inactive entries'),
                 check(studioOpts, 'pruneUnattested', 'Flag keys not in entry text (aliases and typos)'),
-                check(studioOpts, 'pruneCommon', 'Flag english-common and book-common keys'),
-                num(studioOpts, 'bookCommon', '↳ book common: in >', '% of entry TEXT', { min: 1, max: 100, scale: 100 }),
+                check(studioOpts, 'pruneCommon', 'Flag english-common keys'),
                 num(studioOpts, 'chatCommon', '↳ chat common: in >', '% of MESSAGES', { min: 1, max: 100, scale: 100 }),
                 check(studioOpts, 'pruneShared', 'Flag book-shared keys'),
                 num(studioOpts, 'bookShared', '↳ book shared: LISTED by >', '% of entries', { min: 1, max: 100, scale: 100 }),
@@ -1716,38 +1715,73 @@ export async function lorebookStudio(preferredBook = null, open = null) {
         }
     };
     // --- Cleanup tab ---
-    /** Confirms which chats to scan, pre-ticked by binding; global candidates and the open chat start unticked. */
+    /** Confirms which chats to scan, grouped by card and pre-ticked by binding; global candidates and the open chat start unticked. */
     const pickChats = async candidates => {
         const wrap = document.createElement('div');
-        wrap.style.cssText = 'text-align:left;max-width:44rem;';
+        // Scrolls: the shift-click list is every chat on the install, which is hundreds of rows on a real one (P1).
+        wrap.style.cssText = 'text-align:left;max-width:44rem;max-height:60vh;overflow-y:auto;';
         wrap.innerHTML = `<h3 style="margin:0 0 0.3em;">Check keys against which chats?</h3>`
             + `<small style="display:block;opacity:0.75;margin-bottom:0.6em;">Keys flagged “not in entry text” are checked against these. A key that fires somewhere is doing its job — usually an alias your prose never spells out. Only the chats you tick are read.</small>`;
-        const rows = candidates.map((c, i) => {
-            const lab = document.createElement('label');
-            lab.className = 'checkbox_label';
-            lab.style.cssText = 'display:flex;gap:0.5em;align-items:baseline;margin:0.15em 0;';
-            const cb = document.createElement('input');
-            cb.type = 'checkbox';
-            cb.checked = !!c.bound;   // bound chats on; global candidates and the merely-open one off
-            cb.dataset.i = String(i);
-            const txt = document.createElement('span');
-            txt.innerHTML = `${escapeHtml(c.file.replace(/\.jsonl$/, ''))} <small style="opacity:0.6;">· ${escapeHtml(String(c.char || ''))} · ${escapeHtml(String(c.size))} · ${escapeHtml(c.why)}</small>`;
-            lab.append(cb, txt);
-            wrap.append(lab);
-            return cb;
+        // Grouped by card, keyed on the avatar: two cards can carry the same name, and a chat belongs to the file it lives beside.
+        const groups = new Map();
+        const keyFor = c => {
+            if (c.avatar) return c.avatar;
+            // The open chat carries no avatar; it joins its own card's group rather than forming a second one under the same name.
+            for (const [k, g] of groups) if (g.char === c.char) return k;
+            return c.char || '';
+        };
+        candidates.forEach((c, i) => {
+            const k = keyFor(c);
+            if (!groups.has(k)) groups.set(k, { char: c.char, items: [] });
+            groups.get(k).items.push({ c, i });
         });
+        // Nothing is pre-ticked in the all list: binding is what makes a chat this book's evidence, and there it means nothing.
+        const preTick = c => !!c.bound && !candidates.all;
+        const rows = [], syncers = [];
+        // Cards holding something pre-ticked first, so the shift-click list does not open on a wall of unrelated cards.
+        for (const g of [...groups.values()].sort((a, b) => Number(b.items.some(x => x.c.bound)) - Number(a.items.some(x => x.c.bound)))) {
+            const det = document.createElement('details');
+            det.style.cssText = 'margin:0.15em 0;';
+            const sum = document.createElement('summary');
+            sum.style.cssText = 'cursor:pointer;user-select:none;';
+            det.append(sum);
+            const boxes = g.items.map(({ c, i }) => {
+                const lab = document.createElement('label');
+                lab.className = 'checkbox_label';
+                lab.style.cssText = 'display:flex;gap:0.5em;align-items:baseline;margin:0.15em 0 0.15em 1.2em;';
+                const cb = document.createElement('input');
+                cb.type = 'checkbox';
+                cb.checked = preTick(c);   // bound chats on; global candidates and the merely-open one off
+                cb.dataset.i = String(i);
+                const txt = document.createElement('span');
+                txt.innerHTML = `${escapeHtml(c.file.replace(/\.jsonl$/, ''))} <small style="opacity:0.6;">· ${escapeHtml(String(c.size))} · ${escapeHtml(c.why)}</small>`;
+                lab.append(cb, txt);
+                det.append(lab);
+                rows.push(cb);
+                return cb;
+            });
+            // Closed, except a card holding a pre-ticked chat: what the scan is about to read is never hidden behind a twisty.
+            det.open = g.items.some(({ c }) => preTick(c));
+            const sync = () => {
+                const on = boxes.filter(b => b.checked).length;
+                sum.innerHTML = `${escapeHtml(String(g.char || '—'))} <small style="opacity:0.6;">· ${boxes.length} chat${boxes.length === 1 ? '' : 's'}${on ? ` · ${on} selected` : ''}</small>`;
+            };
+            syncers.push(sync); sync();
+            wrap.append(det);
+        }
         const tot = document.createElement('div');
         tot.style.cssText = 'margin-top:0.6em;opacity:0.8;font-size:0.9em;';
         const syncTot = () => {
             const on = rows.filter(cb => cb.checked).length;
             tot.textContent = `${on} chat(s) selected`;
+            for (const s of syncers) s();
         };
         rows.forEach(cb => cb.addEventListener('change', syncTot));
         wrap.append(tot); syncTot();
-        if (candidates.isGlobal) {
+        if (candidates.isGlobal && !candidates.all) {
             const g = document.createElement('small');
             g.style.cssText = 'display:block;opacity:0.75;margin-top:0.4em;';
-            g.textContent = 'This book is globally active, so it reaches every chat — all of them are listed, none pre-ticked. Tick only the ones whose history is relevant.';
+            g.textContent = 'This book is globally active, so it reaches every chat.';
             wrap.append(g);
         }
         const pop = new Popup(wrap, POPUP_TYPE.CONFIRM, '', { okButton: 'Scan selected', cancelButton: 'Cancel', wide: false });
@@ -1774,7 +1808,8 @@ export async function lorebookStudio(preferredBook = null, open = null) {
         return chatIndex;
     };
 
-    const findBookChats = async () => {
+    /** Chats this book could plausibly be checked against; `all` drops the binding filter and lists every chat on the install. */
+    const findBookChats = async (all = false) => {
         // A book binds three ways: chat (chat_metadata.world_info), character (data.extensions.world), global (selected_world_info, never pre-ticked).
         const isGlobal = (selected_world_info ?? []).includes(selected);
         const out = [];
@@ -1782,13 +1817,14 @@ export async function lorebookStudio(preferredBook = null, open = null) {
             const charBound = c.charWorld === selected;
             for (const ch of c.chats) {
                 const chatBound = ch?.chat_metadata?.world_info === selected;
-                if (!chatBound && !charBound && !isGlobal) continue;
+                if (!chatBound && !charBound && !isGlobal && !all) continue;
                 out.push({ char: c.char, avatar: c.avatar, file: ch.file_name, size: ch.file_size ?? '?',
-                    why: chatBound ? 'chat-bound' : charBound ? 'character-bound' : 'global (book is always active)',
+                    why: chatBound ? 'chat-bound' : charBound ? 'character-bound' : isGlobal ? 'global (book is always active)' : 'not bound',
                     bound: chatBound || charBound });
             }
         }
         out.isGlobal = isGlobal;
+        out.all = all;
         return out;
     };
 
@@ -1805,49 +1841,55 @@ export async function lorebookStudio(preferredBook = null, open = null) {
 
     /** Scans the chosen chats and installs the counts — the one gatherer for the picker and the audit; returns a summary, no toast or repaint. */
     const scanChats = async (picked, label) => {
-        // Literals only: one Aho-Corasick pass over folded literals, so a `?` or /regex/ key is omitted (reads as "not checked"), never reported absent.
-        const keys = bookKeys().filter(k => !k.startsWith('?') && !isRegexKey(k));
+        const keys = bookKeys();
         if (!keys.length || !picked?.length) return null;
 
-        // Plugin route first: it scans where the files live and returns counts only.
-        const onDisk = picked.filter(c => !c.open && c.avatar);
-        if (runState.pluginAvailable && onDisk.length === picked.length) {
+        const totals = new Map(keys.map(k => [k, 0]));
+        let seen = 0, via = '';
+        // Results merge by summing both fields (countChatHits), so the two routes can split the picked chats between them.
+        const add = got => { for (const [k, n] of got.messagesWith) totals.set(k, (totals.get(k) ?? 0) + n); seen += got.messages; };
+
+        // Plugin route for whatever is on disk: it runs this same countChatHits where the files live and returns counts
+        // only, so a 25MB chat never crosses the wire. The open chat has no file, so it is always the browser's.
+        let onDisk = picked.filter(c => !c.open && c.avatar);
+        if (runState.pluginAvailable && onDisk.length) {
             const r = await fetch('/api/plugins/worlds-apart/scan-chats', {
                 method: 'POST', headers: getRequestHeaders(),
-                body: JSON.stringify({ keys, chats: onDisk.map(c => ({ dir: c.avatar.replace(/\.png$/, ''), file: c.file })) }),
+                body: JSON.stringify({ keys, wordBoundary: settings().wordBoundary, chats: onDisk.map(c => ({ dir: c.avatar.replace(/\.png$/, ''), file: c.file })) }),
             });
-            if (r.ok) {
-                const j = await r.json();
-                const seen = Number(j.messages) || 0;
-                // 0 messages means the route resolved no files; installing it would zero every key's share.
-                if (!seen) { console.warn('Worlds Apart: /scan-chats read 0 messages', j); return null; }
-                chatHits = new Map(keys.map(k => [k, Number(j.counts?.[k]) || 0]));
-                chatMsgs = seen;
-                chatName = label;
-                return { keys, live: [...chatHits.values()].filter(n => n > 0).length, via: 'server' };
+            const j = r.ok ? await r.json() : null;
+            // 0 messages means the route resolved no files; taking it would zero every key's share, so the browser retries them.
+            if (Number(j?.messages)) {
+                for (const k of keys) totals.set(k, Number(j.counts?.[k]) || 0);
+                seen = Number(j.messages);
+                via = 'server';
+            } else {
+                console.warn('Worlds Apart: /scan-chats returned nothing, falling back to client-side scan', j);
+                onDisk = [];
             }
-            console.warn('Worlds Apart: /scan-chats unavailable, falling back to client-side scan');
+        } else {
+            onDisk = [];
         }
 
+        const served = new Set(onDisk);
         const ctx = getContext();
         const msgs = [];
         for (const c of picked) {
+            if (served.has(c)) continue;
             const got = c.open
                 ? (ctx.chat ?? []).filter(m => m && !m.is_system).map(m => String(m.mes ?? '')).filter(Boolean)
                 : await fetchChatMessages(c);
             msgs.push(...got);
         }
-        if (!msgs.length) return null;
-        const folded = [...new Set(keys.map(fold))];
-        const idxOf = new Map(folded.map((f, i) => [f, i]));
-        const aut = buildAutomaton(folded);
-        const counts = new Map();
-        // Same accumulator the server route uses — a hit is a message, and the two must not drift.
-        for (const t of msgs) addMessageHits(aut, t, counts);
-        chatHits = new Map(keys.map(k => [k, counts.get(idxOf.get(fold(k))) ?? 0]));
-        chatMsgs = msgs.length;
+        if (msgs.length) {
+            add(countChatHits(keys, msgs));
+            via = via ? 'server + browser' : 'browser';
+        }
+        if (!seen) return null;
+        chatHits = totals;
+        chatMsgs = seen;
         chatName = label;
-        return { keys, live: [...chatHits.values()].filter(n => n > 0).length, via: 'client' };
+        return { keys, live: [...totals.values()].filter(n => n > 0).length, via };
     };
 
     /** Every chat BOUND to this book; excludes chats that qualify only because the book is global. */
@@ -1858,25 +1900,31 @@ export async function lorebookStudio(preferredBook = null, open = null) {
         return bound;
     };
 
-    const runChatScan = async () => {
+    const runChatScan = async (all = false) => {
         if (!scan) { toastr.info('Run the audit first.', 'Worlds Apart'); return; }
-        toastr.info('Finding chats that use this book…', 'Worlds Apart', { timeOut: 2000 });
-        const found = await findBookChats();
+        toastr.info(all ? 'Listing every chat…' : 'Finding chats that use this book…', 'Worlds Apart', { timeOut: 2000 });
+        const found = await findBookChats(all);
         // The open chat is offered too, unticked, for the case the metadata does not capture — never assumed.
         const ctx = getContext();
         const openName = String(ctx.chatId ?? '');
         if (openName && !found.some(f => f.file.startsWith(openName))) {
             found.push({ char: ctx.name2 ?? '', avatar: null, file: openName, size: `${(ctx.chat ?? []).length} msgs`, why: 'currently open', open: true });
         }
-        if (!found.length) { toastr.warning(`No chat uses "${selected}" — it is not bound to any chat or character, and not globally active. Bind it, or open a chat that uses it.`, 'Worlds Apart', { timeOut: 9000 }); return; }
-        if (!found.some(f => f.bound) && !found.isGlobal) { toastr.info(`"${selected}" is not bound to any chat; only the open one is offered.`, 'Worlds Apart', { timeOut: 6000 }); }
+        if (!found.length) {
+            toastr.warning(all
+                ? 'No chats found for any character on this install.'
+                : `No chat uses "${selected}" — it is not bound to any chat or character, and not globally active. Bind it, or open a chat that uses it, or shift-click to pick any chat.`,
+                'Worlds Apart', { timeOut: 9000 });
+            return;
+        }
+        if (!all && !found.some(f => f.bound) && !found.isGlobal) { toastr.info(`"${selected}" is not bound to any chat; only the open one is offered. Shift-click to pick from every chat.`, 'Worlds Apart', { timeOut: 6000 }); }
 
         const picked = await pickChats(found);
         if (!picked?.length) return;
         const label = picked.length === 1 ? picked[0].file.replace(/\.jsonl$/, '') : `${picked.length} chats`;
         const got = await scanChats(picked, label);
         if (!got) { toastr.warning('Those chats returned no messages.', 'Worlds Apart'); return; }
-        toastr.success(`${got.live} of ${got.keys.length} fire in "${label}" (${chatMsgs} messages${got.via === 'server' ? ', scanned server-side' : ''}).`, 'Worlds Apart', { timeOut: 6000 });
+        toastr.success(`${got.live} of ${got.keys.length} fire in "${label}" (${chatMsgs} messages, scanned ${got.via}-side).`, 'Worlds Apart', { timeOut: 6000 });
         afterChatScan(got.keys);
     };
 
@@ -2001,6 +2049,12 @@ export async function lorebookStudio(preferredBook = null, open = null) {
             b.title = cleanupShowAll ? 'List only the keys the audit flagged' : 'List every key on every visible entry, flagged or not';
             return b;
         };
+        const chatScanBtn = () => {
+            const b = barBtn(chatHits ? 'Re-check chats' : 'Check against chats',
+                ev => runChatScan(ev?.shiftKey).catch(e => { console.error('Worlds Apart: chat scan failed', e); toastr.error(String(e?.message ?? e), 'Worlds Apart'); }));
+            b.title = 'Scan the chats this book is bound to.\nShift-click to pick from every chat on this install instead.';
+            return b;
+        };
         const paintBar = () => {
             const on = allIds.filter(id => cleanupChecks.get(id)).length;
             const allOn = allIds.length > 0 && on === allIds.length;
@@ -2016,7 +2070,7 @@ export async function lorebookStudio(preferredBook = null, open = null) {
                 barBtn('Prune selected', pruneChecked, 'wa-bulk-danger'),
                 barBtn('Ignore selected', ignoreChecked),
                 showAllBtn(),
-                barBtn(chatHits ? 'Re-check chats' : 'Check against chats', () => runChatScan().catch(e => { console.error('Worlds Apart: chat scan failed', e); toastr.error(String(e?.message ?? e), 'Worlds Apart'); })),
+                chatScanBtn(),
             );
             if (chatHits) {
                 const note = document.createElement('span'); note.className = 'wa-bulk-count';

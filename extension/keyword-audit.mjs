@@ -7,14 +7,12 @@ import { countKey, escapeRegex, isRegexKey, secondaryKeys, segment, usableKeys }
 import { createScanScope, parse, primeScan, tokenize, validateSmartKey } from './smartkeys.mjs';
 
 
-export const KEY_BOOK_COMMON = 0.5;
-
-/** Below this many entries the df-based book-common flag is skipped; English-common still fires. */
-export const KEY_MIN_BOOK_COMMON_ENTRIES = 10;
+/** Below this many entries the df-based book-shared flag is skipped; English-common still fires. */
+export const KEY_MIN_SHARED_ENTRIES = 10;
 
 export const KEY_MIN_LENGTH = 4;
 
-/** Share of the book that may LIST a key before it is flagged: activation breadth, not KEY_BOOK_COMMON's firing rate. */
+/** Share of the book that may LIST a key before it is flagged: how many entries one match activates. */
 export const KEY_BOOK_SHARED = 0.75;
 
 /** Rare-vocabulary Jaccard at which two entries are reported near-duplicates. Advisory only: it colours, never pre-ticks (K14). */
@@ -125,11 +123,16 @@ export function buildKeyPruneScan(data, opts, ignoreSet, { caseSensitiveDefault 
         for (const c of contents) {
             const segments = segment([c], matchWindow);
             primeScan(allKeys, segments, scanScope);
+            // Case variants of one key (`Pack` and `pack`) share a cache slot when cs is off, and both would count this
+            // entry: df would exceed nBook and the ratio read over 100%.
+            const counted = new Set();
             for (const key of allKeys) {
+                const k = ck(key, cs, ww);
+                if (counted.has(k)) continue;
                 let n = 0;
                 for (const s of segments) n += countKey(key, s, cs, ww, scanScope);
                 if (!n) continue;
-                const k = ck(key, cs, ww);
+                counted.add(k);
                 let r = scanCache.get(k);
                 if (!r) scanCache.set(k, r = { df: 0, total: 0 });
                 r.df++; r.total += n;
@@ -168,7 +171,7 @@ export function buildKeyPruneScan(data, opts, ignoreSet, { caseSensitiveDefault 
     };
     const effCase = e => e.caseSensitive ?? caseSensitiveDefault;
     const effWhole = e => e.matchWholeWords ?? wholeWordsDefault;
-    // Priority: unusable, english common, unattested, book common, book shared, fragment, short.
+    // Priority: unusable, english common, unattested, book shared, fragment, short.
     const classify = (key, cs, ww) => {
         const k = String(key).trim();
         if (!k) return null;
@@ -184,13 +187,8 @@ export function buildKeyPruneScan(data, opts, ignoreSet, { caseSensitiveDefault 
             if (term) return { flag: 'english common', term, bookContent, chatRate };
         }
         if (bookContent === 0 && opts.pruneUnattested && !(literal && opts.ignoreProper && looksProper(k)) && !chatRate) return { flag: 'unattested', bookContent, literal, chatChecked: chatRate !== undefined };
-        if (nBook >= KEY_MIN_BOOK_COMMON_ENTRIES && bookContent / nBook > opts.bookCommon * 0.75 && opts.pruneCommon) return { flag: 'book common', bookContent };
-        if (nBook >= KEY_MIN_BOOK_COMMON_ENTRIES && !literal && opts.pruneCommon) {
-            const term = commonSmartKey(k, v => scan(v, cs, ww).df / nBook > opts.bookCommon * 0.75);
-            if (term) return { flag: 'book common', term, bookContent: scan(term, cs, ww).df };
-        }
         const bookListed = bookListedBy.get(k.toLowerCase()) ?? 0;
-        if (nBook >= KEY_MIN_BOOK_COMMON_ENTRIES && bookListed / nBook > opts.bookShared * 0.75 && opts.pruneShared) return { flag: 'book shared', bookContent, bookListed };
+        if (nBook >= KEY_MIN_SHARED_ENTRIES && bookListed / nBook > opts.bookShared * 0.75 && opts.pruneShared) return { flag: 'book shared', bookContent, bookListed };
         if (literal && opts.pruneFragment !== false && looksLikeFragment(k)) return { flag: 'fragment', bookContent };
         if (literal && k.length < opts.minLength && !ww && opts.pruneShort) return { flag: 'short', bookContent, clean: strictClean(k, cs), total: scan(k, cs, false).total };
         return null;
@@ -221,7 +219,6 @@ export function buildKeyPruneScan(data, opts, ignoreSet, { caseSensitiveDefault 
         if (p.flag === 'unattested') return '';
         if (p.flag === 'unusable') return SEVERE;
         if (p.flag === 'english common') return p.chatRate >= (opts.chatCommon ?? KEY_CHAT_COMMON) ? SEVERE : MODERATE;
-        if (p.flag === 'book common') return p.bookContent / nBook >= opts.bookCommon ? SEVERE : MODERATE;
         if (p.flag === 'book shared') return p.bookListed / nBook >= opts.bookShared ? SEVERE : MODERATE;
         if (p.flag === 'fragment') return SEVERE;
         const ratio = p.total ? p.clean / p.total : 0;
@@ -231,10 +228,10 @@ export function buildKeyPruneScan(data, opts, ignoreSet, { caseSensitiveDefault 
         const severity = severityOf(p);
         // A SmartKey or a pattern is not "absent from the text": it evaluated false everywhere.
         if (p.flag === 'unattested') {
-            return { text: !p.literal ? 'never matches' : (p.chatChecked ? 'not in entry text or chat' : 'not in entry text'), severity };
+            if (!p.literal) return { text: p.chatChecked ? 'never matches entry text or chat' : 'never matches', severity };
+            return { text: p.chatChecked ? 'not in entry text or chat' : 'not in entry text', severity };
         }
         if (p.flag === 'unusable') return { text: p.code ? `unusable — ${p.code}` : 'unusable', severity };
-        if (p.flag === 'book common') return { text: `book common${p.term ? ` · ${p.term}` : ''} (${Math.round(100 * p.bookContent / nBook)}%)`, severity };
         if (p.flag === 'english common') {
             const which = p.term ? ` · ${p.term}` : '';
             return { text: p.chatRate === undefined ? `english common${which}` : `english common${which} · ${Math.round(100 * p.chatRate)}% of chat`, severity };
@@ -284,5 +281,5 @@ export function buildKeyPruneScan(data, opts, ignoreSet, { caseSensitiveDefault 
     return { entries, nE, classifyEntry, reasonOf, defChecked, severityOf, effCase, effWhole, dupes, unusableKeysOf };
 }
 
-/** Every entry, every mode; the suggester's dfCeil sits under bookCommon so a suggested key is never one this would flag. */
-export const STUDIO_PRUNE_OPTS = { scanKeyword: true, scanVectorized: true, scanConstant: true, includeInactive: true, pruneUnattested: true, pruneCommon: true, pruneShort: true, pruneShared: true, pruneFragment: true, ignoreProper: false, bookCommon: KEY_BOOK_COMMON, minLength: KEY_MIN_LENGTH, bookShared: KEY_BOOK_SHARED, chatCommon: KEY_CHAT_COMMON };
+/** Every entry, every mode. */
+export const STUDIO_PRUNE_OPTS = { scanKeyword: true, scanVectorized: true, scanConstant: true, includeInactive: true, pruneUnattested: true, pruneCommon: true, pruneShort: true, pruneShared: true, pruneFragment: true, ignoreProper: false, minLength: KEY_MIN_LENGTH, bookShared: KEY_BOOK_SHARED, chatCommon: KEY_CHAT_COMMON };

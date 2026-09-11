@@ -1,6 +1,6 @@
 // relevance.mjs — stage 4's per-entry relevance prediction: the two features nothing else in the pipeline
 // computes, and the consumer that turns a fitted model file into E[credit] per entry. ST-free.
-import { normalizeOrthography } from '../plugin/automaton.mjs';
+import { normalizeOrthography } from './automaton.mjs';
 import { entryKey } from './content-lexical.mjs';
 import { tokenize } from './lexical.mjs';
 import { COMMON_WORDS } from '../plugin/commonwords.js';

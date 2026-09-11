@@ -1,9 +1,8 @@
-// Offline batch version of the Studio's keyword audit, on the same classifier (keyword-audit.mjs KEY_BOOK_COMMON) so the two never drift: per key, dfContent (entries whose content contains it) and bookListedBy (entries listing it); prunable when dead or in > BOOK_COMMON of entries. Shared triggers are never flagged.
+// Offline batch version of the Studio's keyword audit: per key, dfContent (entries whose content contains it) and bookListedBy (entries listing it); prunable when dead. Shared triggers are never flagged.
 // Usage:  node keyword-audit.mjs <index.json> <lorebook.json> [--json out.json]   (--json writes the flagged strings as a flat array, what scene.mjs dropKeys takes)
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { isRegexKey } from '../extension/matcher.mjs';
 // The threshold has an authoritative home; a restated 0.50 here is how this and the in-app audit drift.
-import { KEY_BOOK_COMMON as BOOK_COMMON } from '../extension/keyword-audit.mjs';
 import { stInstall } from './scene.mjs';
 
 // The install is located, never named: an absolute path here is one machine's (scene.mjs stInstall).
@@ -48,7 +47,7 @@ const dfContent = key => {
     dfCache.set(kk, n);
     return n;
 };
-const prunable = key => !isRegex(key) && (dfContent(key) === 0 || dfContent(key) / nE > BOOK_COMMON);
+const prunable = key => !isRegex(key) && dfContent(key) === 0;
 
 let totalKeys = 0, flaggedKeys = 0, deadKeys = 0, commonKeys = 0;
 const flaggedEntries = [];
@@ -62,7 +61,7 @@ for (const r of entryRows) {
 flaggedEntries.sort((a, b) => b.flagged - a.flagged || a.title.localeCompare(b.title));
 
 const pct = n => `${(100 * n / totalKeys).toFixed(0)}%`;
-console.log(`corpus: ${nE} entries, ${totalKeys} keys  (prune = dead, or in >${BOOK_COMMON * 100}% of entries' content)`);
+console.log(`corpus: ${nE} entries, ${totalKeys} keys  (prune = dead)`);
 console.log(`prunable keys: ${flaggedKeys} (${pct(flaggedKeys)}) — dead ${deadKeys}, too-common ${commonKeys}`);
 console.log(`\nENTRIES WITH FLAGGED KEYS (${flaggedEntries.length} of ${entryRows.length}):`);
 for (const e of flaggedEntries) {

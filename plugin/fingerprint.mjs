@@ -1,9 +1,11 @@
 // fingerprint.mjs — content fingerprint of the deployed server plugin, so a stale /plugins copy is detectable.
 
-/** Every deployed plugin file as [source name, deployed name] — the single manifest: deploy-plugin.mjs copies these and both fingerprint sides hash them in this order. */
+/** Every deployed plugin file as [source path relative to plugin/, deployed name] — the single manifest: deploy-plugin.mjs copies these and both fingerprint sides hash them in this order. The matcher's three modules deploy FLAT, which is why they import each other by bare './name'. */
 export const PLUGIN_FILES = [
     ['scoring.mjs', 'scoring.mjs'],
-    ['automaton.mjs', 'automaton.mjs'],
+    ['../extension/automaton.mjs', 'automaton.mjs'],
+    ['../extension/smartkeys.mjs', 'smartkeys.mjs'],
+    ['../extension/matcher.mjs', 'matcher.mjs'],
     ['vector.mjs', 'vector.mjs'],
     ['commonwords.js', 'commonwords.js'],
     ['fingerprint.mjs', 'fingerprint.mjs'],

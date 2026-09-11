@@ -1,6 +1,6 @@
-// lexical.mjs — tokenization and BM25 over chunk texts. Pure; the fold is the matcher's (plugin/automaton.mjs),
+// lexical.mjs — tokenization and BM25 over chunk texts. Pure; the fold is the matcher's (extension/automaton.mjs),
 // so both sides tokenize identically.
-import { fold } from '../plugin/automaton.mjs';
+import { fold } from './automaton.mjs';
 
 export const DEFAULT_K1 = 1.2, DEFAULT_B = 0.75;
 

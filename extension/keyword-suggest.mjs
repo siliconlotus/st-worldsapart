@@ -3,7 +3,7 @@
 import { COMMON_WORDS } from '../plugin/commonwords.js';
 import { ZIPF_EN, POS_VA, POS_VA_STRICT, POS_ADJ } from './zipf-en.js';
 import { buildAutomaton, scanAutomaton } from './smartkeys.mjs';
-import { FUNCTION_WORDS, KEY_BOOK_COMMON } from './keyword-audit.mjs';
+import { FUNCTION_WORDS } from './keyword-audit.mjs';
 
 // Curly apostrophes to straight for a ZIPF_EN lookup only (K14); the term keeps what it was written with.
 const tblKey = w => w.includes('’') ? w.replace(/’/g, "'") : w;
@@ -348,9 +348,8 @@ export function buildKeySuggest(data, opts) {
             if (edgeIllegal(ws)) continue;
             const df = DF.get(term) ?? 1;
             if (df / N > dfCeil) continue;
-            // Zero substring hits means the joined gram never occurs literally (folding bridged punctuation); the high side is the pruner's too-common line.
-            const ds = dfSubstr(term);
-            if (!ds || ds / N > KEY_BOOK_COMMON * 0.75) continue;
+            // Zero substring hits means the joined gram never occurs literally (folding bridged punctuation).
+            if (!dfSubstr(term)) continue;
             const n = term.split(' ').length;
             if (excludeShort && n === 1 && term.length <= 3 && !isAcr(term)) continue;
             if (!isAcr(term) && headBad(term)) continue;
@@ -387,6 +386,6 @@ export function buildKeySuggest(data, opts) {
     return { entries, N, perEntry, canon, dfSubstr, avoid, exampleCanon, exampleWords };
 }
 
-/** dfCeil sits just under the pruner's too-common line (KEY_BOOK_COMMON * 0.75) (S8); cap is a display budget, above the per-entry p75 (S9). */
+/** dfCeil is the share of entries a candidate may appear in (S8); cap is a display budget, above the per-entry p75 (S9). */
 export const STUDIO_SUGGEST_OPTS = { dfCeil: 0.35, maxN: 4, excludeDates: true, excludeShort: true, onlyActive: false, cap: 30, llmChunk: 5000 };
 

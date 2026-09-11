@@ -152,7 +152,7 @@ eq(countKey('? fire::3 XOR flood', 'a fire burns', false, false), 3, 'XOR still 
 
 {
     const data = { entries: { 0: { uid: 0, key: ['? moon mission', '? -apollo'], content: 'nothing relevant' } } };
-    const opts = { scanKeyword: true, scanVectorized: true, scanConstant: true, includeInactive: true, pruneUnattested: true, pruneCommon: true, pruneShort: true, ignoreProper: false, bookCommon: 0.5, minLength: 4 };
+    const opts = { scanKeyword: true, scanVectorized: true, scanConstant: true, includeInactive: true, pruneUnattested: true, pruneCommon: true, pruneShort: true, ignoreProper: false, minLength: 4 };
     const { classifyEntry } = buildKeyPruneScan(data, opts, new Set());
     eq(classifyEntry(data.entries[0]).map(f => f.flag).join(','), 'unattested,unusable', 'a dead query is flagged; a negation-only one is flagged unusable, not dead');
 }
@@ -163,10 +163,10 @@ eq(countKey('? fire::3 XOR flood', 'a fire burns', false, false), 3, 'XOR still 
     entries[1].content += ' By the door.';
     entries[1].key = ['/\\n/', '/zzznope/', '/by the door/i', 'x'];
     const opts = { scanKeyword: true, scanVectorized: true, scanConstant: true, includeInactive: true,
-        pruneUnattested: true, pruneCommon: true, pruneShort: true, pruneShared: true, ignoreProper: false, bookCommon: 0.5, bookShared: 0.5, minLength: 4 };
+        pruneUnattested: true, pruneCommon: true, pruneShort: true, pruneShared: true, ignoreProper: false, bookShared: 0.5, minLength: 4 };
     const { classifyEntry, reasonOf } = buildKeyPruneScan({ entries }, opts, new Set());
     const flags = new Map(classifyEntry(entries[1]).map(f => [String(f.key), f]));
-    eq(flags.get('/\\n/')?.flag, 'book common', 'a pattern that fires on every entry is flagged, like any ubiquitous key');
+    eq(flags.has('/\\n/'), false, 'a pattern that fires on every entry draws nothing: ubiquity in entry text is not a key defect');
     eq(flags.get('/zzznope/')?.flag, 'unattested', '...and one that fires nowhere is flagged dead');
     eq(reasonOf(flags.get('/zzznope/')).text, 'never matches', '...worded as evaluating false, not as absent text');
     eq(flags.has('/by the door/i'), false, 'a pattern that fires in exactly one entry draws nothing');
@@ -247,17 +247,17 @@ console.log('ok   SmartKey structural validation');
     entries[6].key = ['? the Marjorie'];      // AND: one selective term gates it
     const opts = { scanKeyword: true, scanVectorized: true, scanConstant: true, pruneUnattested: true,
         pruneCommon: true, pruneShort: true, pruneShared: true, pruneFragment: true,
-        minLength: 4, bookCommon: 0.5, bookShared: 0.5, ignoreProper: true };
+        minLength: 4, bookShared: 0.5, ignoreProper: true };
     const sc = buildKeyPruneScan({ entries }, opts, new Set(), { caseSensitiveDefault: false, wholeWordsDefault: false });
     const verdict = uid => { const f = sc.classifyEntry(entries[uid])[0]; return f ? `${f.flag}|${sc.reasonOf(f).text}` : ''; };
 
     eq(verdict(2), 'unattested|never matches', 'a query that evaluates false everywhere is flagged dead');
-    eq(verdict(1), verdict(3), 'a SmartKey and the equivalent plain key get the same df verdict');
-    eq(verdict(1), 'book common|book common (100%)', '...and that verdict is the df one, not a string one');
+    eq(verdict(1), verdict(3), 'a SmartKey and the equivalent plain key get the same verdict');
+    eq(verdict(1), '', '...and a key in every entry draws none, so the SmartKey is not judged as a string either');
     eq(verdict(4), 'english common|english common · the', 'a query reducing to a common word earns the English-common flag');
     eq(sc.classifyEntry(entries[5])[0]?.flag, 'english common', 'an alternation is as loose as its loosest branch');
     eq(sc.reasonOf(sc.classifyEntry(entries[5])[0]).text, 'english common · the', '...and the loose branch is named');
-    eq(sc.classifyEntry(entries[6])[0]?.flag, 'book common', 'a conjunction is as tight as its tightest conjunct');
+    eq(sc.classifyEntry(entries[6])[0], undefined, 'a conjunction is as tight as its tightest conjunct, so it earns no common flag');
     entries[7].key = ['? ^Mark'];
     entries[8].key = ['? Mark'];
     eq(sc.classifyEntry(entries[7])[0]?.flag !== 'english common', true, 'a case-sensitive capital cannot be the lower-case common word');

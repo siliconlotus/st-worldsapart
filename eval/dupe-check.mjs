@@ -4,7 +4,7 @@ import { eq } from './metrics.mjs';
 
 const OPTS = { scanKeyword: true, scanVectorized: true, scanConstant: true, includeInactive: true,
     pruneUnattested: false, pruneCommon: false, pruneShort: false, pruneShared: false, pruneFragment: false,
-    ignoreProper: false, bookCommon: 0.5, minLength: 4, bookShared: 0.75 };
+    ignoreProper: false, minLength: 4, bookShared: 0.75 };
 
 // Rare tokens only: the flag ignores anything the English table calls common, so filler must be rare too.
 const rare = (tag, n) => Array.from({ length: n }, (_, i) => `${tag}zzq${i}`).join(' ');

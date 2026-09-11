@@ -6,7 +6,7 @@ const { buildKeyPruneScan } = await import('../extension/keyword-audit.mjs');
 // One option set for every block below, so a block cannot silently differ.
 const opts = {
     scanKeyword: true, scanVectorized: true, scanConstant: true, includeInactive: true,
-    pruneUnattested: true, pruneCommon: true, pruneShort: true, ignoreProper: false, bookCommon: 0.5, minLength: 4,
+    pruneUnattested: true, pruneCommon: true, pruneShort: true, ignoreProper: false, minLength: 4,
 };
 
 const cfg = { k1: 1.2, caseSensitiveDefault: false, wholeWordsDefault: false };
@@ -92,6 +92,21 @@ console.log('ok   matchWindow: scan is the old behaviour, narrower settings scop
 }
 console.log('ok   the audit segments like the runtime, and literals are slice-invariant');
 
+// --- df counts ENTRIES, so two case variants of one key cannot both count the same entry
+{
+    // `Pack` and `pack` fold together when caseSensitive is off; before the guard both wrote to one cache slot.
+    const content = 'The pack gathers. Pack law is absolute.';
+    const entries = {};
+    for (let i = 0; i < 12; i++) entries[i] = { uid: i, key: ['Pack', 'pack'], content };
+    const s = buildKeyPruneScan({ entries }, { ...opts, pruneShared: true, bookShared: 0.75 }, new Set(), {});
+    const p = s.classifyEntry(entries[0]).find(x => x.key === 'Pack');
+    eq(p?.bookContent, 12, 'df is the entry count, not once per variant');
+    eq(p.bookContent <= 12, true, '...so it can never exceed the book');
+    // total is occurrences, and it feeds the short-key ratio: double-counting there mis-bands the severity.
+    eq(s.classifyEntry(entries[0]).find(x => x.key === 'pack')?.bookContent, 12, 'and the variant reads the same slot, not a second one');
+}
+console.log('ok   a key and its case variant count one entry once');
+
 // --- chat evidence reaches the CLASSIFIER, so reasonOf/severityOf carry it
 {
     const { KEY_CHAT_COMMON } = await import('../extension/keyword-audit.mjs');
@@ -132,6 +147,27 @@ console.log('ok   chat evidence reaches the classifier and conditions severity')
         'scan ran but skipped this key: claim no more than was checked');
 }
 console.log('ok   a key the chat scan never covered is not reported as chat-checked');
+
+// --- countChatHits covers `?` and /re/ keys, which the automaton pass cannot see
+{
+    const { countChatHits } = await import('../extension/matcher.mjs');
+    const msgs = ['The copper pipe burst', 'copper, but no plumbing', 'Colonel Vasquez called', 'nothing here'];
+    const got = countChatHits(['copper', '? copper pipe', '/vasqu[ei]z/i', '? zzznope'], msgs);
+    eq(got.messages, 4, 'the denominator is every message it was given');
+    eq(got.messagesWith.get('copper'), 2, 'a literal is still the automaton pass');
+    eq(got.messagesWith.get('? copper pipe'), 1, 'a SmartKey is evaluated per message, so both terms must share one');
+    eq(got.messagesWith.get('/vasqu[ei]z/i'), 1, 'a regex key is matched as a pattern');
+    eq(got.messagesWith.get('? zzznope'), 0, 'a query nothing satisfies is 0 — checked and silent, not absent from the map');
+
+    const book = { entries: { 0: { uid: 0, key: ['? zzznope'], content: 'Nothing relevant.' } } };
+    const why = chatScan => {
+        const sc = buildKeyPruneScan(book, opts, new Set(), { chatScan });
+        return sc.reasonOf(sc.classifyEntry(book.entries[0])[0]).text;
+    };
+    eq(why(undefined), 'never matches', 'a dead query claims only what was checked');
+    eq(why(got), 'never matches entry text or chat', '...and says so when the chat was checked too');
+}
+console.log('ok   the chat scan evaluates `?` and /re/ keys, not just literals');
 
 // --- a chat hit is one MESSAGE, not an occurrence (addMessageHits, shared by browser and plugin)
 {

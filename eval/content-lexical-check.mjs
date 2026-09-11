@@ -36,7 +36,7 @@ ok(pooled.docCount === 4, `the repeated entry chunked into separate documents ($
 ok(Math.abs((ps.get('B.1') ?? 0) - (ps.get('B.2') ?? 0)) < 1e-9,
     `identical chunks pool by MAX: saying it three times ties saying it once (${(ps.get('B.1') ?? 0).toFixed(4)} vs ${(ps.get('B.2') ?? 0).toFixed(4)})`);
 
-// --- the fold: BM25 tokenizes under the MATCHER's fold (plugin/automaton.mjs), not a private one ----
+// --- the fold: BM25 tokenizes under the MATCHER's fold (extension/automaton.mjs), not a private one ----
 const foldIdx = buildContentIndex([e(1, 'The Möbius spire hums over André’s quarter.')], CFG);
 ok(scoreContent(foldIdx, 'möbius spire').has('B.1'), 'an accented word matches its accented query instead of shattering');
 ok(scoreContent(foldIdx, `mo\u0308bius`).has(`B.1`), `NFD in the query matches NFC in the document (one encoding, one token)`);
