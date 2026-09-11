@@ -433,9 +433,6 @@ textarea.wa-entry-full.wa-tall { max-height: 62vh; }
 .wa-kw-sec .wa-mode { margin-right: 0.6em; align-self: flex-start; }
 /* Whitelisted (ignored) keys: purple so a deliberately-spared key reads apart from an unflagged one. */
 .wa-kw-ignored { border-color: #a879e0 !important; background: color-mix(in srgb, #a879e0 18%, transparent); }
-.wa-tray { margin: 2px 0 0; }
-.wa-tray-head { display: inline-flex; align-items: center; gap: 6px; cursor: pointer; opacity: 0.8; font-size: 0.9em; padding: 2px 0 6px; }
-.wa-tray-head:hover { opacity: 1; }
 /* Docked top drawer: full-width block below the header, columns so it stays shallow, divider beneath. */
 .wa-tray-panel { display: flex; flex-wrap: wrap; gap: 18px; padding: 8px 10px 10px; margin-bottom: 4px;
     border-top: 1px solid var(--SmartThemeBorderColor, rgba(255,255,255,0.15));

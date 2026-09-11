@@ -94,6 +94,7 @@ export async function lorebookStudio(preferredBook = null, open = null) {
         ?? attachedBookNames()[0] ?? null;
     let data = null;                 // loaded world-info for `selected`
     let scan = null;                 // buildKeyPruneScan result for `data` (keyword colouring)
+    const staleTerms = new Set();    // rowIds renamed since the audit: their verdict is the OLD term's, so it is not shown as live
     let suggest = null;              // buildKeySuggest result, built lazily on first ⚡/🪄
     let ignoreSet = new Set();       // per-book prune whitelist (shared with the prune popup)
     let studioOpts = { ...STUDIO_PRUNE_OPTS, ...(settings().studioScanOpts ?? {}) };
@@ -198,6 +199,10 @@ export async function lorebookStudio(preferredBook = null, open = null) {
     const save = () => { dirty = true; saveWorldInfo(selected, data, true); };
     const getSugg = uid => { let x = sugg.get(uid); if (!x) sugg.set(uid, x = { tfidf: [], llm: [] }); return x; };
     const rebuildScan = () => {
+        // Every term is judged below, so an edited row drops the false the edit forced and rejoins the pre-tick policy.
+        // Only those: a tick the user set is theirs, and survives a rescan on purpose.
+        for (const id of staleTerms) cleanupChecks.delete(id);
+        staleTerms.clear();
         scan = buildKeyPruneScan(data, studioOpts, ignoreSet, {
             matchWindow: settings().matchWindow,
             // Into the classifier, not painted on in Cleanup: the Explorer's chips colour from reasonOf/severityOf.
@@ -209,7 +214,7 @@ export async function lorebookStudio(preferredBook = null, open = null) {
     const bookKeys = () => [...new Set(Object.values(data?.entries ?? {})
         .flatMap(e => (Array.isArray(e.key) ? e.key : []).map(k => String(k).trim())).filter(Boolean))];
 
-    const clearChatScan = () => { chatHits = null; chatMsgs = 0; chatName = ''; chatNames = []; };
+    const clearChatScan = () => { chatHits = null; chatMsgs = 0; chatName = ''; chatNames = []; staleTerms.clear(); };
     // Repaints the entries carrying any of `keys`; classifyEntry reads ignoreSet live, so whitelisting needs no rescan.
     const rerenderKeys = keys => { const set = new Set(keys); for (const e of Object.values(data?.entries ?? {})) if ((Array.isArray(e.key) ? e.key : []).some(k => set.has(k))) renderEntry(e); };
 
@@ -231,15 +236,7 @@ export async function lorebookStudio(preferredBook = null, open = null) {
 
     // ⚙ Tool Settings tray: audit options, recommender knobs, this book's ignored terms.
     const renderTray = () => {
-        const wrap = document.createElement('div'); wrap.className = 'wa-tray';
-        const head = document.createElement('div'); head.className = 'wa-tray-head';
-        const chev = document.createElement('i'); chev.className = 'fa-solid fa-chevron-right wa-chevron' + (trayOpen ? ' wa-open' : '');
-        const lbl = document.createElement('span'); lbl.innerHTML = '<i class="fa-solid fa-gear"></i> Tool Settings';
-        head.append(chev, lbl);
-        head.addEventListener('click', () => { trayOpen = !trayOpen; refreshTray(); });   // swap only the tray, not the entry list
-        wrap.append(head);
-        if (!trayOpen) return wrap;
-
+        if (!trayOpen) return document.createElement('div');   // nothing mounted when closed
         const panel = document.createElement('div'); panel.className = 'wa-tray-panel';
         const check = (obj, key, label, after) => trayChk('wa-tray-opt', label, !!obj[key], v => { obj[key] = v; persistOpts(); after?.(); });
         const num = (obj, key, before, unit, opt, after) => {
@@ -305,10 +302,19 @@ export async function lorebookStudio(preferredBook = null, open = null) {
             ),
             col(`Ignored terms — ${ignoreSet.size}`, wl),
         );
-        wrap.append(panel);
-        return wrap;
+        return panel;
     };
     const refreshTray = () => { const fresh = renderTray(); if (trayEl?.isConnected) trayEl.replaceWith(fresh); trayEl = fresh; };
+    /** The tray's toggle, which both headers carry: the panel itself mounts below them. */
+    const trayBtn = () => {
+        const b = document.createElement('button'); b.type = 'button'; b.className = 'menu_button wa-filter';
+        b.title = 'Audit thresholds, recommender knobs and this book\'s ignored terms';
+        b.style.cssText = 'width:auto;padding:3px 8px;flex-shrink:0;';
+        b.innerHTML = '<i class="fa-solid fa-gear"></i>';
+        b.style.color = trayOpen ? ACCENT : '';
+        b.addEventListener('click', () => { trayOpen = !trayOpen; b.style.color = trayOpen ? ACCENT : ''; refreshTray(); });
+        return b;
+    };
 
     // 🌐 Global WI settings. Core's knobs are edited by driving core's own inputs, never by assigning the globals.
     const refreshGlobalTray = () => { const fresh = renderGlobalTray(); if (globalTrayEl?.isConnected) globalTrayEl.replaceWith(fresh); globalTrayEl = fresh; };
@@ -761,12 +767,23 @@ export async function lorebookStudio(preferredBook = null, open = null) {
         return { inp, finish };
     };
 
-    const editKeyInline = (e, oldKey, span, list = 'key') => {
+    /** `after` is the caller's repaint, handed the new term when one was written and null otherwise; the Explorer
+     *  redraws one entry row, the term tabs their whole list. */
+    const editKeyInline = (e, oldKey, span, list = 'key', after = null) => {
         inlineInput(span, (nv, ok) => {
             if (ok && nv && nv !== oldKey && !keyWriteOk(nv, list, e)) return false;
-            if (ok && nv && nv !== oldKey && renameKeyOn(e, oldKey, nv, list)) save();
-            renderEntry(e);
+            const renamed = ok && nv && nv !== oldKey && renameKeyOn(e, oldKey, nv, list);
+            if (renamed) save();
+            if (after) after(renamed ? nv : null); else renderEntry(e);
         }, { value: oldKey });
+    };
+
+    /** Runs an in-place rebuild without losing the reader's place: .wa-studio-entries is the scroller, and it is either
+     *  replaced or emptied, both of which reset scrollTop. Not for a book switch, where the top is the right answer. */
+    const keepScroll = fn => {
+        const at = document.querySelector('.wa-studio-entries')?.scrollTop ?? 0;
+        fn();
+        if (at) { const el = document.querySelector('.wa-studio-entries'); if (el) el.scrollTop = at; }
     };
 
     // Book-wide ops on a keyword chip, case-insensitive like core's default scan; primary keys only.
@@ -775,14 +792,14 @@ export async function lorebookStudio(preferredBook = null, open = null) {
         const hits = kwHits(key);
         if (hits.length > 1 && !await Popup.show.confirm(`Delete “${key}” from ${hits.length} entries?`, 'Removes the keyword everywhere it appears in this book.')) return;
         const touched = deleteKey(Object.values(data.entries), key);
-        if (touched) { save(); renderExplorer(); toastr.success(`Deleted “${key}” from ${touched} ${touched === 1 ? 'entry' : 'entries'}.`, 'Worlds Apart'); }
+        if (touched) { save(); keepScroll(renderExplorer); toastr.success(`Deleted “${key}” from ${touched} ${touched === 1 ? 'entry' : 'entries'}.`, 'Worlds Apart'); }
     };
     const replaceKeyEverywhere = async key => {
         const next = (await Popup.show.input('Replace keyword', `Replace “${key}” across all entries with:`, key))?.trim();
         if (!next || next === key) return;   // exact-match only: a case-only rewrite is a real edit, not a no-op
         if (!keyWriteOk(next)) return;
         const touched = replaceKey(Object.values(data.entries), key, next);
-        if (touched) { save(); renderExplorer(); toastr.success(`Replaced “${key}” → “${next}” in ${touched} ${touched === 1 ? 'entry' : 'entries'}.`, 'Worlds Apart'); }
+        if (touched) { save(); keepScroll(renderExplorer); toastr.success(`Replaced “${key}” → “${next}” in ${touched} ${touched === 1 ? 'entry' : 'entries'}.`, 'Worlds Apart'); }
     };
     // A second term on every entry keyed `key` — the alias case.
     const addVariantEverywhere = async key => {
@@ -791,7 +808,7 @@ export async function lorebookStudio(preferredBook = null, open = null) {
         const term = String(raw ?? '').trim();
         if (!term || !keyWriteOk(term)) return;
         const added = addVariant(Object.values(data.entries), key, term);
-        if (added) { save(); renderExplorer(); }
+        if (added) { save(); keepScroll(renderExplorer); }
         toastr[added ? 'success' : 'info'](added
             ? `“${term}” added to ${added} ${added === 1 ? 'entry' : 'entries'} keyed “${key}”.`
             : `Every entry keyed “${key}” already has “${term}”.`, 'Worlds Apart');
@@ -1690,18 +1707,52 @@ export async function lorebookStudio(preferredBook = null, open = null) {
         head.append(glyph, title, meta, view, ...extraActs.map(f => f(e)), buildEntryTools(e, onEntryChange, { compact: true }));
         return head;
     };
-    const termRow = (e, r, checks, reg, onChange, onContext = null) => {
+    /** `onEdit` is the list's repaint; given, the term becomes click-to-edit and the row gains a delete, as the chips have. */
+    const termRow = (e, r, checks, reg, onChange, onContext = null, onEdit = null) => {
         const row = document.createElement('div'); row.className = 'wa-term-row';
         const id = rowId(e.uid, r.term);
         const cb = document.createElement('input'); cb.type = 'checkbox'; cb.style.margin = '0';
         cb.addEventListener('change', () => { checks.set(id, cb.checked); onChange(); });
         reg.row.set(id, cb);
         const name = document.createElement('span'); name.className = 'wa-term-name';
-        name.textContent = r.term; name.title = r.term;
+        name.textContent = r.term; name.title = onEdit ? `${r.term} (click to edit)` : r.term;
         const why = document.createElement('span'); why.className = 'wa-term-why';
         why.textContent = r.why ?? ''; if (r.color) why.style.color = r.color;
         if (onContext) row.addEventListener('contextmenu', ev => { ev.preventDefault(); onContext(e, r, ev.clientX, ev.clientY); });
-        row.append(cb, name, why);
+        // Renamed since the audit: the verdict judged the term that is gone, so it is replaced rather than shown stale.
+        if (staleTerms.has(id)) {
+            name.style.opacity = '0.6'; name.style.fontStyle = 'italic';
+            why.textContent = 'edited';
+            why.style.color = ''; why.style.opacity = '0.6'; why.style.fontStyle = 'italic';
+            why.title = 'Renamed since the audit — re-audit to judge this term';
+        }
+        row.append(cb, name);
+        if (onEdit) {
+            name.style.cursor = 'pointer';
+            // The new term has no df in the cached scan, so the row is marked stale rather than re-judged (a rebuild is seconds).
+            name.addEventListener('click', () => editKeyInline(e, r.term, name, 'key', next => {
+                if (next) {
+                    const to = rowId(e.uid, next);
+                    staleTerms.add(to);
+                    checks.delete(id);
+                    // Explicitly false, so cleanupGroups' defChecked does not tick it: an edited term reads unattested
+                    // in the cached scan, and pre-ticking it for deletion on that is exactly the wrong answer.
+                    checks.set(to, false);
+                }
+                onEdit();
+            }));
+            const del = document.createElement('i'); del.className = 'fa-solid fa-xmark wa-term-act';
+            del.title = 'Delete this keyword — shift-click to ignore it instead';
+            del.style.marginLeft = '0.4rem';
+            del.addEventListener('click', ev => {
+                if (ev.shiftKey) { toggleIgnore(r.term); return; }   // afterIgnoreChange repaints the list itself
+                const i = (Array.isArray(e.key) ? e.key : []).indexOf(r.term);
+                if (i >= 0) { e.key.splice(i, 1); save(); }
+                onEdit();
+            });
+            row.append(del);
+        }
+        row.append(why);
         return row;
     };
     // Push `checks` back into the rendered boxes (rows, then group tri-states) without rebuilding rows.
@@ -2044,7 +2095,7 @@ export async function lorebookStudio(preferredBook = null, open = null) {
             : 'Re-run the keyword audit with the current Tool Settings.\nNo chat searched yet.';
         auditBtn.addEventListener('click', async () => { await withBusy(auditBtn, '0.5', runAudit, '<i class="fa-solid fa-spinner fa-spin"></i> Auditing…'); renderExplorer(); });
         // Search repaints only the list: rebuilding the header would drop the input's focus mid-keystroke.
-        row1.append(auditBtn, buildFilterBtn(renderExplorer), buildSortControl(() => repaint()), buildSearchBox(() => repaint()));
+        row1.append(auditBtn, buildFilterBtn(renderExplorer), buildSortControl(() => repaint()), buildSearchBox(() => repaint()), trayBtn());
         head.append(row1);
         const fixed = document.createElement('div'); fixed.className = 'wa-studio-fixed';
         trayEl = renderTray();
@@ -2132,7 +2183,7 @@ export async function lorebookStudio(preferredBook = null, open = null) {
             }
         };
         const sync = () => { syncTermChecks(cleanupChecks, reg); paintBar(); paintFlags(); };
-        const repaint = () => {
+        const repaint = () => keepScroll(() => {
             paintIgnoredStrip(ignStrip, repaint);   // classifyEntry reads ignoreSet live — no rescan needed
             groups = cleanupGroups();
             allIds = groups.flatMap(g => g.rows.map(r => rowId(g.entry.uid, r.term)));
@@ -2144,10 +2195,10 @@ export async function lorebookStudio(preferredBook = null, open = null) {
                 list.append(termGroupHeader(g.entry, g.rows, cleanupChecks, reg, sync, repaint));
                 if (advOpen.has(g.entry.uid)) list.append(buildAdvancedTray(g.entry, repaint));
                 for (const r of g.rows) list.append(termRow(g.entry, r, cleanupChecks, reg, sync,
-                    (e, row, x, y) => showKwMenu(row.term, x, y)));
+                    (e, row, x, y) => showKwMenu(row.term, x, y), repaint));
             }
             sync();
-        };
+        });
         termRepaint = repaint;
         if (!scan) {
             bar.textContent = 'Auditing…';
@@ -3013,7 +3064,7 @@ export async function lorebookStudio(preferredBook = null, open = null) {
         globeBtn.innerHTML = '<i class="fa-solid fa-globe"></i>';
         globeBtn.style.color = globalTrayOpen ? ACCENT : '';
         globeBtn.addEventListener('click', () => { globalTrayOpen = !globalTrayOpen; globeBtn.style.color = globalTrayOpen ? ACCENT : ''; refreshGlobalTray(); });
-        row1.append(label, vsep(), filterWrap, sortBtn, spacer(), searchWrap, globeBtn);
+        row1.append(label, vsep(), filterWrap, sortBtn, spacer(), searchWrap, trayBtn(), globeBtn);
         const newBtn = document.createElement('button');
         newBtn.type = 'button'; newBtn.className = 'menu_button';
         newBtn.style.cssText = 'width:auto;padding:3px 9px;flex-shrink:0;';
