@@ -174,7 +174,7 @@
             "disable": false,
             "selectiveLogic": 0,
             "comment": "RECURSION SOURCE — fires on \"workshop\" from chat; its content carries \"duskmoth\", which is uid 13's only key. With recursion enabled this drags uid 13 in on the RECURSION pass.",
-            "content": "The workshop rafters shelter a duskmoth colony."
+            "content": "The workshop rafters shelter a duskmoth colony, and gloamvetch grows along the sill."
         },
         "13": {
             "uid": 13,
@@ -187,7 +187,7 @@
             "disable": false,
             "selectiveLogic": 0,
             "comment": "RECURSION TARGET — \"duskmoth\" appears in NO chat message, only in uid 12's content. It activates on the recursion pass, where the prune never judges (INITIAL only): WA's chat-window verdict would be a reject, which is exactly why the pass gate is load-bearing. Must never appear in lastPruned.",
-            "content": "The duskmoth wakes at dusk and steers by the lamps."
+            "content": "The duskmoth wakes at dusk and steers by the lamps, drawn to vellumwing blossom."
         },
         "14": {
             "uid": 14,
@@ -220,6 +220,47 @@
             "disable": false,
             "selective": true,
             "selectiveLogic": 3
+        },
+        "16": {
+            "uid": 16,
+            "key": [
+                "vellumwing"
+            ],
+            "keysecondary": [],
+            "constant": false,
+            "vectorized": false,
+            "disable": false,
+            "selectiveLogic": 0,
+            "comment": "DEPTH-2 TARGET — \"vellumwing\" is in no chat message and in no entry uid 12 reaches: only uid 13's content, which enters the buffer on the SECOND pass. Its stage-3 keys score is divided by 1 + 2. Also preventRecursion, so \"sedgewhistle\" in its own content never reaches uid 18.",
+            "content": "A vellumwing opens at full dark. Sedgewhistle marks the same hour.",
+            "preventRecursion": true
+        },
+        "17": {
+            "uid": 17,
+            "key": [
+                "gloamvetch"
+            ],
+            "keysecondary": [],
+            "constant": false,
+            "vectorized": false,
+            "disable": false,
+            "selectiveLogic": 0,
+            "comment": "NON-RECURSABLE — \"gloamvetch\" is in no chat message, only in uid 12's content, so the buffer carries its key. Core suppresses it on the recursion pass; stage 3 is WA's own loop with core not in it, so the exclusion is applied there by hand. Must score keys 0 against chat AND against the buffer.",
+            "content": "Gloamvetch keeps its flower shut until the frost.",
+            "excludeRecursion": true
+        },
+        "18": {
+            "uid": 18,
+            "key": [
+                "sedgewhistle"
+            ],
+            "keysecondary": [],
+            "constant": false,
+            "vectorized": false,
+            "disable": false,
+            "selectiveLogic": 0,
+            "comment": "UNREACHABLE — \"sedgewhistle\" is in no chat message and appears only in uid 16's content, and uid 16 is preventRecursion, so that content never enters the buffer. Must never activate, at any depth.",
+            "content": "The sedgewhistle sounds once and is not heard again."
         }
     }
 }

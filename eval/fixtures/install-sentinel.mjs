@@ -105,7 +105,7 @@ console.log('Runtime eyeball (prune, bucket 1.5): on a generation whose recent c
 console.log('and bistro, the prompt must contain NEITHER terrace entry — core picks caf as group');
 console.log('winner, WA deletes it, and the group goes empty (ruled; bucket 2 promotes bistro).');
 console.log('');
-console.log('Runtime eyeball, scan-loop behaviours (uids 10-14; enable recursion for 12/13/14).');
+console.log('Runtime eyeball, scan-loop behaviours (uids 10-18; enable recursion for 12-18).');
 console.log('None of these may EVER appear in runState.lastPruned:');
 console.log('   cold frame (sticky 3)    say "cold frame" once: fires, then stays in the prompt the');
 console.log('                            next 3 turns while the key is out of the window — the sticky');
@@ -118,3 +118,10 @@ console.log('                            drags uid 13 in on the RECURSION pass. 
 console.log('                            message — the INITIAL-only gate is why the prune spares it.');
 console.log('   midnight (delay-until-   never fires on the initial pass even though "midnight" is in');
 console.log('   recursion 1)             chat; appears only when a recursion pass runs.');
+console.log('   → vellumwing             uid 13\'s content carries it, so it arrives one pass LATER than');
+console.log('                            duskmoth: depth 2, and its keys score is divided by 1 + 2.');
+console.log('   gloamvetch               uid 12\'s content carries it, so the buffer has its key — but the');
+console.log('                            entry is non-recursable, so it must NOT appear in the prompt and');
+console.log('                            must show no keys score in the Studio.');
+console.log('   sedgewhistle             appears only in uid 16\'s content, and uid 16 prevents further');
+console.log('                            recursion, so it must never appear at any depth.');

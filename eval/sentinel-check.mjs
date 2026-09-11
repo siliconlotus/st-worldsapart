@@ -125,8 +125,25 @@ console.log('ok   sentinel: every audit verdict matches its written-down answer'
     eq(keys13(windowFor), 0, 'recursion target scores keys 0 against chat alone — the budget drops it first');
     const buffered = withExtraTexts(windowFor, [data.entries['12'].content], 'paragraph');
     eq(keys13(buffered) > 0, true, 'the recursion buffer carries the key, so stage 3 can score it');
-    // The weight onScanDone applies; depth 1 is one recursion pass.
-    eq(keys13(buffered) / (1 + 1) < keys13(buffered), true, 'trigger-depth weighting discounts a buffer-only match');
+
+    // Depth resolution: each pass adds only what the previous pass admitted, so uid 16 is out of reach at pass 1.
+    const keysOf = (uid, win) => keywordScore(data.entries[uid], win(20, data.entries[uid]), undefined,
+        { k1: 1.2, caseSensitiveDefault: false, wholeWordsDefault: false }).score;
+    const pass1 = withExtraTexts(windowFor, [data.entries['12'].content], 'paragraph');
+    const pass2 = withExtraTexts(windowFor, [data.entries['12'].content, data.entries['13'].content], 'paragraph');
+    eq(keysOf('16', windowFor), 0, 'depth-2 target scores 0 against chat alone');
+    eq(keysOf('16', pass1), 0, 'and 0 at pass 1 — uid 13 has not been admitted yet, so its content is not in the buffer');
+    eq(keysOf('16', pass2) > 0, true, 'it becomes scorable only at pass 2, which is what makes its depth 2');
+
+    // excludeRecursion: the premise the hand-applied stage-3 exclusion rests on. The exclusion itself is in
+    // worldsapart.js and unreachable from node — it is the install-sentinel eyeball.
+    eq(keysOf('17', windowFor), 0, 'non-recursable entry has no chat evidence');
+    eq(keysOf('17', pass1) > 0, true, 'the buffer DOES carry its key — so stage 3 must exclude it by hand, or credit it');
+
+    // preventRecursion: uid 16's content is the only place uid 18's key appears, and it never enters the buffer.
+    eq(/sedgewhistle/i.test(data.entries['16'].content), true, 'uid 18\'s key lives in uid 16\'s content');
+    eq(msgs.some(m => /sedgewhistle/i.test(m)), false, 'and in no chat message, so uid 16 is its only possible route');
+    eq(keysOf('18', pass2), 0, 'uid 18 stays unscorable: preventRecursion keeps uid 16 out of every later buffer');
 
     // uid 15's three secondaries are one of each kind: usable, negation-only, malformed.
     eq(adds.includes(15), true, 'AND_ALL gate passes: the usable secondaries hold and the malformed one is dropped');
