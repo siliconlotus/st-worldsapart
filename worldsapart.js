@@ -1951,7 +1951,7 @@ function renderDeliveryPanel(layout) {
     // Appended last: the panel opens upward, so the bottom row is nearest the icon.
     const lab = document.createElement('div');
     lab.className = 'wa-delivery-entry';
-    lab.title = 'Open the Keyword Lab on the window this scan read, with the attached books applied';
+    lab.title = 'Open the Studio on the Keyword Lab';
     lab.innerHTML = '<span class="wa-delivery-glyph fa-solid fa-flask"></span>'
         + '<span class="wa-delivery-title">Open the Keyword Lab</span>';
     lab.addEventListener('click', () => lorebookStudio(chatBook(), { lab: true }));

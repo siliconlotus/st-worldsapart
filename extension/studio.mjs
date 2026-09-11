@@ -54,7 +54,7 @@ function planUidReindex(entries, orderedUids, start, desc) {
  * Lorebook Studio (/wa-studio).
  * @param {string|null} preferredBook Opened if it still exists; else the first attached book, else nothing selected
  * @param {{lab?: boolean, entry?: {world: string, uid: number|string}}|null} open Where to land: `lab` opens the Keyword
- *   Lab on the last scan window with the attached books applied, `entry` opens that entry in the Explorer.
+ *   Lab tab, `entry` opens that entry in the Explorer.
  */
 export async function lorebookStudio(preferredBook = null, open = null) {
     if (!(world_names ?? []).length) { toastr.warning('No lorebooks found.', 'Worlds Apart'); return ''; }
@@ -2403,28 +2403,10 @@ export async function lorebookStudio(preferredBook = null, open = null) {
         ], x, y, ctxMount());
     };
 
-    /** The window WA last scanned, as the Lab's haystack: the messages it kept are post-dropChatTags and at capture depth,
-     *  so it is the text the entry fired against, not a fresh read of the chat. */
-    const scannedHaystack = () => {
-        const chat = runState.lastScanChat ?? [];
-        // Empty, not the live chat: reading that is the chat tool's job, on a click, at the depth setting.
-        if (!chat.length) return '';
-        return scanSegments(chat, {
-            depth: chat.length,
-            includeNames: world_info_include_names,
-            matchWindow: 'message',
-        }).join(`\n\n${'-'.repeat(24)}\n\n`);
-    };
-
-    /** Opens the Lab on the scanned window with the attached books applied. Whole-delivery, not per entry: the run reports
-     *  every entry whose keys caught something. */
-    const openLabOnScan = async () => {
-        const hay = scannedHaystack();
-        // Nothing scanned yet: open on whatever the panes hold rather than replacing it.
-        if (hay) { labHay = hay; labCommitted = true; labRun = null; }
+    /** Opens the Lab tab. Loads nothing: reading a chat is the chat tool's job, on a click. */
+    const openLabTab = () => {
         tab = 'lab';
         renderExplorer();
-        if (labHay.trim()) await applyAttached();
     };
 
     /** Re-runs the last applied books, re-reading them: an edit or a setting change is what asks for this. */
@@ -3098,7 +3080,7 @@ export async function lorebookStudio(preferredBook = null, open = null) {
     checkOrphans();   // background; adds a nav row only if something is broken
     // After the book is open: the Lab's run reads `data` for whichever attached book that is, and an entry reveal needs its
     // book loaded and its row painted.
-    if (open?.lab) openLabOnScan();
+    if (open?.lab) openLabTab();
     else if (open?.entry) await revealEntry(open.entry);
 
     // Escape never closes the window: it swallows the <dialog>'s close and, if nothing else claimed it, drops the selection.
