@@ -545,6 +545,10 @@ core's intent, not to its bugs.
 - **`?` SmartKeys and `/re/` terms inside them.** Core's `matchKeys` treats `? …` as a literal needle,
   so an entry keyed only on SmartKeys never activates there. `SMARTKEYS.md` carries what that means
   for an author porting a book to a non-WA install.
+- **`splitKeys` parses a key list**, not core's `customTokenizer`, which skips the character after every
+  comma and so loses a `/regex/` written directly after one (`upstream-st.md` #17). Newlines separate as
+  well as commas; a `"quoted"` term keeps its commas; a token that opens a regex without closing it is
+  re-split on its commas, as core's recovery does.
 - **`messageDepth` supersedes `world_info_depth`** when WA runs (*Stage 2: Activation*).
 
 ---
