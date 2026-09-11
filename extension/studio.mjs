@@ -282,7 +282,7 @@ export async function lorebookStudio(preferredBook = null, open = null) {
                 check(studioOpts, 'scanVectorized', 'Scan Vectorized (🔗)'),
                 check(studioOpts, 'scanConstant', 'Scan Constant (🔵)'),
                 check(studioOpts, 'includeInactive', 'Include inactive entries'),
-                check(studioOpts, 'pruneUnattested', 'Flag keys not in entry text (aliases and typos)'),
+                check(studioOpts, 'pruneUnattested', 'Flag unattested keys (aliases and typos)'),
                 check(studioOpts, 'pruneCommon', 'Flag english-common keys'),
                 num(studioOpts, 'chatCommon', '↳ chat common: in >', '% of MESSAGES', { min: 1, max: 100, scale: 100 }),
                 check(studioOpts, 'pruneShared', 'Flag book-shared keys'),
@@ -2125,7 +2125,7 @@ export async function lorebookStudio(preferredBook = null, open = null) {
             bar.innerHTML = '';
             const count = document.createElement('span'); count.className = 'wa-bulk-count';
             count.textContent = `${on}/${allIds.length} selected`;
-            count.title = 'Pre-ticked terms are suggestions, not verified problems. "Not in entry text" means exactly that — keys match against the chat, so a key your story uses but your prose never spells out reads as dead and is usually worth keeping. Review before applying.';
+            count.title = 'Ticked by the audit, not by hand.';
             bar.append(count,
                 barBtn(allOn ? 'Select none' : 'Select all', () => {
                     for (const id of allIds) cleanupChecks.set(id, !allOn);
