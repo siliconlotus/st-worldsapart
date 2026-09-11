@@ -62,14 +62,27 @@ export async function lorebookStudio(preferredBook = null, open = null) {
 
     /** The books ST has active for this chat: global, the character's own and its charLore extras, the chat's, the persona's.
      *  Mirrors getGlobalLore/getCharacterLore/getChatLore/getPersonaLore, which are private, because the exported
-     *  getSortedEntries emits WORLDINFO_ENTRIES_LOADED (upstream-st.md #18). The Set drops the duplicate core also skips. */
+     *  getSortedEntries emits WORLDINFO_ENTRIES_LOADED (upstream-st.md #18). The Set drops the duplicate core also skips.
+     *  In a group this unions the enabled members, where core takes one member per generation. */
     const attachedBookNames = () => {
         const ctx = getContext();
         const names = new Set(selected_world_info ?? []);
-        const character = characters?.[ctx.characterId];
-        if (character?.data?.extensions?.world) names.add(character.data.extensions.world);
-        const file = ctx.characterId != null ? getCharaFilename(ctx.characterId) : null;
-        for (const b of (file && world_info.charLore?.find(e => e.name === file)?.extraBooks) ?? []) names.add(b);
+        const addCharacter = (character, avatar) => {
+            if (character?.data?.extensions?.world) names.add(character.data.extensions.world);
+            const file = getCharaFilename(null, { manualAvatarKey: avatar ?? character?.avatar });
+            for (const b of (file && world_info.charLore?.find(e => e.name === file)?.extraBooks) ?? []) names.add(b);
+        };
+        const group = ctx.groupId ? ctx.groups?.find(g => String(g.id) === String(ctx.groupId)) : null;
+        if (group) {
+            // Core resolves one member's books per generation, from this_chid as the group sets it per speaker. The union
+            // over the members that can speak is what any turn of this chat could scan.
+            for (const avatar of group.members ?? []) {
+                if ((group.disabled_members ?? []).includes(avatar)) continue;
+                addCharacter(characters?.find(c => c?.avatar === avatar), avatar);
+            }
+        } else if (ctx.characterId != null) {
+            addCharacter(characters?.[ctx.characterId]);
+        }
         const chatWorld = ctx.chatMetadata?.[METADATA_KEY];
         if (chatWorld) names.add(chatWorld);
         if (power_user.persona_description_lorebook) names.add(power_user.persona_description_lorebook);
