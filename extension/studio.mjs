@@ -2233,9 +2233,11 @@ export async function lorebookStudio(preferredBook = null, open = null) {
     const applyOneBook = async name => applyFrom(name, () => bookEntries(name));
 
     /** Applies every attached book. Falls back to the picker when none is attached. */
-    const applyAttached = async () => {
+    const applyAttached = async ({ pickIfNone = false } = {}) => {
         const names = attachedBookNames();
         if (!names.length) {
+            // Only on a click. Opening the Lab is not a request for a dialog, and one raised here lands behind the Studio.
+            if (!pickIfNone) { toastr.info('No lorebook is attached to this chat.', 'Keyword Lab'); return; }
             const name = await pickBook('Nothing is attached to this chat. Apply which lorebook?', true);
             if (name) await applyOneBook(name);
             return;
@@ -2614,7 +2616,7 @@ export async function lorebookStudio(preferredBook = null, open = null) {
             }),
             labTool('fa-book', 'Apply the books attached to this chat, hits only — shift-click to pick any book instead',
                 async ev => {
-                    if (!ev.shiftKey) { await applyAttached(); return; }
+                    if (!ev.shiftKey) { await applyAttached({ pickIfNone: true }); return; }
                     const name = await pickBook('Apply which lorebook?', true);
                     if (name) await applyOneBook(name);
                 }),
@@ -2832,16 +2834,16 @@ export async function lorebookStudio(preferredBook = null, open = null) {
         // Carry the list's scrollTop over the rebuild.
         const listTop = explorer.querySelector('.wa-studio-entries')?.scrollTop ?? 0;
         explorer.innerHTML = ''; rowEls.clear();
-        // The no-book branch paints no tab bar, so it re-adopts the close button the wipe removed.
-        if (!selected) { explorer.innerHTML = '<div style="opacity:0.6;padding:8px;">Select a lorebook on the left.</div>'; explorer.append(closeBtn); return; }
         termRepaint = null;   // the term views below claim it; the Explorer leaves it null
+        // The tab bar first, and with no book too: it carries the close button, and the Lab needs no book to paint.
         explorer.append(renderTabBar());
         const pane = document.createElement('div');
         pane.style.cssText = 'flex:1 1 auto;display:flex;flex-direction:column;overflow:hidden;min-height:0;';
         explorer.append(pane);
+        if (tab === 'lab') { renderLabView(pane); return; }
+        if (!selected) { pane.innerHTML = '<div style="opacity:0.6;padding:8px;">Select a lorebook on the left.</div>'; return; }
         // Cleanup is async (paints a note, then blocks) and repaints itself; nothing awaits it.
         if (tab === 'cleanup') { renderCleanupView(pane); return; }
-        if (tab === 'lab') { renderLabView(pane); return; }
         renderExplorerView(pane);
         if (listTop) { const l = explorer.querySelector('.wa-studio-entries'); if (l) l.scrollTop = listTop; }
     };
