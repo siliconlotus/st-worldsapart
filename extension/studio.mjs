@@ -10,7 +10,7 @@ import { runState, settings } from './state.mjs';
 import { ensureStudioStyle, makeSortControl, renderMessageHtml, showCtxMenu, showEntryText, wiGlyph } from './ui-widgets.mjs';
 import { SORT_FNS, SORT_LABELS, normPresentation, presentationLabel, reconcileTiers, tierRank, wiTitleOf } from './sort.mjs';
 import { buildKeyPruneScan, llmKeyCandidates } from './keyword-tools.mjs';
-import { FLAG_PRIORITY, SEVERE, STUDIO_PRUNE_OPTS } from './keyword-audit.mjs';
+import { FLAG_PRIORITY, MINOR, MODERATE, SEVERE, STUDIO_PRUNE_OPTS } from './keyword-audit.mjs';
 import { buildKeySuggest, classifyLlmCand, STUDIO_SUGGEST_OPTS } from './keyword-suggest.mjs';
 import { validateSmartKey } from './smartkeys.mjs';
 import { findOrphanBindings } from './bindings.mjs';
@@ -105,7 +105,7 @@ export async function lorebookStudio(preferredBook = null, open = null) {
     let globalTrayEl = null;         // the mounted global-tray element, swapped in place on toggle
     const selectedEntries = new Set();   // uids ticked for bulk actions
     let selAnchorUid = null;         // last-ticked entry, for shift-click range selection
-    let entryFilter = 'all';         // explorer entry-type filter (all / keyword / constant / vector / enabled / disabled / flagged)
+    let entryFilter = 'all';         // explorer entry filter: type, state, or worst-flag severity — see FILTER_OPTS
     let entrySort = 'insert';        // 'insert' mirrors the prompt insertion order; persisted per book
     let tieredMode = true;
     let tierCfg = reconcileTiers(settings().tierCfg);   // tier precedence, shared with the prompt builder
@@ -1273,6 +1273,12 @@ export async function lorebookStudio(preferredBook = null, open = null) {
             case 'enabled': return !e.disable;
             case 'disabled': return !!e.disable;
             case 'flagged': return !!scan && (scan.classifyEntry(e).length > 0 || scan.unusableKeysOf(e).length > 0);
+            // Severity is per key, so this is "holds at least one" — the same reading as `flagged`. An unusable
+            // secondary counts severe here as it does on the badge: the entry gates on fewer keys than written.
+            case SEVERE: case MODERATE: case MINOR:
+                if (!scan) return false;
+                if (entryFilter === SEVERE && scan.unusableKeysOf(e).length) return true;
+                return scan.classifyEntry(e).some(p => scan.severityOf(p) === entryFilter);
             default: return true;
         }
     };
@@ -1619,23 +1625,31 @@ export async function lorebookStudio(preferredBook = null, open = null) {
         ['enabled', 'fa-power-off', 'Enabled'],
         ['disabled', '🚫', 'Disabled'],
         ['flagged', 'fa-crosshairs', 'Flagged'],
+        [SEVERE, 'fa-triangle-exclamation', 'Severe', SEVERITY_COLOR[SEVERE]],
+        [MODERATE, 'fa-circle-exclamation', 'Moderate', SEVERITY_COLOR[MODERATE]],
+        [MINOR, 'fa-circle-info', 'Minor', SEVERITY_COLOR[MINOR]],
     ];
-    const iconEl = spec => { if (spec.startsWith('fa-')) { const i = document.createElement('i'); i.className = 'fa-solid ' + spec; return i; } const s = document.createElement('span'); s.textContent = spec; return s; };
+    const iconEl = (spec, color = '') => {
+        if (!spec.startsWith('fa-')) { const s = document.createElement('span'); s.textContent = spec; return s; }
+        const i = document.createElement('i'); i.className = 'fa-solid ' + spec;
+        if (color) i.style.color = color;
+        return i;
+    };
     const buildFilterBtn = onChange => {
         const wrap = document.createElement('span'); wrap.style.cssText = 'position:relative;display:inline-flex;';
         const btn = document.createElement('button'); btn.type = 'button'; btn.className = 'menu_button wa-filter';
-        btn.title = 'Show only entries of a type'; btn.style.cssText = 'display:inline-flex;align-items:center;gap:5px;width:auto;white-space:nowrap;';
+        btn.title = 'List only some entries — by type, by state, or by the severity of a flag they carry'; btn.style.cssText = 'display:inline-flex;align-items:center;gap:5px;width:auto;white-space:nowrap;';
         const cur = FILTER_OPTS.find(o => o[0] === entryFilter) ?? FILTER_OPTS[0];
         const lbl = document.createElement('span'); lbl.textContent = cur[2];
-        btn.append(iconEl('fa-filter'), lbl);
+        btn.append(iconEl('fa-filter', cur[3] ?? ''), lbl);
         const menu = document.createElement('div');
         menu.style.cssText = 'position:absolute;top:100%;left:0;z-index:5;display:none;flex-direction:column;gap:1px;margin-top:2px;padding:4px;border-radius:5px;min-width:9em;'
             + 'background:var(--SmartThemeBlurTintColor, var(--black70a, rgba(20,20,20,0.97)));border:1px solid var(--SmartThemeBorderColor, rgba(255,255,255,0.15));';
-        for (const [val, spec, text] of FILTER_OPTS) {
+        for (const [val, spec, text, color] of FILTER_OPTS) {
             const item = document.createElement('button'); item.type = 'button';
             item.style.cssText = 'display:flex;align-items:center;gap:7px;width:100%;padding:4px 8px;border:none;border-radius:4px;background:' + (val === entryFilter ? 'var(--white20a, rgba(255,255,255,0.1))' : 'transparent') + ';color:inherit;font:inherit;text-align:left;white-space:nowrap;cursor:pointer;';
             if (val === entryFilter) item.style.fontWeight = 'bold';
-            const t = document.createElement('span'); t.textContent = text; item.append(iconEl(spec), t);
+            const t = document.createElement('span'); t.textContent = text; item.append(iconEl(spec, color ?? ''), t);
             item.addEventListener('mouseenter', () => { if (val !== entryFilter) item.style.background = 'var(--white20a, rgba(255,255,255,0.1))'; });
             item.addEventListener('mouseleave', () => { if (val !== entryFilter) item.style.background = 'transparent'; });
             item.addEventListener('click', () => { entryFilter = val; onChange(); });
@@ -1987,10 +2001,10 @@ export async function lorebookStudio(preferredBook = null, open = null) {
                 cleanupChecks.delete(id);
             }
         }
-        if (!removed.length) { toastr.info('Nothing selected to prune.', 'Worlds Apart'); return; }
+        if (!removed.length) { toastr.info('Nothing selected.', 'Worlds Apart'); return; }
         cleanupUndo = removed;
         save(); rebuildScan(); suggest = null; renderExplorer();
-        toastr.success(`Pruned ${removed.length} keyword${removed.length === 1 ? '' : 's'}. Undo is in the bar until the next prune.`, 'Worlds Apart');
+        toastr.success(`Deleted ${removed.length} keyword${removed.length === 1 ? '' : 's'} — Undo is in the bar.`, 'Worlds Apart');
     };
     const undoPrune = () => {
         if (!cleanupUndo?.length) return;
@@ -2066,7 +2080,7 @@ export async function lorebookStudio(preferredBook = null, open = null) {
                     for (const id of allIds) cleanupChecks.set(id, !allOn);
                     sync();
                 }),
-                barBtn('Prune', pruneChecked, 'wa-bulk-danger'),
+                barBtn('Delete', pruneChecked, 'wa-bulk-danger'),
                 barBtn('Ignore', ignoreChecked),
                 showAllBtn(),
                 chatScanBtn(),
