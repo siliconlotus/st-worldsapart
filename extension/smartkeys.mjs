@@ -365,9 +365,13 @@ function ensureScan(scope, text) {
     if (counts === undefined) {
         // Masked, as foldedHay masks: the prescan and the walk have to agree on what the haystack is.
         counts = scanAutomaton(scope.automaton, fold(maskMarkup(text)));
-        scope.scans.set(text, counts);
-        while (scope.scans.size > scope.scanMax) scope.scans.delete(scope.scans.keys().next().value);
+    } else {
+        // A hit moves to the newest position. Eviction is by insertion order, and a segment two entries share — a repeated
+        // header — was being evicted from under the second entry's pass while it was still the one being read.
+        scope.scans.delete(text);
     }
+    scope.scans.set(text, counts);
+    while (scope.scans.size > scope.scanMax) scope.scans.delete(scope.scans.keys().next().value);
     return counts;
 }
 
@@ -486,11 +490,10 @@ export function primeScan(rawKeys, text, scope = defaultScope) {
 }
 
 /** The literal keys among `literals` whose variants the primed scan of `text` found — the automaton's own answer to which
- *  keys a segment can possibly count, so a caller need run countKey for those alone. Every key when `text` was not primed.
- *  The reverse map (pattern index -> keys) is built once per interned set and per `literals` list, by identity. */
+ *  keys a segment can possibly count, so a caller need run countKey for those alone. The reverse map (pattern index -> keys) is built once per interned set and per `literals` list, by identity. */
 export function hitLiterals(scope, text, literals) {
-    const hit = scope.scans.get(text);
-    if (!hit || scope.dirty || scope.automaton === null) return literals;
+    // Primed here if it is not: the caller means this text to be scanned, and "every literal" is a guess, not an answer.
+    const hit = ensureScan(scope, text);
     if (!scope.keysByIdx || scope.keysByIdx.over !== literals) {
         const map = new Map();
         for (const key of literals) {

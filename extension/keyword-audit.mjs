@@ -168,15 +168,40 @@ export function buildKeyPruneScan(data, opts, ignoreSet, { caseSensitiveDefault 
     registerKeys(allKeys, scanScope);
     // Segmented like the scan window, once per content rather than once per flag combo; df still counts entries, not segments (K5).
     const contentSegments = contents.map(c => segment([c], matchWindow));
-    // Literal keys are counted only in the segments the automaton found a variant of them in; `?` and regex keys in every
-    // segment, being evaluated rather than found. Same verdicts as calling countKey for every key in every segment, since
-    // countKey's own first step is that same primed lookup — this changes only when and how often it is called.
-    const literalKeys = allKeys.filter(k => !k.startsWith('?') && !isRegexKey(k));
-    const otherKeys = allKeys.filter(k => k.startsWith('?') || isRegexKey(k));
+    // The trie is compiled once and each segment scanned once: the cache holds every segment of the book, so a second flag
+    // combo, or a case-sensitive check on one key, reads the scan it already has. The runtime's small cache is for a chat
+    // window consulted by many entries; here nothing repeats except by our own doing.
+    scanScope.scanMax = contentSegments.reduce((n, segs) => n + segs.length, 0) + 8;
+    // A flag combo's batch covers the keys of the entries that use it, not every key in the book: under whole-word every
+    // reported hit is verified by regex, and running that over 3,484 keys for the five entries that asked was the audit's
+    // cost. An entry with whole-word on is also listed under its substring combo, which `short` asks for its total.
+    const comboOf = (cs, ww) => `${cs ? 1 : 0}${ww ? 1 : 0}`;
+    const keysByCombo = new Map();
+    for (const e of entries) {
+        const cs = e.caseSensitive ?? caseSensitiveDefault, ww = e.matchWholeWords ?? wholeWordsDefault;
+        for (const k of (Array.isArray(e.key) ? e.key : []).map(x => String(x).trim()).filter(Boolean)) {
+            for (const c of ww ? [comboOf(cs, true), comboOf(cs, false)] : [comboOf(cs, false)]) {
+                let list = keysByCombo.get(c);
+                if (!list) keysByCombo.set(c, list = { all: new Set() });
+                list.all.add(k);
+            }
+        }
+    }
+    for (const list of keysByCombo.values()) {
+        list.all = [...list.all];
+        // Literal keys are counted only in the segments the automaton found a variant of them in; `?` and regex keys in
+        // every segment, being evaluated rather than found. Same verdicts as calling countKey for every key in every
+        // segment, since countKey's own first step is that same primed lookup — this changes only when and how often it is called.
+        list.literal = list.all.filter(k => !k.startsWith('?') && !isRegexKey(k));
+        list.other = list.all.filter(k => k.startsWith('?') || isRegexKey(k));
+    }
     const runBatch = (cs, ww) => {
-        const combo = `${cs ? 1 : 0}${ww ? 1 : 0}`;
+        const combo = comboOf(cs, ww);
         if (batched.has(combo)) return;
         batched.add(combo);
+        const list = keysByCombo.get(combo);
+        if (!list) return;   // no entry uses this combo: a key asked under it is judged on demand
+        const literalKeys = list.literal, otherKeys = list.other;
         for (const segments of contentSegments) {
             primeScan([], segments, scanScope);
             const perKey = new Map();
@@ -206,7 +231,7 @@ export function buildKeyPruneScan(data, opts, ignoreSet, { caseSensitiveDefault 
         }
         // Every key the batch saw is cached, the silent ones as zeros: a cache miss below means a key the audit never
         // scanned, and only that is judged on demand. Leaving the zeros out made every dead key an on-demand rescan.
-        for (const key of allKeys) { const k = ck(key, cs, ww); if (!scanCache.has(k)) scanCache.set(k, { df: 0, total: 0, typed: 0 }); }
+        for (const key of list.all) { const k = ck(key, cs, ww); if (!scanCache.has(k)) scanCache.set(k, { df: 0, total: 0, typed: 0 }); }
     };
     const scan = (key, cs, ww) => {
         runBatch(cs, ww);
@@ -279,7 +304,10 @@ export function buildKeyPruneScan(data, opts, ignoreSet, { caseSensitiveDefault 
         const tokens = k.split(/\s+/);
         const cap = t => t.charAt(0).toUpperCase() + t.slice(1);
         const titled = tokens.map((t, i) => (i === 0 || i === tokens.length - 1 || !NAME_PARTICLES.has(t.toLowerCase()) ? cap(t) : t)).join(' ');
-        return titled !== k && contents.some(c => countKey(titled, c, true, false) > 0);
+        if (titled === k) return false;
+        // The titled form folds to the key's own pattern, so the main scope answers for it unregistered: a folded count of
+        // zero is authoritative, and only a segment holding the words at all is walked case-sensitively.
+        return contentSegments.some(segments => { primeScan([], segments, scanScope); return segments.some(seg => countKey(titled, seg, true, false, scanScope) > 0); });
     };
 
     // Tested in FLAG_PRIORITY order; the first hit wins, so moving a branch changes what a key reports.

@@ -384,6 +384,21 @@ export function countChatHits(keys, messages, { matchWindow = 'message', depth =
 /** Occurrences of `key` — a keyword, /regex/flags, or a `?` SmartKey, which returns its weight — following core's matchKeys
  *  for flags and regex precedence and diverging on orthography, which normalizeOrthography folds and core does not.
  *  `gateAst`, when given, is the AST `key` is evaluated as: how a secondary-gated key is counted. */
+/** The whole-word pattern for a needle, compiled once: a batch verifies every reported hit under this, and the runtime
+ *  scorer every entry with the flag, and compiling per call was the cost. Bounded; the boundary mode is part of the key. */
+const wholeWordRe = new Map();
+export function wholeWordRegex(needle) {
+    const id = `${boundaryBefore()}${needle}`;
+    let re = wholeWordRe.get(id);
+    if (!re) {
+        re = new RegExp(`${boundaryBefore()}${escapeRegex(needle)}${boundaryAfter()}`, 'gu');
+        if (wholeWordRe.size >= 4096) wholeWordRe.clear();
+        wholeWordRe.set(id, re);
+    }
+    re.lastIndex = 0;
+    return re;
+}
+
 export function countKey(key, text, caseSensitive, wholeWords, scope, gateAst = null) {
     const raw = String(key ?? '').trim();
 
@@ -418,8 +433,7 @@ export function countKey(key, text, caseSensitive, wholeWords, scope, gateAst = 
         if (wholeWords) {
             try {
                 // Lookaround, not `\b`: a key may start or end with punctuation, and adjacent occurrences all count.
-                const regex = new RegExp(`${boundaryBefore()}${escapeRegex(needle)}${boundaryAfter()}`, 'gu');
-                count += (hay.match(regex) ?? []).length;
+                count += (hay.match(wholeWordRegex(needle)) ?? []).length;
             } catch {
                 return 0;
             }
@@ -510,7 +524,7 @@ export function keyExcerpts(key, text, caseSensitive, wholeWords, context = 28, 
             if (!needle) continue;
             if (wholeWords) {
                 try {
-                    const re = new RegExp(`${boundaryBefore()}${escapeRegex(needle)}${boundaryAfter()}`, 'gu');
+                    const re = wholeWordRegex(needle);
                     for (let m = re.exec(hay); m; m = re.exec(hay)) {
                         if (!m[0]) { re.lastIndex += 1; continue; }
                         if (push(segment, m.index, m[0].length)) return out;
