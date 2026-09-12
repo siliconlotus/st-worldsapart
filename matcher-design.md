@@ -553,6 +553,15 @@ core's intent, not to its bugs.
   beside the keys themselves — a verdict can cite only a pattern somebody counted. Evidence outranks
   `unattested`: a pattern that would match under another orthography is mis-written, not dead.
 
+- **`collision` is gated on breadth and judged on how the breadth was earned.** A key over the
+  chat-common share whose messages are mostly not whole-word hits wants `=`; mostly the wrong case, `^`.
+  Breadth alone never flags — `authoriz` is what substring matching is for — and neither does the
+  breakdown alone. The probes are `? ="key"` and `? ^"key"`, scanned only for keys already over the
+  gate (`collisionProbes`): a probe is a SmartKey evaluated per message. It outranks `short`: NPR and
+  FBI are short and fine, CIA is short and inside "special". `chatRate` is scanned flags-off, so for an
+  entry with whole-word already on the gate overstates; the suggestion is withheld there, the gate is not
+  corrected.
+
 - **`variant only` cites where**, a scanned chat before the book: `countChatHits` returns `typedWith`
   beside `messagesWith`, the same per-message count for the key as written. What the model writes is
   the stronger claim about which form a key will meet.
@@ -847,28 +856,18 @@ Ordered by whether a user can see the difference.
    first term outside the fit, against `layoutOrder`'s prefix property. `maxRecursionSteps` is the
    existing lever, and caps where this would decay.
 2. **Proximity** (`(…)~N`). Witness spans shipped, so the display it needs exists.
-3. **`chat common` as a gate for how a key fires, not as a flag of its own.** Rate alone is refuted:
-   a firing-rate band mostly catches legitimate keys, Sommers' >20% band removing none against a 41%
-   curation baseline (K16). What it can gate is the breakdown — a key over the threshold whose hits are
-   mostly not whole-word wants `=`, and mostly the wrong case wants `^`. Breadth alone does not flag
-   either, `authoriz` being exactly what substring matching is for; it is breadth THAT COMES FROM
-   COLLISIONS, bare `Eve` on "even" and "evening". `strictClean` is the boundary-respecting count and
-   is gated to keys under `minLength` and to book content, so `Eve` and `Mark` never reach it; the chat
-   half scans `? =Eve` and `? =^Eve` as probes beside the key, as `orthoAlternates` already rides
-   along. The sentinel's `ver` is the case, at 4 of 11 messages and no whole-word hit. K14's 20% is a
-   bound, not a fit.
-4. **Suggester i18n, none of it started.** `ZIPF_EN` scores non-English function words as maximally
+3. **Suggester i18n, none of it started.** `ZIPF_EN` scores non-English function words as maximally
    rare, so the suggester should detect that its priors do not apply and stand down rather than invert.
    Accent variants belong here too (`Gérard`/`Gerard`), with a human in the loop.
-5. **A firing-rate diagnostic for loose reference keys.** Reference entries are never cut, so a key
+4. **A firing-rate diagnostic for loose reference keys.** Reference entries are never cut, so a key
    that fires too easily costs budget on every turn it wins and nothing warns anybody. The Lab answers it
    for one text at a time; what is missing is the standing per-entry rate, beside the keyword audit. Not
    blocking: an over-firing reference entry is a budget cost, where a wrongly cut one is missing material.
-6. **A signal's within-scene SD varies by book**, and the two books `keys` costs are its extremes
+5. **A signal's within-scene SD varies by book**, and the two books `keys` costs are its extremes
    (F45). Standardisation divides by the scene's own SD, so a near-constant column has its few small
    differences amplified into large z against a slope fitted on other books. No use proposed; it is a
    property a book can be measured for, where curation is a label someone applies.
-7. **Reference is centred on the memory tier's centroid, and nothing has asked whether it should
+6. **Reference is centred on the memory tier's centroid, and nothing has asked whether it should
    be.** The memory centroid all but coincides with the collection's mean while the reference centroid
    sits well off it (F44), and cosine is the reference fit's largest coefficient. Candidates, none
    screened: a per-tier centroid, reference on raw cosine, or leaving it. Deferred deliberately —

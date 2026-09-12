@@ -10,7 +10,7 @@ import { runState, settings } from './state.mjs';
 import { ensureStudioStyle, makeSortControl, renderMessageHtml, showCtxMenu, showEntryText, wiGlyph } from './ui-widgets.mjs';
 import { SORT_FNS, SORT_LABELS, normPresentation, presentationLabel, reconcileTiers, tierRank, wiTitleOf } from './sort.mjs';
 import { buildKeyPruneScan, llmKeyCandidates } from './keyword-tools.mjs';
-import { FLAG_PRIORITY, MINOR, MODERATE, SEVERE, STUDIO_PRUNE_OPTS, orthoAlternates } from './keyword-audit.mjs';
+import { FLAG_PRIORITY, KEY_CHAT_COMMON, MINOR, MODERATE, SEVERE, STUDIO_PRUNE_OPTS, collisionProbes, orthoAlternates } from './keyword-audit.mjs';
 import { buildKeySuggest, classifyLlmCand, STUDIO_SUGGEST_OPTS } from './keyword-suggest.mjs';
 import { validateSmartKey } from './smartkeys.mjs';
 import { findOrphanBindings } from './bindings.mjs';
@@ -1910,25 +1910,18 @@ export async function lorebookStudio(preferredBook = null, open = null) {
         return (Array.isArray(j) ? j : []).map(m => String(m?.mes ?? '')).filter(Boolean);
     };
 
-    /** Scans the chosen chats and installs the counts — the one gatherer for the picker and the audit; returns a summary, no toast or repaint. */
-    const scanChats = async (picked, label) => {
-        const own = bookKeys();
-        if (!own.length || !picked?.length) return null;
-        // The orthographic alternates ride along as ordinary keys: the audit can only cite chat evidence for a pattern
-        // somebody counted, and both routes scan whatever list they are handed.
-        const keys = [...new Set([...own, ...own.flatMap(k => orthoAlternates(k).map(a => a.alt))])];
-
+    /** One pass of `keys` over `picked`: counts by both routes, merged. Plugin route for whatever is on disk — it runs this
+     *  same countChatHits where the files live and returns counts only, so a 25MB chat never crosses the wire; the open
+     *  chat has no file, so it is always the browser's. Results merge by summing every field (countChatHits), so the two
+     *  routes can split the picked chats between them. */
+    const scanKeys = async (keys, picked) => {
         const totals = new Map(keys.map(k => [k, 0])), typedTotals = new Map();
         let seen = 0, via = '';
-        // Results merge by summing both fields (countChatHits), so the two routes can split the picked chats between them.
         const add = got => {
             for (const [k, n] of got.messagesWith) totals.set(k, (totals.get(k) ?? 0) + n);
             for (const [k, n] of got.typedWith ?? []) typedTotals.set(k, (typedTotals.get(k) ?? 0) + n);
             seen += got.messages;
         };
-
-        // Plugin route for whatever is on disk: it runs this same countChatHits where the files live and returns counts
-        // only, so a 25MB chat never crosses the wire. The open chat has no file, so it is always the browser's.
         let onDisk = picked.filter(c => !c.open && c.avatar);
         if (runState.pluginAvailable && onDisk.length) {
             const r = await fetch('/api/plugins/worlds-apart/scan-chats', {
@@ -1951,7 +1944,6 @@ export async function lorebookStudio(preferredBook = null, open = null) {
         } else {
             onDisk = [];
         }
-
         const served = new Set(onDisk);
         const ctx = getContext();
         const msgs = [];
@@ -1966,7 +1958,29 @@ export async function lorebookStudio(preferredBook = null, open = null) {
             add(countChatHits(keys, msgs));
             via = via ? 'server + browser' : 'browser';
         }
-        if (!seen) return null;
+        return { totals, typedTotals, seen, via };
+    };
+
+    /** Scans the chosen chats and installs the counts — the one gatherer for the picker and the audit; returns a summary, no toast or repaint. */
+    const scanChats = async (picked, label) => {
+        const own = bookKeys();
+        if (!own.length || !picked?.length) return null;
+        // The orthographic alternates ride along as ordinary keys: the audit can only cite chat evidence for a pattern
+        // somebody counted, and both routes scan whatever list they are handed.
+        const keys = [...new Set([...own, ...own.flatMap(k => orthoAlternates(k).map(a => a.alt))])];
+        const first = await scanKeys(keys, picked);
+        if (!first.seen) return null;
+        const { totals, typedTotals, seen } = first;
+        let via = first.via;
+        // Second pass, probes only for the keys over the gate: a probe is a SmartKey evaluated per message, and the gate
+        // admits a handful of keys where the book has thousands.
+        const gate = studioOpts.chatCommon ?? KEY_CHAT_COMMON;
+        const probes = own.filter(k => (totals.get(k) ?? 0) / seen >= gate).flatMap(collisionProbes);
+        if (probes.length) {
+            const second = await scanKeys(probes, picked);
+            for (const [k, n] of second.totals) totals.set(k, n);
+            if (second.via && second.via !== via) via = 'server + browser';
+        }
         chatHits = totals;
         chatTyped = typedTotals;
         chatMsgs = seen;

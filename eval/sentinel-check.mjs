@@ -1,7 +1,7 @@
 // The sentinel fixture: a book and chat whose every audit verdict is written down, driven through the inputs the Studio uses.
 // Also importable into ST (install-sentinel.mjs), for the half node cannot see: chips, tooltips, colours.
 import fs from 'node:fs';
-import { buildKeyPruneScan, orthoAlternates } from '../extension/keyword-audit.mjs';
+import { buildKeyPruneScan, collisionProbes, orthoAlternates } from '../extension/keyword-audit.mjs';
 import { ORTHO_FAMILIES } from '../extension/smartkeys.mjs';
 import { keywordScore, scanSegments, countKey, countChatHits, activationAdds, makeWindowFor, withExtraTexts } from '../extension/matcher.mjs';
 import { buildKeyPruneScan as _pruneScan } from '../extension/keyword-audit.mjs';
@@ -22,7 +22,8 @@ const entries = Object.values(data.entries);
 const keys = [...new Set(entries.flatMap(e => e.key.map(k => String(k).trim())))];
 
 /** The chat scan through the function the Studio's client path calls. */
-const chatRate = () => countChatHits(keys, msgs);
+// The collision probes ride along as the Studio's second pass would send them: a 22-key fixture needs no gate.
+const chatRate = () => countChatHits([...keys, ...keys.flatMap(collisionProbes)], msgs);
 
 const verdicts = (chat, matchWindow = 'scan') => {
     const s = buildKeyPruneScan(data, OPTS, new Set(), { chatScan: chat, matchWindow });
@@ -63,6 +64,9 @@ eq(msgs.length, 11, 'the hidden message is dropped, as core and WA both drop it'
     eq(v.glimmerwort, undefined, 'a key the chat uses is not dead — the flag is dropped');
     eq(v.zzunattested?.why, 'unattested (book/chat)', 'still dead, and now says both were checked');
     eq(v.morning?.sev, RED, 'a common word the chat confirms fires broadly is severe');
+    eq(v.ver?.why, 'fires in 36% of messages, 0% as a word \u2014 consider ? =ver',
+        'a key broad because it lands inside other words is told so, and offered the flag it lacks');
+    eq(v.ver?.sev, 'moderate', '...one token fixes it, so not severe');
     eq(v.mother?.sev !== RED, true, 'a common word the chat says is quiet stays a warning');
     eq(v['? thornwick brambleshaw'], undefined, 'at scan the query is attested by its own entry text');
     eq(verdicts(chatRate(), 'paragraph')['? thornwick brambleshaw'], undefined,

@@ -81,7 +81,7 @@ export const KEY_CHAT_COMMON = 0.20;
 export const SEVERE = 'severe', MODERATE = 'moderate', MINOR = 'minor';
 
 /** The order `classify` tests its branches in, so a display can rank verdicts without re-deriving them. */
-export const FLAG_PRIORITY = ['unusable', 'english common', 'unattested', 'book shared', 'fragment', 'short', 'variant only', 'regex orthography'];
+export const FLAG_PRIORITY = ['unusable', 'english common', 'unattested', 'book shared', 'collision', 'fragment', 'short', 'variant only', 'regex orthography'];
 
 /** Each orthographic form a regex key cannot reach: `alt` is the pattern rewritten into it, `label` names it, and
  *  `shape` marks the one that flags without evidence. Exported so a chat scan can count these beside the keys —
@@ -104,6 +104,12 @@ export function orthoAlternates(k) {
     if (en && en !== raw) out.push({ alt: en, shape: false, label: 'en-dash', suggest: '[-–]' });
     return out;
 }
+
+/** The two probes `collision` reads for a literal key: the key whole-word, and the key case-sensitive, each as a
+ *  quoted SmartKey so an operator character or a space inside it lexes as one term. Scanned beside the key by
+ *  whoever scans the chat, and only for keys already over the chat-common gate: a probe is a SmartKey evaluated per
+ *  message, so probing every key would cost more than the scan. */
+export const collisionProbes = k => (k.includes('"') ? [] : [`? ="${k}"`, `? ^"${k}"`]);
 
 export function buildKeyPruneScan(data, opts, ignoreSet, { caseSensitiveDefault = false, wholeWordsDefault = false, matchWindow = 'scan', chatScan } = {}) {
     // undefined: no scan, or a scan that did not cover this key; 0: scanned and silent. chatChecked reads the difference.
@@ -238,6 +244,17 @@ export function buildKeyPruneScan(data, opts, ignoreSet, { caseSensitiveDefault 
         if (bookContent === 0 && opts.pruneUnattested && !(literal && opts.ignoreProper && looksProper(k)) && !chatRate) return { flag: 'unattested', bookContent, literal, chatChecked: chatRate !== undefined };
         const bookListed = bookListedBy.get(k.toLowerCase()) ?? 0;
         if (nBook >= KEY_MIN_SHARED_ENTRIES && bookListed / nBook > opts.bookShared * 0.75 && opts.pruneShared) return { flag: 'book shared', bookContent, bookListed };
+        // Gated on breadth, judged on how the breadth was earned: `authoriz` is what substring matching is for, bare `Eve`
+        // on "even" and "never" is not. Only the flag the entry lacks can be suggested.
+        if (literal && chatRate !== undefined && chatRate >= (opts.chatCommon ?? KEY_CHAT_COMMON)) {
+            const [word, cased] = collisionProbes(k).map(pr => chatScan.messagesWith?.get(pr));
+            const any = chatScan.messagesWith.get(k);
+            const wordShare = word === undefined ? undefined : word / any;
+            const caseShare = cased === undefined ? undefined : cased / any;
+            const wantWord = !ww && wordShare !== undefined && wordShare <= 1 / 3;
+            const wantCase = !cs && caseShare !== undefined && caseShare <= 1 / 3;
+            if (wantWord || wantCase) return { flag: 'collision', bookContent, chatRate, wordShare, caseShare, suggest: `? ${wantWord ? '=' : ''}${wantCase ? '^' : ''}${k}` };
+        }
         if (literal && opts.pruneFragment !== false && looksLikeFragment(k)) return { flag: 'fragment', bookContent };
         if (literal && k.length < opts.minLength && !ww && opts.pruneShort) return { flag: 'short', bookContent, clean: strictClean(k, cs), total: scan(k, cs, false).total };
         const hits = scan(k, cs, ww);
@@ -279,6 +296,7 @@ export function buildKeyPruneScan(data, opts, ignoreSet, { caseSensitiveDefault 
         if (p.flag === 'english common') return p.chatRate >= (opts.chatCommon ?? KEY_CHAT_COMMON) ? SEVERE : MODERATE;
         if (p.flag === 'book shared') return p.bookListed / nBook >= opts.bookShared ? SEVERE : MODERATE;
         if (p.flag === 'fragment') return SEVERE;
+        if (p.flag === 'collision') return MODERATE;
         if (p.flag === 'variant only') return MINOR;
         if (p.flag === 'regex orthography') return MINOR;
         const ratio = p.total ? p.clean / p.total : 0;
@@ -299,6 +317,12 @@ export function buildKeyPruneScan(data, opts, ignoreSet, { caseSensitiveDefault 
         }
         if (p.flag === 'book shared') return { text: `book shared (${Math.round(100 * p.bookListed / nBook)}%)`, severity };
         if (p.flag === 'fragment') return { text: 'phrase fragment', severity };
+        if (p.flag === 'collision') {
+            const pct = x => `${Math.round(100 * x)}%`;
+            const how = [p.wordShare !== undefined && p.suggest.includes('=') ? `${pct(p.wordShare)} as a word` : null,
+                p.caseShare !== undefined && p.suggest.includes('^') ? `${pct(p.caseShare)} in this case` : null].filter(Boolean).join(', ');
+            return { text: `fires in ${pct(p.chatRate)} of messages, ${how} — consider ${p.suggest}`, severity };
+        }
         if (p.flag === 'variant only') return { text: `${p.where} uses it only un-hyphenated`, severity };
         if (p.flag === 'regex orthography') return { text: `${p.evidence ?? `will not match ${p.label}`}, consider ${p.suggest}`, severity };
         return { text: `short (${p.clean}/${p.total} clean)`, severity };
