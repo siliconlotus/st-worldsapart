@@ -149,15 +149,18 @@ async function computeSourceFingerprint() {
     if (runState.sourceFP !== null) return runState.sourceFP;
     try {
         const texts = await Promise.all(
-            PLUGIN_FILES.map(([src]) => fetch(new URL(`./plugin/${src}`, import.meta.url)).then(r => r.text())),
+            // `r.ok` checked, or a 404 hashes the error page: a fetch only rejects at the network layer, so a
+            // PLUGIN_FILES entry naming a missing file would fingerprint as drift for ever.
+            PLUGIN_FILES.map(([src]) => fetch(new URL(`./plugin/${src}`, import.meta.url))
+                .then(r => { if (!r.ok) throw new Error(`${src}: ${r.status}`); return r.text(); })),
         );
         runState.sourceFP = pluginFingerprint(...texts);
-    } catch { runState.sourceFP = null; }
+    } catch (error) { console.warn('Worlds Apart: could not fingerprint the plugin source, drift unknown —', error); runState.sourceFP = null; }
     return runState.sourceFP;
 }
 
-/** The deployed plugin is not the source this extension ships. Null fingerprints (an older plugin, an unreadable
- *  source) read as no drift: the check cannot tell, and a false alarm is worse than a missed one. */
+/** The deployed plugin is not the source this extension ships. A null fingerprint — a plugin predating the field, or a
+ *  source file that would not load — reads as no drift: the check cannot tell, and a false alarm is worse. */
 const pluginDrifted = () => Boolean(runState.pluginAvailable && runState.sourceFP && runState.pluginFP !== runState.sourceFP);
 
 /** Fills the plugin setup box with copyable install and redeploy commands, and the drift banner. */
