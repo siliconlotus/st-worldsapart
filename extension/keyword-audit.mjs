@@ -421,11 +421,11 @@ export function buildKeyPruneScan(data, opts, ignoreSet, { caseSensitiveDefault 
         }
         if (p.flag === 'unusable') return { text: p.code ? `unusable — ${p.code}` : 'unusable', severity };
         if (p.flag === 'common word') {
-            return { text: `common word${p.term ? ` · ${p.term}` : ''} · no chat scanned`, severity };
+            return { text: `common word${p.term ? ` (${p.term})` : ''}`, severity };
         }
         if (p.flag === 'book shared') return { text: `book shared (${Math.round(100 * p.bookListed / nBook)}%)`, severity };
-        if (p.flag === 'chat common') return { text: `chat common · ${Math.round(100 * p.chatRate)}% of ${units}${p.via ? `, mostly ${p.via}` : ''}`, severity };
-        if (p.flag === 'book common') return { text: `book common · ${Math.round(100 * p.bookContent / nBook)}% of entries · no chat scanned`, severity };
+        if (p.flag === 'chat common') return { text: `chat common (${Math.round(100 * p.chatRate)}%${p.via ? `, mostly ${p.via}` : ''})`, severity };
+        if (p.flag === 'book common') return { text: `book common (${Math.round(100 * p.bookContent / nBook)}%)`, severity };
         if (p.flag === 'fragment') return { text: 'phrase fragment', severity };
         if (p.flag === 'substring') {
             const pct = x => `${Math.round(100 * x)}%`;

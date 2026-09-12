@@ -2201,6 +2201,12 @@ export async function lorebookStudio(preferredBook = null, open = null) {
                 // Only when the label collapsed them; at one chat the note already says which.
                 if (chatNames.length > 1) note.title = chatNames.slice(0, 20).join('\n') + (chatNames.length > 20 ? `\n+${chatNames.length - 20} more` : '');
                 bar.append(note);
+            } else if (scan) {
+                // The absence is the bar's to say, once, not every flag's: common-word and book-common verdicts rest on the book alone.
+                const note = document.createElement('span'); note.className = 'wa-bulk-count';
+                note.textContent = '· no chat scanned';
+                note.title = 'Common word and book common flags rest on the book alone. Choose chats… to add chat evidence.';
+                bar.append(note);
             }
             if (cleanupUndo?.length) bar.append(barBtn(`Undo (${cleanupUndo.length})`, undoPrune));
         };

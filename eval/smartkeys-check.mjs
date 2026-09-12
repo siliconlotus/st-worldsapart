@@ -283,11 +283,11 @@ console.log('ok   SmartKey structural validation');
     const noChat = buildKeyPruneScan({ entries }, opts, new Set(), { caseSensitiveDefault: false, wholeWordsDefault: false });
     const flagOf = uid => noChat.classifyEntry(entries[uid])[0]?.flag;
     const textOf = uid => { const f = noChat.classifyEntry(entries[uid])[0]; return f ? noChat.reasonOf(f).text : ''; };
-    eq(textOf(1), 'book common · 100% of entries · no chat scanned', 'without a chat the book\'s own prose stands in: a key in every entry is book common');
+    eq(textOf(1), 'book common (100%)', 'without a chat the book\'s own prose stands in: a key in every entry is book common');
     eq(textOf(1), textOf(3), '...for the SmartKey and the plain key alike');
-    eq(textOf(4), 'common word · the · no chat scanned', 'a query reducing to a common word earns the English-common flag while no chat is scanned');
+    eq(textOf(4), 'common word (the)', 'a query reducing to a common word earns the English-common flag while no chat is scanned');
     eq(flagOf(5), 'common word', 'an alternation is as loose as its loosest branch');
-    eq(textOf(5), 'common word · the · no chat scanned', '...and the loose branch is named');
+    eq(textOf(5), 'common word (the)', '...and the loose branch is named');
     eq(flagOf(6) !== 'common word', true, 'a conjunction is as tight as its tightest conjunct, so it earns no common flag');
     entries[7].key = ['? ^Mark'];
     entries[8].key = ['? Mark'];
@@ -299,11 +299,11 @@ console.log('ok   SmartKey structural validation');
     const probes = pathProbes(entries[9].key[0]);
     eq(probes.length, 9, 'every path is a probe, the whole product and not the common paths alone');
     eq(probes.includes('? =mother =my') && probes.includes('? parent Parsons'), true, '...each carrying its terms\' own flags');
-    eq(textOf(9), 'common word · mom & my · no chat scanned', 'no chat: the first common path, joined with &');
+    eq(textOf(9), 'common word (mom & my)', 'no chat: the first common path, joined with &');
     const msgs = ['my mother said', 'my mother again', 'oh my mother', 'my mom once', 'nothing here'];
     const chat = countChatHits([entries[9].key[0], ...probes], msgs);
     const scChat = buildKeyPruneScan({ entries }, opts, new Set(), { chatScan: { messagesWith: chat.messagesWith, messages: chat.messages } });
-    eq(scChat.reasonOf(scChat.classifyEntry(entries[9])[0]).text, 'chat common · 80% of messages, mostly mother & my',
+    eq(scChat.reasonOf(scChat.classifyEntry(entries[9])[0]).text, 'chat common (80%, mostly mother & my)',
         'over the share it is chat common, naming the path that fires most — the chat\'s question, not the list\'s');
     eq(scChat.severityOf(scChat.classifyEntry(entries[9])[0]), 'severe', '...and severe by degree at 80%, whatever the path');
     eq(scChat.defChecked(scChat.classifyEntry(entries[9])[0]), false, '...though never pre-ticked: the remedy is a narrower key, not deletion');
@@ -311,7 +311,7 @@ console.log('ok   SmartKey structural validation');
     const legit = ['my mom once', 'the parent Parsons', 'parent Parsons again', 'Parsons the parent', 'Nick and his parent'];
     const chat2 = countChatHits([entries[9].key[0], ...probes], legit);
     const sc2 = buildKeyPruneScan({ entries }, opts, new Set(), { chatScan: { messagesWith: chat2.messagesWith, messages: chat2.messages } });
-    eq(sc2.reasonOf(sc2.classifyEntry(entries[9])[0]).text, 'chat common · 100% of messages, mostly parent & Parsons',
+    eq(sc2.reasonOf(sc2.classifyEntry(entries[9])[0]).text, 'chat common (100%, mostly parent & Parsons)',
         'a legitimate path firing most is what the chip names');
 }
 console.log('ok   SmartKeys are audited on df, exempt only from the literal-string heuristics');

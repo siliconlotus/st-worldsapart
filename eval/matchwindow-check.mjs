@@ -128,7 +128,7 @@ console.log('ok   a key and its case variant count one entry once');
 
     const live = run({ messagesWith: new Map([['mother', 40], ['zzznope', 12]]), messages: 100 });
     eq(live.zzznope, undefined, 'a key the CHAT uses is not dead — the flag is suppressed, not recoloured');
-    eq(live.mother.why, `chat common · 40% of messages`, 'a common word the chat confirms over-fires reads as the chat flag, above the English list');
+    eq(live.mother.why, `chat common (40%)`, 'a common word the chat confirms over-fires reads as the chat flag, above the English list');
     eq(live.mother.sev, 'moderate', '...moderate at 40%: over the gate, not in more messages than not');
     eq(KEY_CHAT_COMMON, 0.2, 'the chat-common threshold is a named bound, not a literal');
 }
