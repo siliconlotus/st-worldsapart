@@ -44,7 +44,8 @@ eq(msgs.length, 11, 'the hidden message is dropped, as core and WA both drop it'
     eq(v.mother?.sev !== RED, true, '...but unevidenced it is not severe');
     eq(v['lamp-post']?.why, 'book uses it only un-hyphenated', 'the key fires, but never on the form the author typed');
     eq(v['lamp-post']?.sev, 'minor', '...which is advisory: the flag says rewrite or drop, not that it is broken');
-    const lamp = countChatHits(['lamp-post'], ['the lamp post flickers at the corner']);
+    // Six messages, one hit: under the chat-common share, so the variant verdict is what remains.
+    const lamp = countChatHits(['lamp-post'], ['the lamp post flickers at the corner', 'a', 'b', 'c', 'd', 'e']);
     eq(verdicts({ messagesWith: lamp.messagesWith, typedWith: lamp.typedWith, messages: lamp.messages })['lamp-post']?.why,
         'chat uses it only un-hyphenated', '...and the chat is cited over the book, being what the model writes');
     eq(v["/Cap'n \\w+/"]?.why, `will not match curly form, consider ['${ORTHO_FAMILIES.find(f => f.ascii === "'").pair}]`,
@@ -61,9 +62,11 @@ eq(msgs.length, 11, 'the hidden message is dropped, as core and WA both drop it'
 // --- with the chat ----------------------------------------------------------------------------
 {
     const v = verdicts(chatRate());
-    eq(v.glimmerwort, undefined, 'a key the chat uses is not dead — the flag is dropped');
+    eq(v.glimmerwort?.flag !== 'unattested', true, 'a key the chat uses is not dead — the dead flag is dropped');
+    eq(v.glimmerwort?.why, 'chat common · 27% of chat', '...and at 3 of 11 messages it is over the chat-common share, an advisory');
     eq(v.zzunattested?.why, 'unattested (book/chat)', 'still dead, and now says both were checked');
-    eq(v.morning?.sev, RED, 'a common word the chat confirms fires broadly is severe');
+    eq(v.morning?.why, 'chat common · 55% of chat', 'a common word the chat confirms fires broadly reads as the chat flag, above the English list');
+    eq(v.morning?.sev, 'moderate', '...advisory: its remedies are constant or a narrower key, not deletion');
     eq(v.ver?.why, 'fires in 36% of messages, 0% as a word \u2014 consider ? =ver',
         'a key broad because it lands inside other words is told so, and offered the flag it lacks');
     eq(v.ver?.sev, 'moderate', '...one token fixes it, so not severe');

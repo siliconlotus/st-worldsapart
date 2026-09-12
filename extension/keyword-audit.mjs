@@ -60,24 +60,26 @@ function pathsOf(node) {
 const commonTerm = (n, isLoose) => { const v = String(n.value ?? '').trim(); return Boolean(v) && isLoose(v) && !(n.isCaseSensitive && v !== v.toLowerCase()); };
 
 /** A SmartKey's paths, each as a probe the chat scan can count — `? =mom =my` — with `common` set on a path made entirely
- *  of common words. Empty unless some path is: only such a key is english-common, and only for it does the question
- *  "which path fires" arise. The whole product, not the common paths alone: the path that fires most may be a
- *  legitimate one, and that is the finding that clears the flag. */
+ *  of common words. The whole product: the path that fires most is the one to name, common or not. */
 function smartPaths(raw, isLoose) {
     if (!String(raw ?? '').trim().startsWith('?')) return [];
     let paths;
     try { paths = pathsOf(parse(tokenize(String(raw)))); } catch { return []; }
-    const out = paths.map(p => ({ label: p.map(n => String(n.value).trim()).join(' & '), probe: `? ${p.map(renderTerm).join(' ')}`, common: p.every(n => commonTerm(n, isLoose)) }));
-    return out.some(p => p.common) ? out : [];
+    return paths.map(p => ({ label: p.map(n => String(n.value).trim()).join(' & '), probe: `? ${p.map(renderTerm).join(' ')}`, common: p.every(n => commonTerm(n, isLoose)) }));
 }
 
-/** The probes the chat scan counts beside an english-common SmartKey. */
-export const pathProbes = k => smartPaths(k, isEnglishCommon(COMMON_WORDS)).map(p => p.probe);
+/** The probes the chat scan counts beside a SmartKey so `chat common` can name the path that fires most. A single path
+ *  needs no probe: it is the key. Sent only for keys over the chat-common share, a probe being a SmartKey evaluated per
+ *  message. */
+export const pathProbes = k => { const p = smartPaths(k, isEnglishCommon(COMMON_WORDS)); return p.length > 1 ? p.map(x => x.probe) : []; };
 
 const isEnglishCommon = (list) => (v) => !/\s/.test(v) && list.has(v.toLowerCase());
 
-/** Share of messages a key must match before a chat scan turns english-common red. Confirms only, never raises a flag (K14, K16). */
+/** Share of messages a key must match to be `chat common`, and to turn `english common` red. */
 export const KEY_CHAT_COMMON = 0.20;
+/** Share of the book's entries whose content a key must appear in to be `book common` — the no-chat fallback for
+ *  `chat common`. An assertion; 0.45 rather than a half so a book of few entries does not sit on the line. */
+export const KEY_BOOK_COMMON = 0.45;
 
 /**
  * The prune classifier for one loaded lorebook, shared by the Studio audit and eval/keyword-audit.mjs. Live closures:
@@ -89,7 +91,7 @@ export const KEY_CHAT_COMMON = 0.20;
 export const SEVERE = 'severe', MODERATE = 'moderate', MINOR = 'minor';
 
 /** The order `classify` tests its branches in, so a display can rank verdicts without re-deriving them. */
-export const FLAG_PRIORITY = ['unusable', 'english common', 'unattested', 'book shared', 'substring', 'fragment', 'short', 'variant only', 'regex orthography'];
+export const FLAG_PRIORITY = ['unusable', 'substring', 'chat common', 'book common', 'book shared', 'regex orthography', 'english common', 'fragment', 'short', 'unattested', 'variant only'];
 
 /** Each orthographic form a regex key cannot reach: `alt` is the pattern rewritten into it, `label` names it, and
  *  `shape` marks the one that flags without evidence. Exported so a chat scan can count these beside the keys —
@@ -113,11 +115,12 @@ export function orthoAlternates(k) {
     return out;
 }
 
-/** The two probes `substring` reads for a literal key: the key whole-word, and the key case-sensitive, each as a
- *  quoted SmartKey so an operator character or a space inside it lexes as one term. Scanned beside the key by
+/** The probes `substring` reads for a literal key: the key whole-word, and — only where the key has a capital, since
+ *  the wrong-case case is `Mark` hitting `mark` and a lowercase key hitting sentence-initial "Morning" is the right
+ *  word — the key case-sensitive. Each is a quoted SmartKey so an operator character or a space lexes as one term. Scanned beside the key by
  *  whoever scans the chat, and only for keys already over the chat-common gate: a probe is a SmartKey evaluated per
  *  message, so probing every key would cost more than the scan. */
-export const substringProbes = k => (k.includes('"') ? [] : [`? ="${k}"`, `? ^"${k}"`]);
+export const substringProbes = k => (k.includes('"') ? [] : [`? ="${k}"`, ...(/\p{Lu}/u.test(k) ? [`? ^"${k}"`] : [])]);
 
 export function buildKeyPruneScan(data, opts, ignoreSet, { caseSensitiveDefault = false, wholeWordsDefault = false, matchWindow = 'scan', chatScan } = {}) {
     // undefined: no scan, or a scan that did not cover this key; 0: scanned and silent. chatChecked reads the difference.
@@ -233,33 +236,18 @@ export function buildKeyPruneScan(data, opts, ignoreSet, { caseSensitiveDefault 
     };
 
     // Tested in FLAG_PRIORITY order; the first hit wins, so moving a branch changes what a key reports.
-    const classify = (key, cs, ww) => {
+    const classify = (key, cs, ww, declared = false) => {
         const k = String(key).trim();
         if (!k) return null;
         // usableKeys, not a validator call, so which codes are fatal here stays a matcher.mjs rule.
         if (!usableKeys([k]).length) return { flag: 'unusable', code: validateSmartKey(k).find(f => f.severity === 'error')?.code };
-        // English-common, fragment and short read the key as a literal; a SmartKey or regex is judged on its terms (commonSmartKey) or skipped.
+        // English-common, fragment and short read the key as a literal; a SmartKey or regex is judged on its terms (smartPaths) or skipped.
         const literal = !k.startsWith('?') && !isRegexKey(k);
         const bookContent = scan(k, cs, ww).df;
         const chatRate = chatRateOf(k);
-        if (opts.pruneCommon) {
-            if (literal && !/\s/.test(k) && COMMON_WORDS.has(k.toLowerCase())) return { flag: 'english common', bookContent, chatRate };
-            const paths = literal ? [] : smartPaths(k, isEnglishCommon(COMMON_WORDS));
-            if (paths.length) {
-                // Unmeasured, the first common path. Measured, the path that fires most, common or not — a legitimate one
-                // firing most is what clears the flag of the breadth. Ties keep the common path.
-                const hits = p => chatScan?.messagesWith?.get(p.probe) ?? -1;
-                const first = paths.find(p => p.common);
-                const top = paths.reduce((a, p) => (hits(p) > hits(a) || (hits(p) === hits(a) && p.common && !a.common) ? p : a), first);
-                const measured = hits(top) >= 0;
-                return { flag: 'english common', term: top.common ? top.label : first.label, via: measured && !top.common ? top.label : null, viaCommon: !measured || top.common, bookContent, chatRate };
-            }
-        }
-        const evidenced = regexOrtho(k, true);
-        if (evidenced) return evidenced;
-        if (bookContent === 0 && opts.pruneUnattested && !(literal && opts.ignoreProper && looksProper(k)) && !chatRate) return { flag: 'unattested', bookContent, literal, chatChecked: chatRate !== undefined };
-        const bookListed = bookListedBy.get(k.toLowerCase()) ?? 0;
-        if (nBook >= KEY_MIN_SHARED_ENTRIES && bookListed / nBook > opts.bookShared * 0.75 && opts.pruneShared) return { flag: 'book shared', bookContent, bookListed };
+        const hits = scan(k, cs, ww);
+
+        // --- evidence about this chat and this book, in the order the more specific diagnosis wins ---------------
         // Gated on breadth, judged on how the breadth was earned: `authoriz` is what substring matching is for, bare `Eve`
         // on "even" and "never" is not. Only the flag the entry lacks can be suggested.
         if (literal && chatRate !== undefined && chatRate >= (opts.chatCommon ?? KEY_CHAT_COMMON)) {
@@ -271,17 +259,42 @@ export function buildKeyPruneScan(data, opts, ignoreSet, { caseSensitiveDefault 
             const wantCase = !cs && caseShare !== undefined && caseShare <= 1 / 3;
             if (wantWord || wantCase) return { flag: 'substring', bookContent, chatRate, wordShare, caseShare, suggest: `? ${wantWord ? '=' : ''}${wantCase ? '^' : ''}${k}` };
         }
+        // A key that floods the chat, whatever list it is or is not on. Not a `constant` or sticky entry: those are the
+        // author declaring the entry ubiquitous, and the flag claims something about the key against this chat, not the wiring.
+        if (!declared && chatRate !== undefined && chatRate >= (opts.chatCommon ?? KEY_CHAT_COMMON)) {
+            // A SmartKey names the path that fires most, where its paths were probed; a single path is the key itself.
+            const paths = literal ? [] : smartPaths(k, isEnglishCommon(COMMON_WORDS));
+            const hit = p => chatScan.messagesWith?.get(p.probe) ?? -1;
+            const top = paths.length > 1 ? paths.reduce((a, p) => (hit(p) > hit(a) ? p : a), paths[0]) : null;
+            return { flag: 'chat common', bookContent, chatRate, via: top && hit(top) >= 0 ? top.label : null };
+        }
+        // The fallback for a key no chat was scanned for: the book's own prose stands in for the chat it does not have.
+        // With a chat, ubiquity in entry text is a fact about the story and draws nothing on its own.
+        if (!declared && chatRate === undefined && nBook >= KEY_MIN_SHARED_ENTRIES && bookContent / nBook >= (opts.bookCommon ?? KEY_BOOK_COMMON)) return { flag: 'book common', bookContent };
+        const bookListed = bookListedBy.get(k.toLowerCase()) ?? 0;
+        if (nBook >= KEY_MIN_SHARED_ENTRIES && bookListed / nBook > opts.bookShared * 0.75 && opts.pruneShared) return { flag: 'book shared', bookContent, bookListed };
+        const evidenced = regexOrtho(k, true);
+        if (evidenced) return evidenced;
+
+        // --- the English list: an assertion about the language, below anything measured -----------------------------
+        if (opts.pruneCommon) {
+            if (literal && !/\s/.test(k) && COMMON_WORDS.has(k.toLowerCase())) return { flag: 'english common', bookContent, chatRate };
+            // Named by its first all-common path: which path fires is the chat's question, and `chat common` answers it.
+            const common = literal ? null : smartPaths(k, isEnglishCommon(COMMON_WORDS)).find(p => p.common);
+            if (common) return { flag: 'english common', term: common.label, bookContent, chatRate };
+        }
+
+        // --- the key's shape; then dead last, a dead key being neutral --------------------------------------------
         if (literal && opts.pruneFragment !== false && looksLikeFragment(k)) return { flag: 'fragment', bookContent };
-        if (literal && k.length < opts.minLength && !ww && opts.pruneShort) return { flag: 'short', bookContent, clean: strictClean(k, cs), total: scan(k, cs, false).total };
-        const hits = scan(k, cs, ww);
+        // Nothing to judge without a hit: a dead short key is dead, not "0/0 clean".
+        if (literal && k.length < opts.minLength && !ww && opts.pruneShort && hits.total > 0) return { flag: 'short', bookContent, clean: strictClean(k, cs), total: scan(k, cs, false).total };
+        if (bookContent === 0 && opts.pruneUnattested && !(literal && opts.ignoreProper && looksProper(k)) && !chatRate) return { flag: 'unattested', bookContent, literal, chatChecked: chatRate !== undefined };
         if (literal) {
             const chatAny = chatScan?.messagesWith?.get(k), chatTyped = chatTypedOf(k);
             // Chat first: what the model writes is the stronger claim about which form a key will meet.
             if (chatAny > 0 && chatTyped === 0) return { flag: 'variant only', bookContent, where: 'chat' };
             if (hits.total > 0 && hits.typed === 0 && !chatTyped) return { flag: 'variant only', bookContent, where: 'book' };
         }
-        // A regex is fold-exempt, so an ASCII quote in one matches only itself where the same character in a plain key
-        // matches its whole family. Not flagged once the pattern names a curly form: the author has said which they mean.
         return regexOrtho(k, false);
     };
     /** Secondary keys the matcher will not act on, with the validator's message: a set difference against secondaryKeys, so which codes are fatal here stays a matcher.mjs rule. */
@@ -296,10 +309,11 @@ export function buildKeyPruneScan(data, opts, ignoreSet, { caseSensitiveDefault 
     const classifyEntry = e => {
         if (!inScope(e)) return [];
         const cs = effCase(e), ww = effWhole(e);
+        const declared = Boolean(e.constant) || Number(e.sticky) > 0;
         const out = [];
         for (const key of (Array.isArray(e.key) ? e.key : [])) {
             if (ignoreSet.has(key)) continue;
-            const c = classify(key, cs, ww);
+            const c = classify(key, cs, ww, declared);
             if (c) out.push({ uid: e.uid, key, ...c });
         }
         return out;
@@ -309,11 +323,13 @@ export function buildKeyPruneScan(data, opts, ignoreSet, { caseSensitiveDefault 
     const severityOf = p => {
         if (p.flag === 'unattested') return '';
         if (p.flag === 'unusable') return SEVERE;
-        // Breadth promotes to severe only when the common path is what earns it: `viaCommon` false means a legitimate path fires most.
-        if (p.flag === 'english common') return p.chatRate >= (opts.chatCommon ?? KEY_CHAT_COMMON) && p.viaCommon !== false ? SEVERE : MODERATE;
+        // Over the chat-common share the key reports `chat common` instead, so this is moderate in practice; the promotion
+        // survives for a scan that covered the key and not the flag's order.
+        if (p.flag === 'english common') return p.chatRate >= (opts.chatCommon ?? KEY_CHAT_COMMON) ? SEVERE : MODERATE;
         if (p.flag === 'book shared') return p.bookListed / nBook >= opts.bookShared ? SEVERE : MODERATE;
         if (p.flag === 'fragment') return SEVERE;
         if (p.flag === 'substring') return MODERATE;
+        if (p.flag === 'chat common' || p.flag === 'book common') return MODERATE;   // advisory: never severe, so never pre-ticked
         if (p.flag === 'variant only') return MINOR;
         if (p.flag === 'regex orthography') return MINOR;
         const ratio = p.total ? p.clean / p.total : 0;
@@ -330,10 +346,11 @@ export function buildKeyPruneScan(data, opts, ignoreSet, { caseSensitiveDefault 
         if (p.flag === 'unusable') return { text: p.code ? `unusable — ${p.code}` : 'unusable', severity };
         if (p.flag === 'english common') {
             const which = p.term ? ` · ${p.term}` : '';
-            const via = p.via ? `, mostly ${p.via}` : '';
-            return { text: p.chatRate === undefined ? `english common${which}` : `english common${which} · ${Math.round(100 * p.chatRate)}% of chat${via}`, severity };
+            return { text: p.chatRate === undefined ? `english common${which}` : `english common${which} · ${Math.round(100 * p.chatRate)}% of chat`, severity };
         }
         if (p.flag === 'book shared') return { text: `book shared (${Math.round(100 * p.bookListed / nBook)}%)`, severity };
+        if (p.flag === 'chat common') return { text: `chat common · ${Math.round(100 * p.chatRate)}% of chat${p.via ? `, mostly ${p.via}` : ''}`, severity };
+        if (p.flag === 'book common') return { text: `book common · ${Math.round(100 * p.bookContent / nBook)}% of entries · no chat scanned`, severity };
         if (p.flag === 'fragment') return { text: 'phrase fragment', severity };
         if (p.flag === 'substring') {
             const pct = x => `${Math.round(100 * x)}%`;
@@ -387,4 +404,4 @@ export function buildKeyPruneScan(data, opts, ignoreSet, { caseSensitiveDefault 
 }
 
 /** Every entry, every mode. */
-export const STUDIO_PRUNE_OPTS = { scanKeyword: true, scanVectorized: true, scanConstant: true, includeInactive: true, pruneUnattested: true, pruneCommon: true, pruneShort: true, pruneShared: true, pruneFragment: true, ignoreProper: false, minLength: KEY_MIN_LENGTH, bookShared: KEY_BOOK_SHARED, chatCommon: KEY_CHAT_COMMON };
+export const STUDIO_PRUNE_OPTS = { scanKeyword: true, scanVectorized: true, scanConstant: true, includeInactive: true, pruneUnattested: true, pruneCommon: true, pruneShort: true, pruneShared: true, pruneFragment: true, ignoreProper: false, minLength: KEY_MIN_LENGTH, bookShared: KEY_BOOK_SHARED, chatCommon: KEY_CHAT_COMMON, bookCommon: KEY_BOOK_COMMON };

@@ -54,11 +54,16 @@ function flagsOfIgnored() {
     return Object.fromEntries(p.classifyEntry(pruneBook.entries[0]).map(r => [r.key, r.flag]));
 }
 
-// A key saturating the book's own prose draws nothing: ubiquity in entry text is a fact about the story, not the key.
+// A key saturating the book's own prose is `book common` only while no chat has been scanned for it — the fallback for
+// `chat common`. With a chat, ubiquity in entry text is a fact about the story, not the key, and draws nothing.
 const mkBook = (n, hits, key) => ({ entries: Object.fromEntries(Array.from({ length: n }, (_, i) =>
     [i, { uid: i, key: i === 0 ? [key] : [], content: i < hits ? `A ${key} appears here.` : 'Nothing notable here.' }])) });
 const gateFlag = (n, hits) => { const p = buildKeyPruneScan(mkBook(n, hits, 'widgetron'), pruneOpts, new Set()); return Object.fromEntries(p.classifyEntry(p.entries[0]).map(r => [r.key, r.flag])).widgetron; };
-assert.strictEqual(gateFlag(10, 10), undefined, 'a key in every entry\'s text is not flagged for it');
+assert.strictEqual(gateFlag(10, 10), 'book common', 'a key in every entry\'s text is book common while no chat is scanned');
+{
+    const withChat = buildKeyPruneScan(mkBook(10, 10, 'widgetron'), pruneOpts, new Set(), { chatScan: { messagesWith: new Map([['widgetron', 0]]), messages: 50 } });
+    assert.strictEqual(withChat.classifyEntry(mkBook(10, 10, 'widgetron').entries[0])[0], undefined, '...and with a chat that does not bear it out, nothing: ubiquity in entry text is a fact about the story');
+}
 
 // --- buildKeySuggest -----------------------------------------------------------------------------
 // >= 5 entries, so a term in a single entry stays under the isFunc >30%-df cut.

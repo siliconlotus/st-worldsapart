@@ -181,7 +181,12 @@ eq(countKey('? fire::3 XOR flood', 'a fire burns', false, false), 3, 'XOR still 
         pruneUnattested: true, pruneCommon: true, pruneShort: true, pruneShared: true, ignoreProper: false, bookShared: 0.5, minLength: 4 };
     const { classifyEntry, reasonOf } = buildKeyPruneScan({ entries }, opts, new Set());
     const flags = new Map(classifyEntry(entries[1]).map(f => [String(f.key), f]));
-    eq(flags.has('/\\n/'), false, 'a pattern that fires on every entry draws nothing: ubiquity in entry text is not a key defect');
+    eq(flags.get('/\\n/')?.flag, 'book common', 'a pattern that fires on every entry is book common while no chat is scanned for it');
+    {
+        const quiet = { messagesWith: new Map(entries[1].key.map(k => [k, 0])), messages: 50 };
+        const withChat = buildKeyPruneScan({ entries }, opts, new Set(), { chatScan: quiet });
+        eq(withChat.classifyEntry(entries[1]).some(f => String(f.key) === '/\\n/'), false, '...and with a chat that does not bear it out, nothing: ubiquity in entry text is a fact about the story');
+    }
     eq(flags.get('/zzznope/')?.flag, 'unattested', '...and one that fires nowhere is flagged dead');
     eq(reasonOf(flags.get('/zzznope/')).text, 'never matches (book)', '...worded as evaluating false, not as absent text');
     eq(flags.has('/by the door/i'), false, 'a pattern that fires in exactly one entry draws nothing');
@@ -263,15 +268,24 @@ console.log('ok   SmartKey structural validation');
     const opts = { scanKeyword: true, scanVectorized: true, scanConstant: true, pruneUnattested: true,
         pruneCommon: true, pruneShort: true, pruneShared: true, pruneFragment: true,
         minLength: 4, bookShared: 0.5, ignoreProper: true };
-    const sc = buildKeyPruneScan({ entries }, opts, new Set(), { caseSensitiveDefault: false, wholeWordsDefault: false });
+    // A chat scanned that bears none of these out: with chat evidence, ubiquity in entry text draws nothing on its own,
+    // which is what lets the English-list verdicts below be observed. Without one, `book common` stands in (further down).
+    const quiet = { messagesWith: new Map(Object.values(entries).flatMap(e => e.key).map(k => [k, 0])), messages: 50 };
+    const sc = buildKeyPruneScan({ entries }, opts, new Set(), { caseSensitiveDefault: false, wholeWordsDefault: false, chatScan: quiet });
     const verdict = uid => { const f = sc.classifyEntry(entries[uid])[0]; return f ? `${f.flag}|${sc.reasonOf(f).text}` : ''; };
 
-    eq(verdict(2), 'unattested|never matches (book)', 'a query that evaluates false everywhere is flagged dead');
+    eq(verdict(2), 'unattested|never matches (book/chat)', 'a query that evaluates false everywhere is flagged dead');
     eq(verdict(1), verdict(3), 'a SmartKey and the equivalent plain key get the same verdict');
-    eq(verdict(1), '', '...and a key in every entry draws none, so the SmartKey is not judged as a string either');
-    eq(verdict(4), 'english common|english common · the', 'a query reducing to a common word earns the English-common flag');
+    eq(verdict(1), '', '...and a key in every entry draws none with a chat scanned, so the SmartKey is not judged as a string either');
+    {
+        const noChat = buildKeyPruneScan({ entries }, opts, new Set(), { caseSensitiveDefault: false, wholeWordsDefault: false });
+        const v = uid => { const f = noChat.classifyEntry(entries[uid])[0]; return f ? noChat.reasonOf(f).text : ''; };
+        eq(v(1), 'book common · 100% of entries · no chat scanned', 'without a chat the book\'s own prose stands in: a key in every entry is book common');
+        eq(v(1), v(3), '...for the SmartKey and the plain key alike');
+    }
+    eq(verdict(4), 'english common|english common · the · 0% of chat', 'a query reducing to a common word earns the English-common flag, the chat that bears it out shown');
     eq(sc.classifyEntry(entries[5])[0]?.flag, 'english common', 'an alternation is as loose as its loosest branch');
-    eq(sc.reasonOf(sc.classifyEntry(entries[5])[0]).text, 'english common · the', '...and the loose branch is named');
+    eq(sc.reasonOf(sc.classifyEntry(entries[5])[0]).text, 'english common · the · 0% of chat', '...and the loose branch is named');
     eq(sc.classifyEntry(entries[6])[0], undefined, 'a conjunction is as tight as its tightest conjunct, so it earns no common flag');
     entries[7].key = ['? ^Mark'];
     entries[8].key = ['? Mark'];
@@ -287,16 +301,15 @@ console.log('ok   SmartKey structural validation');
     const msgs = ['my mother said', 'my mother again', 'oh my mother', 'my mom once', 'nothing here'];
     const chat = countChatHits([entries[9].key[0], ...probes], msgs);
     const scChat = buildKeyPruneScan({ entries }, opts, new Set(), { chatScan: { messagesWith: chat.messagesWith, messages: chat.messages } });
-    eq(scChat.reasonOf(scChat.classifyEntry(entries[9])[0]).text, 'english common · mother & my · 80% of chat',
-        'with a chat: the common path that fires most is named, not the first');
-    eq(scChat.severityOf(scChat.classifyEntry(entries[9])[0]), 'severe', '...and over the chat-common share it is severe, the common path earning it');
-    // The breadth earned by a legitimate path instead: named as such, and never severe for it.
+    eq(scChat.reasonOf(scChat.classifyEntry(entries[9])[0]).text, 'chat common · 80% of chat, mostly mother & my',
+        'over the share it is chat common, naming the path that fires most — the chat\'s question, not the list\'s');
+    eq(scChat.severityOf(scChat.classifyEntry(entries[9])[0]), 'moderate', '...advisory, whatever the path');
+    // The breadth earned by a legitimate path: named as such, which is what clears the English-list concern.
     const legit = ['my mom once', 'the parent Parsons', 'parent Parsons again', 'Parsons the parent', 'Nick and his parent'];
     const chat2 = countChatHits([entries[9].key[0], ...probes], legit);
     const sc2 = buildKeyPruneScan({ entries }, opts, new Set(), { chatScan: { messagesWith: chat2.messagesWith, messages: chat2.messages } });
-    eq(sc2.reasonOf(sc2.classifyEntry(entries[9])[0]).text, 'english common · mom & my · 100% of chat, mostly parent & Parsons',
-        'a non-common path firing most is named, the flag still standing on the common path that exists');
-    eq(sc2.severityOf(sc2.classifyEntry(entries[9])[0]), 'moderate', '...and the breadth cannot promote it, not being the common path\'s doing');
+    eq(sc2.reasonOf(sc2.classifyEntry(entries[9])[0]).text, 'chat common · 100% of chat, mostly parent & Parsons',
+        'a legitimate path firing most is what the chip names');
 }
 console.log('ok   SmartKeys are audited on df, exempt only from the literal-string heuristics');
 

@@ -92,7 +92,8 @@ console.log('                            sit in different paragraphs of its own 
 console.log('                            or message, which is the tell that the setting is arriving:');
 console.log('                            entry text has no messages, so only paragraph subdivides it.');
 console.log('   mother                   "common", warning severity — quiet in this chat');
-console.log('   morning                  "common · ~55% of chat", severe');
+console.log('   morning                  "chat common · 55% of chat", moderate — the chat outranks the English list,');
+console.log('                            and is advisory: constant or a narrower key, never a pre-tick');
 console.log('   ver                      dead in entry text; fires 4/11 only inside longer words — with a chat');
 console.log('                            scanned, "fires in 36% of messages, 0% as a word — consider ? =ver"');
 console.log('   ? sodium & lamps         unflagged (attested in its own text). Its ACTIVATION is the');

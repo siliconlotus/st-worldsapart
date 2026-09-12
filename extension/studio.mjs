@@ -294,7 +294,8 @@ export async function lorebookStudio(preferredBook = null, open = null) {
                 check(studioOpts, 'includeInactive', 'Include inactive entries'),
                 check(studioOpts, 'pruneUnattested', 'Flag unattested keys (aliases and typos)'),
                 check(studioOpts, 'pruneCommon', 'Flag english-common keys'),
-                num(studioOpts, 'chatCommon', '↳ chat common: in >', '% of MESSAGES', { min: 1, max: 100, scale: 100 }),
+                num(studioOpts, 'chatCommon', 'chat common: in >', '% of MESSAGES', { min: 1, max: 100, scale: 100 }),
+                num(studioOpts, 'bookCommon', 'book common: in >', '% of ENTRIES', { min: 1, max: 100, scale: 100 }),
                 check(studioOpts, 'pruneShared', 'Flag book-shared keys'),
                 num(studioOpts, 'bookShared', '↳ book shared: LISTED by >', '% of entries', { min: 1, max: 100, scale: 100 }),
                 check(studioOpts, 'pruneShort', 'Flag short keys'),
@@ -1981,9 +1982,7 @@ export async function lorebookStudio(preferredBook = null, open = null) {
         if (!own.length || !picked?.length) return null;
         // The orthographic alternates ride along as ordinary keys: the audit can only cite chat evidence for a pattern
         // somebody counted, and both routes scan whatever list they are handed.
-        // Path probes ride in the first pass: only an english-common SmartKey has any — 22 keys and 151 probes across the
-        // corpus, the largest key 30 — and each is a conjunction the automaton pass already tallies.
-        const keys = [...new Set([...own, ...own.flatMap(k => orthoAlternates(k).map(a => a.alt)), ...own.flatMap(pathProbes)])];
+        const keys = [...new Set([...own, ...own.flatMap(k => orthoAlternates(k).map(a => a.alt))])];
         const first = await scanKeys(keys, picked);
         if (!first.seen) return null;
         const { totals, typedTotals, seen } = first;
@@ -1991,7 +1990,8 @@ export async function lorebookStudio(preferredBook = null, open = null) {
         // Second pass, probes only for the keys over the gate: a probe is a SmartKey evaluated per message, and the gate
         // admits a handful of keys where the book has thousands.
         const gate = studioOpts.chatCommon ?? KEY_CHAT_COMMON;
-        const probes = own.filter(k => (totals.get(k) ?? 0) / seen >= gate).flatMap(substringProbes);
+        // substring's whole-word and case probes, and a SmartKey's paths, so `chat common` can name the one that fires.
+        const probes = own.filter(k => (totals.get(k) ?? 0) / seen >= gate).flatMap(k => [...substringProbes(k), ...pathProbes(k)]);
         if (probes.length) {
             const second = await scanKeys(probes, picked);
             for (const [k, n] of second.totals) totals.set(k, n);

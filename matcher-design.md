@@ -553,14 +553,28 @@ core's intent, not to its bugs.
   beside the keys themselves — a verdict can cite only a pattern somebody counted. Evidence outranks
   `unattested`: a pattern that would match under another orthography is mis-written, not dead.
 
+- **Evidence about this book and this chat outranks the English list.** `FLAG_PRIORITY` is the order
+  `classify` tests: `unusable`, `substring`, `chat common`, `book common`, `book shared`, the evidenced
+  `regex orthography`, then `english common`, then the shape flags, then `unattested` — a dead key
+  being neutral — and `variant only`. The first hit is what a key reports.
+- **`chat common` is a flag of its own**, advisory: a key over the chat-common share of messages,
+  whatever list it is or is not on. Not on a `constant` or sticky entry, the author having declared
+  the entry ubiquitous; the flag claims something about the key against this chat, not the wiring.
+  Never severe, so never pre-ticked: its remedies are `constant` or a narrower key. K16 — one book, a
+  handful of keys over the share — says those keys were kept by curation, which is why it is advisory
+  and not why it does not exist.
+- **`book common` is its fallback**, only for a key no chat was scanned for: the book's own prose
+  standing in for the chat it does not have, at `KEY_BOOK_COMMON` of the entries. With a chat scanned,
+  ubiquity in entry text is a fact about the story and draws nothing on its own.
 - **`substring` is gated on breadth and judged on how the breadth was earned.** A key over the
-  chat-common share whose messages are mostly not whole-word hits wants `=`; mostly the wrong case, `^`.
-  Breadth alone never flags — `authoriz` is what substring matching is for — and neither does the
-  breakdown alone. The probes are `? ="key"` and `? ^"key"`, scanned only for keys already over the
-  gate (`substringProbes`): a probe is a SmartKey evaluated per message. It outranks `short`: NPR and
-  FBI are short and fine, CIA is short and inside "special". `chatRate` is scanned flags-off, so for an
-  entry with whole-word already on the gate overstates; the suggestion is withheld there, the gate is not
-  corrected.
+  chat-common share whose messages are mostly not whole-word hits wants `=`; a key with a capital whose
+  hits are mostly the wrong case wants `^` — a lowercase key hitting sentence-initial "Morning" is the
+  right word, so it is never offered. Breadth alone never flags: `authoriz` is what substring matching
+  is for. The probes are `? ="key"` and `? ^"key"`, scanned only for keys already over the gate
+  (`substringProbes`), a probe being a SmartKey evaluated per message. It outranks `short`: NPR and FBI
+  are short and fine, CIA is short and inside "special". `chatRate` is scanned flags-off, so for an
+  entry with whole-word already on the gate overstates; the suggestion is withheld there, the gate is
+  not corrected.
 
 - **`variant only` cites where**, a scanned chat before the book: `countChatHits` returns `typedWith`
   beside `messagesWith`, the same per-message count for the key as written. What the model writes is
