@@ -19,7 +19,8 @@ const closeCtx = () => {
 };
 const ctxDown = ev => { if (!ctxPanels.some(m => m.contains(ev.target))) closeCtx(); };
 const ctxKey = ev => { if (ev.key === 'Escape') { ev.preventDefault(); closeCtx(); } };
-const buildCtxPanel = (items, x, y, depth, mount) => {
+// `refresh` is the item builder for a menu whose `keep` items stay open: after such a click the menu is rebuilt from it, so tick marks update in place.
+const buildCtxPanel = (items, x, y, depth, mount, refresh = null) => {
     while (ctxPanels.length > depth) ctxPanels.pop().remove();
     const menu = document.createElement('div'); menu.className = 'wa-ctx';
     for (const it of items) {
@@ -33,7 +34,11 @@ const buildCtxPanel = (items, x, y, depth, mount) => {
         } else {
             row.addEventListener('mouseenter', () => { while (ctxPanels.length > depth + 1) ctxPanels.pop().remove(); });
             // Without stopPropagation the click bubbles to ST's autoclose handler and collapses the Extensions drawer.
-            row.addEventListener('click', ev => { ev.stopPropagation(); closeCtx(); it.fn?.(); });
+            row.addEventListener('click', ev => {
+                ev.stopPropagation();
+                if (it.keep && refresh) { it.fn?.(); buildCtxPanel(refresh(), x, y, depth, mount, refresh); return; }
+                closeCtx(); it.fn?.();
+            });
         }
         menu.append(row);
     }
@@ -44,9 +49,9 @@ const buildCtxPanel = (items, x, y, depth, mount) => {
     menu.style.top = Math.max(6, Math.min(y, innerHeight - r.height - 6)) + 'px';
     return menu;
 };
-export const showCtxMenu = (items, x, y, mount = document.body) => {
+export const showCtxMenu = (items, x, y, mount = document.body, refresh = null) => {
     closeCtx();
-    buildCtxPanel(items, x, y, 0, mount);
+    buildCtxPanel(items, x, y, 0, mount, refresh);
     document.addEventListener('mousedown', ctxDown, true);
     document.addEventListener('keydown', ctxKey, true);
     window.addEventListener('scroll', closeCtx, true);
