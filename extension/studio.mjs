@@ -2696,8 +2696,8 @@ export async function lorebookStudio(preferredBook = null, open = null) {
         hayWrap.style.cssText = 'flex:3 1 0;position:relative;display:flex;min-height:0;overflow:hidden;margin:5px 0;';
         // Outside hayRead, which scrolls: a child of it would scroll away from the text.
         const hayToggle = document.createElement('i');
-        hayToggle.style.cssText = 'position:absolute;top:5px;right:9px;cursor:pointer;opacity:0.6;padding:3px 5px;border-radius:4px;'
-            + 'background:var(--black30a, rgba(0,0,0,0.3));font-size:0.85em;z-index:1;';
+        hayToggle.style.cssText = 'position:absolute;top:5px;right:9px;cursor:pointer;opacity:0.85;padding:3px 5px;border-radius:4px;'
+            + 'background:var(--black70a, rgba(0,0,0,0.7));font-size:0.85em;z-index:1;';
         // The text as it was when editing began, so a cancel can put it back; null while nothing is being edited.
         let hayBeforeEdit = null;
         hayToggle.addEventListener('click', () => {
@@ -2711,8 +2711,8 @@ export async function lorebookStudio(preferredBook = null, open = null) {
         const hayCancel = document.createElement('i');
         hayCancel.className = 'fa-solid fa-xmark';
         hayCancel.title = 'Cancel the edit';
-        hayCancel.style.cssText = 'position:absolute;top:5px;right:34px;cursor:pointer;opacity:0.6;padding:3px 5px;border-radius:4px;'
-            + 'background:var(--black30a, rgba(0,0,0,0.3));font-size:0.85em;z-index:1;';
+        hayCancel.style.cssText = 'position:absolute;top:5px;right:34px;cursor:pointer;opacity:0.85;padding:3px 5px;border-radius:4px;'
+            + 'background:var(--black70a, rgba(0,0,0,0.7));font-size:0.85em;z-index:1;';
         hayCancel.addEventListener('click', () => {
             if (hayBeforeEdit === null) return;
             labHay = hayBeforeEdit; hayBox.value = labHay; hayBeforeEdit = null;
@@ -2723,14 +2723,14 @@ export async function lorebookStudio(preferredBook = null, open = null) {
         const srcToggle = document.createElement('i');
         srcToggle.className = 'fa-solid fa-code';
         srcToggle.style.cssText = 'position:absolute;top:5px;right:34px;cursor:pointer;padding:3px 5px;border-radius:4px;'
-            + 'background:var(--black30a, rgba(0,0,0,0.3));font-size:0.85em;z-index:1;';
+            + 'background:var(--black70a, rgba(0,0,0,0.7));font-size:0.85em;z-index:1;';
         srcToggle.addEventListener('click', () => { labShowMarkup = !labShowMarkup; repaint(); });
         // Clears the haystack outright, whichever view is up.
         const hayErase = document.createElement('i');
         hayErase.className = 'fa-solid fa-eraser';
         hayErase.title = 'Clear the text';
-        hayErase.style.cssText = 'position:absolute;top:5px;right:59px;cursor:pointer;opacity:0.6;padding:3px 5px;border-radius:4px;'
-            + 'background:var(--black30a, rgba(0,0,0,0.3));font-size:0.85em;z-index:1;';
+        hayErase.style.cssText = 'position:absolute;top:5px;right:59px;cursor:pointer;opacity:0.85;padding:3px 5px;border-radius:4px;'
+            + 'background:var(--black70a, rgba(0,0,0,0.7));font-size:0.85em;z-index:1;';
         hayErase.addEventListener('click', () => { labHay = ''; hayBox.value = ''; hayBeforeEdit = null; labCommitted = false; repaint(); hayBox.focus(); });
         hayWrap.append(hayBox, hayRead, srcToggle, hayCancel, hayErase, hayToggle);
         const keyBox = box('Keys, comma- or newline-separated — plain, /regex/flags or ?SmartKey', () => labKeys, v => { labKeys = v; });
