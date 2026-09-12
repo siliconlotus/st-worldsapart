@@ -46,4 +46,5 @@ The code is MIT. Two generated data files carry their own terms, stated in their
   Google Books Ngrams, Wikipedia, OPUS OpenSubtitles 2018, ParaCrawl, the Leeds Internet Corpus, and the SUBTLEX word
   lists by Marc Brysbaert et al., which are freely available data and are credited here as wordfreq requires.
 
-Any table built with `build-zipf.py` for another language is wordfreq data under the same CC BY-SA 4.0 terms.
+Packs for other languages live in [st-worldsapart-lang](https://github.com/siliconlotus/st-worldsapart-lang), built by
+`build-zipf.py` from wordfreq data under the same CC BY-SA 4.0 terms; the extension fetches one on first use.

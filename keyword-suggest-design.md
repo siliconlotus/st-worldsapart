@@ -378,6 +378,11 @@ corpus's dominant tag, on words wordfreq knows, which is also the vocabulary gat
 line is absence from the table, which begins at 3.0 after rounding. wordfreq alone measured within
 noise of the SUBTLEX blend it replaced (S23) and is what any other language would build from.
 
+**Every language is one pack shape.** `build-zipf.py` writes the bundled English module and every
+fetched `zipf-<lang>.json` as the same object: the packed deciles, the three POS sets, the common
+list and a hash. `lang.mjs` holds whichever is current; the suggester and the audit read it at the
+top of each build. A wordfreq-only pack has no POS sets and no name subtraction on its common list.
+
 **Ruled: `chat common` raises its own flag.** Chat rate was confirm-only (it could redden
 `common word` and never speak alone), so a key that floods the chat without being a common English
 word or frequent in the book's own prose went unflagged — `magic` on a Foxbridge entry. The flag

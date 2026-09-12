@@ -877,14 +877,13 @@ Ordered by whether a user can see the difference.
    first term outside the fit, against `layoutOrder`'s prefix property. `maxRecursionSteps` is the
    existing lever, and caps where this would decay.
 2. **Proximity** (`(…)~N`). Witness spans shipped, so the display it needs exists.
-3. **Suggester i18n: English is supported, other languages fall back.** Stages 3–4 assume no
-   language (F58); the audit's `common word` is already a fallback behind chat and book evidence.
-   The suggester is English: `ZIPF_EN` scores a non-English function word as maximally rare, so it
-   should detect that its table does not cover the chat and stand down rather than invert. Standing
-   down is a junkier list, not an equivalent one — chat evidence catches 1–4% of what the gate kills
-   (S22) — and the POS filters and morphology are English regardless. Per-language Zipf tables are
-   the upgrade if it is ever wanted. Accents are not a fold or an expansion in any language (`du`/`dû`);
-   an English chat dropping one on a borrowed name is `variant only`'s evidence-gated territory.
+3. **Language packs ship; other languages fall back.** Every language is one pack shape (`lang.mjs`):
+   English is bundled, built from fiction prose with POS sets; any other language is wordfreq alone,
+   fetched once from the data repo and kept in the user's files, with no POS sets, so the verb and
+   adjective filters are no-ops there and the English morphology rules stay on. A pack carries its own
+   common list, so `common word` applies under every language. Standing down (no pack) is a junkier
+   list, not an equivalent one (S22). Stages 3–4 assume no language (F58). Open: the English
+   morphology rules under another language, and tokenisation for languages without whitespace.
 4. **A signal's within-scene SD varies by book**, and the two books `keys` costs are its extremes
    (F45). Standardisation divides by the scene's own SD, so a near-constant column has its few small
    differences amplified into large z against a slope fitted on other books. No use proposed; it is a
