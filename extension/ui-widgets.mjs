@@ -338,7 +338,7 @@ dialog.popup:has(.wa-studio), .wa-studio-nav, .wa-studio-explorer, .wa-studio-en
 .wa-studio-entries { flex: 1 1 auto; overflow-y: auto; min-width: 0; }
 .wa-studio-body { flex: 1 1 auto; display: flex; min-height: 0; }
 .wa-rail { flex: 0 0 auto; display: flex; flex-direction: column; gap: 6px; padding: 2px 8px 0; }
-.wa-rail .menu_button { width: 3em; height: 3em; padding: 0; margin: 0; display: grid; place-items: center; position: relative; font-size: 1.05em; }
+.wa-rail .menu_button { width: 2.6em; height: 2.6em; padding: 0; margin: 0; display: grid; place-items: center; position: relative; font-size: 1.05em; }
 .wa-rail-count { position: absolute; bottom: 1px; right: 2px; font-size: 0.55em; line-height: 1; opacity: 0.8; }
 .wa-studio-navhead, .wa-studio-exphead { position: sticky; top: 0; z-index: 1; padding: 2px 0 6px;
     background: var(--SmartThemeBlurTintColor, var(--black70a, rgba(20,20,20,0.95))); }
