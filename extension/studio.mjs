@@ -2651,28 +2651,6 @@ export async function lorebookStudio(preferredBook = null, open = null) {
 
     /** The haystack at full width with every match marked, and the digest under it. The tab keeps only the digest: the
      *  marked text needs the room, and the pane above it already shows the same characters unmarked. */
-    const showMarkedText = () => {
-        const { ink, rows, spans } = scanLab();
-        const wrap = document.createElement('div');
-        wrap.style.cssText = 'text-align:left;width:100%;display:flex;gap:12px;align-items:stretch;';
-        const body = document.createElement('div');
-        body.className = 'wa-marked';
-        body.style.cssText = 'flex:1.6 1 0;white-space:pre-wrap;line-height:1.6;max-height:78vh;overflow:auto;font-size:0.95em;min-width:0;';
-        body.innerHTML = markedHtml(labHay, spans, ink) || '<span style="opacity:0.6;">(no text)</span>';
-        const digest = document.createElement('div');
-        digest.style.cssText = 'flex:1 1 0;max-height:78vh;overflow:auto;min-width:0;'
-            + 'padding-left:12px;border-left:1px solid color-mix(in srgb, currentColor 15%, transparent);';
-        digest.innerHTML = labRun ? labRunHtml() : rows.map(r => labKeyHtml(r, r.color)).join('');
-        bindCollapse(digest);
-        bindJump(digest, body);
-        bindMarkJump(body, digest);
-        bindKwMenu(digest);
-        wrap.append(body, digest);
-        const vp = new Popup(wrap, POPUP_TYPE.TEXT, '', { large: true, allowVerticalScrolling: true });
-        vp.dlg.style.setProperty('width', 'calc(var(--sheldWidth, 90vw) * 0.9)', 'important');
-        vp.dlg.style.setProperty('max-width', 'calc(100dvw - 2em)', 'important');
-        vp.show();
-    };
 
     const renderLabView = pane => {
         const panes = document.createElement('div');
@@ -2813,7 +2791,6 @@ export async function lorebookStudio(preferredBook = null, open = null) {
                     const name = await pickBook('Apply which lorebook?', true);
                     if (name) await applyOneBook(name);
                 }),
-            labTool('fa-expand', 'Show the text with every match marked', () => showMarkedText()),
         );
         const out = document.createElement('div');
         out.style.cssText = 'flex:2 1 0;overflow:auto;min-width:0;min-height:0;';
