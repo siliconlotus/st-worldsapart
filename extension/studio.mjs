@@ -10,7 +10,7 @@ import { runState, settings } from './state.mjs';
 import { ensureStudioStyle, makeSortControl, renderMessageHtml, showCtxMenu, showEntryText, wiGlyph } from './ui-widgets.mjs';
 import { SORT_FNS, SORT_LABELS, normPresentation, presentationLabel, reconcileTiers, tierRank, wiTitleOf } from './sort.mjs';
 import { buildKeyPruneScan, llmKeyCandidates } from './keyword-tools.mjs';
-import { FLAG_PRIORITY, KEY_CHAT_COMMON, MINOR, MODERATE, SEVERE, STUDIO_PRUNE_OPTS, collisionProbes, orthoAlternates, pathProbes } from './keyword-audit.mjs';
+import { FLAG_PRIORITY, KEY_CHAT_COMMON, MINOR, MODERATE, SEVERE, STUDIO_PRUNE_OPTS, substringProbes, orthoAlternates, pathProbes } from './keyword-audit.mjs';
 import { buildKeySuggest, classifyLlmCand, STUDIO_SUGGEST_OPTS } from './keyword-suggest.mjs';
 import { validateSmartKey } from './smartkeys.mjs';
 import { findOrphanBindings } from './bindings.mjs';
@@ -1991,7 +1991,7 @@ export async function lorebookStudio(preferredBook = null, open = null) {
         // Second pass, probes only for the keys over the gate: a probe is a SmartKey evaluated per message, and the gate
         // admits a handful of keys where the book has thousands.
         const gate = studioOpts.chatCommon ?? KEY_CHAT_COMMON;
-        const probes = own.filter(k => (totals.get(k) ?? 0) / seen >= gate).flatMap(collisionProbes);
+        const probes = own.filter(k => (totals.get(k) ?? 0) / seen >= gate).flatMap(substringProbes);
         if (probes.length) {
             const second = await scanKeys(probes, picked);
             for (const [k, n] of second.totals) totals.set(k, n);

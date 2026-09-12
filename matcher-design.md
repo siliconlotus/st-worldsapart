@@ -553,11 +553,11 @@ core's intent, not to its bugs.
   beside the keys themselves — a verdict can cite only a pattern somebody counted. Evidence outranks
   `unattested`: a pattern that would match under another orthography is mis-written, not dead.
 
-- **`collision` is gated on breadth and judged on how the breadth was earned.** A key over the
+- **`substring` is gated on breadth and judged on how the breadth was earned.** A key over the
   chat-common share whose messages are mostly not whole-word hits wants `=`; mostly the wrong case, `^`.
   Breadth alone never flags — `authoriz` is what substring matching is for — and neither does the
   breakdown alone. The probes are `? ="key"` and `? ^"key"`, scanned only for keys already over the
-  gate (`collisionProbes`): a probe is a SmartKey evaluated per message. It outranks `short`: NPR and
+  gate (`substringProbes`): a probe is a SmartKey evaluated per message. It outranks `short`: NPR and
   FBI are short and fine, CIA is short and inside "special". `chatRate` is scanned flags-off, so for an
   entry with whole-word already on the gate overstates; the suggestion is withheld there, the gate is not
   corrected.
