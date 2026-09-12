@@ -7,6 +7,7 @@ import { Popup, POPUP_TYPE, POPUP_RESULT } from '../../../../popup.js';
 import { escapeHtml, getCharaFilename, getStringHash, download, uuidv4 } from '../../../../utils.js';
 import { getRequestHeaders, saveSettingsDebounced } from '../../../../../script.js';
 import { getTokenCountAsync } from '../../../../tokenizers.js';
+import { t, translate } from '../../../../i18n.js';
 import { runState, settings } from './state.mjs';
 import * as matcher from './matcher.mjs';
 import { entryFoldHtml, keyHitsHtml, showEntryText, wiGlyph } from './ui-widgets.mjs';
@@ -21,10 +22,12 @@ let host = null;
 export function setCaptureHost(h) { host = h; }
 
 /** The grading scale in one caption line, shared by both grading popups. */
-const gradeAnchorLine = () => `Grade 0–4: ${GRADE_ANCHORS.map((a, g) => `${g} = ${a.split(';')[0].toLowerCase()}`).join(' · ')}.`;
+const gradeAnchorLine = () => { const scale = GRADE_ANCHORS.map((a, g) => `${g} = ${translate(a).split(';')[0].toLowerCase()}`).join(' · '); return t`Grade 0–4: ${scale}.`; };
 
 /** HTML-escaping for the grading tables, with null/undefined rendering blank rather than "undefined". */
 const esc = s => escapeHtml(String(s ?? ''));
+/** The scissors tooltip on a row the budget cut. */
+const cutTip = row => t`cut by the budget` + (row.cutBy ? ': ' + t`${row.cutBy} cap` : '') + (row.tokens ? ', ' + t`${row.tokens} tokens` : '');
 
 /** ST's match flags for captureParams. A function, not an object: the imports are live bindings. */
 const stParams = () => ({
@@ -137,7 +140,7 @@ export async function versusCore(named) {
     }
 
     const population = runState.lastLayoutOrder;
-    if (!runState.lastCandidates?.length || !population?.length) { toastr.info('Nothing ranked \u2014 the scan activated no entries.', 'Worlds Apart'); return; }
+    if (!runState.lastCandidates?.length || !population?.length) { toastr.info(t`Nothing ranked — the scan activated no entries.`, 'Worlds Apart'); return; }
 
     const { entries: coreEntries, viaVectors, vectorsRan } = await host.coreSelection();
 
@@ -196,7 +199,7 @@ export async function versusCore(named) {
         rows: union.map(([k, x]) => ({ ...row([k, x]), core: coreKeys.has(k), wa: waKeys.has(k), content: x.entry.content })),
     });
     await versusBundle(union, coreKeys, waKeys, viaVectors);
-    toastr.success(`core ${coreKeys.size} / WA ${waKeys.size}, ${coreKeys.size - both} core-only \u2014 see console`, 'WA vs core');
+    toastr.success(t`core ${coreKeys.size} / WA ${waKeys.size}, ${coreKeys.size - both} core-only — see console`, t`WA vs core`);
 }
 
 /**
@@ -267,7 +270,7 @@ async function versusBundle(union, coreKeys, waKeys, viaVectors) {
     const bundle = await bundleSamples(arms, { ...sceneRange(), user: raterId(), captureId: uuidv4() });
     const { filename, content } = sampleFile(bundle);
     download(content, filename, 'application/json');
-    toastr.info(`Saved ${filename} — open it with Review bundles to grade these ${union.length} rows.`, 'Worlds Apart', { timeOut: 8000 });
+    toastr.info(t`Saved ${filename} — open it with Review bundles to grade these ${union.length} rows.`, 'Worlds Apart', { timeOut: 8000 });
 }
 
 /** Default sample name: chat slug + the message the scene ends on — distinct across scenes, stable on a re-grade. */
@@ -346,13 +349,13 @@ export async function gradeScene(named) {
     }
 
     if (!rows.length) {
-        toastr.warning('Nothing was activated — nothing to grade.', 'Worlds Apart');
+        toastr.warning(t`Nothing was activated — nothing to grade.`, 'Worlds Apart');
         return '';
     }
 
     // An empty lastQuery means no query text could be built at all; keyword-only scenes pass, their query frozen.
     if (!runState.lastQuery) {
-        toastr.warning('No query text could be built from this chat — the sample would have nothing to score offline.', 'Worlds Apart');
+        toastr.warning(t`No query text could be built from this chat — the sample would have nothing to score offline.`, 'Worlds Apart');
         return '';
     }
 
@@ -362,24 +365,26 @@ export async function gradeScene(named) {
     const scaffold = rows.length - gradeable.length;
 
     const wrap = document.createElement('div');
-    wrap.innerHTML = '<h3 style="margin:0 0 0.25em;">Grade this scene</h3>'
-        + `<small style="display:block;opacity:0.7;margin-bottom:0.5em;">${gradeAnchorLine()} ${gradeable.length} retrieved entries${scaffold ? `; ${scaffold} constant or sticky row(s) listed, not graded` : ''}. Blank means ungraded, not 0.</small>`
-        + '<details style="margin-bottom:0.75em;"><summary style="cursor:pointer;">Query text — what retrieval actually matched on '
-        + `(${runState.lastQuery.length} chars, depth ${settings().messageDepth})</summary>`
+    const counts = [t`${gradeable.length} retrieved entries`];
+    if (scaffold) counts.push(t`${scaffold} constant or sticky row(s) listed, not graded`);
+    wrap.innerHTML = `<h3 style="margin:0 0 0.25em;">${esc(t`Grade this scene`)}</h3>`
+        + `<small style="display:block;opacity:0.7;margin-bottom:0.5em;">${esc(gradeAnchorLine())} ${esc(counts.join('; '))}. ${esc(t`Blank means ungraded, not 0.`)}</small>`
+        + `<details style="margin-bottom:0.75em;"><summary style="cursor:pointer;">${esc(t`Query text — what retrieval actually matched on`)} `
+        + `${esc(t`(${runState.lastQuery.length} chars, depth ${settings().messageDepth})`)}</summary>`
         + `<pre style="white-space:pre-wrap;max-height:14em;overflow:auto;font-size:0.85em;opacity:0.85;border:1px solid var(--SmartThemeBorderColor);padding:0.5em;margin-top:0.5em;">${esc(runState.lastQuery)}</pre></details>`
         + '<table style="width:100%;border-collapse:collapse;font-size:0.9em;text-align:left;"><thead><tr style="text-align:left;">'
-        + '<th style="width:4em;">Grade</th><th>Entry</th><th style="width:4em;">fused</th><th style="width:4em;">cos</th><th style="width:4em;">text</th><th style="width:4em;">keys</th></tr></thead><tbody>'
+        + `<th style="width:4em;">${esc(t`Grade`)}</th><th>${esc(t`Entry`)}</th><th style="width:4em;">${esc(t`fused`)}</th><th style="width:4em;">${esc(t`cos`)}</th><th style="width:4em;">${esc(t`text`)}</th><th style="width:4em;">${esc(t`keys`)}</th></tr></thead><tbody>`
         // Block + score order (gradeOrder); `i` stays the capture index, which every data-i indexes.
         + gradeOrder(rows, r => -(r.score ?? -Infinity)).map(({ row, i }) => {
             const scaff = isDurable(row);
             const num = n => (n == null ? '·' : String(n));
             const cell = scaff
-                ? `<span style="opacity:0.5;font-size:0.85em;">${row.block === 'constant' ? 'const' : 'sticky'}</span>`
+                ? `<span style="opacity:0.5;font-size:0.85em;">${esc(row.block === 'constant' ? t`const` : t`sticky`)}</span>`
                 : `<input type="number" class="wa-grade text_pole" data-i="${i}" min="0" max="4" step="1" placeholder="—" title="${esc(GRADE_ANCHORS.map((a, g) => `${g}: ${a}`).join('\n'))}" style="width:4em;padding:2px 4px;">`;
             return `<tr style="border-top:1px solid var(--SmartThemeBorderColor);${scaff ? 'opacity:0.6;' : ''}">`
                 + `<td>${cell}</td>`
                 // wiGlyph, never a local mapping.
-                + `<td>${row.cut ? `<i class="fa-solid fa-scissors" style="opacity:0.55;margin-right:0.35em;" title="cut by the budget${row.cutBy ? `: ${esc(row.cutBy)} cap` : ''}${row.tokens ? `, ${row.tokens} tokens` : ''}"></i>` : ''}${entries[i] ? wiGlyph(entries[i]) + ' ' : ''}${esc(row.title)}<br><small style="opacity:0.5;">${esc(row.book)} · uid ${num(row.uid)}</small>${keyHitsHtml(row.why)}<br><i class="fa-solid fa-chevron-right wa-chevron wa-fold" data-i="${i}" title="Show keys and entry text" style="margin-top:0.35em;"></i></td>`
+                + `<td>${row.cut ? `<i class="fa-solid fa-scissors" style="opacity:0.55;margin-right:0.35em;" title="${esc(cutTip(row))}"></i>` : ''}${entries[i] ? wiGlyph(entries[i]) + ' ' : ''}${esc(row.title)}<br><small style="opacity:0.5;">${esc(row.book)} · ${esc(t`uid ${num(row.uid)}`)}</small>${keyHitsHtml(row.why)}<br><i class="fa-solid fa-chevron-right wa-chevron wa-fold" data-i="${i}" title="${esc(t`Show keys and entry text`)}" style="margin-top:0.35em;"></i></td>`
                 + `<td>${num(row.score)}</td><td>${num(row.cosine)}</td><td>${num(row.text)}</td><td>${num(row.keys)}</td>`
                 + `</tr>`
                 + `<tr class="wa-foldrow" data-i="${i}" style="display:none;"><td colspan="6" style="padding:0.5em 0.75em 0.9em;">${entryFoldHtml(entries[i], i)}</td></tr>`;
@@ -390,17 +395,17 @@ export async function gradeScene(named) {
 
     const popup = new Popup(wrap, POPUP_TYPE.CONFIRM, '', { customButtons: [{
         // No `result`, so it acts on the form and leaves the popup open.
-        text: 'Fill blanks with 0', icon: 'fa-0',
-        tooltip: 'Every untouched row becomes a graded 0. Leave a row blank to record it as UNGRADED instead.',
+        text: t`Fill blanks with 0`, icon: 'fa-0',
+        tooltip: t`Every untouched row becomes a graded 0. Leave a row blank to record it as UNGRADED instead.`,
         action: () => {
             const { filled, undo } = fillReadZeros(wrap);
-            if (!filled) { toastr.info('No blank rows to fill.', 'Worlds Apart'); return; }
-            toastr.success(`Filled ${filled} blank row(s) with 0. Click to undo.`, 'Worlds Apart', {
+            if (!filled) { toastr.info(t`No blank rows to fill.`, 'Worlds Apart'); return; }
+            toastr.success(t`Filled ${filled} blank row(s) with 0. Click to undo.`, 'Worlds Apart', {
                 timeOut: 10000, extendedTimeOut: 10000,
-                onclick: () => { const n = undo(); toastr.info(`Reverted ${n} row(s) to ungraded.`, 'Worlds Apart'); },
+                onclick: () => { const n = undo(); toastr.info(t`Reverted ${n} row(s) to ungraded.`, 'Worlds Apart'); },
             });
         },
-    }], okButton: 'Save sample', cancelButton: 'Cancel', large: true, wide: true, allowVerticalScrolling: true });
+    }], okButton: t`Save sample`, cancelButton: t`Cancel`, large: true, wide: true, allowVerticalScrolling: true });
     const result = await popup.show();
 
     if (result !== POPUP_RESULT.AFFIRMATIVE) {
@@ -443,7 +448,7 @@ export async function gradeScene(named) {
     const { filename, content } = sampleFile(bundle);
     download(content, filename, 'application/json');
     const graded = grades.filter(g => gradeValue(g) > 0).length;
-    toastr.success(`Saved ${filename} — ${graded} of ${grades.length} graded above 0. Move it to eval/eval-data/ and run graded-scene-grid.mjs --sample`, 'Worlds Apart', { timeOut: 8000 });
+    toastr.success(t`Saved ${filename} — ${graded} of ${grades.length} graded above 0. Move it to eval/eval-data/ and run graded-scene-grid.mjs --sample`, 'Worlds Apart', { timeOut: 8000 });
     console.log(`Worlds Apart: sample "${sample.name}" — ${grades.length} graded rows, ${Object.keys(books).length} book(s) embedded`, sample);
 
     return '';
@@ -500,7 +505,7 @@ async function captureArm(overrides, wanted) {
  * @param {object[]} [args.sections] /wa-super-eval's N bundles, one section each; absent means one scene
  * @returns {Promise<{grades: object[]}|{sections: object[], edited: number}|null>} null on cancel
  */
-async function superGradePopup({ captures, union, entryOf, subtitle = '', okButton = 'Save samples', sections = null }) {
+async function superGradePopup({ captures, union, entryOf, subtitle = '', okButton = t`Save samples`, sections = null }) {
     let prior = [];   // grades from earlier rounds, loaded by the file picker
 
     // `data-i` indexes `flat` across sections, not a section's own rows: the same entry appears against several scenes (G10); section membership rides on the row.
@@ -534,29 +539,30 @@ async function superGradePopup({ captures, union, entryOf, subtitle = '', okButt
             byQ.set(cap.query, hit);
         }
         return [...byQ.entries()].map(([text, arms]) => {
-            const label = byQ.size === 1 ? 'Query text — what retrieval actually matched on' : `Query text (${esc(arms.join(', '))})`;
-            const si = sceneRef(text, sc.name ?? sc.file ?? 'Scene text');
-            return `<details style="margin-bottom:0.4em;"><summary style="cursor:pointer;">${label} `
-                + `(${text.length} chars, depth ${caps[0]?.depth ?? '?'}) `
-                + `<i class="fa-solid fa-up-right-and-down-left-from-center wa-scene-pop" data-i="${si}" title="Open the whole scene text" style="opacity:0.55;margin-left:0.35em;cursor:pointer;"></i></summary>`
+            const label = byQ.size === 1 ? t`Query text — what retrieval actually matched on` : t`Query text (${arms.join(', ')})`;
+            const si = sceneRef(text, sc.name ?? sc.file ?? t`Scene text`);
+            return `<details style="margin-bottom:0.4em;"><summary style="cursor:pointer;">${esc(label)} `
+                + `${esc(t`(${text.length} chars, depth ${caps[0]?.depth ?? '?'})`)} `
+                + `<i class="fa-solid fa-up-right-and-down-left-from-center wa-scene-pop" data-i="${si}" title="${esc(t`Open the whole scene text`)}" style="opacity:0.55;margin-left:0.35em;cursor:pointer;"></i></summary>`
                 + `<pre style="white-space:pre-wrap;max-height:32em;overflow:auto;font-size:0.85em;opacity:0.85;border:1px solid var(--SmartThemeBorderColor);padding:0.5em;margin-top:0.5em;">${esc(text)}</pre></details>`;
         }).join('')
-            + (byQ.size > 1 ? `<small style="display:block;opacity:0.6;margin-bottom:0.5em;">${byQ.size} arms retrieved against different text. Grade relevance to the scene, not to any one query.</small>` : '');
+            + (byQ.size > 1 ? `<small style="display:block;opacity:0.6;margin-bottom:0.5em;">${esc(t`${byQ.size} arms retrieved against different text. Grade relevance to the scene, not to any one query.`)}</small>` : '');
     };
     const queryBlocks = multi ? '' : queryBlocksFor(secs[0]);
 
-    head.innerHTML = `<h3 style="margin:0 0 0.25em;">${multi ? `Grade ${secs.length} scenes` : 'Grade this scene'}</h3>`
+    const armList = captures.map(c => c.arm).join(', ');
+    head.innerHTML = `<h3 style="margin:0 0 0.25em;">${esc(multi ? t`Grade ${secs.length} scenes` : t`Grade this scene`)}</h3>`
         + `${subtitle ? `<small style="display:block;opacity:0.7;margin-bottom:0.25em;">${esc(subtitle)}</small>` : ''}`
-        + `<small style="display:block;opacity:0.7;margin-bottom:0.5em;">${gradeAnchorLine()} ${multi
-            ? `${flat.length} rows across ${secs.length} scenes; each section shows its own query text.`
-            : `${union.rows.length} distinct entries from ${captures.length} arm(s): ${esc(captures.map(c => c.arm).join(', '))}.`}</small>`
+        + `<small style="display:block;opacity:0.7;margin-bottom:0.5em;">${esc(gradeAnchorLine())} ${esc(multi
+            ? t`${flat.length} rows across ${secs.length} scenes; each section shows its own query text.`
+            : t`${union.rows.length} distinct entries from ${captures.length} arm(s): ${armList}.`)}</small>`
         + queryBlocks
         + (multi ? '' : '<div style="margin:0.6em 0;display:flex;align-items:center;gap:0.6em;flex-wrap:wrap;">'
-        + '<div class="menu_button wa-sg-pick" style="width:auto;padding:0.3em 0.8em;">Load earlier samples / pool requests…</div>'
-        + '<small class="wa-sg-loaded" style="opacity:0.7;">nothing loaded</small>'
+        + `<div class="menu_button wa-sg-pick" style="width:auto;padding:0.3em 0.8em;">${esc(t`Load earlier samples / pool requests…`)}</div>`
+        + `<small class="wa-sg-loaded" style="opacity:0.7;">${esc(t`nothing loaded`)}</small>`
         + '<input type="file" class="wa-sg-prior" accept=".json,application/json" multiple style="display:none;">'
         + '</div>'
-        + '<small style="display:block;opacity:0.6;margin-bottom:0.5em;">Grades in loaded samples are skipped; pool requests add entries.</small>');
+        + `<small style="display:block;opacity:0.6;margin-bottom:0.5em;">${esc(t`Grades in loaded samples are skipped; pool requests add entries.`)}</small>`);
 
     // Repaint, not patch: priors change which rows are gradeable. Only dirty inputs carry across, or pristine "0"s would shadow the priors.
     const paint = () => {
@@ -567,16 +573,17 @@ async function superGradePopup({ captures, union, entryOf, subtitle = '', okButt
         const known = split.flatMap(x => x.known);
         const scaffoldN = secs.reduce((a, sc) => a + sc.union.rows.filter(r => isDurable(r)).length, 0);
 
-        body.innerHTML = `<small style="display:block;opacity:0.7;margin-bottom:0.5em;">${freshN} to grade`
-            + `${known.length ? `; ${known.length} judged in an earlier round (pre-filled — edit any you disagree with, untouched rows carry through as shown)` : ''}`
-            + `${scaffoldN ? `; ${scaffoldN} constant/persisting-sticky row(s) listed but not graded — WA did not choose them this turn` : ''}. Blank means UNGRADED, not 0.</small>`
+        const counts = [t`${freshN} to grade`];
+        if (known.length) counts.push(t`${known.length} judged in an earlier round (pre-filled — edit any you disagree with, untouched rows carry through as shown)`);
+        if (scaffoldN) counts.push(t`${scaffoldN} constant/persisting-sticky row(s) listed but not graded — WA did not choose them this turn`);
+        body.innerHTML = `<small style="display:block;opacity:0.7;margin-bottom:0.5em;">${esc(counts.join('; '))}. ${esc(t`Blank means UNGRADED, not 0.`)}</small>`
             + '<table style="width:100%;border-collapse:collapse;font-size:0.9em;text-align:left;"><thead><tr style="text-align:left;">'
-            + '<th style="width:4em;">Grade</th><th>Entry</th><th style="width:9em;">surfaced by</th><th style="width:4em;">best#</th><th style="width:4em;">cos</th><th style="width:4em;">text</th><th style="width:4em;">keys</th></tr></thead><tbody>'
+            + `<th style="width:4em;">${esc(t`Grade`)}</th><th>${esc(t`Entry`)}</th><th style="width:9em;">${esc(t`surfaced by`)}</th><th style="width:4em;">${esc(t`best#`)}</th><th style="width:4em;">${esc(t`cos`)}</th><th style="width:4em;">${esc(t`text`)}</th><th style="width:4em;">${esc(t`keys`)}</th></tr></thead><tbody>`
             // bestRank is the only cross-arm quantity comparable within a section; not across scenes, hence per section.
             + secs.map((sc, si) => (multi
                 ? `<tr><td colspan="7" style="padding:0.9em 0.25em 0.35em;border-top:2px solid var(--SmartThemeBorderColor);">`
-                  + `<b>${esc(sc.name ?? sc.file ?? `scene ${si + 1}`)}</b>`
-                  + `<small style="opacity:0.6;"> — ${sc.union.rows.filter(r => !isDurable(r)).length} gradeable, ${split[si].known.length} pre-filled</small>`
+                  + `<b>${esc(sc.name ?? sc.file ?? t`scene ${si + 1}`)}</b>`
+                  + `<small style="opacity:0.6;"> — ${esc(t`${sc.union.rows.filter(r => !isDurable(r)).length} gradeable, ${split[si].known.length} pre-filled`)}</small>`
                   + queryBlocksFor(sc) + `</td></tr>`
                 : '')
             + gradeOrder(sc.union.rows, r => r.bestRank ?? Infinity).map(({ row, i: rowI }) => {
@@ -589,15 +596,15 @@ async function superGradePopup({ captures, union, entryOf, subtitle = '', okButt
                 const done = priorOf.has(pkey);
                 // Prior rows are inputs pre-filled with the earlier grade; an edit re-emits the row and mergeGrades is last-wins. A dirty edit stays dirty across repaints.
                 const cell = isDurable(row)
-                    ? `<span style="opacity:0.5;font-size:0.85em;">${row.block === 'constant' ? 'const' : 'sticky'}</span>`
+                    ? `<span style="opacity:0.5;font-size:0.85em;">${esc(row.block === 'constant' ? t`const` : t`sticky`)}</span>`
                     : `<input type="number" class="wa-grade text_pole" data-key="${esc(key)}" data-i="${i}" min="0" max="4" step="1" ${typed.has(key) ? 'data-dirty="1" ' : ''}value="${esc(typed.get(key) ?? (done ? priorOf.get(pkey) : ''))}" placeholder="—" title="${esc(GRADE_ANCHORS.map((a, g) => `${g}: ${a}`).join('\n'))}" style="width:4em;padding:2px 4px;">`;
                 return `<tr style="border-top:1px solid var(--SmartThemeBorderColor);${done ? 'opacity:0.55;' : ''}">`
                     + `<td>${cell}</td>`
-                    + `<td>${row.cut ? `<i class="fa-solid fa-scissors" style="opacity:0.55;margin-right:0.35em;" title="cut by the budget${row.cutBy ? `: ${esc(row.cutBy)} cap` : ''}${row.tokens ? `, ${row.tokens} tokens` : ''}"></i>` : ''}${flat[i].entry ? wiGlyph(flat[i].entry) + ' ' : ''}${esc(row.title)}<br><small style="opacity:0.5;">${esc(row.book)} · uid ${num(row.uid)}</small>${keyHitsHtml(row.why)}<br><i class="fa-solid fa-chevron-right wa-chevron wa-fold" data-i="${i}" title="Show keys and entry text" style="margin-top:0.35em;"></i></td>`
+                    + `<td>${row.cut ? `<i class="fa-solid fa-scissors" style="opacity:0.55;margin-right:0.35em;" title="${esc(cutTip(row))}"></i>` : ''}${flat[i].entry ? wiGlyph(flat[i].entry) + ' ' : ''}${esc(row.title)}<br><small style="opacity:0.5;">${esc(row.book)} · ${esc(t`uid ${num(row.uid)}`)}</small>${keyHitsHtml(row.why)}<br><i class="fa-solid fa-chevron-right wa-chevron wa-fold" data-i="${i}" title="${esc(t`Show keys and entry text`)}" style="margin-top:0.35em;"></i></td>`
                     // The arm that supplied the numbers is underlined; the signal columns are its measurements alone.
                     + `<td><small style="opacity:0.7;">${row.arms.map(a => (a === row.from ? `<u>${esc(a)}</u>` : esc(a))).join(', ')}</small></td>`
                     // A borrowed signal is marked with its arm: absent-filled, never blended (unionArms).
-                    + `<td>${num(row.bestRank)}</td>${['cosine', 'text', 'keys'].map(s => `<td>${num(row.scores?.[s])}${row.filled?.[s] ? `<br><small style="opacity:0.5;font-size:0.75em;" title="filled from the ${esc(row.filled[s])} arm">${esc(row.filled[s])}</small>` : ''}</td>`).join('')}`
+                    + `<td>${num(row.bestRank)}</td>${['cosine', 'text', 'keys'].map(s => `<td>${num(row.scores?.[s])}${row.filled?.[s] ? `<br><small style="opacity:0.5;font-size:0.75em;" title="${esc(t`filled from the ${row.filled[s]} arm`)}">${esc(row.filled[s])}</small>` : ''}</td>`).join('')}`
                     + `</tr>`
                     + `<tr class="wa-foldrow" data-i="${i}" style="display:none;"><td colspan="7" style="padding:0.5em 0.75em 0.9em;">${entryFoldHtml(flat[i].entry, i)}</td></tr>`;
             }).join('')).join('')
@@ -633,7 +640,7 @@ async function superGradePopup({ captures, union, entryOf, subtitle = '', okButt
                         union.rows.push({
                             title: entry?.comment || row.title, book: row.book, uid: row.uid,
                             block: 'dynamic', sticky: 0, score: null, cosine: null, text: null, keys: null,
-                            arms: [`offline: ${(row.doses ?? []).length || '?'} dose(s)`],
+                            arms: [t`offline: ${(row.doses ?? []).length || '?'} dose(s)`],
                             bestRank: row.bestRank ?? null,
                         });
                         union.entries.push(entry);
@@ -645,24 +652,23 @@ async function superGradePopup({ captures, union, entryOf, subtitle = '', okButt
                     // Scene guard: prior grades pool by rowKey (book + uid), so a bundle from another scene would attach its verdicts to this one (G9). Any arm, since arms can differ in `query`; skipped, not thrown.
                     const off = captures.map(c => sceneDiff(c, priorSample)).sort((x, y) => x.length - y.length)[0] ?? ['query'];
                     if (off.length) {
-                        toastr.warning(`${file.name} was graded against a different scene (${off.join(', ')} differ) — ignored, or its verdicts would be attached to this one`, 'Worlds Apart', { timeOut: 8000 });
+                        toastr.warning(t`${file.name} was graded against a different scene (${off.join(', ')} differ) — ignored, or its verdicts would be attached to this one`, 'Worlds Apart', { timeOut: 8000 });
                         continue;
                     }
                     loaded.push(...(priorSample.entries ?? []));
                 } else {
-                    toastr.warning(`${file.name} has neither graded scenes nor "pending" — ignored`, 'Worlds Apart');
+                    toastr.warning(t`${file.name} has neither graded scenes nor "pending" — ignored`, 'Worlds Apart');
                     continue;
                 }
                 names.push(file.name);
             } catch {
-                toastr.warning(`Could not parse ${file.name} — ignored`, 'Worlds Apart');
+                toastr.warning(t`Could not parse ${file.name} — ignored`, 'Worlds Apart');
             }
         }
         prior = mergeGrades(prior, loaded, { user: raterId(), now: today() });
-        head.querySelector('.wa-sg-loaded').textContent = names.length
-            ? `${names.length} file(s): ${prior.length} prior grade(s)${added ? `, ${added} entry(ies) requested offline` : ''}`
-            : 'no usable files — nothing loaded';
-        toastr.info(`${prior.length} prior grade(s)${added ? `, ${added} entr(y/ies) requested offline` : ''}`, 'Worlds Apart', { timeOut: 3000 });
+        const priorTxt = t`${prior.length} prior grade(s)` + (added ? ', ' + t`${added} entry(ies) requested offline` : '');
+        head.querySelector('.wa-sg-loaded').textContent = names.length ? t`${names.length} file(s): ${priorTxt}` : t`no usable files — nothing loaded`;
+        toastr.info(priorTxt, 'Worlds Apart', { timeOut: 3000 });
         paint();
     });
 
@@ -670,17 +676,17 @@ async function superGradePopup({ captures, union, entryOf, subtitle = '', okButt
 
     const popup = new Popup(wrap, POPUP_TYPE.CONFIRM, '', { customButtons: [{
         // No `result`, so it acts on the form and leaves the popup open.
-        text: 'Fill blanks with 0', icon: 'fa-0',
-        tooltip: 'Every untouched row becomes a graded 0. Leave a row blank to record it as UNGRADED instead.',
+        text: t`Fill blanks with 0`, icon: 'fa-0',
+        tooltip: t`Every untouched row becomes a graded 0. Leave a row blank to record it as UNGRADED instead.`,
         action: () => {
             const { filled, undo } = fillReadZeros(body);
-            if (!filled) { toastr.info('No blank rows to fill.', 'Worlds Apart'); return; }
-            toastr.success(`Filled ${filled} blank row(s) with 0. Click to undo.`, 'Worlds Apart', {
+            if (!filled) { toastr.info(t`No blank rows to fill.`, 'Worlds Apart'); return; }
+            toastr.success(t`Filled ${filled} blank row(s) with 0. Click to undo.`, 'Worlds Apart', {
                 timeOut: 10000, extendedTimeOut: 10000,
-                onclick: () => { const n = undo(); toastr.info(`Reverted ${n} row(s) to ungraded.`, 'Worlds Apart'); },
+                onclick: () => { const n = undo(); toastr.info(t`Reverted ${n} row(s) to ungraded.`, 'Worlds Apart'); },
             });
         },
-    }], okButton, cancelButton: 'Cancel', large: true, wide: true, allowVerticalScrolling: true });
+    }], okButton, cancelButton: t`Cancel`, large: true, wide: true, allowVerticalScrolling: true });
     if (await popup.show() !== POPUP_RESULT.AFFIRMATIVE) {
         return null;
     }
@@ -718,13 +724,13 @@ export async function superGradeScene(named) {
         : Object.keys(POOL_ARMS);
     const unknown = picked.filter(a => !POOL_ARMS[a]);
     if (unknown.length) {
-        toastr.warning(`Unknown arm(s): ${unknown.join(', ')}. Known: ${Object.keys(POOL_ARMS).join(', ')}`, 'Worlds Apart');
+        toastr.warning(t`Unknown arm(s): ${unknown.join(', ')}. Known: ${Object.keys(POOL_ARMS).join(', ')}`, 'Worlds Apart');
         return '';
     }
 
     const captures = [];
     for (const [n, arm] of picked.entries()) {
-        toastr.info(`Arm ${n + 1}/${picked.length}: ${arm}`, 'Worlds Apart', { timeOut: 2500 });
+        toastr.info(t`Arm ${n + 1}/${picked.length}: ${arm}`, 'Worlds Apart', { timeOut: 2500 });
         // Sequential, not Promise.all: the arms share one live settings object and one retrieval pipeline.
         const cap = await captureArm(POOL_ARMS[arm], wanted);
         if (!cap.rows.length) {
@@ -740,14 +746,14 @@ export async function superGradeScene(named) {
     }
 
     if (!captures.length) {
-        toastr.warning('No arm activated anything — nothing to grade.', 'Worlds Apart');
+        toastr.warning(t`No arm activated anything — nothing to grade.`, 'Worlds Apart');
         return '';
     }
 
     const union = unionArms(captures);
     // On the gradeable subset: unionArms keeps durable rows, so an all-constant scene has a non-empty union.
     if (!union.rows.some(r => !isDurable(r))) {
-        toastr.warning('Every activated row was constant or a persisting sticky — relevance chose nothing to grade.', 'Worlds Apart');
+        toastr.warning(t`Every activated row was constant or a persisting sticky — relevance chose nothing to grade.`, 'Worlds Apart');
         return '';
     }
 
@@ -796,8 +802,8 @@ export async function superGradeScene(named) {
 
     const above = grades.filter(g => gradeValue(g) > 0).length;
     toastr.success(
-        `Saved ${filename} — ${built.length} arms in one file, ${union.rows.length} rows this round, ${grades.length} pooled, ${above} above 0. `
-        + 'Move it to eval/eval-data/ and run graded-scene-grid.mjs --sample (add --arm to pick one); watch judged@10.',
+        t`Saved ${filename} — ${built.length} arms in one file, ${union.rows.length} rows this round, ${grades.length} pooled, ${above} above 0.`
+        + ' ' + t`Move it to eval/eval-data/ and run graded-scene-grid.mjs --sample (add --arm to pick one); watch judged@10.`,
         'Worlds Apart', { timeOut: 12000 },
     );
     return '';
@@ -816,7 +822,7 @@ const pickJsonFiles = ({ multiple = false } = {}) => new Promise(resolve => {
     // ponytail: focus heuristic, 2s; a dialog that opens without taking focus reads as blocked.
     setTimeout(() => {
         if (!document.hasFocus()) return;
-        toastr.warning('The browser blocked the file picker — run it again now that the chat is open.', 'Worlds Apart');
+        toastr.warning(t`The browser blocked the file picker — run it again now that the chat is open.`, 'Worlds Apart');
         resolve([]);
     }, 2000);
 });
@@ -834,7 +840,7 @@ export async function superEvalScene() {
         try {
             parsed = JSON.parse(await file.text());
         } catch {
-            toastr.warning(`Could not parse ${file.name} — skipped`, 'Worlds Apart');
+            toastr.warning(t`Could not parse ${file.name} — skipped`, 'Worlds Apart');
             continue;
         }
         for (const m of (Array.isArray(parsed) ? parsed : [parsed])) bundles.push({ name: m?.file ?? file.name, manifest: m });
@@ -845,7 +851,7 @@ export async function superEvalScene() {
         const names = armNames(manifest);
         const arms = (names.length ? names : [null]).map(n => { try { return openBundle(manifest, n); } catch { return null; } }).filter(Boolean);
         if (!arms.length || !arms[0].candidates?.length || !Array.isArray(arms[0].entries)) {
-            toastr.warning(`${fileName} is not a graded scene — skipped`, 'Worlds Apart');
+            toastr.warning(t`${fileName} is not a graded scene — skipped`, 'Worlds Apart');
             continue;
         }
         const entryOf = entryResolver(manifest.books ?? {});
@@ -858,13 +864,13 @@ export async function superEvalScene() {
         }));
         const union = unionArms(captures);
         if (!union.rows.some(r => !isDurable(r))) {
-            toastr.warning(`${fileName} has no gradeable rows — skipped`, 'Worlds Apart');
+            toastr.warning(t`${fileName} has no gradeable rows — skipped`, 'Worlds Apart');
             continue;
         }
         secs.push({ file: fileName, name: manifest.name ?? fileName, manifest, captures, union, entryOf, prior: arms[0].entries });
     }
     if (!secs.length) {
-        toastr.warning('No usable graded bundles in that selection.', 'Worlds Apart');
+        toastr.warning(t`No usable graded bundles in that selection.`, 'Worlds Apart');
         return '';
     }
     const manifest = secs[0].manifest;
@@ -876,9 +882,9 @@ export async function superEvalScene() {
         entryOf,
         sections: secs,
         subtitle: secs.length === 1
-            ? `Reviewing ${secs[0].file} (${manifest.createdBy ?? 'unknown grader'}) — loaded from file, no chat required.`
-            : `Reviewing ${secs.length} bundles — loaded from files, no chat required.`,
-        okButton: 'Save review',
+            ? t`Reviewing ${secs[0].file} (${manifest.createdBy ?? translate('unknown grader')}) — loaded from file, no chat required.`
+            : t`Reviewing ${secs.length} bundles — loaded from files, no chat required.`,
+        okButton: t`Save review`,
     });
     if (!done) {
         return '';
@@ -923,9 +929,8 @@ export async function superEvalScene() {
     // Agreement over the rows a human graded that also carry judge verdicts; the judge side resolves by gradeValue's median rule.
     const both = all.filter(g => g.grade !== undefined && (g.grades ?? []).some(v => v.kind === 'llm'));
     const pairs = both.map(g => [Number(g.grade), gradeValue({ grades: g.grades.filter(v => v.kind === 'llm') })]);
-    const irr = pairs.length
-        ? ` LLM agreement: ${pairs.filter(([h, j]) => h === j).length}/${pairs.length} exact, ${pairs.filter(([h, j]) => Math.abs(h - j) <= 1).length}/${pairs.length} within 1.`
-        : '';
-    toastr.success(`Saved ${filename} — ${done.edited} row(s) edited across ${reviewed.length} scene(s), ${rel} relevant (>=3).${irr} Apply with: node eval/synthetic-data/apply-review.mjs --write`, 'Worlds Apart', { timeOut: 15000 });
+    const exact = pairs.filter(([h, j]) => h === j).length, near = pairs.filter(([h, j]) => Math.abs(h - j) <= 1).length;
+    const irr = pairs.length ? ' ' + t`LLM agreement: ${exact}/${pairs.length} exact, ${near}/${pairs.length} within 1.` : '';
+    toastr.success(t`Saved ${filename} — ${done.edited} row(s) edited across ${reviewed.length} scene(s), ${rel} relevant (>=3).` + irr + ' ' + t`Apply with: node eval/synthetic-data/apply-review.mjs --write`, 'Worlds Apart', { timeOut: 15000 });
     return '';
 }
