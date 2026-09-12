@@ -288,7 +288,7 @@ eq(countKey('wait-no', 'wait—no', false, false), 0, 'em dash does NOT collapse
 eq(countKey('a...b', 'a…b', false, false), 1, 'ellipsis normalises');
 eq(countKey('a b', 'a b', false, false), 1, 'non-breaking space normalises');
 eq(countKey('three-inch', 'three inch', false, false), 1, 'DIVERGENCE: a key expands hyphen <-> space, where core matches neither way');
-eq(countKey('three inch', 'three-inch', false, false), 1, 'and the expansion runs both ways, prose picking the form per term');
+eq(countKey('three inch', 'three-inch', false, false), 0, 'one way only: a spaces-only key interns no hyphenated form');
 eq(countKey('wait-no', 'wait\u2014no', false, false), 0, 'the expansion is not the fold: an em-dash stays two hyphens and no variant reaches it');
 eq(countKey('Bose\u2013Einstein', 'the Bose Einstein condensate', false, false), 1, 'an en-dash key expands as the hyphen it folds to');
 eq(countKey('Jos\u00e9', `Jose\u0301 Sommers`, false, false), 1, 'decomposed text matches a precomposed key');

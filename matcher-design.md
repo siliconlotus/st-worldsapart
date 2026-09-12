@@ -535,10 +535,10 @@ core's intent, not to its bugs.
 - **The fold.** `fold` is `normalizeOrthography` then lowercase; core's `#transformString` only
   lowercases. For the default substring path WA is a strict superset.
 - **NFC** on the regex path, where core runs raw.
-- **A key expands hyphen ↔ space**, each single separator writable as the other, capped at 8 variants
-  (`automaton.mjs` `keyVariants`). A separator adjacent to another is not one, so an em-dash's `--` is
-  left alone. It is an expansion and not a fold: the haystack keeps the distinction, and a `/regex/`
-  key is the way to demand one form. A SmartKeys `TERM` is a word and expands with the rest.
+- **A key's hyphen is written as a space too** (`automaton.mjs` `keyVariants`), and not the reverse:
+  62% of the corpus's keys are spaces-only and would each intern a form nobody writes. An em-dash's `--`
+  yields a double space, a literal nothing matches. It is an expansion and not a fold: the haystack keeps the distinction, and a `/regex/` key is the way to
+  demand one form. A SmartKeys `TERM` is a word and expands with the rest.
 - **Whole-word applies to multi-word keys.** Core splits the key on whitespace and uses `includes()`,
   so *Match Whole Words* is a silent no-op for any key with a space in it — the same shape as
   `upstream-st.md` #1.

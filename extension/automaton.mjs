@@ -22,26 +22,13 @@ export const normalizeOrthography = s => {
 /** The one fold every match uses; registry, scan and fallback all go through it or they silently disagree. */
 export const fold = s => normalizeOrthography(s).toLowerCase();
 
-/** A key's hyphen/space variants: each SINGLE `-` or ` ` may be written as the other. A separator adjacent to another is
- *  not one — `--` is an em-dash's fold, not two compound hyphens. Normalised first, or ` – ` reads as one separator
- *  rather than three. [key] alone when it has none, or when 2^n exceeds `max`. */
-export function keyVariants(key, max = 8) {
+/** A key's hyphen written as a space too, since a compound is written both ways. Not the reverse: 62% of the corpus's
+ *  keys are spaces-only and would each intern a form nobody writes. Normalised first, so an en-dash expands as the
+ *  hyphen it folds to; an em-dash's `--` yields a double space, which is a literal nothing matches. */
+export function keyVariants(key) {
     const s = normalizeOrthography(key);
-    const at = [];
-    for (let i = 0; i < s.length; i++) {
-        if (s[i] !== '-' && s[i] !== ' ') continue;
-        const near = c => c === '-' || c === ' ';
-        if (near(s[i - 1]) || near(s[i + 1])) continue;
-        at.push(i);
-    }
-    if (!at.length || (1 << at.length) > max) return [s];
-    const out = new Set();
-    for (let mask = 0; mask < (1 << at.length); mask++) {
-        const c = [...s];
-        at.forEach((p, b) => { c[p] = ((mask >> b) & 1) ? '-' : ' '; });
-        out.add(c.join(''));
-    }
-    return [...out];
+    const open = s.replaceAll('-', ' ');
+    return open === s ? [s] : [s, open];
 }
 
 /** Aho-Corasick automaton over folded literals: `{next, fail, out, len}`. */
