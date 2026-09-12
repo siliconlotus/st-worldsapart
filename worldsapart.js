@@ -1720,6 +1720,12 @@ const SETTINGS_HTML = `
 .worlds-apart-settings .checkbox_label { margin-left: 0; }
 .worlds-apart-settings .checkbox_label input[type="checkbox"] { margin-left: 0; }
 .worlds-apart-settings .wa-section > .inline-drawer-content { padding-bottom: 10px; }
+.worlds-apart-settings { padding-bottom: 10px; }
+/* The enable state as a switch; still a checkbox underneath, so bind() reads it unchanged. */
+.worlds-apart-settings input.wa-switch { appearance: none; -webkit-appearance: none; width: 34px; height: 18px; border-radius: 9px; background: var(--white30a, rgba(255,255,255,0.3)); position: relative; cursor: pointer; vertical-align: middle; margin: 0; transition: background 0.15s; }
+.worlds-apart-settings input.wa-switch::before { content: ''; position: absolute; top: 2px; left: 2px; width: 14px; height: 14px; border-radius: 50%; background: var(--SmartThemeBodyColor, #fff); transition: left 0.15s; }
+.worlds-apart-settings input.wa-switch:checked { background: var(--SmartThemeQuoteColor, #7aa2f7); }
+.worlds-apart-settings input.wa-switch:checked::before { left: 18px; }
 .worlds-apart-settings .wa-section > .inline-drawer-toggle { font-size: 0.95em; opacity: 0.8; }
 .worlds-apart-settings .wa-section > .inline-drawer-toggle b { font-weight: 500; }
 .worlds-apart-settings small.opacity50p { display: block; margin: 0.15em 0 0.8em; }
@@ -1737,7 +1743,7 @@ const SETTINGS_HTML = `
         <div class="inline-drawer-content">
             <div id="wa_plugin_alert"></div>
             <label class="checkbox_label" for="wa_enabled">
-                <input id="wa_enabled" type="checkbox"><span>Enabled</span>
+                <input id="wa_enabled" type="checkbox" class="wa-switch"><span>Enabled</span>
             </label>
             <label>Prompt insertion order <span class="fa-solid fa-circle-question note-link-span" title="The order selected entries take in the prompt. A base sort, with optional tier grouping. This setting is saved; the Studio's sort views are not."></span></label>
             <div id="wa_presentation_order_mount" style="margin-top:4px;"></div>
