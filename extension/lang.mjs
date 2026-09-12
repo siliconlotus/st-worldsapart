@@ -46,3 +46,30 @@ export function standDown(lang) {
     current = { lang, label: lang, hash: null, zipf: new Map(), posVAStrict: new Set(), posVA: new Set(), posAdj: new Set(), common: new Set(), loaded: false };
     return current;
 }
+
+/** The table for `lang`: the bundled pack for 'en', else the store's copy, else one fetch that is then stored; a failure stands down. */
+export async function setLanguage(lang, { fetchPack, store }) {
+    if (!lang || lang === 'en') return usePack(EN);
+    let pack = await store.get(lang);
+    if (!pack) {
+        try { pack = await fetchPack(lang); await store.put(lang, pack); }
+        catch { return standDown(lang); }
+    }
+    return usePack(pack);
+}
+
+/** The index for the dropdown; a stored pack whose hash the index has moved is refetched and replaced. Null when the index is unreachable. */
+export async function refreshIndex({ fetchIndex, fetchPack, store }) {
+    let index;
+    try { index = await fetchIndex(); } catch { return null; }
+    for (const [lang, meta] of Object.entries(index ?? {})) {
+        const have = await store.get(lang);
+        if (!have || have.hash === meta.hash) continue;
+        try {
+            const fresh = await fetchPack(lang);
+            await store.put(lang, fresh);
+            if (current?.lang === lang) usePack(fresh);
+        } catch { /* the stored copy stands; the next refresh tries again */ }
+    }
+    return index;
+}
