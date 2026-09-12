@@ -422,6 +422,7 @@ textarea.wa-entry-full.wa-tall { max-height: 62vh; }
 .wa-tool.fa-power-off { margin-right: 1px; }
 /* The crown and the percent sign draw to the top of their em box where the others leave headroom; a pixel down evens the row. */
 .wa-tool.fa-crown, .wa-tool.fa-percent { position: relative; top: 1px; }
+.wa-tool.fa-thumbtack { position: relative; top: 2px; }
 .wa-tool { cursor: pointer; display: inline-flex; align-items: center; justify-content: center; line-height: 1; height: 1.5em; padding: 0 2px; min-width: 1.3em; border-radius: 4px; opacity: 0.55; font-style: normal; }
 .wa-tool:hover { opacity: 1; background: var(--white20a, rgba(255,255,255,0.1)); }
 .wa-tool-narrow { transform: scaleX(0.85); transform-origin: center; margin: 0 -0.1em; }   /* the crown and the lettered tools: the scale leaves the box its full width; the margin takes back what the glyph gave up */
