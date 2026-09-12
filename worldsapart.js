@@ -1745,6 +1745,7 @@ const SETTINGS_HTML = `
                     <div class="inline-drawer-icon fa-solid fa-circle-chevron-down down"></div>
                 </div>
                 <div class="inline-drawer-content">
+                    <small class="opacity50p" id="wa_tier_state"></small>
                     <div id="wa_tier_editor_mount" style="margin-top:4px;"></div>
                 </div>
             </div>
@@ -2042,11 +2043,12 @@ export async function init() {
     const presentationMount = document.querySelector('#wa_presentation_order_mount');
     const tierMount = document.querySelector('#wa_tier_editor_mount');
     let tierEditor = null;
+    const tierState = () => { $('#wa_tier_state').text(settings().presentationTiered ? 'Tiered grouping is on: the prompt groups entries by these tiers.' : 'Tiered grouping is off: this order applies in the Studio only.'); };
     if (presentationMount) presentationMount.append(makeSortControl({
         getSort: () => normPresentation(settings().presentationOrder),
         setSort: k => { settings().presentationOrder = k; saveSettingsDebounced(); },
         getTiered: () => !!settings().presentationTiered,
-        setTiered: on => { settings().presentationTiered = on; saveSettingsDebounced(); },
+        setTiered: on => { settings().presentationTiered = on; saveSettingsDebounced(); tierState(); },
         getTierCfg, setTierCfg,
         extraItems: [{ label: 'Most relevant first', key: 'best-first' }, { label: 'Most relevant last', key: 'best-last' }],
         // Keeps the inline tier editor in sync when tiers are reordered from the button's menu.
@@ -2054,6 +2056,7 @@ export async function init() {
         block: true,
     }));
     if (tierMount) tierMount.append(tierEditor = makeTierEditor(getTierCfg, setTierCfg, () => {}, { omit: ['disabled'] }));
+    tierState();
     renderPluginSetup();                     // paints "checking…" then the detected/install state
     Promise.all([hasPlugin(), computeSourceFingerprint()]).then(() => {
         renderPluginSetup();
