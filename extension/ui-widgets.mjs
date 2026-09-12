@@ -4,6 +4,7 @@ import { escapeHtml } from '../../../../utils.js';
 import { markExcerptText } from './matcher.mjs';
 import { DOMPurify } from '../../../../../lib.js';
 import { Popup, POPUP_TYPE } from '../../../../popup.js';
+import { t, translate } from '../../../../i18n.js';
 import { wiTitleOf, TIER_DEFS, SORT_LABELS, SORT_MENU } from './sort.mjs';
 
 export const wiGlyph = e => e.constant ? '🔵' : (e.vectorized ? '🔗' : '🟢');
@@ -72,16 +73,16 @@ export function makeTierEditor(getCfg, setCfg, onChange, { omit = [] } = {}) {
     const render = () => {
         const cfg = getCfg();
         wrap.innerHTML = '';
-        const vis = cfg.map((t, i) => ({ t, i })).filter(x => !omit.includes(x.t.id));
-        vis.forEach(({ t, i }, k) => {
+        const vis = cfg.map((tier, i) => ({ tier, i })).filter(x => !omit.includes(x.tier.id));
+        vis.forEach(({ tier, i }, k) => {
             const row = document.createElement('div'); row.style.cssText = 'display:flex;align-items:center;gap:8px;padding:3px 0;';
             const mv = (cls, dis, dir) => { const x = document.createElement('i'); x.className = 'fa-solid ' + cls; x.style.cssText = `cursor:${dis ? 'default' : 'pointer'};opacity:${dis ? 0.25 : 0.7};padding:2px 4px;`; if (!dis) x.addEventListener('click', () => { const n = getCfg(); const j = vis[k + dir].i; [n[j], n[i]] = [n[i], n[j]]; commit(n); }); return x; };
             const up = mv('fa-chevron-up', k === 0, -1);
             const dn = mv('fa-chevron-down', k === vis.length - 1, +1);
             const lbl = document.createElement('label'); lbl.className = 'checkbox_label'; lbl.style.flex = '1';
-            const cb = document.createElement('input'); cb.type = 'checkbox'; cb.checked = t.on;
+            const cb = document.createElement('input'); cb.type = 'checkbox'; cb.checked = tier.on;
             cb.addEventListener('change', () => { const n = getCfg(); n[i] = { ...n[i], on: cb.checked }; commit(n); });
-            const sp = document.createElement('span'); sp.textContent = TIER_DEFS[t.id].label;
+            const sp = document.createElement('span'); sp.textContent = translate(TIER_DEFS[tier.id].label);
             lbl.append(cb, sp); row.append(up, dn, lbl); wrap.append(row);
         });
     };
@@ -91,16 +92,16 @@ export function makeTierEditor(getCfg, setCfg, onChange, { omit = [] } = {}) {
 async function configureTiersPopup(getCfg, setCfg, onSaved) {
     const wrap = document.createElement('div'); wrap.style.textAlign = 'left';
     const hint = document.createElement('div'); hint.style.cssText = 'opacity:0.7;margin-bottom:8px;font-size:0.9em;';
-    hint.textContent = 'An entry joins the first ticked tier it matches, top to bottom. Untick a tier to skip it. Shared with the settings panel.';
+    hint.textContent = t`An entry joins the first ticked tier it matches, top to bottom. Untick a tier to skip it. Shared with the settings panel.`;
     wrap.append(hint, makeTierEditor(getCfg, setCfg, onSaved));
-    await new Popup(wrap, POPUP_TYPE.TEXT, '', { okButton: 'Close' }).show();
+    await new Popup(wrap, POPUP_TYPE.TEXT, '', { okButton: t`Close` }).show();
 }
 
 /** Sort-control button shared by the Studio header and the settings panel; the menu is `leadItems`, the tiered
  * toggle, Configure tiers…, the base sorts, then `extraItems`. `mount` is a fn returning the element the menu attaches to. */
 export function makeSortControl({ getSort, setSort, getTiered, setTiered, getTierCfg, setTierCfg, leadItems = [], extraItems = [], onChange, mount, block = false }) {
     const btn = document.createElement('button'); btn.type = 'button'; btn.className = 'menu_button wa-filter';
-    btn.title = 'Sort order';
+    btn.title = t`Sort order`;
     btn.style.cssText = block
         ? 'display:flex;align-items:center;gap:6px;width:100%;justify-content:flex-start;white-space:nowrap;'
         : 'display:inline-flex;align-items:center;gap:5px;width:auto;white-space:nowrap;';
@@ -108,8 +109,8 @@ export function makeSortControl({ getSort, setSort, getTiered, setTiered, getTie
     const lblEl = document.createElement('span'); if (block) lblEl.style.cssText = 'flex:1;text-align:left;'; btn.append(lblEl);
     if (block) { const car = document.createElement('span'); car.textContent = '▾'; car.style.opacity = '0.6'; btn.append(car); }
     const named = [...leadItems, ...extraItems];
-    const labelFor = k => SORT_LABELS[k] ?? named.find(e => e.key === k)?.label ?? 'Order ↑';
-    const refresh = () => { const k = getSort(); const lead = leadItems.some(e => e.key === k); lblEl.textContent = (!lead && getTiered() ? 'Tiered · ' : '') + labelFor(k); };
+    const labelFor = k => (SORT_LABELS[k] ? translate(SORT_LABELS[k]) : named.find(e => e.key === k)?.label) ?? translate(SORT_LABELS['order-asc']);
+    const refresh = () => { const k = getSort(); const lead = leadItems.some(e => e.key === k); lblEl.textContent = !lead && getTiered() ? t`Tiered · ${labelFor(k)}` : labelFor(k); };
     refresh();
     const changed = () => { refresh(); onChange?.(); };
     btn.addEventListener('click', () => {
@@ -117,11 +118,11 @@ export function makeSortControl({ getSort, setSort, getTiered, setTiered, getTie
         const leaf = ex => ({ label: ex.label, active: cur === ex.key, fn: () => { setSort(ex.key); changed(); } });
         const items = [
             ...leadItems.map(leaf),
-            { label: 'Tiered grouping', icon: getTiered() ? 'fa-solid fa-square-check' : 'fa-regular fa-square', active: getTiered(), fn: () => { setTiered(!getTiered()); changed(); } },
-            { label: 'Configure tiers…', fn: () => configureTiersPopup(getTierCfg, setTierCfg, changed) },
+            { label: t`Tiered grouping`, icon: getTiered() ? 'fa-solid fa-square-check' : 'fa-regular fa-square', active: getTiered(), fn: () => { setTiered(!getTiered()); changed(); } },
+            { label: t`Configure tiers…`, fn: () => configureTiersPopup(getTierCfg, setTierCfg, changed) },
             ...SORT_MENU.map(m => m.key
-                ? { label: m.label, active: cur === m.key, fn: () => { setSort(m.key); changed(); } }
-                : { label: m.label, active: m.kids.some(([, k]) => k === cur), children: m.kids.map(([l, k]) => ({ label: l, active: cur === k, fn: () => { setSort(k); changed(); } })) }),
+                ? { label: translate(m.label), active: cur === m.key, fn: () => { setSort(m.key); changed(); } }
+                : { label: translate(m.label), active: m.kids.some(([, k]) => k === cur), children: m.kids.map(([l, k]) => ({ label: translate(l), active: cur === k, fn: () => { setSort(k); changed(); } })) }),
             ...extraItems.map(leaf),
         ];
         const r = btn.getBoundingClientRect(); showCtxMenu(items, r.left, r.bottom + 2, mount?.());
@@ -136,7 +137,7 @@ export function wiTooltip({ item, block }) {
     if (item.score !== undefined) lines.push(`vector ${item.score.toFixed(3)}`);
     if (item.textScore) lines.push(`text ${item.textScore.toFixed(2)}`);
     if (item.keywordScore) lines.push(`keys ${item.keywordScore.toFixed(2)}`);
-    if (item.keywordHits?.length) lines.push('hits: ' + item.keywordHits.map(h => `${h.key} ×${h.count}`).join(', '));
+    if (item.keywordHits?.length) { const hits = item.keywordHits.map(h => `${h.key} ×${h.count}`).join(', '); lines.push(t`hits: ${hits}`); }
     return lines.join('\n');
 }
 
@@ -174,18 +175,18 @@ export function entryFoldHtml(entry, idx) {
     const line = (label, list) => (list.length
         ? `<div style="margin-bottom:0.35em;"><small style="opacity:0.55;">${label}</small><br>${list.map(chip).join('')}</div>`
         : '');
-    const pop = `<i class="wa-fold-pop fa-solid fa-expand" data-i="${idx}" title="Open in a larger window" style="cursor:pointer;opacity:0.6;float:right;padding:2px 4px;"></i>`;
+    const pop = `<i class="wa-fold-pop fa-solid fa-expand" data-i="${idx}" title="${escapeHtml(t`Open in a larger window`)}" style="cursor:pointer;opacity:0.6;float:right;padding:2px 4px;"></i>`;
     return `<div style="text-align:left;">${pop}`
-        + line('keys', keys)
-        + line('secondary', sec)
-        + (keys.length || sec.length ? '' : '<div style="opacity:0.5;margin-bottom:0.35em;"><small>no keys</small></div>')
-        + `<div style="white-space:pre-wrap;max-height:22em;overflow:auto;opacity:0.9;border-left:2px solid var(--SmartThemeBorderColor);padding-left:0.6em;">${escapeHtml(String(entry?.content ?? '') || '(empty)')}</div></div>`;
+        + line(escapeHtml(t`keys`), keys)
+        + line(escapeHtml(t`secondary`), sec)
+        + (keys.length || sec.length ? '' : `<div style="opacity:0.5;margin-bottom:0.35em;"><small>${escapeHtml(t`no keys`)}</small></div>`)
+        + `<div style="white-space:pre-wrap;max-height:22em;overflow:auto;opacity:0.9;border-left:2px solid var(--SmartThemeBorderColor);padding-left:0.6em;">${escapeHtml(String(entry?.content ?? '') || t`(empty)`)}</div></div>`;
 }
 
 export function showEntryText(entry) {
     const body = document.createElement('div');
     body.style.cssText = 'white-space:pre-wrap;text-align:left;max-height:65vh;overflow:auto;font-size:0.95em;';
-    body.textContent = String(entry.content ?? '') || '(empty)';
+    body.textContent = String(entry.content ?? '') || t`(empty)`;
     const wrap = document.createElement('div');
     wrap.style.cssText = 'text-align:left;width:100%;';
     wrap.innerHTML = `<b>${escapeHtml(wiTitleOf(entry))}</b>`;
@@ -269,7 +270,7 @@ export function renderMessageHtml(text, { spans = [], markSpan = null, showMarku
     const src = String(text).normalize('NFC');
     // The blank lines around a thematic break are consumed with it: the container is pre-wrap, so they would render as
     // blank lines on top of the rule's margins.
-    const escapedWithRules = t => escapeHtml(t).replace(/(?:\r?\n)*^[ \t]*-{3,}[ \t]*$(?:\r?\n)*/gm,
+    const escapedWithRules = txt => escapeHtml(txt).replace(/(?:\r?\n)*^[ \t]*-{3,}[ \t]*$(?:\r?\n)*/gm,
         // No border and no colour: ST's `hr` is a gradient, which either would flatten.
         '<hr style="margin:15px 0;opacity:0.75;">');
     const prose = proseRanges(src);
@@ -300,8 +301,8 @@ export function renderMessageHtml(text, { spans = [], markSpan = null, showMarku
         closeCode();
         const tags = covering.filter(r => r.tag !== 'delim').map(r => r.tag)
             .sort((x, y) => TAG_ORDER.indexOf(x) - TAG_ORDER.indexOf(y));
-        html += `${tags.map(t => TAG_HTML[t][0]).join('')}${sp ? markSpan(sp, src.slice(a, b)) : escapedWithRules(src.slice(a, b))}`
-            + `${[...tags].reverse().map(t => TAG_HTML[t][1]).join('')}`;
+        html += `${tags.map(g => TAG_HTML[g][0]).join('')}${sp ? markSpan(sp, src.slice(a, b)) : escapedWithRules(src.slice(a, b))}`
+            + `${[...tags].reverse().map(g => TAG_HTML[g][1]).join('')}`;
     }
     closeCode();
     // ST's own config, so this admits what a message admits. data-at/data-to are added: DOMPurify drops unknown attributes.
