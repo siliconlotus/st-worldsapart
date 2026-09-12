@@ -1730,8 +1730,7 @@ const SETTINGS_HTML = `
             <label class="checkbox_label" for="wa_enabled">
                 <input id="wa_enabled" type="checkbox"><span>Enabled</span>
             </label>
-            <label>Prompt insertion order</label>
-            <small class="opacity50p">The order selected entries take in the prompt. A base sort, with optional tier grouping. This setting is saved; the Studio's sort views are not.</small>
+            <label>Prompt insertion order <span class="fa-solid fa-circle-question note-link-span" title="The order selected entries take in the prompt. A base sort, with optional tier grouping. This setting is saved; the Studio's sort views are not."></span></label>
             <div id="wa_presentation_order_mount" style="margin-top:4px;"></div>
 
             <label for="wa_message_depth">Message depth</label>
@@ -1743,43 +1742,38 @@ const SETTINGS_HTML = `
             </select>
             <small class="opacity50p" id="wa_language_state"></small>
 
-            <label for="wa_match_window">Match window</label>
+            <label for="wa_match_window">Match window <span class="fa-solid fa-circle-question note-link-span" title="The span within which a key's conditions must all match."></span></label>
             <select id="wa_match_window" class="text_pole">
                 <option value="paragraph">Paragraph</option>
                 <option value="message">Message</option>
                 <option value="scan">Whole scan window (SillyTavern default)</option>
             </select>
-            <small class="opacity50p">The span within which a key's conditions must all match.</small>
 
-            <label for="wa_drop_chat_tags">Ignore these HTML tags in chat</label>
-            <input id="wa_drop_chat_tags" type="text" class="text_pole" placeholder="internal_states, thinking" title="You might want to set this to your preset's internal state tracker so your quest tracker doesn't constantly pull entries.">
-            <small class="opacity50p">Comma-separated tags to be skipped when scanning for keyword hits.</small>
+            <label for="wa_drop_chat_tags">Ignore these HTML tags in chat <span class="fa-solid fa-circle-question note-link-span" title="Comma-separated tags to be skipped when scanning for keyword hits. You might want to set this to your preset's internal state tracker so your quest tracker doesn't constantly pull entries."></span></label>
+            <input id="wa_drop_chat_tags" type="text" class="text_pole" placeholder="internal_states, thinking">
 
-            <label for="wa_word_boundary">Word boundary</label>
+            <label for="wa_word_boundary">Word boundary <span class="fa-solid fa-circle-question note-link-span" title="Applies to entries with Match Whole Words on and SmartKeys that use =. Permissive: whole-word &quot;Joe&quot; matches &quot;Joe's&quot;. Strict: no match. Neither matches &quot;Joes&quot;."></span></label>
             <select id="wa_word_boundary" class="text_pole">
                 <option value="strict">Strict: hyphens and apostrophes are part of a word</option>
                 <option value="permissive">Permissive: only letters and digits are</option>
             </select>
-            <small class="opacity50p">Applies to entries with Match Whole Words on. Permissive: whole-word "Joe" matches "Joe's". Strict: no match. Neither matches "Joes".</small>
 
             <div class="inline-drawer wa-section">
                 <div class="inline-drawer-toggle inline-drawer-header">
-                    <b>Tier precedence</b>
+                    <b>Tier precedence</b> <span class="fa-solid fa-circle-question note-link-span" title="With tier grouping on, an entry joins the first tier it matches, top to bottom. Untick a tier to skip it. Shared with the Studio."></span>
                     <div class="inline-drawer-icon fa-solid fa-circle-chevron-down down"></div>
                 </div>
                 <div class="inline-drawer-content">
-                    <small class="opacity50p">With tier grouping on, an entry joins the first tier it matches, top to bottom. Untick a tier to skip it. Shared with the Studio.</small>
                     <div id="wa_tier_editor_mount" style="margin-top:4px;"></div>
                 </div>
             </div>
 
             <div class="inline-drawer wa-section">
                 <div class="inline-drawer-toggle inline-drawer-header">
-                    <b>Lorebook priority</b>
+                    <b>Lorebook priority</b> <span class="fa-solid fa-circle-question note-link-span" title="How entries from several books compete for the budget and where they sit in the prompt. A book appears here after its first scan."></span>
                     <div class="inline-drawer-icon fa-solid fa-circle-chevron-down down"></div>
                 </div>
                 <div class="inline-drawer-content">
-                    <small class="opacity50p">How entries from several books compete for the budget and where they sit in the prompt. A book appears here after its first scan.</small>
 
                     <label for="wa_world_priority_mode">Mode</label>
                     <select id="wa_world_priority_mode" class="text_pole">
@@ -1793,11 +1787,10 @@ const SETTINGS_HTML = `
 
             <div class="inline-drawer wa-section">
                 <div class="inline-drawer-toggle inline-drawer-header">
-                    <b>LLM</b>
+                    <b>LLM</b> <span class="fa-solid fa-circle-question note-link-span" title="Used by the keyword suggester, one call per entry."></span>
                     <div class="inline-drawer-icon fa-solid fa-circle-chevron-down down"></div>
                 </div>
                 <div class="inline-drawer-content">
-                    <small class="opacity50p">Used by the keyword suggester, one call per entry.</small>
 
                     <label for="wa_llm_profile">Generate with</label>
                     <div class="flex-container alignItemsCenter flexnowrap">
@@ -1812,19 +1805,17 @@ const SETTINGS_HTML = `
 
             <div class="inline-drawer wa-section">
                 <div class="inline-drawer-toggle inline-drawer-header">
-                    <b>Vector Match</b>
+                    <b>Vector Match</b> <span class="fa-solid fa-circle-question note-link-span" title="Embedding similarity between the chat and each entry."></span>
                     <div class="inline-drawer-icon fa-solid fa-circle-chevron-down down"></div>
                 </div>
                 <div class="inline-drawer-content">
-                    <small class="opacity50p">Embedding similarity between the chat and each entry.</small>
                     <div id="wa_embed_info" class="opacity50p" style="margin:0.4em 0;font-size:0.85em;" title="Set the embedding model in the Vector Storage extension."></div>
 
                     <label>Mean-centered search</label>
                     <div id="wa_plugin_setup" style="margin:0.4em 0;font-size:0.85em;opacity:0.75;"></div>
 
-                    <div id="wa_find_orphans" class="menu_button" style="width:auto;padding:0.3em 0.8em;">Find unused vector collections…</div>
+                    <div id="wa_find_orphans" class="menu_button" style="width:auto;padding:0.3em 0.8em;" title="Lists vector collections no current book claims. Nothing is deleted.">Find unused vector collections…</div>
                     <div id="wa_orphans_out" class="opacity50p" style="margin:0.4em 0;font-size:0.85em;"></div>
-                    <small class="opacity50p">Lists vector collections no current book claims. Nothing is deleted.</small>
 
                 </div>
             </div>
@@ -1863,9 +1854,8 @@ const SETTINGS_HTML = `
                     </select>
 
                     <label class="checkbox_label" for="wa_drop_unavailable">
-                        <input id="wa_drop_unavailable" type="checkbox"><span>Hide entries from later in the chat</span>
+                        <input id="wa_drop_unavailable" type="checkbox"><span>Hide entries from later in the chat</span> <span class="fa-solid fa-circle-question note-link-span" title="On a branch from an earlier point, scene summaries written after that point are hidden. No effect at the latest turn."></span>
                     </label>
-                    <small class="opacity50p">On a branch from an earlier point, scene summaries written after that point are hidden. No effect at the latest turn.</small>
 
                     <label class="checkbox_label" for="wa_tokens_include_exempt">
                         <input id="wa_tokens_include_exempt" type="checkbox"><span>Count "ignore budget" entries against the token budget</span>
@@ -1888,13 +1878,11 @@ const SETTINGS_HTML = `
                         <input id="wa_debug_log" type="checkbox"><span>Log the selection table on every generation</span>
                     </label>
 
-                    <label for="wa_rater_id">Rater id</label>
+                    <label for="wa_rater_id">Rater id <span class="fa-solid fa-circle-question note-link-span" title="A random anonymous ID your grades are signed with."></span></label>
                     <input id="wa_rater_id" type="text" class="text_pole" readonly placeholder="generated on your first grade">
-                    <small class="opacity50p">A random anonymous ID your grades are signed with.</small>
 
 
-                    <small class="opacity50p">Opens the bundle reviewer without a chat.</small>
-                    <div id="wa_review_bundles" class="menu_button" style="width:auto;padding:0.3em 0.8em;">Review graded bundles…</div>
+                    <div id="wa_review_bundles" class="menu_button" style="width:auto;padding:0.3em 0.8em;" title="Opens the bundle reviewer without a chat.">Review graded bundles…</div>
                 </div>
             </div>
         </div>
