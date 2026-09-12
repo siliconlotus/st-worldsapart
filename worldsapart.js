@@ -1717,6 +1717,7 @@ const SETTINGS_HTML = `
 .worlds-apart-settings .wa-section { margin-left: 10px; border-left: 2px solid var(--SmartThemeBorderColor, rgba(255,255,255,0.15)); padding-left: 8px; }
 .worlds-apart-settings .wa-section > .inline-drawer-toggle { font-size: 0.95em; opacity: 0.8; }
 .worlds-apart-settings .wa-section > .inline-drawer-toggle b { font-weight: 500; }
+.worlds-apart-settings small.opacity50p { display: block; margin: 0.15em 0 0.8em; }
 </style>
 <div class="worlds-apart-settings">
     <div class="inline-drawer">
