@@ -132,6 +132,7 @@ export async function lorebookStudio(preferredBook = null, open = null) {
     let cleanupUndo = null;            // [{uid, key}] from the last prune, restorable until the next one
     let cleanupShowAll = false;        // Cleanup lists every key on the visible entries, not only the flagged ones
     let chatHits = null;        // Map<key, count> from the chat scan, null until one has run; survives a rescan, cleared on book change
+    let chatTyped = null;       // the same count for each key AS WRITTEN, its variants excluded
     let chatMsgs = 0;
     let chatName = '';          // WHICH chat produced those counts — see runChatScan
     let chatNames = [];         // the same, unabbreviated: chatName collapses to "N chats" and only the tooltip can name them
@@ -206,7 +207,7 @@ export async function lorebookStudio(preferredBook = null, open = null) {
         scan = buildKeyPruneScan(data, studioOpts, ignoreSet, {
             matchWindow: settings().matchWindow,
             // Into the classifier, not painted on in Cleanup: the Explorer's chips colour from reasonOf/severityOf.
-            chatScan: chatHits ? { messagesWith: chatHits, messages: chatMsgs } : undefined,
+            chatScan: chatHits ? { messagesWith: chatHits, typedWith: chatTyped, messages: chatMsgs } : undefined,
         });
     };
     const afterChatScan = keys => { rebuildScan(); termRepaint?.(); rerenderKeys(keys); };
@@ -214,7 +215,7 @@ export async function lorebookStudio(preferredBook = null, open = null) {
     const bookKeys = () => [...new Set(Object.values(data?.entries ?? {})
         .flatMap(e => (Array.isArray(e.key) ? e.key : []).map(k => String(k).trim())).filter(Boolean))];
 
-    const clearChatScan = () => { chatHits = null; chatMsgs = 0; chatName = ''; chatNames = []; staleTerms.clear(); };
+    const clearChatScan = () => { chatHits = null; chatTyped = null; chatMsgs = 0; chatName = ''; chatNames = []; staleTerms.clear(); };
     // Repaints the entries carrying any of `keys`; classifyEntry reads ignoreSet live, so whitelisting needs no rescan.
     const rerenderKeys = keys => { const set = new Set(keys); for (const e of Object.values(data?.entries ?? {})) if ((Array.isArray(e.key) ? e.key : []).some(k => set.has(k))) renderEntry(e); };
 
@@ -1917,10 +1918,14 @@ export async function lorebookStudio(preferredBook = null, open = null) {
         // somebody counted, and both routes scan whatever list they are handed.
         const keys = [...new Set([...own, ...own.flatMap(k => orthoAlternates(k).map(a => a.alt))])];
 
-        const totals = new Map(keys.map(k => [k, 0]));
+        const totals = new Map(keys.map(k => [k, 0])), typedTotals = new Map();
         let seen = 0, via = '';
         // Results merge by summing both fields (countChatHits), so the two routes can split the picked chats between them.
-        const add = got => { for (const [k, n] of got.messagesWith) totals.set(k, (totals.get(k) ?? 0) + n); seen += got.messages; };
+        const add = got => {
+            for (const [k, n] of got.messagesWith) totals.set(k, (totals.get(k) ?? 0) + n);
+            for (const [k, n] of got.typedWith ?? []) typedTotals.set(k, (typedTotals.get(k) ?? 0) + n);
+            seen += got.messages;
+        };
 
         // Plugin route for whatever is on disk: it runs this same countChatHits where the files live and returns counts
         // only, so a 25MB chat never crosses the wire. The open chat has no file, so it is always the browser's.
@@ -1933,7 +1938,10 @@ export async function lorebookStudio(preferredBook = null, open = null) {
             const j = r.ok ? await r.json() : null;
             // 0 messages means the route resolved no files; taking it would zero every key's share, so the browser retries them.
             if (Number(j?.messages)) {
-                for (const k of keys) totals.set(k, Number(j.counts?.[k]) || 0);
+                for (const k of keys) {
+                    totals.set(k, Number(j.counts?.[k]) || 0);
+                    if (j.typed && k in j.typed) typedTotals.set(k, Number(j.typed[k]) || 0);
+                }
                 seen = Number(j.messages);
                 via = 'server';
             } else {
@@ -1960,6 +1968,7 @@ export async function lorebookStudio(preferredBook = null, open = null) {
         }
         if (!seen) return null;
         chatHits = totals;
+        chatTyped = typedTotals;
         chatMsgs = seen;
         chatName = label;
         chatNames = picked.map(c => String(c.file).replace(/\.jsonl$/, ''));

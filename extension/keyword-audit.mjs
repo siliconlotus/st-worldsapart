@@ -107,6 +107,8 @@ export function orthoAlternates(k) {
 
 export function buildKeyPruneScan(data, opts, ignoreSet, { caseSensitiveDefault = false, wholeWordsDefault = false, matchWindow = 'scan', chatScan } = {}) {
     // undefined: no scan, or a scan that did not cover this key; 0: scanned and silent. chatChecked reads the difference.
+    // Messages holding the key AS WRITTEN. undefined when no scan covered it; absent from a scan that predates the field.
+    const chatTypedOf = key => chatScan?.typedWith?.get(key);
     const chatRateOf = key => {
         if (!chatScan?.messages) return undefined;
         const n = chatScan.messagesWith?.get(key);
@@ -239,7 +241,12 @@ export function buildKeyPruneScan(data, opts, ignoreSet, { caseSensitiveDefault 
         if (literal && opts.pruneFragment !== false && looksLikeFragment(k)) return { flag: 'fragment', bookContent };
         if (literal && k.length < opts.minLength && !ww && opts.pruneShort) return { flag: 'short', bookContent, clean: strictClean(k, cs), total: scan(k, cs, false).total };
         const hits = scan(k, cs, ww);
-        if (literal && hits.total > 0 && hits.typed === 0) return { flag: 'variant only', bookContent };
+        if (literal) {
+            const chatAny = chatScan?.messagesWith?.get(k), chatTyped = chatTypedOf(k);
+            // Chat first: what the model writes is the stronger claim about which form a key will meet.
+            if (chatAny > 0 && chatTyped === 0) return { flag: 'variant only', bookContent, where: 'chat' };
+            if (hits.total > 0 && hits.typed === 0 && !chatTyped) return { flag: 'variant only', bookContent, where: 'book' };
+        }
         // A regex is fold-exempt, so an ASCII quote in one matches only itself where the same character in a plain key
         // matches its whole family. Not flagged once the pattern names a curly form: the author has said which they mean.
         return regexOrtho(k, false);
@@ -292,7 +299,7 @@ export function buildKeyPruneScan(data, opts, ignoreSet, { caseSensitiveDefault 
         }
         if (p.flag === 'book shared') return { text: `book shared (${Math.round(100 * p.bookListed / nBook)}%)`, severity };
         if (p.flag === 'fragment') return { text: 'phrase fragment', severity };
-        if (p.flag === 'variant only') return { text: 'matches only un-hyphenated', severity };
+        if (p.flag === 'variant only') return { text: `${p.where} uses it only un-hyphenated`, severity };
         if (p.flag === 'regex orthography') return { text: `${p.evidence ?? `will not match ${p.label}`}, consider ${p.suggest}`, severity };
         return { text: `short (${p.clean}/${p.total} clean)`, severity };
     };

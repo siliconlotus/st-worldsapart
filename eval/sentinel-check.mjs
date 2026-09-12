@@ -41,8 +41,11 @@ eq(msgs.length, 11, 'the hidden message is dropped, as core and WA both drop it'
     eq(v.glimmerwort?.why, 'unattested (book)', 'chat-only key reads dead when no chat was searched');
     eq(v.mother?.flag, 'english common', 'the English list flags a generic word with no chat needed');
     eq(v.mother?.sev !== RED, true, '...but unevidenced it is not severe');
-    eq(v['lamp-post']?.why, 'matches only un-hyphenated', 'the key fires, but never on the form the author typed');
+    eq(v['lamp-post']?.why, 'book uses it only un-hyphenated', 'the key fires, but never on the form the author typed');
     eq(v['lamp-post']?.sev, 'minor', '...which is advisory: the flag says rewrite or drop, not that it is broken');
+    const lamp = countChatHits(['lamp-post'], ['the lamp post flickers at the corner']);
+    eq(verdicts({ messagesWith: lamp.messagesWith, typedWith: lamp.typedWith, messages: lamp.messages })['lamp-post']?.why,
+        'chat uses it only un-hyphenated', '...and the chat is cited over the book, being what the model writes');
     eq(v["/Cap'n \\w+/"]?.why, `will not match curly form, consider ['${ORTHO_FAMILIES.find(f => f.ascii === "'").pair}]`,
         'a regex key is told its quote matches only itself, and is offered the curly pair');
     eq(v['/Bose-Einstein \\w+/']?.why, 'book uses en-dash, consider [-\u2013]',

@@ -547,6 +547,10 @@ core's intent, not to its bugs.
   beside the keys themselves — a verdict can cite only a pattern somebody counted. Evidence outranks
   `unattested`: a pattern that would match under another orthography is mis-written, not dead.
 
+- **`variant only` cites where**, a scanned chat before the book: `countChatHits` returns `typedWith`
+  beside `messagesWith`, the same per-message count for the key as written. What the model writes is
+  the stronger claim about which form a key will meet.
+
 - **A key's hyphen is written as a space too** (`automaton.mjs` `keyVariants`), and not the reverse:
   62% of the corpus's keys are spaces-only and would each intern a form nobody writes. An em-dash's `--`
   yields a double space, a literal nothing matches. It is an expansion and not a fold: the haystack keeps the distinction, and a `/regex/` key is the way to

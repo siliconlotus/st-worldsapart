@@ -331,7 +331,9 @@ export const foldedHay = (text, caseSensitive) => {
 /** MESSAGES containing each key, never occurrences — the Studio's chat evidence, and the shape buildKeyPruneScan's
  *  `chatScan` takes. Literals go through one automaton pass; a `?` or `/re/` key is evaluated per message, under its
  *  own flags rather than an entry's. `messages` may be any iterable, so the server route streams a chat file into it.
- *  Merge two results by summing both fields: a hit is per message, so the split point cannot matter. */
+ *  `typedWith` is the same count for the key AS WRITTEN, its variants excluded, which is how the audit tells a key
+ *  that only ever lands un-hyphenated. Merge two results by summing every field: a hit is per message, so the split
+ *  point cannot matter. */
 export function countChatHits(keys, messages) {
     const all = [...new Set(keys.map(k => String(k ?? '').trim()).filter(Boolean))];
     const isLiteral = k => !k.startsWith('?') && !isRegexKey(k);
@@ -358,8 +360,9 @@ export function countChatHits(keys, messages) {
         }
         for (const k of rest) if (countKey(k, t, false, false, scope) > 0) messagesWith.set(k, messagesWith.get(k) + 1);
     }
-    for (const k of literals) if (!messagesWith.has(k)) messagesWith.set(k, counts.get(idxOf.get(fold(k))) ?? 0);
-    return { messagesWith, messages: seen };
+    const typedWith = new Map(literals.map(k => [k, counts.get(idxOf.get(fold(k))) ?? 0]));
+    for (const k of literals) if (!messagesWith.has(k)) messagesWith.set(k, typedWith.get(k));
+    return { messagesWith, typedWith, messages: seen };
 }
 
 /** Occurrences of `key` — a keyword, /regex/flags, or a `?` SmartKey, which returns its weight — following core's matchKeys
