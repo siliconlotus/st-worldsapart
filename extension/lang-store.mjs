@@ -26,4 +26,4 @@ export const packStore = {
 
 const getJson = async url => { const r = await fetch(url, { cache: 'no-cache' }); if (!r.ok) throw new Error(`${r.status} ${url}`); return r.json(); };
 export const fetchIndex = () => getJson(`${PACKS_BASE}packs.json`);
-export const fetchPack = lang => getJson(`${PACKS_BASE}zipf-${encodeURIComponent(lang)}.json`);
+export const fetchPack = lang => getJson(`${PACKS_BASE}wa-pack-${encodeURIComponent(lang)}.json`);

@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
 # Builds one language pack — the Zipf table, POS sets and common list — as extension/zipf-en.js (English, bundled) or
-# zipf-<lang>.json (fetched). Needs `pip install wordfreq`.
+# wa-pack-<lang>.json (fetched). Needs `pip install wordfreq`.
 # English, from Google Books eng-fiction 1-grams (CC BY 3.0) with wordfreq (CC BY-SA) gating the vocabulary:
 #   curl -O http://storage.googleapis.com/books/ngrams/books/20200217/eng-fiction/1-00000-of-00001.gz
 #   curl -O http://storage.googleapis.com/books/ngrams/books/20200217/eng-fiction/totalcounts-1
 #   python3 build-zipf.py --ngrams 1-00000-of-00001.gz --totals totalcounts-1
-# Any other language, from wordfreq alone (no POS sets):  python3 build-zipf.py --lang de --out zipf-de.json --index packs.json
+# Any other language, from wordfreq alone (no POS sets):  python3 build-zipf.py --lang de --out wa-pack-de.json --index packs.json
 # Every output carries the licence line the README's 'Data sources and licences' section explains; keep the two in step.
 import argparse, gzip, hashlib, importlib.metadata, json, math, os, re, sys
 import wordfreq
@@ -90,7 +90,7 @@ body = json.dumps(pack, ensure_ascii=False, separators=(',', ':'))
 if out.endswith('.js'):
     header = ('// Data: Google Books Ngram eng-fiction 20200217, CC BY 3.0 (https://creativecommons.org/licenses/by/3.0/); vocabulary, common list\n'
               '// and every other language from wordfreq (Robyn Speer), CC BY-SA 4.0 — see README, Data sources and licences.\n'
-              '// The bundled English pack: the same object every fetched zipf-<lang>.json carries (lang.mjs usePack). Rebuild: build-zipf.py.\n'
+              '// The bundled English pack: the same object every fetched wa-pack-<lang>.json carries (lang.mjs usePack). Rebuild: build-zipf.py.\n'
               '// packed: `decizipf:words` bands, z >= 3.0 only, so absence means rare; va95/va85/adj85: dominant-POS sets; common: top 2000.\n')
     open(out, 'w', encoding='utf-8').write(header + f'export const PACK = {body};\n')
 else:
@@ -98,6 +98,6 @@ else:
 if a.index:
     try: index = json.load(open(a.index, encoding='utf-8'))
     except FileNotFoundError: index = {}
-    index[a.lang] = {'label': pack['label'], 'file': os.path.basename(out), 'bytes': len(body.encode('utf-8')) + 1, 'hash': pack['hash']}
+    index[a.lang] = {'label': pack['label'], 'bytes': len(body.encode('utf-8')) + 1, 'hash': pack['hash']}   # the file is wa-pack-<lang>.json by convention
     open(a.index, 'w', encoding='utf-8').write(json.dumps(dict(sorted(index.items())), ensure_ascii=False, indent=1) + '\n')
 print(f"{out}: {sum(len(v) for v in bands.values())} words at z >= {FLOOR}; POS {len(pos['VA95']) if pos else 0}/{len(pos['VA85']) if pos else 0}/{len(pos['ADJ85']) if pos else 0}; common {len(common)}; hash {pack['hash'][:8]}")
