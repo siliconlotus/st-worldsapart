@@ -2725,7 +2725,14 @@ export async function lorebookStudio(preferredBook = null, open = null) {
         srcToggle.style.cssText = 'position:absolute;top:5px;right:34px;cursor:pointer;padding:3px 5px;border-radius:4px;'
             + 'background:var(--black30a, rgba(0,0,0,0.3));font-size:0.85em;z-index:1;';
         srcToggle.addEventListener('click', () => { labShowMarkup = !labShowMarkup; repaint(); });
-        hayWrap.append(hayBox, hayRead, srcToggle, hayCancel, hayToggle);
+        // Clears the haystack outright, whichever view is up.
+        const hayErase = document.createElement('i');
+        hayErase.className = 'fa-solid fa-eraser';
+        hayErase.title = 'Clear the text';
+        hayErase.style.cssText = 'position:absolute;top:5px;right:59px;cursor:pointer;opacity:0.6;padding:3px 5px;border-radius:4px;'
+            + 'background:var(--black30a, rgba(0,0,0,0.3));font-size:0.85em;z-index:1;';
+        hayErase.addEventListener('click', () => { labHay = ''; hayBox.value = ''; hayBeforeEdit = null; labCommitted = false; repaint(); hayBox.focus(); });
+        hayWrap.append(hayBox, hayRead, srcToggle, hayCancel, hayErase, hayToggle);
         const keyBox = box('Keys, comma- or newline-separated — plain, /regex/flags or ?SmartKey', () => labKeys, v => { labKeys = v; });
         const gateBox = document.createElement('details');
         gateBox.style.cssText = 'flex:0 0 auto;margin-bottom:4px;';
@@ -2899,6 +2906,7 @@ export async function lorebookStudio(preferredBook = null, open = null) {
             hayToggle.title = reading ? 'Edit the text' : 'Mark up the text';
             hayToggle.style.display = labHay.trim() ? '' : 'none';
             hayCancel.style.display = !reading && hayBeforeEdit !== null ? '' : 'none';
+            hayErase.style.display = labHay.trim() ? '' : 'none';
             srcToggle.style.display = reading ? '' : 'none';
             srcToggle.style.opacity = labShowMarkup ? '1' : '0.5';
             srcToggle.title = labShowMarkup ? 'Hide the markup again' : 'Show every tag, entity and marker in the text';
