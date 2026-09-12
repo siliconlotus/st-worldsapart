@@ -274,6 +274,19 @@
             "selectiveLogic": 0,
             "comment": "VARIANT ONLY — \"lamp-post\" as typed appears in no entry text and no chat message; only the space form does, in its own content. The audit flags it minor: the key fires, but never on the form the author wrote.",
             "content": "A lamp post leans at the corner of the lane."
+        },
+        "20": {
+            "uid": 20,
+            "key": [
+                "/Cap'n \\w+/"
+            ],
+            "keysecondary": [],
+            "constant": false,
+            "vectorized": false,
+            "disable": false,
+            "selectiveLogic": 0,
+            "comment": "REGEX ORTHOGRAPHY — a regex is fold-exempt, so this ASCII apostrophe matches only itself, where the plain key Cap'n matches the whole family. The audit suggests the class; it does not rewrite the pattern, the fold-exemption being the author's.",
+            "content": "Cap'n Rourke keeps the ledger. Cap'n Rourke keeps the keys."
         }
     }
 }

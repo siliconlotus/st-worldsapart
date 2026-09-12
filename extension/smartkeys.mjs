@@ -11,8 +11,8 @@
 
 import { coreReadsAsRegex, countRegexKey, escapeRegex, foldedHay, isRegexKey, maskMarkup, REGEX_KEY_RE, boundaryAfter, boundaryBefore, wordChar } from './matcher.mjs';
 // Re-exported: matcher.mjs, keyword-tools.mjs and studio.mjs import these from here. One copy, or the browser and the server disagree.
-import { buildAutomaton, scanAutomaton, fold, keyVariants, normalizeOrthography, addMessageHits } from './automaton.mjs';
-export { buildAutomaton, scanAutomaton, fold, keyVariants, normalizeOrthography, addMessageHits };
+import { buildAutomaton, scanAutomaton, fold, keyVariants, normalizeOrthography, ORTHO_FAMILIES, addMessageHits } from './automaton.mjs';
+export { buildAutomaton, scanAutomaton, fold, keyVariants, normalizeOrthography, ORTHO_FAMILIES, addMessageHits };
 
 const OPS = {
     '&&': 'AND', '&': 'AND', '+': 'AND', 'AND': 'AND',

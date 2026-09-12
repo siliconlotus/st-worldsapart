@@ -535,6 +535,12 @@ core's intent, not to its bugs.
 - **The fold.** `fold` is `normalizeOrthography` then lowercase; core's `#transformString` only
   lowercases. For the default substring path WA is a strict superset.
 - **NFC** on the regex path, where core runs raw.
+- **A regex is fold-exempt, and the audit says so rather than rewriting it.** An ASCII quote in a
+  pattern matches only itself where the same character in a plain key matches its whole family, so
+  `regex orthography` names the character and suggests the class, read off `ORTHO_FAMILIES` so it
+  cannot drift from what the fold collapses. Not flagged once the pattern already carries a curly form.
+  An expansion would take away the only way to demand one form.
+
 - **A key's hyphen is written as a space too** (`automaton.mjs` `keyVariants`), and not the reverse:
   62% of the corpus's keys are spaces-only and would each intern a form nobody writes. An em-dash's `--`
   yields a double space, a literal nothing matches. It is an expansion and not a fold: the haystack keeps the distinction, and a `/regex/` key is the way to
@@ -827,30 +833,24 @@ Ordered by whether a user can see the difference.
 2. **Proximity** (`(…)~N`). Witness spans shipped, so the display it needs exists.
 3. **`chat common` as a raising flag** — `KEY_CHAT_COMMON` can only confirm another flag. It needs the
    structural exclusion (constant/sticky) decided and the 20% re-read against what survives.
-4. **Orthographic expansion for regex keys**, in that pass and not the fold — a pattern is code, so
-   rewriting `…` to `...` turns a literal into three wildcards. Only 1→1 substitutions are generated
-   (the apostrophe family, the double-quote family, en-dash ↔ hyphen, nbsp ↔ space): a one-character
-   swap splices into a class as an ordinary member, where `a--?b` needs a parse a substitution pass
-   does not have. Em-dash and ellipsis are the author's. Real chats mix apostrophe forms within one
-   chat (K11), so the expansion should exist before the keys do.
-5. **`reportFailure`: retrieval failure is a failure, not a degradation.** A retrieval outage costs the
+4. **`reportFailure`: retrieval failure is a failure, not a degradation.** A retrieval outage costs the
    vector and text signals on every entry it was the only source for.
-6. **Suggester i18n, none of it started.** `ZIPF_EN` scores non-English function words as maximally
+5. **Suggester i18n, none of it started.** `ZIPF_EN` scores non-English function words as maximally
    rare, so the suggester should detect that its priors do not apply and stand down rather than invert.
    Accent variants belong here too (`Gérard`/`Gerard`), with a human in the loop.
-7. **Group weights, `(...)::N`.** A weight is per unit and a conjunction has one intent, but
+6. **Group weights, `(...)::N`.** A weight is per unit and a conjunction has one intent, but
    `? (copper pipe)::3` tokenizes to `(copper AND pipe) AND TERM("::3")` and the validator passes it.
    Essentially nothing on disk depends on the current reading (K12). Until it lands, a bare `::N` or
    `^N` term is a silently dead key of the same class as `~N`.
-8. **A firing-rate diagnostic for loose reference keys.** Reference entries are never cut, so a key
+7. **A firing-rate diagnostic for loose reference keys.** Reference entries are never cut, so a key
    that fires too easily costs budget on every turn it wins and nothing warns anybody. The Lab answers it
    for one text at a time; what is missing is the standing per-entry rate, beside the keyword audit. Not
    blocking: an over-firing reference entry is a budget cost, where a wrongly cut one is missing material.
-9. **A signal's within-scene SD varies by book**, and the two books `keys` costs are its extremes
+8. **A signal's within-scene SD varies by book**, and the two books `keys` costs are its extremes
     (F45). Standardisation divides by the scene's own SD, so a near-constant column has its few small
     differences amplified into large z against a slope fitted on other books. No use proposed; it is a
     property a book can be measured for, where curation is a label someone applies.
-10. **Reference is centred on the memory tier's centroid, and nothing has asked whether it should
+9. **Reference is centred on the memory tier's centroid, and nothing has asked whether it should
     be.** The memory centroid all but coincides with the collection's mean while the reference centroid
     sits well off it (F44), and cosine is the reference fit's largest coefficient. Candidates, none
     screened: a per-tier centroid, reference on raw cosine, or leaving it. Deferred deliberately —

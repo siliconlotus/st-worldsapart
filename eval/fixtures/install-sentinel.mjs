@@ -102,6 +102,10 @@ console.log('                            WOULD fire it; that divergence is the e
 console.log('   bistro                   unflagged; loses the terrace group to caf\'s override under core.');
 console.log('   lamp-post                "matches only as a hyphen/space variant", minor — the space form is');
 console.log('                            in its own content, the hyphenated form nowhere.');
+console.log('   /Cap\'n \\w+/             "a regex does not fold \' — try [...]", minor, the class being the');
+console.log('                            fold\'s own apostrophe family. Same chip in the Explorer and in');
+console.log('                            Bulk Cleanup: both read the classifier.');
+console.log('                            Explorer and in Bulk Cleanup: both read the classifier.');
 console.log('');
 console.log('Runtime eyeball (prune, bucket 1.5): on a generation whose recent chat mentions café');
 console.log('and bistro, the prompt must contain NEITHER terrace entry — core picks caf as group');

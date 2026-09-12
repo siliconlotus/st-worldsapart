@@ -4,7 +4,7 @@ import { COMMON_WORDS } from '../plugin/commonwords.js';
 import { NAME_PARTICLES } from './relevance.mjs';
 import { ZIPF_EN } from './zipf-en.js';
 import { countKey, escapeRegex, isRegexKey, secondaryKeys, segment, usableKeys } from './matcher.mjs';
-import { cachedCount, createScanScope, parse, primeScan, tokenize, validateSmartKey } from './smartkeys.mjs';
+import { cachedCount, createScanScope, ORTHO_FAMILIES, parse, primeScan, tokenize, validateSmartKey } from './smartkeys.mjs';
 
 
 /** Below this many entries the df-based book-shared flag is skipped; English-common still fires. */
@@ -81,7 +81,7 @@ export const KEY_CHAT_COMMON = 0.20;
 export const SEVERE = 'severe', MODERATE = 'moderate', MINOR = 'minor';
 
 /** The order `classify` tests its branches in, so a display can rank verdicts without re-deriving them. */
-export const FLAG_PRIORITY = ['unusable', 'english common', 'unattested', 'book shared', 'fragment', 'short', 'variant only'];
+export const FLAG_PRIORITY = ['unusable', 'english common', 'unattested', 'book shared', 'fragment', 'short', 'variant only', 'regex orthography'];
 
 export function buildKeyPruneScan(data, opts, ignoreSet, { caseSensitiveDefault = false, wholeWordsDefault = false, matchWindow = 'scan', chatScan } = {}) {
     // undefined: no scan, or a scan that did not cover this key; 0: scanned and silent. chatChecked reads the difference.
@@ -200,6 +200,12 @@ export function buildKeyPruneScan(data, opts, ignoreSet, { caseSensitiveDefault 
         if (literal && k.length < opts.minLength && !ww && opts.pruneShort) return { flag: 'short', bookContent, clean: strictClean(k, cs), total: scan(k, cs, false).total };
         const hits = scan(k, cs, ww);
         if (literal && hits.total > 0 && hits.typed === 0) return { flag: 'variant only', bookContent };
+        // A regex is fold-exempt, so an ASCII quote in one matches only itself where the same character in a plain key
+        // matches its whole family. Not flagged once the pattern names a curly form: the author has said which they mean.
+        if (isRegexKey(k)) {
+            const fam = ORTHO_FAMILIES.find(f => k.includes(f.ascii) && ![...f.variants].some(c => k.includes(c)));
+            if (fam) return { flag: 'regex orthography', bookContent, ascii: fam.ascii, suggest: `[${fam.ascii}${fam.variants}]` };
+        }
         return null;
     };
     /** Secondary keys the matcher will not act on, with the validator's message: a set difference against secondaryKeys, so which codes are fatal here stays a matcher.mjs rule. */
@@ -231,6 +237,7 @@ export function buildKeyPruneScan(data, opts, ignoreSet, { caseSensitiveDefault 
         if (p.flag === 'book shared') return p.bookListed / nBook >= opts.bookShared ? SEVERE : MODERATE;
         if (p.flag === 'fragment') return SEVERE;
         if (p.flag === 'variant only') return MINOR;
+        if (p.flag === 'regex orthography') return MINOR;
         const ratio = p.total ? p.clean / p.total : 0;
         return ratio >= 1 ? MINOR : ratio <= 1 / 3 ? SEVERE : MODERATE;
     };
@@ -250,6 +257,7 @@ export function buildKeyPruneScan(data, opts, ignoreSet, { caseSensitiveDefault 
         if (p.flag === 'book shared') return { text: `book shared (${Math.round(100 * p.bookListed / nBook)}%)`, severity };
         if (p.flag === 'fragment') return { text: 'phrase fragment', severity };
         if (p.flag === 'variant only') return { text: 'matches only as a hyphen/space variant', severity };
+        if (p.flag === 'regex orthography') return { text: `a regex does not fold ${p.ascii} — try ${p.suggest}`, severity };
         return { text: `short (${p.clean}/${p.total} clean)`, severity };
     };
     // Pre-ticked: the red tier, plus unattested on machine-written entries only (K14). Unusable is red but wants a correction, not a deletion.

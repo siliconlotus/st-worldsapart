@@ -2,6 +2,7 @@
 // Also importable into ST (install-sentinel.mjs), for the half node cannot see: chips, tooltips, colours.
 import fs from 'node:fs';
 import { buildKeyPruneScan } from '../extension/keyword-audit.mjs';
+import { ORTHO_FAMILIES } from '../extension/smartkeys.mjs';
 import { keywordScore, scanSegments, countKey, countChatHits, activationAdds, makeWindowFor, withExtraTexts } from '../extension/matcher.mjs';
 import { buildKeyPruneScan as _pruneScan } from '../extension/keyword-audit.mjs';
 import { eq } from './metrics.mjs';
@@ -42,6 +43,8 @@ eq(msgs.length, 11, 'the hidden message is dropped, as core and WA both drop it'
     eq(v.mother?.sev !== RED, true, '...but unevidenced it is not severe');
     eq(v['lamp-post']?.why, 'matches only as a hyphen/space variant', 'the key fires, but never on the form the author typed');
     eq(v['lamp-post']?.sev, 'minor', '...which is advisory: the flag says rewrite or drop, not that it is broken');
+    eq(v["/Cap'n \\w+/"]?.why, `a regex does not fold ' \u2014 try ['${ORTHO_FAMILIES.find(f => f.ascii === "'").variants}]`,
+        'a regex key is told its quote matches only itself, in the fold\'s own family');
 }
 
 // --- with the chat ----------------------------------------------------------------------------

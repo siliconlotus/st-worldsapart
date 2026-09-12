@@ -1,8 +1,15 @@
 // automaton.mjs — the Aho-Corasick literal matcher and the text fold it matches on. No imports; deployed into the
 // server plugin alongside matcher.mjs, so both halves match on one copy of the fold.
 
-const APOSTROPHES = /[‘’‚‛ʼʹ´`′‹›]/g;
-const DOUBLE_QUOTES = /[“”„‟″ʺ«»]/g;
+/** The families normalizeOrthography collapses onto one ASCII character. Exported because a regex key is fold-exempt
+ *  and the audit suggests the class from here: a second list would drift from what the fold actually collapses. */
+export const ORTHO_FAMILIES = [
+    { ascii: "'", variants: '‘’‚‛ʼʹ´`′‹›' },
+    { ascii: '"', variants: '“”„‟″ʺ«»' },
+];
+const classOf = a => new RegExp(`[${ORTHO_FAMILIES.find(f => f.ascii === a).variants}]`, 'g');
+const APOSTROPHES = classOf("'");
+const DOUBLE_QUOTES = classOf('"');
 const COMBINING = /[̀-ͯ᪰-᫿᷀-᷿⃐-⃿︠-︯]/;
 
 /** Orthography without case: apostrophe and quote variants, dashes, ellipsis, NBSP, NFC. Never anything that can carry meaning (a hyphen against a space); 《》 and 「」 stay out, they partition what " collapses (K10). */
