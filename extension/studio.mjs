@@ -2749,8 +2749,8 @@ export async function lorebookStudio(preferredBook = null, open = null) {
         panes.append(hayWrap, keyBox, gateBox, bookList);
 
         const opts = document.createElement('div');
-        // One line: the labels shrink, the tools never do, and past that the strip scrolls sideways rather than clipping.
-        opts.style.cssText = 'display:flex;align-items:center;gap:14px;padding:6px 8px;flex:0 0 auto;opacity:0.8;font-size:0.9em;overflow-x:auto;white-space:nowrap;';
+        // One line: the labels shrink, wrapping their own text; the tools group never shrinks.
+        opts.style.cssText = 'display:flex;align-items:center;gap:14px;padding:6px 8px;flex:0 0 auto;opacity:0.8;font-size:0.9em;';
         const flag = (label, get, set) => {
             const l = document.createElement('label'); l.style.cssText = 'display:flex;gap:4px;align-items:center;cursor:pointer;';
             const c = document.createElement('input'); c.type = 'checkbox'; c.checked = get();
