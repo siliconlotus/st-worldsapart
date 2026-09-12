@@ -847,8 +847,16 @@ Ordered by whether a user can see the difference.
    first term outside the fit, against `layoutOrder`'s prefix property. `maxRecursionSteps` is the
    existing lever, and caps where this would decay.
 2. **Proximity** (`(…)~N`). Witness spans shipped, so the display it needs exists.
-3. **`chat common` as a raising flag** — `KEY_CHAT_COMMON` can only confirm another flag. It needs the
-   structural exclusion (constant/sticky) decided and the 20% re-read against what survives.
+3. **`chat common` as a gate for how a key fires, not as a flag of its own.** Rate alone is refuted:
+   a firing-rate band mostly catches legitimate keys, Sommers' >20% band removing none against a 41%
+   curation baseline (K16). What it can gate is the breakdown — a key over the threshold whose hits are
+   mostly not whole-word wants `=`, and mostly the wrong case wants `^`. Breadth alone does not flag
+   either, `authoriz` being exactly what substring matching is for; it is breadth THAT COMES FROM
+   COLLISIONS, bare `Eve` on "even" and "evening". `strictClean` is the boundary-respecting count and
+   is gated to keys under `minLength` and to book content, so `Eve` and `Mark` never reach it; the chat
+   half scans `? =Eve` and `? =^Eve` as probes beside the key, as `orthoAlternates` already rides
+   along. The sentinel's `ver` is the case, at 4 of 11 messages and no whole-word hit. K14's 20% is a
+   bound, not a fit.
 4. **Suggester i18n, none of it started.** `ZIPF_EN` scores non-English function words as maximally
    rare, so the suggester should detect that its priors do not apply and stand down rather than invert.
    Accent variants belong here too (`Gérard`/`Gerard`), with a human in the loop.
