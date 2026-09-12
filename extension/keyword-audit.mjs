@@ -239,6 +239,16 @@ export function buildKeyPruneScan(data, opts, ignoreSet, { caseSensitiveDefault 
         return null;
     };
 
+    /** A lowercase-typed key whose title-cased form — particles left lowercase, the frame capitalised as looksProper
+     *  wants it — appears case-sensitively in the book's own text is a name, not a phrase: `isle of wight` clears on
+     *  "Isle of Wight" in an entry. The shape test cannot see this; the book can. */
+    const namedInBook = k => {
+        const tokens = k.split(/\s+/);
+        const cap = t => t.charAt(0).toUpperCase() + t.slice(1);
+        const titled = tokens.map((t, i) => (i === 0 || i === tokens.length - 1 || !NAME_PARTICLES.has(t.toLowerCase()) ? cap(t) : t)).join(' ');
+        return titled !== k && contents.some(c => countKey(titled, c, true, false) > 0);
+    };
+
     // Tested in FLAG_PRIORITY order; the first hit wins, so moving a branch changes what a key reports.
     const classify = (key, cs, ww, declared = false) => {
         const k = String(key).trim();
@@ -290,7 +300,7 @@ export function buildKeyPruneScan(data, opts, ignoreSet, { caseSensitiveDefault 
         }
 
         // --- the key's shape; then dead last, a dead key being neutral --------------------------------------------
-        if (literal && opts.pruneFragment !== false && looksLikeFragment(k)) return { flag: 'fragment', bookContent };
+        if (literal && opts.pruneFragment !== false && looksLikeFragment(k) && !namedInBook(k)) return { flag: 'fragment', bookContent };
         // Nothing to judge without a hit: a dead short key is dead, not "0/0 clean".
         if (literal && k.length < opts.minLength && !ww && opts.pruneShort && hits.total > 0) return { flag: 'short', bookContent, clean: strictClean(k, cs), total: scan(k, cs, false).total, key: k, ww };
         if (bookContent === 0 && opts.pruneUnattested && !(literal && opts.ignoreProper && looksProper(k)) && !chatRate) return { flag: 'unattested', bookContent, literal, chatChecked: chatRate !== undefined };

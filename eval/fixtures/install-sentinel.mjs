@@ -104,6 +104,8 @@ console.log('                            WOULD fire it; that divergence is the e
 console.log('   bistro                   unflagged; loses the terrace group to caf\'s override under core.');
 console.log('   CIA                      "short (1/4 clean) — consider ? =CIA": inside special/official/social, once as');
 console.log('                            the word; the book-side twin of the substring flag\'s suggestion');
+console.log('   isle of wight            unflagged: a fragment by shape, but the book writes "Isle of Wight"');
+console.log('   piece of cake            "phrase fragment" — the same shape, and nothing capitalises it');
 console.log('   lamp-post                "book uses it only un-hyphenated", minor — the space form is');
 console.log('                            in its own content, the hyphenated form nowhere.');
 console.log('   /Cap\'n \\\\w+/             "will not match curly form, consider [...]", minor, the class being');

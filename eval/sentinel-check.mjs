@@ -42,6 +42,8 @@ eq(msgs.length, 11, 'the hidden message is dropped, as core and WA both drop it'
     eq(v.glimmerwort?.why, 'unattested (book)', 'chat-only key reads dead when no chat was searched');
     eq(v.mother?.why, 'english common · no chat scanned', 'the English list flags a generic word while no chat has been scanned');
     eq(v.CIA?.why, 'short (1/4 clean) — consider ? =CIA', 'a short key mostly inside longer words is offered the whole-word flag, measured over the book');
+    eq(v['isle of wight'], undefined, 'a lowercase locative the book writes capitalised is a name, not a fragment');
+    eq(v['piece of cake']?.flag, 'fragment', '...where the same shape nothing capitalises is the phrase fragment it looks like');
     eq(v.mother?.sev !== RED, true, '...but unevidenced it is not severe');
     eq(v['lamp-post']?.why, 'book uses it only un-hyphenated', 'the key fires, but never on the form the author typed');
     eq(v['lamp-post']?.sev, 'minor', '...which is advisory: the flag says rewrite or drop, not that it is broken');

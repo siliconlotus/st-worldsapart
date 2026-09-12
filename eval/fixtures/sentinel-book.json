@@ -313,6 +313,32 @@
             "selectiveLogic": 0,
             "comment": "SHORT, MOSTLY INSIDE WORDS — three letters that land in \"special\", \"official\" and \"social\" and only once as the word. The short flag carries the same suggestion substring makes, measured over the book: consider ? =CIA. FBI would be short and clean, and offered nothing.",
             "content": "A special report: the official social calendar, and one CIA memo."
+        },
+        "23": {
+            "uid": 23,
+            "key": [
+                "isle of wight"
+            ],
+            "keysecondary": [],
+            "constant": false,
+            "vectorized": false,
+            "disable": false,
+            "selectiveLogic": 0,
+            "comment": "LOWERCASE LOCATIVE — the shape test reads \"of\" as a function word and calls this a fragment; the book says \"Isle of Wight\", capitalised, so it is a name. Not flagged.",
+            "content": "The Isle of Wight ferry runs at dawn."
+        },
+        "24": {
+            "uid": 24,
+            "key": [
+                "piece of cake"
+            ],
+            "keysecondary": [],
+            "constant": false,
+            "vectorized": false,
+            "disable": false,
+            "selectiveLogic": 0,
+            "comment": "PHRASE FRAGMENT, control — same shape as uid 23, and nothing in the book capitalises it. Flagged.",
+            "content": "It was a piece of cake, she said."
         }
     }
 }
