@@ -3049,7 +3049,7 @@ export async function lorebookStudio(preferredBook = null, open = null) {
         const allOpen = entries.length > 0 && entries.every(x => entryOpen.has(x.uid));
         const expandBtn = document.createElement('button');
         expandBtn.type = 'button'; expandBtn.className = 'menu_button';
-        expandBtn.innerHTML = `<i class="fa-solid ${allOpen ? 'fa-square-caret-up' : 'fa-square-caret-down'}"></i>`;
+        expandBtn.innerHTML = `<i class="fa-solid ${allOpen ? 'fa-down-left-and-up-right-to-center' : 'fa-up-right-and-down-left-from-center'}"></i>`;
         expandBtn.title = `${allOpen ? 'Collapse' : 'Expand'} all entries. Shift-click expands only entries with flagged keywords.`;
         expandBtn.addEventListener('click', async ev => {
             if (ev.shiftKey) {   // expand only flagged entries (scan first if needed), collapse the rest
