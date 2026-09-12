@@ -3075,11 +3075,13 @@ export async function lorebookStudio(preferredBook = null, open = null) {
         // Typing re-filters in place (applyFilter), not the header, so the input keeps focus.
         const searchWrap = buildSearchBox(() => applyFilter());
         const rowStyle = 'display:flex;align-items:center;gap:8px;flex-wrap:wrap;';
-        const vsep = () => { const s = document.createElement('span'); s.style.cssText = 'align-self:stretch;width:1px;background:color-mix(in srgb, currentColor 22%, transparent);margin:2px;'; return s; };
+        // The title is a row of its own: its width is the book's name, and a control row that shares it wraps wherever the name ends.
+        const row0 = document.createElement('div'); row0.style.cssText = rowStyle;
         const row1 = document.createElement('div'); row1.style.cssText = rowStyle;
         const row2 = document.createElement('div'); row2.style.cssText = rowStyle;
-        const spacer = () => { const s = document.createElement('span'); s.style.width = '10px'; return s; };
-        row1.append(label, vsep(), filterWrap, sortBtn, spacer(), searchWrap, trayBtn());
+        row0.append(label);
+        searchWrap.style.flex = '1 1 8em'; searchWrap.querySelector('input').style.width = '100%';
+        row1.append(filterWrap, sortBtn, searchWrap, trayBtn());
         const newBtn = document.createElement('button');
         newBtn.type = 'button'; newBtn.className = 'menu_button';
         newBtn.style.cssText = 'width:auto;padding:3px 9px;flex-shrink:0;';
@@ -3089,7 +3091,7 @@ export async function lorebookStudio(preferredBook = null, open = null) {
         // A flex spacer with basis 0, not margin-left:auto: it never affects where the row wraps.
         const grow = document.createElement('span'); grow.style.cssText = 'flex:1 1 0;min-width:0;';
         row2.append(expandBtn, scanBtn, suggestAllBtn, suggestAllLlmBtn, grow, newBtn);
-        head.append(row1, row2);
+        head.append(row0, row1, row2);
         const fixed = document.createElement('div'); fixed.className = 'wa-studio-fixed';
         globalTrayEl = renderGlobalTray();
         trayEl = renderTray();
