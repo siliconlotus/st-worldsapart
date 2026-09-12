@@ -2734,6 +2734,13 @@ export async function lorebookStudio(preferredBook = null, open = null) {
         // handler only ever asks for the content's own height.
         keyBox.style.cssText += 'flex:0 0 auto;min-height:3em;max-height:8.8em;height:3em;';
         const growKeys = () => { keyBox.style.height = 'auto'; keyBox.style.height = `${keyBox.scrollHeight}px`; };
+        // The keys box with an eraser in its corner: clears the keys, the secondary keys and any applied run.
+        const keyWrap = document.createElement('div'); keyWrap.style.cssText = 'position:relative;flex:0 0 auto;display:flex;';
+        keyBox.style.width = '100%'; keyBox.style.paddingRight = '1.8em';
+        const eraser = document.createElement('i'); eraser.className = 'fa-solid fa-eraser wa-tool'; eraser.title = 'Clear all terms';
+        eraser.style.cssText = 'position:absolute;top:4px;right:6px;';
+        eraser.addEventListener('click', () => { labKeys = ''; labSec = ''; labRun = null; keyBox.value = ''; secBox.value = ''; growKeys(); repaint(); });
+        keyWrap.append(keyBox, eraser);
         keyBox.addEventListener('input', growKeys);
         // What an applied run is matching with, in place of the keys pane it is not using. Dashed and unfilled like the
         // committed haystack, since it states what ran rather than taking input.
@@ -2747,7 +2754,7 @@ export async function lorebookStudio(preferredBook = null, open = null) {
             labRun = null;
             repaint();
         });
-        panes.append(hayWrap, keyBox, gateBox, bookList);
+        panes.append(hayWrap, keyWrap, gateBox, bookList);
 
         const opts = document.createElement('div');
         // One line: the labels shrink, wrapping their own text; the tools group never shrinks.
@@ -2833,12 +2840,6 @@ export async function lorebookStudio(preferredBook = null, open = null) {
                 if (picked.sec.length) gateBox.open = true;   // an imported gate must not land shut and invisible
                 repaint();
             }),
-            labTool('fa-eraser', 'Clear all terms: the keys, the secondary keys, and any applied run', () => {
-                labKeys = ''; labSec = ''; labRun = null;
-                keyBox.value = ''; secBox.value = '';
-                growKeys();
-                repaint();
-            }),
             labTool('fa-book', 'Apply the books attached to this chat, hits only. Shift-click to pick any book.',
                 async ev => {
                     if (!ev.shiftKey) { await applyAttached({ pickIfNone: true }); return; }
@@ -2872,7 +2873,7 @@ export async function lorebookStudio(preferredBook = null, open = null) {
             gateSum.style.opacity = secN ? '1' : '0.6';
             // An applied run matches with books, not with what is typed, so the keys and the gate step aside for the list.
             const running = !!labRun;
-            keyBox.style.display = running ? 'none' : '';
+            keyWrap.style.display = running ? 'none' : '';
             gateBox.style.display = running ? 'none' : '';
             bookList.style.display = running ? '' : 'none';
             if (running) {
