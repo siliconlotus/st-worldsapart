@@ -4,7 +4,7 @@ import { COMMON_WORDS } from '../plugin/commonwords.js';
 import { NAME_PARTICLES } from './relevance.mjs';
 import { ZIPF_EN } from './zipf-en.js';
 import { countKey, escapeRegex, isRegexKey, secondaryKeys, segment, usableKeys } from './matcher.mjs';
-import { cachedCount, createScanScope, keyVariants, parse, primeScan, tokenize, validateSmartKey } from './smartkeys.mjs';
+import { cachedCount, createScanScope, parse, primeScan, tokenize, validateSmartKey } from './smartkeys.mjs';
 
 
 /** Below this many entries the df-based book-shared flag is skipped; English-common still fires. */
@@ -199,7 +199,7 @@ export function buildKeyPruneScan(data, opts, ignoreSet, { caseSensitiveDefault 
         if (literal && opts.pruneFragment !== false && looksLikeFragment(k)) return { flag: 'fragment', bookContent };
         if (literal && k.length < opts.minLength && !ww && opts.pruneShort) return { flag: 'short', bookContent, clean: strictClean(k, cs), total: scan(k, cs, false).total };
         const hits = scan(k, cs, ww);
-        if (literal && hits.total > 0 && hits.typed === 0 && keyVariants(k).length > 1) return { flag: 'variant only', bookContent };
+        if (literal && hits.total > 0 && hits.typed === 0) return { flag: 'variant only', bookContent };
         return null;
     };
     /** Secondary keys the matcher will not act on, with the validator's message: a set difference against secondaryKeys, so which codes are fatal here stays a matcher.mjs rule. */

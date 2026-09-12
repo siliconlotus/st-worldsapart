@@ -515,7 +515,7 @@ export function makeCandidateSet({ loaded, byKey, entries, params: P, chunkCfg, 
         // The retrieval winners feed recursion too: WA force-activates them, so core counts them in new.successful.
         const feeds = e => P.recursive && !e.preventRecursion && Boolean(String(e.content ?? '').trim());
         const buffer = rows.map(r => r.entry).filter(feeds).map(e => String(e.content).trim());
-        const withBuffer = () => matcher.withExtraTexts((_d, e) => haystackFor(e), buffer, P.matchWindow);
+        const buffered = matcher.withExtraTexts((_d, e) => haystackFor(e), buffer, P.matchWindow);
         const depthOf = new Map();
         // Termination is the buffer standing still, not a pass admitting nothing: the retrieval winners seed the buffer
         // and the depth-0 pass matches chat only, so a pass that admits nothing can still leave text for the next one.
@@ -526,7 +526,7 @@ export function makeCandidateSet({ loaded, byKey, entries, params: P, chunkCfg, 
                 if (buffer.length === scanned) break;
                 scanned = buffer.length;
             }
-            const hay = depth === 0 ? haystackFor : (e => withBuffer()(0, e));
+            const hay = depth === 0 ? haystackFor : (e => buffered(0, e));
             const found = [];
             for (const e of entries) {
                 const key = entryKey(e);
