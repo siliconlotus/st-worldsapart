@@ -2325,6 +2325,22 @@ export async function lorebookStudio(preferredBook = null, open = null) {
         return messages.join(`\n\n${'-'.repeat(24)}\n\n`);
     };
 
+    /** The Lab haystack over picked chats (pickChats rows), each to `depth` messages, joined under a header line per chat; the open chat has no file and reads live. */
+    const chatsHaystack = async (picked, override) => {
+        const spec = settings().dropChatTags;
+        const depth = Number(override ?? (settings().messageDepth || world_info_depth));
+        const parts = []; let total = 0;
+        for (const c of picked) {
+            const raw = c.open ? (getContext().chat ?? []) : await fetchChatMessages(c);
+            const chat = raw.filter(m => m && !m.is_system).map(m => (spec?.trim() ? { ...m, mes: dropTags(String(m.mes ?? ''), spec) } : m));
+            const messages = scanSegments(chat, { depth, includeNames: world_info_include_names, matchWindow: 'message' });
+            total += messages.length;
+            parts.push(`${'='.repeat(8)} ${String(c.file).replace(/\.jsonl$/, '')} ${'='.repeat(8)}\n\n${messages.join(`\n\n${'-'.repeat(24)}\n\n`)}`);
+        }
+        toastr.info(`${total} message${total === 1 ? '' : 's'} from ${picked.length} chat${picked.length === 1 ? '' : 's'} at depth ${depth}`, 'Keyword Lab');
+        return parts.join('\n\n');
+    };
+
     /** `{ keys, sec, logic }` from an entry of any book, as the entry spells them. Null when nothing was chosen. */
     const pickEntryKeys = async () => {
         const w = document.createElement('div');
@@ -2764,7 +2780,7 @@ export async function lorebookStudio(preferredBook = null, open = null) {
         tools.style.cssText = 'display:flex;gap:10px;align-items:center;flex-shrink:0;margin-left:auto;';
         opts.append(winLabel, tools);
         tools.append(
-            labTool('fa-comments', 'Load the current chat to the message-depth setting. Shift-click for a depth.',
+            labTool('fa-comment-dots', 'Load the current chat to the message-depth setting. Shift-click for a depth.',
                 async ev => {
                     const depth = ev.shiftKey
                         ? await numberPrompt('Load chat', 'How many messages deep?', settings().messageDepth || world_info_depth, 1)
@@ -2773,6 +2789,23 @@ export async function lorebookStudio(preferredBook = null, open = null) {
                     labHay = chatHaystack(depth);
                     hayBox.value = labHay;
                     labCommitted = true;   // imported text is for reading, not editing
+                    repaint();
+                }),
+            labTool('fa-comments', 'Load chats: pick chats bound to this book, each to the message-depth setting. Shift-click for a depth.',
+                async ev => {
+                    const depth = ev.shiftKey
+                        ? await numberPrompt('Load chats', 'How many messages deep, per chat?', settings().messageDepth || world_info_depth, 1)
+                        : undefined;
+                    if (ev.shiftKey && depth == null) return;
+                    const found = await findBookChats(false);
+                    const ctx = getContext(); const openName = String(ctx.chatId ?? '');
+                    if (openName && !found.some(f => f.file.startsWith(openName))) found.push({ char: ctx.name2 ?? '', avatar: null, file: openName, size: `${(ctx.chat ?? []).length} msgs`, why: 'currently open', open: true });
+                    if (!found.length) { toastr.warning('No chat is bound to this book.', 'Keyword Lab'); return; }
+                    const picked = await pickChats(found);
+                    if (!picked?.length) return;
+                    labHay = await chatsHaystack(picked, depth);
+                    hayBox.value = labHay;
+                    labCommitted = true;
                     repaint();
                 }),
             labTool('fa-key', 'Take the keys of an entry in any book, secondary condition and all', async () => {
