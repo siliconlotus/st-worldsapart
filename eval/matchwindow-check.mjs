@@ -153,6 +153,9 @@ console.log('ok   a key the chat scan never covered is not reported as chat-chec
     const { countChatHits } = await import('../extension/matcher.mjs');
     const msgs = ['The copper pipe burst', 'copper, but no plumbing', 'Colonel Vasquez called', 'nothing here'];
     const got = countChatHits(['copper', '? copper pipe', '/vasqu[ei]z/i', '? zzznope'], msgs);
+    // Expansion reaches here too, or a hyphenated key reports fewer messages than countKey matches.
+    const hy = countChatHits(['copper-pipe'], ['a copper pipe', 'a copper-pipe', 'both copper pipe and copper-pipe', 'neither']);
+    eq(hy.messagesWith.get('copper-pipe'), 3, 'both forms count, and a message holding both counts once');
     eq(got.messages, 4, 'the denominator is every message it was given');
     eq(got.messagesWith.get('copper'), 2, 'a literal is still the automaton pass');
     eq(got.messagesWith.get('? copper pipe'), 1, 'a SmartKey is evaluated per message, so both terms must share one');

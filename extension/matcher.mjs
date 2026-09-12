@@ -336,20 +336,29 @@ export function countChatHits(keys, messages) {
     const all = [...new Set(keys.map(k => String(k ?? '').trim()).filter(Boolean))];
     const isLiteral = k => !k.startsWith('?') && !isRegexKey(k);
     const literals = all.filter(isLiteral), rest = all.filter(k => !isLiteral(k));
-    const folded = [...new Set(literals.map(fold))];
+    // Every variant is its own pattern, or a hyphenated key reports fewer messages here than countKey matches.
+    const folded = [...new Set(literals.flatMap(k => keyVariants(k).map(fold)))];
     const idxOf = new Map(folded.map((f, i) => [f, i]));
     const aut = buildAutomaton(folded);
     const counts = new Map();
     const messagesWith = new Map(rest.map(k => [k, 0]));
+    // A key whose forms could both land in one message is counted by union; summing its indices would count it twice.
+    const expanded = literals.map(k => [k, keyVariants(k).map(v => idxOf.get(fold(v)))]).filter(([, idx]) => idx.length > 1);
+    for (const [k] of expanded) messagesWith.set(k, 0);
     // Its own scope: the live one carries the active books' vocabulary, and a whole book's keys would swamp it.
     const scope = createScanScope();
     let seen = 0;
     for (const t of messages) {
         seen++;
-        addMessageHits(aut, t, counts);
+        const hit = expanded.length ? new Map() : counts;
+        addMessageHits(aut, t, hit);
+        if (hit !== counts) {
+            for (const [i, n] of hit) counts.set(i, (counts.get(i) ?? 0) + n);
+            for (const [k, idx] of expanded) if (idx.some(i => hit.has(i))) messagesWith.set(k, messagesWith.get(k) + 1);
+        }
         for (const k of rest) if (countKey(k, t, false, false, scope) > 0) messagesWith.set(k, messagesWith.get(k) + 1);
     }
-    for (const k of literals) messagesWith.set(k, counts.get(idxOf.get(fold(k))) ?? 0);
+    for (const k of literals) if (!messagesWith.has(k)) messagesWith.set(k, counts.get(idxOf.get(fold(k))) ?? 0);
     return { messagesWith, messages: seen };
 }
 
