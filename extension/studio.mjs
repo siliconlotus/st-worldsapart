@@ -1747,7 +1747,7 @@ export async function lorebookStudio(preferredBook = null, open = null) {
             : (r.p && r.p.flag !== 'unattested' && (r.sev === SEVERE || r.sev === MODERATE)) ? SEVERITY_COLOR[r.sev] : '';
         if (termColor) name.style.color = termColor;
         const why = document.createElement('span'); why.className = 'wa-term-why';
-        why.textContent = r.why ?? ''; if (r.color) why.style.color = r.color;
+        why.textContent = r.why ?? '';   // muted, whatever the flag: the term's own colour carries the state
         if (onContext) row.addEventListener('contextmenu', ev => { ev.preventDefault(); onContext(e, r, ev.clientX, ev.clientY); });
         row.append(cb, name);
         if (onEdit) {
