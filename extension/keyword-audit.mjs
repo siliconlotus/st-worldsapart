@@ -198,7 +198,7 @@ export function buildKeyPruneScan(data, opts, ignoreSet, { caseSensitiveDefault 
         }
         // The hyphen only ever flags with evidence: a literal hyphen in a pattern is ordinary.
         if (k.includes('–') || !misses(swapLiteralHyphens(k, '–'))) return null;
-        return { flag: 'regex orthography', bookContent: 0, suggest: '[-–]', evidence: 'the book has the en-dash form' };
+        return { flag: 'regex orthography', bookContent: 0, suggest: '[-–]', evidence: 'book uses en-dash' };
     };
 
     // Tested in FLAG_PRIORITY order; the first hit wins, so moving a branch changes what a key reports.
@@ -278,7 +278,7 @@ export function buildKeyPruneScan(data, opts, ignoreSet, { caseSensitiveDefault 
         if (p.flag === 'book shared') return { text: `book shared (${Math.round(100 * p.bookListed / nBook)}%)`, severity };
         if (p.flag === 'fragment') return { text: 'phrase fragment', severity };
         if (p.flag === 'variant only') return { text: 'matches only un-hyphenated', severity };
-        if (p.flag === 'regex orthography') return { text: `${p.evidence ?? `will not match the ${p.missing} form`} — consider ${p.suggest}`, severity };
+        if (p.flag === 'regex orthography') return { text: `${p.evidence ?? `will not match ${p.missing} form`}, consider ${p.suggest}`, severity };
         return { text: `short (${p.clean}/${p.total} clean)`, severity };
     };
     // Pre-ticked: the red tier, plus unattested on machine-written entries only (K14). Unusable is red but wants a correction, not a deletion.
