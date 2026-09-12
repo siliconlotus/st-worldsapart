@@ -420,6 +420,7 @@ textarea.wa-entry-full.wa-tall { max-height: 62vh; }
 .wa-entry-tools { display: flex; align-items: center; gap: 0; margin-left: auto; }
 .wa-tool { cursor: pointer; padding: 3px 2px; min-width: 1.3em; text-align: center; border-radius: 4px; opacity: 0.55; font-style: normal; }
 .wa-tool:hover { opacity: 1; background: var(--white20a, rgba(255,255,255,0.1)); }
+.wa-tool-narrow { transform: scaleX(0.85); transform-origin: center; }
 .wa-tool.wa-on { opacity: 1; color: var(--SmartThemeQuoteColor, #6ea8fe); }
 .wa-tool.wa-badge { position: relative; }
 .wa-tool.wa-badge::after { content: attr(data-badge); position: absolute; top: -3px; right: -4px;
