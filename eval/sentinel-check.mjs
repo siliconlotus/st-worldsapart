@@ -66,7 +66,8 @@ eq(msgs.length, 11, 'the hidden message is dropped, as core and WA both drop it'
     eq(v.glimmerwort?.why, 'chat common · 27% of chat', '...and at 3 of 11 messages it is over the chat-common share, an advisory');
     eq(v.zzunattested?.why, 'unattested (book/chat)', 'still dead, and now says both were checked');
     eq(v.morning?.why, 'chat common · 55% of chat', 'a common word the chat confirms fires broadly reads as the chat flag, above the English list');
-    eq(v.morning?.sev, 'moderate', '...advisory: its remedies are constant or a narrower key, not deletion');
+    eq(v.morning?.sev, RED, '...and severe by degree, being in more messages than not');
+    eq(v.mother?.flag === 'chat common' ? v.mother.sev : 'n/a', 'n/a', 'mother is under the share and stays on the English list');
     eq(v.ver?.why, 'fires in 36% of messages, 0% as a word \u2014 consider ? =ver',
         'a key broad because it lands inside other words is told so, and offered the flag it lacks');
     eq(v.ver?.sev, 'moderate', '...one token fixes it, so not severe');

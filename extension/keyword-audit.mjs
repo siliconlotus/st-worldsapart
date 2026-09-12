@@ -77,6 +77,8 @@ const isEnglishCommon = (list) => (v) => !/\s/.test(v) && list.has(v.toLowerCase
 
 /** Share of messages a key must match to be `chat common`, and to turn `english common` red. */
 export const KEY_CHAT_COMMON = 0.20;
+/** Share of messages at which `chat common` is severe rather than moderate: more messages than not. An assertion. */
+export const KEY_CHAT_SEVERE = 0.50;
 /** Share of the book's entries whose content a key must appear in to be `book common` — the no-chat fallback for
  *  `chat common`. An assertion; 0.45 rather than a half so a book of few entries does not sit on the line. */
 export const KEY_BOOK_COMMON = 0.45;
@@ -329,7 +331,9 @@ export function buildKeyPruneScan(data, opts, ignoreSet, { caseSensitiveDefault 
         if (p.flag === 'book shared') return p.bookListed / nBook >= opts.bookShared ? SEVERE : MODERATE;
         if (p.flag === 'fragment') return SEVERE;
         if (p.flag === 'substring') return MODERATE;
-        if (p.flag === 'chat common' || p.flag === 'book common') return MODERATE;   // advisory: never severe, so never pre-ticked
+        // By degree: over the gate is worth a look, in more messages than not is a problem. book common is a proxy and stays moderate.
+        if (p.flag === 'chat common') return p.chatRate >= KEY_CHAT_SEVERE ? SEVERE : MODERATE;
+        if (p.flag === 'book common') return MODERATE;
         if (p.flag === 'variant only') return MINOR;
         if (p.flag === 'regex orthography') return MINOR;
         const ratio = p.total ? p.clean / p.total : 0;
@@ -365,7 +369,8 @@ export function buildKeyPruneScan(data, opts, ignoreSet, { caseSensitiveDefault 
     // Pre-ticked: the red tier, plus unattested on machine-written entries only (K14). Unusable is red but wants a correction, not a deletion.
     const generated = e => e?.stmemorybooks !== undefined || e?.STMB_start !== undefined || e?.stmbArc !== undefined;
     const byUid = new Map(allEntries.map(e => [String(e.uid), e]));
-    const defChecked = p => p.flag !== 'unusable' && (severityOf(p) === SEVERE || (p.flag === 'unattested' && generated(byUid.get(String(p.uid)))));
+    // chat common is red at degree but never pre-ticked: its remedies are `constant` or a narrower key, not deletion.
+    const defChecked = p => p.flag !== 'unusable' && p.flag !== 'chat common' && (severityOf(p) === SEVERE || (p.flag === 'unattested' && generated(byUid.get(String(p.uid)))));
 
     // Near-duplicates: Jaccard over rare vocabulary; an arc and its member scene are skipped. Advisory only.
     const isArc = e => e?.stmbArc === true || /^\s*\[?\s*arc\b/i.test(String(e?.comment ?? ''));

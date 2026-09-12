@@ -303,7 +303,8 @@ console.log('ok   SmartKey structural validation');
     const scChat = buildKeyPruneScan({ entries }, opts, new Set(), { chatScan: { messagesWith: chat.messagesWith, messages: chat.messages } });
     eq(scChat.reasonOf(scChat.classifyEntry(entries[9])[0]).text, 'chat common · 80% of chat, mostly mother & my',
         'over the share it is chat common, naming the path that fires most — the chat\'s question, not the list\'s');
-    eq(scChat.severityOf(scChat.classifyEntry(entries[9])[0]), 'moderate', '...advisory, whatever the path');
+    eq(scChat.severityOf(scChat.classifyEntry(entries[9])[0]), 'severe', '...and severe by degree at 80%, whatever the path');
+    eq(scChat.defChecked(scChat.classifyEntry(entries[9])[0]), false, '...though never pre-ticked: the remedy is a narrower key, not deletion');
     // The breadth earned by a legitimate path: named as such, which is what clears the English-list concern.
     const legit = ['my mom once', 'the parent Parsons', 'parent Parsons again', 'Parsons the parent', 'Nick and his parent'];
     const chat2 = countChatHits([entries[9].key[0], ...probes], legit);

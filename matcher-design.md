@@ -560,9 +560,10 @@ core's intent, not to its bugs.
 - **`chat common` is a flag of its own**, advisory: a key over the chat-common share of messages,
   whatever list it is or is not on. Not on a `constant` or sticky entry, the author having declared
   the entry ubiquitous; the flag claims something about the key against this chat, not the wiring.
-  Never severe, so never pre-ticked: its remedies are `constant` or a narrower key. K16 — one book, a
-  handful of keys over the share — says those keys were kept by curation, which is why it is advisory
-  and not why it does not exist.
+  Severe by degree — in more messages than not, `KEY_CHAT_SEVERE`, an assertion — and moderate from the
+  gate to there; never pre-ticked at either, its remedies being `constant` or a narrower key. K16 — one
+  book, a handful of keys over the share — says those keys were kept by curation, which is why it does
+  not pre-tick and not why it does not exist.
 - **`book common` is its fallback**, only for a key no chat was scanned for: the book's own prose
   standing in for the chat it does not have, at `KEY_BOOK_COMMON` of the entries. With a chat scanned,
   ubiquity in entry text is a fact about the story and draws nothing on its own.
