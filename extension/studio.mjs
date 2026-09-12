@@ -2153,9 +2153,9 @@ export async function lorebookStudio(preferredBook = null, open = null) {
             return b;
         };
         const chatScanBtn = () => {
-            const b = barBtn(chatHits ? 'Rescan chats' : 'Scan chats',
+            const b = barBtn('Choose chats…',
                 ev => runChatScan(ev?.shiftKey, b).catch(e => { console.error('Worlds Apart: chat scan failed', e); toastr.error(String(e?.message ?? e), 'Worlds Apart'); }));
-            b.title = 'Count the chat messages each key matches, over the chats bound to this book. Shift-click to choose any chat.';
+            b.title = 'Pick which chats to count key hits over. Bound chats are scanned when the audit runs; shift-click lists every chat on this install.';
             return b;
         };
         const paintBar = () => {
