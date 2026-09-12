@@ -229,6 +229,9 @@ export const sceneParams = (S, overrides = {}) => ({
     denseAllEntries: true,
     // Which entries define the corpus mean (plugin/vector.mjs): 'vectorized', 'memory' (production) or 'memoryArchived' (adds disabled memory entries; needs a --archived index).
     centroidPopulation: 'memory',
+    // What a REFERENCE entry's stage-3 cosine is centred on: 'memory' (production: both sides on the centroid above),
+    // 'reference' (both sides on the reference-tier mean), 'cross' (query on the centroid, items on the reference mean), 'raw' (uncentred).
+    referenceCentroid: 'memory',
     // How many leading components of the centred corpus are projected out, on top of the mean; 0 is production.
     pcRemove: 0,
     // Whitening: how many of the book's own directions to rescale (whitenR, 0 is production) and by how much (whitenAlpha).
@@ -318,6 +321,13 @@ export function loadScene(S, { indexFile, indexOpts = {}, params: P }) {
         const emptySelection = !meanSource.length && live.length;
         if (emptySelection) meanSource = live;
         const loaded = { book, items, extra, mean: meanSource.length ? corpusMean(meanSource) : [] };
+        if (P.referenceCentroid !== 'memory') {
+            if (!['reference', 'cross', 'raw'].includes(P.referenceCentroid)) throw new Error(`unknown referenceCentroid "${P.referenceCentroid}" — one of memory, reference, cross, raw`);
+            if (P.sharedComponents > 0 || P.pcRemove > 0 || P.whitenR > 0 || !P.meanCentered) throw new Error('referenceCentroid is defined on the plain centred cosine; not combinable with pcRemove/sharedComponents/whitenR or centering off');
+            const refItems = live.filter(it => !ofMemory(it));
+            loaded.refItems = refItems;
+            loaded.refMean = refItems.length ? corpusMean(refItems) : loaded.mean;
+        }
 
         // Projected at load and the mean becomes zero; the QUERY must take the same transform at every call site (pcQuery).
         if (P.sharedComponents > 0 || P.pcRemove > 0 || P.whitenR > 0) {
@@ -541,6 +551,21 @@ export function makeCandidateSet({ loaded, byKey, entries, params: P, chunkCfg, 
                 rows.push({ uid: Number(e.uid), book: e.world, entry: e, title: wiTitle(e), score: dense.get(key), textScore: contentText.get(key) ?? 0, keywordScore: 0, vectorEligible: dense.has(key) || !!e.vectorized, textEligible: hasContent(e), keysEligible: true });
             }
             for (const e of found) if (feeds(e)) buffer.push(String(e.content).trim());
+        }
+        // --- STAGE 3, reference cosine under another centring; the column only, stage 1 keeps the production centroid.
+        if (P.referenceCentroid !== 'memory') {
+            const ref = new Map();
+            for (const L of loaded) {
+                if (!L.refItems?.length) continue;
+                // 'cross' wants (q - mean)·(item - refMean): shifting q by (refMean - mean) makes the one-mean scorer do it.
+                const q = P.referenceCentroid === 'cross' ? qvec.map((x, i) => x - L.mean[i] + L.refMean[i]) : qvec;
+                const scores = centeredCosineScores(L.refItems, q, L.refMean, P.referenceCentroid !== 'raw');
+                L.refItems.forEach((it, i) => {
+                    const key = entryKey({ world: L.book, uid: it.metadata?.index });
+                    ref.set(key, Math.max(ref.get(key) ?? -Infinity, scores[i]));
+                });
+            }
+            for (const r of rows) if (!isMemory(r.entry) && ref.has(entryKey(r.entry))) r.score = ref.get(entryKey(r.entry));
         }
         // --- STAGE 3, keys. Once, over the COMPLETE buffer, as onScanDone runs after core's last loop. An entry that fed
         // the buffer does not match its own content there: that is the entry naming itself, not the conversation naming it.

@@ -835,7 +835,8 @@ fit serves both settings, the keys-live one; unticking blanks the keys and the c
   `text`, an entry's keys being drawn from its own content. Most memory keys are machine output, so a
   keys claim on this tier is a claim about generated keys (F22).
 - Against the `vectorized` population the memory-tier centroid is flat and the two all but coincide
-  (F44).
+  (F44). Centring the reference tier's own column on the reference mean, on both sides or on the
+  item side only, is measured flat at matched delivery, and raw cosine measured worse (F57).
 - The base-rate argument for the tier split was measured wrong: pooled prevalence tracks grading
   depth, at matched rank the tiers are indistinguishable at the head, and a depth cut selects the rater
   (F38).
@@ -876,19 +877,15 @@ Ordered by whether a user can see the difference.
 3. **Suggester i18n, none of it started.** `ZIPF_EN` scores non-English function words as maximally
    rare, so the suggester should detect that its priors do not apply and stand down rather than invert.
    Accent variants belong here too (`Gérard`/`Gerard`), with a human in the loop.
-4. **A firing-rate diagnostic for loose reference keys.** Reference entries are never cut, so a key
-   that fires too easily costs budget on every turn it wins and nothing warns anybody. The Lab answers it
-   for one text at a time; what is missing is the standing per-entry rate, beside the keyword audit. Not
-   blocking: an over-firing reference entry is a budget cost, where a wrongly cut one is missing material.
-5. **A signal's within-scene SD varies by book**, and the two books `keys` costs are its extremes
+4. **A signal's within-scene SD varies by book**, and the two books `keys` costs are its extremes
    (F45). Standardisation divides by the scene's own SD, so a near-constant column has its few small
    differences amplified into large z against a slope fitted on other books. No use proposed; it is a
    property a book can be measured for, where curation is a label someone applies.
-6. **Reference is centred on the memory tier's centroid, and nothing has asked whether it should
-   be.** The memory centroid all but coincides with the collection's mean while the reference centroid
-   sits well off it (F44), and cosine is the reference fit's largest coefficient. Candidates, none
-   screened: a per-tier centroid, reference on raw cosine, or leaving it. Deferred deliberately —
-   stage-4 work is memory-tier only.
+5. **Reference is centred on the memory tier's centroid**, which sits well off the reference centroid
+   (F44). A per-tier centring and a cross centring (query on the memory centroid, items on the
+   reference mean) are measured flat, with two thirds of scenes tying and the per-tier gain on the
+   small folds only (F57); the `referenceCentroid` arm in `eval/scene.mjs` is the instrument. Re-run
+   when the corpus has more books; nothing moves until then.
 
 ---
 
