@@ -837,6 +837,9 @@ fit serves both settings, the keys-live one; unticking blanks the keys and the c
 - Against the `vectorized` population the memory-tier centroid is flat and the two all but coincide
   (F44). Centring the reference tier's own column on the reference mean, on both sides or on the
   item side only, is measured flat at matched delivery, and raw cosine measured worse (F57).
+- The English list `properNames` subtracts from the properNouns column is measured flat on both
+  tiers, and so is the BM25 term df threshold at the cut (F58): nothing in stages 3–4 assumes
+  English; only the suggester and audit do.
 - The base-rate argument for the tier split was measured wrong: pooled prevalence tracks grading
   depth, at matched rank the tiers are indistinguishable at the head, and a depth cut selects the rater
   (F38).

@@ -29,7 +29,7 @@ const ARMS = {
     'gaz=bodies': { gazetteerSource: 'bodies', __reload: true },
     'gaz=none': { gazetteerSource: 'none', __reload: true },
     'boost=1': { boost: 1 }, 'boost=5': { boost: 5 }, 'boost=8': { boost: 8 },
-    'stopwordDf=0.15': { stopwordDf: 0.15 }, 'stopwordDf=0.4': { stopwordDf: 0.4 },
+    'stopwordDf=0': { stopwordDf: 0 }, 'stopwordDf=0.15': { stopwordDf: 0.15 }, 'stopwordDf=0.4': { stopwordDf: 0.4 },
     'filter=off': { entityFilter: false },
     // Chunk arms need their own collection (reindex.mjs), cached on disk; the first run pays one embedding pass per book per dose.
     ...Object.fromEntries([200, 300, 400, 600, 800, 1200, 1600, 2400].map(v => [`chunkSize=${v}`, { __chunk: { chunkSize: v } }])),

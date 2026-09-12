@@ -1,7 +1,7 @@
 // What each stage-3 signal is worth as a predictor of per-entry relevance, and how a parameter moves that.
 // Usage (from SillyTavern root):
 //   node .../relevance-regress.mjs <sample.json> [...] [--sweep gazetteerSource=keys,titles]
-//        --tier all|memory|reference [--cut 4] [--ordinal] [--loso] [--lobo] [--calibration] [--cutoff] [--at 0.10] [--degree 2] [--interactions] --features cosine,text,properNouns,density [--drop-keys flagged.json] [--emit-rows rows.json] [--emit-model relevance-model-<tier>.json] [--proper-nouns count|idf|idf-len|jaccard|gaz] [--proper-nouns-extract regex|entity|span|book|named] [--density-extract entity|book]
+//        --tier all|memory|reference [--cut 4] [--ordinal] [--loso] [--lobo] [--calibration] [--cutoff] [--at 0.10] [--degree 2] [--interactions] --features cosine,text,properNouns,density [--drop-keys flagged.json] [--emit-rows rows.json] [--emit-model relevance-model-<tier>.json] [--proper-nouns count|idf|idf-len|jaccard|gaz] [--proper-nouns-extract regex|entity|bare|span|book|named] [--density-extract entity|book]
 //   --tier and --features are required. With properNouns in --features, --proper-nouns and --proper-nouns-extract are
 //   required. A --sweep read with --cutoff requires --at: arms compare at one set cutoff.
 import { haystackFor, indexPath, isMemory, loadScene, openSample, sceneParams, makeCandidateSet, makeGradeOf, embed, sceneLabel } from './scene.mjs';
@@ -80,7 +80,7 @@ const CALIB = argv.includes('--calibration');
 if (has('properNouns') && !['count', 'idf', 'idf-len', 'jaccard', 'gaz'].includes(PROPER_MODE)) {
     console.error(`--proper-nouns is required with the properNouns feature: count|idf|idf-len|jaccard|gaz (got ${PROPER_MODE})`); process.exit(2);
 }
-if (has('properNouns') && !['regex', 'entity', 'span', 'book', 'named'].includes(PROPER_EXTRACT)) {
+if (has('properNouns') && !['regex', 'entity', 'bare', 'span', 'book', 'named'].includes(PROPER_EXTRACT)) {
     console.error(`--proper-nouns-extract is required with the properNouns feature: regex|entity|span|book|named (got ${PROPER_EXTRACT})`); process.exit(2);
 }
 if (has('density') && !['entity', 'book'].includes(DENSITY_EXTRACT)) {
@@ -171,6 +171,8 @@ const makeExtract = (mode, entries) => {
 const properNouns = (text, mode = PROPER_EXTRACT) => {
     // The shipped function itself, so the fit and the runtime cannot drift on what a name is.
     if (mode === 'entity') return properNames(text);
+    // No stoplist at all: the density extractor's function, so the column is what properNames would be without COMMON_WORDS.
+    if (mode === 'bare') return properNounsOf(normalizeOrthography(String(text ?? '')));
     if (mode === 'span') return properSpans(text);
     const out = new Set();
     for (const m of String(text ?? '').match(PROPER_RE) ?? []) {
