@@ -278,7 +278,7 @@ export async function lorebookStudio(preferredBook = null, open = null) {
         wl.append(chips);
         if (ignoreSet.size) {
             const clrRow = document.createElement('div'); clrRow.className = 'wa-tray-wl-clear';
-            const clr = document.createElement('button'); clr.type = 'button'; clr.className = 'menu_button'; clr.style.margin = '0';
+            const clr = document.createElement('button'); clr.type = 'button'; clr.className = 'menu_button'; clr.style.cssText = 'margin:0;width:auto;white-space:nowrap;';
             clr.textContent = 'Clear ignored';
             clr.addEventListener('click', () => { const cleared = [...ignoreSet]; ignoreSet.clear(); persistIgnore(); afterIgnoreChange(cleared); refreshTray(); });
             clrRow.append(clr); wl.append(clrRow);
@@ -286,30 +286,30 @@ export async function lorebookStudio(preferredBook = null, open = null) {
 
         panel.append(
             col('Keyword audit',
-                check(studioOpts, 'scanKeyword', 'Scan Keyword (🟢)'),
-                check(studioOpts, 'scanVectorized', 'Scan Vectorized (🔗)'),
-                check(studioOpts, 'scanConstant', 'Scan Constant (🔵)'),
-                check(studioOpts, 'includeInactive', 'Include inactive entries'),
-                check(studioOpts, 'pruneUnattested', 'Flag unattested keys (aliases and typos)'),
-                check(studioOpts, 'pruneCommon', 'Flag english-common keys'),
-                num(studioOpts, 'chatCommon', 'chat common: in >', '% of MESSAGES', { min: 1, max: 100, scale: 100 }),
-                num(studioOpts, 'bookCommon', 'book common: in >', '% of ENTRIES', { min: 1, max: 100, scale: 100 }),
+                check(studioOpts, 'scanKeyword', 'Audit 🟢 keyword entries'),
+                check(studioOpts, 'scanVectorized', 'Audit 🔗 vector entries'),
+                check(studioOpts, 'scanConstant', 'Audit 🔵 constant entries'),
+                check(studioOpts, 'includeInactive', 'Include disabled entries'),
+                check(studioOpts, 'pruneUnattested', 'Flag unattested keys'),
+                check(studioOpts, 'pruneCommon', 'Flag common words'),
+                num(studioOpts, 'chatCommon', 'Chat common: in over', '% of messages', { min: 1, max: 100, scale: 100 }),
+                num(studioOpts, 'bookCommon', 'Book common: in over', '% of entries', { min: 1, max: 100, scale: 100 }),
                 check(studioOpts, 'pruneShared', 'Flag book-shared keys'),
-                num(studioOpts, 'bookShared', '↳ book shared: LISTED by >', '% of entries', { min: 1, max: 100, scale: 100 }),
+                num(studioOpts, 'bookShared', '↳ listed by over', '% of entries', { min: 1, max: 100, scale: 100 }),
                 check(studioOpts, 'pruneShort', 'Flag short keys'),
-                num(studioOpts, 'minLength', '↳ short: under', 'chars', { min: 1 }),
-                check(studioOpts, 'ignoreProper', 'Spare proper nouns from the dead flag'),
+                num(studioOpts, 'minLength', '↳ under', 'characters', { min: 1 }),
+                check(studioOpts, 'ignoreProper', 'Never flag proper nouns as unattested'),
             ),
-            col('Recommender (⚡ / ✨)',
-                num(suggestOpts, 'dfCeil', 'Skip terms in >', '% of entries', { min: 1, max: 100, scale: 100 }, invSuggest),
-                num(suggestOpts, 'maxN', 'Longest phrase', 'content words', { min: 1, max: 8 }, invSuggest),
+            col('Suggestions',
+                num(suggestOpts, 'dfCeil', 'Skip terms in over', '% of entries', { min: 1, max: 100, scale: 100 }, invSuggest),
+                num(suggestOpts, 'maxN', 'Longest phrase', 'words', { min: 1, max: 8 }, invSuggest),
                 num(suggestOpts, 'cap', 'Max per entry', '', { min: 1, max: 50 }, invSuggest),
-                num(suggestOpts, 'llmChunk', '✨ chunk over', 'chars', { min: 500, width: '5.6em' }),   // longer entries split into this-sized passes
-                check(suggestOpts, 'excludeDates', 'Skip date-like terms', invSuggest),
+                num(suggestOpts, 'llmChunk', 'LLM chunk size', 'characters', { min: 500, width: '5.6em' }),   // longer entries split into this-sized passes
+                check(suggestOpts, 'excludeDates', 'Skip dates', invSuggest),
                 check(suggestOpts, 'excludeShort', 'Skip short terms', invSuggest),
-                check(suggestOpts, 'onlyActive', 'Suggest from active entries only', invSuggest),
+                check(suggestOpts, 'onlyActive', 'Active entries only', invSuggest),
             ),
-            col(`Ignored terms — ${ignoreSet.size}`, wl),
+            col(`Ignored terms (${ignoreSet.size})`, wl),
         );
         return panel;
     };

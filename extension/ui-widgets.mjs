@@ -453,8 +453,9 @@ textarea.wa-entry-full.wa-tall { max-height: 62vh; }
     border-top: 1px solid var(--SmartThemeBorderColor, rgba(255,255,255,0.15));
     border-bottom: 1px solid var(--SmartThemeBorderColor, rgba(255,255,255,0.15));
     background: var(--black30a, rgba(0,0,0,0.15)); }
-.wa-tray-col { flex: 1 1 210px; min-width: 190px; }
-.wa-tray-sec { font-weight: bold; font-size: 0.8em; opacity: 0.7; margin: 0 0 4px; text-transform: uppercase; letter-spacing: 0.03em; }
+.wa-tray-col { flex: 2 1 190px; min-width: 170px; }
+.wa-tray-panel > .wa-tray-col:first-child { flex: 3 1 240px; }
+.wa-tray-sec { font-weight: bold; font-size: 0.9em; opacity: 0.8; margin: 0 0 4px; }
 .wa-tray-opt { display: flex; align-items: center; margin: 1px 0; font-size: 0.9em; }
 .wa-tray-num { gap: 2px; }
 .wa-tray-wl { display: flex; flex-wrap: wrap; align-items: center; gap: 0.4em; font-size: 0.9em; }
