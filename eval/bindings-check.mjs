@@ -46,3 +46,9 @@ eq(editDistance('kitten', 'sitting'), 3, 'edit distance is the standard one');
 eq(editDistance('', 'abc'), 3, 'and handles an empty side');
 
 console.log('ok   orphaned bindings are found, grouped, and only confidently suggested');
+
+{
+    const r = findOrphanBindings([{ char: 'Cy', avatar: 'Cy.png', charWorld: null, extraBooks: ['Gone', 'Kept'], chats: [] }], ['Kept']);
+    eq(r.cardCount, 1, 'an additional lorebook naming a missing book is a card orphan');
+    eq(r.missing[0]?.name + ':' + r.missing[0]?.cards.join(), 'Gone:Cy', '...attributed to the character carrying it, the existing one untouched');
+}

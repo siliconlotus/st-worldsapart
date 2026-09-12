@@ -255,7 +255,9 @@ export async function init(router) {
         }
     });
 
-    /** `[{ dir, file, world_info }]` for every chat naming a book, reading only line 0 of each (P1). */
+    /** `[{ dir, file, world_info, size }]` for EVERY chat, `world_info` null when line 0 names no book; line 0 is all
+     *  that is read (P1). Every chat, not only the bound ones: a book attached through the character or globally
+     *  reaches chats whose own metadata names nothing. */
     router.post('/chat-bindings', async (request, response) => {
         try {
             const root = request.user.directories.chats;
@@ -268,8 +270,9 @@ export async function init(router) {
                 for (const file of fs.readdirSync(dirPath)) {
                     if (!file.endsWith('.jsonl')) continue;
                     chats++;
+                    const full = path.join(dirPath, file);
                     const world = await new Promise(resolve => {
-                        const rl = readline.createInterface({ input: fs.createReadStream(path.join(dirPath, file)), crlfDelay: Infinity });
+                        const rl = readline.createInterface({ input: fs.createReadStream(full), crlfDelay: Infinity });
                         let done = false;
                         const finish = v => { if (!done) { done = true; rl.close(); resolve(v); } };
                         // Line 0 is the metadata header; stop there.
@@ -277,7 +280,9 @@ export async function init(router) {
                         rl.on('close', () => finish(null));
                         rl.on('error', () => finish(null));
                     });
-                    if (world) bindings.push({ dir: dir.name, file, world_info: String(world) });
+                    let size = null;
+                    try { size = fs.statSync(full).size; } catch { /* unreadable: listed without a size */ }
+                    bindings.push({ dir: dir.name, file, world_info: world ? String(world) : null, size });
                 }
             }
             return response.send({ bindings, chats });

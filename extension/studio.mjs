@@ -148,7 +148,15 @@ export async function lorebookStudio(preferredBook = null, open = null) {
     let orphans = null;       // findOrphanBindings result, computed once in the background; null until it has run
     let orphanView = false;   // showing the list instead of a book — `selected` stays a real book name
 
-    /** The chat index: the plugin's chat-bindings route (reads line 0 only, P1), else ST's endpoint via loadChatIndex. */
+    /** The "additional lorebooks" a character carries: world_info.charLore, keyed by avatar filename. */
+    const extraBooksOf = avatar => {
+        const file = getCharaFilename(null, { manualAvatarKey: avatar });
+        return (file && world_info.charLore?.find(e => e.name === file)?.extraBooks) ?? [];
+    };
+    const humanSize = n => (!Number.isFinite(n) ? '?' : n >= 1e6 ? `${(n / 1e6).toFixed(1)} MB` : n >= 1e3 ? `${Math.round(n / 1e3)} KB` : `${n} B`);
+
+    /** The chat index: the plugin's chat-bindings route (reads line 0 only, P1), else ST's endpoint via loadChatIndex,
+     *  which reads every chat whole for its metadata. Same shape either way: [{ char, avatar, charWorld, extraBooks, chats }]. */
     const bindingIndex = async () => {
         if (runState.pluginAvailable) {
             try {
@@ -164,12 +172,13 @@ export async function lorebookStudio(preferredBook = null, open = null) {
                         let e = out.get(dir);
                         if (!e) {
                             const c = byDir.get(dir);
-                            out.set(dir, e = { char: c?.name ?? dir, avatar: c?.avatar ?? `${dir}.png`, charWorld: c?.data?.extensions?.world ?? null, chats: [] });
+                            const avatar = c?.avatar ?? `${dir}.png`;
+                            out.set(dir, e = { char: c?.name ?? dir, avatar, charWorld: c?.data?.extensions?.world ?? null, extraBooks: extraBooksOf(avatar), chats: [] });
                         }
                         return e;
                     };
                     for (const c of characters ?? []) if (c?.avatar) entry(String(c.avatar).replace(/\.png$/, ''));
-                    for (const b of bindings ?? []) entry(b.dir).chats.push({ file_name: b.file, chat_metadata: { world_info: b.world_info } });
+                    for (const b of bindings ?? []) entry(b.dir).chats.push({ file_name: b.file, file_size: humanSize(b.size), chat_metadata: { world_info: b.world_info } });
                     return [...out.values()];
                 }
             } catch (err) { console.warn('[WA] chat-bindings route unavailable, falling back', err); }
@@ -1478,8 +1487,8 @@ export async function lorebookStudio(preferredBook = null, open = null) {
     const repointChats = async (oldName, newName) => {
         const moved = [], failed = [];
         const openFile = String(getContext().chatId ?? '');
-        chatIndex = null;   // a rename invalidates it, and this is the one place that must not read stale
-        for (const c of await loadChatIndex()) {
+        chatIndex = null;   // a rename invalidates the fallback's cache, and this is the one place that must not read stale
+        for (const c of await bindingIndex()) {
             for (const ch of c.chats) {
                 if (ch?.chat_metadata?.world_info !== oldName) continue;
                 const file = String(ch.file_name ?? '').replace(/\.jsonl$/, '');
@@ -1874,7 +1883,7 @@ export async function lorebookStudio(preferredBook = null, open = null) {
                 });
                 if (r.ok) { const j = await r.json(); if (Array.isArray(j)) chats = j; }
             } catch { /* a character with no chats dir just yields nothing */ }
-            return { char: c.name, avatar: c.avatar, charWorld: c?.data?.extensions?.world ?? null, chats };
+            return { char: c.name, avatar: c.avatar, charWorld: c?.data?.extensions?.world ?? null, extraBooks: extraBooksOf(c.avatar), chats };
         }));
         return chatIndex;
     };
@@ -1885,14 +1894,11 @@ export async function lorebookStudio(preferredBook = null, open = null) {
         // additional lorebooks (world_info.charLore[].extraBooks, keyed by avatar filename), global (selected_world_info,
         // never pre-ticked). The same four attachedBookNames reads.
         const isGlobal = (selected_world_info ?? []).includes(selected);
-        const extraBound = avatar => {
-            const file = getCharaFilename(null, { manualAvatarKey: avatar });
-            return Boolean(file && world_info.charLore?.find(e => e.name === file)?.extraBooks?.includes(selected));
-        };
         const out = [];
-        for (const c of await loadChatIndex()) {
+        // bindingIndex, not loadChatIndex: line 0 of each chat where the plugin is present, never the whole file.
+        for (const c of await bindingIndex()) {
             const cardBound = c.charWorld === selected;
-            const auxBound = !cardBound && extraBound(c.avatar);
+            const auxBound = !cardBound && (c.extraBooks ?? []).includes(selected);
             const charBound = cardBound || auxBound;
             for (const ch of c.chats) {
                 const chatBound = ch?.chat_metadata?.world_info === selected;

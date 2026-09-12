@@ -38,7 +38,7 @@ export function nearestWorld(missing, worldNames) {
 }
 
 /** Every binding that names a book which does not exist.
- * @param index loadChatIndex() output: [{char, avatar, charWorld, chats: [{chat_metadata, file_name}]}] */
+ * @param index [{char, avatar, charWorld, extraBooks, chats: [{chat_metadata, file_name}]}] — charWorld is the card's own book, extraBooks the character's additional lorebooks */
 export function findOrphanBindings(index, worldNames) {
     const exists = new Set(worldNames.map(String));
     const groups = new Map();   // missing name -> { chats, cards }
@@ -50,6 +50,7 @@ export function findOrphanBindings(index, worldNames) {
 
     for (const c of index ?? []) {
         if (c?.charWorld && !exists.has(c.charWorld)) group(c.charWorld).cards.push(c.char);
+        for (const b of c?.extraBooks ?? []) if (b && !exists.has(b)) group(b).cards.push(c.char);
         for (const ch of c?.chats ?? []) {
             const w = ch?.chat_metadata?.world_info;
             if (!w || exists.has(w)) continue;
