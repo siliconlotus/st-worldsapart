@@ -464,15 +464,11 @@ keys re-rank vector entries and never admit one.
 **Stage 3 scores the recursion buffer.** The scan window is chat plus injects plus opted-in match
 sources, wrapped by `matcher.withExtraTexts` over `runState.waRecursionTexts` — each recursion content
 its own segment, as match sources and injects already are. Keyword scoring only: the buffer is text WA
-injected, so it stays out of the window `properNouns` is counted over. Without it an entry whose key
-matched another entry's content scores `keys: 0` and the budget drops it first, and the budget binds on
-every graded scene measured (F4).
+injected, so it stays out of the window `properNouns` is counted over.
 
-**An entry does not match its own content in the buffer.** An entry that fired feeds the buffer, and its
-own content usually repeats its own keys; matching there is the entry naming itself, not the conversation
-naming it. Core never self-matches because it activates an entry once, where stage 3 re-reads the buffer
-for everything. Its own text is filtered out of its window, the audit drawing the same line between
-entry-text attestation and chat evidence.
+**An entry does not match its own content in the buffer.** Its own text is filtered out of its own
+window. Core never reaches this case, activating an entry once, where stage 3 re-reads the whole buffer
+for every entry.
 
 **An `excludeRecursion` entry is scored against the chat window alone.** Core's gate runs before
 `getExternallyActivated` (*The seam*), so stage 2 inherits it; stage 3 is WA's own loop and core is not
@@ -481,24 +477,21 @@ in it, so the exclusion is applied there by hand.
 **An entry reached at recursion pass `d` scores `keys / (1 + d)`.** `waTriggerDepth` is a per-entry
 scalar stamped where a newly-matched entry joins `waMatched`; the counter advances on recursion passes
 only, `args.state.next === scan_state.MIN_ACTIVATIONS` marking a min-activations widening, whose match
-was found in the chat. Depth is a property of the moment, not of the entry, and depth 0 is unweighted,
-so a book that wires no recursion does not move. The curve is an assertion: no book in the corpus
-exercises recursion, and the sentinel is a verdict fixture, not a measurement.
+was found in the chat. Depth is a property of the moment, not of the entry, and depth 0 is unweighted.
+The curve is an assertion.
 
 **`eval/scene.mjs` recomputes the buffer rather than replaying one.** `makeCandidateSet`'s keyword route
 runs to a fixpoint: chat first, then chat plus the content of what each pass admitted, the retrieval
-winners seeding it because WA force-activates them into `new.successful`. `preventRecursion` decides who
-feeds it, `excludeRecursion` who it may reach, and a `delayUntilRecursion` entry is held out of the
-initial pass — its LEVEL is not modelled, core walking distinct levels rather than passes. Termination is
-the buffer standing still, not a pass admitting nothing: the depth-0 pass matches chat only, so a pass
-that admits nothing can still leave text for the next. Both the buffer and the depth are deterministic
-from the scene's own `scanChat`, entries and params, so neither is a capture field.
+winners seeding it, WA force-activating them into `new.successful`. `preventRecursion` decides who feeds
+it, `excludeRecursion` who it may reach, and a `delayUntilRecursion` entry is held out of the initial
+pass; its LEVEL is not modelled, core walking distinct levels rather than passes. **Termination is the
+buffer standing still, never a pass admitting nothing** — the depth-0 pass matches chat only, so a pass
+that admits nothing can still leave text for the next. Neither the buffer nor the depth is a capture
+field: both are deterministic from the scene's `scanChat`, entries and params.
 
-**Core's two settings are, though, and a capture that does not carry them reads as off.** `recursive` and
-`maxRecursionSteps` go in under core's own names, `maxRecursionSteps` 0 meaning no cap. Off is the state
-every capture predating the fields was made under, so it is the only default that leaves their `keys`
-scores where they were. Which emits core's gates would have admitted stays the standing offline
-divergence.
+**A capture that does not carry `recursive` reads as off.** It and `maxRecursionSteps` go in under core's
+own names, `maxRecursionSteps` 0 meaning no cap. Which emits core's gates would have admitted stays the
+standing offline divergence.
 
 ---
 
