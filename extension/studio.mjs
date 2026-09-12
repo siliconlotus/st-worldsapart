@@ -1832,8 +1832,9 @@ export async function lorebookStudio(preferredBook = null, open = null) {
             if (!groups.has(k)) groups.set(k, { char: c.char, items: [] });
             groups.get(k).items.push({ c, i });
         });
-        // Nothing is pre-ticked in the all list: binding is what makes a chat this book's evidence, and there it means nothing.
-        const preTick = c => !!c.bound && !candidates.all;
+        // Pre-ticked: chats bound to this book by their own metadata, and only in the bound list. A character-bound card can carry
+        // dozens of chats, and a global book lists every chat; neither is a default anyone wants ticked wholesale.
+        const preTick = c => c.why === 'chat-bound' && !candidates.all;
         const rows = [], syncers = [];
         // Cards holding something pre-ticked first, so the shift-click list does not open on a wall of unrelated cards.
         for (const g of [...groups.values()].sort((a, b) => Number(b.items.some(x => x.c.bound)) - Number(a.items.some(x => x.c.bound)))) {
@@ -2784,6 +2785,8 @@ export async function lorebookStudio(preferredBook = null, open = null) {
         tools.append(
             labTool('fa-comment-dots', 'Load the current chat to the message-depth setting. Shift-click for a depth.',
                 async ev => {
+                    // No character or group: there is no chat to read, and nothing here may cause ST to make one.
+                    if (getContext().characterId === undefined && !getContext().groupId) { toastr.info('No chat is open.', 'Keyword Lab'); return; }
                     const depth = ev.shiftKey
                         ? await numberPrompt('Load chat', 'How many messages deep?', settings().messageDepth || world_info_depth, 1)
                         : undefined;
