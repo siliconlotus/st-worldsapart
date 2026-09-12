@@ -10,7 +10,7 @@ import { runState, settings } from './state.mjs';
 import { ensureStudioStyle, makeSortControl, renderMessageHtml, showCtxMenu, showEntryText, wiGlyph } from './ui-widgets.mjs';
 import { SORT_FNS, SORT_LABELS, normPresentation, presentationLabel, reconcileTiers, tierRank, wiTitleOf } from './sort.mjs';
 import { buildKeyPruneScan, llmKeyCandidates } from './keyword-tools.mjs';
-import { FLAG_PRIORITY, KEY_CHAT_COMMON, MINOR, MODERATE, SEVERE, STUDIO_PRUNE_OPTS, collisionProbes, orthoAlternates } from './keyword-audit.mjs';
+import { FLAG_PRIORITY, KEY_CHAT_COMMON, MINOR, MODERATE, SEVERE, STUDIO_PRUNE_OPTS, collisionProbes, commonPathProbes, orthoAlternates } from './keyword-audit.mjs';
 import { buildKeySuggest, classifyLlmCand, STUDIO_SUGGEST_OPTS } from './keyword-suggest.mjs';
 import { validateSmartKey } from './smartkeys.mjs';
 import { findOrphanBindings } from './bindings.mjs';
@@ -1981,7 +1981,9 @@ export async function lorebookStudio(preferredBook = null, open = null) {
         if (!own.length || !picked?.length) return null;
         // The orthographic alternates ride along as ordinary keys: the audit can only cite chat evidence for a pattern
         // somebody counted, and both routes scan whatever list they are handed.
-        const keys = [...new Set([...own, ...own.flatMap(k => orthoAlternates(k).map(a => a.alt))])];
+        // Common-path probes ride in the first pass ungated: only a SmartKey with two or more common paths has any, a
+        // handful per book, and each is a conjunction of common words that the automaton pass already tallies.
+        const keys = [...new Set([...own, ...own.flatMap(k => orthoAlternates(k).map(a => a.alt)), ...own.flatMap(commonPathProbes)])];
         const first = await scanKeys(keys, picked);
         if (!first.seen) return null;
         const { totals, typedTotals, seen } = first;

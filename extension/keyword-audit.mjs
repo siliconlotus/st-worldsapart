@@ -38,33 +38,45 @@ export function looksProper(key) {
 }
 
 /** The loose term a SmartKey reduces to under `isLoose`, or null once it has a selective term anywhere: OR takes the loosest branch, AND the tightest conjunct; NOT and REGEX read as selective. */
-function commonSurfaceOf(node, isLoose) {
-    if (!node) return null;
+/** A TERM as its author wrote it — flags, and quotes where the value would not lex as one term — so a probe built from
+ *  it evaluates under the same rules. */
+const renderTerm = n => {
+    const v = String(n.value ?? '').trim();
+    const bare = /^[^\s()|&"]+$/.test(v) && !/^(?:AND|OR|NOT|XOR)$/i.test(v) && !/^[-!+]/.test(v);
+    return `${n.isExact ? '=' : ''}${n.isCaseSensitive ? '^' : ''}${bare ? v : `"${v}"`}`;
+};
+
+/** Every path through the AST made entirely of common words, each as its TERM nodes: an OR contributes each common member,
+ *  an AND the cross-product of its sides, so `(a||b) (c||d)` with all four common is four paths. */
+function commonPathsOf(node, isLoose) {
+    if (!node) return [];
     switch (node.type) {
         // A case-sensitive capitalised term can never be the common word: `? ^Mark` never matches `mark`.
         case 'TERM': {
             const v = String(node.value ?? '').trim();
-            if (node.isCaseSensitive && v !== v.toLowerCase()) return null;
-            return v && isLoose(v) ? v : null;
+            if (node.isCaseSensitive && v !== v.toLowerCase()) return [];
+            return v && isLoose(v) ? [[node]] : [];
         }
-        case 'OR': {
-            const l = commonSurfaceOf(node.left, isLoose);
-            return l ?? commonSurfaceOf(node.right, isLoose);
-        }
+        case 'OR': return [...commonPathsOf(node.left, isLoose), ...commonPathsOf(node.right, isLoose)];
         case 'AND': {
-            const l = commonSurfaceOf(node.left, isLoose);
-            if (!l) return null;
-            const r = commonSurfaceOf(node.right, isLoose);
-            return r ? l : null;
+            const l = commonPathsOf(node.left, isLoose);
+            if (!l.length) return [];
+            const r = commonPathsOf(node.right, isLoose);
+            return l.flatMap(a => r.map(b => [...a, ...b]));
         }
-        default: return null;
+        default: return [];
     }
 }
 
-function commonSmartKey(raw, isLoose) {
-    if (!String(raw ?? '').trim().startsWith('?')) return null;
-    try { return commonSurfaceOf(parse(tokenize(String(raw))), isLoose); } catch { return null; }
+/** A SmartKey's common paths as probes — `? =mom =my` — one per path, each a key the chat scan can count. */
+function commonPaths(raw, isLoose) {
+    if (!String(raw ?? '').trim().startsWith('?')) return [];
+    try { return commonPathsOf(parse(tokenize(String(raw))), isLoose).map(p => ({ label: p.map(n => String(n.value).trim()).join(' & '), probe: `? ${p.map(renderTerm).join(' ')}` })); }
+    catch { return []; }
 }
+
+/** The probes the chat scan counts beside a SmartKey so `english common` can name the path that actually fires. */
+export const commonPathProbes = k => commonPaths(k, isEnglishCommon(COMMON_WORDS)).map(p => p.probe);
 
 const isEnglishCommon = (list) => (v) => !/\s/.test(v) && list.has(v.toLowerCase());
 
@@ -236,8 +248,13 @@ export function buildKeyPruneScan(data, opts, ignoreSet, { caseSensitiveDefault 
         const chatRate = chatRateOf(k);
         if (opts.pruneCommon) {
             if (literal && !/\s/.test(k) && COMMON_WORDS.has(k.toLowerCase())) return { flag: 'english common', bookContent, chatRate };
-            const term = literal ? null : commonSmartKey(k, isEnglishCommon(COMMON_WORDS));
-            if (term) return { flag: 'english common', term, bookContent, chatRate };
+            const paths = literal ? [] : commonPaths(k, isEnglishCommon(COMMON_WORDS));
+            if (paths.length) {
+                // The path that fires most where a chat was scanned; unmeasured, the first. Ties keep the first.
+                const hits = p => chatScan?.messagesWith?.get(p.probe) ?? -1;
+                const best = paths.reduce((a, p) => (hits(p) > hits(a) ? p : a), paths[0]);
+                return { flag: 'english common', term: best.label, bookContent, chatRate };
+            }
         }
         const evidenced = regexOrtho(k, true);
         if (evidenced) return evidenced;

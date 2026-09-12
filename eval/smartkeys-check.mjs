@@ -1,8 +1,8 @@
 // Verifies the SmartKeys boolean-query engine against the spec's acceptance table,
 // plus the lexer edge cases the spec calls out (internal hyphens, weights, flags).
-import { countKey, keywordScore, repeatCurveOf, setBoundaryMode, isRegexKey } from '../extension/matcher.mjs';
+import { countChatHits, countKey, keywordScore, repeatCurveOf, setBoundaryMode, isRegexKey } from '../extension/matcher.mjs';
 import { tokenize, parse, evaluate, buildAutomaton, scanAutomaton, validateSmartKey, fold, resetSmartKeys } from '../extension/smartkeys.mjs';
-import { buildKeyPruneScan } from '../extension/keyword-audit.mjs';
+import { buildKeyPruneScan, commonPathProbes } from '../extension/keyword-audit.mjs';
 import { eq } from './metrics.mjs';
 
 const matches = (key, text) => countKey(key, text, false, false) > 0;
@@ -277,6 +277,16 @@ console.log('ok   SmartKey structural validation');
     entries[8].key = ['? Mark'];
     eq(sc.classifyEntry(entries[7])[0]?.flag !== 'english common', true, 'a case-sensitive capital cannot be the lower-case common word');
     eq(sc.classifyEntry(entries[8])[0]?.flag, 'english common', '...where the same term written plainly can');
+
+    // Two common paths through one conjunction: unmeasured the first is named; measured, the one the chat fires.
+    entries[9].key = ['? (=mom || =mother || parent) (=Nick || =my || Parsons)'];
+    eq(commonPathProbes(entries[9].key[0]).join(' | '), '? =mom =my | ? =mother =my', 'each common path is a probe carrying its terms\' own flags');
+    eq(sc.reasonOf(sc.classifyEntry(entries[9])[0]).text, 'english common · mom & my', 'no chat: the first path, joined with &');
+    const msgs = ['my mother said', 'my mother again', 'oh my mother', 'my mom once', 'nothing here'];
+    const chat = countChatHits([entries[9].key[0], ...commonPathProbes(entries[9].key[0])], msgs);
+    const scChat = buildKeyPruneScan({ entries }, opts, new Set(), { chatScan: { messagesWith: chat.messagesWith, messages: chat.messages } });
+    eq(scChat.reasonOf(scChat.classifyEntry(entries[9])[0]).text, 'english common · mother & my · 80% of chat',
+        'with a chat: the path that fires most is named, not the first');
 }
 console.log('ok   SmartKeys are audited on df, exempt only from the literal-string heuristics');
 
