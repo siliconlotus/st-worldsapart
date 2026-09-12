@@ -418,11 +418,10 @@ textarea.wa-entry-full.wa-tall { max-height: 62vh; }
 .wa-chevron { width: 14px; text-align: center; opacity: 0.7; transition: transform 0.12s; cursor: pointer; }
 .wa-chevron.wa-open { transform: rotate(90deg); }
 .wa-entry-tools { display: flex; align-items: center; gap: 0; margin-left: auto; }
-/* One box for every tool, glyph centred; lettered tools are set smaller so their capitals stand as tall as the icons. */
+/* One box for every tool, glyph centred. */
 .wa-tool { cursor: pointer; display: inline-flex; align-items: center; justify-content: center; height: 1.5em; padding: 0 2px; min-width: 1.3em; border-radius: 4px; opacity: 0.55; font-style: normal; }
-.wa-tool-text { font-size: 0.78em; height: 1.92em; min-width: 1.6em; }
 .wa-tool:hover { opacity: 1; background: var(--white20a, rgba(255,255,255,0.1)); }
-.wa-tool-narrow { transform: scaleX(0.85); transform-origin: center; margin: 0 -0.1em; }   /* the crown: the scale leaves the box its full width; the margin takes back what the glyph gave up */
+.wa-tool-narrow { transform: scaleX(0.85); transform-origin: center; margin: 0 -0.1em; }   /* the crown and the lettered tools: the scale leaves the box its full width; the margin takes back what the glyph gave up */
 .wa-tool.wa-on { opacity: 1; color: var(--SmartThemeQuoteColor, #6ea8fe); }
 .wa-tool.wa-badge { position: relative; }
 .wa-tool.wa-badge::after { content: attr(data-badge); position: absolute; top: -3px; right: -4px;
