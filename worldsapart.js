@@ -1800,6 +1800,15 @@ const SETTINGS_HTML = `
                     <div class="inline-drawer-icon fa-solid fa-circle-chevron-down down"></div>
                 </div>
                 <div class="inline-drawer-content">
+                    <label for="wa_world_priority_mode">Lorebook priority <span class="fa-solid fa-circle-question note-link-span" title="Interleaved: one ranked list across books, with optional per-book weights. Sequential: higher books fill first. A book appears below after its first scan."></span></label>
+                    <select id="wa_world_priority_mode" class="text_pole">
+                    <option value="interleaved">Interleaved</option>
+                    <option value="sequential">Sequential</option>
+                    </select>
+
+                    <label>Lorebook order</label>
+                    <div id="wa_world_priority_list" style="margin-top:2px;"></div>
+
                     <div class="wa-row"><label for="wa_relevance_cutoff">Relevance cutoff <span class="fa-solid fa-circle-question note-link-span" title="Memory entries below this are dropped. 0 = none."></span></label><input id="wa_relevance_cutoff" type="number" class="text_pole" min="0" max="1" step="0.01"></div>
 
                     <div class="wa-row"><label for="wa_max_entries">Vector entry cap <span class="fa-solid fa-circle-question note-link-span" title="Retrieved entries in the prompt."></span></label><input id="wa_max_entries" type="number" class="text_pole" min="1" max="100" step="1"></div>
@@ -1819,15 +1828,6 @@ const SETTINGS_HTML = `
                     <option value="once">One entry</option>
                     <option value="all">All entries</option>
                     </select>
-                    <label for="wa_world_priority_mode">Lorebook priority <span class="fa-solid fa-circle-question note-link-span" title="Interleaved: one ranked list across books, with optional per-book weights. Sequential: higher books fill first. A book appears below after its first scan."></span></label>
-                    <select id="wa_world_priority_mode" class="text_pole">
-                    <option value="interleaved">Interleaved</option>
-                    <option value="sequential">Sequential</option>
-                    </select>
-
-                    <label>Lorebook order</label>
-                    <div id="wa_world_priority_list" style="margin-top:2px;"></div>
-
                     <label class="checkbox_label" for="wa_tokens_include_exempt">
                     <input id="wa_tokens_include_exempt" type="checkbox"><span>Count "ignore budget" entries against the token budget</span>
                     </label>
