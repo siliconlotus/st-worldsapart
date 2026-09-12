@@ -46,37 +46,33 @@ const renderTerm = n => {
     return `${n.isExact ? '=' : ''}${n.isCaseSensitive ? '^' : ''}${bare ? v : `"${v}"`}`;
 };
 
-/** Every path through the AST made entirely of common words, each as its TERM nodes: an OR contributes each common member,
- *  an AND the cross-product of its sides, so `(a||b) (c||d)` with all four common is four paths. */
-function commonPathsOf(node, isLoose) {
+/** Every path through the AST as its TERM nodes: an OR contributes each member, an AND the cross-product of its sides. */
+function pathsOf(node) {
     if (!node) return [];
     switch (node.type) {
-        // A case-sensitive capitalised term can never be the common word: `? ^Mark` never matches `mark`.
-        case 'TERM': {
-            const v = String(node.value ?? '').trim();
-            if (node.isCaseSensitive && v !== v.toLowerCase()) return [];
-            return v && isLoose(v) ? [[node]] : [];
-        }
-        case 'OR': return [...commonPathsOf(node.left, isLoose), ...commonPathsOf(node.right, isLoose)];
-        case 'AND': {
-            const l = commonPathsOf(node.left, isLoose);
-            if (!l.length) return [];
-            const r = commonPathsOf(node.right, isLoose);
-            return l.flatMap(a => r.map(b => [...a, ...b]));
-        }
+        case 'TERM': return [[node]];
+        case 'OR': return [...pathsOf(node.left), ...pathsOf(node.right)];
+        case 'AND': { const l = pathsOf(node.left), r = pathsOf(node.right); return l.flatMap(a => r.map(b => [...a, ...b])); }
         default: return [];
     }
 }
+// A case-sensitive capitalised term can never be the common word: `? ^Mark` never matches `mark`.
+const commonTerm = (n, isLoose) => { const v = String(n.value ?? '').trim(); return Boolean(v) && isLoose(v) && !(n.isCaseSensitive && v !== v.toLowerCase()); };
 
-/** A SmartKey's common paths as probes — `? =mom =my` — one per path, each a key the chat scan can count. */
-function commonPaths(raw, isLoose) {
+/** A SmartKey's paths, each as a probe the chat scan can count — `? =mom =my` — with `common` set on a path made entirely
+ *  of common words. Empty unless some path is: only such a key is english-common, and only for it does the question
+ *  "which path fires" arise. The whole product, not the common paths alone: the path that fires most may be a
+ *  legitimate one, and that is the finding that clears the flag. */
+function smartPaths(raw, isLoose) {
     if (!String(raw ?? '').trim().startsWith('?')) return [];
-    try { return commonPathsOf(parse(tokenize(String(raw))), isLoose).map(p => ({ label: p.map(n => String(n.value).trim()).join(' & '), probe: `? ${p.map(renderTerm).join(' ')}` })); }
-    catch { return []; }
+    let paths;
+    try { paths = pathsOf(parse(tokenize(String(raw)))); } catch { return []; }
+    const out = paths.map(p => ({ label: p.map(n => String(n.value).trim()).join(' & '), probe: `? ${p.map(renderTerm).join(' ')}`, common: p.every(n => commonTerm(n, isLoose)) }));
+    return out.some(p => p.common) ? out : [];
 }
 
-/** The probes the chat scan counts beside a SmartKey so `english common` can name the path that actually fires. */
-export const commonPathProbes = k => commonPaths(k, isEnglishCommon(COMMON_WORDS)).map(p => p.probe);
+/** The probes the chat scan counts beside an english-common SmartKey. */
+export const pathProbes = k => smartPaths(k, isEnglishCommon(COMMON_WORDS)).map(p => p.probe);
 
 const isEnglishCommon = (list) => (v) => !/\s/.test(v) && list.has(v.toLowerCase());
 
@@ -248,12 +244,15 @@ export function buildKeyPruneScan(data, opts, ignoreSet, { caseSensitiveDefault 
         const chatRate = chatRateOf(k);
         if (opts.pruneCommon) {
             if (literal && !/\s/.test(k) && COMMON_WORDS.has(k.toLowerCase())) return { flag: 'english common', bookContent, chatRate };
-            const paths = literal ? [] : commonPaths(k, isEnglishCommon(COMMON_WORDS));
+            const paths = literal ? [] : smartPaths(k, isEnglishCommon(COMMON_WORDS));
             if (paths.length) {
-                // The path that fires most where a chat was scanned; unmeasured, the first. Ties keep the first.
+                // Unmeasured, the first common path. Measured, the path that fires most, common or not — a legitimate one
+                // firing most is what clears the flag of the breadth. Ties keep the common path.
                 const hits = p => chatScan?.messagesWith?.get(p.probe) ?? -1;
-                const best = paths.reduce((a, p) => (hits(p) > hits(a) ? p : a), paths[0]);
-                return { flag: 'english common', term: best.label, bookContent, chatRate };
+                const first = paths.find(p => p.common);
+                const top = paths.reduce((a, p) => (hits(p) > hits(a) || (hits(p) === hits(a) && p.common && !a.common) ? p : a), first);
+                const measured = hits(top) >= 0;
+                return { flag: 'english common', term: top.common ? top.label : first.label, via: measured && !top.common ? top.label : null, viaCommon: !measured || top.common, bookContent, chatRate };
             }
         }
         const evidenced = regexOrtho(k, true);
@@ -310,7 +309,8 @@ export function buildKeyPruneScan(data, opts, ignoreSet, { caseSensitiveDefault 
     const severityOf = p => {
         if (p.flag === 'unattested') return '';
         if (p.flag === 'unusable') return SEVERE;
-        if (p.flag === 'english common') return p.chatRate >= (opts.chatCommon ?? KEY_CHAT_COMMON) ? SEVERE : MODERATE;
+        // Breadth promotes to severe only when the common path is what earns it: `viaCommon` false means a legitimate path fires most.
+        if (p.flag === 'english common') return p.chatRate >= (opts.chatCommon ?? KEY_CHAT_COMMON) && p.viaCommon !== false ? SEVERE : MODERATE;
         if (p.flag === 'book shared') return p.bookListed / nBook >= opts.bookShared ? SEVERE : MODERATE;
         if (p.flag === 'fragment') return SEVERE;
         if (p.flag === 'collision') return MODERATE;
@@ -330,7 +330,8 @@ export function buildKeyPruneScan(data, opts, ignoreSet, { caseSensitiveDefault 
         if (p.flag === 'unusable') return { text: p.code ? `unusable — ${p.code}` : 'unusable', severity };
         if (p.flag === 'english common') {
             const which = p.term ? ` · ${p.term}` : '';
-            return { text: p.chatRate === undefined ? `english common${which}` : `english common${which} · ${Math.round(100 * p.chatRate)}% of chat`, severity };
+            const via = p.via ? `, mostly ${p.via}` : '';
+            return { text: p.chatRate === undefined ? `english common${which}` : `english common${which} · ${Math.round(100 * p.chatRate)}% of chat${via}`, severity };
         }
         if (p.flag === 'book shared') return { text: `book shared (${Math.round(100 * p.bookListed / nBook)}%)`, severity };
         if (p.flag === 'fragment') return { text: 'phrase fragment', severity };

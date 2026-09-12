@@ -2,7 +2,7 @@
 // plus the lexer edge cases the spec calls out (internal hyphens, weights, flags).
 import { countChatHits, countKey, keywordScore, repeatCurveOf, setBoundaryMode, isRegexKey } from '../extension/matcher.mjs';
 import { tokenize, parse, evaluate, buildAutomaton, scanAutomaton, validateSmartKey, fold, resetSmartKeys } from '../extension/smartkeys.mjs';
-import { buildKeyPruneScan, commonPathProbes } from '../extension/keyword-audit.mjs';
+import { buildKeyPruneScan, pathProbes } from '../extension/keyword-audit.mjs';
 import { eq } from './metrics.mjs';
 
 const matches = (key, text) => countKey(key, text, false, false) > 0;
@@ -280,13 +280,23 @@ console.log('ok   SmartKey structural validation');
 
     // Two common paths through one conjunction: unmeasured the first is named; measured, the one the chat fires.
     entries[9].key = ['? (=mom || =mother || parent) (=Nick || =my || Parsons)'];
-    eq(commonPathProbes(entries[9].key[0]).join(' | '), '? =mom =my | ? =mother =my', 'each common path is a probe carrying its terms\' own flags');
+    const probes = pathProbes(entries[9].key[0]);
+    eq(probes.length, 9, 'every path is a probe, the whole product and not the common paths alone');
+    eq(probes.includes('? =mother =my') && probes.includes('? parent Parsons'), true, '...each carrying its terms\' own flags');
     eq(sc.reasonOf(sc.classifyEntry(entries[9])[0]).text, 'english common · mom & my', 'no chat: the first path, joined with &');
     const msgs = ['my mother said', 'my mother again', 'oh my mother', 'my mom once', 'nothing here'];
-    const chat = countChatHits([entries[9].key[0], ...commonPathProbes(entries[9].key[0])], msgs);
+    const chat = countChatHits([entries[9].key[0], ...probes], msgs);
     const scChat = buildKeyPruneScan({ entries }, opts, new Set(), { chatScan: { messagesWith: chat.messagesWith, messages: chat.messages } });
     eq(scChat.reasonOf(scChat.classifyEntry(entries[9])[0]).text, 'english common · mother & my · 80% of chat',
-        'with a chat: the path that fires most is named, not the first');
+        'with a chat: the common path that fires most is named, not the first');
+    eq(scChat.severityOf(scChat.classifyEntry(entries[9])[0]), 'severe', '...and over the chat-common share it is severe, the common path earning it');
+    // The breadth earned by a legitimate path instead: named as such, and never severe for it.
+    const legit = ['my mom once', 'the parent Parsons', 'parent Parsons again', 'Parsons the parent', 'Nick and his parent'];
+    const chat2 = countChatHits([entries[9].key[0], ...probes], legit);
+    const sc2 = buildKeyPruneScan({ entries }, opts, new Set(), { chatScan: { messagesWith: chat2.messagesWith, messages: chat2.messages } });
+    eq(sc2.reasonOf(sc2.classifyEntry(entries[9])[0]).text, 'english common · mom & my · 100% of chat, mostly parent & Parsons',
+        'a non-common path firing most is named, the flag still standing on the common path that exists');
+    eq(sc2.severityOf(sc2.classifyEntry(entries[9])[0]), 'moderate', '...and the breadth cannot promote it, not being the common path\'s doing');
 }
 console.log('ok   SmartKeys are audited on df, exempt only from the literal-string heuristics');
 
