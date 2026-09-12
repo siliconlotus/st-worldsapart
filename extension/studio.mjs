@@ -2698,11 +2698,26 @@ export async function lorebookStudio(preferredBook = null, open = null) {
         const hayToggle = document.createElement('i');
         hayToggle.style.cssText = 'position:absolute;top:5px;right:9px;cursor:pointer;opacity:0.6;padding:3px 5px;border-radius:4px;'
             + 'background:var(--black30a, rgba(0,0,0,0.3));font-size:0.85em;z-index:1;';
+        // The text as it was when editing began, so a cancel can put it back; null while nothing is being edited.
+        let hayBeforeEdit = null;
         hayToggle.addEventListener('click', () => {
             if (!labHay.trim()) return;
             labCommitted = !labCommitted;
+            hayBeforeEdit = labCommitted ? null : labHay;
             repaint();
             if (!labCommitted) hayBox.focus();
+        });
+        // Cancel: the edit is dropped and the earlier text is marked up again. Only while editing text that was committed before.
+        const hayCancel = document.createElement('i');
+        hayCancel.className = 'fa-solid fa-xmark';
+        hayCancel.title = 'Cancel the edit';
+        hayCancel.style.cssText = 'position:absolute;top:5px;right:34px;cursor:pointer;opacity:0.6;padding:3px 5px;border-radius:4px;'
+            + 'background:var(--black30a, rgba(0,0,0,0.3));font-size:0.85em;z-index:1;';
+        hayCancel.addEventListener('click', () => {
+            if (hayBeforeEdit === null) return;
+            labHay = hayBeforeEdit; hayBox.value = labHay; hayBeforeEdit = null;
+            labCommitted = true;
+            repaint();
         });
         // Beside the pencil, and only while the marked view is up: there is no rendering to see behind in a textarea.
         const srcToggle = document.createElement('i');
@@ -2710,7 +2725,7 @@ export async function lorebookStudio(preferredBook = null, open = null) {
         srcToggle.style.cssText = 'position:absolute;top:5px;right:34px;cursor:pointer;padding:3px 5px;border-radius:4px;'
             + 'background:var(--black30a, rgba(0,0,0,0.3));font-size:0.85em;z-index:1;';
         srcToggle.addEventListener('click', () => { labShowMarkup = !labShowMarkup; repaint(); });
-        hayWrap.append(hayBox, hayRead, srcToggle, hayToggle);
+        hayWrap.append(hayBox, hayRead, srcToggle, hayCancel, hayToggle);
         const keyBox = box('Keys, comma- or newline-separated — plain, /regex/flags or ?SmartKey', () => labKeys, v => { labKeys = v; });
         const gateBox = document.createElement('details');
         gateBox.style.cssText = 'flex:0 0 auto;margin-bottom:4px;';
@@ -2883,6 +2898,7 @@ export async function lorebookStudio(preferredBook = null, open = null) {
             hayToggle.className = `fa-solid ${reading ? 'fa-pen' : 'fa-check'}`;
             hayToggle.title = reading ? 'Edit the text' : 'Mark up the text';
             hayToggle.style.display = labHay.trim() ? '' : 'none';
+            hayCancel.style.display = !reading && hayBeforeEdit !== null ? '' : 'none';
             srcToggle.style.display = reading ? '' : 'none';
             srcToggle.style.opacity = labShowMarkup ? '1' : '0.5';
             srcToggle.title = labShowMarkup ? 'Hide the markup again' : 'Show every tag, entity and marker in the text';
