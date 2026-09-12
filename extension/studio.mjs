@@ -101,7 +101,6 @@ export async function lorebookStudio(preferredBook = null, open = null) {
     let trayOpen = false;            // Tool Settings disclosure state (session)
     let trayEl = null;               // the mounted tray element, so open/close swaps just it (not the entry list)
     let bulkEl = null;               // the mounted bulk-action bar, swapped in place as selection changes
-    let globalTrayOpen = false;      // 🌐 global WI settings drawer (session)
     let globalTrayEl = null;         // the mounted global-tray element, swapped in place on toggle
     const selectedEntries = new Set();   // uids ticked for bulk actions
     let selAnchorUid = null;         // last-ticked entry, for shift-click range selection
@@ -318,18 +317,18 @@ export async function lorebookStudio(preferredBook = null, open = null) {
     /** The tray's toggle, which both headers carry: the panel itself mounts below them. */
     const trayBtn = () => {
         const b = document.createElement('button'); b.type = 'button'; b.className = 'menu_button wa-filter';
-        b.title = 'Audit and suggestion settings, and this book\'s ignored terms';
+        b.title = 'Settings: audit and suggestions, this book\'s ignored terms, and World Info';
         b.style.cssText = 'width:auto;padding:3px 8px;flex-shrink:0;';
         b.innerHTML = '<i class="fa-solid fa-gear"></i>';
         b.style.color = trayOpen ? ACCENT : '';
-        b.addEventListener('click', () => { trayOpen = !trayOpen; b.style.color = trayOpen ? ACCENT : ''; refreshTray(); });
+        b.addEventListener('click', () => { trayOpen = !trayOpen; b.style.color = trayOpen ? ACCENT : ''; refreshTray(); refreshGlobalTray(); });
         return b;
     };
 
     // 🌐 Global WI settings. Core's knobs are edited by driving core's own inputs, never by assigning the globals.
     const refreshGlobalTray = () => { const fresh = renderGlobalTray(); if (globalTrayEl?.isConnected) globalTrayEl.replaceWith(fresh); globalTrayEl = fresh; };
     function renderGlobalTray() {
-        if (!globalTrayOpen) return document.createElement('div');   // nothing mounted when closed
+        if (!trayOpen) return document.createElement('div');   // opens with the cog tray, below it
         const panel = document.createElement('div'); panel.className = 'wa-tray-panel';
         const col = (title, ...kids) => trayCol('wa-tray-col', 'wa-tray-sec', title, ...kids);
         const numRow = (label, backing, unit, title) => {
@@ -3080,12 +3079,7 @@ export async function lorebookStudio(preferredBook = null, open = null) {
         const row1 = document.createElement('div'); row1.style.cssText = rowStyle;
         const row2 = document.createElement('div'); row2.style.cssText = rowStyle;
         const spacer = () => { const s = document.createElement('span'); s.style.width = '10px'; return s; };
-        const globeBtn = document.createElement('button'); globeBtn.type = 'button'; globeBtn.className = 'menu_button wa-filter';
-        globeBtn.title = 'Global World Info settings'; globeBtn.style.cssText = 'width:auto;margin-left:auto;padding:3px 8px;flex-shrink:0;';
-        globeBtn.innerHTML = '<i class="fa-solid fa-globe"></i>';
-        globeBtn.style.color = globalTrayOpen ? ACCENT : '';
-        globeBtn.addEventListener('click', () => { globalTrayOpen = !globalTrayOpen; globeBtn.style.color = globalTrayOpen ? ACCENT : ''; refreshGlobalTray(); });
-        row1.append(label, vsep(), filterWrap, sortBtn, spacer(), searchWrap, trayBtn(), globeBtn);
+        row1.append(label, vsep(), filterWrap, sortBtn, spacer(), searchWrap, trayBtn());
         const newBtn = document.createElement('button');
         newBtn.type = 'button'; newBtn.className = 'menu_button';
         newBtn.style.cssText = 'width:auto;padding:3px 9px;flex-shrink:0;';
@@ -3100,7 +3094,7 @@ export async function lorebookStudio(preferredBook = null, open = null) {
         globalTrayEl = renderGlobalTray();
         trayEl = renderTray();
         bulkEl = renderBulkBar();
-        fixed.append(head, globalTrayEl, trayEl, bulkEl);
+        fixed.append(head, trayEl, globalTrayEl, bulkEl);
         const list = document.createElement('div'); list.className = 'wa-studio-entries';
         pane.append(fixed, list);
         // Repaints just the entry list and the count for the current filter + search.
