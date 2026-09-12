@@ -626,6 +626,10 @@ function reportVectorCandidates(scores, targets, searchText) {
 /** Retrieval over the chat; returns the vectorized entries that scored. The emit is selectAndActivate's. */
 async function retrieve(chat) {
     runState.lastScores.clear();
+    // Cleared, not just reassigned below: the no-query-text return sits ABOVE that assignment, so a turn with nothing
+    // to query on would otherwise leave the PREVIOUS turn's standing for contentTextScores to score BM25 against.
+    runState.lastQuery = '';
+    runState.lastQueryChat = [];
 
     // One substitution pass serves both the query and the /wa-grade stash: queryMessages must not run twice per generation.
     const queryChat = query.queryMessages(chat, { depth: settings().messageDepth, substituteParams });
@@ -731,8 +735,10 @@ async function selectAndActivate(chat) {
         winners = await retrieve(chat);
     } catch (error) {
         reportFailure('retrieval failed',
-            'Vectorized entries will not be retrieved this turn. Keyword matching is unaffected.',
-            error, 'warning');
+            'No vectorized entry is activated this turn, so an entry with no keys is absent from the prompt rather than '
+            + 'ranked lower. Every entry loses its cosine, and relevance falls back to the cosine-free fit. Keyword '
+            + 'matching and constants are unaffected.',
+            error);
         runState.lastScores.clear();
     }
 

@@ -319,6 +319,12 @@ before constant/sticky/key-matching. Every other gate — disable, triggers, cha
 delay, cooldown, `delayUntilRecursion`, `excludeRecursion`, decorators — runs before it, so
 force-activation inherits them rather than bypassing them.
 
+**A retrieval outage is a failure, not a degradation.** It costs every entry its cosine, so stage 4 scores
+on the cosine-free fit, and no vectorized entry is force-activated — an entry with no keys is absent from
+the prompt rather than ranked lower. `retrieve` clears `lastQuery` on entry as well as setting it: the
+no-query-text return sits above the assignment, so a turn with nothing to query on would leave the
+previous turn's standing for `contentTextScores` to score against.
+
 **Prohibited: no per-turn fallback to core for matching.** A silent fallback makes match semantics
 flicker between two rule sets, with the audit reporting on rules that are not what fired. A matcher
 failure fails visibly (`reportFailure` — stage, consequence in plain terms, the error and the top stack
@@ -843,20 +849,18 @@ Ordered by whether a user can see the difference.
 2. **Proximity** (`(…)~N`). Witness spans shipped, so the display it needs exists.
 3. **`chat common` as a raising flag** — `KEY_CHAT_COMMON` can only confirm another flag. It needs the
    structural exclusion (constant/sticky) decided and the 20% re-read against what survives.
-4. **`reportFailure`: retrieval failure is a failure, not a degradation.** A retrieval outage costs the
-   vector and text signals on every entry it was the only source for.
-5. **Suggester i18n, none of it started.** `ZIPF_EN` scores non-English function words as maximally
+4. **Suggester i18n, none of it started.** `ZIPF_EN` scores non-English function words as maximally
    rare, so the suggester should detect that its priors do not apply and stand down rather than invert.
    Accent variants belong here too (`Gérard`/`Gerard`), with a human in the loop.
-6. **A firing-rate diagnostic for loose reference keys.** Reference entries are never cut, so a key
+5. **A firing-rate diagnostic for loose reference keys.** Reference entries are never cut, so a key
    that fires too easily costs budget on every turn it wins and nothing warns anybody. The Lab answers it
    for one text at a time; what is missing is the standing per-entry rate, beside the keyword audit. Not
    blocking: an over-firing reference entry is a budget cost, where a wrongly cut one is missing material.
-7. **A signal's within-scene SD varies by book**, and the two books `keys` costs are its extremes
+6. **A signal's within-scene SD varies by book**, and the two books `keys` costs are its extremes
     (F45). Standardisation divides by the scene's own SD, so a near-constant column has its few small
     differences amplified into large z against a slope fitted on other books. No use proposed; it is a
     property a book can be measured for, where curation is a label someone applies.
-8. **Reference is centred on the memory tier's centroid, and nothing has asked whether it should
+7. **Reference is centred on the memory tier's centroid, and nothing has asked whether it should
     be.** The memory centroid all but coincides with the collection's mean while the reference centroid
     sits well off it (F44), and cosine is the reference fit's largest coefficient. Candidates, none
     screened: a per-tier centroid, reference on raw cosine, or leaving it. Deferred deliberately —
