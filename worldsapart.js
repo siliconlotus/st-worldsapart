@@ -12,6 +12,7 @@ import {
     extension_prompt_types,
 } from '../../../../script.js';
 import { extension_settings, getContext } from '../../../extensions.js';
+import { t } from '../../../i18n.js';
 
 import { checkWorldInfo, getSortedEntries, getWorldInfoPrompt, world_names, world_info_include_names, world_info_depth, world_info_min_activations, world_info_match_whole_words, world_info_case_sensitive, world_info_recursive, selected_world_info, world_info, METADATA_KEY, scan_state } from '../../../world-info.js';
 import { power_user } from '../../../power-user.js';
@@ -106,7 +107,8 @@ function vectorRequestBody(args = {}) {
 function updateEmbedInfo() {
     const b = vectorRequestBody();
     const endpoint = b.apiUrl || b.extrasUrl || b.siliconflow_endpoint || b.source;
-    $('#wa_embed_info').text(`Embed: ${endpoint} · ${b.model || '(provider default)'}`);
+    const model = b.model || t`(provider default)`;
+    $('#wa_embed_info').text(t`Embed: ${endpoint} · ${model}`);
 }
 
 async function vectorPost(route, args) {
@@ -175,7 +177,7 @@ function renderPluginSetup() {
     const row = (cmd) => {
         const r = $('<div class="flex-container alignItemsCenter flexnowrap" style="gap:6px;margin:3px 0;"></div>');
         const code = $('<code style="flex:1;overflow-x:auto;white-space:nowrap;padding:2px 6px;border-radius:4px;background:var(--black30a,rgba(0,0,0,0.2));"></code>').text(cmd);
-        const btn = $('<div class="menu_button fa-solid fa-copy" title="Copy" style="margin:0;flex:0 0 auto;"></div>');
+        const btn = $('<div class="menu_button fa-solid fa-copy" title="Copy" data-i18n="[title]Copy" style="margin:0;flex:0 0 auto;"></div>');
         btn.on('click', async () => {
             try { await navigator.clipboard.writeText(cmd); } catch { /* clipboard blocked; user can select the text */ }
             btn.removeClass('fa-copy').addClass('fa-check');
@@ -188,27 +190,27 @@ function renderPluginSetup() {
     const banner = (text, ...rest) => $('<div style="margin:0 0 8px;padding:6px 8px;border-radius:5px;font-size:0.9em;background:color-mix(in srgb, var(--golden, #e0a86c) 15%, transparent);border:1px solid color-mix(in srgb, var(--golden, #e0a86c) 45%, transparent);"></div>')
         .append($('<div style="color:var(--warning,#d80);"></div>').text(text), ...rest);
     box.empty();
-    if (runState.pluginAvailable === null) { box.text('Checking for server plugin…'); return; }
+    if (runState.pluginAvailable === null) { box.text(t`Checking for server plugin…`); return; }
     if (runState.pluginAvailable) {
         const stale = pluginDrifted();
         if (stale) {
-            const warn = '⚠ Server plugin out of date — the deployed copy differs from this extension\'s source. Redeploy and restart:';
+            const warn = t`⚠ Server plugin out of date — the deployed copy differs from this extension's source. Redeploy and restart:`;
             alert.append(banner(warn, row(deployCmd)));
             box.append($('<div style="color:var(--warning,#d80);"></div>').text(warn));
             box.append(row(deployCmd));
             return;
         }
-        box.append($('<div style="color:var(--active,#7ac);"></div>').text('✓ Server plugin active' + (runState.sourceFP ? ` — up to date (build ${runState.sourceFP}).` : '.')));
-        box.append($('<div style="margin-top:3px;"></div>').text('After editing plugin code, redeploy and restart SillyTavern:'));
+        box.append($('<div style="color:var(--active,#7ac);"></div>').text(runState.sourceFP ? t`✓ Server plugin active — up to date (build ${runState.sourceFP}).` : t`✓ Server plugin active.`));
+        box.append($('<div style="margin-top:3px;"></div>').text(t`After editing plugin code, redeploy and restart SillyTavern:`));
         box.append(row(deployCmd));
         return;
     }
-    const absent = '⚠ Server plugin not installed — retrieval runs on ST\'s own vector search, without mean-centering or server-side pooling.';
+    const absent = t`⚠ Server plugin not installed — retrieval runs on ST's own vector search, without mean-centering or server-side pooling.`;
     alert.append(banner(absent));
-    box.append($('<div></div>').text(absent + ' To install:'));
-    box.append($('<div style="margin-top:3px;"></div>').text('1. Open a terminal in your SillyTavern folder and deploy the plugin (also enables server plugins in config):'));
+    box.append($('<div></div>').text(t`${absent} To install:`));
+    box.append($('<div style="margin-top:3px;"></div>').text(t`1. Open a terminal in your SillyTavern folder and deploy the plugin (also enables server plugins in config):`));
     box.append(row(deployCmd));
-    box.append($('<div style="margin-top:3px;">2. Restart SillyTavern. This box will then show the exact redeploy command with your full path.</div>'));
+    box.append($('<div style="margin-top:3px;"></div>').text(t`2. Restart SillyTavern. This box will then show the exact redeploy command with your full path.`));
 }
 
 /** Multi-collection query through the plugin's mean-centered search, or the no-plugin path (ST's own /api/vector)
@@ -286,7 +288,7 @@ async function syncWorld(world, entries) {
         let announced = false;
         const slow = setTimeout(() => {
             announced = true;
-            toastr.info(`Embedding ${newItems.length} chunks for "${world}". A large embedding model can make the first sync of a big book take several minutes.`, 'Worlds Apart', { timeOut: 15000 });
+            toastr.info(t`Embedding ${newItems.length} chunks for "${world}". A large embedding model can make the first sync of a big book take several minutes.`, 'Worlds Apart', { timeOut: 15000 });
         }, 3000);
         const started = Date.now();
         try {
@@ -294,7 +296,8 @@ async function syncWorld(world, entries) {
         } finally {
             clearTimeout(slow);
         }
-        if (announced) toastr.success(`Embedded ${newItems.length} chunks for "${world}" in ${Math.round((Date.now() - started) / 1000)}s.`, 'Worlds Apart', { timeOut: 5000 });
+        const secs = Math.round((Date.now() - started) / 1000);
+        if (announced) toastr.success(t`Embedded ${newItems.length} chunks for "${world}" in ${secs}s.`, 'Worlds Apart', { timeOut: 5000 });
     }
 
     if (staleHashes.length) {
@@ -356,7 +359,7 @@ const mib = b => `${(b / 1048576).toFixed(1)} MiB`;
 /** Prints the orphan report and returns a one-line summary for the panel. */
 async function reportOrphanCollections() {
     const found = await findOrphanCollections();
-    if (!found) return 'Needs the server plugin.';
+    if (!found) return t`Needs the server plugin.`;
     const { unclaimed, staleConfig, live, bytes } = found;
     const table = rows => rows.map(c => ({ collection: c.collectionId, source: c.source, model: c.model, size: mib(c.bytes), lastWritten: new Date(c.mtimeMs).toISOString().slice(0, 10) }));
     console.log(`%cWorlds Apart · vector collections — ${mib(bytes)} total`, 'font-weight: bold');
@@ -365,9 +368,10 @@ async function reportOrphanCollections() {
     if (unclaimed.length) { console.log(`NO lorebook hashes to these (${unclaimed.length}) — renamed or deleted books. Nothing will ever read them again:`); console.table(table(unclaimed)); }
     const dead = unclaimed.reduce((a, c) => a + c.bytes, 0);
     const stale = staleConfig.reduce((a, c) => a + c.bytes, 0);
+    const n = live.length + staleConfig.length + unclaimed.length;
     return unclaimed.length || staleConfig.length
-        ? `${mib(bytes)} in ${live.length + staleConfig.length + unclaimed.length} collections — ${mib(dead)} unclaimed, ${mib(stale)} on another source/model. Listed in the console; delete by hand from data/<user>/vectors/.`
-        : `${mib(bytes)} in ${live.length} collection(s), all claimed.`;
+        ? t`${mib(bytes)} in ${n} collections — ${mib(dead)} unclaimed, ${mib(stale)} on another source/model. Listed in the console; delete by hand from data/<user>/vectors/.`
+        : t`${mib(bytes)} in ${live.length} collection(s), all claimed.`;
 }
 
 /** Per-tier relevance fits for the current embedding model — fetched, never a JSON import; `null` is cached so a 404 is not re-fetched. */
@@ -711,7 +715,7 @@ function reportFailure(stage, consequence, error, severity = 'error') {
     toastr[severity](
         [escapeHtml(consequence),
             escapeHtml(cause) + (frame ? `<br>&nbsp;&nbsp;at ${escapeHtml(frame)}` : ''),
-            'See the browser console for the full trace.'].join('<br><br>'),
+            t`See the browser console for the full trace.`].join('<br><br>'),
         `Worlds Apart: ${stage}`,
         { timeOut: 20000, extendedTimeOut: 15000, escapeHtml: false, closeButton: true },
     );
@@ -736,10 +740,8 @@ async function selectAndActivate(chat) {
     try {
         winners = await retrieve(chat);
     } catch (error) {
-        reportFailure('retrieval failed',
-            'No vectorized entry is activated this turn, so an entry with no keys is absent from the prompt rather than '
-            + 'ranked lower. Every entry loses its cosine, and relevance falls back to the cosine-free fit. Keyword '
-            + 'matching and constants are unaffected.',
+        reportFailure(t`retrieval failed`,
+            t`No vectorized entry is activated this turn, so an entry with no keys is absent from the prompt rather than ranked lower. Every entry loses its cosine, and relevance falls back to the cosine-free fit. Keyword matching and constants are unaffected.`,
             error);
         runState.lastScores.clear();
     }
@@ -749,8 +751,8 @@ async function selectAndActivate(chat) {
         adds = await keywordActivations(chat);
     } catch (error) {
         // Total: waOwnsScan is set below regardless, so core does not match either.
-        reportFailure('keyword activation failed',
-            'No entry will activate by keyword this turn. WA has taken over key matching, so SillyTavern will not match them either — the prompt has only retrieved, constant and sticky entries.',
+        reportFailure(t`keyword activation failed`,
+            t`No entry will activate by keyword this turn. WA has taken over key matching, so SillyTavern will not match them either — the prompt has only retrieved, constant and sticky entries.`,
             error);
     }
 
@@ -838,7 +840,7 @@ function showExemptCount(entries) {
     const exempt = entries.filter(delivery.authorIgnoreBudget).length;
 
     field.text(exempt
-        ? `${exempt} of ${entries.length} entries are marked "ignore budget" — never cut, and not counted toward the entry caps.`
+        ? t`${exempt} of ${entries.length} entries are marked "ignore budget" — never cut, and not counted toward the entry caps.`
         : '');
 }
 
@@ -855,11 +857,11 @@ function renderWorldPriority() {
     const scoped = scopedPriority();
 
     if (scoped == null) {
-        $list.html('<small class="opacity50p">No character selected. Lorebook order is per-character. Open a character to set one.</small>');
+        $list.empty().append($('<small class="opacity50p"></small>').text(t`No character selected. Lorebook order is per-character. Open a character to set one.`));
         return;
     }
     if (!scoped.length) {
-        $list.html('<small class="opacity50p">No lorebooks attached. Open a chat with a lorebook active, or run /wa-dry.</small>');
+        $list.empty().append($('<small class="opacity50p"></small>').text(t`No lorebooks attached. Open a chat with a lorebook active, or run /wa-dry.`));
         return;
     }
 
@@ -867,15 +869,15 @@ function renderWorldPriority() {
     const showTuning = !showOrder;
     $list.empty();
     scoped.forEach(({ cfg, i, world }) => {
-        const label = cfg.world === 'chat' ? `${world} (current chat)` : world;
+        const label = cfg.world === 'chat' ? t`${world} (current chat)` : world;
         const row = $(`
             <div class="flex-container alignItemsCenter flexnowrap wa-world-row" data-i="${i}" style="gap:4px;margin-bottom:2px;">
-                <div class="menu_button fa-solid fa-chevron-up wa-world-up ${showOrder ? '' : 'displayNone'}" title="Higher priority"></div>
-                <div class="menu_button fa-solid fa-chevron-down wa-world-down ${showOrder ? '' : 'displayNone'}" title="Lower priority"></div>
+                <div class="menu_button fa-solid fa-chevron-up wa-world-up ${showOrder ? '' : 'displayNone'}" title="Higher priority" data-i18n="[title]Higher priority"></div>
+                <div class="menu_button fa-solid fa-chevron-down wa-world-down ${showOrder ? '' : 'displayNone'}" title="Lower priority" data-i18n="[title]Lower priority"></div>
                 <span class="flex1 wa-world-name" style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;"></span>
-                <label class="${showTuning ? '' : 'displayNone'}" title="Relevance multiplier for this book">×<input type="number" class="text_pole wa-world-weight" style="width:4em;" min="0" step="0.1"></label>
-                <label class="${showTuning ? '' : 'displayNone'}" title="Prompt-order offset for this book">±<input type="number" class="text_pole wa-world-offset" style="width:4.5em;" step="1"></label>
-                <label title="Max dynamic entries from this book (0 = no cap)">≤<input type="number" class="text_pole wa-world-cap" style="width:4em;" min="0" step="1"></label>
+                <label class="${showTuning ? '' : 'displayNone'}" title="Relevance multiplier for this book" data-i18n="[title]Relevance multiplier for this book">×<input type="number" class="text_pole wa-world-weight" style="width:4em;" min="0" step="0.1"></label>
+                <label class="${showTuning ? '' : 'displayNone'}" title="Prompt-order offset for this book" data-i18n="[title]Prompt-order offset for this book">±<input type="number" class="text_pole wa-world-offset" style="width:4.5em;" step="1"></label>
+                <label title="Max dynamic entries from this book (0 = no cap)" data-i18n="[title]Max dynamic entries from this book (0 = no cap)">≤<input type="number" class="text_pole wa-world-cap" style="width:4em;" min="0" step="1"></label>
             </div>`);
         row.find('.wa-world-name').text(label);
         row.find('.wa-world-weight').val(cfg.weight);
@@ -1212,7 +1214,7 @@ async function onScanDone(args) {
         // conversation naming it, and core never self-matches because it activates an entry once.
         const recursionTexts = runState.waRecursionTexts ?? [];
         const keywordWindowFor = (depth, entry) => {
-            const others = entry?.excludeRecursion ? [] : recursionTexts.filter(t => t !== String(entry?.content ?? ''));
+            const others = entry?.excludeRecursion ? [] : recursionTexts.filter(x => x !== String(entry?.content ?? ''));
             return others.length
                 ? matcher.withExtraTexts(windowFor, others, settings().matchWindow)(depth, entry)
                 : windowFor(depth, entry);
@@ -1440,12 +1442,12 @@ async function dryRun(verbose = false) {
 
     // The only gate on this path: with WA off a dry run would half-run, force-activating into a scan WA does not own.
     if (!settings().enabled) {
-        toastr.warning('Worlds Apart is disabled — turn it on to run a dry run.', 'Worlds Apart');
+        toastr.warning(t`Worlds Apart is disabled — turn it on to run a dry run.`, 'Worlds Apart');
         return '';
     }
 
     if (!chat.length) {
-        toastr.warning(rawChat.length ? 'Every message in this chat is hidden.' : 'No chat to scan.', 'Worlds Apart');
+        toastr.warning(rawChat.length ? t`Every message in this chat is hidden.` : t`No chat to scan.`, 'Worlds Apart');
         return '';
     }
 
@@ -1680,7 +1682,7 @@ async function probeQuery(_named, text) {
     const searchText = String(text ?? '').trim();
 
     if (!searchText) {
-        toastr.warning('Provide query text: /wa-query your text here', 'Worlds Apart');
+        toastr.warning(t`Provide query text: /wa-query your text here`, 'Worlds Apart');
         return '';
     }
 
@@ -1738,22 +1740,22 @@ const SETTINGS_HTML = `
 <div class="worlds-apart-settings">
     <div class="inline-drawer">
         <div class="inline-drawer-toggle inline-drawer-header">
-            <b>Worlds Apart</b>
+            <b data-i18n="Worlds Apart">Worlds Apart</b>
             <div class="inline-drawer-icon fa-solid fa-circle-chevron-down down"></div>
         </div>
         <div class="inline-drawer-content">
             <div id="wa_plugin_alert"></div>
             <label class="checkbox_label" for="wa_enabled">
-                <input id="wa_enabled" type="checkbox" class="wa-switch"><span>Enabled</span>
+                <input id="wa_enabled" type="checkbox" class="wa-switch"><span data-i18n="Enabled">Enabled</span>
             </label>
-            <label>Prompt insertion order <span class="fa-solid fa-circle-question note-link-span" title="The order selected entries take in the prompt. A base sort, with optional tier grouping. This setting is saved; the Studio's sort views are not."></span></label>
+            <label><span data-i18n="Prompt insertion order">Prompt insertion order</span> <span class="fa-solid fa-circle-question note-link-span" title="The order selected entries take in the prompt. A base sort, with optional tier grouping. This setting is saved; the Studio's sort views are not." data-i18n="[title]The order selected entries take in the prompt. A base sort, with optional tier grouping. This setting is saved; the Studio's sort views are not."></span></label>
             <div id="wa_presentation_order_mount" style="margin-top:4px;"></div>
 
-            <div class="wa-row"><label for="wa_message_depth">Message depth</label><input id="wa_message_depth" type="number" class="text_pole" min="1" max="20" step="1"></div>
+            <div class="wa-row"><label for="wa_message_depth" data-i18n="Message depth">Message depth</label><input id="wa_message_depth" type="number" class="text_pole" min="1" max="20" step="1"></div>
 
             <div class="inline-drawer wa-section">
                 <div class="inline-drawer-toggle inline-drawer-header">
-                    <b>Tier precedence <span class="fa-solid fa-circle-question note-link-span" title="With tier grouping on, an entry joins the first tier it matches, top to bottom. Untick a tier to skip it. Shared with the Studio."></span></b>
+                    <b><span data-i18n="Tier precedence">Tier precedence</span> <span class="fa-solid fa-circle-question note-link-span" title="With tier grouping on, an entry joins the first tier it matches, top to bottom. Untick a tier to skip it. Shared with the Studio." data-i18n="[title]With tier grouping on, an entry joins the first tier it matches, top to bottom. Untick a tier to skip it. Shared with the Studio."></span></b>
                     <div class="inline-drawer-icon fa-solid fa-circle-chevron-down down"></div>
                 </div>
                 <div class="inline-drawer-content">
@@ -1764,18 +1766,18 @@ const SETTINGS_HTML = `
 
             <div class="inline-drawer wa-section">
                 <div class="inline-drawer-toggle inline-drawer-header">
-                    <b>Match window</b>
+                    <b data-i18n="Match window">Match window</b>
                     <div class="inline-drawer-icon fa-solid fa-circle-chevron-down down"></div>
                 </div>
                 <div class="inline-drawer-content">
-                    <label for="wa_drop_chat_tags">Ignored tags <span class="fa-solid fa-circle-question note-link-span" title="Comma-separated HTML or XML tags to be skipped when scanning for keyword hits. You might want to set this to your preset's internal state tracker so your quest tracker doesn't constantly pull entries."></span></label>
+                    <label for="wa_drop_chat_tags"><span data-i18n="Ignored tags">Ignored tags</span> <span class="fa-solid fa-circle-question note-link-span" title="Comma-separated HTML or XML tags to be skipped when scanning for keyword hits. You might want to set this to your preset's internal state tracker so your quest tracker doesn't constantly pull entries." data-i18n="[title]Comma-separated HTML or XML tags to be skipped when scanning for keyword hits. You might want to set this to your preset's internal state tracker so your quest tracker doesn't constantly pull entries."></span></label>
                     <input id="wa_drop_chat_tags" type="text" class="text_pole" placeholder="internal_states, thinking">
 
-                    <label for="wa_match_window">Match span <span class="fa-solid fa-circle-question note-link-span" title="The span within which a key's conditions must all match, e.g. ? apple AND banana must both appear in the same paragraph, message or scan window."></span></label>
+                    <label for="wa_match_window"><span data-i18n="Match span">Match span</span> <span class="fa-solid fa-circle-question note-link-span" title="The span within which a key's conditions must all match, e.g. ? apple AND banana must both appear in the same paragraph, message or scan window." data-i18n="[title]The span within which a key's conditions must all match, e.g. ? apple AND banana must both appear in the same paragraph, message or scan window."></span></label>
                     <select id="wa_match_window" class="text_pole">
-                    <option value="paragraph">Paragraph</option>
-                    <option value="message">Message</option>
-                    <option value="scan">Whole scan window (SillyTavern default)</option>
+                    <option value="paragraph" data-i18n="Paragraph">Paragraph</option>
+                    <option value="message" data-i18n="Message">Message</option>
+                    <option value="scan" data-i18n="Whole scan window (SillyTavern default)">Whole scan window (SillyTavern default)</option>
                     </select>
 
                 </div>
@@ -1783,66 +1785,66 @@ const SETTINGS_HTML = `
 
             <div class="inline-drawer wa-section">
                 <div class="inline-drawer-toggle inline-drawer-header">
-                    <b>Matching &amp; relevance</b>
+                    <b data-i18n="Matching &amp; relevance">Matching &amp; relevance</b>
                     <div class="inline-drawer-icon fa-solid fa-circle-chevron-down down"></div>
                 </div>
                 <div class="inline-drawer-content">
-                    <label for="wa_word_boundary">Word boundary <span class="fa-solid fa-circle-question note-link-span" title="Applies to entries with Match Whole Words on and SmartKeys that use =. Permissive: whole-word &quot;Joe&quot; matches &quot;Joe's&quot;. Strict: no match. Neither matches &quot;Joes&quot;."></span></label>
+                    <label for="wa_word_boundary"><span data-i18n="Word boundary">Word boundary</span> <span class="fa-solid fa-circle-question note-link-span" title="Applies to entries with Match Whole Words on and SmartKeys that use =. Permissive: whole-word &quot;Joe&quot; matches &quot;Joe's&quot;. Strict: no match. Neither matches &quot;Joes&quot;." data-i18n="[title]Applies to entries with Match Whole Words on and SmartKeys that use =. Permissive: whole-word &quot;Joe&quot; matches &quot;Joe's&quot;. Strict: no match. Neither matches &quot;Joes&quot;."></span></label>
                     <select id="wa_word_boundary" class="text_pole">
-                    <option value="strict">Strict: do not allow apostrophes and hyphens</option>
-                    <option value="permissive">Permissive: whole-word matches allow apostrophes and hyphens</option>
+                    <option value="strict" data-i18n="Strict: do not allow apostrophes and hyphens">Strict: do not allow apostrophes and hyphens</option>
+                    <option value="permissive" data-i18n="Permissive: whole-word matches allow apostrophes and hyphens">Permissive: whole-word matches allow apostrophes and hyphens</option>
                     </select>
 
-                    <div id="wa_embed_info" class="opacity50p" style="margin:0.4em 0;font-size:0.85em;" title="Set the embedding model in the Vector Storage extension."></div>
+                    <div id="wa_embed_info" class="opacity50p" style="margin:0.4em 0;font-size:0.85em;" title="Set the embedding model in the Vector Storage extension." data-i18n="[title]Set the embedding model in the Vector Storage extension."></div>
 
-                    <label>Mean-centered search <span class="fa-solid fa-circle-question note-link-span" title="Subtracts the collection's average vector before comparing, so wording every entry shares stops dominating similarity. Automatic when the server plugin is installed."></span></label>
+                    <label><span data-i18n="Mean-centered search">Mean-centered search</span> <span class="fa-solid fa-circle-question note-link-span" title="Subtracts the collection's average vector before comparing, so wording every entry shares stops dominating similarity. Automatic when the server plugin is installed." data-i18n="[title]Subtracts the collection's average vector before comparing, so wording every entry shares stops dominating similarity. Automatic when the server plugin is installed."></span></label>
                     <div id="wa_plugin_setup" style="margin:0.4em 0;font-size:0.85em;opacity:0.75;"></div>
 
-                    <div id="wa_find_orphans" class="menu_button" style="width:auto;padding:0.3em 0.8em;" title="Lists vector collections no current book claims. Nothing is deleted.">Find unused vector collections…</div>
+                    <div id="wa_find_orphans" class="menu_button" style="width:auto;padding:0.3em 0.8em;" title="Lists vector collections no current book claims. Nothing is deleted." data-i18n="Find unused vector collections…;[title]Lists vector collections no current book claims. Nothing is deleted.">Find unused vector collections…</div>
                     <div id="wa_orphans_out" class="opacity50p" style="margin:0.4em 0;font-size:0.85em;"></div>
 
                     <label class="checkbox_label" for="wa_drop_unavailable">
-                    <input id="wa_drop_unavailable" type="checkbox"><span>Hide entries from later in the chat</span> <span class="fa-solid fa-circle-question note-link-span" title="On a branch from an earlier point, scene summaries written after that point are hidden. No effect at the latest turn."></span>
+                    <input id="wa_drop_unavailable" type="checkbox"><span data-i18n="Hide entries from later in the chat">Hide entries from later in the chat</span> <span class="fa-solid fa-circle-question note-link-span" title="On a branch from an earlier point, scene summaries written after that point are hidden. No effect at the latest turn." data-i18n="[title]On a branch from an earlier point, scene summaries written after that point are hidden. No effect at the latest turn."></span>
                     </label>
                 </div>
             </div>
 
             <div class="inline-drawer wa-section">
                 <div class="inline-drawer-toggle inline-drawer-header">
-                    <b>Selection &amp; budget</b>
+                    <b data-i18n="Selection &amp; budget">Selection &amp; budget</b>
                     <div class="inline-drawer-icon fa-solid fa-circle-chevron-down down"></div>
                 </div>
                 <div class="inline-drawer-content">
-                    <label for="wa_world_priority_mode">Lorebook priority <span class="fa-solid fa-circle-question note-link-span" title="Interleaved: one ranked list across books, with optional per-book weights. Sequential: higher books fill first. A book appears below after its first scan."></span></label>
+                    <label for="wa_world_priority_mode"><span data-i18n="Lorebook priority">Lorebook priority</span> <span class="fa-solid fa-circle-question note-link-span" title="Interleaved: one ranked list across books, with optional per-book weights. Sequential: higher books fill first. A book appears below after its first scan." data-i18n="[title]Interleaved: one ranked list across books, with optional per-book weights. Sequential: higher books fill first. A book appears below after its first scan."></span></label>
                     <select id="wa_world_priority_mode" class="text_pole">
-                    <option value="interleaved">Interleaved</option>
-                    <option value="sequential">Sequential</option>
+                    <option value="interleaved" data-i18n="Interleaved">Interleaved</option>
+                    <option value="sequential" data-i18n="Sequential">Sequential</option>
                     </select>
 
-                    <label>Lorebook order</label>
+                    <label data-i18n="Lorebook order">Lorebook order</label>
                     <div id="wa_world_priority_list" style="margin-top:2px;"></div>
 
-                    <div class="wa-row"><label for="wa_relevance_cutoff">Relevance cutoff <span class="fa-solid fa-circle-question note-link-span" title="Memory entries scoring below this are dropped. Recommend 0.1-0.2: higher drops more, including entries you may want; lower lets more irrelevant ones through. 0 = none."></span></label><input id="wa_relevance_cutoff" type="number" class="text_pole" min="0" max="1" step="0.01"></div>
+                    <div class="wa-row"><label for="wa_relevance_cutoff"><span data-i18n="Relevance cutoff">Relevance cutoff</span> <span class="fa-solid fa-circle-question note-link-span" title="Memory entries scoring below this are dropped. Recommend 0.1-0.2: higher drops more, including entries you may want; lower lets more irrelevant ones through. 0 = none." data-i18n="[title]Memory entries scoring below this are dropped. Recommend 0.1-0.2: higher drops more, including entries you may want; lower lets more irrelevant ones through. 0 = none."></span></label><input id="wa_relevance_cutoff" type="number" class="text_pole" min="0" max="1" step="0.01"></div>
 
-                    <div class="wa-row"><label for="wa_max_entries">Vector entry cap <span class="fa-solid fa-circle-question note-link-span" title="Retrieved entries in the prompt."></span></label><input id="wa_max_entries" type="number" class="text_pole" min="1" max="100" step="1"></div>
+                    <div class="wa-row"><label for="wa_max_entries"><span data-i18n="Vector entry cap">Vector entry cap</span> <span class="fa-solid fa-circle-question note-link-span" title="Retrieved entries in the prompt." data-i18n="[title]Retrieved entries in the prompt."></span></label><input id="wa_max_entries" type="number" class="text_pole" min="1" max="100" step="1"></div>
 
-                    <div class="wa-row"><label for="wa_max_dynamic">Dynamic entry cap <span class="fa-solid fa-circle-question note-link-span" title="Vector and keyword entries. 0 = unlimited."></span></label><input id="wa_max_dynamic" type="number" class="text_pole" min="0" max="500" step="1"></div>
+                    <div class="wa-row"><label for="wa_max_dynamic"><span data-i18n="Dynamic entry cap">Dynamic entry cap</span> <span class="fa-solid fa-circle-question note-link-span" title="Vector and keyword entries. 0 = unlimited." data-i18n="[title]Vector and keyword entries. 0 = unlimited."></span></label><input id="wa_max_dynamic" type="number" class="text_pole" min="0" max="500" step="1"></div>
 
-                    <div class="wa-row"><label for="wa_max_total">Total entry cap <span class="fa-solid fa-circle-question note-link-span" title="Including constants and stickies. 0 = unlimited."></span></label><input id="wa_max_total" type="number" class="text_pole" min="0" max="500" step="1"></div>
+                    <div class="wa-row"><label for="wa_max_total"><span data-i18n="Total entry cap">Total entry cap</span> <span class="fa-solid fa-circle-question note-link-span" title="Including constants and stickies. 0 = unlimited." data-i18n="[title]Including constants and stickies. 0 = unlimited."></span></label><input id="wa_max_total" type="number" class="text_pole" min="0" max="500" step="1"></div>
 
-                    <div class="wa-row"><label for="wa_max_tokens_pct">Context % <span class="fa-solid fa-circle-question note-link-span" title="Token budget as a share of the context. 0 = unlimited."></span></label><input id="wa_max_tokens_pct" type="number" class="text_pole" min="0" max="100" step="1"></div>
+                    <div class="wa-row"><label for="wa_max_tokens_pct"><span data-i18n="Context %">Context %</span> <span class="fa-solid fa-circle-question note-link-span" title="Token budget as a share of the context. 0 = unlimited." data-i18n="[title]Token budget as a share of the context. 0 = unlimited."></span></label><input id="wa_max_tokens_pct" type="number" class="text_pole" min="0" max="100" step="1"></div>
 
-                    <div class="wa-row"><label for="wa_max_tokens">Max tokens <span class="fa-solid fa-circle-question note-link-span" title="Token budget in tokens; the tighter of the two applies. 0 = unlimited."></span></label><input id="wa_max_tokens" type="number" class="text_pole" min="0" max="100000" step="64"></div>
+                    <div class="wa-row"><label for="wa_max_tokens"><span data-i18n="Max tokens">Max tokens</span> <span class="fa-solid fa-circle-question note-link-span" title="Token budget in tokens; the tighter of the two applies. 0 = unlimited." data-i18n="[title]Token budget in tokens; the tighter of the two applies. 0 = unlimited."></span></label><input id="wa_max_tokens" type="number" class="text_pole" min="0" max="100000" step="64"></div>
 
-                    <div class="wa-row"><label for="wa_budget_slack">Budget slack <span class="fa-solid fa-circle-question note-link-span" title="% of the budget a slightly-too-big entry may exceed it by. 0 applies the budget strictly."></span></label><input id="wa_budget_slack" type="number" class="text_pole" min="0" max="50" step="1"></div>
+                    <div class="wa-row"><label for="wa_budget_slack"><span data-i18n="Budget slack">Budget slack</span> <span class="fa-solid fa-circle-question note-link-span" title="% of the budget a slightly-too-big entry may exceed it by. 0 applies the budget strictly." data-i18n="[title]% of the budget a slightly-too-big entry may exceed it by. 0 applies the budget strictly."></span></label><input id="wa_budget_slack" type="number" class="text_pole" min="0" max="50" step="1"></div>
 
-                    <label for="wa_slack_mode">Slack allowed for</label>
+                    <label for="wa_slack_mode" data-i18n="Slack allowed for">Slack allowed for</label>
                     <select id="wa_slack_mode" class="text_pole">
-                    <option value="once">One entry</option>
-                    <option value="all">All entries</option>
+                    <option value="once" data-i18n="One entry">One entry</option>
+                    <option value="all" data-i18n="All entries">All entries</option>
                     </select>
                     <label class="checkbox_label" for="wa_tokens_include_exempt">
-                    <input id="wa_tokens_include_exempt" type="checkbox"><span>Count "ignore budget" entries against the token budget</span>
+                    <input id="wa_tokens_include_exempt" type="checkbox"><span data-i18n="Count "ignore budget" entries against the token budget">Count "ignore budget" entries against the token budget</span>
                     </label>
 
                     <small id="wa_exempt_count" class="opacity50p"></small>
@@ -1851,44 +1853,44 @@ const SETTINGS_HTML = `
 
             <div class="inline-drawer wa-section">
                 <div class="inline-drawer-toggle inline-drawer-header">
-                    <b>Audit &amp; suggestions</b>
+                    <b data-i18n="Audit &amp; suggestions">Audit &amp; suggestions</b>
                     <div class="inline-drawer-icon fa-solid fa-circle-chevron-down down"></div>
                 </div>
                 <div class="inline-drawer-content">
-                    <label for="wa_language">Language <span class="fa-solid fa-circle-question note-link-span" title="Language of the lorebook and chat. Selects the word-frequency table the keyword suggester and audit use."></span></label>
+                    <label for="wa_language"><span data-i18n="Language">Language</span> <span class="fa-solid fa-circle-question note-link-span" title="Language of the lorebook and chat. Selects the word-frequency table the keyword suggester and audit use." data-i18n="[title]Language of the lorebook and chat. Selects the word-frequency table the keyword suggester and audit use."></span></label>
                     <select id="wa_language" class="text_pole">
-                    <option value="en">English</option>
+                    <option value="en" data-i18n="English">English</option>
                     </select>
                     <small class="opacity50p" id="wa_language_state"></small>
 
 
-                    <label for="wa_llm_profile">Suggester LLM profile <span class="fa-solid fa-circle-question note-link-span" title="One call per entry."></span></label>
+                    <label for="wa_llm_profile"><span data-i18n="Suggester LLM profile">Suggester LLM profile</span> <span class="fa-solid fa-circle-question note-link-span" title="One call per entry." data-i18n="[title]One call per entry."></span></label>
                     <div class="flex-container alignItemsCenter flexnowrap">
                     <select id="wa_llm_profile" class="text_pole flex1"></select>
-                    <div id="wa_refresh_profiles" class="menu_button fa-solid fa-rotate" title="Reload the Connection Manager profile list"></div>
+                    <div id="wa_refresh_profiles" class="menu_button fa-solid fa-rotate" title="Reload the Connection Manager profile list" data-i18n="[title]Reload the Connection Manager profile list"></div>
                     </div>
 
-                    <div class="wa-row"><label for="wa_llm_temp">Temperature <span class="fa-solid fa-circle-question note-link-span" title="No measured effect on suggestion quality. Leave blank for the backend default."></span></label><input id="wa_llm_temp" type="number" class="text_pole" min="0" max="2" step="0.05" placeholder="backend default"></div>
+                    <div class="wa-row"><label for="wa_llm_temp"><span data-i18n="Temperature">Temperature</span> <span class="fa-solid fa-circle-question note-link-span" title="No measured effect on suggestion quality. Leave blank for the backend default." data-i18n="[title]No measured effect on suggestion quality. Leave blank for the backend default."></span></label><input id="wa_llm_temp" type="number" class="text_pole" min="0" max="2" step="0.05" placeholder="backend default" data-i18n="[placeholder]backend default"></div>
                 </div>
             </div>
 
             <div class="inline-drawer wa-section">
                 <div class="inline-drawer-toggle inline-drawer-header">
-                    <b>Advanced</b>
+                    <b data-i18n="Advanced">Advanced</b>
                     <div class="inline-drawer-icon fa-solid fa-circle-chevron-down down"></div>
                 </div>
                 <div class="inline-drawer-content">
 
 
                     <label class="checkbox_label" for="wa_debug_log">
-                        <input id="wa_debug_log" type="checkbox"><span>Log the selection table on every generation</span>
+                        <input id="wa_debug_log" type="checkbox"><span data-i18n="Log the selection table on every generation">Log the selection table on every generation</span>
                     </label>
 
-                    <label for="wa_rater_id">Rater id <span class="fa-solid fa-circle-question note-link-span" title="A random anonymous ID your grades are signed with."></span></label>
-                    <input id="wa_rater_id" type="text" class="text_pole" readonly style="opacity:0.55;cursor:default;" placeholder="generated on your first grade">
+                    <label for="wa_rater_id"><span data-i18n="Rater id">Rater id</span> <span class="fa-solid fa-circle-question note-link-span" title="A random anonymous ID your grades are signed with." data-i18n="[title]A random anonymous ID your grades are signed with."></span></label>
+                    <input id="wa_rater_id" type="text" class="text_pole" readonly style="opacity:0.55;cursor:default;" placeholder="generated on your first grade" data-i18n="[placeholder]generated on your first grade">
 
 
-                    <div id="wa_review_bundles" class="menu_button" style="width:auto;padding:0.3em 0.8em;" title="Opens the bundle reviewer without a chat.">Review graded bundles…</div>
+                    <div id="wa_review_bundles" class="menu_button" style="width:auto;padding:0.3em 0.8em;" title="Opens the bundle reviewer without a chat." data-i18n="Review graded bundles…;[title]Opens the bundle reviewer without a chat.">Review graded bundles…</div>
                 </div>
             </div>
         </div>
@@ -1903,7 +1905,7 @@ function populateProfiles(notify = false) {
     $('#wa_llm_profile')
         .empty()
         // Not a neutral fallback: without a profile generateText uses generateRaw, which takes no generation parameters.
-        .append([`<option value="">Current chat API</option>`]
+        .append([`<option value="">${escapeHtml(t`Current chat API`)}</option>`]
             .concat(profiles.map(x => `<option value="${escapeHtml(x.id)}">${escapeHtml(x.name)}</option>`))
             .join(''));
 
@@ -1913,11 +1915,11 @@ function populateProfiles(notify = false) {
 
     if (!stillExists) {
         console.warn(`Worlds Apart: saved LLM profile "${selected}" no longer exists, falling back to the current API`);
-        toastr.warning('Saved LLM profile no longer exists.', 'Worlds Apart');
+        toastr.warning(t`Saved LLM profile no longer exists.`, 'Worlds Apart');
     }
 
     if (notify) {
-        toastr.info(`${profiles.length} profile(s) loaded.`, 'Worlds Apart');
+        toastr.info(t`${profiles.length} profile(s) loaded.`, 'Worlds Apart');
     }
 }
 
@@ -1970,7 +1972,7 @@ function ensureDeliveryPanel() {
 
     deliveryTrigger = document.createElement('div');
     deliveryTrigger.className = 'wa-delivery-trigger fa-solid fa-fw fa-book-atlas';
-    deliveryTrigger.title = 'Worlds Apart — delivered this turn';
+    deliveryTrigger.title = t`Worlds Apart — delivered this turn`;
     deliveryTrigger.dataset.count = '0';
     deliveryPanel = document.createElement('div');
     deliveryPanel.className = 'wa-delivery-panel';
@@ -1985,14 +1987,14 @@ function renderDeliveryPanel(layout) {
     // Appended last: the panel opens upward, so the bottom row is nearest the icon.
     const lab = document.createElement('div');
     lab.className = 'wa-delivery-entry';
-    lab.title = 'Open the Studio on the Keyword Lab';
+    lab.title = t`Open the Studio on the Keyword Lab`;
     lab.innerHTML = '<span class="wa-delivery-glyph fa-solid fa-flask"></span>'
-        + '<span class="wa-delivery-title">Open the Keyword Lab</span>';
+        + `<span class="wa-delivery-title">${escapeHtml(t`Open the Keyword Lab`)}</span>`;
     lab.addEventListener('click', () => lorebookStudio(chatBook(), { lab: true }));
     if (!layout.length) {
         const empty = document.createElement('div');
         empty.className = 'wa-delivery-empty';
-        empty.textContent = 'Nothing delivered yet';
+        empty.textContent = t`Nothing delivered yet`;
         deliveryPanel.append(empty, lab);
         return;
     }
@@ -2000,14 +2002,14 @@ function renderDeliveryPanel(layout) {
         const e = row.item.entry;
         const el = document.createElement('div');
         el.className = 'wa-delivery-entry';
-        el.title = `${wiTooltip(row)}\n\nClick: open in the Explorer · Shift-click: show the text`;
+        el.title = wiTooltip(row) + '\n\n' + t`Click: open in the Explorer · Shift-click: show the text`;
         const g = document.createElement('span');
         g.className = 'wa-delivery-glyph';
         g.textContent = wiGlyph(e);
-        const t = document.createElement('span');
-        t.className = 'wa-delivery-title';
-        t.textContent = wiTitleOf(e);
-        el.append(g, t);
+        const ttl = document.createElement('span');
+        ttl.className = 'wa-delivery-title';
+        ttl.textContent = wiTitleOf(e);
+        el.append(g, ttl);
         // Click opens the entry in the Explorer; shift-click shows its text alone.
         el.addEventListener('click', ev => {
             if (ev.shiftKey) { showEntryText(e); return; }
@@ -2044,7 +2046,7 @@ export async function init() {
     updateEmbedInfo();   // refresh on drawer open so it tracks Vector Storage changes made mid-session
     $('#wa_embed_info').closest('.inline-drawer').children('.inline-drawer-toggle').on('click', updateEmbedInfo);
 
-    $('#extensionsMenu').append('<div id="wa_studio" class="list-group-item flex-container flexGap5" title="Worlds Apart — Lorebook Studio: manage all lorebooks and entries"><div class="fa-solid fa-book-open extensionsMenuExtensionButton"></div><span>WA Lorebook Studio</span></div>');
+    $('#extensionsMenu').append('<div id="wa_studio" class="list-group-item flex-container flexGap5" title="Worlds Apart — Lorebook Studio: manage all lorebooks and entries" data-i18n="[title]Worlds Apart — Lorebook Studio: manage all lorebooks and entries"><div class="fa-solid fa-book-open extensionsMenuExtensionButton"></div><span data-i18n="WA Lorebook Studio">WA Lorebook Studio</span></div>');
     $('#wa_studio').on('click', () => { lorebookStudio(chatBook()); });
 
     bind('#wa_enabled', 'enabled', 'checked');
@@ -2055,14 +2057,14 @@ export async function init() {
     const presentationMount = document.querySelector('#wa_presentation_order_mount');
     const tierMount = document.querySelector('#wa_tier_editor_mount');
     let tierEditor = null;
-    const tierState = () => { $('#wa_tier_state').text(settings().presentationTiered ? 'Tiered grouping is on: the prompt groups entries by these tiers.' : 'Tiered grouping is off: this order applies in the Studio only.'); };
+    const tierState = () => { $('#wa_tier_state').text(settings().presentationTiered ? t`Tiered grouping is on: the prompt groups entries by these tiers.` : t`Tiered grouping is off: this order applies in the Studio only.`); };
     if (presentationMount) presentationMount.append(makeSortControl({
         getSort: () => normPresentation(settings().presentationOrder),
         setSort: k => { settings().presentationOrder = k; saveSettingsDebounced(); },
         getTiered: () => !!settings().presentationTiered,
         setTiered: on => { settings().presentationTiered = on; saveSettingsDebounced(); tierState(); },
         getTierCfg, setTierCfg,
-        extraItems: [{ label: 'Most relevant first', key: 'best-first' }, { label: 'Most relevant last', key: 'best-last' }],
+        extraItems: [{ label: t`Most relevant first`, key: 'best-first' }, { label: t`Most relevant last`, key: 'best-last' }],
         // Inside the settings root, or ST's autoclose reads a menu click as outside the Extensions drawer and shuts it.
         mount: () => document.querySelector('.worlds-apart-settings') ?? document.body,
         // Keeps the inline tier editor in sync when tiers are reordered from the button's menu.
@@ -2075,22 +2077,22 @@ export async function init() {
     Promise.all([hasPlugin(), computeSourceFingerprint()]).then(() => {
         renderPluginSetup();
         // The settings banner only shows once somebody opens settings, and a drifted plugin answers with stale code meanwhile.
-        if (pluginDrifted()) toastr.warning('Server plugin is out of date. Redeploy it and restart SillyTavern.', 'Worlds Apart', { timeOut: 0, extendedTimeOut: 0 });
+        if (pluginDrifted()) toastr.warning(t`Server plugin is out of date. Redeploy it and restart SillyTavern.`, 'Worlds Apart', { timeOut: 0, extendedTimeOut: 0 });
     });
     bind('#wa_debug_log', 'debugLog', 'checked');
     document.querySelector('#wa_find_orphans')?.addEventListener('click', async () => {
         const out = document.querySelector('#wa_orphans_out');
-        if (out) out.textContent = 'Looking…';
+        if (out) out.textContent = t`Looking…`;
         try { const line = await reportOrphanCollections(); if (out) out.textContent = line; }
-        catch (error) { if (out) out.textContent = `Failed: ${error.message}`; }
+        catch (error) { if (out) out.textContent = t`Failed: ${error.message}`; }
     });
     $('#wa_rater_id').val(settings().raterId);
     bind('#wa_message_depth', 'messageDepth', 'number');
     bind('#wa_match_window', 'matchWindow', 'string');
     bind('#wa_language', 'language', 'string');
     const languageState = () => {
-        const t = table();
-        $('#wa_language_state').text(t.loaded ? `${t.label} — ${t.zipf.size} words` : `${t.lang}: pack not loaded — every word reads rare until it is`);
+        const tb = table();
+        $('#wa_language_state').text(tb.loaded ? t`${tb.label} — ${tb.zipf.size} words` : t`${tb.lang}: pack not loaded — every word reads rare until it is`);
     };
     $('#wa_language').on('change', async () => { await setLanguage(settings().language, { fetchPack, store: packStore }); languageState(); });
     // The index is read only here, when the panel fills its list; a stored pack the index has moved is refreshed then.
@@ -2195,11 +2197,11 @@ export async function init() {
         name: 'wa-core',
         callback: () => {
             const c = runState.lastCoreSet;
-            if (!c) { toastr.info('No core selection recorded yet — it is captured on ST\u2019s own dry runs, so send or receive a message first.', 'Worlds Apart'); return ''; }
+            if (!c) { toastr.info(t`No core selection recorded yet — it is captured on ST’s own dry runs, so send or receive a message first.`, 'Worlds Apart'); return ''; }
             console.log(`%cWorlds Apart \u00b7 ST core's own selection at message ${c.at} \u2014 ${c.entries.length} entries, core budget ${c.budget ?? 'unknown'}`, 'font-weight: bold');
             console.table(c.entries.map(e => ({ uid: e.uid, order: e.order, constant: e.constant, book: e.world, entry: e.title })));
             console.log(`uids for eval/core-compare.mjs --core-uids:\n${c.entries.map(e => e.uid).join(',')}`);
-            toastr.success(`${c.entries.length} entries \u2014 see console`, 'ST core selection');
+            toastr.success(t`${c.entries.length} entries — see console`, t`ST core selection`);
             return '';
         },
         helpString: 'Worlds Apart: what ST core selected on its own, with WA standing down. Captured from ST\u2019s dry runs, where interceptors are skipped and core runs its own budget \u2014 so it is core\u2019s shipped set, keyword route only. Console.',
