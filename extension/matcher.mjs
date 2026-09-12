@@ -334,24 +334,23 @@ export const foldedHay = (text, caseSensitive) => {
  *  `typedWith` is the same count for the key AS WRITTEN, its variants excluded, which is how the audit tells a key
  *  that only ever lands un-hyphenated. Merge two results by summing every field: a hit is per message, so the split
  *  point cannot matter. */
-/** The chat cut into the unit a conjunction is matched within — each message, each paragraph of each message, or blocks of
- *  `depth` messages joined as the live scan joins them, cut from the newest end so the last block is full. Bare text: a
- *  message's name is not part of the unit. */
-export function chatUnits(messages, matchWindow = 'message', depth = 0) {
-    const texts = [...messages].map(m => String(m ?? ''));
-    if (matchWindow === 'paragraph') return texts.flatMap(t => segment([t], 'paragraph'));
-    if (matchWindow !== 'scan') return texts;
-    const n = Math.max(1, Number(depth) || texts.length);
+/** The chat cut into the unit a conjunction is matched within — each message, each paragraph of each message, or blocks
+ *  of `depth` messages joined as the live scan joins them, cut from the newest end so the last block is full. Through
+ *  scanSegments, so a message reads `Name: text` exactly when the live scan would; a bare string is a nameless message. */
+export function chatUnits(messages, { matchWindow = 'message', depth = 0, includeNames = false } = {}) {
+    const chat = [...messages].map(m => (typeof m === 'string' ? { mes: m } : m));
+    if (matchWindow !== 'scan') return scanSegments(chat, { depth: chat.length, includeNames, matchWindow });
+    const n = Math.max(1, Number(depth) || chat.length);
     const out = [];
-    for (let end = texts.length; end > 0; end -= n) out.unshift(segment(texts.slice(Math.max(0, end - n), end), 'scan')[0]);
+    for (let end = chat.length; end > 0; end -= n) out.unshift(...scanSegments(chat.slice(Math.max(0, end - n), end), { depth: n, includeNames, matchWindow: 'scan' }));
     return out;
 }
 
-export function countChatHits(keys, messages, { matchWindow = 'message', depth = 0 } = {}) {
+export function countChatHits(keys, messages, { matchWindow = 'message', depth = 0, includeNames = false } = {}) {
     // Test like we fight: the units are what the matcher matches a conjunction within, so a `?` key whose terms sit in
     // adjacent messages counts under `scan` and not under `message`, as it fires. `messagesWith`/`messages` keep their
     // names and count units; `unit` says which.
-    messages = chatUnits(messages, matchWindow, depth);
+    messages = chatUnits(messages, { matchWindow, depth, includeNames });
     const all = [...new Set(keys.map(k => String(k ?? '').trim()).filter(Boolean))];
     const isLiteral = k => !k.startsWith('?') && !isRegexKey(k);
     const literals = all.filter(isLiteral), rest = all.filter(k => !isLiteral(k));

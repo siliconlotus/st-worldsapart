@@ -214,7 +214,7 @@ export async function init(router) {
             if (!wordBoundary) return response.status(400).send({ error: 'wordBoundary is required' });
             setBoundaryMode(wordBoundary);
             // The unit the chat is cut into, the caller's setting as wordBoundary is; message when an older client sends none.
-            const unitOpts = { matchWindow: String(request.body?.matchWindow ?? 'message'), depth: Number(request.body?.depth) || 0 };
+            const unitOpts = { matchWindow: String(request.body?.matchWindow ?? 'message'), depth: Number(request.body?.depth) || 0, includeNames: Boolean(request.body?.includeNames) };
 
             const totals = new Map(), typedTotals = new Map();
             let messages = 0, scanned = 0, missing = 0, unit = 'message';
@@ -231,9 +231,11 @@ export async function init(router) {
                     const rl = readline.createInterface({ input: fs.createReadStream(full), crlfDelay: Infinity });
                     rl.on('line', line => {
                         if (!line) return;
-                        let text = '';
-                        try { text = String(JSON.parse(line)?.mes ?? ''); } catch { return; }   // line 0 is metadata
-                        if (text) texts.push(text);
+                        let m;
+                        try { m = JSON.parse(line); } catch { return; }   // line 0 is metadata
+                        // Hidden messages are not scanned live (C3), so they are not counted here.
+                        if (m?.is_system || !String(m?.mes ?? '')) return;
+                        texts.push({ name: m.name, mes: String(m.mes) });
                     });
                     rl.on('close', resolve);
                     rl.on('error', resolve);   // an unreadable chat is skipped, not fatal

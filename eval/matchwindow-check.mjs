@@ -161,6 +161,10 @@ console.log('ok   a key the chat scan never covered is not reported as chat-chec
     eq(`${sc.messagesWith.get('? copper pipe')}/${sc.messages} ${sc.unit}`, '1/2 window', 'scan unit: blocks of `depth` messages, and the conjunction co-occurs in one');
     const pg = countChatHits(['? copper pipe'], ['copper here.\n\npipe there.'], { matchWindow: 'paragraph' });
     eq(`${pg.messagesWith.get('? copper pipe')}/${pg.messages} ${pg.unit}`, '0/2 paragraph', 'paragraph unit: one message, two paragraphs, no co-occurrence');
+    // includeNames: the speaker's name is in the unit exactly when the live scan would put it there.
+    const named = [{ name: 'Sentinel', mes: 'hello' }, { name: 'You', mes: 'hi' }];
+    eq(countChatHits(['Sentinel'], named, { includeNames: true }).messagesWith.get('Sentinel'), 1, 'with includeNames a key reaches the speaker');
+    eq(countChatHits(['Sentinel'], named).messagesWith.get('Sentinel'), 0, '...and not without, the default');
     const hy = countChatHits(['copper-pipe'], ['a copper pipe', 'a copper-pipe', 'both copper pipe and copper-pipe', 'neither']);
     eq(hy.messagesWith.get('copper-pipe'), 3, 'both forms count, and a message holding both counts once');
     eq(got.messages, 4, 'the denominator is every message it was given');

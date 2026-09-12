@@ -1915,7 +1915,7 @@ export async function lorebookStudio(preferredBook = null, open = null) {
         return out;
     };
 
-    /** No-plugin path: pulls a chat's messages over HTTP. */
+    /** No-plugin path: pulls a chat's messages over HTTP, as {name, mes}. */
     const fetchChatMessages = async ({ char, avatar, file }) => {
         const r = await fetch('/api/chats/get', {
             method: 'POST', headers: getRequestHeaders(), cache: 'no-cache',
@@ -1923,7 +1923,8 @@ export async function lorebookStudio(preferredBook = null, open = null) {
         });
         if (!r.ok) return [];
         const j = await r.json();
-        return (Array.isArray(j) ? j : []).map(m => String(m?.mes ?? '')).filter(Boolean);
+        // Hidden messages are not scanned live (C3), so they are not counted here; names ride along for includeNames.
+        return (Array.isArray(j) ? j : []).filter(m => m && !m.is_system && String(m.mes ?? '')).map(m => ({ name: m.name, mes: String(m.mes) }));
     };
 
     /** One pass of `keys` over `picked`: counts by both routes, merged. Plugin route for whatever is on disk — it runs this
@@ -1935,7 +1936,7 @@ export async function lorebookStudio(preferredBook = null, open = null) {
         let seen = 0, via = '', unit = 'message';
         // The chat is cut into the unit the book's match window matches a conjunction within; the scan depth only sizes
         // a `scan` block. Both routes are handed the same two, as they are wordBoundary.
-        const unitOpts = { matchWindow: settings().matchWindow, depth: Number(settings().messageDepth || world_info_depth) };
+        const unitOpts = { matchWindow: settings().matchWindow, depth: Number(settings().messageDepth || world_info_depth), includeNames: Boolean(world_info_include_names) };
         const add = got => {
             for (const [k, n] of got.messagesWith) totals.set(k, (totals.get(k) ?? 0) + n);
             for (const [k, n] of got.typedWith ?? []) typedTotals.set(k, (typedTotals.get(k) ?? 0) + n);
@@ -1971,7 +1972,7 @@ export async function lorebookStudio(preferredBook = null, open = null) {
         for (const c of picked) {
             if (served.has(c)) continue;
             const got = c.open
-                ? (ctx.chat ?? []).filter(m => m && !m.is_system).map(m => String(m.mes ?? '')).filter(Boolean)
+                ? (ctx.chat ?? []).filter(m => m && !m.is_system && String(m.mes ?? '')).map(m => ({ name: m.name, mes: String(m.mes) }))
                 : await fetchChatMessages(c);
             msgs.push(...got);
         }
