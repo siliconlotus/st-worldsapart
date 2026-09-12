@@ -182,14 +182,16 @@ function renderPluginSetup() {
         return r.append(code, btn);
     };
     const alert = $('#wa_plugin_alert').empty();
+    // Top of the drawer, so neither state needs the setup box open to be seen.
+    const banner = (text, ...rest) => $('<div style="margin:0 0 8px;padding:6px 8px;border-radius:5px;font-size:0.9em;background:color-mix(in srgb, var(--golden, #e0a86c) 15%, transparent);border:1px solid color-mix(in srgb, var(--golden, #e0a86c) 45%, transparent);"></div>')
+        .append($('<div style="color:var(--warning,#d80);"></div>').text(text), ...rest);
     box.empty();
     if (runState.pluginAvailable === null) { box.text('Checking for server plugin…'); return; }
     if (runState.pluginAvailable) {
         const stale = pluginDrifted();
         if (stale) {
             const warn = '⚠ Server plugin out of date — the deployed copy differs from this extension\'s source. Redeploy and restart:';
-            alert.append($('<div style="margin:0 0 8px;padding:6px 8px;border-radius:5px;font-size:0.9em;background:color-mix(in srgb, var(--golden, #e0a86c) 15%, transparent);border:1px solid color-mix(in srgb, var(--golden, #e0a86c) 45%, transparent);"></div>')
-                .append($('<div style="color:var(--warning,#d80);"></div>').text(warn), row(deployCmd)));
+            alert.append(banner(warn, row(deployCmd)));
             box.append($('<div style="color:var(--warning,#d80);"></div>').text(warn));
             box.append(row(deployCmd));
             return;
@@ -199,7 +201,9 @@ function renderPluginSetup() {
         box.append(row(deployCmd));
         return;
     }
-    box.append($('<div></div>').text('⚠ Not detected — mean-centered search is inactive (falling back to stock vector search). To install:'));
+    const absent = '⚠ Server plugin not installed — retrieval runs on ST\'s own vector search, without mean-centering or server-side pooling.';
+    alert.append(banner(absent));
+    box.append($('<div></div>').text(absent + ' To install:'));
     box.append($('<div style="margin-top:3px;"></div>').text('1. Open a terminal in your SillyTavern folder and deploy the plugin (also enables server plugins in config):'));
     box.append(row(deployCmd));
     box.append($('<div style="margin-top:3px;">2. Restart SillyTavern. This box will then show the exact redeploy command with your full path.</div>'));
