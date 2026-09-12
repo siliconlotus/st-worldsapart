@@ -2206,24 +2206,23 @@ export async function lorebookStudio(preferredBook = null, open = null) {
             }
             if (cleanupUndo?.length) bar.append(barBtn(`Undo (${cleanupUndo.length})`, undoPrune));
         };
-        /** The Select… menu: All flagged and None set the selection; a severity or a flag toggles its rows in and out, the menu staying open, so several can be combined. */
+        /** The Select… menu: All visible and None set the selection; a severity or a flag toggles its rows in and out, the menu staying open, so several can be combined. */
         const selectItems = () => {
             const buckets = new Map();
             const bySev = new Map();
-            let flagged = 0;
             for (const g of groups) for (const r of g.rows) {
                 const id = rowId(g.entry.uid, r.term);
                 const name = r.p?.flag ?? r.why;   // show-all rows carry no verdict: "not flagged", or "ignored"
                 if (!buckets.has(name)) buckets.set(name, []);
                 buckets.get(name).push(id);
-                if (r.p) { flagged++; if (!bySev.has(r.sev)) bySev.set(r.sev, []); bySev.get(r.sev).push(id); }
+                if (r.p) { if (!bySev.has(r.sev)) bySev.set(r.sev, []); bySev.get(r.sev).push(id); }
             }
             const only = ids => () => { for (const id of allIds) cleanupChecks.set(id, false); for (const id of ids) cleanupChecks.set(id, true); sync(); };
             // A bucket with every row ticked untoggles; anything less ticks the whole bucket.
             const toggle = ids => { const all = ids.length > 0 && ids.every(id => cleanupChecks.get(id)); return { mark: all ? '☑' : ids.some(id => cleanupChecks.get(id)) ? '◪' : '☐', fn: () => { for (const id of ids) cleanupChecks.set(id, !all); sync(); }, keep: true }; };
             const rank = n => { const i = FLAG_PRIORITY.indexOf(n); return i < 0 ? FLAG_PRIORITY.length : i; };
             const items = [
-                { label: `All flagged (${flagged})`, fn: only([...groups.flatMap(g => g.rows.filter(r => r.p).map(r => rowId(g.entry.uid, r.term)))]) },
+                { label: `All visible (${allIds.length})`, fn: only(allIds) },   // what the filter and search leave on screen
                 { label: 'None', fn: only([]) },
             ];
             for (const sev of [SEVERE, MODERATE, MINOR]) if (bySev.has(sev)) { const t = toggle(bySev.get(sev)); items.push({ ...t, label: `${t.mark} ${sev[0].toUpperCase()}${sev.slice(1)} (${bySev.get(sev).length})` }); }
