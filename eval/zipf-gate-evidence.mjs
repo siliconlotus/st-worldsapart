@@ -1,13 +1,18 @@
 // Is the suggester's Zipf gate redundant with evidence? Diffs buildKeySuggest with the English gate on and off, and asks
 // of every term the gate killed whether the chat would have flagged it anyway (over KEY_CHAT_COMMON, the audit's own gate).
 // Usage:  node zipf-gate-evidence.mjs <book.json> <chat.jsonl> [<book.json> <chat.jsonl> ...]   — gold pairs only; n is the pair count.
-import { readFileSync } from 'node:fs';
+import { readFileSync, writeFileSync } from 'node:fs';
 import { basename } from 'node:path';
 import { buildKeySuggest, STUDIO_SUGGEST_OPTS as OPTS } from '../extension/keyword-suggest.mjs';
 import { KEY_CHAT_COMMON } from '../extension/keyword-audit.mjs';
 import { countKey } from '../extension/matcher.mjs';
 
-const args = process.argv.slice(2);
+// --dump <file> writes {pair: killed terms} for a table-vs-table diff.
+const argv = process.argv.slice(2);
+const di = argv.indexOf('--dump');
+const DUMP = di >= 0 ? argv[di + 1] : null;
+const args = argv.filter((a, i) => i !== di && i !== di + 1);
+const dumped = {};
 if (!args.length || args.length % 2) { console.error('usage: node zipf-gate-evidence.mjs <book.json> <chat.jsonl> [...]'); process.exit(2); }
 
 const pct = n => `${(100 * n).toFixed(1)}%`;
@@ -42,4 +47,6 @@ for (let i = 0; i < args.length; i += 2) {
     const show = rows => rows.sort((a, b) => b.hits - a.hits).slice(0, 25).map(r => `${r.term}(${r.hits})`).join('  ');
     console.log(`  survivors, most-firing first: ${show(useful)}`);
     console.log(`  caught, most-firing first:    ${show(common)}`);
+    dumped[basename(bookPath, '.json')] = killed.map(r => ({ term: r.term, hits: r.hits }));
 }
+if (DUMP) writeFileSync(DUMP, JSON.stringify(dumped));
