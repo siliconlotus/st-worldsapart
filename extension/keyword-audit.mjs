@@ -87,6 +87,7 @@ export const KEY_BOOK_COMMON = 0.45;
  * The prune classifier for one loaded lorebook, shared by the Studio audit and eval/keyword-audit.mjs. Live closures:
  * classifyEntry re-reads each entry's flags. `bookContent` and `bookListed` are counts over `nBook`; `chatRate` is a share.
  * @param {{messagesWith: Map<string, number>, messages: number}} [chatScan] MESSAGES containing each key (addMessageHits), never occurrences; absent = no chat evidence
+ * @param {Function} [t] the template tag every verdict text goes through; ST passes its i18n `t`, the checks take the plain default
  * @returns {{entries, nE, classifyEntry, reasonOf, defChecked, severityOf, effCase, effWhole, dupes, unusableKeysOf}}
  */
 /** The audit's three severities, by name. The colours they are drawn in belong to the display, and the order to RANK there. */
@@ -124,10 +125,13 @@ export function orthoAlternates(k) {
  *  message, so probing every key would cost more than the scan. */
 export const substringProbes = k => (k.includes('"') ? [] : [`? ="${k}"`, ...(/\p{Lu}/u.test(k) ? [`? ^"${k}"`] : [])]);
 
-export function buildKeyPruneScan(data, opts, ignoreSet, { caseSensitiveDefault = false, wholeWordsDefault = false, matchWindow = 'scan', chatScan } = {}) {
+/** Plain interpolation: what the injected `t` does when nobody supplies one, so the checks assert English. */
+const plain = (s, ...v) => s.reduce((a, str, i) => a + str + (i < v.length ? String(v[i] ?? '') : ''), '');
+
+export function buildKeyPruneScan(data, opts, ignoreSet, { caseSensitiveDefault = false, wholeWordsDefault = false, matchWindow = 'scan', chatScan, t = plain } = {}) {
     // undefined: no scan, or a scan that did not cover this key; 0: scanned and silent. chatChecked reads the difference.
     // The unit the chat scan counted, named for a chip: what a rate is a rate of.
-    const units = { message: 'messages', paragraph: 'paragraphs', window: 'scan windows' }[chatScan?.unit] ?? 'messages';
+    const units = { message: t`messages`, paragraph: t`paragraphs`, window: t`scan windows` }[chatScan?.unit] ?? t`messages`;
     // Messages holding the key AS WRITTEN. undefined when no scan covered it; absent from a scan that predates the field.
     const chatTypedOf = key => chatScan?.typedWith?.get(key);
     const chatRateOf = key => {
@@ -289,7 +293,7 @@ export function buildKeyPruneScan(data, opts, ignoreSet, { caseSensitiveDefault 
                 const chat = chatRateOf(a.alt), mine = chatRateOf(k) ?? 0;
                 const where = (chat !== undefined && chat > mine) ? 'chat'
                     : contents.some(c => countRegexKey(a.alt, c) > countRegexKey(k, c)) ? 'book' : null;
-                if (where) return { flag: 'regex orthography', bookContent: 0, suggest: a.suggest, evidence: `${where} uses ${a.label}` };
+                if (where) return { flag: 'regex orthography', bookContent: 0, suggest: a.suggest, where, label: a.label };
                 continue;
             }
             if (a.shape) return { flag: 'regex orthography', bookContent: 0, suggest: a.suggest, label: a.label };
@@ -414,30 +418,34 @@ export function buildKeyPruneScan(data, opts, ignoreSet, { caseSensitiveDefault 
     const reasonOf = p => {
         const severity = severityOf(p);
         // A SmartKey or a pattern is not "absent from the text": it evaluated false everywhere.
+        const pct = x => Math.round(100 * x);
+        // Every text is one template, so a translation can reorder it; a branch per variant rather than a joined fragment.
         if (p.flag === 'unattested') {
-            const where = p.chatChecked ? '(book/chat)' : '(book)';
             // A SmartKey or a pattern is not absent from the text: it evaluated false everywhere it was run.
-            return { text: `${p.literal ? 'unattested' : 'never matches'} ${where}`, severity };
+            const text = p.literal ? (p.chatChecked ? t`unattested (book/chat)` : t`unattested (book)`)
+                : (p.chatChecked ? t`never matches (book/chat)` : t`never matches (book)`);
+            return { text, severity };
         }
-        if (p.flag === 'unusable') return { text: p.code ? `unusable — ${p.code}` : 'unusable', severity };
-        if (p.flag === 'common word') {
-            return { text: `common word${p.term ? ` (${p.term})` : ''}`, severity };
-        }
-        if (p.flag === 'book shared') return { text: `book shared (${Math.round(100 * p.bookListed / nBook)}%)`, severity };
-        if (p.flag === 'chat common') return { text: `chat common (${Math.round(100 * p.chatRate)}%${p.via ? `, mostly ${p.via}` : ''})`, severity };
-        if (p.flag === 'book common') return { text: `book common (${Math.round(100 * p.bookContent / nBook)}%)`, severity };
-        if (p.flag === 'fragment') return { text: 'phrase fragment', severity };
+        if (p.flag === 'unusable') return { text: p.code ? t`unusable — ${p.code}` : t`unusable`, severity };
+        if (p.flag === 'common word') return { text: p.term ? t`common word (${p.term})` : t`common word`, severity };
+        if (p.flag === 'book shared') return { text: t`book shared (${pct(p.bookListed / nBook)}%)`, severity };
+        if (p.flag === 'chat common') return { text: p.via ? t`chat common (${pct(p.chatRate)}%, mostly ${p.via})` : t`chat common (${pct(p.chatRate)}%)`, severity };
+        if (p.flag === 'book common') return { text: t`book common (${pct(p.bookContent / nBook)}%)`, severity };
+        if (p.flag === 'fragment') return { text: t`phrase fragment`, severity };
         if (p.flag === 'substring') {
-            const pct = x => `${Math.round(100 * x)}%`;
-            const how = [p.wordShare !== undefined && p.suggest.includes('=') ? `${pct(p.wordShare)} as a word` : null,
-                p.caseShare !== undefined && p.suggest.includes('^') ? `${pct(p.caseShare)} in this case` : null].filter(Boolean).join(', ');
-            return { text: `fires in ${pct(p.chatRate)} of ${units}, ${how} — consider ${p.suggest}`, severity };
+            const how = [p.wordShare !== undefined && p.suggest.includes('=') ? t`${pct(p.wordShare)}% as a word` : null,
+                p.caseShare !== undefined && p.suggest.includes('^') ? t`${pct(p.caseShare)}% in this case` : null].filter(Boolean).join(', ');
+            return { text: t`fires in ${pct(p.chatRate)}% of ${units}, ${how} — consider ${p.suggest}`, severity };
         }
-        if (p.flag === 'variant only') return { text: `${p.where} uses it only un-hyphenated`, severity };
-        if (p.flag === 'regex orthography') return { text: `${p.evidence ?? `will not match ${p.label}`}, consider ${p.suggest}`, severity };
+        if (p.flag === 'variant only') return { text: p.where === 'chat' ? t`chat uses it only un-hyphenated` : t`book uses it only un-hyphenated`, severity };
+        if (p.flag === 'regex orthography') {
+            const form = { 'curly form': t`curly form`, 'straight form': t`straight form`, 'en-dash': t`en-dash` }[p.label] ?? p.label;
+            const lead = p.where === 'chat' ? t`chat uses ${form}` : p.where === 'book' ? t`book uses ${form}` : t`will not match ${form}`;
+            return { text: t`${lead}, consider ${p.suggest}`, severity };
+        }
         // The same suggestion substring makes, measured over the book: hits mostly inside longer words want `=`.
         const ratio = p.total ? p.clean / p.total : 0;
-        return { text: `short (${p.clean}/${p.total} clean)${ratio <= 1 / 3 && !p.ww ? ` — consider ? =${p.key}` : ''}`, severity };
+        return { text: ratio <= 1 / 3 && !p.ww ? t`short (${p.clean}/${p.total} clean) — consider ? =${p.key}` : t`short (${p.clean}/${p.total} clean)`, severity };
     };
     // Pre-ticked: the red tier, plus unattested on machine-written entries only (K14). Unusable is red but wants a correction, not a deletion.
     const generated = e => e?.stmemorybooks !== undefined || e?.STMB_start !== undefined || e?.stmbArc !== undefined;

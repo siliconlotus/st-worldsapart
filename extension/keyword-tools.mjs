@@ -4,6 +4,7 @@ import { extension_settings } from '../../../../extensions.js';
 import { world_info_case_sensitive, world_info_match_whole_words } from '../../../../world-info.js';
 import { splitRecursive } from './chunking.mjs';
 import { ConnectionManagerRequestService } from '../../../shared.js';
+import { t } from '../../../../i18n.js';
 import { settings } from './state.mjs';
 import { buildKeyPruneScan as buildKeyPruneScanCore } from './keyword-audit.mjs';
 import { buildKeyPrompt, parseKeyList } from './keyword-suggest.mjs';
@@ -14,6 +15,7 @@ export const buildKeyPruneScan = (data, opts, ignoreSet, extra = {}) =>
     buildKeyPruneScanCore(data, opts, ignoreSet, {
         caseSensitiveDefault: world_info_case_sensitive,
         wholeWordsDefault: world_info_match_whole_words,
+        t,
         ...extra,
     });
 
