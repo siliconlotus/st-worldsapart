@@ -370,6 +370,7 @@ dialog.popup:has(.wa-studio), .wa-studio-nav, .wa-studio-explorer, .wa-studio-en
 .wa-nav-wide .wa-book-name { overflow: visible; text-overflow: clip; }
 /* Tab strip above the explorer pane: Explorer / Cleanup. The active tab is the only
    indicator of which direction a commit runs in, so it reads loudly (underline + colour, not just weight). */
+.wa-tab-status { margin-left: auto; margin-right: 2.4em; align-self: center; font-size: 0.85em; opacity: 0.6; white-space: nowrap; }
 .wa-tabs { display: flex; gap: 2px; flex: 0 0 auto; margin-bottom: 6px;
     border-bottom: 1px solid var(--SmartThemeBorderColor, rgba(255,255,255,0.15)); }
 .wa-tab { padding: 5px 14px; cursor: pointer; white-space: nowrap; opacity: 0.6; font-size: 0.9em;

@@ -2184,19 +2184,6 @@ export async function lorebookStudio(preferredBook = null, open = null) {
             count.textContent = `${on}/${allIds.length} selected`;
             const selBtn = barBtn('Select… ▾', () => { const r = selBtn.getBoundingClientRect(); showCtxMenu(selectItems(), r.left, r.bottom + 2, ctxMount(), selectItems); });
             bar.append(count, selBtn);
-            if (chatHits) {
-                const note = document.createElement('span'); note.className = 'wa-bulk-count';
-                note.textContent = `· ${[...chatHits.values()].filter(n => n > 0).length}/${chatHits.size} fire in ${chatLabel()} (${chatMsgs} msgs)`;
-                // Only when the label collapsed them; at one chat the note already says which.
-                if (chatNames.length > 1) note.title = chatNames.slice(0, 20).join('\n') + (chatNames.length > 20 ? `\n+${chatNames.length - 20} more` : '');
-                bar.append(note);
-            } else if (scan) {
-                // The absence is the bar's to say, once, not every flag's: common-word and book-common verdicts rest on the book alone.
-                const note = document.createElement('span'); note.className = 'wa-bulk-count';
-                note.textContent = '· no chat scanned';
-                note.title = 'Common word and book common flags rest on the book alone. Choose chats… to add chat evidence.';
-                bar.append(note);
-            }
             if (cleanupUndo?.length) bar.append(barBtn(`Undo (${cleanupUndo.length})`, undoPrune));
         };
         /** The Select… menu: All visible and None set the selection; a severity or a flag toggles its rows in and out, the menu staying open, so several can be combined. */
@@ -2866,6 +2853,18 @@ export async function lorebookStudio(preferredBook = null, open = null) {
             bar.append(b);
         }
         // Clear of the close X, which is absolutely positioned at the bar's right edge.
+        // The book's chat-evidence status, once, here: it belongs to the audit, not to any one tab's tools.
+        if (scan) {
+            const st = document.createElement('span'); st.className = 'wa-tab-status';
+            if (chatHits) {
+                st.textContent = `${[...chatHits.values()].filter(n => n > 0).length}/${chatHits.size} keys fire in ${chatLabel()} (${chatMsgs} msgs)`;
+                if (chatNames.length > 1) st.title = chatNames.slice(0, 20).join('\n') + (chatNames.length > 20 ? `\n+${chatNames.length - 20} more` : '');
+            } else {
+                st.textContent = 'no chat scanned';
+                st.title = 'Common word and book common flags rest on the book alone. Choose chats… to add chat evidence.';
+            }
+            bar.append(st);
+        }
         bar.append(closeBtn);   // tab order: straight after the last tab. It's positioned, so no layout effect
         return bar;
     };
