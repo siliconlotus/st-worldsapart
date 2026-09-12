@@ -591,7 +591,7 @@ export async function lorebookStudio(preferredBook = null, open = null) {
         const i = document.createElement('i');
         // The crown and the lettered tools are wide glyphs; wa-tool-narrow squeezes them to the pitch of the rest.
         if (cls.startsWith('fa-')) i.className = `fa-solid ${cls} wa-tool` + (on ? ' wa-on' : '') + (cls === 'fa-crown' ? ' wa-tool-narrow' : '');
-        else { i.className = 'wa-tool wa-tool-narrow' + (on ? ' wa-on' : ''); i.textContent = cls; i.style.fontWeight = 'bold'; }
+        else { i.className = 'wa-tool wa-tool-text' + (on ? ' wa-on' : ''); i.textContent = cls; i.style.fontWeight = 'bold'; }
         i.title = title;
         i.addEventListener('click', ev => { ev.stopPropagation(); onClick(ev); });
         return i;
