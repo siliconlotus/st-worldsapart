@@ -1749,8 +1749,8 @@ const SETTINGS_HTML = `
                 <option value="scan">Whole scan window (SillyTavern default)</option>
             </select>
 
-            <label for="wa_drop_chat_tags">Ignore these HTML tags in chat <span class="fa-solid fa-circle-question note-link-span" title="Comma-separated tags to be skipped when scanning for keyword hits."></span></label>
-            <input id="wa_drop_chat_tags" type="text" class="text_pole" placeholder="internal_states, thinking" title="You might want to set this to your preset's internal state tracker so your quest tracker doesn't constantly pull entries.">
+            <label for="wa_drop_chat_tags">Ignore these HTML tags in chat <span class="fa-solid fa-circle-question note-link-span" title="Comma-separated tags to be skipped when scanning for keyword hits. You might want to set this to your preset's internal state tracker so your quest tracker doesn't constantly pull entries."></span></label>
+            <input id="wa_drop_chat_tags" type="text" class="text_pole" placeholder="internal_states, thinking">
 
             <label for="wa_word_boundary">Word boundary <span class="fa-solid fa-circle-question note-link-span" title="Applies to entries with Match Whole Words on and SmartKeys that use =. Permissive: whole-word &quot;Joe&quot; matches &quot;Joe's&quot;. Strict: no match. Neither matches &quot;Joes&quot;."></span></label>
             <select id="wa_word_boundary" class="text_pole">
