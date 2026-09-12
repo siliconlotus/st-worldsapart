@@ -261,6 +261,19 @@
             "selectiveLogic": 0,
             "comment": "UNREACHABLE — \"sedgewhistle\" is in no chat message and appears only in uid 16's content, and uid 16 is preventRecursion, so that content never enters the buffer. Must never activate, at any depth.",
             "content": "The sedgewhistle sounds once and is not heard again."
+        },
+        "19": {
+            "uid": 19,
+            "key": [
+                "lamp-post"
+            ],
+            "keysecondary": [],
+            "constant": false,
+            "vectorized": false,
+            "disable": false,
+            "selectiveLogic": 0,
+            "comment": "VARIANT ONLY — \"lamp-post\" as typed appears in no entry text and no chat message; only the space form does, in its own content. The audit flags it minor: the key fires, but never on the form the author wrote.",
+            "content": "A lamp post leans at the corner of the lane."
         }
     }
 }

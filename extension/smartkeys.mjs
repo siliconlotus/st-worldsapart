@@ -316,7 +316,8 @@ function registerTerms(scope, node) {
     if (node.type === 'REGEX') {
         // No acIndex: a pattern is not a literal, so it skips pass 1.
     } else if (node.type === 'TERM') {
-        node.acIndex = internLiteral(scope, fold(node.value));
+        // One index per variant: a single one would make the pass-1 zero authoritative for the typed form alone.
+        node.acIndex = keyVariants(node.value).map(v => internLiteral(scope, fold(v)));
     } else if (node.type === 'NOT') {
         registerTerms(scope, node.operand);
     } else {
@@ -356,9 +357,10 @@ export function evaluate(node, text, acHits) {
     if (!node) return { matched: false, scoreBoost: 0, units: [] };
     switch (node.type) {
         case 'TERM': {
-            if (acHits && node.acIndex !== undefined) {
+            if (acHits && Array.isArray(node.acIndex)) {
                 // No folded-substring hit means no match under any flags; an unflagged term is exactly what pass 1 proved.
-                const n = acHits.get(node.acIndex);
+                let n = 0;
+                for (const i of node.acIndex) n += acHits.get(i) ?? 0;
                 if (!n) return { matched: false, scoreBoost: 0, units: [] };
                 if (!node.isExact && !node.isCaseSensitive) return { matched: true, scoreBoost: node.weight * n, units: unit(node, node.weight * n, n) };
             }
@@ -447,12 +449,12 @@ export function primeScan(rawKeys, text, scope = defaultScope) {
 
 /** A plain key's count from a primed scan, or undefined when the cache cannot answer (unscanned text, unregistered key, pending
  *  rebuild). A 0 is authoritative under any flags: no folded-substring hit means no case-sensitive or whole-word hit. */
-export function cachedCount(raw, text, scope = defaultScope) {
+export function cachedCount(raw, text, scope = defaultScope, expand = true) {
     if (scope.dirty || scope.automaton === null) return undefined;
     const counts = scope.scans.get(text);
     if (counts === undefined) return undefined;
     let total = 0;
-    for (const v of keyVariants(raw)) {
+    for (const v of (expand ? keyVariants(raw) : [normalizeOrthography(raw)])) {
         const idx = scope.termIndex.get(fold(v));
         if (idx === undefined) return undefined;
         total += counts.get(idx) ?? 0;

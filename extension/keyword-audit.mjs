@@ -4,7 +4,7 @@ import { COMMON_WORDS } from '../plugin/commonwords.js';
 import { NAME_PARTICLES } from './relevance.mjs';
 import { ZIPF_EN } from './zipf-en.js';
 import { countKey, escapeRegex, isRegexKey, secondaryKeys, segment, usableKeys } from './matcher.mjs';
-import { createScanScope, parse, primeScan, tokenize, validateSmartKey } from './smartkeys.mjs';
+import { cachedCount, createScanScope, keyVariants, parse, primeScan, tokenize, validateSmartKey } from './smartkeys.mjs';
 
 
 /** Below this many entries the df-based book-shared flag is skipped; English-common still fires. */
@@ -81,7 +81,7 @@ export const KEY_CHAT_COMMON = 0.20;
 export const SEVERE = 'severe', MODERATE = 'moderate', MINOR = 'minor';
 
 /** The order `classify` tests its branches in, so a display can rank verdicts without re-deriving them. */
-export const FLAG_PRIORITY = ['unusable', 'english common', 'unattested', 'book shared', 'fragment', 'short'];
+export const FLAG_PRIORITY = ['unusable', 'english common', 'unattested', 'book shared', 'fragment', 'short', 'variant only'];
 
 export function buildKeyPruneScan(data, opts, ignoreSet, { caseSensitiveDefault = false, wholeWordsDefault = false, matchWindow = 'scan', chatScan } = {}) {
     // undefined: no scan, or a scan that did not cover this key; 0: scanned and silent. chatChecked reads the difference.
@@ -132,19 +132,23 @@ export function buildKeyPruneScan(data, opts, ignoreSet, { caseSensitiveDefault 
             for (const key of allKeys) {
                 const k = ck(key, cs, ww);
                 if (counted.has(k)) continue;
-                let n = 0;
-                for (const s of segments) n += countKey(key, s, cs, ww, scanScope);
+                let n = 0, typed = 0;
+                // cachedCount both times, or a flag-aware total meets a folded-substring one: a 0 there is authoritative under any flags.
+                for (const s of segments) {
+                    n += countKey(key, s, cs, ww, scanScope);
+                    typed += cachedCount(key, s, scanScope, false) ?? 0;
+                }
                 if (!n) continue;
                 counted.add(k);
                 let r = scanCache.get(k);
-                if (!r) scanCache.set(k, r = { df: 0, total: 0 });
-                r.df++; r.total += n;
+                if (!r) scanCache.set(k, r = { df: 0, total: 0, typed: 0 });
+                r.df++; r.total += n; r.typed += typed;
             }
         }
     };
     const scan = (key, cs, ww) => {
         runBatch(cs, ww);
-        return scanCache.get(ck(key, cs, ww)) ?? { df: 0, total: 0 };
+        return scanCache.get(ck(key, cs, ww)) ?? { df: 0, total: 0, typed: 0 };
     };
     // Short-key second pass: a boundary hit is rejected when a digit sits in the surrounding run of [\d.,$£€¥], so "007" is clean in "Agent 007." but not in "$10,007.08".
     const NUMRUN = /[\d.,$£€¥]/;
@@ -194,6 +198,8 @@ export function buildKeyPruneScan(data, opts, ignoreSet, { caseSensitiveDefault 
         if (nBook >= KEY_MIN_SHARED_ENTRIES && bookListed / nBook > opts.bookShared * 0.75 && opts.pruneShared) return { flag: 'book shared', bookContent, bookListed };
         if (literal && opts.pruneFragment !== false && looksLikeFragment(k)) return { flag: 'fragment', bookContent };
         if (literal && k.length < opts.minLength && !ww && opts.pruneShort) return { flag: 'short', bookContent, clean: strictClean(k, cs), total: scan(k, cs, false).total };
+        const hits = scan(k, cs, ww);
+        if (literal && hits.total > 0 && hits.typed === 0 && keyVariants(k).length > 1) return { flag: 'variant only', bookContent };
         return null;
     };
     /** Secondary keys the matcher will not act on, with the validator's message: a set difference against secondaryKeys, so which codes are fatal here stays a matcher.mjs rule. */
@@ -224,6 +230,7 @@ export function buildKeyPruneScan(data, opts, ignoreSet, { caseSensitiveDefault 
         if (p.flag === 'english common') return p.chatRate >= (opts.chatCommon ?? KEY_CHAT_COMMON) ? SEVERE : MODERATE;
         if (p.flag === 'book shared') return p.bookListed / nBook >= opts.bookShared ? SEVERE : MODERATE;
         if (p.flag === 'fragment') return SEVERE;
+        if (p.flag === 'variant only') return MINOR;
         const ratio = p.total ? p.clean / p.total : 0;
         return ratio >= 1 ? MINOR : ratio <= 1 / 3 ? SEVERE : MODERATE;
     };
@@ -242,6 +249,7 @@ export function buildKeyPruneScan(data, opts, ignoreSet, { caseSensitiveDefault 
         }
         if (p.flag === 'book shared') return { text: `book shared (${Math.round(100 * p.bookListed / nBook)}%)`, severity };
         if (p.flag === 'fragment') return { text: 'phrase fragment', severity };
+        if (p.flag === 'variant only') return { text: 'matches only as a hyphen/space variant', severity };
         return { text: `short (${p.clean}/${p.total} clean)`, severity };
     };
     // Pre-ticked: the red tier, plus unattested on machine-written entries only (K14). Unusable is red but wants a correction, not a deletion.

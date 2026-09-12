@@ -100,6 +100,8 @@ console.log('                            with WA enabled it must appear in the p
 console.log('   caf                      dead under WA — whole-word, and "café" does not count (core');
 console.log('                            WOULD fire it; that divergence is the entry\'s whole point)');
 console.log('   bistro                   unflagged; loses the terrace group to caf\'s override under core.');
+console.log('   lamp-post                "matches only as a hyphen/space variant", minor — the space form is');
+console.log('                            in its own content, the hyphenated form nowhere.');
 console.log('');
 console.log('Runtime eyeball (prune, bucket 1.5): on a generation whose recent chat mentions café');
 console.log('and bistro, the prompt must contain NEITHER terrace entry — core picks caf as group');
