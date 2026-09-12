@@ -2029,7 +2029,7 @@ export async function lorebookStudio(preferredBook = null, open = null) {
         if (!scan) { toastr.info('Run the audit first.', 'Worlds Apart'); return; }
         // The button shows the wait, as the audit button does; a toast for a lookup this short only lingers.
         const finding = () => findBookChats(all);
-        const found = btn ? await withBusy(btn, '0.5', finding, `<i class="fa-solid fa-spinner fa-spin"></i> ${all ? 'Listing chats…' : 'Finding chats…'}`) : await finding();
+        const found = btn ? await withBusy(btn, '0.5', finding, '<i class="fa-solid fa-spinner fa-spin"></i>') : await finding();   // a rail square: the spinner alone
         // The open chat is offered too, unticked, for the case the metadata does not capture — never assumed.
         const ctx = getContext();
         const openName = String(ctx.chatId ?? '');
@@ -2143,14 +2143,8 @@ export async function lorebookStudio(preferredBook = null, open = null) {
         const bookLbl = document.createElement('b'); bookLbl.textContent = selected;
         bookLbl.style.cssText = 'overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:16em;';
         row1.append(bookLbl);
-        const auditBtn = document.createElement('button'); auditBtn.type = 'button'; auditBtn.className = 'menu_button';
-        auditBtn.innerHTML = `<i class="fa-solid fa-stethoscope"></i> ${scan ? 'Re-audit' : 'Run audit'}`;
-        auditBtn.title = chatHits
-            ? `Re-run the keyword audit with the current Tool Settings.\nChat evidence: ${chatLabel()}, ${chatMsgs} messages.`
-            : 'Re-run the keyword audit with the current Tool Settings.\nNo chat searched yet.';
-        auditBtn.addEventListener('click', async () => { await withBusy(auditBtn, '0.5', runAudit, '<i class="fa-solid fa-spinner fa-spin"></i> Auditing…'); renderExplorer(); });
         // Search repaints only the list: rebuilding the header would drop the input's focus mid-keystroke.
-        row1.append(auditBtn, buildFilterBtn(renderExplorer), buildSortControl(() => repaint()), buildSearchBox(() => repaint()));
+        row1.append(buildFilterBtn(renderExplorer), buildSortControl(() => repaint()), buildSearchBox(() => repaint()));
         head.append(row1);
         const fixed = document.createElement('div'); fixed.className = 'wa-studio-fixed';
         trayEl = renderTray();
@@ -2158,34 +2152,30 @@ export async function lorebookStudio(preferredBook = null, open = null) {
         const ignStrip = document.createElement('div'); ignStrip.className = 'wa-ign-strip';
         fixed.append(head, trayEl, bar, ignStrip);
         const list = document.createElement('div'); list.className = 'wa-studio-entries';
-        pane.append(fixed, list);
+        // The actions stand in a rail beside the list, as the Explorer's do: audit, delete, ignore, show all, choose chats.
+        const railBtn = (icon, title, onClick) => { const b = document.createElement('button'); b.type = 'button'; b.className = 'menu_button'; b.innerHTML = `<i class="fa-solid ${icon}"></i>`; b.title = title; b.addEventListener('click', onClick); return b; };
+        const auditBtn = railBtn('fa-stethoscope', `${scan ? 'Re-audit' : 'Run audit'}: flag dead, common and short keywords.` + (chatHits ? `\nChat evidence: ${chatLabel()}, ${chatMsgs} messages.` : '\nNo chat searched yet.'),
+            async () => { await withBusy(auditBtn, '0.5', runAudit, '<i class="fa-solid fa-spinner fa-spin"></i>'); renderExplorer(); });
+        const deleteBtn = railBtn('fa-trash-can', 'Delete the selected keywords', () => pruneChecked()); deleteBtn.classList.add('wa-bulk-danger');
+        const ignoreBtn = railBtn('fa-bell-slash', 'Ignore the selected terms: never flag them in this book', () => ignoreChecked());
+        const showAllBtn = railBtn(cleanupShowAll ? 'fa-eye-slash' : 'fa-eye', cleanupShowAll ? 'Back to flagged keys only' : 'Show every key on every visible entry, flagged or not',
+            () => { cleanupShowAll = !cleanupShowAll; showAllBtn.innerHTML = `<i class="fa-solid ${cleanupShowAll ? 'fa-eye-slash' : 'fa-eye'}"></i>`; showAllBtn.title = cleanupShowAll ? 'Back to flagged keys only' : 'Show every key on every visible entry, flagged or not'; repaint(); });
+        const chatsBtn = railBtn('fa-comments', 'Choose chats: pick which chats to count key hits over. Bound chats are scanned when the audit runs; shift-click lists every chat on this install.',
+            ev => runChatScan(ev?.shiftKey, chatsBtn).catch(e => { console.error('Worlds Apart: chat scan failed', e); toastr.error(String(e?.message ?? e), 'Worlds Apart'); }));
+        const rail = document.createElement('div'); rail.className = 'wa-rail';
+        rail.append(auditBtn, deleteBtn, ignoreBtn, showAllBtn, chatsBtn);
+        const body = document.createElement('div'); body.className = 'wa-studio-body';
+        body.append(list, rail);
+        pane.append(fixed, body);
 
         let groups = [], allIds = [], reg = { row: new Map(), grp: [] };
-        // Repaints the list, not just the bar: it changes which rows exist.
-        const showAllBtn = () => {
-            const b = barBtn(cleanupShowAll ? 'Flagged only' : 'Show all', () => { cleanupShowAll = !cleanupShowAll; repaint(); });
-            b.title = cleanupShowAll ? 'List only the keys the audit flagged' : 'List every key on every visible entry, flagged or not';
-            return b;
-        };
-        const chatScanBtn = () => {
-            const b = barBtn('Choose chats…',
-                ev => runChatScan(ev?.shiftKey, b).catch(e => { console.error('Worlds Apart: chat scan failed', e); toastr.error(String(e?.message ?? e), 'Worlds Apart'); }));
-            b.title = 'Pick which chats to count key hits over. Bound chats are scanned when the audit runs; shift-click lists every chat on this install.';
-            return b;
-        };
         const paintBar = () => {
             const on = allIds.filter(id => cleanupChecks.get(id)).length;
             bar.innerHTML = '';
             const count = document.createElement('span'); count.className = 'wa-bulk-count';
             count.textContent = `${on}/${allIds.length} selected`;
             const selBtn = barBtn('Select… ▾', () => { const r = selBtn.getBoundingClientRect(); showCtxMenu(selectItems(), r.left, r.bottom + 2, ctxMount(), selectItems); });
-            bar.append(count,
-                selBtn,
-                barBtn('Delete', pruneChecked, 'wa-bulk-danger'),
-                barBtn('Ignore', ignoreChecked),
-                showAllBtn(),
-                chatScanBtn(),
-            );
+            bar.append(count, selBtn);
             if (chatHits) {
                 const note = document.createElement('span'); note.className = 'wa-bulk-count';
                 note.textContent = `· ${[...chatHits.values()].filter(n => n > 0).length}/${chatHits.size} fire in ${chatLabel()} (${chatMsgs} msgs)`;
