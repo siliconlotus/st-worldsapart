@@ -2749,7 +2749,8 @@ export async function lorebookStudio(preferredBook = null, open = null) {
         panes.append(hayWrap, keyBox, gateBox, bookList);
 
         const opts = document.createElement('div');
-        opts.style.cssText = 'display:flex;flex-wrap:wrap;align-items:center;gap:8px 14px;padding:6px 8px;flex:0 0 auto;opacity:0.8;font-size:0.9em;';
+        // One line: the labels shrink, the tools never do, and past that the strip scrolls sideways rather than clipping.
+        opts.style.cssText = 'display:flex;align-items:center;gap:14px;padding:6px 8px;flex:0 0 auto;opacity:0.8;font-size:0.9em;overflow-x:auto;white-space:nowrap;';
         const flag = (label, get, set) => {
             const l = document.createElement('label'); l.style.cssText = 'display:flex;gap:4px;align-items:center;cursor:pointer;';
             const c = document.createElement('input'); c.type = 'checkbox'; c.checked = get();
@@ -2780,8 +2781,10 @@ export async function lorebookStudio(preferredBook = null, open = null) {
             i.addEventListener('click', onClick);
             return i;
         };
-        opts.append(
-            winLabel,
+        const tools = document.createElement('span');
+        tools.style.cssText = 'display:flex;gap:10px;align-items:center;flex-shrink:0;margin-left:auto;';
+        opts.append(winLabel, tools);
+        tools.append(
             labTool('fa-comments', 'Load the current chat to the message-depth setting. Shift-click for a depth.',
                 async ev => {
                     const depth = ev.shiftKey
