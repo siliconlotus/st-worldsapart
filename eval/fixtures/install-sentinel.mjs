@@ -100,7 +100,7 @@ console.log('                            with WA enabled it must appear in the p
 console.log('   caf                      dead under WA — whole-word, and "café" does not count (core');
 console.log('                            WOULD fire it; that divergence is the entry\'s whole point)');
 console.log('   bistro                   unflagged; loses the terrace group to caf\'s override under core.');
-console.log('   lamp-post                "matches only as a hyphen/space variant", minor — the space form is');
+console.log('   lamp-post                "matches only un-hyphenated", minor — the space form is');
 console.log('                            in its own content, the hyphenated form nowhere.');
 console.log('   /Cap\'n \\w+/             "a regex does not fold \' — try [...]", minor, the class being the');
 console.log('                            fold\'s own apostrophe family. Same chip in the Explorer and in');

@@ -271,7 +271,7 @@ export function buildKeyPruneScan(data, opts, ignoreSet, { caseSensitiveDefault 
         }
         if (p.flag === 'book shared') return { text: `book shared (${Math.round(100 * p.bookListed / nBook)}%)`, severity };
         if (p.flag === 'fragment') return { text: 'phrase fragment', severity };
-        if (p.flag === 'variant only') return { text: 'matches only as a hyphen/space variant', severity };
+        if (p.flag === 'variant only') return { text: 'matches only un-hyphenated', severity };
         if (p.flag === 'regex orthography') return { text: p.evidence ? `${p.evidence} — try ${p.suggest}` : `a regex does not fold ${p.ascii} — try ${p.suggest}`, severity };
         return { text: `short (${p.clean}/${p.total} clean)`, severity };
     };

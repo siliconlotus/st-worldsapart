@@ -41,7 +41,7 @@ eq(msgs.length, 11, 'the hidden message is dropped, as core and WA both drop it'
     eq(v.glimmerwort?.why, 'unattested (book)', 'chat-only key reads dead when no chat was searched');
     eq(v.mother?.flag, 'english common', 'the English list flags a generic word with no chat needed');
     eq(v.mother?.sev !== RED, true, '...but unevidenced it is not severe');
-    eq(v['lamp-post']?.why, 'matches only as a hyphen/space variant', 'the key fires, but never on the form the author typed');
+    eq(v['lamp-post']?.why, 'matches only un-hyphenated', 'the key fires, but never on the form the author typed');
     eq(v['lamp-post']?.sev, 'minor', '...which is advisory: the flag says rewrite or drop, not that it is broken');
     eq(v["/Cap'n \\w+/"]?.why, `a regex does not fold ' \u2014 try ['${ORTHO_FAMILIES.find(f => f.ascii === "'").pair}]`,
         'a regex key is told its quote matches only itself, and is offered the curly pair');
