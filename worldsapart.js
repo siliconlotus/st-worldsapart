@@ -1717,6 +1717,9 @@ const SETTINGS_HTML = `
 .worlds-apart-settings .wa-section { margin-left: 12px; border-left: 2px solid var(--SmartThemeBorderColor, rgba(255,255,255,0.15)); padding-left: 8px; }
 /* Every item under the top header is indented the same as a section is, so top-level and section items read as one level each. */
 .worlds-apart-settings > .inline-drawer > .inline-drawer-content > :not(.wa-section) { margin-left: 12px; }
+.worlds-apart-settings .checkbox_label { margin-left: 0; }
+.worlds-apart-settings .checkbox_label input[type="checkbox"] { margin-left: 0; }
+.worlds-apart-settings .wa-section > .inline-drawer-content { padding-bottom: 10px; }
 .worlds-apart-settings .wa-section > .inline-drawer-toggle { font-size: 0.95em; opacity: 0.8; }
 .worlds-apart-settings .wa-section > .inline-drawer-toggle b { font-weight: 500; }
 .worlds-apart-settings small.opacity50p { display: block; margin: 0.15em 0 0.8em; }
