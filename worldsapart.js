@@ -38,6 +38,8 @@ import { PRESENTATION_ALIAS, normPresentation, presentationBaseLabel, reconcileT
 import { lorebookStudio } from './extension/studio.mjs';
 import { setCaptureHost, versusCore, gradeScene, superGradeScene, superEvalScene, POOL_ARMS } from './extension/capture-ui.mjs';
 import { isDurable } from './extension/grading.mjs';
+import { setLanguage, refreshIndex, table } from './extension/lang.mjs';
+import { packStore, fetchIndex, fetchPack } from './extension/lang-store.mjs';
 
 import { chunkEntry } from './extension/chunking.mjs';
 import { buildContentIndex, scoreContent, indexFingerprint, entryKey } from './extension/content-lexical.mjs';
@@ -1734,6 +1736,12 @@ const SETTINGS_HTML = `
             <label for="wa_message_depth">Message depth (recent messages for retrieval + keyword scan)</label>
             <input id="wa_message_depth" type="number" class="text_pole" min="1" max="20" step="1">
 
+            <label for="wa_language">Language (the frequency table the key suggester and audit read)</label>
+            <select id="wa_language" class="text_pole">
+                <option value="en">English</option>
+            </select>
+            <small class="opacity50p" id="wa_language_state"></small>
+
             <label for="wa_match_window">Match window (the unit a key has to match within)</label>
             <select id="wa_match_window" class="text_pole">
                 <option value="paragraph">Paragraph — terms must land in the same paragraph</option>
@@ -2038,6 +2046,7 @@ export async function init() {
     if (settings().presentationOrder in PRESENTATION_ALIAS) settings().presentationOrder = PRESENTATION_ALIAS[settings().presentationOrder];
     if (settings().studioTierCfg && !settings().tierCfg) { settings().tierCfg = settings().studioTierCfg; delete settings().studioTierCfg; }
     delete settings().baselineQuery; delete settings().baselineWeight;   // removed feature — drop orphaned stored values
+    await setLanguage(settings().language, { fetchPack, store: packStore });
     // The one place wordBoundary crosses into the matcher, which holds it module-level; re-pushed by the select's handler below.
     matcher.setBoundaryMode(settings().wordBoundary);
 
@@ -2085,6 +2094,23 @@ export async function init() {
     bind('#wa_rater_id', 'raterId', 'string');
     bind('#wa_message_depth', 'messageDepth', 'number');
     bind('#wa_match_window', 'matchWindow', 'string');
+    bind('#wa_language', 'language', 'string');
+    const languageState = () => {
+        const t = table();
+        $('#wa_language_state').text(t.loaded ? `${t.label} — ${t.zipf.size} words` : `${t.lang}: pack not loaded — every word reads rare until it is`);
+    };
+    $('#wa_language').on('change', async () => { await setLanguage(settings().language, { fetchPack, store: packStore }); languageState(); });
+    // The index is read only here, when the panel fills its list; a stored pack the index has moved is refreshed then.
+    (async () => {
+        const index = await refreshIndex({ fetchIndex, fetchPack, store: packStore });
+        const $sel = $('#wa_language');
+        const known = new Set(['en']);
+        for (const [lang, meta] of Object.entries(index ?? {})) { if (!known.has(lang)) { known.add(lang); $sel.append(new Option(meta.label, lang)); } }
+        // A language the store holds but the index no longer lists stays selectable while it is the setting.
+        if (!known.has(settings().language)) $sel.append(new Option(settings().language, settings().language));
+        $sel.val(settings().language);
+        languageState();
+    })();
     bind('#wa_drop_chat_tags', 'dropChatTags', 'string');
     bind('#wa_word_boundary', 'wordBoundary', 'string');
     $('#wa_word_boundary').on('change', () => matcher.setBoundaryMode(settings().wordBoundary));

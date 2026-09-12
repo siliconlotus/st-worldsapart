@@ -24,6 +24,7 @@ export const defaultSettings = {
     matchWindow: 'paragraph', // 'scan' | 'message' | 'paragraph' — the unit a key must match within; 'scan' is core's
     wordBoundary: 'strict', // 'permissive' | 'strict' (also hyphen and apostrophes); read through matcher.mjs setBoundaryMode()
     raterId: '', // UUIDv4 a typed grade is signed as, generated on first use
+    language: 'en', // which language pack the suggester and audit read (lang.mjs); 'en' is bundled, others fetch once
 
     bm25K1: 1.2, // tf saturation for the key scorer (matcher.mjs) and the content text scorer; the plugin ignores it
     repeatCurve: 'presence-log', // 'bm25' | 'presence-log' — the shape a key's repeats accrue by (matcher.mjs repeatCurveOf)
