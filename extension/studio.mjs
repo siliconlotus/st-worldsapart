@@ -248,6 +248,7 @@ export async function lorebookStudio(preferredBook = null, open = null) {
     const renderTray = (force = false) => {
         if (!trayOpen && !force) return document.createElement('div');   // nothing mounted when closed
         const panel = document.createElement('div'); panel.className = 'wa-tray-panel';
+        if (force) panel.dataset.force = '1';   // rendered into the popup: a refresh must force too, or it swaps in an empty div
         const check = (obj, key, label, after) => trayChk('wa-tray-opt', label, !!obj[key], v => { obj[key] = v; persistOpts(); after?.(); });
         const num = (obj, key, before, unit, opt, after) => {
             const { min = 1, max, scale = 1, width = '3.6em' } = opt || {};
@@ -315,7 +316,7 @@ export async function lorebookStudio(preferredBook = null, open = null) {
         );
         return panel;
     };
-    const refreshTray = () => { const fresh = renderTray(); if (trayEl?.isConnected) trayEl.replaceWith(fresh); trayEl = fresh; };
+    const refreshTray = () => { const fresh = renderTray(trayEl?.dataset?.force === '1'); if (trayEl?.isConnected) trayEl.replaceWith(fresh); trayEl = fresh; };
     /** The tray's toggle, which both headers carry: the panel itself mounts below them. */
     const trayBtn = () => {
         const b = document.createElement('button'); b.type = 'button'; b.className = 'menu_button wa-filter';
@@ -325,7 +326,8 @@ export async function lorebookStudio(preferredBook = null, open = null) {
         // A popup, not an inline tray: both panels together outgrow the fixed header and push the list and the rail off the pane.
         b.addEventListener('click', async () => {
             const wrap = document.createElement('div'); wrap.style.textAlign = 'left';
-            wrap.append(renderTray(true), renderGlobalTray(true));
+            trayEl = renderTray(true);   // the popup's panel is the one a refresh replaces while it is open
+            wrap.append(trayEl, renderGlobalTray(true));
             await new Popup(wrap, POPUP_TYPE.TEXT, '', { okButton: 'Close', wide: true, large: true }).show();
             renderExplorer();   // every option saved on change; the list repaints under the new ones
         });
@@ -1806,7 +1808,7 @@ export async function lorebookStudio(preferredBook = null, open = null) {
             const chip = document.createElement('span'); chip.className = 'wa-kw wa-kw-ignored';
             const t = document.createElement('span'); t.className = 'wa-kw-text'; t.textContent = key; t.style.cursor = 'default';
             const x = document.createElement('i'); x.className = 'fa-solid fa-xmark wa-kw-del'; x.title = 'Stop ignoring this term';
-            x.addEventListener('click', () => { ignoreSet.delete(key); persistIgnore(); onChange(); if (trayOpen) refreshTray(); });
+            x.addEventListener('click', () => { ignoreSet.delete(key); persistIgnore(); onChange(); if (trayEl?.isConnected) refreshTray(); });
             chip.append(t, x); host.append(chip);
         }
     };
