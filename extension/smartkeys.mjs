@@ -322,7 +322,8 @@ export function synthesizeSecondary(primary, secondaries, logic = 0, flags = {})
 
 /** One matching context: the term registry, the automaton, the AST cache and the per-text scans. Scoped, not global: registerTerms stamps a scope-local index onto each TERM. */
 export function createScanScope() {
-    return { termIndex: new Map(), patterns: [], automaton: null, dirty: false, scans: new Map(), scanMax: SCAN_CACHE_MAX, astCache: new Map() };
+    // variantIdx: raw key -> its variants' pattern indices, filled once every variant is interned; the hot path is then a map read.
+    return { termIndex: new Map(), patterns: [], automaton: null, dirty: false, scans: new Map(), scanMax: SCAN_CACHE_MAX, astCache: new Map(), variantIdx: new Map(), typedIdx: new Map(), keysByIdx: null };
 }
 
 const defaultScope = createScanScope();
@@ -334,6 +335,7 @@ function internLiteral(scope, folded) {
         scope.patterns.push(folded);
         scope.termIndex.set(folded, idx);
         scope.dirty = true;
+        scope.keysByIdx = null;   // the reverse map is over the interned set, which just grew
     }
     return idx;
 }
@@ -483,24 +485,60 @@ export function primeScan(rawKeys, text, scope = defaultScope) {
     for (const segment of segments) ensureScan(scope, segment);
 }
 
+/** The literal keys among `literals` whose variants the primed scan of `text` found — the automaton's own answer to which
+ *  keys a segment can possibly count, so a caller need run countKey for those alone. Every key when `text` was not primed.
+ *  The reverse map (pattern index -> keys) is built once per interned set and per `literals` list, by identity. */
+export function hitLiterals(scope, text, literals) {
+    const hit = scope.scans.get(text);
+    if (!hit || scope.dirty || scope.automaton === null) return literals;
+    if (!scope.keysByIdx || scope.keysByIdx.over !== literals) {
+        const map = new Map();
+        for (const key of literals) {
+            for (const v of keyVariants(key)) {
+                const i = scope.termIndex.get(fold(v));
+                if (i === undefined) continue;
+                let list = map.get(i);
+                if (!list) map.set(i, list = []);
+                list.push(key);
+            }
+        }
+        scope.keysByIdx = { over: literals, map };
+    }
+    const out = new Set();
+    for (const [i, n] of hit) if (n) for (const key of scope.keysByIdx.map.get(i) ?? []) out.add(key);
+    return out;
+}
+
 /** A plain key's count from a primed scan, or undefined when the cache cannot answer (unscanned text, unregistered key, pending
  *  rebuild). A 0 is authoritative under any flags: no folded-substring hit means no case-sensitive or whole-word hit. */
 export function cachedCount(raw, text, scope = defaultScope, expand = true) {
     if (scope.dirty || scope.automaton === null) return undefined;
     const counts = scope.scans.get(text);
     if (counts === undefined) return undefined;
-    let total = 0;
-    for (const v of (expand ? keyVariants(raw) : [normalizeOrthography(raw)])) {
-        const idx = scope.termIndex.get(fold(v));
-        if (idx === undefined) return undefined;
-        total += counts.get(idx) ?? 0;
+    // The indices are folded and looked up once per key per scope: this runs once per key per segment per entry, and the
+    // fold is the audit's whole cost when it runs here (R7 is scan cost; this was the rest).
+    const memo = expand ? scope.variantIdx : scope.typedIdx;
+    let idx = memo?.get(raw);
+    if (idx === undefined) {
+        idx = [];
+        for (const v of (expand ? keyVariants(raw) : [normalizeOrthography(raw)])) {
+            const i = scope.termIndex.get(fold(v));
+            if (i === undefined) return undefined;
+            idx.push(i);
+        }
+        memo?.set(raw, idx);
     }
+    let total = 0;
+    for (const i of idx) total += counts.get(i) ?? 0;
     return total;
 }
 
 /** Drops every registered key, cached AST and scan; called on chat switch so the automaton tracks the active books' vocabulary. */
 export function resetSmartKeys(scope = defaultScope) {
     scope.termIndex.clear();
+    scope.variantIdx?.clear();
+    scope.typedIdx?.clear();
+    scope.keysByIdx = null;
     scope.patterns.length = 0;
     scope.astCache.clear();
     scope.scans.clear();

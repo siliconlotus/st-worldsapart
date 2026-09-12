@@ -4,7 +4,7 @@ import { COMMON_WORDS } from '../plugin/commonwords.js';
 import { NAME_PARTICLES } from './relevance.mjs';
 import { ZIPF_EN } from './zipf-en.js';
 import { countKey, countRegexKey, escapeRegex, isRegexKey, secondaryKeys, segment, swapLiteralHyphens, usableKeys } from './matcher.mjs';
-import { cachedCount, createScanScope, ORTHO_FAMILIES, parse, primeScan, tokenize, validateSmartKey } from './smartkeys.mjs';
+import { cachedCount, createScanScope, hitLiterals, ORTHO_FAMILIES, parse, primeScan, registerKeys, tokenize, validateSmartKey } from './smartkeys.mjs';
 
 
 /** Below this many entries the df-based book-shared flag is skipped; English-common still fires. */
@@ -164,33 +164,49 @@ export function buildKeyPruneScan(data, opts, ignoreSet, { caseSensitiveDefault 
     const ck = (key, cs, ww) => `${cs ? 1 : 0}${ww ? 1 : 0} ${cs ? key : String(key).toLowerCase()}`;
     // Content-outer, key-inner: one automaton walk per entry serves every key.
     const batched = new Set();
+    // Once: every key interned before any content is scanned. Registering per content re-folded every key per entry.
+    registerKeys(allKeys, scanScope);
+    // Segmented like the scan window, once per content rather than once per flag combo; df still counts entries, not segments (K5).
+    const contentSegments = contents.map(c => segment([c], matchWindow));
+    // Literal keys are counted only in the segments the automaton found a variant of them in; `?` and regex keys in every
+    // segment, being evaluated rather than found. Same verdicts as calling countKey for every key in every segment, since
+    // countKey's own first step is that same primed lookup — this changes only when and how often it is called.
+    const literalKeys = allKeys.filter(k => !k.startsWith('?') && !isRegexKey(k));
+    const otherKeys = allKeys.filter(k => k.startsWith('?') || isRegexKey(k));
     const runBatch = (cs, ww) => {
         const combo = `${cs ? 1 : 0}${ww ? 1 : 0}`;
         if (batched.has(combo)) return;
         batched.add(combo);
-        // Segmented like the scan window; df still counts entries, not segments (K5).
-        for (const c of contents) {
-            const segments = segment([c], matchWindow);
-            primeScan(allKeys, segments, scanScope);
+        for (const segments of contentSegments) {
+            primeScan([], segments, scanScope);
+            const perKey = new Map();
+            const tally = (key, seg) => {
+                const n = countKey(key, seg, cs, ww, scanScope);
+                if (!n) return;
+                let r = perKey.get(key);
+                if (!r) perKey.set(key, r = { n: 0, typed: 0 });
+                r.n += n;
+                r.typed += cachedCount(key, seg, scanScope, false) ?? 0;
+            };
+            for (const seg of segments) {
+                for (const key of hitLiterals(scanScope, seg, literalKeys)) tally(key, seg);
+                for (const key of otherKeys) tally(key, seg);
+            }
             // Case variants of one key (`Pack` and `pack`) share a cache slot when cs is off, and both would count this
             // entry: df would exceed nBook and the ratio read over 100%.
             const counted = new Set();
-            for (const key of allKeys) {
+            for (const [key, { n, typed }] of perKey) {
                 const k = ck(key, cs, ww);
                 if (counted.has(k)) continue;
-                let n = 0, typed = 0;
-                // cachedCount both times, or a flag-aware total meets a folded-substring one: a 0 there is authoritative under any flags.
-                for (const s of segments) {
-                    n += countKey(key, s, cs, ww, scanScope);
-                    typed += cachedCount(key, s, scanScope, false) ?? 0;
-                }
-                if (!n) continue;
                 counted.add(k);
                 let r = scanCache.get(k);
                 if (!r) scanCache.set(k, r = { df: 0, total: 0, typed: 0 });
                 r.df++; r.total += n; r.typed += typed;
             }
         }
+        // Every key the batch saw is cached, the silent ones as zeros: a cache miss below means a key the audit never
+        // scanned, and only that is judged on demand. Leaving the zeros out made every dead key an on-demand rescan.
+        for (const key of allKeys) { const k = ck(key, cs, ww); if (!scanCache.has(k)) scanCache.set(k, { df: 0, total: 0, typed: 0 }); }
     };
     const scan = (key, cs, ww) => {
         runBatch(cs, ww);
@@ -317,7 +333,8 @@ export function buildKeyPruneScan(data, opts, ignoreSet, { caseSensitiveDefault 
         }
 
         // --- the key's shape; then dead last, a dead key being neutral --------------------------------------------
-        if (literal && opts.pruneFragment !== false && looksLikeFragment(k) && !namedInBook(k)) return { flag: 'fragment', bookContent };
+        // bookContent first: a name the book never mentions cannot be attested by it, and that spares the case-sensitive pass.
+        if (literal && opts.pruneFragment !== false && looksLikeFragment(k) && !(bookContent > 0 && namedInBook(k))) return { flag: 'fragment', bookContent };
         // Nothing to judge without a hit: a dead short key is dead, not "0/0 clean".
         if (literal && k.length < opts.minLength && !ww && opts.pruneShort && hits.total > 0) return { flag: 'short', bookContent, clean: strictClean(k, cs), total: scan(k, cs, false).total, key: k, ww };
         if (bookContent === 0 && opts.pruneUnattested && !(literal && opts.ignoreProper && looksProper(k)) && !chatRate) return { flag: 'unattested', bookContent, literal, chatChecked: chatRate !== undefined };
