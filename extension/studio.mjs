@@ -490,7 +490,7 @@ export async function lorebookStudio(preferredBook = null, open = null) {
         if (!n) {   // nothing selected -> the Reselect offer if a bulk action just spent one, else no footprint
             if (!lastSel?.size) return wrap;
             wrap.classList.add('wa-bulk-on');
-            const note = document.createElement('span'); note.className = 'wa-bulk-count'; note.textContent = 'Selection cleared';
+            const note = document.createElement('span'); note.className = 'wa-bulk-count'; note.textContent = 'Deselected';
             const drop = document.createElement('i'); drop.className = 'fa-solid fa-xmark wa-undo-dismiss'; drop.title = 'Dismiss';
             drop.addEventListener('click', () => { lastSel = null; refreshBulkBar(); });
             wrap.append(note, barBtn(`Reselect ${lastSel.size}`, () => {
@@ -539,7 +539,7 @@ export async function lorebookStudio(preferredBook = null, open = null) {
         wrap.append(
             count,
             barBtn(n === all.length ? 'Select none' : 'Select all', () => { if (n === all.length) consumeSelection(); else { lastSel = null; all.forEach(e => selectedEntries.add(e.uid)); syncSelCheckboxes(); } }),
-            ...(n === all.length ? [] : [barBtn('Clear', consumeSelection)]),
+            ...(n === all.length ? [] : [barBtn('Deselect', consumeSelection)]),
             sep(),
             barBtn(anyDisabled ? 'Enable' : 'Disable', () => { applyBulk(e => e.disable = !anyDisabled); refreshBulkBar(); }),
             addTermBtn,
@@ -3202,7 +3202,7 @@ export async function lorebookStudio(preferredBook = null, open = null) {
             if (selectedBooks.size) {
                 const top = document.createElement('div'); top.className = 'wa-bookbulk-top';
                 const cnt = document.createElement('span'); cnt.style.fontWeight = 'bold'; cnt.textContent = `${selectedBooks.size} selected`;
-                const clr = document.createElement('i'); clr.className = 'fa-solid fa-xmark wa-undo-dismiss'; clr.title = 'Clear selection';
+                const clr = document.createElement('i'); clr.className = 'fa-solid fa-xmark wa-undo-dismiss'; clr.title = 'Deselect all';
                 clr.addEventListener('click', () => { selectedBooks.clear(); bookAnchor = null; renderBooks(); });
                 top.append(cnt, clr);
                 const actions = document.createElement('div'); actions.className = 'wa-bookbulk-actions';
