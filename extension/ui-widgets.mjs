@@ -25,6 +25,7 @@ const buildCtxPanel = (items, x, y, depth, mount, refresh = null) => {
     const menu = document.createElement('div'); menu.className = 'wa-ctx';
     for (const it of items) {
         const row = document.createElement('div'); row.className = 'wa-ctx-item' + (it.danger ? ' wa-ctx-danger' : '') + (it.children ? ' wa-ctx-parent' : '') + (it.active ? ' wa-ctx-active' : '');
+        if (it.icon) { const ic = document.createElement('i'); ic.className = `${it.icon} wa-ctx-icon`; row.append(ic); }   // a Font Awesome class, e.g. a tick state
         const lbl = document.createElement('span'); lbl.textContent = it.label; row.append(lbl);
         if (it.children) {
             const car = document.createElement('span'); car.className = 'wa-ctx-caret'; car.textContent = '›'; row.append(car);
@@ -111,7 +112,7 @@ export function makeSortControl({ getSort, setSort, getTiered, setTiered, getTie
         const leaf = ex => ({ label: ex.label, active: cur === ex.key, fn: () => { setSort(ex.key); changed(); } });
         const items = [
             ...leadItems.map(leaf),
-            { label: `${getTiered() ? '☑' : '☐'} Tiered grouping`, active: getTiered(), fn: () => { setTiered(!getTiered()); changed(); } },
+            { label: 'Tiered grouping', icon: getTiered() ? 'fa-solid fa-square-check' : 'fa-regular fa-square', active: getTiered(), fn: () => { setTiered(!getTiered()); changed(); } },
             { label: 'Configure tiers…', fn: () => configureTiersPopup(getTierCfg, setTierCfg, changed) },
             ...SORT_MENU.map(m => m.key
                 ? { label: m.label, active: cur === m.key, fn: () => { setSort(m.key); changed(); } }
@@ -518,6 +519,7 @@ textarea.wa-entry-full.wa-tall { max-height: 62vh; }
     box-shadow: 0 6px 20px var(--SmartThemeShadowColor, rgba(0,0,0,0.45)); font-size: 0.9em; }
 .wa-ctx-item { display: flex; align-items: center; gap: 14px; padding: 5px 11px; border-radius: 4px; cursor: pointer; white-space: nowrap; }
 .wa-ctx-item:hover { background: var(--white20a, rgba(255,255,255,0.12)); }
+.wa-ctx-icon { width: 1.1em; text-align: center; margin-right: -6px; opacity: 0.85; }
 .wa-ctx-danger:hover { color: var(--wa-severe); }
 .wa-ctx-caret { margin-left: auto; opacity: 0.55; font-size: 1.15em; line-height: 1; }
 .wa-ctx-active { color: var(--SmartThemeQuoteColor, #6ea8fe); font-weight: 600; }

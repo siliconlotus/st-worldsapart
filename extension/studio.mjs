@@ -2219,14 +2219,14 @@ export async function lorebookStudio(preferredBook = null, open = null) {
             }
             const only = ids => () => { for (const id of allIds) cleanupChecks.set(id, false); for (const id of ids) cleanupChecks.set(id, true); sync(); };
             // A bucket with every row ticked untoggles; anything less ticks the whole bucket.
-            const toggle = ids => { const all = ids.length > 0 && ids.every(id => cleanupChecks.get(id)); return { mark: all ? '☑' : ids.some(id => cleanupChecks.get(id)) ? '◪' : '☐', fn: () => { for (const id of ids) cleanupChecks.set(id, !all); sync(); }, keep: true }; };
+            const toggle = ids => { const all = ids.length > 0 && ids.every(id => cleanupChecks.get(id)); return { icon: all ? 'fa-solid fa-square-check' : ids.some(id => cleanupChecks.get(id)) ? 'fa-solid fa-square-minus' : 'fa-regular fa-square', fn: () => { for (const id of ids) cleanupChecks.set(id, !all); sync(); }, keep: true }; };
             const rank = n => { const i = FLAG_PRIORITY.indexOf(n); return i < 0 ? FLAG_PRIORITY.length : i; };
             const items = [
                 { label: `All visible (${allIds.length})`, fn: only(allIds) },   // what the filter and search leave on screen
                 { label: 'None', fn: only([]) },
             ];
-            for (const sev of [SEVERE, MODERATE, MINOR]) if (bySev.has(sev)) { const t = toggle(bySev.get(sev)); items.push({ ...t, label: `${t.mark} ${sev[0].toUpperCase()}${sev.slice(1)} (${bySev.get(sev).length})` }); }
-            for (const name of [...buckets.keys()].sort((a, b) => rank(a) - rank(b) || a.localeCompare(b))) { const t = toggle(buckets.get(name)); items.push({ ...t, label: `${t.mark} ${name} (${buckets.get(name).length})` }); }
+            for (const sev of [SEVERE, MODERATE, MINOR]) if (bySev.has(sev)) { const t = toggle(bySev.get(sev)); items.push({ ...t, label: `${sev[0].toUpperCase()}${sev.slice(1)} (${bySev.get(sev).length})` }); }
+            for (const name of [...buckets.keys()].sort((a, b) => rank(a) - rank(b) || a.localeCompare(b))) { const t = toggle(buckets.get(name)); items.push({ ...t, label: `${name} (${buckets.get(name).length})` }); }
             return items;
         };
         const sync = () => { syncTermChecks(cleanupChecks, reg); paintBar(); };
