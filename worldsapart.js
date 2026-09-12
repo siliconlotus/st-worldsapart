@@ -156,6 +156,10 @@ async function computeSourceFingerprint() {
     return runState.sourceFP;
 }
 
+/** The deployed plugin is not the source this extension ships. Null fingerprints (an older plugin, an unreadable
+ *  source) read as no drift: the check cannot tell, and a false alarm is worse than a missed one. */
+const pluginDrifted = () => Boolean(runState.pluginAvailable && runState.sourceFP && runState.pluginFP !== runState.sourceFP);
+
 /** Fills the plugin setup box with copyable install and redeploy commands, and the drift banner. */
 function renderPluginSetup() {
     const box = $('#wa_plugin_setup');
@@ -178,7 +182,7 @@ function renderPluginSetup() {
     box.empty();
     if (runState.pluginAvailable === null) { box.text('Checking for server plugin…'); return; }
     if (runState.pluginAvailable) {
-        const stale = runState.sourceFP && runState.pluginFP !== runState.sourceFP;
+        const stale = pluginDrifted();
         if (stale) {
             const warn = '⚠ Server plugin out of date — the deployed copy differs from this extension\'s source. Redeploy and restart:';
             alert.append($('<div style="margin:0 0 8px;padding:6px 8px;border-radius:5px;font-size:0.9em;background:color-mix(in srgb, var(--golden, #e0a86c) 15%, transparent);border:1px solid color-mix(in srgb, var(--golden, #e0a86c) 45%, transparent);"></div>')
@@ -2053,7 +2057,11 @@ export async function init() {
     }));
     if (tierMount) tierMount.append(tierEditor = makeTierEditor(getTierCfg, setTierCfg, () => {}));
     renderPluginSetup();                     // paints "checking…" then the detected/install state
-    Promise.all([hasPlugin(), computeSourceFingerprint()]).then(renderPluginSetup);
+    Promise.all([hasPlugin(), computeSourceFingerprint()]).then(() => {
+        renderPluginSetup();
+        // The settings banner only shows once somebody opens settings, and a drifted plugin answers with stale code meanwhile.
+        if (pluginDrifted()) toastr.warning('Server plugin is out of date. Redeploy it and restart SillyTavern.', 'Worlds Apart', { timeOut: 0, extendedTimeOut: 0 });
+    });
     bind('#wa_debug_log', 'debugLog', 'checked');
     document.querySelector('#wa_find_orphans')?.addEventListener('click', async () => {
         const out = document.querySelector('#wa_orphans_out');
