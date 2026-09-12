@@ -121,14 +121,14 @@ const zipfBook = { entries: { ...suggestBook.entries,
     0: { uid: 0, key: [], content: 'The trash sat by the tavern door. The trash grew. The tavern was never clean.', comment: 'A' },
     // Mid-sentence capitals, as real prose: sentence-initial capitalisation is not properness evidence.
     5: { uid: 5, key: [], content: 'Everyone saw Jeffrey arrive early. Nobody heard Jeffrey explain his reasons.', comment: 'F' },
-    6: { uid: 6, key: [], content: 'A minotaur guarded the gate. The minotaur never slept at night.', comment: 'G' },
+    6: { uid: 6, key: [], content: 'A basilisk guarded the gate. The basilisk never slept at night.', comment: 'G' },
     7: { uid: 7, key: [], content: 'They spoke of the comparison. Micah frowned at the ledger. Everyone asked Micah about the comparison later.', comment: 'H' },
-    // Contiguous prose whose possessive the fold strips: "steal teddy bronze minotaur" is not a substring of this text.
-    8: { uid: 8, key: [], content: "Kyle plotted to steal Teddy's bronze minotaur. Nobody would help him steal Teddy's bronze minotaur.", comment: 'I' },
+    // Contiguous prose whose possessive the fold strips: "steal teddy bronze basilisk" is not a substring of this text.
+    8: { uid: 8, key: [], content: "Kyle plotted to steal Teddy's bronze basilisk. Nobody would help him steal Teddy's bronze basilisk.", comment: 'I' },
     9: { uid: 9, key: [], content: 'The visitor was Sarah Olusanmokun from Stearns Corporation, carrying incorporation paperwork. Nobody mentioned the earlier incident again.', comment: 'J' },
-    // "solidifying" is z 2.58, below the table floor, so only the gerund rule can gate it.
+    // "solidifying" is below the table floor, so the gerund rule and the POS set are what gate it.
     10: { uid: 10, key: [], content: 'Rumors kept solidifying around the Jubilee device. Sales kept solidifying around the Jubilee device.', comment: 'K' },
-    // "unfolds" is out-of-table (SUBTLEX has "unfold" 3.1, not the inflection).
+    // "unfolds" is out-of-table (the table has "unfold", not the inflection).
     11: { uid: 11, key: [], content: 'The ritual unfolds at midnight. The ritual unfolds in silence.', comment: 'L' },
     12: { uid: 12, key: [], content: 'Everyone watched Jeffrey acquiesce. Later they watched Jeffrey acquiesce again.', comment: 'M' },
     13: { uid: 13, key: [], content: 'Everyone saw Jeffrey self-deprecatingly wave. Then Kyle sulkily agreed, and Kyle sulkily left.', comment: 'N' },
@@ -146,10 +146,10 @@ const zipfBook = { entries: { ...suggestBook.entries,
     const terms = uid => rowsOf(uid).map(r => r.term);
     assert.strictEqual(rowsOf(0).length, 0, 'an entry whose every candidate is gated yields nothing');
     assert.ok(terms(5).includes('jeffrey'), '"Jeffrey" (common word, never lowercase) is spared as a proper noun');
-    assert.ok(terms(6).includes('minotaur'), '"minotaur" (below the table floor) is suggested at full weight');
+    assert.ok(terms(6).includes('basilisk'), '"basilisk" (below the table floor) is suggested at full weight');
     assert.ok(terms(7).some(t => t.startsWith('micah')) && !terms(7).includes('comparison micah'), 'no phrase bridges a sentence boundary');
     assert.ok(!terms(8).some(t => t.includes('teddy bronze')), 'a gram bridging a stripped possessive is never suggested');
-    assert.ok(terms(8).includes('bronze minotaur') && terms(8).includes('teddy'), 'the fold-broken gram unfolds into its attested parts');
+    assert.ok(terms(8).includes('bronze basilisk') && terms(8).includes('teddy'), 'the fold-broken gram unfolds into its attested parts');
     assert.ok(terms(9).includes('sarah olusanmokun') && terms(9).includes('stearns corporation'), 'single-mention entities surface on a summary entry');
     assert.strictEqual(rowsOf(9).find(r => r.term === 'sarah olusanmokun')?.display, 'Sarah Olusanmokun', 'display un-folds proper-noun casing from the recorded surface form');
     assert.ok(!terms(9).includes('paperwork') && !terms(9).includes('incident'), 'common f=1 words do not ride in with them');
@@ -284,15 +284,15 @@ const OPTS = { dfCeil: 0.5, maxN: 4, excludeDates: true, excludeShort: true, onl
 // Cohesion subsumption: the longer gram at equal frequency must be a unit (count(whole)/(halfA+halfB) >= 0.4) or the contained gram wins.
 {
     const assembly = { entries: { ...filler(6),
-        0: { uid: 0, key: [], content: 'The bronze minotaur Arthur Baxter guarded it. Again the bronze minotaur Arthur Baxter stood watch.' },
+        0: { uid: 0, key: [], content: 'The bronze basilisk Arthur Baxter guarded it. Again the bronze basilisk Arthur Baxter stood watch.' },
         1: { uid: 1, key: [], content: 'A letter reached Arthur Baxter at the office today.' },
         2: { uid: 2, key: [], content: 'Nobody argued with Arthur Baxter about the schedule.' },
-        3: { uid: 3, key: [], content: 'The bronze minotaur sat alone in the hall.' },
-        4: { uid: 4, key: [], content: 'They polished the bronze minotaur every spring without fail.' },
+        3: { uid: 3, key: [], content: 'The bronze basilisk sat alone in the hall.' },
+        4: { uid: 4, key: [], content: 'They polished the bronze basilisk every spring without fail.' },
     } };
     const t0 = buildKeySuggest(assembly, OPTS).perEntry.find(pe => pe.entry.uid === 0)?.newRows.map(r => r.term) ?? [];
-    assert.ok(!t0.includes('bronze minotaur arthur baxter'), 'an incohesive tetragram does not swallow its halves');
-    assert.ok(t0.includes('arthur baxter') && t0.includes('bronze minotaur'), 'the halves that live independently are offered instead');
+    assert.ok(!t0.includes('bronze basilisk arthur baxter'), 'an incohesive tetragram does not swallow its halves');
+    assert.ok(t0.includes('arthur baxter') && t0.includes('bronze basilisk'), 'the halves that live independently are offered instead');
     // filler(9): with only 6 the shared word sits in 33% of entries and the function-word cut strips it before subsumption.
     const tri = { entries: { ...filler(9),
         0: { uid: 0, key: [], content: 'They toured Mobius Industries HQ. The badge said Mobius Industries HQ.' },

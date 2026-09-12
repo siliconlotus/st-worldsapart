@@ -369,11 +369,14 @@ nearly empty — of what the Zipf gate kills, chat rate would catch 1–4% and m
 moderate rate (S22) — and where `ENGLISH_COMMON` is wrong is proper nouns that collide with common words
 (`River`, `Paris`) — most of the high-Zipf population in real books — where chat rate is right (K16).
 
-**The table is wordfreq's raw Zipf scale** (`build-zipf.py`), the scale the unigram bands were read on
-(S5). A SUBTLEX term once sat over it and contributed 1–10% of the gate's kills, spoken-register nouns
-and one name, at a worse curated-key rate than the kills every table shares (S23). Values are stored
-to 0.1, so a threshold is only meaningful to a decile: the phrase ceiling is exclusive at 5.5 and the
-rare line is absence from the table, which begins at 3.0 after rounding.
+**The table is fiction prose** (`build-zipf.py`: Google Books eng-fiction 1-grams, 1980 on), because the
+prior's job is to say what is ordinary in the register the chat is written in, and a suggester
+over-filtering costs the user one typed key where under-filtering costs a list of `shoulder` and
+`thrall`. Genre-common words are ordinary here by design (S24). The POS sets come off the same
+corpus's dominant tag, on words wordfreq knows, which is also the vocabulary gate. Values are stored to
+0.1, so a threshold is only meaningful to a decile: the phrase ceiling is exclusive at 5.5 and the rare
+line is absence from the table, which begins at 3.0 after rounding. wordfreq alone measured within
+noise of the SUBTLEX blend it replaced (S23) and is what any other language would build from.
 
 **Ruled: `chat common` raises its own flag.** Chat rate was confirm-only (it could redden
 `english common` and never speak alone), so a key that floods the chat without being a common English

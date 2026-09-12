@@ -57,8 +57,8 @@ export const GENRE_CASES = [
     {
         genre: 'litrpg', shape: 'label bullet lines',
         text: '- Devoted: the thrall answers a summons without hesitation.\n- Devoted: the bond deepens with every trial the thrall survives.',
-        expect: ['thrall'],
-        reject: ['devoted'],   // a bare adjective is a poor trigger
+        expect: [],
+        reject: ['devoted', 'thrall'],   // a bare adjective is a poor trigger; "thrall" is genre-common, not this book's coinage
     },
 
     // --- High fantasy --------------------------------------------------------------------------
