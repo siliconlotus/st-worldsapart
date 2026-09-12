@@ -126,7 +126,7 @@ export async function lorebookStudio(preferredBook = null, open = null) {
     const sugg = new Map();          // uid -> { tfidf:string[], llm:string[] } transient suggestion chips
     const rowEls = new Map();        // uid -> entry row element, so one edit re-renders just that entry
     let tab = 'explorer';            // 'explorer' | 'cleanup' | 'lab'
-    const cleanupChecks = new Map();   // rowId -> bool, defaulting from scan.defChecked; survives rescans and tab switches on purpose
+    const cleanupChecks = new Map();   // rowId -> bool, nothing pre-ticked; survives rescans and tab switches on purpose
     let cleanupUndo = null;            // [{uid, key}] from the last prune, restorable until the next one
     let cleanupShowAll = false;        // Cleanup lists every key on the visible entries, not only the flagged ones
     let chatHits = null;        // Map<key, count> from the chat scan, null until one has run; survives a rescan, cleared on book change
@@ -2081,7 +2081,7 @@ export async function lorebookStudio(preferredBook = null, open = null) {
             const rows = scan.classifyEntry(e).map(p => {
                 const rc = scan.reasonOf(p);
                 const id = rowId(e.uid, p.key);
-                if (!cleanupChecks.has(id)) cleanupChecks.set(id, scan.defChecked(p));   // pre-tick policy shared with the pruner
+                if (!cleanupChecks.has(id)) cleanupChecks.set(id, false);   // nothing pre-ticked: flags are worked through in passes from Select…
                 return { term: p.key, why: rc.text, color: SEVERITY_COLOR[rc.severity] ?? '', sev: rc.severity, p };
             });
             // Show-all appends the keys classifyEntry did not return; flagged rows stay on top.
@@ -2161,8 +2161,7 @@ export async function lorebookStudio(preferredBook = null, open = null) {
         trayEl = renderTray();
         const bar = document.createElement('div'); bar.className = 'wa-bulk-on';
         const ignStrip = document.createElement('div'); ignStrip.className = 'wa-ign-strip';
-        const flagStrip = document.createElement('div'); flagStrip.className = 'wa-ign-strip';
-        fixed.append(head, trayEl, bar, flagStrip, ignStrip);
+        fixed.append(head, trayEl, bar, ignStrip);
         const list = document.createElement('div'); list.className = 'wa-studio-entries';
         pane.append(fixed, list);
 
@@ -2181,16 +2180,12 @@ export async function lorebookStudio(preferredBook = null, open = null) {
         };
         const paintBar = () => {
             const on = allIds.filter(id => cleanupChecks.get(id)).length;
-            const allOn = allIds.length > 0 && on === allIds.length;
             bar.innerHTML = '';
             const count = document.createElement('span'); count.className = 'wa-bulk-count';
             count.textContent = `${on}/${allIds.length} selected`;
-            count.title = 'Ticked by the audit, not by hand.';
+            const selBtn = barBtn('Select… ▾', () => { const r = selBtn.getBoundingClientRect(); showCtxMenu(selectItems(), r.left, r.bottom + 2, ctxMount()); });
             bar.append(count,
-                barBtn(allOn ? 'Select none' : 'Select all', () => {
-                    for (const id of allIds) cleanupChecks.set(id, !allOn);
-                    sync();
-                }),
+                selBtn,
                 barBtn('Delete', pruneChecked, 'wa-bulk-danger'),
                 barBtn('Ignore', ignoreChecked),
                 showAllBtn(),
@@ -2211,44 +2206,29 @@ export async function lorebookStudio(preferredBook = null, open = null) {
             }
             if (cleanupUndo?.length) bar.append(barBtn(`Undo (${cleanupUndo.length})`, undoPrune));
         };
-        /** One tri-state box per verdict present, in the classifier's own priority order, so triage runs a flag at a time. */
-        const paintFlags = () => {
-            flagStrip.innerHTML = '';
+        /** The Select… menu: the selection becomes exactly one bucket — all flagged, a severity, or one flag — so triage runs a flag at a time. */
+        const selectItems = () => {
             const buckets = new Map();
+            const bySev = new Map();
+            let flagged = 0;
             for (const g of groups) for (const r of g.rows) {
+                const id = rowId(g.entry.uid, r.term);
                 const name = r.p?.flag ?? r.why;   // show-all rows carry no verdict: "not flagged", or "ignored"
                 if (!buckets.has(name)) buckets.set(name, []);
-                buckets.get(name).push({ id: rowId(g.entry.uid, r.term), sev: r.sev });
+                buckets.get(name).push(id);
+                if (r.p) { flagged++; if (!bySev.has(r.sev)) bySev.set(r.sev, []); bySev.get(r.sev).push(id); }
             }
-            if (buckets.size < 2) { flagStrip.style.display = 'none'; return; }   // one flag is the Select all button
-            flagStrip.style.display = 'flex';
-            const lbl = document.createElement('span');
-            lbl.style.cssText = 'opacity:0.7;font-size:0.85em;white-space:nowrap;';
-            lbl.textContent = 'Flags:';
-            flagStrip.append(lbl);
+            const only = ids => () => { for (const id of allIds) cleanupChecks.set(id, false); for (const id of ids) cleanupChecks.set(id, true); sync(); };
             const rank = n => { const i = FLAG_PRIORITY.indexOf(n); return i < 0 ? FLAG_PRIORITY.length : i; };
-            for (const name of [...buckets.keys()].sort((a, b) => rank(a) - rank(b) || a.localeCompare(b))) {
-                const rows = buckets.get(name);
-                const on = rows.filter(r => cleanupChecks.get(r.id)).length;
-                const wrap = document.createElement('label');
-                wrap.className = 'checkbox_label';
-                wrap.style.cssText = 'display:flex;gap:0.35em;align-items:center;margin:0;white-space:nowrap;';
-                const cb = document.createElement('input');
-                cb.type = 'checkbox';
-                cb.className = 'wa-tri';
-                cb.checked = on > 0 && on === rows.length;
-                cb.indeterminate = on > 0 && on < rows.length;
-                cb.addEventListener('change', () => { for (const r of rows) cleanupChecks.set(r.id, cb.checked); sync(); });
-                const txt = document.createElement('span');
-                let worst = '';
-                for (const r of rows) if ((SEVERITY_RANK[r.sev] ?? 0) > (SEVERITY_RANK[worst] ?? 0)) worst = r.sev;
-                if (SEVERITY_COLOR[worst]) txt.style.color = SEVERITY_COLOR[worst];
-                txt.innerHTML = `${escapeHtml(name)} <small style="opacity:0.6;">${on}/${rows.length}</small>`;
-                wrap.append(cb, txt);
-                flagStrip.append(wrap);
-            }
+            const items = [
+                { label: `All flagged (${flagged})`, fn: only([...groups.flatMap(g => g.rows.filter(r => r.p).map(r => rowId(g.entry.uid, r.term)))]) },
+                { label: 'None', fn: only([]) },
+            ];
+            for (const sev of [SEVERE, MODERATE, MINOR]) if (bySev.has(sev)) items.push({ label: `${sev[0].toUpperCase()}${sev.slice(1)} (${bySev.get(sev).length})`, fn: only(bySev.get(sev)) });
+            for (const name of [...buckets.keys()].sort((a, b) => rank(a) - rank(b) || a.localeCompare(b))) items.push({ label: `${name} (${buckets.get(name).length})`, fn: only(buckets.get(name)) });
+            return items;
         };
-        const sync = () => { syncTermChecks(cleanupChecks, reg); paintBar(); paintFlags(); };
+        const sync = () => { syncTermChecks(cleanupChecks, reg); paintBar(); };
         const repaint = () => keepScroll(() => {
             paintIgnoredStrip(ignStrip, repaint);   // classifyEntry reads ignoreSet live — no rescan needed
             groups = cleanupGroups();
