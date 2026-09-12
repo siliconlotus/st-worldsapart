@@ -337,8 +337,8 @@ dialog.popup:has(.wa-studio), .wa-studio-nav, .wa-studio-explorer, .wa-studio-en
 .wa-studio-fixed { flex: 0 0 auto; }
 .wa-studio-entries { flex: 1 1 auto; overflow-y: auto; min-width: 0; }
 .wa-studio-body { flex: 1 1 auto; display: flex; min-height: 0; }
-/* Reaches into the popup's own right padding (ST popup.css: 14 + 1 + 8 px) so the squares sit centred between the list and the dialog edge. */
-.wa-rail { flex: 0 0 auto; display: flex; flex-direction: column; gap: 6px; padding: 2px 12px 0; margin-right: -23px; }
+/* Reaches into the popup content's padding (ST popup.css: 8 + 1 px before .popup-body clips; the popup's own 14 px shows beyond it), so the squares sit centred between the list and the dialog edge. */
+.wa-rail { flex: 0 0 auto; display: flex; flex-direction: column; gap: 6px; padding: 2px 1px 0 12px; margin-right: -8px; }
 .wa-rail .menu_button { width: 2.6em; height: 2.6em; padding: 0; margin: 0; display: grid; place-items: center; position: relative; font-size: 1.05em; }
 .wa-rail-count { position: absolute; bottom: 1px; right: 2px; font-size: 0.55em; line-height: 1; opacity: 0.8; }
 .wa-studio-navhead, .wa-studio-exphead { position: sticky; top: 0; z-index: 1; padding: 2px 0 6px;
