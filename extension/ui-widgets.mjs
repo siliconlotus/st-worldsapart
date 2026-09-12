@@ -54,17 +54,19 @@ export const showCtxMenu = (items, x, y, mount = document.body) => {
 
 /** Tier-precedence editor (↑/↓ and an enable checkbox), committing live through setCfg/onChange. `getCfg` must
  * return a fresh array each call: the editor mutates it before handing it to setCfg. */
-export function makeTierEditor(getCfg, setCfg, onChange) {
+/** `omit` hides tiers that mean nothing where the editor is shown (the panel hides `disabled`: no disabled entry reaches the prompt); moves skip over hidden rows, the config keeps them. */
+export function makeTierEditor(getCfg, setCfg, onChange, { omit = [] } = {}) {
     const wrap = document.createElement('div');
     const commit = next => { setCfg(next); onChange?.(); render(); };
     const render = () => {
         const cfg = getCfg();
         wrap.innerHTML = '';
-        cfg.forEach((t, i) => {
+        const vis = cfg.map((t, i) => ({ t, i })).filter(x => !omit.includes(x.t.id));
+        vis.forEach(({ t, i }, k) => {
             const row = document.createElement('div'); row.style.cssText = 'display:flex;align-items:center;gap:8px;padding:3px 0;';
-            const mv = (cls, dis, dir) => { const x = document.createElement('i'); x.className = 'fa-solid ' + cls; x.style.cssText = `cursor:${dis ? 'default' : 'pointer'};opacity:${dis ? 0.25 : 0.7};padding:2px 4px;`; if (!dis) x.addEventListener('click', () => { const n = getCfg(); [n[i + dir], n[i]] = [n[i], n[i + dir]]; commit(n); }); return x; };
-            const up = mv('fa-chevron-up', i === 0, -1);
-            const dn = mv('fa-chevron-down', i === cfg.length - 1, +1);
+            const mv = (cls, dis, dir) => { const x = document.createElement('i'); x.className = 'fa-solid ' + cls; x.style.cssText = `cursor:${dis ? 'default' : 'pointer'};opacity:${dis ? 0.25 : 0.7};padding:2px 4px;`; if (!dis) x.addEventListener('click', () => { const n = getCfg(); const j = vis[k + dir].i; [n[j], n[i]] = [n[i], n[j]]; commit(n); }); return x; };
+            const up = mv('fa-chevron-up', k === 0, -1);
+            const dn = mv('fa-chevron-down', k === vis.length - 1, +1);
             const lbl = document.createElement('label'); lbl.className = 'checkbox_label'; lbl.style.flex = '1';
             const cb = document.createElement('input'); cb.type = 'checkbox'; cb.checked = t.on;
             cb.addEventListener('change', () => { const n = getCfg(); n[i] = { ...n[i], on: cb.checked }; commit(n); });

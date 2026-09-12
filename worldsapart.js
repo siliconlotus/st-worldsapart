@@ -2050,10 +2050,10 @@ export async function init() {
         getTierCfg, setTierCfg,
         extraItems: [{ label: 'Most relevant first', key: 'best-first' }, { label: 'Most relevant last', key: 'best-last' }],
         // Keeps the inline tier editor in sync when tiers are reordered from the button's menu.
-        onChange: () => { if (tierEditor) tierEditor.replaceWith(tierEditor = makeTierEditor(getTierCfg, setTierCfg, () => {})); },
+        onChange: () => { if (tierEditor) tierEditor.replaceWith(tierEditor = makeTierEditor(getTierCfg, setTierCfg, () => {}, { omit: ['disabled'] })); },
         block: true,
     }));
-    if (tierMount) tierMount.append(tierEditor = makeTierEditor(getTierCfg, setTierCfg, () => {}));
+    if (tierMount) tierMount.append(tierEditor = makeTierEditor(getTierCfg, setTierCfg, () => {}, { omit: ['disabled'] }));
     renderPluginSetup();                     // paints "checking…" then the detected/install state
     Promise.all([hasPlugin(), computeSourceFingerprint()]).then(() => {
         renderPluginSetup();
