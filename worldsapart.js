@@ -1718,6 +1718,10 @@ const SETTINGS_HTML = `
 .worlds-apart-settings .wa-section > .inline-drawer-toggle { font-size: 0.95em; opacity: 0.8; }
 .worlds-apart-settings .wa-section > .inline-drawer-toggle b { font-weight: 500; }
 .worlds-apart-settings small.opacity50p { display: block; margin: 0.15em 0 0.8em; }
+.worlds-apart-settings .wa-section > .inline-drawer-content { margin-left: 12px; }
+.worlds-apart-settings .wa-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin: 4px 0; }
+.worlds-apart-settings .wa-row label { margin: 0; }
+.worlds-apart-settings .wa-row input { width: 6em; flex: 0 0 auto; }
 </style>
 <div class="worlds-apart-settings">
     <div class="inline-drawer">
@@ -1733,8 +1737,7 @@ const SETTINGS_HTML = `
             <label>Prompt insertion order <span class="fa-solid fa-circle-question note-link-span" title="The order selected entries take in the prompt. A base sort, with optional tier grouping. This setting is saved; the Studio's sort views are not."></span></label>
             <div id="wa_presentation_order_mount" style="margin-top:4px;"></div>
 
-            <label for="wa_message_depth">Message depth</label>
-            <input id="wa_message_depth" type="number" class="text_pole" min="1" max="20" step="1">
+            <div class="wa-row"><label for="wa_message_depth">Message depth</label><input id="wa_message_depth" type="number" class="text_pole" min="1" max="20" step="1"></div>
 
             <div class="inline-drawer wa-section">
                 <div class="inline-drawer-toggle inline-drawer-header">
@@ -1752,10 +1755,10 @@ const SETTINGS_HTML = `
                     <div class="inline-drawer-icon fa-solid fa-circle-chevron-down down"></div>
                 </div>
                 <div class="inline-drawer-content">
-                    <label for="wa_drop_chat_tags">Ignore these HTML tags in chat <span class="fa-solid fa-circle-question note-link-span" title="Comma-separated tags to be skipped when scanning for keyword hits. You might want to set this to your preset's internal state tracker so your quest tracker doesn't constantly pull entries."></span></label>
+                    <label for="wa_drop_chat_tags">Ignored tags <span class="fa-solid fa-circle-question note-link-span" title="Comma-separated HTML or XML tags to be skipped when scanning for keyword hits. You might want to set this to your preset's internal state tracker so your quest tracker doesn't constantly pull entries."></span></label>
                     <input id="wa_drop_chat_tags" type="text" class="text_pole" placeholder="internal_states, thinking">
 
-                    <label for="wa_match_window">Match window <span class="fa-solid fa-circle-question note-link-span" title="The span within which a key's conditions must all match, e.g. ? apple AND banana must both appear in the same paragraph, message or scan window."></span></label>
+                    <label for="wa_match_window">Match span <span class="fa-solid fa-circle-question note-link-span" title="The span within which a key's conditions must all match, e.g. ? apple AND banana must both appear in the same paragraph, message or scan window."></span></label>
                     <select id="wa_match_window" class="text_pole">
                     <option value="paragraph">Paragraph</option>
                     <option value="message">Message</option>
@@ -1773,13 +1776,13 @@ const SETTINGS_HTML = `
                 <div class="inline-drawer-content">
                     <label for="wa_word_boundary">Word boundary <span class="fa-solid fa-circle-question note-link-span" title="Applies to entries with Match Whole Words on and SmartKeys that use =. Permissive: whole-word &quot;Joe&quot; matches &quot;Joe's&quot;. Strict: no match. Neither matches &quot;Joes&quot;."></span></label>
                     <select id="wa_word_boundary" class="text_pole">
-                    <option value="strict">Strict: hyphens and apostrophes are part of a word</option>
-                    <option value="permissive">Permissive: only letters and digits are</option>
+                    <option value="strict">Strict: do not allow apostrophes and hyphens</option>
+                    <option value="permissive">Permissive: whole-word matches allow apostrophes and hyphens</option>
                     </select>
 
                     <div id="wa_embed_info" class="opacity50p" style="margin:0.4em 0;font-size:0.85em;" title="Set the embedding model in the Vector Storage extension."></div>
 
-                    <label>Mean-centered search</label>
+                    <label>Mean-centered search <span class="fa-solid fa-circle-question note-link-span" title="Subtracts the collection's average vector before comparing, so wording every entry shares stops dominating similarity. Automatic when the server plugin is installed."></span></label>
                     <div id="wa_plugin_setup" style="margin:0.4em 0;font-size:0.85em;opacity:0.75;"></div>
 
                     <div id="wa_find_orphans" class="menu_button" style="width:auto;padding:0.3em 0.8em;" title="Lists vector collections no current book claims. Nothing is deleted.">Find unused vector collections…</div>
@@ -1797,31 +1800,24 @@ const SETTINGS_HTML = `
                     <div class="inline-drawer-icon fa-solid fa-circle-chevron-down down"></div>
                 </div>
                 <div class="inline-drawer-content">
-                    <label for="wa_relevance_cutoff">Relevance cutoff for memory entries (0 = none)</label>
-                    <input id="wa_relevance_cutoff" type="number" class="text_pole" min="0" max="1" step="0.01">
+                    <div class="wa-row"><label for="wa_relevance_cutoff">Relevance cutoff <span class="fa-solid fa-circle-question note-link-span" title="Memory entries below this are dropped. 0 = none."></span></label><input id="wa_relevance_cutoff" type="number" class="text_pole" min="0" max="1" step="0.01"></div>
 
-                    <label for="wa_max_entries">Vector entry cap</label>
-                    <input id="wa_max_entries" type="number" class="text_pole" min="1" max="100" step="1">
+                    <div class="wa-row"><label for="wa_max_entries">Vector entry cap <span class="fa-solid fa-circle-question note-link-span" title="Retrieved entries in the prompt."></span></label><input id="wa_max_entries" type="number" class="text_pole" min="1" max="100" step="1"></div>
 
-                    <label for="wa_max_dynamic">Dynamic entry cap, keyword and vector (0 = none)</label>
-                    <input id="wa_max_dynamic" type="number" class="text_pole" min="0" max="500" step="1">
+                    <div class="wa-row"><label for="wa_max_dynamic">Dynamic entry cap <span class="fa-solid fa-circle-question note-link-span" title="Vector and keyword entries. 0 = unlimited."></span></label><input id="wa_max_dynamic" type="number" class="text_pole" min="0" max="500" step="1"></div>
 
-                    <label for="wa_max_total">Total entry cap, constants included (0 = none)</label>
-                    <input id="wa_max_total" type="number" class="text_pole" min="0" max="500" step="1">
+                    <div class="wa-row"><label for="wa_max_total">Total entry cap <span class="fa-solid fa-circle-question note-link-span" title="Including constants and stickies. 0 = unlimited."></span></label><input id="wa_max_total" type="number" class="text_pole" min="0" max="500" step="1"></div>
 
-                    <label for="wa_max_tokens_pct">Token budget, % of context (0 = off)</label>
-                    <input id="wa_max_tokens_pct" type="number" class="text_pole" min="0" max="100" step="1">
+                    <div class="wa-row"><label for="wa_max_tokens_pct">Context % <span class="fa-solid fa-circle-question note-link-span" title="Token budget as a share of the context. 0 = unlimited."></span></label><input id="wa_max_tokens_pct" type="number" class="text_pole" min="0" max="100" step="1"></div>
 
-                    <label for="wa_max_tokens">Token budget, tokens (0 = off; the tighter of the two applies)</label>
-                    <input id="wa_max_tokens" type="number" class="text_pole" min="0" max="100000" step="64">
+                    <div class="wa-row"><label for="wa_max_tokens">Max tokens <span class="fa-solid fa-circle-question note-link-span" title="Token budget in tokens; the tighter of the two applies. 0 = unlimited."></span></label><input id="wa_max_tokens" type="number" class="text_pole" min="0" max="100000" step="64"></div>
 
-                    <label for="wa_budget_slack">Budget slack, % over (0 = none)</label>
-                    <input id="wa_budget_slack" type="number" class="text_pole" min="0" max="50" step="1">
+                    <div class="wa-row"><label for="wa_budget_slack">Budget slack <span class="fa-solid fa-circle-question note-link-span" title="% of the budget a slightly-too-big entry may exceed it by. 0 applies the budget strictly."></span></label><input id="wa_budget_slack" type="number" class="text_pole" min="0" max="50" step="1"></div>
 
-                    <label for="wa_slack_mode">Slack applies</label>
+                    <label for="wa_slack_mode">Slack allowed for</label>
                     <select id="wa_slack_mode" class="text_pole">
-                    <option value="once">Once: one entry may exceed the budget</option>
-                    <option value="all">All: every entry may exceed it</option>
+                    <option value="once">One entry</option>
+                    <option value="all">All entries</option>
                     </select>
 
                     <label class="checkbox_label" for="wa_tokens_include_exempt">
@@ -1830,11 +1826,10 @@ const SETTINGS_HTML = `
 
                     <small id="wa_exempt_count" class="opacity50p"></small>
 
-                    <label>Lorebook priority <span class="fa-solid fa-circle-question note-link-span" title="How entries from several books compete for the budget and where they sit in the prompt. A book appears here after its first scan."></span></label>
-                    <label for="wa_world_priority_mode">Mode</label>
+                    <label for="wa_world_priority_mode">Lorebook priority <span class="fa-solid fa-circle-question note-link-span" title="Interleaved: one ranked list across books, with optional per-book weights. Sequential: higher books fill first. A book appears below after its first scan."></span></label>
                     <select id="wa_world_priority_mode" class="text_pole">
-                    <option value="interleaved">Interleaved: one ranked list, with optional per-book weights</option>
-                    <option value="sequential">Sequential: higher books fill first</option>
+                    <option value="interleaved">Interleaved</option>
+                    <option value="sequential">Sequential</option>
                     </select>
 
                     <div id="wa_world_priority_list" style="margin-top:6px;"></div>
@@ -1847,21 +1842,20 @@ const SETTINGS_HTML = `
                     <div class="inline-drawer-icon fa-solid fa-circle-chevron-down down"></div>
                 </div>
                 <div class="inline-drawer-content">
-                    <label for="wa_language">Language of the lorebook</label>
+                    <label for="wa_language">Language <span class="fa-solid fa-circle-question note-link-span" title="Language of the lorebook and chat. Selects the word-frequency table the keyword suggester and audit use."></span></label>
                     <select id="wa_language" class="text_pole">
                     <option value="en">English</option>
                     </select>
                     <small class="opacity50p" id="wa_language_state"></small>
 
 
-                    <label for="wa_llm_profile">Suggestion profile <span class="fa-solid fa-circle-question note-link-span" title="Used by the keyword suggester, one call per entry."></span></label>
+                    <label for="wa_llm_profile">Suggester LLM profile <span class="fa-solid fa-circle-question note-link-span" title="One call per entry."></span></label>
                     <div class="flex-container alignItemsCenter flexnowrap">
                     <select id="wa_llm_profile" class="text_pole flex1"></select>
                     <div id="wa_refresh_profiles" class="menu_button fa-solid fa-rotate" title="Reload the Connection Manager profile list"></div>
                     </div>
 
-                    <label for="wa_llm_temp">Temperature</label>
-                    <input id="wa_llm_temp" type="number" class="text_pole" min="0" max="2" step="0.05" placeholder="backend default">
+                    <div class="wa-row"><label for="wa_llm_temp">Temperature <span class="fa-solid fa-circle-question note-link-span" title="No measured effect on suggestion quality. Leave blank for the backend default."></span></label><input id="wa_llm_temp" type="number" class="text_pole" min="0" max="2" step="0.05" placeholder="backend default"></div>
                 </div>
             </div>
 
