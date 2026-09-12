@@ -417,8 +417,8 @@ textarea.wa-entry-full.wa-tall { max-height: 62vh; }
 .wa-studio-exphead .menu_button i { margin-right: 6px; }
 .wa-chevron { width: 14px; text-align: center; opacity: 0.7; transition: transform 0.12s; cursor: pointer; }
 .wa-chevron.wa-open { transform: rotate(90deg); }
-.wa-entry-tools { display: flex; align-items: center; gap: 2px; margin-left: auto; }
-.wa-tool { cursor: pointer; padding: 3px 4px; border-radius: 4px; opacity: 0.55; font-style: normal; }
+.wa-entry-tools { display: flex; align-items: center; gap: 0; margin-left: auto; }
+.wa-tool { cursor: pointer; padding: 3px 2px; min-width: 1.3em; text-align: center; border-radius: 4px; opacity: 0.55; font-style: normal; }
 .wa-tool:hover { opacity: 1; background: var(--white20a, rgba(255,255,255,0.1)); }
 .wa-tool.wa-on { opacity: 1; color: var(--SmartThemeQuoteColor, #6ea8fe); }
 .wa-tool.wa-badge { position: relative; }
