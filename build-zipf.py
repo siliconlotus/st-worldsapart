@@ -6,6 +6,7 @@
 #   python3 build-zipf.py --ngrams 1-00000-of-00001.gz --totals totalcounts-1
 # Any other language comes from wordfreq alone, with no POS sets:  python3 build-zipf.py --lang de
 # Rewrites the PACKED / VA95 / VA85 / ADJ85 lines of an existing file, so everything else in it is kept.
+# Every output carries the licence line the README's 'Data sources and licences' section explains; keep the two in step.
 # With --ngrams it also rewrites plugin/commonwords.js: wordfreq's top 2000, alpha and length >= 2, minus words fiction
 # capitalises >= 95% of the time (the name test); that file deploys into the plugin, so redeploy after.
 import argparse, gzip, json, math, re, sys
@@ -71,6 +72,7 @@ if a.ngrams:
                   if w.isalpha() and len(w) >= 2 and capped.get(w, 0) / max(1, count.get(w, 0)) < NAME_SHARE]
         cw = 'plugin/commonwords.js'
         open(cw, 'w', encoding='utf-8').write(
+            "// Data: derived from wordfreq (Robyn Speer), CC BY-SA 4.0 (https://creativecommons.org/licenses/by-sa/4.0/) — see README, Data sources and licences.\n"
             "// Top-2000 English words from wordfreq, alpha and length >= 2, minus words Google Books fiction capitalises >= 95% of the\n"
             "// time (names). Rebuild: build-zipf.py --ngrams (see its header); deploys into the plugin.\n"
             f"export const COMMON_WORDS = new Set(`{' '.join(common)}`.split(' '));\n")
