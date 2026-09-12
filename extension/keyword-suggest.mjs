@@ -255,6 +255,7 @@ export function buildKeySuggest(data, opts) {
     };
     const tblZ = w => { let z = ZIPF_EN.get(tblKey(w)); if (z === undefined) { z = 0; for (const s of stems(w)) z = Math.max(z, ZIPF_EN.get(tblKey(s)) ?? 0); } return z; };
     const zEff = w => isName(w) ? 0 : Math.max(tblZ(w), isGer(w) ? 3.8 : 0);
+    // Exclusive on the table's 0.1 grid, so a word stored AT the ceiling passes ("order" is 5.5 on wordfreq's scale).
     const PHRASE_WORD_CEIL = 5.5;
     const engMultOf = term => {
         if (!englishGate) return 1;   // the diagnostic's switch: every term passes at full weight
@@ -262,7 +263,7 @@ export function buildKeySuggest(data, opts) {
         let minZ = Infinity;
         for (const w of words) {
             minZ = Math.min(minZ, zEff(w));
-            if (words.length > 1 && !LINKERS.has(w) && !isName(w) && tblZ(w) >= PHRASE_WORD_CEIL) return 0;
+            if (words.length > 1 && !LINKERS.has(w) && !isName(w) && tblZ(w) > PHRASE_WORD_CEIL) return 0;
         }
         return (words.length === 1 && minZ >= 3.0) ? 0 : Math.min(1, Math.max(0, (3.8 - minZ) / 1.3));
     };

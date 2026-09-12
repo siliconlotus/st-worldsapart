@@ -369,6 +369,12 @@ nearly empty — of what the Zipf gate kills, chat rate would catch 1–4% and m
 moderate rate (S22) — and where `ENGLISH_COMMON` is wrong is proper nouns that collide with common words
 (`River`, `Paris`) — most of the high-Zipf population in real books — where chat rate is right (K16).
 
+**The table is wordfreq's raw Zipf scale** (`build-zipf.py`), the scale the unigram bands were read on
+(S5). A SUBTLEX term once sat over it and contributed 1–10% of the gate's kills, spoken-register nouns
+and one name, at a worse curated-key rate than the kills every table shares (S23). Values are stored
+to 0.1, so a threshold is only meaningful to a decile: the phrase ceiling is exclusive at 5.5 and the
+rare line is absence from the table, which begins at 3.0 after rounding.
+
 **Ruled: `chat common` raises its own flag.** Chat rate was confirm-only (it could redden
 `english common` and never speak alone), so a key that floods the chat without being a common English
 word or frequent in the book's own prose went unflagged — `magic` on a Foxbridge entry. The flag
