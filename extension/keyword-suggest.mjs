@@ -113,7 +113,7 @@ export function nameEvidence() {
  * @returns {{entries:object[], N:number, perEntry:object[], canon:Function, dfSubstr:Function, avoid:string[], exampleCanon:Set<string>, exampleWords:Set<string>}}
  */
 export function buildKeySuggest(data, opts) {
-    const { dfCeil, maxN, excludeDates, excludeShort, onlyActive, cap, bgDocs = [] } = opts;
+    const { dfCeil, maxN, excludeDates, excludeShort, onlyActive, cap, bgDocs = [], englishGate = true } = opts;
     const STOP = FUNCTION_WORDS;
     const { fold, wordSeq, isName, isAcr } = nameEvidence();
     const canon = k => (String(k).match(/[\p{L}][\p{L}'’-]+/gu) ?? []).map(w => fold(w).toLowerCase()).join(' ');
@@ -257,6 +257,7 @@ export function buildKeySuggest(data, opts) {
     const zEff = w => isName(w) ? 0 : Math.max(tblZ(w), isGer(w) ? 3.8 : 0);
     const PHRASE_WORD_CEIL = 5.5;
     const engMultOf = term => {
+        if (!englishGate) return 1;   // the diagnostic's switch: every term passes at full weight
         const words = term.split(' ');
         let minZ = Infinity;
         for (const w of words) {

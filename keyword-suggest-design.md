@@ -365,7 +365,8 @@ re-ranking while the band's keys sit mostly on reference entries — the two-sco
 **Three signals, and none supersedes another.** `ENGLISH_COMMON` says the word denotes nothing in
 particular and needs no chat (roughly half the books have none); chat firing rate says how much a key
 matches; the collapse ratio says it matches the wrong thing. The overlap between the first two is
-nearly empty, and where `ENGLISH_COMMON` is wrong is proper nouns that collide with common words
+nearly empty — of what the Zipf gate kills, chat rate would catch 1–4% and most of the rest fires at a
+moderate rate (S22) — and where `ENGLISH_COMMON` is wrong is proper nouns that collide with common words
 (`River`, `Paris`) — most of the high-Zipf population in real books — where chat rate is right (K16).
 
 **Ruled: `chat common` raises its own flag.** Chat rate was confirm-only (it could redden
