@@ -24,6 +24,7 @@ const SEVERITY_RANK = { severe: 3, moderate: 2, minor: 1 };
 const ACCENT = 'var(--SmartThemeQuoteColor)';
 const INHERIT_TINT = 'color-mix(in srgb, var(--SmartThemeBodyColor) 55%, transparent)';
 const WA_GREEN = SEVERITY_COLOR.minor;   // "no prune" — a keyword the scan doesn't flag
+const WA_PURPLE = '#a879e0';             // an ignored key, the chips' .wa-kw-ignored colour
 const WA_RED = SEVERITY_COLOR.severe;
 // Core's world_info_logic, worded as the sentence the chips beside it complete.
 const LOGIC_LABEL = { 0: 'only if any of', 1: 'unless all of', 2: 'unless any of', 3: 'only if all of' };
@@ -1742,7 +1743,9 @@ export async function lorebookStudio(preferredBook = null, open = null) {
         reg.row.set(id, cb);
         const name = document.createElement('span'); name.className = 'wa-term-name';
         name.textContent = r.term; name.title = onEdit ? `${r.term} (click to edit)` : r.term;
-        if (r.clean) name.style.color = WA_GREEN;
+        const termColor = r.clean ? WA_GREEN : r.why === 'ignored' ? WA_PURPLE
+            : (r.p && r.p.flag !== 'unattested' && (r.sev === SEVERE || r.sev === MODERATE)) ? SEVERITY_COLOR[r.sev] : '';
+        if (termColor) name.style.color = termColor;
         const why = document.createElement('span'); why.className = 'wa-term-why';
         why.textContent = r.why ?? ''; if (r.color) why.style.color = r.color;
         if (onContext) row.addEventListener('contextmenu', ev => { ev.preventDefault(); onContext(e, r, ev.clientX, ev.clientY); });
