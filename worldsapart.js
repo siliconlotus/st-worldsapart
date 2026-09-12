@@ -1741,7 +1741,7 @@ const SETTINGS_HTML = `
 
             <div class="inline-drawer wa-section">
                 <div class="inline-drawer-toggle inline-drawer-header">
-                    <b>Tier precedence</b> <span class="fa-solid fa-circle-question note-link-span" title="With tier grouping on, an entry joins the first tier it matches, top to bottom. Untick a tier to skip it. Shared with the Studio."></span>
+                    <b>Tier precedence <span class="fa-solid fa-circle-question note-link-span" title="With tier grouping on, an entry joins the first tier it matches, top to bottom. Untick a tier to skip it. Shared with the Studio."></span></b>
                     <div class="inline-drawer-icon fa-solid fa-circle-chevron-down down"></div>
                 </div>
                 <div class="inline-drawer-content">
