@@ -3049,7 +3049,8 @@ export async function lorebookStudio(preferredBook = null, open = null) {
         const allOpen = entries.length > 0 && entries.every(x => entryOpen.has(x.uid));
         const expandBtn = document.createElement('button');
         expandBtn.type = 'button'; expandBtn.className = 'menu_button';
-        expandBtn.innerHTML = `<i class="fa-solid ${allOpen ? 'fa-down-left-and-up-right-to-center' : 'fa-up-right-and-down-left-from-center'}"></i>`;
+        // Expand is arrows-up-down with a crossbar drawn by CSS (Font Awesome's arrows-from-line is Pro only); collapse is arrows-down-to-line.
+        expandBtn.innerHTML = allOpen ? '<i class="fa-solid fa-arrows-down-to-line"></i>' : '<span class="wa-icon-fromline"><i class="fa-solid fa-arrows-up-down"></i></span>';
         expandBtn.title = `${allOpen ? 'Collapse' : 'Expand'} all entries. Shift-click expands only entries with flagged keywords.`;
         expandBtn.addEventListener('click', async ev => {
             if (ev.shiftKey) {   // expand only flagged entries (scan first if needed), collapse the rest
