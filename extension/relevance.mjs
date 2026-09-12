@@ -3,7 +3,9 @@
 import { normalizeOrthography } from './automaton.mjs';
 import { entryKey } from './content-lexical.mjs';
 import { tokenize } from './lexical.mjs';
-import { COMMON_WORDS } from '../plugin/commonwords.js';
+import { PACK as EN } from './zipf-en.js';
+// The bundled English list, whatever language is picked: this feeds a fitted column (F58), not the audit.
+const COMMON_WORDS = new Set(EN.common.split(' '));
 
 export const isMemory = e => Boolean(e) && ('stmemorybooks' in e || 'STMB_start' in e);
 

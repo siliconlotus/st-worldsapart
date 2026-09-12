@@ -8,6 +8,10 @@ const pack = {
     common: 'the of and', hash: 'h1',
 };
 
+eq(table().lang, 'en', 'the first read is the bundled English pack');
+eq(table().zipf.get('the') > 7, true, 'and it carries the English table');
+eq(table().common.has('the'), true, 'and its common list');
+
 const t = usePack(pack);
 eq(t.lang, 'xx', 'usePack sets the language');
 eq(t.zipf.get('the'), 5.5, 'a decile band unpacks to its Zipf value');

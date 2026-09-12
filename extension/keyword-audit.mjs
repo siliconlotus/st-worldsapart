@@ -1,8 +1,7 @@
 // keyword-audit.mjs — the key audit: does an existing key work, and if not why. The prune classifier
 // (buildKeyPruneScan) and the predicates its flags rest on. ST-free; keyword-tools.mjs injects the match flags.
-import { COMMON_WORDS } from '../plugin/commonwords.js';
 import { NAME_PARTICLES } from './relevance.mjs';
-import { ZIPF_EN } from './zipf-en.js';
+import { table } from './lang.mjs';
 import { countKey, countRegexKey, escapeRegex, isRegexKey, secondaryKeys, segment, swapLiteralHyphens, usableKeys } from './matcher.mjs';
 import { cachedCount, createScanScope, hitLiterals, ORTHO_FAMILIES, parse, primeScan, registerKeys, tokenize, validateSmartKey } from './smartkeys.mjs';
 
@@ -72,7 +71,7 @@ function smartPaths(raw, isLoose) {
 /** The probes the chat scan counts beside a SmartKey so `chat common` can name the path that fires most. A single path
  *  needs no probe: it is the key. Sent only for keys over the chat-common share, a probe being a SmartKey evaluated per
  *  message. */
-export const pathProbes = k => { const p = smartPaths(k, isEnglishCommon(COMMON_WORDS)); return p.length > 1 ? p.map(x => x.probe) : []; };
+export const pathProbes = k => { const p = smartPaths(k, isEnglishCommon(table().common)); return p.length > 1 ? p.map(x => x.probe) : []; };
 
 const isEnglishCommon = (list) => (v) => !/\s/.test(v) && list.has(v.toLowerCase());
 
@@ -338,7 +337,7 @@ export function buildKeyPruneScan(data, opts, ignoreSet, { caseSensitiveDefault 
         // author declaring the entry ubiquitous, and the flag claims something about the key against this chat, not the wiring.
         if (!declared && chatRate !== undefined && chatRate >= (opts.chatCommon ?? KEY_CHAT_COMMON)) {
             // A SmartKey names the path that fires most, where its paths were probed; a single path is the key itself.
-            const paths = literal ? [] : smartPaths(k, isEnglishCommon(COMMON_WORDS));
+            const paths = literal ? [] : smartPaths(k, isEnglishCommon(table().common));
             const hit = p => chatScan.messagesWith?.get(p.probe) ?? -1;
             const top = paths.length > 1 ? paths.reduce((a, p) => (hit(p) > hit(a) ? p : a), paths[0]) : null;
             return { flag: 'chat common', bookContent, chatRate, via: top && hit(top) >= 0 ? top.label : null };
@@ -354,9 +353,9 @@ export function buildKeyPruneScan(data, opts, ignoreSet, { caseSensitiveDefault 
         // --- the English list: the fallback for a key no chat was scanned for. With a chat, the chat has answered: over
         // the gate it read as chat common above, under it the list is contradicted and says nothing. -------------------
         if (opts.pruneCommon && chatRate === undefined) {
-            if (literal && !/\s/.test(k) && COMMON_WORDS.has(k.toLowerCase())) return { flag: 'english common', bookContent, chatRate };
+            if (literal && !/\s/.test(k) && table().common.has(k.toLowerCase())) return { flag: 'english common', bookContent, chatRate };
             // Named by its first all-common path: which path fires is the chat's question, and `chat common` answers it.
-            const common = literal ? null : smartPaths(k, isEnglishCommon(COMMON_WORDS)).find(p => p.common);
+            const common = literal ? null : smartPaths(k, isEnglishCommon(table().common)).find(p => p.common);
             if (common) return { flag: 'english common', term: common.label, bookContent, chatRate };
         }
 
@@ -451,7 +450,7 @@ export function buildKeyPruneScan(data, opts, ignoreSet, { caseSensitiveDefault 
     const dupeVocab = e => {
         const out = new Set();
         for (const w of String(e.content ?? '').toLowerCase().match(/[a-z][a-z'-]{2,}/g) ?? []) {
-            if ((ZIPF_EN.get(w) ?? 0) < 3.0) out.add(w);
+            if ((table().zipf.get(w) ?? 0) < 3.0) out.add(w);
         }
         return out;
     };

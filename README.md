@@ -38,11 +38,11 @@ changed, so unrelated extension updates never trigger it.
 
 The code is MIT. Two generated data files carry their own terms, stated in their headers:
 
-- `extension/zipf-en.js` — word frequencies and part-of-speech sets from the
+- `extension/zipf-en.js` — the bundled English pack: word frequencies and part-of-speech sets from the
   [Google Books Ngram](https://books.google.com/ngrams/) eng-fiction corpus, version 20200217, licensed under
-  [CC BY 3.0](https://creativecommons.org/licenses/by/3.0/); vocabulary gated by wordfreq.
-- `plugin/commonwords.js` — derived from [wordfreq](https://github.com/rspeer/wordfreq) by Robyn Speer, whose data is
-  [CC BY-SA 4.0](https://creativecommons.org/licenses/by-sa/4.0/), so this file is too. wordfreq's own sources include
+  [CC BY 3.0](https://creativecommons.org/licenses/by/3.0/), and a common-word list derived from
+  [wordfreq](https://github.com/rspeer/wordfreq) by Robyn Speer, whose data is
+  [CC BY-SA 4.0](https://creativecommons.org/licenses/by-sa/4.0/), so the file is too. wordfreq's own sources include
   Google Books Ngrams, Wikipedia, OPUS OpenSubtitles 2018, ParaCrawl, the Leeds Internet Corpus, and the SUBTLEX word
   lists by Marc Brysbaert et al., which are freely available data and are credited here as wordfreq requires.
 

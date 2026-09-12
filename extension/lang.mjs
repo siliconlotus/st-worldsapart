@@ -1,5 +1,6 @@
 // lang.mjs — the current language table: one pack shape for every language, English bundled, the rest fetched once and
 // kept by the caller's store. ST-free; fetch and store are injected.
+import { PACK as EN } from './zipf-en.js';
 
 /** The packed decile string (`decizipf:words;…`) to a word -> Zipf map. */
 export function parsePacked(packed) {
@@ -16,10 +17,12 @@ export function parsePacked(packed) {
 const words = s => new Set(String(s ?? '').split(' ').filter(Boolean));
 
 let current = null;
+/** The bundled English pack, always present because it ships. */
+export const BUNDLED = EN;
 
-/** The table in force; `usePack` before any read, or `table()` throws. */
+/** The table in force; the bundled English pack until `usePack` says otherwise. */
 export function table() {
-    if (!current) throw new Error('Worlds Apart: lang.mjs table() read before usePack()');
+    if (!current) usePack(EN);
     return current;
 }
 

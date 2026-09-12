@@ -1,11 +1,10 @@
 // keyword-suggest.mjs — the key suggester: what to propose for an entry, from its own text (the TF-IDF ranker) and
 // from a model (the prompt, parser and post-filter). ST-free; keyword-suggest-design.md carries the definition work.
-import { COMMON_WORDS } from '../plugin/commonwords.js';
-import { ZIPF_EN, POS_VA, POS_VA_STRICT, POS_ADJ } from './zipf-en.js';
+import { table } from './lang.mjs';
 import { buildAutomaton, scanAutomaton } from './smartkeys.mjs';
 import { FUNCTION_WORDS } from './keyword-audit.mjs';
 
-// Curly apostrophes to straight for a ZIPF_EN lookup only (K14); the term keeps what it was written with.
+// Curly apostrophes to straight for a table lookup only (K14); the term keeps what it was written with.
 const tblKey = w => w.includes('’') ? w.replace(/’/g, "'") : w;
 
 // Few-shot examples, invented and absent from every lorebook, so the post-filter can drop an echo unconditionally.
@@ -66,7 +65,7 @@ export function classifyLlmCand(cand, { canon, exampleCanon, exampleWords, entry
         const body = String(entryText).toLowerCase();
         if (c.split(' ').some(w => exampleWords.has(w) && !body.includes(w))) return { term, canon: c, reason: 'echo' };
     }
-    if (!c.includes(' ') && COMMON_WORDS.has(c)) return { term, canon: c, reason: 'junk' };   // generic single word
+    if (!c.includes(' ') && table().common.has(c)) return { term, canon: c, reason: 'junk' };   // generic single word
     if (excludeDates && isDateLike(term)) return { term, canon: c, reason: 'junk' };
     const df = dfSubstr(term);
     if (df / N > dfCeil) return { term, canon: c, reason: 'junk' };
@@ -74,7 +73,7 @@ export function classifyLlmCand(cand, { canon, exampleCanon, exampleWords, entry
 }
 
 /** Corpus name evidence: `wordSeq(text)` observes a text and returns the suggester's token sequence; `isName(w)` reads it — mid-sentence
- *  capitals at >= NAME_CAP_RATIO, acronyms exempt, "I" excluded, a never-lowercase word absent from ZIPF_EN accepted. The one properness test. */
+ *  capitals at >= NAME_CAP_RATIO, acronyms exempt, "I" excluded, a never-lowercase word absent from the table accepted. The one properness test. */
 export function nameEvidence() {
     const fold = w => { w = w.replace(/^['’-]+|['’-]+$/g, ''); return /['’]s$/i.test(w) ? w.slice(0, -2) : w; };
     // A token seen only in all-caps is an acronym; capitals count only mid-sentence.
@@ -102,7 +101,7 @@ export function nameEvidence() {
         if (w === 'i' || /^i['’]/.test(w)) return false;
         const up = capMidCount.get(w) ?? 0, lo = lowerCount.get(w) ?? 0;
         if (up > 0 && up / (up + lo) >= NAME_CAP_RATIO) return true;
-        return lo === 0 && (capsSeen.has(w) || mixedSeen.has(w)) && !ZIPF_EN.has(tblKey(w));
+        return lo === 0 && (capsSeen.has(w) || mixedSeen.has(w)) && !table().zipf.has(tblKey(w));
     };
     return { fold, wordSeq, isName, isAcr };
 }
@@ -114,6 +113,7 @@ export function nameEvidence() {
  */
 export function buildKeySuggest(data, opts) {
     const { dfCeil, maxN, excludeDates, excludeShort, onlyActive, cap, bgDocs = [], englishGate = true } = opts;
+    const T = table();   // read once per build: a switch takes effect on the next build
     const STOP = FUNCTION_WORDS;
     const { fold, wordSeq, isName, isAcr } = nameEvidence();
     const canon = k => (String(k).match(/[\p{L}][\p{L}'’-]+/gu) ?? []).map(w => fold(w).toLowerCase()).join(' ');
@@ -139,17 +139,17 @@ export function buildKeySuggest(data, opts) {
         if (DET.has(t)) fDet.set(p, (fDet.get(p) ?? 0) + 1);
     }
     const isVerbHead = t => { const tot = bAll.get(t) ?? 0; return tot >= 5 && (bSubj.get(t) ?? 0) / tot > 0.4 && (bDet.get(t) ?? 0) / tot < 0.1; };
-    // Verb tests: the table's dominant-POS sets (POS_VA for heads, POS_VA_STRICT anywhere), -ily/-ingly/-edly adverbs off the table, the book's own syntax (takesObj); names outrank all of them.
+    // Verb tests: the table's dominant-POS sets (posVA for heads, posVAStrict anywhere), -ily/-ingly/-edly adverbs off the table, the book's own syntax (takesObj); names outrank all of them.
     const inSetOrStem = (set, w) => set.has(tblKey(w)) || stems(w).some(s => set.has(tblKey(s)));
     const notName = w => !isName(w);
     const posBad = (set, w) => inSetOrStem(set, w) && notName(w);
-    const advLy = h => h.length >= 6 && /(?:ily|ingly|edly)$/.test(h) && !ZIPF_EN.has(tblKey(h)) && notName(h);
+    const advLy = h => h.length >= 6 && /(?:ily|ingly|edly)$/.test(h) && !T.zipf.has(tblKey(h)) && notName(h);
     const takesObj = t => { const tot = fAll.get(t) ?? 0; return tot >= 2 && (fDet.get(t) ?? 0) / tot > 0.5 && notName(t); };
     const CLITIC = /(?:n['’]t|['’](?:ve|ll|re|d|m|s))$/;
     const headBad = term => {
         const h = term.slice(term.lastIndexOf(' ') + 1);
-        if (satEntity(h) || isVerbHead(h) || posBad(POS_VA, h) || takesObj(h) || advLy(h) || CLITIC.test(h)) return true;
-        return term.includes(' ') && term.split(' ').some(w => posBad(POS_VA_STRICT, w) || CLITIC.test(w));
+        if (satEntity(h) || isVerbHead(h) || posBad(T.posVA, h) || takesObj(h) || advLy(h) || CLITIC.test(h)) return true;
+        return term.includes(' ') && term.split(' ').some(w => posBad(T.posVAStrict, w) || CLITIC.test(w));
     };
     // Linkers may sit inside a gram; a particle may also lead ("de la Cruz"), an English linker may not; nothing trails. Broader than the books on disk use (S4).
     const PARTICLES = new Set('de del da di du la las le les los el van von der den bin ibn al af av dos das'.split(' '));
@@ -239,7 +239,7 @@ export function buildKeySuggest(data, opts) {
         return ((s == null || SHOUTED.test(s)) ? wideForm(term) : s) ?? term;
     };
 
-    // English-frequency gate (zipf-en.js): names z 0; a unigram in the table is cut; a phrase rides its rarest word on a ramp (full at
+    // Frequency gate (lang.mjs table): names z 0; a unigram in the table is cut; a phrase rides its rarest word on a ramp (full at
     // z<=2.5, gone at z>=3.8) and is cut if any non-linker, non-name word is top-500 English (S5). A lowercase -ing word inherits a junk-band pseudo-z.
     // ponytail: constants eyeballed off one book's junk band; retune there.
     const isGer = w => w.length >= 6 && w.endsWith('ing');
@@ -253,7 +253,7 @@ export function buildKeySuggest(data, opts) {
         else if (w.length >= 4 && w.endsWith('s') && !w.endsWith('ss')) { out.push(w.slice(0, -1)); if (w.endsWith('es')) out.push(w.slice(0, -2)); }
         return out;
     };
-    const tblZ = w => { let z = ZIPF_EN.get(tblKey(w)); if (z === undefined) { z = 0; for (const s of stems(w)) z = Math.max(z, ZIPF_EN.get(tblKey(s)) ?? 0); } return z; };
+    const tblZ = w => { let z = T.zipf.get(tblKey(w)); if (z === undefined) { z = 0; for (const s of stems(w)) z = Math.max(z, T.zipf.get(tblKey(s)) ?? 0); } return z; };
     const zEff = w => isName(w) ? 0 : Math.max(tblZ(w), isGer(w) ? 3.8 : 0);
     // Exclusive on the table's 0.1 grid, so a word stored AT the ceiling passes ("order" is 5.5 on wordfreq's scale).
     const PHRASE_WORD_CEIL = 5.5;
@@ -333,7 +333,7 @@ export function buildKeySuggest(data, opts) {
         if (lng.n < 3 || cohesion(lng.term) >= SUBSUME_COHESION) {
             const lw = lng.term.split(' ');
             let k = 0; while (k < lw.length && PARTICLES.has(lw[k])) k++;
-            if (k > 0 && lw.length - k === 1 && srt.term === lw[k] && !ZIPF_EN.has(tblKey(lw[k]))) return r === lng;
+            if (k > 0 && lw.length - k === 1 && srt.term === lw[k] && !T.zipf.has(tblKey(lw[k]))) return r === lng;
             if (srt.n === 1) return false;
             return r === srt;
         }
@@ -355,10 +355,10 @@ export function buildKeySuggest(data, opts) {
             const n = term.split(' ').length;
             if (excludeShort && n === 1 && term.length <= 3 && !isAcr(term)) continue;
             if (!isAcr(term) && headBad(term)) continue;
-            // An adjective over-fires detached from its noun, so POS_ADJ applies to unigrams only.
-            if (n === 1 && posBad(POS_ADJ, term)) continue;
+            // An adjective over-fires detached from its noun, so posAdj applies to unigrams only.
+            if (n === 1 && posBad(T.posAdj, term)) continue;
             const el = n === 1 ? term.match(ELIDED) : null;
-            if (el && !ZIPF_EN.has(tblKey(el[1])) && tf.has(el[1])) continue;
+            if (el && !T.zipf.has(tblKey(el[1])) && tf.has(el[1])) continue;
             if (n === 1 && /^[ivxlcdm]{2,}$/.test(term)) continue;
             if (n === 1 && TITLES.has(term)) continue;
             if (excludeDates && isDateLike(term)) continue;

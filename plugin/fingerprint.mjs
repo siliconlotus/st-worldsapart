@@ -7,7 +7,6 @@ export const PLUGIN_FILES = [
     ['../extension/smartkeys.mjs', 'smartkeys.mjs'],
     ['../extension/matcher.mjs', 'matcher.mjs'],
     ['vector.mjs', 'vector.mjs'],
-    ['commonwords.js', 'commonwords.js'],
     ['fingerprint.mjs', 'fingerprint.mjs'],
     ['server.js', 'index.js'],
 ];
