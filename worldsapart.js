@@ -1809,7 +1809,7 @@ const SETTINGS_HTML = `
                     <label>Lorebook order</label>
                     <div id="wa_world_priority_list" style="margin-top:2px;"></div>
 
-                    <div class="wa-row"><label for="wa_relevance_cutoff">Relevance cutoff <span class="fa-solid fa-circle-question note-link-span" title="Memory entries below this are dropped. 0 = none."></span></label><input id="wa_relevance_cutoff" type="number" class="text_pole" min="0" max="1" step="0.01"></div>
+                    <div class="wa-row"><label for="wa_relevance_cutoff">Relevance cutoff <span class="fa-solid fa-circle-question note-link-span" title="Memory entries scoring below this are dropped. 0.1 to 0.2 is the usual range: higher drops more, including entries you may want; lower lets more irrelevant ones through. 0 = none."></span></label><input id="wa_relevance_cutoff" type="number" class="text_pole" min="0" max="1" step="0.01"></div>
 
                     <div class="wa-row"><label for="wa_max_entries">Vector entry cap <span class="fa-solid fa-circle-question note-link-span" title="Retrieved entries in the prompt."></span></label><input id="wa_max_entries" type="number" class="text_pole" min="1" max="100" step="1"></div>
 
