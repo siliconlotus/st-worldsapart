@@ -1885,7 +1885,7 @@ const SETTINGS_HTML = `
                     </label>
 
                     <label for="wa_rater_id">Rater id <span class="fa-solid fa-circle-question note-link-span" title="A random anonymous ID your grades are signed with."></span></label>
-                    <input id="wa_rater_id" type="text" class="text_pole" readonly placeholder="generated on your first grade">
+                    <input id="wa_rater_id" type="text" class="text_pole" readonly style="opacity:0.55;cursor:default;" placeholder="generated on your first grade">
 
 
                     <div id="wa_review_bundles" class="menu_button" style="width:auto;padding:0.3em 0.8em;" title="Opens the bundle reviewer without a chat.">Review graded bundles…</div>
