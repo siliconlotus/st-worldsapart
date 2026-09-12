@@ -213,9 +213,11 @@ export async function init(router) {
             const wordBoundary = String(request.body?.wordBoundary ?? '');
             if (!wordBoundary) return response.status(400).send({ error: 'wordBoundary is required' });
             setBoundaryMode(wordBoundary);
+            // The unit the chat is cut into, the caller's setting as wordBoundary is; message when an older client sends none.
+            const unitOpts = { matchWindow: String(request.body?.matchWindow ?? 'message'), depth: Number(request.body?.depth) || 0 };
 
             const totals = new Map(), typedTotals = new Map();
-            let messages = 0, scanned = 0, missing = 0;
+            let messages = 0, scanned = 0, missing = 0, unit = 'message';
 
             for (const entry of chats) {
                 const dir = sanitize(String(entry?.dir ?? ''));
@@ -237,10 +239,11 @@ export async function init(router) {
                     rl.on('error', resolve);   // an unreadable chat is skipped, not fatal
                 });
                 // One file at a time, then merged: a hit is per message, so where the scan is split cannot change the total.
-                const got = countChatHits(keys, texts);
+                const got = countChatHits(keys, texts, unitOpts);
                 for (const [k, n] of got.messagesWith) totals.set(k, (totals.get(k) ?? 0) + n);
                 for (const [k, n] of got.typedWith) typedTotals.set(k, (typedTotals.get(k) ?? 0) + n);
                 messages += got.messages;
+                unit = got.unit;
             }
 
             const counts = {}, typed = {};
@@ -248,7 +251,7 @@ export async function init(router) {
                 counts[k] = totals.get(k) ?? 0;
                 if (typedTotals.has(k)) typed[k] = typedTotals.get(k);
             }
-            return response.send({ counts, typed, messages, scanned, missing });
+            return response.send({ counts, typed, messages, unit, scanned, missing });
         } catch (error) {
             console.error('Worlds Apart: /scan-chats failed', error);
             return response.status(500).send({ error: String(error?.message ?? error) });

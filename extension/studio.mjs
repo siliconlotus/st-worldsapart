@@ -133,6 +133,7 @@ export async function lorebookStudio(preferredBook = null, open = null) {
     let cleanupShowAll = false;        // Cleanup lists every key on the visible entries, not only the flagged ones
     let chatHits = null;        // Map<key, count> from the chat scan, null until one has run; survives a rescan, cleared on book change
     let chatTyped = null;       // the same count for each key AS WRITTEN, its variants excluded
+    let chatUnit = 'message';   // what chatHits counts: messages, paragraphs, or scan windows (countChatHits `unit`)
     let chatMsgs = 0;
     let chatName = '';          // WHICH chat produced those counts — see runChatScan
     let chatNames = [];         // the same, unabbreviated: chatName collapses to "N chats" and only the tooltip can name them
@@ -216,7 +217,7 @@ export async function lorebookStudio(preferredBook = null, open = null) {
         scan = buildKeyPruneScan(data, studioOpts, ignoreSet, {
             matchWindow: settings().matchWindow,
             // Into the classifier, not painted on in Cleanup: the Explorer's chips colour from reasonOf/severityOf.
-            chatScan: chatHits ? { messagesWith: chatHits, typedWith: chatTyped, messages: chatMsgs } : undefined,
+            chatScan: chatHits ? { messagesWith: chatHits, typedWith: chatTyped, messages: chatMsgs, unit: chatUnit } : undefined,
         });
     };
     const afterChatScan = keys => { rebuildScan(); termRepaint?.(); rerenderKeys(keys); };
@@ -224,7 +225,7 @@ export async function lorebookStudio(preferredBook = null, open = null) {
     const bookKeys = () => [...new Set(Object.values(data?.entries ?? {})
         .flatMap(e => (Array.isArray(e.key) ? e.key : []).map(k => String(k).trim())).filter(Boolean))];
 
-    const clearChatScan = () => { chatHits = null; chatTyped = null; chatMsgs = 0; chatName = ''; chatNames = []; staleTerms.clear(); };
+    const clearChatScan = () => { chatHits = null; chatTyped = null; chatUnit = 'message'; chatMsgs = 0; chatName = ''; chatNames = []; staleTerms.clear(); };
     // Repaints the entries carrying any of `keys`; classifyEntry reads ignoreSet live, so whitelisting needs no rescan.
     const rerenderKeys = keys => { const set = new Set(keys); for (const e of Object.values(data?.entries ?? {})) if ((Array.isArray(e.key) ? e.key : []).some(k => set.has(k))) renderEntry(e); };
 
@@ -1931,17 +1932,21 @@ export async function lorebookStudio(preferredBook = null, open = null) {
      *  routes can split the picked chats between them. */
     const scanKeys = async (keys, picked) => {
         const totals = new Map(keys.map(k => [k, 0])), typedTotals = new Map();
-        let seen = 0, via = '';
+        let seen = 0, via = '', unit = 'message';
+        // The chat is cut into the unit the book's match window matches a conjunction within; the scan depth only sizes
+        // a `scan` block. Both routes are handed the same two, as they are wordBoundary.
+        const unitOpts = { matchWindow: settings().matchWindow, depth: Number(settings().messageDepth || world_info_depth) };
         const add = got => {
             for (const [k, n] of got.messagesWith) totals.set(k, (totals.get(k) ?? 0) + n);
             for (const [k, n] of got.typedWith ?? []) typedTotals.set(k, (typedTotals.get(k) ?? 0) + n);
             seen += got.messages;
+            unit = got.unit ?? unit;
         };
         let onDisk = picked.filter(c => !c.open && c.avatar);
         if (runState.pluginAvailable && onDisk.length) {
             const r = await fetch('/api/plugins/worlds-apart/scan-chats', {
                 method: 'POST', headers: getRequestHeaders(),
-                body: JSON.stringify({ keys, wordBoundary: settings().wordBoundary, chats: onDisk.map(c => ({ dir: c.avatar.replace(/\.png$/, ''), file: c.file })) }),
+                body: JSON.stringify({ keys, wordBoundary: settings().wordBoundary, ...unitOpts, chats: onDisk.map(c => ({ dir: c.avatar.replace(/\.png$/, ''), file: c.file })) }),
             });
             const j = r.ok ? await r.json() : null;
             // 0 messages means the route resolved no files; taking it would zero every key's share, so the browser retries them.
@@ -1951,6 +1956,7 @@ export async function lorebookStudio(preferredBook = null, open = null) {
                     if (j.typed && k in j.typed) typedTotals.set(k, Number(j.typed[k]) || 0);
                 }
                 seen = Number(j.messages);
+                unit = j.unit ?? unit;
                 via = 'server';
             } else {
                 console.warn('Worlds Apart: /scan-chats returned nothing, falling back to client-side scan', j);
@@ -1970,10 +1976,10 @@ export async function lorebookStudio(preferredBook = null, open = null) {
             msgs.push(...got);
         }
         if (msgs.length) {
-            add(countChatHits(keys, msgs));
+            add(countChatHits(keys, msgs, unitOpts));
             via = via ? 'server + browser' : 'browser';
         }
-        return { totals, typedTotals, seen, via };
+        return { totals, typedTotals, seen, via, unit };
     };
 
     /** Scans the chosen chats and installs the counts — the one gatherer for the picker and the audit; returns a summary, no toast or repaint. */
@@ -1985,7 +1991,7 @@ export async function lorebookStudio(preferredBook = null, open = null) {
         const keys = [...new Set([...own, ...own.flatMap(k => orthoAlternates(k).map(a => a.alt))])];
         const first = await scanKeys(keys, picked);
         if (!first.seen) return null;
-        const { totals, typedTotals, seen } = first;
+        const { totals, typedTotals, seen, unit } = first;
         let via = first.via;
         // Second pass, probes only for the keys over the gate: a probe is a SmartKey evaluated per message, and the gate
         // admits a handful of keys where the book has thousands.
@@ -2000,6 +2006,7 @@ export async function lorebookStudio(preferredBook = null, open = null) {
         chatHits = totals;
         chatTyped = typedTotals;
         chatMsgs = seen;
+        chatUnit = unit;
         chatName = label;
         chatNames = picked.map(c => String(c.file).replace(/\.jsonl$/, ''));
         return { keys, live: [...totals.values()].filter(n => n > 0).length, via };

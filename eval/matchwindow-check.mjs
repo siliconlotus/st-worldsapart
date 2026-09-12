@@ -128,7 +128,7 @@ console.log('ok   a key and its case variant count one entry once');
 
     const live = run({ messagesWith: new Map([['mother', 40], ['zzznope', 12]]), messages: 100 });
     eq(live.zzznope, undefined, 'a key the CHAT uses is not dead — the flag is suppressed, not recoloured');
-    eq(live.mother.why, `chat common · 40% of chat`, 'a common word the chat confirms over-fires reads as the chat flag, above the English list');
+    eq(live.mother.why, `chat common · 40% of messages`, 'a common word the chat confirms over-fires reads as the chat flag, above the English list');
     eq(live.mother.sev, 'moderate', '...moderate at 40%: over the gate, not in more messages than not');
     eq(KEY_CHAT_COMMON, 0.2, 'the chat-common threshold is a named bound, not a literal');
 }
@@ -154,6 +154,13 @@ console.log('ok   a key the chat scan never covered is not reported as chat-chec
     const msgs = ['The copper pipe burst', 'copper, but no plumbing', 'Colonel Vasquez called', 'nothing here'];
     const got = countChatHits(['copper', '? copper pipe', '/vasqu[ei]z/i', '? zzznope'], msgs);
     // Expansion reaches here too, or a hyphenated key reports fewer messages than countKey matches.
+    // Test like we fight: a conjunction across two adjacent messages fires under `scan` and not under `message`.
+    const split = ['the copper arrived', 'the pipe burst', 'nothing', 'nothing'];
+    eq(countChatHits(['? copper pipe'], split).messagesWith.get('? copper pipe'), 0, 'message unit: terms in different messages never co-occur');
+    const sc = countChatHits(['? copper pipe'], split, { matchWindow: 'scan', depth: 2 });
+    eq(`${sc.messagesWith.get('? copper pipe')}/${sc.messages} ${sc.unit}`, '1/2 window', 'scan unit: blocks of `depth` messages, and the conjunction co-occurs in one');
+    const pg = countChatHits(['? copper pipe'], ['copper here.\n\npipe there.'], { matchWindow: 'paragraph' });
+    eq(`${pg.messagesWith.get('? copper pipe')}/${pg.messages} ${pg.unit}`, '0/2 paragraph', 'paragraph unit: one message, two paragraphs, no co-occurrence');
     const hy = countChatHits(['copper-pipe'], ['a copper pipe', 'a copper-pipe', 'both copper pipe and copper-pipe', 'neither']);
     eq(hy.messagesWith.get('copper-pipe'), 3, 'both forms count, and a message holding both counts once');
     eq(got.messages, 4, 'the denominator is every message it was given');

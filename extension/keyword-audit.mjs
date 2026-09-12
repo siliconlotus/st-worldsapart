@@ -126,6 +126,8 @@ export const substringProbes = k => (k.includes('"') ? [] : [`? ="${k}"`, ...(/\
 
 export function buildKeyPruneScan(data, opts, ignoreSet, { caseSensitiveDefault = false, wholeWordsDefault = false, matchWindow = 'scan', chatScan } = {}) {
     // undefined: no scan, or a scan that did not cover this key; 0: scanned and silent. chatChecked reads the difference.
+    // The unit the chat scan counted, named for a chip: what a rate is a rate of.
+    const units = { message: 'messages', paragraph: 'paragraphs', window: 'scan windows' }[chatScan?.unit] ?? 'messages';
     // Messages holding the key AS WRITTEN. undefined when no scan covered it; absent from a scan that predates the field.
     const chatTypedOf = key => chatScan?.typedWith?.get(key);
     const chatRateOf = key => {
@@ -350,17 +352,17 @@ export function buildKeyPruneScan(data, opts, ignoreSet, { caseSensitiveDefault 
         if (p.flag === 'unusable') return { text: p.code ? `unusable — ${p.code}` : 'unusable', severity };
         if (p.flag === 'english common') {
             const which = p.term ? ` · ${p.term}` : '';
-            return { text: p.chatRate === undefined ? `english common${which}` : `english common${which} · ${Math.round(100 * p.chatRate)}% of chat`, severity };
+            return { text: p.chatRate === undefined ? `english common${which}` : `english common${which} · ${Math.round(100 * p.chatRate)}% of ${units}`, severity };
         }
         if (p.flag === 'book shared') return { text: `book shared (${Math.round(100 * p.bookListed / nBook)}%)`, severity };
-        if (p.flag === 'chat common') return { text: `chat common · ${Math.round(100 * p.chatRate)}% of chat${p.via ? `, mostly ${p.via}` : ''}`, severity };
+        if (p.flag === 'chat common') return { text: `chat common · ${Math.round(100 * p.chatRate)}% of ${units}${p.via ? `, mostly ${p.via}` : ''}`, severity };
         if (p.flag === 'book common') return { text: `book common · ${Math.round(100 * p.bookContent / nBook)}% of entries · no chat scanned`, severity };
         if (p.flag === 'fragment') return { text: 'phrase fragment', severity };
         if (p.flag === 'substring') {
             const pct = x => `${Math.round(100 * x)}%`;
             const how = [p.wordShare !== undefined && p.suggest.includes('=') ? `${pct(p.wordShare)} as a word` : null,
                 p.caseShare !== undefined && p.suggest.includes('^') ? `${pct(p.caseShare)} in this case` : null].filter(Boolean).join(', ');
-            return { text: `fires in ${pct(p.chatRate)} of messages, ${how} — consider ${p.suggest}`, severity };
+            return { text: `fires in ${pct(p.chatRate)} of ${units}, ${how} — consider ${p.suggest}`, severity };
         }
         if (p.flag === 'variant only') return { text: `${p.where} uses it only un-hyphenated`, severity };
         if (p.flag === 'regex orthography') return { text: `${p.evidence ?? `will not match ${p.label}`}, consider ${p.suggest}`, severity };
