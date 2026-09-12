@@ -2077,7 +2077,7 @@ export async function lorebookStudio(preferredBook = null, open = null) {
             scanned: got?.via ?? 'none', messages: chatMsgs, keys: chatHits?.size ?? 0, firing: got?.live ?? 0,
         });
         // Only the absence is worth saying: the bulk bar carries the counts when there are any.
-        if (!got && !chatHits) toastr.info('No chat is bound; scanning the book only.', 'Worlds Apart', { timeOut: 6000 });
+        if (!got && !chatHits) toastr.info('No chat is bound; scanned the book only.', 'Worlds Apart', { timeOut: 6000 });
     };
 
     const cleanupGroups = () => {
