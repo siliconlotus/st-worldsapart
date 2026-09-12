@@ -287,6 +287,19 @@
             "selectiveLogic": 0,
             "comment": "REGEX ORTHOGRAPHY — a regex is fold-exempt, so this ASCII apostrophe matches only itself, where the plain key Cap'n matches the whole family. The audit suggests the class; it does not rewrite the pattern, the fold-exemption being the author's.",
             "content": "Cap'n Rourke keeps the ledger. Cap'n Rourke keeps the keys."
+        },
+        "21": {
+            "uid": 21,
+            "key": [
+                "/Bose-Einstein \\w+/"
+            ],
+            "keysecondary": [],
+            "constant": false,
+            "vectorized": false,
+            "disable": false,
+            "selectiveLogic": 0,
+            "comment": "REGEX HYPHEN — the content writes the pair with an en-dash, which this pattern cannot reach, so the key is dead. The hyphen flags only because the book holds what the en-dash form WOULD have matched, and that evidence outranks unattested: the pattern is mis-written, not dead. A range marker would not be swapped.",
+            "content": "The Bose–Einstein condensate forms below the critical point."
         }
     }
 }

@@ -105,6 +105,8 @@ console.log('                            in its own content, the hyphenated form
 console.log('   /Cap\'n \\w+/             "a regex does not fold \' — try [...]", minor, the class being the');
 console.log('                            fold\'s own apostrophe family. Same chip in the Explorer and in');
 console.log('                            Bulk Cleanup: both read the classifier.');
+console.log('   /Bose-Einstein \\\\w+/      "the book has the en-dash form — try [-–]", minor. Dead as');
+console.log('                            written, and the evidence outranks that dead verdict.');
 console.log('                            Explorer and in Bulk Cleanup: both read the classifier.');
 console.log('');
 console.log('Runtime eyeball (prune, bucket 1.5): on a generation whose recent chat mentions café');
