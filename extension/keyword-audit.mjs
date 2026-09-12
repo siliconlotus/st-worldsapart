@@ -157,102 +157,103 @@ export function buildKeyPruneScan(data, opts, ignoreSet, { caseSensitiveDefault 
         }
     }
 
-    const scanCache = new Map();
     const allKeys = [...new Set(allEntries.flatMap(e => (Array.isArray(e.key) ? e.key : []).map(k => String(k).trim())).filter(Boolean))];
     // Its OWN scope: sharing the retrieval scope would leave thousands of keys in the live automaton.
     const scanScope = createScanScope();
-    const ck = (key, cs, ww) => `${cs ? 1 : 0}${ww ? 1 : 0} ${cs ? key : String(key).toLowerCase()}`;
-    // Content-outer, key-inner: one automaton walk per entry serves every key.
-    const batched = new Set();
-    // Once: every key interned before any content is scanned. Registering per content re-folded every key per entry.
     registerKeys(allKeys, scanScope);
-    // Segmented like the scan window, once per content rather than once per flag combo; df still counts entries, not segments (K5).
+    const comboId = (cs, ww) => `${cs ? 1 : 0}${ww ? 1 : 0}`;
+    const ck = (key, cs, ww) => `${comboId(cs, ww)} ${cs ? key : String(key).toLowerCase()}`;
+    // Segmented like the scan window; df still counts entries, not segments (K5).
     const contentSegments = contents.map(c => segment([c], matchWindow));
-    // The trie is compiled once and each segment scanned once: the cache holds every segment of the book, so a second flag
-    // combo, or a case-sensitive check on one key, reads the scan it already has. The runtime's small cache is for a chat
-    // window consulted by many entries; here nothing repeats except by our own doing.
-    scanScope.scanMax = contentSegments.reduce((n, segs) => n + segs.length, 0) + 8;
-    // A flag combo's batch covers the keys of the entries that use it, not every key in the book: under whole-word every
-    // reported hit is verified by regex, and running that over 3,484 keys for the five entries that asked was the audit's
-    // cost. An entry with whole-word on is also listed under its substring combo, which `short` asks for its total.
-    const comboOf = (cs, ww) => `${cs ? 1 : 0}${ww ? 1 : 0}`;
-    const keysByCombo = new Map();
+
+    // The questions the verdicts will ask of the book, fixed before the pass so it can answer them all at once: which
+    // flag combos each key is counted under — its entries' own, and for a whole-word entry the substring combo too,
+    // which `short` reads for its total — and which keys want their title-cased form looked for.
+    const combosOf = new Map();
     for (const e of entries) {
         const cs = e.caseSensitive ?? caseSensitiveDefault, ww = e.matchWholeWords ?? wholeWordsDefault;
         for (const k of (Array.isArray(e.key) ? e.key : []).map(x => String(x).trim()).filter(Boolean)) {
-            for (const c of ww ? [comboOf(cs, true), comboOf(cs, false)] : [comboOf(cs, false)]) {
-                let list = keysByCombo.get(c);
-                if (!list) keysByCombo.set(c, list = { all: new Set() });
-                list.all.add(k);
-            }
+            let list = combosOf.get(k);
+            if (!list) combosOf.set(k, list = new Map());
+            for (const w of ww ? [true, false] : [false]) list.set(comboId(cs, w), { cs, ww: w });
         }
     }
-    for (const list of keysByCombo.values()) {
-        list.all = [...list.all];
-        // Literal keys are counted only in the segments the automaton found a variant of them in; `?` and regex keys in
-        // every segment, being evaluated rather than found. Same verdicts as calling countKey for every key in every
-        // segment, since countKey's own first step is that same primed lookup — this changes only when and how often it is called.
-        list.literal = list.all.filter(k => !k.startsWith('?') && !isRegexKey(k));
-        list.other = list.all.filter(k => k.startsWith('?') || isRegexKey(k));
-    }
-    const runBatch = (cs, ww) => {
-        const combo = comboOf(cs, ww);
-        if (batched.has(combo)) return;
-        batched.add(combo);
-        const list = keysByCombo.get(combo);
-        if (!list) return;   // no entry uses this combo: a key asked under it is judged on demand
-        const literalKeys = list.literal, otherKeys = list.other;
-        for (const segments of contentSegments) {
-            primeScan([], segments, scanScope);
-            const perKey = new Map();
-            const tally = (key, seg) => {
+    const titledOf = k => {
+        const tokens = k.split(/\s+/);
+        const cap = t => t.charAt(0).toUpperCase() + t.slice(1);
+        const titled = tokens.map((t, i) => (i === 0 || i === tokens.length - 1 || !NAME_PARTICLES.has(t.toLowerCase()) ? cap(t) : t)).join(' ');
+        return titled === k ? null : titled;
+    };
+    const isLiteral = k => !k.startsWith('?') && !isRegexKey(k);
+    const literalKeys = allKeys.filter(isLiteral);
+    const otherKeys = allKeys.filter(k => !isLiteral(k));
+    const wantsTitled = new Map(literalKeys.filter(looksLikeFragment).map(k => [k, titledOf(k)]).filter(([, t]) => t));
+
+    // ONE pass over the book: each segment through the automaton once, and every fact recorded as it goes. Literal keys
+    // are counted only in the segments the automaton found a variant of them in; `?` and regex keys in every segment,
+    // being evaluated rather than found. Same verdicts as countKey for every key in every segment, its own first step
+    // being that same lookup — the pass changes only when and how often it is called.
+    const bookScan = new Map();   // ck(key, cs, ww) -> { df, total, typed }, the chatScan's twin
+    const named = new Map();      // key -> the book holds its title-cased form case-sensitively somewhere
+    for (const segments of contentSegments) {
+        primeScan([], segments, scanScope);
+        const perKey = new Map();   // key -> combo id -> { n, typed }, this content only
+        const tally = (key, seg) => {
+            const combos = combosOf.get(key);
+            if (!combos) return;
+            let byCombo = perKey.get(key);
+            for (const [id, { cs, ww }] of combos) {
                 const n = countKey(key, seg, cs, ww, scanScope);
-                if (!n) return;
-                let r = perKey.get(key);
-                if (!r) perKey.set(key, r = { n: 0, typed: 0 });
+                if (!n) continue;
+                if (!byCombo) perKey.set(key, byCombo = new Map());
+                let r = byCombo.get(id);
+                if (!r) byCombo.set(id, r = { n: 0, typed: 0 });
                 r.n += n;
                 r.typed += cachedCount(key, seg, scanScope, false) ?? 0;
-            };
-            for (const seg of segments) {
-                for (const key of hitLiterals(scanScope, seg, literalKeys)) tally(key, seg);
-                for (const key of otherKeys) tally(key, seg);
             }
-            // Case variants of one key (`Pack` and `pack`) share a cache slot when cs is off, and both would count this
-            // entry: df would exceed nBook and the ratio read over 100%.
-            const counted = new Set();
-            for (const [key, { n, typed }] of perKey) {
+            // The titled form folds to the key's own pattern, so a segment the automaton reported is the only kind that can
+            // hold it: only those are walked case-sensitively.
+            const titled = wantsTitled.get(key);
+            if (titled && !named.get(key) && countKey(titled, seg, true, false, scanScope) > 0) named.set(key, true);
+        };
+        for (const seg of segments) {
+            for (const key of hitLiterals(scanScope, seg, literalKeys)) tally(key, seg);
+            for (const key of otherKeys) tally(key, seg);
+        }
+        // Case variants of one key (`Pack` and `pack`) share a slot when cs is off, and both would count this entry:
+        // df would exceed nBook and the ratio read over 100%.
+        const counted = new Set();
+        for (const [key, byCombo] of perKey) {
+            for (const [id, { n, typed }] of byCombo) {
+                const { cs, ww } = combosOf.get(key).get(id);
                 const k = ck(key, cs, ww);
                 if (counted.has(k)) continue;
                 counted.add(k);
-                let r = scanCache.get(k);
-                if (!r) scanCache.set(k, r = { df: 0, total: 0, typed: 0 });
+                let r = bookScan.get(k);
+                if (!r) bookScan.set(k, r = { df: 0, total: 0, typed: 0 });
                 r.df++; r.total += n; r.typed += typed;
             }
         }
-        // Every key the batch saw is cached, the silent ones as zeros: a cache miss below means a key the audit never
-        // scanned, and only that is judged on demand. Leaving the zeros out made every dead key an on-demand rescan.
-        for (const key of list.all) { const k = ck(key, cs, ww); if (!scanCache.has(k)) scanCache.set(k, { df: 0, total: 0, typed: 0 }); }
-    };
-    const scan = (key, cs, ww) => {
-        runBatch(cs, ww);
-        const id = ck(key, cs, ww);
-        let r = scanCache.get(id);
-        if (!r) {
-            // A key the batch never saw — edited since the audit. Judged on demand, one key over the contents through a
-            // private scope, so the shared automaton is not rebuilt and the answer is a verdict rather than "0/0".
-            r = { df: 0, total: 0, typed: 0 };
-            const own = createScanScope();
-            for (const c of contents) {
-                const segments = segment([c], matchWindow);
-                primeScan([key], segments, own);
-                let n = 0, typed = 0;
-                for (const seg of segments) { n += countKey(key, seg, cs, ww, own); typed += cachedCount(key, seg, own, false) ?? 0; }
-                if (n) { r.df++; r.total += n; r.typed += typed; }
-            }
-            scanCache.set(id, r);
+    }
+    // Every question asked has an answer, the silent ones zeros: a miss below means a key the audit never saw.
+    for (const [key, combos] of combosOf) for (const { cs, ww } of combos.values()) { const k = ck(key, cs, ww); if (!bookScan.has(k)) bookScan.set(k, { df: 0, total: 0, typed: 0 }); }
+    for (const key of wantsTitled.keys()) if (!named.has(key)) named.set(key, false);
+
+    /** A key the pass never saw — edited since the audit — judged on demand: one key over the contents through a private
+     *  scope, so the shared automaton is not rebuilt, and the answer is a verdict rather than "0/0". */
+    const onDemand = (key, cs, ww) => {
+        const r = { df: 0, total: 0, typed: 0 };
+        const own = createScanScope();
+        for (const segments of contentSegments) {
+            primeScan([key], segments, own);
+            let n = 0, typed = 0;
+            for (const seg of segments) { n += countKey(key, seg, cs, ww, own); typed += cachedCount(key, seg, own, false) ?? 0; }
+            if (n) { r.df++; r.total += n; r.typed += typed; }
         }
+        bookScan.set(ck(key, cs, ww), r);
         return r;
     };
+    const scan = (key, cs, ww) => bookScan.get(ck(key, cs, ww)) ?? onDemand(key, cs, ww);
     // Short-key second pass: a boundary hit is rejected when a digit sits in the surrounding run of [\d.,$£€¥], so "007" is clean in "Agent 007." but not in "$10,007.08".
     const NUMRUN = /[\d.,$£€¥]/;
     const cleanCache = new Map();
@@ -299,15 +300,14 @@ export function buildKeyPruneScan(data, opts, ignoreSet, { caseSensitiveDefault 
 
     /** A lowercase-typed key whose title-cased form — particles left lowercase, the frame capitalised as looksProper
      *  wants it — appears case-sensitively in the book's own text is a name, not a phrase: `isle of wight` clears on
-     *  "Isle of Wight" in an entry. The shape test cannot see this; the book can. */
+     *  "Isle of Wight" in an entry. The shape test cannot see this; the pass did. A key it never saw is walked now. */
     const namedInBook = k => {
-        const tokens = k.split(/\s+/);
-        const cap = t => t.charAt(0).toUpperCase() + t.slice(1);
-        const titled = tokens.map((t, i) => (i === 0 || i === tokens.length - 1 || !NAME_PARTICLES.has(t.toLowerCase()) ? cap(t) : t)).join(' ');
-        if (titled === k) return false;
-        // The titled form folds to the key's own pattern, so the main scope answers for it unregistered: a folded count of
-        // zero is authoritative, and only a segment holding the words at all is walked case-sensitively.
-        return contentSegments.some(segments => { primeScan([], segments, scanScope); return segments.some(seg => countKey(titled, seg, true, false, scanScope) > 0); });
+        const known = named.get(k);
+        if (known !== undefined) return known;
+        const titled = titledOf(k);
+        const found = Boolean(titled) && contentSegments.some(segments => segments.some(seg => countKey(titled, seg, true, false) > 0));
+        named.set(k, found);
+        return found;
     };
 
     // Tested in FLAG_PRIORITY order; the first hit wins, so moving a branch changes what a key reports.
