@@ -94,7 +94,6 @@ export async function lorebookStudio(preferredBook = null, open = null) {
         ?? attachedBookNames()[0] ?? null;
     let data = null;                 // loaded world-info for `selected`
     let scan = null;                 // buildKeyPruneScan result for `data` (keyword colouring)
-    const staleTerms = new Set();    // rowIds renamed since the audit: their verdict is the OLD term's, so it is not shown as live
     let suggest = null;              // buildKeySuggest result, built lazily on first ⚡/🪄
     let ignoreSet = new Set();       // per-book prune whitelist (shared with the prune popup)
     let studioOpts = { ...STUDIO_PRUNE_OPTS, ...(settings().studioScanOpts ?? {}) };
@@ -212,8 +211,7 @@ export async function lorebookStudio(preferredBook = null, open = null) {
     const rebuildScan = () => {
         // Every term is judged below, so an edited row drops the false the edit forced and rejoins the pre-tick policy.
         // Only those: a tick the user set is theirs, and survives a rescan on purpose.
-        for (const id of staleTerms) cleanupChecks.delete(id);
-        staleTerms.clear();
+       
         scan = buildKeyPruneScan(data, studioOpts, ignoreSet, {
             matchWindow: settings().matchWindow,
             // Into the classifier, not painted on in Cleanup: the Explorer's chips colour from reasonOf/severityOf.
@@ -225,7 +223,7 @@ export async function lorebookStudio(preferredBook = null, open = null) {
     const bookKeys = () => [...new Set(Object.values(data?.entries ?? {})
         .flatMap(e => (Array.isArray(e.key) ? e.key : []).map(k => String(k).trim())).filter(Boolean))];
 
-    const clearChatScan = () => { chatHits = null; chatTyped = null; chatUnit = 'message'; chatMsgs = 0; chatName = ''; chatNames = []; staleTerms.clear(); };
+    const clearChatScan = () => { chatHits = null; chatTyped = null; chatUnit = 'message'; chatMsgs = 0; chatName = ''; chatNames = []; };
     // Repaints the entries carrying any of `keys`; classifyEntry reads ignoreSet live, so whitelisting needs no rescan.
     const rerenderKeys = keys => { const set = new Set(keys); for (const e of Object.values(data?.entries ?? {})) if ((Array.isArray(e.key) ? e.key : []).some(k => set.has(k))) renderEntry(e); };
 
@@ -1731,25 +1729,15 @@ export async function lorebookStudio(preferredBook = null, open = null) {
         const why = document.createElement('span'); why.className = 'wa-term-why';
         why.textContent = r.why ?? ''; if (r.color) why.style.color = r.color;
         if (onContext) row.addEventListener('contextmenu', ev => { ev.preventDefault(); onContext(e, r, ev.clientX, ev.clientY); });
-        // Renamed since the audit: the verdict judged the term that is gone, so it is replaced rather than shown stale.
-        if (staleTerms.has(id)) {
-            name.style.opacity = '0.6'; name.style.fontStyle = 'italic';
-            why.textContent = 'edited';
-            why.style.color = ''; why.style.opacity = '0.6'; why.style.fontStyle = 'italic';
-            why.title = 'Renamed since the audit — re-audit to judge this term';
-        }
         row.append(cb, name);
         if (onEdit) {
             name.style.cursor = 'pointer';
-            // The new term has no df in the cached scan, so the row is marked stale rather than re-judged (a rebuild is seconds).
+            // The scan judges the new term on demand (keyword-audit scan()), so the repaint shows a real verdict.
             name.addEventListener('click', () => editKeyInline(e, r.term, name, 'key', next => {
                 if (next) {
-                    const to = rowId(e.uid, next);
-                    staleTerms.add(to);
                     checks.delete(id);
-                    // Explicitly false, so cleanupGroups' defChecked does not tick it: an edited term reads unattested
-                    // in the cached scan, and pre-ticking it for deletion on that is exactly the wrong answer.
-                    checks.set(to, false);
+                    // Explicitly false: the author just wrote this term, and a pre-tick for deletion is not the answer to that.
+                    checks.set(rowId(e.uid, next), false);
                 }
                 onEdit();
             }));

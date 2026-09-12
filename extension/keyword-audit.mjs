@@ -193,7 +193,23 @@ export function buildKeyPruneScan(data, opts, ignoreSet, { caseSensitiveDefault 
     };
     const scan = (key, cs, ww) => {
         runBatch(cs, ww);
-        return scanCache.get(ck(key, cs, ww)) ?? { df: 0, total: 0, typed: 0 };
+        const id = ck(key, cs, ww);
+        let r = scanCache.get(id);
+        if (!r) {
+            // A key the batch never saw — edited since the audit. Judged on demand, one key over the contents through a
+            // private scope, so the shared automaton is not rebuilt and the answer is a verdict rather than "0/0".
+            r = { df: 0, total: 0, typed: 0 };
+            const own = createScanScope();
+            for (const c of contents) {
+                const segments = segment([c], matchWindow);
+                primeScan([key], segments, own);
+                let n = 0, typed = 0;
+                for (const seg of segments) { n += countKey(key, seg, cs, ww, own); typed += cachedCount(key, seg, own, false) ?? 0; }
+                if (n) { r.df++; r.total += n; r.typed += typed; }
+            }
+            scanCache.set(id, r);
+        }
+        return r;
     };
     // Short-key second pass: a boundary hit is rejected when a digit sits in the surrounding run of [\d.,$£€¥], so "007" is clean in "Agent 007." but not in "$10,007.08".
     const NUMRUN = /[\d.,$£€¥]/;

@@ -42,6 +42,11 @@ eq(msgs.length, 11, 'the hidden message is dropped, as core and WA both drop it'
     eq(v.glimmerwort?.why, 'unattested (book)', 'chat-only key reads dead when no chat was searched');
     eq(v.mother?.why, 'english common · no chat scanned', 'the English list flags a generic word while no chat has been scanned');
     eq(v.CIA?.why, 'short (1/4 clean) — consider ? =CIA', 'a short key mostly inside longer words is offered the whole-word flag, measured over the book');
+    // A key the audit never scanned — edited in since — is judged on demand, not handed "never matches" by default.
+    const later = buildKeyPruneScan(data, OPTS, new Set());
+    const fresh = key => { const f = later.classifyEntry({ uid: 99, key: [key] })[0]; return f ? later.reasonOf(f).text : ''; };
+    eq(fresh('? =quarkspindle'), '', 'an edited-in whole-word term the book holds is judged attested');
+    eq(fresh('? =zzunattested'), 'never matches (book)', '...and one it does not hold is dead, by a scan and not by default');
     eq(v['isle of wight'], undefined, 'a lowercase locative the book writes capitalised is a name, not a fragment');
     eq(v['piece of cake']?.flag, 'fragment', '...where the same shape nothing capitalises is the phrase fragment it looks like');
     eq(v.mother?.sev !== RED, true, '...but unevidenced it is not severe');
