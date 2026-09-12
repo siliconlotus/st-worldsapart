@@ -338,7 +338,7 @@ dialog.popup:has(.wa-studio), .wa-studio-nav, .wa-studio-explorer, .wa-studio-en
 .wa-studio-entries { flex: 1 1 auto; overflow-y: auto; min-width: 0; }
 .wa-studio-body { flex: 1 1 auto; display: flex; min-height: 0; }
 /* The explorer clips its overflow, so the rail cannot reach into the popup's 23 px right padding (ST popup.css: 14 + 1 + 8); it leans toward the list instead: 13 px on the left against the 23 on the right reads better than centred. */
-.wa-rail { flex: 0 0 auto; display: flex; flex-direction: column; gap: 6px; padding: 2px 0 0 13px; }
+.wa-rail { flex: 0 0 auto; display: flex; flex-direction: column; gap: 6px; padding: 2em 0 0 13px; }
 .wa-rail .menu_button { width: 2.6em; height: 2.6em; padding: 0; margin: 0; display: grid; place-items: center; position: relative; font-size: 1.05em; }
 .wa-rail-count { position: absolute; bottom: 1px; right: 2px; font-size: 0.55em; line-height: 1; opacity: 0.8; }
 .wa-icon-fromline { position: relative; display: inline-grid; place-items: center; }
