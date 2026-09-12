@@ -2832,6 +2832,12 @@ export async function lorebookStudio(preferredBook = null, open = null) {
                 if (picked.sec.length) gateBox.open = true;   // an imported gate must not land shut and invisible
                 repaint();
             }),
+            labTool('fa-eraser', 'Clear all terms: the keys, the secondary keys, and any applied run', () => {
+                labKeys = ''; labSec = ''; labRun = null;
+                keyBox.value = ''; secBox.value = '';
+                growKeys();
+                repaint();
+            }),
             labTool('fa-book', 'Apply the books attached to this chat, hits only. Shift-click to pick any book.',
                 async ev => {
                     if (!ev.shiftKey) { await applyAttached({ pickIfNone: true }); return; }
