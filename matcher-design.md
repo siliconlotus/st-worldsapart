@@ -857,14 +857,14 @@ Ordered by whether a user can see the difference.
    for one text at a time; what is missing is the standing per-entry rate, beside the keyword audit. Not
    blocking: an over-firing reference entry is a budget cost, where a wrongly cut one is missing material.
 6. **A signal's within-scene SD varies by book**, and the two books `keys` costs are its extremes
-    (F45). Standardisation divides by the scene's own SD, so a near-constant column has its few small
-    differences amplified into large z against a slope fitted on other books. No use proposed; it is a
-    property a book can be measured for, where curation is a label someone applies.
+   (F45). Standardisation divides by the scene's own SD, so a near-constant column has its few small
+   differences amplified into large z against a slope fitted on other books. No use proposed; it is a
+   property a book can be measured for, where curation is a label someone applies.
 7. **Reference is centred on the memory tier's centroid, and nothing has asked whether it should
-    be.** The memory centroid all but coincides with the collection's mean while the reference centroid
-    sits well off it (F44), and cosine is the reference fit's largest coefficient. Candidates, none
-    screened: a per-tier centroid, reference on raw cosine, or leaving it. Deferred deliberately —
-    stage-4 work is memory-tier only.
+   be.** The memory centroid all but coincides with the collection's mean while the reference centroid
+   sits well off it (F44), and cosine is the reference fit's largest coefficient. Candidates, none
+   screened: a per-tier centroid, reference on raw cosine, or leaving it. Deferred deliberately —
+   stage-4 work is memory-tier only.
 
 ---
 
