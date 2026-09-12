@@ -2162,8 +2162,11 @@ export async function lorebookStudio(preferredBook = null, open = null) {
             () => { cleanupShowAll = !cleanupShowAll; showAllBtn.innerHTML = `<i class="fa-solid ${cleanupShowAll ? 'fa-eye-slash' : 'fa-eye'}"></i>`; showAllBtn.title = cleanupShowAll ? 'Back to flagged keys only' : 'Show every key on every visible entry, flagged or not'; repaint(); });
         const chatsBtn = railBtn('fa-comments', 'Choose chats: pick which chats to count key hits over. Bound chats are scanned when the audit runs; shift-click lists every chat on this install.',
             ev => runChatScan(ev?.shiftKey, chatsBtn).catch(e => { console.error('Worlds Apart: chat scan failed', e); toastr.error(String(e?.message ?? e), 'Worlds Apart'); }));
+        const selectAllBtn = railBtn('fa-square-check', 'Select all visible', () => { for (const id of allIds) cleanupChecks.set(id, true); sync(); });
+        const deselectBtn = railBtn('fa-xmark', 'Deselect', () => { for (const id of allIds) cleanupChecks.set(id, false); sync(); });
+        const cog = trayBtn(); cog.style.width = ''; cog.style.padding = '';
         const rail = document.createElement('div'); rail.className = 'wa-rail';
-        rail.append(auditBtn, deleteBtn, ignoreBtn, showAllBtn, chatsBtn);
+        rail.append(auditBtn, selectAllBtn, deselectBtn, deleteBtn, ignoreBtn, showAllBtn, chatsBtn, cog);
         const body = document.createElement('div'); body.className = 'wa-studio-body';
         body.append(list, rail);
         pane.append(fixed, body);
@@ -2858,7 +2861,6 @@ export async function lorebookStudio(preferredBook = null, open = null) {
             bar.append(b);
         }
         // Clear of the close X, which is absolutely positioned at the bar's right edge.
-        if (tab === 'cleanup') { const cog = trayBtn(); cog.style.marginLeft = 'auto'; cog.style.marginRight = '2.4em'; bar.append(cog); }   // the Explorer's cog is in its rail
         bar.append(closeBtn);   // tab order: straight after the last tab. It's positioned, so no layout effect
         return bar;
     };
