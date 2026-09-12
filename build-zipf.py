@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# Builds one language pack — the Zipf table, POS sets and common list — as extension/zipf-en.js (English, bundled) or
+# Builds one language pack — the Zipf table, POS sets and common list — as extension/wa-pack-en.js (English, bundled) or
 # wa-pack-<lang>.json (fetched). Needs `pip install wordfreq`.
 # English, from Google Books eng-fiction 1-grams (CC BY 3.0) with wordfreq (CC BY-SA) gating the vocabulary:
 #   curl -O http://storage.googleapis.com/books/ngrams/books/20200217/eng-fiction/1-00000-of-00001.gz
@@ -23,7 +23,7 @@ ap.add_argument('--ngrams', help='Google Books 1-gram file (.gz) for --lang; wor
 ap.add_argument('--totals', help='the matching totalcounts-1 file')
 ap.add_argument('--index', help="packs.json to add or replace this pack's entry in")
 a = ap.parse_args()
-out = a.out or f'extension/zipf-{a.lang}.js'
+out = a.out or f'extension/wa-pack-{a.lang}.js'
 if a.lang not in wordfreq.available_languages('best'):
     sys.exit(f'wordfreq has no list for "{a.lang}"; it has: {" ".join(sorted(wordfreq.available_languages("best")))}')
 size = 'large' if a.lang in wordfreq.available_languages('large') else 'best'

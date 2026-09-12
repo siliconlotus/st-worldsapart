@@ -1,6 +1,6 @@
 // lang.mjs — the current language table: one pack shape for every language, English bundled, the rest fetched once and
 // kept by the caller's store. ST-free; fetch and store are injected.
-import { PACK as EN } from './zipf-en.js';
+import { PACK as EN } from './wa-pack-en.js';
 
 /** The packed decile string (`decizipf:words;…`) to a word -> Zipf map. */
 export function parsePacked(packed) {

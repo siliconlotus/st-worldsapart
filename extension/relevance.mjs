@@ -3,7 +3,7 @@
 import { normalizeOrthography } from './automaton.mjs';
 import { entryKey } from './content-lexical.mjs';
 import { tokenize } from './lexical.mjs';
-import { PACK as EN } from './zipf-en.js';
+import { PACK as EN } from './wa-pack-en.js';
 // The bundled English list, whatever language is picked: this feeds a fitted column (F58), not the audit.
 const COMMON_WORDS = new Set(EN.common.split(' '));
 

@@ -38,7 +38,7 @@ changed, so unrelated extension updates never trigger it.
 
 The code is MIT. Two generated data files carry their own terms, stated in their headers:
 
-- `extension/zipf-en.js` — the bundled English pack: word frequencies and part-of-speech sets from the
+- `extension/wa-pack-en.js` — the bundled English pack: word frequencies and part-of-speech sets from the
   [Google Books Ngram](https://books.google.com/ngrams/) eng-fiction corpus, version 20200217, licensed under
   [CC BY 3.0](https://creativecommons.org/licenses/by/3.0/), and a common-word list derived from
   [wordfreq](https://github.com/rspeer/wordfreq) by Robyn Speer, whose data is

@@ -1,6 +1,6 @@
 // The English-commonness cut behind the too-common flag: the deliberated words land on the expected side of the one list.
 import assert from 'node:assert';
-import { PACK } from '../extension/zipf-en.js';
+import { PACK } from '../extension/wa-pack-en.js';
 const COMMON_WORDS = new Set(PACK.common.split(' '));
 
 const isCommon = w => COMMON_WORDS.has(w);

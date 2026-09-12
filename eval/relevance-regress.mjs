@@ -8,7 +8,7 @@ import { haystackFor, indexPath, isMemory, loadScene, openSample, sceneParams, m
 import { ensureIndex, resolveModel } from './reindex.mjs';
 import fs from 'node:fs';
 import { gradeValue, gradeCredit, fbeta, RECALL_WEIGHT, signTest, arg } from './metrics.mjs';
-import { PACK } from '../extension/zipf-en.js';
+import { PACK } from '../extension/wa-pack-en.js';
 const COMMON_WORDS = new Set(PACK.common.split(' '));
 import { logisticFit, auc, cumulativeFit, prCurve, reliability, sigmoid } from './logistic.mjs';
 import * as entity from '../extension/entity.mjs';
