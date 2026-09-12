@@ -1640,7 +1640,7 @@ export async function lorebookStudio(preferredBook = null, open = null) {
         getTiered: () => entrySort === 'insert' ? !!settings().presentationTiered : tieredMode,
         setTiered: on => { if (entrySort === 'insert') { const k = normPresentation(settings().presentationOrder); entrySort = SORT_FNS[k] ? k : 'order-asc'; } tieredMode = on; persistSortView(); },
         getTierCfg: () => tierCfg, setTierCfg: cfg => { tierCfg = cfg; settings().tierCfg = cfg; saveSettingsDebounced(); },
-        leadItems: [{ label: 'Insert Order', key: 'insert' }],
+        leadItems: [{ label: 'Insert', key: 'insert' }],
         onChange, mount: ctxMount,
     });
 
@@ -2135,7 +2135,7 @@ export async function lorebookStudio(preferredBook = null, open = null) {
             : 'Re-run the keyword audit with the current Tool Settings.\nNo chat searched yet.';
         auditBtn.addEventListener('click', async () => { await withBusy(auditBtn, '0.5', runAudit, '<i class="fa-solid fa-spinner fa-spin"></i> Auditing…'); renderExplorer(); });
         // Search repaints only the list: rebuilding the header would drop the input's focus mid-keystroke.
-        row1.append(auditBtn, buildFilterBtn(renderExplorer), buildSortControl(() => repaint()), buildSearchBox(() => repaint()), trayBtn());
+        row1.append(auditBtn, buildFilterBtn(renderExplorer), buildSortControl(() => repaint()), buildSearchBox(() => repaint()));
         head.append(row1);
         const fixed = document.createElement('div'); fixed.className = 'wa-studio-fixed';
         trayEl = renderTray();
@@ -2865,6 +2865,8 @@ export async function lorebookStudio(preferredBook = null, open = null) {
             b.addEventListener('click', () => { if (tab !== id) { tab = id; renderExplorer(); } });
             bar.append(b);
         }
+        // Clear of the close X, which is absolutely positioned at the bar's right edge.
+        if (tab !== 'lab') { const cog = trayBtn(); cog.style.marginLeft = 'auto'; cog.style.marginRight = '2.4em'; bar.append(cog); }
         bar.append(closeBtn);   // tab order: straight after the last tab. It's positioned, so no layout effect
         return bar;
     };
@@ -3026,12 +3028,9 @@ export async function lorebookStudio(preferredBook = null, open = null) {
         const head = document.createElement('div');
         head.className = 'wa-studio-exphead';
         head.style.cssText = 'display:flex;flex-direction:column;align-items:stretch;gap:6px;';
-        // The title yields to the controls: it fills what is left of the row and truncates, so the row never wraps on a long name.
         const label = document.createElement('div');
-        label.style.cssText = 'display:flex;align-items:center;gap:5px;flex:1 1 0;min-width:6em;overflow:hidden;';
-        const nameB = document.createElement('b'); nameB.textContent = selected; nameB.title = selected;
-        nameB.style.cssText = 'overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0;';
-        const countSpan = document.createElement('span'); countSpan.style.cssText = 'opacity:0.6;flex-shrink:0;';
+        const nameB = document.createElement('b'); nameB.textContent = selected;
+        const countSpan = document.createElement('span'); countSpan.style.cssText = 'opacity:0.6;margin-left:5px;';
         label.append(nameB, countSpan);
         const bookTools = document.createElement('span'); bookTools.className = 'wa-book-tools';
         bookTools.append(
@@ -3078,10 +3077,9 @@ export async function lorebookStudio(preferredBook = null, open = null) {
         // Typing re-filters in place (applyFilter), not the header, so the input keeps focus.
         const searchWrap = buildSearchBox(() => applyFilter());
         const rowStyle = 'display:flex;align-items:center;gap:8px;flex-wrap:wrap;';
-        const row1 = document.createElement('div'); row1.style.cssText = 'display:flex;align-items:center;gap:8px;';
+        const row1 = document.createElement('div'); row1.style.cssText = rowStyle;
         const row2 = document.createElement('div'); row2.style.cssText = rowStyle;
-        for (const c of [filterWrap, sortBtn, searchWrap]) c.style.flexShrink = '0';
-        row1.append(label, filterWrap, sortBtn, searchWrap, trayBtn());
+        row1.append(label, filterWrap, sortBtn, searchWrap);
         const newBtn = document.createElement('button');
         newBtn.type = 'button'; newBtn.className = 'menu_button';
         newBtn.style.cssText = 'width:auto;padding:3px 9px;flex-shrink:0;';
