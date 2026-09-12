@@ -1742,6 +1742,7 @@ export async function lorebookStudio(preferredBook = null, open = null) {
         reg.row.set(id, cb);
         const name = document.createElement('span'); name.className = 'wa-term-name';
         name.textContent = r.term; name.title = onEdit ? `${r.term} (click to edit)` : r.term;
+        if (r.clean) name.style.color = WA_GREEN;
         const why = document.createElement('span'); why.className = 'wa-term-why';
         why.textContent = r.why ?? ''; if (r.color) why.style.color = r.color;
         if (onContext) row.addEventListener('contextmenu', ev => { ev.preventDefault(); onContext(e, r, ev.clientX, ev.clientY); });
@@ -2087,7 +2088,8 @@ export async function lorebookStudio(preferredBook = null, open = null) {
                     shown.add(key);
                     const id = rowId(e.uid, key);
                     if (!cleanupChecks.has(id)) cleanupChecks.set(id, false);   // never pre-tick what the audit didn't flag
-                    rows.push({ term: key, why: ignoreSet.has(key) ? 'ignored' : 'not flagged', color: '' });
+                    // A clean key says nothing, in the Explorer's green, as its chip does there; an ignored one says so.
+                    rows.push({ term: key, why: ignoreSet.has(key) ? 'ignored' : '', color: '', clean: !ignoreSet.has(key) });
                 }
             }
             if (rows.length) out.push({ entry: e, rows });
@@ -2200,7 +2202,7 @@ export async function lorebookStudio(preferredBook = null, open = null) {
             const bySev = new Map();
             for (const g of groups) for (const r of g.rows) {
                 const id = rowId(g.entry.uid, r.term);
-                const name = r.p?.flag ?? r.why;   // show-all rows carry no verdict: "not flagged", or "ignored"
+                const name = r.p?.flag ?? (r.why || 'clean');   // show-all rows carry no verdict: clean, or "ignored"
                 if (!buckets.has(name)) buckets.set(name, []);
                 buckets.get(name).push(id);
                 if (r.p) { if (!bySev.has(r.sev)) bySev.set(r.sev, []); bySev.get(r.sev).push(id); }
