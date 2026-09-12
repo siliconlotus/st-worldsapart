@@ -488,6 +488,7 @@ textarea.wa-entry-full.wa-tall { max-height: 62vh; }
 .wa-tri:indeterminate::before { transform: scale(1); clip-path: polygon(12% 42%, 88% 42%, 88% 58%, 12% 58%); }
 /* width:unset, or ST's .menu_button width breaks any two-word label onto a second line (its own popup.css says so). */
 .wa-bulk-btn { margin: 0; padding: 3px 10px; font-size: 0.82em; width: unset; white-space: nowrap; }
+.wa-studio-exphead .wa-bulk-btn { width: auto; }   /* the header's fixed button width does not apply to a bar button placed there */
 .wa-bulk-danger { color: var(--wa-severe); }
 .wa-bulk-sep { align-self: stretch; width: 1px; background: color-mix(in srgb, currentColor 22%, transparent); margin: 0 3px; }
 .wa-book-tools { margin-left: 8px; white-space: nowrap; }
