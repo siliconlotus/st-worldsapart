@@ -537,9 +537,13 @@ core's intent, not to its bugs.
 - **NFC** on the regex path, where core runs raw.
 - **A regex is fold-exempt, and the audit says so rather than rewriting it.** An ASCII quote in a
   pattern matches only itself where the same character in a plain key matches its whole family, so
-  `regex orthography` names the character and suggests the class, read off `ORTHO_FAMILIES` so it
-  cannot drift from what the fold collapses. Not flagged once the pattern already carries a curly form.
-  An expansion would take away the only way to demand one form.
+  `regex orthography` names the character and suggests `ORTHO_FAMILIES`' `pair`, the same mark written
+  curly — never the whole folded family, a guillemet or a prime being a different mark. Not flagged
+  once the pattern already carries a curly form. An expansion would take away the only way to demand
+  one form.
+- **A regex hyphen flags only on evidence**, the book holding what the en-dash form would have matched
+  (`matcher.mjs` `swapLiteralHyphens`, range markers and `v` patterns left alone). Evidence outranks
+  `unattested`: a pattern the book would match under another orthography is mis-written, not dead.
 
 - **A key's hyphen is written as a space too** (`automaton.mjs` `keyVariants`), and not the reverse:
   62% of the corpus's keys are spaces-only and would each intern a form nobody writes. An em-dash's `--`

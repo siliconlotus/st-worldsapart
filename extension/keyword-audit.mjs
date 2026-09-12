@@ -3,7 +3,7 @@
 import { COMMON_WORDS } from '../plugin/commonwords.js';
 import { NAME_PARTICLES } from './relevance.mjs';
 import { ZIPF_EN } from './zipf-en.js';
-import { countKey, escapeRegex, isRegexKey, secondaryKeys, segment, usableKeys } from './matcher.mjs';
+import { countKey, countRegexKey, escapeRegex, isRegexKey, secondaryKeys, segment, swapLiteralHyphens, usableKeys } from './matcher.mjs';
 import { cachedCount, createScanScope, ORTHO_FAMILIES, parse, primeScan, tokenize, validateSmartKey } from './smartkeys.mjs';
 
 
@@ -178,6 +178,23 @@ export function buildKeyPruneScan(data, opts, ignoreSet, { caseSensitiveDefault 
     };
     const effCase = e => e.caseSensitive ?? caseSensitiveDefault;
     const effWhole = e => e.matchWholeWords ?? wholeWordsDefault;
+    /** A regex key's orthography verdict. `needEvidence` asks whether the book actually holds the other form, which is
+     *  what lets this outrank `unattested`; without it only the quotes flag, models emitting curly ones regardless. */
+    const regexOrtho = (k, needEvidence) => {
+        if (!isRegexKey(k)) return null;
+        const misses = alt => alt && alt !== k && contents.some(c => countRegexKey(alt, c) > countRegexKey(k, c));
+        for (const f of ORTHO_FAMILIES) {
+            if (!k.includes(f.ascii) || [...f.variants].some(c => k.includes(c))) continue;
+            // A quote is never a metacharacter, so a 1-for-1 swap is safe anywhere, class or not.
+            if (needEvidence && ![...f.variants].some(v => misses(k.replaceAll(f.ascii, v)))) continue;
+            return { flag: 'regex orthography', bookContent: 0, ascii: f.ascii, suggest: `[${f.ascii}${f.pair}]`,
+                evidence: needEvidence ? `the book has ${f.ascii === "'" ? 'a curly apostrophe' : 'a curly quote'} here` : null };
+        }
+        // The hyphen only ever flags with evidence: a literal hyphen in a pattern is ordinary.
+        if (k.includes('–') || !misses(swapLiteralHyphens(k, '–'))) return null;
+        return { flag: 'regex orthography', bookContent: 0, ascii: '-', suggest: '[-–]', evidence: 'the book has the en-dash form' };
+    };
+
     // Tested in FLAG_PRIORITY order; the first hit wins, so moving a branch changes what a key reports.
     const classify = (key, cs, ww) => {
         const k = String(key).trim();
@@ -193,6 +210,8 @@ export function buildKeyPruneScan(data, opts, ignoreSet, { caseSensitiveDefault 
             const term = literal ? null : commonSmartKey(k, isEnglishCommon(COMMON_WORDS));
             if (term) return { flag: 'english common', term, bookContent, chatRate };
         }
+        const evidenced = regexOrtho(k, true);
+        if (evidenced) return evidenced;
         if (bookContent === 0 && opts.pruneUnattested && !(literal && opts.ignoreProper && looksProper(k)) && !chatRate) return { flag: 'unattested', bookContent, literal, chatChecked: chatRate !== undefined };
         const bookListed = bookListedBy.get(k.toLowerCase()) ?? 0;
         if (nBook >= KEY_MIN_SHARED_ENTRIES && bookListed / nBook > opts.bookShared * 0.75 && opts.pruneShared) return { flag: 'book shared', bookContent, bookListed };
@@ -202,11 +221,7 @@ export function buildKeyPruneScan(data, opts, ignoreSet, { caseSensitiveDefault 
         if (literal && hits.total > 0 && hits.typed === 0) return { flag: 'variant only', bookContent };
         // A regex is fold-exempt, so an ASCII quote in one matches only itself where the same character in a plain key
         // matches its whole family. Not flagged once the pattern names a curly form: the author has said which they mean.
-        if (isRegexKey(k)) {
-            const fam = ORTHO_FAMILIES.find(f => k.includes(f.ascii) && ![...f.variants].some(c => k.includes(c)));
-            if (fam) return { flag: 'regex orthography', bookContent, ascii: fam.ascii, suggest: `[${fam.ascii}${fam.variants}]` };
-        }
-        return null;
+        return regexOrtho(k, false);
     };
     /** Secondary keys the matcher will not act on, with the validator's message: a set difference against secondaryKeys, so which codes are fatal here stays a matcher.mjs rule. */
     const unusableKeysOf = (e) => {
@@ -257,7 +272,7 @@ export function buildKeyPruneScan(data, opts, ignoreSet, { caseSensitiveDefault 
         if (p.flag === 'book shared') return { text: `book shared (${Math.round(100 * p.bookListed / nBook)}%)`, severity };
         if (p.flag === 'fragment') return { text: 'phrase fragment', severity };
         if (p.flag === 'variant only') return { text: 'matches only as a hyphen/space variant', severity };
-        if (p.flag === 'regex orthography') return { text: `a regex does not fold ${p.ascii} — try ${p.suggest}`, severity };
+        if (p.flag === 'regex orthography') return { text: p.evidence ? `${p.evidence} — try ${p.suggest}` : `a regex does not fold ${p.ascii} — try ${p.suggest}`, severity };
         return { text: `short (${p.clean}/${p.total} clean)`, severity };
     };
     // Pre-ticked: the red tier, plus unattested on machine-written entries only (K14). Unusable is red but wants a correction, not a deletion.

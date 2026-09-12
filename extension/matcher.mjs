@@ -100,6 +100,38 @@ export function countRegexKey(raw, text) {
     }
 }
 
+/** A pattern's LITERAL hyphens rewritten as `to`, range markers left alone: `[a-z]` keeps its range, `[-a]`, `[a-]`
+ *  and `[a-z-x]`'s second hyphen do not. Escaped hyphens are left alone too, and a `v` pattern is returned unchanged,
+ *  `--` being set difference there. Detection only — a 1-for-1 swap needs no class splicing. */
+export function swapLiteralHyphens(raw, to) {
+    const m = String(raw).match(REGEX_KEY_RE);
+    if (!m || m[2].includes('v')) return null;
+    const body = m[1];
+    let out = '', inClass = false, classAt = -1, operand = false, ranging = false;
+    for (let i = 0; i < body.length; i++) {
+        const c = body[i];
+        if (c === '\\') { out += c + (body[i + 1] ?? ''); i++; operand = !ranging; ranging = false; continue; }
+        if (!inClass) {
+            out += c === '-' ? to : c;
+            if (c === '[') { inClass = true; classAt = i; operand = false; }
+            continue;
+        }
+        if (c === ']') { out += c; inClass = false; operand = false; ranging = false; continue; }
+        if (c === '-') {
+            const first = i === classAt + 1 || (body[classAt + 1] === '^' && i === classAt + 2);
+            const isRange = operand && !first && body[i + 1] !== ']';
+            out += isRange ? c : to;
+            operand = !isRange;
+            ranging = isRange;
+            continue;
+        }
+        out += c;
+        operand = !ranging;
+        ranging = false;
+    }
+    return `/${out}/${m[2]}`;
+}
+
 /** The keyword scan window over the last `cfg.depth` messages, joined; `cfg.includeNames` is world_info_include_names. */
 export function scanWindow(chat, cfg) {
     return scanSegments(chat, { ...cfg, matchWindow: 'scan' })[0];

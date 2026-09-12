@@ -4,8 +4,11 @@
 /** The families normalizeOrthography collapses onto one ASCII character. Exported because a regex key is fold-exempt
  *  and the audit suggests the class from here: a second list would drift from what the fold actually collapses. */
 export const ORTHO_FAMILIES = [
-    { ascii: "'", variants: '‘’‚‛ʼʹ´`′‹›' },
-    { ascii: '"', variants: '“”„‟″ʺ«»' },
+    // `variants` is everything the fold collapses. `pair` is the same mark written curly, which is what the audit
+    // suggests: a guillemet, a German low quote, a prime or an accent folds onto the ASCII form but is a DIFFERENT
+    // mark, and a regex author has already chosen the language they are matching.
+    { ascii: "'", pair: '‘’', variants: '‘’‚‛ʼʹ´`′‹›' },
+    { ascii: '"', pair: '“”', variants: '“”„‟″ʺ«»' },
 ];
 const classOf = a => new RegExp(`[${ORTHO_FAMILIES.find(f => f.ascii === a).variants}]`, 'g');
 const APOSTROPHES = classOf("'");
