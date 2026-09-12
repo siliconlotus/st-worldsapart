@@ -2051,6 +2051,8 @@ export async function init() {
         setTiered: on => { settings().presentationTiered = on; saveSettingsDebounced(); tierState(); },
         getTierCfg, setTierCfg,
         extraItems: [{ label: 'Most relevant first', key: 'best-first' }, { label: 'Most relevant last', key: 'best-last' }],
+        // Inside the settings root, or ST's autoclose reads a menu click as outside the Extensions drawer and shuts it.
+        mount: () => document.querySelector('.worlds-apart-settings') ?? document.body,
         // Keeps the inline tier editor in sync when tiers are reordered from the button's menu.
         onChange: () => { if (tierEditor) tierEditor.replaceWith(tierEditor = makeTierEditor(getTierCfg, setTierCfg, () => {}, { omit: ['disabled'] })); },
         block: true,
