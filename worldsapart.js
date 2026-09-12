@@ -1751,15 +1751,15 @@ const SETTINGS_HTML = `
             <small class="opacity50p">The span within which a key's conditions must all match.</small>
 
             <label for="wa_drop_chat_tags">Ignore these HTML tags in chat</label>
-            <input id="wa_drop_chat_tags" type="text" class="text_pole" placeholder="internal_states, thinking">
-            <small class="opacity50p">Comma-separated tag names. Each element is removed with its contents before Worlds Apart reads the chat, for both retrieval and the keyword scan. What SillyTavern sends to the model is unchanged.</small>
+            <input id="wa_drop_chat_tags" type="text" class="text_pole" placeholder="internal_states, thinking" title="You might want to set this to your preset's internal state tracker so your quest tracker doesn't constantly pull entries.">
+            <small class="opacity50p">Comma-separated tags to be skipped when scanning for keyword hits.</small>
 
             <label for="wa_word_boundary">Word boundary</label>
             <select id="wa_word_boundary" class="text_pole">
                 <option value="strict">Strict: hyphens and apostrophes are part of a word</option>
                 <option value="permissive">Permissive: only letters and digits are</option>
             </select>
-            <small class="opacity50p">Applies to entries with Match Whole Words on. Under Strict the key "Joe" does not match "Joe's"; under Permissive it does. Plurals never match under either. Unlike SillyTavern, the setting also applies to keys with a space in them.</small>
+            <small class="opacity50p">Applies to entries with Match Whole Words on. Permissive: whole-word "Joe" matches "Joe's". Strict: no match. Neither matches "Joes".</small>
 
             <div class="inline-drawer wa-section">
                 <div class="inline-drawer-toggle inline-drawer-header">
