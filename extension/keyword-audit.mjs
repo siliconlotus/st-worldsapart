@@ -20,10 +20,11 @@ export const KEY_DUPE_MIN = 0.35;
 
 export const FUNCTION_WORDS = new Set('a an the and or but if then else for to of in on at by with from as is are was were be been being this that these those it its he she they them his her their you your i we our my me not no do does did has have had will would can could should'.split(' '));
 
-/** A multi-word key containing an English function word, unless it is a constructed proper noun (looksProper); a single word is never a fragment. */
+/** A multi-word key containing an English function word, unless it is a constructed proper noun (looksProper) — a titular
+ *  `the` in either case does not break the frame, so `the Spire` is a name where `the door` is not; a single word is never a fragment. */
 export function looksLikeFragment(key) {
     const raw = String(key ?? '').trim();
-    if (looksProper(raw)) return false;
+    if (looksProper(raw) || looksProper(raw.replace(/^the\s+/i, ''))) return false;
     const words = raw.toLowerCase().match(/[\p{L}][\p{L}'-]*/gu) ?? [];
     return words.length > 1 && words.some(w => FUNCTION_WORDS.has(w));
 }

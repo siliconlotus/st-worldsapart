@@ -47,6 +47,10 @@ eq(msgs.length, 11, 'the hidden message is dropped, as core and WA both drop it'
     const fresh = key => { const f = later.classifyEntry({ uid: 99, key: [key] })[0]; return f ? later.reasonOf(f).text : ''; };
     eq(fresh('? =quarkspindle'), '', 'an edited-in whole-word term the book holds is judged attested');
     eq(fresh('? =zzunattested'), 'never matches (book)', '...and one it does not hold is dead, by a scan and not by default');
+    const flagOf = key => later.classifyEntry({ uid: 99, key: [key] })[0]?.flag;
+    eq(flagOf('the Spire') !== 'fragment', true, 'a titular "the" before a capitalised word is a name, not a fragment');
+    eq(flagOf('The Isle of Wight') !== 'fragment', true, '...in either case, and over a longer frame');
+    eq(flagOf('the door'), 'fragment', '...where "the" before a lowercase word is the phrase fragment it looks like');
     eq(v['isle of wight'], undefined, 'a lowercase locative the book writes capitalised is a name, not a fragment');
     eq(v['piece of cake']?.flag, 'fragment', '...where the same shape nothing capitalises is the phrase fragment it looks like');
     eq(v.mother?.sev !== RED, true, '...but unevidenced it is not severe');
