@@ -342,7 +342,7 @@ dialog.popup:has(.wa-studio), .wa-studio-nav, .wa-studio-explorer, .wa-studio-en
 .wa-rail .menu_button { width: 2.6em; height: 2.6em; padding: 0; margin: 0; display: grid; place-items: center; position: relative; font-size: 1.05em; }
 .wa-rail-count { position: absolute; bottom: 1px; right: 2px; font-size: 0.55em; line-height: 1; opacity: 0.8; }
 .wa-icon-fromline { position: relative; display: inline-grid; place-items: center; }
-.wa-icon-fromline::after { content: ''; position: absolute; width: 1em; height: 0.13em; border-radius: 1px; background: currentColor; transform: translateY(-2px); }
+.wa-icon-fromline::after { content: ''; position: absolute; width: 1em; height: 0.13em; border-radius: 1px; background: currentColor; transform: translateY(-1px); }
 .wa-studio-navhead, .wa-studio-exphead { position: sticky; top: 0; z-index: 1; padding: 2px 0 6px;
     background: var(--SmartThemeBlurTintColor, var(--black70a, rgba(20,20,20,0.95))); }
 .wa-book-row { display: flex; align-items: center; gap: 5px; padding: 4px 6px; border-radius: 5px;
