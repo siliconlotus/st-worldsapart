@@ -468,6 +468,12 @@ injected, so it stays out of the window `properNouns` is counted over. Without i
 matched another entry's content scores `keys: 0` and the budget drops it first, and the budget binds on
 every graded scene measured (F4).
 
+**An entry does not match its own content in the buffer.** An entry that fired feeds the buffer, and its
+own content usually repeats its own keys; matching there is the entry naming itself, not the conversation
+naming it. Core never self-matches because it activates an entry once, where stage 3 re-reads the buffer
+for everything. Its own text is filtered out of its window, the audit drawing the same line between
+entry-text attestation and chat evidence.
+
 **An `excludeRecursion` entry is scored against the chat window alone.** Core's gate runs before
 `getExternallyActivated` (*The seam*), so stage 2 inherits it; stage 3 is WA's own loop and core is not
 in it, so the exclusion is applied there by hand.

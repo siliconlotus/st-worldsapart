@@ -1189,10 +1189,15 @@ async function onScanDone(args) {
         windowFor = built.windowFor;
         // Keyword scoring only: the buffer is text WA injected, so it must not enter the window properNouns is counted over.
         // excludeRecursion honoured here because core's gate is not in this loop — stage 2 inherits it, stage 3 must not.
-        const buffered = runState.waRecursionTexts?.length
-            ? matcher.withExtraTexts(windowFor, runState.waRecursionTexts, settings().matchWindow)
-            : windowFor;
-        const keywordWindowFor = (depth, entry) => (entry?.excludeRecursion ? windowFor : buffered)(depth, entry);
+        // An entry that fed the buffer must not match its OWN content there: that is the entry naming itself, not the
+        // conversation naming it, and core never self-matches because it activates an entry once.
+        const recursionTexts = runState.waRecursionTexts ?? [];
+        const keywordWindowFor = (depth, entry) => {
+            const others = entry?.excludeRecursion ? [] : recursionTexts.filter(t => t !== String(entry?.content ?? ''));
+            return others.length
+                ? matcher.withExtraTexts(windowFor, others, settings().matchWindow)(depth, entry)
+                : windowFor(depth, entry);
+        };
 
         // Live keys, else the takeover's stash; every entry's keys are scored, vectorized included (matcher-design.md, *Scoring memory's keys*).
         const scoreKeysOf = entry => (entry.key?.length ? entry.key : (entry.waKeys ?? []));
@@ -1235,6 +1240,8 @@ async function onScanDone(args) {
         if (runState.verboseRun) {
             console.log('%cWorlds Apart · keyword scan windows — the exact text WA searched, by depth', 'font-weight: bold');
             console.log(Object.fromEntries([...windowFor.windows]));
+            console.log('%cWorlds Apart · recursion buffer — the entry contents stage 3 appended to every window', 'font-weight: bold');
+            console.log(runState.waRecursionTexts);
         }
     }
 

@@ -64,6 +64,17 @@ const run = (overrides = {}) => {
     eq(on.get(3).keywordScore < on.get(2).keywordScore, true, 'and a depth-2 hit less again');
 }
 
+// --- an entry does not name itself through the buffer.
+{
+    // uid 1 fires on "workshop" from chat and its own content is the first thing in the buffer; "workshop"
+    // appears there too, so scoring it against its own feed would count the same key twice.
+    const off = run();
+    const on = run({ recursive: true });
+    eq(on.get(1).keywordScore, off.get(1).keywordScore,
+        'the entry that seeded the buffer scores exactly what it scored from chat alone');
+    eq(/workshop/.test(S.books.B[1].content), true, 'and its own content really does repeat its key — the premise of that claim');
+}
+
 // --- the step cap.
 {
     const r = run({ recursive: true, maxRecursionSteps: 1 });

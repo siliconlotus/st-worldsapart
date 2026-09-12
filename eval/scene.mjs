@@ -542,10 +542,12 @@ export function makeCandidateSet({ loaded, byKey, entries, params: P, chunkCfg, 
             }
             for (const e of found) if (feeds(e)) buffer.push(String(e.content).trim());
         }
-        // --- STAGE 3, keys. Once, over the COMPLETE buffer, as onScanDone runs after core's last loop.
-        const finalHay = buffer.length ? withBuffer() : null;
+        // --- STAGE 3, keys. Once, over the COMPLETE buffer, as onScanDone runs after core's last loop. An entry that fed
+        // the buffer does not match its own content there: that is the entry naming itself, not the conversation naming it.
         for (const r of rows) {
-            const hay = (finalHay && !r.entry.excludeRecursion) ? finalHay(0, r.entry) : haystackFor(r.entry);
+            const own = String(r.entry.content ?? '').trim();
+            const others = r.entry.excludeRecursion ? [] : buffer.filter(t => t !== own);
+            const hay = others.length ? matcher.withExtraTexts((_d, e) => haystackFor(e), others, P.matchWindow)(0, r.entry) : haystackFor(r.entry);
             r.triggerDepth = depthOf.get(entryKey(r.entry)) ?? 0;
             r.keywordScore = keywordScore(r.entry, hay, k1) / (1 + r.triggerDepth);
         }
