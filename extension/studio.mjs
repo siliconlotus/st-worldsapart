@@ -1881,16 +1881,24 @@ export async function lorebookStudio(preferredBook = null, open = null) {
 
     /** Chats this book could plausibly be checked against; `all` drops the binding filter and lists every chat on the install. */
     const findBookChats = async (all = false) => {
-        // A book binds three ways: chat (chat_metadata.world_info), character (data.extensions.world), global (selected_world_info, never pre-ticked).
+        // A book binds four ways: chat (chat_metadata.world_info), character (data.extensions.world), the character's
+        // additional lorebooks (world_info.charLore[].extraBooks, keyed by avatar filename), global (selected_world_info,
+        // never pre-ticked). The same four attachedBookNames reads.
         const isGlobal = (selected_world_info ?? []).includes(selected);
+        const extraBound = avatar => {
+            const file = getCharaFilename(null, { manualAvatarKey: avatar });
+            return Boolean(file && world_info.charLore?.find(e => e.name === file)?.extraBooks?.includes(selected));
+        };
         const out = [];
         for (const c of await loadChatIndex()) {
-            const charBound = c.charWorld === selected;
+            const cardBound = c.charWorld === selected;
+            const auxBound = !cardBound && extraBound(c.avatar);
+            const charBound = cardBound || auxBound;
             for (const ch of c.chats) {
                 const chatBound = ch?.chat_metadata?.world_info === selected;
                 if (!chatBound && !charBound && !isGlobal && !all) continue;
                 out.push({ char: c.char, avatar: c.avatar, file: ch.file_name, size: ch.file_size ?? '?',
-                    why: chatBound ? 'chat-bound' : charBound ? 'character-bound' : isGlobal ? 'global (book is always active)' : 'not bound',
+                    why: chatBound ? 'chat-bound' : cardBound ? 'character-bound' : auxBound ? 'character-bound (additional lorebook)' : isGlobal ? 'global (book is always active)' : 'not bound',
                     bound: chatBound || charBound });
             }
         }
