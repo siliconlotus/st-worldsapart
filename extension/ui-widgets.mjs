@@ -420,7 +420,7 @@ textarea.wa-entry-full.wa-tall { max-height: 62vh; }
 .wa-entry-tools { display: flex; align-items: center; gap: 0; margin-left: auto; }
 /* One box for every tool, glyph centred. The power glyph fills its em box, so it gets a breath before Aa. */
 .wa-tool.fa-power-off { margin-right: 1px; }
-.wa-tool { cursor: pointer; display: inline-flex; align-items: center; justify-content: center; height: 1.5em; padding: 0 2px; min-width: 1.3em; border-radius: 4px; opacity: 0.55; font-style: normal; }
+.wa-tool { cursor: pointer; display: inline-flex; align-items: flex-start; justify-content: center; height: 1.5em; padding: 0 2px; min-width: 1.3em; border-radius: 4px; opacity: 0.55; font-style: normal; }
 .wa-tool:hover { opacity: 1; background: var(--white20a, rgba(255,255,255,0.1)); }
 .wa-tool-narrow { transform: scaleX(0.85); transform-origin: center; margin: 0 -0.1em; }   /* the crown and the lettered tools: the scale leaves the box its full width; the margin takes back what the glyph gave up */
 .wa-tool.wa-on { opacity: 1; color: var(--SmartThemeQuoteColor, #6ea8fe); }
