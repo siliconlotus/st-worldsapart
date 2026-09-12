@@ -243,8 +243,8 @@ export async function lorebookStudio(preferredBook = null, open = null) {
     };
 
     // ⚙ Tool Settings tray: audit options, recommender knobs, this book's ignored terms.
-    const renderTray = () => {
-        if (!trayOpen) return document.createElement('div');   // nothing mounted when closed
+    const renderTray = (force = false) => {
+        if (!trayOpen && !force) return document.createElement('div');   // nothing mounted when closed
         const panel = document.createElement('div'); panel.className = 'wa-tray-panel';
         const check = (obj, key, label, after) => trayChk('wa-tray-opt', label, !!obj[key], v => { obj[key] = v; persistOpts(); after?.(); });
         const num = (obj, key, before, unit, opt, after) => {
@@ -320,15 +320,20 @@ export async function lorebookStudio(preferredBook = null, open = null) {
         b.title = 'Settings: audit and suggestions, this book\'s ignored terms, and World Info';
         b.style.cssText = 'width:auto;padding:3px 8px;flex-shrink:0;';
         b.innerHTML = '<i class="fa-solid fa-gear"></i>';
-        b.style.color = trayOpen ? ACCENT : '';
-        b.addEventListener('click', () => { trayOpen = !trayOpen; b.style.color = trayOpen ? ACCENT : ''; refreshTray(); refreshGlobalTray(); });
+        // A popup, not an inline tray: both panels together outgrow the fixed header and push the list and the rail off the pane.
+        b.addEventListener('click', async () => {
+            const wrap = document.createElement('div'); wrap.style.textAlign = 'left';
+            wrap.append(renderTray(true), renderGlobalTray(true));
+            await new Popup(wrap, POPUP_TYPE.TEXT, '', { okButton: 'Close', wide: true, large: true }).show();
+            renderExplorer();   // every option saved on change; the list repaints under the new ones
+        });
         return b;
     };
 
     // 🌐 Global WI settings. Core's knobs are edited by driving core's own inputs, never by assigning the globals.
     const refreshGlobalTray = () => { const fresh = renderGlobalTray(); if (globalTrayEl?.isConnected) globalTrayEl.replaceWith(fresh); globalTrayEl = fresh; };
-    function renderGlobalTray() {
-        if (!trayOpen) return document.createElement('div');   // opens with the cog tray, below it
+    function renderGlobalTray(force = false) {
+        if (!trayOpen && !force) return document.createElement('div');   // opens with the cog tray, below it
         const panel = document.createElement('div'); panel.className = 'wa-tray-panel';
         const col = (title, ...kids) => trayCol('wa-tray-col', 'wa-tray-sec', title, ...kids);
         const numRow = (label, backing, unit, title) => {
