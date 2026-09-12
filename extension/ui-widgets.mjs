@@ -80,7 +80,7 @@ export function makeTierEditor(getCfg, setCfg, onChange, { omit = [] } = {}) {
 async function configureTiersPopup(getCfg, setCfg, onSaved) {
     const wrap = document.createElement('div'); wrap.style.textAlign = 'left';
     const hint = document.createElement('div'); hint.style.cssText = 'opacity:0.7;margin-bottom:8px;font-size:0.9em;';
-    hint.textContent = 'Entries fall into the first ticked tier they match, top to bottom. ↑/↓ sets precedence; untick to skip a tier. Shared with the prompt insertion order (WA settings).';
+    hint.textContent = 'An entry joins the first ticked tier it matches, top to bottom. Untick a tier to skip it. Shared with the settings panel.';
     wrap.append(hint, makeTierEditor(getCfg, setCfg, onSaved));
     await new Popup(wrap, POPUP_TYPE.TEXT, '', { okButton: 'Close' }).show();
 }

@@ -318,7 +318,7 @@ export async function lorebookStudio(preferredBook = null, open = null) {
     /** The tray's toggle, which both headers carry: the panel itself mounts below them. */
     const trayBtn = () => {
         const b = document.createElement('button'); b.type = 'button'; b.className = 'menu_button wa-filter';
-        b.title = 'Audit thresholds, recommender knobs and this book\'s ignored terms';
+        b.title = 'Audit and suggestion settings, and this book\'s ignored terms';
         b.style.cssText = 'width:auto;padding:3px 8px;flex-shrink:0;';
         b.innerHTML = '<i class="fa-solid fa-gear"></i>';
         b.style.color = trayOpen ? ACCENT : '';
@@ -534,7 +534,7 @@ export async function lorebookStudio(preferredBook = null, open = null) {
         const setBtn = barBtn('Set… ▾', () => { const r = setBtn.getBoundingClientRect(); showCtxMenu(setItems(), r.left, r.bottom + 2, ctxMount()); });
         setBtn.title = 'Set a field on all selected entries';
         const addTermBtn = barBtn('Add term…', bulkAddTerm); addTermBtn.title = 'Add one keyword to every selected entry';
-        const reBtn = barBtn('Renumber…', ev => bulkOrder(ev.shiftKey)); reBtn.title = 'Renumber order — shift-click to also renumber UIDs';
+        const reBtn = barBtn('Renumber…', ev => bulkOrder(ev.shiftKey)); reBtn.title = 'Renumber order. Shift-click to renumber UIDs too.';
         const anyDisabled = Object.values(data?.entries ?? {}).some(e => selectedEntries.has(e.uid) && e.disable);
         wrap.append(
             count,
@@ -959,7 +959,7 @@ export async function lorebookStudio(preferredBook = null, open = null) {
             }
             const softer = (flagged?.size ?? 0) - counted.length;
             // No colour means the uncoloured flag; name it from reasonOf.
-            badge.title = `Keywords the last scan flagged — worst: ${worst || scan.reasonOf(counted[0]).text}.${secBad ? ` Includes ${secBad} secondary key${secBad === 1 ? '' : 's'} the matcher cannot run.` : ''}${softer ? ` ${softer} more are warnings, not counted here.` : ''} Expand to see which.`;
+            badge.title = `Flagged keywords. Worst: ${worst || scan.reasonOf(counted[0]).text}.${secBad ? ` Includes ${secBad} secondary key${secBad === 1 ? '' : 's'} the matcher cannot run.` : ''}${softer ? ` ${softer} more are warnings, not counted here.` : ''} Expand to see which.`;
             h.append(badge);
         }
         h.addEventListener('click', () => { open ? entryOpen.delete(e.uid) : entryOpen.add(e.uid); renderEntry(e); });
@@ -1004,7 +1004,7 @@ export async function lorebookStudio(preferredBook = null, open = null) {
             text.title = isIgnored ? `${key} — ignored (click to edit; shift-click ✕ to un-ignore)` : (v ? `${key} — ${why} (click to edit)` : `${key} (click to edit)`);
             text.addEventListener('click', () => editKeyInline(e, key, text));
             chip.append(text);   // term only inside the chip
-            const del = document.createElement('i'); del.className = 'fa-solid fa-xmark wa-kw-del'; del.title = 'Delete keyword — shift-click to ignore it instead';
+            const del = document.createElement('i'); del.className = 'fa-solid fa-xmark wa-kw-del'; del.title = 'Delete keyword. Shift-click to ignore it instead.';
             del.addEventListener('click', ev => {
                 if (ev.shiftKey) {   // whitelist toggle (mirrors the pruner's ban icon); tray lists/clears these
                     toggleIgnore(key);   // recolours every entry using this key and syncs the tray; no rescan
@@ -1028,7 +1028,7 @@ export async function lorebookStudio(preferredBook = null, open = null) {
             take.addEventListener('click', () => acceptSugg(e, term));
             const t = document.createElement('span'); t.className = 'wa-sugg-text';
             t.textContent = (kind === 'llm' ? '✨ ' : '⚡ ') + term;
-            t.title = `${term} — click to reword, then it's added`;
+            t.title = `${term}. Click to edit before adding.`;
             t.addEventListener('click', () => inlineInput(t, (nv, ok) => {
                 if (ok && nv && nv !== term) acceptEdited(e, term, nv); else renderEntry(e);
             }, { value: term }));
@@ -1166,7 +1166,7 @@ export async function lorebookStudio(preferredBook = null, open = null) {
             l.append(s, inp); return l;
         };
         const toMsg = v => Math.max(0, Math.floor(Number(v) || 0)) || null;   // 0/blank -> null (off), like core
-        const recWarn = () => { const w = document.createElement('div'); w.className = 'wa-adv-warn'; w.innerHTML = '<i class="fa-solid fa-triangle-exclamation"></i> Recursion is off globally — these have no effect.'; return w; };
+        const recWarn = () => { const w = document.createElement('div'); w.className = 'wa-adv-warn'; w.innerHTML = '<i class="fa-solid fa-triangle-exclamation"></i> Recursion is off globally; these have no effect.'; return w; };
         // Tri-state select for the nullable match flags: Inherit / On / Off.
         const triSel = (label, get, set, globalOn) => {
             const l = document.createElement('label'); l.className = 'wa-adv-row';
@@ -1665,7 +1665,7 @@ export async function lorebookStudio(preferredBook = null, open = null) {
     const buildFilterBtn = onChange => {
         const wrap = document.createElement('span'); wrap.style.cssText = 'position:relative;display:inline-flex;';
         const btn = document.createElement('button'); btn.type = 'button'; btn.className = 'menu_button wa-filter';
-        btn.title = 'List only some entries — by type, by state, or by the severity of a flag they carry'; btn.style.cssText = 'display:inline-flex;align-items:center;gap:5px;width:auto;white-space:nowrap;';
+        btn.title = 'Filter entries by type, state or flag severity'; btn.style.cssText = 'display:inline-flex;align-items:center;gap:5px;width:auto;white-space:nowrap;';
         const cur = FILTER_OPTS.find(o => o[0] === entryFilter) ?? FILTER_OPTS[0];
         const lbl = document.createElement('span'); lbl.textContent = cur[2];
         btn.append(iconEl('fa-filter', cur[3] ?? ''), lbl);
@@ -1742,7 +1742,7 @@ export async function lorebookStudio(preferredBook = null, open = null) {
                 onEdit();
             }));
             const del = document.createElement('i'); del.className = 'fa-solid fa-xmark wa-term-act';
-            del.title = 'Delete this keyword — shift-click to ignore it instead';
+            del.title = 'Delete this keyword. Shift-click to ignore it instead.';
             del.style.marginLeft = '0.4rem';
             del.addEventListener('click', ev => {
                 if (ev.shiftKey) { toggleIgnore(r.term); return; }   // afterIgnoreChange repaints the list itself
@@ -2154,7 +2154,7 @@ export async function lorebookStudio(preferredBook = null, open = null) {
         const chatScanBtn = () => {
             const b = barBtn(chatHits ? 'Rescan chats' : 'Scan chats',
                 ev => runChatScan(ev?.shiftKey).catch(e => { console.error('Worlds Apart: chat scan failed', e); toastr.error(String(e?.message ?? e), 'Worlds Apart'); }));
-            b.title = 'Count how many chat messages each key matches, over the chats this book is bound to.\nShift-click to pick from every chat on this install instead.';
+            b.title = 'Count the chat messages each key matches, over the chats bound to this book. Shift-click to choose any chat.';
             return b;
         };
         const paintBar = () => {
@@ -2764,7 +2764,7 @@ export async function lorebookStudio(preferredBook = null, open = null) {
         );
         const winLabel = document.createElement('label');
         winLabel.style.cssText = 'display:flex;gap:6px;align-items:center;';
-        winLabel.title = 'The unit a key has to match within, as the Match window setting has it';
+        winLabel.title = 'Match span, as set in the settings';
         const win = document.createElement('select'); win.className = 'text_pole';
         win.style.cssText = 'width:auto;margin:0;';
         for (const [v, label] of [['paragraph', 'Paragraph'], ['message', 'Message'], ['scan', 'Whole scan window']]) {
@@ -3069,7 +3069,7 @@ export async function lorebookStudio(preferredBook = null, open = null) {
         expandBtn.type = 'button'; expandBtn.className = 'menu_button';
         expandBtn.style.cssText = 'width:auto;padding:3px 7px;flex-shrink:0;';
         expandBtn.innerHTML = `<i class="fa-solid ${allOpen ? 'fa-square-caret-up' : 'fa-square-caret-down'}"></i>`;
-        expandBtn.title = `${allOpen ? 'Collapse' : 'Expand'} all entries — shift-click expands only entries with flagged keywords`;
+        expandBtn.title = `${allOpen ? 'Collapse' : 'Expand'} all entries. Shift-click expands only entries with flagged keywords.`;
         expandBtn.addEventListener('click', async ev => {
             if (ev.shiftKey) {   // expand only flagged entries (scan first if needed), collapse the rest
                 if (!scan) await withBusy(expandBtn, '0.5', runAudit);   // building an audit here means building the SAME audit
@@ -3083,12 +3083,12 @@ export async function lorebookStudio(preferredBook = null, open = null) {
         const suggestAllBtn = document.createElement('button');
         suggestAllBtn.type = 'button'; suggestAllBtn.className = 'menu_button';
         suggestAllBtn.innerHTML = '<i class="fa-solid fa-bolt"></i> Suggest all';
-        suggestAllBtn.title = 'Add TF-IDF keyword suggestions to every entry (review the ⚡ chips before accepting)';
+        suggestAllBtn.title = 'Suggest keywords for every entry from its own text';
         suggestAllBtn.addEventListener('click', () => suggestAll(suggestAllBtn));
         const suggestAllLlmBtn = document.createElement('button');
         suggestAllLlmBtn.type = 'button'; suggestAllLlmBtn.className = 'menu_button';
         suggestAllLlmBtn.innerHTML = '<i class="fa-solid fa-wand-magic-sparkles"></i> Suggest all (LLM)';
-        suggestAllLlmBtn.title = 'Run local-model keyword suggestions on every visible entry (long entries are chunked; review the ✨ chips before accepting)';
+        suggestAllLlmBtn.title = 'Suggest keywords for every visible entry with the LLM';
         suggestAllLlmBtn.addEventListener('click', () => suggestAllLlm(suggestAllLlmBtn));
         // Typing re-filters in place (applyFilter), not the header, so the input keeps focus.
         const searchWrap = buildSearchBox(() => applyFilter());
@@ -3182,7 +3182,7 @@ export async function lorebookStudio(preferredBook = null, open = null) {
         const ttl = document.createElement('b'); ttl.textContent = 'Lorebooks';
         const sortBtn = document.createElement('i');
         sortBtn.className = `fa-solid ${sortAsc ? 'fa-arrow-down-a-z' : 'fa-arrow-up-a-z'}`;
-        sortBtn.title = `Sort ${sortAsc ? 'A→Z' : 'Z→A'} (click to flip)`;
+        sortBtn.title = `Sort by ${sortAsc ? 'A→Z' : 'Z→A'}; click to flip`;
         sortBtn.style.cssText = 'cursor:pointer;opacity:0.7;';
         sortBtn.addEventListener('click', () => { sortAsc = !sortAsc; renderBooks(); });
         const bulkToggle = document.createElement('i');
