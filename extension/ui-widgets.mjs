@@ -418,7 +418,7 @@ textarea.wa-entry-full.wa-tall { max-height: 62vh; }
 .wa-kw-para { display: flex; flex-wrap: wrap; align-items: flex-start; margin: 6px 0 2px 22px; }
 /* Chip outline/fill derive from currentColor (the theme's text colour) so they stay visible on any
    background — a fixed --SmartThemeBorderColor vanished on near-black themes. */
-.wa-kw-item { display: inline-flex; flex-direction: column; align-items: center; white-space: nowrap; margin: 0 0.6em 0.5em 0; }
+.wa-kw-item { display: inline-flex; flex-direction: column; align-items: flex-start; white-space: nowrap; margin: 0 0.6em 0.5em 0; }
 .wa-kw { display: inline-flex; align-items: center; gap: 4px; padding: 0 8px;
     white-space: nowrap; border: 1px solid color-mix(in srgb, currentColor 40%, transparent); border-radius: 11px; }
 .wa-kw-dead .wa-kw-text { opacity: 0.8; }
