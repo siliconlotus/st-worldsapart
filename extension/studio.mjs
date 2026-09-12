@@ -921,7 +921,8 @@ export async function lorebookStudio(preferredBook = null, open = null) {
                 if (ok && nv !== (e.comment ?? '')) { e.comment = nv; save(); }
                 renderEntry(e);
             }, {
-                value: e.comment ?? '', css: 'margin:0;font-size:0.95em;',
+                // width:auto, or .text_pole's 100% wins over `size` and the ✓ lands at the far edge of the row.
+                value: e.comment ?? '', css: 'margin:0;font-size:0.95em;width:auto;',
                 fit: x => Math.max(6, x.value.length + 2),   // grow to the text so ✓ stays under the mouse
             });
             inp.addEventListener('click', e2 => e2.stopPropagation());
