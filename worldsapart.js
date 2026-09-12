@@ -1742,7 +1742,7 @@ const SETTINGS_HTML = `
             </select>
             <small class="opacity50p" id="wa_language_state"></small>
 
-            <label for="wa_match_window">Match window <span class="fa-solid fa-circle-question note-link-span" title="The span within which a key's conditions must all match."></span></label>
+            <label for="wa_match_window">Match window <span class="fa-solid fa-circle-question note-link-span" title="The span within which a key's conditions must all match, e.g. ? apple AND banana must both appear in the same paragraph, message or scan window."></span></label>
             <select id="wa_match_window" class="text_pole">
                 <option value="paragraph">Paragraph</option>
                 <option value="message">Message</option>
