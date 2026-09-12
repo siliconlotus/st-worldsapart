@@ -2866,7 +2866,7 @@ export async function lorebookStudio(preferredBook = null, open = null) {
             bar.append(b);
         }
         // Clear of the close X, which is absolutely positioned at the bar's right edge.
-        if (tab !== 'lab') { const cog = trayBtn(); cog.style.marginLeft = 'auto'; cog.style.marginRight = '2.4em'; bar.append(cog); }
+        if (tab === 'cleanup') { const cog = trayBtn(); cog.style.marginLeft = 'auto'; cog.style.marginRight = '2.4em'; bar.append(cog); }   // the Explorer's cog is in its rail
         bar.append(closeBtn);   // tab order: straight after the last tab. It's positioned, so no layout effect
         return bar;
     };
@@ -3083,7 +3083,8 @@ export async function lorebookStudio(preferredBook = null, open = null) {
         newBtn.addEventListener('click', () => newEntry());
         // The actions stand in a rail beside the list: the rows leave that width empty, and a row above the list does not.
         const rail = document.createElement('div'); rail.className = 'wa-rail';
-        rail.append(newBtn, expandBtn, scanBtn, suggestAllBtn, suggestAllLlmBtn);
+        const cog = trayBtn(); cog.style.width = ''; cog.style.padding = '';   // the rail's square sizing, not the header button's; the open-state colour stays
+        rail.append(cog, newBtn, expandBtn, scanBtn, suggestAllBtn, suggestAllLlmBtn);
         head.append(row1);
         const fixed = document.createElement('div'); fixed.className = 'wa-studio-fixed';
         globalTrayEl = renderGlobalTray();
