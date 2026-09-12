@@ -928,7 +928,11 @@ export async function lorebookStudio(preferredBook = null, open = null) {
             const okBtn = document.createElement('i'); okBtn.className = 'fa-solid fa-check wa-tool'; okBtn.title = 'Confirm rename';
             okBtn.addEventListener('mousedown', e2 => e2.preventDefault());   // keep input focus so blur doesn't fire first
             okBtn.addEventListener('click', e2 => { e2.stopPropagation(); finish(true); });
-            inp.after(okBtn);
+            const cancelBtn = document.createElement('i'); cancelBtn.className = 'fa-solid fa-xmark wa-tool'; cancelBtn.title = 'Cancel rename';
+            cancelBtn.addEventListener('mousedown', e2 => e2.preventDefault());
+            cancelBtn.addEventListener('click', e2 => { e2.stopPropagation(); finish(false); });
+            pencil.style.display = 'none';   // the repaint after finish brings it back
+            inp.after(okBtn, cancelBtn);
         });
         const meta = document.createElement('span'); meta.className = 'wa-entry-meta';
         const prob = e.probability != null ? Number(e.probability) : 100;
