@@ -2009,10 +2009,11 @@ export async function lorebookStudio(preferredBook = null, open = null) {
         return bound;
     };
 
-    const runChatScan = async (all = false) => {
+    const runChatScan = async (all = false, btn = null) => {
         if (!scan) { toastr.info('Run the audit first.', 'Worlds Apart'); return; }
-        toastr.info(all ? 'Listing every chat…' : 'Finding chats that use this book…', 'Worlds Apart', { timeOut: 2000 });
-        const found = await findBookChats(all);
+        // The button shows the wait, as the audit button does; a toast for a lookup this short only lingers.
+        const finding = () => findBookChats(all);
+        const found = btn ? await withBusy(btn, '0.5', finding, `<i class="fa-solid fa-spinner fa-spin"></i> ${all ? 'Listing chats…' : 'Finding chats…'}`) : await finding();
         // The open chat is offered too, unticked, for the case the metadata does not capture — never assumed.
         const ctx = getContext();
         const openName = String(ctx.chatId ?? '');
@@ -2049,7 +2050,7 @@ export async function lorebookStudio(preferredBook = null, open = null) {
             scanned: got?.via ?? 'none', messages: chatMsgs, keys: chatHits?.size ?? 0, firing: got?.live ?? 0,
         });
         // Only the absence is worth saying: the bulk bar carries the counts when there are any.
-        if (!got && !chatHits) toastr.info(`Audited against entry text only. No chat is bound to “${selected}”.`, 'Worlds Apart', { timeOut: 6000 });
+        if (!got && !chatHits) toastr.info('No chat is bound; scanning the book only.', 'Worlds Apart', { timeOut: 6000 });
     };
 
     const cleanupGroups = () => {
@@ -2153,7 +2154,7 @@ export async function lorebookStudio(preferredBook = null, open = null) {
         };
         const chatScanBtn = () => {
             const b = barBtn(chatHits ? 'Rescan chats' : 'Scan chats',
-                ev => runChatScan(ev?.shiftKey).catch(e => { console.error('Worlds Apart: chat scan failed', e); toastr.error(String(e?.message ?? e), 'Worlds Apart'); }));
+                ev => runChatScan(ev?.shiftKey, b).catch(e => { console.error('Worlds Apart: chat scan failed', e); toastr.error(String(e?.message ?? e), 'Worlds Apart'); }));
             b.title = 'Count the chat messages each key matches, over the chats bound to this book. Shift-click to choose any chat.';
             return b;
         };
