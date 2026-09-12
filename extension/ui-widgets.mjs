@@ -26,6 +26,11 @@ const buildCtxPanel = (items, x, y, depth, mount, refresh = null) => {
     for (const it of items) {
         const row = document.createElement('div'); row.className = 'wa-ctx-item' + (it.danger ? ' wa-ctx-danger' : '') + (it.children ? ' wa-ctx-parent' : '') + (it.active ? ' wa-ctx-active' : '');
         if (it.icon) { const ic = document.createElement('i'); ic.className = `${it.icon} wa-ctx-icon`; row.append(ic); }   // a Font Awesome class, e.g. a tick state
+        // `glyph` is the item's own mark beside the tick: a Font Awesome class or a text glyph such as an emoji, tinted by `glyphColor`.
+        if (it.glyph) {
+            const g = it.glyph.startsWith('fa-') ? Object.assign(document.createElement('i'), { className: `fa-solid ${it.glyph}` }) : Object.assign(document.createElement('span'), { textContent: it.glyph });
+            g.classList.add('wa-ctx-glyph'); if (it.glyphColor) g.style.color = it.glyphColor; row.append(g);
+        }
         const lbl = document.createElement('span'); lbl.textContent = it.label; row.append(lbl);
         if (it.children) {
             const car = document.createElement('span'); car.className = 'wa-ctx-caret'; car.textContent = '›'; row.append(car);
@@ -520,6 +525,7 @@ textarea.wa-entry-full.wa-tall { max-height: 62vh; }
 .wa-ctx-item { display: flex; align-items: center; gap: 14px; padding: 5px 11px; border-radius: 4px; cursor: pointer; white-space: nowrap; }
 .wa-ctx-item:hover { background: var(--white20a, rgba(255,255,255,0.12)); }
 .wa-ctx-icon { width: 1.1em; text-align: center; margin-right: -6px; opacity: 0.85; }
+.wa-ctx-glyph { width: 1.2em; text-align: center; margin-right: -6px; }
 .wa-ctx-danger:hover { color: var(--wa-severe); }
 .wa-ctx-caret { margin-left: auto; opacity: 0.55; font-size: 1.15em; line-height: 1; }
 .wa-ctx-active { color: var(--SmartThemeQuoteColor, #6ea8fe); font-weight: 600; }

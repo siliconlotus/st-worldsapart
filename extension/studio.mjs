@@ -1695,8 +1695,8 @@ export async function lorebookStudio(preferredBook = null, open = null) {
         btn.append(iconEl('fa-filter', picked[0]?.[3] ?? ''), lbl);
         const items = () => [
             { label: 'All', icon: entryFilter.size ? 'fa-regular fa-square' : 'fa-solid fa-square-check', fn: () => { entryFilter.clear(); onChange(); } },
-            ...FILTER_OPTS.filter(o => o[0] !== 'all').map(([val, , text]) => ({
-                label: text, icon: entryFilter.has(val) ? 'fa-solid fa-square-check' : 'fa-regular fa-square', keep: true,
+            ...FILTER_OPTS.filter(o => o[0] !== 'all').map(([val, spec, text, color]) => ({
+                label: text, icon: entryFilter.has(val) ? 'fa-solid fa-square-check' : 'fa-regular fa-square', glyph: spec, glyphColor: color ?? '', keep: true,
                 fn: () => { entryFilter.has(val) ? entryFilter.delete(val) : entryFilter.add(val); onChange(); },
             })),
         ];
