@@ -6,6 +6,8 @@
 #   python3 build-zipf.py --ngrams 1-00000-of-00001.gz --totals totalcounts-1
 # Any other language comes from wordfreq alone, with no POS sets:  python3 build-zipf.py --lang de
 # Rewrites the PACKED / VA95 / VA85 / ADJ85 lines of an existing file, so everything else in it is kept.
+# With --ngrams it also rewrites plugin/commonwords.js: wordfreq's top 2000, alpha and length >= 2, minus words fiction
+# capitalises >= 95% of the time (the name test); that file deploys into the plugin, so redeploy after.
 import argparse, gzip, json, math, re, sys
 import wordfreq
 
@@ -32,7 +34,7 @@ if a.ngrams:
     if not a.totals: sys.exit('--ngrams needs --totals')
     total = sum(int(c.split(',')[1]) for c in open(a.totals).read().split() if c.strip() and int(c.split(',')[0]) >= Y0)
     known = set(wordfreq.iter_wordlist(a.lang, size))
-    count, tags = {}, {}
+    count, tags, capped = {}, {}, {}   # capped: occurrences of the word with a capital initial, folded key
     with gzip.open(a.ngrams, 'rt', encoding='utf-8', errors='replace') as f:
         for line in f:
             tok, _, rest = line.partition('\t')
@@ -47,7 +49,9 @@ if a.ngrams:
                 c += int(m)
             if not c: continue
             w = tok.lower()
-            if tag is None: count[w] = count.get(w, 0) + c
+            if tag is None:
+                count[w] = count.get(w, 0) + c
+                if tok[0].isupper(): capped[w] = capped.get(w, 0) + c
             else: tags.setdefault(w, {})[tag] = tags.get(w, {}).get(tag, 0) + c
     for w, c in count.items():
         dz = decile(math.log10(c / total * 1e9))
@@ -61,6 +65,16 @@ if a.ngrams:
             if share >= 0.95: pos['VA95'].append(w)
             elif share >= 0.85: pos['VA85'].append(w)
         elif top == 'ADJ' and share >= 0.85: pos['ADJ85'].append(w)
+    if a.lang == 'en':
+        NAME_SHARE = 0.95
+        common = [w for w in wordfreq.top_n_list('en', 2000, wordlist=size)
+                  if w.isalpha() and len(w) >= 2 and capped.get(w, 0) / max(1, count.get(w, 0)) < NAME_SHARE]
+        cw = 'plugin/commonwords.js'
+        open(cw, 'w', encoding='utf-8').write(
+            "// Top-2000 English words from wordfreq, alpha and length >= 2, minus words Google Books fiction capitalises >= 95% of the\n"
+            "// time (names). Rebuild: build-zipf.py --ngrams (see its header); deploys into the plugin.\n"
+            f"export const COMMON_WORDS = new Set(`{' '.join(common)}`.split(' '));\n")
+        print(f'{cw}: {len(common)} words')
 else:
     for w in wordfreq.iter_wordlist(a.lang, size):          # descending frequency
         dz = decile(wordfreq.zipf_frequency(w, a.lang, size))
