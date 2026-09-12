@@ -16,6 +16,14 @@ export function parsePacked(packed) {
 
 const words = s => new Set(String(s ?? '').split(' ').filter(Boolean));
 
+/** UTF-8 text to base64 for ST's upload endpoint, in chunks: a pack is hundreds of KB, past the spread-argument limit. */
+export function toBase64(text) {
+    const bytes = new TextEncoder().encode(text);
+    let bin = '';
+    for (let i = 0; i < bytes.length; i += 0x8000) bin += String.fromCharCode.apply(null, bytes.subarray(i, i + 0x8000));
+    return btoa(bin);
+}
+
 let current = null;
 /** The bundled English pack, always present because it ships. */
 export const BUNDLED = EN;

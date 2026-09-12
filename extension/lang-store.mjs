@@ -1,23 +1,26 @@
 // lang-store.mjs — the browser side of language packs: a store over ST's user-files endpoints (data/<user>/user/files/) and
 // the two fetchers lang.mjs is handed. ST-coupled.
 import { getRequestHeaders } from '../../../../../script.js';
+import { toBase64 } from './lang.mjs';
 
 export const PACKS_BASE = 'https://raw.githubusercontent.com/siliconlotus/st-worldsapart-lang/main/';
-const fileName = lang => `wa-pack-${lang}.json`;
-const b64 = s => btoa(String.fromCharCode(...new TextEncoder().encode(s)));
+const filePath = lang => `user/files/wa-pack-${lang}.json`;
 
-/** lang.mjs's store contract over /api/files: a missing file reads as undefined; a failed write is forgotten, not thrown. */
+/** lang.mjs's store contract over /api/files: existence through /verify so a miss is silent, not a 404; a failed write is forgotten, not thrown. */
 export const packStore = {
     get: async lang => {
         try {
-            const r = await fetch(`/user/files/${encodeURIComponent(fileName(lang))}`, { cache: 'no-cache' });
+            const v = await fetch('/api/files/verify', { method: 'POST', headers: getRequestHeaders(), body: JSON.stringify({ urls: [filePath(lang)] }) });
+            if (!v.ok || !(await v.json())[filePath(lang)]) return undefined;
+            const r = await fetch(`/${filePath(lang)}`, { cache: 'no-cache' });
             return r.ok ? await r.json() : undefined;
         } catch { return undefined; }
     },
     put: async (lang, pack) => {
         try {
-            await fetch('/api/files/upload', { method: 'POST', headers: getRequestHeaders(), body: JSON.stringify({ name: fileName(lang), data: b64(JSON.stringify(pack)) }) });
-        } catch { /* in memory for this session; the next switch fetches again */ }
+            const r = await fetch('/api/files/upload', { method: 'POST', headers: getRequestHeaders(), body: JSON.stringify({ name: `wa-pack-${lang}.json`, data: toBase64(JSON.stringify(pack)) }) });
+            if (!r.ok) console.warn(`Worlds Apart: storing the ${lang} pack failed (${r.status}); it is in memory for this session`);
+        } catch (e) { console.warn('Worlds Apart: storing the pack failed', e); }
     },
 };
 

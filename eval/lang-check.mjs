@@ -1,6 +1,6 @@
 // Self-check for extension/lang.mjs: a pack becomes the table, a stand-down empties it, and the switch touches the store and the network only when it must.
 import { eq } from './metrics.mjs';
-import { table, usePack, standDown, parsePacked, setLanguage, refreshIndex, BUNDLED } from '../extension/lang.mjs';
+import { table, usePack, standDown, parsePacked, setLanguage, refreshIndex, BUNDLED, toBase64 } from '../extension/lang.mjs';
 
 const pack = {
     lang: 'xx', label: 'Test', source: 'synthetic', license: 'none',
@@ -66,5 +66,9 @@ eq(parsePacked('').size, 0, 'an empty packed string is an empty table');
     eq(table().hash, 'h3', 'a refresh of the current language swaps it in');
     const bad = await refreshIndex({ fetchIndex: async () => { throw new Error('offline'); }, fetchPack, store: S });
     eq(bad, null, 'an unreachable index is null, not a throw');
+}
+{
+    const big = JSON.stringify(BUNDLED) + 'Русский ' .repeat(1000);
+    eq(Buffer.from(toBase64(big), 'base64').toString('utf8') === big, true, 'a pack-sized UTF-8 string round-trips through toBase64');
 }
 console.log(process.exitCode ? 'FAIL' : 'ok');
