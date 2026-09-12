@@ -268,7 +268,7 @@ export async function lorebookStudio(preferredBook = null, open = null) {
 
         const wl = document.createElement('div');   // whitelist column body: chips row, then a centred Clear
         const chips = document.createElement('div'); chips.className = 'wa-tray-wl';
-        if (!ignoreSet.size) { const em = document.createElement('span'); em.style.opacity = '0.55'; em.textContent = 'None — right-click a term to ignore it.'; chips.append(em); }
+        if (!ignoreSet.size) { const em = document.createElement('span'); em.style.opacity = '0.55'; em.textContent = 'None. Right-click a term to ignore it.'; chips.append(em); }
         for (const key of [...ignoreSet].sort()) {
             const chip = document.createElement('span'); chip.className = 'wa-kw wa-kw-ignored';
             const t = document.createElement('span'); t.className = 'wa-kw-text'; t.textContent = key; t.style.cursor = 'default';
@@ -400,16 +400,16 @@ export async function lorebookStudio(preferredBook = null, open = null) {
                 + '<span>Don\'t do this unless you really know what you\'re doing.</span></div>'
             : '')
             + (advanced
-            ? 'Advanced reorder: renumber the selected entries into a contiguous block, setting <b>both order and UID</b>, top to bottom.'
-            : 'Renumber the selected entries into a contiguous <b>order</b> block, top to bottom.')
+            ? 'Renumber the selected entries into a contiguous block, setting both order and UID, top to bottom.'
+            : 'Renumber the selected entries into a contiguous order block, top to bottom.')
             + '<div style="margin-top:8px;">Start at <input type="number" class="wa-bo-start text_pole" style="width:6em;margin:0 6px;" value="1"></div>'
             + '<div style="margin-top:8px;">In order of <select class="wa-bo-sort text_pole" style="width:auto;margin-left:6px;">'
             + '<option value="">On screen</option>'
             + Object.entries(SORT_LABELS).map(([k, v]) => `<option value="${escapeHtml(k)}">${escapeHtml(v)}</option>`).join('')
             + '</select></div>'
-            + '<label class="checkbox_label" style="margin-top:6px;"><input type="radio" name="wa-bo-dir" class="wa-bo-asc" checked><span>Ascending — top gets the start value</span></label>'
-            + '<label class="checkbox_label"><input type="radio" name="wa-bo-dir" class="wa-bo-desc"><span>Descending — top gets the highest value</span></label>'
-            + (advanced ? '<small style="opacity:0.6;display:block;margin-top:6px;">Sets UID = order per entry. Aborts if the target UID range overlaps an unselected entry.</small>' : '')
+            + '<label class="checkbox_label" style="margin-top:6px;"><input type="radio" name="wa-bo-dir" class="wa-bo-asc" checked><span>Ascending: the top entry gets the start value</span></label>'
+            + '<label class="checkbox_label"><input type="radio" name="wa-bo-dir" class="wa-bo-desc"><span>Descending: the top entry gets the highest value</span></label>'
+            + (advanced ? '<small style="opacity:0.6;display:block;margin-top:6px;">Sets each entry\'s UID to its order. Stops if the target range overlaps an unselected entry.</small>' : '')
             + `<div style="margin-top:8px;opacity:0.7;">Current sort order: <b>${escapeHtml(String(curOrder))}</b></div>`;
         const p = new Popup(w, POPUP_TYPE.CONFIRM, '', { okButton: advanced ? 'Reorder + UIDs' : 'Renumber', cancelButton: 'Cancel' });
         if (await p.show() !== POPUP_RESULT.AFFIRMATIVE) return;
@@ -424,10 +424,10 @@ export async function lorebookStudio(preferredBook = null, open = null) {
         if (!advanced) { ordered.forEach((e, i) => e.order = targetOf(i)); save(); ordered.forEach(x => renderEntry(x)); consumeSelection(); return; }
 
         // UID is the entries-object key and the entry's identity, so this rebuilds data.entries.
-        if (data.originalData) { toastr.warning('UID renumber isn\'t available for character-embedded books.', 'Worlds Apart'); return; }
+        if (data.originalData) { toastr.warning('UID renumbering is not available for character-embedded books.', 'Worlds Apart'); return; }
         if (start < 0) { toastr.warning('Start must be 0 or greater when renumbering UIDs.', 'Worlds Apart'); return; }
         const plan = planUidReindex(data.entries, ordered.map(e => e.uid), start, desc);
-        if (plan.conflict != null) { toastr.warning(`UID ${plan.conflict} is already used by an unselected entry — clear that block or include it in the selection.`, 'Worlds Apart'); return; }
+        if (plan.conflict != null) { toastr.warning(`UID ${plan.conflict} is used by an unselected entry.`, 'Worlds Apart'); return; }
         const byUid = new Map(ordered.map(e => [e.uid, e]));
         const selUids = new Set(byUid.keys());
         const next = {};
@@ -461,18 +461,18 @@ export async function lorebookStudio(preferredBook = null, open = null) {
         const sel = selectedList(); if (!sel.length) return;
         const total = sel.reduce((n, e) => n + (Array.isArray(e.key) ? e.key.length : 0), 0);
         if (!total) { toastr.info('The selected entries have no keywords.', 'Worlds Apart'); return; }
-        if (!await Popup.show.confirm(`Delete all ${total} keyword${total === 1 ? '' : 's'} from ${sel.length} selected ${sel.length === 1 ? 'entry' : 'entries'}?`, 'Undoable from the toast for 20 seconds.')) return;
+        if (!await Popup.show.confirm(`Delete all ${total} keyword${total === 1 ? '' : 's'} from ${sel.length} selected ${sel.length === 1 ? 'entry' : 'entries'}?`, 'Undo is available for 20 seconds.')) return;
         const book = selected, before = sel.map(e => [e.uid, Array.isArray(e.key) ? [...e.key] : []]);
         applyBulk(e => e.key = []);
         suggest = null; if (scan) { rebuildScan(); sel.forEach(x => renderEntry(x)); }
         const undo = () => {
-            if (selected !== book) { toastr.warning(`That undo belongs to “${book}” — reopen it first.`, 'Worlds Apart'); return; }
+            if (selected !== book) { toastr.warning(`That undo belongs to “${book}”. Reopen it first.`, 'Worlds Apart'); return; }
             let n = 0;
             for (const [uid, keys] of before) { const e = data?.entries?.[uid]; if (!e) continue; e.key = keys; n += keys.length; }
             save(); suggest = null; if (scan) rebuildScan(); renderExplorer();
             toastr.success(`Restored ${n} keyword${n === 1 ? '' : 's'}.`, 'Worlds Apart');
         };
-        toastr.success(`Deleted ${total} keyword${total === 1 ? '' : 's'} — click to undo.`, 'Worlds Apart', { timeOut: 20000, extendedTimeOut: 10000, onclick: undo });
+        toastr.success(`Deleted ${total} keyword${total === 1 ? '' : 's'}. Click to undo.`, 'Worlds Apart', { timeOut: 20000, extendedTimeOut: 10000, onclick: undo });
     };
     const menuBtn = (label, onClick, cls = '', style = '') => {
         const b = document.createElement('button'); b.type = 'button';
@@ -1210,7 +1210,7 @@ export async function lorebookStudio(preferredBook = null, open = null) {
     /** New blank entry from core's createWorldInfoEntry — never a hand-rolled object, so the field set cannot drift. */
     const newEntry = () => {
         const ne = createWorldInfoEntry(selected, data);
-        if (!ne) { toastr.warning('Couldn\'t create an entry — this book may be full.', 'Worlds Apart'); return; }
+        if (!ne) { toastr.warning('Could not create an entry.', 'Worlds Apart'); return; }
         save(); suggest = null; if (scan) rebuildScan();   // corpus changed -> ranker/scan stale
         entryOpen.add(ne.uid); expanded.add(ne.uid);
         renderExplorer();
@@ -1262,7 +1262,7 @@ export async function lorebookStudio(preferredBook = null, open = null) {
         const target = await pickBook(`${deleteOriginal ? 'Move' : 'Copy'} ${what} to:`);
         if (!target) return;
         const tgt = await loadWorldInfo(target);
-        if (!tgt?.entries) { toastr.warning(`Couldn't load “${target}”.`, 'Worlds Apart'); return; }
+        if (!tgt?.entries) { toastr.warning(`Could not load “${target}”.`, 'Worlds Apart'); return; }
         let maxDisplay = Object.values(tgt.entries).reduce((m, x) => Math.max(m, x.displayIndex ?? -1), -1);
         const copied = [];
         for (const e of list) {
@@ -1508,7 +1508,7 @@ export async function lorebookStudio(preferredBook = null, open = null) {
         if (!newName || newName === oldName) return;
         if (world_names.some(n => n.toLowerCase() === newName.toLowerCase())) { toastr.warning('A lorebook with that name already exists.', 'Worlds Apart'); return; }
         const bookData = (oldName === selected) ? data : await loadWorldInfo(oldName);
-        if (!bookData) { toastr.warning(`Couldn't load “${oldName}”.`, 'Worlds Apart'); return; }
+        if (!bookData) { toastr.warning(`Could not load “${oldName}”.`, 'Worlds Apart'); return; }
         const ctx = getContext();
         const wasSelected = selected_world_info.includes(oldName);
         const wasPersona = power_user.persona_description_lorebook === oldName;
@@ -1544,11 +1544,11 @@ export async function lorebookStudio(preferredBook = null, open = null) {
         const also = bits.length ? ` Re-pointed ${bits.join(' and ')}.` : '';
         toastr.success(`Renamed to “${newName}”.${also}`, 'Worlds Apart');
         const stuck = [...failed, ...cards.failed];
-        if (stuck.length) toastr.warning(`Still bound to “${oldName}”: ${stuck.join(', ')}. Re-point by hand, or they will not see this book.`, 'Worlds Apart', { timeOut: 12000 });
+        if (stuck.length) toastr.warning(`Still bound to “${oldName}”: ${stuck.join(', ')}.`, 'Worlds Apart', { timeOut: 12000 });
     };
     // Batch TF-IDF into every entry's ⚡ chips; yields a frame first so the button can dim before the build.
     const suggestAll = btn => withBusy(btn, '0.5', async () => {
-        let s; try { s = ensureSuggest(); } catch { toastr.warning('Couldn\'t build suggestions.', 'Worlds Apart'); return; }
+        let s; try { s = ensureSuggest(); } catch { toastr.warning('Could not build suggestions.', 'Worlds Apart'); return; }
         let n = 0;
         for (const pe of s.perEntry) {
             const e = data.entries[pe.entry.uid]; if (!e) continue;
@@ -1566,7 +1566,7 @@ export async function lorebookStudio(preferredBook = null, open = null) {
     // One ✨ pass per visible non-empty entry, sequential: a small model serves one request at a time.
     const suggestAllLlm = btn => withBusy(btn, '0.5', async () => {
         const label = btn.innerHTML;
-        let s; try { s = ensureSuggest(); } catch { toastr.warning('Couldn\'t build suggestions.', 'Worlds Apart'); return; }
+        let s; try { s = ensureSuggest(); } catch { toastr.warning('Could not build suggestions.', 'Worlds Apart'); return; }
         const targets = Object.values(data?.entries ?? {}).filter(filterMatch).filter(e => String(e.content ?? '').trim());
         let n = 0, i = 0;
         for (const e of targets) {
@@ -1851,7 +1851,7 @@ export async function lorebookStudio(preferredBook = null, open = null) {
         if (candidates.isGlobal && !candidates.all) {
             const g = document.createElement('small');
             g.style.cssText = 'display:block;opacity:0.75;margin-top:0.4em;';
-            g.textContent = 'This book is globally active, so it reaches every chat.';
+            g.textContent = 'This book is globally active.';
             wrap.append(g);
         }
         const pop = new Popup(wrap, POPUP_TYPE.CONFIRM, '', { okButton: 'Scan selected', cancelButton: 'Cancel', wide: false });
@@ -2020,7 +2020,7 @@ export async function lorebookStudio(preferredBook = null, open = null) {
             found.push({ char: ctx.name2 ?? '', avatar: null, file: openName, size: `${(ctx.chat ?? []).length} msgs`, why: 'currently open', open: true });
         }
         if (!found.length) {
-            toastr.warning(all ? 'No chats found.' : `No chat is bound to "${selected}". Shift-click to pick any chat.`,
+            toastr.warning(all ? 'No chats found.' : `No chat is bound to “${selected}”. Shift-click to pick any chat.`,
                 'Worlds Apart', { timeOut: 9000 });
             return;
         }
@@ -2049,7 +2049,7 @@ export async function lorebookStudio(preferredBook = null, open = null) {
             scanned: got?.via ?? 'none', messages: chatMsgs, keys: chatHits?.size ?? 0, firing: got?.live ?? 0,
         });
         // Only the absence is worth saying: the bulk bar carries the counts when there are any.
-        if (!got && !chatHits) toastr.info(`Audited against entry text only — no chat is bound to "${selected}".`, 'Worlds Apart', { timeOut: 6000 });
+        if (!got && !chatHits) toastr.info(`Audited against entry text only. No chat is bound to “${selected}”.`, 'Worlds Apart', { timeOut: 6000 });
     };
 
     const cleanupGroups = () => {
@@ -2093,7 +2093,7 @@ export async function lorebookStudio(preferredBook = null, open = null) {
         if (!removed.length) { toastr.info('Nothing selected.', 'Worlds Apart'); return; }
         cleanupUndo = removed;
         save(); rebuildScan(); suggest = null; renderExplorer();
-        toastr.success(`Deleted ${removed.length} keyword${removed.length === 1 ? '' : 's'} — Undo is in the bar.`, 'Worlds Apart');
+        toastr.success(`Deleted ${removed.length} keyword${removed.length === 1 ? '' : 's'}.`, 'Worlds Apart');
     };
     const undoPrune = () => {
         if (!cleanupUndo?.length) return;
@@ -2115,7 +2115,7 @@ export async function lorebookStudio(preferredBook = null, open = null) {
         }
         if (!n) { toastr.info('Nothing selected to ignore.', 'Worlds Apart'); return; }
         persistIgnore(); rebuildScan(); renderExplorer();
-        toastr.success(`Now ignoring ${n} term${n === 1 ? '' : 's'} in "${selected}" — they won't be flagged again.`, 'Worlds Apart');
+        toastr.success(`Ignoring ${n} term${n === 1 ? '' : 's'} in “${selected}”.`, 'Worlds Apart');
     };
     // Both term tabs paint a working note, yield a frame, then run the synchronous pre-pass.
 
@@ -3159,7 +3159,7 @@ export async function lorebookStudio(preferredBook = null, open = null) {
         renderBooks();
         data = await loadWorldInfo(name);
         if (selected !== name) return;   // a faster second click won this race
-        if (!data?.entries) { toastr.warning(`Couldn't load "${name}".`, 'Worlds Apart'); return; }
+        if (!data?.entries) { toastr.warning(`Could not load “${name}”.`, 'Worlds Apart'); return; }
         const s = settings(); if (!s.keywordIgnore) s.keywordIgnore = {};
         ignoreSet = new Set(s.keywordIgnore[name] ?? []);
         renderExplorer();

@@ -1730,36 +1730,36 @@ const SETTINGS_HTML = `
                 <input id="wa_enabled" type="checkbox"><span>Enabled</span>
             </label>
             <label>Prompt insertion order</label>
-            <small class="opacity50p">How WA lays out the entries it selected, in every prompt. Pick a base sort and, optionally, tiered grouping. (The Studio's sort views reuse this control but are per-session; this one is saved.)</small>
+            <small class="opacity50p">The order selected entries take in the prompt. A base sort, with optional tier grouping. This setting is saved; the Studio's sort views are not.</small>
             <div id="wa_presentation_order_mount" style="margin-top:4px;"></div>
 
-            <label for="wa_message_depth">Message depth (recent messages for retrieval + keyword scan)</label>
+            <label for="wa_message_depth">Message depth</label>
             <input id="wa_message_depth" type="number" class="text_pole" min="1" max="20" step="1">
 
-            <label for="wa_language">Language (the frequency table the key suggester and audit read)</label>
+            <label for="wa_language">Language of the lorebook</label>
             <select id="wa_language" class="text_pole">
                 <option value="en">English</option>
             </select>
             <small class="opacity50p" id="wa_language_state"></small>
 
-            <label for="wa_match_window">Match window (the unit a key has to match within)</label>
+            <label for="wa_match_window">Match window</label>
             <select id="wa_match_window" class="text_pole">
-                <option value="paragraph">Paragraph — terms must land in the same paragraph</option>
-                <option value="message">Message — anywhere within one message</option>
-                <option value="scan">Whole scan window — what SillyTavern core does</option>
+                <option value="paragraph">Paragraph</option>
+                <option value="message">Message</option>
+                <option value="scan">Whole scan window (SillyTavern default)</option>
             </select>
-            <small class="opacity50p">Only affects keys that combine conditions: secondary keys (AND ANY / NOT ANY / …) and <code>?</code> SmartKeys. A single keyword matches the same text either way. Narrower settings stop an entry firing on terms that were pages apart — and stop a negation five messages back from silently vetoing a match. Core has no equivalent, so anything but "Whole scan window" is a deliberate divergence from what core would have activated.</small>
+            <small class="opacity50p">The span within which a key's conditions must all match.</small>
 
-            <label for="wa_drop_chat_tags">Ignore these HTML tags in chat (comma-separated)</label>
-            <input id="wa_drop_chat_tags" type="text" class="text_pole" placeholder="e.g. internal_states, thinking">
-            <small class="opacity50p">Each named element is removed <b>with its contents</b> from every message before Worlds Apart reads it — both the retrieval query and the keyword scan. For presets that keep state tracking in the reply: the block lists every character, place and item the story has touched, so keywords fire on the bookkeeping instead of the scene, every turn. Only the tags you name are dropped, so a <code>&lt;div&gt;</code> rendering a letter or a phone screen still counts as scene text. Does not change what SillyTavern sends to the model, and does not affect the Studio&rsquo;s chat-rate check.</small>
+            <label for="wa_drop_chat_tags">Ignore these HTML tags in chat</label>
+            <input id="wa_drop_chat_tags" type="text" class="text_pole" placeholder="internal_states, thinking">
+            <small class="opacity50p">Comma-separated tag names. Each element is removed with its contents before Worlds Apart reads the chat, for both retrieval and the keyword scan. What SillyTavern sends to the model is unchanged.</small>
 
-            <label for="wa_word_boundary">Word boundary (what counts as inside a word)</label>
+            <label for="wa_word_boundary">Word boundary</label>
             <select id="wa_word_boundary" class="text_pole">
-                <option value="strict">Strict — hyphens and apostrophes are part of the word</option>
-                <option value="permissive">Permissive — only letters and digits are</option>
+                <option value="strict">Strict: hyphens and apostrophes are part of a word</option>
+                <option value="permissive">Permissive: only letters and digits are</option>
             </select>
-            <small class="opacity50p">Only applies to entries with <b>Match Whole Words</b> ticked. Under Strict, the key <code>Joe</code> does not match <i>Joe's</i> and <code>hot tub</code> does not match <i>hot tub-side</i>; under Permissive both match. Plurals break under either — <code>hot tub</code> never matches <i>hot tubs</i> with the box ticked. A <code>/regex/</code> key using <code>\\b</code> gets Permissive behaviour back for one key without changing the setting. Unlike SillyTavern core, the box also applies to keys with a space in them.</small>
+            <small class="opacity50p">Applies to entries with Match Whole Words on. Under Strict the key "Joe" does not match "Joe's"; under Permissive it does. Plurals never match under either. Unlike SillyTavern, the setting also applies to keys with a space in them.</small>
 
             <div class="inline-drawer wa-section">
                 <div class="inline-drawer-toggle inline-drawer-header">
@@ -1767,7 +1767,7 @@ const SETTINGS_HTML = `
                     <div class="inline-drawer-icon fa-solid fa-circle-chevron-down down"></div>
                 </div>
                 <div class="inline-drawer-content">
-                    <small class="opacity50p">When tiered grouping is on (in the insertion-order control above or in the Studio), entries group into the first tier they match, top to bottom. ↑/↓ sets precedence; untick to skip a tier. Shared with the Studio.</small>
+                    <small class="opacity50p">With tier grouping on, an entry joins the first tier it matches, top to bottom. Untick a tier to skip it. Shared with the Studio.</small>
                     <div id="wa_tier_editor_mount" style="margin-top:4px;"></div>
                 </div>
             </div>
@@ -1778,12 +1778,12 @@ const SETTINGS_HTML = `
                     <div class="inline-drawer-icon fa-solid fa-circle-chevron-down down"></div>
                 </div>
                 <div class="inline-drawer-content">
-                    <small class="opacity50p">With several books active, how their entries compete for budget slots and where they sit in the prompt. Books appear here once WA has seen them in a scan.</small>
+                    <small class="opacity50p">How entries from several books compete for the budget and where they sit in the prompt. A book appears here after its first scan.</small>
 
                     <label for="wa_world_priority_mode">Mode</label>
                     <select id="wa_world_priority_mode" class="text_pole">
-                        <option value="interleaved">Interleaved — one relevance-ranked list, optional per-book weight</option>
-                        <option value="sequential">Sequential — fill higher books first</option>
+                        <option value="interleaved">Interleaved: one ranked list, with optional per-book weights</option>
+                        <option value="sequential">Sequential: higher books fill first</option>
                     </select>
 
                     <div id="wa_world_priority_list" style="margin-top:6px;"></div>
@@ -1796,7 +1796,7 @@ const SETTINGS_HTML = `
                     <div class="inline-drawer-icon fa-solid fa-circle-chevron-down down"></div>
                 </div>
                 <div class="inline-drawer-content">
-                    <small class="opacity50p">Which model WA uses for its own generation calls — currently just the ✨ keyword suggester in Lorebook Studio. Nothing here affects your chat. Leave empty to use your current chat model. Either way it is one call per entry, more for long ones — negligible for a single ✨, worth thinking about before a book-wide suggest-all.</small>
+                    <small class="opacity50p">Used by the keyword suggester, one call per entry.</small>
 
                     <label for="wa_llm_profile">Generate with</label>
                     <div class="flex-container alignItemsCenter flexnowrap">
@@ -1804,7 +1804,7 @@ const SETTINGS_HTML = `
                         <div id="wa_refresh_profiles" class="menu_button fa-solid fa-rotate" title="Reload the Connection Manager profile list"></div>
                     </div>
 
-                    <label for="wa_llm_temp">Temperature (blank = backend default; needs a profile)</label>
+                    <label for="wa_llm_temp">Temperature</label>
                     <input id="wa_llm_temp" type="number" class="text_pole" min="0" max="2" step="0.05" placeholder="backend default">
                 </div>
             </div>
@@ -1815,15 +1815,15 @@ const SETTINGS_HTML = `
                     <div class="inline-drawer-icon fa-solid fa-circle-chevron-down down"></div>
                 </div>
                 <div class="inline-drawer-content">
-                    <small class="opacity50p">Embedding similarity between the match text and your entries. Inactive when Retrieval = BM25 only.</small>
-                    <div id="wa_embed_info" class="opacity50p" style="margin:0.4em 0;font-size:0.85em;" title="The embedding model and endpoint are configured in the Vector Storage extension settings — change them there."></div>
+                    <small class="opacity50p">Embedding similarity between the chat and each entry.</small>
+                    <div id="wa_embed_info" class="opacity50p" style="margin:0.4em 0;font-size:0.85em;" title="Set the embedding model in the Vector Storage extension."></div>
 
-                    <label>Mean-centered search (automatic when the server plugin is installed)</label>
+                    <label>Mean-centered search</label>
                     <div id="wa_plugin_setup" style="margin:0.4em 0;font-size:0.85em;opacity:0.75;"></div>
 
                     <div id="wa_find_orphans" class="menu_button" style="width:auto;padding:0.3em 0.8em;">Find unused vector collections…</div>
                     <div id="wa_orphans_out" class="opacity50p" style="margin:0.4em 0;font-size:0.85em;"></div>
-                    <small class="opacity50p">Nothing removes a vector collection: chunk pruning only runs for a book being synced, so a renamed, deleted or detached book leaves its whole collection on disk, as does switching embedding source or model. This reports what nothing claims — it deletes nothing, because these cost embedding time and a book you have not opened is not garbage.</small>
+                    <small class="opacity50p">Lists vector collections no current book claims. Nothing is deleted.</small>
 
                 </div>
             </div>
@@ -1834,40 +1834,40 @@ const SETTINGS_HTML = `
                     <div class="inline-drawer-icon fa-solid fa-circle-chevron-down down"></div>
                 </div>
                 <div class="inline-drawer-content">
-                    <label for="wa_relevance_cutoff">Relevance cutoff — memory entries must clear this (0 = no cut)</label>
+                    <label for="wa_relevance_cutoff">Relevance cutoff for memory entries (0 = none)</label>
                     <input id="wa_relevance_cutoff" type="number" class="text_pole" min="0" max="1" step="0.01">
 
-                    <label for="wa_max_entries">Vector entry cap — retrieved entries in the prompt</label>
+                    <label for="wa_max_entries">Vector entry cap</label>
                     <input id="wa_max_entries" type="number" class="text_pole" min="1" max="100" step="1">
 
-                    <label for="wa_max_dynamic">Dynamic entry cap — keyword + vector (0 = no limit)</label>
+                    <label for="wa_max_dynamic">Dynamic entry cap, keyword and vector (0 = none)</label>
                     <input id="wa_max_dynamic" type="number" class="text_pole" min="0" max="500" step="1">
 
-                    <label for="wa_max_total">Total entry cap — includes constants (0 = no limit)</label>
+                    <label for="wa_max_total">Total entry cap, constants included (0 = none)</label>
                     <input id="wa_max_total" type="number" class="text_pole" min="0" max="500" step="1">
 
                     <label for="wa_max_tokens_pct">Token budget, % of context (0 = off)</label>
                     <input id="wa_max_tokens_pct" type="number" class="text_pole" min="0" max="100" step="1">
 
-                    <label for="wa_max_tokens">Token budget, absolute (0 = off; tighter of the two wins)</label>
+                    <label for="wa_max_tokens">Token budget, tokens (0 = off; the tighter of the two applies)</label>
                     <input id="wa_max_tokens" type="number" class="text_pole" min="0" max="100000" step="64">
 
-                    <label for="wa_budget_slack">Budget slack, % over (0 = exact)</label>
+                    <label for="wa_budget_slack">Budget slack, % over (0 = none)</label>
                     <input id="wa_budget_slack" type="number" class="text_pole" min="0" max="50" step="1">
 
                     <label for="wa_slack_mode">Slack applies</label>
                     <select id="wa_slack_mode" class="text_pole">
-                        <option value="once">Once — rescues one entry, then the budget is exact</option>
-                        <option value="all">All — every entry may use the slack</option>
+                        <option value="once">Once: one entry may exceed the budget</option>
+                        <option value="all">All: every entry may exceed it</option>
                     </select>
 
                     <label class="checkbox_label" for="wa_drop_unavailable">
                         <input id="wa_drop_unavailable" type="checkbox"><span>Hide entries from later in the chat</span>
                     </label>
-                    <small class="opacity50p">On a branch back to an earlier point, the book still holds every scene summary written after it. This hides them, so WA cannot surface descriptions of events that have not happened yet. Does nothing at the latest turn — turn it off if you are using an old branch to write a story you have already told.</small>
+                    <small class="opacity50p">On a branch from an earlier point, scene summaries written after that point are hidden. No effect at the latest turn.</small>
 
                     <label class="checkbox_label" for="wa_tokens_include_exempt">
-                        <input id="wa_tokens_include_exempt" type="checkbox"><span>Token budget caps "ignore budget" entries (i.e., tokens never exceeds cap)</span>
+                        <input id="wa_tokens_include_exempt" type="checkbox"><span>Count "ignore budget" entries against the token budget</span>
                     </label>
 
                     <small id="wa_exempt_count" class="opacity50p"></small>
@@ -1880,25 +1880,19 @@ const SETTINGS_HTML = `
                     <div class="inline-drawer-icon fa-solid fa-circle-chevron-down down"></div>
                 </div>
                 <div class="inline-drawer-content">
-                    <small class="opacity50p">Set once and forget.</small>
+                    <small class="opacity50p"></small>
 
 
                     <label class="checkbox_label" for="wa_debug_log">
-                        <input id="wa_debug_log" type="checkbox"><span>Log selection table on every generation</span>
+                        <input id="wa_debug_log" type="checkbox"><span>Log the selection table on every generation</span>
                     </label>
 
-                    <label for="wa_rater_id">Rater id (who your grades are signed as)</label>
-                    <input id="wa_rater_id" type="text" class="text_pole" placeholder="generated on your first grade">
-                    <small class="opacity50p">A random id, minted once and kept, written onto every grade you
-                    type — so that when graded scenes are pooled from several people, two verdicts on the same
-                    entry stay two verdicts. Random rather than your name or machine, because a composed
-                    identity collides (almost nobody changes <code>default-user</code>) and a hostname is
-                    usually a person's name, which would then travel in everything you share.</small>
+                    <label for="wa_rater_id">Rater id</label>
+                    <input id="wa_rater_id" type="text" class="text_pole" readonly placeholder="generated on your first grade">
+                    <small class="opacity50p">A random anonymous ID your grades are signed with.</small>
 
 
-                    <small class="opacity50p">Reviewing graded bundles needs no chat, but running a slash
-                    command does — ST opens a placeholder assistant chat to dispatch one. This launches the
-                    same reviewer without touching the chat input.</small>
+                    <small class="opacity50p">Opens the bundle reviewer without a chat.</small>
                     <div id="wa_review_bundles" class="menu_button" style="width:auto;padding:0.3em 0.8em;">Review graded bundles…</div>
                 </div>
             </div>
@@ -1914,7 +1908,7 @@ function populateProfiles(notify = false) {
     $('#wa_llm_profile')
         .empty()
         // Not a neutral fallback: without a profile generateText uses generateRaw, which takes no generation parameters.
-        .append([`<option value="">Current chat API — ignores the settings below</option>`]
+        .append([`<option value="">Current chat API</option>`]
             .concat(profiles.map(x => `<option value="${escapeHtml(x.id)}">${escapeHtml(x.name)}</option>`))
             .join(''));
 
@@ -2091,7 +2085,7 @@ export async function init() {
         try { const line = await reportOrphanCollections(); if (out) out.textContent = line; }
         catch (error) { if (out) out.textContent = `Failed: ${error.message}`; }
     });
-    bind('#wa_rater_id', 'raterId', 'string');
+    $('#wa_rater_id').val(settings().raterId);
     bind('#wa_message_depth', 'messageDepth', 'number');
     bind('#wa_match_window', 'matchWindow', 'string');
     bind('#wa_language', 'language', 'string');

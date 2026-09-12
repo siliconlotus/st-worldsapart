@@ -363,7 +363,7 @@ export async function gradeScene(named) {
 
     const wrap = document.createElement('div');
     wrap.innerHTML = '<h3 style="margin:0 0 0.25em;">Grade this scene</h3>'
-        + `<small style="display:block;opacity:0.7;margin-bottom:0.5em;">${gradeAnchorLine()} ${gradeable.length} retrieved entries${scaffold ? `; ${scaffold} constant/persisting-sticky row(s) listed but not graded — WA did not choose them this turn` : ''}. Blank means UNGRADED, not 0.</small>`
+        + `<small style="display:block;opacity:0.7;margin-bottom:0.5em;">${gradeAnchorLine()} ${gradeable.length} retrieved entries${scaffold ? `; ${scaffold} constant or sticky row(s) listed, not graded` : ''}. Blank means ungraded, not 0.</small>`
         + '<details style="margin-bottom:0.75em;"><summary style="cursor:pointer;">Query text — what retrieval actually matched on '
         + `(${runState.lastQuery.length} chars, depth ${settings().messageDepth})</summary>`
         + `<pre style="white-space:pre-wrap;max-height:14em;overflow:auto;font-size:0.85em;opacity:0.85;border:1px solid var(--SmartThemeBorderColor);padding:0.5em;margin-top:0.5em;">${esc(runState.lastQuery)}</pre></details>`
@@ -379,7 +379,7 @@ export async function gradeScene(named) {
             return `<tr style="border-top:1px solid var(--SmartThemeBorderColor);${scaff ? 'opacity:0.6;' : ''}">`
                 + `<td>${cell}</td>`
                 // wiGlyph, never a local mapping.
-                + `<td>${row.cut ? `<i class="fa-solid fa-scissors" style="opacity:0.55;margin-right:0.35em;" title="cut by the budget${row.cutBy ? ` — ${esc(row.cutBy)} cap` : ''}${row.tokens ? `; ${row.tokens} tokens` : ''}"></i>` : ''}${entries[i] ? wiGlyph(entries[i]) + ' ' : ''}${esc(row.title)}<br><small style="opacity:0.5;">${esc(row.book)} · uid ${num(row.uid)}</small>${keyHitsHtml(row.why)}<br><i class="fa-solid fa-chevron-right wa-chevron wa-fold" data-i="${i}" title="Show keys and entry text" style="margin-top:0.35em;"></i></td>`
+                + `<td>${row.cut ? `<i class="fa-solid fa-scissors" style="opacity:0.55;margin-right:0.35em;" title="cut by the budget${row.cutBy ? `: ${esc(row.cutBy)} cap` : ''}${row.tokens ? `, ${row.tokens} tokens` : ''}"></i>` : ''}${entries[i] ? wiGlyph(entries[i]) + ' ' : ''}${esc(row.title)}<br><small style="opacity:0.5;">${esc(row.book)} · uid ${num(row.uid)}</small>${keyHitsHtml(row.why)}<br><i class="fa-solid fa-chevron-right wa-chevron wa-fold" data-i="${i}" title="Show keys and entry text" style="margin-top:0.35em;"></i></td>`
                 + `<td>${num(row.score)}</td><td>${num(row.cosine)}</td><td>${num(row.text)}</td><td>${num(row.keys)}</td>`
                 + `</tr>`
                 + `<tr class="wa-foldrow" data-i="${i}" style="display:none;"><td colspan="6" style="padding:0.5em 0.75em 0.9em;">${entryFoldHtml(entries[i], i)}</td></tr>`;
@@ -541,11 +541,11 @@ async function superGradePopup({ captures, union, entryOf, subtitle = '', okButt
                 + `<i class="fa-solid fa-up-right-and-down-left-from-center wa-scene-pop" data-i="${si}" title="Open the whole scene text" style="opacity:0.55;margin-left:0.35em;cursor:pointer;"></i></summary>`
                 + `<pre style="white-space:pre-wrap;max-height:32em;overflow:auto;font-size:0.85em;opacity:0.85;border:1px solid var(--SmartThemeBorderColor);padding:0.5em;margin-top:0.5em;">${esc(text)}</pre></details>`;
         }).join('')
-            + (byQ.size > 1 ? `<small style="display:block;opacity:0.6;margin-bottom:0.5em;">${byQ.size} arms retrieved against different text — judge relevance to the SCENE, not to any one query.</small>` : '');
+            + (byQ.size > 1 ? `<small style="display:block;opacity:0.6;margin-bottom:0.5em;">${byQ.size} arms retrieved against different text. Grade relevance to the scene, not to any one query.</small>` : '');
     };
     const queryBlocks = multi ? '' : queryBlocksFor(secs[0]);
 
-    head.innerHTML = `<h3 style="margin:0 0 0.25em;">${multi ? `Grade ${secs.length} scenes` : 'Grade this scene — pooled across arms'}</h3>`
+    head.innerHTML = `<h3 style="margin:0 0 0.25em;">${multi ? `Grade ${secs.length} scenes` : 'Grade this scene'}</h3>`
         + `${subtitle ? `<small style="display:block;opacity:0.7;margin-bottom:0.25em;">${esc(subtitle)}</small>` : ''}`
         + `<small style="display:block;opacity:0.7;margin-bottom:0.5em;">${gradeAnchorLine()} ${multi
             ? `${flat.length} rows across ${secs.length} scenes; each section shows its own query text.`
@@ -553,10 +553,10 @@ async function superGradePopup({ captures, union, entryOf, subtitle = '', okButt
         + queryBlocks
         + (multi ? '' : '<div style="margin:0.6em 0;display:flex;align-items:center;gap:0.6em;flex-wrap:wrap;">'
         + '<div class="menu_button wa-sg-pick" style="width:auto;padding:0.3em 0.8em;">Load earlier samples / pool requests…</div>'
-        + '<small class="wa-sg-loaded" style="opacity:0.7;">nothing loaded — grading everything from scratch</small>'
+        + '<small class="wa-sg-loaded" style="opacity:0.7;">nothing loaded</small>'
         + '<input type="file" class="wa-sg-prior" accept=".json,application/json" multiple style="display:none;">'
         + '</div>'
-        + '<small style="display:block;opacity:0.6;margin-bottom:0.5em;">Earlier rounds\' samples: their grades are subtracted so you only judge what is new. Pool requests from eval/pool-extend.mjs: their entries are added.</small>');
+        + '<small style="display:block;opacity:0.6;margin-bottom:0.5em;">Grades in loaded samples are skipped; pool requests add entries.</small>');
 
     // Repaint, not patch: priors change which rows are gradeable. Only dirty inputs carry across, or pristine "0"s would shadow the priors.
     const paint = () => {
@@ -593,11 +593,11 @@ async function superGradePopup({ captures, union, entryOf, subtitle = '', okButt
                     : `<input type="number" class="wa-grade text_pole" data-key="${esc(key)}" data-i="${i}" min="0" max="4" step="1" ${typed.has(key) ? 'data-dirty="1" ' : ''}value="${esc(typed.get(key) ?? (done ? priorOf.get(pkey) : ''))}" placeholder="—" title="${esc(GRADE_ANCHORS.map((a, g) => `${g}: ${a}`).join('\n'))}" style="width:4em;padding:2px 4px;">`;
                 return `<tr style="border-top:1px solid var(--SmartThemeBorderColor);${done ? 'opacity:0.55;' : ''}">`
                     + `<td>${cell}</td>`
-                    + `<td>${row.cut ? `<i class="fa-solid fa-scissors" style="opacity:0.55;margin-right:0.35em;" title="cut by the budget${row.cutBy ? ` — ${esc(row.cutBy)} cap` : ''}${row.tokens ? `; ${row.tokens} tokens` : ''}"></i>` : ''}${flat[i].entry ? wiGlyph(flat[i].entry) + ' ' : ''}${esc(row.title)}<br><small style="opacity:0.5;">${esc(row.book)} · uid ${num(row.uid)}</small>${keyHitsHtml(row.why)}<br><i class="fa-solid fa-chevron-right wa-chevron wa-fold" data-i="${i}" title="Show keys and entry text" style="margin-top:0.35em;"></i></td>`
+                    + `<td>${row.cut ? `<i class="fa-solid fa-scissors" style="opacity:0.55;margin-right:0.35em;" title="cut by the budget${row.cutBy ? `: ${esc(row.cutBy)} cap` : ''}${row.tokens ? `, ${row.tokens} tokens` : ''}"></i>` : ''}${flat[i].entry ? wiGlyph(flat[i].entry) + ' ' : ''}${esc(row.title)}<br><small style="opacity:0.5;">${esc(row.book)} · uid ${num(row.uid)}</small>${keyHitsHtml(row.why)}<br><i class="fa-solid fa-chevron-right wa-chevron wa-fold" data-i="${i}" title="Show keys and entry text" style="margin-top:0.35em;"></i></td>`
                     // The arm that supplied the numbers is underlined; the signal columns are its measurements alone.
                     + `<td><small style="opacity:0.7;">${row.arms.map(a => (a === row.from ? `<u>${esc(a)}</u>` : esc(a))).join(', ')}</small></td>`
                     // A borrowed signal is marked with its arm: absent-filled, never blended (unionArms).
-                    + `<td>${num(row.bestRank)}</td>${['cosine', 'text', 'keys'].map(s => `<td>${num(row.scores?.[s])}${row.filled?.[s] ? `<br><small style="opacity:0.5;font-size:0.75em;" title="filled from the ${esc(row.filled[s])} arm — this arm could not measure it">${esc(row.filled[s])}</small>` : ''}</td>`).join('')}`
+                    + `<td>${num(row.bestRank)}</td>${['cosine', 'text', 'keys'].map(s => `<td>${num(row.scores?.[s])}${row.filled?.[s] ? `<br><small style="opacity:0.5;font-size:0.75em;" title="filled from the ${esc(row.filled[s])} arm">${esc(row.filled[s])}</small>` : ''}</td>`).join('')}`
                     + `</tr>`
                     + `<tr class="wa-foldrow" data-i="${i}" style="display:none;"><td colspan="7" style="padding:0.5em 0.75em 0.9em;">${entryFoldHtml(flat[i].entry, i)}</td></tr>`;
             }).join('')).join('')
