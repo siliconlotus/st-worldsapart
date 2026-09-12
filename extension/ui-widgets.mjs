@@ -416,8 +416,8 @@ textarea.wa-entry-full.wa-tall { max-height: 62vh; }
     color: var(--SmartThemeBodyColor); }
 .wa-title-edit { font-size: 0.82em; opacity: 0.4; }
 .wa-mode { margin: 0; padding: 1px 2px; font-size: 0.95em; background: transparent;
-    border: 1px solid var(--SmartThemeBorderColor, rgba(255,255,255,0.15)); border-radius: 4px; cursor: pointer; outline: none; }
-.wa-mode:focus-visible { outline: 1px solid var(--interactable-outline-color, currentColor); }
+    border: 1px solid transparent; border-radius: 4px; cursor: pointer; outline: none; }
+.wa-mode:hover, .wa-mode:focus-visible { border-color: var(--SmartThemeBorderColor, rgba(255,255,255,0.15)); }
 .wa-kw-para { display: flex; flex-wrap: wrap; align-items: flex-start; margin: 6px 0 2px 22px; }
 /* Chip outline/fill derive from currentColor (the theme's text colour) so they stay visible on any
    background — a fixed --SmartThemeBorderColor vanished on near-black themes. */
