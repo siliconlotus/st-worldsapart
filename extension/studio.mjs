@@ -882,15 +882,18 @@ export async function lorebookStudio(preferredBook = null, open = null) {
             }
             open ? entryOpen.delete(e.uid) : entryOpen.add(e.uid); renderEntry(e);
         });
-        const mode = document.createElement('select'); mode.className = 'wa-mode';
+        // A glyph at rest; the menu carries the words, as the Studio's other menus do.
         const modeOpts = [['keyword', '🟢', 'Keyword'], ['constant', '🔵', 'Constant'], ['vector', '🔗', 'Vector']];
-        for (const [val, glyph, word] of modeOpts) {
-            const o = document.createElement('option'); o.value = val; o.textContent = glyph; o.title = word; mode.append(o);   // emoji only; word rides the tooltip
-        }
-        mode.value = e.constant ? 'constant' : (e.vectorized ? 'vector' : 'keyword');
-        mode.title = 'Match mode: ' + (modeOpts.find(m => m[0] === mode.value)?.[2] ?? '');
-        mode.addEventListener('click', ev => ev.stopPropagation());
-        mode.addEventListener('change', () => { e.constant = mode.value === 'constant'; e.vectorized = mode.value === 'vector'; save(); renderEntry(e); });
+        const modeVal = e.constant ? 'constant' : (e.vectorized ? 'vector' : 'keyword');
+        const mode = document.createElement('span'); mode.className = 'wa-mode'; mode.setAttribute('role', 'button'); mode.tabIndex = 0;
+        mode.textContent = modeOpts.find(m => m[0] === modeVal)?.[1] ?? '';
+        mode.title = 'Match mode: ' + (modeOpts.find(m => m[0] === modeVal)?.[2] ?? '');
+        const openModeMenu = () => {
+            const r = mode.getBoundingClientRect();
+            showCtxMenu(modeOpts.map(([val, glyph, word]) => ({ label: `${glyph} ${word}`, active: val === modeVal, fn: () => { e.constant = val === 'constant'; e.vectorized = val === 'vector'; save(); renderEntry(e); } })), r.left, r.bottom + 2, ctxMount());
+        };
+        mode.addEventListener('click', ev => { ev.stopPropagation(); openModeMenu(); });
+        mode.addEventListener('keydown', ev => { if (ev.key === 'Enter' || ev.key === ' ') { ev.preventDefault(); openModeMenu(); } });
         const title = document.createElement('span');
         title.className = 'wa-entry-title' + (e.disable ? ' wa-off' : '');
         title.textContent = wiTitleOf(e);

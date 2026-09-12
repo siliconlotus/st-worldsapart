@@ -415,7 +415,7 @@ textarea.wa-entry-full.wa-tall { max-height: 62vh; }
     border-radius: 8px; background: color-mix(in srgb, var(--SmartThemeQuoteColor) 30%, var(--SmartThemeBlurTintColor));
     color: var(--SmartThemeBodyColor); }
 .wa-title-edit { font-size: 0.82em; opacity: 0.4; }
-.wa-mode { margin: 0; padding: 1px 2px; font-size: 0.95em; background: transparent;
+.wa-mode { display: inline-block; user-select: none; margin: 0; padding: 1px 2px; font-size: 0.95em; background: transparent;
     border: 1px solid transparent; border-radius: 4px; cursor: pointer; outline: none; }
 .wa-mode:hover, .wa-mode:focus-visible { border-color: var(--SmartThemeBorderColor, rgba(255,255,255,0.15)); }
 .wa-kw-para { display: flex; flex-wrap: wrap; align-items: flex-start; margin: 6px 0 2px 22px; }
