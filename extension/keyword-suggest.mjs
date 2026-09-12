@@ -139,7 +139,7 @@ export function buildKeySuggest(data, opts) {
         if (DET.has(t)) fDet.set(p, (fDet.get(p) ?? 0) + 1);
     }
     const isVerbHead = t => { const tot = bAll.get(t) ?? 0; return tot >= 5 && (bSubj.get(t) ?? 0) / tot > 0.4 && (bDet.get(t) ?? 0) / tot < 0.1; };
-    // Verb tests: SUBTLEX dominant-POS (POS_VA for heads, POS_VA_STRICT anywhere), -ily/-ingly/-edly adverbs off the table, the book's own syntax (takesObj); names outrank all of them.
+    // Verb tests: the table's dominant-POS sets (POS_VA for heads, POS_VA_STRICT anywhere), -ily/-ingly/-edly adverbs off the table, the book's own syntax (takesObj); names outrank all of them.
     const inSetOrStem = (set, w) => set.has(tblKey(w)) || stems(w).some(s => set.has(tblKey(s)));
     const notName = w => !isName(w);
     const posBad = (set, w) => inSetOrStem(set, w) && notName(w);

@@ -132,7 +132,7 @@ const zipfBook = { entries: { ...suggestBook.entries,
     11: { uid: 11, key: [], content: 'The ritual unfolds at midnight. The ritual unfolds in silence.', comment: 'L' },
     12: { uid: 12, key: [], content: 'Everyone watched Jeffrey acquiesce. Later they watched Jeffrey acquiesce again.', comment: 'M' },
     13: { uid: 13, key: [], content: 'Everyone saw Jeffrey self-deprecatingly wave. Then Kyle sulkily agreed, and Kyle sulkily left.', comment: 'N' },
-    // "exchanges" tags Noun 1.00 in SUBTLEX; only the book's own syntax (followed by a determiner) can catch it.
+    // "exchanges" is a noun in the POS sets; only the book's own syntax (followed by a determiner) can catch it.
     14: { uid: 14, key: [], content: 'Kyle exchanges a look with Brad. Kyle exchanges a nod with Shane.', comment: 'O' },
     15: { uid: 15, key: [], content: 'A voracious reader lived upstairs. The voracious reader never returned the books.', comment: 'P' },
     16: { uid: 16, key: [], content: 'They gathered for Dia de los Muertos at the plaza. Nobody spoke of it afterward.', comment: 'Q' },
@@ -162,7 +162,7 @@ const zipfBook = { entries: { ...suggestBook.entries,
     assert.ok(terms(12).includes('jeffrey'), 'the proper anchor itself survives the POS kill');
     assert.ok(!terms(13).some(t => t.includes('deprecatingly') || t.includes('sulkily')), 'out-of-table -ily/-ingly adverb heads are killed');
     assert.ok(terms(13).includes('kyle') || terms(13).includes('jeffrey'), 'the names beside the adverbs survive');
-    assert.ok(!terms(14).some(t => t.includes('exchanges')), 'a Noun-1.00-by-SUBTLEX verb dies on the followed-by-determiner test');
+    assert.ok(!terms(14).some(t => t.includes('exchanges')), 'a noun-by-the-table verb dies on the followed-by-determiner test');
     assert.ok(terms(14).includes('kyle'), 'the subject name survives the syntax kill');
     assert.ok(!terms(15).includes('voracious'), 'a bare adjective unigram is dropped');
     assert.ok(terms(15).includes('voracious reader'), 'the same adjective is free to lead its noun phrase');
