@@ -104,7 +104,7 @@ export async function lorebookStudio(preferredBook = null, open = null) {
     let globalTrayEl = null;         // the mounted global-tray element, swapped in place on toggle
     const selectedEntries = new Set();   // uids ticked for bulk actions
     let selAnchorUid = null;         // last-ticked entry, for shift-click range selection
-    let entryFilter = 'all';         // explorer entry filter: type, state, or worst-flag severity — see FILTER_OPTS
+    let entryFilter = new Set();     // explorer entry filter facets (FILTER_OPTS); empty = all. OR within a group, AND across groups
     let entrySort = 'insert';        // 'insert' mirrors the prompt insertion order; persisted per book
     let tieredMode = true;
     let tierCfg = reconcileTiers(settings().tierCfg);   // tier precedence, shared with the prompt builder
@@ -1313,8 +1313,8 @@ export async function lorebookStudio(preferredBook = null, open = null) {
         if (searchScope.keywords) fields.push((Array.isArray(e.key) ? e.key : []).join(' '));
         return !fields.length || fields.some(f => f.toLowerCase().includes(q));
     };
-    const typeMatch = e => {
-        switch (entryFilter) {
+    const facetMatch = (e, f) => {
+        switch (f) {
             case 'keyword': return !e.constant && !e.vectorized;
             case 'constant': return !!e.constant;
             case 'vector': return !!e.vectorized;
@@ -1325,11 +1325,14 @@ export async function lorebookStudio(preferredBook = null, open = null) {
             // secondary counts severe here as it does on the badge: the entry gates on fewer keys than written.
             case SEVERE: case MODERATE: case MINOR:
                 if (!scan) return false;
-                if (entryFilter === SEVERE && scan.unusableKeysOf(e).length) return true;
-                return scan.classifyEntry(e).some(p => scan.severityOf(p) === entryFilter);
+                if (f === SEVERE && scan.unusableKeysOf(e).length) return true;
+                return scan.classifyEntry(e).some(p => scan.severityOf(p) === f);
             default: return true;
         }
     };
+    const FILTER_GROUPS = [['keyword', 'constant', 'vector'], ['enabled', 'disabled'], ['flagged', SEVERE, MODERATE, MINOR]];
+    // Any facet of a group admits (OR); every group with a facet picked must admit (AND).
+    const typeMatch = e => FILTER_GROUPS.every(g => { const sel = g.filter(f => entryFilter.has(f)); return !sel.length || sel.some(f => facetMatch(e, f)); });
     const filterMatch = e => matchSearch(e) && typeMatch(e);
     // Explorer display order: base sort, then tiered buckets by tierRank with base order kept within each.
     const sortEntries = list => {
@@ -1684,29 +1687,21 @@ export async function lorebookStudio(preferredBook = null, open = null) {
         return i;
     };
     const buildFilterBtn = onChange => {
-        const wrap = document.createElement('span'); wrap.style.cssText = 'position:relative;display:inline-flex;';
         const btn = document.createElement('button'); btn.type = 'button'; btn.className = 'menu_button wa-filter';
-        btn.title = 'Filter entries by type, state or flag severity'; btn.style.cssText = 'display:inline-flex;align-items:center;gap:5px;width:auto;white-space:nowrap;';
-        const cur = FILTER_OPTS.find(o => o[0] === entryFilter) ?? FILTER_OPTS[0];
-        const lbl = document.createElement('span'); lbl.textContent = cur[2];
-        btn.append(iconEl('fa-filter', cur[3] ?? ''), lbl);
-        const menu = document.createElement('div');
-        menu.style.cssText = 'position:absolute;top:100%;left:0;z-index:5;display:none;flex-direction:column;gap:1px;margin-top:2px;padding:4px;border-radius:5px;min-width:9em;'
-            + 'background:var(--SmartThemeBlurTintColor, var(--black70a, rgba(20,20,20,0.97)));border:1px solid var(--SmartThemeBorderColor, rgba(255,255,255,0.15));';
-        for (const [val, spec, text, color] of FILTER_OPTS) {
-            const item = document.createElement('button'); item.type = 'button';
-            item.style.cssText = 'display:flex;align-items:center;gap:7px;width:100%;padding:4px 8px;border:none;border-radius:4px;background:' + (val === entryFilter ? 'var(--white20a, rgba(255,255,255,0.1))' : 'transparent') + ';color:inherit;font:inherit;text-align:left;white-space:nowrap;cursor:pointer;';
-            if (val === entryFilter) item.style.fontWeight = 'bold';
-            const t = document.createElement('span'); t.textContent = text; item.append(iconEl(spec, color ?? ''), t);
-            item.addEventListener('mouseenter', () => { if (val !== entryFilter) item.style.background = 'var(--white20a, rgba(255,255,255,0.1))'; });
-            item.addEventListener('mouseleave', () => { if (val !== entryFilter) item.style.background = 'transparent'; });
-            item.addEventListener('click', () => { entryFilter = val; onChange(); });
-            menu.append(item);
-        }
-        btn.addEventListener('click', () => { menu.style.display = menu.style.display === 'none' ? 'flex' : 'none'; });
-        wrap.addEventListener('focusout', ev => { if (!wrap.contains(ev.relatedTarget)) menu.style.display = 'none'; });
-        wrap.append(btn, menu);
-        return wrap;
+        btn.title = 'Filter entries by type, state or flag severity; several can be combined'; btn.style.cssText = 'display:inline-flex;align-items:center;gap:5px;width:auto;white-space:nowrap;';
+        const picked = FILTER_OPTS.filter(o => entryFilter.has(o[0]));
+        const lbl = document.createElement('span');
+        lbl.textContent = picked.length ? (picked.length <= 2 ? picked.map(o => o[2]).join(', ') : `${picked[0][2]} +${picked.length - 1}`) : 'All';
+        btn.append(iconEl('fa-filter', picked[0]?.[3] ?? ''), lbl);
+        const items = () => [
+            { label: 'All', icon: entryFilter.size ? 'fa-regular fa-square' : 'fa-solid fa-square-check', fn: () => { entryFilter.clear(); onChange(); } },
+            ...FILTER_OPTS.filter(o => o[0] !== 'all').map(([val, , text]) => ({
+                label: text, icon: entryFilter.has(val) ? 'fa-solid fa-square-check' : 'fa-regular fa-square', keep: true,
+                fn: () => { entryFilter.has(val) ? entryFilter.delete(val) : entryFilter.add(val); onChange(); },
+            })),
+        ];
+        btn.addEventListener('click', () => { const r = btn.getBoundingClientRect(); showCtxMenu(items(), r.left, r.bottom + 2, ctxMount(), items); });
+        return btn;
     };
 
     /**
@@ -3108,7 +3103,7 @@ export async function lorebookStudio(preferredBook = null, open = null) {
             rowEls.clear();
             const shown = sortEntries(total.filter(filterMatch));
             visibleUids = shown.map(e => e.uid);   // keep the "visual order" source of truth in sync
-            countSpan.textContent = (entryFilter !== 'all' || searchQuery.trim())
+            countSpan.textContent = (entryFilter.size || searchQuery.trim())
                 ? `(${shown.length} of ${total.length})`
                 : `(${total.length} ${total.length === 1 ? 'entry' : 'entries'})`;
             list.innerHTML = '';
