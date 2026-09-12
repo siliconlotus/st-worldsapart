@@ -3085,7 +3085,7 @@ export async function lorebookStudio(preferredBook = null, open = null) {
         // The actions stand in a rail beside the list: the rows leave that width empty, and a row above the list does not.
         const rail = document.createElement('div'); rail.className = 'wa-rail';
         const cog = trayBtn(); cog.style.width = ''; cog.style.padding = '';   // the rail's square sizing, not the header button's; the open-state colour stays
-        rail.append(cog, newBtn, expandBtn, scanBtn, suggestAllBtn, suggestAllLlmBtn);
+        rail.append(scanBtn, newBtn, suggestAllBtn, suggestAllLlmBtn, expandBtn, cog);
         head.append(row1);
         const fixed = document.createElement('div'); fixed.className = 'wa-studio-fixed';
         globalTrayEl = renderGlobalTray();
