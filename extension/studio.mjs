@@ -2172,7 +2172,7 @@ export async function lorebookStudio(preferredBook = null, open = null) {
         const auditBtn = railBtn('fa-stethoscope', `${scan ? 'Re-audit' : 'Run audit'}: flag dead, common and short keywords.` + (chatHits ? `\nChat evidence: ${chatLabel()}, ${chatMsgs} messages.` : '\nNo chat searched yet.'),
             async () => { await withBusy(auditBtn, '0.5', runAudit, '<i class="fa-solid fa-spinner fa-spin"></i>'); renderExplorer(); });
         const deleteBtn = railBtn('fa-trash-can', 'Delete the selected keywords', () => pruneChecked()); deleteBtn.classList.add('wa-bulk-danger');
-        const ignoreBtn = railBtn('fa-bell-slash', 'Ignore the selected terms: never flag them in this book', () => ignoreChecked());
+        const ignoreBtn = railBtn('fa-ban', 'Ignore the selected terms: never flag them in this book', () => ignoreChecked());
         const showAllBtn = railBtn(cleanupShowAll ? 'fa-eye-slash' : 'fa-eye', cleanupShowAll ? 'Back to flagged keys only' : 'Show every key on every visible entry, flagged or not',
             () => { cleanupShowAll = !cleanupShowAll; showAllBtn.innerHTML = `<i class="fa-solid ${cleanupShowAll ? 'fa-eye-slash' : 'fa-eye'}"></i>`; showAllBtn.title = cleanupShowAll ? 'Back to flagged keys only' : 'Show every key on every visible entry, flagged or not'; repaint(); });
         const chatsBtn = railBtn('fa-comments', 'Choose chats: pick which chats to count key hits over. Bound chats are scanned when the audit runs; shift-click lists every chat on this install.',
