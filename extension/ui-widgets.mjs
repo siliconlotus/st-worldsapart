@@ -335,7 +335,11 @@ dialog.popup:has(.wa-studio), .wa-studio-nav, .wa-studio-explorer, .wa-studio-en
    list down) while only the entries scroll beneath. */
 .wa-studio-explorer { flex: 1 1 auto; display: flex; flex-direction: column; overflow: hidden; padding-left: 12px; min-width: 0; }
 .wa-studio-fixed { flex: 0 0 auto; }
-.wa-studio-entries { flex: 1 1 auto; overflow-y: auto; }
+.wa-studio-entries { flex: 1 1 auto; overflow-y: auto; min-width: 0; }
+.wa-studio-body { flex: 1 1 auto; display: flex; min-height: 0; }
+.wa-rail { flex: 0 0 auto; display: flex; flex-direction: column; gap: 6px; padding: 2px 0 0 8px; }
+.wa-rail .menu_button { width: 2.2em; height: 2.2em; padding: 0; margin: 0; display: grid; place-items: center; position: relative; }
+.wa-rail-count { position: absolute; bottom: 1px; right: 2px; font-size: 0.55em; line-height: 1; opacity: 0.8; }
 .wa-studio-navhead, .wa-studio-exphead { position: sticky; top: 0; z-index: 1; padding: 2px 0 6px;
     background: var(--SmartThemeBlurTintColor, var(--black70a, rgba(20,20,20,0.95))); }
 .wa-book-row { display: flex; align-items: center; gap: 5px; padding: 4px 6px; border-radius: 5px;

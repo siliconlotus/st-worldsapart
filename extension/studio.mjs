@@ -1571,7 +1571,7 @@ export async function lorebookStudio(preferredBook = null, open = null) {
         const targets = Object.values(data?.entries ?? {}).filter(filterMatch).filter(e => String(e.content ?? '').trim());
         let n = 0, i = 0;
         for (const e of targets) {
-            btn.innerHTML = `<i class="fa-solid fa-wand-magic-sparkles"></i> ${++i}/${targets.length}…`;
+            btn.innerHTML = `<i class="fa-solid fa-wand-magic-sparkles"></i><small class="wa-rail-count">${++i}/${targets.length}</small>`;
             let cands; try { cands = await llmKeyCandidates(e.content, s.avoid, suggestOpts.llmChunk); }
             catch (err) { toastr.warning(`Local model: ${String(err?.message ?? err)}`, 'Worlds Apart'); break; }
             if (mergeLlmCands(e, cands, s)) { n++; entryOpen.add(e.uid); }
@@ -3043,15 +3043,12 @@ export async function lorebookStudio(preferredBook = null, open = null) {
         const sortBtn = buildSortControl(renderExplorer);
         const scanBtn = document.createElement('button');
         scanBtn.type = 'button'; scanBtn.className = 'menu_button';
-        scanBtn.innerHTML = `<i class="fa-solid fa-stethoscope"></i> ${scan ? 'Re-audit' : 'Keyword audit'}`;
-        scanBtn.title = chatHits
-            ? `Flag dead / common / short keywords — tune under Tool Settings.\nChat evidence: ${chatLabel()}, ${chatMsgs} messages.`
-            : 'Flag dead / common / short keywords and colour them by verdict — tune under Tool Settings.\nNo chat searched yet.';
-        scanBtn.addEventListener('click', async () => { await withBusy(scanBtn, '0.5', runAudit, '<i class="fa-solid fa-spinner fa-spin"></i> Auditing…'); renderExplorer(); });
+        scanBtn.innerHTML = '<i class="fa-solid fa-stethoscope"></i>';
+        scanBtn.title = `${scan ? 'Re-audit' : 'Keyword audit'}: flag dead, common and short keywords.` + (chatHits ? `\nChat evidence: ${chatLabel()}, ${chatMsgs} messages.` : '\nNo chat searched yet.');
+        scanBtn.addEventListener('click', async () => { await withBusy(scanBtn, '0.5', runAudit, '<i class="fa-solid fa-spinner fa-spin"></i>'); renderExplorer(); });
         const allOpen = entries.length > 0 && entries.every(x => entryOpen.has(x.uid));
         const expandBtn = document.createElement('button');
         expandBtn.type = 'button'; expandBtn.className = 'menu_button';
-        expandBtn.style.cssText = 'width:auto;padding:3px 7px;flex-shrink:0;';
         expandBtn.innerHTML = `<i class="fa-solid ${allOpen ? 'fa-square-caret-up' : 'fa-square-caret-down'}"></i>`;
         expandBtn.title = `${allOpen ? 'Collapse' : 'Expand'} all entries. Shift-click expands only entries with flagged keywords.`;
         expandBtn.addEventListener('click', async ev => {
@@ -3066,37 +3063,37 @@ export async function lorebookStudio(preferredBook = null, open = null) {
         });
         const suggestAllBtn = document.createElement('button');
         suggestAllBtn.type = 'button'; suggestAllBtn.className = 'menu_button';
-        suggestAllBtn.innerHTML = '<i class="fa-solid fa-bolt"></i> Suggest all';
-        suggestAllBtn.title = 'Suggest keywords for every entry from its own text';
+        suggestAllBtn.innerHTML = '<i class="fa-solid fa-bolt"></i>';
+        suggestAllBtn.title = 'Suggest all: keywords for every entry from its own text';
         suggestAllBtn.addEventListener('click', () => suggestAll(suggestAllBtn));
         const suggestAllLlmBtn = document.createElement('button');
         suggestAllLlmBtn.type = 'button'; suggestAllLlmBtn.className = 'menu_button';
-        suggestAllLlmBtn.innerHTML = '<i class="fa-solid fa-wand-magic-sparkles"></i> Suggest all (LLM)';
-        suggestAllLlmBtn.title = 'Suggest keywords for every visible entry with the LLM';
+        suggestAllLlmBtn.innerHTML = '<i class="fa-solid fa-wand-magic-sparkles"></i>';
+        suggestAllLlmBtn.title = 'Suggest all (LLM): keywords for every visible entry';
         suggestAllLlmBtn.addEventListener('click', () => suggestAllLlm(suggestAllLlmBtn));
         // Typing re-filters in place (applyFilter), not the header, so the input keeps focus.
         const searchWrap = buildSearchBox(() => applyFilter());
         const rowStyle = 'display:flex;align-items:center;gap:8px;flex-wrap:wrap;';
         const row1 = document.createElement('div'); row1.style.cssText = rowStyle;
-        const row2 = document.createElement('div'); row2.style.cssText = rowStyle;
         row1.append(label, filterWrap, sortBtn, searchWrap);
         const newBtn = document.createElement('button');
         newBtn.type = 'button'; newBtn.className = 'menu_button';
-        newBtn.style.cssText = 'width:auto;padding:3px 9px;flex-shrink:0;';
-        newBtn.innerHTML = '<i class="fa-solid fa-plus"></i> New entry';
-        newBtn.title = 'Add a blank entry to this lorebook';
+        newBtn.innerHTML = '<i class="fa-solid fa-plus"></i>';
+        newBtn.title = 'New entry';
         newBtn.addEventListener('click', () => newEntry());
-        // A flex spacer with basis 0, not margin-left:auto: it never affects where the row wraps.
-        const grow = document.createElement('span'); grow.style.cssText = 'flex:1 1 0;min-width:0;';
-        row2.append(expandBtn, scanBtn, suggestAllBtn, suggestAllLlmBtn, grow, newBtn);
-        head.append(row1, row2);
+        // The actions stand in a rail beside the list: the rows leave that width empty, and a row above the list does not.
+        const rail = document.createElement('div'); rail.className = 'wa-rail';
+        rail.append(newBtn, expandBtn, scanBtn, suggestAllBtn, suggestAllLlmBtn);
+        head.append(row1);
         const fixed = document.createElement('div'); fixed.className = 'wa-studio-fixed';
         globalTrayEl = renderGlobalTray();
         trayEl = renderTray();
         bulkEl = renderBulkBar();
         fixed.append(head, trayEl, globalTrayEl, bulkEl);
         const list = document.createElement('div'); list.className = 'wa-studio-entries';
-        pane.append(fixed, list);
+        const body = document.createElement('div'); body.className = 'wa-studio-body';
+        body.append(list, rail);
+        pane.append(fixed, body);
         // Repaints just the entry list and the count for the current filter + search.
         const applyFilter = () => {
             rowEls.clear();
