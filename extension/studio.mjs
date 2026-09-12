@@ -2247,7 +2247,7 @@ export async function lorebookStudio(preferredBook = null, open = null) {
             if (!pane.isConnected || tab !== 'cleanup') return;   // switched away while we were blocked
             // runAudit, not rebuildScan: an audit that gathered no chat evidence is a different audit from the Explorer's.
             await runAudit();
-            auditBtn.innerHTML = '<i class="fa-solid fa-stethoscope"></i> Re-audit';
+            auditBtn.title = auditBtn.title.replace(/^Run audit/, 'Re-audit');   // a rail square: the word rides the tooltip
         }
         repaint();
     };
