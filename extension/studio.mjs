@@ -135,6 +135,7 @@ export async function lorebookStudio(preferredBook = null, open = null) {
     let chatUnit = 'message';   // what chatHits counts: messages, paragraphs, or scan windows (countChatHits `unit`)
     let chatMsgs = 0;
     let chatName = '';          // WHICH chat produced those counts — see runChatScan
+    let ignoredOpen = false;    // the Cleanup tab's ignored-terms tray, opened from its count
     let chatNames = [];         // the same, unabbreviated: chatName collapses to "N chats" and only the tooltip can name them
     // Quoted only when it IS a name: quotes around "2 chats" read as scare quotes.
     const chatLabel = () => (chatNames.length === 1 ? `"${chatName}"` : chatName);
@@ -1793,10 +1794,14 @@ export async function lorebookStudio(preferredBook = null, open = null) {
         host.innerHTML = '';
         if (!ignoreSet.size) { host.style.display = 'none'; return; }
         host.style.display = 'flex';
+        // A count at rest; the chips are a tray it opens.
         const lbl = document.createElement('span');
-        lbl.style.cssText = 'opacity:0.7;font-size:0.85em;white-space:nowrap;';
-        lbl.textContent = `Ignored (${ignoreSet.size}):`;
+        lbl.style.cssText = 'opacity:0.7;font-size:0.85em;white-space:nowrap;cursor:pointer;';
+        lbl.textContent = `${ignoreSet.size} ignored ${ignoredOpen ? '▾' : '▸'}`;
+        lbl.title = ignoredOpen ? 'Hide the ignored terms' : 'Show the ignored terms';
+        lbl.addEventListener('click', () => { ignoredOpen = !ignoredOpen; paintIgnoredStrip(host, onChange); });
         host.append(lbl);
+        if (!ignoredOpen) return;
         for (const key of [...ignoreSet].sort()) {
             const chip = document.createElement('span'); chip.className = 'wa-kw wa-kw-ignored';
             const t = document.createElement('span'); t.className = 'wa-kw-text'; t.textContent = key; t.style.cursor = 'default';
@@ -2149,7 +2154,9 @@ export async function lorebookStudio(preferredBook = null, open = null) {
         bookLbl.style.cssText = 'overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:16em;';
         row1.append(bookLbl);
         // Search repaints only the list: rebuilding the header would drop the input's focus mid-keystroke.
-        row1.append(buildFilterBtn(renderExplorer), buildSortControl(() => repaint()), buildSearchBox(() => repaint()));
+        const selBtn = barBtn('Select… ▾', () => { const r = selBtn.getBoundingClientRect(); showCtxMenu(selectItems(), r.left, r.bottom + 2, ctxMount(), selectItems); });
+        const selCount = document.createElement('span'); selCount.className = 'wa-bulk-count';
+        row1.append(buildFilterBtn(renderExplorer), buildSortControl(() => repaint()), buildSearchBox(() => repaint()), selBtn, selCount);
         head.append(row1);
         const fixed = document.createElement('div'); fixed.className = 'wa-studio-fixed';
         trayEl = renderTray();
@@ -2179,12 +2186,11 @@ export async function lorebookStudio(preferredBook = null, open = null) {
         let groups = [], allIds = [], reg = { row: new Map(), grp: [] };
         const paintBar = () => {
             const on = allIds.filter(id => cleanupChecks.get(id)).length;
+            selCount.textContent = `(${on}/${allIds.length})`;
+            selCount.title = `${on} of ${allIds.length} listed keys selected`;
             bar.innerHTML = '';
-            const count = document.createElement('span'); count.className = 'wa-bulk-count';
-            count.textContent = `${on}/${allIds.length} selected`;
-            const selBtn = barBtn('Select… ▾', () => { const r = selBtn.getBoundingClientRect(); showCtxMenu(selectItems(), r.left, r.bottom + 2, ctxMount(), selectItems); });
-            bar.append(count, selBtn);
             if (cleanupUndo?.length) bar.append(barBtn(`Undo (${cleanupUndo.length})`, undoPrune));
+            bar.style.display = cleanupUndo?.length ? '' : 'none';   // an empty bar is a blank band
         };
         /** The Select… menu: All visible and None set the selection; a severity or a flag toggles its rows in and out, the menu staying open, so several can be combined. */
         const selectItems = () => {
