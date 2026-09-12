@@ -855,7 +855,7 @@ function renderWorldPriority() {
     const scoped = scopedPriority();
 
     if (scoped == null) {
-        $list.html('<small class="opacity50p">No character selected. Lorebook order is per-character — open a character to set one.</small>');
+        $list.html('<small class="opacity50p">No character selected. Lorebook order is per-character. Open a character to set one.</small>');
         return;
     }
     if (!scoped.length) {
@@ -1832,7 +1832,8 @@ const SETTINGS_HTML = `
                     <option value="sequential">Sequential</option>
                     </select>
 
-                    <div id="wa_world_priority_list" style="margin-top:6px;"></div>
+                    <label>Lorebook order</label>
+                    <div id="wa_world_priority_list" style="margin-top:2px;"></div>
                 </div>
             </div>
 
