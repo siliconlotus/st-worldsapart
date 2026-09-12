@@ -390,6 +390,8 @@ dialog.popup:has(.wa-studio), .wa-studio-nav, .wa-studio-explorer, .wa-studio-en
 .wa-entry-title { font-weight: bold; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; flex: 1 1 auto; }
 .wa-off { opacity: 0.45; }
 .wa-entry-meta { opacity: 0.45; font-size: 0.85em; white-space: nowrap; flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.wa-entry-titlewrap { display: flex; flex-direction: column; min-width: 0; flex: 1 1 auto; }
+.wa-entry-meta-sub { white-space: normal; overflow: visible; }
 .wa-entry-badge { font-size: 0.78em; background: var(--wa-kw-flag-bg, #274d78); color: #fff;
     border-radius: 8px; padding: 1px 7px; white-space: nowrap; flex-shrink: 0; }
 .wa-entry-body { margin-top: 2px; }
