@@ -1,7 +1,7 @@
 // matcher.mjs — countKey and everything a match verdict rests on: the fold, boundaries, regex keys, SmartKeys
 // dispatch, secondary keys, the scan window, stage-2 activation. ST-free; core parity is asserted in core-matcher-check, worth in matcher-check.
 
-import { addMessageHits, buildAutomaton, cachedCount, createScanScope, evaluate, evaluateAst, evaluateSmartKey, fold, normalizeOrthography, parse, primeScan, synthesizeSecondary, tokenize, validateSmartKey } from './smartkeys.mjs';
+import { addMessageHits, buildAutomaton, cachedCount, createScanScope, evaluate, evaluateAst, evaluateSmartKey, fold, keyVariants, normalizeOrthography, parse, primeScan, synthesizeSecondary, tokenize, validateSmartKey } from './smartkeys.mjs';
 
 export function escapeRegex(str) { return String(str).replace(/[.*+?^${}()|[\]\\]/g, '\\$&'); }
 
@@ -351,21 +351,23 @@ export function countKey(key, text, caseSensitive, wholeWords, scope, gateAst = 
 
     // Must match smartkeys' fold exactly, or the trie and this walk disagree.
     const hay = foldedHay(text, caseSensitive);
-    const needle = caseSensitive ? normalizeOrthography(raw) : fold(raw);
-
-    if (wholeWords) {
-        try {
-            // Lookaround, not `\b`: a key may start or end with punctuation, and adjacent occurrences all count.
-            const regex = new RegExp(`${boundaryBefore()}${escapeRegex(needle)}${boundaryAfter()}`, 'gu');
-            return (hay.match(regex) ?? []).length;
-        } catch {
-            return 0;
-        }
-    }
-
     let count = 0;
-    for (let i = hay.indexOf(needle); i !== -1; i = hay.indexOf(needle, i + needle.length)) {
-        count++;
+    for (const variant of keyVariants(raw)) {
+        const needle = caseSensitive ? normalizeOrthography(variant) : fold(variant);
+        if (!needle) continue;
+        if (wholeWords) {
+            try {
+                // Lookaround, not `\b`: a key may start or end with punctuation, and adjacent occurrences all count.
+                const regex = new RegExp(`${boundaryBefore()}${escapeRegex(needle)}${boundaryAfter()}`, 'gu');
+                count += (hay.match(regex) ?? []).length;
+            } catch {
+                return 0;
+            }
+            continue;
+        }
+        for (let i = hay.indexOf(needle); i !== -1; i = hay.indexOf(needle, i + needle.length)) {
+            count++;
+        }
     }
     return count;
 }
@@ -443,20 +445,22 @@ export function keyExcerpts(key, text, caseSensitive, wholeWords, context = 28, 
             continue;
         }
         const hay = foldedHay(segment, caseSensitive);
-        const needle = caseSensitive ? normalizeOrthography(raw) : fold(raw);
-        if (!needle) continue;
-        if (wholeWords) {
-            try {
-                const re = new RegExp(`${boundaryBefore()}${escapeRegex(needle)}${boundaryAfter()}`, 'gu');
-                for (let m = re.exec(hay); m; m = re.exec(hay)) {
-                    if (!m[0]) { re.lastIndex += 1; continue; }
-                    if (push(segment, m.index, m[0].length)) return out;
-                }
-            } catch { /* mirror countKey's failure mode */ }
-            continue;
-        }
-        for (let i = hay.indexOf(needle); i !== -1; i = hay.indexOf(needle, i + needle.length)) {
-            if (push(segment, i, needle.length)) return out;
+        for (const variant of keyVariants(raw)) {
+            const needle = caseSensitive ? normalizeOrthography(variant) : fold(variant);
+            if (!needle) continue;
+            if (wholeWords) {
+                try {
+                    const re = new RegExp(`${boundaryBefore()}${escapeRegex(needle)}${boundaryAfter()}`, 'gu');
+                    for (let m = re.exec(hay); m; m = re.exec(hay)) {
+                        if (!m[0]) { re.lastIndex += 1; continue; }
+                        if (push(segment, m.index, m[0].length)) return out;
+                    }
+                } catch { /* mirror countKey's failure mode */ }
+                continue;
+            }
+            for (let i = hay.indexOf(needle); i !== -1; i = hay.indexOf(needle, i + needle.length)) {
+                if (push(segment, i, needle.length)) return out;
+            }
         }
     }
     return out;

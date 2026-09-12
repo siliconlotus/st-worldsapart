@@ -11,8 +11,8 @@
 
 import { coreReadsAsRegex, countRegexKey, escapeRegex, foldedHay, isRegexKey, maskMarkup, REGEX_KEY_RE, boundaryAfter, boundaryBefore, wordChar } from './matcher.mjs';
 // Re-exported: matcher.mjs, keyword-tools.mjs and studio.mjs import these from here. One copy, or the browser and the server disagree.
-import { buildAutomaton, scanAutomaton, fold, normalizeOrthography, addMessageHits } from './automaton.mjs';
-export { buildAutomaton, scanAutomaton, fold, normalizeOrthography, addMessageHits };
+import { buildAutomaton, scanAutomaton, fold, keyVariants, normalizeOrthography, addMessageHits } from './automaton.mjs';
+export { buildAutomaton, scanAutomaton, fold, keyVariants, normalizeOrthography, addMessageHits };
 
 const OPS = {
     '&&': 'AND', '&': 'AND', '+': 'AND', 'AND': 'AND',
@@ -364,7 +364,8 @@ export function evaluate(node, text, acHits) {
             }
             // Fold both sides and use the same lookaround as countKey's naive walk — two boundary definitions is two matchers.
             const hay = foldedHay(text, node.isCaseSensitive);
-            let pattern = escapeRegex(node.isCaseSensitive ? normalizeOrthography(node.value) : fold(node.value));
+            const forms = keyVariants(node.value).map(v => node.isCaseSensitive ? normalizeOrthography(v) : fold(v));
+            let pattern = forms.length > 1 ? `(?:${forms.map(escapeRegex).join('|')})` : escapeRegex(forms[0]);
             if (node.isExact) pattern = `${boundaryBefore()}${pattern}${boundaryAfter()}`;
             const n = (hay.match(new RegExp(pattern, 'gu')) ?? []).length;
             return { matched: n > 0, scoreBoost: node.weight * n, units: unit(node, node.weight * n, n) };
@@ -431,7 +432,7 @@ export function registerKeys(rawKeys, scope = defaultScope) {
         if (raw.startsWith('?')) {
             ensureAst(scope, raw, () => parse(tokenize(raw)));
         } else {
-            internLiteral(scope, fold(raw));
+            for (const v of keyVariants(raw)) internLiteral(scope, fold(v));
         }
     }
 }
@@ -450,9 +451,13 @@ export function cachedCount(raw, text, scope = defaultScope) {
     if (scope.dirty || scope.automaton === null) return undefined;
     const counts = scope.scans.get(text);
     if (counts === undefined) return undefined;
-    const idx = scope.termIndex.get(fold(raw));
-    if (idx === undefined) return undefined;
-    return counts.get(idx) ?? 0;
+    let total = 0;
+    for (const v of keyVariants(raw)) {
+        const idx = scope.termIndex.get(fold(v));
+        if (idx === undefined) return undefined;
+        total += counts.get(idx) ?? 0;
+    }
+    return total;
 }
 
 /** Drops every registered key, cached AST and scan; called on chat switch so the automaton tracks the active books' vocabulary. */
