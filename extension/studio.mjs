@@ -896,7 +896,7 @@ export async function lorebookStudio(preferredBook = null, open = null) {
         title.className = 'wa-entry-title' + (e.disable ? ' wa-off' : '');
         title.textContent = wiTitleOf(e);
         const keyCount = Array.isArray(e.key) ? e.key.length : 0;
-        title.title = keyCount ? `Keywords (${keyCount}): ${e.key.join(', ')}` : 'No keywords';
+        title.title = wiTitleOf(e);
         // Near-duplicate marker from the audit, advisory: it says "pick one", never which.
         const twins = scan?.dupes?.get(e.uid);
         const dupMark = twins?.length ? (() => {
@@ -939,7 +939,7 @@ export async function lorebookStudio(preferredBook = null, open = null) {
         if (delay > 0) metaTxt += ` · delay ${delay}`;
         if (cooldown > 0) metaTxt += ` · cd ${cooldown}`;
         meta.textContent = metaTxt;
-        meta.title = `trigger probability ${e.useProbability !== false ? prob : 100}% · delay ${delay} · cooldown ${cooldown} (messages)`;
+        meta.title = (keyCount ? `Keywords (${keyCount}): ${e.key.join(', ')}` : 'No keywords') + `\ntrigger probability ${e.useProbability !== false ? prob : 100}% · delay ${delay} · cooldown ${cooldown} (messages)`;
         h.append(selBox, chev, mode, title, ...(dupMark ? [dupMark] : []), pencil, meta);
         // Collapsed-line badge: flagged-key count tinted by the worst flag; counts problems, not warnings (yellow, green).
         const counted = flagged ? [...flagged.values()].filter(v => scan.severityOf(v) === SEVERE) : [];

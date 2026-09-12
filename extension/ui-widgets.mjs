@@ -338,7 +338,7 @@ dialog.popup:has(.wa-studio), .wa-studio-nav, .wa-studio-explorer, .wa-studio-en
 .wa-studio-entries { flex: 1 1 auto; overflow-y: auto; min-width: 0; }
 .wa-studio-body { flex: 1 1 auto; display: flex; min-height: 0; }
 .wa-rail { flex: 0 0 auto; display: flex; flex-direction: column; gap: 6px; padding: 2px 0 0 8px; }
-.wa-rail .menu_button { width: 2.2em; height: 2.2em; padding: 0; margin: 0; display: grid; place-items: center; position: relative; }
+.wa-rail .menu_button { width: 3em; height: 3em; padding: 0; margin: 0; display: grid; place-items: center; position: relative; font-size: 1.05em; }
 .wa-rail-count { position: absolute; bottom: 1px; right: 2px; font-size: 0.55em; line-height: 1; opacity: 0.8; }
 .wa-studio-navhead, .wa-studio-exphead { position: sticky; top: 0; z-index: 1; padding: 2px 0 6px;
     background: var(--SmartThemeBlurTintColor, var(--black70a, rgba(20,20,20,0.95))); }
@@ -383,9 +383,10 @@ dialog.popup:has(.wa-studio), .wa-studio-nav, .wa-studio-explorer, .wa-studio-en
 .wa-term-act:hover { opacity: 1; }
 .wa-entry { padding: 5px 4px; border-bottom: 1px solid var(--SmartThemeBorderColor, rgba(255,255,255,0.1)); }
 .wa-entry-head { display: flex; align-items: center; gap: 6px; cursor: pointer; }
-.wa-entry-title { font-weight: bold; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+/* The title yields last: the meta text shrinks and truncates first, the title only below its floor. */
+.wa-entry-title { font-weight: bold; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; flex: 1 1 auto; }
 .wa-off { opacity: 0.45; }
-.wa-entry-meta { opacity: 0.45; font-size: 0.85em; white-space: nowrap; flex-shrink: 0; }
+.wa-entry-meta { opacity: 0.45; font-size: 0.85em; white-space: nowrap; flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 .wa-entry-badge { font-size: 0.78em; background: var(--wa-kw-flag-bg, #274d78); color: #fff;
     border-radius: 8px; padding: 1px 7px; white-space: nowrap; flex-shrink: 0; }
 .wa-entry-body { margin-top: 2px; }
