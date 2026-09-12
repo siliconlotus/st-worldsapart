@@ -300,6 +300,19 @@
             "selectiveLogic": 0,
             "comment": "REGEX HYPHEN — the content writes the pair with an en-dash, which this pattern cannot reach, so the key is dead. The hyphen flags only because the book holds what the en-dash form WOULD have matched, and that evidence outranks unattested: the pattern is mis-written, not dead. A range marker would not be swapped.",
             "content": "The Bose–Einstein condensate forms below the critical point."
+        },
+        "22": {
+            "uid": 22,
+            "key": [
+                "CIA"
+            ],
+            "keysecondary": [],
+            "constant": false,
+            "vectorized": false,
+            "disable": false,
+            "selectiveLogic": 0,
+            "comment": "SHORT, MOSTLY INSIDE WORDS — three letters that land in \"special\", \"official\" and \"social\" and only once as the word. The short flag carries the same suggestion substring makes, measured over the book: consider ? =CIA. FBI would be short and clean, and offered nothing.",
+            "content": "A special report: the official social calendar, and one CIA memo."
         }
     }
 }

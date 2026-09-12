@@ -258,12 +258,12 @@ console.log('ok   SmartKey structural validation');
 
 {
     const entries = {};
-    for (let i = 1; i <= 12; i++) entries[i] = { uid: i, key: [], content: `Marjorie walked. Entry number ${i} of the set.` };
+    for (let i = 1; i <= 12; i++) entries[i] = { uid: i, key: [], content: `Marjorie walked. Entry number ${i}.` };   // no `the`: book common must not eat the list
     entries[1].key = ['? Marjorie'];          // fires everywhere
     entries[2].key = ['? zebra unicorn'];     // fires nowhere
     entries[3].key = ['Marjorie'];            // plain control with the same df
     entries[4].key = ['? the'];               // reduces to an English-common term
-    entries[5].key = ["? (the|Marjorie)"];    // OR: as loose as its loosest branch
+    entries[5].key = ["? (the|zebra)"];       // OR: as loose as its loosest branch; zebra is nowhere, so book common cannot eat it
     entries[6].key = ['? the Marjorie'];      // AND: one selective term gates it
     const opts = { scanKeyword: true, scanVectorized: true, scanConstant: true, pruneUnattested: true,
         pruneCommon: true, pruneShort: true, pruneShared: true, pruneFragment: true,
@@ -277,27 +277,29 @@ console.log('ok   SmartKey structural validation');
     eq(verdict(2), 'unattested|never matches (book/chat)', 'a query that evaluates false everywhere is flagged dead');
     eq(verdict(1), verdict(3), 'a SmartKey and the equivalent plain key get the same verdict');
     eq(verdict(1), '', '...and a key in every entry draws none with a chat scanned, so the SmartKey is not judged as a string either');
-    {
-        const noChat = buildKeyPruneScan({ entries }, opts, new Set(), { caseSensitiveDefault: false, wholeWordsDefault: false });
-        const v = uid => { const f = noChat.classifyEntry(entries[uid])[0]; return f ? noChat.reasonOf(f).text : ''; };
-        eq(v(1), 'book common · 100% of entries · no chat scanned', 'without a chat the book\'s own prose stands in: a key in every entry is book common');
-        eq(v(1), v(3), '...for the SmartKey and the plain key alike');
-    }
-    eq(verdict(4), 'english common|english common · the · 0% of messages', 'a query reducing to a common word earns the English-common flag, the chat that bears it out shown');
-    eq(sc.classifyEntry(entries[5])[0]?.flag, 'english common', 'an alternation is as loose as its loosest branch');
-    eq(sc.reasonOf(sc.classifyEntry(entries[5])[0]).text, 'english common · the · 0% of messages', '...and the loose branch is named');
-    eq(sc.classifyEntry(entries[6])[0], undefined, 'a conjunction is as tight as its tightest conjunct, so it earns no common flag');
+    eq(verdict(4), 'unattested|never matches (book/chat)', 'a common word the chat does not bear out is not english common: the chat has answered, and what remains is that it is dead');
+
+    // The English list is the no-chat fallback, so its verdicts are observed without one.
+    const noChat = buildKeyPruneScan({ entries }, opts, new Set(), { caseSensitiveDefault: false, wholeWordsDefault: false });
+    const flagOf = uid => noChat.classifyEntry(entries[uid])[0]?.flag;
+    const textOf = uid => { const f = noChat.classifyEntry(entries[uid])[0]; return f ? noChat.reasonOf(f).text : ''; };
+    eq(textOf(1), 'book common · 100% of entries · no chat scanned', 'without a chat the book\'s own prose stands in: a key in every entry is book common');
+    eq(textOf(1), textOf(3), '...for the SmartKey and the plain key alike');
+    eq(textOf(4), 'english common · the · no chat scanned', 'a query reducing to a common word earns the English-common flag while no chat is scanned');
+    eq(flagOf(5), 'english common', 'an alternation is as loose as its loosest branch');
+    eq(textOf(5), 'english common · the · no chat scanned', '...and the loose branch is named');
+    eq(flagOf(6) !== 'english common', true, 'a conjunction is as tight as its tightest conjunct, so it earns no common flag');
     entries[7].key = ['? ^Mark'];
     entries[8].key = ['? Mark'];
-    eq(sc.classifyEntry(entries[7])[0]?.flag !== 'english common', true, 'a case-sensitive capital cannot be the lower-case common word');
-    eq(sc.classifyEntry(entries[8])[0]?.flag, 'english common', '...where the same term written plainly can');
+    eq(flagOf(7) !== 'english common', true, 'a case-sensitive capital cannot be the lower-case common word');
+    eq(flagOf(8), 'english common', '...where the same term written plainly can');
 
     // Two common paths through one conjunction: unmeasured the first is named; measured, the one the chat fires.
     entries[9].key = ['? (=mom || =mother || parent) (=Nick || =my || Parsons)'];
     const probes = pathProbes(entries[9].key[0]);
     eq(probes.length, 9, 'every path is a probe, the whole product and not the common paths alone');
     eq(probes.includes('? =mother =my') && probes.includes('? parent Parsons'), true, '...each carrying its terms\' own flags');
-    eq(sc.reasonOf(sc.classifyEntry(entries[9])[0]).text, 'english common · mom & my', 'no chat: the first path, joined with &');
+    eq(textOf(9), 'english common · mom & my · no chat scanned', 'no chat: the first common path, joined with &');
     const msgs = ['my mother said', 'my mother again', 'oh my mother', 'my mom once', 'nothing here'];
     const chat = countChatHits([entries[9].key[0], ...probes], msgs);
     const scChat = buildKeyPruneScan({ entries }, opts, new Set(), { chatScan: { messagesWith: chat.messagesWith, messages: chat.messages } });

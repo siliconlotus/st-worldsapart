@@ -124,7 +124,7 @@ console.log('ok   a key and its case variant count one entry once');
 
     const quiet = run({ messagesWith: new Map([['mother', 2], ['zzznope', 0]]), messages: 100 });
     eq(quiet.zzznope.why, 'unattested (book/chat)', 'chat checked and silent: the claim gets stronger');
-    eq(quiet.mother.sev !== 'severe', true, 'a quiet common word stays flagged, not severe');
+    eq(quiet.mother, undefined, 'a common word the chat says is quiet is not flagged: the chat has answered, and the list is its fallback only');
 
     const live = run({ messagesWith: new Map([['mother', 40], ['zzznope', 12]]), messages: 100 });
     eq(live.zzznope, undefined, 'a key the CHAT uses is not dead — the flag is suppressed, not recoloured');

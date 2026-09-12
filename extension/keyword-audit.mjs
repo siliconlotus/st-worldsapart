@@ -280,8 +280,9 @@ export function buildKeyPruneScan(data, opts, ignoreSet, { caseSensitiveDefault 
         const evidenced = regexOrtho(k, true);
         if (evidenced) return evidenced;
 
-        // --- the English list: an assertion about the language, below anything measured -----------------------------
-        if (opts.pruneCommon) {
+        // --- the English list: the fallback for a key no chat was scanned for. With a chat, the chat has answered: over
+        // the gate it read as chat common above, under it the list is contradicted and says nothing. -------------------
+        if (opts.pruneCommon && chatRate === undefined) {
             if (literal && !/\s/.test(k) && COMMON_WORDS.has(k.toLowerCase())) return { flag: 'english common', bookContent, chatRate };
             // Named by its first all-common path: which path fires is the chat's question, and `chat common` answers it.
             const common = literal ? null : smartPaths(k, isEnglishCommon(COMMON_WORDS)).find(p => p.common);
@@ -291,7 +292,7 @@ export function buildKeyPruneScan(data, opts, ignoreSet, { caseSensitiveDefault 
         // --- the key's shape; then dead last, a dead key being neutral --------------------------------------------
         if (literal && opts.pruneFragment !== false && looksLikeFragment(k)) return { flag: 'fragment', bookContent };
         // Nothing to judge without a hit: a dead short key is dead, not "0/0 clean".
-        if (literal && k.length < opts.minLength && !ww && opts.pruneShort && hits.total > 0) return { flag: 'short', bookContent, clean: strictClean(k, cs), total: scan(k, cs, false).total };
+        if (literal && k.length < opts.minLength && !ww && opts.pruneShort && hits.total > 0) return { flag: 'short', bookContent, clean: strictClean(k, cs), total: scan(k, cs, false).total, key: k, ww };
         if (bookContent === 0 && opts.pruneUnattested && !(literal && opts.ignoreProper && looksProper(k)) && !chatRate) return { flag: 'unattested', bookContent, literal, chatChecked: chatRate !== undefined };
         if (literal) {
             const chatAny = chatScan?.messagesWith?.get(k), chatTyped = chatTypedOf(k);
@@ -327,9 +328,7 @@ export function buildKeyPruneScan(data, opts, ignoreSet, { caseSensitiveDefault 
     const severityOf = p => {
         if (p.flag === 'unattested') return '';
         if (p.flag === 'unusable') return SEVERE;
-        // Over the chat-common share the key reports `chat common` instead, so this is moderate in practice; the promotion
-        // survives for a scan that covered the key and not the flag's order.
-        if (p.flag === 'english common') return p.chatRate >= (opts.chatCommon ?? KEY_CHAT_COMMON) ? SEVERE : MODERATE;
+        if (p.flag === 'english common') return MODERATE;   // an assertion about the language; only the chat can make it severe, as chat common
         if (p.flag === 'book shared') return p.bookListed / nBook >= opts.bookShared ? SEVERE : MODERATE;
         if (p.flag === 'fragment') return SEVERE;
         if (p.flag === 'substring') return MODERATE;
@@ -351,8 +350,7 @@ export function buildKeyPruneScan(data, opts, ignoreSet, { caseSensitiveDefault 
         }
         if (p.flag === 'unusable') return { text: p.code ? `unusable — ${p.code}` : 'unusable', severity };
         if (p.flag === 'english common') {
-            const which = p.term ? ` · ${p.term}` : '';
-            return { text: p.chatRate === undefined ? `english common${which}` : `english common${which} · ${Math.round(100 * p.chatRate)}% of ${units}`, severity };
+            return { text: `english common${p.term ? ` · ${p.term}` : ''} · no chat scanned`, severity };
         }
         if (p.flag === 'book shared') return { text: `book shared (${Math.round(100 * p.bookListed / nBook)}%)`, severity };
         if (p.flag === 'chat common') return { text: `chat common · ${Math.round(100 * p.chatRate)}% of ${units}${p.via ? `, mostly ${p.via}` : ''}`, severity };
@@ -366,7 +364,9 @@ export function buildKeyPruneScan(data, opts, ignoreSet, { caseSensitiveDefault 
         }
         if (p.flag === 'variant only') return { text: `${p.where} uses it only un-hyphenated`, severity };
         if (p.flag === 'regex orthography') return { text: `${p.evidence ?? `will not match ${p.label}`}, consider ${p.suggest}`, severity };
-        return { text: `short (${p.clean}/${p.total} clean)`, severity };
+        // The same suggestion substring makes, measured over the book: hits mostly inside longer words want `=`.
+        const ratio = p.total ? p.clean / p.total : 0;
+        return { text: `short (${p.clean}/${p.total} clean)${ratio <= 1 / 3 && !p.ww ? ` — consider ? =${p.key}` : ''}`, severity };
     };
     // Pre-ticked: the red tier, plus unattested on machine-written entries only (K14). Unusable is red but wants a correction, not a deletion.
     const generated = e => e?.stmemorybooks !== undefined || e?.STMB_start !== undefined || e?.stmbArc !== undefined;

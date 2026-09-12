@@ -564,9 +564,11 @@ core's intent, not to its bugs.
   gate to there; never pre-ticked at either, its remedies being `constant` or a narrower key. K16 — one
   book, a handful of keys over the share — says those keys were kept by curation, which is why it does
   not pre-tick and not why it does not exist.
-- **`book common` is its fallback**, only for a key no chat was scanned for: the book's own prose
-  standing in for the chat it does not have, at `KEY_BOOK_COMMON` of the entries. With a chat scanned,
-  ubiquity in entry text is a fact about the story and draws nothing on its own.
+- **`book common` and `english common` are its fallbacks**, only for a key no chat was scanned for: the
+  book's own prose standing in at `KEY_BOOK_COMMON` of the entries, then the English list. With a chat
+  scanned the chat has answered — over the gate the key is `chat common`, under it neither says
+  anything: ubiquity in entry text is a fact about the story, and a list word the chat does not bear
+  out is a list being contradicted.
 - **`substring` is gated on breadth and judged on how the breadth was earned.** A key over the
   chat-common share whose messages are mostly not whole-word hits wants `=`; a key with a capital whose
   hits are mostly the wrong case wants `^` — a lowercase key hitting sentence-initial "Morning" is the
