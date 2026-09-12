@@ -510,6 +510,7 @@ export async function lorebookStudio(preferredBook = null, open = null) {
             const onOff = prop => [{ label: 'On', fn: () => setField(prop, true) }, { label: 'Off', fn: () => setField(prop, false) }];
             const tri = (prop, g) => [{ label: 'On', fn: () => setField(prop, true) }, { label: 'Off', fn: () => setField(prop, false) }, { label: `Inherit (${g})`, fn: () => setField(prop, null) }];
             return [
+                { label: 'Enabled', children: [{ label: 'On', fn: () => { applyBulk(e => e.disable = false); refreshBulkBar(); } }, { label: 'Off', fn: () => { applyBulk(e => e.disable = true); refreshBulkBar(); } }] },
                 { label: 'Mode', children: [{ label: '🟢 Keyword', fn: () => setMode('keyword') }, { label: '🔵 Constant', fn: () => setMode('constant') }, { label: '🔗 Vector', fn: () => setMode('vector') }] },
                 { label: 'Sticky…', fn: bulkSticky },
                 { label: 'Cooldown…', fn: bulkCooldown },
@@ -535,13 +536,11 @@ export async function lorebookStudio(preferredBook = null, open = null) {
         setBtn.title = 'Set a field on all selected entries';
         const addTermBtn = barBtn('Add term…', bulkAddTerm); addTermBtn.title = 'Add one keyword to every selected entry';
         const reBtn = barBtn('Renumber…', ev => bulkOrder(ev.shiftKey)); reBtn.title = 'Renumber order. Shift-click to renumber UIDs too.';
-        const anyDisabled = Object.values(data?.entries ?? {}).some(e => selectedEntries.has(e.uid) && e.disable);
         wrap.append(
             count,
             barBtn(n === all.length ? 'Select none' : 'Select all', () => { if (n === all.length) consumeSelection(); else { lastSel = null; all.forEach(e => selectedEntries.add(e.uid)); syncSelCheckboxes(); } }),
             ...(n === all.length ? [] : [barBtn('Deselect', consumeSelection)]),
             sep(),
-            barBtn(anyDisabled ? 'Enable' : 'Disable', () => { applyBulk(e => e.disable = !anyDisabled); refreshBulkBar(); }),
             addTermBtn,
             setBtn,
             reBtn,
