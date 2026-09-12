@@ -1911,15 +1911,17 @@ export async function lorebookStudio(preferredBook = null, open = null) {
         // A book binds four ways: chat (chat_metadata.world_info), character (data.extensions.world), the character's
         // additional lorebooks (world_info.charLore[].extraBooks, keyed by avatar filename), global (selected_world_info,
         // never pre-ticked). The same four attachedBookNames reads.
-        const isGlobal = (selected_world_info ?? []).includes(selected);
+        // No book selected: nothing binds to it. Without this, `undefined === undefined` reads every unbound chat as chat-bound.
+        const book = selected || null;
+        const isGlobal = !!book && (selected_world_info ?? []).includes(book);
         const out = [];
         // bindingIndex, not loadChatIndex: line 0 of each chat where the plugin is present, never the whole file.
         for (const c of await bindingIndex()) {
-            const cardBound = c.charWorld === selected;
-            const auxBound = !cardBound && (c.extraBooks ?? []).includes(selected);
+            const cardBound = !!book && c.charWorld === book;
+            const auxBound = !!book && !cardBound && (c.extraBooks ?? []).includes(book);
             const charBound = cardBound || auxBound;
             for (const ch of c.chats) {
-                const chatBound = ch?.chat_metadata?.world_info === selected;
+                const chatBound = !!book && ch?.chat_metadata?.world_info === book;
                 if (!chatBound && !charBound && !isGlobal && !all) continue;
                 out.push({ char: c.char, avatar: c.avatar, file: ch.file_name, size: ch.file_size ?? '?',
                     why: chatBound ? 'chat-bound' : cardBound ? 'character-bound' : auxBound ? 'character-bound (additional lorebook)' : isGlobal ? 'global (book is always active)' : 'not bound',
