@@ -2155,8 +2155,11 @@ export async function lorebookStudio(preferredBook = null, open = null) {
         row1.append(bookLbl);
         // Search repaints only the list: rebuilding the header would drop the input's focus mid-keystroke.
         const selBtn = barBtn('Select… ▾', () => { const r = selBtn.getBoundingClientRect(); showCtxMenu(selectItems(), r.left, r.bottom + 2, ctxMount(), selectItems); });
-        const selCount = document.createElement('span'); selCount.className = 'wa-bulk-count';
-        row1.append(buildFilterBtn(renderExplorer), buildSortControl(() => repaint()), buildSearchBox(() => repaint()), selBtn, selCount);
+        const selCount = document.createElement('span');
+        // One unit: the count never wraps away from its button, and it is plain text at the row's own size.
+        const selWrap = document.createElement('span'); selWrap.style.cssText = 'display:inline-flex;align-items:center;gap:6px;white-space:nowrap;';
+        selWrap.append(selBtn, selCount);
+        row1.append(buildFilterBtn(renderExplorer), buildSortControl(() => repaint()), buildSearchBox(() => repaint()), selWrap);
         head.append(row1);
         const fixed = document.createElement('div'); fixed.className = 'wa-studio-fixed';
         trayEl = renderTray();
