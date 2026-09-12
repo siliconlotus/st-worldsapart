@@ -31,8 +31,8 @@ const SPACELESS_SCRIPTS = [
     ['Burmese', /\p{Script=Myanmar}/u],
 ];
 
-/** Messages an author needs about Match Whole Words (`wholeWords` is the resolved flag): a spaced key, which WA applies the flag to and core does not, or a spaceless-script key. `?` and `/re/` keys are excluded. */
-export function wholeWordAdvice(keys, wholeWords) {
+/** Messages an author needs about Match Whole Words (`wholeWords` is the resolved flag): a spaced key, which WA applies the flag to and core does not, or a spaceless-script key. `?` and `/re/` keys are excluded. `t` is the template tag the text goes through; ST passes its i18n tag. */
+export function wholeWordAdvice(keys, wholeWords, t = (s, ...v) => s.reduce((a, str, i) => a + str + (i < v.length ? String(v[i] ?? '') : ''), '')) {
     const out = [];
     if (!wholeWords) return out;
     const plain = (Array.isArray(keys) ? keys : [])
@@ -41,11 +41,11 @@ export function wholeWordAdvice(keys, wholeWords) {
 
     const spaced = plain.find(k => /\s/.test(k));
     if (spaced) {
-        out.push(`Whole-word matching applies to multi-word keys here, unlike SillyTavern core — “${spaced}” will not match a suffixed form such as its plural.`);
+        out.push(t`Whole-word matching applies to multi-word keys here, unlike SillyTavern core — “${spaced}” will not match a suffixed form such as its plural.`);
     }
     const script = SPACELESS_SCRIPTS.find(([, re]) => plain.some(k => re.test(k)));
     if (script) {
-        out.push(`A key here is written in ${script[0]}, a script without word boundaries. Whole-word matching is likely to work where it appears among Latin text or punctuation, but it can never fire inside a wholly ${script[0]} sentence.`);
+        out.push(t`A key here is written in ${script[0]}, a script without word boundaries. Whole-word matching is likely to work where it appears among Latin text or punctuation, but it can never fire inside a wholly ${script[0]} sentence.`);
     }
     return out;
 }
