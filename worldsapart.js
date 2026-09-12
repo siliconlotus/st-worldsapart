@@ -36,23 +36,6 @@ const SETTINGS_HTML = `
 
             <div class="inline-drawer wa-section">
                 <div class="inline-drawer-toggle inline-drawer-header">
-                    <b>Books</b> <span class="fa-solid fa-circle-question note-link-span" title="How entries from several books compete for the budget and where they sit in the prompt. A book appears here after its first scan."></span>
-                    <div class="inline-drawer-icon fa-solid fa-circle-chevron-down down"></div>
-                </div>
-                <div class="inline-drawer-content">
-
-                    <label for="wa_world_priority_mode">Mode</label>
-                    <select id="wa_world_priority_mode" class="text_pole">
-                    <option value="interleaved">Interleaved: one ranked list, with optional per-book weights</option>
-                    <option value="sequential">Sequential: higher books fill first</option>
-                    </select>
-
-                    <div id="wa_world_priority_list" style="margin-top:6px;"></div>
-                </div>
-            </div>
-
-            <div class="inline-drawer wa-section">
-                <div class="inline-drawer-toggle inline-drawer-header">
                     <b>Match window</b>
                     <div class="inline-drawer-icon fa-solid fa-circle-chevron-down down"></div>
                 </div>
@@ -134,6 +117,15 @@ const SETTINGS_HTML = `
                     </label>
 
                     <small id="wa_exempt_count" class="opacity50p"></small>
+
+                    <label>Lorebook priority <span class="fa-solid fa-circle-question note-link-span" title="How entries from several books compete for the budget and where they sit in the prompt. A book appears here after its first scan."></span></label>
+                    <label for="wa_world_priority_mode">Mode</label>
+                    <select id="wa_world_priority_mode" class="text_pole">
+                    <option value="interleaved">Interleaved: one ranked list, with optional per-book weights</option>
+                    <option value="sequential">Sequential: higher books fill first</option>
+                    </select>
+
+                    <div id="wa_world_priority_list" style="margin-top:6px;"></div>
                 </div>
             </div>
 
