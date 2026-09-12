@@ -1814,11 +1814,12 @@ export async function lorebookStudio(preferredBook = null, open = null) {
     };
     // --- Cleanup tab ---
     /** Confirms which chats to scan, grouped by card and pre-ticked by binding; global candidates and the open chat start unticked. */
-    const pickChats = async candidates => {
+    /** `verb` is the OK button's word: the Cleanup scans what is picked, the Lab loads it. */
+    const pickChats = async (candidates, verb = 'Scan') => {
         const wrap = document.createElement('div');
         // Scrolls: the shift-click list is every chat on the install, which is hundreds of rows on a real one (P1).
         wrap.style.cssText = 'text-align:left;max-width:44rem;max-height:60vh;overflow-y:auto;';
-        wrap.innerHTML = `<h3 style="margin:0 0 0.6em;">Check keys against which chats?</h3>`;
+        wrap.innerHTML = `<h3 style="margin:0 0 0.6em;">${verb === 'Load' ? 'Load which chats?' : 'Check keys against which chats?'}</h3>`;
         // Grouped by card, keyed on the avatar: two cards can carry the same name, and a chat belongs to the file it lives beside.
         const groups = new Map();
         const keyFor = c => {
@@ -1882,7 +1883,7 @@ export async function lorebookStudio(preferredBook = null, open = null) {
             g.textContent = 'This book is globally active.';
             wrap.append(g);
         }
-        const pop = new Popup(wrap, POPUP_TYPE.CONFIRM, '', { okButton: 'Scan selected', cancelButton: 'Cancel', wide: false });
+        const pop = new Popup(wrap, POPUP_TYPE.CONFIRM, '', { okButton: `${verb} selected`, cancelButton: 'Cancel', wide: false });
         if (await pop.show() !== POPUP_RESULT.AFFIRMATIVE) return null;
         return rows.filter(cb => cb.checked).map(cb => candidates[Number(cb.dataset.i)]);
     };
@@ -2814,7 +2815,7 @@ export async function lorebookStudio(preferredBook = null, open = null) {
                     const ctx = getContext(); const openName = String(ctx.chatId ?? '');
                     if (openName && !found.some(f => f.file.startsWith(openName))) found.push({ char: ctx.name2 ?? '', avatar: null, file: openName, size: `${(ctx.chat ?? []).length} msgs`, why: 'currently open', open: true });
                     if (!found.length) { toastr.warning('No chats found.', 'Keyword Lab'); return; }
-                    const picked = await pickChats(found);
+                    const picked = await pickChats(found, 'Load');
                     if (!picked?.length) return;
                     labHay = await chatsHaystack(picked, depth, end);
                     hayBox.value = labHay;
