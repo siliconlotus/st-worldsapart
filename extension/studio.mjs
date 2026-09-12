@@ -2808,7 +2808,7 @@ export async function lorebookStudio(preferredBook = null, open = null) {
         tools.style.cssText = 'display:flex;gap:10px;align-items:center;flex-shrink:0;margin-left:auto;';
         opts.append(winLabel, tools);
         tools.append(
-            labTool('fa-comment-dots', 'Load the current chat to the message-depth setting. Shift-click for a depth.',
+            labTool('fa-comment-dots', `Load current chat to scan depth ${settings().messageDepth || world_info_depth}. Shift-click to select depth.`,
                 async ev => {
                     // No character or group: there is no chat to read, and nothing here may cause ST to make one.
                     if (getContext().characterId === undefined && !getContext().groupId) { toastr.info('No chat is open.', 'Keyword Lab'); return; }
@@ -2823,7 +2823,7 @@ export async function lorebookStudio(preferredBook = null, open = null) {
                     labCommitted = true;   // imported text is for reading, not editing
                     repaint();
                 }),
-            labTool('fa-comments', 'Load chats: pick from the chats bound to this book, or from every chat when none is. Shift-click lists every chat and asks for a depth.',
+            labTool('fa-comments', `Load chats to scan depth ${settings().messageDepth || world_info_depth}: pick from the chats bound to this book, or from every chat when none is. Shift-click to list every chat and select depth.`,
                 async ev => {
                     const depth = ev.shiftKey
                         ? await numberPrompt('Load chats', 'How many messages deep, per chat?', settings().messageDepth || world_info_depth, 1)
