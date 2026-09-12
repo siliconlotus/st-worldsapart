@@ -43,9 +43,9 @@ eq(msgs.length, 11, 'the hidden message is dropped, as core and WA both drop it'
     eq(v.mother?.sev !== RED, true, '...but unevidenced it is not severe');
     eq(v['lamp-post']?.why, 'matches only un-hyphenated', 'the key fires, but never on the form the author typed');
     eq(v['lamp-post']?.sev, 'minor', '...which is advisory: the flag says rewrite or drop, not that it is broken');
-    eq(v["/Cap'n \\w+/"]?.why, `a regex does not fold ' \u2014 try ['${ORTHO_FAMILIES.find(f => f.ascii === "'").pair}]`,
+    eq(v["/Cap'n \\w+/"]?.why, `will not match the curly form \u2014 consider ['${ORTHO_FAMILIES.find(f => f.ascii === "'").pair}]`,
         'a regex key is told its quote matches only itself, and is offered the curly pair');
-    eq(v['/Bose-Einstein \\w+/']?.why, 'the book has the en-dash form \u2014 try [-\u2013]',
+    eq(v['/Bose-Einstein \\w+/']?.why, 'the book has the en-dash form \u2014 consider [-\u2013]',
         'the hyphen flags on evidence, and the evidence outranks the dead verdict it explains');
 }
 

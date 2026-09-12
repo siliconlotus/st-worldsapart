@@ -537,10 +537,10 @@ core's intent, not to its bugs.
 - **NFC** on the regex path, where core runs raw.
 - **A regex is fold-exempt, and the audit says so rather than rewriting it.** An ASCII quote in a
   pattern matches only itself where the same character in a plain key matches its whole family, so
-  `regex orthography` names the character and suggests `ORTHO_FAMILIES`' `pair`, the same mark written
-  curly — never the whole folded family, a guillemet or a prime being a different mark. Not flagged
-  once the pattern already carries a curly form. An expansion would take away the only way to demand
-  one form.
+  `regex orthography` fires where a pattern carries one side of `ORTHO_FAMILIES`' `pair` and not the
+  other, in either direction, and suggests the pair — never the whole folded family, a guillemet or a
+  prime being a different mark. The straight side flags on shape, the curly side only on evidence. An
+  expansion would take away the only way to demand one form.
 - **A regex hyphen flags only on evidence**, the book holding what the en-dash form would have matched
   (`matcher.mjs` `swapLiteralHyphens`, range markers and `v` patterns left alone). Evidence outranks
   `unattested`: a pattern the book would match under another orthography is mis-written, not dead.
