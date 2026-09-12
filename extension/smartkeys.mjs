@@ -50,7 +50,14 @@ export function tokenize(input) {
         let m = src.match(/^\s+/);
         if (m) { src = src.slice(m[0].length); continue; }
         if (src[0] === '(') { tokens.push({ type: 'LPAREN' }); src = src.slice(1); continue; }
-        if (src[0] === ')') { tokens.push({ type: 'RPAREN' }); src = src.slice(1); continue; }
+        if (src[0] === ')') {
+            src = src.slice(1);
+            // The weight rides on the RPAREN; lexed as a term of its own it is punctuation that can never match.
+            const w = src.match(/^(?:::|\^)(\d+(?:\.\d+)?)/);
+            if (w) src = src.slice(w[0].length);
+            tokens.push({ type: 'RPAREN', weight: w ? parseFloat(w[1]) : undefined });
+            continue;
+        }
         m = src.match(/^(&&|\|\||&|\||\+|!|-)/) ?? src.match(/^(AND|OR|NOT|XOR)\b(?=\s|[()]|$)/i);
         if (m) {
             tokens.push({ type: OPS[m[1].toUpperCase()] });
@@ -132,7 +139,10 @@ export function parse(tokens) {
         if (!t) return null;
         if (t.type === 'LPAREN') {
             const node = parseOr();
-            if (peek()?.type === 'RPAREN') i++;
+            let w;
+            if (peek()?.type === 'RPAREN') { w = tokens[i].weight; i++; }
+            // `groupWeight`, never `weight`: a TERM already multiplies its own into wsum, and `(fire::2)::3` is both.
+            if (node && w !== undefined) node.groupWeight = (node.groupWeight ?? 1) * w;
             return node;
         }
         return t.type === 'TERM' || t.type === 'REGEX' ? t : null; // stray RPAREN — drop
@@ -189,6 +199,23 @@ export function validateSmartKey(raw) {
         out.push({
             severity: 'error', code: 'negation-only',
             message: 'Every term is negated, so this matches whenever they are absent — which is almost always. Add a term that must be present.',
+        });
+    }
+
+    // A weight lexes as a term only when it followed neither a term nor a group, so it cannot be anything but misplaced.
+    // `^N` is the other spelling and lexes differently: `^` is the case flag, leaving a case-sensitive number, and a
+    // number has no case for the flag to mean anything by.
+    for (const t of terms) {
+        if (t.type !== 'TERM' || t.quoted) continue;
+        const v = String(t.value);
+        const bare = /^(?:::|\^)\d+(?:\.\d+)?$/.test(v);
+        const flagged = t.isCaseSensitive && /^\d+(?:\.\d+)?$/.test(v);
+        if (!bare && !flagged) continue;
+        out.push({
+            severity: 'error', code: 'stray-weight',
+            message: flagged
+                ? `“^${v}” reads as a case-sensitive search for “${v}”, since “^” at the start of a term is the case flag. A weight goes straight after the term or the group it weights, with no space: “fire^${v}”, “(copper pipe)^${v}”.`
+                : `The weight ${JSON.stringify(v)} is not attached to anything. A weight goes straight after the term or the group it weights, with no space: “fire::3”, “(copper pipe)::3”.`,
         });
     }
 
@@ -354,6 +381,15 @@ const boostOf = units => units.reduce((a, u) => a + u.wsum, 0);
 /** Evaluates an AST against a text; `acHits` is pass-1 counts for this text, omitted for the pure regex path. An unmatched node
  *  must carry scoreBoost 0: parents sum child boosts without re-checking matched. */
 export function evaluate(node, text, acHits) {
+    const r = evaluateNode(node, text, acHits);
+    const w = node?.groupWeight;
+    if (!w || w === 1 || !r.units.length) return r;
+    // wsum only: the weight multiplies the thing, and `n` is what the saturation curve reads.
+    const units = r.units.map(u => ({ ...u, wsum: u.wsum * w }));
+    return { ...r, scoreBoost: boostOf(units), units };
+}
+
+function evaluateNode(node, text, acHits) {
     if (!node) return { matched: false, scoreBoost: 0, units: [] };
     switch (node.type) {
         case 'TERM': {

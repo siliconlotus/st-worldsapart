@@ -50,6 +50,11 @@ per-term position (`? +fire +water`) means "required", which the implicit AND al
 case-sensitive (`? ^NASA` will not match `nasa`). They apply per term, and a SmartKey **ignores the
 entry's own** *Case-Sensitive* and *Match Whole Words* checkboxes.
 
+**Weights** apply to a group as well as a term: `? (copper pipe)::3` is the conjunction, tripled. A group's
+weight multiplies each thing inside it, so it scales the group's total whatever the operator; a term's own
+weight and its group's compose (`(fire::2)::3` is 6), and groups nest. A weight attached to nothing —
+`? fire ::3`, or `? fire ^2`, where `^` at the start of a term is the case flag — is refused as an error.
+
 **Weights** are a postfix: `term::2`, `term::0.5`, or the Lucene spelling `term^2`. `::` and not `:`,
 so a single colon stays ordinary text — `? meeting 10:30`, `? Judges 3:16`, `? re:code` and URLs
 work as written; a delimiter followed by anything but digits is part of the term (`fire::abc`).

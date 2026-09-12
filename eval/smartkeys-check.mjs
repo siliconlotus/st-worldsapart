@@ -33,6 +33,21 @@ eq(matches('? sci-fi', 'a sci-fi novel'), true, 'internal hyphen stays in the te
 eq(matches('? sci-fi', 'a fantasy novel'), false, 'sci-fi does not degrade to sci AND NOT fi (would match here)');
 eq(matches('? c-3po', 'c-3po beeped'), true, 'digits and hyphens in terms');
 eq(countKey('? fire::2.5', 'fire everywhere', false, false), 2.5, '::weight scales the matched score');
+// --- group weights ----------------------------------------------------------------------------------
+{
+    const at = (k, t) => countKey(k, t, false, false);
+    eq(at('? (copper pipe)::3', 'a copper pipe burst'), 3 * at('? copper pipe', 'a copper pipe burst'),
+        'a group weight multiplies the whole conjunction, each of its things alike');
+    eq(at('? (everest OR kailash)::2', 'the everest route'), 2,
+        'an alternation is one thing, so the weight doubles it rather than its mentions');
+    eq(at('? (fire::2)::3', 'fire here'), 6, 'a term weight and its group\'s compose');
+    eq(at('? ((fire::2)::3)::5', 'fire here'), 30, '...and nest');
+    const codes = k => validateSmartKey(k).map(p => `${p.severity}:${p.code}`).join(' ');
+    eq(codes('? fire ::3'), 'error:stray-weight', 'a weight attached to nothing is fatal, not a term to search for');
+    eq(codes('? fire ^2'), 'error:stray-weight', '...and the Lucene spelling, which lexes as a case-sensitive number');
+    eq(codes('? =2'), '', 'a whole-word number is an ordinary term');
+    eq(codes('? "^2"'), '', '...and quoting says the punctuation was meant');
+}
 eq(countKey('? fire::0.5', 'fire everywhere', false, false), 0.5, 'sub-1 ::weight down-weights (not clamped to 1)');
 eq(countKey('? "hot tub"::2 party', 'hot tub party', false, false), 3, 'weight after quoted phrase, summed by AND');
 eq(matches('? meeting "10:30"', 'the meeting is at 10:30'), true, 'literal colon via quoting');
