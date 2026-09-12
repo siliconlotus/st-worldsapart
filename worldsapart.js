@@ -1819,13 +1819,6 @@ const SETTINGS_HTML = `
                     <option value="once">One entry</option>
                     <option value="all">All entries</option>
                     </select>
-
-                    <label class="checkbox_label" for="wa_tokens_include_exempt">
-                    <input id="wa_tokens_include_exempt" type="checkbox"><span>Count "ignore budget" entries against the token budget</span>
-                    </label>
-
-                    <small id="wa_exempt_count" class="opacity50p"></small>
-
                     <label for="wa_world_priority_mode">Lorebook priority <span class="fa-solid fa-circle-question note-link-span" title="Interleaved: one ranked list across books, with optional per-book weights. Sequential: higher books fill first. A book appears below after its first scan."></span></label>
                     <select id="wa_world_priority_mode" class="text_pole">
                     <option value="interleaved">Interleaved</option>
@@ -1834,6 +1827,12 @@ const SETTINGS_HTML = `
 
                     <label>Lorebook order</label>
                     <div id="wa_world_priority_list" style="margin-top:2px;"></div>
+
+                    <label class="checkbox_label" for="wa_tokens_include_exempt">
+                    <input id="wa_tokens_include_exempt" type="checkbox"><span>Count "ignore budget" entries against the token budget</span>
+                    </label>
+
+                    <small id="wa_exempt_count" class="opacity50p"></small>
                 </div>
             </div>
 
