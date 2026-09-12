@@ -3026,9 +3026,12 @@ export async function lorebookStudio(preferredBook = null, open = null) {
         const head = document.createElement('div');
         head.className = 'wa-studio-exphead';
         head.style.cssText = 'display:flex;flex-direction:column;align-items:stretch;gap:6px;';
+        // The title yields to the controls: it fills what is left of the row and truncates, so the row never wraps on a long name.
         const label = document.createElement('div');
-        const nameB = document.createElement('b'); nameB.textContent = selected;
-        const countSpan = document.createElement('span'); countSpan.style.cssText = 'opacity:0.6;margin-left:5px;';
+        label.style.cssText = 'display:flex;align-items:center;gap:5px;flex:1 1 0;min-width:6em;overflow:hidden;';
+        const nameB = document.createElement('b'); nameB.textContent = selected; nameB.title = selected;
+        nameB.style.cssText = 'overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0;';
+        const countSpan = document.createElement('span'); countSpan.style.cssText = 'opacity:0.6;flex-shrink:0;';
         label.append(nameB, countSpan);
         const bookTools = document.createElement('span'); bookTools.className = 'wa-book-tools';
         bookTools.append(
@@ -3075,13 +3078,10 @@ export async function lorebookStudio(preferredBook = null, open = null) {
         // Typing re-filters in place (applyFilter), not the header, so the input keeps focus.
         const searchWrap = buildSearchBox(() => applyFilter());
         const rowStyle = 'display:flex;align-items:center;gap:8px;flex-wrap:wrap;';
-        // The title is a row of its own: its width is the book's name, and a control row that shares it wraps wherever the name ends.
-        const row0 = document.createElement('div'); row0.style.cssText = rowStyle;
-        const row1 = document.createElement('div'); row1.style.cssText = rowStyle;
+        const row1 = document.createElement('div'); row1.style.cssText = 'display:flex;align-items:center;gap:8px;';
         const row2 = document.createElement('div'); row2.style.cssText = rowStyle;
-        row0.append(label);
-        searchWrap.style.flex = '1 1 8em'; searchWrap.querySelector('input').style.width = '100%';
-        row1.append(filterWrap, sortBtn, searchWrap, trayBtn());
+        for (const c of [filterWrap, sortBtn, searchWrap]) c.style.flexShrink = '0';
+        row1.append(label, filterWrap, sortBtn, searchWrap, trayBtn());
         const newBtn = document.createElement('button');
         newBtn.type = 'button'; newBtn.className = 'menu_button';
         newBtn.style.cssText = 'width:auto;padding:3px 9px;flex-shrink:0;';
@@ -3091,7 +3091,7 @@ export async function lorebookStudio(preferredBook = null, open = null) {
         // A flex spacer with basis 0, not margin-left:auto: it never affects where the row wraps.
         const grow = document.createElement('span'); grow.style.cssText = 'flex:1 1 0;min-width:0;';
         row2.append(expandBtn, scanBtn, suggestAllBtn, suggestAllLlmBtn, grow, newBtn);
-        head.append(row0, row1, row2);
+        head.append(row1, row2);
         const fixed = document.createElement('div'); fixed.className = 'wa-studio-fixed';
         globalTrayEl = renderGlobalTray();
         trayEl = renderTray();

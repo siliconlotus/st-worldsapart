@@ -459,7 +459,7 @@ textarea.wa-entry-full.wa-tall { max-height: 62vh; }
 .wa-bulk-btn { margin: 0; padding: 3px 10px; font-size: 0.82em; width: unset; white-space: nowrap; }
 .wa-bulk-danger { color: var(--wa-severe); }
 .wa-bulk-sep { align-self: stretch; width: 1px; background: color-mix(in srgb, currentColor 22%, transparent); margin: 0 3px; }
-.wa-book-tools { margin-left: 8px; white-space: nowrap; }
+.wa-book-tools { margin-left: 8px; white-space: nowrap; flex-shrink: 0; }
 .wa-book-tool { cursor: pointer; opacity: 0.5; padding: 3px 5px; border-radius: 4px; font-size: 0.9em; }
 .wa-book-tool:hover { opacity: 1; background: var(--white20a, rgba(255,255,255,0.1)); }
 .wa-book-tool-danger:hover { color: var(--wa-severe); }
