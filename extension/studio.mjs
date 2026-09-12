@@ -219,7 +219,7 @@ export async function lorebookStudio(preferredBook = null, open = null) {
             chatScan: chatHits ? { messagesWith: chatHits, typedWith: chatTyped, messages: chatMsgs, unit: chatUnit } : undefined,
         });
     };
-    const afterChatScan = keys => { rebuildScan(); termRepaint?.(); rerenderKeys(keys); };
+    const afterChatScan = keys => { rebuildScan(); termRepaint?.(); rerenderKeys(keys); refreshTabStatus(); };
     /** Every key in the book — the whole book, not visibleEntries(), so a verdict never depends on the filter. */
     const bookKeys = () => [...new Set(Object.values(data?.entries ?? {})
         .flatMap(e => (Array.isArray(e.key) ? e.key : []).map(k => String(k).trim())).filter(Boolean))];
@@ -2244,6 +2244,7 @@ export async function lorebookStudio(preferredBook = null, open = null) {
             // runAudit, not rebuildScan: an audit that gathered no chat evidence is a different audit from the Explorer's.
             await runAudit();
             auditBtn.title = auditBtn.title.replace(/^Run audit/, 'Re-audit');   // a rail square: the word rides the tooltip
+            refreshTabStatus();
         }
         repaint();
     };
@@ -2850,6 +2851,21 @@ export async function lorebookStudio(preferredBook = null, open = null) {
     };
 
     const TABS = [['explorer', 'Explorer'], ['cleanup', 'Bulk Cleanup'], ['lab', 'Keyword Lab']];
+    /** The book's chat-evidence status, once, on the tab bar: it belongs to the audit, not to any one tab's tools. Empty until an audit exists. */
+    const tabStatus = () => {
+        const st = document.createElement('span'); st.className = 'wa-tab-status';
+        if (!scan) return st;
+        if (chatHits) {
+            st.textContent = `${[...chatHits.values()].filter(n => n > 0).length}/${chatHits.size} keys fire in ${chatLabel()} (${chatMsgs} msgs)`;
+            if (chatNames.length > 1) st.title = chatNames.slice(0, 20).join('\n') + (chatNames.length > 20 ? `\n+${chatNames.length - 20} more` : '');
+        } else {
+            st.textContent = 'no chat scanned';
+            st.title = 'Common word and book common flags rest on the book alone. Choose chats… to add chat evidence.';
+        }
+        return st;
+    };
+    // The bar is drawn before the automatic audit and before any chat scan, so both refresh the status in place.
+    const refreshTabStatus = () => { root.querySelector('.wa-tabs .wa-tab-status')?.replaceWith(tabStatus()); };
     const renderTabBar = () => {
         const bar = document.createElement('div'); bar.className = 'wa-tabs';
         for (const [id, label] of TABS) {
@@ -2862,19 +2878,7 @@ export async function lorebookStudio(preferredBook = null, open = null) {
             bar.append(b);
         }
         // Clear of the close X, which is absolutely positioned at the bar's right edge.
-        // The book's chat-evidence status, once, here: it belongs to the audit, not to any one tab's tools.
-        if (scan) {
-            const st = document.createElement('span'); st.className = 'wa-tab-status';
-            if (chatHits) {
-                st.textContent = `${[...chatHits.values()].filter(n => n > 0).length}/${chatHits.size} keys fire in ${chatLabel()} (${chatMsgs} msgs)`;
-                if (chatNames.length > 1) st.title = chatNames.slice(0, 20).join('\n') + (chatNames.length > 20 ? `\n+${chatNames.length - 20} more` : '');
-            } else {
-                st.textContent = 'no chat scanned';
-                st.title = 'Common word and book common flags rest on the book alone. Choose chats… to add chat evidence.';
-            }
-            bar.append(st);
-        }
-        bar.append(closeBtn);   // tab order: straight after the last tab. It's positioned, so no layout effect
+        bar.append(tabStatus(), closeBtn);   // tab order: straight after the last tab. It's positioned, so no layout effect
         return bar;
     };
 
