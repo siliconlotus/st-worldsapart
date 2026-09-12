@@ -2800,7 +2800,7 @@ export async function lorebookStudio(preferredBook = null, open = null) {
                     labCommitted = true;   // imported text is for reading, not editing
                     repaint();
                 }),
-            labTool('fa-comments', 'Load chats: pick chats bound to this book, each to the message-depth setting. Shift-click for a depth.',
+            labTool('fa-comments', 'Load chats: pick from the chats bound to this book, or from every chat when none is. Shift-click lists every chat and asks for a depth.',
                 async ev => {
                     const depth = ev.shiftKey
                         ? await numberPrompt('Load chats', 'How many messages deep, per chat?', settings().messageDepth || world_info_depth, 1)
@@ -2808,10 +2808,12 @@ export async function lorebookStudio(preferredBook = null, open = null) {
                     if (ev.shiftKey && depth == null) return;
                     const end = ev.shiftKey ? await numberPrompt('Load chats', 'Last message ID (-1 for the last message)', -1, -1) : -1;
                     if (ev.shiftKey && end == null) return;
-                    const found = await findBookChats(false);
+                    // Bound chats when there are any; otherwise every chat, nothing pre-ticked. Shift-click lists every chat regardless.
+                    let found = ev.shiftKey ? [] : await findBookChats(false);
+                    if (!found.length) found = await findBookChats(true);
                     const ctx = getContext(); const openName = String(ctx.chatId ?? '');
                     if (openName && !found.some(f => f.file.startsWith(openName))) found.push({ char: ctx.name2 ?? '', avatar: null, file: openName, size: `${(ctx.chat ?? []).length} msgs`, why: 'currently open', open: true });
-                    if (!found.length) { toastr.warning('No chat is bound to this book.', 'Keyword Lab'); return; }
+                    if (!found.length) { toastr.warning('No chats found.', 'Keyword Lab'); return; }
                     const picked = await pickChats(found);
                     if (!picked?.length) return;
                     labHay = await chatsHaystack(picked, depth, end);
