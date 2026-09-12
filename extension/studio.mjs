@@ -10,7 +10,7 @@ import { runState, settings } from './state.mjs';
 import { ensureStudioStyle, makeSortControl, renderMessageHtml, showCtxMenu, showEntryText, wiGlyph } from './ui-widgets.mjs';
 import { SORT_FNS, SORT_LABELS, normPresentation, presentationLabel, reconcileTiers, tierRank, wiTitleOf } from './sort.mjs';
 import { buildKeyPruneScan, llmKeyCandidates } from './keyword-tools.mjs';
-import { FLAG_PRIORITY, MINOR, MODERATE, SEVERE, STUDIO_PRUNE_OPTS } from './keyword-audit.mjs';
+import { FLAG_PRIORITY, MINOR, MODERATE, SEVERE, STUDIO_PRUNE_OPTS, orthoAlternates } from './keyword-audit.mjs';
 import { buildKeySuggest, classifyLlmCand, STUDIO_SUGGEST_OPTS } from './keyword-suggest.mjs';
 import { validateSmartKey } from './smartkeys.mjs';
 import { findOrphanBindings } from './bindings.mjs';
@@ -1911,8 +1911,11 @@ export async function lorebookStudio(preferredBook = null, open = null) {
 
     /** Scans the chosen chats and installs the counts — the one gatherer for the picker and the audit; returns a summary, no toast or repaint. */
     const scanChats = async (picked, label) => {
-        const keys = bookKeys();
-        if (!keys.length || !picked?.length) return null;
+        const own = bookKeys();
+        if (!own.length || !picked?.length) return null;
+        // The orthographic alternates ride along as ordinary keys: the audit can only cite chat evidence for a pattern
+        // somebody counted, and both routes scan whatever list they are handed.
+        const keys = [...new Set([...own, ...own.flatMap(k => orthoAlternates(k).map(a => a.alt))])];
 
         const totals = new Map(keys.map(k => [k, 0]));
         let seen = 0, via = '';

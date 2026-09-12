@@ -1,7 +1,7 @@
 // The sentinel fixture: a book and chat whose every audit verdict is written down, driven through the inputs the Studio uses.
 // Also importable into ST (install-sentinel.mjs), for the half node cannot see: chips, tooltips, colours.
 import fs from 'node:fs';
-import { buildKeyPruneScan } from '../extension/keyword-audit.mjs';
+import { buildKeyPruneScan, orthoAlternates } from '../extension/keyword-audit.mjs';
 import { ORTHO_FAMILIES } from '../extension/smartkeys.mjs';
 import { keywordScore, scanSegments, countKey, countChatHits, activationAdds, makeWindowFor, withExtraTexts } from '../extension/matcher.mjs';
 import { buildKeyPruneScan as _pruneScan } from '../extension/keyword-audit.mjs';
@@ -47,6 +47,11 @@ eq(msgs.length, 11, 'the hidden message is dropped, as core and WA both drop it'
         'a regex key is told its quote matches only itself, and is offered the curly pair');
     eq(v['/Bose-Einstein \\w+/']?.why, 'book uses en-dash, consider [-\u2013]',
         'the hyphen flags on evidence, and the evidence outranks the dead verdict it explains');
+    // Chat outranks the book as the citation: the alternates are scanned as ordinary keys so the count exists.
+    const probes = orthoAlternates('/Bose-Einstein \\w+/').map(a => a.alt);
+    const withChat = countChatHits(['/Bose-Einstein \\w+/', ...probes], ['the Bose\u2013Einstein condensate forms']);
+    const vc = verdicts({ messagesWith: withChat.messagesWith, messages: withChat.messages });
+    eq(vc['/Bose-Einstein \\w+/']?.why, 'chat uses en-dash, consider [-\u2013]', 'and the chat is cited over the book when it has the form');
 }
 
 // --- with the chat ----------------------------------------------------------------------------

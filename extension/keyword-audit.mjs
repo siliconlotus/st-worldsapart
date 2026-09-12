@@ -83,6 +83,28 @@ export const SEVERE = 'severe', MODERATE = 'moderate', MINOR = 'minor';
 /** The order `classify` tests its branches in, so a display can rank verdicts without re-deriving them. */
 export const FLAG_PRIORITY = ['unusable', 'english common', 'unattested', 'book shared', 'fragment', 'short', 'variant only', 'regex orthography'];
 
+/** Each orthographic form a regex key cannot reach: `alt` is the pattern rewritten into it, `label` names it, and
+ *  `shape` marks the one that flags without evidence. Exported so a chat scan can count these beside the keys —
+ *  a verdict can only cite evidence for a pattern somebody counted. */
+export function orthoAlternates(k) {
+    const raw = String(k ?? '').trim();
+    if (!isRegexKey(raw)) return [];
+    const out = [];
+    for (const f of ORTHO_FAMILIES) {
+        const straight = raw.includes(f.ascii);
+        const curly = [...f.pair].some(c => raw.includes(c));
+        if (straight === curly) continue;                        // both sides, or neither: nothing to say
+        const common = { label: straight ? 'curly form' : 'straight form', suggest: `[${f.ascii}${f.pair}]` };
+        // A quote is never a metacharacter, so a 1-for-1 swap is safe anywhere, class or not.
+        if (straight) for (const v of f.pair) out.push({ alt: raw.replaceAll(f.ascii, v), shape: true, ...common });
+        else out.push({ alt: [...f.pair].reduce((a, v) => a.replaceAll(v, f.ascii), raw), shape: false, ...common });
+    }
+    // The hyphen never flags on shape: a literal hyphen in a pattern is ordinary.
+    const en = raw.includes('–') ? null : swapLiteralHyphens(raw, '–');
+    if (en && en !== raw) out.push({ alt: en, shape: false, label: 'en-dash', suggest: '[-–]' });
+    return out;
+}
+
 export function buildKeyPruneScan(data, opts, ignoreSet, { caseSensitiveDefault = false, wholeWordsDefault = false, matchWindow = 'scan', chatScan } = {}) {
     // undefined: no scan, or a scan that did not cover this key; 0: scanned and silent. chatChecked reads the difference.
     const chatRateOf = key => {
@@ -178,27 +200,20 @@ export function buildKeyPruneScan(data, opts, ignoreSet, { caseSensitiveDefault 
     };
     const effCase = e => e.caseSensitive ?? caseSensitiveDefault;
     const effWhole = e => e.matchWholeWords ?? wholeWordsDefault;
-    /** A regex key's orthography verdict: it carries one side of a curly pair and not the other, so the form it omits
-     *  is unreachable. `needEvidence` asks whether the book holds that form, which is what lets this outrank
-     *  `unattested`; without it the straight side still flags, models emitting curly marks whatever a book holds. */
+    /** A regex key's orthography verdict. `needEvidence` asks whether a chat or the book holds the form the pattern
+     *  cannot reach, which is what lets this outrank `unattested`; the chat is the stronger claim and is cited first. */
     const regexOrtho = (k, needEvidence) => {
-        if (!isRegexKey(k)) return null;
-        const misses = alt => alt && alt !== k && contents.some(c => countRegexKey(alt, c) > countRegexKey(k, c));
-        for (const f of ORTHO_FAMILIES) {
-            const hasStraight = k.includes(f.ascii);
-            const hasCurly = [...f.pair].some(c => k.includes(c));
-            if (hasStraight === hasCurly) continue;                      // both sides, or neither: nothing to say
-            // A quote is never a metacharacter, so a 1-for-1 swap is safe anywhere, class or not.
-            const swaps = hasStraight
-                ? [...f.pair].map(v => k.replaceAll(f.ascii, v))
-                : [[...f.pair].reduce((acc, v) => acc.replaceAll(v, f.ascii), k)];
-            if (needEvidence ? !swaps.some(misses) : !hasStraight) continue;
-            return { flag: 'regex orthography', bookContent: 0, suggest: `[${f.ascii}${f.pair}]`,
-                missing: hasStraight ? 'curly' : 'straight' };
+        for (const a of orthoAlternates(k)) {
+            if (needEvidence) {
+                const chat = chatRateOf(a.alt), mine = chatRateOf(k) ?? 0;
+                const where = (chat !== undefined && chat > mine) ? 'chat'
+                    : contents.some(c => countRegexKey(a.alt, c) > countRegexKey(k, c)) ? 'book' : null;
+                if (where) return { flag: 'regex orthography', bookContent: 0, suggest: a.suggest, evidence: `${where} uses ${a.label}` };
+                continue;
+            }
+            if (a.shape) return { flag: 'regex orthography', bookContent: 0, suggest: a.suggest, label: a.label };
         }
-        // The hyphen only ever flags with evidence: a literal hyphen in a pattern is ordinary.
-        if (k.includes('–') || !misses(swapLiteralHyphens(k, '–'))) return null;
-        return { flag: 'regex orthography', bookContent: 0, suggest: '[-–]', evidence: 'book uses en-dash' };
+        return null;
     };
 
     // Tested in FLAG_PRIORITY order; the first hit wins, so moving a branch changes what a key reports.
@@ -278,7 +293,7 @@ export function buildKeyPruneScan(data, opts, ignoreSet, { caseSensitiveDefault 
         if (p.flag === 'book shared') return { text: `book shared (${Math.round(100 * p.bookListed / nBook)}%)`, severity };
         if (p.flag === 'fragment') return { text: 'phrase fragment', severity };
         if (p.flag === 'variant only') return { text: 'matches only un-hyphenated', severity };
-        if (p.flag === 'regex orthography') return { text: `${p.evidence ?? `will not match ${p.missing} form`}, consider ${p.suggest}`, severity };
+        if (p.flag === 'regex orthography') return { text: `${p.evidence ?? `will not match ${p.label}`}, consider ${p.suggest}`, severity };
         return { text: `short (${p.clean}/${p.total} clean)`, severity };
     };
     // Pre-ticked: the red tier, plus unattested on machine-written entries only (K14). Unusable is red but wants a correction, not a deletion.

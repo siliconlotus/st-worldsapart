@@ -541,9 +541,11 @@ core's intent, not to its bugs.
   other, in either direction, and suggests the pair — never the whole folded family, a guillemet or a
   prime being a different mark. The straight side flags on shape, the curly side only on evidence. An
   expansion would take away the only way to demand one form.
-- **A regex hyphen flags only on evidence**, the book holding what the en-dash form would have matched
-  (`matcher.mjs` `swapLiteralHyphens`, range markers and `v` patterns left alone). Evidence outranks
-  `unattested`: a pattern the book would match under another orthography is mis-written, not dead.
+- **A regex hyphen flags only on evidence**, a scanned chat or the book holding what the en-dash form
+  would have matched (`matcher.mjs` `swapLiteralHyphens`, range markers and `v` patterns left alone).
+  The chip cites where, the chat outranking the book. `orthoAlternates` is what a chat scan counts
+  beside the keys themselves — a verdict can cite only a pattern somebody counted. Evidence outranks
+  `unattested`: a pattern that would match under another orthography is mis-written, not dead.
 
 - **A key's hyphen is written as a space too** (`automaton.mjs` `keyVariants`), and not the reverse:
   62% of the corpus's keys are spaces-only and would each intern a form nobody writes. An em-dash's `--`
