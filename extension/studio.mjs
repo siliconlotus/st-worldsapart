@@ -942,9 +942,11 @@ export async function lorebookStudio(preferredBook = null, open = null) {
         meta.title = (keyCount ? `Keywords (${keyCount}): ${e.key.join(', ')}` : 'No keywords') + `\ntrigger probability ${e.useProbability !== false ? prob : 100}% · delay ${delay} · cooldown ${cooldown} (messages)`;
         // Open: the meta line sits under the title, with the title's own left edge; closed: it trails the row.
         const titleWrap = document.createElement('span'); titleWrap.className = 'wa-entry-titlewrap';
-        titleWrap.append(title);
+        const titleLine = document.createElement('span'); titleLine.className = 'wa-entry-titleline';
+        titleLine.append(title, ...(dupMark ? [dupMark] : []), pencil);   // the pencil stays at the end of the title, not the row
+        titleWrap.append(titleLine);
         if (open) { meta.classList.add('wa-entry-meta-sub'); titleWrap.append(meta); }
-        h.append(selBox, chev, mode, titleWrap, ...(dupMark ? [dupMark] : []), pencil, ...(open ? [] : [meta]));
+        h.append(selBox, chev, mode, titleWrap, ...(open ? [] : [meta]));
         // Collapsed-line badge: flagged-key count tinted by the worst flag; counts problems, not warnings (yellow, green).
         const counted = flagged ? [...flagged.values()].filter(v => scan.severityOf(v) === SEVERE) : [];
         // Unusable secondaries count too, as severe: the entry gates on fewer keys than written.
