@@ -553,9 +553,9 @@ core's intent, not to its bugs.
   beside the keys themselves — a verdict can cite only a pattern somebody counted. Evidence outranks
   `unattested`: a pattern that would match under another orthography is mis-written, not dead.
 
-- **Evidence about this book and this chat outranks the English list.** `FLAG_PRIORITY` is the order
+- **Evidence about this book and this chat outranks the pack's common list.** `FLAG_PRIORITY` is the order
   `classify` tests: `unusable`, `substring`, `chat common`, `book common`, `book shared`, the evidenced
-  `regex orthography`, then `english common`, then the shape flags, then `unattested` — a dead key
+  `regex orthography`, then `common word`, then the shape flags, then `unattested` — a dead key
   being neutral — and `variant only`. The first hit is what a key reports.
 - **`chat common` is a flag of its own**, advisory: a key over the chat-common share of messages,
   whatever list it is or is not on. Not on a `constant` or sticky entry, the author having declared
@@ -564,8 +564,8 @@ core's intent, not to its bugs.
   gate to there; never pre-ticked at either, its remedies being `constant` or a narrower key. K16 — one
   book, a handful of keys over the share — says those keys were kept by curation, which is why it does
   not pre-tick and not why it does not exist.
-- **`book common` and `english common` are its fallbacks**, only for a key no chat was scanned for: the
-  book's own prose standing in at `KEY_BOOK_COMMON` of the entries, then the English list. With a chat
+- **`book common` and `common word` are its fallbacks**, only for a key no chat was scanned for: the
+  book's own prose standing in at `KEY_BOOK_COMMON` of the entries, then the pack's common list. With a chat
   scanned the chat has answered — over the gate the key is `chat common`, under it neither says
   anything: ubiquity in entry text is a fact about the story, and a list word the chat does not bear
   out is a list being contradicted.
@@ -878,7 +878,7 @@ Ordered by whether a user can see the difference.
    existing lever, and caps where this would decay.
 2. **Proximity** (`(…)~N`). Witness spans shipped, so the display it needs exists.
 3. **Suggester i18n: English is supported, other languages fall back.** Stages 3–4 assume no
-   language (F58); the audit's `english common` is already a fallback behind chat and book evidence.
+   language (F58); the audit's `common word` is already a fallback behind chat and book evidence.
    The suggester is English: `ZIPF_EN` scores a non-English function word as maximally rare, so it
    should detect that its table does not cover the chat and stand down rather than invert. Standing
    down is a junkier list, not an equivalent one — chat evidence catches 1–4% of what the gate kills

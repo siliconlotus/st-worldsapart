@@ -119,7 +119,7 @@ console.log('ok   a key and its case variant count one entry once');
     const none = run(undefined);
     eq(none.zzznope.flag, 'unattested', 'no chat: a key absent from entry text is dead');
     eq(none.zzznope.why, 'unattested (book)', '...and says only what it checked');
-    eq(none.mother.flag, 'english common', 'no chat: the English list still flags a generic word');
+    eq(none.mother.flag, 'common word', 'no chat: the common list still flags a generic word');
     eq(none.mother.sev !== 'severe', true, '...but unevidenced it is no longer severe');
 
     const quiet = run({ messagesWith: new Map([['mother', 2], ['zzznope', 0]]), messages: 100 });

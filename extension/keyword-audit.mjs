@@ -71,11 +71,11 @@ function smartPaths(raw, isLoose) {
 /** The probes the chat scan counts beside a SmartKey so `chat common` can name the path that fires most. A single path
  *  needs no probe: it is the key. Sent only for keys over the chat-common share, a probe being a SmartKey evaluated per
  *  message. */
-export const pathProbes = k => { const p = smartPaths(k, isEnglishCommon(table().common)); return p.length > 1 ? p.map(x => x.probe) : []; };
+export const pathProbes = k => { const p = smartPaths(k, isCommonWord(table().common)); return p.length > 1 ? p.map(x => x.probe) : []; };
 
-const isEnglishCommon = (list) => (v) => !/\s/.test(v) && list.has(v.toLowerCase());
+const isCommonWord = (list) => (v) => !/\s/.test(v) && list.has(v.toLowerCase());
 
-/** Share of messages a key must match to be `chat common`, and to turn `english common` red. */
+/** Share of messages a key must match to be `chat common`, and to turn `common word` red. */
 export const KEY_CHAT_COMMON = 0.20;
 /** Share of messages at which `chat common` is severe rather than moderate: more messages than not. An assertion. */
 export const KEY_CHAT_SEVERE = 0.50;
@@ -93,7 +93,7 @@ export const KEY_BOOK_COMMON = 0.45;
 export const SEVERE = 'severe', MODERATE = 'moderate', MINOR = 'minor';
 
 /** The order `classify` tests its branches in, so a display can rank verdicts without re-deriving them. */
-export const FLAG_PRIORITY = ['unusable', 'substring', 'chat common', 'book common', 'book shared', 'regex orthography', 'english common', 'fragment', 'short', 'unattested', 'variant only'];
+export const FLAG_PRIORITY = ['unusable', 'substring', 'chat common', 'book common', 'book shared', 'regex orthography', 'common word', 'fragment', 'short', 'unattested', 'variant only'];
 
 /** Each orthographic form a regex key cannot reach: `alt` is the pattern rewritten into it, `label` names it, and
  *  `shape` marks the one that flags without evidence. Exported so a chat scan can count these beside the keys —
@@ -337,7 +337,7 @@ export function buildKeyPruneScan(data, opts, ignoreSet, { caseSensitiveDefault 
         // author declaring the entry ubiquitous, and the flag claims something about the key against this chat, not the wiring.
         if (!declared && chatRate !== undefined && chatRate >= (opts.chatCommon ?? KEY_CHAT_COMMON)) {
             // A SmartKey names the path that fires most, where its paths were probed; a single path is the key itself.
-            const paths = literal ? [] : smartPaths(k, isEnglishCommon(table().common));
+            const paths = literal ? [] : smartPaths(k, isCommonWord(table().common));
             const hit = p => chatScan.messagesWith?.get(p.probe) ?? -1;
             const top = paths.length > 1 ? paths.reduce((a, p) => (hit(p) > hit(a) ? p : a), paths[0]) : null;
             return { flag: 'chat common', bookContent, chatRate, via: top && hit(top) >= 0 ? top.label : null };
@@ -350,13 +350,13 @@ export function buildKeyPruneScan(data, opts, ignoreSet, { caseSensitiveDefault 
         const evidenced = regexOrtho(k, true);
         if (evidenced) return evidenced;
 
-        // --- the English list: the fallback for a key no chat was scanned for. With a chat, the chat has answered: over
+        // --- the pack's common list: the fallback for a key no chat was scanned for. With a chat, the chat has answered: over
         // the gate it read as chat common above, under it the list is contradicted and says nothing. -------------------
         if (opts.pruneCommon && chatRate === undefined) {
-            if (literal && !/\s/.test(k) && table().common.has(k.toLowerCase())) return { flag: 'english common', bookContent, chatRate };
+            if (literal && !/\s/.test(k) && table().common.has(k.toLowerCase())) return { flag: 'common word', bookContent, chatRate };
             // Named by its first all-common path: which path fires is the chat's question, and `chat common` answers it.
-            const common = literal ? null : smartPaths(k, isEnglishCommon(table().common)).find(p => p.common);
-            if (common) return { flag: 'english common', term: common.label, bookContent, chatRate };
+            const common = literal ? null : smartPaths(k, isCommonWord(table().common)).find(p => p.common);
+            if (common) return { flag: 'common word', term: common.label, bookContent, chatRate };
         }
 
         // --- the key's shape; then dead last, a dead key being neutral --------------------------------------------
@@ -399,7 +399,7 @@ export function buildKeyPruneScan(data, opts, ignoreSet, { caseSensitiveDefault 
     const severityOf = p => {
         if (p.flag === 'unattested') return '';
         if (p.flag === 'unusable') return SEVERE;
-        if (p.flag === 'english common') return MODERATE;   // an assertion about the language; only the chat can make it severe, as chat common
+        if (p.flag === 'common word') return MODERATE;   // an assertion about the language; only the chat can make it severe, as chat common
         if (p.flag === 'book shared') return p.bookListed / nBook >= opts.bookShared ? SEVERE : MODERATE;
         if (p.flag === 'fragment') return SEVERE;
         if (p.flag === 'substring') return MODERATE;
@@ -420,8 +420,8 @@ export function buildKeyPruneScan(data, opts, ignoreSet, { caseSensitiveDefault 
             return { text: `${p.literal ? 'unattested' : 'never matches'} ${where}`, severity };
         }
         if (p.flag === 'unusable') return { text: p.code ? `unusable — ${p.code}` : 'unusable', severity };
-        if (p.flag === 'english common') {
-            return { text: `english common${p.term ? ` · ${p.term}` : ''} · no chat scanned`, severity };
+        if (p.flag === 'common word') {
+            return { text: `common word${p.term ? ` · ${p.term}` : ''} · no chat scanned`, severity };
         }
         if (p.flag === 'book shared') return { text: `book shared (${Math.round(100 * p.bookListed / nBook)}%)`, severity };
         if (p.flag === 'chat common') return { text: `chat common · ${Math.round(100 * p.chatRate)}% of ${units}${p.via ? `, mostly ${p.via}` : ''}`, severity };

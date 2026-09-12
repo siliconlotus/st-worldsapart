@@ -40,7 +40,7 @@ eq(msgs.length, 11, 'the hidden message is dropped, as core and WA both drop it'
     eq(v.quarkspindle, undefined, 'a key in its own entry text is not flagged');
     eq(v.zzunattested?.why, 'unattested (book)', 'dead, and says only that the book was checked');
     eq(v.glimmerwort?.why, 'unattested (book)', 'chat-only key reads dead when no chat was searched');
-    eq(v.mother?.why, 'english common · no chat scanned', 'the English list flags a generic word while no chat has been scanned');
+    eq(v.mother?.why, 'common word · no chat scanned', 'the common list flags a generic word while no chat has been scanned');
     eq(v.CIA?.why, 'short (1/4 clean) — consider ? =CIA', 'a short key mostly inside longer words is offered the whole-word flag, measured over the book');
     // A key the audit never scanned — edited in since — is judged on demand, not handed "never matches" by default.
     const later = buildKeyPruneScan(data, OPTS, new Set());
@@ -79,7 +79,7 @@ eq(msgs.length, 11, 'the hidden message is dropped, as core and WA both drop it'
     eq(v.zzunattested?.why, 'unattested (book/chat)', 'still dead, and now says both were checked');
     eq(v.morning?.why, 'chat common · 55% of messages', 'a common word the chat confirms fires broadly reads as the chat flag, above the English list');
     eq(v.morning?.sev, RED, '...and severe by degree, being in more messages than not');
-    eq(v.mother, undefined, 'mother, in 1 of 11 messages, is under the share: the chat has answered, and the English list says nothing');
+    eq(v.mother, undefined, 'mother, in 1 of 11 messages, is under the share: the chat has answered, and the common list says nothing');
     eq(v.ver?.why, 'fires in 36% of messages, 0% as a word \u2014 consider ? =ver',
         'a key broad because it lands inside other words is told so, and offered the flag it lacks');
     eq(v.ver?.sev, 'moderate', '...one token fixes it, so not severe');

@@ -362,11 +362,11 @@ limits: the graded samples embed the pre-curation book, and the contrast ran on 
 re-ranking while the band's keys sit mostly on reference entries — the two-score work in
 `matcher-design.md` is what would let it be asked of the ranking that arbitrates.
 
-**Three signals, and none supersedes another.** `ENGLISH_COMMON` says the word denotes nothing in
+**Three signals, and none supersedes another.** `COMMON_WORD` says the word denotes nothing in
 particular and needs no chat (roughly half the books have none); chat firing rate says how much a key
 matches; the collapse ratio says it matches the wrong thing. The overlap between the first two is
 nearly empty — of what the Zipf gate kills, chat rate would catch 1–4% and most of the rest fires at a
-moderate rate (S22) — and where `ENGLISH_COMMON` is wrong is proper nouns that collide with common words
+moderate rate (S22) — and where `COMMON_WORD` is wrong is proper nouns that collide with common words
 (`River`, `Paris`) — most of the high-Zipf population in real books — where chat rate is right (K16).
 
 **The table is fiction prose** (`build-zipf.py`: Google Books eng-fiction 1-grams, 1980 on), because the
@@ -379,7 +379,7 @@ line is absence from the table, which begins at 3.0 after rounding. wordfreq alo
 noise of the SUBTLEX blend it replaced (S23) and is what any other language would build from.
 
 **Ruled: `chat common` raises its own flag.** Chat rate was confirm-only (it could redden
-`english common` and never speak alone), so a key that floods the chat without being a common English
+`common word` and never speak alone), so a key that floods the chat without being a common English
 word or frequent in the book's own prose went unflagged — `magic` on a Foxbridge entry. The flag
 claims something about the key against this chat, not about the entry's wiring, and that decides the
 exemptions: **exempt `constant` and `sticky`**, author declarations that the entry is meant to be

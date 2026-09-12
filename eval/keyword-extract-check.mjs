@@ -19,7 +19,7 @@ assert.strictEqual(ps.entries.length, 4, 'all keyword entries scanned');
 const flagsOf = uid => Object.fromEntries(ps.classifyEntry(pruneBook.entries[uid]).map(r => [r.key, r.flag]));
 const f0 = flagsOf(0);
 assert.strictEqual(f0.zzzznope, 'unattested', 'a key in no entry text is unattested');
-assert.strictEqual(f0.home, 'english common', 'a common English word is flagged as english-common');
+assert.strictEqual(f0.home, 'common word', 'a common English word is flagged as english-common');
 assert.strictEqual(f0.aX, 'short', 'a sub-minLength key is flagged short');
 assert.ok(!('Quillfeather' in f0), 'a real findable name is not flagged');
 {
