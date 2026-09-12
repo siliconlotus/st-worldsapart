@@ -870,7 +870,7 @@ export async function lorebookStudio(preferredBook = null, open = null) {
         selBox.addEventListener('change', () => { lastSel = null; selBox.checked ? selectedEntries.add(e.uid) : selectedEntries.delete(e.uid); refreshBulkBar(); });
         const chev = document.createElement('i');
         chev.className = 'fa-solid fa-chevron-right wa-chevron' + (open ? ' wa-open' : '');
-        chev.title = (open ? 'Collapse entry' : 'Expand entry') + ' — shift-click for all entries';
+        chev.title = (open ? 'Collapse entry' : 'Expand entry') + '. Shift-click for all entries.';
         // Shift toggles every OTHER entry; this one is left as-is.
         chev.addEventListener('click', ev => {
             ev.stopPropagation();
@@ -2749,7 +2749,7 @@ export async function lorebookStudio(preferredBook = null, open = null) {
         panes.append(hayWrap, keyBox, gateBox, bookList);
 
         const opts = document.createElement('div');
-        opts.style.cssText = 'display:flex;gap:14px;padding:6px 8px;flex:0 0 auto;opacity:0.8;font-size:0.9em;';
+        opts.style.cssText = 'display:flex;flex-wrap:wrap;align-items:center;gap:8px 14px;padding:6px 8px;flex:0 0 auto;opacity:0.8;font-size:0.9em;';
         const flag = (label, get, set) => {
             const l = document.createElement('label'); l.style.cssText = 'display:flex;gap:4px;align-items:center;cursor:pointer;';
             const c = document.createElement('input'); c.type = 'checkbox'; c.checked = get();
@@ -2772,7 +2772,7 @@ export async function lorebookStudio(preferredBook = null, open = null) {
             win.append(o);
         }
         win.addEventListener('change', () => { labWindow = win.value; rerunLab(); repaint(); });
-        winLabel.append(document.createTextNode('Match window'), win);
+        winLabel.append(document.createTextNode('Match span'), win);
         const labTool = (icon, title, onClick, marginLeft) => {
             const i = document.createElement('i');
             i.className = `fa-solid ${icon}`; i.title = title;
@@ -2782,7 +2782,7 @@ export async function lorebookStudio(preferredBook = null, open = null) {
         };
         opts.append(
             winLabel,
-            labTool('fa-comments', 'Load the current chat, as deep as the message-depth setting reads — shift-click for a depth',
+            labTool('fa-comments', 'Load the current chat to the message-depth setting. Shift-click for a depth.',
                 async ev => {
                     const depth = ev.shiftKey
                         ? await numberPrompt('Load chat', 'How many messages deep?', settings().messageDepth || world_info_depth, 1)
@@ -2804,7 +2804,7 @@ export async function lorebookStudio(preferredBook = null, open = null) {
                 if (picked.sec.length) gateBox.open = true;   // an imported gate must not land shut and invisible
                 repaint();
             }),
-            labTool('fa-book', 'Apply the books attached to this chat, hits only — shift-click to pick any book instead',
+            labTool('fa-book', 'Apply the books attached to this chat, hits only. Shift-click to pick any book.',
                 async ev => {
                     if (!ev.shiftKey) { await applyAttached({ pickIfNone: true }); return; }
                     const name = await pickBook('Apply which lorebook?', true);
