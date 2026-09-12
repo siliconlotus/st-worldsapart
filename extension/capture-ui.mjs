@@ -167,7 +167,7 @@ export async function versusCore(named) {
         properNouns: Number.isFinite(x.properNouns) ? Number(x.properNouns.toFixed(3)) : null,
         density: Number.isFinite(x.density) ? Number(x.density.toFixed(2)) : null,
     });
-    const spend = keys => [...byKey.entries()].filter(([k]) => keys.has(k)).reduce((t, [, x]) => t + (x.tokens || 0), 0);
+    const spend = keys => [...byKey.entries()].filter(([k]) => keys.has(k)).reduce((sum, [, x]) => sum + (x.tokens || 0), 0);
     const both = [...coreKeys].filter(k => waKeys.has(k)).length;
 
     console.log(`%cWorlds Apart \u00b7 WA vs ST core, message ${(getContext().chat ?? []).length}`, 'font-weight: bold');

@@ -1748,7 +1748,7 @@ const SETTINGS_HTML = `
             <label class="checkbox_label" for="wa_enabled">
                 <input id="wa_enabled" type="checkbox" class="wa-switch"><span data-i18n="Enabled">Enabled</span>
             </label>
-            <label><span data-i18n="Prompt insertion order">Prompt insertion order</span> <span class="fa-solid fa-circle-question note-link-span" title="The order selected entries take in the prompt. A base sort, with optional tier grouping. This setting is saved; the Studio's sort views are not." data-i18n="[title]The order selected entries take in the prompt. A base sort, with optional tier grouping. This setting is saved; the Studio's sort views are not."></span></label>
+            <label><span data-i18n="Prompt insertion order">Prompt insertion order</span> <span class="fa-solid fa-circle-question note-link-span" title="The order selected entries take in the prompt. A base sort, with optional tier grouping. This setting is saved. The Studio's sort views are not." data-i18n="[title]The order selected entries take in the prompt. A base sort, with optional tier grouping. This setting is saved. The Studio's sort views are not."></span></label>
             <div id="wa_presentation_order_mount" style="margin-top:4px;"></div>
 
             <div class="wa-row"><label for="wa_message_depth" data-i18n="Message depth">Message depth</label><input id="wa_message_depth" type="number" class="text_pole" min="1" max="20" step="1"></div>
@@ -1824,7 +1824,7 @@ const SETTINGS_HTML = `
                     <label data-i18n="Lorebook order">Lorebook order</label>
                     <div id="wa_world_priority_list" style="margin-top:2px;"></div>
 
-                    <div class="wa-row"><label for="wa_relevance_cutoff"><span data-i18n="Relevance cutoff">Relevance cutoff</span> <span class="fa-solid fa-circle-question note-link-span" title="Memory entries scoring below this are dropped. Recommend 0.1-0.2: higher drops more, including entries you may want; lower lets more irrelevant ones through. 0 = none." data-i18n="[title]Memory entries scoring below this are dropped. Recommend 0.1-0.2: higher drops more, including entries you may want; lower lets more irrelevant ones through. 0 = none."></span></label><input id="wa_relevance_cutoff" type="number" class="text_pole" min="0" max="1" step="0.01"></div>
+                    <div class="wa-row"><label for="wa_relevance_cutoff"><span data-i18n="Relevance cutoff">Relevance cutoff</span> <span class="fa-solid fa-circle-question note-link-span" title="Memory entries scoring below this are dropped. Recommend 0.1-0.2: higher drops more, including entries you may want. Lower lets more irrelevant ones through. 0 = none." data-i18n="[title]Memory entries scoring below this are dropped. Recommend 0.1-0.2: higher drops more, including entries you may want. Lower lets more irrelevant ones through. 0 = none."></span></label><input id="wa_relevance_cutoff" type="number" class="text_pole" min="0" max="1" step="0.01"></div>
 
                     <div class="wa-row"><label for="wa_max_entries"><span data-i18n="Vector entry cap">Vector entry cap</span> <span class="fa-solid fa-circle-question note-link-span" title="Retrieved entries in the prompt." data-i18n="[title]Retrieved entries in the prompt."></span></label><input id="wa_max_entries" type="number" class="text_pole" min="1" max="100" step="1"></div>
 
@@ -1834,7 +1834,7 @@ const SETTINGS_HTML = `
 
                     <div class="wa-row"><label for="wa_max_tokens_pct"><span data-i18n="Context %">Context %</span> <span class="fa-solid fa-circle-question note-link-span" title="Token budget as a share of the context. 0 = unlimited." data-i18n="[title]Token budget as a share of the context. 0 = unlimited."></span></label><input id="wa_max_tokens_pct" type="number" class="text_pole" min="0" max="100" step="1"></div>
 
-                    <div class="wa-row"><label for="wa_max_tokens"><span data-i18n="Max tokens">Max tokens</span> <span class="fa-solid fa-circle-question note-link-span" title="Token budget in tokens; the tighter of the two applies. 0 = unlimited." data-i18n="[title]Token budget in tokens; the tighter of the two applies. 0 = unlimited."></span></label><input id="wa_max_tokens" type="number" class="text_pole" min="0" max="100000" step="64"></div>
+                    <div class="wa-row"><label for="wa_max_tokens"><span data-i18n="Max tokens">Max tokens</span> <span class="fa-solid fa-circle-question note-link-span" title="Token budget in tokens. The tighter of the two applies. 0 = unlimited." data-i18n="[title]Token budget in tokens. The tighter of the two applies. 0 = unlimited."></span></label><input id="wa_max_tokens" type="number" class="text_pole" min="0" max="100000" step="64"></div>
 
                     <div class="wa-row"><label for="wa_budget_slack"><span data-i18n="Budget slack">Budget slack</span> <span class="fa-solid fa-circle-question note-link-span" title="% of the budget a slightly-too-big entry may exceed it by. 0 applies the budget strictly." data-i18n="[title]% of the budget a slightly-too-big entry may exceed it by. 0 applies the budget strictly."></span></label><input id="wa_budget_slack" type="number" class="text_pole" min="0" max="50" step="1"></div>
 
@@ -1844,7 +1844,7 @@ const SETTINGS_HTML = `
                     <option value="all" data-i18n="All entries">All entries</option>
                     </select>
                     <label class="checkbox_label" for="wa_tokens_include_exempt">
-                    <input id="wa_tokens_include_exempt" type="checkbox"><span data-i18n="Count "ignore budget" entries against the token budget">Count "ignore budget" entries against the token budget</span>
+                    <input id="wa_tokens_include_exempt" type="checkbox"><span data-i18n="Count &quot;ignore budget&quot; entries against the token budget">Count "ignore budget" entries against the token budget</span>
                     </label>
 
                     <small id="wa_exempt_count" class="opacity50p"></small>

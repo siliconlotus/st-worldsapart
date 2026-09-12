@@ -10,5 +10,8 @@
     "homePage": "",
     "hooks": {
         "activate": "init"
+    },
+    "i18n": {
+        "fr-fr": "i18n/fr-fr.json"
     }
 }

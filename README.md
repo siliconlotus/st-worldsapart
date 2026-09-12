@@ -5,6 +5,14 @@ Keys get their own page: **[SMARTKEYS.md](SMARTKEYS.md)** — the `?` boolean ex
 matches every kind of key (substring by default, what the fold normalises, word boundaries, the
 Lucene delta).
 
+## Languages
+
+The interface follows SillyTavern's own language setting; French ships in `i18n/fr-fr.json`, and a new locale
+is one JSON file declared in `manifest.json`, drafted from `node eval/i18n-check.mjs --dump`. The **Language**
+setting under *Audit & suggestions* is a different thing: it picks the word-frequency pack the keyword
+suggester and audit read (see *Data sources and licences*), so a French speaker can run an English UI over a
+French lorebook, or the reverse.
+
 ## Server plugin (optional, enables mean-centered search)
 
 The extension works on its own, but its best retrieval mode — **mean-centered vector

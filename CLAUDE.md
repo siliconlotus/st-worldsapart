@@ -224,6 +224,17 @@ globals are injected by the caller, never imported. The ST/DOM half is `worldsap
 `keyword-tools.mjs`, `studio.mjs`, `ui-widgets.mjs`, `capture-ui.mjs`. `state.mjs` binds ST's store
 rather than importing it, so the harness can read the shipped value of every knob.
 
+**Every string a user reads goes through ST's i18n, and `eval/i18n-check.mjs` is the gate.** In the ST half,
+injected HTML carries `data-i18n` (the English text is the key; `[title]…` for an attribute, `;` joining the
+two, so no key may hold `;`) and code strings use the `t` tag, one whole sentence per template so a translation
+can reorder it — a count whose noun changes is two templates, never a `${n === 1 ? '' : 's'}`. A pure module
+whose prose reaches the screen (`keyword-audit.mjs` verdicts, `wholeWordAdvice`) takes the tag as a parameter
+defaulting to plain interpolation, so the checks still assert English. An English constant a check or the docs
+name (a flag, a sort label, a grade anchor) stays the key and is `translate()`d where drawn; the check
+enumerates those tables. Nothing in the ST half may bind a local named `t`. `i18n/<locale>.json` must cover
+exactly the extracted keys, and the check prints the missing ones; `--dump` lists every key for drafting a
+locale. Console output, slash-command help and the SmartKey validator's messages are not translated.
+
 **A harness may contain no literal that has an authoritative home.** Where the authority is a file,
 import it; where the authority is the user, require it.
 
