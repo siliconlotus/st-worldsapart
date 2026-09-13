@@ -223,8 +223,7 @@ no key matches on them; they are ordinary narrative prose and stay evidence for 
 - The Explorer is the primary curation surface and Cleanup the once-per-book sweep. Both read the same
   classifier over the whole book and differ only in presentation and checkbox state — any other
   divergence is a bug — so anything the audit learns must reach the classifier (`classifyEntry`,
-  `reasonOf`/`severityOf`) or it is invisible where the work happens; a finding about `defChecked`, the
-  pre-tick, is about the secondary screen.
+  `reasonOf`/`severityOf`) or it is invisible where the work happens.
 - `generated()` (`keyword-audit.mjs`) tests STMB field presence and is used only in `defChecked`; scope
   is `inScope`. A miss costs manual ticking on Cleanup and nothing else.
 - Chat header identity fields are deprecated; the per-message `name` on `is_user` turns is
@@ -249,13 +248,9 @@ first-class seed source**, because it names its subject; a memory entry's title 
 editorial label ("003 - Post-Rut Domesticity") and weaker. Asserted, not measured.
 
 Reference entries are a small minority living *inside* memory books, and those books are a handful of
-stories (S17), so any memory/reference branch must be per entry, as the pruner's `generated()` split
-is. Book size does not identify a population. **`generated()` under-detects**, because offline editing
-strips the STMB metadata. The fallback: read the numbering pattern off the book's *own* tagged entries
-and treat an untagged entry as generated if its title continues the series. Where STMB's serial
-prefix is off there is no series, so it degrades to silence; requiring *continuation* rather than
-*looking numbered* biases it toward misses, the right direction — a false positive pre-ticks
-deliberate aliases on a hand-written entry, a false negative costs a few clicks on Cleanup.
+stories (S17), so any memory/reference branch must be per entry, as the tier is (`relevance.mjs`
+`isMemory`). Book size does not identify a population. **The STMB fields under-detect**, because
+offline editing strips the metadata.
 
 **Do not compare key counts across populations.** Reference entries carry far fewer keys, but that is
 who *wrote* them — memory keys LLM-generated, reference keys hand-written, the same split within one
@@ -390,8 +385,8 @@ claims something about the key against this chat, not about the entry's wiring, 
 exemptions: **exempt `constant` and `sticky`**, author declarations that the entry is meant to be
 ubiquitous (the audit's own sticky exemptions are deleted, so this stands alone); **not exempt
 vectorized**, and therefore not the memory tier — revisit if the volume drowns the flags worth acting
-on. **Advisory: it colours, it never pre-ticks**, as `KEY_DUPE_MIN` does; its remedies are `constant`
-or a narrower key, so it does not belong in a tick-to-remove list. **Open: the threshold.**
+on. **Advisory: it colours**, as `KEY_DUPE_MIN` does; its remedies are `constant` or a narrower key,
+not removal. **Open: the threshold.**
 `KEY_CHAT_COMMON` is 20%, set loose for the confirm role; it wants re-reading against what the flag
 actually surfaces.
 
@@ -423,33 +418,24 @@ Blocking measurement:
 
 Accepted as follow-on:
 
-5. **SmartKeys emission.** Portability policy is a judgement call, and the quality gates exempt `?`
-   keys entirely (`keyword-audit.mjs`), so they would enter where nothing can see them.
-6. **`countKey` signature change.**
-7. **`generated()` fallback** — the numbering-series heuristic in *Populations*. Low stakes, so
-   "fairly safe" is the proportionate standard.
-8. **The surviving hypothesis**: reference entries may be reachable by lexical-statistical means on
+5. **`countKey` signature change.**
+6. **The surviving hypothesis**: reference entries may be reachable by lexical-statistical means on
    the entry plus a chat backstop, while memory entries need more. Untested. *Populations* cuts both
    ways: reference bodies overlap the chat least, so the backstop supplies least there, but a
    reference entry's subject usually sits in its title.
-9. **Chat corpus assembly** — union a book's bound chats and dedupe shared branch prefixes, without
+7. **Chat corpus assembly** — union a book's bound chats and dedupe shared branch prefixes, without
    classifying branch semantics, since only the corrupting case is the detectable one.
-
-Wanting a labelled set beyond Richard's:
-
-10. **The collapse diagnostic.** Ship "this entry has a key matching inside other words" as a
-    per-entry advisory on the Explorer chips. Missing is precision and recall against human judgement;
-    a finished curation's removed set is a clean negative label. Advises, never repairs (item 0).
-11. **Whether the pre-tick is calibrated well enough to be the default.** A pre-tick is a
-    recommendation; the measurement is the override rate over a finished pass — high means recalibrate
-    or drop the default, low means it stays (it is not redundant with Select all, which ticks the
-    yellow band too). The bar sits higher than for a reversible action, because an un-vetted removal is
-    silent where an un-vetted retention reappears next audit. Governs Cleanup, so nothing is blocked.
 
 Retired, recorded so they are not re-derived: **key-set overlap as the score** (superseded by the
 behavioural standard); **`J(entry, window)` and its apparatus** (ranker-side); **span masking** (not
 replaced; the problem does not arise under a count test); **embedding drift detection** (reads
-surface overlap rather than meaning, S15); **hypernymy by co-occurrence** (the Zipf gate is the proxy).
+surface overlap rather than meaning, S15); **hypernymy by co-occurrence** (the Zipf gate is the proxy);
+**SmartKeys emission** (the audit suggests `? =k` and `? ^k` where a key collapses under whole-word or
+case, and `?` keys are audited on df, exempt only from the literal-string heuristics); **the collapse
+diagnostic's precision and recall against a curation** (shipped as the `substring` and `short` flags,
+per key; a curation is one book's situation, so there is nothing to optimise against); **the pre-tick**
+(Cleanup pre-ticks nothing; Select… picks a bucket); **the `generated()` fallback** (a numbering-series
+heuristic whose only consumer was the pre-tick).
 
 ## Related
 

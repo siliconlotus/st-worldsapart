@@ -88,7 +88,7 @@ export const KEY_BOOK_COMMON = 0.45;
  * classifyEntry re-reads each entry's flags. `bookContent` and `bookListed` are counts over `nBook`; `chatRate` is a share.
  * @param {{messagesWith: Map<string, number>, messages: number}} [chatScan] MESSAGES containing each key (addMessageHits), never occurrences; absent = no chat evidence
  * @param {Function} [t] the template tag every verdict text goes through; ST passes its i18n `t`, the checks take the plain default
- * @returns {{entries, nE, classifyEntry, reasonOf, defChecked, severityOf, effCase, effWhole, dupes, unusableKeysOf}}
+ * @returns {{entries, nE, classifyEntry, reasonOf, severityOf, effCase, effWhole, dupes, unusableKeysOf}}
  */
 /** The audit's three severities, by name. The colours they are drawn in belong to the display, and the order to RANK there. */
 export const SEVERE = 'severe', MODERATE = 'moderate', MINOR = 'minor';
@@ -398,7 +398,7 @@ export function buildKeyPruneScan(data, opts, ignoreSet, { caseSensitiveDefault 
         }
         return out;
     };
-    // Shared by reasonOf, defChecked and the Studio badge, so severity, pre-tick and problem status agree. A name, not a
+    // Shared by reasonOf and the Studio badge, so severity and problem status agree. A name, not a
     // colour: a caller comparing shades breaks the moment one is retuned, and this module has no business holding either.
     const severityOf = p => {
         if (p.flag === 'unattested') return '';
@@ -447,12 +447,6 @@ export function buildKeyPruneScan(data, opts, ignoreSet, { caseSensitiveDefault 
         const ratio = p.total ? p.clean / p.total : 0;
         return { text: ratio <= 1 / 3 && !p.ww ? t`short (${p.clean}/${p.total} exact) — consider ? =${p.key}` : t`short (${p.clean}/${p.total} exact)`, severity };
     };
-    // Pre-ticked: the red tier, plus unattested on machine-written entries only (K14). Unusable is red but wants a correction, not a deletion.
-    const generated = e => e?.stmemorybooks !== undefined || e?.STMB_start !== undefined || e?.stmbArc !== undefined;
-    const byUid = new Map(allEntries.map(e => [String(e.uid), e]));
-    // chat common is red at degree but never pre-ticked: its remedies are `constant` or a narrower key, not deletion.
-    const defChecked = p => p.flag !== 'unusable' && p.flag !== 'chat common' && (severityOf(p) === SEVERE || (p.flag === 'unattested' && generated(byUid.get(String(p.uid)))));
-
     // Near-duplicates: Jaccard over rare vocabulary; an arc and its member scene are skipped. Advisory only.
     const isArc = e => e?.stmbArc === true || /^\s*\[?\s*arc\b/i.test(String(e?.comment ?? ''));
     const dupeVocab = e => {
@@ -486,7 +480,7 @@ export function buildKeyPruneScan(data, opts, ignoreSet, { caseSensitiveDefault 
         for (const list of dupes.values()) list.sort((p, q) => q.sim - p.sim);
     }
 
-    return { entries, nE, classifyEntry, reasonOf, defChecked, severityOf, effCase, effWhole, dupes, unusableKeysOf };
+    return { entries, nE, classifyEntry, reasonOf, severityOf, effCase, effWhole, dupes, unusableKeysOf };
 }
 
 /** Every entry, every mode. */

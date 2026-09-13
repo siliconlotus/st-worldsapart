@@ -35,8 +35,6 @@ assert.ok(!('Quillfeather' in f0), 'a real findable name is not flagged');
         'an unusable primary is flagged as such, with the validator\'s own code, not as unattested');
     assert.ok(prim.every(f => scan.reasonOf(f).text.startsWith('unusable') && scan.reasonOf(f).severity),
         'it reads as unusable on the chip and carries a severity colour');
-    assert.ok(prim.every(f => !scan.defChecked(f)),
-        'and is NOT pre-ticked for deletion — the fix is a correction, not a removal');
     assert.deepStrictEqual(scan.unusableKeysOf(book.entries[0]).map(r => `${r.key}:${r.code}`), ['? "moon:stray-quote'],
         'only the secondary needs the separate list; the negation-only one is legitimate there');
     assert.ok(scan.unusableKeysOf(book.entries[0]).every(r => r.message), 'each carries the validator message the author reads');
