@@ -519,6 +519,8 @@ console.log('ok   the SMARTKEYS.md worked example holds');
     eq(c('? ((john XOR quincy) adams)~1', 'Quincy Adams and John Adams'), 1, 'a vetoed window consumes nothing: John Adams forms after Adams-and-John is refused');
     eq(c('? (fire XOR flame)~1', 'fire and flame'), 0, 'a group that is itself the XOR: each side within the other\'s reach');
     eq(c('? (fire XOR flame)~1', 'fire and fire'), 2, '...and one side alone counts its occurrences');
+    eq(c('? (((john james) | quincy) adams)~1', 'John Adams'), 0, 'an alternation of longer things is a choice: the left side needs both names');
+    eq(c('? (((john james) | quincy) adams)~1', 'John James Adams and Quincy Adams'), 2, '...swept together, so each Adams goes to the name beside it');
     eq(c('? (=cat (dog | wolf))~1', 'the cat and wolf'), 1, 'flags on leaves hold inside a group');
     eq(c('? (=cat (dog | wolf))~1', 'the category and wolf'), 0, '...so = still refuses the substring');
     eq(c('? (fire pipe)~0', 'firetruck pipe'), 1, 'a span is widened to its word before slack is counted: a substring hit is as near as its word');

@@ -114,6 +114,8 @@ being the one construct that carries order.
 
 - The unit of completeness is the conjunct, not the leaf: in `? ((Arthur | Kyle) Porsche)~3` the
   window needs one span from `Porsche` and one from either branch, and the sweep takes the nearer.
+- An alternation of anything larger than leaves is a choice of alternatives, swept together: a window
+  counts when any alternative is complete in it, and a span is consumed once whichever formed it.
 - N is per junction: consecutive spans, sorted by position, each within N words. Accepted cost: a
   k-term group can span (k−1)·N.
 - N is the words strictly between neighbouring spans, so `~0` is adjacency in either order.

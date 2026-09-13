@@ -504,39 +504,50 @@ function alternatives(node, text, acHits, top = false) {
         : both;
 }
 
-/** Leftmost minimal windows holding one span per conjunct with at most `slack` words between neighbours, each consumed before the next is
- *  sought. A window `vetoed` consumes nothing: the sweep moves on from its first span. */
-function sweep(reqs, slack, src, vetoed) {
-    const k = reqs.length;
-    if (!k || reqs.some(r => !r.length)) return [];
+/** Leftmost minimal windows over every alternative's spans at once: a window counts when some alternative has one span per conjunct
+ *  in it with at most `slack` words between neighbours, is shrunk to what that alternative needs, and is consumed as found; a
+ *  `vetoed` one consumes nothing, the sweep moving on from its first span. */
+function sweep(alts, slack, src, vetoed) {
+    const live = alts.filter(a => a.reqs.length && a.reqs.every(r => r.length));
+    if (!live.length) return [];
     // Widened to the words it sits in, so a substring hit is as near as its word and the tail of a word is not a word between.
     const isWord = new RegExp(wordChar(), 'u');
-    const snap = sp => {
-        let { at, to } = sp;
+    const snap = ({ at, to }) => {
         while (at > 0 && isWord.test(src[at - 1])) at--;
         while (to < src.length && isWord.test(src[to])) to++;
-        return { ...sp, at, to };
+        return { at, to };
     };
-    const spans = reqs.flatMap((r, req) => r.map(sp => snap({ ...sp, req }))).sort(byAt);
-    const out = [], seen = new Map();
-    let s = 0, have = 0;
-    const add = i => { const n = (seen.get(spans[i].req) ?? 0) + 1; seen.set(spans[i].req, n); if (n === 1) have++; };
-    const drop = i => { const n = seen.get(spans[i].req) - 1; seen.set(spans[i].req, n); if (n === 0) have--; };
-    const reset = i => { s = i; seen.clear(); have = 0; };
+    // One span per extent, carrying every [alternative, conjunct] it serves: a leaf two alternatives share is one occurrence.
+    const byExtent = new Map();
+    live.forEach((a, ai) => a.reqs.forEach((r, ri) => r.forEach(raw => {
+        const { at, to } = snap(raw);
+        let sp = byExtent.get(`${at}:${to}`);
+        if (!sp) byExtent.set(`${at}:${to}`, sp = { at, to, in: [] });
+        sp.in.push([ai, ri]);
+    })));
+    const spans = [...byExtent.values()].sort(byAt);
+    const count = live.map(() => new Map()), have = live.map(() => 0);
+    const add = i => { for (const [a, r] of spans[i].in) { const n = (count[a].get(r) ?? 0) + 1; count[a].set(r, n); if (n === 1) have[a]++; } };
+    const drop = i => { for (const [a, r] of spans[i].in) { const n = count[a].get(r) - 1; count[a].set(r, n); if (n === 0) have[a]--; } };
+    const covered = () => live.findIndex((a, i) => have[i] === a.reqs.length);
+    const needed = (a, i) => spans[i].in.some(([ai, r]) => ai === a && count[a].get(r) === 1);
+    const out = [];
+    let s = 0;
+    const reset = i => { s = i; count.forEach(m => m.clear()); have.fill(0); };
     for (let e = 0; e < spans.length; e++) {
         if (e > s && between(src, spans[e - 1], spans[e]) > slack) reset(e);
         add(e);
-        while (have === k) {
-            while (seen.get(spans[s].req) > 1) drop(s++);
+        for (let a = covered(); a >= 0; a = covered()) {
+            while (!needed(a, s)) drop(s++);
             const win = { at: spans[s].at, to: Math.max(...spans.slice(s, e + 1).map(x => x.to)) };
-            if (!vetoed(win)) { out.push(win); reset(e + 1); break; }
+            if (!vetoed(live[a].vetoes, win)) { out.push(win); reset(e + 1); break; }
             drop(s++);
         }
     }
     return out;
 }
 
-/** Non-overlapping clusters of a `~N` group, in text order. A cluster stands only if no negated operand holds within reach of it:
+/** Clusters of a `~N` group, in text order and disjoint. A cluster stands only if no negated operand holds within reach of it:
  *  a leaf or a `~N` group holds by an occurrence at most `near` words away, however far it extends; a compound by its operator
  *  over its sides. */
 function clusters(node, text, acHits) {
@@ -551,13 +562,7 @@ function clusters(node, text, acHits) {
         const l = inReach(v.left, c), r = inReach(v.right, c);
         return v.type === 'AND' ? l && r : v.type === 'OR' ? l || r : l !== r;
     };
-    const found = [];
-    for (const { reqs, vetoes } of alternatives(node, text, acHits, true)) {
-        found.push(...sweep(reqs, node.near, src, c => vetoes.some(v => inReach(v, c))));
-    }
-    const out = [];
-    for (const c of found.sort(byAt)) if (!out.length || c.at >= out[out.length - 1].to) out.push(c);
-    return out;
+    return sweep(alternatives(node, text, acHits, true), node.near, src, (vetoes, c) => vetoes.some(v => inReach(v, c)));
 }
 
 /** A `~N` group is one thing, seen once per cluster: leaf weights are not read, the group's own applies in evaluate(). `parts` carries

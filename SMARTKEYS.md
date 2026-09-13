@@ -68,7 +68,8 @@ thing the passage is about.
 and *pipe* are within three words of each other, in either order — *pipe of old copper* (two words between)
 yes, *copper in the bath beside the pipe* no. `~0` is adjacency, either order. N is the words allowed between
 each neighbouring pair, so a group of three can stretch to twice N. An alternation inside takes whichever
-branch is nearer: `? ((Arthur | Kyle) Porsche)~3`; an `XOR` takes either branch unless the other is
+branch is nearer: `? ((Arthur | Kyle) Porsche)~3`, and an alternation of longer things is a choice
+between them, `? (((john james) | quincy) adams)~1`; an `XOR` takes either branch unless the other is
 also within reach: `? ((john XOR quincy) adams)~1` finds *John James Adams* and *Quincy Jefferson
 Adams*, and not *John Quincy Adams*. A negation inside vetoes only within reach: `? (fire
 -drill)~2` matches a *fire* with no *drill* within two words of it, where `? fire -drill` gives up on the
