@@ -126,11 +126,11 @@ being the one construct that carries order.
 - In `((a b)~2)~3` the inner slack binds: a nested group is one conjunct whose spans are its clusters.
 - XOR inside a group is `(a -b) | (b -a)`, the negations being the group's own veto: `((a XOR b) c)~3`
   has a cluster through either side unless the other side is within that cluster's reach.
-- A negation is a veto over the padded window: the positive witness window, padded N+1 words each side
-  — the reach a positive has, N being the words strictly between — holds no negated operand. The
-  operand is evaluated whole over that window's text, so a compound negation vetoes when it matches
-  there and has no reach of its own; a pattern's `^` and `$` anchor to the window. `? (-x)~N` has no positive to anchor and is the existing `negation-only`
-  error.
+- A negation is a veto within reach — the reach a positive has, at most N words between. A term, a
+  pattern or a `~N` group is within reach by an occurrence (a match, a cluster), however far it extends;
+  a compound holds by its operator over its sides. So `-(drill practice)` vetoes when both words are
+  within reach of the cluster, and `-(drill practice)~0` when a stretch holding them adjacent is.
+  `? (-x)~N` has no positive to anchor and is the existing `negation-only` error.
 - The digits are required; a bare `~` would depend on a default the key does not show.
 - A group without `~` keeps segment scope, so no existing key changes meaning.
 - NEAR is for content terms; whether an operand is a stopword is language-dependent and belongs to the

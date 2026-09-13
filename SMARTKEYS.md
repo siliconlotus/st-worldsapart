@@ -72,8 +72,9 @@ branch is nearer: `? ((Arthur | Kyle) Porsche)~3`; an `XOR` takes either branch 
 also within reach: `? ((john XOR quincy) adams)~1` finds *John James Adams* and *Quincy Jefferson
 Adams*, and not *John Quincy Adams*. A negation inside vetoes only within reach: `? (fire
 -drill)~2` matches a *fire* with no *drill* within two words of it, where `? fire -drill` gives up on the
-whole window. The negated part can be anything a key can be, read whole within reach: `-(drill
-practice)` vetoes when both words are within reach, wherever they sit relative to each other. Each cluster counts once, as one thing: the group scores like a single term, and a weight
+whole window. The negated part can be anything a key can be. A word, a phrase or a group is within reach when
+any part of it is, and a combination is read over what is within reach: `-(drill practice)` vetoes when
+both words are, `-(drill practice)~0` when they are adjacent to each other and that pair is. Each cluster counts once, as one thing: the group scores like a single term, and a weight
 goes on the group, `? (copper pipe)~3::2`; a weight on a word inside the group is not read. `~N` goes on a
 group only. After a quoted phrase it is refused, since a phrase is already its words adjacent and in order,
 and a `~` anywhere else is an ordinary character. What counts as a word is the *Word boundary* setting below.

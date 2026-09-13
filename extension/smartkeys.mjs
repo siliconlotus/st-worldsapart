@@ -467,6 +467,8 @@ function evaluateNode(node, text, acHits) {
 const wordRuns = () => new RegExp(`${wordChar()}+`, 'gu');
 const wordsIn = s => (s.match(wordRuns()) ?? []).length;
 const byAt = (a, b) => a.at - b.at || a.to - b.to;
+/** Words strictly between two spans; 0 when they touch or overlap. */
+const between = (src, a, b) => { if (a.at > b.at) [a, b] = [b, a]; return b.at > a.to ? wordsIn(src.slice(a.to, b.at)) : 0; };
 
 const leaves = (node, out = []) => {
     if (!node) return out;
@@ -483,7 +485,7 @@ function leafSpans(node, text, acHits) {
 }
 
 /** The ways a group can be satisfied, each `{ reqs, vetoes }`: one span list per conjunct — an alternation of leaves pools into one,
- *  a nested `~N` group is its clusters — and the NOT operands, which are tested over the padded window. */
+ *  a nested `~N` group is its clusters — and the NOT operands, whose occurrences must be out of reach. */
 function alternatives(node, text, acHits, top = false) {
     if (!node) return [];
     if (!top && node.near !== undefined) return [{ reqs: [clusters(node, text, acHits)], vetoes: [] }];
@@ -516,14 +518,13 @@ function sweep(reqs, slack, src, vetoed) {
         return { ...sp, at, to };
     };
     const spans = reqs.flatMap((r, req) => r.map(sp => snap({ ...sp, req }))).sort(byAt);
-    const gap = (a, b) => (b.at > a.to ? wordsIn(src.slice(a.to, b.at)) : 0);
     const out = [], seen = new Map();
     let s = 0, have = 0;
     const add = i => { const n = (seen.get(spans[i].req) ?? 0) + 1; seen.set(spans[i].req, n); if (n === 1) have++; };
     const drop = i => { const n = seen.get(spans[i].req) - 1; seen.set(spans[i].req, n); if (n === 0) have--; };
     const reset = i => { s = i; seen.clear(); have = 0; };
     for (let e = 0; e < spans.length; e++) {
-        if (e > s && gap(spans[e - 1], spans[e]) > slack) reset(e);
+        if (e > s && between(src, spans[e - 1], spans[e]) > slack) reset(e);
         add(e);
         while (have === k) {
             while (seen.get(spans[s].req) > 1) drop(s++);
@@ -535,21 +536,24 @@ function sweep(reqs, slack, src, vetoed) {
     return out;
 }
 
-/** `[from, to]`: the window widened by `slack` + 1 words each side — the reach a positive has, `slack` being the words strictly between. */
-function padded(src, at, to, slack) {
-    const before = [...src.slice(0, at).matchAll(wordRuns())].slice(-(slack + 1));
-    const after = [...src.slice(to).matchAll(wordRuns())].slice(0, slack + 1);
-    const last = after[after.length - 1];
-    return [before.length ? before[0].index : at, last ? to + last.index + last[0].length : to];
-}
-
-/** Non-overlapping clusters of a `~N` group, in text order. */
+/** Non-overlapping clusters of a `~N` group, in text order. A cluster stands only if no negated operand holds within reach of it:
+ *  a leaf or a `~N` group holds by an occurrence at most `near` words away, however far it extends; a compound by its operator
+ *  over its sides. */
 function clusters(node, text, acHits) {
     const src = String(text).normalize('NFC');
+    const occ = new Map();
+    // A leaf's occurrences are its matches, snapped as the sweep snaps them: one conjunct at unbounded slack is exactly that.
+    const occurrences = v => { let o = occ.get(v); if (!o) occ.set(v, o = clusters(v.near !== undefined ? v : { ...v, near: Infinity }, text, acHits)); return o; };
+    const inReach = (v, c) => {
+        if (!v) return false;
+        if (v.near !== undefined || v.type === 'TERM' || v.type === 'REGEX') return occurrences(v).some(o => between(src, c, o) <= node.near);
+        if (v.type === 'NOT') return !inReach(v.operand, c);
+        const l = inReach(v.left, c), r = inReach(v.right, c);
+        return v.type === 'AND' ? l && r : v.type === 'OR' ? l || r : l !== r;
+    };
     const found = [];
     for (const { reqs, vetoes } of alternatives(node, text, acHits, true)) {
-        const vetoed = c => { const [from, to] = padded(src, c.at, c.to, node.near); return vetoes.some(v => evaluate(v, src.slice(from, to)).matched); };
-        found.push(...sweep(reqs, node.near, src, vetoed));
+        found.push(...sweep(reqs, node.near, src, c => vetoes.some(v => inReach(v, c))));
     }
     const out = [];
     for (const c of found.sort(byAt)) if (!out.length || c.at >= out[out.length - 1].to) out.push(c);
