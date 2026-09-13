@@ -23,7 +23,7 @@ const run = rows => {
 };
 
 /** Verdict for a single row. `> 0`, not `>= 1`: fractional `::weight`s on both sides total below 1 having passed the gate (pinned below). */
-const fired = (...args) => (count(...args) > 0 ? 1 : 0);
+const matched = (...args) => (count(...args) > 0 ? 1 : 0);
 
 // --- the truth table, which is the whole of core's matchSecondaryKeys -------------------------------
 {
@@ -90,18 +90,18 @@ run([
 {
     const cs = { caseSensitive: true };
     const ww = { matchWholeWords: true };
-    eq(fired('NASA', ['apollo'], AND_ANY, 'nasa flew apollo', cs), 0, 'caseSensitive reaches the primary TERM');
-    eq(fired('NASA', ['apollo'], AND_ANY, 'NASA flew apollo', cs), 1, '...and passes on the exact case');
-    eq(fired('apollo', ['NASA'], AND_ALL, 'apollo flew nasa', cs), 0, '...and reaches the secondary TERM');
-    eq(fired('cat', ['apollo'], AND_ANY, 'the category met apollo', ww), 0, 'matchWholeWords reaches the primary TERM');
-    eq(fired('cat', ['apollo'], AND_ANY, 'the cat met apollo', ww), 1, '...and passes on a standalone word');
-    eq(fired('apollo', ['cat'], AND_ALL, 'apollo saw the category', ww), 0, '...and reaches the secondary TERM');
-    eq(fired('? nasa', ['apollo'], AND_ANY, 'nasa flew apollo', cs), 1, 'a `?` primary keeps its own case rules');
-    eq(fired('apollo', ['? nasa'], AND_ALL, 'apollo flew nasa', cs), 1, '...and so does a `?` secondary');
-    eq(fired('/cat/', ['apollo'], AND_ANY, 'the category met apollo', ww), 1, 'a regex key carries its own rules');
+    eq(matched('NASA', ['apollo'], AND_ANY, 'nasa flew apollo', cs), 0, 'caseSensitive reaches the primary TERM');
+    eq(matched('NASA', ['apollo'], AND_ANY, 'NASA flew apollo', cs), 1, '...and passes on the exact case');
+    eq(matched('apollo', ['NASA'], AND_ALL, 'apollo flew nasa', cs), 0, '...and reaches the secondary TERM');
+    eq(matched('cat', ['apollo'], AND_ANY, 'the category met apollo', ww), 0, 'matchWholeWords reaches the primary TERM');
+    eq(matched('cat', ['apollo'], AND_ANY, 'the cat met apollo', ww), 1, '...and passes on a standalone word');
+    eq(matched('apollo', ['cat'], AND_ALL, 'apollo saw the category', ww), 0, '...and reaches the secondary TERM');
+    eq(matched('? nasa', ['apollo'], AND_ANY, 'nasa flew apollo', cs), 1, 'a `?` primary keeps its own case rules');
+    eq(matched('apollo', ['? nasa'], AND_ALL, 'apollo flew nasa', cs), 1, '...and so does a `?` secondary');
+    eq(matched('/cat/', ['apollo'], AND_ANY, 'the category met apollo', ww), 1, 'a regex key carries its own rules');
 }
 
-// --- blanks, and keys that cannot fire -------------------------------------------------------------
+// --- blanks, and keys that cannot match -------------------------------------------------------------
 run([
     ['cosmonaut', ['', '   '], AND_ALL, 'the cosmonaut waited', 1, 'blank secondaries drop out, leaving no gate'],
     ['cosmonaut', ['', '   '], NOT_ANY, 'the cosmonaut waited', 1, '...under every logic, since the list is empty'],
@@ -219,7 +219,7 @@ console.log('ok   whole words: multi-word keys included, _ excluded, permissive/
     eq(n(['? hot tub']), 0, 'a SmartKey does not take entry flags, so neither trigger is true of it');
     eq(n(['/hot tub/']), 0, '...nor does a regex key');
     eq(n(['\u9f8d\u306e\u5bfa']), 1, 'a spaceless script is advised about');
-    eq(n(['satyr camp', '\u0e01\u0e23\u0e38\u0e07\u0e40\u0e17\u0e1e']), 2, 'both triggers can fire on one entry');
+    eq(n(['satyr camp', '\u0e01\u0e23\u0e38\u0e07\u0e40\u0e17\u0e1e']), 2, 'both keys can match on one entry');
     const named = k => /written in (\w+)/.exec(wholeWordAdvice([k], true)[0])?.[1];
     eq(named('\u3072\u3089\u304c\u306a'), 'Japanese', 'kana is named Japanese');
     eq(named('\u9f8d\u5bfa'), 'Chinese', 'Han alone is named Chinese');

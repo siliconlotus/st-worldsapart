@@ -2040,7 +2040,7 @@ export async function lorebookStudio(preferredBook = null, open = null) {
         // Second pass, probes only for the keys over the gate: a probe is a SmartKey evaluated per message, and the gate
         // admits a handful of keys where the book has thousands.
         const gate = studioOpts.chatCommon ?? KEY_CHAT_COMMON;
-        // substring's whole-word and case probes, and a SmartKey's paths, so `chat common` can name the one that fires.
+        // substring's whole-word and case probes, and a SmartKey's paths, so `chat common` can name the one that matches.
         const probes = own.filter(k => (totals.get(k) ?? 0) / seen >= gate).flatMap(k => [...substringProbes(k), ...pathProbes(k)]);
         if (probes.length) {
             const second = await scanKeys(probes, picked);
@@ -2102,7 +2102,7 @@ export async function lorebookStudio(preferredBook = null, open = null) {
         rebuildScan();
         console.log('Worlds Apart: audit evidence —', {
             book: selected, matchWindow: settings().matchWindow, boundChats: bound.length,
-            scanned: got?.via ?? 'none', messages: chatMsgs, keys: chatHits?.size ?? 0, firing: got?.live ?? 0,
+            scanned: got?.via ?? 'none', messages: chatMsgs, keys: chatHits?.size ?? 0, matching: got?.live ?? 0,
         });
         // Only the absence is worth saying: the bulk bar carries the counts when there are any.
         if (!got && !chatHits) toastr.info(t`No chat is bound; scanned the book only.`, 'Worlds Apart', { timeOut: 6000 });
@@ -2967,8 +2967,8 @@ export async function lorebookStudio(preferredBook = null, open = null) {
         const st = document.createElement('span'); st.className = 'wa-tab-status';
         if (!scan) return st;
         if (chatHits) {
-            const fired = [...chatHits.values()].filter(n => n > 0).length;
-            st.textContent = t`${fired}/${chatHits.size} keys match in ${chatLabel()} (${chatMsgs} msgs)`;
+            const matched = [...chatHits.values()].filter(n => n > 0).length;
+            st.textContent = t`${matched}/${chatHits.size} keys match in ${chatLabel()} (${chatMsgs} msgs)`;
             if (chatNames.length > 1) st.title = chatNames.slice(0, 20).join('\n') + (chatNames.length > 20 ? '\n' + t`+${chatNames.length - 20} more` : '');
         } else {
             st.textContent = t`no chat scanned`;

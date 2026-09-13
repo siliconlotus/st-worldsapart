@@ -8,7 +8,7 @@ IDs: `eval/eval-data/measured-claims.md`.
 
 ## The goal
 
-Keys selective enough not to over-trigger and flood the injection context, and common enough to fire
+Keys selective enough not to over-match and flood the injection context, and common enough to match
 when characters refer to the entry's material.
 
 ## Scope: two systems, one boundary
@@ -44,7 +44,7 @@ an ever-present principal.
 
 "Likely to appear in C" is not "appeared in C": a location the story has not reached and an alias
 people will use later both read as zero occurrences and are realizable, so any metric built on
-observed firing counts is biased against them, including the dead band in `eval/suggest-firing.mjs`.
+observed match counts is biased against them, including the dead band in `eval/suggest-match-rate.mjs`.
 It is measurable through anchors: variants and synonyms of a known-good seed **inherit its
 realizability**, so anchors need only be *some* defensible keys per entry, never complete sets.
 
@@ -72,7 +72,7 @@ reviewer may not recognise it as a good key.
 ### Allowing patterns changes the metric
 
 A stem string-matches none of the curated keys it covers, so the superset standard is **behavioural**:
-for each curated key, does the produced keyset fire where that key fires — `countKey` against the same
+for each curated key, does the produced keyset match where that key matches — `countKey` against the same
 text. A broad key cannot game it, because coverage is only the recall half.
 
 ## What makes a seed
@@ -118,7 +118,7 @@ they are per-chat indices, and **a range shared by dozens of entries is a sentin
 **Frontier** — priors only, strongest first: proper-nounhood (names attach to things that persist);
 rarity *combined with* entity-ness (rarity alone fails — "olfactory" is rare and is not a thing);
 within-entry re-mention (weak, and mostly what TF already picks up). Measuring against the same chat
-that informs the ranking is not circular; `eval/suggest-firing.mjs` takes that position deliberately.
+that informs the ranking is not circular; `eval/suggest-match-rate.mjs` takes that position deliberately.
 
 **Consequence for the two arms.** The LLM's advantage is concentrated at the frontier and on new books;
 on a mature book with a long chat the lexical arm has direct evidence of recurrence. Testable, and it
@@ -197,16 +197,16 @@ semantics per key**: `=` is word-boundary, `^` case-sensitive, combinable, per t
 
 **SmartKeys should degrade, not fuse.** `? =rut|=ruts` as one key plus a plain literal `rutting` as
 another beats a single `? =rut OR =ruts OR =rutting`: an un-extended core drops the SmartKey and still
-fires on the literal, and the surviving literals are the non-colliding ones — **degradation loses
+matches on the literal, and the surviving literals are the non-colliding ones — **degradation loses
 recall and preserves precision**. So the expander emits a seed plus its forms, each tagged with its
 collision measurement; rendering as literal, whole-word, SmartKey or a mix is a downstream pass, where
 portability policy is applied.
 
 **Measure against the text runtime actually searches.** An entry can opt into scanning the persona
 description, character description, personality, depth prompt, scenario or creator notes, and that
-text then joins the search text — a rate over it correctly reports "fires always". Nothing on disk
+text then joins the search text — a rate over it correctly reports "matches always". Nothing on disk
 sets one (S21), so nothing handles them yet. Hidden messages (`is_system`) are not in the prompt, so
-no key fires on them; they are ordinary narrative prose and stay evidence for realizability.
+no key matches on them; they are ordinary narrative prose and stay evidence for realizability.
 
 ## Code facts established while working this out
 
@@ -217,7 +217,7 @@ no key fires on them; they are ordinary narrative prose and stay evidence for re
   `scan(k, cs, false).total`, read by `severityOf` for short keys only. Generalizing it is caller-side.
 - SmartKeys return a weight and no counts, regex a raw match count (`matcher.mjs`) — what makes
   SmartKeys unmeasurable, and the case for a `(exactCount, substringCount, weight)` signature.
-- `eval/suggest-firing.mjs` uses the real matcher on the unprimed branch, which production never takes.
+- `eval/suggest-match-rate.mjs` uses the real matcher on the unprimed branch, which production never takes.
   Fixing it is a loop inversion (register the key universe once, prime per message) and a prerequisite
   for trusting any collision number it reports.
 - The Explorer is the primary curation surface and Cleanup the once-per-book sweep. Both read the same
@@ -243,7 +243,7 @@ way — the subject's canonical name, its morphological variants, and the common
 of it — and the key counts of the two populations overlap completely (S17). What varies is **subject
 ubiquity**, a continuum: peripheral NPCs earn role nouns, principals get a bare first name and nothing
 else. Degeneracy to a name tracks how central the subject is, not that it is a person; its
-consequence, an entry whose only good key fires in nearly every window, is an activation and
+consequence, an entry whose only good key matches in nearly every window, is an activation and
 precedence question and the ranker's side of the boundary. For a reference entry the **title is a
 first-class seed source**, because it names its subject; a memory entry's title is a generated
 editorial label ("003 - Post-Rut Domesticity") and weaker. Asserted, not measured.
@@ -288,7 +288,7 @@ example**, and the causes are mechanically separable:
 Three curated books (S18): **Foxbridge** — hand-authored end to end, pure reference, several chats
 attached under character-card binding; **Richard** — curated by hand through the Explorer;
 **Sommers** — by far the largest, the first gold set carrying memory entries and a chat long enough to
-measure firing against.
+measure matching against.
 
 Richard and Sommers were curated **entry-grounded**: judged against entry text (Sommers supplemented
 by author memory), not the chat, so both are largely silent on realizability by construction — except
@@ -324,7 +324,7 @@ books are the control for form-level findings, and none has a chat.
   (lowercase multiword one-off props and actions, quote fragments) is the dominant removal class —
   discourse-recurrence gating, observed in gold. The player character is keyed nowhere. Truncation ran
   one way, shortening over-specified keys ("Mr. Sterling" → "Sterling"). Attestation was not required:
-  a sizeable share of kept keys never fire in the frozen chat, and many of the curator's own additions
+  a sizeable share of kept keys never match in the frozen chat, and many of the curator's own additions
   are unattested in the entry text. Collision was always rescued, never fatal: every SmartKey
   post-dates the curation, and most carry no plain-literal fallback, against the degradation principle
   — unresolved. Variants and aliases were enumerated by hand — the expander's job. Nested bare+full
@@ -332,7 +332,7 @@ books are the control for form-level findings, and none has a chat.
   Title-case is not proper-nounhood: LLM-capitalized generics were removed, and one-scene proper nouns
   fail recurrence despite the capital.
 
-## Why a key over-fires — four classes, four remedies
+## Why a key over-matches — four classes, four remedies
 
 Measured against the standard chat corpus (`eval/eval-data/README.md`). Only one class means "delete
 this key"; the other three mean the entry is configured wrong, and it has to be said on the
@@ -347,15 +347,15 @@ this key"; the other three mean the entry is configured wrong, and it has to be 
 
 **The collapse ratio is the sharp instrument**, threshold-free: colliding keys collapse to near zero
 under whole-word while merely frequent keys do not move, it catches the moderate-rate cases a safe
-rate band misses, and random high-Zipf words used as keys fire at real rates yet almost never
+rate band misses, and random high-Zipf words used as keys match at real rates yet almost never
 collapse, so the class is separable (K15). The usual cause is a **short form nesting inside its own
 long form** (`Kim` ⊂ `Kimberly`), so the diagnostic is per entry — "this entry has a key inside
 another of its keys" — and the fix is one checkbox.
 
-**A firing-rate band is not the sharp instrument, and nearly everything it catches is legitimate**:
+**A match-rate band is not the sharp instrument, and nearly everything it catches is legitimate**:
 much of what it flags sits on vectorized entries or is main-cast names on sticky sheets, Sommers'
 high band has a zero removal rate against a substantial curation baseline, and every key curation
-removed fired below the band (K16). That zero is by design — the band was retained as a hold-out —
+removed matched below the band (K16). That zero is by design — the band was retained as a hold-out —
 and it measured flat, paired (F41): neither removing the band, uniform cast placement, nor both is
 distinguishable from baseline, so the band stays retained because nothing argues for moving it. Two
 limits: the graded samples embed the pre-curation book, and the contrast ran on memory-tier
@@ -363,9 +363,9 @@ re-ranking while the band's keys sit mostly on reference entries — the two-sco
 `matcher-design.md` is what would let it be asked of the ranking that arbitrates.
 
 **Three signals, and none supersedes another.** `COMMON_WORD` says the word denotes nothing in
-particular and needs no chat (roughly half the books have none); chat firing rate says how much a key
+particular and needs no chat (roughly half the books have none); chat match rate says how much a key
 matches; the collapse ratio says it matches the wrong thing. The overlap between the first two is
-nearly empty — of what the Zipf gate kills, chat rate would catch 1–4% and most of the rest fires at a
+nearly empty — of what the Zipf gate kills, chat rate would catch 1–4% and most of the rest matches at a
 moderate rate (S22) — and where `COMMON_WORD` is wrong is proper nouns that collide with common words
 (`River`, `Paris`) — most of the high-Zipf population in real books — where chat rate is right (K16).
 

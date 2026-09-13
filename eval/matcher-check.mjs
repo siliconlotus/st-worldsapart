@@ -34,7 +34,7 @@ const scored = (e, t, k) => keywordScore(e, t, k).score > 0;
     const on = (sec, text, logic = 0) =>
         keywordScore({ key: ['cosmonaut'], keysecondary: sec, selectiveLogic: logic }, text, undefined, cfg).score > 0;
 
-    eq(on(['? -gagarin'], 'the cosmonaut launched', 3), true, 'negation-only secondary: fires when the negated term is absent');
+    eq(on(['? -gagarin'], 'the cosmonaut launched', 3), true, 'negation-only secondary: matches when the negated term is absent');
     eq(on(['? -gagarin'], 'cosmonaut gagarin waved', 3), false, '...and gates when it is present');
     eq(on(['? -gagarin', 'astronaut'], 'cosmonaut gagarin waved', 3), false, 'AND_ALL: the negation bites past a positive sibling');
     eq(on(['? -gagarin', 'astronaut'], 'cosmonaut astronaut', 3), true, '...and passes when both conditions hold');
@@ -141,7 +141,7 @@ eq(scored({ key: ['? -zebra'] }, 'the cosmonaut waited'), false, 'an entry keyed
     };
     const count = (...a) => hit(...a)?.count ?? 0;
     const keyScore = (...a) => hit(...a)?.score ?? 0;
-    const fired = (...a) => (count(...a) > 0 ? 1 : 0);
+    const matched = (...a) => (count(...a) > 0 ? 1 : 0);
 
     eq(count('cosmonaut', ['apollo'], AND_ANY, 'cosmonaut and cosmonaut, with apollo'), 3,
         'the primary\'s two occurrences plus the secondary\'s one');
@@ -160,7 +160,7 @@ eq(scored({ key: ['? -zebra'] }, 'the cosmonaut waited'), false, 'an entry keyed
         'fractional weights on both sides SCORE below 1 — and the gate PASSED');
     eq(count('? cosmonaut::0.3', ['? apollo::0.2'], AND_ALL, 'cosmonaut apollo'), 2,
         '...while the count is still two plain occurrences, which is why they are separate fields');
-    eq(fired('? cosmonaut::0.3', ['? apollo::0.2'], AND_ALL, 'cosmonaut apollo'), 1,
+    eq(matched('? cosmonaut::0.3', ['? apollo::0.2'], AND_ALL, 'cosmonaut apollo'), 1,
         '...and `> 0` reads the pass, where `>= 1` on the score would call it a refusal');
     eq(count('? cosmonaut::0.3', ['? apollo::0.2'], AND_ALL, 'cosmonaut alone'), 0,
         'a real refusal reports no hit at all');
@@ -243,7 +243,7 @@ const space = 'the Russian cosmonaut Yuri Gagarin flew; the American astronaut N
 const leaves = k => keyExcerpts(k, space, false, true).map(e => `${e.negated ? '-' : ''}${e.term}:${e.n}`);
 eq(leaves('? (armstrong gagarin)').join(' '), 'gagarin:2 armstrong:1', 'AND: both leaves, ordered by position, not by the AST');
 eq(leaves('? (apple | gagarin | coconut)').join(' '), 'gagarin:2', 'OR: only the side that hit, and the pooled n is that side\'s own');
-eq(leaves('? (gagarin -banana)').join(' '), 'gagarin:2 -banana:0', 'NOT: a negative that never fires is named at 0');
+eq(leaves('? (gagarin -banana)').join(' '), 'gagarin:2 -banana:0', 'NOT: a negative that never matches is named at 0');
 eq(leaves('? (gagarin banana)').join(' '), 'gagarin:2', 'a key whose verdict is false still shows the branch that hit — the group is tuned against that');
 eq(leaves('? (apple | banana)').join(' '), '', 'a key nothing in it hit shows nothing');
 eq(markExcerptText(keyExcerpts('? (armstrong gagarin)', space, false, true, 12)[0]),
@@ -261,11 +261,11 @@ const digest = (k, text, opts = {}) => {
 
 // --- every branch is reported per segment, negated ones included: a broken negative is invisible otherwise
 eq(digest('? cosmonaut -astronaut', space), '? cosmonaut -astronaut:0 | !cosmonaut 1, -astronaut 1',
-    'the veto is named with its count in the segment it fired in, so a key reading 0 says what stopped it');
+    'the veto is named with its count in the segment it matched in, so a key reading 0 says what stopped it');
 eq(digest('? cosmonaut -astronuat', space), '? cosmonaut -astronuat:1 | cosmonaut 1, -astronuat 0',
-    'a negative that never fires reads 0 — a misspelt one is invisible otherwise');
+    'a negative that never matches reads 0 — a misspelt one is invisible otherwise');
 eq(keyHits(['? cosmonaut -astronuat'], space, false, true)[0].segments[0].excerpts.length, 1,
-    'only a branch that fired has a place to show');
+    'only a branch that matched has a place to show');
 eq(keySpans(['? cosmonaut -astronaut'], space, false, true).map(sp => `${sp.term}${sp.negated ? '!' : ''}`).join(' '),
     'cosmonaut astronaut!', 'the veto is marked too, flagged so a caller can draw it as what stopped the key');
 // A window with no positive branch is skipped, however its negatives read.
@@ -286,7 +286,7 @@ eq(digest('breath', breaths, { matchWindow: 'paragraph', gate: { keys: ['slow'],
 console.log('ok   keyHits: every branch per segment, negated ones counted, and never marked in the text');
 
 
-// --- gate: a secondary condition in core's own terms, firing exactly where the entry's key does
+// --- gate: a secondary condition in core's own terms, matching exactly where the entry's key does
 {
     const texts = ['apple on a tablet', 'apple alone', 'banana and computer', 'nothing here', 'apple computer tablet'];
     const opts = { k1: 1.2, caseSensitiveDefault: false, wholeWordsDefault: false };
@@ -294,10 +294,10 @@ console.log('ok   keyHits: every branch per segment, negated ones counted, and n
     for (const logic of [WI_LOGIC.AND_ANY, WI_LOGIC.AND_ALL, WI_LOGIC.NOT_ANY, WI_LOGIC.NOT_ALL]) {
         const entry = { key: keys, keysecondary: sec, selective: true, selectiveLogic: logic };
         for (const text of texts) {
-            const fired = new Set(rankKeywordScore(entry, text, entry.key, opts).hits.map(h => h.key));
+            const matched = new Set(rankKeywordScore(entry, text, entry.key, opts).hits.map(h => h.key));
             const gated = keyHits(keys, text, false, false, { gate: { keys: sec, logic } });
-            eq(gated.map(r => r.count > 0).join(), keys.map(k => fired.has(k)).join(),
-                `logic ${logic} on "${text}": the gate fires exactly where the entry's own secondary keys do`);
+            eq(gated.map(r => r.count > 0).join(), keys.map(k => matched.has(k)).join(),
+                `logic ${logic} on "${text}": the gate matches exactly where the entry's own secondary keys do`);
         }
     }
     const gate = { keys: sec, logic: WI_LOGIC.AND_ANY };
@@ -334,7 +334,7 @@ eq(rows[0].count, 2, 'a plain key reports its occurrences');
 eq(rows[0].segments[0].excerpts.length, 2, 'a single-branch key carries every occurrence: no window can filter it');
 eq(rows[1].segments[0].excerpts.length, 2, 'a branching key carries the first of each branch instead');
 eq(rows[1].segments[0].leaves.map(l => `${l.term} ${l.n}`).join(', '), 'armstrong 1, gagarin 2', 'a compound reports every leaf');
-eq(rows[2].count, undefined, 'a negation-only SmartKey can never fire...');
+eq(rows[2].count, undefined, 'a negation-only SmartKey can never match...');
 eq(typeof rows[2].message, 'string', '...so it carries a message instead of a count');
 eq(rows[3].count, 0, 'a key that simply did not match is a zero, not an error');
 eq(rows[3].segments.length, 0, 'and has no segment to report');
@@ -428,7 +428,7 @@ console.log('ok   keySpans: source offsets for marking the haystack, ordered and
     const MES = 'She waited.\n<internal_states>\nLocation: Big Sur\nPresent: Kyle, Mara\n</internal_states>\n<div style="border:1px solid">Kyle: are you there?</div>\nShe did not answer.';
     const out = dropTags(MES, 'internal_states');
 
-    eq(countKey('Big Sur', MES, false, false), 1, 'the tracker fires the key before the strip');
+    eq(countKey('Big Sur', MES, false, false), 1, 'the tracker matches the key before the strip');
     eq(countKey('Big Sur', out, false, false), 0, 'and not after — the content went with the tag');
     eq(countKey('Kyle', out, false, false), 1, 'the div survives: an unnamed tag is scene text, not bookkeeping');
     eq(out.includes('She waited.') && out.includes('She did not answer.'), true, 'prose either side is untouched');

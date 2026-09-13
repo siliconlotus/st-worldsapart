@@ -104,7 +104,7 @@ cache (K2).
 `matchWholeWords` do not reach inside a SmartKey or a pattern: `? nasa` in a `caseSensitive` entry is
 still insensitive, and `? ver` in a `matchWholeWords` entry still matches `never` (`? =ver` for the
 boundary). The grammar has `^` and `=` and no inverse of either, so an entry flag winning would leave
-"insensitive here" unwritable. This is already what `countKey` fires (K3).
+"insensitive here" unwritable. This is already what `countKey` matches (K3).
 
 ### Proximity — `(…)~N`
 
@@ -127,7 +127,7 @@ being the one construct that carries order.
   suggester, never the validator.
 - Where it earns its keep is narrow: terms individually common and jointly specific. A polyseme's noise
   sits at slack 0, which per-term `=` excludes and no `~N` can.
-- Negative slack is overlap, and proximity cannot fix it: `moving in` fires inside "moving" and
+- Negative slack is overlap, and proximity cannot fix it: `moving in` matches inside "moving" and
   `scrap yard` matches `scrap-yard`; only per-operand whole-word excludes them.
 
 Implementation: the trie answers presence and positions are walked with `indexOf` after the candidate
@@ -173,7 +173,7 @@ User-facing wording must name the mode rather than stating either as the rule.
 underscore emphasis.
 
 **No CJK carve-out.** Whole-word in a script without word separators is an unanswerable request: such
-a key still fires among Latin text or punctuation and cannot fire inside a wholly Chinese or Japanese
+a key still matches among Latin text or punctuation and cannot match inside a wholly Chinese or Japanese
 sentence; `matcher.wholeWordAdvice` says so and the matcher does not guess. The trigger class is Han,
 Hiragana, Katakana, Thai, Lao, Khmer and Myanmar. Hangul is out, modern Korean being spaced; Tibetan is
 out, the tsheg being a separator.
@@ -236,8 +236,8 @@ Where a key landed. `keyExcerpts` answers for a compound key as well as a lone `
 - Spans are the AST's leaves, walked directly, **not** `evaluate`'s units: those are gated on the verdict,
   so a key that failed would report nothing.
 - **A negated leaf is reported**, with `negated` set. At count 0 it carries no offsets — that is the
-  reading for a negative that can never fire.
-- **A negated leaf's count is over the whole text**, not per window: it only fires in the windows the key
+  reading for a negative that can never match.
+- **A negated leaf's count is over the whole text**, not per window: it only matches in the windows the key
   failed in, which are the windows the key's own branches are not reported from.
 - **A window with no positive branch is skipped**, whatever its negatives count.
 - Counts are occurrences, not weight. `keyHits` gives one excerpt per branch per window, except for a key
@@ -286,7 +286,7 @@ core's `activated` map.
 
 **Core keeps the gates, the timers, recursion control and prompt assembly. WA replaces exactly one
 question: *did a key match*.** On a scan WA intercepts, every keyword-activating entry's keys are
-stashed and blanked at `WORLDINFO_ENTRIES_LOADED`, so core's matcher never fires and the
+stashed and blanked at `WORLDINFO_ENTRIES_LOADED`, so core's matcher never matches and the
 inclusion-group filter runs over WA's verdicts; `feedScanLoop` answers each later pass. If WA is
 enabled, it owns activation — there is no half-owned mode and no setting selects one.
 
@@ -326,11 +326,11 @@ no-query-text return sits above the assignment, so a turn with nothing to query 
 previous turn's standing for `contentTextScores` to score against.
 
 **Prohibited: no per-turn fallback to core for matching.** A silent fallback makes match semantics
-flicker between two rule sets, with the audit reporting on rules that are not what fired. A matcher
+flicker between two rule sets, with the audit reporting on rules that are not what matched. A matcher
 failure fails visibly (`reportFailure` — stage, consequence in plain terms, the error and the top stack
 frame, once per distinct message per session) and WA keeps ownership.
 
-**`negation-only` is fatal**: a key that can fire must not fire on absence alone.
+**`negation-only` is fatal**: a key that can match must not match on absence alone.
 
 **Prohibited: `countKey` stays unfiltered.** It answers what an expression does; deciding whether to
 ask is the caller's job. A validator error bars a key from scoring as well as from activating —
@@ -453,12 +453,12 @@ times. `score` is what the key contributed, and is where weights and saturation 
 settings. A bounded curve stops discriminating above a modest count (K8).
 
 **No frequency discount, deliberately.** A ubiquitous key is an author declaration; a badly chosen one
-is reported by the audit against the chat, where the author can act on it, and an entry whose key fires
+is reported by the audit against the chat, where the author can act on it, and an entry whose key matches
 broadly but whose content does not fit still ranks low on the other signals. A discount here would be
 that judgement taken a second time, silently.
 
 **Sticky is audited like any other entry** — the whole English list, no breadth reprieve. `sticky`
-declares only that an entry persists once fired, a claim about duration and not breadth, so a broad key
+declares only that an entry persists once activated, a claim about duration and not breadth, so a broad key
 there latches on the wrong turn and holds. Exempting it would hide only a handful of flags (K12).
 
 **A change to the layout score can never surface an entry retrieval did not return**, so no keyword
@@ -515,7 +515,7 @@ is recorded rather than resolved: carving an exemption for keyword rows would ma
 provenance. `promote` is the per-entry escape.
 
 **`promote` is an author declaration that activation is sufficient**: a promoted entry enters the
-layout whenever its keys fire, exempt from the relevance cut and not from capacity — the per-entry form
+layout whenever its keys match, exempt from the relevance cut and not from capacity — the per-entry form
 of *triggered == relevant*, and what `sticky: 1, constant: false` was reaching for: the insertion
 guarantee without the persistence.
 
@@ -527,7 +527,7 @@ guarantee without the persistence.
   `block: 'promoted'`; the row is not durable, having had to activate.
 - The audit gives it no reprieve, and would need its own evidence to.
 - No per-book count is worth surfacing: promoted entries are situational, and what means something is
-  how many fired on this turn.
+  how many matched on this turn.
 
 ---
 
@@ -543,7 +543,7 @@ core's intent, not to its bugs.
 - **NFC** on the regex path, where core runs raw.
 - **A regex is fold-exempt, and the audit says so rather than rewriting it.** An ASCII quote in a
   pattern matches only itself where the same character in a plain key matches its whole family, so
-  `regex orthography` fires where a pattern carries one side of `ORTHO_FAMILIES`' `pair` and not the
+  `regex orthography` is raised where a pattern carries one side of `ORTHO_FAMILIES`' `pair` and not the
   other, in either direction, and suggests the pair — never the whole folded family, a guillemet or a
   prime being a different mark. The straight side flags on shape, the curly side only on evidence. An
   expansion would take away the only way to demand one form.
@@ -643,13 +643,13 @@ haystack exists independently of whether anyone has written the key yet.
 `eval/eval-data/shared-metrics/FULLBOOK-AUDIT-2026-08-10.md`, enforced in `eval/scene.mjs`
 `scoreScene`). An entry is memory iff STMB-marked (`stmemorybooks`/`STMB_start`), because provenance
 cannot drift with the configuration under evaluation, where `vectorized`/`sticky`/`constant` all can.
-A keyword-activated reference entry is relevant because its trigger fired — *triggered == relevant* —
-so the only judgement left is whether the trigger deserved to fire; a memory entry is relevant because
+A keyword-activated reference entry is relevant because its key matched — *matched == relevant* —
+so the only judgement left is whether the key deserved to match; a memory entry is relevant because
 ranking chose it.
 
 **Set metrics on a reference-heavy book are joint** and cannot tune routing alone: a key miss and a
 routing miss land in the same recall number. Split the misses by divergence class
-(`eval/divergence-audit.mjs`) — key miss (suggester), window miss (depth/persistence), over-fire
+(`eval/divergence-audit.mjs`) — key miss (suggester), window miss (depth/persistence), over-match
 (prune) — before reading an F or recall figure on such a book as a statement about the ranker.
 
 **An arm that surfaces unjudged entries scores them 0**, so its Δ is a lower bound.
@@ -850,7 +850,7 @@ fit serves both settings, the keys-live one; unticking blanks the keys and the c
 - The gazetteer source lands within a whisker whichever it is; the ordering below the top does not
   replicate across passes, and the gazetteer is worth more where keys were never reviewed (F33). Keys
   can be the best source while useless as a signal in the same tier: a signal asks whether an entry's
-  keys fired, a gazetteer what vocabulary the query should weight.
+  keys matched, a gazetteer what vocabulary the query should weight.
 - Two cutoffs, one per tier, and each is a range rather than a point: both curves are flat around
   their peak, so a re-tune inside the band measures noise (F34).
 - Cutting reference would fall almost entirely on the corpus's only reference-only book, on abstract

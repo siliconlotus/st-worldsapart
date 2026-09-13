@@ -85,7 +85,7 @@
  "+${0} more": "+${0} autres",
  "1. Open a terminal in your SillyTavern folder and deploy the plugin (also enables server plugins in config):": "1. Ouvrez un terminal dans votre dossier SillyTavern et déployez le plugin (cela active aussi les plugins serveur dans la config) :",
  "2. Restart SillyTavern. This box will then show the exact redeploy command with your full path.": "2. Redémarrez SillyTavern. Cette boîte affichera alors la commande de redéploiement exacte avec votre chemin complet.",
- "A key here is written in ${0}, a script without word boundaries. Whole-word matching is likely to work where it appears among Latin text or punctuation, but it can never fire inside a wholly ${1} sentence.": "Un mot-clé est écrit ici en ${0}, une écriture sans frontières de mots. La correspondance par mots entiers fonctionnera sans doute là où il apparaît parmi du texte latin ou de la ponctuation, mais jamais à l’intérieur d’une phrase entièrement en ${1}.",
+ "A key here is written in ${0}, a script without word boundaries. Whole-word matching is likely to work where it appears among Latin text or punctuation, but it can never match inside a wholly ${1} sentence.": "Un mot-clé est écrit ici en ${0}, une écriture sans frontières de mots. La correspondance par mots entiers fonctionnera sans doute là où il apparaît parmi du texte latin ou de la ponctuation, mais jamais à l’intérieur d’une phrase entièrement en ${1}.",
  "A lorebook named “${0}” already exists.": "Un lorebook nommé « ${0} » existe déjà.",
  "A lorebook with that name already exists.": "Un lorebook porte déjà ce nom.",
  "A random anonymous ID your grades are signed with.": "Un identifiant anonyme aléatoire qui signe vos notes.",

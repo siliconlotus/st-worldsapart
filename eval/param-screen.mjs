@@ -57,7 +57,7 @@ const ARMS = {
 
     'centering=off': { meanCentered: false },
 
-    // The high-band hold-out: every Sommers key curation retained above 15.6% firing (F41); Teddy sits at the band edge and is out.
+    // The high-band hold-out: every Sommers key curation retained above a 15.6% match rate (F41); Teddy sits at the band edge and is out.
     'dropKeys=hiband': { dropKeys: ['Jeffrey', 'Liam', 'Brad', 'Arthur', 'Shane'] },
     // Kyle (player persona), Sara and Ian (orthographic collisions) are excluded on purpose.
     'addKeys=cast': { addCastKeys: ['Jeffrey', 'Shane', 'Brad', 'Micah', 'Teddy', 'Alex', 'Dylan', 'Liam', 'Marjorie', 'Valentina', 'Arthur'] },

@@ -54,7 +54,7 @@ eq(msgs.length, 11, 'the hidden message is dropped, as core and WA both drop it'
     eq(v['isle of wight'], undefined, 'a lowercase locative the book writes capitalised is a name, not a fragment');
     eq(v['piece of cake']?.flag, 'fragment', '...where the same shape nothing capitalises is the phrase fragment it looks like');
     eq(v.mother?.sev !== RED, true, '...but unevidenced it is not severe');
-    eq(v['lamp-post']?.why, 'book uses it only un-hyphenated', 'the key fires, but never on the form the author typed');
+    eq(v['lamp-post']?.why, 'book uses it only un-hyphenated', 'the key matches, but never on the form the author typed');
     eq(v['lamp-post']?.sev, 'minor', '...which is advisory: the flag says rewrite or drop, not that it is broken');
     // Six messages, one hit: under the chat-common share, so the variant verdict is what remains.
     const lamp = countChatHits(['lamp-post'], ['the lamp post flickers at the corner', 'a', 'b', 'c', 'd', 'e']);
@@ -77,7 +77,7 @@ eq(msgs.length, 11, 'the hidden message is dropped, as core and WA both drop it'
     eq(v.glimmerwort?.flag !== 'unattested', true, 'a key the chat uses is not dead — the dead flag is dropped');
     eq(v.glimmerwort?.why, 'chat common (27%)', '...and at 3 of 11 messages it is over the chat-common share, an advisory');
     eq(v.zzunattested?.why, 'unattested (book/chat)', 'still dead, and now says both were checked');
-    eq(v.morning?.why, 'chat common (55%)', 'a common word the chat confirms fires broadly reads as the chat flag, above the English list');
+    eq(v.morning?.why, 'chat common (55%)', 'a common word the chat confirms matches broadly reads as the chat flag, above the English list');
     eq(v.morning?.sev, RED, '...and severe by degree, being in more messages than not');
     eq(v.mother, undefined, 'mother, in 1 of 11 messages, is under the share: the chat has answered, and the common list says nothing');
     eq(v.ver?.why, 'matches in 36% of messages, 0% as a word \u2014 consider ? =ver',
@@ -112,7 +112,7 @@ eq(msgs.length, 11, 'the hidden message is dropped, as core and WA both drop it'
 {
     const sub = msgs.filter(m => countKey('ver', m, false, false) > 0).length;
     const whole = msgs.filter(m => countKey('ver', m, false, true) > 0).length;
-    eq(sub > 0 && whole === 0, true, `"ver" fires ${sub}/${msgs.length} as substring and never as a word`);
+    eq(sub > 0 && whole === 0, true, `"ver" matches ${sub}/${msgs.length} as substring and never as a word`);
 }
 
 console.log('ok   sentinel: every audit verdict matches its written-down answer');
@@ -145,7 +145,7 @@ console.log('ok   sentinel: every audit verdict matches its written-down answer'
     const adds = activationAdds(Object.values(data.entries), windowFor, opts).map(e => e.uid);
     eq(adds.includes(10), true, 'sticky entry: key in window, union adds it (persistence is core\'s)');
     eq(adds.includes(11), true, 'cooldown entry: union adds; core gates cooldown BEFORE external activations, so a force cannot break it');
-    eq(adds.includes(12), true, 'recursion source fires from chat');
+    eq(adds.includes(12), true, 'recursion source activates from chat');
     eq(adds.includes(13), false, 'recursion target has no chat evidence — only the recursion pass admits it');
     eq(adds.includes(14), true, 'delayUntilRecursion IS emitted; core decides when, or whether, to admit it');
 

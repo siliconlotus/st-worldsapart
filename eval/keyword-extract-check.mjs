@@ -273,7 +273,7 @@ assert.equal(looksLikeFragment("Kyle's heat"), false, 'possessive is not a funct
 assert.equal(looksLikeFragment('Sommers, Teddy'), false, 'comma-separated name');
 assert.equal(FUNCTION_WORDS.has('and') && FUNCTION_WORDS.has('the') && FUNCTION_WORDS.has('not'), true, 'FUNCTION_WORDS is populated');
 assert.equal(FUNCTION_WORDS.has('de') || FUNCTION_WORDS.has('los'), false, 'no non-English determiners in the list');
-console.log('ok   looksLikeFragment: fires on clause fragments, spares concrete names and non-English entities');
+console.log('ok   looksLikeFragment: flags clause fragments, spares concrete names and non-English entities');
 
 // --- cohesion subsumption + properness --------------------------------------------------------
 // filler pads entries so a term's df stays under the distributional function-word cut; OPTS is shared by the blocks below.

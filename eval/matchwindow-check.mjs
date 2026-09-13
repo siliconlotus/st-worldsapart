@@ -128,7 +128,7 @@ console.log('ok   a key and its case variant count one entry once');
 
     const live = run({ messagesWith: new Map([['mother', 40], ['zzznope', 12]]), messages: 100 });
     eq(live.zzznope, undefined, 'a key the CHAT uses is not dead — the flag is suppressed, not recoloured');
-    eq(live.mother.why, `chat common (40%)`, 'a common word the chat confirms over-fires reads as the chat flag, above the English list');
+    eq(live.mother.why, `chat common (40%)`, 'a common word the chat confirms over-matches reads as the chat flag, above the English list');
     eq(live.mother.sev, 'moderate', '...moderate at 40%: over the gate, not in more messages than not');
     eq(KEY_CHAT_COMMON, 0.2, 'the chat-common threshold is a named bound, not a literal');
 }
@@ -154,7 +154,7 @@ console.log('ok   a key the chat scan never covered is not reported as chat-chec
     const msgs = ['The copper pipe burst', 'copper, but no plumbing', 'Colonel Vasquez called', 'nothing here'];
     const got = countChatHits(['copper', '? copper pipe', '/vasqu[ei]z/i', '? zzznope'], msgs);
     // Expansion reaches here too, or a hyphenated key reports fewer messages than countKey matches.
-    // Test like we fight: a conjunction across two adjacent messages fires under `scan` and not under `message`.
+    // Test like we fight: a conjunction across two adjacent messages matches under `scan` and not under `message`.
     const split = ['the copper arrived', 'the pipe burst', 'nothing', 'nothing'];
     eq(countChatHits(['? copper pipe'], split).messagesWith.get('? copper pipe'), 0, 'message unit: terms in different messages never co-occur');
     const sc = countChatHits(['? copper pipe'], split, { matchWindow: 'scan', depth: 2 });

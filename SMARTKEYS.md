@@ -19,7 +19,7 @@ and the WI panel, and everything in the **Keyword Studio** — colouring, the au
 Matching uses **WA's** scan depth, not core's *Scan Depth*; a per-entry Scan Depth overrides both.
 SillyTavern's own dry runs (prompt token counts, chat load) are not WA generations, so they keep
 core's matcher, where a `?` key never matches. That is the portability story: a book full of
-SmartKeys loads in a stock SillyTavern, where the keys never fire rather than breaking anything.
+SmartKeys loads in a stock SillyTavern, where the keys never match rather than breaking anything.
 
 ---
 
@@ -59,7 +59,7 @@ weight and its group's compose (`(fire::2)::3` is 6), and groups nest. A weight 
 so a single colon stays ordinary text — `? meeting 10:30`, `? Judges 3:16`, `? re:code` and URLs
 work as written; a delimiter followed by anything but digits is part of the term (`fire::abc`).
 Weight `0` means "must be present, but do not rank on it" — a **disambiguator**: `? mercury AND
-planet::0` needs the word *planet* nearby, so the entry does not fire on the element or the god, and
+planet::0` needs the word *planet* nearby, so the entry does not match on the element or the god, and
 still scores exactly what `? mercury` alone would; without the `::0` the qualifier counts as a second
 thing the passage is about.
 
@@ -167,7 +167,7 @@ SmartKey. With *Match Whole Words* ticked the plain key `apollo astronauts` chec
 
 **Which form to reach for.** If you want the literal string, use a plain key; it takes any character
 without ceremony — `6" pipe` is a plain key, quote and all. Reach for a SmartKey for **order
-invariance** and **tolerance of words in between**: `? 6" copper pipe` fires on *"that copper pipe is
+invariance** and **tolerance of words in between**: `? 6" copper pipe` matches on *"that copper pipe is
 6" in diameter"*, where the plain key `6" copper pipe` does not.
 
 ## Secondary keys
@@ -176,13 +176,13 @@ SillyTavern's *Secondary Keywords* box, with its AND_ANY / AND_ALL / NOT_ANY / N
 second way to write a condition, and WA reads it exactly as SillyTavern does. **The two boxes say one
 thing: every primary against every secondary, under one operator.** Keys `astronaut, cosmonaut,
 taikonaut` with secondaries `Gagarin, Armstrong, "Yang Liwei"` under AND_ANY is nine pairs, and it
-fires on all nine:
+matches on all nine:
 
 | text | two boxes | what you probably meant |
 |---|---|---|
-| the astronaut Armstrong stepped down | fires | fires |
-| the cosmonaut Gagarin orbited | fires | fires |
-| the taikonaut **Gagarin** waved | fires | — |
+| the astronaut Armstrong stepped down | matches | matches |
+| the cosmonaut Gagarin orbited | matches | matches |
+| the taikonaut **Gagarin** waved | matches | — |
 | the astronaut waited | — | — |
 
 Written out, the boxes are:
@@ -280,7 +280,7 @@ SillyTavern). **Word boundaries are Unicode-aware**: a word character is any let
 underscore in any script, so whole-word `caf` does not match `café` and `Мари` does not match `Марию`.
 
 **Known limit — scripts without word boundaries.** Chinese, Japanese, Thai, Lao, Khmer and Burmese do
-not write them, so a whole-word key like `猫` fires where it appears among Latin text or punctuation —
+not write them, so a whole-word key like `猫` matches where it appears among Latin text or punctuation —
 a sign name inside an English sentence, or beside `・` `、` `。` — and misses wherever it sits between
 two characters of running text. Leave the box off for entries keyed in these scripts; the Studio
 marks the whole-words control on any entry where this applies.
@@ -299,7 +299,7 @@ marks the whole-words control on any entry where this applies.
 | non-breaking space | ordinary space |
 | decomposed `José` | composed `José` (NFC) |
 
-So a key typed `Cap'n Joe` fires against prose written `Cap’n Joe`. Em and en dashes do **not**
+So a key typed `Cap'n Joe` matches against prose written `Cap’n Joe`. Em and en dashes do **not**
 collapse together: one separates clauses, the other joins. Nothing that can *carry meaning* is
 folded: a fold applies to the text being scanned, so it erases a distinction for every key at once
 and no flag can ask for it back — case is the one exception, because `^` exists to opt out. That is
@@ -338,5 +338,5 @@ character would break the case that works, and stripping markup would destroy th
 Carried over: `AND` `OR` `NOT` `+` `-` `&&` `||` `!`, parentheses, quoted phrases, and `^N` boost
 (aliased onto `::N`). Not implemented, and matched literally instead: wildcards `*` `?`, fuzzy and
 proximity `~`, field syntax `field:value`, and ranges — a key that expected one of these will never
-fire, and the Studio's audit reports it as a dead key. `XOR` and `::` weights are not Lucene at all;
+match, and the Studio's audit reports it as a dead key. `XOR` and `::` weights are not Lucene at all;
 `::` is Midjourney's multi-prompt weight, borrowed because it cannot collide with a time or a ratio.

@@ -35,8 +35,8 @@ const entries = [
 ];
 const run = runBook(entries, text, para);
 eq(run.scanned, 4, 'a disabled entry and an unkeyed one are not scanned');
-eq(run.entries.map(h => h.entry.uid).join(), '1,2,3', 'the entries that fired, in the order given');
-eq(run.entries[1].rows[0].count, 1, 'a gated entry fires only where its secondary is in the same window');
+eq(run.entries.map(h => h.entry.uid).join(), '1,2,3', 'the entries that matched, in the order given');
+eq(run.entries[1].rows[0].count, 1, 'a gated entry matches only where its secondary is in the same window');
 eq(run.books.join(), 'B,C', 'the books scanned, deduped in encounter order');
 eq(run.keyList.join(), 'breath,slow', 'the run\'s distinct keys — one key two entries found is one term to colour');
 // Core keyword-matches a vectorized entry, so skipVectorized is a filter the caller asks for, not a default.
@@ -51,7 +51,7 @@ eq(runBook(entries, 'a quiet room', para).scanned, 4, '...and still reports what
 // --- runSpans: one fold over the union, not one per entry
 const spans = runSpans(run, text, para);
 eq(spans.map(sp => text.slice(sp.start, sp.end)).join(' '), 'breath slow breath slow',
-    'every entry\'s hits, in source order — including the window its gate refused, which is where the branch still fired');
+    'every entry\'s hits, in source order — including the window its gate refused, which is where the branch still matched');
 eq(spans[0].keys.length, 3, 'a word several entries reached is one span naming them all: two keys here, and one gate\'s term');
 
 // --- labScan: the same shape in both modes, so a caller cannot read a field that only one branch has

@@ -211,7 +211,7 @@ candidate. The distinction that matters to a reader is durable versus not:
 `isDurable` (`extension/grading.mjs`) is `constant || sticky`: durable rows are in the prompt by intent,
 so they are listed and not graded; a promoted row is exempt from the relevance cut, not from being
 judged. Anything asking "is this row gradeable" reads `!isDurable(row)`; testing `block === 'dynamic'`
-drops promoted rows out of the pool. A row with `sticky` configured that fired this turn reads
+drops promoted rows out of the pool. A row with `sticky` configured that activated this turn reads
 `dynamic`: `block` is the runtime state, `sticky` the authored value.
 
 ## Every stored path is relative to the ST install

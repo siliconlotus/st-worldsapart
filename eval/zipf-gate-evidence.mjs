@@ -45,8 +45,8 @@ for (let i = 0; i < args.length; i += 2) {
     console.log(`  1-3 hits:                              ${String(rare.length).padStart(5)}  ${pct(rare.length / killed.length)}`);
     console.log(`  4+ hits and under the share — SURVIVES: ${String(useful.length).padStart(5)}  ${pct(useful.length / killed.length)}`);
     const show = rows => rows.sort((a, b) => b.hits - a.hits).slice(0, 25).map(r => `${r.term}(${r.hits})`).join('  ');
-    console.log(`  survivors, most-firing first: ${show(useful)}`);
-    console.log(`  caught, most-firing first:    ${show(common)}`);
+    console.log(`  survivors, most-matching first: ${show(useful)}`);
+    console.log(`  caught, most-matching first:    ${show(common)}`);
     dumped[basename(bookPath, '.json')] = { killed: killed.map(r => ({ term: r.term, hits: r.hits })), offered: [...on.values()].map(r => r.term) };
 }
 if (DUMP) writeFileSync(DUMP, JSON.stringify(dumped));

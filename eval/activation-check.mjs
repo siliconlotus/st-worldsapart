@@ -15,7 +15,7 @@ const addedUids = (entries, text, o = {}) =>
 
     const smart = { uid: 2, key: ['? apollo & cosmonaut'], content: 'x' };
     eq(addedUids([smart], 'the cosmonaut boarded apollo'), '2',
-        'SmartKeys-only entry activates — core reads `? …` as a literal needle and never fires it');
+        'SmartKeys-only entry activates — core reads `? …` as a literal needle and never matches it');
     eq(addedUids([smart], 'the cosmonaut waited'), '', 'conjunction unmet, no add');
 
     eq(addedUids([{ uid: 3, key: ['? !apollo'], content: 'x' }], 'quiet evening'), '',

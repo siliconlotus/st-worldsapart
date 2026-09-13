@@ -6,7 +6,7 @@ import { countKey, countRegexKey, escapeRegex, isRegexKey, secondaryKeys, segmen
 import { cachedCount, createScanScope, hitLiterals, ORTHO_FAMILIES, parse, primeScan, registerKeys, tokenize, validateSmartKey } from './smartkeys.mjs';
 
 
-/** Below this many entries the df-based book-shared flag is skipped; English-common still fires. */
+/** Below this many entries the df-based book-shared flag is skipped; common word still applies. */
 export const KEY_MIN_SHARED_ENTRIES = 10;
 
 export const KEY_MIN_LENGTH = 4;
@@ -60,7 +60,7 @@ function pathsOf(node) {
 const commonTerm = (n, isLoose) => { const v = String(n.value ?? '').trim(); return Boolean(v) && isLoose(v) && !(n.isCaseSensitive && v !== v.toLowerCase()); };
 
 /** A SmartKey's paths, each as a probe the chat scan can count — `? =mom =my` — with `common` set on a path made entirely
- *  of common words. The whole product: the path that fires most is the one to name, common or not. */
+ *  of common words. The whole product: the path that matches most is the one to name, common or not. */
 function smartPaths(raw, isLoose) {
     if (!String(raw ?? '').trim().startsWith('?')) return [];
     let paths;
@@ -68,7 +68,7 @@ function smartPaths(raw, isLoose) {
     return paths.map(p => ({ label: p.map(n => String(n.value).trim()).join(' & '), probe: `? ${p.map(renderTerm).join(' ')}`, common: p.every(n => commonTerm(n, isLoose)) }));
 }
 
-/** The probes the chat scan counts beside a SmartKey so `chat common` can name the path that fires most. A single path
+/** The probes the chat scan counts beside a SmartKey so `chat common` can name the path that matches most. A single path
  *  needs no probe: it is the key. Sent only for keys over the chat-common share, a probe being a SmartKey evaluated per
  *  message. */
 export const pathProbes = k => { const p = smartPaths(k, isCommonWord(table().common)); return p.length > 1 ? p.map(x => x.probe) : []; };
@@ -340,7 +340,7 @@ export function buildKeyPruneScan(data, opts, ignoreSet, { caseSensitiveDefault 
         // A key that floods the chat, whatever list it is or is not on. Not a `constant` or sticky entry: those are the
         // author declaring the entry ubiquitous, and the flag claims something about the key against this chat, not the wiring.
         if (!declared && chatRate !== undefined && chatRate >= (opts.chatCommon ?? KEY_CHAT_COMMON)) {
-            // A SmartKey names the path that fires most, where its paths were probed; a single path is the key itself.
+            // A SmartKey names the path that matches most, where its paths were probed; a single path is the key itself.
             const paths = literal ? [] : smartPaths(k, isCommonWord(table().common));
             const hit = p => chatScan.messagesWith?.get(p.probe) ?? -1;
             const top = paths.length > 1 ? paths.reduce((a, p) => (hit(p) > hit(a) ? p : a), paths[0]) : null;
@@ -358,7 +358,7 @@ export function buildKeyPruneScan(data, opts, ignoreSet, { caseSensitiveDefault 
         // the gate it read as chat common above, under it the list is contradicted and says nothing. -------------------
         if (opts.pruneCommon && chatRate === undefined) {
             if (literal && !/\s/.test(k) && table().common.has(k.toLowerCase())) return { flag: 'common word', bookContent, chatRate };
-            // Named by its first all-common path: which path fires is the chat's question, and `chat common` answers it.
+            // Named by its first all-common path: which path matches is the chat's question, and `chat common` answers it.
             const common = literal ? null : smartPaths(k, isCommonWord(table().common)).find(p => p.common);
             if (common) return { flag: 'common word', term: common.label, bookContent, chatRate };
         }

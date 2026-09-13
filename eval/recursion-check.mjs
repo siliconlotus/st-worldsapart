@@ -66,7 +66,7 @@ const run = (overrides = {}) => {
 
 // --- an entry does not name itself through the buffer.
 {
-    // uid 1 fires on "workshop" from chat and its own content is the first thing in the buffer; "workshop"
+    // uid 1 matches on "workshop" from chat and its own content is the first thing in the buffer; "workshop"
     // appears there too, so scoring it against its own feed would count the same key twice.
     const off = run();
     const on = run({ recursive: true });

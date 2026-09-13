@@ -355,7 +355,7 @@ export function buildKeySuggest(data, opts) {
             const n = term.split(' ').length;
             if (excludeShort && n === 1 && term.length <= 3 && !isAcr(term)) continue;
             if (!isAcr(term) && headBad(term)) continue;
-            // An adjective over-fires detached from its noun, so posAdj applies to unigrams only.
+            // An adjective over-matches detached from its noun, so posAdj applies to unigrams only.
             if (n === 1 && posBad(T.posAdj, term)) continue;
             const el = n === 1 ? term.match(ELIDED) : null;
             if (el && !T.zipf.has(tblKey(el[1])) && tf.has(el[1])) continue;

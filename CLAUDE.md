@@ -93,7 +93,7 @@ the delta. `judged@10` in `graded-scene-grid.mjs` is the stopping rule. It canno
 offline re-derivation ranks keyword-only rows core's gates would have rejected — probability rolls,
 inclusion groups, delay and cooldown, character and tag filters, `@@dont_activate`,
 `delayUntilRecursion`, triggers. Matching is WA's and `scene.mjs` models it through the same
-`keywordScore` that fires at runtime.
+`keywordScore` that runs at runtime.
 
 **One `grades` array per row; each verdict names its rater, and `raters[].kind` says whether that rater
 is a human or a judge** (`bundle-schema.md`). Nothing in the file holds a reduced value: read the value
@@ -121,7 +121,7 @@ small batches anyway.
 
 ## Chat-based measurement uses the standard corpus
 
-Anything measuring how keys behave against prose — firing rate, over-firing, discourse recurrence — runs
+Anything measuring how keys behave against prose — match rate, over-matching, discourse recurrence — runs
 against the standard chat set in `eval/eval-data/README.md` (gitignored: the corpus is one person's
 chats), not whatever chat is open. Count usable messages, not raw lines: core and WA both drop
 `is_system`, and one chat in the set is mostly hidden (C3).

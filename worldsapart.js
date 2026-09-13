@@ -1545,7 +1545,7 @@ function whySelected(item, block) {
         return parts.join(' · ');
     }
 
-    // No WA signal, so core activated it. @@activate fires before keyword matching, so its 0 is correct, not a miss.
+    // No WA signal, so core activated it. @@activate applies before keyword matching, so its 0 is correct, not a miss.
     if (Array.isArray(item.entry.decorators) && item.entry.decorators.includes('@@activate')) {
         return 'core (@@activate)';
     }

@@ -1,5 +1,5 @@
-// Does a suggested key fire? Buckets buildKeySuggest's candidates by how many messages of a real chat they match (countKey, so /regex/ and ?SmartKeys score too), beside the book's own keys under their entries' flags; the chat doubles as bgDocs, exactly as the Studio passes it.
-// Usage:  node suggest-firing.mjs <book.json> <chat.jsonl> [<book.json> <chat.jsonl> ...]   (pass several pairs; n=1 book overstates any finding)
+// Does a suggested key match? Buckets buildKeySuggest's candidates by how many messages of a real chat they match (countKey, so /regex/ and ?SmartKeys score too), beside the book's own keys under their entries' flags; the chat doubles as bgDocs, exactly as the Studio passes it.
+// Usage:  node suggest-match-rate.mjs <book.json> <chat.jsonl> [<book.json> <chat.jsonl> ...]   (pass several pairs; n=1 book overstates any finding)
 // Both denominators are printed: per-row and unique diverge enough to invert a comparison (S11), so neither may be the only one on screen.
 import { readFileSync } from 'node:fs';
 import { basename } from 'node:path';
@@ -8,7 +8,7 @@ import { countKey } from '../extension/matcher.mjs';
 
 const args = process.argv.slice(2);
 if (!args.length || args.length % 2) {
-    console.error('usage: node suggest-firing.mjs <book.json> <chat.jsonl> [<book.json> <chat.jsonl> ...]');
+    console.error('usage: node suggest-match-rate.mjs <book.json> <chat.jsonl> [<book.json> <chat.jsonl> ...]');
     process.exit(2);
 }
 
@@ -22,7 +22,7 @@ const quant = (rows, q) => {
     return v[Math.floor(q * (v.length - 1))];
 };
 
-/** Messages this key fires in; `flags` is [caseSensitive, wholeWords]. Memoised: the naive walk is the whole runtime. */
+/** Messages this key matches in; `flags` is [caseSensitive, wholeWords]. Memoised: the naive walk is the whole runtime. */
 const fireCache = new Map();
 const firesIn = (key, msgs, [cs, ww] = [false, false]) => {
     const ck = `${key}${cs}${ww}`;
@@ -77,7 +77,7 @@ for (let i = 0; i < args.length; i += 2) {
     const suggest = buildKeySuggest(data, { ...OPTS, bgDocs: msgs });
     const cand = suggest.perEntry.flatMap(pe => pe.newRows.map(r => ({ pair, term: r.display, n: r.n, hits: firesIn(r.display, msgs) })));
 
-    // Once per entry that lists it: a key shared by five entries is five chances to fire.
+    // Once per entry that lists it: a key shared by five entries is five chances to match.
     const keys = entries.flatMap(e => (Array.isArray(e.key) ? e.key : [])
         .filter(k => String(k ?? '').trim())
         .map(k => ({ pair, term: String(k), hits: firesIn(String(k), msgs, [!!e.caseSensitive, !!e.matchWholeWords]) })));
@@ -88,7 +88,7 @@ for (let i = 0; i < args.length; i += 2) {
 
     const worst = uniqueBy(cand).sort((a, b) => b.hits - a.hits).slice(0, 8);
     if (worst.length) {
-        console.log('\n  broadest candidates (fire most often — the other failure mode):');
+        console.log('\n  broadest candidates (match most often — the other failure mode):');
         for (const r of worst) console.log(`    ${String(r.hits).padStart(5)}  ${r.term}`);
     }
 }

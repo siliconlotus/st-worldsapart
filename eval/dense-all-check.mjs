@@ -22,7 +22,7 @@ const S = {
         B: {
             1: entry(1, { vectorized: true }),
             5: entry(5, { vectorized: true }),
-            2: entry(2, { key: ['spire'] }),   // keyword-only, fires below
+            2: entry(2, { key: ['spire'] }),   // keyword-only, matches below
             3: entry(3),                        // keyword-only, no key: nothing can activate it
         },
     },
@@ -54,7 +54,7 @@ eq(dense.byUid.get(1).score, base.byUid.get(1).score, 'a vectorized entry\'s cos
 eq(dense.byUid.get(5).score, base.byUid.get(5).score, 'so is its sibling\'s');
 
 // --- scoring only, never admission -----------------------------------------------------------------
-eq([...base.byUid.keys()].sort().join(','), '1,2,5', 'baseline: two retrieved entries and the one whose key fired');
+eq([...base.byUid.keys()].sort().join(','), '1,2,5', 'baseline: two retrieved entries and the one whose key matched');
 eq([...dense.byUid.keys()].sort().join(','), '1,2,5', 'dense-all ranks exactly the same rows — a cosine admits nothing');
 eq(dense.byUid.has(3), false, 'an entry in the --all index that no key activated still gets no row');
 

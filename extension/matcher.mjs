@@ -45,7 +45,7 @@ export function wholeWordAdvice(keys, wholeWords, t = (s, ...v) => s.reduce((a, 
     }
     const script = SPACELESS_SCRIPTS.find(([, re]) => plain.some(k => re.test(k)));
     if (script) {
-        out.push(t`A key here is written in ${script[0]}, a script without word boundaries. Whole-word matching is likely to work where it appears among Latin text or punctuation, but it can never fire inside a wholly ${script[0]} sentence.`);
+        out.push(t`A key here is written in ${script[0]}, a script without word boundaries. Whole-word matching is likely to work where it appears among Latin text or punctuation, but it can never match inside a wholly ${script[0]} sentence.`);
     }
     return out;
 }
@@ -348,7 +348,7 @@ export function chatUnits(messages, { matchWindow = 'message', depth = 0, includ
 
 export function countChatHits(keys, messages, { matchWindow = 'message', depth = 0, includeNames = false } = {}) {
     // Test like we fight: the units are what the matcher matches a conjunction within, so a `?` key whose terms sit in
-    // adjacent messages counts under `scan` and not under `message`, as it fires. `messagesWith`/`messages` keep their
+    // adjacent messages counts under `scan` and not under `message`, as it matches. `messagesWith`/`messages` keep their
     // names and count units; `unit` says which.
     messages = chatUnits(messages, { matchWindow, depth, includeNames });
     const all = [...new Set(keys.map(k => String(k ?? '').trim()).filter(Boolean))];
@@ -553,7 +553,7 @@ function leafNodes(node, negated = false, out = []) {
 const leafCount = (id, text) => countKey(String(id?.value ?? ''), text,
     id?.type !== 'REGEX' && !!id?.isCaseSensitive, id?.type !== 'REGEX' && !!id?.isExact);
 
-/** One excerpt per leaf that fired, at its first occurrence, ordered by position: `term` is the leaf's value and `n` its
+/** One excerpt per leaf that matched, at its first occurrence, ordered by position: `term` is the leaf's value and `n` its
  *  occurrences in that segment. Reports leaves whatever the key's verdict — a false key's leaves come off the AST, since
  *  evaluate returns no units then. A negated leaf is reported with `negated` set, and at n 0 carries no offsets. */
 function compoundExcerpts(node, text, context, limit) {
@@ -659,7 +659,7 @@ export function keySpans(keys, text, caseSensitive, wholeWords, { limit = 200, m
 
 /** One entry per key: `{ key, count, segments }`, or `{ key, message }` for a key validateSmartKey rejects. `segments` holds
  *  the windows with at least one positive branch hit, each `{ at, text, matched, leaves, excerpts }` — `matched` the key's
- *  verdict there, `leaves` every branch with that window's count and a `negated` flag, `excerpts` one per branch that fired
+ *  verdict there, `leaves` every branch with that window's count and a `negated` flag, `excerpts` one per branch that matched
  *  (every occurrence when the key is a single positive branch), whose `at`/`to` index `text`. `count` sums the key's own
  *  occurrences over matched windows. `gate` is `{ keys, logic }`, applied to every key as keysecondary gates a primary. */
 export function keyHits(keys, text, caseSensitive, wholeWords, { context = 28, limit = 20, matchWindow = 'scan', gate } = {}) {
