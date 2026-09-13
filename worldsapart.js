@@ -1844,7 +1844,7 @@ const SETTINGS_HTML = `
                     <option value="all" data-i18n="All entries">All entries</option>
                     </select>
                     <label class="checkbox_label" for="wa_tokens_include_exempt">
-                    <input id="wa_tokens_include_exempt" type="checkbox"><span data-i18n="Count &quot;ignore budget&quot; entries toward the token budget">Count "ignore budget" entries toward the token budget</span>
+                    <input id="wa_tokens_include_exempt" type="checkbox"><span data-i18n="Budget-exempt entries spend budget">Budget-exempt entries spend budget</span>
                     </label>
 
                     <small id="wa_exempt_count" class="opacity50p"></small>
