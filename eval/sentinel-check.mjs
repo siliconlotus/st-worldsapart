@@ -80,7 +80,7 @@ eq(msgs.length, 11, 'the hidden message is dropped, as core and WA both drop it'
     eq(v.morning?.why, 'chat common (55%)', 'a common word the chat confirms fires broadly reads as the chat flag, above the English list');
     eq(v.morning?.sev, RED, '...and severe by degree, being in more messages than not');
     eq(v.mother, undefined, 'mother, in 1 of 11 messages, is under the share: the chat has answered, and the common list says nothing');
-    eq(v.ver?.why, 'fires in 36% of messages, 0% as a word \u2014 consider ? =ver',
+    eq(v.ver?.why, 'matches in 36% of messages, 0% as a word \u2014 consider ? =ver',
         'a key broad because it lands inside other words is told so, and offered the flag it lacks');
     eq(v.ver?.sev, 'moderate', '...one token fixes it, so not severe');
     eq(v.mother?.sev !== RED, true, 'a common word the chat says is quiet stays a warning');

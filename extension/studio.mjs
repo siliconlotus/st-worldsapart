@@ -692,7 +692,7 @@ export async function lorebookStudio(preferredBook = null, open = null) {
     });
     const editProbability = e => stepperPopup(e, {
         value: e.probability != null ? clampPct(e.probability) : 100, step: 10, clamp: clampPct, max: 100,
-        reset: 100, resetLabel: '🎯', resetTitle: t`Always fire (100%)`, title: t`Trigger probability %`,
+        reset: 100, resetLabel: '🎯', resetTitle: t`Always trigger (100%)`, title: t`Trigger probability %`,
         commit: v => { e.probability = v; e.useProbability = true; },
     });
 
@@ -2968,7 +2968,7 @@ export async function lorebookStudio(preferredBook = null, open = null) {
         if (!scan) return st;
         if (chatHits) {
             const fired = [...chatHits.values()].filter(n => n > 0).length;
-            st.textContent = t`${fired}/${chatHits.size} keys fire in ${chatLabel()} (${chatMsgs} msgs)`;
+            st.textContent = t`${fired}/${chatHits.size} keys match in ${chatLabel()} (${chatMsgs} msgs)`;
             if (chatNames.length > 1) st.title = chatNames.slice(0, 20).join('\n') + (chatNames.length > 20 ? '\n' + t`+${chatNames.length - 20} more` : '');
         } else {
             st.textContent = t`no chat scanned`;

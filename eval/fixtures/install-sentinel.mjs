@@ -95,7 +95,7 @@ console.log('   mother                   "common", warning severity — quiet in
 console.log('   morning                  "chat common · 55% of messages", severe by degree (more messages than not) —');
 console.log('                            red, but never pre-ticked: constant or a narrower key is the remedy');
 console.log('   ver                      dead in entry text; fires 4/11 only inside longer words — with a chat');
-console.log('                            scanned, "fires in 36% of messages, 0% as a word — consider ? =ver"');
+console.log('                            scanned, "matches in 36% of messages, 0% as a word — consider ? =ver"');
 console.log('   ? sodium & lamps         unflagged (attested in its own text). Its ACTIVATION is the');
 console.log('                            union check: core reads "?" as a literal and never fires it;');
 console.log('                            with WA enabled it must appear in the prompt on a café/bistro turn.');

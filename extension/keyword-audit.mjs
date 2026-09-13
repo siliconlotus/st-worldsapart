@@ -435,7 +435,7 @@ export function buildKeyPruneScan(data, opts, ignoreSet, { caseSensitiveDefault 
         if (p.flag === 'substring') {
             const how = [p.wordShare !== undefined && p.suggest.includes('=') ? t`${pct(p.wordShare)}% as a word` : null,
                 p.caseShare !== undefined && p.suggest.includes('^') ? t`${pct(p.caseShare)}% in this case` : null].filter(Boolean).join(', ');
-            return { text: t`fires in ${pct(p.chatRate)}% of ${units}, ${how} — consider ${p.suggest}`, severity };
+            return { text: t`matches in ${pct(p.chatRate)}% of ${units}, ${how} — consider ${p.suggest}`, severity };
         }
         if (p.flag === 'variant only') return { text: p.where === 'chat' ? t`chat uses it only un-hyphenated` : t`book uses it only un-hyphenated`, severity };
         if (p.flag === 'regex orthography') {
