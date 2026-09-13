@@ -285,7 +285,7 @@
  "Grade 0–4: ${0}.": "Note de 0 à 4 : ${0}.",
  "Grade this scene": "Noter cette scène",
  "Grades in loaded samples are skipped; pool requests add entries.": "Les notes des échantillons chargés sont sautées ; les demandes de pool ajoutent des entrées.",
- "Hide entries from later in the chat": "Masquer les entrées venant de plus loin dans la discussion",
+ "Hide entries from later in the chat": "Masquer les entrées ultérieures dans la discussion",
  "Hide the ignored keys": "Masquer les clés ignorées",
  "Hide the markup again": "Masquer à nouveau le balisage",
  "High → low": "Haut → bas",
