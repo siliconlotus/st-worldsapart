@@ -1,4 +1,4 @@
-// pair-f2.mjs — the paired sign test between two relevance-regress --emit files, each arm at its own best cutoff (matcher-design.md, *A cutoff-curve peak is not a comparison*); a feature set cannot be swept in one process, so the contrast lives outside both runs. Scene sets are checked by name, never assumed.
+// pair-f2.mjs — the paired sign test between two relevance-regress --emit files, each arm at its own best cutoff (F11: each arm's peak is a different operating point); a feature set cannot be swept in one process, so the contrast lives outside both runs. Scene sets are checked by name, never assumed.
 // Usage (any cwd):
 //   node eval/pair-f2.mjs <baseline.json> <arm.json> [--at-recall 0.75]
 import fs from 'node:fs';

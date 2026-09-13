@@ -1220,7 +1220,7 @@ async function onScanDone(args) {
                 : windowFor(depth, entry);
         };
 
-        // Live keys, else the takeover's stash; every entry's keys are scored, vectorized included (matcher-design.md, *Scoring memory's keys*).
+        // Live keys, else the takeover's stash; every entry's keys are scored, vectorized included (matcher-design.md, *Stage 3 — Scoring*).
         const scoreKeysOf = entry => (entry.key?.length ? entry.key : (entry.waKeys ?? []));
         // A local view, never a write-back: restoring keys on core's scan copies mid-scan hands core's next loop the keys the takeover blanked.
         const scoringView = entry => (!entry.keysecondary?.length && entry.waSecondary?.length)
@@ -1239,7 +1239,7 @@ async function onScanDone(args) {
             const scanText = keywordWindowFor(depth, item.entry);
             const scoreKeys = scoreKeysOf(item.entry);
             const scored = keywordScore(scoringView(item.entry), scanText, scoreKeys);
-            // An entry reached at recursion pass d did not have the conversation name it (matcher-design.md, *Trigger depth*).
+            // An entry reached at recursion pass d did not have the conversation name it (matcher-design.md, *Stage 3 — Scoring*).
             item.keywordScore = scored.score / (1 + (Number(item.entry.waTriggerDepth) || 0));
             item.keywordHits = scored.hits;
             // Verbose runs only: where each key matched, for /wa-grade's why column. Flags mirror the keywordScore call above exactly.

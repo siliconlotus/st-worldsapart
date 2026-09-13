@@ -141,8 +141,7 @@ says nothing about keys the flag never surfaced, so removals speak to precision,
 by a threshold: `relevanceCut` tests each row's `E[credit]` against the cutoff on its own. Rank enters
 only at stage 5, where the caps and the budget take a prefix of the layout order — rank decides what
 overflows, never what belongs. So the validity score is F2 over the delivered set, set-based and
-asymmetric — recall at grade >= 3, precision crediting a 2 at half (`metrics.mjs` `gradeCredit`)
-(`matcher-design.md`, *Evidence → Two scores*). No window is imposed on it. nDCG and any score read at a
+asymmetric — recall at grade >= 3, precision crediting a 2 at half (`metrics.mjs` `gradeCredit`). No window is imposed on it. nDCG and any score read at a
 window the system is not asked to choose (`@R`) are diagnostics on the ordering, never evidence that the
 system works. The terms are fixed; say which stage a claim is about.
 
