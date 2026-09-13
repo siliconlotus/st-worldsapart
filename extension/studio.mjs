@@ -2826,7 +2826,7 @@ export async function lorebookStudio(preferredBook = null, open = null) {
         );
         const winLabel = document.createElement('label');
         winLabel.style.cssText = 'display:flex;gap:6px;align-items:center;';
-        winLabel.title = t`Match span, as set in the settings`;
+        winLabel.title = t`Match window, as set in the settings`;
         const win = document.createElement('select'); win.className = 'text_pole';
         win.style.cssText = 'width:auto;margin:0;';
         for (const [v, label] of [['paragraph', t`Paragraph`], ['message', t`Message`], ['scan', t`Whole scan window`]]) {
@@ -2834,7 +2834,7 @@ export async function lorebookStudio(preferredBook = null, open = null) {
             win.append(o);
         }
         win.addEventListener('change', () => { labWindow = win.value; rerunLab(); repaint(); });
-        winLabel.append(document.createTextNode(t`Match span`), win);
+        winLabel.append(document.createTextNode(t`Match window`), win);
         const labTool = (icon, title, onClick, marginLeft) => {
             const i = document.createElement('i');
             i.className = `fa-solid ${icon}`; i.title = title;

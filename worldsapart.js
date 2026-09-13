@@ -1766,14 +1766,14 @@ const SETTINGS_HTML = `
 
             <div class="inline-drawer wa-section">
                 <div class="inline-drawer-toggle inline-drawer-header">
-                    <b data-i18n="Match window">Match window</b>
+                    <b data-i18n="Scan window">Scan window</b>
                     <div class="inline-drawer-icon fa-solid fa-circle-chevron-down down"></div>
                 </div>
                 <div class="inline-drawer-content">
                     <label for="wa_drop_chat_tags"><span data-i18n="Ignored tags">Ignored tags</span> <span class="fa-solid fa-circle-question note-link-span" title="Comma-separated HTML or XML tags to be skipped when scanning for keyword hits. You might want to set this to your preset's internal state tracker so your quest tracker doesn't constantly pull entries." data-i18n="[title]Comma-separated HTML or XML tags to be skipped when scanning for key hits. You might want to set this to your preset's internal state tracker so your quest tracker doesn't constantly pull entries."></span></label>
                     <input id="wa_drop_chat_tags" type="text" class="text_pole" placeholder="internal_states, thinking">
 
-                    <label for="wa_match_window"><span data-i18n="Match span">Match span</span> <span class="fa-solid fa-circle-question note-link-span" title="The span within which a key's conditions must all match, e.g. ? apple AND banana must both appear in the same paragraph, message or scan window." data-i18n="[title]The span within which a key's conditions must all match, e.g. ? apple AND banana must both appear in the same paragraph, message or scan window."></span></label>
+                    <label for="wa_match_window"><span data-i18n="Match window">Match window</span> <span class="fa-solid fa-circle-question note-link-span" title="The window within which a key's conditions must all match, e.g. ? apple AND banana must both appear in the same paragraph, message or scan window." data-i18n="[title]The window within which a key's conditions must all match, e.g. ? apple AND banana must both appear in the same paragraph, message or scan window."></span></label>
                     <select id="wa_match_window" class="text_pole">
                     <option value="paragraph" data-i18n="Paragraph">Paragraph</option>
                     <option value="message" data-i18n="Message">Message</option>
