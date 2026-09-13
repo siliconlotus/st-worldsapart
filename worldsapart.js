@@ -464,7 +464,7 @@ async function scoreRelevanceColumn(items, windowFor) {
 
     if (runState.verboseRun) {
         const scored = items.filter(it => Number.isFinite(it.eCredit));
-        const cuts = Object.entries(models).filter(([, m]) => m).map(([t]) => `${t} ${t === 'memory' ? `>= ${settings().relevanceCutoff}` : 'uncut'}`).join(', ');
+        const cuts = Object.entries(models).filter(([, m]) => m).map(([t]) => `${t} >= ${settings().relevanceCutoff}`).join(', ');
         console.log(`%cWorlds Apart · E[credit] over ${scored.length} entries — ${cuts}; the cut runs at selection`, 'font-weight: bold');
         console.table([...scored]
             .sort((a, b) => b.eCredit - a.eCredit)
@@ -472,7 +472,7 @@ async function scoreRelevanceColumn(items, windowFor) {
                 entry: it.entry.comment || it.entry.key?.[0] || it.entry.uid,
                 tier: it.eCreditTier,
                 eCredit: Number(it.eCredit.toFixed(4)),
-                clears: it.eCreditTier === 'memory' && it.eCredit >= settings().relevanceCutoff,
+                clears: it.eCredit >= settings().relevanceCutoff,
                 cosine: Number.isFinite(it.score) ? Number(it.score.toFixed(4)) : null,
                 text: Number((it.textScore ?? 0).toFixed(3)),
                 properNouns: Number(it.properNouns.toFixed(3)),
@@ -1290,7 +1290,7 @@ async function onScanDone(args) {
     const cutoffs = relevanceModel.value ?? {};
     const { cut: relevanceCutRows } = args?.state?.next ? { cut: [] } : selection.relevanceCut(results, {
         scoreOf: it => it.eCredit,
-        cutoffOf: it => (isMemory(it.entry) && cutoffs.memory ? settings().relevanceCutoff : NaN),
+        cutoffOf: it => (cutoffs[isMemory(it.entry) ? 'memory' : 'reference'] ? settings().relevanceCutoff : NaN),
     });
     const cutByRelevance = new Set(relevanceCutRows);
     results = results.filter(it => !cutByRelevance.has(it));
@@ -1824,7 +1824,7 @@ const SETTINGS_HTML = `
                     <label data-i18n="Lorebook order">Lorebook order</label>
                     <div id="wa_world_priority_list" style="margin-top:2px;"></div>
 
-                    <div class="wa-row"><label for="wa_relevance_cutoff"><span data-i18n="Relevance cutoff">Relevance cutoff</span> <span class="fa-solid fa-circle-question note-link-span" title="Memory entries scoring below this are dropped. Recommend 0.1-0.2: higher drops more, including entries you may want. Lower lets more irrelevant ones through. 0 = none." data-i18n="[title]Memory entries scoring below this are dropped. Recommend 0.1-0.2: higher drops more, including entries you may want. Lower lets more irrelevant ones through. 0 = none."></span></label><input id="wa_relevance_cutoff" type="number" class="text_pole" min="0" max="1" step="0.01"></div>
+                    <div class="wa-row"><label for="wa_relevance_cutoff"><span data-i18n="Relevance cutoff">Relevance cutoff</span> <span class="fa-solid fa-circle-question note-link-span" title="Entries scoring below this are dropped. Recommend 0.1-0.2: higher drops more, including entries you may want. Lower lets more irrelevant ones through. 0 = none." data-i18n="[title]Entries scoring below this are dropped. Recommend 0.1-0.2: higher drops more, including entries you may want. Lower lets more irrelevant ones through. 0 = none."></span></label><input id="wa_relevance_cutoff" type="number" class="text_pole" min="0" max="1" step="0.01"></div>
 
                     <div class="wa-row"><label for="wa_max_entries"><span data-i18n="Vector entry cap">Vector entry cap</span> <span class="fa-solid fa-circle-question note-link-span" title="Retrieved entries in the prompt." data-i18n="[title]Retrieved entries in the prompt."></span></label><input id="wa_max_entries" type="number" class="text_pole" min="1" max="100" step="1"></div>
 

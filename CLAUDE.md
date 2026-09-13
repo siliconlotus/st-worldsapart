@@ -131,8 +131,8 @@ says nothing about keys the flag never surfaced, so removals speak to precision,
 The stages are `matcher-design.md`'s: **1. Retrieval** (`retrieve`, cosine only, no admission test),
 **2. Activation** (`selectAndActivate`, one force-activate; core's `activated` map is the result),
 **3. Scoring** (`onScanDone`: text, keys, `properNouns`, `density` and the cosine into the fitted
-per-tier model, whose `E[credit]` is the layout order), **4. Selection** (`relevanceCut`, memory rows
-only, the dynamic block only, one cutoff for every model), **5. Delivery** (`applyBudget`, every cap a
+per-tier model, whose `E[credit]` is the layout order), **4. Selection** (`relevanceCut`, the dynamic
+block only, both tiers at one cutoff for every model), **5. Delivery** (`applyBudget`, every cap a
 prefix of the layout order). Say which stage a claim is about.
 
 **WA is a selection system, not a ranking system.** What ships is the set that survives stage 4, chosen

@@ -315,13 +315,12 @@ This is the layout order (`runState.lastLayoutOrder`); the prompt order is separ
 
 ## Stage 4 — Selection
 
-`selection.mjs` `relevanceCut`, on the last scan loop only, over the dynamic block only: a memory row
-whose `E[credit]` is below the `relevanceCutoff` setting (0.10) is dropped and deleted from core's map.
-The cutoff is one setting for every model, never the fit's own `cutoff`, because `E[credit]` is
-calibrated across embedders (E4). A row with no finite score or no fit is kept: an absent verdict is not
-a negative one. Reference rows are never cut: a key on a reference entry is the author declaring when
-it should be present. Constants, armed stickies and promoted rows are separate blocks and never reach
-the cut.
+`selection.mjs` `relevanceCut`, on the last scan loop only, over the dynamic block only: a row of
+either tier whose `E[credit]` is below the `relevanceCutoff` setting (0.10) is dropped and deleted from
+core's map. The cutoff is one setting for every model and both tiers, never the fit's own `cutoff`,
+because `E[credit]` is calibrated across embedders (E4). A row with no finite score, or whose tier has
+no fit, is kept: an absent verdict is not a negative one. Constants, armed stickies and promoted rows
+are separate blocks and never reach the cut.
 
 **`@@promote`** is the per-entry exemption: an author declaration that activation is sufficient. It is
 read at `WORLDINFO_ENTRIES_LOADED`, the last place the raw content exists, exact-named where core's
@@ -390,7 +389,7 @@ its `upstream-st.md` number.
 | `matchWindow` | `paragraph` | `scan` / `message` / `paragraph`, the unit a key must match within |
 | `wordBoundary` | `strict` | the whole-word boundary class |
 | `dropChatTags` | `''` | tag names removed with their content from every message WA reads |
-| `relevanceCutoff` | 0.10 | the stage-4 `E[credit]` cutoff for memory rows |
+| `relevanceCutoff` | 0.10 | the stage-4 `E[credit]` cutoff for dynamic rows of both tiers |
 | `dropUnavailable` | true | hide memory entries whose STMB range postdates the current message |
 | `maxVectorEntries` | 20 | stage-5 cap on `vectorized` rows |
 | `maxDynamicEntries`, `maxTotalEntries` | 0 | stage-5 caps, 0 off |

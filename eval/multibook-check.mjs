@@ -80,7 +80,8 @@ eq(top2.length, 2, 'topK counts entries across every collection, not per collect
 // --- stage 4's per-book quota ------------------------------------------------------------------------
 // relevanceFit is named because check-embed has no fit and modelsFor refuses to borrow; which fit is arbitrary.
 const delivered = async (overrides) => {
-    const r = await scoreScene({ sample: sample(), overrides: { budgetTokens: 100000, relevanceFit: 'bge-m3', ...overrides }, scene, qv: QV });
+    // memoryCutoff 0: the relevance cut admits every scored row, so only the cap and the budget decide.
+    const r = await scoreScene({ sample: sample(), overrides: { budgetTokens: 100000, relevanceFit: 'bge-m3', memoryCutoff: 0, ...overrides }, scene, qv: QV });
     return r.atBudget.n;
 };
 eq(await delivered({}), 4, 'no cap: the budget alone delivers every row');

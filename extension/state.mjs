@@ -11,7 +11,7 @@ export const defaultSettings = {
     llmTemperature: '1', // '' sends none; ignored without a profile, since generateRaw takes no sampling parameters
     minChunkSize: 120, // paragraphs shorter than this are joined with the next one
     meanCentered: true, // passed to the plugin as a parameter; off buys uncentered scores, not the no-plugin path
-    relevanceCutoff: 0.10, // stage-4 E[credit] cutoff for memory rows; one setting for every model, never the fit's own `cutoff`
+    relevanceCutoff: 0.10, // stage-4 E[credit] cutoff for dynamic rows of both tiers; one setting for every model, never the fit's own `cutoff`
     maxVectorEntries: 20, // stage-5 cap, counted off the `vectorized` flag
     entityFilter: true, // keep capitalised tokens and lorebook vocabulary in raw-text queries; ignored in summary mode
     properNounBoost: 3, // weight multiplier for capitalised query tokens under entityFilter

@@ -40,8 +40,8 @@ ships a fit of its own beside it.
 
 The sweep on the shipped model is in the register (E5): lowering the cutoff buys recall at the cost of
 precision, every delivered memory entry costs on the order of a couple thousand tokens, and precision
-never reaches much above half at any cutoff for any model. Memory tier only — reference entries and
-constants sit on top of every figure. The usable range is 0.05 to about 0.35; past there the dial loses
+never reaches much above half at any cutoff for any model. The sweep is over the memory tier alone;
+reference entries and constants sit on top of every figure. The usable range is 0.05 to about 0.35; past there the dial loses
 both. The default sits at the recall-favouring end deliberately, F2 weighting recall; a user who wants
 the other end says so with this knob.
 

@@ -363,7 +363,7 @@
  "Max per entry": "Max par entrée",
  "Max tokens": "Tokens max",
  "Mean-centered search": "Recherche centrée sur la moyenne",
- "Memory entries scoring below this are dropped. Recommend 0.1-0.2: higher drops more, including entries you may want. Lower lets more irrelevant ones through. 0 = none.": "Les entrées de mémoire notées en dessous sont écartées. Conseillé : 0,1-0,2. Plus haut écarte davantage, y compris des entrées que vous pourriez vouloir. Plus bas laisse passer plus d’entrées hors sujet. 0 = aucune coupe.",
+ "Entries scoring below this are dropped. Recommend 0.1-0.2: higher drops more, including entries you may want. Lower lets more irrelevant ones through. 0 = none.": "Les entrées notées en dessous sont écartées. Conseillé : 0,1-0,2. Plus haut écarte davantage, y compris des entrées que vous pourriez vouloir. Plus bas laisse passer plus d’entrées hors sujet. 0 = aucune coupe.",
  "Message": "Message",
  "Message depth": "Profondeur en messages",
  "Messages before first activation (0 = none):": "Messages avant la première activation (0 = aucun) :",

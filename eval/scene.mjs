@@ -211,7 +211,7 @@ export const embed = async (text, { ollama = 'http://localhost:11434', model, en
 /** The sample's own `params` over these defaults, then `overrides`. The defaults are one tuned chat's snapshot, not the shipped ones (state.mjs ships K1 1.2). */
 export const sceneParams = (S, overrides = {}) => ({
     K1: 2, B: 0.75, boost: 3, stopwordDf: 0.25,
-    // null = the shipped memory fit's own cutoff; a cutoff arm sets it (scoreScene admits).
+    // null = each tier's fit's own cutoff; a cutoff arm sets one number for both tiers (scoreScene admits).
     memoryCutoff: null,
     // Which fit scores the column, by name; null is production. An arm setting this must also fix memoryCutoff.
     relevanceFit: null,
@@ -713,11 +713,11 @@ export async function scoreScene({ sample: S, overrides = {}, k = 10, vectors, m
     const ranked = layoutOrder(rankable);
     const atR = scoreWindow(ranked.slice(0, relevant));
 
-    //   @cut  what the relevance cut admits, the one window the system chooses; memory only, at the arm's memoryCutoff else the fit's own (production reads the relevanceCutoff setting instead).
-    const cutFor = r => (isMemory(r.entry) && Number.isFinite(P.memoryCutoff)) ? P.memoryCutoff : r.tierCutoff;
+    //   @cut  what the relevance cut admits, the one window the system chooses; both tiers, at the arm's memoryCutoff — the field's name in every bundle, though it cuts both tiers — else the fit's own (production reads the relevanceCutoff setting instead).
+    const cutFor = r => Number.isFinite(P.memoryCutoff) ? P.memoryCutoff : r.tierCutoff;
     // Promoted rows are exempt, as at runtime; read off the entry, since a bundle embeds the book verbatim.
     const promotedRow = r => hasPromoteDecorator(r.entry);
-    const admits = r => promotedRow(r) || !isMemory(r.entry) || !Number.isFinite(cutFor(r)) || !Number.isFinite(r.eCredit) || r.eCredit >= cutFor(r);
+    const admits = r => promotedRow(r) || !Number.isFinite(cutFor(r)) || !Number.isFinite(r.eCredit) || r.eCredit >= cutFor(r);
     const atCut = scoreWindow(ranked.filter(admits));
 
     //   @budget  what the token ceiling leaves — the delivered set. Recorded tokens where the capture has them, else this corpus's chars-per-token (G12).
