@@ -2233,7 +2233,8 @@ export async function lorebookStudio(preferredBook = null, open = null) {
             const bySev = new Map();
             for (const g of groups) for (const r of g.rows) {
                 const id = rowId(g.entry.uid, r.term);
-                const name = r.p?.flag ?? (r.why || 'clean');   // show-all rows carry no verdict: clean, or "ignored"
+                const name = r.p?.flag ?? r.why;   // a show-all row carries no verdict: "ignored" is its own bucket, an unflagged key none
+                if (!name) continue;
                 if (!buckets.has(name)) buckets.set(name, []);
                 buckets.get(name).push(id);
                 if (r.p) { if (!bySev.has(r.sev)) bySev.set(r.sev, []); bySev.get(r.sev).push(id); }

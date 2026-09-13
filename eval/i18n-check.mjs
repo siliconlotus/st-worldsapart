@@ -15,12 +15,12 @@ const ST_HALF = ['worldsapart.js', 'extension/studio.mjs', 'extension/ui-widgets
 // Pure modules that take the tag as a parameter: their t`` literals are keys too, but they may bind `t` themselves.
 const TAGGED_PURE = ['extension/keyword-audit.mjs', 'extension/matcher.mjs'];
 // English constants translated at the display site with translate(); the check enumerates them so the locale covers them.
-// 'clean' and 'ignored' are the Cleanup tab's two verdict-less buckets, named beside the flags.
+// 'ignored' is the Cleanup tab's one verdict-less bucket, named beside the flags.
 const TABLE_KEYS = [
     ...Object.values(SORT_LABELS),
     ...SORT_MENU.flatMap(m => [m.label, ...(m.kids ?? []).map(([l]) => l)]),
     ...Object.values(TIER_DEFS).map(d => d.label),
-    ...FLAG_PRIORITY, SEVERE, MODERATE, MINOR, 'clean', 'ignored',
+    ...FLAG_PRIORITY, SEVERE, MODERATE, MINOR, 'ignored',
     ...GRADE_ANCHORS,
 ];
 
