@@ -273,7 +273,7 @@
  "Filled ${0} blank row(s) with 0. Click to undo.": "${0} ligne(s) vide(s) remplie(s) avec 0. Cliquer pour annuler.",
  "Filter entries by type, state or flag severity; several can be combined": "Filtrer les entrées par type, état ou gravité du signal ; plusieurs peuvent se combiner",
  "Find unused vector collections…": "Trouver les collections vectorielles inutilisées…",
- "Flag book-shared keys": "Signaler les mots-clés partagés dans le livre",
+ "Flag book-shared keys": "Signaler les clés souvent partagées dans le livre",
  "Flag common words": "Signaler les mots courants",
  "Flag short keys": "Signaler les mots-clés courts",
  "Flag unattested keys": "Signaler les mots-clés non attestés",
