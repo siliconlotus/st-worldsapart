@@ -367,7 +367,7 @@ export async function lorebookStudio(preferredBook = null, open = null) {
                 numRow(t`Min Inserted Entries`, coreNum('#world_info_min_activations'), '', t`Keep scanning back until at least this many entries activate (0 = off). Mutually exclusive with Max Recursions.`),
                 numRow(t`↳ Max Depth`, coreNum('#world_info_min_activations_depth_max'), t`messages`, t`When Min Inserted Entries > 0, the furthest back the search will reach (0 = no cap)`),
                 numRow(t`Max Recursions`, coreNum('#world_info_max_recursion_steps'), '', t`Recursive scan passes (0 = off). Mutually exclusive with Min Inserted Entries.`),
-                chkRow(t`Recursive scanning`, coreChk('#world_info_recursive'), t`Let activated entries trigger further entries`),
+                chkRow(t`Recursive scanning`, coreChk('#world_info_recursive'), t`Let activated entries activate further entries`),
             ),
             col(t`Matching defaults`,
                 chkRow(t`Case-sensitive`, coreChk('#world_info_case_sensitive', renderExplorer), t`Default for entries that don’t set their own — their Aa icon shows light green when inherited`),
