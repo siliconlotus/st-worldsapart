@@ -866,34 +866,37 @@ fit serves both settings, the keys-live one; unticking blanks the keys and the c
 
 ---
 
-## Open work
+## Open
 
-Ordered by whether a user can see the difference.
+Planned:
 
-1. **Depth does not reach `E[credit]`.** `waTriggerDepth` divides `keys`, which no shipped fit reads,
-   while `cosine` and `text` are scored against the query rather than the scan window and carry no
-   discount at all — so a depth-3 entry competes on relevance like any other. A depth column cannot be
-   fitted until a recursion-using book has graded scenes; a post-hoc factor on `E[credit]` would be the
-   first term outside the fit, against `layoutOrder`'s prefix property. `maxRecursionSteps` is the
-   existing lever, and caps where this would decay.
-2. **Proximity** (`(…)~N`). Witness spans shipped, so the display it needs exists.
-3. **Language packs ship; other languages fall back.** Every language is one pack shape (`lang.mjs`):
-   English is bundled, built from fiction prose with POS sets; any other language is wordfreq alone,
-   fetched once from the data repo and kept in the user's files, with no POS sets, so the verb and
-   adjective filters are no-ops there and the English morphology rules stay on. A pack carries its own
-   common list, so `common word` applies under every language. Standing down (no pack) is a junkier
-   list, not an equivalent one (S22). Stages 3–4 assume no language (F58). The pack is not the UI
-   locale: that is ST's language setting, and `eval/i18n-check.mjs` gates it (README, *Languages*). Open:
-   the English morphology rules under another language, and tokenisation for languages without whitespace.
-4. **A signal's within-scene SD varies by book**, and the two books `keys` costs are its extremes
-   (F45). Standardisation divides by the scene's own SD, so a near-constant column has its few small
-   differences amplified into large z against a slope fitted on other books. No use proposed; it is a
-   property a book can be measured for, where curation is a label someone applies.
-5. **Reference is centred on the memory tier's centroid**, which sits well off the reference centroid
-   (F44). A per-tier centring and a cross centring (query on the memory centroid, items on the
-   reference mean) are measured flat, with two thirds of scenes tying and the per-tier gain on the
+1. **Proximity** (`(…)~N`). Ruled under *Grammar*; witness spans shipped, so the display it needs exists.
+
+Options, each against a behaviour that stands:
+
+2. **A depth term in the score.** Depth is not a scoring signal: `waTriggerDepth` divides `keys`, which
+   no shipped fit reads, and `cosine` and `text` are scored against the query with no discount, so an
+   entry reached at any recursion depth competes on relevance like one matched in the chat. A fitted
+   depth column needs a recursion-using book with graded scenes; a post-hoc factor on `E[credit]` would
+   be the first term outside the fit, against `layoutOrder`'s prefix property. `maxRecursionSteps`
+   bounds how far recursion reaches.
+3. **Language packs beyond wordfreq.** Every language is one pack shape (`lang.mjs`): English is
+   bundled, built from fiction prose with POS sets; any other language is wordfreq alone, fetched once
+   from the data repo and kept in the user's files, with no POS sets, so the verb and adjective filters
+   are no-ops there and the English morphology rules stay on. A pack carries its own common list, so
+   `common word` applies under every language. Standing down (no pack) is a junkier list, not an
+   equivalent one (S22). Stages 3–4 assume no language (F58). The pack is not the UI locale: that is
+   ST's language setting, and `eval/i18n-check.mjs` gates it (README, *Languages*). Options: the
+   English morphology rules under another language, and tokenisation for languages without whitespace.
+4. **Per-book signal spread as a book property.** A signal's within-scene SD varies by book, and the
+   two books `keys` costs are its extremes (F45). Standardisation divides by the scene's own SD, so a
+   near-constant column has its few small differences amplified into large z against a slope fitted on
+   other books. Measurable per book, where curation is a label someone applies; no use proposed.
+5. **Per-tier centring.** Reference is centred on the memory tier's centroid, which sits well off the
+   reference centroid (F44). Per-tier centring and cross centring (query on the memory centroid, items
+   on the reference mean) are measured flat, two thirds of scenes tying and the per-tier gain on the
    small folds only (F57); the `referenceCentroid` arm in `eval/scene.mjs` is the instrument. Re-run
-   when the corpus has more books; nothing moves until then.
+   when the corpus has more books.
 
 ---
 
