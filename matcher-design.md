@@ -882,8 +882,9 @@ Ordered by whether a user can see the difference.
    fetched once from the data repo and kept in the user's files, with no POS sets, so the verb and
    adjective filters are no-ops there and the English morphology rules stay on. A pack carries its own
    common list, so `common word` applies under every language. Standing down (no pack) is a junkier
-   list, not an equivalent one (S22). Stages 3–4 assume no language (F58). Open: the English
-   morphology rules under another language, and tokenisation for languages without whitespace.
+   list, not an equivalent one (S22). Stages 3–4 assume no language (F58). The pack is not the UI
+   locale: that is ST's language setting, and `eval/i18n-check.mjs` gates it (README, *Languages*). Open:
+   the English morphology rules under another language, and tokenisation for languages without whitespace.
 4. **A signal's within-scene SD varies by book**, and the two books `keys` costs are its extremes
    (F45). Standardisation divides by the scene's own SD, so a near-constant column has its few small
    differences amplified into large z against a slope fitted on other books. No use proposed; it is a
