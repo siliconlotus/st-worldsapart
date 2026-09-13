@@ -45,16 +45,6 @@ constants sit on top of every figure. The usable range is 0.05 to about 0.35; pa
 both. The default sits at the recall-favouring end deliberately, F2 weighting recall; a user who wants
 the other end says so with this knob.
 
-## The measurement
-
-`relevance-regress.mjs --tier memory --lobo --cutoff` with the shipped feature set, on a
-lineage-disjoint book set, each model with its own fit; the corpus state and the full tables are in the
-register (E2). Compared at a matched budget, because at F2's own optimum jina delivers about twice as
-many entries as Qwen3-8B and still scores lower (E6). Qwen3-8B wins every book fold, the one ordering
-worth acting on; embeddinggemma and qwen3-embedding:0.6b are not separable; jina-embeddings-v2-base-en,
-ST's stock default, is last on held-out AUC and on recall at matched budget (E2). Panopticon is the
-smallest fold, and every model does worst there.
-
 ## Context length: check it against your scan window
 
 WA embeds the scan window, not a search phrase, and a typical window runs to several times a 512-token
@@ -106,23 +96,3 @@ chat content leaving your machine — and a round trip per turn before retrieval
 - **Sharing one server between a chat model and the embedder** can evict the embedder and reload it every
   turn if both do not fit in memory. It looks like retrieval getting slow, not like an error. oMLX can pin
   a model to prevent it.
-
-## Open
-
-- **Batch and concurrency tuning** — oMLX defaults to 8 concurrent requests and 32 texts per pass; WA's
-  index build is sequential at 64 per request, so neither currently binds. Unmeasured.
-- **Probe for truncation at sync time.** Embed the scan window, embed its first half; cosine 1.0 means
-  the model cannot see the window. Catches any short-context model without a table of context lengths,
-  which the embeddinggemma probe shows would not work.
-- **Detect a stale collection and rebuild that book.** A collection built under a different model
-  produces numbers rather than an error, and the setting lives in Vector Storage, so a user can re-point
-  WA with nothing in WA's UI having moved. `syncWorld` lists the collection before it writes, so
-  detection is free; the re-embed spends money on a hosted endpoint. Open: whether that needs a confirm.
-- **A "purge WA vector indices" button.** ST's `/api/vector/purge` takes a collectionId and WA's are
-  `wa_<hash of world name>` (`syncWorld`); all books, never Vector Storage's collections; purge, and
-  purge-and-rebuild.
-- **Should WA own its embedding model setting?** Inheriting Vector Storage's gives parity for free, but
-  WA embeds the scan window (E8) while Vector Storage embeds messages and file chunks, so a 512-token
-  model is correct for one and broken for the other. Owning it costs two embedding models resident for
-  anyone running both extensions — the eviction thrash under *Known gotchas*. A default-inherit with an
-  override is the middle path; undecided.

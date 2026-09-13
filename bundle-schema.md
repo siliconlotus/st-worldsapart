@@ -14,6 +14,8 @@ label standing in for a row's own. Which verdict counts is the reader's question
 
 ## Identity is `book` + `uid`, as two fields
 
+Field names are camelCase throughout.
+
 `uid` is unique within a book and nowhere else. The two are never joined into one string in the file:
 lorebook names are filenames and already contain every printable separator (G8). Code needing a single
 key joins them in memory with US (`\x1f`).
@@ -337,7 +339,7 @@ Only Ollama surfaces a digest (`/api/tags`), with `/api/show` giving `details.fa
 `.quantization_level`, `.parameter_size` and `capabilities` — the last is what lets an absent `think`
 mean unsupported rather than unrecorded. oMLX's `/v1/models` gives only the repo id's tail, without the
 org, and the local models span several publishing accounts (G8); `~/.omlx/models/` is `<org>/<name>`
-for anything oMLX downloaded, so the org is resolvable, and nothing reads it yet. Nothing is parsed out
+for anything oMLX downloaded, so the org is resolvable; nothing reads it. Nothing is parsed out
 of a name; `config.json` `architectures` is `family` resolved. A hosted model has none of it.
 
 Three facts the block cannot carry:
@@ -366,8 +368,3 @@ the id, not the index, is the identity.
 The rule WA states is `extension/grading.mjs` `gradeValue`, re-exported by `eval/metrics.mjs` so every
 reader shares one copy: the latest human verdict if any, else the judges' median once three exist, else
 the latest judge. A later judge pass is not a better one (G7).
-
-## Open
-
-- Whether the schema is camelCase throughout. It is now, but `sceneChat` and `waVersion` were arrived at
-  separately.
