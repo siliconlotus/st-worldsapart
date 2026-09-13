@@ -635,7 +635,7 @@ export async function lorebookStudio(preferredBook = null, open = null) {
         if (e.ignoreBudget) advParts.push(t`ignore budget`);
         if (e.scanDepth != null) advParts.push(t`scan depth ${e.scanDepth}`);
         const advActive = advParts.length > 0;
-        const advTool = tool('fa-gear', advOpen.has(e.uid) || advActive, advActive ? advParts.join('\n') : t`Advanced: recursion, budget, timing`, () => { advOpen.has(e.uid) ? advOpen.delete(e.uid) : advOpen.add(e.uid); repaint(e); });
+        const advTool = tool('fa-sliders', advOpen.has(e.uid) || advActive, advActive ? advParts.join('\n') : t`Advanced: recursion, budget, timing`, () => { advOpen.has(e.uid) ? advOpen.delete(e.uid) : advOpen.add(e.uid); repaint(e); });
         // `??`, not `||`: an explicit false is an entry override, null is inherit.
         const flagState = (v, g) => { const on = v ?? g; return v == null ? (on ? t`On (inherited)` : t`Off (inherited)`) : (on ? t`On (entry)` : t`Off (entry)`); };
         const effCase = e.caseSensitive ?? world_info_case_sensitive;
@@ -1658,7 +1658,7 @@ export async function lorebookStudio(preferredBook = null, open = null) {
         search.addEventListener('input', () => { searchQuery = search.value; clearTimeout(timer); timer = setTimeout(onChange, 180); });
         const scopeBtn = document.createElement('button'); scopeBtn.type = 'button'; scopeBtn.className = 'menu_button wa-filter';
         scopeBtn.style.cssText = 'width:auto;display:inline-flex;align-items:center;justify-content:center;margin:0 -1px 0 0;padding:3px 8px;border-top-right-radius:0;border-bottom-right-radius:0;';
-        scopeBtn.innerHTML = '<i class="fa-solid fa-sliders"></i>';
+        scopeBtn.innerHTML = '<i class="fa-solid fa-list-check"></i>';
         const menu = document.createElement('div');
         menu.style.cssText = 'position:absolute;top:100%;left:0;z-index:5;display:none;flex-direction:column;gap:2px;margin-top:2px;padding:6px 8px;border-radius:5px;'
             + 'background:var(--SmartThemeBlurTintColor, var(--black70a, rgba(20,20,20,0.97)));border:1px solid var(--SmartThemeBorderColor, rgba(255,255,255,0.15));';
