@@ -1,5 +1,5 @@
 // Makes the sentinel fixture visible to SillyTavern, so the half of the audit that cannot be reached
-// from node — chips, tooltips, colours, the pre-tick — can be checked against a book whose every
+// from node — chips, tooltips, colours — can be checked against a book whose every
 // verdict is written down in sentinel-check.mjs.
 //
 // LINKS, not copies: editing the fixture has to change what the UI shows, or the two drift and the
@@ -93,7 +93,7 @@ console.log('                            or message, which is the tell that the 
 console.log('                            entry text has no messages, so only paragraph subdivides it.');
 console.log('   mother                   "common", warning severity — quiet in this chat');
 console.log('   morning                  "chat common · 55% of messages", severe by degree (more messages than not) —');
-console.log('                            red, but never pre-ticked: constant or a narrower key is the remedy');
+console.log('                            red; constant or a narrower key is the remedy');
 console.log('   ver                      dead in entry text; matches 4/11 only inside longer words — with a chat');
 console.log('                            scanned, "matches in 36% of messages, 0% as a word — consider ? =ver"');
 console.log('   ? sodium & lamps         unflagged (attested in its own text). Its ACTIVATION is the');

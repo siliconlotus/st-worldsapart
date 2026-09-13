@@ -421,8 +421,7 @@ the only place that rule lives, and `unusableKeysOf` (`keyword-audit.mjs`) repor
 rather than re-deriving it.
 
 **A key the matcher refuses is flagged per key, ahead of every other verdict.** `classify` asks
-`usableKeys` before anything reads the text. Red, but never pre-ticked for removal: a malformed key
-wants a correction, not a deletion.
+`usableKeys` before anything reads the text. Red: a malformed key wants a correction, not a deletion.
 
 **Secondary keys are chips like any other**, in their own row under a rule, with the operator at the
 head of the row as a control — core's four names, the reading on the tooltip. The collapsed entry's
@@ -574,9 +573,9 @@ core's intent, not to its bugs.
   whatever list it is or is not on. Not on a `constant` or sticky entry, the author having declared
   the entry ubiquitous; the flag claims something about the key against this chat, not the wiring.
   Severe by degree — in more messages than not, `KEY_CHAT_SEVERE`, an assertion — and moderate from the
-  gate to there; never pre-ticked at either, its remedies being `constant` or a narrower key. K16 — one
-  book, a handful of keys over the share — says those keys were kept by curation, which is why it does
-  not pre-tick and not why it does not exist.
+  gate to there; its remedies are `constant` or a narrower key, not removal. K16 — one book, a handful
+  of keys over the share — says those keys were kept by curation, which is why it is advisory and not
+  why it does not exist.
 - **`book common` and `common word` are its fallbacks**, only for a key no chat was scanned for: the
   book's own prose standing in at `KEY_BOOK_COMMON` of the entries, then the pack's common list. With a chat
   scanned the chat has answered — over the gate the key is `chat common`, under it neither says

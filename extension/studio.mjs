@@ -212,7 +212,7 @@ export async function lorebookStudio(preferredBook = null, open = null) {
     const save = () => { dirty = true; saveWorldInfo(selected, data, true); };
     const getSugg = uid => { let x = sugg.get(uid); if (!x) sugg.set(uid, x = { tfidf: [], llm: [] }); return x; };
     const rebuildScan = () => {
-        // Every term is judged below, so an edited row drops the false the edit forced and rejoins the pre-tick policy.
+        // Every term is judged below, so an edited row drops the false the edit forced.
         // Only those: a tick the user set is theirs, and survives a rescan on purpose.
        
         scan = buildKeyPruneScan(data, studioOpts, ignoreSet, {
@@ -1778,7 +1778,7 @@ export async function lorebookStudio(preferredBook = null, open = null) {
             name.addEventListener('click', () => editKeyInline(e, r.term, name, 'key', next => {
                 if (next) {
                     checks.delete(id);
-                    // Explicitly false: the author just wrote this term, and a pre-tick for deletion is not the answer to that.
+                    // The new term starts unticked, whatever the old row was.
                     checks.set(rowId(e.uid, next), false);
                 }
                 onEdit();
@@ -2125,7 +2125,7 @@ export async function lorebookStudio(preferredBook = null, open = null) {
                     if (shown.has(key)) continue;
                     shown.add(key);
                     const id = rowId(e.uid, key);
-                    if (!cleanupChecks.has(id)) cleanupChecks.set(id, false);   // never pre-tick what the audit didn't flag
+                    if (!cleanupChecks.has(id)) cleanupChecks.set(id, false);   // unticked, as every row starts
                     // A clean key says nothing, in the Explorer's green, as its chip does there; an ignored one says so.
                     rows.push({ term: key, why: ignoreSet.has(key) ? 'ignored' : '', color: '', clean: !ignoreSet.has(key) });
                 }

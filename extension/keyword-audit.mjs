@@ -14,7 +14,7 @@ export const KEY_MIN_LENGTH = 4;
 /** Share of the book that may LIST a key before it is flagged: how many entries one match activates. */
 export const KEY_BOOK_SHARED = 0.75;
 
-/** Rare-vocabulary Jaccard at which two entries are reported near-duplicates. Advisory only: it colours, never pre-ticks (K14). */
+/** Rare-vocabulary Jaccard at which two entries are reported near-duplicates. Advisory only: it colours (K14). */
 export const KEY_DUPE_MIN = 0.35;
 
 export const FUNCTION_WORDS = new Set('a an the and or but if then else for to of in on at by with from as is are was were be been being this that these those it its he she they them his her their you your i we our my me not no do does did has have had will would can could should'.split(' '));

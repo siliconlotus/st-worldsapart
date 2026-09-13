@@ -224,8 +224,7 @@ no key matches on them; they are ordinary narrative prose and stay evidence for 
   classifier over the whole book and differ only in presentation and checkbox state — any other
   divergence is a bug — so anything the audit learns must reach the classifier (`classifyEntry`,
   `reasonOf`/`severityOf`) or it is invisible where the work happens.
-- `generated()` (`keyword-audit.mjs`) tests STMB field presence and is used only in `defChecked`; scope
-  is `inScope`. A miss costs manual ticking on Cleanup and nothing else.
+- Scope is `inScope` (`keyword-audit.mjs`).
 - Chat header identity fields are deprecated; the per-message `name` on `is_user` turns is
   authoritative.
 
