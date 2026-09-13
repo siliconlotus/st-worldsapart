@@ -752,7 +752,7 @@ async function selectAndActivate(chat) {
     } catch (error) {
         // Total: waOwnsScan is set below regardless, so core does not match either.
         reportFailure(t`keyword activation failed`,
-            t`No entry will activate by keyword this turn. WA has taken over key matching, so SillyTavern will not match them either — the prompt has only retrieved, constant and sticky entries.`,
+            t`No entry will activate by key this turn. WA has taken over key matching, so SillyTavern will not match them either — the prompt has only retrieved, constant and sticky entries.`,
             error);
     }
 
@@ -1770,7 +1770,7 @@ const SETTINGS_HTML = `
                     <div class="inline-drawer-icon fa-solid fa-circle-chevron-down down"></div>
                 </div>
                 <div class="inline-drawer-content">
-                    <label for="wa_drop_chat_tags"><span data-i18n="Ignored tags">Ignored tags</span> <span class="fa-solid fa-circle-question note-link-span" title="Comma-separated HTML or XML tags to be skipped when scanning for keyword hits. You might want to set this to your preset's internal state tracker so your quest tracker doesn't constantly pull entries." data-i18n="[title]Comma-separated HTML or XML tags to be skipped when scanning for keyword hits. You might want to set this to your preset's internal state tracker so your quest tracker doesn't constantly pull entries."></span></label>
+                    <label for="wa_drop_chat_tags"><span data-i18n="Ignored tags">Ignored tags</span> <span class="fa-solid fa-circle-question note-link-span" title="Comma-separated HTML or XML tags to be skipped when scanning for keyword hits. You might want to set this to your preset's internal state tracker so your quest tracker doesn't constantly pull entries." data-i18n="[title]Comma-separated HTML or XML tags to be skipped when scanning for key hits. You might want to set this to your preset's internal state tracker so your quest tracker doesn't constantly pull entries."></span></label>
                     <input id="wa_drop_chat_tags" type="text" class="text_pole" placeholder="internal_states, thinking">
 
                     <label for="wa_match_window"><span data-i18n="Match span">Match span</span> <span class="fa-solid fa-circle-question note-link-span" title="The span within which a key's conditions must all match, e.g. ? apple AND banana must both appear in the same paragraph, message or scan window." data-i18n="[title]The span within which a key's conditions must all match, e.g. ? apple AND banana must both appear in the same paragraph, message or scan window."></span></label>

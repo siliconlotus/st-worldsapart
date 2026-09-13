@@ -272,11 +272,11 @@ export async function lorebookStudio(preferredBook = null, open = null) {
 
         const wl = document.createElement('div');   // whitelist column body: chips row, then a centred Clear
         const chips = document.createElement('div'); chips.className = 'wa-tray-wl';
-        if (!ignoreSet.size) { const em = document.createElement('span'); em.style.opacity = '0.55'; em.textContent = t`None. Right-click a term to ignore it.`; chips.append(em); }
+        if (!ignoreSet.size) { const em = document.createElement('span'); em.style.opacity = '0.55'; em.textContent = t`None. Right-click a key to ignore it.`; chips.append(em); }
         for (const key of [...ignoreSet].sort()) {
             const chip = document.createElement('span'); chip.className = 'wa-kw wa-kw-ignored';
             const kw = document.createElement('span'); kw.className = 'wa-kw-text'; kw.textContent = key; kw.style.cursor = 'default';
-            const x = document.createElement('i'); x.className = 'fa-solid fa-xmark wa-kw-del'; x.title = t`Stop ignoring this term`;
+            const x = document.createElement('i'); x.className = 'fa-solid fa-xmark wa-kw-del'; x.title = t`Stop ignoring this key`;
             x.addEventListener('click', () => { ignoreSet.delete(key); persistIgnore(); afterIgnoreChange([key]); refreshTray(); });
             chip.append(kw, x); chips.append(chip);
         }
@@ -306,15 +306,15 @@ export async function lorebookStudio(preferredBook = null, open = null) {
                 check(studioOpts, 'ignoreProper', t`Never flag proper nouns as unattested`),
             ),
             col(t`Suggestions`,
-                num(suggestOpts, 'dfCeil', t`Skip terms in over`, t`% of entries`, { min: 1, max: 100, scale: 100 }, invSuggest),
+                num(suggestOpts, 'dfCeil', t`Skip keywords in over`, t`% of entries`, { min: 1, max: 100, scale: 100 }, invSuggest),
                 num(suggestOpts, 'maxN', t`Longest phrase`, t`words`, { min: 1, max: 8 }, invSuggest),
                 num(suggestOpts, t`cap`, t`Max per entry`, '', { min: 1, max: 50 }, invSuggest),
                 num(suggestOpts, 'llmChunk', t`LLM chunk size`, t`characters`, { min: 500, width: '5.6em' }),   // longer entries split into this-sized passes
                 check(suggestOpts, 'excludeDates', t`Skip dates`, invSuggest),
-                check(suggestOpts, 'excludeShort', t`Skip short terms`, invSuggest),
+                check(suggestOpts, 'excludeShort', t`Skip short keywords`, invSuggest),
                 check(suggestOpts, 'onlyActive', t`Active entries only`, invSuggest),
             ),
-            col(t`Ignored terms (${ignoreSet.size})`, wl),
+            col(t`Ignored keys (${ignoreSet.size})`, wl),
         );
         return panel;
     };
@@ -322,7 +322,7 @@ export async function lorebookStudio(preferredBook = null, open = null) {
     /** The tray's toggle, which both headers carry: the panel itself mounts below them. */
     const trayBtn = () => {
         const b = document.createElement('button'); b.type = 'button'; b.className = 'menu_button wa-filter';
-        b.title = t`Settings: audit and suggestions, this book's ignored terms, and World Info`;
+        b.title = t`Settings: audit and suggestions, this book's ignored keys, and World Info`;
         b.style.cssText = 'width:auto;padding:3px 8px;flex-shrink:0;';
         b.innerHTML = '<i class="fa-solid fa-gear"></i>';
         // A popup, not an inline tray: both panels together outgrow the fixed header and push the list and the rail off the pane.
@@ -459,7 +459,7 @@ export async function lorebookStudio(preferredBook = null, open = null) {
         save(); suggest = null; if (scan) rebuildScan(); renderExplorer();
     };
     const bulkAddTerm = async () => {
-        const raw = await Popup.show.input(t`Add term — selected entries`, t`Keyword to add to every selected entry:`);
+        const raw = await Popup.show.input(t`Add key — selected entries`, t`Key to add to every selected entry:`);
         const term = String(raw ?? '').trim();
         if (!term || !keyWriteOk(term)) return;
         let added = 0;
@@ -473,8 +473,8 @@ export async function lorebookStudio(preferredBook = null, open = null) {
     const bulkClearTerms = async () => {
         const sel = selectedList(); if (!sel.length) return;
         const total = sel.reduce((n, e) => n + (Array.isArray(e.key) ? e.key.length : 0), 0);
-        if (!total) { toastr.info(t`The selected entries have no keywords.`, 'Worlds Apart'); return; }
-        const kwTxt = total === 1 ? t`${total} keyword` : t`${total} keywords`;
+        if (!total) { toastr.info(t`The selected entries have no keys.`, 'Worlds Apart'); return; }
+        const kwTxt = total === 1 ? t`${total} key` : t`${total} keys`;
         if (!await Popup.show.confirm(sel.length === 1 ? t`Delete all ${kwTxt} from ${sel.length} selected entry?` : t`Delete all ${kwTxt} from ${sel.length} selected entries?`, t`Undo is available for 20 seconds.`)) return;
         const book = selected, before = sel.map(e => [e.uid, Array.isArray(e.key) ? [...e.key] : []]);
         applyBulk(e => e.key = []);
@@ -484,9 +484,9 @@ export async function lorebookStudio(preferredBook = null, open = null) {
             let n = 0;
             for (const [uid, keys] of before) { const e = data?.entries?.[uid]; if (!e) continue; e.key = keys; n += keys.length; }
             save(); suggest = null; if (scan) rebuildScan(); renderExplorer();
-            toastr.success(n === 1 ? t`Restored ${n} keyword.` : t`Restored ${n} keywords.`, 'Worlds Apart');
+            toastr.success(n === 1 ? t`Restored ${n} key.` : t`Restored ${n} keys.`, 'Worlds Apart');
         };
-        toastr.success(total === 1 ? t`Deleted ${total} keyword. Click to undo.` : t`Deleted ${total} keywords. Click to undo.`, 'Worlds Apart', { timeOut: 20000, extendedTimeOut: 10000, onclick: undo });
+        toastr.success(total === 1 ? t`Deleted ${total} key. Click to undo.` : t`Deleted ${total} keys. Click to undo.`, 'Worlds Apart', { timeOut: 20000, extendedTimeOut: 10000, onclick: undo });
     };
     const menuBtn = (label, onClick, cls = '', style = '') => {
         const b = document.createElement('button'); b.type = 'button';
@@ -547,7 +547,7 @@ export async function lorebookStudio(preferredBook = null, open = null) {
         };
         const setBtn = barBtn(t`Set… ▾`, () => { const r = setBtn.getBoundingClientRect(); showCtxMenu(setItems(), r.left, r.bottom + 2, ctxMount()); });
         setBtn.title = t`Set a field on all selected entries`;
-        const addTermBtn = barBtn(t`Add term…`, bulkAddTerm); addTermBtn.title = t`Add one keyword to every selected entry`;
+        const addTermBtn = barBtn(t`Add key…`, bulkAddTerm); addTermBtn.title = t`Add one key to every selected entry`;
         const reBtn = barBtn(t`Renumber…`, ev => bulkOrder(ev.shiftKey)); reBtn.title = t`Renumber order. Shift-click to renumber UIDs too.`;
         wrap.append(
             count,
@@ -561,7 +561,7 @@ export async function lorebookStudio(preferredBook = null, open = null) {
             barBtn(t`Copy to…`, bulkCopyTo),
             barBtn(t`Move to…`, bulkMoveTo),
             sep(),
-            barBtn(t`Delete all terms`, bulkClearTerms, 'wa-bulk-danger'),
+            barBtn(t`Delete all keys`, bulkClearTerms, 'wa-bulk-danger'),
             barBtn(t`Delete`, bulkDelete, 'wa-bulk-danger'),
         );
         return wrap;
@@ -591,7 +591,7 @@ export async function lorebookStudio(preferredBook = null, open = null) {
             if (seen) seen.n++; else byCode.set(w.code, { message: w.message, n: 1 });
         }
         for (const { message, n } of byCode.values()) {
-            toastr.info(n > 1 ? t`${message} (${n} terms)` : message, 'Worlds Apart', { timeOut: 6000 });
+            toastr.info(n > 1 ? t`${message} (${n} keys)` : message, 'Worlds Apart', { timeOut: 6000 });
         }
         return true;
     };
@@ -815,12 +815,12 @@ export async function lorebookStudio(preferredBook = null, open = null) {
     const kwHits = key => keyHolders(Object.values(data.entries), key);
     const deleteKeyEverywhere = async key => {
         const hits = kwHits(key);
-        if (hits.length > 1 && !await Popup.show.confirm(t`Delete “${key}” from ${hits.length} entries?`, t`Removes the keyword everywhere it appears in this book.`)) return;
+        if (hits.length > 1 && !await Popup.show.confirm(t`Delete “${key}” from ${hits.length} entries?`, t`Removes the key everywhere it appears in this book.`)) return;
         const touched = deleteKey(Object.values(data.entries), key);
         if (touched) { save(); keepScroll(renderExplorer); toastr.success(touched === 1 ? t`Deleted “${key}” from ${touched} entry.` : t`Deleted “${key}” from ${touched} entries.`, 'Worlds Apart'); }
     };
     const replaceKeyEverywhere = async key => {
-        const next = (await Popup.show.input(t`Replace keyword`, t`Replace “${key}” across all entries with:`, key))?.trim();
+        const next = (await Popup.show.input(t`Replace key`, t`Replace “${key}” across all entries with:`, key))?.trim();
         if (!next || next === key) return;   // exact-match only: a case-only rewrite is a real edit, not a no-op
         if (!keyWriteOk(next)) return;
         const touched = replaceKey(Object.values(data.entries), key, next);
@@ -829,7 +829,7 @@ export async function lorebookStudio(preferredBook = null, open = null) {
     // A second term on every entry keyed `key` — the alias case.
     const addVariantEverywhere = async key => {
         const hits = kwHits(key);
-        const raw = await Popup.show.input(t`Add variant`, hits.length === 1 ? t`Keyword to add to the ${hits.length} entry keyed “${key}”:` : t`Keyword to add to the ${hits.length} entries keyed “${key}”:`);
+        const raw = await Popup.show.input(t`Add variant`, hits.length === 1 ? t`Key to add to the ${hits.length} entry keyed “${key}”:` : t`Key to add to the ${hits.length} entries keyed “${key}”:`);
         const term = String(raw ?? '').trim();
         if (!term || !keyWriteOk(term)) return;
         const added = addVariant(Object.values(data.entries), key, term);
@@ -965,7 +965,7 @@ export async function lorebookStudio(preferredBook = null, open = null) {
         if (cooldown > 0) metaBits.push(t`cd ${cooldown}`);
         meta.textContent = `· ${metaBits.join(' · ')}`;
         const probTxt = e.useProbability !== false ? prob : 100;
-        meta.title = (keyCount ? t`Keywords (${keyCount}): ${e.key.join(', ')}` : t`No keywords`) + '\n' + t`trigger probability ${probTxt}% · delay ${delay} · cooldown ${cooldown} (messages)`;
+        meta.title = (keyCount ? t`Keys (${keyCount}): ${e.key.join(', ')}` : t`No keys`) + '\n' + t`trigger probability ${probTxt}% · delay ${delay} · cooldown ${cooldown} (messages)`;
         // Open: the meta line sits under the title, with the title's own left edge; closed: it trails the row.
         const titleWrap = document.createElement('span'); titleWrap.className = 'wa-entry-titlewrap';
         const titleLine = document.createElement('span'); titleLine.className = 'wa-entry-titleline';
@@ -993,7 +993,7 @@ export async function lorebookStudio(preferredBook = null, open = null) {
             const softer = (flagged?.size ?? 0) - counted.length;
             // No colour means the uncoloured flag; name it from reasonOf.
             const worstTxt = worst ? translate(worst) : scan.reasonOf(counted[0]).text;
-            const tip = [t`Flagged keywords. Worst: ${worstTxt}.`];
+            const tip = [t`Flagged keys. Worst: ${worstTxt}.`];
             if (secBad) tip.push(secBad === 1 ? t`Includes ${secBad} secondary key the matcher cannot run.` : t`Includes ${secBad} secondary keys the matcher cannot run.`);
             if (softer) tip.push(t`${softer} more are warnings, not counted here.`);
             tip.push(t`Expand to see which.`);
@@ -1042,7 +1042,7 @@ export async function lorebookStudio(preferredBook = null, open = null) {
             text.title = isIgnored ? t`${key} — ignored (click to edit; shift-click ✕ to un-ignore)` : (v ? t`${key} — ${why} (click to edit)` : t`${key} (click to edit)`);
             text.addEventListener('click', () => editKeyInline(e, key, text));
             chip.append(text);   // term only inside the chip
-            const del = document.createElement('i'); del.className = 'fa-solid fa-xmark wa-kw-del'; del.title = t`Delete keyword. Shift-click to ignore it instead.`;
+            const del = document.createElement('i'); del.className = 'fa-solid fa-xmark wa-kw-del'; del.title = t`Delete key. Shift-click to ignore it instead.`;
             del.addEventListener('click', ev => {
                 if (ev.shiftKey) {   // whitelist toggle (mirrors the pruner's ban icon); tray lists/clears these
                     toggleIgnore(key);   // recolours every entry using this key and syncs the tray; no rescan
@@ -1072,7 +1072,7 @@ export async function lorebookStudio(preferredBook = null, open = null) {
             }, { value: term }));
             chip.append(take, st); para.append(chip);
         }
-        const add = document.createElement('i'); add.className = 'fa-solid fa-plus wa-tool'; add.title = t`Add a keyword`;
+        const add = document.createElement('i'); add.className = 'fa-solid fa-plus wa-tool'; add.title = t`Add a key`;
         add.addEventListener('click', () => inlineInput(add, (nv, ok) => {
             if (ok && nv && !hasKey(e, nv) && !keyWriteOk(nv)) return false;
             if (ok && nv && !hasKey(e, nv)) { if (!Array.isArray(e.key)) e.key = []; e.key.push(nv); save(); }
@@ -1406,7 +1406,7 @@ export async function lorebookStudio(preferredBook = null, open = null) {
         if (n) {
             const l = document.createElement('label'); l.className = 'checkbox_label'; l.style.marginTop = '0.7em';
             cb = document.createElement('input'); cb.type = 'checkbox'; cb.checked = true;
-            const sp = document.createElement('span'); sp.textContent = n === 1 ? t`Also copy ${n} ignored term` : t`Also copy ${n} ignored terms`;
+            const sp = document.createElement('span'); sp.textContent = n === 1 ? t`Also copy ${n} ignored key` : t`Also copy ${n} ignored keys`;
             l.append(cb, sp); wrap.append(l);
         }
         const res = await new Popup(wrap, POPUP_TYPE.CONFIRM, '', {
@@ -1662,7 +1662,7 @@ export async function lorebookStudio(preferredBook = null, open = null) {
         const menu = document.createElement('div');
         menu.style.cssText = 'position:absolute;top:100%;left:0;z-index:5;display:none;flex-direction:column;gap:2px;margin-top:2px;padding:6px 8px;border-radius:5px;'
             + 'background:var(--SmartThemeBlurTintColor, var(--black70a, rgba(20,20,20,0.97)));border:1px solid var(--SmartThemeBorderColor, rgba(255,255,255,0.15));';
-        const SCOPES = [['title', t`Title`], ['entry', t`Entry`], ['keywords', t`Keywords`]];
+        const SCOPES = [['title', t`Title`], ['entry', t`Entry`], ['keywords', t`Keys`]];
         const syncBtn = () => { const on = SCOPES.filter(([k]) => searchScope[k]).map(([, l]) => l).join(', ') || t`nothing selected`; scopeBtn.title = t`Search in: ${on}`; };
         for (const [key, lbl] of SCOPES) {
             const l = document.createElement('label'); l.className = 'checkbox_label'; l.style.cssText = 'font-size:0.85em;white-space:nowrap;';
@@ -1749,7 +1749,7 @@ export async function lorebookStudio(preferredBook = null, open = null) {
         const title = document.createElement('span'); title.textContent = wiTitleOf(e); title.title = wiTitleOf(e);
         title.style.cssText = `flex:0 1 auto;min-width:3em;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;${e.disable ? 'opacity:0.5;' : ''}`;
         const meta = document.createElement('span'); meta.className = 'wa-tab-count'; meta.style.flex = '0 0 auto';
-        meta.textContent = rows.length ? (rows.length === 1 ? t`${rows.length} term` : t`${rows.length} terms`) : t`no candidates`;
+        meta.textContent = rows.length ? (rows.length === 1 ? t`${rows.length} key` : t`${rows.length} keys`) : t`no candidates`;
         const view = document.createElement('i'); view.className = 'fa-solid fa-file-lines wa-term-act';
         view.title = t`View this entry's text`;
         view.addEventListener('click', () => showEntryText(e));
@@ -1784,7 +1784,7 @@ export async function lorebookStudio(preferredBook = null, open = null) {
                 onEdit();
             }));
             const del = document.createElement('i'); del.className = 'fa-solid fa-xmark wa-term-act';
-            del.title = t`Delete this keyword. Shift-click to ignore it instead.`;
+            del.title = t`Delete this key. Shift-click to ignore it instead.`;
             del.style.marginLeft = '0.4rem';
             del.addEventListener('click', ev => {
                 if (ev.shiftKey) { toggleIgnore(r.term); return; }   // afterIgnoreChange repaints the list itself
@@ -1819,14 +1819,14 @@ export async function lorebookStudio(preferredBook = null, open = null) {
         const lbl = document.createElement('span');
         lbl.style.cssText = 'opacity:0.7;font-size:0.85em;white-space:nowrap;cursor:pointer;';
         lbl.textContent = t`${ignoreSet.size} ignored` + (ignoredOpen ? ' ▾' : ' ▸');
-        lbl.title = ignoredOpen ? t`Hide the ignored terms` : t`Show the ignored terms`;
+        lbl.title = ignoredOpen ? t`Hide the ignored keys` : t`Show the ignored keys`;
         lbl.addEventListener('click', () => { ignoredOpen = !ignoredOpen; paintIgnoredStrip(host, onChange); });
         host.append(lbl);
         if (!ignoredOpen) return;
         for (const key of [...ignoreSet].sort()) {
             const chip = document.createElement('span'); chip.className = 'wa-kw wa-kw-ignored';
             const kw = document.createElement('span'); kw.className = 'wa-kw-text'; kw.textContent = key; kw.style.cursor = 'default';
-            const x = document.createElement('i'); x.className = 'fa-solid fa-xmark wa-kw-del'; x.title = t`Stop ignoring this term`;
+            const x = document.createElement('i'); x.className = 'fa-solid fa-xmark wa-kw-del'; x.title = t`Stop ignoring this key`;
             x.addEventListener('click', () => { ignoreSet.delete(key); persistIgnore(); onChange(); if (trayEl?.isConnected) refreshTray(); });
             chip.append(kw, x); host.append(chip);
         }
@@ -2150,7 +2150,7 @@ export async function lorebookStudio(preferredBook = null, open = null) {
         if (!removed.length) { toastr.info(t`Nothing selected.`, 'Worlds Apart'); return; }
         cleanupUndo = removed;
         save(); rebuildScan(); suggest = null; renderExplorer();
-        toastr.success(removed.length === 1 ? t`Deleted ${removed.length} keyword.` : t`Deleted ${removed.length} keywords.`, 'Worlds Apart');
+        toastr.success(removed.length === 1 ? t`Deleted ${removed.length} key.` : t`Deleted ${removed.length} keys.`, 'Worlds Apart');
     };
     const undoPrune = () => {
         if (!cleanupUndo?.length) return;
@@ -2162,7 +2162,7 @@ export async function lorebookStudio(preferredBook = null, open = null) {
         }
         cleanupUndo = null;
         save(); rebuildScan(); suggest = null; renderExplorer();
-        toastr.success(n === 1 ? t`Restored ${n} keyword.` : t`Restored ${n} keywords.`, 'Worlds Apart');
+        toastr.success(n === 1 ? t`Restored ${n} key.` : t`Restored ${n} keys.`, 'Worlds Apart');
     };
     // Whitelists the ticked terms — persistent, where unticking spares a term for this run only.
     const ignoreChecked = () => {
@@ -2172,7 +2172,7 @@ export async function lorebookStudio(preferredBook = null, open = null) {
         }
         if (!n) { toastr.info(t`Nothing selected to ignore.`, 'Worlds Apart'); return; }
         persistIgnore(); rebuildScan(); renderExplorer();
-        toastr.success(n === 1 ? t`Ignoring ${n} term in “${selected}”.` : t`Ignoring ${n} terms in “${selected}”.`, 'Worlds Apart');
+        toastr.success(n === 1 ? t`Ignoring ${n} key in “${selected}”.` : t`Ignoring ${n} keys in “${selected}”.`, 'Worlds Apart');
     };
     // Both term tabs paint a working note, yield a frame, then run the synchronous pre-pass.
 
@@ -2199,11 +2199,11 @@ export async function lorebookStudio(preferredBook = null, open = null) {
         const list = document.createElement('div'); list.className = 'wa-studio-entries';
         // The actions stand in a rail beside the list, as the Explorer's do: audit, delete, ignore, show all, choose chats.
         const railBtn = (icon, title, onClick) => { const b = document.createElement('button'); b.type = 'button'; b.className = 'menu_button'; b.innerHTML = `<i class="fa-solid ${icon}"></i>`; b.title = title; b.addEventListener('click', onClick); return b; };
-        const auditTitle = () => (scan ? t`Re-audit: flag dead, common and short keywords.` : t`Run audit: flag dead, common and short keywords.`) + '\n' + (chatHits ? t`Chat evidence: ${chatLabel()}, ${chatMsgs} messages.` : t`No chat searched yet.`);
+        const auditTitle = () => (scan ? t`Re-audit: flag dead, common and short keys.` : t`Run audit: flag dead, common and short keys.`) + '\n' + (chatHits ? t`Chat evidence: ${chatLabel()}, ${chatMsgs} messages.` : t`No chat searched yet.`);
         const auditBtn = railBtn('fa-stethoscope', auditTitle(),
             async () => { await withBusy(auditBtn, '0.5', runAudit, '<i class="fa-solid fa-spinner fa-spin"></i>'); renderExplorer(); });
-        const deleteBtn = railBtn('fa-trash-can', t`Delete the selected keywords`, () => pruneChecked()); deleteBtn.classList.add('wa-bulk-danger');
-        const ignoreBtn = railBtn('fa-ban', t`Ignore the selected terms: never flag them in this book`, () => ignoreChecked());
+        const deleteBtn = railBtn('fa-trash-can', t`Delete the selected keys`, () => pruneChecked()); deleteBtn.classList.add('wa-bulk-danger');
+        const ignoreBtn = railBtn('fa-ban', t`Ignore the selected keys: never flag them in this book`, () => ignoreChecked());
         const showAllTitle = () => (cleanupShowAll ? t`Back to flagged keys only` : t`Show every key on every visible entry, flagged or not`);
         const showAllBtn = railBtn(cleanupShowAll ? 'fa-eye-slash' : 'fa-eye', showAllTitle(),
             () => { cleanupShowAll = !cleanupShowAll; showAllBtn.innerHTML = `<i class="fa-solid ${cleanupShowAll ? 'fa-eye-slash' : 'fa-eye'}"></i>`; showAllBtn.title = showAllTitle(); repaint(); });
@@ -2259,8 +2259,8 @@ export async function lorebookStudio(preferredBook = null, open = null) {
             allIds = groups.flatMap(g => g.rows.map(r => rowId(g.entry.uid, r.term)));
             reg = { row: new Map(), grp: [] };
             list.innerHTML = '';
-            if (!scan) list.append(emptyNote(t`Run the audit to flag weak keywords — tune what counts as weak under Tool Settings.`));
-            else if (!groups.length) list.append(emptyNote(cleanupShowAll ? t`The visible entries have no keywords at all.` : t`No flagged keywords in the visible entries — “Show all terms” lists the rest.`));
+            if (!scan) list.append(emptyNote(t`Run the audit to flag weak keys — tune what counts as weak under Tool Settings.`));
+            else if (!groups.length) list.append(emptyNote(cleanupShowAll ? t`The visible entries have no keys at all.` : t`No flagged keys in the visible entries — “Show all keys” lists the rest.`));
             else for (const g of groups) {
                 list.append(termGroupHeader(g.entry, g.rows, cleanupChecks, reg, sync, repaint));
                 if (advOpen.has(g.entry.uid)) list.append(buildAdvancedTray(g.entry, repaint));
@@ -2272,7 +2272,7 @@ export async function lorebookStudio(preferredBook = null, open = null) {
         termRepaint = repaint;
         if (!scan) {
             bar.textContent = t`Auditing…`;
-            list.append(emptyNote(t`Auditing keywords…`));
+            list.append(emptyNote(t`Auditing keys…`));
             await yieldFrame();
             if (!pane.isConnected || tab !== 'cleanup') return;   // switched away while we were blocked
             // runAudit, not rebuildScan: an audit that gathered no chat evidence is a different audit from the Explorer's.
@@ -2583,7 +2583,7 @@ export async function lorebookStudio(preferredBook = null, open = null) {
             // No count: it would take loading every book to know.
             fn: async () => {
                 if (!await Popup.show.confirm(t`Delete “${key}” from every entry in ${scopeLabel}?`,
-                    t`Removes the keyword everywhere it appears there.`)) return;
+                    t`Removes the key everywhere it appears there.`)) return;
                 const n = await apply(es => deleteKey(es, key));
                 toastr[n ? 'success' : 'info'](n
                     ? (n === 1 ? t`Deleted “${key}” from ${n} entry.` : t`Deleted “${key}” from ${n} entries.`)
@@ -2593,7 +2593,7 @@ export async function lorebookStudio(preferredBook = null, open = null) {
         {
             label: t`Replace across ${scopeLabel}…`,
             fn: async () => {
-                const next = (await Popup.show.input(t`Replace keyword`, t`Replace “${key}” across ${scopeLabel} with:`, key))?.trim();
+                const next = (await Popup.show.input(t`Replace key`, t`Replace “${key}” across ${scopeLabel} with:`, key))?.trim();
                 if (!next || next === key || !keyWriteOk(next)) return;
                 const n = await apply(es => replaceKey(es, key, next));
                 toastr[n ? 'success' : 'info'](n
@@ -2604,7 +2604,7 @@ export async function lorebookStudio(preferredBook = null, open = null) {
         {
             label: t`Add variant across ${scopeLabel}…`,
             fn: async () => {
-                const raw = await Popup.show.input(t`Add variant`, t`Keyword to add to every entry in ${scopeLabel} keyed “${key}”:`);
+                const raw = await Popup.show.input(t`Add variant`, t`Key to add to every entry in ${scopeLabel} keyed “${key}”:`);
                 const term = String(raw ?? '').trim();
                 if (!term || !keyWriteOk(term)) return;
                 const n = await apply(es => addVariant(es, key, term));
@@ -2623,7 +2623,7 @@ export async function lorebookStudio(preferredBook = null, open = null) {
             {
                 label: t`Edit…`,
                 fn: async () => {
-                    const next = (await Popup.show.input(t`Edit keyword`, t`Rename “${key}” in this entry:`, key))?.trim();
+                    const next = (await Popup.show.input(t`Edit key`, t`Rename “${key}” in this entry:`, key))?.trim();
                     if (!next || next === key || !keyWriteOk(next)) return;
                     const n = await editInBook(world, es => {
                         const e = es.find(x => String(x.uid) === String(uid));
@@ -2790,7 +2790,7 @@ export async function lorebookStudio(preferredBook = null, open = null) {
         // The keys box with an eraser in its corner: clears the keys, the secondary keys and any applied run.
         const keyWrap = document.createElement('div'); keyWrap.style.cssText = 'position:relative;flex:0 0 auto;display:flex;';
         keyBox.style.width = '100%'; keyBox.style.paddingRight = '1.8em';
-        const eraser = document.createElement('i'); eraser.className = 'fa-solid fa-eraser wa-tool'; eraser.title = t`Clear all terms`;
+        const eraser = document.createElement('i'); eraser.className = 'fa-solid fa-eraser wa-tool'; eraser.title = t`Clear all keys`;
         eraser.style.cssText = 'position:absolute;top:4px;right:6px;';
         eraser.addEventListener('click', () => { labKeys = ''; labSec = ''; labRun = null; keyBox.value = ''; secBox.value = ''; growKeys(); repaint(); });
         keyWrap.append(keyBox, eraser);
@@ -2921,7 +2921,7 @@ export async function lorebookStudio(preferredBook = null, open = null) {
             // scanLab, whose applied-run branch has no gate to report.
             const secN = splitKeys(labSec).length;
             gateSum.textContent = secN
-                ? (secN === 1 ? t`Secondary keys — ${logicSel.value === 'off' ? 'OFF' : LOGIC_OPTS.find(o => o[0] === logicSel.value)?.[1] ?? ''}, ${secN} term` : t`Secondary keys — ${LOGIC_OPTS.find(o => o[0] === logicSel.value)?.[1] ?? ''}, ${secN} terms`)
+                ? (secN === 1 ? t`Secondary keys — ${logicSel.value === 'off' ? 'OFF' : LOGIC_OPTS.find(o => o[0] === logicSel.value)?.[1] ?? ''}, ${secN} key` : t`Secondary keys — ${LOGIC_OPTS.find(o => o[0] === logicSel.value)?.[1] ?? ''}, ${secN} keys`)
                 : t`Secondary keys`;
             gateSum.style.opacity = secN ? '1' : '0.6';
             // An applied run matches with books, not with what is typed, so the keys and the gate step aside for the list.
@@ -3167,14 +3167,14 @@ export async function lorebookStudio(preferredBook = null, open = null) {
         const scanBtn = document.createElement('button');
         scanBtn.type = 'button'; scanBtn.className = 'menu_button';
         scanBtn.innerHTML = '<i class="fa-solid fa-stethoscope"></i>';
-        scanBtn.title = (scan ? t`Re-audit: flag dead, common and short keywords.` : t`Keyword audit: flag dead, common and short keywords.`) + '\n' + (chatHits ? t`Chat evidence: ${chatLabel()}, ${chatMsgs} messages.` : t`No chat searched yet.`);
+        scanBtn.title = (scan ? t`Re-audit: flag dead, common and short keys.` : t`Keyword audit: flag dead, common and short keys.`) + '\n' + (chatHits ? t`Chat evidence: ${chatLabel()}, ${chatMsgs} messages.` : t`No chat searched yet.`);
         scanBtn.addEventListener('click', async () => { await withBusy(scanBtn, '0.5', runAudit, '<i class="fa-solid fa-spinner fa-spin"></i>'); renderExplorer(); });
         const allOpen = entries.length > 0 && entries.every(x => entryOpen.has(x.uid));
         const expandBtn = document.createElement('button');
         expandBtn.type = 'button'; expandBtn.className = 'menu_button';
         // Expand is arrows-up-down with a crossbar drawn by CSS (Font Awesome's arrows-from-line is Pro only); collapse is the inward diagonal pair.
         expandBtn.innerHTML = allOpen ? '<i class="fa-solid fa-down-left-and-up-right-to-center"></i>' : '<span class="wa-icon-fromline"><i class="fa-solid fa-arrows-up-down"></i></span>';
-        expandBtn.title = allOpen ? t`Collapse all entries. Shift-click expands only entries with flagged keywords.` : t`Expand all entries. Shift-click expands only entries with flagged keywords.`;
+        expandBtn.title = allOpen ? t`Collapse all entries. Shift-click expands only entries with flagged keys.` : t`Expand all entries. Shift-click expands only entries with flagged keys.`;
         expandBtn.addEventListener('click', async ev => {
             if (ev.shiftKey) {   // expand only flagged entries (scan first if needed), collapse the rest
                 if (!scan) await withBusy(expandBtn, '0.5', runAudit);   // building an audit here means building the SAME audit
