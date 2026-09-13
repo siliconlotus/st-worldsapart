@@ -3,7 +3,7 @@
 How a key is written, how it is matched, and what WA does at each stage of a generation. The suggester
 and the audit are `keyword-suggest-design.md`; ST core's own scan is `st-worldinfo.md`; core defects
 are `upstream-st.md` in the SillyTavern root. The stage numbering is `CLAUDE.md`'s (*Four stages, and
-the two rankings*). A measured claim cites its register entry, `eval/eval-data/measured-claims.md`, by
+the three orderings*). A measured claim cites its register entry, `eval/eval-data/measured-claims.md`, by
 ID; anything else is an assertion.
 
 ## Principles
@@ -428,11 +428,3 @@ Each an option against a behaviour that stands:
 4. **Per-tier centring.** Reference is centred on the memory tier's centroid, which sits well off the
    reference centroid (F44). Per-tier and cross centring are measured flat (F57); the
    `referenceCentroid` arm in `eval/scene.mjs` is the instrument. Re-run when the corpus has more books.
-
-## Standing caveats
-
-- **`plugin/` changes need `node deploy-plugin.mjs` and an ST restart**, and so does a change to
-  `matcher.mjs`, `smartkeys.mjs` or `automaton.mjs`, which the manifest deploys into the plugin. Until
-  the redeploy the two halves match differently.
-- **The check suite is run by exit code.** `eq()` sets `process.exitCode`, so a failed assertion and a
-  thrown error are the same signal. Grepping for `^FAIL` alone misses thrown errors.

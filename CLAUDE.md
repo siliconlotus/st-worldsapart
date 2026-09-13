@@ -12,34 +12,35 @@ live in the design docs and `measured-claims.md`, and a misstep warning may cite
 pointer, in one line. A module header is at most two lines, a docblock one sentence plus the params
 whose shape is not obvious, an inline comment one line.
 
-`keyword-suggest-design.md` owns the suggester and the audit: what a good key is, the gates
-`buildKeySuggest` applies, and the audit's flags. Read it before changing either, and update it rather
-than re-deriving it in conversation.
+## The design docs document how the code works and the decisions behind it
 
-`matcher-design.md` owns the matcher: how a key is matched, the SmartKeys grammar, and activation. Read
-it before changing `countKey`, `smartkeys.mjs`, the fold, or anything about activation.
+`matcher-design.md` owns the matcher and the pipeline: how a key is written and matched, and what each
+stage does. `keyword-suggest-design.md` owns the suggester and the audit. `st-worldinfo.md` is ST
+core's own scan; `bundle-schema.md` the graded bundle; `embedding-models.md` the model guidance;
+`SMARTKEYS.md` the user's page, which must neither run ahead of the code nor lag it. Read the owning
+doc before changing what it covers, and update it rather than re-deriving it in conversation.
 
-## The design docs record rules, not the working that produced them
+A doc carries how the code works now and the architectural decisions behind it, and nothing else: not
+how it used to work, how it could work, how it does not work, speculation, or measurements nothing
+hinges on. An *Open* list holds at most options against a behaviour that stands.
 
-They carry decisions and the facts whose absence would cause a mistake. The instance that convinced
-someone, the counts behind it, and any account of what an earlier draft got wrong stay out.
+**Terms are stable, or they are announced as new.** Use the doc's vocabulary exactly, and prefer the
+standard technical term to a coinage.
 
-**Terms are stable, or they are announced as new.** Use the doc's vocabulary exactly — seed, expander,
-renderer, required forms, hypernymy, propriolization. Prefer the standard technical term to a coinage.
-
-**Say which claims are measured, and keep the evidence out.** A measured claim states its finding and
-cites its entry in `eval/eval-data/measured-claims.md` — "measured flat (F41)" — the gitignored register
-that holds the numbers, the instrument and the n under a stable ID. Anything else is labelled an
-assertion. A number that would not be worth registering is not worth stating. Unchallenged is not agreed.
+**A measurement stays only where a decision hinges on it**, cited by ID from
+`eval/eval-data/measured-claims.md`, the gitignored register that holds the numbers, the instrument and
+the n. Anything else is an assertion and says so. Unchallenged is not agreed.
 
 **Propose a new claim before writing it down.** Cuts and restatements of settled content can just be
 made; anything asserting what the doc does not already carry, with no measurement behind it, gets
 proposed first. The test is structural, not a judgement about how controversial it looks.
 
-## eval/ has three kinds of file
+## What is in eval/
 
-- `*-check.mjs` — self-checking. Run with no arguments; they print `ok`/`FAIL` or assert. This is the
-  regression suite: `for f in eval/*-check.mjs; do node "$f"; done` should be silent-clean.
+- `*-check.mjs` — self-checking, run with no arguments. The regression suite is run by exit code:
+  `for f in eval/*-check.mjs; do node "$f" >/dev/null 2>&1 || echo "FAIL $f"; done`. `eq()` sets
+  `process.exitCode`, so a failed assertion and a thrown error are the same signal; grepping for `^FAIL`
+  misses throws.
 - `scene.mjs`, `metrics.mjs` — libraries, no CLI. `scene.mjs` loads and scores one graded scene;
   `metrics.mjs` holds the shared statistics. Every tool goes through them: a second copy of the
   gazetteer or the scorers must never appear (R22).
@@ -47,14 +48,13 @@ proposed first. The test is structural, not a judgement about how controversial 
   down, and `install-sentinel.mjs`, which symlinks both into `data/default-user/` so the same fixture
   opens in the Studio. Symlinks rather than copies, so editing the fixture changes what the UI shows;
   every other check calls the classifier one layer below what the UI uses.
+- `synthetic-data/` — generates graded data and measures nothing. `grade-pending.mjs` turns a row list
+  (`{bundle, book, uid}`) into judge jobs and merges the answers back, reading `eval-data` and writing
+  `grade-jobs`. The rubric is `.claude/agents/scene-relevance.md`, where Claude Code discovers
+  subagents; `scene-relevance-min.md` is the minimal-prompt arm.
 - everything else (`*-grid.mjs`, `param-screen`, `keyword-audit`, `relevance-regress`) — benchmark and
   analysis tools that take a vector index and/or lorebook path. Run bare they print a usage line and
   exit non-zero; that is not a test failure.
-
-**`synthetic-data/` is a fourth thing: it generates graded data and measures nothing.**
-`grade-pending.mjs` turns a row list (`{bundle, book, uid}`) into judge jobs and merges the answers back,
-reading `eval-data` and writing `grade-jobs`. The rubric is `.claude/agents/scene-relevance.md`, where
-Claude Code discovers subagents; `scene-relevance-min.md` is the minimal-prompt arm.
 
 ## A harness that spends anything appends; it never collects and writes at the end
 
@@ -95,13 +95,8 @@ inclusion groups, delay and cooldown, character and tag filters, `@@dont_activat
 `delayUntilRecursion`, triggers. Matching is WA's and `scene.mjs` models it through the same
 `keywordScore` that runs at runtime.
 
-**One `grades` array per row; each verdict names its rater, and `raters[].kind` says whether that rater
-is a human or a judge** (`bundle-schema.md`). Nothing in the file holds a reduced value: read the value
-in force through `grading.mjs` `gradeValue` (NaN when ungraded), never a stored scalar.
-
-**No verdict is ever overwritten** (`bundle-schema.md`, *Verdict elements*). A re-grade appends beside
-the one it disagrees with. The one exemption is a repeated pass, so a re-run of a merge is idempotent:
-same rater and day for a human, same rubric, model and day for a judge.
+The bundle's own rules — one `grades` array per row, no verdict ever overwritten, the value in force
+read through `grading.mjs` `gradeValue` and never a stored scalar — are `bundle-schema.md`'s.
 
 **Grading is the expensive step, so extend a pool by delta and never re-pool.** Loaded grades are
 subtracted (`/wa-super-grade`), carried onto a fresh capture (`graft-grades.mjs`), or built into jobs
@@ -111,13 +106,9 @@ re-grading.
 **A grade mean is only comparable at matched retrieval rank.** Grades fall steeply with pool depth, so a
 pass that graded deeper reads as a harsher rater (G2). Match the band or make no comparison; a scene's
 `entries` carry no rank, so join through the arm's `candidates`. Which rater graded a row correlates
-with rank band, so `graded-scene-grid.mjs` can report that as a parameter effect. The human grades
-predate the current rubric, so head disagreement is a changed construct as much as rater drift (G2).
-
-**The contract does not reproduce evenly, and the relevant band is the unstable one** (G3): agreement
-is weakest at the head of the pool, and every selection criterion is defined on the >= 3 line, so a
-one-scene difference between arms is inside the noise. **Job size does not move grades** (G4); prefer
-small batches anyway.
+with rank band, so `graded-scene-grid.mjs` can report that as a parameter effect. Agreement is weakest
+at the head of the pool, where every selection criterion is defined, so a one-scene difference between
+arms is inside the noise (G3).
 
 ## Chat-based measurement uses the standard corpus
 
@@ -135,66 +126,34 @@ derivable from the data. The per-book curation status is in `eval/eval-data/READ
 infer. In a curated book a removal is agreement with the flag and a retention is an override; curation
 says nothing about keys the flag never surfaced, so removals speak to precision, never to recall.
 
-## Four stages, and the two rankings
+## Four stages, and the three orderings
+
+The stages are `matcher-design.md`'s: **1. Retrieval** (`retrieve`, cosine only, no admission test),
+**2. Activation** (`selectAndActivate`, one force-activate; core's `activated` map is the result),
+**3. Scoring** (`onScanDone`: text, keys, `properNouns`, `density` and the cosine into the fitted
+per-tier model, whose `E[credit]` is the layout order), **4. Selection** (`relevanceCut`, memory rows
+only, the dynamic block only, one cutoff for every model), **5. Delivery** (`applyBudget`, every cap a
+prefix of the layout order). Say which stage a claim is about.
 
 **WA is a selection system, not a ranking system.** What ships is the set that survives stage 4, chosen
-by a threshold: `relevanceCut` tests each row's `E[credit]` against the cutoff on its own. Rank enters
-only at stage 5, where the caps and the budget take a prefix of the layout order — rank decides what
-overflows, never what belongs. So the validity score is F2 over the delivered set, set-based and
-asymmetric — recall at grade >= 3, precision crediting a 2 at half (`metrics.mjs` `gradeCredit`). No window is imposed on it. nDCG and any score read at a
-window the system is not asked to choose (`@R`) are diagnostics on the ordering, never evidence that the
-system works. The terms are fixed; say which stage a claim is about.
+by a threshold on each row alone; rank decides what overflows at stage 5, never what belongs. So the
+validity score is F2 over the delivered set, set-based and asymmetric — recall at grade >= 3, precision
+crediting a 2 at half (`metrics.mjs` `gradeCredit`) — with no window imposed on it. nDCG and any score
+read at a window the system is not asked to choose (`@R`) are diagnostics on the ordering, never
+evidence that the system works.
+
+**Three orderings, and only one is a ranking.** The retrieval ranking decides what is activated; the
+layout order is what the caps and budget take a prefix of (`runState.lastLayoutOrder`); the prompt
+order is the user's sort over the survivors (`runState.lastPromptOrder`). A change to the layout score
+can never surface an entry retrieval did not return, so no scoring change is a recall lever, only a
+precision one.
 
 **Three populations, and they cross-cut.** `memory` is STMB-marked and `reference` is everything else —
 the tier an entry belongs to. `durable` is `constant` plus sticky: in the prompt by intent rather than
-because relevance chose it. It is how a row got there, not what kind of thing it is.
-
-**Sticky is read at two moments, so say which durable you mean.** The runtime reads the armed effect
-(`isEffectActive`, `onScanDone`), and `walkOrder` hoists an armed sticky into stage 5's population, so it
-never reaches stage 4's cut. The eval side sees no armed effect: `grading.mjs` `isDurable` reads a
-capture row's `block`, which a dry run never sets to sticky, and `eval/scene.mjs` `isDurableEntry` reads
-`constant`. So a sticky entry is durable at runtime once armed and is graded like any other activation.
-
-**1. Retrieval** — `selectAndActivate` in `worldsapart.js`. Cosine only, with no admission test: the
-plugin scores every chunk by mean-centered cosine, pools to entries and returns them in score order —
-the **retrieval ranking** — bounded only by `admitCeiling` (`plugin/scoring.mjs`), which no measured book
-approaches (R4). Keys and every lexical signal live at stage 3, not here (R1). Call the non-plugin route the **no-plugin
-path**: ST's own `/api/vector` endpoint, taken when the plugin is absent or errors; it does not
-mean-centre and does not pool server-side.
-
-**2. Activation** — whether an entry is ranked at all. Three routes: WA emits `WORLDINFO_FORCE_ACTIVATE`
-on the retrieval winners; core keyword-matches whatever keys are live; `constant`, decorators and sticky
-persistence. The result is core's `activated` map.
-
-**3. Scoring** — `onScanDone`, on `WORLDINFO_SCAN_DONE`. The vector score is what retrieval stored; the
-text score is BM25 over entry content (`content-lexical.mjs`, over every entry, filtered by the entity
-filter's term weights); the keyword score is computed over the scan window. Those plus `properNouns`
-and `density` feed the fitted per-tier model (`relevance.mjs` `scoreRelevance`), whose `E[credit]` is the
-**layout order** (`layout.mjs` `layoutOrder`, checked by `eval/layout-check.mjs`). It is not the prompt
-order, which is a user setting applied to whatever survived. Which signal predicts best is a property of
-the embedding model, so it is quoted with one (E14).
-
-**4. Selection** — does this entry belong. The relevance cut drops a memory row whose `E[credit]` is
-below the `relevanceCutoff` setting (`selection.mjs` `relevanceCut`). Memory only: a key on a reference
-entry is the author declaring when it should be present, so reference rows are ordered and never cut. A
-row the model could not score is kept — an absent verdict, not a negative one. The cutoff is one setting
-for every model, not a property of the fit, whose own `cutoff` is provenance. It sees the dynamic block
-only: constants, armed stickies and `@@promote`d rows are separate arrays that reach `walkOrder`
-directly. Being a block is `promote`'s exemption; `selection.mjs` has no condition for it.
-
-**5. Delivery** — what fits, and in what order. Nothing here judges an entry; every cut is a prefix of
-the layout order. `delivery.mjs` `walkOrder` hoists constants, then armed stickies, then promoted rows
-ahead of the dynamic block. The entry maxes decide how many, on nested populations — vector ⊆ capped ⊆
-all, plus the per-book cap — with `maxVectorEntries` counted off the `vectorized` flag. `isDynamic` and
-`isCapped` differ by exactly the promoted block: `maxDynamic` bounds relevance-selected material, the
-vector and per-book caps bound capacity. The token budget decides how much. Both live in `applyBudget`,
-which walks durable-first and returns the survivors; `onScanDone` deletes the rest from `activated`,
-since `delivery.mjs` is ST-free and the map is core's.
-
-**Three orderings, and only one is a ranking.** The retrieval ranking decides what is activated; the layout
-order is what the caps and budget take a prefix of (`runState.lastLayoutOrder`); the prompt order is the
-user's sort over the survivors (`runState.lastPromptOrder`). A change to the layout score can never
-surface an entry retrieval did not return, so no scoring change is a recall lever, only a precision one.
+because relevance chose it — how a row got there, not what kind of thing it is. Sticky is read at two
+moments: the runtime reads the armed effect and hoists it past the cut, while the eval side reads a
+capture row's `block`, which a dry run never sets to sticky, so a sticky entry is durable at runtime
+once armed and is graded like any other activation.
 
 `eval/scene.mjs` models stages 1 and 3; the keyword loop in `makeCandidateSet` is stage 2 and may only
 admit what core could have activated — not disabled entries, not a `delayUntilRecursion` one on the
@@ -216,12 +175,11 @@ matched expression is worth goes in the second.
 
 ## Pure vs ST-coupled
 
-`matcher.mjs`, `entity.mjs`, `query.mjs`, `keyedit.mjs`, `keyword-audit.mjs`, `keyword-suggest.mjs`, `lab.mjs`, `layout.mjs`,
-`selection.mjs`, `delivery.mjs`, `smartkeys.mjs`, `sort.mjs`, `lexical.mjs`, `relevance.mjs` and
-`automaton.mjs` and `plugin/*.mjs` are ST-free and node-importable, so the evals exercise the shipped code. Settings and ST
-globals are injected by the caller, never imported. The ST/DOM half is `worldsapart.js`,
-`keyword-tools.mjs`, `studio.mjs`, `ui-widgets.mjs`, `capture-ui.mjs`. `state.mjs` binds ST's store
-rather than importing it, so the harness can read the shipped value of every knob.
+Every module under `extension/` and `plugin/` is ST-free and node-importable, so the evals exercise the
+shipped code, except the five that import ST: `keyword-tools.mjs`, `studio.mjs`, `ui-widgets.mjs`,
+`capture-ui.mjs` and `lang-store.mjs`; `worldsapart.js` is the ST half proper. Settings and ST globals
+are injected by the caller, never imported; `state.mjs` binds ST's store rather than importing it, so
+the harness can read the shipped value of every knob.
 
 **Every string a user reads goes through ST's i18n, and `eval/i18n-check.mjs` is the gate.** In the ST half,
 injected HTML carries `data-i18n` (the English text is the key; `[title]…` for an attribute, `;` joining the
@@ -251,7 +209,7 @@ imports ST. **A slice is not a test of the shipped code, and it fails silently**
 the sliced range throws `ReferenceError`, and grepping for `^FAIL` reports green. If something in the
 ST-coupled half needs a check, move it to the pure half first.
 
-## Composite keys use US (``), never NUL
+## Composite keys use US (``), never NUL
 
 Cache keys and row ids that join fields into one string (the `rowId` helpers in `studio.mjs` and
 `keyword-tools.mjs`) separate with Unit Separator. NUL makes git treat the file as binary and truncates
