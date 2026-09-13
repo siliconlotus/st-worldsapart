@@ -41,7 +41,7 @@ eq(msgs.length, 11, 'the hidden message is dropped, as core and WA both drop it'
     eq(v.zzunattested?.why, 'unattested (book)', 'dead, and says only that the book was checked');
     eq(v.glimmerwort?.why, 'unattested (book)', 'chat-only key reads dead when no chat was searched');
     eq(v.mother?.why, 'common word', 'the common list flags a generic word while no chat has been scanned');
-    eq(v.CIA?.why, 'short (1/4 clean) — consider ? =CIA', 'a short key mostly inside longer words is offered the whole-word flag, measured over the book');
+    eq(v.CIA?.why, 'short (1/4 exact) — consider ? =CIA', 'a short key mostly inside longer words is offered the whole-word flag, measured over the book');
     // A key the audit never scanned — edited in since — is judged on demand, not handed "never matches" by default.
     const later = buildKeyPruneScan(data, OPTS, new Set());
     const fresh = key => { const f = later.classifyEntry({ uid: 99, key: [key] })[0]; return f ? later.reasonOf(f).text : ''; };

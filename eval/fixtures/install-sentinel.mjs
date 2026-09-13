@@ -102,7 +102,7 @@ console.log('                            with WA enabled it must appear in the p
 console.log('   caf                      dead under WA — whole-word, and "café" does not count (core');
 console.log('                            WOULD fire it; that divergence is the entry\'s whole point)');
 console.log('   bistro                   unflagged; loses the terrace group to caf\'s override under core.');
-console.log('   CIA                      "short (1/4 clean) — consider ? =CIA": inside special/official/social, once as');
+console.log('   CIA                      "short (1/4 exact) — consider ? =CIA": inside special/official/social, once as');
 console.log('                            the word; the book-side twin of the substring flag\'s suggestion');
 console.log('   isle of wight            unflagged: a fragment by shape, but the book writes "Isle of Wight"');
 console.log('   piece of cake            "phrase fragment" — the same shape, and nothing capitalises it');

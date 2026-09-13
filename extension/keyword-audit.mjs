@@ -445,7 +445,7 @@ export function buildKeyPruneScan(data, opts, ignoreSet, { caseSensitiveDefault 
         }
         // The same suggestion substring makes, measured over the book: hits mostly inside longer words want `=`.
         const ratio = p.total ? p.clean / p.total : 0;
-        return { text: ratio <= 1 / 3 && !p.ww ? t`short (${p.clean}/${p.total} clean) — consider ? =${p.key}` : t`short (${p.clean}/${p.total} clean)`, severity };
+        return { text: ratio <= 1 / 3 && !p.ww ? t`short (${p.clean}/${p.total} exact) — consider ? =${p.key}` : t`short (${p.clean}/${p.total} exact)`, severity };
     };
     // Pre-ticked: the red tier, plus unattested on machine-written entries only (K14). Unusable is red but wants a correction, not a deletion.
     const generated = e => e?.stmemorybooks !== undefined || e?.STMB_start !== undefined || e?.stmbArc !== undefined;
