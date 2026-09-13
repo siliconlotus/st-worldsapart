@@ -2204,7 +2204,7 @@ export async function lorebookStudio(preferredBook = null, open = null) {
             async () => { await withBusy(auditBtn, '0.5', runAudit, '<i class="fa-solid fa-spinner fa-spin"></i>'); renderExplorer(); });
         const deleteBtn = railBtn('fa-trash-can', t`Delete the selected keys`, () => pruneChecked()); deleteBtn.classList.add('wa-bulk-danger');
         const ignoreBtn = railBtn('fa-ban', t`Ignore the selected keys: never flag them in this book`, () => ignoreChecked());
-        const showAllTitle = () => (cleanupShowAll ? t`Back to flagged keys only` : t`Show every key on every visible entry, flagged or not`);
+        const showAllTitle = () => (cleanupShowAll ? t`Back to flagged keys only` : t`Show every key, flagged or not`);
         const showAllBtn = railBtn(cleanupShowAll ? 'fa-eye-slash' : 'fa-eye', showAllTitle(),
             () => { cleanupShowAll = !cleanupShowAll; showAllBtn.innerHTML = `<i class="fa-solid ${cleanupShowAll ? 'fa-eye-slash' : 'fa-eye'}"></i>`; showAllBtn.title = showAllTitle(); repaint(); });
         const chatsBtn = railBtn('fa-comments', t`Choose chats: pick which chats to count key hits over. Bound chats are scanned when the audit runs; shift-click lists every chat on this install.`,

@@ -570,7 +570,7 @@
  "Severe": "Grave",
  "Shift-click for every other key": "Maj-clic pour tous les autres mots-clés",
  "Short → long": "Court → long",
- "Show every key on every visible entry, flagged or not": "Afficher toutes les clés, signalées ou non",
+ "Show every key, flagged or not": "Afficher toutes les clés, signalées ou non",
  "Show every tag, entity and marker in the text": "Afficher chaque balise, entité et marqueur du texte",
  "Show keys and entry text": "Afficher les mots-clés et le texte de l’entrée",
  "Show the ignored keys": "Afficher les clés ignorées",
