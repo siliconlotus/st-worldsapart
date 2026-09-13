@@ -1650,7 +1650,7 @@ export async function lorebookStudio(preferredBook = null, open = null) {
 
     // --- Shared header controls: the search box and type filter read and write the same state on every tab ---
     const buildSearchBox = onChange => {
-        const wrap = document.createElement('span'); wrap.style.cssText = 'position:relative;display:inline-flex;align-items:center;';
+        const wrap = document.createElement('span'); wrap.style.cssText = 'position:relative;display:inline-flex;align-items:stretch;';   // stretch: the icon-only button takes the input's height
         const search = document.createElement('input'); search.type = 'search'; search.className = 'text_pole wa-filter';
         search.placeholder = t`Search…`; search.value = searchQuery;
         search.style.cssText = 'width:11em;border-top-left-radius:0;border-bottom-left-radius:0;';
