@@ -12,9 +12,9 @@ live in the design docs and `measured-claims.md`, and a misstep warning may cite
 pointer, in one line. A module header is at most two lines, a docblock one sentence plus the params
 whose shape is not obvious, an inline comment one line.
 
-`keyword-suggest-design.md` owns the suggester: what a good key is, what counts as success, and which
-of the books' own keys are not evidence. Read it before proposing anything about `buildKeySuggest` or
-how to measure it, and update it rather than re-deriving it in conversation.
+`keyword-suggest-design.md` owns the suggester and the audit: what a good key is, the gates
+`buildKeySuggest` applies, and the audit's flags. Read it before changing either, and update it rather
+than re-deriving it in conversation.
 
 `matcher-design.md` owns the matcher: how a key is matched, the SmartKeys grammar, and activation. Read
 it before changing `countKey`, `smartkeys.mjs`, the fold, or anything about activation.
