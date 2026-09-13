@@ -290,7 +290,7 @@ export async function lorebookStudio(preferredBook = null, open = null) {
         }
 
         panel.append(
-            col(t`Keyword audit`,
+            col(t`Key audit`,
                 check(studioOpts, 'scanKeyword', t`Audit 🟢 keyword entries`),
                 check(studioOpts, 'scanVectorized', t`Audit 🔗 vector entries`),
                 check(studioOpts, 'scanConstant', t`Audit 🔵 constant entries`),
@@ -2283,7 +2283,7 @@ export async function lorebookStudio(preferredBook = null, open = null) {
         repaint();
     };
 
-    // --- Keyword Lab ---
+    // --- Key Lab ---
     /** Seven hues, one per colour family, none in the red band SEVERITY_COLOR uses. labInk indexes them and desaturates on
      *  the second pass, so fourteen positions run before a colour repeats. */
     const LAB_HUES = [215, 120, 305, 35, 180, 265, 58];
@@ -2355,7 +2355,7 @@ export async function lorebookStudio(preferredBook = null, open = null) {
         if (end >= 0) bits.push(t`ending at #${end}`);
         if (hidden) bits.push(hidden === 1 ? t`${hidden} hidden message skipped` : t`${hidden} hidden messages skipped`);
         // dropChatTags removes the named element WITH its contents, so a tracker block leaves a gap in the pane.
-        toastr.info(bits.join(', ') + (spec?.trim() ? '. ' + t`Dropped, with contents: ${escapeHtml(spec)}` : ''), t`Keyword Lab`);
+        toastr.info(bits.join(', ') + (spec?.trim() ? '. ' + t`Dropped, with contents: ${escapeHtml(spec)}` : ''), t`Key Lab`);
         return messages.join(`\n\n${'-'.repeat(24)}\n\n`);
     };
 
@@ -2374,7 +2374,7 @@ export async function lorebookStudio(preferredBook = null, open = null) {
         }
         const chats = picked.length === 1 ? t`${picked.length} chat` : t`${picked.length} chats`;
         const line = total === 1 ? t`${total} message from ${chats} at depth ${depth}` : t`${total} messages from ${chats} at depth ${depth}`;
-        toastr.info(end >= 0 ? line + ', ' + t`ending at #${end}` : line, t`Keyword Lab`);
+        toastr.info(end >= 0 ? line + ', ' + t`ending at #${end}` : line, t`Key Lab`);
         return parts.join('\n\n');
     };
 
@@ -2483,7 +2483,7 @@ export async function lorebookStudio(preferredBook = null, open = null) {
             skipVectorized: labSkipVector,
         });
         labRun = { label, ...run };
-        toastr.info(run.scanned === 1 ? t`${run.entries.length} of ${run.scanned} keyed entry matched` : t`${run.entries.length} of ${run.scanned} keyed entries matched`, t`Keyword Lab`);
+        toastr.info(run.scanned === 1 ? t`${run.entries.length} of ${run.scanned} keyed entry matched` : t`${run.entries.length} of ${run.scanned} keyed entries matched`, t`Key Lab`);
         labRepaint?.();
     };
 
@@ -2498,7 +2498,7 @@ export async function lorebookStudio(preferredBook = null, open = null) {
         const names = attachedBookNames();
         if (!names.length) {
             // Only on a click. Opening the Lab is not a request for a dialog, and one raised here lands behind the Studio.
-            if (!pickIfNone) { toastr.info(t`No lorebook is attached to this chat.`, t`Keyword Lab`); return; }
+            if (!pickIfNone) { toastr.info(t`No lorebook is attached to this chat.`, t`Key Lab`); return; }
             const name = await pickBook(t`Nothing is attached to this chat. Apply which lorebook?`, true);
             if (name) await applyOneBook(name);
             return;
@@ -2849,7 +2849,7 @@ export async function lorebookStudio(preferredBook = null, open = null) {
             labTool('fa-comment-dots', t`Load current chat to scan depth ${settings().messageDepth || world_info_depth}. Shift-click to select depth.`,
                 async ev => {
                     // No character or group: there is no chat to read, and nothing here may cause ST to make one.
-                    if (getContext().characterId === undefined && !getContext().groupId) { toastr.info(t`No chat is open.`, t`Keyword Lab`); return; }
+                    if (getContext().characterId === undefined && !getContext().groupId) { toastr.info(t`No chat is open.`, t`Key Lab`); return; }
                     const depth = ev.shiftKey
                         ? await numberPrompt(t`Load chat`, t`How many messages deep?`, settings().messageDepth || world_info_depth, 1)
                         : undefined;
@@ -2874,7 +2874,7 @@ export async function lorebookStudio(preferredBook = null, open = null) {
                     if (!found.length) found = await findBookChats(true);
                     const ctx = getContext(); const openName = String(ctx.chatId ?? '');
                     if (openName && !found.some(f => f.file.startsWith(openName))) found.push({ char: ctx.name2 ?? '', avatar: null, file: openName, size: t`${(ctx.chat ?? []).length} msgs`, why: 'currently open', open: true });
-                    if (!found.length) { toastr.warning(t`No chats found.`, t`Keyword Lab`); return; }
+                    if (!found.length) { toastr.warning(t`No chats found.`, t`Key Lab`); return; }
                     const picked = await pickChats(found, 'Load');
                     if (!picked?.length) return;
                     labHay = await chatsHaystack(picked, depth, end);
@@ -2961,7 +2961,7 @@ export async function lorebookStudio(preferredBook = null, open = null) {
         pane.append(opts, body);
     };
 
-    const TABS = [['explorer', t`Explorer`], ['cleanup', t`Bulk Cleanup`], ['lab', t`Keyword Lab`]];
+    const TABS = [['explorer', t`Explorer`], ['cleanup', t`Bulk Cleanup`], ['lab', t`Key Lab`]];
     /** The book's chat-evidence status, once, on the tab bar: it belongs to the audit, not to any one tab's tools. Empty until an audit exists. */
     const tabStatus = () => {
         const st = document.createElement('span'); st.className = 'wa-tab-status';
@@ -3167,7 +3167,7 @@ export async function lorebookStudio(preferredBook = null, open = null) {
         const scanBtn = document.createElement('button');
         scanBtn.type = 'button'; scanBtn.className = 'menu_button';
         scanBtn.innerHTML = '<i class="fa-solid fa-stethoscope"></i>';
-        scanBtn.title = (scan ? t`Re-audit: flag dead, common and short keys.` : t`Keyword audit: flag dead, common and short keys.`) + '\n' + (chatHits ? t`Chat evidence: ${chatLabel()}, ${chatMsgs} messages.` : t`No chat searched yet.`);
+        scanBtn.title = (scan ? t`Re-audit: flag dead, common and short keys.` : t`Key audit: flag dead, common and short keys.`) + '\n' + (chatHits ? t`Chat evidence: ${chatLabel()}, ${chatMsgs} messages.` : t`No chat searched yet.`);
         scanBtn.addEventListener('click', async () => { await withBusy(scanBtn, '0.5', runAudit, '<i class="fa-solid fa-spinner fa-spin"></i>'); renderExplorer(); });
         const allOpen = entries.length > 0 && entries.every(x => entryOpen.has(x.uid));
         const expandBtn = document.createElement('button');

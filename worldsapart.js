@@ -1987,9 +1987,9 @@ function renderDeliveryPanel(layout) {
     // Appended last: the panel opens upward, so the bottom row is nearest the icon.
     const lab = document.createElement('div');
     lab.className = 'wa-delivery-entry';
-    lab.title = t`Open the Studio on the Keyword Lab`;
+    lab.title = t`Open the Studio on the Key Lab`;
     lab.innerHTML = '<span class="wa-delivery-glyph fa-solid fa-flask"></span>'
-        + `<span class="wa-delivery-title">${escapeHtml(t`Open the Keyword Lab`)}</span>`;
+        + `<span class="wa-delivery-title">${escapeHtml(t`Open the Key Lab`)}</span>`;
     lab.addEventListener('click', () => lorebookStudio(chatBook(), { lab: true }));
     if (!layout.length) {
         const empty = document.createElement('div');

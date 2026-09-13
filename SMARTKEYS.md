@@ -239,7 +239,7 @@ meant. The last row applies to a bare `/regex/` key as well.
 | **warn** | a `/pattern/` with an unescaped `/` inside — vanilla SillyTavern will not run it (above) |
 
 Whether a term ever occurs in your book is a different question, and the audit answers it. The Studio's
-Keyword Lab answers it against any text you paste or load. It reports keyword hits only — probability,
+Key Lab answers it against any text you paste or load. It reports keyword hits only — probability,
 delay, cooldown, inclusion groups, character and tag filters, decorators, recursion and vector retrieval
 are not applied — so a key that hits there has not necessarily activated its entry.
 

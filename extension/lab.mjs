@@ -1,4 +1,4 @@
-// lab.mjs — the Keyword Lab's model: a text against a typed key list, or against a book's entries. ST-free; the Studio
+// lab.mjs — the Key Lab's model: a text against a typed key list, or against a book's entries. ST-free; the Studio
 // injects the settings.
 
 import { keyHits, keySpans, mergeSpans, secondaryKeys, splitKeys, usableKeys, WI_LOGIC } from './matcher.mjs';
