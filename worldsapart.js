@@ -1844,7 +1844,7 @@ const SETTINGS_HTML = `
                     <option value="all" data-i18n="All entries">All entries</option>
                     </select>
                     <label class="checkbox_label" for="wa_tokens_include_exempt">
-                    <input id="wa_tokens_include_exempt" type="checkbox"><span data-i18n="Budget-exempt entries spend budget">Budget-exempt entries spend budget</span>
+                    <input id="wa_tokens_include_exempt" type="checkbox"><span data-i18n="Budget-exempt entries spend budget">Budget-exempt entries spend budget</span> <span class="fa-solid fa-circle-question note-link-span" title="On: their tokens still spend the budget, so fewer other entries fit beside them. Off: they ride free, and the prompt may exceed the budget by their size. Either way they are never cut." data-i18n="[title]On: their tokens still spend the budget, so fewer other entries fit beside them. Off: they ride free, and the prompt may exceed the budget by their size. Either way they are never cut."></span>
                     </label>
 
                     <small id="wa_exempt_count" class="opacity50p"></small>

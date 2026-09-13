@@ -437,6 +437,7 @@
  "On (inherited)": "Oui (hérité)",
  "On a branch from an earlier point, scene summaries written after that point are hidden. No effect at the latest turn.": "Sur une branche partant d’un point antérieur, les résumés de scène écrits après ce point sont masqués. Sans effet au dernier tour.",
  "On screen": "À l’écran",
+ "On: their tokens still spend the budget, so fewer other entries fit beside them. Off: they ride free, and the prompt may exceed the budget by their size. Either way they are never cut.": "Activé : leurs tokens consomment le budget, donc moins d’autres entrées tiennent à côté. Désactivé : elles passent gratuitement, et le prompt peut dépasser le budget de leur taille. Dans les deux cas elles ne sont jamais coupées.",
  "One call per entry.": "Un appel par entrée.",
  "One entry": "Une entrée",
  "Open in a larger window": "Ouvrir dans une fenêtre plus grande",
