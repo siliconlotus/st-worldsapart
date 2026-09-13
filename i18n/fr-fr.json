@@ -179,7 +179,7 @@
  "Could not parse ${0} — ignored": "Impossible de lire ${0} — ignoré",
  "Could not parse ${0} — skipped": "Impossible de lire ${0} — sauté",
  "Could not re-point: ${0}": "Impossible de réorienter : ${0}",
- "Count \"ignore budget\" entries against the token budget": "Compter les entrées « ignorer le budget » dans le budget de tokens",
+ "Count \"ignore budget\" entries toward the token budget": "Compter les entrées « ignorer le budget » dans le budget de tokens",
  "Current chat API": "API de la discussion en cours",
  "Current sort order:": "Ordre de tri actuel :",
  "Custom": "Personnalisé",
