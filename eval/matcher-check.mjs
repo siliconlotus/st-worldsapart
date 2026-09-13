@@ -453,3 +453,12 @@ console.log('ok   keySpans: source offsets for marking the haystack, ordered and
     eq(dropTags('a<xy>1</xy>b', 'x'), 'a<xy>1</xy>b', 'a tag name is matched whole: `x` is not `xy`');
     eq(dropTags('a<X ID="1">1</x>b', 'x'), 'ab', 'tag names are case-insensitive and attributes come along');
 }
+
+// --- proximity in the witness report: the verdict is the cluster's, the leaves are reported as ever
+eq(digest('? (copper pipe)~1', 'copper far far pipe', { ww: false }), '? (copper pipe)~1:0 | !copper 1, pipe 1',
+    'both leaves hit, the window is marked unmatched: the leaves say what is there, the flag says it is too far apart');
+eq(digest('? (copper pipe)~1', 'copper hot pipe', { ww: false }), '? (copper pipe)~1:1 | copper 1, pipe 1',
+    'within reach, the count is the cluster');
+eq(keyExcerpts('? (copper pipe)~1', 'copper hot pipe', false, false).map(e => `${e.term}:${e.n}`).join(' '), 'copper:1 pipe:1',
+    'a matched proximity group excerpts its leaves');
+console.log('ok   proximity: witness spans report leaves, the verdict is the cluster');

@@ -35,6 +35,7 @@ SmartKeys loads in a stock SillyTavern, where the keys never match rather than b
 ? fire^2.5                        ^N is accepted too (Lucene's boost)
 ? (rain OR snow) -indoors         parentheses group
 ? /co(l|s)monaut/i landed         /pattern/flags is a term
+? (copper pipe)~3                 ~N: the group's words within 3 words of each other
 ```
 
 **Terms.** Anything that is not an operator or a paren, matched as a plain key would be — substring
@@ -62,6 +63,20 @@ Weight `0` means "must be present, but do not rank on it" — a **disambiguator*
 planet::0` needs the word *planet* nearby, so the entry does not match on the element or the god, and
 still scores exactly what `? mercury` alone would; without the `::0` the qualifier counts as a second
 thing the passage is about.
+
+**Proximity.** `~N` after a group holds its words to a window: `? (copper pipe)~3` matches when *copper*
+and *pipe* are within three words of each other, in either order — *pipe of old copper* (two words between)
+yes, *copper in the bath beside the pipe* no. `~0` is adjacency, either order. N is the words allowed between
+each neighbouring pair, so a group of three can stretch to twice N. An alternation inside takes whichever
+branch is nearer: `? ((Arthur | Kyle) Porsche)~3`; an `XOR` takes either branch unless the other is
+also within reach: `? ((john XOR quincy) adams)~1` finds *John James Adams* and *Quincy Jefferson
+Adams*, and not *John Quincy Adams*. A negation inside vetoes only within reach: `? (fire
+-drill)~2` matches a *fire* with no *drill* within two words of it, where `? fire -drill` gives up on the
+whole window. The negated part can be anything a key can be, read whole within reach: `-(drill
+practice)` vetoes when both words are within reach, wherever they sit relative to each other. Each cluster counts once, as one thing: the group scores like a single term, and a weight
+goes on the group, `? (copper pipe)~3::2`; a weight on a word inside the group is not read. `~N` goes on a
+group only. After a quoted phrase it is refused, since a phrase is already its words adjacent and in order,
+and a `~` anywhere else is an ordinary character. What counts as a word is the *Word boundary* setting below.
 
 **Scoring.** A key's score is the sum over the things it is **about**. `AND` joins two different
 things, so each is scored separately and the scores add: `? moon AND rocket` is worth two. `OR` names
@@ -233,6 +248,7 @@ meant. The last row applies to a bare `/regex/` key as well.
 | **error** | every term negated — that matches whenever they are absent, which is nearly always |
 | **error** | an unclosed quote |
 | **error** | a `/pattern/` JavaScript cannot compile |
+| **error** | `~N` after a quoted phrase — a phrase is already its words adjacent and in order; group them instead |
 | **warn** | a punctuation-only term (usually a second `?`: only the first one is the sentinel) |
 | **warn** | unbalanced parens — it still parses, but probably not the way you grouped it |
 | **warn** | when all terms in an expression are weighted 0, the key ranks on nothing. In the secondary box that is a deliberate gate; as a key of its own it still counts as one thing present |
@@ -312,7 +328,8 @@ match `sci-fi`. If a compound is written both ways in your chats, key both (`? s
 on the language (`du` and `dû` are different French words), so key both forms when your model writes
 both.
 
-**No wildcards, no fuzzy matching.** `*` and `~` are ordinary characters: `M*A*S*H` matches `M*A*S*H`.
+**No wildcards, no fuzzy matching.** `*` is an ordinary character, and so is `~` except as `~N` after a
+group (*Proximity*, above): `M*A*S*H` matches `M*A*S*H` and `fire~2` matches `fire~2`.
 Substring matching already covers what a leading or trailing `*` would buy you; for anything more,
 write a `/regex/` — as the whole key, or as one term inside a SmartKey.
 
@@ -335,8 +352,9 @@ character would break the case that works, and stripping markup would destroy th
 
 # Coming from Lucene
 
-Carried over: `AND` `OR` `NOT` `+` `-` `&&` `||` `!`, parentheses, quoted phrases, and `^N` boost
-(aliased onto `::N`). Not implemented, and matched literally instead: wildcards `*` `?`, fuzzy and
-proximity `~`, field syntax `field:value`, and ranges — a key that expected one of these will never
+Carried over: `AND` `OR` `NOT` `+` `-` `&&` `||` `!`, parentheses, quoted phrases, `^N` boost
+(aliased onto `::N`), and `~N` as proximity — on a group, `(a b)~3`, rather than Lucene's phrase slop
+`"a b"~3`, which is refused. Not implemented, and matched literally instead: wildcards `*` `?`, fuzzy
+`~` on a term, field syntax `field:value`, and ranges — a key that expected one of these will never
 match, and the Studio's audit reports it as a dead key. `XOR` and `::` weights are not Lucene at all;
 `::` is Midjourney's multi-prompt weight, borrowed because it cannot collide with a time or a ratio.

@@ -6,10 +6,11 @@
 //   ? meeting 10:30                 a single colon is ordinary text; only :: introduces a weight
 //   ? +fire +water                  Lucene's required-marker, absorbed: AND is implicit
 //   ? /co(l|s)monaut/i landed       /pattern/flags is a term — negatable, weightable, not folded
-//   ? M*A*S*H   ? ~5                * and ~ are literals; a /regex/ term is the only pattern syntax
+//   ? (copper pipe)~3               ~N after a group: its things within N words of each other, any order; a -x inside vetoes within N words
+//   ? M*A*S*H   ? ~5                * and ~ are literals elsewhere; a /regex/ term is the only pattern syntax
 //   ? "hot tub"                     quoting is the one escape: operators, weights, parens and wildcards off. `? hot tub` is two terms.
 
-import { coreReadsAsRegex, countRegexKey, escapeRegex, foldedHay, isRegexKey, maskMarkup, REGEX_KEY_RE, boundaryAfter, boundaryBefore, wordChar } from './matcher.mjs';
+import { coreReadsAsRegex, countRegexKey, escapeRegex, foldedHay, isRegexKey, keyExcerpts, maskMarkup, REGEX_KEY_RE, boundaryAfter, boundaryBefore, wordChar } from './matcher.mjs';
 // Re-exported: matcher.mjs, keyword-tools.mjs and studio.mjs import these from here. One copy, or the browser and the server disagree.
 import { buildAutomaton, scanAutomaton, fold, keyVariants, normalizeOrthography, ORTHO_FAMILIES, addMessageHits } from './automaton.mjs';
 export { buildAutomaton, scanAutomaton, fold, keyVariants, normalizeOrthography, ORTHO_FAMILIES, addMessageHits };
@@ -52,10 +53,12 @@ export function tokenize(input) {
         if (src[0] === '(') { tokens.push({ type: 'LPAREN' }); src = src.slice(1); continue; }
         if (src[0] === ')') {
             src = src.slice(1);
-            // The weight rides on the RPAREN; lexed as a term of its own it is punctuation that can never match.
+            // `~N` then the weight ride on the RPAREN; lexed as terms of their own they are punctuation that can never match. Digits required: a bare `~` is text.
+            const p = src.match(/^~(\d+)/);
+            if (p) src = src.slice(p[0].length);
             const w = src.match(/^(?:::|\^)(\d+(?:\.\d+)?)/);
             if (w) src = src.slice(w[0].length);
-            tokens.push({ type: 'RPAREN', weight: w ? parseFloat(w[1]) : undefined });
+            tokens.push({ type: 'RPAREN', weight: w ? parseFloat(w[1]) : undefined, near: p ? parseInt(p[1], 10) : undefined });
             continue;
         }
         m = src.match(/^(&&|\|\||&|\||\+|!|-)/) ?? src.match(/^(AND|OR|NOT|XOR)\b(?=\s|[()]|$)/i);
@@ -79,9 +82,12 @@ export function tokenize(input) {
         if (!m) { src = src.slice(1); continue; } // lone stray char (e.g. unmatched ") — drop
         src = src.slice(m[0].length);
         let value = m[2] ?? m[3];
-        let weight = 1.0;
+        let weight = 1.0, near;
         // Weight is `::` or `^N`, never `:`, so `10:30`, `re:code` and URLs need no quoting; a delimiter followed by non-digits stays in the term.
         if (m[2] !== undefined) {
+            // `"…"~N` is taken so the validator can refuse it; left in `src` it would be a term that never matches.
+            const p = src.match(/^~(\d+)/);
+            if (p) { near = parseInt(p[1], 10); src = src.slice(p[0].length); }
             const w = src.match(/^(?:::|\^)(\d+(?:\.\d+)?)/); // quoted: weight sits after the close quote
             if (w) { weight = parseFloat(w[1]); src = src.slice(w[0].length); }
         } else {
@@ -96,6 +102,7 @@ export function tokenize(input) {
             isCaseSensitive: m[1].includes('^'),
             quoted: m[2] !== undefined,
             weight,
+            ...(near !== undefined && { near }),
         });
     }
     return tokens;
@@ -139,10 +146,12 @@ export function parse(tokens) {
         if (!t) return null;
         if (t.type === 'LPAREN') {
             const node = parseOr();
-            let w;
-            if (peek()?.type === 'RPAREN') { w = tokens[i].weight; i++; }
+            let w, near;
+            if (peek()?.type === 'RPAREN') { ({ weight: w, near } = tokens[i]); i++; }
             // `groupWeight`, never `weight`: a TERM already multiplies its own into wsum, and `(fire::2)::3` is both.
             if (node && w !== undefined) node.groupWeight = (node.groupWeight ?? 1) * w;
+            // `??=`: in `((a b)~2)~3` the inner clusters are the outer's one conjunct, so the inner slack is the one that binds.
+            if (node && near !== undefined) node.near ??= near;
             return node;
         }
         return t.type === 'TERM' || t.type === 'REGEX' ? t : null; // stray RPAREN — drop
@@ -216,6 +225,15 @@ export function validateSmartKey(raw) {
             message: flagged
                 ? `“^${v}” reads as a case-sensitive search for “${v}”, since “^” at the start of a term is the case flag. A weight goes straight after the term or the group it weights, with no space: “fire^${v}”, “(copper pipe)^${v}”.`
                 : `The weight ${JSON.stringify(v)} is not attached to anything. A weight goes straight after the term or the group it weights, with no space: “fire::3”, “(copper pipe)::3”.`,
+        });
+    }
+
+    // Quoting is the one construct that carries order, so proximity has nothing to say about a phrase.
+    for (const t of terms) {
+        if (t.type !== 'TERM' || t.near === undefined) continue;
+        out.push({
+            severity: 'error', code: 'proximity-on-phrase',
+            message: `“~${t.near}” after a quoted phrase means nothing: the phrase is already its words adjacent and in order. To allow words between, group the terms instead: (${t.value})~${t.near}.`,
         });
     }
 
@@ -387,7 +405,7 @@ const boostOf = units => units.reduce((a, u) => a + u.wsum, 0);
 /** Evaluates an AST against a text; `acHits` is pass-1 counts for this text, omitted for the pure regex path. An unmatched node
  *  must carry scoreBoost 0: parents sum child boosts without re-checking matched. */
 export function evaluate(node, text, acHits) {
-    const r = evaluateNode(node, text, acHits);
+    const r = node?.near !== undefined ? evaluateNear(node, text, acHits) : evaluateNode(node, text, acHits);
     const w = node?.groupWeight;
     if (!w || w === 1 || !r.units.length) return r;
     // wsum only: the weight multiplies the thing, and `n` is what the saturation curve reads.
@@ -444,6 +462,107 @@ function evaluateNode(node, text, acHits) {
             return { matched, scoreBoost: boostOf(units), units };
         }
     }
+}
+
+const wordRuns = () => new RegExp(`${wordChar()}+`, 'gu');
+const wordsIn = s => (s.match(wordRuns()) ?? []).length;
+const byAt = (a, b) => a.at - b.at || a.to - b.to;
+
+const leaves = (node, out = []) => {
+    if (!node) return out;
+    if (node.type === 'TERM' || node.type === 'REGEX') out.push(node);
+    else if (node.type !== 'NOT') { leaves(node.left, out); leaves(node.right, out); }
+    return out;
+};
+
+/** A leaf's occurrences as `{at, to}` in the NFC text, none when pass 1 says it is absent. */
+function leafSpans(node, text, acHits) {
+    if (!evaluateNode(node, text, acHits).matched) return [];
+    const isRegex = node.type === 'REGEX';
+    return keyExcerpts(String(node.value), text, !isRegex && !!node.isCaseSensitive, !isRegex && !!node.isExact, 0, Infinity).map(e => ({ at: e.at, to: e.to }));
+}
+
+/** The ways a group can be satisfied, each `{ reqs, vetoes }`: one span list per conjunct — an alternation of leaves pools into one,
+ *  a nested `~N` group is its clusters — and the NOT operands, which are tested over the padded window. */
+function alternatives(node, text, acHits, top = false) {
+    if (!node) return [];
+    if (!top && node.near !== undefined) return [{ reqs: [clusters(node, text, acHits)], vetoes: [] }];
+    if (node.type === 'TERM' || node.type === 'REGEX') return [{ reqs: [leafSpans(node, text, acHits)], vetoes: [] }];
+    if (node.type === 'NOT') return [{ reqs: [], vetoes: [node.operand] }];
+    if (node.type === 'XOR') {
+        // `(a XOR b)` is `(a -b) | (b -a)`, the negations being the group's own veto: a cluster through either side unless the other is within reach.
+        const side = (a, b) => ({ type: 'AND', left: a, right: { type: 'NOT', operand: b } });
+        return alternatives({ type: 'OR', left: side(node.left, node.right), right: side(node.right, node.left) }, text, acHits);
+    }
+    const l = alternatives(node.left, text, acHits), r = alternatives(node.right, text, acHits);
+    if (node.type === 'AND') return l.flatMap(a => r.map(b => ({ reqs: [...a.reqs, ...b.reqs], vetoes: [...a.vetoes, ...b.vetoes] })));
+    const both = [...l, ...r];
+    return both.every(a => a.reqs.length === 1 && !a.vetoes.length)
+        ? [{ reqs: [both.flatMap(a => a.reqs[0]).sort(byAt)], vetoes: [] }]
+        : both;
+}
+
+/** Leftmost minimal windows holding one span per conjunct with at most `slack` words between neighbours, each consumed before the next is
+ *  sought. A window `vetoed` consumes nothing: the sweep moves on from its first span. */
+function sweep(reqs, slack, src, vetoed) {
+    const k = reqs.length;
+    if (!k || reqs.some(r => !r.length)) return [];
+    // Widened to the words it sits in, so a substring hit is as near as its word and the tail of a word is not a word between.
+    const isWord = new RegExp(wordChar(), 'u');
+    const snap = sp => {
+        let { at, to } = sp;
+        while (at > 0 && isWord.test(src[at - 1])) at--;
+        while (to < src.length && isWord.test(src[to])) to++;
+        return { ...sp, at, to };
+    };
+    const spans = reqs.flatMap((r, req) => r.map(sp => snap({ ...sp, req }))).sort(byAt);
+    const gap = (a, b) => (b.at > a.to ? wordsIn(src.slice(a.to, b.at)) : 0);
+    const out = [], seen = new Map();
+    let s = 0, have = 0;
+    const add = i => { const n = (seen.get(spans[i].req) ?? 0) + 1; seen.set(spans[i].req, n); if (n === 1) have++; };
+    const drop = i => { const n = seen.get(spans[i].req) - 1; seen.set(spans[i].req, n); if (n === 0) have--; };
+    const reset = i => { s = i; seen.clear(); have = 0; };
+    for (let e = 0; e < spans.length; e++) {
+        if (e > s && gap(spans[e - 1], spans[e]) > slack) reset(e);
+        add(e);
+        while (have === k) {
+            while (seen.get(spans[s].req) > 1) drop(s++);
+            const win = { at: spans[s].at, to: Math.max(...spans.slice(s, e + 1).map(x => x.to)) };
+            if (!vetoed(win)) { out.push(win); reset(e + 1); break; }
+            drop(s++);
+        }
+    }
+    return out;
+}
+
+/** `[from, to]`: the window widened by `slack` + 1 words each side — the reach a positive has, `slack` being the words strictly between. */
+function padded(src, at, to, slack) {
+    const before = [...src.slice(0, at).matchAll(wordRuns())].slice(-(slack + 1));
+    const after = [...src.slice(to).matchAll(wordRuns())].slice(0, slack + 1);
+    const last = after[after.length - 1];
+    return [before.length ? before[0].index : at, last ? to + last.index + last[0].length : to];
+}
+
+/** Non-overlapping clusters of a `~N` group, in text order. */
+function clusters(node, text, acHits) {
+    const src = String(text).normalize('NFC');
+    const found = [];
+    for (const { reqs, vetoes } of alternatives(node, text, acHits, true)) {
+        const vetoed = c => { const [from, to] = padded(src, c.at, c.to, node.near); return vetoes.some(v => evaluate(v, src.slice(from, to)).matched); };
+        found.push(...sweep(reqs, node.near, src, vetoed));
+    }
+    const out = [];
+    for (const c of found.sort(byAt)) if (!out.length || c.at >= out[out.length - 1].to) out.push(c);
+    return out;
+}
+
+/** A `~N` group is one thing, seen once per cluster: leaf weights are not read, the group's own applies in evaluate(). `parts` carries
+ *  the leaves' units so an excerpt has a term to show. */
+function evaluateNear(node, text, acHits) {
+    const n = clusters(node, text, acHits).length;
+    if (!n) return { matched: false, scoreBoost: 0, units: [] };
+    const parts = leaves(node).flatMap(l => evaluateNode(l, text, acHits).units);
+    return { matched: true, scoreBoost: n, units: [{ id: node, wsum: n, n, parts }] };
 }
 
 function ensureAst(scope, id, build) {

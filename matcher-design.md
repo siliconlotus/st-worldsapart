@@ -62,7 +62,7 @@ A key beginning `?` opts into expression syntax. `SMARTKEYS.md` is the user-faci
 what works; it must not run ahead of the code or lag it, because nothing in the suite reads it.
 
 **The sentinel is `?`**, because a key does not plausibly start with one. Every other punctuation call
-resolves toward the literal — `*` and `~` are text, a single colon is text, `+` is absorbed. Only the
+resolves toward the literal — `*` is text, `~` is text except as `~N` on a group (*Proximity*), a single colon is text, `+` is absorbed. Only the
 first character is the sentinel, so `what's up?` is a plain key. Accepted cost: a literal key that did
 start with `?` is read as a SmartKey.
 
@@ -108,7 +108,7 @@ boundary). The grammar has `^` and `=` and no inverse of either, so an entry fla
 
 ### Proximity — `(…)~N`
 
-**Ruled, unimplemented.** `? (copper pipe)~5` constrains a group to a window. Parens group without
+`? (copper pipe)~5` constrains a group to a window. Parens group without
 order, so the slack attaches to something order-free by construction; `"…"~N` is rejected, quoting
 being the one construct that carries order.
 
@@ -116,10 +116,20 @@ being the one construct that carries order.
   window needs one span from `Porsche` and one from either branch, and the sweep takes the nearer.
 - N is per junction: consecutive spans, sorted by position, each within N words. Accepted cost: a
   k-term group can span (k−1)·N.
-- Slack counts words, off `wordChar()` — one boundary class, or two matchers.
-- Occurrences are clusters: leftmost minimal windows, each consumed before the next is sought.
-- A negation is a veto over the padded window: the positive witness window, padded N words each side,
-  holds no negated operand. `? (-x)~N` has no positive to anchor and is the existing `negation-only`
+- N is the words strictly between neighbouring spans, so `~0` is adjacency in either order.
+- Slack counts words, off `wordChar()` — one boundary class, or two matchers. Spans are widened to the
+  words they sit in before it is counted, so a substring hit is as near as its word.
+- Occurrences are clusters: leftmost minimal windows, each consumed before the next is sought. A vetoed
+  window consumes nothing: the sweep moves on from its first span.
+- A group is one unit, seen once per cluster. Leaf weights inside it are not read; the group's own
+  weight applies.
+- In `((a b)~2)~3` the inner slack binds: a nested group is one conjunct whose spans are its clusters.
+- XOR inside a group is `(a -b) | (b -a)`, the negations being the group's own veto: `((a XOR b) c)~3`
+  has a cluster through either side unless the other side is within that cluster's reach.
+- A negation is a veto over the padded window: the positive witness window, padded N+1 words each side
+  — the reach a positive has, N being the words strictly between — holds no negated operand. The
+  operand is evaluated whole over that window's text, so a compound negation vetoes when it matches
+  there and has no reach of its own; a pattern's `^` and `$` anchor to the window. `? (-x)~N` has no positive to anchor and is the existing `negation-only`
   error.
 - The digits are required; a bare `~` would depend on a default the key does not show.
 - A group without `~` keeps segment scope, so no existing key changes meaning.
@@ -245,9 +255,10 @@ Where a key landed. `keyExcerpts` answers for a compound key as well as a lone `
 - `mergeSpans` folds overlapping spans to one at the first one's extent, listing the rest in `keys`; a
   caller producing spans in several passes merges the union once, not per pass.
 - Offsets index the NFC form of the text.
+- A `~N` group's unit carries its leaves under `parts`, so the walk reports the leaves; the cluster
+  window itself is not a span.
 
-**Unimplemented:** proximity (`(…)~N`), which these spans would display, and merging two overlapping
-context windows into one excerpt carrying both.
+**Unimplemented:** merging two overlapping context windows into one excerpt carrying both.
 
 ---
 
@@ -868,19 +879,15 @@ fit serves both settings, the keys-live one; unticking blanks the keys and the c
 
 ## Open
 
-Planned:
+Each an option against a behaviour that stands:
 
-1. **Proximity** (`(…)~N`). Ruled under *Grammar*; witness spans shipped, so the display it needs exists.
-
-Options, each against a behaviour that stands:
-
-2. **A depth term in the score.** Depth is not a scoring signal: `waTriggerDepth` divides `keys`, which
+1. **A depth term in the score.** Depth is not a scoring signal: `waTriggerDepth` divides `keys`, which
    no shipped fit reads, and `cosine` and `text` are scored against the query with no discount, so an
    entry reached at any recursion depth competes on relevance like one matched in the chat. A fitted
    depth column needs a recursion-using book with graded scenes; a post-hoc factor on `E[credit]` would
    be the first term outside the fit, against `layoutOrder`'s prefix property. `maxRecursionSteps`
    bounds how far recursion reaches.
-3. **Language packs beyond wordfreq.** Every language is one pack shape (`lang.mjs`): English is
+2. **Language packs beyond wordfreq.** Every language is one pack shape (`lang.mjs`): English is
    bundled, built from fiction prose with POS sets; any other language is wordfreq alone, fetched once
    from the data repo and kept in the user's files, with no POS sets, so the verb and adjective filters
    are no-ops there and the English morphology rules stay on. A pack carries its own common list, so
@@ -888,11 +895,11 @@ Options, each against a behaviour that stands:
    equivalent one (S22). Stages 3–4 assume no language (F58). The pack is not the UI locale: that is
    ST's language setting, and `eval/i18n-check.mjs` gates it (README, *Languages*). Options: the
    English morphology rules under another language, and tokenisation for languages without whitespace.
-4. **Per-book signal spread as a book property.** A signal's within-scene SD varies by book, and the
+3. **Per-book signal spread as a book property.** A signal's within-scene SD varies by book, and the
    two books `keys` costs are its extremes (F45). Standardisation divides by the scene's own SD, so a
    near-constant column has its few small differences amplified into large z against a slope fitted on
    other books. Measurable per book, where curation is a label someone applies; no use proposed.
-5. **Per-tier centring.** Reference is centred on the memory tier's centroid, which sits well off the
+4. **Per-tier centring.** Reference is centred on the memory tier's centroid, which sits well off the
    reference centroid (F44). Per-tier centring and cross centring (query on the memory centroid, items
    on the reference mean) are measured flat, two thirds of scenes tying and the per-tier gain on the
    small folds only (F57); the `referenceCentroid` arm in `eval/scene.mjs` is the instrument. Re-run
