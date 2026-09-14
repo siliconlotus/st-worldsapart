@@ -1,17 +1,36 @@
 #!/bin/sh
-# pre-push — on main only: refuse a push whose tip carries no tag matching manifest.json's version, since a bundle records that version as waVersion and a release is meant to be exactly a version (bundle-schema.md, "WA's version is declared"). Every other branch pushes untouched.
-# git feeds one line per ref: <local ref> <local sha> <remote ref> <remote sha>.
+# pre-push — release must carry a plain X.Y.Z with a tag of that name on the tip; staging must carry the
+# +build.N counter. Every other branch pushes untouched. git feeds one line per ref: <local ref> <local sha> <remote ref> <remote sha>.
 ZERO=0000000000000000000000000000000000000000
+ROOT=$(git rev-parse --show-toplevel)
 status=0
 
 while read -r _local_ref local_sha remote_ref _remote_sha; do
-    [ "$remote_ref" = "refs/heads/main" ] || continue
-    [ "$local_sha" = "$ZERO" ] && continue   # deleting the branch is not a release
+    [ "$local_sha" = "$ZERO" ] && continue   # deleting a branch is not a push
 
-    # Out of the commit being pushed, not the worktree: pushing main from a feature branch is the normal case.
+    case "$remote_ref" in
+        refs/heads/release|refs/heads/staging) ;;
+        *) continue ;;
+    esac
+
+    # Out of the commit being pushed, not the worktree: pushing release from another branch is the normal case.
     version=$(git show "$local_sha:manifest.json" | sed -n 's/.*"version"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' | head -1)
     if [ -z "$version" ]; then
         echo "pre-push: no version in manifest.json" >&2
+        status=1
+        continue
+    fi
+
+    if [ "$remote_ref" = "refs/heads/staging" ]; then
+        if ! WA_VERSION="$version" node -e "import('$ROOT/eval/version.mjs').then(m => process.exit(m.hasBuildCounter(process.env.WA_VERSION) ? 0 : 1))"; then
+            echo "pre-push: staging carries the build counter; manifest.json says $version, not X.Y.Z+build.N" >&2
+            status=1
+        fi
+        continue
+    fi
+
+    if ! WA_VERSION="$version" node -e "import('$ROOT/eval/version.mjs').then(m => process.exit(m.isReleaseVersion(process.env.WA_VERSION) ? 0 : 1))"; then
+        echo "pre-push: release carries a plain X.Y.Z; manifest.json says $version" >&2
         status=1
         continue
     fi

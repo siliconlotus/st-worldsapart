@@ -6,7 +6,8 @@
     "generate_interceptor": "worldsApart_intercept",
     "js": "worldsapart.js",
     "author": "siliconlotus",
-    "version": "1.0.0-alpha.1",
+    "version": "1.0.0-alpha.1+build.1",
+    "auto_update": true,
     "homePage": "",
     "hooks": {
         "activate": "init"
