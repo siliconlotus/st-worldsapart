@@ -4,8 +4,9 @@
 import { readFileSync, appendFileSync, existsSync } from 'node:fs';
 import { buildKeySuggest, parseKeyList, STUDIO_SUGGEST_OPTS } from '../extension/keyword-suggest.mjs';
 import { mean, fmt3 as fmt } from './metrics.mjs';
+import { fileURLToPath } from 'node:url';
 
-const HERE = new URL('.', import.meta.url).pathname;
+const HERE = fileURLToPath(new URL('.', import.meta.url));
 const BASE = process.env.NANO_BASE_URL ?? 'https://nano-gpt.com/api/v1';
 
 const arg = (n, d = null) => {

@@ -2,20 +2,17 @@
 
 import { entryFlags, entryGate, labScan, runBook, runSpans } from '../extension/lab.mjs';
 import { WI_LOGIC } from '../extension/matcher.mjs';
+import { eq } from './metrics.mjs';
 
-let failed = 0;
-const eq = (got, want, what) => {
-    if (got === want) { console.log(`ok   ${what}: ${got}`); return; }
-    failed++; process.exitCode = 1;
-    console.log(`FAIL ${what}: ${got} (want ${want})`);
-};
 
 const text = 'His breath is fast.\n\nHe looks slowly.\n\nHis breath hitches before slowly leveling out.';
 const para = { matchWindow: 'paragraph' };
 
 // --- an entry's gate and flags are core's reading of it, and nothing else's
 eq(entryGate({ key: ['a'] }), undefined, 'no secondaries, no gate');
-eq(entryGate({ keysecondary: ['b'] }), undefined, 'secondaries without `selective` do not gate — core reads the flag');
+eq(JSON.stringify(entryGate({ keysecondary: ['b'] })), '{"keys":["b"],"logic":0}',
+    'secondaries with NO `selective` gate, as secondaryKeys reads it: only `selective === false` ignores the list');
+eq(entryGate({ selective: false, keysecondary: ['b'] }), undefined, '...and `selective === false` is what drops it');
 eq(JSON.stringify(entryGate({ selective: true, keysecondary: ['b', ' '], selectiveLogic: 2 })),
     '{"keys":["b"],"logic":2}', 'a blank secondary is dropped before the logic, as core drops it');
 eq(JSON.stringify(entryGate({ selective: true, keysecondary: ['b'] })), '{"keys":["b"],"logic":0}',
@@ -66,4 +63,4 @@ eq(applied.rows.length, 0, '...where a run\'s hang off the run, per entry');
 eq(applied.gate, null, 'a run has no gate of its own: every entry brought one');
 eq(applied.spans.length, 4, 'and its spans are the union of its entries\'');
 
-console.log(failed ? `FAILED ${failed}` : 'ok   lab: gate, flags, a book applied, and one result shape for both modes');
+console.log(process.exitCode ? 'FAILED  lab' : 'ok   lab: gate, flags, a book applied, and one result shape for both modes');

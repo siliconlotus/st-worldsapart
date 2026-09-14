@@ -4,11 +4,11 @@
 // Both fits must be fitted on this corpus: a model fitted elsewhere reads two corpora as a standardisation effect.
 import { indexPath, loadScene, openSample, sceneParams, scoreScene, embed, sceneLabel } from './scene.mjs';
 import { resolveModel } from './reindex.mjs';
-import { mean } from './metrics.mjs';
+import { mean, arg as sharedArg } from './metrics.mjs';
 
 
 const argv = process.argv.slice(2);
-const arg = (f, d = null) => { const i = argv.indexOf(f); return i >= 0 && argv[i + 1] ? argv[i + 1] : d; };
+const arg = (f, d = null) => sharedArg(argv, f, d);
 const samples = argv.filter(a => a.endsWith('.json') && !a.startsWith('--'));
 const FITS = (arg('--fits') ?? '').split(',').filter(Boolean).map(s => s.split('='));
 const CUTOFFS = (arg('--cutoffs') ?? '0.04,0.08,0.12,0.16,0.20,0.25,0.30').split(',').map(Number);

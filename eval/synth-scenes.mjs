@@ -19,7 +19,7 @@ import * as query from '../extension/query.mjs';
 import * as entity from '../extension/entity.mjs';
 import * as matcher from '../extension/matcher.mjs';
 import { bundleSamples, openBundle, stRelative } from '../extension/grading.mjs';
-import { execFileSync } from 'node:child_process';
+import { gitVersion } from './gitversion.mjs';
 
 /** The pooling arms in harness vocabulary; mirrors worldsapart.js POOL_ARMS, which imports ST and cannot be loaded here. */
 const POOL_ARMS = {
@@ -208,15 +208,9 @@ if (!WRITE) {
     process.exit(0);
 }
 
-/** <branch>@<git describe --tags --always --dirty>; +dirty rather than -dirty because SemVer build metadata compares equal. Empty when not a repo. */
-const gitVersion = (dir) => {
-    const git = (...a) => execFileSync('git', ['-C', dir, ...a], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim();
-    try {
-        return `${git('rev-parse', '--abbrev-ref', 'HEAD')}@${git('describe', '--tags', '--always', '--dirty=+dirty')}`;
-    } catch { return ''; }
-};
 
-const WA_VERSION = gitVersion(resolvePath(dirname(fileURLToPath(import.meta.url)), '..'));
+// WA declared, ST resolved: WA's release discipline is ours and a bundle carries WA's inputs, ST's it does not.
+const WA_VERSION = JSON.parse(readFileSync(resolvePath(dirname(fileURLToPath(import.meta.url)), '..', 'manifest.json'), 'utf8')).version ?? '';
 const ST_VERSION = st?.root ? gitVersion(st.root) : '';
 
 const r5 = x => (Number.isFinite(x) ? Number(x.toFixed(5)) : null);
@@ -243,7 +237,7 @@ for (const idx of picks) {
         if (i > idx || !isMessage(r) || (!INCLUDE_HIDDEN && r.is_system)) return;
         visible.push(r); srcIndex.push(i);
     });
-    const query = query.buildQuery(visible, { depth: DEPTH });
+    const queryText = query.buildQuery(visible, { depth: DEPTH });   // not `query`: that shadows the module namespace this line reads
     const queryChat = query.queryMessages(visible, { depth: DEPTH });
     const sceneStart = srcIndex[queryChat[0].i];
     const sceneEnd = srcIndex[queryChat[queryChat.length - 1].i];
@@ -251,7 +245,7 @@ for (const idx of picks) {
     const { depth: _d, ...base } = { ...(src?.params ?? {}) };
     // The messages, not a window: what /wa-grade freezes (runState.lastScanChat).
     const scanChat = visible.slice(-DEPTH).map(r => ({ name: r.name, mes: r.mes }));
-    const qv = await embed(query, { ollama: OLLAMA, model: MODEL });
+    const qv = await embed(queryText, { ollama: OLLAMA, model: MODEL });
 
     const armsOut = [];
     const pool = new Map();
@@ -259,7 +253,7 @@ for (const idx of picks) {
         const capture = { ...base, ...override };
         const S = {
             primaryBook: BOOK, books: allBooks, chat: CHAT,
-            query, queryChat, scanChat, depth: DEPTH, params: capture,
+            query: queryText, queryChat, scanChat, depth: DEPTH, params: capture,
             paramSnapshot: src?.paramSnapshot, index: built.path,
         };
         const P = sceneParams(S);
@@ -267,9 +261,9 @@ for (const idx of picks) {
         const scene = loadScene(S, { indexFile: indexPath(S, { model: MODEL }), indexOpts: { model: MODEL }, params: P });
         const haystack = haystackFor(S, P);
         // Term weights as scoreScene derives them; null runs every arm with the entity filter off (R22).
-        const tw = P.entityFilter ? entity.buildTermWeights(query, scene.gaz, P.boost) : null;
+        const tw = P.entityFilter ? entity.buildTermWeights(queryText, scene.gaz, P.boost) : null;
         const rows = makeCandidateSet({ ...scene, params: P })(
-            P.K1, P.B, tw, qv, query, haystack,
+            P.K1, P.B, tw, qv, queryText, haystack,
         );
         // Ordered but not truncated: a pool that is the whole population is one no later re-ranking can orphan a grade out of.
         const ranked = makeLayoutOrder({ scene, haystack: haystackFor(S, P) })(rows);
@@ -295,7 +289,7 @@ for (const idx of picks) {
             return row;
         });
         armsOut.push({
-            arm: armName, query, queryChat, scanChat, depth: DEPTH,
+            arm: armName, query: queryText, queryChat, scanChat, depth: DEPTH,
             primaryBook: BOOK, index: built.path,
             // Inside params, the open map the schema keeps arm knobs in.
             params: { ...capture, ...(INCLUDE_HIDDEN ? { includedHidden: true } : {}) },

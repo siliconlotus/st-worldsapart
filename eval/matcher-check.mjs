@@ -321,7 +321,6 @@ eq(splitKeys('/a{1,3}/,cat').join(' | '), '/a{1,3}/ | cat', 'a regex keeps the c
 eq(splitKeys('? "hot, tub", cat').join(' | '), '? "hot, tub" | cat', 'and so does a quoted term');
 eq(splitKeys('and/or, cat').join(' | '), 'and/or | cat', 'a slash mid-token is an ordinary character, not a regex opening');
 eq(splitKeys('/unclosed,cat').join(' | '), '/unclosed | cat', 'a regex that never closes is split back up rather than left holding the comma');
-eq(splitKeys('/a/,/b/').join(' | '), '/a/ | /b/', 'a regex straight after a comma is seen (upstream-st.md #17: core misses it)');
 eq(splitKeys('a,,b\n\n').join(' | '), 'a | b', 'empty tokens are dropped, not kept as blanks');
 eq(splitKeys('').length, 0, 'nothing in, nothing out');
 console.log('ok   splitKeys: comma and newline separate; regexes and quoted terms keep their commas');

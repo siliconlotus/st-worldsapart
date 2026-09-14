@@ -1,11 +1,6 @@
-// Guards planUidReindex, the planner behind Lorebook Studio's Renumber and its one destructive path. String-sliced out of studio.mjs, which imports ST + DOM.
-// ponytail: string-slice, not an import; promote planUidReindex to a pure module if a second harness ever needs it.
+// Guards planUidReindex, the planner behind Lorebook Studio's Renumber and its one destructive path.
 import assert from 'node:assert';
-import { readFileSync } from 'node:fs';
-
-const src = readFileSync(new URL('../extension/studio.mjs', import.meta.url), 'utf8');
-const slice = name => { const i = src.indexOf(`function ${name}`); return src.slice(i, src.indexOf('\n}\n', i) + 2); };
-const planUidReindex = new Function(slice('planUidReindex') + '; return planUidReindex;')();
+import { planUidReindex } from '../extension/keyedit.mjs';
 
 const entries = Object.fromEntries([0, 1, 2, 3, 4].map(u => [u, { uid: u }]));
 

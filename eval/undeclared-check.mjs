@@ -4,6 +4,7 @@ import { parse } from 'acorn';
 import fs from 'node:fs';
 import { readdirSync } from 'node:fs';
 import { join, relative } from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 const GLOBALS = new Set(['globalThis','window','document','navigator','location','history','console','fetch','Headers','Request','Response','URL','URLSearchParams','Blob','File','FileReader','FormData','AbortController','WebSocket','Worker','crypto','performance','structuredClone','setTimeout','clearTimeout','setInterval','clearInterval','queueMicrotask','requestAnimationFrame','cancelAnimationFrame','localStorage','sessionStorage','IndexedDB','indexedDB','alert','confirm','prompt','getComputedStyle','MutationObserver','ResizeObserver','IntersectionObserver','CustomEvent','Event','Element','HTMLElement','Node','NodeList','DOMParser','XMLHttpRequest','TextEncoder','TextDecoder','Intl','Object','Array','String','Number','Boolean','Symbol','BigInt','Math','JSON','Date','RegExp','Error','TypeError','RangeError','SyntaxError','ReferenceError','EvalError','URIError','AggregateError','Map','Set','WeakMap','WeakSet','WeakRef','Promise','Proxy','Reflect','Function','ArrayBuffer','SharedArrayBuffer','DataView','Int8Array','Uint8Array','Uint8ClampedArray','Int16Array','Uint16Array','Int32Array','Uint32Array','Float32Array','Float64Array','BigInt64Array','BigUint64Array','parseInt','parseFloat','isNaN','isFinite','encodeURI','encodeURIComponent','decodeURI','decodeURIComponent','escape','unescape','NaN','Infinity','undefined','eval','process','Buffer','__dirname','__filename','require','module','exports','global','TransformStream','ReadableStream','WritableStream','CompressionStream','DecompressionStream','$','jQuery','toastr','moment','SillyTavern','Handlebars','DOMPurify','showdown','Popper','localforage','Fuse','droll','pdfjsLib','Readability','isProbablyReaderable','hljs','Bowser','seedrandom','diff_match_patch','marked','katex','mermaid','Papa','JSZip','saveAs','html2canvas','ePub','yaml','lodash','_','ai','SVGElement','Image','Audio','AudioContext','MediaRecorder','speechSynthesis','SpeechSynthesisUtterance','ClipboardItem','Notification','BroadcastChannel','EventSource','Option','FontFace','CSS','matchMedia','scrollTo','scrollBy','open','close','postMessage','addEventListener','removeEventListener','dispatchEvent','btoa','atob','reportError','Atomics','WebAssembly','Iterator','AsyncFunction','GeneratorFunction','FinalizationRegistry','AbortSignal','innerWidth','innerHeight','outerWidth','outerHeight','screen','frames','parent','self','top','name','status','origin','isSecureContext','caches','clientInformation','devicePixelRatio','visualViewport','customElements','Text','Range','Selection','XPathResult','Storage','Headers']);
 
@@ -21,7 +22,7 @@ const declared = (node, out) => {
 };
 
 /** Every source file WA ships. `plugin/` is in and its deployed copy is outside the repo; `.claude` holds worktree CHECKOUTS of other branches. */
-const ROOT = new URL('..', import.meta.url).pathname;
+const ROOT = fileURLToPath(new URL('..', import.meta.url));
 const SKIP = new Set(['node_modules', '.git', '.claude', 'eval-data', 'grade-jobs', 'data']);
 const sources = (dir) => readdirSync(dir, { withFileTypes: true }).flatMap((d) => {
     if (SKIP.has(d.name)) return [];
@@ -38,7 +39,8 @@ for (const file of files) {
     const src = fs.readFileSync(join(ROOT, file), 'utf8');
     let ast;
     try { ast = parse(src, { ecmaVersion: 'latest', sourceType: 'module', locations: true, allowAwaitOutsideFunction: true, allowReturnOutsideFunction: true }); }
-    catch (e) { console.log(`PARSE ${file}: ${e.message}`); continue; }
+    // Counted, not just printed: an unparseable shipped file is worse than an undeclared name, and the runner reads the exit code.
+    catch (e) { console.log(`FAIL ${file}: does not parse — ${e.message}`); bad++; continue; }
 
     const names = new Set();
     const used = new Map();   // name -> first line

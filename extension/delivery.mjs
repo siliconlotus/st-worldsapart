@@ -72,7 +72,8 @@ export async function applyBudget({ walk, isDynamic, isCapped = isDynamic, maxTo
             continue;
         }
 
-        if (rescuable) {
+        // Only a row that charges the budget can spend the slack; an exempt one adds nothing to `budgeted` to be rescued from.
+        if (rescuable && (!exempt || exemptIsBudgeted)) {
             slackSpent = true;
         }
 

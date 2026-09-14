@@ -4,7 +4,6 @@
 import path from 'node:path';
 import fs from 'node:fs';
 import readline from 'node:readline';
-import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import sanitize from 'sanitize-filename';
 import { LocalIndex } from 'vectra';
@@ -20,7 +19,7 @@ import { getMakerSuiteVector, getVertexVector } from '../../src/vectors/google-v
 import { getConfigValue } from '../../src/util.js';
 import { scoreCollection, poolEntries, selectTopK } from './scoring.mjs';
 // Deployed flat beside this file from extension/ (fingerprint.mjs's manifest), so the server matches on the shipped matcher.
-import { countChatHits, setBoundaryMode } from './matcher.mjs';
+import { countChatHits, dropTags, setBoundaryMode } from './matcher.mjs';
 import { norm, corpusMean } from './vector.mjs';
 import { pluginFingerprint, PLUGIN_FILES } from './fingerprint.mjs';
 
@@ -30,14 +29,6 @@ const ST_ROOT = path.resolve(PLUGIN_DIR, '..', '..');
 // The deployed copy's own fingerprint; the extension compares it with the same hash over its source files.
 const readDeployed = f => { try { return fs.readFileSync(path.join(PLUGIN_DIR, f), 'utf8'); } catch { return ''; } };
 const FINGERPRINT = pluginFingerprint(...PLUGIN_FILES.map(([, deployed]) => readDeployed(deployed)));
-
-/** `<branch>@<git describe --tags --always --dirty>` of a checkout, '' when not a repo; must match eval/synth-scenes.mjs. `+dirty`, not `-dirty`: SemVer build metadata. */
-const gitVersion = (dir) => {
-    const git = (...a) => execFileSync('git', ['-C', dir, ...a], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim();
-    try {
-        return `${git('rev-parse', '--abbrev-ref', 'HEAD')}@${git('describe', '--tags', '--always', '--dirty=+dirty')}`;
-    } catch { return ''; }
-};
 
 export const info = {
     id: 'worlds-apart',
@@ -215,6 +206,8 @@ export async function init(router) {
             setBoundaryMode(wordBoundary);
             // The unit the chat is cut into, the caller's setting as wordBoundary is; message when an older client sends none.
             const unitOpts = { matchWindow: String(request.body?.matchWindow ?? 'message'), depth: Number(request.body?.depth) || 0, includeNames: Boolean(request.body?.includeNames) };
+            // The elements WA strips from every message it reads live, so the audit counts the same text the runtime does.
+            const dropChatTags = String(request.body?.dropChatTags ?? '').trim();
 
             const totals = new Map(), typedTotals = new Map();
             let messages = 0, scanned = 0, missing = 0, unit = 'message';
@@ -235,7 +228,7 @@ export async function init(router) {
                         try { m = JSON.parse(line); } catch { return; }   // line 0 is metadata
                         // Hidden messages are not scanned live (C3), so they are not counted here.
                         if (m?.is_system || !String(m?.mes ?? '')) return;
-                        texts.push({ name: m.name, mes: String(m.mes) });
+                        texts.push({ name: m.name, mes: dropChatTags ? dropTags(String(m.mes), dropChatTags) : String(m.mes) });
                     });
                     rl.on('close', resolve);
                     rl.on('error', resolve);   // an unreadable chat is skipped, not fatal
@@ -248,7 +241,8 @@ export async function init(router) {
                 unit = got.unit;
             }
 
-            const counts = {}, typed = {};
+            // Null-prototype: the keys are the caller's, and `counts['__proto__'] = n` on a plain object hits the setter and is dropped from the reply.
+            const counts = Object.create(null), typed = Object.create(null);
             for (const k of keys) {
                 counts[k] = totals.get(k) ?? 0;
                 if (typedTotals.has(k)) typed[k] = typedTotals.get(k);
@@ -277,9 +271,11 @@ export async function init(router) {
                     chats++;
                     const full = path.join(dirPath, file);
                     const world = await new Promise(resolve => {
-                        const rl = readline.createInterface({ input: fs.createReadStream(full), crlfDelay: Infinity });
+                        const stream = fs.createReadStream(full);
+                        const rl = readline.createInterface({ input: stream, crlfDelay: Infinity });
                         let done = false;
-                        const finish = v => { if (!done) { done = true; rl.close(); resolve(v); } };
+                        // destroy, not just rl.close(): close only pauses the stream, and a stream paused at line 0 never autocloses its fd.
+                        const finish = v => { if (!done) { done = true; rl.close(); stream.destroy(); resolve(v); } };
                         // Line 0 is the metadata header; stop there.
                         rl.on('line', line => { try { finish(JSON.parse(line)?.chat_metadata?.world_info ?? null); } catch { finish(null); } });
                         rl.on('close', () => finish(null));
@@ -324,11 +320,8 @@ export async function init(router) {
         }
     });
 
-    // `dir` is the extension's third-party folder name, sanitized to one path component; waVersion is resolved from git, not manifest.json.
     router.post('/ping', (request, response) => {
-        const dir = sanitize(String(request.body?.dir ?? ''));
-        const waVersion = dir ? gitVersion(path.join(ST_ROOT, 'public', 'scripts', 'extensions', 'third-party', dir)) : '';
-        response.send({ ok: true, id: info.id, root: ST_ROOT, fingerprint: FINGERPRINT, waVersion });
+        response.send({ ok: true, id: info.id, root: ST_ROOT, fingerprint: FINGERPRINT });
     });
 
     console.log('[Worlds Apart] server plugin ready at /api/plugins/worlds-apart');

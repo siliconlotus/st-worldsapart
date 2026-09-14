@@ -87,7 +87,8 @@ export function nameEvidence() {
             if (/^[.!?…;\n]$/.test(w)) { atStart = true; return ['.']; }
             if (!/\p{L}/u.test(w)) { atStart = true; return []; }
             const core = fold(w), lc = core.toLowerCase();
-            (/^[A-Z]{2,}$/.test(core) ? capsSeen : mixedSeen).add(lc);
+            // `\p{Lu}`, never `[A-Z]`: an ASCII class reads ÉDF or ЖКХ as mixed case and strips its acronym exemption.
+            (/^\p{Lu}{2,}$/u.test(core) ? capsSeen : mixedSeen).add(lc);
             if (/^[\p{Ll}]/u.test(core)) lowerCount.set(lc, (lowerCount.get(lc) ?? 0) + 1);
             else if (!atStart && /^[\p{Lu}]/u.test(core)) capMidCount.set(lc, (capMidCount.get(lc) ?? 0) + 1);
             atStart = false;
@@ -208,7 +209,7 @@ export function buildKeySuggest(data, opts) {
 
     // Display casing: the form the text uses most, voting only where the capital is not positional; a tie goes to the quieter form.
     const SENT_END = /[.!?…;:\n]/, SKIP_BACK = /[ \t"'“”‘’(\[{*_#>-]/;
-    const SHOUTED = /[A-Z]{3,}/;
+    const SHOUTED = /\p{Lu}{3,}/u;
     const tallyForms = (idx, term, voting, all) => {
         const lc = contentsLc[idx], raw = String(entries[idx].content ?? '');
         const bump = (m, k) => m.set(k, (m.get(k) ?? 0) + 1);

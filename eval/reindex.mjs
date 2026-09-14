@@ -10,6 +10,7 @@ import { arg } from './metrics.mjs';
 import { openBundle } from '../extension/grading.mjs';
 import { isMemory, PREFIXES } from '../extension/relevance.mjs';
 import { defaultSettings } from '../extension/state.mjs';
+import { fileURLToPath } from 'node:url';
 
 /** Chunk settings, sample's own unless overridden. Field names match `settings()` and paramSnapshot.settings. */
 export const chunkConfig = (S, overrides = {}) => {
@@ -52,7 +53,7 @@ export const pathSafe = (label) => String(label).replace(/\//g, '-');
 export function cachePath(S, cfg, model, book = S.primaryBook, all = false, archived = false) {
     const slug = String(book).replace(/[^\w.-]+/g, '-').slice(0, 40);
     const key = getStringHash(`${book}${model}${cfg.chunkMode}${cfg.chunkSize}${cfg.minChunkSize}${all ? `all` : ``}${archived ? `archived` : ``}`);
-    return new URL(`./eval-data/indexes/${slug}__${pathSafe(model)}${all ? `__all` : ``}${archived ? `__archived` : ``}__${key}/index.json`, import.meta.url).pathname;
+    return fileURLToPath(new URL(`./eval-data/indexes/${slug}__${pathSafe(model)}${all ? `__all` : ``}${archived ? `__archived` : ``}__${key}/index.json`, import.meta.url));
 }
 
 /** Server stems for OpenAI-compatible /v1/embeddings, in the spec so two arms can sit on different servers; LM Studio cannot serve an MLX embedder (embedOnce checks who answered). */

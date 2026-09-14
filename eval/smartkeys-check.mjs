@@ -538,7 +538,14 @@ console.log('ok   the SMARTKEYS.md worked example holds');
     eq(codes('? (-drill)~3'), 'error:negation-only', 'a group with no positive is the existing error');
     eq(codes('? fire~2'), '', '~ inside a term is still a literal');
     eq(c('? fire~2', 'fire~2 here'), 1, '...and still matches its characters');
+    eq(codes('? (fire)~3'), '', 'a one-term group takes ~N: parse stamps `near` on the term, which is not the phrase case');
     const rp = tokenize('? (a b)~3::2').find(t => t.type === 'RPAREN');
     eq(`${rp.near}/${rp.weight}`, '3/2', '~N then the weight ride on the closing paren');
+    const rp2 = tokenize('? (a b)::2~3').find(t => t.type === 'RPAREN');
+    eq(`${rp2.near}/${rp2.weight}`, '3/2', '...in either order, so the two spellings are one key');
+    eq(codes('? (a b)~3::2~5'), 'error:stray-proximity', 'a second ~N is fatal: the group took the first, and this one searches for text');
+    eq(codes('? (a b) ~5'), 'error:stray-proximity', '...whitespace does not attach it either');
+    eq(codes('? fire ~5'), '', 'a ~N not after a group is ordinary text ("~5 minutes"), never the misplaced operator');
+    eq(codes('? (a b)~3 "~5"'), '', '...and quoting it after a group says the text was meant');
 }
 console.log('ok   proximity: (…)~N clusters a group within N words, vetoes over the padded window');

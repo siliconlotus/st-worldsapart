@@ -97,7 +97,7 @@ id and a `name`; `captureId` survives a rename and is what a pointer between art
           // Redundant with `depth` on purpose: the two disagreeing means the scene was mis-extracted.
           "sceneStart": 1035,
           "depth": 10,
-          // ON THE CELL ONLY WHEN THE ARMS DISAGREE — `queryMode` moves them, so they cannot hoist
+          // ON THE CELL ONLY WHEN THE ARMS DISAGREE — `messageDepth` moves them, so they cannot hoist
           // unconditionally; when nothing moved them they sit once on the scene instead.
           "query": "…", "queryChat": [ /* … */ ], "primaryBook": "Sommers_Pack__v22",
           // WHAT THE GRADER WAS SHOWN, which a later run needs to know what it may believe. `cutoff` is
@@ -226,27 +226,30 @@ unchanged. `stInstall().resolve` maps a `data/` prefix through `config.yaml` `da
 else through the root; `eval/scene.mjs` skips a stored `index` that does not exist locally and derives
 its own.
 
-## The version fields record what was resolved, not what was declared
+## WA's version is declared, ST's is resolved
 
-Both are `<branch>@<git describe --tags --always --dirty='+dirty'>`, one rule for both projects, on the
-arm because arms of one scene are captured at different times.
+Both sit on the arm, because arms of one scene are captured at different times.
+
+`waVersion` is `manifest.json`'s version, read by the extension from its own manifest — a release
+identity, and what a bug report can quote. It can afford to be coarse: a bundle carries WA's whole
+input — `books`, `query`, `scanChat`, `injects`, `paramSnapshot`, `embedModel` — so a reader re-derives
+stages 1 and 3 through `eval/scene.mjs` rather than trusting what any version computed.
+
+`stVersion` is `<branch>@<commit>`, from ST's `/version` at runtime and `git describe` offline
+(`eval/gitversion.mjs`). Resolved rather than declared because ST's code is the one thing a bundle does
+*not* carry, and because ST's declared version only advances on pushes to `main`: a staging
+`package.json` names a release its tree is not (G8).
 
 ```
-main@0.2.0                    on a tag: the identity IS the version
-main@0.2.0+dirty              …with uncommitted changes
-main@0.2.0-1-g6cbcecf         past the tag: version, distance, commit
-matcher-and-studio@7cd7496    no tags reachable: the commit alone
+staging@4ed137241             branch and commit
+main@1.0.0-alpha.1-1-g6cbcecf past a tag: version, distance, commit
+main@1.0.0-alpha.1+dirty      uncommitted changes, so the tree cannot be reconstructed
 ```
 
-The branch says which software ran: ST's declared version only advances on pushes to `main`, so a
-staging `package.json` names a release its tree is not (G8); on `main` a release is one squashed commit
-carrying one tag, so the identity is exactly a version. `manifest.json` and `package.json` are never
-read — only a tag makes a version a fact about a commit. `waVersion` comes off the server plugin's
-`/ping` and is empty without one (`sourceFP`, a hash of the code, is the stronger drift signal);
-`stVersion` comes from ST's `/version` (`<branch>@<short HEAD>`, no tags, no dirty flag). `+dirty`
-means uncommitted changes, so the capture cannot be reproduced from the version alone; it is SemVer
-build metadata, equal to `0.2.0` rather than sorting below it as git's `-dirty` would, and a suffix so
-that a `0.2.*` filter includes dirty captures and excluding them is an explicit act.
+Neither field is the drift signal. `pluginFP` is what served the capture and `sourceFP` what the
+extension's own copy hashes to; unequal means the deployed plugin is not this extension's, which is
+change-based rather than release-based, so a release touching nothing in `plugin/` never reads as
+drift.
 
 ## `invalidConfiguration` marks a capture that is not a real configuration
 

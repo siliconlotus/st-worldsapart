@@ -9,7 +9,10 @@ import { ensureIndex, resolveModel } from './reindex.mjs';
 import fs from 'node:fs';
 import { gradeValue, gradeCredit, fbeta, RECALL_WEIGHT, signTest, arg } from './metrics.mjs';
 import { PACK } from '../extension/wa-pack-en.js';
-const COMMON_WORDS = new Set(PACK.common.split(' '));
+import { table, usePack } from '../extension/lang.mjs';
+// table().common, not a second split: lang.mjs owns how a pack's word list is read.
+usePack(PACK);
+const COMMON_WORDS = table().common;
 import { logisticFit, auc, cumulativeFit, prCurve, reliability, sigmoid } from './logistic.mjs';
 import * as entity from '../extension/entity.mjs';
 import { properNames, properDensity, modelKey, properNounsOf, NAME_PARTICLES } from '../extension/relevance.mjs';

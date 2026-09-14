@@ -12,7 +12,7 @@ export const eq = (got, want, label) => report(got === want, got, want, label);
 export const eqNear = (got, want, label, tol = 1e-9) => report(Math.abs(got - want) < tol, got, want, label);
 
 /** The value after `k` in `argv`, or `d`; a flag with no value is also the default. `argv` is passed in: callers disagree about whether it is sliced. */
-export const arg = (argv, k, d = null) => { const i = argv.indexOf(k); return i >= 0 ? argv[i + 1] : d; };
+export const arg = (argv, k, d = null) => { const i = argv.indexOf(k); return i >= 0 ? (argv[i + 1] ?? d) : d; };
 
 export const mean = xs => (xs.length ? xs.reduce((a, b) => a + b, 0) / xs.length : NaN);
 

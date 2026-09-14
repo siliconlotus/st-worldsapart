@@ -70,14 +70,15 @@ export async function setLanguage(lang, { fetchPack, store }) {
 export async function refreshIndex({ fetchIndex, fetchPack, store }) {
     let index;
     try { index = await fetchIndex(); } catch { return null; }
-    for (const [lang, meta] of Object.entries(index ?? {})) {
+    // In parallel: each language touches only its own stored pack, and usePack can fire for at most one of them.
+    await Promise.all(Object.entries(index ?? {}).map(async ([lang, meta]) => {
         const have = await store.get(lang);
-        if (!have || have.hash === meta.hash) continue;
+        if (!have || have.hash === meta.hash) return;
         try {
             const fresh = await fetchPack(lang);
             await store.put(lang, fresh);
             if (current?.lang === lang) usePack(fresh);
         } catch { /* the stored copy stands; the next refresh tries again */ }
-    }
+    }));
     return index;
 }

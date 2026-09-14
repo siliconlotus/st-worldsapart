@@ -1,4 +1,4 @@
-// contract.mjs — what a rubric hash names: the instruction block as sent (frontmatter stripped), archived under its sha256[:8] in contracts/, which is committed so a bundle's hash resolves for anyone with the repo.
+// contract.mjs — what a rubric hash names: the instruction block as sent (frontmatter stripped), archived under its sha256[:8] in contracts/, a LOCAL store (gitignored, like eval-data); the rubrics a run depends on are copied beside it in eval-data.
 // Hashed over the body only — hashing the frontmatter moves the hash when a `description` line is edited (G9). Entries under superseded whole-file hashes are kept, since a bundle records the hash current when it was graded.
 import { readFileSync, writeFileSync, existsSync, mkdirSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';

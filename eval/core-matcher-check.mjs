@@ -1,6 +1,6 @@
 // How WA relates to ST core on an unmodified lorebook: parity with matchKeys/matchSecondaryKeys, and the named divergences.
 // An assertion citing core as the authority goes here; one about what a matched expression is WORTH goes in matcher-check.mjs.
-import { countKey, hasPromoteDecorator, keywordScore, secondaryKeys, setBoundaryMode, wholeWordAdvice, withPromote, WI_LOGIC } from '../extension/matcher.mjs';
+import { countKey, hasPromoteDecorator, keywordScore, secondaryKeys, setBoundaryMode, splitKeys, wholeWordAdvice, withPromote, WI_LOGIC } from '../extension/matcher.mjs';
 import { synthesizeSecondary } from '../extension/smartkeys.mjs';
 import { eq } from './metrics.mjs';
 
@@ -334,3 +334,7 @@ eq(withPromote('The villa\n@@promote', false), 'The villa\n@@promote',
 eq(withPromote('', true), '@@promote\n', 'an empty entry can be promoted');
 eq(withPromote(undefined, false), '', 'absent content is not a throw');
 console.log('ok   withPromote: add/remove round-trips through the reader and leaves the rest of the run alone');
+
+// --- splitKeys: a NAMED divergence, so the claim about core lives here
+eq(splitKeys('/a/,/b/').join(' | '), '/a/ | /b/', 'a regex straight after a comma is seen (upstream-st.md #17: core\'s customTokenizer misses it)');
+console.log('ok   splitKeys: the key-field tokenizer diverges from core where core skips the character after a comma');

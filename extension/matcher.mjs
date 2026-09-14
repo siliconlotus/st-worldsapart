@@ -31,8 +31,11 @@ const SPACELESS_SCRIPTS = [
     ['Burmese', /\p{Script=Myanmar}/u],
 ];
 
+/** Plain interpolation: what an injected `t` does when nobody supplies one, so the checks assert English. */
+export const plainTag = (s, ...v) => s.reduce((a, str, i) => a + str + (i < v.length ? String(v[i] ?? '') : ''), '');
+
 /** Messages an author needs about Match Whole Words (`wholeWords` is the resolved flag): a spaced key, which WA applies the flag to and core does not, or a spaceless-script key. `?` and `/re/` keys are excluded. `t` is the template tag the text goes through; ST passes its i18n tag. */
-export function wholeWordAdvice(keys, wholeWords, t = (s, ...v) => s.reduce((a, str, i) => a + str + (i < v.length ? String(v[i] ?? '') : ''), '')) {
+export function wholeWordAdvice(keys, wholeWords, t = plainTag) {
     const out = [];
     if (!wholeWords) return out;
     const plain = (Array.isArray(keys) ? keys : [])
@@ -61,10 +64,10 @@ export function splitKeys(input) {
     const out = [];
     let cur = '', inRegex = false, inQuote = false;
     const push = () => {
-        const t = cur.trim();
+        const tok = cur.trim();
         // A token that opened a regex without closing it: core splits it on its commas.
-        if (t.startsWith('/') && !isRegexKey(t)) out.push(...t.split(',').map(x => x.trim()).filter(Boolean));
-        else if (t) out.push(t);
+        if (tok.startsWith('/') && !isRegexKey(tok)) out.push(...tok.split(',').map(x => x.trim()).filter(Boolean));
+        else if (tok) out.push(tok);
         cur = '';
     };
     const src = String(input ?? '');
@@ -149,13 +152,13 @@ const BLOCK_TAGS = 'address|article|aside|blockquote|details|div|dd|dl|dt|fields
 const BLOCK_EDGE = new RegExp(`(?=<(?:${BLOCK_TAGS})\\b[^>]*>)|(?<=<\\/(?:${BLOCK_TAGS})\\s*>)`, 'gi');
 
 /** Splits each of `texts` at every BLOCK_EDGE. Consumes nothing, so a caller tracking offsets sums the piece lengths. */
-const cutBlocks = texts => texts.flatMap(t => String(t).split(BLOCK_EDGE));
+const cutBlocks = texts => texts.flatMap(x => String(x).split(BLOCK_EDGE));
 
 /** Removes named elements, tag and content, from one message; `spec` is a comma/space-separated list or an array. An unclosed element runs to its parent's close tag, or to the end (K6). */
 export function dropTags(text, spec) {
     const tags = (Array.isArray(spec) ? spec : String(spec ?? '').split(/[\s,]+/))
         // A tag name, or nothing: a stray `<`, `/` or `>` must not reach the RegExp as syntax.
-        .map(t => String(t).replace(/[^\w:-]/g, '')).filter(Boolean);
+        .map(x => String(x).replace(/[^\w:-]/g, '')).filter(Boolean);
     let out = String(text ?? '');
     if (!out || !tags.length) return out;
 
@@ -217,9 +220,9 @@ export function scanSegments(chat, { depth, includeNames = true, matchWindow = '
 export function segment(texts, matchWindow) {
     if (matchWindow === 'scan') return [texts.join('\n')];
     const out = matchWindow === 'paragraph'
-        ? cutBlocks(texts.flatMap(t => String(t).split(PARAGRAPH_BREAK)))
+        ? cutBlocks(texts.flatMap(x => String(x).split(PARAGRAPH_BREAK)))
         : texts.map(String);
-    return out.filter(t => t.trim());
+    return out.filter(x => x.trim());
 }
 
 /** A message boundary in a single string: a line of three or more dashes and nothing else. */
@@ -290,13 +293,23 @@ export function withMatchSources(chatWindow, entry, sources, matchWindow) {
  *  — an `ambient` one (`position !== IN_CHAT`, resolved by the caller) is in every window, diverging from core (upstream-st.md #16) — then the sources. */
 export function makeWindowFor(chat, { injects = [], sources = {}, matchWindow = 'scan', includeNames = true } = {}) {
     const windows = new Map();
+    // The window plus its injects, segmented ONCE per depth: both depend on `depth` alone, and re-segmenting them for
+    // every candidate entry was a full pass over the scan window per entry per activation pass.
+    const base = new Map();
     const windowFor = (depth, entry) => {
         if (!windows.has(depth)) windows.set(depth, scanSegments(chat, { depth, includeNames, matchWindow }));
-        const admitted = injects
-            // `<`, matching core's own `#depthBuffer.slice(startDepth, depth)`.
-            .filter(i => i?.text && (i.ambient || Number(i.depth ?? 0) < depth))
-            .map(i => i.text);
-        return withMatchSources([...windows.get(depth), ...admitted], entry, sources, matchWindow);
+        if (!base.has(depth)) {
+            const admitted = injects
+                // `<`, matching core's own `#depthBuffer.slice(startDepth, depth)`.
+                .filter(i => i?.text && (i.ambient || Number(i.depth ?? 0) < depth))
+                .map(i => i.text);
+            base.set(depth, segment([...windows.get(depth), ...admitted], matchWindow));
+        }
+        // Only the entry's own sources are per-entry. Segmenting a concatenation is concatenating the segmentations,
+        // so appending their segments matches what withMatchSources returns for the whole. Read-only: shared per depth.
+        const extra = [];
+        for (const [flag, field] of Object.entries(MATCH_SOURCE_FIELDS)) if (entry?.[flag] && sources[field]) extra.push(sources[field]);
+        return extra.length ? [...base.get(depth), ...segment(extra, matchWindow)] : base.get(depth);
     };
     windowFor.windows = windows;
     return windowFor;
@@ -346,6 +359,13 @@ export function chatUnits(messages, { matchWindow = 'message', depth = 0, includ
     return out;
 }
 
+let chatAutKey = null, chatAut = null;
+const chatAutomaton = folded => {
+    const id = folded.join('\u001f');
+    if (id !== chatAutKey) { chatAutKey = id; chatAut = buildAutomaton(folded); }
+    return chatAut;
+};
+
 export function countChatHits(keys, messages, { matchWindow = 'message', depth = 0, includeNames = false } = {}) {
     // Test like we fight: the units are what the matcher matches a conjunction within, so a `?` key whose terms sit in
     // adjacent messages counts under `scan` and not under `message`, as it matches. `messagesWith`/`messages` keep their
@@ -357,7 +377,9 @@ export function countChatHits(keys, messages, { matchWindow = 'message', depth =
     // Every variant is its own pattern, or a hyphenated key reports fewer messages here than countKey matches.
     const folded = [...new Set(literals.flatMap(k => keyVariants(k).map(fold)))];
     const idxOf = new Map(folded.map((f, i) => [f, i]));
-    const aut = buildAutomaton(folded);
+    // Memoised on the folded list: the plugin calls this once per chat FILE with one book's keys, and rebuilding the
+    // trie per file was the whole cost of a multi-chat scan.
+    const aut = chatAutomaton(folded);
     const counts = new Map();
     const messagesWith = new Map(rest.map(k => [k, 0]));
     // A key whose forms could both land in one message is counted by union; summing its indices would count it twice.
@@ -366,15 +388,16 @@ export function countChatHits(keys, messages, { matchWindow = 'message', depth =
     // Its own scope: the live one carries the active books' vocabulary, and a whole book's keys would swamp it.
     const scope = createScanScope();
     let seen = 0;
-    for (const t of messages) {
+    for (const msg of messages) {
         seen++;
         const hit = expanded.length ? new Map() : counts;
-        addMessageHits(aut, t, hit);
+        // The masked form, as countKey counts: a key inside a tag or an HTML comment matches neither, and `rest` below is masked by countKey.
+        addMessageHits(aut, maskedHay(msg), hit);
         if (hit !== counts) {
             for (const [i, n] of hit) counts.set(i, (counts.get(i) ?? 0) + n);
             for (const [k, idx] of expanded) if (idx.some(i => hit.has(i))) messagesWith.set(k, messagesWith.get(k) + 1);
         }
-        for (const k of rest) if (countKey(k, t, false, false, scope) > 0) messagesWith.set(k, messagesWith.get(k) + 1);
+        for (const k of rest) if (countKey(k, msg, false, false, scope) > 0) messagesWith.set(k, messagesWith.get(k) + 1);
     }
     const typedWith = new Map(literals.map(k => [k, counts.get(idxOf.get(fold(k))) ?? 0]));
     for (const k of literals) if (!messagesWith.has(k)) messagesWith.set(k, typedWith.get(k));
@@ -452,11 +475,13 @@ export const markExcerptText = ex => (ex
     : null);
 
 /** Every place a key matched, up to `limit`, as excerpts with match offsets; display only. A compound SmartKey returns nothing; a single-term one uses its own flags. */
-export function keyExcerpts(key, text, caseSensitive, wholeWords, context = 28, limit = 20, gateAst = null) {
-    if (gateAst) return compoundExcerpts(gateAst, text, context, limit);
+export function keyExcerpts(key, text, caseSensitive, wholeWords, context = 28, limit = 20) {
     const out = [];
     let raw = String(key ?? '').trim();
     if (!raw || limit < 1) return out;
+    // A TERM's value is a literal whatever it looks like: `? "/re/"` is the hatch validateSmartKey recommends, and
+    // re-reading its shape below would mark it as a pattern that countKey never ran.
+    let literalOnly = false;
     if (raw.startsWith('?')) {
         let node = null;
         try { node = parse(tokenize(raw)); } catch { return out; }
@@ -464,19 +489,30 @@ export function keyExcerpts(key, text, caseSensitive, wholeWords, context = 28, 
         if (node.type !== 'TERM' && node.type !== 'REGEX') return compoundExcerpts(node, text, context, limit);
         raw = String(node.value ?? '').trim();
         if (!raw) return out;
+        literalOnly = node.type === 'TERM';
         caseSensitive = node.type === 'REGEX' ? caseSensitive : !!node.isCaseSensitive;
         wholeWords = node.type === 'REGEX' ? wholeWords : !!node.isExact;
     }
     // Folded -> source offset, folding one character at a time; the source must be NFC first or offsets drift.
+    // Prefix sums, built once per segment: srcIndex runs twice per match and `limit` is Infinity on the proximity path.
+    let sumsFor = null, sums = null;
     const srcIndex = (src, target) => {
-        // The masked form, which is what foldedHay folded. Same length, so the indexes agree.
-        const walk = maskMarkup(src);
-        let acc = 0;
-        for (let i = 0; i < walk.length; i++) {
-            if (acc >= target) return i;
-            acc += (caseSensitive ? normalizeOrthography(walk[i]) : fold(walk[i])).length;
+        if (src !== sumsFor) {
+            // The masked form, which is what foldedHay folded. Same length, so the indexes agree.
+            const walk = maskMarkup(src);
+            sums = new Int32Array(walk.length + 1);
+            let acc = 0;
+            for (let i = 0; i < walk.length; i++) {
+                sums[i] = acc;
+                acc += (caseSensitive ? normalizeOrthography(walk[i]) : fold(walk[i])).length;
+            }
+            sums[walk.length] = acc;
+            sumsFor = src;
         }
-        return walk.length;
+        // The leftmost index whose folded prefix reaches `target`, as the walk it replaces returned.
+        let lo = 0, hi = sums.length - 1;
+        while (lo < hi) { const mid = (lo + hi) >> 1; if (sums[mid] >= target) hi = mid; else lo = mid + 1; }
+        return sums[lo] >= target ? lo : sums.length - 1;
     };
     const markAt = (src, start, end) => {
         let from = Math.max(0, start - context);
@@ -497,15 +533,16 @@ export function keyExcerpts(key, text, caseSensitive, wholeWords, context = 28, 
         const tail = `${src.slice(end, to)}${to < src.length ? '…' : ''}`.replace(/\s+/g, ' ');
         return { text: head + hit + tail, start: head.length, end: head.length + hit.length, at: start, to: end };
     };
+    let nfcFor = null, nfc = null;
     const mark = (raw0, index, length) => {
-        const src = raw0.normalize('NFC');
-        return markAt(src, srcIndex(src, index), srcIndex(src, index + length));
+        if (raw0 !== nfcFor) { nfcFor = raw0; nfc = raw0.normalize('NFC'); }
+        return markAt(nfc, srcIndex(nfc, index), srcIndex(nfc, index + length));
     };
     const push = (segment, index, length) => { out.push(mark(segment, index, length)); return out.length >= limit; };
     const pushAt = (segment, start, end) => { out.push(markAt(segment, start, end)); return out.length >= limit; };
     for (const segment of Array.isArray(text) ? text : [text]) {
         if (!segment) continue;
-        const asRegex = raw.match(REGEX_KEY_RE);
+        const asRegex = literalOnly ? null : raw.match(REGEX_KEY_RE);
         if (asRegex) {
             try {
                 // Same NFC as countRegexKey, and marked against the same string it was searched in.
@@ -550,8 +587,13 @@ function leafNodes(node, negated = false, out = []) {
 }
 
 /** One leaf's occurrences in `text` under its own flags; a REGEX leaf carries its flags in the pattern. */
-const leafCount = (id, text) => countKey(String(id?.value ?? ''), text,
-    id?.type !== 'REGEX' && !!id?.isCaseSensitive, id?.type !== 'REGEX' && !!id?.isExact);
+const leafCount = (id, text) => {
+    const v = String(id?.value ?? '');
+    const cs = id?.type !== 'REGEX' && !!id?.isCaseSensitive, ww = id?.type !== 'REGEX' && !!id?.isExact;
+    // A TERM shaped like a pattern is still a literal (`? "/re/"`), so it is re-quoted rather than handed to countKey bare.
+    const literal = id?.type !== 'REGEX' && isRegexKey(v) && !v.includes('"');
+    return countKey(literal ? `? ${ww ? '=' : ''}${cs ? '^' : ''}"${v}"` : v, text, cs, ww);
+};
 
 /** One excerpt per leaf that matched, at its first occurrence, ordered by position: `term` is the leaf's value and `n` its
  *  occurrences in that segment. Reports leaves whatever the key's verdict — a false key's leaves come off the AST, since
@@ -619,12 +661,6 @@ const astFor = (key, gateOf) => {
     if (gated) return gated;
     if (!key.startsWith('?')) return null;
     try { return parse(tokenize(key)); } catch { return null; }
-};
-
-/** The segments `key` matched in; all of them when it matched in none. */
-const liveSegments = (key, segs, caseSensitive, wholeWords, gateAst = null) => {
-    const live = segs.filter(sg => countKey(key, sg.text, caseSensitive, wholeWords, undefined, gateAst) > 0);
-    return live.length ? live : segs;
 };
 
 /** Overlapping spans folded to one, in source order: the first to start keeps its extent and every span it swallowed is
@@ -852,7 +888,9 @@ export function activationAdds(entries, windowFor, opts = {}) {
     const out = [];
     for (const entry of entries ?? []) {
         if (!entry || entry.disable || entry.constant) continue;
-        if (hasDecorator(entry, '@@dont_activate')) continue;
+        // `@@activate` is core's to honour, like `constant`: WA leaves those keys unblanked and core's ladder reaches it
+        // at a step above `@@dont_activate`, so forcing it again here would be noise (CCv3 gives `@@activate` precedence).
+        if (hasDecorator(entry, '@@dont_activate') || hasDecorator(entry, '@@activate')) continue;
         const keys = usableKeys(entry.key);
         if (!keys.length) continue;
         const depth = scanDepthFor(entry, opts.messageDepth, opts.fallbackDepth, opts.depthSkew);

@@ -2,6 +2,7 @@
 import { readFileSync, existsSync } from 'node:fs';
 import { stInstall } from './scene.mjs';
 import { eq } from './metrics.mjs';
+import { fileURLToPath } from 'node:url';
 
 const st = stInstall();
 const vectorsFile = st && `${st.root}/src/endpoints/vectors.js`;
@@ -14,7 +15,7 @@ const stSource = readFileSync(vectorsFile, 'utf8');
 const listed = [...(stSource.match(/const SOURCES = \[([\s\S]*?)\]/)?.[1] ?? '').matchAll(/'([^']+)'/g)].map(m => m[1]);
 eq(listed.length > 0, true, "ST's SOURCES array is still parseable");
 
-const pluginSource = readFileSync(new URL('../plugin/server.js', import.meta.url).pathname, 'utf8');
+const pluginSource = readFileSync(fileURLToPath(new URL('../plugin/server.js', import.meta.url)), 'utf8');
 const routed = new Set([...pluginSource.matchAll(/case '([^']+)':/g)].map(m => m[1]));
 
 const missing = listed.filter(s => !routed.has(s));

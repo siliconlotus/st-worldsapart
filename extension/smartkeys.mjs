@@ -1,14 +1,5 @@
 // smartkeys.mjs — boolean query engine for `?`-prefixed World Info keys. Entry point evaluateSmartKey(); countKey() routes `?` keys here.
-//   ? moon mission -apollo          implicit AND, prefix - negates
-//   ? =cat                          = word boundary, ^ case-sensitive (combinable: ^=NASA)
-//   ? "moon mission" OR cosmonaut   quoted phrases, AND/OR/NOT/XOR, &&/||/!/-/+, (...) grouping
-//   ? fire::2.5                     ::weight scales the key's BM25 contribution; ^N is an alias (Lucene's boost)
-//   ? meeting 10:30                 a single colon is ordinary text; only :: introduces a weight
-//   ? +fire +water                  Lucene's required-marker, absorbed: AND is implicit
-//   ? /co(l|s)monaut/i landed       /pattern/flags is a term — negatable, weightable, not folded
-//   ? (copper pipe)~3               ~N after a group: its things within N words of each other, any order; a -x inside vetoes within N words
-//   ? M*A*S*H   ? ~5                * and ~ are literals elsewhere; a /regex/ term is the only pattern syntax
-//   ? "hot tub"                     quoting is the one escape: operators, weights, parens and wildcards off. `? hot tub` is two terms.
+// The grammar is SMARTKEYS.md's; matcher-design.md holds what each operator is worth.
 
 import { coreReadsAsRegex, countRegexKey, escapeRegex, foldedHay, isRegexKey, keyExcerpts, maskMarkup, REGEX_KEY_RE, boundaryAfter, boundaryBefore, wordChar } from './matcher.mjs';
 // Re-exported: matcher.mjs, keyword-tools.mjs and studio.mjs import these from here. One copy, or the browser and the server disagree.
@@ -53,11 +44,12 @@ export function tokenize(input) {
         if (src[0] === '(') { tokens.push({ type: 'LPAREN' }); src = src.slice(1); continue; }
         if (src[0] === ')') {
             src = src.slice(1);
-            // `~N` then the weight ride on the RPAREN; lexed as terms of their own they are punctuation that can never match. Digits required: a bare `~` is text.
-            const p = src.match(/^~(\d+)/);
+            // `~N` and the weight ride on the RPAREN in either order; lexed as terms of their own they are punctuation that can never match. Digits required: a bare `~` is text.
+            let p = src.match(/^~(\d+)/);
             if (p) src = src.slice(p[0].length);
             const w = src.match(/^(?:::|\^)(\d+(?:\.\d+)?)/);
             if (w) src = src.slice(w[0].length);
+            if (!p && (p = src.match(/^~(\d+)/))) src = src.slice(p[0].length);
             tokens.push({ type: 'RPAREN', weight: w ? parseFloat(w[1]) : undefined, near: p ? parseInt(p[1], 10) : undefined });
             continue;
         }
@@ -228,9 +220,23 @@ export function validateSmartKey(raw) {
         });
     }
 
+    // The same for `~N`, which the lexer absorbs onto the group: one left over is a second the group cannot take.
+    // After a RPAREN only — a bare `~5` elsewhere is ordinary text ("~5 minutes"), and quoting keeps it that way.
+    for (let i = 1; i < tokens.length; i++) {
+        const t = tokens[i];
+        if (t.type !== 'TERM' || t.quoted || tokens[i - 1].type !== 'RPAREN') continue;
+        const v = String(t.value);
+        if (!/^~\d+$/.test(v)) continue;
+        out.push({
+            severity: 'error', code: 'stray-proximity',
+            message: `“${v}” is not attached to anything: a group takes one “~N” and this is a second, so it is being searched for as text. Keep the one that applies — “(copper pipe)~3” — or quote it as "${v}" to search for it.`,
+        });
+    }
+
     // Quoting is the one construct that carries order, so proximity has nothing to say about a phrase.
     for (const t of terms) {
-        if (t.type !== 'TERM' || t.near === undefined) continue;
+        // `quoted`, not just `near`: parse() stamps `near` on the lone term of a one-term group, which is the supported spelling.
+        if (t.type !== 'TERM' || t.near === undefined || !t.quoted) continue;
         out.push({
             severity: 'error', code: 'proximity-on-phrase',
             message: `“~${t.near}” after a quoted phrase means nothing: the phrase is already its words adjacent and in order. To allow words between, group the terms instead: (${t.value})~${t.near}.`,
@@ -402,12 +408,28 @@ const pool = (id, units) => (units.length
 /** Σ weighted occurrences — the same scalar under every operator, so countKey's contract is unaffected by the unit split. */
 const boostOf = units => units.reduce((a, u) => a + u.wsum, 0);
 
+/** A TERM's compiled pattern, cached on the node: the forms and the escape do not change, and compiling per evaluation
+ *  was the cost countKey's own wholeWordRe removes. Keyed by boundary mode, which setBoundaryMode can move under us. */
+const termRegex = node => {
+    const mode = `${node.isExact ? boundaryBefore() : ''}`;
+    if (node._reMode !== mode) {
+        const forms = keyVariants(node.value).map(v => node.isCaseSensitive ? normalizeOrthography(v) : fold(v));
+        let pattern = forms.length > 1 ? `(?:${forms.map(escapeRegex).join('|')})` : escapeRegex(forms[0]);
+        if (node.isExact) pattern = `${boundaryBefore()}${pattern}${boundaryAfter()}`;
+        node._re = new RegExp(pattern, 'gu');
+        node._reMode = mode;
+    }
+    node._re.lastIndex = 0;
+    return node._re;
+};
+
 /** Evaluates an AST against a text; `acHits` is pass-1 counts for this text, omitted for the pure regex path. An unmatched node
  *  must carry scoreBoost 0: parents sum child boosts without re-checking matched. */
 export function evaluate(node, text, acHits) {
     const r = node?.near !== undefined ? evaluateNear(node, text, acHits) : evaluateNode(node, text, acHits);
     const w = node?.groupWeight;
-    if (!w || w === 1 || !r.units.length) return r;
+    // `undefined`, not falsy: weight 0 is the documented free gate, and `!w` let `(a b)::0` score its full unweighted boost.
+    if (w === undefined || w === 1 || !r.units.length) return r;
     // wsum only: the weight multiplies the thing, and `n` is what the saturation curve reads.
     const units = r.units.map(u => ({ ...u, wsum: u.wsum * w }));
     return { ...r, scoreBoost: boostOf(units), units };
@@ -426,10 +448,7 @@ function evaluateNode(node, text, acHits) {
             }
             // Fold both sides and use the same lookaround as countKey's naive walk — two boundary definitions is two matchers.
             const hay = foldedHay(text, node.isCaseSensitive);
-            const forms = keyVariants(node.value).map(v => node.isCaseSensitive ? normalizeOrthography(v) : fold(v));
-            let pattern = forms.length > 1 ? `(?:${forms.map(escapeRegex).join('|')})` : escapeRegex(forms[0]);
-            if (node.isExact) pattern = `${boundaryBefore()}${pattern}${boundaryAfter()}`;
-            const n = (hay.match(new RegExp(pattern, 'gu')) ?? []).length;
+            const n = (hay.match(termRegex(node)) ?? []).length;
             return { matched: n > 0, scoreBoost: node.weight * n, units: unit(node, node.weight * n, n) };
         }
         // Shares countRegexKey with countKey: case-sensitive, fold-exempt, on raw text; `/i` is how insensitivity is written.

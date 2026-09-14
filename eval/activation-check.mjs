@@ -37,6 +37,10 @@ const addedUids = (entries, text, o = {}) =>
         'delayed entries ARE emitted — core\'s gate order and the persistent external map admit them at their level, and with core\'s matcher blanked there is no other route in');
     eq(addedUids([{ uid: 14, key: ['cosmonaut'], decorators: ['@@dont_activate'], content: 'x' }], 'cosmonaut'), '',
         'parsed entries (getSortedEntries) carry decorators in the array with content stripped — the array is authoritative');
+    eq(addedUids([{ uid: 15, key: ['cosmonaut'], decorators: ['@@activate'], content: 'x' }], 'cosmonaut'), '',
+        '@@activate entries are core\'s to activate, as constants are: WA leaves their keys unblanked and core\'s ladder takes them');
+    eq(addedUids([{ uid: 16, key: ['cosmonaut'], decorators: ['@@dont_activate', '@@activate'], content: 'x' }], 'cosmonaut'), '',
+        '...both decorators too: CCv3 gives @@activate precedence, and core reaches it first, so WA must not suppress it here');
     console.log('ok   activationAdds: candidacy — SmartKeys admitted, error keys and excluded entries not');
 }
 

@@ -38,6 +38,8 @@ export function captureParams(s, { caseSensitive, wholeWords, includeNames, allo
         wholeWords,
         // Read back by the harness, not only snapshotted: without it a permissive capture re-scores at the default.
         wordBoundary: s.wordBoundary,
+        // The same, for the unit a conjunction must match within: absent, the harness re-scores at `scan` whatever the run used.
+        matchWindow: s.matchWindow,
         includeNames,
         // "Include in World Info Scanning" on the Author's Note panel: puts the note and the depth prompt into the scan for every entry.
         allowWIScan,

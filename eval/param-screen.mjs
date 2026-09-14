@@ -95,7 +95,7 @@ if (unknown.length) { console.error(`unknown arm(s): ${unknown.join(', ')} — s
 const K = Number(arg(argv, '--k') ?? 10);
 // A user setting, so never off the bundle; required by --metric fAtBudget.
 const BUDGET = Number(arg(argv, '--budget') ?? 0);
-// A user setting (relevanceCutoff), never defaulted; without it each scene cuts at its fit's provenance cutoff.
+// A user setting (relevanceCutoff), never defaulted: without it scene.mjs reports no @cut window at all.
 const CUTOFF = arg(argv, '--cutoff') === null ? null : Number(arg(argv, '--cutoff'));
 if (CUTOFF !== null && !Number.isFinite(CUTOFF)) { console.error('--cutoff must be a number'); process.exit(2); }
 if (CUTOFF === null && picked.some(a => 'relevanceFit' in ARMS[a])) {
@@ -106,8 +106,13 @@ if (CUTOFF === null && picked.some(a => 'relevanceFit' in ARMS[a])) {
 const GLOBAL = { ...(BUDGET ? { budgetTokens: BUDGET } : {}), ...(CUTOFF !== null ? { memoryCutoff: CUTOFF } : {}) };
 // fAtCut is F-beta(2) over the set the relevance cut admits; the others are diagnostics on the ordering at a fixed window.
 const METRIC = arg(argv, '--metric') ?? 'fAtCut';
-const WINDOWED = { fAtR: r => r.atR.f, fAtCut: r => r.atCut.f, nAtCut: r => r.atCut.n, fAtBudget: r => r.atBudget?.f ?? NaN, nAtBudget: r => r.atBudget?.n ?? NaN };
+const WINDOWED = { fAtR: r => r.atR.f, fAtCut: r => r.atCut?.f ?? NaN, nAtCut: r => r.atCut?.n ?? NaN, fAtBudget: r => r.atBudget?.f ?? NaN, nAtBudget: r => r.atBudget?.n ?? NaN };
 if (!['n', 'nAt5', 'f2', 'recall', 'precision', ...Object.keys(WINDOWED)].includes(METRIC)) { console.error(`unknown --metric ${METRIC}`); process.exit(2); }
+// @cut is the one window the system chooses, and its cutoff is a user setting: scoring it needs --cutoff.
+if (CUTOFF === null && (METRIC === 'fAtCut' || METRIC === 'nAtCut')) {
+    console.error(`--metric ${METRIC} needs --cutoff: relevanceCutoff is a user setting, and nothing here may stand in for it`);
+    process.exit(2);
+}
 const mOf = r => (WINDOWED[METRIC] ? WINDOWED[METRIC](r) : r[METRIC]);
 // Falls back to the bundle's own model, never a hardcoded name (H3).
 const MODEL = process.env.WA_EMBED_MODEL ?? openSample(samples[0], arg(argv, '--arm')).embedModel;
@@ -212,7 +217,7 @@ const fx = n => (n >= 0 ? '+' : '') + n.toFixed(4);
                 r = await scoreScene({ sample: sc.S, overrides: scoring, k: K, scene: sc.scene, qv: sc.qv });
             }
             // Read at the window the score is taken from, or a cell scored at the cut could deliver an ungraded row and print no ?.
-            const win = WINDOWED[METRIC] ? { judged: r.atCut.judged, of: r.atCut.n } : { judged: r.judged, of: r.of };
+            const win = WINDOWED[METRIC] ? { judged: r.atCut?.judged ?? 0, of: r.atCut?.n ?? 0 } : { judged: r.judged, of: r.of };
             cells.push({ scene: sc.name, delta: mOf(r) - mOf(sc.base), ...win, unjudged: r.unjudged });
         }
         results.push({ arm: armName, cells, stat: signTest(cells.map(c => c.delta)) });

@@ -62,7 +62,9 @@ export function settings() {
 /** Merge defaults under stored settings and bind ST's store; call once at init, before settings(). */
 export function ensureSettings(extensionSettings) {
     store = extensionSettings;
-    store[MODULE_NAME] = Object.assign({}, defaultSettings, store[MODULE_NAME]);
+    // structuredClone of the defaults: a shallow Object.assign hands the live settings the SAME nested objects
+    // defaultSettings holds, so the first write to one (worldPriorityByChar) edits this module's exported defaults.
+    store[MODULE_NAME] = Object.assign(structuredClone(defaultSettings), store[MODULE_NAME]);
     for (const k of INTERNAL_KEYS) store[MODULE_NAME][k] = defaultSettings[k];
 }
 
@@ -90,6 +92,11 @@ export const runState = {
     pluginAvailable: null,        // did the server plugin answer /ping
     pluginRoot: null,             // absolute ST root from /ping
     pluginFP: null,               // fingerprint the deployed plugin reports
-    pluginWaVersion: null,        // WA's `<branch>@<git describe>` from /ping
     sourceFP: null,               // fingerprint of this extension's source plugin files
+    lastLayoutOrder: [],          // the last scan's LAYOUT order, pre-cut — what the caps take a prefix of; the capture's population
+    lastInjects: [],              // the Author's Note and depth prompts the scan read, when allowWIScan is on
+    lastSources: {},              // the card/persona fields an entry opted into, by source name
+    lastCoreSet: null,            // what core alone selected during a /wa-versus probe
+    inCoreProbe: false,           // true while that probe runs, so the takeover stands down
+    waRecursionDepth: 0,          // the recursion level WA is emitting at
 };

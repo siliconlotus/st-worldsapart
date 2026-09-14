@@ -9,11 +9,12 @@ import { topComponents } from './metrics.mjs';
 import { openSample, lineagesOf, indexPath, sceneParams, getStringHash } from './scene.mjs';
 import { cachePath, chunkConfig, resolveModel } from './reindex.mjs';
 import { isMemory } from '../extension/relevance.mjs';
+import { fileURLToPath } from 'node:url';
 
 /** Where a book's basis lives, keyed by the book being scored; the hash is of the full name because two books can differ only past character 40. */
 export const basisPath = (book, model, within = false) => {
     if (!model) throw new Error('basisPath needs the model label — a basis is per model');
-    return new URL(`./eval-data/basis/${String(book).replace(/[^\w.-]+/g, '-').slice(0, 40)}__${model}${within ? '__within' : ''}__${getStringHash(String(book))}.json`, import.meta.url).pathname;
+    return fileURLToPath(new URL(`./eval-data/basis/${String(book).replace(/[^\w.-]+/g, '-').slice(0, 40)}__${model}${within ? '__within' : ''}__${getStringHash(String(book))}.json`, import.meta.url));
 };
 
 /** Reads one book's basis. Returns null when absent — the caller decides whether that is fatal. */

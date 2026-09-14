@@ -2,13 +2,8 @@
 // Self-checking; run with no arguments.
 
 import { addVariant, deleteKey, hasKey, keyHolders, kwNorm, renameKeyOn, replaceKey } from '../extension/keyedit.mjs';
+import { eq } from './metrics.mjs';
 
-let failed = 0;
-const eq = (got, want, what) => {
-    if (got === want) { console.log(`ok   ${what}: ${got}`); return; }
-    failed++; process.exitCode = 1;
-    console.log(`FAIL ${what}: ${got} (want ${want})`);
-};
 const book = () => [{ key: ['Cat', 'dog'] }, { key: ['cat'] }, { key: ['bird'] }, { key: [] }, {}];
 
 // --- what counts as the same key is what core's default scan counts: case and surrounding space
@@ -43,4 +38,4 @@ eq(keyHolders(book(), 'CAT').length, 2, 'holders finds every entry with the key,
     eq(deleteKey(es, 'nothing'), 0, 'a key nothing has touches nothing');
 }
 
-console.log(failed ? `FAILED ${failed}` : 'ok   keyedit: rename merges, and the book-wide three report what they touched');
+console.log(process.exitCode ? 'FAILED  keyedit' : 'ok   keyedit: rename merges, and the book-wide three report what they touched');

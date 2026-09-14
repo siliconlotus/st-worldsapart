@@ -37,7 +37,7 @@ import { runState, defaultSettings, settings, ensureSettings } from './extension
 import { ensureStudioStyle, makeSortControl, makeTierEditor, showEntryText, wiGlyph, wiTooltip } from './extension/ui-widgets.mjs';
 import { PRESENTATION_ALIAS, normPresentation, presentationBaseLabel, reconcileTiers, wiTitleOf } from './extension/sort.mjs';
 import { lorebookStudio } from './extension/studio.mjs';
-import { setCaptureHost, versusCore, gradeScene, superGradeScene, superEvalScene, POOL_ARMS } from './extension/capture-ui.mjs';
+import { setCaptureHost, versusCore, gradeScene, superGradeScene, superEvalScene, waVersion, POOL_ARMS } from './extension/capture-ui.mjs';
 import { isDurable } from './extension/grading.mjs';
 import { setLanguage, refreshIndex, table } from './extension/lang.mjs';
 import { packStore, fetchIndex, fetchPack } from './extension/lang-store.mjs';
@@ -139,7 +139,7 @@ async function hasPlugin() {
         const dir = decodeURIComponent(new URL('.', import.meta.url).pathname).replace(/\/$/, '').split('/').pop();
         const response = await fetch('/api/plugins/worlds-apart/ping', { method: 'POST', headers: getRequestHeaders(), body: JSON.stringify({ dir }) });
         runState.pluginAvailable = response.ok;
-        if (response.ok) { try { const d = await response.json(); runState.pluginRoot = d?.root ?? null; runState.pluginFP = d?.fingerprint ?? null; runState.pluginWaVersion = d?.waVersion || ''; } catch { /* older plugin: no root/fingerprint/waVersion fields */ } }
+        if (response.ok) { try { const d = await response.json(); runState.pluginRoot = d?.root ?? null; runState.pluginFP = d?.fingerprint ?? null; } catch { /* older plugin: no root/fingerprint fields */ } }
     } catch {
         runState.pluginAvailable = false;
     }
@@ -420,17 +420,17 @@ function loadRelevanceModel() {
 }
 
 /** Every entry of every book in the scan, grouped by book — the population the per-book statistics are of. */
-const entriesByWorld = async () => Map.groupBy(await getSortedEntries(), e => e.world);
+const entriesByWorld = async (entries = null) => Map.groupBy(entries ?? await getSortedEntries(), e => e.world);
 
 /**
  * Fills the stage-4 relevance column: `properNouns`, `density`, then `E[credit]` per entry. Cuts nothing.
  * @param {Function} windowFor The scan window builder; eval/scene.mjs `haystackFor` calls the same one with the same inputs
  */
-async function scoreRelevanceColumn(items, windowFor) {
+async function scoreRelevanceColumn(items, windowFor, entries = null) {
     const models = await loadRelevanceModel();
     if (!models || !windowFor) return;
 
-    const byWorld = await entriesByWorld();
+    const byWorld = await entriesByWorld(entries);
 
     const depth = Number(settings().messageDepth || world_info_depth);
     const windowNames = properNames(windowFor(depth, {}).join('\n'));
@@ -483,13 +483,14 @@ async function scoreRelevanceColumn(items, windowFor) {
 
 /** BM25 of the query against every entry's content — the stage-3 text signal.
  *  @returns {Promise<Map<string, number>>} `${world}.${uid}` -> best chunk score; empty when unavailable */
-async function contentTextScores(query) {
+async function contentTextScores(query, entries = null) {
     if (!query) return new Map();
-    const byWorld = await entriesByWorld();
+    entries ??= await getSortedEntries();
+    const byWorld = await entriesByWorld(entries);
     if (!byWorld.size) return new Map();
 
     const s = settings();
-    const termWeights = await queryTermWeights(query, { log: false });
+    const termWeights = await queryTermWeights(query, { log: false, entries });
     const opts = { k1: s.bm25K1, b: s.bm25B, termWeights, stopwordDf: s.stopwordDocFreq };
     const out = new Map();
     for (const [world, entries] of byWorld) {
@@ -504,7 +505,7 @@ async function contentTextScores(query) {
 /** The entity-filter term weights for a query, or null when the filter is off. Nothing else derives them (R19).
  *  @param {boolean} [opts.log] Log the kept-term count and, in a verbose run, the surviving terms
  *  @returns {Promise<Record<string, number>|null>} */
-async function queryTermWeights(searchText, { log = true } = {}) {
+async function queryTermWeights(searchText, { log = true, entries = null } = {}) {
     if (!settings().entityFilter) {
         return null;
     }
@@ -513,7 +514,7 @@ async function queryTermWeights(searchText, { log = true } = {}) {
     const authored = entry => (entry.waKeys || entry.waSecondary)
         ? { ...entry, key: entry.key?.length ? entry.key : (entry.waKeys ?? []), keysecondary: entry.keysecondary?.length ? entry.keysecondary : (entry.waSecondary ?? []) }
         : entry;
-    const gazetteer = entity.buildGazetteer((await getSortedEntries()).map(authored));
+    const gazetteer = entity.buildGazetteer((entries ?? await getSortedEntries()).map(authored));
     const termWeights = buildTermWeights(searchText, gazetteer);
 
     if (log) {
@@ -1108,18 +1109,18 @@ function recordCoreSet(activated, args, how) {
     };
 }
 
-/** What ST core selects for this turn with WA standing down: the `ignoreBudget` takeover is undone for the call and
- *  re-entry via WORLDINFO_SCAN_DONE suppressed by `inCoreProbe`, both restored after.
+/** What ST core selects for this turn with WA standing down: `inCoreProbe` makes onEntriesLoaded return before it blinds
+ *  core's keys or takes the budget, so checkWorldInfo reads the authored entries, and it suppresses re-entry via
+ *  WORLDINFO_SCAN_DONE. Nothing is saved and restored here: getSortedEntries hands every caller a fresh structuredClone,
+ *  so writing `ignoreBudget` on a local copy could not reach the set checkWorldInfo fetches for itself.
  *  @returns {Promise<{entries: object[], viaVectors: boolean, vectorsRan: boolean}>} */
 async function coreSelection() {
     const chat = (runState.scanChat ?? getContext().chat ?? []).filter(x => x && !x.is_system);
-    const entries = await getSortedEntries();
     let core;
     const viaVectors = Boolean(extension_settings.vectors?.enabled_world_info);
     let vectorsRan = false;
     runState.inCoreProbe = true;
     try {
-        for (const e of entries) if (e.waIgnoreBudget !== undefined) e.ignoreBudget = e.waIgnoreBudget;
         // A copy: an interceptor may rearrange what it is handed.
         if (viaVectors && typeof globalThis.vectors_rearrangeChat === 'function') {
             try { await globalThis.vectors_rearrangeChat([...chat], getMaxPromptTokens(), null, 'normal'); vectorsRan = true; }
@@ -1128,7 +1129,6 @@ async function coreSelection() {
         // Strings, as `checkWorldInfo` takes them; `vectors_rearrangeChat` above wanted message objects.
         core = await checkWorldInfo(forWI(chat), getMaxPromptTokens(), true, { ...scanSources(), trigger: 'normal' });
     } finally {
-        for (const e of entries) if (e.waIgnoreBudget !== undefined) e.ignoreBudget = true;
         runState.inCoreProbe = false;
     }
     return { entries: [...(core?.allActivatedEntries ?? [])], viaVectors, vectorsRan };
@@ -1165,11 +1165,15 @@ async function onScanDone(args) {
     if (activated.size === 0) {
         skip('core activated nothing');
         runState.lastPromptOrder = [];
+        runState.lastLayoutOrder = [];   // only written past this return, so without it the capture reads the PREVIOUS scan's population
         if (!args?.state?.next) renderDeliveryPanel([]);
         return;
     }
 
-    const contentText = await contentTextScores(runState.lastQuery);
+    // One fetch for the whole loop: getSortedEntries hashes and structuredClones every entry and emits ENTRIES_LOADED,
+    // which re-enters WA's own handler, so three calls a scan was three of those.
+    const scanEntries = await getSortedEntries();
+    const contentText = await contentTextScores(runState.lastQuery, scanEntries);
 
     // Here because onScanDone owns what survives into the prompt, so one filter covers both routes.
     const at = settings().dropUnavailable ? (getContext().chat?.length ?? NaN) : NaN;
@@ -1266,7 +1270,7 @@ async function onScanDone(args) {
         }
     }
 
-    await scoreRelevanceColumn(items, windowFor);
+    await scoreRelevanceColumn(items, windowFor, scanEntries);
 
     // Ordering the dynamic block by anything but E[credit] breaks the prefix property applyBudget assumes.
     const priorityList = charPriority() ?? [];
@@ -1451,7 +1455,9 @@ async function dryRun(verbose = false) {
         return '';
     }
 
-    console.log(`%cWorlds Apart: ${verbose ? 'debug run' : 'dry run'}`, 'font-weight: bold', paramSnapshot());
+    console.log(`%cWorlds Apart ${(await waVersion()) || 'version unknown'}: ${verbose ? 'debug run' : 'dry run'}`, 'font-weight: bold', paramSnapshot());
+    // Version and fingerprints stay out of paramSnapshot: a bundle carries them in SHARED_FIELDS, and recording them twice would let the two disagree.
+    console.log(`Worlds Apart: plugin ${runState.pluginAvailable ? `${runState.pluginFP ?? 'unknown'}, source ${runState.sourceFP ?? 'unknown'}${pluginDrifted() ? ' — OUT OF DATE, redeploy' : ''}` : 'not installed'}`);
 
     runState.verboseRun = Boolean(verbose);
     runState.dryRunInProgress = true;
@@ -1466,6 +1472,7 @@ async function dryRun(verbose = false) {
     runState.lastQuery = '';
     runState.lastScanChat = [];
     runState.lastQueryChat = [];
+    runState.lastLayoutOrder = [];
 
     // retrieve() is inside the try: a throw outside the finally leaves verboseRun/dryRunInProgress stuck true.
     try {
@@ -1741,6 +1748,7 @@ const SETTINGS_HTML = `
     <div class="inline-drawer">
         <div class="inline-drawer-toggle inline-drawer-header">
             <b data-i18n="Worlds Apart">Worlds Apart</b>
+            <small id="wa_version" style="opacity:0.55;margin-left:6px;font-weight:400;"></small>
             <div class="inline-drawer-icon fa-solid fa-circle-chevron-down down"></div>
         </div>
         <div class="inline-drawer-content">
@@ -1934,10 +1942,16 @@ function bind(selector, key, kind) {
         $el.val(settings()[key]);
     }
 
-    $el.on('input change', () => {
-        settings()[key] = kind === 'checked' ? $el.prop('checked')
-            : kind === 'number' ? Number($el.val())
-                : String($el.val());
+    $el.on('input change', ev => {
+        if (kind === 'number') {
+            const raw = String($el.val()).trim(), n = Number(raw);
+            // A cleared box is mid-edit, never a zero: `relevanceCutoff` 0 admits every row, and a cap of 0 is "off".
+            // On commit the box snaps back to the value in force rather than showing a blank that was never stored.
+            if (!raw || !Number.isFinite(n)) { if (ev.type === 'change') $el.val(settings()[key]); return; }
+            settings()[key] = n;
+        } else {
+            settings()[key] = kind === 'checked' ? $el.prop('checked') : String($el.val());
+        }
         saveSettingsDebounced();
     });
 }
@@ -2036,8 +2050,12 @@ export async function init() {
     if (settings().worldPriorityMode === 'off') settings().worldPriorityMode = 'interleaved';
     if (settings().presentationOrder in PRESENTATION_ALIAS) settings().presentationOrder = PRESENTATION_ALIAS[settings().presentationOrder];
     if (settings().studioTierCfg && !settings().tierCfg) { settings().tierCfg = settings().studioTierCfg; delete settings().studioTierCfg; }
-    delete settings().baselineQuery; delete settings().baselineWeight;   // removed feature — drop orphaned stored values
-    await setLanguage(settings().language, { fetchPack, store: packStore });
+    // Removed features — drop the orphaned stored values, or ensureSettings merges them over the defaults forever.
+    for (const k of ['baselineQuery', 'baselineWeight', 'queryMode', 'summaryPrompt', 'summaryLength', 'uncenteredGate', 'keywordScoring']) delete settings()[k];
+    // Not awaited: an unstored pack is a network fetch with no timeout, and ST awaits each extension's activate hook in
+    // turn — blocking here holds up every later extension while the interceptor is already live and the scan hooks are
+    // not yet registered. The pack applies when it lands; until then `table()` is the English one.
+    setLanguage(settings().language, { fetchPack, store: packStore }).catch(() => {});
     // The one place wordBoundary crosses into the matcher, which holds it module-level; re-pushed by the select's handler below.
     matcher.setBoundaryMode(settings().wordBoundary);
 
@@ -2074,6 +2092,7 @@ export async function init() {
     if (tierMount) tierMount.append(tierEditor = makeTierEditor(getTierCfg, setTierCfg, () => {}, { omit: ['disabled'] }));
     tierState();
     renderPluginSetup();                     // paints "checking…" then the detected/install state
+    waVersion().then(v => { if (v) document.querySelector('#wa_version').textContent = v; });
     Promise.all([hasPlugin(), computeSourceFingerprint()]).then(() => {
         renderPluginSetup();
         // The settings banner only shows once somebody opens settings, and a drifted plugin answers with stale code meanwhile.
@@ -2166,7 +2185,7 @@ export async function init() {
     // Wrapped, not passed by reference: CHAT_CHANGED emits the chat id, which would land in resetSmartKeys's `scope`.
     eventSource.on(event_types.CHAT_CHANGED, () => resetSmartKeys());
     // The panel survives dry-run scans untouched, so it would carry the previous chat's selection across a switch.
-    eventSource.on(event_types.CHAT_CHANGED, () => { runState.lastPromptOrder = []; renderDeliveryPanel([]); });
+    eventSource.on(event_types.CHAT_CHANGED, () => { runState.lastPromptOrder = []; runState.lastLayoutOrder = []; renderDeliveryPanel([]); });
     refreshAttached();
     eventSource.on(event_types.WORLDINFO_SCAN_DONE, onScanDone);
     // After onScanDone, so the feed sees the flag while the scan is live. Cleared on the final loop, not only at

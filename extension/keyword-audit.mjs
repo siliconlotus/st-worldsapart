@@ -2,7 +2,7 @@
 // (buildKeyPruneScan) and the predicates its flags rest on. ST-free; keyword-tools.mjs injects the match flags.
 import { NAME_PARTICLES } from './relevance.mjs';
 import { table } from './lang.mjs';
-import { countKey, countRegexKey, escapeRegex, isRegexKey, secondaryKeys, segment, swapLiteralHyphens, usableKeys } from './matcher.mjs';
+import { countKey, countRegexKey, isRegexKey, keyExcerpts, plainTag as plain, secondaryKeys, segment, swapLiteralHyphens, usableKeys } from './matcher.mjs';
 import { cachedCount, createScanScope, hitLiterals, ORTHO_FAMILIES, parse, primeScan, registerKeys, tokenize, validateSmartKey } from './smartkeys.mjs';
 
 
@@ -11,30 +11,35 @@ export const KEY_MIN_SHARED_ENTRIES = 10;
 
 export const KEY_MIN_LENGTH = 4;
 
-/** Share of the book that may LIST a key before it is flagged: how many entries one match activates. */
+/** Share of the book LISTING a key at which the flag turns severe: how many entries one match activates. */
 export const KEY_BOOK_SHARED = 0.75;
+
+/** The flag itself fires at this fraction of `KEY_BOOK_SHARED`, so `book shared` has a moderate band below its severe one. */
+export const KEY_BOOK_SHARED_FLAG = 0.75;
 
 /** Rare-vocabulary Jaccard at which two entries are reported near-duplicates. Advisory only: it colours (K14). */
 export const KEY_DUPE_MIN = 0.35;
 
 export const FUNCTION_WORDS = new Set('a an the and or but if then else for to of in on at by with from as is are was were be been being this that these those it its he she they them his her their you your i we our my me not no do does did has have had will would can could should'.split(' '));
 
-/** A multi-word key containing an English function word, unless it is a constructed proper noun (looksProper) — a titular
- *  `the` in either case does not break the frame, so `the Spire` is a name where `the door` is not; a single word is never a fragment. */
+/** A multi-word key containing an English function word, unless it is a constructed proper noun (looksProper, which
+ *  allows the titular `the`): `the Spire` is a name where `the door` is not. A single word is never a fragment. */
 export function looksLikeFragment(key) {
     const raw = String(key ?? '').trim();
-    if (looksProper(raw) || looksProper(raw.replace(/^the\s+/i, ''))) return false;
+    if (looksProper(raw)) return false;
     const words = raw.toLowerCase().match(/[\p{L}][\p{L}'-]*/gu) ?? [];
     return words.length > 1 && words.some(w => FUNCTION_WORDS.has(w));
 }
 
-/** A capitalised frame with a name-particle interior; a single capitalised word qualifies. `\p{Lu}`, not `[A-Z]`. */
+/** A capitalised frame with a name-particle interior; a single capitalised word qualifies, and a titular leading `the`
+ *  does not break the frame (`the Spire` is a name). `\p{Lu}`, not `[A-Z]`. */
 export function looksProper(key) {
-    const tokens = String(key ?? '').trim().split(/\s+/).filter(Boolean);
+    const raw = String(key ?? '').trim();
+    const tokens = raw.replace(/^the\s+/i, '').split(/\s+/).filter(Boolean);
     if (!tokens.length) return false;
-    const cap = t => /^[^\p{L}]*\p{Lu}/u.test(t);
+    const cap = w => /^[^\p{L}]*\p{Lu}/u.test(w);
     return cap(tokens[0]) && cap(tokens[tokens.length - 1])
-        && tokens.every(t => cap(t) || NAME_PARTICLES.has(t.toLowerCase()));
+        && tokens.every(w => cap(w) || NAME_PARTICLES.has(w.toLowerCase()));
 }
 
 /** The loose term a SmartKey reduces to under `isLoose`, or null once it has a selective term anywhere: OR takes the loosest branch, AND the tightest conjunct; NOT and REGEX read as selective. */
@@ -125,9 +130,6 @@ export function orthoAlternates(k) {
  *  message, so probing every key would cost more than the scan. */
 export const substringProbes = k => (k.includes('"') ? [] : [`? ="${k}"`, ...(/\p{Lu}/u.test(k) ? [`? ^"${k}"`] : [])]);
 
-/** Plain interpolation: what the injected `t` does when nobody supplies one, so the checks assert English. */
-const plain = (s, ...v) => s.reduce((a, str, i) => a + str + (i < v.length ? String(v[i] ?? '') : ''), '');
-
 export function buildKeyPruneScan(data, opts, ignoreSet, { caseSensitiveDefault = false, wholeWordsDefault = false, matchWindow = 'scan', chatScan, t = plain } = {}) {
     // undefined: no scan, or a scan that did not cover this key; 0: scanned and silent. chatChecked reads the difference.
     // The unit the chat scan counted, named for a chip: what a rate is a rate of.
@@ -183,8 +185,8 @@ export function buildKeyPruneScan(data, opts, ignoreSet, { caseSensitiveDefault 
     }
     const titledOf = k => {
         const tokens = k.split(/\s+/);
-        const cap = t => t.charAt(0).toUpperCase() + t.slice(1);
-        const titled = tokens.map((t, i) => (i === 0 || i === tokens.length - 1 || !NAME_PARTICLES.has(t.toLowerCase()) ? cap(t) : t)).join(' ');
+        const cap = w => w.charAt(0).toUpperCase() + w.slice(1);
+        const titled = tokens.map((w, i) => (i === 0 || i === tokens.length - 1 || !NAME_PARTICLES.has(w.toLowerCase()) ? cap(w) : w)).join(' ');
         return titled === k ? null : titled;
     };
     const isLiteral = k => !k.startsWith('?') && !isRegexKey(k);
@@ -267,16 +269,17 @@ export function buildKeyPruneScan(data, opts, ignoreSet, { caseSensitiveDefault 
         const needle = String(key);
         n = 0;
         if (needle && !/\s/.test(needle) && !isRegexKey(needle)) {
-            const re = new RegExp(`(?<!\\w)${escapeRegex(needle)}(?!\\w)`, cs ? 'g' : 'gi');
-            for (const hay of contents) {
-                re.lastIndex = 0;
-                let m;
-                while ((m = re.exec(hay)) !== null) {
-                    const start = m.index, end = start + m[0].length;
-                    let embedded = false;
-                    for (let j = start - 1; j >= 0 && NUMRUN.test(hay[j]); j--) if (hay[j] >= '0' && hay[j] <= '9') { embedded = true; break; }
-                    if (!embedded) for (let j = end; j < hay.length && NUMRUN.test(hay[j]); j++) if (hay[j] >= '0' && hay[j] <= '9') { embedded = true; break; }
-                    if (!embedded) n++;
+            // countKey's own whole-word pass, never a second regex: the boundary class, keyVariants, the orthography fold
+            // and markup masking must decide `clean` exactly as they decide the `total` it is reported over.
+            for (const segments of contentSegments) {
+                for (const seg of segments) {
+                    const hay = String(seg).normalize('NFC');   // the form keyExcerpts indexes
+                    for (const { at: start, to: end } of keyExcerpts(needle, seg, cs, true, 0, Infinity)) {
+                        let embedded = false;
+                        for (let j = start - 1; j >= 0 && NUMRUN.test(hay[j]); j--) if (hay[j] >= '0' && hay[j] <= '9') { embedded = true; break; }
+                        if (!embedded) for (let j = end; j < hay.length && NUMRUN.test(hay[j]); j++) if (hay[j] >= '0' && hay[j] <= '9') { embedded = true; break; }
+                        if (!embedded) n++;
+                    }
                 }
             }
         }
@@ -308,7 +311,8 @@ export function buildKeyPruneScan(data, opts, ignoreSet, { caseSensitiveDefault 
         const known = named.get(k);
         if (known !== undefined) return known;
         const titled = titledOf(k);
-        const found = Boolean(titled) && contentSegments.some(segments => segments.some(seg => countKey(titled, seg, true, false) > 0));
+        // scanScope, as the twin probe and onDemand pass: the module default is the LIVE retrieval scope this pass must not touch.
+        const found = Boolean(titled) && contentSegments.some(segments => segments.some(seg => countKey(titled, seg, true, false, scanScope) > 0));
         named.set(k, found);
         return found;
     };
@@ -321,9 +325,12 @@ export function buildKeyPruneScan(data, opts, ignoreSet, { caseSensitiveDefault 
         if (!usableKeys([k]).length) return { flag: 'unusable', code: validateSmartKey(k).find(f => f.severity === 'error')?.code };
         // English-common, fragment and short read the key as a literal; a SmartKey or regex is judged on its terms (smartPaths) or skipped.
         const literal = !k.startsWith('?') && !isRegexKey(k);
-        const bookContent = scan(k, cs, ww).df;
-        const chatRate = chatRateOf(k);
+        // The rate under the entry's OWN flags where that probe was scanned: countChatHits counts bare keys, so a
+        // whole-word key must not read as chat-common on the strength of hits its flag refuses.
+        const flagProbe = literal && ww !== cs && !k.includes('"') ? `? ${ww ? '=' : '^'}"${k}"` : null;
+        const chatRate = (flagProbe ? chatRateOf(flagProbe) : undefined) ?? chatRateOf(k);
         const hits = scan(k, cs, ww);
+        const bookContent = hits.df;
 
         // --- evidence about this chat and this book, in the order the more specific diagnosis wins ---------------
         // Gated on breadth, judged on how the breadth was earned: `authoriz` is what substring matching is for, bare `Eve`
@@ -350,7 +357,7 @@ export function buildKeyPruneScan(data, opts, ignoreSet, { caseSensitiveDefault 
         // With a chat, ubiquity in entry text is a fact about the story and draws nothing on its own.
         if (!declared && chatRate === undefined && nBook >= KEY_MIN_SHARED_ENTRIES && bookContent / nBook >= (opts.bookCommon ?? KEY_BOOK_COMMON)) return { flag: 'book common', bookContent };
         const bookListed = bookListedBy.get(k.toLowerCase()) ?? 0;
-        if (nBook >= KEY_MIN_SHARED_ENTRIES && bookListed / nBook > opts.bookShared * 0.75 && opts.pruneShared) return { flag: 'book shared', bookContent, bookListed };
+        if (nBook >= KEY_MIN_SHARED_ENTRIES && bookListed / nBook > opts.bookShared * KEY_BOOK_SHARED_FLAG && opts.pruneShared) return { flag: 'book shared', bookContent, bookListed };
         const evidenced = regexOrtho(k, true);
         if (evidenced) return evidenced;
 
@@ -451,7 +458,8 @@ export function buildKeyPruneScan(data, opts, ignoreSet, { caseSensitiveDefault 
     const isArc = e => e?.stmbArc === true || /^\s*\[?\s*arc\b/i.test(String(e?.comment ?? ''));
     const dupeVocab = e => {
         const out = new Set();
-        for (const w of String(e.content ?? '').toLowerCase().match(/[a-z][a-z'-]{2,}/g) ?? []) {
+        // `\p{L}`, not `[a-z]`: an ASCII class gives a non-Latin book no vocabulary at all, so it can never report a duplicate.
+        for (const w of String(e.content ?? '').toLowerCase().match(/[\p{L}][\p{L}'-]{2,}/gu) ?? []) {
             if ((table().zipf.get(w) ?? 0) < 3.0) out.add(w);
         }
         return out;

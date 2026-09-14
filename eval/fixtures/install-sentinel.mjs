@@ -66,7 +66,12 @@ const isOurs = (kind, src, dst) => {
 
 for (const [kind, src, dst] of links) {
     if (fs.lstatSync(dst, { throwIfNoEntry: false })) {
-        if (!isOurs(kind, src, dst) && !remove) { console.error(`refused: ${dst} exists and is not ours`); process.exit(1); }
+        // Holds on --remove too: without --char the chat path is guessed, so the destination can be someone's real file.
+        if (!isOurs(kind, src, dst)) {
+            if (!remove) { console.error(`refused: ${dst} exists and is not ours`); process.exit(1); }
+            console.log(`kept      ${dst} — not ours, left alone`);
+            continue;
+        }
         fs.unlinkSync(dst);
         console.log(`${remove ? 'removed' : 'replaced'}  ${dst}`);
     }

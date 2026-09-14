@@ -11,6 +11,7 @@ import { t, translate } from '../../../../i18n.js';
 import { runState, settings } from './state.mjs';
 import * as matcher from './matcher.mjs';
 import { entryFoldHtml, keyHitsHtml, showEntryText, wiGlyph } from './ui-widgets.mjs';
+import { entryKey } from './content-lexical.mjs';
 import { gradeOrder } from './sort.mjs';
 import { GRADE_ANCHORS, GRADE_SCALE, armNames, buildSample, bundleSamples, captureParams, gradeValue, isDurable, keyByUid, mergeGrades, openBundle, rowKey, sampleFile, sceneDiff, searchedBook, splitGraded, toCandidate, unionArms } from './grading.mjs';
 
@@ -26,8 +27,15 @@ const gradeAnchorLine = () => { const scale = GRADE_ANCHORS.map((a, g) => `${g} 
 
 /** HTML-escaping for the grading tables, with null/undefined rendering blank rather than "undefined". */
 const esc = s => escapeHtml(String(s ?? ''));
-/** The scissors tooltip on a row the budget cut. */
-const cutTip = row => t`cut by the budget` + (row.cutBy ? ': ' + t`${row.cutBy} cap` : '') + (row.tokens ? ', ' + t`${row.tokens} tokens` : '');
+/** A grading table's number cell: a missing value is a dot, never "null". */
+const num = n => (n == null ? '·' : String(n));
+/** The scissors tooltip on a row the budget cut: one whole sentence per case, so a translation can reorder it. */
+const cutTip = ({ cutBy, tokens }) => {
+    if (cutBy && tokens) return t`Cut by the budget: the ${cutBy} cap, at ${tokens} tokens.`;
+    if (cutBy) return t`Cut by the budget: the ${cutBy} cap.`;
+    if (tokens) return t`Cut by the budget, at ${tokens} tokens.`;
+    return t`Cut by the budget.`;
+};
 
 /** ST's match flags for captureParams. A function, not an object: the imports are live bindings. */
 const stParams = () => ({
@@ -49,8 +57,17 @@ function sceneRange() {
     return { start: win[0].i + 1, end: win[win.length - 1].i + 1 };
 }
 
-/** WA's resolved version, `<branch>@<git describe>`, off the plugin's /ping; empty with no plugin, never the manifest's number. */
-const waVersion = () => runState.pluginWaVersion ?? '';
+/** WA's declared version, out of its own manifest; empty when unreadable, cached for the page. */
+let waVersionCache = null;
+
+export async function waVersion() {
+    if (waVersionCache !== null) return waVersionCache;
+    try {
+        const r = await fetch(new URL('../manifest.json', import.meta.url));
+        waVersionCache = r.ok ? String((await r.json())?.version ?? '') : '';
+    } catch { waVersionCache = ''; }
+    return waVersionCache;
+}
 
 /** ST's resolved version, `<branch>@<commit>` from /version; empty when unreadable, cached for the page. */
 let stVersionCache = null;
@@ -106,7 +123,7 @@ async function loadBooks() {
 }
 
 /** Resolves an entry out of an embedded book map — how the grading tables find text for a row. */
-const entryResolver = books => (world, uid) => Object.values(books[world] ?? {}).find(e => Number(e.uid) === Number(uid));
+const entryResolver = books => (world, uid) => books[world]?.[uid];   // keyByUid keys by uid, and a property read coerces a numeric one
 
 /**
  * The provenance stamps every capture writes; `primaryBook` comes off the ranking per arm, the chat's bound book as the keyword-only fallback.
@@ -117,7 +134,7 @@ async function sceneCommon(rows, books) {
     return {
         pluginFP: runState.pluginFP,
         sourceFP: runState.sourceFP,
-        waVersion: waVersion(),
+        waVersion: await waVersion(),
         stVersion: await stVersion(),
         chat: chatFilePath(),
         book: primaryBook ? `data/default-user/worlds/${primaryBook}.json` : '',
@@ -144,11 +161,10 @@ export async function versusCore(named) {
 
     const { entries: coreEntries, viaVectors, vectorsRan } = await host.coreSelection();
 
-    const keyOf = e => `${e.world}.${e.uid}`;
-    const coreKeys = new Set(coreEntries.map(keyOf));
-    const waKeys = new Set((runState.lastPromptOrder ?? []).map(x => keyOf(x.item.entry)));
-    const byKey = new Map(population.map(x => [keyOf(x.entry), x]));
-    for (const e of coreEntries) if (!byKey.has(keyOf(e))) byKey.set(keyOf(e), { entry: e });
+    const coreKeys = new Set(coreEntries.map(entryKey));
+    const waKeys = new Set((runState.lastPromptOrder ?? []).map(x => entryKey(x.item.entry)));
+    const byKey = new Map(population.map(x => [entryKey(x.entry), x]));
+    for (const e of coreEntries) if (!byKey.has(entryKey(e))) byKey.set(entryKey(e), { entry: e });
 
     const tokens = await Promise.all([...byKey.values()].map(x => getTokenCountAsync(x.entry.content ?? '')));
     [...byKey.values()].forEach((x, i) => { x.tokens = tokens[i]; });
@@ -213,9 +229,9 @@ async function versusBundle(union, coreKeys, waKeys, viaVectors) {
     const waRows = runState.lastCandidates;
 
     // Core's rows reuse WA's where both ranked the entry; a row only core activated has no signals, and unionArms fills an absent one.
-    const byKey = new Map(waRows.map(r => [`${r.book}\u001f${r.uid}`, r]));
+    const byKey = new Map(waRows.map(r => [rowKey(r), r]));
     const coreRows = [...union].filter(([k]) => coreKeys.has(k)).map(([, x], i) => {
-        const key = `${x.entry.world}\u001f${x.entry.uid}`;
+        const key = rowKey({ book: x.entry.world, uid: x.entry.uid });
         const base = byKey.get(key);
         return {
             ...(base ?? {
@@ -301,6 +317,26 @@ function wireFolds(root, entryAt) {
 
 /** Fills every blank grade field with 0 (ordinary grades, no new semantics; blank still means ungraded).
  * Undo re-queries the DOM by `data-key`/`data-i`, since a repaint detaches every input. */
+/** The entry column of a grading row: the budget's scissors, the entry glyph, its title and book/uid, the key hits, and
+ *  the chevron that opens the fold. Shared by both grading tables, which differ only in the signal columns beside it. */
+const entryCellHtml = (row, entry, i) => `<td>${row.cut ? `<i class="fa-solid fa-scissors" style="opacity:0.55;margin-right:0.35em;" title="${esc(cutTip(row))}"></i>` : ''}`
+    + `${entry ? wiGlyph(entry) + ' ' : ''}${esc(row.title)}<br><small style="opacity:0.5;">${esc(row.book)} · ${esc(t`uid ${num(row.uid)}`)}</small>`
+    + `${keyHitsHtml(row.why)}<br><i class="fa-solid fa-chevron-right wa-chevron wa-fold" data-i="${i}" title="${esc(t`Show keys and entry text`)}" style="margin-top:0.35em;"></i></td>`;
+
+/** The grading popups' "Fill blanks with 0" button over `root`. No `result`, so it acts on the form and leaves the popup open. */
+const fillZerosButton = root => ({
+    text: t`Fill blanks with 0`, icon: 'fa-0',
+    tooltip: t`Every untouched row becomes a graded 0. Leave a row blank to record it as UNGRADED instead.`,
+    action: () => {
+        const { filled, undo } = fillReadZeros(root);
+        if (!filled) { toastr.info(t`No blank rows to fill.`, 'Worlds Apart'); return; }
+        toastr.success(t`Filled ${filled} blank row(s) with 0. Click to undo.`, 'Worlds Apart', {
+            timeOut: 10000, extendedTimeOut: 10000,
+            onclick: () => { const n = undo(); toastr.info(t`Reverted ${n} row(s) to ungraded.`, 'Worlds Apart'); },
+        });
+    },
+});
+
 function fillReadZeros(root) {
     const idOf = input => input.dataset.key ?? input.dataset.i;
     const touched = new Set();
@@ -377,14 +413,13 @@ export async function gradeScene(named) {
         // Block + score order (gradeOrder); `i` stays the capture index, which every data-i indexes.
         + gradeOrder(rows, r => -(r.score ?? -Infinity)).map(({ row, i }) => {
             const scaff = isDurable(row);
-            const num = n => (n == null ? '·' : String(n));
             const cell = scaff
                 ? `<span style="opacity:0.5;font-size:0.85em;">${esc(row.block === 'constant' ? t`const` : t`sticky`)}</span>`
                 : `<input type="number" class="wa-grade text_pole" data-i="${i}" min="0" max="4" step="1" placeholder="—" title="${esc(GRADE_ANCHORS.map((a, g) => `${g}: ${a}`).join('\n'))}" style="width:4em;padding:2px 4px;">`;
             return `<tr style="border-top:1px solid var(--SmartThemeBorderColor);${scaff ? 'opacity:0.6;' : ''}">`
                 + `<td>${cell}</td>`
                 // wiGlyph, never a local mapping.
-                + `<td>${row.cut ? `<i class="fa-solid fa-scissors" style="opacity:0.55;margin-right:0.35em;" title="${esc(cutTip(row))}"></i>` : ''}${entries[i] ? wiGlyph(entries[i]) + ' ' : ''}${esc(row.title)}<br><small style="opacity:0.5;">${esc(row.book)} · ${esc(t`uid ${num(row.uid)}`)}</small>${keyHitsHtml(row.why)}<br><i class="fa-solid fa-chevron-right wa-chevron wa-fold" data-i="${i}" title="${esc(t`Show keys and entry text`)}" style="margin-top:0.35em;"></i></td>`
+                + entryCellHtml(row, entries[i], i)
                 + `<td>${num(row.score)}</td><td>${num(row.cosine)}</td><td>${num(row.text)}</td><td>${num(row.keys)}</td>`
                 + `</tr>`
                 + `<tr class="wa-foldrow" data-i="${i}" style="display:none;"><td colspan="6" style="padding:0.5em 0.75em 0.9em;">${entryFoldHtml(entries[i], i)}</td></tr>`;
@@ -393,19 +428,7 @@ export async function gradeScene(named) {
 
     wireFolds(wrap, i => entries[i]);
 
-    const popup = new Popup(wrap, POPUP_TYPE.CONFIRM, '', { customButtons: [{
-        // No `result`, so it acts on the form and leaves the popup open.
-        text: t`Fill blanks with 0`, icon: 'fa-0',
-        tooltip: t`Every untouched row becomes a graded 0. Leave a row blank to record it as UNGRADED instead.`,
-        action: () => {
-            const { filled, undo } = fillReadZeros(wrap);
-            if (!filled) { toastr.info(t`No blank rows to fill.`, 'Worlds Apart'); return; }
-            toastr.success(t`Filled ${filled} blank row(s) with 0. Click to undo.`, 'Worlds Apart', {
-                timeOut: 10000, extendedTimeOut: 10000,
-                onclick: () => { const n = undo(); toastr.info(t`Reverted ${n} row(s) to ungraded.`, 'Worlds Apart'); },
-            });
-        },
-    }], okButton: t`Save sample`, cancelButton: t`Cancel`, large: true, wide: true, allowVerticalScrolling: true });
+    const popup = new Popup(wrap, POPUP_TYPE.CONFIRM, '', { customButtons: [fillZerosButton(wrap)], okButton: t`Save sample`, cancelButton: t`Cancel`, large: true, wide: true, allowVerticalScrolling: true });
     const result = await popup.show();
 
     if (result !== POPUP_RESULT.AFFIRMATIVE) {
@@ -435,7 +458,7 @@ export async function gradeScene(named) {
         snapshot: host.paramSnapshot(),
         candidates: rows,
         grades,
-        // Historical name, kept so samples on disk stay readable; records only the grading depth now.
+        // The grading depth: what the grader was shown, not a relevance cutoff (bundle-schema.md).
         cutoff: {
             live,   // the configuration being assessed
             gradingOverride: { maxVectorEntries: wanted },   // how many rows the grader was shown
@@ -511,12 +534,26 @@ async function superGradePopup({ captures, union, entryOf, subtitle = '', okButt
     // `data-i` indexes `flat` across sections, not a section's own rows: the same entry appears against several scenes (G10); section membership rides on the row.
     const secs = sections ?? [{ captures, union, entryOf, prior }];
     const multi = Boolean(sections);
-    const flat = [];
-    for (let s = 0; s < secs.length; s++) {
-        const u = secs[s].union;
-        for (let i = 0; i < u.rows.length; i++) flat.push({ sec: s, row: u.rows[i], entry: u.entries[i] });
-    }
-    const flatIndex = new Map(flat.map((f, i) => [`${f.sec}:${f.row.book}:${f.row.uid}`, i]));
+    let flat = [], flatIndex = new Map();
+    // Rebuilt on every paint: the prior-file picker pushes rows into `union.rows`, and a frozen index resolves those to
+    // undefined, so the repaint threw inside the template and left the table showing its pre-load contents.
+    const rebuildFlat = () => {
+        flat = [];
+        for (let s = 0; s < secs.length; s++) {
+            const u = secs[s].union;
+            for (let i = 0; i < u.rows.length; i++) flat.push({ sec: s, row: u.rows[i], entry: u.entries[i] });
+        }
+        flatIndex = new Map(flat.map((f, i) => [`${f.sec}:${f.row.book}:${f.row.uid}`, i]));
+    };
+    rebuildFlat();
+
+    /** The scene-text popouts in one container; `head` is written once, so binding it per paint stacked a popup per load. */
+    const wireScenePops = root => root.querySelectorAll('.wa-scene-pop').forEach(pop => pop.addEventListener('click', event => {
+        event.preventDefault();
+        event.stopPropagation();          // inside a <summary>, or the click also toggles the fold
+        const hit = sceneText[Number(pop.dataset.i)];
+        if (hit) showEntryText({ content: hit.text, comment: hit.label });
+    }));
 
     const wrap = document.createElement('div');
     const head = document.createElement('div');
@@ -564,8 +601,11 @@ async function superGradePopup({ captures, union, entryOf, subtitle = '', okButt
         + '</div>'
         + `<small style="display:block;opacity:0.6;margin-bottom:0.5em;">${esc(t`Grades in loaded samples are skipped; pool requests add entries.`)}</small>`);
 
+    wireScenePops(head);   // once: head.innerHTML is written above and never rebuilt
+
     // Repaint, not patch: priors change which rows are gradeable. Only dirty inputs carry across, or pristine "0"s would shadow the priors.
     const paint = () => {
+        rebuildFlat();   // before anything reads flatIndex: a loaded pool request adds rows
         const typed = new Map([...body.querySelectorAll('.wa-grade')].filter(i => i.dataset.dirty).map(i => [i.dataset.key, i.value]));
         // Per section: a shared pool would pre-fill a row from another scene's verdict for the same entry.
         const split = secs.map((sc, si) => splitGraded(sc.union.rows, si === 0 && !multi ? prior : (sc.prior ?? [])));
@@ -592,7 +632,6 @@ async function superGradePopup({ captures, union, entryOf, subtitle = '', okButt
                 // The DOM key is section-qualified; `priorOf` is keyed by plain rowKey within a scene.
                 const pkey = rowKey(row);
                 const key = `${si}${String.fromCharCode(31)}${pkey}`;
-                const num = n => (n == null ? '·' : String(n));
                 const done = priorOf.has(pkey);
                 // Prior rows are inputs pre-filled with the earlier grade; an edit re-emits the row and mergeGrades is last-wins. A dirty edit stays dirty across repaints.
                 const cell = isDurable(row)
@@ -600,7 +639,7 @@ async function superGradePopup({ captures, union, entryOf, subtitle = '', okButt
                     : `<input type="number" class="wa-grade text_pole" data-key="${esc(key)}" data-i="${i}" min="0" max="4" step="1" ${typed.has(key) ? 'data-dirty="1" ' : ''}value="${esc(typed.get(key) ?? (done ? priorOf.get(pkey) : ''))}" placeholder="—" title="${esc(GRADE_ANCHORS.map((a, g) => `${g}: ${a}`).join('\n'))}" style="width:4em;padding:2px 4px;">`;
                 return `<tr style="border-top:1px solid var(--SmartThemeBorderColor);${done ? 'opacity:0.55;' : ''}">`
                     + `<td>${cell}</td>`
-                    + `<td>${row.cut ? `<i class="fa-solid fa-scissors" style="opacity:0.55;margin-right:0.35em;" title="${esc(cutTip(row))}"></i>` : ''}${flat[i].entry ? wiGlyph(flat[i].entry) + ' ' : ''}${esc(row.title)}<br><small style="opacity:0.5;">${esc(row.book)} · ${esc(t`uid ${num(row.uid)}`)}</small>${keyHitsHtml(row.why)}<br><i class="fa-solid fa-chevron-right wa-chevron wa-fold" data-i="${i}" title="${esc(t`Show keys and entry text`)}" style="margin-top:0.35em;"></i></td>`
+                    + entryCellHtml(row, flat[i].entry, i)
                     // The arm that supplied the numbers is underlined; the signal columns are its measurements alone.
                     + `<td><small style="opacity:0.7;">${row.arms.map(a => (a === row.from ? `<u>${esc(a)}</u>` : esc(a))).join(', ')}</small></td>`
                     // A borrowed signal is marked with its arm: absent-filled, never blended (unionArms).
@@ -611,14 +650,7 @@ async function superGradePopup({ captures, union, entryOf, subtitle = '', okButt
             + '</tbody></table>';
 
         wireFolds(body, i => flat[i].entry);
-        for (const root of [head, body]) {
-            root.querySelectorAll('.wa-scene-pop').forEach(pop => pop.addEventListener('click', event => {
-                event.preventDefault();
-                event.stopPropagation();          // inside a <summary>, or the click also toggles the fold
-                const hit = sceneText[Number(pop.dataset.i)];
-                if (hit) showEntryText({ content: hit.text, comment: hit.label });
-            }));
-        }
+        wireScenePops(body);   // head is bound once, after its own innerHTML
         body.querySelectorAll('.wa-grade').forEach(input => input.addEventListener('input', () => { input.dataset.dirty = '1'; }));
     };
 
@@ -666,27 +698,18 @@ async function superGradePopup({ captures, union, entryOf, subtitle = '', okButt
             }
         }
         prior = mergeGrades(prior, loaded, { user: raterId(), now: today() });
-        const priorTxt = t`${prior.length} prior grade(s)` + (added ? ', ' + t`${added} entry(ies) requested offline` : '');
-        head.querySelector('.wa-sg-loaded').textContent = names.length ? t`${names.length} file(s): ${priorTxt}` : t`no usable files — nothing loaded`;
+        // Whole sentences, and a count whose noun changes is two templates: never an inline "(s)".
+        const gradeTxt = prior.length === 1 ? t`1 prior grade.` : t`${prior.length} prior grades.`;
+        const priorTxt = added ? `${gradeTxt} ${added === 1 ? t`1 entry requested offline.` : t`${added} entries requested offline.`}` : gradeTxt;
+        const loadedTxt = names.length === 1 ? t`1 file: ${priorTxt}` : t`${names.length} files: ${priorTxt}`;
+        head.querySelector('.wa-sg-loaded').textContent = names.length ? loadedTxt : t`no usable files — nothing loaded`;
         toastr.info(priorTxt, 'Worlds Apart', { timeOut: 3000 });
         paint();
     });
 
     paint();
 
-    const popup = new Popup(wrap, POPUP_TYPE.CONFIRM, '', { customButtons: [{
-        // No `result`, so it acts on the form and leaves the popup open.
-        text: t`Fill blanks with 0`, icon: 'fa-0',
-        tooltip: t`Every untouched row becomes a graded 0. Leave a row blank to record it as UNGRADED instead.`,
-        action: () => {
-            const { filled, undo } = fillReadZeros(body);
-            if (!filled) { toastr.info(t`No blank rows to fill.`, 'Worlds Apart'); return; }
-            toastr.success(t`Filled ${filled} blank row(s) with 0. Click to undo.`, 'Worlds Apart', {
-                timeOut: 10000, extendedTimeOut: 10000,
-                onclick: () => { const n = undo(); toastr.info(t`Reverted ${n} row(s) to ungraded.`, 'Worlds Apart'); },
-            });
-        },
-    }], okButton, cancelButton: t`Cancel`, large: true, wide: true, allowVerticalScrolling: true });
+    const popup = new Popup(wrap, POPUP_TYPE.CONFIRM, '', { customButtons: [fillZerosButton(body)], okButton, cancelButton: t`Cancel`, large: true, wide: true, allowVerticalScrolling: true });
     if (await popup.show() !== POPUP_RESULT.AFFIRMATIVE) {
         return null;
     }
@@ -816,11 +839,14 @@ const pickJsonFiles = ({ multiple = false } = {}) => new Promise(resolve => {
     input.type = 'file';
     input.accept = '.json,application/json';
     input.multiple = multiple;
-    input.addEventListener('change', () => resolve([...(input.files ?? [])]), { once: true });
-    input.addEventListener('cancel', () => resolve([]), { once: true });
+    // Cancelled by either event, or a pick inside the window still warns that the picker it just used was blocked.
+    let timer = null;
+    const settle = v => { clearTimeout(timer); resolve(v); };
+    input.addEventListener('change', () => settle([...(input.files ?? [])]), { once: true });
+    input.addEventListener('cancel', () => settle([]), { once: true });
     input.click();
     // ponytail: focus heuristic, 2s; a dialog that opens without taking focus reads as blocked.
-    setTimeout(() => {
+    timer = setTimeout(() => {
         if (!document.hasFocus()) return;
         toastr.warning(t`The browser blocked the file picker — run it again now that the chat is open.`, 'Worlds Apart');
         resolve([]);

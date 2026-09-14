@@ -1,14 +1,14 @@
 // Graded-scene grid: reproduce WA's retrieval ranking for a real scene offline, score it against human 0-4 grades with nDCG, and sweep any parameter.
 // Usage (from SillyTavern root):
 //   node .../graded-scene-grid.mjs --sample <sample.json> [--index <index.json>] [--validate <capture.json>]
-//   node .../graded-scene-grid.mjs --sample <sample.json> --chat <chat.jsonl> --depth 5 --freeze    # snapshots query + scanText into the sample
+//   node .../graded-scene-grid.mjs --sample <sample.json> --chat <chat.jsonl> --depth 5 --freeze    # snapshots query + scan messages into the bundle
 // --sample is a /wa-grade sample, paths relative to the ST root. Shape:
 //
 //   {
 //     "name": "scene1",
 //     "query": "Sommers ABO: …",          // the retrieval query, verbatim — see FREEZE below
 //     "queryChat": [{name, mes}, ...],    // the messages it was joined from, for the depth sweep
-//     "scanText": "…",                    // the keyword scan window for the same messages
+//     "scanChat": [{name, mes}, ...],     // the messages the keyword scan window is cut from
 //     "chat":  "data/default-user/chats/<char>/<chat>.jsonl",   // provenance / re-freezing only
 //     "book":  "data/default-user/worlds/<book>.json",          // provenance only; entries come from "books"
 //     "grades": [{ "title": "…", "grade": 4 }, ...],
@@ -23,6 +23,7 @@
 // The query text is frozen, never the chat: a played-on chat scores a different scene against the old grades with no error.
 import { readFileSync, writeFileSync, statSync, openSync, readSync } from 'node:fs';
 import { isDurable } from '../extension/grading.mjs';
+import { defaultSettings } from '../extension/state.mjs';
 import { tokenize } from '../extension/lexical.mjs';
 import { norm } from '../plugin/vector.mjs';
 import * as queryBuild from '../extension/query.mjs';
@@ -109,8 +110,20 @@ if (FREEZE) {
     if (S.query !== undefined && S.query !== query) {
         console.warn('!! --freeze is REPLACING an existing snapshot and the chat no longer yields the same query — has the chat been played on since grading? The grades may no longer describe this scene.');
     }
-    writeFileSync(path, `${JSON.stringify({ ...S, query, scanText, frozenAt: new Date().toISOString() }, null, 2)}\n`);
-    console.log(`froze query (${query.length} chars) + scan window (${scanText.length} chars) into ${path}`);
+    // Into the document, never `S`: that is one arm flattened, with loadScene's availability filter
+    // already applied to its entries, so writing it back drops every sibling arm and every filtered row.
+    const doc = JSON.parse(readFileSync(path, 'utf8'));
+    const sc = doc.scenes?.[0];
+    if (!sc) { console.error(`${path} carries no \`scenes\` — not a graded-scene document`); process.exit(2); }
+    const cell = (doc.arms ?? []).find(a => a.name === S.arm)?.scenes?.[sc.id];
+    const target = cell?.query !== undefined ? cell : sc;   // stays where the bundle already hoisted it
+    const frozenChat = chat.slice(-DEPTH).map(m => ({ name: m.name, mes: m.mes }));
+    target.query = query;
+    target.queryChat = frozenChat;
+    (doc.sceneChats ??= {})[sc.id] = frozenChat;   // the scan MESSAGES; scanText is a per-entry composer
+    sc.frozenAt = new Date().toISOString();
+    writeFileSync(path, `${JSON.stringify(doc, null, 2)}\n`);
+    console.log(`froze query (${query.length} chars) + ${frozenChat.length} scan message(s) into ${path}`);
 }
 
 // The gazetteer is built in loadScene (R22); only the query-dependent term weights are derived here.
@@ -198,7 +211,7 @@ const fmt = n => (n == null ? '·' : (+n).toFixed(3));
     const grades = gradesAll.filter(g => !outOfScope(g));
     if (grades.length < gradesAll.length) console.log(`excluded ${gradesAll.length - grades.length} out-of-scope grade(s) — their book is not embedded, so nothing here can rank them: ${gradesAll.filter(g => outOfScope(g)).map(g => `"${g.title}"`).join(', ')}\n`);
     const gradeOf = makeGradeOf(S.entries, { outOfScope, primary });
-    const DEF = { k1: 1.2, b: 0.75 };   // shipped defaults (extension/state.mjs)
+    const DEF = { k1: defaultSettings.bm25K1, b: defaultSettings.bm25B };   // state.mjs owns them
     const relCount = grades.filter(x => x.g >= 3).length;
 
     // --depths: the grades are held fixed; widening the window reaches further back from the same graded moment.

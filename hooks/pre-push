@@ -1,5 +1,5 @@
 #!/bin/sh
-# pre-push — on main only: refuse a push whose tip carries no tag matching manifest.json's version, since a bundle records <branch>@<git describe> and a release is meant to be exactly a version (bundle-schema.md, "The version fields"). Every other branch pushes untouched.
+# pre-push — on main only: refuse a push whose tip carries no tag matching manifest.json's version, since a bundle records that version as waVersion and a release is meant to be exactly a version (bundle-schema.md, "WA's version is declared"). Every other branch pushes untouched.
 # git feeds one line per ref: <local ref> <local sha> <remote ref> <remote sha>.
 ZERO=0000000000000000000000000000000000000000
 status=0

@@ -21,7 +21,8 @@ export function buildGazetteer(entries) {
 
 /** Query terms that are capitalised or in `gazetteer`, capitalised ones weighted `boost`; not applied to summarized queries. */
 export function buildTermWeights(queryText, gazetteer, boost) {
-    const weights = {};
+    // Null-prototype: the keys are chat tokens, and `weights['constructor'] ?? 0` would otherwise read a Function and fold to NaN.
+    const weights = Object.create(null);
     // The split must stay lexical.tokenize's character class, or an accented query term shatters and matches nothing (K9).
     const query = normalizeOrthography(queryText);
     const properNouns = properNounsOf(query);

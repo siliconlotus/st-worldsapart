@@ -76,7 +76,7 @@ Adams*, and not *John Quincy Adams*. A negation inside vetoes only within reach:
 whole window. The negated part can be anything a key can be. A word, a phrase or a group is within reach when
 any part of it is, and a combination is read over what is within reach: `-(drill practice)` vetoes when
 both words are, `-(drill practice)~0` when they are adjacent to each other and that pair is. Each cluster counts once, as one thing: the group scores like a single term, and a weight
-goes on the group, `? (copper pipe)~3::2`; a weight on a word inside the group is not read. `~N` goes on a
+goes on the group, `? (copper pipe)~3::2` or `? (copper pipe)::2~3`, the two being the same key; a weight on a word inside the group is not read. `~N` goes on a
 group only. After a quoted phrase it is refused, since a phrase is already its words adjacent and in order,
 and a `~` anywhere else is an ordinary character. What counts as a word is the *Word boundary* setting below.
 
@@ -250,6 +250,8 @@ meant. The last row applies to a bare `/regex/` key as well.
 | **error** | every term negated — that matches whenever they are absent, which is nearly always |
 | **error** | an unclosed quote |
 | **error** | a `/pattern/` JavaScript cannot compile |
+| **error** | a `::N` or `^N` weight attached to nothing |
+| **error** | a second `~N` after a group — a group takes one; quote it to search for the text |
 | **error** | `~N` after a quoted phrase — a phrase is already its words adjacent and in order; group them instead |
 | **warn** | a punctuation-only term (usually a second `?`: only the first one is the sentinel) |
 | **warn** | unbalanced parens — it still parses, but probably not the way you grouped it |

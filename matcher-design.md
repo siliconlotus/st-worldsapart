@@ -120,6 +120,7 @@ but `AND_ANY`); a `warn` is legal and probably a typo.
 | `no-terms` | error | no term at all |
 | `negation-only` | error | no term reachable without an odd number of NOTs |
 | `stray-weight` | error | a `::N` or `^N` attached to nothing |
+| `stray-proximity` | error | a `~N` term straight after a group, which already took one |
 | `proximity-on-phrase` | error | `~N` after a quoted phrase |
 | `stray-quote` | error | an unclosed quote |
 | `regex-invalid` | error | a `/…/flags` shape `new RegExp` refuses; asked of a bare regex key too |

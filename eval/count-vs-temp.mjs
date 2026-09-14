@@ -5,8 +5,9 @@ import { createHash } from 'node:crypto';
 import { buildKeySuggest, parseKeyList, STUDIO_SUGGEST_OPTS } from '../extension/keyword-suggest.mjs';
 import { countKey } from '../extension/matcher.mjs';
 import { mean } from './metrics.mjs';
+import { fileURLToPath } from 'node:url';
 
-const HERE = new URL('.', import.meta.url).pathname;
+const HERE = fileURLToPath(new URL('.', import.meta.url));
 const OLLAMA = process.env.OLLAMA_URL ?? 'http://localhost:11434';
 const WORLDS = `${HERE}../../../../../../data/default-user/worlds`;
 const LADDER_CACHE = `${HERE}eval-data/temp-ladder-cache.json`;

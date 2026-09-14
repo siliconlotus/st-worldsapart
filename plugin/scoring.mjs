@@ -1,5 +1,5 @@
-// scoring.mjs — stage 1: mean-centered cosine over a collection's chunks, pooled to entries, bounded. Cosine only, no
-// admission test: scoreThreshold was a measured no-op (R1), BM25 then had no admission to serve, and above admitCeiling the overflow is cosine-only (R2, R4).
+// scoring.mjs — stage 1: mean-centered cosine over a collection's chunks, pooled to entries, bounded.
+// Cosine only, with no admission test: above admitCeiling the overflow is cosine-only.
 import { centeredCosineScores } from './vector.mjs';
 
 export function scoreCollection(collectionId, loaded, queryVector, { centered = true } = {}) {

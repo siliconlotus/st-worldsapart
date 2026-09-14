@@ -1,8 +1,7 @@
 // matchWindow — the unit a key has to match within: scan, message, paragraph.
 import { keywordScore, repeatCurveOf, scanSegments, scanWindow, segment } from '../extension/matcher.mjs';
 import { eq } from './metrics.mjs';
-// Dynamic, because keyword-audit.mjs pulls the ST-coupled half in at module scope on some branches.
-const { buildKeyPruneScan } = await import('../extension/keyword-audit.mjs');
+import { buildKeyPruneScan } from '../extension/keyword-audit.mjs';
 // One option set for every block below, so a block cannot silently differ.
 const opts = {
     scanKeyword: true, scanVectorized: true, scanConstant: true, includeInactive: true,

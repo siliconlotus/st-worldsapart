@@ -17,7 +17,7 @@ import { validateSmartKey } from './smartkeys.mjs';
 import { findOrphanBindings } from './bindings.mjs';
 import { WI_LOGIC, countChatHits, dropTags, hasPromoteDecorator, isRegexKey, scanSegments, secondaryKeys, splitKeys, usableKeys, wholeWordAdvice, withPromote } from './matcher.mjs';
 import { labScan, runBook } from './lab.mjs';
-import { addVariant, deleteKey, hasKey, keyHolders, kwNorm, renameKeyOn, replaceKey } from './keyedit.mjs';
+import { addVariant, deleteKey, hasKey, keyHolders, kwNorm, planUidReindex, renameKeyOn, replaceKey } from './keyedit.mjs';
 
 // Fixed, not theme variables: severity is read by hue.
 const SEVERITY_COLOR = { severe: '#e06c6c', moderate: '#d9b74a', minor: '#7bbf6a' };
@@ -38,20 +38,6 @@ const LOGIC_OPTS = [
     ['2', 'NOT_ANY', LOGIC_LABEL[2]],
     ['1', 'NOT_ALL', LOGIC_LABEL[1]],
 ];
-
-/**
- * Places the selected entries (`orderedUids`, on-screen order) into a contiguous UID/order block [start, start+N-1].
- * Returns `{conflict: uid}` when an unselected entry holds a target UID, else `{moves: [[oldUid, newUid], …]}`.
- * @param {boolean} desc top gets start+N-1 rather than `start`
- * Sliced by eval/bulk-reorder-check.mjs from its `function` line to the first `\n}\n`: keep it a plain function.
- */
-function planUidReindex(entries, orderedUids, start, desc) {
-    const n = orderedUids.length;
-    const selUids = new Set(orderedUids);
-    const targetOf = i => start + (desc ? n - 1 - i : i);
-    for (let i = 0; i < n; i++) { const u = targetOf(i); if ((u in entries) && !selUids.has(u)) return { conflict: u }; }
-    return { moves: orderedUids.map((uid, i) => [uid, targetOf(i)]) };
-}
 
 /**
  * Lorebook Studio (/wa-studio).
@@ -101,16 +87,16 @@ export async function lorebookStudio(preferredBook = null, open = null) {
     let ignoreSet = new Set();       // per-book prune whitelist (shared with the prune popup)
     let studioOpts = { ...STUDIO_PRUNE_OPTS, ...(settings().studioScanOpts ?? {}) };
     let suggestOpts = { ...STUDIO_SUGGEST_OPTS, ...(settings().studioSuggestOpts ?? {}) };
-    let trayOpen = false;            // Tool Settings disclosure state (session)
-    let trayEl = null;               // the mounted tray element, so open/close swaps just it (not the entry list)
+    let trayEl = null;               // the cog popup's tray panel while it is open; a refresh replaces this node
     let bulkEl = null;               // the mounted bulk-action bar, swapped in place as selection changes
-    let globalTrayEl = null;         // the mounted global-tray element, swapped in place on toggle
+    let globalTrayEl = null;         // the cog popup's global panel while it is open; refreshGlobalTray replaces this node
     const selectedEntries = new Set();   // uids ticked for bulk actions
     let selAnchorUid = null;         // last-ticked entry, for shift-click range selection
     let entryFilter = new Set();     // explorer entry filter facets (FILTER_OPTS); empty = all. OR within a group, AND across groups
     let entrySort = 'insert';        // 'insert' mirrors the prompt insertion order; persisted per book
     let tieredMode = true;
-    let tierCfg = reconcileTiers(settings().tierCfg);   // tier precedence, shared with the prompt builder
+    // Read live, never snapshotted: the settings panel edits the same setting, and a stale local written back discarded its change.
+    const tierCfg = () => reconcileTiers(settings().tierCfg);   // tier precedence, shared with the prompt builder
     const loadSortView = name => { const v = settings().studioSortByBook?.[name]; entrySort = v?.sort ?? 'insert'; tieredMode = v?.tiered ?? true; };
     const persistSortView = () => { const s = settings(); (s.studioSortByBook ??= {})[selected] = { sort: entrySort, tiered: tieredMode }; saveSettingsDebounced(); };
     let searchQuery = '';            // explorer free-text search
@@ -136,16 +122,15 @@ export async function lorebookStudio(preferredBook = null, open = null) {
     let chatTyped = null;       // the same count for each key AS WRITTEN, its variants excluded
     let chatUnit = 'message';   // what chatHits counts: messages, paragraphs, or scan windows (countChatHits `unit`)
     let chatMsgs = 0;
-    let chatName = '';          // WHICH chat produced those counts — see runChatScan
     let ignoredOpen = false;    // the Cleanup tab's ignored-terms tray, opened from its count
-    let chatNames = [];         // the same, unabbreviated: chatName collapses to "N chats" and only the tooltip can name them
+    let chatNames = [];         // WHICH chats produced those counts, unabbreviated; chatLabel collapses several to "N chats"
     // Quoted only when it IS a name: quotes around "2 chats" read as scare quotes.
-    const chatLabel = () => (chatNames.length === 1 ? `"${chatName}"` : chatName);
+    const chatLabel = () => (chatNames.length === 1 ? `"${chatNames[0]}"` : t`${chatNames.length} chats`);
     const rowId = (uid, term) => `${uid}${term}`;
     let termRepaint = null;   // the active term tab's list repaint; null in the Explorer, whose rerenderKeys walks rowEls instead
     const afterIgnoreChange = keys => {
         if (termRepaint) termRepaint(); else rerenderKeys(keys);
-        if (trayOpen) refreshTray();   // the whitelist column lives there
+        if (trayEl?.isConnected) refreshTray();   // the whitelist column lives there
     };
 
     let orphans = null;       // findOrphanBindings result, computed once in the background; null until it has run
@@ -226,7 +211,7 @@ export async function lorebookStudio(preferredBook = null, open = null) {
     const bookKeys = () => [...new Set(Object.values(data?.entries ?? {})
         .flatMap(e => (Array.isArray(e.key) ? e.key : []).map(k => String(k).trim())).filter(Boolean))];
 
-    const clearChatScan = () => { chatHits = null; chatTyped = null; chatUnit = 'message'; chatMsgs = 0; chatName = ''; chatNames = []; };
+    const clearChatScan = () => { chatHits = null; chatTyped = null; chatUnit = 'message'; chatMsgs = 0; chatNames = []; };
     // Repaints the entries carrying any of `keys`; classifyEntry reads ignoreSet live, so whitelisting needs no rescan.
     const rerenderKeys = keys => { const set = new Set(keys); for (const e of Object.values(data?.entries ?? {})) if ((Array.isArray(e.key) ? e.key : []).some(k => set.has(k))) renderEntry(e); };
 
@@ -247,10 +232,8 @@ export async function lorebookStudio(preferredBook = null, open = null) {
     };
 
     // ⚙ Tool Settings tray: audit options, recommender knobs, this book's ignored terms.
-    const renderTray = (force = false) => {
-        if (!trayOpen && !force) return document.createElement('div');   // nothing mounted when closed
+    const renderTray = () => {
         const panel = document.createElement('div'); panel.className = 'wa-tray-panel';
-        if (force) panel.dataset.force = '1';   // rendered into the popup: a refresh must force too, or it swaps in an empty div
         const check = (obj, key, label, after) => trayChk('wa-tray-opt', label, !!obj[key], v => { obj[key] = v; persistOpts(); after?.(); });
         const num = (obj, key, before, unit, opt, after) => {
             const { min = 1, max, scale = 1, width = '3.6em' } = opt || {};
@@ -300,7 +283,7 @@ export async function lorebookStudio(preferredBook = null, open = null) {
                 num(studioOpts, 'chatCommon', t`Chat common: in over`, t`% of messages`, { min: 1, max: 100, scale: 100 }),
                 num(studioOpts, 'bookCommon', t`Book common: in over`, t`% of entries`, { min: 1, max: 100, scale: 100 }),
                 check(studioOpts, 'pruneShared', t`Flag book-shared keys`),
-                num(studioOpts, 'bookShared', t`↳ listed by over`, t`% of entries`, { min: 1, max: 100, scale: 100 }),
+                num(studioOpts, 'bookShared', t`↳ severe when listed by over`, t`% of entries`, { min: 1, max: 100, scale: 100 }),
                 check(studioOpts, 'pruneShort', t`Flag short keys`),
                 num(studioOpts, 'minLength', t`↳ under`, t`characters`, { min: 1 }),
                 check(studioOpts, 'ignoreProper', t`Never flag proper nouns as unattested`),
@@ -308,7 +291,7 @@ export async function lorebookStudio(preferredBook = null, open = null) {
             col(t`Suggestions`,
                 num(suggestOpts, 'dfCeil', t`Skip keywords in over`, t`% of entries`, { min: 1, max: 100, scale: 100 }, invSuggest),
                 num(suggestOpts, 'maxN', t`Phrases up to`, t`words`, { min: 1, max: 8 }, invSuggest),
-                num(suggestOpts, t`cap`, t`Max per entry`, '', { min: 1, max: 50 }, invSuggest),
+                num(suggestOpts, 'cap', t`Max per entry`, '', { min: 1, max: 50 }, invSuggest),
                 num(suggestOpts, 'llmChunk', t`LLM chunk size`, t`characters`, { min: 500, width: '5.6em' }),   // longer entries split into this-sized passes
                 check(suggestOpts, 'excludeDates', t`Skip dates`, invSuggest),
                 check(suggestOpts, 'excludeShort', t`Skip short keywords`, invSuggest),
@@ -318,7 +301,7 @@ export async function lorebookStudio(preferredBook = null, open = null) {
         );
         return panel;
     };
-    const refreshTray = () => { const fresh = renderTray(trayEl?.dataset?.force === '1'); if (trayEl?.isConnected) trayEl.replaceWith(fresh); trayEl = fresh; };
+    const refreshTray = () => { const fresh = renderTray(); if (trayEl?.isConnected) trayEl.replaceWith(fresh); trayEl = fresh; };
     /** The tray's toggle, which both headers carry: the panel itself mounts below them. */
     const trayBtn = () => {
         const b = document.createElement('button'); b.type = 'button'; b.className = 'menu_button wa-filter';
@@ -328,8 +311,10 @@ export async function lorebookStudio(preferredBook = null, open = null) {
         // A popup, not an inline tray: both panels together outgrow the fixed header and push the list and the rail off the pane.
         b.addEventListener('click', async () => {
             const wrap = document.createElement('div'); wrap.style.textAlign = 'left';
-            trayEl = renderTray(true);   // the popup's panel is the one a refresh replaces while it is open
-            wrap.append(trayEl, renderGlobalTray(true));
+            // BOTH stored: these are the mounted panels a refresh replaces while the popup is open.
+            trayEl = renderTray();
+            globalTrayEl = renderGlobalTray();
+            wrap.append(trayEl, globalTrayEl);
             await new Popup(wrap, POPUP_TYPE.TEXT, '', { okButton: t`Close`, wide: true, large: true }).show();
             renderExplorer();   // every option saved on change; the list repaints under the new ones
         });
@@ -338,8 +323,7 @@ export async function lorebookStudio(preferredBook = null, open = null) {
 
     // 🌐 Global WI settings. Core's knobs are edited by driving core's own inputs, never by assigning the globals.
     const refreshGlobalTray = () => { const fresh = renderGlobalTray(); if (globalTrayEl?.isConnected) globalTrayEl.replaceWith(fresh); globalTrayEl = fresh; };
-    function renderGlobalTray(force = false) {
-        if (!trayOpen && !force) return document.createElement('div');   // opens with the cog tray, below it
+    function renderGlobalTray() {
         const panel = document.createElement('div'); panel.className = 'wa-tray-panel';
         const col = (title, ...kids) => trayCol('wa-tray-col', 'wa-tray-sec', title, ...kids);
         const numRow = (label, backing, unit, title) => {
@@ -425,7 +409,9 @@ export async function lorebookStudio(preferredBook = null, open = null) {
             + `<div style="margin-top:8px;opacity:0.7;">${h(t`Current sort order:`)} <b>${h(String(curOrder))}</b></div>`;
         const p = new Popup(w, POPUP_TYPE.CONFIRM, '', { okButton: advanced ? t`Reorder + UIDs` : t`Renumber`, cancelButton: t`Cancel` });
         if (await p.show() !== POPUP_RESULT.AFFIRMATIVE) return;
-        const startRaw = Number(w.querySelector('.wa-bo-start').value); const start = Number.isFinite(startRaw) ? Math.round(startRaw) : 1;
+        // The blank is what reaches here from a cleared box, and Number('') is 0: without the text test the `: 1` never runs and a UID block renumbers from 0.
+        const startTxt = String(w.querySelector('.wa-bo-start').value).trim(), startRaw = Number(startTxt);
+        const start = startTxt && Number.isFinite(startRaw) ? Math.round(startRaw) : 1;
         const desc = w.querySelector('.wa-bo-desc').checked;
         const ordered = visibleUids.filter(u => selectedEntries.has(u)).map(u => data.entries[u]).filter(Boolean);   // selected, in on-screen (sorted) order
         const sortKey = w.querySelector('.wa-bo-sort').value;
@@ -1365,7 +1351,7 @@ export async function lorebookStudio(preferredBook = null, open = null) {
         const sorted = [...list].sort(base);
         if (!tiered) return sorted;
         const buckets = [];
-        for (const e of sorted) (buckets[tierRank(e, tierCfg)] ??= []).push(e);
+        for (const e of sorted) (buckets[tierRank(e, tierCfg())] ??= []).push(e);
         return buckets.flat();   // sparse holes (empty ranks) are skipped by flat()
     };
     /** The default duplicate name: "X copy", then "X copy 2", … until one is free. */
@@ -1685,7 +1671,7 @@ export async function lorebookStudio(preferredBook = null, open = null) {
         getSort: () => entrySort, setSort: k => { entrySort = k; persistSortView(); },
         getTiered: () => entrySort === 'insert' ? !!settings().presentationTiered : tieredMode,
         setTiered: on => { if (entrySort === 'insert') { const k = normPresentation(settings().presentationOrder); entrySort = SORT_FNS[k] ? k : 'order-asc'; } tieredMode = on; persistSortView(); },
-        getTierCfg: () => tierCfg, setTierCfg: cfg => { tierCfg = cfg; settings().tierCfg = cfg; saveSettingsDebounced(); },
+        getTierCfg: tierCfg, setTierCfg: cfg => { settings().tierCfg = cfg; saveSettingsDebounced(); },
         leadItems: [{ label: t`Insert`, key: 'insert' }],
         onChange, mount: ctxMount,
     });
@@ -1958,16 +1944,18 @@ export async function lorebookStudio(preferredBook = null, open = null) {
         return out;
     };
 
-    /** No-plugin path: pulls a chat's messages over HTTP, as {name, mes}. */
-    const fetchChatMessages = async ({ char, avatar, file }) => {
+    /** No-plugin path: pulls a chat's messages over HTTP, as {name, mes}. `byId` instead returns every message with the
+     *  metadata header dropped, so an index is the MESSAGE ID it is live — what a "last message" cut must slice. */
+    const fetchChatMessages = async ({ char, avatar, file }, { byId = false } = {}) => {
         const r = await fetch('/api/chats/get', {
             method: 'POST', headers: getRequestHeaders(), cache: 'no-cache',
             body: JSON.stringify({ ch_name: char, file_name: String(file).replace(/\.jsonl$/, ''), avatar_url: avatar }),
         });
         if (!r.ok) return [];
         const j = await r.json();
+        const list = (Array.isArray(j) ? j : []).filter(m => m && typeof m.mes === 'string');   // the header carries no `mes`
         // Hidden messages are not scanned live (C3), so they are not counted here; names ride along for includeNames.
-        return (Array.isArray(j) ? j : []).filter(m => m && !m.is_system && String(m.mes ?? '')).map(m => ({ name: m.name, mes: String(m.mes) }));
+        return byId ? list : list.filter(m => !m.is_system && m.mes).map(m => ({ name: m.name, mes: String(m.mes) }));
     };
 
     /** One pass of `keys` over `picked`: counts by both routes, merged. Plugin route for whatever is on disk — it runs this
@@ -1990,14 +1978,15 @@ export async function lorebookStudio(preferredBook = null, open = null) {
         if (runState.pluginAvailable && onDisk.length) {
             const r = await fetch('/api/plugins/worlds-apart/scan-chats', {
                 method: 'POST', headers: getRequestHeaders(),
-                body: JSON.stringify({ keys, wordBoundary: settings().wordBoundary, ...unitOpts, chats: onDisk.map(c => ({ dir: c.avatar.replace(/\.png$/, ''), file: c.file })) }),
+                body: JSON.stringify({ keys, wordBoundary: settings().wordBoundary, dropChatTags: settings().dropChatTags ?? '', ...unitOpts, chats: onDisk.map(c => ({ dir: c.avatar.replace(/\.png$/, ''), file: c.file })) }),
             });
             const j = r.ok ? await r.json() : null;
             // 0 messages means the route resolved no files; taking it would zero every key's share, so the browser retries them.
             if (Number(j?.messages)) {
                 for (const k of keys) {
-                    totals.set(k, Number(j.counts?.[k]) || 0);
-                    if (j.typed && k in j.typed) typedTotals.set(k, Number(j.typed[k]) || 0);
+                    // Object.hasOwn, never `in` or a bare read: a key spelled `constructor` finds Object.prototype's and records a measured 0.
+                    totals.set(k, Object.hasOwn(j.counts ?? {}, k) ? Number(j.counts[k]) || 0 : 0);
+                    if (Object.hasOwn(j.typed ?? {}, k)) typedTotals.set(k, Number(j.typed[k]) || 0);
                 }
                 seen = Number(j.messages);
                 unit = j.unit ?? unit;
@@ -2011,13 +2000,16 @@ export async function lorebookStudio(preferredBook = null, open = null) {
         }
         const served = new Set(onDisk);
         const ctx = getContext();
+        const spec = settings().dropChatTags;
+        // The same strip the runtime applies at intake, so the audit counts the text WA actually reads, not the trackers in it.
+        const strip = ms => (spec?.trim() ? ms.map(m => ({ ...m, mes: dropTags(String(m.mes ?? ''), spec) })) : ms);
         const msgs = [];
         for (const c of picked) {
             if (served.has(c)) continue;
             const got = c.open
                 ? (ctx.chat ?? []).filter(m => m && !m.is_system && String(m.mes ?? '')).map(m => ({ name: m.name, mes: String(m.mes) }))
                 : await fetchChatMessages(c);
-            msgs.push(...got);
+            msgs.push(...strip(got));
         }
         if (msgs.length) {
             add(countChatHits(keys, msgs, unitOpts));
@@ -2027,7 +2019,7 @@ export async function lorebookStudio(preferredBook = null, open = null) {
     };
 
     /** Scans the chosen chats and installs the counts — the one gatherer for the picker and the audit; returns a summary, no toast or repaint. */
-    const scanChats = async (picked, label) => {
+    const scanChats = async (picked) => {
         const own = bookKeys();
         if (!own.length || !picked?.length) return null;
         // The orthographic alternates ride along as ordinary keys: the audit can only cite chat evidence for a pattern
@@ -2051,7 +2043,6 @@ export async function lorebookStudio(preferredBook = null, open = null) {
         chatTyped = typedTotals;
         chatMsgs = seen;
         chatUnit = unit;
-        chatName = label;
         chatNames = picked.map(c => String(c.file).replace(/\.jsonl$/, ''));
         return { keys, live: [...totals.values()].filter(n => n > 0).length, via };
     };
@@ -2083,8 +2074,7 @@ export async function lorebookStudio(preferredBook = null, open = null) {
 
         const picked = await pickChats(found);
         if (!picked?.length) return;
-        const label = picked.length === 1 ? picked[0].file.replace(/\.jsonl$/, '') : t`${picked.length} chats`;
-        const got = await scanChats(picked, label);
+        const got = await scanChats(picked);
         if (!got) { toastr.warning(t`Those chats returned no messages.`, 'Worlds Apart'); return; }
         afterChatScan(got.keys);
     };
@@ -2095,8 +2085,7 @@ export async function lorebookStudio(preferredBook = null, open = null) {
         if (!chatHits) {
             bound = await boundChats();
             if (bound.length) {
-                const label = bound.length === 1 ? bound[0].file.replace(/\.jsonl$/, '') : t`${bound.length} chats`;
-                got = await scanChats(bound, label);
+                got = await scanChats(bound);
             }
         }
         rebuildScan();
@@ -2192,10 +2181,9 @@ export async function lorebookStudio(preferredBook = null, open = null) {
         row1.append(buildFilterBtn(renderExplorer), buildSortControl(() => repaint()), buildSearchBox(() => repaint()), selWrap);
         head.append(row1);
         const fixed = document.createElement('div'); fixed.className = 'wa-studio-fixed';
-        trayEl = renderTray();
         const bar = document.createElement('div'); bar.className = 'wa-bulk-on';
         const ignStrip = document.createElement('div'); ignStrip.className = 'wa-ign-strip';
-        fixed.append(head, trayEl, bar, ignStrip);
+        fixed.append(head, bar, ignStrip);   // the trays live in the cog popup, never inline
         const list = document.createElement('div'); list.className = 'wa-studio-entries';
         // The actions stand in a rail beside the list, as the Explorer's do: audit, delete, ignore, show all, choose chats.
         const railBtn = (icon, title, onClick) => { const b = document.createElement('button'); b.type = 'button'; b.className = 'menu_button'; b.innerHTML = `<i class="fa-solid ${icon}"></i>`; b.title = title; b.addEventListener('click', onClick); return b; };
@@ -2338,39 +2326,41 @@ export async function lorebookStudio(preferredBook = null, open = null) {
                                  // as they are now: a snapshot taken at apply time would still hold a key since deleted   // the source behind the rendering: every tag, entity and delimiter shown at once
     let labSec = '', labLogic = String(WI_LOGIC.AND_ANY);
 
-    /** The chat as WA reads it for a scan: is_system dropped, dropChatTags applied, the last `messageDepth` messages —
-     *  `override` messages instead when given — names included per world_info_include_names. Joined on MESSAGE_BREAK rules. */
+    const LAB_JOIN = `\n\n${'-'.repeat(24)}\n\n`;
+    /** One chat's messages as WA reads them for a scan: cut at `end` (a MESSAGE ID, so on the raw list, hidden messages
+     *  counted), is_system dropped, dropChatTags applied, then segmented to `depth`. `hidden` is what the cut held back. */
+    const labMessages = (full, depth, end) => {
+        const spec = settings().dropChatTags;
+        const raw = end >= 0 ? full.slice(0, end + 1) : full;
+        const chat = raw.filter(m => m && !m.is_system).map(m => (spec?.trim() ? { ...m, mes: dropTags(String(m.mes ?? ''), spec) } : m));
+        return { messages: scanSegments(chat, { depth, includeNames: world_info_include_names, matchWindow: 'message' }), hidden: raw.length - chat.length };
+    };
+
+    /** The OPEN chat as WA reads it for a scan; `override` sets the depth. Joined on MESSAGE_BREAK rules. */
     const chatHaystack = (override, end = -1) => {
         const spec = settings().dropChatTags;
-        const full = getContext().chat ?? [];
-        const raw = end >= 0 ? full.slice(0, end + 1) : full;   // message ids count hidden messages, so the cut is on the raw chat
-        const chat = raw
-            .filter(m => m && !m.is_system)
-            .map(m => (spec?.trim() ? { ...m, mes: dropTags(String(m.mes ?? ''), spec) } : m));
         const depth = Number(override ?? (settings().messageDepth || world_info_depth));
-        const messages = scanSegments(chat, { depth, includeNames: world_info_include_names, matchWindow: 'message' });
+        const { messages, hidden } = labMessages(getContext().chat ?? [], depth, end);
         // Reports depth and the is_system drop: neither is visible in the pane, and both change the count.
-        const hidden = raw.length - chat.length;
         const bits = [messages.length === 1 ? t`${messages.length} message at depth ${depth}` : t`${messages.length} messages at depth ${depth}`];
         if (end >= 0) bits.push(t`ending at #${end}`);
         if (hidden) bits.push(hidden === 1 ? t`${hidden} hidden message skipped` : t`${hidden} hidden messages skipped`);
         // dropChatTags removes the named element WITH its contents, so a tracker block leaves a gap in the pane.
         toastr.info(bits.join(', ') + (spec?.trim() ? '. ' + t`Dropped, with contents: ${escapeHtml(spec)}` : ''), t`Key Lab`);
-        return messages.join(`\n\n${'-'.repeat(24)}\n\n`);
+        return messages.join(LAB_JOIN);
     };
 
     /** The Lab haystack over picked chats (pickChats rows), each to `depth` messages, joined under a header line per chat; the open chat has no file and reads live. */
     const chatsHaystack = async (picked, override, end = -1) => {
-        const spec = settings().dropChatTags;
         const depth = Number(override ?? (settings().messageDepth || world_info_depth));
         const parts = []; let total = 0;
-        for (const c of picked) {
-            const full = c.open ? (getContext().chat ?? []) : await fetchChatMessages(c);
-            const raw = end >= 0 ? full.slice(0, end + 1) : full;
-            const chat = raw.filter(m => m && !m.is_system).map(m => (spec?.trim() ? { ...m, mes: dropTags(String(m.mes ?? ''), spec) } : m));
-            const messages = scanSegments(chat, { depth, includeNames: world_info_include_names, matchWindow: 'message' });
+        // Fetched together: the chats are independent, and Promise.all keeps `picked` order, which `parts` reads.
+        // byId: message ids count hidden messages, so the cut is on the raw chat, as chatHaystack cuts the open one.
+        const loaded = await Promise.all(picked.map(c => (c.open ? Promise.resolve(getContext().chat ?? []) : fetchChatMessages(c, { byId: true }))));
+        for (const [i, c] of picked.entries()) {
+            const { messages } = labMessages(loaded[i], depth, end);
             total += messages.length;
-            parts.push(`${'='.repeat(8)} ${String(c.file).replace(/\.jsonl$/, '')} ${'='.repeat(8)}\n\n${messages.join(`\n\n${'-'.repeat(24)}\n\n`)}`);
+            parts.push(`${'='.repeat(8)} ${String(c.file).replace(/\.jsonl$/, '')} ${'='.repeat(8)}\n\n${messages.join(LAB_JOIN)}`);
         }
         const chats = picked.length === 1 ? t`${picked.length} chat` : t`${picked.length} chats`;
         const line = total === 1 ? t`${total} message from ${chats} at depth ${depth}` : t`${total} messages from ${chats} at depth ${depth}`;
@@ -2713,7 +2703,10 @@ export async function lorebookStudio(preferredBook = null, open = null) {
             const ta = document.createElement('textarea'); ta.className = 'text_pole';
             ta.placeholder = placeholder; ta.value = get();
             ta.style.cssText = 'flex:1 1 0;height:100%;min-height:0;resize:none;font-family:var(--monoFontFamily);overflow:auto;';
-            ta.addEventListener('input', () => { set(ta.value); repaint(); });
+            // Debounced as the search box is: repaint re-scans the whole haystack and re-marks it, which is seconds of
+            // work on a deep chat, and typing a key would otherwise do it once per character.
+            let timer = null;
+            ta.addEventListener('input', () => { set(ta.value); clearTimeout(timer); timer = setTimeout(repaint, 180); });
             return ta;
         };
         const hayBox = box(t`Paste any text to match against… a line of dashes separates one message from the next`, () => labHay, v => { labHay = v; });
@@ -3211,10 +3204,8 @@ export async function lorebookStudio(preferredBook = null, open = null) {
         rail.append(scanBtn, newBtn, suggestAllBtn, suggestAllLlmBtn, expandBtn, cog);
         head.append(row1);
         const fixed = document.createElement('div'); fixed.className = 'wa-studio-fixed';
-        globalTrayEl = renderGlobalTray();
-        trayEl = renderTray();
         bulkEl = renderBulkBar();
-        fixed.append(head, trayEl, globalTrayEl, bulkEl);
+        fixed.append(head, bulkEl);   // the trays live in the cog popup, never inline
         const list = document.createElement('div'); list.className = 'wa-studio-entries';
         const body = document.createElement('div'); body.className = 'wa-studio-body';
         body.append(list, rail);
@@ -3254,6 +3245,7 @@ export async function lorebookStudio(preferredBook = null, open = null) {
         orphanView = false;
         if (dirty && selected) { reloadEditor(selected); dirty = false; }   // refresh the outgoing book's editor
         selected = name; loadSortView(name); entryOpen.clear(); expanded.clear(); tall.clear(); advOpen.clear(); sugg.clear(); selectedEntries.clear(); lastSel = null; selAnchorUid = null; suggest = null; scan = null; clearChatScan();   // scan is on-demand; chat counts belong to a (book, chat) pair
+        cleanupChecks.clear(); cleanupUndo = null;   // rowId is (uid, term): uids collide across books, so a tick or an undo must not cross one
         explorer.innerHTML = `<div style="opacity:0.6;padding:8px;">${escapeHtml(t`Loading…`)}</div>`; explorer.append(closeBtn);   // same re-adopt as the no-book branch
         renderBooks();
         data = await loadWorldInfo(name);

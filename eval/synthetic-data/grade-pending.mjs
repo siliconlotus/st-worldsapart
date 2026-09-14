@@ -8,7 +8,7 @@ import { readFileSync, writeFileSync, mkdirSync, readdirSync, existsSync, statSy
 import { archiveContract, contractBody } from './contract.mjs';
 import { dirname, resolve as resolvePath } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { openBundle, passKey, raterParts, setGrades } from '../../extension/grading.mjs';
+import { openBundle, passKey, raterKey, raterParts, setGrades } from '../../extension/grading.mjs';
 import { arg } from '../metrics.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -164,7 +164,8 @@ for (const jf of jobFiles) {
         const g = got.get(rowKey(c.book, c.uid));
         // kind 'llm', never 'human': the kind is what tells an unreviewed row from a reviewed one, and this writer names no other. --effort fills what a result cannot know about itself.
         const params = { ...(res.params ?? {}), ...(EFFORT ? { effort: EFFORT } : {}) };
-        const one = { ...rater, ...(Object.keys(params).length ? { params } : {}), grade: Number(g.grade), gradedAt, ...(g.why ? { why: g.why } : {}) };
+        // `id` is what passKey and raterParts read, and a bundle's own verdicts carry it: without it every re-merge reads as a new pass.
+        const one = { ...rater, id: raterKey(rater), ...(Object.keys(params).length ? { params } : {}), grade: Number(g.grade), gradedAt, ...(g.why ? { why: g.why } : {}) };
         return { title: c.title, grades: [one], book: c.book, uid: c.uid };
     }));
 }
@@ -184,7 +185,7 @@ for (const [target, rows] of bySceneRows) {
     const byRow = new Map(priorRows.map(g => [rowKey(g.book, g.uid), g]));
     let appended = 0;
     const perPass = new Map();
-    const label = v => raterParts(v).rubric + '/' + raterParts(v).model;
+    const label = v => { const { rubric, modelId } = raterParts(v); return `${rubric ?? ''}/${modelId ?? ''}`; };
     const bump = v => perPass.set(label(v), (perPass.get(label(v)) ?? 0) + 1);
     const fresh = rows.filter(r => {
         const prior = byRow.get(rowKey(r.book, r.uid));

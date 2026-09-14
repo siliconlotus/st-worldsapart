@@ -13,6 +13,7 @@ import { isDurable, openBundle } from '../extension/grading.mjs';
 import * as selection from '../extension/selection.mjs';
 import * as delivery from '../extension/delivery.mjs';
 import { buildContentIndex, scoreContent, entryKey } from '../extension/content-lexical.mjs';
+import { defaultSettings } from '../extension/state.mjs';
 // Cycle with reindex.mjs (getStringHash); safe only while neither side references the other at module scope.
 import { cachePath, chunkConfig, embedTexts, pathSafe, resolveModel } from './reindex.mjs';
 import { gradeCredit, fbeta, RECALL_WEIGHT, gradeValue, topComponents, projectOut, componentScales } from './metrics.mjs';
@@ -144,7 +145,7 @@ export const ndcg = (vec, k) => { const ideal = [...vec].sort((a, b) => b - a); 
 export function stInstall() {
     let root = process.env.WA_ST_ROOT;
     if (!root) {
-        for (let d = dirname(new URL(import.meta.url).pathname); ; d = dirname(d)) {
+        for (let d = dirname(fileURLToPath(import.meta.url)); ; d = dirname(d)) {
             if (existsSync(`${d}/config.yaml`)) { root = d; break; }
             if (dirname(d) === d) return null;
         }
@@ -156,7 +157,7 @@ export function stInstall() {
 }
 
 export const evalDataDir = () => {
-    const local = new URL('./eval-data/', import.meta.url).pathname;
+    const local = fileURLToPath(new URL('./eval-data/', import.meta.url));
     const st = stInstall();
     return existsSync(local) || !st ? local : `${st.root}/public/scripts/extensions/third-party/WorldsApart/eval/eval-data/`;
 };
@@ -181,7 +182,7 @@ export const indexPath = (S, { vectors = 'data/default-user/vectors/ollama', mod
 
 const qCache = new Map();
 /** The cache file for one model label. `pathSafe` only, as cachePath treats the model half of a collection path. */
-export const queryCachePath = label => new URL(`./eval-data/query-cache__${pathSafe(label)}.jsonl`, import.meta.url).pathname;
+export const queryCachePath = label => fileURLToPath(new URL(`./eval-data/query-cache__${pathSafe(label)}.jsonl`, import.meta.url));
 const qCachePath = queryCachePath;
 const qCacheLoad = (label) => {
     if (qCache.has(label)) return qCache.get(label);
@@ -208,9 +209,9 @@ export const embed = async (text, { ollama = 'http://localhost:11434', model, en
     return v;
 };
 
-/** The sample's own `params` over these defaults, then `overrides`. The defaults are one tuned chat's snapshot, not the shipped ones (state.mjs ships K1 1.2). */
+/** The sample's own `params` over these defaults, then `overrides`. The scorer constants come off state.mjs, which owns them. */
 export const sceneParams = (S, overrides = {}) => ({
-    K1: 2, B: 0.75, boost: 3, stopwordDf: 0.25,
+    K1: defaultSettings.bm25K1, B: defaultSettings.bm25B, boost: defaultSettings.properNounBoost, stopwordDf: defaultSettings.stopwordDocFreq,
     // null = each tier's fit's own cutoff; a cutoff arm sets one number for both tiers (scoreScene admits).
     memoryCutoff: null,
     // Which fit scores the column, by name; null is production. An arm setting this must also fix memoryCutoff.
@@ -487,7 +488,8 @@ export const makeKeywordScore = P => (e, text, k1) => {
 export function makeCandidateSet({ loaded, byKey, entries, params: P, chunkCfg, topK = admitCeiling(true) }) {
     const keywordScore = makeKeywordScore(P);
     // The stage-3 text index, one per book as bookIndexes keys it: pooling the books would pool their IDF.
-    const cfg = chunkCfg ?? { chunkMode: 'paragraph', chunkSize: 800, minChunkSize: 120 };
+    const { chunkMode, chunkSize, minChunkSize } = defaultSettings;
+    const cfg = chunkCfg ?? { chunkMode, chunkSize, minChunkSize };   // the shipped values, never a second copy of them
     const byBook = new Map();
     for (const e of entries) { const b = e.world; if (!byBook.has(b)) byBook.set(b, []); byBook.get(b).push(e); }
     const contentIndexes = [...byBook].map(([, own]) => buildContentIndex(own, cfg));
@@ -541,6 +543,10 @@ export function makeCandidateSet({ loaded, byKey, entries, params: P, chunkCfg, 
             for (const e of entries) {
                 const key = entryKey(e);
                 if (admitted.has(key) || e.disable) continue;
+                // This loop may admit only what could have activated. `@@activate` outranks `@@dont_activate` (CCv3: the
+                // latter "SHOULD be ignored" when the former is present), and core's ladder tests them in that order.
+                // A constant is NOT skipped here — it reaches the pool through stage 1 and scoreScene's `rankable` strips it.
+                if (matcher.hasDecorator(e, '@@dont_activate') && !matcher.hasDecorator(e, '@@activate')) continue;
                 if (depth === 0 ? e.delayUntilRecursion : e.excludeRecursion) continue;
                 if (keywordScore(e, hay(e), k1) > 0) found.push(e);
             }
@@ -590,6 +596,12 @@ const modelFiles = (dir = null) => {
             try { out[tier] = JSON.parse(fs.readFileSync(resolvePath(base, `relevance-model-${tier}.json`), 'utf8')); }
             catch { out[tier] = dir ? modelFiles()[tier] : null; }
         }
+        // The cosine-free fit rides on every fit in its tier, attached ONCE here as the runtime's loadRelevanceModel does.
+        // Stamped at read time instead, what a caller got depended on whether modelsFor had run for that key first.
+        for (const tier of ['memory', 'reference']) {
+            const nc = out[tier]?.noCosine ?? null;
+            for (const f of Object.values(out[tier]?.byModel ?? {})) f.noCosine = nc;
+        }
         MODEL_CACHE.set(key, out);
     }
     return MODEL_CACHE.get(key);
@@ -607,8 +619,6 @@ export const modelsFor = (embedModel, dir = null) => {
                 + `The runtime would borrow "${UNFITTED_FALLBACK}"'s coefficients here; a harness is told its embedder, so say which fit you mean `
                 + 'with an explicit arm (fit=<name>) or fit this model with eval/relevance-regress.mjs --emit-model.');
         }
-        // The cosine-free fit rides on the model's own, as the runtime attaches it (loadRelevanceModel).
-        out[tier].noCosine = MODEL_FILES[tier]?.noCosine ?? null;
     }
     return out;
 };
@@ -654,7 +664,7 @@ export const makeLayoutOrder = ({ scene, haystack, fit = null, fitDir = null }) 
             if (!mine.length) continue;
             // Population rule and the noCosine fallback are read off the fit, as worldsapart.js scoreRelevanceColumn does; must not drift.
             const fit = mine.some(r => Number.isFinite(r.score)) ? model : (model.noCosine ?? model);
-            const population = fit.standardise === 'pooled' ? rows.map(col) : undefined;
+            const population = (fit.standardise === 'pooled' ? rows : mine).filter(r => !r.entry?.constant).map(col);
             const e = scoreRelevance(fit, mine.map(col), population);
             // tierCutoff is the fit's own optimum, provenance only; the cut and its number belong to scoreScene `admits`.
             mine.forEach((r, i) => { r.eCredit = e[i]; r.tierCutoff = fit.cutoff; });
@@ -713,18 +723,29 @@ export async function scoreScene({ sample: S, overrides = {}, k = 10, vectors, m
     const ranked = layoutOrder(rankable);
     const atR = scoreWindow(ranked.slice(0, relevant));
 
-    //   @cut  what the relevance cut admits, the one window the system chooses; both tiers, at the arm's memoryCutoff — the field's name in every bundle, though it cuts both tiers — else the fit's own (production reads the relevanceCutoff setting instead).
-    const cutFor = r => Number.isFinite(P.memoryCutoff) ? P.memoryCutoff : r.tierCutoff;
+    //   @cut  what the relevance cut admits, the one window the system chooses; both tiers, at the arm's memoryCutoff —
+    //   the field's name in every bundle, though it cuts both tiers. `relevanceCutoff` is a USER setting, so nothing here
+    //   may stand in for it: with none supplied the window is reported as unavailable rather than scored at the fit's own
+    //   optimum, which is a number production never reads.
+    const cutGiven = Number.isFinite(P.memoryCutoff);
+    const cutFor = () => P.memoryCutoff;
     // Promoted rows are exempt, as at runtime; read off the entry, since a bundle embeds the book verbatim.
     const promotedRow = r => hasPromoteDecorator(r.entry);
-    const admits = r => promotedRow(r) || !Number.isFinite(cutFor(r)) || !Number.isFinite(r.eCredit) || r.eCredit >= cutFor(r);
-    const atCut = scoreWindow(ranked.filter(admits));
+    // selection.relevanceCut IS the keep rule — never a second copy of it. A promoted row is exempt because the runtime's
+    // layout order splits it out before the cut, and NaN as its cutoff is how relevanceCut spells "not cut".
+    // No cutoff supplied: nothing is cut, so @budget still reports the whole ranked set — only @cut goes unavailable.
+    const keptSet = new Set(selection.relevanceCut(ranked, {
+        scoreOf: r => r.eCredit,
+        cutoffOf: r => (!cutGiven || promotedRow(r) ? NaN : cutFor()),
+    }).kept);
+    const admits = r => keptSet.has(r);
+    const atCut = cutGiven ? scoreWindow(ranked.filter(admits)) : null;
 
     //   @budget  what the token ceiling leaves — the delivered set. Recorded tokens where the capture has them, else this corpus's chars-per-token (G12).
     const recorded = new Map((S.candidates ?? []).map(c => [entryKey({ world: c.book ?? S.primaryBook, uid: c.uid }), c.tokens]).filter(([, t]) => typeof t === 'number'));
     const tokensOf = r => recorded.get(entryKey(r.entry)) ?? Math.round(String(r.entry?.content ?? '').length / 4.91);
     // What the admitted set costs when nothing binds; outside the budget branch on purpose.
-    atCut.tokens = ranked.filter(admits).reduce((n, r) => n + tokensOf(r), 0);
+    if (atCut) atCut.tokens = ranked.filter(admits).reduce((n, r) => n + tokensOf(r), 0);
 
     let atBudget = null;
     if (P.budgetTokens > 0) {

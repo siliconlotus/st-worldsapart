@@ -49,3 +49,16 @@ export function addVariant(entries, key, term, list = 'key') {
     for (const e of keyHolders(entries, key, list)) if (!hasKey(e, term, list)) { e[list].push(term); added++; }
     return added;
 }
+
+/**
+ * Places the selected entries (`orderedUids`, on-screen order) into a contiguous UID/order block [start, start+N-1].
+ * Returns `{conflict: uid}` when an unselected entry holds a target UID, else `{moves: [[oldUid, newUid], …]}`.
+ * @param {boolean} desc top gets start+N-1 rather than `start`
+ */
+export function planUidReindex(entries, orderedUids, start, desc) {
+    const n = orderedUids.length;
+    const selUids = new Set(orderedUids);
+    const targetOf = i => start + (desc ? n - 1 - i : i);
+    for (let i = 0; i < n; i++) { const u = targetOf(i); if (Object.hasOwn(entries, u) && !selUids.has(u)) return { conflict: u }; }
+    return { moves: orderedUids.map((uid, i) => [uid, targetOf(i)]) };
+}

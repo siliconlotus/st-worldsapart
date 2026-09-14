@@ -11,8 +11,9 @@ const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const read = f => readFileSync(join(ROOT, f), 'utf8');
 
 // The ST-coupled half: DOM, toasts and popups live here, so every prose literal must be tagged (the lint below).
-const ST_HALF = ['worldsapart.js', 'extension/studio.mjs', 'extension/ui-widgets.mjs', 'extension/capture-ui.mjs', 'extension/keyword-tools.mjs'];
-// Pure modules that take the tag as a parameter: their t`` literals are keys too, but they may bind `t` themselves.
+const ST_HALF = ['worldsapart.js', 'extension/studio.mjs', 'extension/ui-widgets.mjs', 'extension/capture-ui.mjs', 'extension/keyword-tools.mjs', 'extension/lang-store.mjs'];
+// Pure modules that take the tag as a parameter: their t`` literals are keys too, and they may not bind `t` either —
+// a shadowing binding turns a template inside it into a call on a string.
 const TAGGED_PURE = ['extension/keyword-audit.mjs', 'extension/matcher.mjs'];
 // English constants translated at the display site with translate(); the check enumerates them so the locale covers them.
 // 'ignored' is the Cleanup tab's one verdict-less bucket, named beside the flags.
@@ -95,8 +96,15 @@ function lint(src, file) {
     for (const m of src.matchAll(/toastr\.\w+\(\s*\n\s*['"`][A-Za-z]/g)) fail.push(`${file}:${lineOf(src, m.index)}: untagged toast text`);
 }
 
+/** The one lint rule a tag-taking pure module needs: nothing may rebind `t`, or a template inside that scope calls a string. */
+function shadowLint(src, file) {
+    src.split('\n').forEach((code, i) => {
+        if (/\b(const|let|var) t\b|\bt =>|\(t\)|\(t,/.test(code)) fail.push(`${file}:${i + 1}: a binding named t shadows the i18n tag`);
+    });
+}
+
 for (const f of ST_HALF) { const src = read(f); tagged(src, f); attributes(src, f); lint(src, f); }
-for (const f of TAGGED_PURE) tagged(read(f), f);
+for (const f of TAGGED_PURE) { const src = read(f); tagged(src, f); shadowLint(src, f); }
 for (const k of TABLE_KEYS) add(k, 'table');
 // ST splits a data-i18n value on ';', so a key holding one is cut in two; here ';' only ever joins a text key to an
 // `[attr]` key, so every ';' in the decoded value must be followed by '['. A t`` key may hold ';' freely.

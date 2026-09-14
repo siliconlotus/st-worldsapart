@@ -6,7 +6,9 @@ import { keyHits, keySpans, mergeSpans, secondaryKeys, splitKeys, usableKeys, WI
 /** An entry's secondary condition as `keyHits`/`keySpans` take it, or undefined when it has none. Blank secondaries are
  *  dropped and `selective` is read: core ignores keysecondary without it. */
 export const entryGate = (entry) => {
-    const keys = entry?.selective ? secondaryKeys(entry).map(k => String(k ?? '').trim()).filter(Boolean) : [];
+    // secondaryKeys owns the rule (`selective === false` ignores the list, an absent field keeps core's default); reading
+    // the flag again here made the Lab show a gate the runtime applies as un-gated.
+    const keys = secondaryKeys(entry).map(k => String(k ?? '').trim()).filter(Boolean);
     return keys.length ? { keys, logic: Number(entry.selectiveLogic ?? WI_LOGIC.AND_ANY) } : undefined;
 };
 
