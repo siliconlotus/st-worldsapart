@@ -239,7 +239,11 @@ summarised.
 `syncWorld` chunks every enabled entry with content (`chunking.mjs`: `paragraph` mode keeps one
 paragraph per chunk, splits one over `chunkSize` and merges fragments under `minChunkSize` forward)
 into the collection `wa_<hash of book name>`, one row per (text, uid), inserting new chunks and
-deleting stale ones.
+deleting stale ones. Every fetch in the generation path is time-bounded: a query, the plugin check
+and the fit fetches at ten seconds — one embedding round-trip, past which the endpoint is wedged and
+the turn degrades through the fallbacks below. The bulk insert is bounded at five minutes as a
+hang-detector only: the server finishes and persists the embed regardless of the client, and the next
+turn's `list` picks the chunks up.
 
 `queryCollections` asks the server plugin's `/query-multi`: every chunk of every attached book scored
 by cosine against the query, both centred on the collection's centroid — the memory tier's chunks,

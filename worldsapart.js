@@ -112,11 +112,19 @@ function updateEmbedInfo() {
     $('#wa_embed_info').text(t`Embed: ${endpoint} · ${model}`);
 }
 
-async function vectorPost(route, args) {
+// Time bounds for the generation path's fetches. A query is one embedding round-trip — legitimate answers arrive in
+// well under ten seconds, so past that the endpoint is wedged and the stock fallback or the cosine-free fit is the
+// better turn. The bulk embed is the exception: its bound is a hang-detector, not a patience bound, because the
+// server finishes and persists the embed regardless of the client, and the next turn's `list` picks the chunks up.
+const QUERY_TIMEOUT_MS = 10_000;
+const SYNC_TIMEOUT_MS = 300_000;
+
+async function vectorPost(route, args, timeoutMs = QUERY_TIMEOUT_MS) {
     const response = await fetch(`/api/vector/${route}`, {
         method: 'POST',
         headers: getRequestHeaders(),
         body: JSON.stringify(vectorRequestBody(args)),
+        signal: AbortSignal.timeout(timeoutMs),
     });
 
     if (!response.ok) {
@@ -138,7 +146,7 @@ async function hasPlugin() {
     try {
         // The extension's own folder name, decoded: a pathname is percent-encoded and a folder name is not.
         const dir = decodeURIComponent(new URL('.', import.meta.url).pathname).replace(/\/$/, '').split('/').pop();
-        const response = await fetch('/api/plugins/worlds-apart/ping', { method: 'POST', headers: getRequestHeaders(), body: JSON.stringify({ dir }) });
+        const response = await fetch('/api/plugins/worlds-apart/ping', { method: 'POST', headers: getRequestHeaders(), body: JSON.stringify({ dir }), signal: AbortSignal.timeout(QUERY_TIMEOUT_MS) });
         runState.pluginAvailable = response.ok;
         if (response.ok) { try { const d = await response.json(); runState.pluginRoot = d?.root ?? null; runState.pluginFP = d?.fingerprint ?? null; } catch { /* older plugin: no root/fingerprint fields */ } }
     } catch {
@@ -156,7 +164,7 @@ async function computeSourceFingerprint() {
         const texts = await Promise.all(
             // `r.ok` checked, or a 404 hashes the error page: a fetch only rejects at the network layer, so a
             // PLUGIN_FILES entry naming a missing file would fingerprint as drift for ever.
-            PLUGIN_FILES.map(([src]) => fetch(new URL(`./plugin/${src}`, import.meta.url))
+            PLUGIN_FILES.map(([src]) => fetch(new URL(`./plugin/${src}`, import.meta.url), { signal: AbortSignal.timeout(QUERY_TIMEOUT_MS) })
                 .then(r => { if (!r.ok) throw new Error(`${src}: ${r.status}`); return r.text(); })),
         );
         runState.sourceFP = pluginFingerprint(...texts);
@@ -235,6 +243,7 @@ async function queryCollections(args) {
                     // Every provider field minus the query fields; narrowing it makes a provider fail on a missing setting.
                     sourceSettings: (({ collectionIds, searchText, centroidUids, topK, ...rest }) => rest)(body),
                 }),
+                signal: AbortSignal.timeout(QUERY_TIMEOUT_MS),
             });
 
             if (response.ok) {
@@ -293,7 +302,7 @@ async function syncWorld(world, entries) {
         }, 3000);
         const started = Date.now();
         try {
-            await vectorPost('insert', { collectionId, items: newItems });
+            await vectorPost('insert', { collectionId, items: newItems }, SYNC_TIMEOUT_MS);
         } finally {
             clearTimeout(slow);
         }
@@ -388,7 +397,7 @@ function loadRelevanceModel() {
     }
     // One fit per tier, never shared: the coefficients differ in sign across tiers (F19).
     relevanceModel.promise ??= Promise.all(['memory', 'reference'].map(tier =>
-        fetch(new URL(`./extension/relevance-model-${tier}.json`, import.meta.url))
+        fetch(new URL(`./extension/relevance-model-${tier}.json`, import.meta.url), { signal: AbortSignal.timeout(QUERY_TIMEOUT_MS) })
             .then(r => (r.ok ? r.json() : Promise.reject(new Error(`HTTP ${r.status}`))))
             .then((file) => {
                 // Own fit, else UNFITTED_FALLBACK's, else `noCosine` for a turn with no cosine (no-plugin path, retrieval outage).
