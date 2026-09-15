@@ -47,22 +47,8 @@ unless the threshold was derived from a measurement, spec facts stated without o
 - **R7** — Stage-3 keywordScore cost: 13µs/entry at the corpus's widest window (22.8KB) and densest keys
  (19.6/entry), linear to 2000; 1000 entries ≈ 13ms/turn. — `plugin/scoring.mjs selectTopK`.
 
-- **R8** — `uncenteredGate` (removed): caught the wrong-genre case (9 entries at gate 0 → 1 at 0.5,
- Qwen3-8B) but not the realistic sibling-book mistake (15 → 9 on the same measurement).
- — `plugin/scoring.mjs scoreCollection`.
-
 - **R9** — Mean-centering rationale: corpus mean vector norm 0.71 on a real lorebook; raw similarities
  compressed near 0.6. — `plugin/server.js`.
-
-- **R11** — Summarization screen, n=106 scenes paired, F2 over delivered set, one local summarizer at
- temp 0: summarizing the query −0.021 (p=0.028, fails Holm), −0.014 with entity filter kept;
- summarizing entries −0.094 (p<0.001), −0.107 at matched @R, and decalibrates the fit (cut admits 44%
- more rows). Caveats: one summarizer, one prompt per side, effective n ≈ 3 stories.
- — `docs/matching.md Settings (state.mjs)`.
-
-- **R12** — `baselineQuery` (removed) measured harmful: 374-trial LOO grid, monotonic decline, no
- beneficial weight; mean-centering measurably helps, +8.8% nDCG@5. Single-scene A/B agrees: nDCG@5 1.000→0.918 at w1.0, recall 9/9→8/9 (n=1).
- — `extension/state.mjs runState`; `eval/eval-data/README.md Baseline A/B — scene1 result (single scene, n=1)` (gitignored).
 
 - **R13** — messageDepth dose-response, n=80 scenes paired vs each scene's own depth-10 capture:
  nDCG@10 climbs monotonically 1→10 (depth 3 −0.098 p=0.001; depth 5 −0.053 p=0.020), flat 10–15, dips
@@ -95,10 +81,6 @@ unless the threshold was derived from a measurement, spec facts stated without o
  identical 0.9322 for boost 1/2/3/5/8 on one scene; scoring within the activated pool returned 0.9634
  for every arm including no-filter; graded pools bottom out in zeros around rank 24–28.
  — `extension/entity.mjs buildTermWeights`; `eval/graded-scene-grid.mjs`.
-
-- **R23** — Fusion evidence: rrfK=60 hurt all three scenes, rrfK=10 helped two (less flattening reads
- better); absolute thresholds don't transfer across scenes (text medians 41/53/57; keys never exceeds
- 3.5 while text reaches 158).
 
 - **R24** — Chunk settings: paragraph distribution over 3642 paragraphs of 604 memory entries — mean
  881, median 650, p90 1735, p99 4934; the old 800 cap fired on 36.5% of paragraphs, 1750 is that p90;
@@ -484,6 +466,7 @@ unless the threshold was derived from a measurement, spec facts stated without o
 
 - **S21** — [zero-result census] `matchPersonaDescription` and siblings: nothing on disk sets one.
  — `docs/keyword-suggestions.md`.
+
 - **S24** — Fiction register vs wordfreq for the Zipf table, gold pairs + hand-written public books. Shift:
  genre and narrative vocabulary rises 0.3–0.7 (sword 4.4→4.8, cloak 3.6→4.3, mage 3.1→3.7, shoulder
  4.5→5.2, thrall/necromancer absent→3.0+), web/tech/business falls (spreadsheet, inbox, firewall pass
