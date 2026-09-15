@@ -21,6 +21,14 @@ and which bundles is not recorded.
 **What counts.** A claim backed by a named measurement. Excluded: configuration values and thresholds
 unless the threshold was derived from a measurement, spec facts stated without one, and pure arithmetic.
 
+**`[one corpus]`** marks a finding drawn from one person's books, kept for the shape it names rather
+than the counts it once carried — those counts are that corpus's taste, not a property of lorebooks, so
+they are not stated. A number goes back when there are other people's books to take it from. A finding
+that hinges on the counts themselves is not published at all.
+
+**A census never licenses a design choice.** Where a decision needs an argument it is made on
+correctness, and the register does not carry "rare in one corpus" as a reason.
+
 ## R — Stage 1: retrieval, embedding space, query
 
 - **R1** — Removing the stage-1 admission gate was a no-op: `bm25 > 0` admitted 99.9% of every book's
@@ -388,14 +396,6 @@ unless the threshold was derived from a measurement, spec facts stated without o
  ligatures / U+2212 all 0; fullwidth 14,367 but all punctuation; the NFC guard is free (0.000ms
  guarded vs 0.019ms unconditional on a 15KB window). — `extension/automaton.mjs ORTHO_FAMILIES, normalizeOrthography, keyVariants, buildAutomaton`.
 
-- **K12** — SmartKey/regex censuses over the books on disk: 2 regex keys in 46,226; 0 keys contain
- `^`+digit (0 in 367KB of scan text); 148 SmartKeys across 43 books, exactly 1 with a per-term weight
- (single-term, so the group-weight change is free); removing the sticky audit exemption hides 2
- SmartKeys + 23 book-common flags; the case-sensitive-capital exemption covers 2 of the 7 flagged
- SmartKeys (both one character name); 84 entries across 43 books carry secondary keys.
- — `extension/smartkeys.mjs tokenize, validateSmartKey`; `docs/matching.md Divergences from ST core`;
- `test/smartkeys-check.mjs`; `st/studio.mjs lorebookStudio`.
-
 - **K13** — Priming secondaries up front: 2ms vs 102ms over 200 entries × 20 segments.
  — `worldsapart.js`.
 
@@ -433,8 +433,8 @@ unless the threshold was derived from a measurement, spec facts stated without o
  lowercase); distributional function-word test: "marches" df 48.6% / 3.0 repeats was blocking every
  n-gram, "aldric" escaped at 6.42 repeats. — `extension/keyword-suggest.mjs buildKeySuggest`.
 
-- **S4** — Particles occurring over 38 books: only de/la/los/el/van/del/du/da/der/le.
- — `extension/keyword-suggest.mjs buildKeySuggest`.
+- **S4** — [one corpus] The nobiliary particles the gazetteer carries: de/la/los/el/van/del/du/da/der/le.
+ No other particle has turned up. — `extension/keyword-suggest.mjs buildKeySuggest`.
 
 - **S6** — Cohesion: splitting a trigram down the middle muddied the bands to 0/50/55/68% where the
  bigram pair reads 8/65/100/100%; the legal-part rule matters — 13/84 and 31/102 of dropped grams on
@@ -459,10 +459,10 @@ unless the threshold was derived from a measurement, spec facts stated without o
  overlap average 0.61, orthographic neighbours with no shared meaning 0.68 — no separating
  threshold). — `docs/keyword-suggestions.md`.
 
-- **S19** — Genre shapes over one user's 35 books: acronyms in 30, bracket tags 26, apostrophe names
- 20, accented text 18, nobiliary particles 15, hyphenated species compounds 12, shouted markdown
- headers 9, elisions 8, roman numerals 8, LitRPG stat blocks 7 — nearly every suggester bug came
- from one of these. — `test/genre-cases.mjs`.
+- **S19** — [one corpus] Genre shapes the suggester has to survive: acronyms are near-universal;
+ bracket tags, apostrophe names, accented text and nobiliary particles are common; hyphenated species
+ compounds, shouted markdown headers, elisions, roman numerals and LitRPG stat blocks are minority
+ shapes. Nearly every suggester bug came from one of these. — `test/genre-cases.mjs`.
 
 - **S21** — [zero-result census] `matchPersonaDescription` and siblings: nothing on disk sets one.
  — `docs/keyword-suggestions.md`.
