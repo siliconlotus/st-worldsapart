@@ -48,10 +48,6 @@ unless the threshold was derived from a measurement, spec facts stated without o
 - **R9** — Mean-centering rationale: corpus mean vector norm 0.71 on a real lorebook; raw similarities
   compressed near 0.6. — `plugin/server.js:16`.
 
-- **R10** — [SNAPSHOT, older corpus] Stage-3 text beta +0.756 vs cosine +0.570 over n=7536 judged rows.
-  Superseded in precision by the 102-scene fits (F1) but still cited in the header as the defence for
-  removing stage-1 lexical. — `plugin/scoring.mjs:13`.
-
 - **R11** — Summarization screen, n=106 scenes paired, F2 over delivered set, one local summarizer at
   temp 0: summarizing the query −0.021 (p=0.028, fails Holm), −0.014 with entity filter kept;
   summarizing entries −0.094 (p<0.001), −0.107 at matched @R, and decalibrates the fit (cut admits 44%
@@ -319,10 +315,6 @@ unless the threshold was derived from a measurement, spec facts stated without o
   reference centroid's 0.81806–0.97998 (memory is 59–93% of chunks; worst at 7.3% reference; 7 books).
   — `docs/matching.md:1495,:1723`; `worldsapart.js:863`; `eval/lib/scene.mjs:508`.
 
-- **F46** — [UNSOURCED — D9] 71% p-overlap; 25%-purity-at-66%-recall; per-tier recall curve (reference
-  95% at 5.4 entries, memory 38 for 73%). Nothing computes an overlap or a purity; the doc marks them
-  suspect. Re-derive or delete. — `docs/matching.md:1554`.
-
 - **F52** — Runtime/harness parity: on one browser capture (16 scored rows), `properNouns` reproduces
   from `relevance.mjs` to the capture's own rounding. — `docs/matching.md:1612`.
 
@@ -413,9 +405,6 @@ unless the threshold was derived from a measurement, spec facts stated without o
   ligatures / U+2212 all 0; fullwidth 14,367 but all punctuation; the NFC guard is free (0.000ms
   guarded vs 0.019ms unconditional on a 15KB window). — `extension/automaton.mjs:17,:27,:30,:42,:53`.
 
-- **K11** — [FRAGMENT — D8] Curly-apostrophe distribution: 18 above 90% curly (worst 97.6%), 91
-  between 5–95%, 44 under 5% — population clause missing from the doc. — `docs/matching.md:1684`.
-
 - **K12** — SmartKey/regex censuses over the books on disk: 2 regex keys in 46,226; 0 keys contain
   `^`+digit (0 in 367KB of scan text); 148 SmartKeys across 43 books, exactly 1 with a per-term weight
   (single-term, so the group-weight change is free); removing the sticky audit exemption hides 2
@@ -441,11 +430,6 @@ unless the threshold was derived from a measurement, spec facts stated without o
   discovery: one hand-disabled pair in a 334-entry book; the O(n²) pass is 55k intersections on the
   largest book. — `extension/keyword-audit.mjs:21,:50,:54,:73,:203,:387,:523,:531,:552,:557,:564,:575`;
   `extension/studio.mjs:137,:1102`.
-
-- **K17** — [VERIFIED, not statistical] Core's scan behaviour read from `world-info.js`: both
-  delay-level gates run before `getExternallyActivated`, and `externalActivations` is a static map
-  read non-destructively per pass — the blind emit is refused on the initial pass and stands for the
-  whole scan. — `docs/matching.md:441`.
 
 ## S — Keyword suggester and curation evidence
 
