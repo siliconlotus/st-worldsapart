@@ -9,14 +9,15 @@ import { Popup, POPUP_TYPE, POPUP_RESULT } from '../../../../popup.js';
 import { t, translate } from '../../../../i18n.js';
 import { runState, settings } from './state.mjs';
 import { ensureStudioStyle, makeSortControl, renderMessageHtml, showCtxMenu, showEntryText, wiGlyph } from './ui-widgets.mjs';
-import { SORT_FNS, SORT_LABELS, normPresentation, presentationBaseLabel, reconcileTiers, tierRank, wiTitleOf } from './sort.mjs';
+import { SORT_FNS, SORT_LABELS, normPresentation, presentationBaseLabel, reconcileTiers, sortTiered, tierRank, wiTitleOf } from './sort.mjs';
+import { matchSearch as matchSearchOf, rankBySearch as rankBySearchOf, typeMatch as typeMatchOf } from './entry-filter.mjs';
 import { buildKeyPruneScan, llmKeyCandidates } from './keyword-tools.mjs';
-import { FLAG_PRIORITY, KEY_CHAT_COMMON, MINOR, MODERATE, SEVERE, STUDIO_PRUNE_OPTS, substringProbes, orthoAlternates, pathProbes } from './keyword-audit.mjs';
+import { cleanupRows, FLAG_PRIORITY, KEY_CHAT_COMMON, MINOR, MODERATE, SEVERE, STUDIO_PRUNE_OPTS, substringProbes, orthoAlternates, pathProbes } from './keyword-audit.mjs';
 import { buildKeySuggest, classifyLlmCand, STUDIO_SUGGEST_OPTS } from './keyword-suggest.mjs';
 import { validateSmartKey } from './smartkeys.mjs';
-import { findOrphanBindings } from './bindings.mjs';
-import { WI_LOGIC, countChatHits, dropTags, hasPromoteDecorator, isRegexKey, scanSegments, secondaryKeys, splitKeys, usableKeys, wholeWordAdvice, withPromote } from './matcher.mjs';
-import { labScan, runBook } from './lab.mjs';
+import { attachedBooks, classifyBookChats, findOrphanBindings } from './bindings.mjs';
+import { WI_LOGIC, countChatHits, dropTags, hasPromoteDecorator, isRegexKey, secondaryKeys, splitKeys, usableKeys, wholeWordAdvice, withPromote } from './matcher.mjs';
+import { labMessages, labScan, runBook, windowTip } from './lab.mjs';
 import { addVariant, deleteKey, hasKey, keyHolders, kwNorm, planUidReindex, renameKeyOn, replaceKey } from './keyedit.mjs';
 
 // Fixed, not theme variables: severity is read by hue.
@@ -49,33 +50,17 @@ export async function lorebookStudio(preferredBook = null, open = null) {
     if (!(world_names ?? []).length) { toastr.warning(t`No lorebooks found.`, 'Worlds Apart'); return ''; }
     ensureStudioStyle();
 
-    /** The books ST has active for this chat: global, the character's own and its charLore extras, the chat's, the persona's.
-     *  Mirrors getGlobalLore/getCharacterLore/getChatLore/getPersonaLore, which are private, because the exported
-     *  getSortedEntries emits WORLDINFO_ENTRIES_LOADED (upstream-st.md #18). The Set drops the duplicate core also skips.
-     *  In a group this unions the enabled members, where core takes one member per generation. */
+    /** bindings.mjs attachedBooks, bound to ST's globals. */
     const attachedBookNames = () => {
         const ctx = getContext();
-        const names = new Set(selected_world_info ?? []);
-        const addCharacter = (character, avatar) => {
-            if (character?.data?.extensions?.world) names.add(character.data.extensions.world);
-            const file = getCharaFilename(null, { manualAvatarKey: avatar ?? character?.avatar });
-            for (const b of (file && world_info.charLore?.find(e => e.name === file)?.extraBooks) ?? []) names.add(b);
-        };
-        const group = ctx.groupId ? ctx.groups?.find(g => String(g.id) === String(ctx.groupId)) : null;
-        if (group) {
-            // Core resolves one member's books per generation, from this_chid as the group sets it per speaker. The union
-            // over the members that can speak is what any turn of this chat could scan.
-            for (const avatar of group.members ?? []) {
-                if ((group.disabled_members ?? []).includes(avatar)) continue;
-                addCharacter(characters?.find(c => c?.avatar === avatar), avatar);
-            }
-        } else if (ctx.characterId != null) {
-            addCharacter(characters?.[ctx.characterId]);
-        }
-        const chatWorld = ctx.chatMetadata?.[METADATA_KEY];
-        if (chatWorld) names.add(chatWorld);
-        if (power_user.persona_description_lorebook) names.add(power_user.persona_description_lorebook);
-        return [...names].filter(Boolean).filter(n => world_names.includes(n));
+        return attachedBooks({
+            globalBooks: selected_world_info ?? [],
+            characters, characterId: ctx.characterId,
+            group: ctx.groupId ? ctx.groups?.find(g => String(g.id) === String(ctx.groupId)) : null,
+            chatBook: ctx.chatMetadata?.[METADATA_KEY],
+            personaBook: power_user.persona_description_lorebook,
+            extraBooksOf, worldNames: world_names,
+        });
     };
 
     let sortAsc = true;
@@ -1311,49 +1296,20 @@ export async function lorebookStudio(preferredBook = null, open = null) {
     const moveEntryTo = e => entriesToBook([e], true);
 
     // --- Book-level tools (explorer header) ---
-    const matchSearch = e => {
-        const q = searchQuery.trim().toLowerCase();
-        if (!q) return true;
-        const fields = [];
-        if (searchScope.title) fields.push(String(wiTitleOf(e)));
-        if (searchScope.entry) fields.push(String(e.content ?? ''));
-        if (searchScope.keywords) fields.push((Array.isArray(e.key) ? e.key : []).join(' '));
-        return !fields.length || fields.some(f => f.toLowerCase().includes(q));
-    };
-    const facetMatch = (e, f) => {
-        switch (f) {
-            case 'keyword': return !e.constant && !e.vectorized;
-            case 'constant': return !!e.constant;
-            case 'vector': return !!e.vectorized;
-            case 'enabled': return !e.disable;
-            case 'disabled': return !!e.disable;
-            case 'flagged': return !!scan && (scan.classifyEntry(e).length > 0 || scan.unusableKeysOf(e).length > 0);
-            // Severity is per key, so this is "holds at least one" — the same reading as `flagged`. An unusable
-            // secondary counts severe here as it does on the badge: the entry gates on fewer keys than written.
-            case SEVERE: case MODERATE: case MINOR:
-                if (!scan) return false;
-                if (f === SEVERE && scan.unusableKeysOf(e).length) return true;
-                return scan.classifyEntry(e).some(p => scan.severityOf(p) === f);
-            default: return true;
-        }
-    };
-    const FILTER_GROUPS = [['keyword', 'constant', 'vector'], ['enabled', 'disabled'], ['flagged', SEVERE, MODERATE, MINOR]];
-    // Any facet of a group admits (OR); every group with a facet picked must admit (AND).
-    const typeMatch = e => FILTER_GROUPS.every(g => { const sel = g.filter(f => entryFilter.has(f)); return !sel.length || sel.some(f => facetMatch(e, f)); });
+    // The Explorer's state, bound to entry-filter.mjs's pure predicates.
+    const matchSearch = e => matchSearchOf(e, searchQuery, searchScope);
+    const typeMatch = e => typeMatchOf(e, entryFilter, scan);
     const filterMatch = e => matchSearch(e) && typeMatch(e);
-    // Explorer display order: base sort, then tiered buckets by tierRank with base order kept within each.
     const sortEntries = list => {
         // 'insert' mirrors the prompt insertion order from settings; relevance keys have no rest-state score and degrade to order-asc.
         const insert = entrySort === 'insert';
-        const baseKey = insert ? normPresentation(settings().presentationOrder) : entrySort;
-        const base = SORT_FNS[baseKey] ?? SORT_FNS['order-asc'];
-        const tiered = insert ? !!settings().presentationTiered : tieredMode;
-        const sorted = [...list].sort(base);
-        if (!tiered) return sorted;
-        const buckets = [];
-        for (const e of sorted) (buckets[tierRank(e, tierCfg())] ??= []).push(e);
-        return buckets.flat();   // sparse holes (empty ranks) are skipped by flat()
+        return sortTiered(list, {
+            sortKey: insert ? settings().presentationOrder : entrySort,
+            tiered: insert ? !!settings().presentationTiered : tieredMode,
+            tierCfg: tierCfg(),
+        });
     };
+
     /** The default duplicate name: "X copy", then "X copy 2", … until one is free. */
     const freeCopyName = src => { const base = `${src} copy`; let name = base, i = 2; while (world_names.includes(name)) name = `${base} ${i++}`; return name; };
     const nameTaken = n => world_names.some(x => x.toLowerCase() === n.toLowerCase());
@@ -1616,23 +1572,7 @@ export async function lorebookStudio(preferredBook = null, open = null) {
     // The term tabs' entry set: type filter + the shared sort, without the search — those tabs rank by it (rankBySearch).
     const visibleEntries = () => sortEntries(Object.values(data?.entries ?? {}).filter(typeMatch));
 
-    /**
-     * Term-tab search: keeps a group whose title, listed terms or (if scoped) text match, ranked title > term > text; rows are never filtered.
-     * @param {Array<{entry: object, rows: Array<{term: string}>}>} groups
-     */
-    const rankBySearch = groups => {
-        const q = searchQuery.trim().toLowerCase();
-        if (!q) return groups;
-        const rankOf = g => {
-            if (searchScope.title && String(wiTitleOf(g.entry)).toLowerCase().includes(q)) return 0;
-            if (searchScope.keywords && g.rows.some(r => r.term.toLowerCase().includes(q))) return 1;
-            if (searchScope.entry && String(g.entry.content ?? '').toLowerCase().includes(q)) return 2;
-            return -1;
-        };
-        return groups.map(g => ({ g, r: rankOf(g) })).filter(x => x.r >= 0)
-            .sort((a, b) => a.r - b.r)   // stable, so the shared sort survives within each band
-            .map(x => x.g);
-    };
+    const rankBySearch = groups => rankBySearchOf(groups, searchQuery, searchScope);
 
     // --- Shared header controls: the search box and type filter read and write the same state on every tab ---
     const buildSearchBox = onChange => {
@@ -1919,29 +1859,13 @@ export async function lorebookStudio(preferredBook = null, open = null) {
 
     /** Chats this book could plausibly be checked against; `all` drops the binding filter and lists every chat on the install. */
     const findBookChats = async (all = false) => {
-        // A book binds four ways: chat (chat_metadata.world_info), character (data.extensions.world), the character's
-        // additional lorebooks (world_info.charLore[].extraBooks, keyed by avatar filename), global (selected_world_info,
-        // never pre-ticked). The same four attachedBookNames reads.
-        // No book selected: nothing binds to it. Without this, `undefined === undefined` reads every unbound chat as chat-bound.
-        const book = selected || null;
-        const isGlobal = !!book && (selected_world_info ?? []).includes(book);
-        const out = [];
         // bindingIndex, not loadChatIndex: line 0 of each chat where the plugin is present, never the whole file.
-        for (const c of await bindingIndex()) {
-            const cardBound = !!book && c.charWorld === book;
-            const auxBound = !!book && !cardBound && (c.extraBooks ?? []).includes(book);
-            const charBound = cardBound || auxBound;
-            for (const ch of c.chats) {
-                const chatBound = !!book && ch?.chat_metadata?.world_info === book;
-                if (!chatBound && !charBound && !isGlobal && !all) continue;
-                out.push({ char: c.char, avatar: c.avatar, file: ch.file_name, size: ch.file_size ?? '?',
-                    why: chatBound ? 'chat-bound' : cardBound ? 'character-bound' : auxBound ? 'character-bound (additional lorebook)' : isGlobal ? 'global (book is always active)' : 'not bound',
-                    bound: chatBound || charBound });
-            }
-        }
-        out.isGlobal = isGlobal;
-        out.all = all;
-        return out;
+        const { rows, isGlobal } = classifyBookChats(await bindingIndex(),
+            { book: selected, globalBooks: selected_world_info ?? [], all });
+        // Glued on, not fields: the pickers read them off the list they were handed.
+        rows.isGlobal = isGlobal;
+        rows.all = all;
+        return rows;
     };
 
     /** No-plugin path: pulls a chat's messages over HTTP, as {name, mes}. `byId` instead returns every message with the
@@ -2101,23 +2025,12 @@ export async function lorebookStudio(preferredBook = null, open = null) {
         if (!scan) return [];
         const out = [];
         for (const e of visibleEntries()) {
-            const rows = scan.classifyEntry(e).map(p => {
-                const rc = scan.reasonOf(p);
-                const id = rowId(e.uid, p.key);
-                if (!cleanupChecks.has(id)) cleanupChecks.set(id, false);   // nothing pre-ticked: flags are worked through in passes from Select…
-                return { term: p.key, why: rc.text, color: SEVERITY_COLOR[rc.severity] ?? '', sev: rc.severity, p };
-            });
-            // Show-all appends the keys classifyEntry did not return; flagged rows stay on top.
-            if (cleanupShowAll) {
-                const shown = new Set(rows.map(r => r.term));
-                for (const key of (Array.isArray(e.key) ? e.key : [])) {
-                    if (shown.has(key)) continue;
-                    shown.add(key);
-                    const id = rowId(e.uid, key);
-                    if (!cleanupChecks.has(id)) cleanupChecks.set(id, false);   // unticked, as every row starts
-                    // A clean key says nothing, in the Explorer's green, as its chip does there; an ignored one says so.
-                    rows.push({ term: key, why: ignoreSet.has(key) ? 'ignored' : '', color: '', clean: !ignoreSet.has(key) });
-                }
+            const rows = cleanupRows(e, scan, { showAll: cleanupShowAll, ignored: ignoreSet });
+            for (const r of rows) {
+                r.color = SEVERITY_COLOR[r.sev] ?? '';
+                // Nothing pre-ticked: flags are worked through in passes from Select…
+                const id = rowId(e.uid, r.term);
+                if (!cleanupChecks.has(id)) cleanupChecks.set(id, false);
             }
             if (rows.length) out.push({ entry: e, rows });
         }
@@ -2280,24 +2193,6 @@ export async function lorebookStudio(preferredBook = null, open = null) {
         return `hsl(${LAB_HUES[i % LAB_HUES.length]} ${pastel ? 45 : 80}% ${pastel ? 68 : 50}%${a < 1 ? ` / ${a}` : ''})`;
     };
 
-    /** `sg`'s window text with every hit in it guillemeted, «so» for a positive and »so« for a negative, for a title
-     *  attribute, which takes no markup. Over 320 characters it is clipped to 110 either side of `ex`. */
-    const windowTip = (sg, ex) => {
-        const src = String(sg.text ?? '');
-        const wide = src.length > 320;
-        const from = wide ? Math.max(0, ex.at - 110) : 0;
-        const to = wide ? Math.min(src.length, ex.to + 110) : src.length;
-        let out = '', at = from;
-        for (const x of [...sg.excerpts].sort((a, b) => a.at - b.at)) {
-            if (x.at < from || x.to > to) continue;
-            const [open, close] = x.negated ? ['\u00bb', '\u00ab'] : ['\u00ab', '\u00bb'];
-            out += `${src.slice(at, x.at)}${open}${src.slice(x.at, x.to)}${close}`;
-            at = x.to;
-        }
-        out = `${out}${src.slice(at, to)}`.replace(/\s+/g, ' ').trim();
-        return `${from > 0 ? '\u2026' : ''}${out}${to < src.length ? '\u2026' : ''}`;
-    };
-
     /** A markSpan for renderMessageHtml: the key's ink, or SEVERITY_COLOR.severe for a negated span. */
     const labMark = ink => (sp, text) => {
         const fill = sp.negated ? `color-mix(in srgb, ${WA_RED} 40%, transparent)` : ink(sp, 0.4);
@@ -2327,20 +2222,15 @@ export async function lorebookStudio(preferredBook = null, open = null) {
     let labSec = '', labLogic = String(WI_LOGIC.AND_ANY);
 
     const LAB_JOIN = `\n\n${'-'.repeat(24)}\n\n`;
-    /** One chat's messages as WA reads them for a scan: cut at `end` (a MESSAGE ID, so on the raw list, hidden messages
-     *  counted), is_system dropped, dropChatTags applied, then segmented to `depth`. `hidden` is what the cut held back. */
-    const labMessages = (full, depth, end) => {
-        const spec = settings().dropChatTags;
-        const raw = end >= 0 ? full.slice(0, end + 1) : full;
-        const chat = raw.filter(m => m && !m.is_system).map(m => (spec?.trim() ? { ...m, mes: dropTags(String(m.mes ?? ''), spec) } : m));
-        return { messages: scanSegments(chat, { depth, includeNames: world_info_include_names, matchWindow: 'message' }), hidden: raw.length - chat.length };
-    };
+    const labChatMessages = (full, depth, end) => labMessages(full, {
+        depth, end, dropSpec: settings().dropChatTags, includeNames: world_info_include_names,
+    });
 
     /** The OPEN chat as WA reads it for a scan; `override` sets the depth. Joined on MESSAGE_BREAK rules. */
     const chatHaystack = (override, end = -1) => {
         const spec = settings().dropChatTags;
         const depth = Number(override ?? (settings().messageDepth || world_info_depth));
-        const { messages, hidden } = labMessages(getContext().chat ?? [], depth, end);
+        const { messages, hidden } = labChatMessages(getContext().chat ?? [], depth, end);
         // Reports depth and the is_system drop: neither is visible in the pane, and both change the count.
         const bits = [messages.length === 1 ? t`${messages.length} message at depth ${depth}` : t`${messages.length} messages at depth ${depth}`];
         if (end >= 0) bits.push(t`ending at #${end}`);
@@ -2358,7 +2248,7 @@ export async function lorebookStudio(preferredBook = null, open = null) {
         // byId: message ids count hidden messages, so the cut is on the raw chat, as chatHaystack cuts the open one.
         const loaded = await Promise.all(picked.map(c => (c.open ? Promise.resolve(getContext().chat ?? []) : fetchChatMessages(c, { byId: true }))));
         for (const [i, c] of picked.entries()) {
-            const { messages } = labMessages(loaded[i], depth, end);
+            const { messages } = labChatMessages(loaded[i], depth, end);
             total += messages.length;
             parts.push(`${'='.repeat(8)} ${String(c.file).replace(/\.jsonl$/, '')} ${'='.repeat(8)}\n\n${messages.join(LAB_JOIN)}`);
         }

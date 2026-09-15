@@ -1,5 +1,5 @@
 // Orphaned bindings (bindings.mjs): chats and character cards naming a lorebook that no longer exists.
-import { findOrphanBindings, nearestWorld, normalizeWorldName, editDistance } from '../extension/bindings.mjs';
+import { attachedBooks, classifyBookChats, findOrphanBindings, nearestWorld, normalizeWorldName, editDistance } from '../extension/bindings.mjs';
 import { eq } from '../eval/lib/metrics.mjs';
 
 const chat = (file, world) => ({ file_name: file, chat_metadata: world ? { world_info: world } : {} });
@@ -51,4 +51,84 @@ console.log('ok   orphaned bindings are found, grouped, and only confidently sug
     const r = findOrphanBindings([{ char: 'Cy', avatar: 'Cy.png', charWorld: null, extraBooks: ['Gone', 'Kept'], chats: [] }], ['Kept']);
     eq(r.cardCount, 1, 'an additional lorebook naming a missing book is a card orphan');
     eq(r.missing[0]?.name + ':' + r.missing[0]?.cards.join(), 'Gone:Cy', '...attributed to the character carrying it, the existing one untouched');
+}
+
+// --- attachedBooks: the four ways a book is active for one chat, and the group union
+{
+    const worlds = ['Global', 'CardBook', 'Aux', 'ChatBook', 'Persona', 'OtherCard'];
+    const cast = [
+        { avatar: 'a.png', data: { extensions: { world: 'CardBook' } } },
+        { avatar: 'b.png', data: { extensions: { world: 'OtherCard' } } },
+        { avatar: 'c.png' },
+    ];
+    const extras = { 'a.png': ['Aux'] };
+    const extraBooksOf = av => extras[av] ?? [];
+    const base = { characters: cast, extraBooksOf, worldNames: worlds };
+
+    eq(attachedBooks({ ...base, globalBooks: ['Global'] }).join(','), 'Global',
+        'no character and no chat: the global selection alone');
+    eq(attachedBooks({ ...base, characterId: 0 }).join(','), 'CardBook,Aux',
+        'a solo character contributes its own book and its charLore extras');
+    eq(attachedBooks({ ...base, characterId: 2 }).length, 0, 'a character with no book contributes nothing');
+    eq(attachedBooks({ ...base, globalBooks: ['Global'], characterId: 0, chatBook: 'ChatBook', personaBook: 'Persona' }).join(','),
+        'Global,CardBook,Aux,ChatBook,Persona', 'all four sources, global first');
+    eq(attachedBooks({ ...base, globalBooks: ['CardBook'], characterId: 0 }).join(','), 'CardBook,Aux',
+        'a book active two ways appears once — the duplicate core also skips');
+    eq(attachedBooks({ ...base, characterId: 0, chatBook: 'Nonexistent' }).join(','), 'CardBook,Aux',
+        'a stale binding naming a book that no longer exists is dropped');
+    // A group unions the members that can speak, where core resolves one member per generation.
+    const group = { members: ['a.png', 'b.png'], disabled_members: [] };
+    eq(attachedBooks({ ...base, group }).join(','), 'CardBook,Aux,OtherCard', 'a group unions its members');
+    eq(attachedBooks({ ...base, group: { ...group, disabled_members: ['b.png'] } }).join(','), 'CardBook,Aux',
+        'a disabled member contributes nothing');
+    eq(attachedBooks({ ...base, group, characterId: 0 }).join(','), 'CardBook,Aux,OtherCard',
+        'a group ignores characterId, which the group sets per speaker');
+}
+
+// --- classifyBookChats: the binding precedence, and the guard against an unselected book
+{
+    const idx = [
+        { char: 'Ann', avatar: 'a.png', charWorld: 'CardBook', extraBooks: ['Aux'], chats: [
+            { file_name: 'a1.jsonl', file_size: '2 KB', chat_metadata: { world_info: 'ChatBook' } },
+            { file_name: 'a2.jsonl', file_size: '1 KB', chat_metadata: {} },
+        ] },
+        { char: 'Bo', avatar: 'b.png', charWorld: null, extraBooks: [], chats: [
+            { file_name: 'b1.jsonl', file_size: '3 KB', chat_metadata: { world_info: 'ChatBook' } },
+            { file_name: 'b2.jsonl', file_size: '4 KB', chat_metadata: {} },
+        ] },
+    ];
+    const why = r => `${r.file}:${r.why}`;
+
+    const chat = classifyBookChats(idx, { book: 'ChatBook' });
+    eq(chat.rows.map(why).join(' '), 'a1.jsonl:chat-bound b1.jsonl:chat-bound', 'a chat binding names only its own chats');
+    eq(chat.isGlobal, false, 'and the book is not global');
+    eq(chat.rows.every(r => r.bound), true, 'a chat-bound row is bound');
+
+    eq(classifyBookChats(idx, { book: 'CardBook' }).rows.map(why).join(' '),
+        'a1.jsonl:character-bound a2.jsonl:character-bound', 'a card binding names every chat of that card');
+    eq(classifyBookChats(idx, { book: 'Aux' }).rows.map(why).join(' '),
+        'a1.jsonl:character-bound (additional lorebook) a2.jsonl:character-bound (additional lorebook)',
+        'an extraBooks binding is named apart from the card’s own');
+
+    // Precedence: the chat's own binding wins over the card's, which wins over global.
+    const both = classifyBookChats([{ ...idx[0], charWorld: 'ChatBook' }], { book: 'ChatBook', globalBooks: ['ChatBook'] });
+    eq(both.rows.map(why).join(' '), 'a1.jsonl:chat-bound a2.jsonl:character-bound',
+        'chat beats card, and card beats global, per chat');
+    eq(both.isGlobal, true, 'a book in the global selection reports isGlobal whatever else binds it');
+
+    const glob = classifyBookChats(idx, { book: 'Global', globalBooks: ['Global'] });
+    eq(glob.rows.length, 4, 'a global book lists every chat');
+    eq(glob.rows.every(r => r.why === 'global (book is always active)'), true, '...as globally active');
+    eq(glob.rows.some(r => r.bound), false, 'global is not a binding: no row is bound');
+
+    eq(classifyBookChats(idx, { book: 'Unbound' }).rows.length, 0, 'a book nothing names lists nothing');
+    eq(classifyBookChats(idx, { book: 'Unbound', all: true }).rows.map(why).join(' '),
+        'a1.jsonl:not bound a2.jsonl:not bound b1.jsonl:not bound b2.jsonl:not bound',
+        '`all` drops the filter and marks every chat unbound');
+    // Without the !!book guard, `undefined === undefined` reads every chat with no world_info as chat-bound.
+    eq(classifyBookChats(idx, { book: null, all: true }).rows.some(r => r.bound), false,
+        'no book selected: nothing binds, including the chats carrying no world_info');
+    eq(classifyBookChats(idx, { book: '', all: true }).rows.every(r => r.why === 'not bound'), true,
+        '...and the empty name is read the same way');
+    eq(classifyBookChats(null, { book: 'ChatBook' }).rows.length, 0, 'a missing index is empty, not a throw');
 }

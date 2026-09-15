@@ -1,5 +1,5 @@
 // sort-check — the canonical grading-table order (sort.mjs gradeOrder), what /wa-grade and /wa-super-grade show first.
-import { gradeOrder } from '../extension/sort.mjs';
+import { gradeOrder, reconcileTiers, sortTiered } from '../extension/sort.mjs';
 import { eq } from '../eval/lib/metrics.mjs';
 
 // One row per class, in the order onScanDone hands them over; do not reorder this fixture.
@@ -43,3 +43,31 @@ eq(gradeOrder([{ block: undefined, score: 1 }], r => -(r.score ?? 0))[0].i, 0, '
         'promHi,dynMid,promLo,sticky,const',
         'promoted rows interleave with dynamic ones by score; only the durable blocks trail');
 }
+
+// --- sortTiered: the Explorer's display order, base sort then tier buckets
+const cfg = reconcileTiers([]);   // constant, sticky, keyword, vector, disabled
+const ent = (uid, order, o = {}) => ({ uid, order, ...o });
+const list = [
+    ent(1, 10),                          // keyword
+    ent(2, 30, { constant: true }),      // constant
+    ent(3, 20, { disable: true }),       // disabled
+    ent(4, 40, { sticky: 3 }),           // sticky
+    ent(5, 50),                          // keyword
+];
+eq(sortTiered(list, { sortKey: 'order-asc' }).map(e => e.uid).join(','), '1,3,2,4,5',
+    'untiered is the base sort alone');
+eq(sortTiered(list, { sortKey: 'order-asc', tiered: true, tierCfg: cfg }).map(e => e.uid).join(','), '2,4,1,5,3',
+    'tiered buckets by tierRank, base order kept within each bucket');
+eq(sortTiered(list, { sortKey: 'authored', tiered: true, tierCfg: cfg }).map(e => e.uid).join(','), '2,4,1,5,3',
+    'a legacy presentation alias resolves through normPresentation');
+eq(sortTiered(list, { sortKey: 'best-first', tiered: true, tierCfg: cfg }).map(e => e.uid).join(','), '2,4,1,5,3',
+    'a relevance key has no rest-state score and degrades to order-asc');
+// Turning a tier off removes its rank, so the entries that would have filled it fall to the next bucket.
+const noSticky = cfg.map(t => (t.id === 'sticky' ? { ...t, on: false } : t));
+eq(sortTiered(list, { sortKey: 'order-asc', tiered: true, tierCfg: noSticky }).map(e => e.uid).join(','), '2,1,4,5,3',
+    'a disabled tier leaves no bucket and its entries sort into the next one that tests');
+eq(sortTiered([ent(9, 1, { vectorized: true })], { sortKey: 'order-asc', tiered: true, tierCfg: cfg }).map(e => e.uid).join(','), '9',
+    'empty ranks below an occupied one are sparse holes, which flat() skips');
+const src = [ent(1, 2), ent(2, 1)];
+sortTiered(src, { sortKey: 'order-asc' });
+eq(src.map(e => e.uid).join(','), '1,2', 'the caller’s list is not sorted in place');

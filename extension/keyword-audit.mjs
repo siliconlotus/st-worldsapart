@@ -493,3 +493,25 @@ export function buildKeyPruneScan(data, opts, ignoreSet, { caseSensitiveDefault 
 
 /** Every entry, every mode. */
 export const STUDIO_PRUNE_OPTS = { scanKeyword: true, scanVectorized: true, scanConstant: true, includeInactive: true, pruneUnattested: true, pruneCommon: true, pruneShort: true, pruneShared: true, pruneFragment: true, ignoreProper: false, minLength: KEY_MIN_LENGTH, bookShared: KEY_BOOK_SHARED, chatCommon: KEY_CHAT_COMMON, bookCommon: KEY_BOOK_COMMON };
+
+/**
+ * The Cleanup tab's rows for one entry: every flagged key, then — with `showAll` — the keys classifyEntry did not
+ * return, so flagged rows stay on top. Carries no colour: the caller maps `sev`.
+ * @param scan buildKeyPruneScan's
+ * @param {Set<string>} opt.ignored The book's whitelist; an ignored key says so where a clean one says nothing
+ */
+export function cleanupRows(entry, scan, { showAll = false, ignored = new Set() } = {}) {
+    const rows = scan.classifyEntry(entry).map(p => {
+        const rc = scan.reasonOf(p);
+        return { term: p.key, why: rc.text, sev: rc.severity, p };
+    });
+    if (!showAll) return rows;
+    const shown = new Set(rows.map(r => r.term));
+    for (const key of (Array.isArray(entry.key) ? entry.key : [])) {
+        if (shown.has(key)) continue;
+        shown.add(key);
+        // A clean key says nothing, in the Explorer's green, as its chip does there; an ignored one says so.
+        rows.push({ term: key, why: ignored.has(key) ? 'ignored' : '', clean: !ignored.has(key) });
+    }
+    return rows;
+}

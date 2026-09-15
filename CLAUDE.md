@@ -135,12 +135,15 @@ matched expression is worth goes in the second.
 ## Pure vs ST-coupled
 
 Every module under `extension/` and `plugin/` is ST-free and node-importable, so the evals exercise the
-shipped code, except the five that import ST: `keyword-tools.mjs`, `studio.mjs`, `ui-widgets.mjs`,
-`capture-ui.mjs` and `lang-store.mjs`; `worldsapart.js` is the ST half proper. Settings and ST globals
-are injected by the caller, never imported; `state.mjs` binds ST's store rather than importing it, so
-the harness can read the shipped value of every knob.
+shipped code, except the five that import ST's browser half: `keyword-tools.mjs`, `studio.mjs`,
+`ui-widgets.mjs`, `capture-ui.mjs` and `lang-store.mjs`; `worldsapart.js` is the ST half proper.
+`plugin/server.js` is the sixth, importing ST's SERVER half (`../../src/`) — a path that resolves from
+the deploy location, not from here, so it is not node-importable either. `test/st-half.mjs` declares
+both lists and `st-boundary-check.mjs` fails when anything else reaches past the repo root. Settings and
+ST globals are injected by the caller, never imported; `state.mjs` binds ST's store rather than importing
+it, so the harness can read the shipped value of every knob.
 
-**Every string a user reads goes through ST's i18n, and `eval/i18n-check.mjs` is the gate.** In the ST half,
+**Every string a user reads goes through ST's i18n, and `test/i18n-check.mjs` is the gate.** In the ST half,
 injected HTML carries `data-i18n` (the English text is the key; `[title]…` for an attribute, `;` joining the
 two, so no key may hold `;`) and code strings use the `t` tag, one whole sentence per template so a translation
 can reorder it — a count whose noun changes is two templates, never a `${n === 1 ? '' : 's'}`. A pure module

@@ -1,7 +1,7 @@
 // lab.mjs — the Key Lab's model: a text against a typed key list, or against a book's entries. ST-free; the Studio
 // injects the settings.
 
-import { keyHits, keySpans, mergeSpans, secondaryKeys, splitKeys, usableKeys, WI_LOGIC } from './matcher.mjs';
+import { dropTags, keyHits, keySpans, mergeSpans, scanSegments, secondaryKeys, splitKeys, usableKeys, WI_LOGIC } from './matcher.mjs';
 
 /** An entry's secondary condition as `keyHits`/`keySpans` take it, or undefined when it has none. Blank secondaries are
  *  dropped and `selective` is read: core ignores keysecondary without it. */
@@ -64,5 +64,35 @@ export function labScan({ hay = '', keys = '', sec = '', logic = WI_LOGIC.AND_AN
         rows: keyHits(keyList, hay, caseSensitive, wholeWords, { context, matchWindow, gate }),
         gate,
         spans: keySpans(keyList, hay, caseSensitive, wholeWords, { matchWindow, gate }),
+    };
+}
+
+/** `sg`'s window text with every hit in it guillemeted, «so» for a positive and »so« for a negative, for a title
+ *  attribute, which takes no markup. Over 320 characters it is clipped to 110 either side of `ex`. */
+export function windowTip(sg, ex) {
+    const src = String(sg.text ?? '');
+    const wide = src.length > 320;
+    const from = wide ? Math.max(0, ex.at - 110) : 0;
+    const to = wide ? Math.min(src.length, ex.to + 110) : src.length;
+    let out = '', at = from;
+    for (const x of [...sg.excerpts].sort((a, b) => a.at - b.at)) {
+        if (x.at < from || x.to > to) continue;
+        const [open, close] = x.negated ? ['»', '«'] : ['«', '»'];
+        out += `${src.slice(at, x.at)}${open}${src.slice(x.at, x.to)}${close}`;
+        at = x.to;
+    }
+    out = `${out}${src.slice(at, to)}`.replace(/\s+/g, ' ').trim();
+    return `${from > 0 ? '…' : ''}${out}${to < src.length ? '…' : ''}`;
+}
+
+/** One chat's messages as WA reads them for a scan: cut at `end` (a MESSAGE ID, so on the raw list, hidden messages
+ *  counted), is_system dropped, dropChatTags applied, then segmented to `depth`. `hidden` is what the cut held back. */
+export function labMessages(full, { depth, end = -1, dropSpec = '', includeNames = false } = {}) {
+    const raw = end >= 0 ? (full ?? []).slice(0, end + 1) : (full ?? []);
+    const chat = raw.filter(m => m && !m.is_system)
+        .map(m => (dropSpec?.trim() ? { ...m, mes: dropTags(String(m.mes ?? ''), dropSpec) } : m));
+    return {
+        messages: scanSegments(chat, { depth, includeNames, matchWindow: 'message' }),
+        hidden: raw.length - chat.length,
     };
 }

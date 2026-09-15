@@ -423,3 +423,44 @@ console.log('ok   elided particles follow the same rule as written ones');
 
 
 
+
+// --- cleanupRows: the Cleanup tab's rows over a scan ----------------------------------------------
+import { cleanupRows } from '../extension/keyword-audit.mjs';
+
+{
+    // A stand-in scan: only the two methods cleanupRows calls.
+    const stub = flagged => ({
+        classifyEntry: () => flagged.map(([key, flag, severity, text]) => ({ key, flag, severity, text })),
+        reasonOf: p => ({ text: p.text, severity: p.severity }),
+    });
+    const entry = { uid: 1, key: ['ravensgate', 'the gate', 'gate', 'moss'] };
+    const scan = stub([['gate', 'too-common', 'severe', 'matches almost every message'],
+        ['the gate', 'substring', 'minor', 'inside another key']]);
+
+    const flaggedOnly = cleanupRows(entry, scan);
+    assert.deepEqual(flaggedOnly.map(r => r.term), ['gate', 'the gate'], 'without showAll only the flagged keys are rows');
+    assert.deepEqual(flaggedOnly.map(r => r.sev), ['severe', 'minor'], 'each row carries its severity, not a colour');
+    assert.equal(flaggedOnly[0].why, 'matches almost every message', 'and the verdict prose reasonOf gave it');
+    assert.equal(flaggedOnly[0].p.flag, 'too-common', 'the verdict rides along, so Select… can bucket by flag');
+
+    const all = cleanupRows(entry, scan, { showAll: true });
+    assert.deepEqual(all.map(r => r.term), ['gate', 'the gate', 'ravensgate', 'moss'],
+        'showAll appends the unflagged keys AFTER the flagged ones, which stay on top');
+    assert.equal(all.filter(r => r.clean).length, 2, 'the appended keys are clean');
+    assert.equal(all[2].why, '', 'a clean key says nothing: its colour carries the state');
+    assert.equal(all.slice(0, 2).every(r => r.clean === undefined), true, 'and a flagged row is never clean');
+
+    const ignored = cleanupRows(entry, scan, { showAll: true, ignored: new Set(['moss']) });
+    const moss = ignored.find(r => r.term === 'moss');
+    assert.equal(moss.why, 'ignored', 'a whitelisted key says so');
+    assert.equal(moss.clean, false, '...and is not clean, so it colours apart from an unflagged key');
+
+    // A key that is both flagged and present in entry.key must not appear twice.
+    assert.equal(cleanupRows(entry, scan, { showAll: true }).filter(r => r.term === 'gate').length, 1,
+        'a flagged key is not appended a second time by showAll');
+    assert.deepEqual(cleanupRows({ uid: 2, key: [] }, stub([]), { showAll: true }), [],
+        'an entry with no keys and no flags has no rows');
+    assert.deepEqual(cleanupRows({ uid: 3 }, stub([]), { showAll: true }), [],
+        'a missing key list is empty, not a throw');
+}
+console.log('cleanupRows: ok');

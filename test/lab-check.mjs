@@ -1,6 +1,6 @@
 // lab-check.mjs — lab.mjs: entryGate, entryFlags, runBook, runSpans, labScan. Self-checking; run with no arguments.
 
-import { entryFlags, entryGate, labScan, runBook, runSpans } from '../extension/lab.mjs';
+import { entryFlags, entryGate, labMessages, labScan, runBook, runSpans, windowTip } from '../extension/lab.mjs';
 import { WI_LOGIC } from '../extension/matcher.mjs';
 import { eq } from '../eval/lib/metrics.mjs';
 
@@ -64,3 +64,58 @@ eq(applied.gate, null, 'a run has no gate of its own: every entry brought one');
 eq(applied.spans.length, 4, 'and its spans are the union of its entries\'');
 
 console.log(process.exitCode ? 'FAILED  lab' : 'ok   lab: gate, flags, a book applied, and one result shape for both modes');
+
+// --- windowTip: the title-attribute rendering of a window, guillemets around every hit in it
+const win = (text, excerpts) => ({ text, excerpts });
+const sg1 = win('He looks slowly at the gate.', [{ at: 3, to: 8, negated: false }]);
+eq(windowTip(sg1, sg1.excerpts[0]), 'He «looks» slowly at the gate.', 'a positive hit is «guillemeted»');
+const sg2 = win('He looks slowly.', [{ at: 3, to: 8, negated: true }]);
+eq(windowTip(sg2, sg2.excerpts[0]), 'He »looks« slowly.', 'a negated hit reverses them');
+const sg3 = win('a bb ccc', [{ at: 5, to: 8 }, { at: 2, to: 4 }]);
+eq(windowTip(sg3, sg3.excerpts[0]), 'a «bb» «ccc»', 'excerpts are marked in text order, whatever order they arrive in');
+eq(windowTip(win('  spaced \n\n out  ', []), { at: 0, to: 1 }), 'spaced out', 'whitespace collapses: a title attribute is one line');
+
+// Over 320 characters the window is clipped to 110 either side of the cited excerpt, with ellipses for what was cut.
+const pad = 'x'.repeat(200);
+const long = `${pad} HIT ${pad}`;
+const ex = { at: pad.length + 1, to: pad.length + 4 };
+const clipped = windowTip(win(long, [ex]), ex);
+eq(clipped.startsWith('…'), true, 'a clip at the head is marked with an ellipsis');
+eq(clipped.endsWith('…'), true, 'and so is one at the tail');
+eq(clipped.includes('«HIT»'), true, 'the cited excerpt survives the clip');
+eq(clipped.length < 260, true, 'the clip is 110 either side, not the whole window');
+// An excerpt outside the clip window is left unmarked rather than dropped from the text.
+const other = { at: 5, to: 8 };
+const two = windowTip(win(long, [other, ex]), ex);
+eq(two.includes('«xxx»'), false, 'an excerpt outside the clipped window is not marked');
+eq(windowTip(win('short', [{ at: 0, to: 5 }]), { at: 0, to: 5 }), '«short»', 'under 320 characters nothing is clipped');
+
+// --- labMessages: the cut, the is_system drop, dropChatTags, then the segmentation
+{
+    const m = (mes, o = {}) => ({ name: 'Ann', mes, ...o });
+    const chat = [m('one'), m('two', { is_system: true }), m('three'), m('four')];
+
+    const all = labMessages(chat, { depth: 10 });
+    eq(all.messages.join('|'), 'one|three|four', 'is_system messages are dropped, as core and WA both drop them');
+    eq(all.hidden, 1, 'and `hidden` counts what the drop held back');
+    eq(labMessages(chat, { depth: 2 }).messages.join('|'), 'three|four', 'depth takes the last N of what survives');
+    eq(labMessages(chat, { depth: 0 }).messages.length, 0,
+        'depth 0 is authored: core reads it as "match nothing from chat", not "no limit"');
+    eq(labMessages(chat, { depth: 10, includeNames: true }).messages[0], 'Ann: one', 'includeNames prefixes the speaker');
+
+    // `end` is a MESSAGE ID, so it cuts the RAW list with the hidden messages still counted.
+    eq(labMessages(chat, { depth: 10, end: 2 }).messages.join('|'), 'one|three',
+        'the cut is on the raw list: message id 2 is the third entry, hidden ones counted');
+    eq(labMessages(chat, { depth: 10, end: 2 }).hidden, 1, 'and the drop inside the cut is reported');
+    eq(labMessages(chat, { depth: 10, end: 0 }).messages.join('|'), 'one', 'ending at id 0 keeps the first message');
+    eq(labMessages(chat, { depth: 10, end: -1 }).messages.length, 3, 'end -1 is no cut');
+
+    // dropChatTags removes the named element WITH its contents, as the runtime does at intake.
+    const tagged = [m('keep <tracker>hidden state</tracker> tail')];
+    eq(labMessages(tagged, { depth: 10, dropSpec: 'tracker' }).messages[0], 'keep  tail',
+        'a dropped tag takes its contents with it');
+    eq(labMessages(tagged, { depth: 10, dropSpec: '  ' }).messages[0], 'keep <tracker>hidden state</tracker> tail',
+        'a blank spec drops nothing');
+    eq(labMessages([], { depth: 10 }).messages.length, 0, 'an empty chat is empty');
+    eq(labMessages(undefined, { depth: 10 }).hidden, 0, 'a missing chat is empty, not a throw');
+}

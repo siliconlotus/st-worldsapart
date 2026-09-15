@@ -11,7 +11,8 @@ const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const read = f => readFileSync(join(ROOT, f), 'utf8');
 
 // The ST-coupled half: DOM, toasts and popups live here, so every prose literal must be tagged (the lint below).
-const ST_HALF = ['worldsapart.js', 'extension/studio.mjs', 'extension/ui-widgets.mjs', 'extension/capture-ui.mjs', 'extension/keyword-tools.mjs', 'extension/lang-store.mjs'];
+// st-half.mjs owns the list; st-boundary-check asserts nothing else imports ST.
+import { ST_HALF } from './st-half.mjs';
 // Pure modules that take the tag as a parameter: their t`` literals are keys too, and they may not bind `t` either —
 // a shadowing binding turns a template inside it into a call on a string.
 const TAGGED_PURE = ['extension/keyword-audit.mjs', 'extension/matcher.mjs'];
