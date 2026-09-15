@@ -616,6 +616,7 @@
  "Temperature": "Température",
  "That undo belongs to “${0}”. Reopen it first.": "Cette annulation appartient à « ${0} ». Rouvrez-le d’abord.",
  "The browser blocked the file picker — run it again now that the chat is open.": "Le navigateur a bloqué le sélecteur de fichiers — relancez maintenant que la discussion est ouverte.",
+ "The key audit failed — see the browser console.": "L’audit des clés a échoué — consultez la console du navigateur.",
  "The order selected entries take in the prompt. A base sort, with optional tier grouping. This setting is saved. The Studio's sort views are not.": "L’ordre que prennent les entrées sélectionnées dans le prompt. Un tri de base, avec regroupement par niveaux facultatif. Ce réglage est enregistré. Les vues de tri du Studio ne le sont pas.",
  "The selected entries have no keys.": "Les entrées sélectionnées n’ont pas de clés.",
  "The visible entries have no keys at all.": "Les entrées visibles n’ont aucune clé.",

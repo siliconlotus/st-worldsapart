@@ -1393,13 +1393,18 @@ export async function lorebookStudio(preferredBook = null, open = null) {
             if (d) books.push({ name: n, data: structuredClone(d) });
             await deleteWorldInfo(n);
         }
+        // The per-book settings go with the book; restoreBook puts them back when the delete is undone.
+        const forgotten = names.map(n => ({ name: n, sort: settings().studioSortByBook?.[n], ignore: settings().keywordIgnore?.[n] }));
+        const s = settings();
+        for (const n of names) { delete s.studioSortByBook?.[n]; delete s.keywordIgnore?.[n]; }
+        saveSettingsDebounced();
         if (wasOpen) {
             selected = [...world_names].sort((a, b) => a.localeCompare(b)).find(n => !names.includes(n)) ?? null;
             data = null; scan = null; suggest = null; entryOpen.clear(); expanded.clear(); tall.clear(); advOpen.clear(); sugg.clear(); selectedEntries.clear(); lastSel = null;
         }
         dirty = false;
         if (undoTimer) clearTimeout(undoTimer);
-        pendingUndo = { books };
+        pendingUndo = { books, forgotten };
         undoTimer = setTimeout(() => { pendingUndo = null; undoTimer = null; renderBooks(); }, 30000);
         renderBooks();
         if (wasOpen) { if (selected) openBook(selected); else renderExplorer(); }
@@ -1425,6 +1430,13 @@ export async function lorebookStudio(preferredBook = null, open = null) {
             if (world_names.some(n => n.toLowerCase() === b.name.toLowerCase())) { skipped.push(b.name); continue; }
             await saveWorldInfo(b.name, b.data, true); restored++;
         }
+        // The book's per-book settings come back with it, unless the name was already taken again.
+        for (const f of p.forgotten ?? []) {
+            if (skipped.includes(f.name)) continue;
+            if (f.sort) (settings().studioSortByBook ??= {})[f.name] = f.sort;
+            if (f.ignore) (settings().keywordIgnore ??= {})[f.name] = f.ignore;
+        }
+        if (p.forgotten?.some(f => !skipped.includes(f.name))) saveSettingsDebounced();
         await updateWorldInfoList();
         if (restored && !selected) selected = p.books.find(b => world_names.includes(b.name))?.name ?? null;
         renderBooks();
@@ -1900,11 +1912,17 @@ export async function lorebookStudio(preferredBook = null, open = null) {
         };
         let onDisk = picked.filter(c => !c.open && c.avatar);
         if (runState.pluginAvailable && onDisk.length) {
-            const r = await fetch('/api/plugins/worlds-apart/scan-chats', {
-                method: 'POST', headers: getRequestHeaders(),
-                body: JSON.stringify({ keys, wordBoundary: settings().wordBoundary, dropChatTags: settings().dropChatTags ?? '', ...unitOpts, chats: onDisk.map(c => ({ dir: c.avatar.replace(/\.png$/, ''), file: c.file })) }),
-            });
-            const j = r.ok ? await r.json() : null;
+            let j = null;
+            try {
+                const r = await fetch('/api/plugins/worlds-apart/scan-chats', {
+                    method: 'POST', headers: getRequestHeaders(),
+                    body: JSON.stringify({ keys, wordBoundary: settings().wordBoundary, dropChatTags: settings().dropChatTags ?? '', ...unitOpts, chats: onDisk.map(c => ({ dir: c.avatar.replace(/\.png$/, ''), file: c.file })) }),
+                });
+                j = r.ok ? await r.json() : null;
+            } catch (error) {
+                // A plugin mid-redeploy or gone is not an audit failure: the browser scans the same chats below.
+                console.warn('Worlds Apart: /scan-chats threw, falling back to the client-side scan', error);
+            }
             // 0 messages means the route resolved no files; taking it would zero every key's share, so the browser retries them.
             if (Number(j?.messages)) {
                 for (const k of keys) {
@@ -2177,7 +2195,8 @@ export async function lorebookStudio(preferredBook = null, open = null) {
             await yieldFrame();
             if (!pane.isConnected || tab !== 'cleanup') return;   // switched away while we were blocked
             // runAudit, not rebuildScan: an audit that gathered no chat evidence is a different audit from the Explorer's.
-            await runAudit();
+            try { await runAudit(); }
+            catch (error) { console.error('Worlds Apart: key audit failed', error); toastr.error(t`The key audit failed — see the browser console.`, 'Worlds Apart'); }
             auditBtn.title = auditTitle();   // a rail square: the word rides the tooltip
             refreshTabStatus();
         }
@@ -3051,7 +3070,11 @@ export async function lorebookStudio(preferredBook = null, open = null) {
         scanBtn.type = 'button'; scanBtn.className = 'menu_button';
         scanBtn.innerHTML = '<i class="fa-solid fa-stethoscope"></i>';
         scanBtn.title = (scan ? t`Re-audit: flag dead, common and short keys.` : t`Key audit: flag dead, common and short keys.`) + '\n' + (chatHits ? t`Chat evidence: ${chatLabel()}, ${chatMsgs} messages.` : t`No chat searched yet.`);
-        scanBtn.addEventListener('click', async () => { await withBusy(scanBtn, '0.5', runAudit, '<i class="fa-solid fa-spinner fa-spin"></i>'); renderExplorer(); });
+        scanBtn.addEventListener('click', async () => {
+            try { await withBusy(scanBtn, '0.5', runAudit, '<i class="fa-solid fa-spinner fa-spin"></i>'); }
+            catch (error) { console.error('Worlds Apart: key audit failed', error); toastr.error(t`The key audit failed — see the browser console.`, 'Worlds Apart'); }
+            renderExplorer();
+        });
         const allOpen = entries.length > 0 && entries.every(x => entryOpen.has(x.uid));
         const expandBtn = document.createElement('button');
         expandBtn.type = 'button'; expandBtn.className = 'menu_button';

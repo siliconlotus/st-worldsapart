@@ -24,6 +24,7 @@ export const packStore = {
     },
 };
 
-const getJson = async url => { const r = await fetch(url, { cache: 'no-cache' }); if (!r.ok) throw new Error(`${r.status} ${url}`); return r.json(); };
+// Remote, and bounded: a slow GitHub is the pack's absence — lang.mjs falls back to the bundled 'en' — never a hang.
+const getJson = async url => { const r = await fetch(url, { cache: 'no-cache', signal: AbortSignal.timeout(30000) }); if (!r.ok) throw new Error(`${r.status} ${url}`); return r.json(); };
 export const fetchIndex = () => getJson(`${PACKS_BASE}packs.json`);
 export const fetchPack = lang => getJson(`${PACKS_BASE}wa-pack-${encodeURIComponent(lang)}.json`);
