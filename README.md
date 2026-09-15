@@ -61,6 +61,10 @@ deployed copies (`/ping`); if they differ, WA settings
 shows **⚠ Server plugin out of date — redeploy**. The check fires only when those files actually
 changed, so unrelated extension updates never trigger it.
 
+## Contributing
+
+Branch from `staging`, PR against `staging`, run `test/`. [CONTRIBUTING.md](CONTRIBUTING.md) has the rest.
+
 ## Data sources and licences
 
 The code is MIT. Two generated data files carry their own terms, stated in their headers:
