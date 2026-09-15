@@ -5,6 +5,25 @@ Keys get their own page: **[SMARTKEYS.md](SMARTKEYS.md)** — the `?` boolean ex
 matches every kind of key (substring by default, what the fold normalises, word boundaries, the
 Lucene delta).
 
+## Install
+
+In SillyTavern: **Extensions → Install extension**, and paste
+
+```
+https://github.com/siliconlotus/st-worldsapart
+```
+
+That installs the **release** channel, which is what you want unless you have a reason to want
+otherwise. To follow **staging** instead — fixes and features before they are released, and the place to
+report a bug you want fixed quickly — pick `staging` in the branch box when installing, or switch later
+with the branch control on WA's entry in the extensions list.
+
+Updates stay on the channel you chose. WA checks for them once a day and tells you when one is waiting.
+
+**Staging users:** when an update changes anything under `plugin/`, re-run the deploy command below and
+restart SillyTavern. WA tells you when this is needed — the settings panel shows **⚠ Server plugin out of
+date** and a notification that does not dismiss itself.
+
 ## Languages
 
 The interface follows SillyTavern's own language setting; French ships in `i18n/fr-fr.json`, and a new locale
