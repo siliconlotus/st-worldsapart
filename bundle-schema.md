@@ -78,9 +78,8 @@ id and a `name`; `captureId` survives a rename and is what a pointer between art
   "arms": [
     {
       "name": "shipped",
-      // WHAT PRODUCED THIS CAPTURE. Not declared versions — a staging checkout's package.json names a
-      // release it is not.
-      "waVersion": "matcher-and-studio@7cd7496+dirty",
+      // WHAT PRODUCED THIS CAPTURE: WA's declared version, ST's resolved one.
+      "waVersion": "1.0.0-alpha.1+build.14",
       "stVersion": "staging@4ed137241",
       // `scoredBy` is the fitted model's identity — a knob like any other, and the one thing
       // waVersion/stVersion cannot carry, since the model ships as data rather than as code.
@@ -241,9 +240,9 @@ stages 1 and 3 through `eval/scene.mjs` rather than trusting what any version co
 `package.json` names a release its tree is not (G8).
 
 ```
-staging@4ed137241             branch and commit
-main@1.0.0-alpha.1-1-g6cbcecf past a tag: version, distance, commit
-main@1.0.0-alpha.1+dirty      uncommitted changes, so the tree cannot be reconstructed
+staging@4ed137241             runtime: ST's /version, branch and short commit
+release@1.13.4-2-g6cbcecf     offline: git describe, past a tag
+release@1.13.4+dirty          offline: uncommitted changes, so the tree cannot be reconstructed
 ```
 
 Neither field is the drift signal. `pluginFP` is what served the capture and `sourceFP` what the
