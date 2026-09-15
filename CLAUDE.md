@@ -35,27 +35,35 @@ the n. Anything else is an assertion and says so. Unchallenged is not agreed.
 made; anything asserting what the doc does not already carry, with no measurement behind it, gets
 proposed first. The test is structural, not a judgement about how controversial it looks.
 
-## What is in eval/
+## What is in test/ and eval/
 
-- `*-check.mjs` — self-checking, run with no arguments. The regression suite is run by exit code:
-  `for f in eval/*-check.mjs; do node "$f" >/dev/null 2>&1 || echo "FAIL $f"; done`. `eq()` sets
+`test/` is the regression suite and nothing else; `eval/` is the research harness, and nothing in it
+ships or runs in CI.
+
+- `test/*-check.mjs` — self-checking, run with no arguments. The suite is run by exit code:
+  `for f in test/*-check.mjs; do node "$f" >/dev/null 2>&1 || echo "FAIL $f"; done`. `eq()` sets
   `process.exitCode`, so a failed assertion and a thrown error are the same signal; grepping for `^FAIL`
   misses throws.
-- `scene.mjs`, `metrics.mjs`, `corpus.mjs` — libraries, no CLI. `scene.mjs` loads and scores one graded scene;
-  `metrics.mjs` holds the shared statistics; `corpus.mjs` resolves which lorebooks a run reads. Every
-  tool goes through them: a second copy of the gazetteer or the scorers must never appear (R22), and no
-  tool names a book.
-- `fixtures/` + `sentinel-check.mjs` — a synthetic book and chat whose every audit verdict is written
-  down, and `install-sentinel.mjs`, which symlinks both into `data/default-user/` so the same fixture
-  opens in the Studio. Symlinks rather than copies, so editing the fixture changes what the UI shows;
-  every other check calls the classifier one layer below what the UI uses.
-- `synthetic-data/` — generates graded data and measures nothing. `grade-pending.mjs` turns a row list
-  (`{bundle, book, uid}`) into judge jobs and merges the answers back, reading `eval-data` and writing
-  `grade-jobs`. The rubric is `.claude/agents/scene-relevance.md`, where Claude Code discovers
+- `test/fixtures/` + `sentinel-check.mjs` — a synthetic book and chat whose every audit verdict is
+  written down, and `install-sentinel.mjs`, which symlinks both into `data/default-user/` so the same
+  fixture opens in the Studio. Symlinks rather than copies, so editing the fixture changes what the UI
+  shows; every other check calls the classifier one layer below what the UI uses.
+  `test/genre-cases.mjs` is test data on the same footing.
+- `eval/scene.mjs`, `metrics.mjs`, `corpus.mjs` — libraries, no CLI. `scene.mjs` loads and scores one
+  graded scene; `metrics.mjs` holds the shared statistics; `corpus.mjs` resolves which lorebooks a run
+  reads. Every tool goes through them: a second copy of the gazetteer or the scorers must never appear
+  (R22), and no tool names a book.
+- `eval/synthetic-data/` — generates graded data and measures nothing. `grade-pending.mjs` turns a row
+  list (`{bundle, book, uid}`) into judge jobs and merges the answers back, reading `eval-data` and
+  writing `grade-jobs`. The rubric is `.claude/agents/scene-relevance.md`, where Claude Code discovers
   subagents; `scene-relevance-min.md` is the minimal-prompt arm.
-- everything else (`*-grid.mjs`, `param-screen`, `keyword-audit`, `relevance-regress`) — benchmark and
-  analysis tools that take a vector index and/or lorebook path. Run bare they print a usage line and
-  exit non-zero; that is not a test failure.
+- everything else in `eval/` (`*-grid.mjs`, `param-screen`, `keyword-audit`, `relevance-regress`) —
+  benchmark and analysis tools that take a vector index and/or lorebook path. Run bare they print a
+  usage line and exit non-zero; that is not a test failure.
+
+**A module that is both a library and a CLI splits into the two.** `corpus.mjs` is the shape: `evalBooks()`
+computes and throws, `booksOrExit()` parses argv and exits. `reindex.mjs` and `global-basis.mjs` have not
+been split yet.
 
 ## A harness that spends anything appends; it never collects and writes at the end
 
@@ -207,10 +215,9 @@ import it; where the authority is the user, require it.
   out of the fit.
 - a deterministic value — the tier — is computed, and is never a parameter at all.
 
-One exception: `eval/bulk-reorder-check.mjs` string-slices `planUidReindex` out of `studio.mjs`, which
-imports ST. **A slice is not a test of the shipped code, and it fails silently**: a helper added outside
-the sliced range throws `ReferenceError`, and grepping for `^FAIL` reports green. If something in the
-ST-coupled half needs a check, move it to the pure half first.
+Where a check needs something from the ST-coupled half, the fix is to move that thing into a pure module
+first, as `planUidReindex` was moved into `keyedit.mjs` for `bulk-reorder-check.mjs`. A check that reads
+shipped code as text rather than importing it is not testing the shipped code, and it fails silently.
 
 ## Composite keys use US (``), never NUL
 
