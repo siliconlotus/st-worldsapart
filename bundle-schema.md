@@ -251,6 +251,11 @@ extension's own copy hashes to; unequal means the deployed plugin is not this ex
 change-based rather than release-based, so a release touching nothing in `plugin/` never reads as
 drift.
 
+Both suffixes WA writes are build metadata rather than prerelease: `+dirty` on a resolved version and
+`+build.N` on staging's declared one. `-` lowers precedence, so `1.2.0-beta.1` claims to precede a 1.2.0
+that may never exist; `+` is ignored in precedence, so the string carries the fact without making a
+claim about ordering. A `1.2.*` filter therefore includes both, and excluding them is an explicit act.
+
 ## `invalidConfiguration` marks a capture that is not a real configuration
 
 A control — a wrong-book capture, a deliberately broken parameter — looks exactly like a real scene. The
