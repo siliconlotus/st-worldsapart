@@ -6,6 +6,7 @@ import {
     event_types,
     getRequestHeaders,
     getMaxPromptTokens,
+    is_send_press,
     saveSettingsDebounced,
     substituteParams,
     getExtensionPromptByName,
@@ -723,8 +724,12 @@ function reportFailure(stage, consequence, error, severity = 'error', { dedupe =
     );
 }
 
-/** Stages 1 and 2: retrieval winners ∪ keyword adds, one FORCE_ACTIVATE emit. The two routes fail independently. */
-async function selectAndActivate(chat) {
+/** Stages 1 and 2: retrieval winners ∪ keyword adds, one FORCE_ACTIVATE emit. The two routes fail independently.
+ *  `token` and `abort` are the generation's identity: after every await a superseded or aborted generation bails
+ *  rather than write scan state or emit activations into whoever's prompt is now current. */
+async function selectAndActivate(chat, token, abort) {
+    const superseded = () => token !== runState.scanToken || Boolean(abort?.());
+
     chat = dropChatTags(chat);
 
     // /wa-dry reaches here without the interceptor, so the replayed scan judges the chat it was handed.
@@ -747,6 +752,7 @@ async function selectAndActivate(chat) {
             error);
         runState.lastScores.clear();
     }
+    if (superseded()) return;
 
     let adds = [];
     try {
@@ -757,6 +763,7 @@ async function selectAndActivate(chat) {
             t`No entry will activate by key this turn. WA has taken over key matching, so SillyTavern will not match them either — the prompt has only retrieved, constant and sticky entries.`,
             error);
     }
+    if (superseded()) return;
 
     const winnerKeys = new Set(winners.map(e => `${e.world}.${e.uid}`));
     const union = adds.filter(e => !winnerKeys.has(`${e.world}.${e.uid}`));
@@ -766,17 +773,27 @@ async function selectAndActivate(chat) {
         console.log(`Worlds Apart: activating ${winners.length} retrieved + ${union.length} keyword-matched entries`);
         await eventSource.emit(event_types.WORLDINFO_FORCE_ACTIVATE, activated);
     }
+    if (superseded()) return;
 
     // TRUE last, after WA's own fetches: the next WORLDINFO_ENTRIES_LOADED is core's scan. Cleared on the final SCAN_DONE loop and at generation end.
     for (const e of activated) runState.waMatched.add(`${e.world}.${e.uid}`);
+    runState.armedToken = token;
     runState.waOwnsScan = true;
 }
 
 // Hooks
 
-/** Generation interceptor. Quiet generations scan like visible ones; ST skips interceptors on its dry runs. */
-async function intercept(chat, _maxContext, _type) {
+/** Generation interceptor. ST calls it (chat, contextSize, abort, type): abort() reads the generation's AbortSignal.
+ *  Quiet generations scan like visible ones; ST skips interceptors on its dry runs. */
+async function intercept(chat, _maxContext, abort, type) {
+    // A quiet generation never displaces one the user has in flight: it stands down and runs core-native.
+    // is_send_press is the send lock the UI paths hold; Generate('quiet') sets it only later, at the prompt build.
+    if (type === 'quiet' && is_send_press) {
+        return;
+    }
+
     // Before the gates: this chat IS core's scan haystack (regex applied, files appended). Sliced so ST's later in-place splices cannot shift it.
+    const token = ++runState.scanToken;
     runState.scanChat = chat.slice();
     // Before the gate: a takeover flag leaked from an aborted scan would blank a disabled generation's keys.
     runState.waOwnsScan = false;
@@ -785,7 +802,7 @@ async function intercept(chat, _maxContext, _type) {
         return;
     }
 
-    await selectAndActivate(chat);
+    await selectAndActivate(chat, token, abort);
 }
 
 
@@ -1158,6 +1175,14 @@ async function onScanDone(args) {
         return;
     }
 
+    // A scan ranks only when its generation is the armed one. A superseded generation's late scan — its interceptor
+    // bailed, so core matched natively — must not rank with the current generation's scores.
+    if (runState.armedToken !== runState.scanToken) {
+        skip('the scan is not the armed generation\'s');
+        recordCoreSet(activated, args, 'superseded or unarmed generation — core in full');
+        return;
+    }
+
     // Past the gates the scan is WA's — the takeover has stashed core's keys and stood core's budget down — so a throw
     // must not pass silently: nothing undecided ships, and the failure is loud on every turn it happens.
     try {
@@ -1493,7 +1518,9 @@ async function dryRun(verbose = false) {
 
     // retrieve() is inside the try: a throw outside the finally leaves verboseRun/dryRunInProgress stuck true.
     try {
-        await selectAndActivate(chat);
+        // The dry run takes the next token: an in-flight generation's continuations stand down rather than interleave.
+        const token = ++runState.scanToken;
+        await selectAndActivate(chat, token);
 
         await getWorldInfoPrompt(forWI(chat), getMaxPromptTokens(), true, { ...scanSources(), trigger: 'normal' });
 

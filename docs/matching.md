@@ -60,6 +60,14 @@ core, whose match semantics would then flicker between two rule sets. A failure 
 the toast stays until dismissed, and the scan ships only what never needed a decision (constants,
 `@@activate`, armed stickies — `delivery.dropUndecided`). An undecided selection never ships.
 
+The pipeline is generation-scoped. Every interceptor entry takes the next `scanToken`, and a
+continuation whose token is no longer current — an aborted generation, or one a newer generation
+displaced — bails at its next await instead of writing scan state or emitting activations into
+someone else's prompt. A `quiet` generation never displaces one the user has in flight: it stands
+down and runs core-native. A scan ranks only while its generation is the armed one (`armedToken`).
+ST labels no scans, so two generations interleaving inside one arming window are one limitation WA
+accepts; the token bounds it to a single degraded turn.
+
 ## Keys
 
 A key is one of three things: a **plain** key, matched as a substring; a **regex** key, `/pattern/flags`
