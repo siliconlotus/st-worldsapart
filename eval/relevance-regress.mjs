@@ -714,7 +714,7 @@ const queryVec = async (S, name, value, em) => {
         if (bases.length > 1) {
             const b0 = bases[0];
             console.log(`\npaired against ${SWEPT}=${b0.value}, every arm at the ${AT} cutoff — per-scene F2, sign test`);
-            // Per book too: scenes on one book are nearer one observation than many (CLAUDE.md, Graded scenes).
+            // Per book too: scenes on one book are nearer one observation than many (CLAUDE.local.md, Graded scenes).
             const bk = b0.cutoff?.sceneBooks ?? [];
             const bookNames = [...new Set(bk)];
             for (const t of bases.slice(1)) {
@@ -764,5 +764,5 @@ const queryVec = async (S, name, value, em) => {
     }
 
     console.log('\nA coefficient is fitted over POOLED rows, so it has no paired sign test behind it — read the SE,');
-    console.log('and remember these rows sit on 3 corpora however many scenes they span (CLAUDE.md, graded scenes).');
+    console.log('and remember these rows sit on 3 corpora however many scenes they span (CLAUDE.local.md, graded scenes).');
 })();

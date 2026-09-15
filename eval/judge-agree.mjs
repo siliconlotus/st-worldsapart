@@ -80,4 +80,4 @@ for (const [s, d] of [...deltas.slice(0, 3), ...deltas.slice(-3)].filter((v, i, 
 }
 
 console.log(`\nreference: the contract vs itself is 87.7% exact / 98.3% within-1 overall, but 79% at the`);
-console.log(`head of a pool, and 4 of 13 rows originally >= 3 came back below it (CLAUDE.md, "Graded scenes").`);
+console.log(`head of a pool, and 4 of 13 rows originally >= 3 came back below it (CLAUDE.local.md, "Graded scenes").`);

@@ -2,8 +2,9 @@
 
 Two modules. `keyword-suggest.mjs` proposes keys for an entry from its own text and from a model;
 `keyword-audit.mjs` judges the keys an entry has. Both are ST-free; `keyword-tools.mjs` and `studio.mjs`
-drive them. Matching itself is `matching.md`. Vocabulary and claim discipline: `CLAUDE.md`; claim
-IDs: `eval/eval-data/measured-claims.md`.
+drive them. Matching itself is `matching.md`; vocabulary is `CLAUDE.md`. A measured claim cites its
+register entry by ID and anything else is an assertion; the register itself is not published, since it
+holds one person's corpus.
 
 ## What a key is for
 

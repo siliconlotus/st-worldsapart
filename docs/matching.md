@@ -3,8 +3,8 @@
 How a key is written, how it is matched, and what WA does at each stage of a generation. The suggester
 and the audit are `keyword-suggestions.md`; ST core's own scan is `eval/st-worldinfo.md`; core defects
 are `upstream-st.md` in the SillyTavern root. The stage numbering is `CLAUDE.md`'s (*Four stages, and
-the three orderings*). A measured claim cites its register entry, `eval/eval-data/measured-claims.md`, by
-ID; anything else is an assertion.
+the three orderings*). A measured claim cites its register entry by ID and anything else is an
+assertion; the register itself is not published, since it holds one person's corpus.
 
 ## Principles
 
