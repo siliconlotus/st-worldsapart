@@ -57,11 +57,6 @@ const ARMS = {
 
     'centering=off': { meanCentered: false },
 
-    // The high-band hold-out: every Sommers key curation retained above a 15.6% match rate (F41); Teddy sits at the band edge and is out.
-    'dropKeys=hiband': { dropKeys: ['Jeffrey', 'Liam', 'Brad', 'Arthur', 'Shane'] },
-    // Kyle (player persona), Sara and Ian (orthographic collisions) are excluded on purpose.
-    'addKeys=cast': { addCastKeys: ['Jeffrey', 'Shane', 'Brad', 'Micah', 'Teddy', 'Alex', 'Dylan', 'Liam', 'Marjorie', 'Valentina', 'Arthur'] },
-    'addKeys=cast+dropHi': { addCastKeys: ['Jeffrey', 'Shane', 'Brad', 'Micah', 'Teddy', 'Alex', 'Dylan', 'Liam', 'Marjorie', 'Valentina', 'Arthur'], dropKeys: ['Jeffrey', 'Liam', 'Brad', 'Arthur', 'Shane'] },
     // Read with --metric fAtCut; a fixed-k metric cannot see the cut.
     'cutoff=0.04': { memoryCutoff: 0.04 },
     'cutoff=0.12': { memoryCutoff: 0.12 },
