@@ -27,6 +27,15 @@ for (const file of files) {
     if (outside.length) escapes.push([relative(ROOT, file), outside]);
 }
 
+// An import that lands INSIDE the repo, as a repo-relative path: the edges between our own modules.
+const edges = new Map();
+for (const file of files) {
+    const rel = relative(ROOT, file);
+    edges.set(rel, [...readFileSync(file, 'utf8').matchAll(IMPORT)].map(m => m[1])
+        .map(spec => relative(ROOT, resolve(dirname(file), spec)))
+        .filter(t => !t.startsWith('..')));
+}
+
 const found = escapes.map(([f]) => f).sort();
 const DECLARED = [...ST_HALF, ...ST_SERVER].sort();
 eq(found.join('\n'), DECLARED.join('\n'),
@@ -37,3 +46,11 @@ eq(found.join('\n'), DECLARED.join('\n'),
 const pure = files.map(f => relative(ROOT, f)).filter(f => !DECLARED.includes(f));
 eq(pure.some(f => found.includes(f)), false, 'no module outside the ST half reaches past the repo root');
 eq(pure.length > 20, true, 'and the sweep is reading the tree, not an empty list');
+
+// Importing an ST-coupled module is as fatal as importing ST: it drags the same modules in behind it, so the
+// importer stops being node-importable too. The escape sweep above cannot see that — it reads each file alone.
+const inbound = [...edges].filter(([f]) => !DECLARED.includes(f))
+    .flatMap(([f, targets]) => targets.filter(t => DECLARED.includes(t)).map(t => `${f} -> ${t}`));
+eq(inbound.join('\n'), '', 'no pure module imports the ST half; such an import is transitively ST-coupled and the '
+    + 'escape sweep, which reads one file at a time, would pass it');
+eq([...edges.values()].flat().length > 40, true, 'and the edge map is populated, not silently empty');
