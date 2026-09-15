@@ -443,6 +443,21 @@ unless the threshold was derived from a measurement, spec facts stated without o
 - **K13** — Priming secondaries up front: 2ms vs 102ms over 200 entries × 20 segments.
   — `worldsapart.js:1085`.
 
+- **K14** — Audit flag evidence: unfolded "isn't" scored maximally rare and fired in 770 of 16,360
+  messages; KEY_DUPE sits in an empty band (dupes 0.52–1.00, highest non-dupe 0.294, 7 books;
+  near-misses are consecutive STMB parts at 0.200; calibrating instance 0.584 vs 0.289 in-book
+  ceiling; raw overlap reads ~0.6 on unrelated same-book pairs — hence rare-vocabulary Jaccard);
+  fragment gap: 3 uncurated entries, 22 keys, 0 hits over 5473 messages, all unflagged;
+  KEY_CHAT_COMMON's 20% is a bound not a fit (no key one curated book's curation kept fired above 11%; of 20
+  keys over 20% across seven books, 8 sit on vectorized entries, rest mostly cast on sticky sheets);
+  `eng`-flag precision against chat: 1 of 38 flagged keys actually fires broadly; dropping the whole
+  yellow band: +0.036 nDCG on one graded book, 0.000/−0.0006 on two others; dead-flag by provenance:
+  on STMB entries 12/39/40% of keys ever appear in chat (three full histories) vs ~90% deliberate
+  aliases on a hand-written public book (real finds: two typos, two apostrophe breaks); near-dupe
+  discovery: one hand-disabled pair in a 334-entry book; the O(n²) pass is 55k intersections on the
+  largest book. — `extension/keyword-audit.mjs:21,:50,:54,:73,:203,:387,:523,:531,:552,:557,:564,:575`;
+  `extension/studio.mjs:137,:1102`.
+
 - **K17** — [VERIFIED, not statistical] Core's scan behaviour read from `world-info.js`: both
   delay-level gates run before `getExternallyActivated`, and `externalActivations` is a static map
   read non-destructively per pass — the blind emit is refused on the initial pass and stands for the
@@ -477,6 +492,14 @@ unless the threshold was derived from a measurement, spec facts stated without o
   bigram pair reads 8/65/100/100%; the legal-part rule matters — 13/84 and 31/102 of dropped grams on
   two books were being counted against an illegal part. — `extension/keyword-suggest.mjs:545,:563`.
 
+- **S7** — Subsumption is match-aware because specificity dies unattested: a half of an INCOHESIVE
+  tetragram out-fires the whole 96% of the time, 13% when cohesive (one book and its 5598-message
+  chat); a unit never swallows a bare word, and ~a third of swallowed unigrams sat in that band.
+  — `extension/keyword-suggest.mjs:577,:602`; `test/keyword-extract-check.mjs:364,:504`.
+
+- **S8** — dfCeil at 0.15 was silently cutting recurring cast: a character in ~25% of a book’s entries.
+  — `extension/keyword-suggest.mjs:709`.
+
 - **S9** — The cap: uncapped over 39 books / 3405 entries an entry yields median 17 / mean 27
   candidates, near-linear ~7 per 1000 chars; cap 8 discarded ~70% of gate survivors (not junk — on a
   269-candidate entry the next hundred still held proper nouns); 30 sits above the p75 of 29. The
@@ -498,6 +521,22 @@ unless the threshold was derived from a measurement, spec facts stated without o
 
 - **S21** — [zero-result census] `matchPersonaDescription` and siblings: nothing on disk sets one.
   — `docs/keyword-suggestions.md:348`.
+- **S24** — Fiction register vs wordfreq for the Zipf table, gold pairs + hand-written public books. Shift:
+  genre and narrative vocabulary rises 0.3–0.7 (sword 4.4→4.8, cloak 3.6→4.3, mage 3.1→3.7, shoulder
+  4.5→5.2, thrall/necromancer absent→3.0+), web/tech/business falls (spreadsheet, inbox, firewall pass
+  the gate). Gate kills 98% shared (161/407/2155 wordfreq vs 158/395/2078 fiction); fiction's own
+  kills — teak, collarbone, unhurried, divan, minotaur — hold 0 curated keys, wordfreq's own 126
+  hold 9. Curated single-word keys the unigram gate kills over 7 books / 1041 keys: wordfreq
+  473, fiction 436, a 0.5-mean blend 452; each register kills the other's vocabulary (fiction-only 23:
+  necromancer, minotaur, inquisitor, elven, first names; wordfreq-only 60: bucharest, firewall, heist,
+  implants). Decided on principle, not on these: the prior judges "ordinary" against fiction prose, and
+  a suggester over-filtering costs one typed key. Genre case "thrall" reclassified as a rejection.
+  POS sets from the same corpus at >= 1000 tagged occurrences on wordfreq-known words: VA95 10326 /
+  VA85 4723 / ADJ85 6856 vs SUBTLEX 13317 / 1611 / 9056, 67% / 9% / 67% of the fiction sets inside
+  SUBTLEX's; on the gold pairs the swap moves 0 / 11 / 72 offered terms out and 19 / 25 / 235 in, one
+  curated key each way. Shipped: fiction table + fiction POS, SUBTLEX out — gate kills
+  158 / 403 / 2146, chat common still 1.9% / 4.0% / 1.1%. n = 3 pairs, 7 books, one user.
+  — `docs/keyword-suggestions.md:365`; `build-zipf.py`.
 
 ## G — Grading, judges, bundles
 
