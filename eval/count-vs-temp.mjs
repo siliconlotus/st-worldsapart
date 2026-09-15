@@ -5,11 +5,11 @@ import { createHash } from 'node:crypto';
 import { buildKeySuggest, parseKeyList, STUDIO_SUGGEST_OPTS } from '../extension/keyword-suggest.mjs';
 import { countKey } from '../extension/matcher.mjs';
 import { mean } from './metrics.mjs';
+import { booksOrExit, WORLDS } from './corpus.mjs';
 import { fileURLToPath } from 'node:url';
 
 const HERE = fileURLToPath(new URL('.', import.meta.url));
 const OLLAMA = process.env.OLLAMA_URL ?? 'http://localhost:11434';
-const WORLDS = `${HERE}../../../../../../data/default-user/worlds`;
 const LADDER_CACHE = `${HERE}eval-data/temp-ladder-cache.json`;
 const CACHE_PATH = `${HERE}eval-data/count-vs-temp-cache.json`;
 
@@ -27,7 +27,7 @@ const hash = s => createHash('sha1').update(s).digest('hex').slice(0, 16);
 const ladder = existsSync(LADDER_CACHE) ? JSON.parse(readFileSync(LADDER_CACHE, 'utf8')) : {};
 const cache = existsSync(CACHE_PATH) ? JSON.parse(readFileSync(CACHE_PATH, 'utf8')) : {};
 
-const files = { foxbridge: 'Foxbridge.json', sommers: 'Sommers_Pack__v22.json', timewhore: 'LTM_Isekai_-_Time_Whore_updated.json' };
+const files = Object.fromEntries(Object.entries(booksOrExit()).map(([slug, b]) => [slug, b.file]));
 const canon = {}, refKeys = {};
 for (const [slug, f] of Object.entries(files)) {
     const d = JSON.parse(readFileSync(`${WORLDS}/${f}`, 'utf8'));

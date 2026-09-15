@@ -4,6 +4,7 @@
 import { readFileSync, appendFileSync, existsSync } from 'node:fs';
 import { buildKeySuggest, parseKeyList, STUDIO_SUGGEST_OPTS } from '../extension/keyword-suggest.mjs';
 import { mean, fmt3 as fmt } from './metrics.mjs';
+import { booksOrExit, WORLDS } from './corpus.mjs';
 import { fileURLToPath } from 'node:url';
 
 const HERE = fileURLToPath(new URL('.', import.meta.url));
@@ -29,8 +30,7 @@ const VARIANTS = {
 const SHIPPED = 'Output as many keywords as you are confident about';
 const useVariants = arg('variants', 'all') === 'shipped' ? { 'range-5-10': SHIPPED } : VARIANTS;
 
-const files = { foxbridge: 'Foxbridge.json', sommers: 'Sommers_Pack__v22.json', timewhore: 'LTM_Isekai_-_Time_Whore_updated.json' };
-const WORLDS = `${HERE}../../../../../../data/default-user/worlds`;
+const files = Object.fromEntries(Object.entries(booksOrExit()).map(([slug, b]) => [slug, b.file]));
 const canon = {}, refKeys = {};
 for (const [slug, f] of Object.entries(files)) {
     const d = JSON.parse(readFileSync(`${WORLDS}/${f}`, 'utf8'));

@@ -9,19 +9,15 @@ import { createHash } from 'node:crypto';
 import { buildKeySuggest, buildKeyPrompt, parseKeyList, STUDIO_SUGGEST_OPTS } from '../extension/keyword-suggest.mjs';
 import { countKey } from '../extension/matcher.mjs';
 import { mean, fmt3 as fmt } from './metrics.mjs';
+import { booksOrExit, WORLDS } from './corpus.mjs';
 import { fileURLToPath } from 'node:url';
 
 const HERE = fileURLToPath(new URL('.', import.meta.url));
 const CACHE_PATH = `${HERE}eval-data/temp-ladder-cache.json`;
 const OLLAMA = process.env.OLLAMA_URL ?? 'http://localhost:11434';
-const WORLDS = `${HERE}../../../../../../data/default-user/worlds`;
 
 // Only hand-written or curated books can stand as a reference (eval-data/README.md); order fixed so the sample is reproducible.
-const BOOKS = [
-    ['foxbridge', 'Foxbridge.json', 'hand-written'],
-    ['sommers', 'Sommers_Pack__v22.json', 'manually curated'],
-    ['timewhore', 'LTM_Isekai_-_Time_Whore_updated.json', 'manually curated (mostly)'],
-];
+const BOOKS = Object.entries(booksOrExit()).map(([slug, b]) => [slug, b.file, b.provenance]);
 
 const arg = (name, dflt = null) => {
     const i = process.argv.indexOf(`--${name}`);

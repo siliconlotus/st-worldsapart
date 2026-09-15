@@ -41,9 +41,10 @@ proposed first. The test is structural, not a judgement about how controversial 
   `for f in eval/*-check.mjs; do node "$f" >/dev/null 2>&1 || echo "FAIL $f"; done`. `eq()` sets
   `process.exitCode`, so a failed assertion and a thrown error are the same signal; grepping for `^FAIL`
   misses throws.
-- `scene.mjs`, `metrics.mjs` — libraries, no CLI. `scene.mjs` loads and scores one graded scene;
-  `metrics.mjs` holds the shared statistics. Every tool goes through them: a second copy of the
-  gazetteer or the scorers must never appear (R22).
+- `scene.mjs`, `metrics.mjs`, `corpus.mjs` — libraries, no CLI. `scene.mjs` loads and scores one graded scene;
+  `metrics.mjs` holds the shared statistics; `corpus.mjs` resolves which lorebooks a run reads. Every
+  tool goes through them: a second copy of the gazetteer or the scorers must never appear (R22), and no
+  tool names a book.
 - `fixtures/` + `sentinel-check.mjs` — a synthetic book and chat whose every audit verdict is written
   down, and `install-sentinel.mjs`, which symlinks both into `data/default-user/` so the same fixture
   opens in the Studio. Symlinks rather than copies, so editing the fixture changes what the UI shows;
@@ -199,7 +200,9 @@ import it; where the authority is the user, require it.
   everywhere. Import it.
 - a user setting — the embedding model, `relevanceCutoff` — has no knowable value, so the harness must
   be told (a flag, the env, or the bundle's own record) and refuse when none supplies it. No eval harness
-  carries a fallback value for one.
+  carries a fallback value for one. **Which lorebooks a sweep reads is one of these**: `corpus.mjs`
+  `booksOrExit()` takes them from `--books A.json,B.json` or the gitignored `eval-data/books.json`, so no
+  tool names a book and any developer can point the evals at a corpus they know.
 - a derived constant — the fitted feature set — comes off the artifact it derives from. Read `features`
   out of the fit.
 - a deterministic value — the tier — is computed, and is never a parameter at all.
