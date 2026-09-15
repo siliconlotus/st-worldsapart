@@ -46,6 +46,8 @@ symbols. Adjacent terms get an implicit `AND`, so `? moon mission` requires both
 operators only at the *start* of a token, so `sci-fi` and `c++` are single terms; `+` in Lucene's
 per-term position (`? +fire +water`) means "required", which the implicit AND already says.
 **Precedence:** `(...)` before `NOT` before `AND` before `OR`/`XOR`. When in doubt, use parens.
+Groups and negations nest up to **100** deep; a key that nests deeper is refused with an error — a
+keyword that deep is a mistake, and the key editor will say so.
 
 **Flags** are prefixes on a single term: `=` whole word (`? =cat` will not match `catalogue`), `^`
 case-sensitive (`? ^NASA` will not match `nasa`). They apply per term, and a SmartKey **ignores the

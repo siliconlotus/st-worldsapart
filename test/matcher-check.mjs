@@ -200,6 +200,11 @@ eq(scored({ key: ['? -zebra'] }, 'the cosmonaut waited'), false, 'an entry keyed
 eq(countKey('? -zebra', 'the cosmonaut waited', false, false), 1,
     'countKey itself is unfiltered — it answers what the expression does, and the filter is the caller\'s');
 
+// --- a key the grammar refuses counts 0 wherever it is matched; the depth ceiling is parse's, not the stack's (~2200 groups on it)
+eq(countKey(`?${'('.repeat(101)}x`, 'x'), 0, 'a key nesting past the ceiling counts 0, not a throw');
+eq(countKey(`?${'!'.repeat(101)}x`, 'x'), 0, 'negations past the ceiling likewise');
+eq(countKey(`?${'('.repeat(100)}x`, 'x'), 1, 'the ceiling itself parses and matches');
+
 
 // --- keyExcerpts: the first place a key matched, marked «so»; must agree with countKey on WHERE
 const keyExcerpt = (key, text, cs, ww, context = 28) => markExcerptText(keyExcerpts(key, text, cs, ww, context, 1)[0]);

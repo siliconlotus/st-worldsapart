@@ -1,7 +1,7 @@
 // Verifies the SmartKeys boolean-query engine against the spec's acceptance table,
 // plus the lexer edge cases the spec calls out (internal hyphens, weights, flags).
 import { countChatHits, countKey, keywordScore, repeatCurveOf, setBoundaryMode, isRegexKey } from '../extension/matcher.mjs';
-import { tokenize, parse, evaluate, buildAutomaton, scanAutomaton, validateSmartKey, fold, resetSmartKeys } from '../extension/smartkeys.mjs';
+import { tokenize, parse, evaluate, buildAutomaton, scanAutomaton, validateSmartKey, fold, resetSmartKeys, createScanScope, registerKeys } from '../extension/smartkeys.mjs';
 import { buildKeyPruneScan, pathProbes } from '../extension/keyword-audit.mjs';
 import { eq } from '../eval/lib/metrics.mjs';
 
@@ -251,10 +251,29 @@ console.log('ok   weight delimiter is ::, single colon is ordinary text');
     eq(codes('? fire::0'), 'warn:all-zero-weights', 'a zero-weight key gates without scoring');
     eq(codes('? fire::0 water'), '', 'only ALL weights being zero is worth saying');
 
+    const deep = n => `?${'('.repeat(n)}fire${')'.repeat(n)}`;
+    eq(codes(deep(100)), '', 'a hundred nested groups is the ceiling, and parses clean');
+    eq(codes(deep(101)), 'error:too-deep', 'one group past the ceiling is refused, not a stack overflow');
+    eq(codes(`?${'-'.repeat(101)}fire`), 'error:too-deep', 'negations count toward the same ceiling');
+    eq(validateSmartKey(deep(101))[0].message.includes('100'), true, 'the refusal names the ceiling');
+
     eq(codes('plain key'), '', 'a plain key is not a SmartKey and gets no opinion');
     eq(codes('/regex/i'), '', 'nor is a regex key');
 }
 console.log('ok   SmartKey structural validation');
+
+// The nesting ceiling, and what a refused key does at registration and at match time.
+{
+    const deep = n => `?${'('.repeat(n)}fire${')'.repeat(n)}`;
+    eq(matches(deep(100), 'on a fire escape'), true, 'a key at the ceiling still matches');
+    eq(matches(deep(101), 'on a fire escape'), false, 'one group past it counts 0 — refused, not thrown');
+    eq(matches(`?${'!'.repeat(101)}fire`, 'on a fire escape'), false, 'a negation chain past it likewise');
+    const scope = createScanScope();
+    registerKeys([deep(101), 'fire'], scope);   // the refusal must stop at this key: the rest of the pass registers
+    eq(countKey('fire', 'on a fire escape', false, false, scope), 1, 'a plain key registered beside a refused one still counts');
+    eq(countKey(deep(101), 'on a fire escape', false, false, scope), 0, 'the refused key answers 0 from the scope it failed in');
+}
+console.log('ok   nesting ceiling: 100 groups or negations, refused past that');
 
 {
     const entries = {};

@@ -100,44 +100,52 @@ export function tokenize(input) {
     return tokens;
 }
 
+// Nesting ceiling: keywords, not programs. parse throws past it and validateSmartKey relays that as `too-deep`,
+// so the recursion below never reaches the stack limit (~2200 groups deep on the engine's own stack) and a
+// refused key can never abort the scan matching it.
+const MAX_DEPTH = 100;
+const tooDeep = () => new Error(`a SmartKey nests more than ${MAX_DEPTH} groups or negations deep`);
+
 /** Recursive descent; adjacent primaries get an implicit AND. Precedence: (...) > NOT > AND > OR/XOR. Malformed tails degrade to null (matches nothing). */
 export function parse(tokens) {
     let i = 0;
     const peek = () => tokens[i];
     // A binary operator with nothing on one side keeps the side that exists; the validator is what tells the author.
     const bin = (type, left, right) => (left && right ? { type, left, right } : left ?? right);
-    const parseOr = () => {
-        let left = parseAnd();
+    const parseOr = d => {
+        let left = parseAnd(d);
         while (peek()?.type === 'OR' || peek()?.type === 'XOR') {
             const type = tokens[i++].type;
-            left = bin(type, left, parseAnd());
+            left = bin(type, left, parseAnd(d));
         }
         return left;
     };
-    const parseAnd = () => {
-        let left = parseUnary();
+    const parseAnd = d => {
+        let left = parseUnary(d);
         while (peek() && (peek().type === 'AND' || peek().type === 'TERM' || peek().type === 'REGEX' || peek().type === 'LPAREN' || peek().type === 'NOT')) {
             if (peek().type === 'AND') i++;
-            left = bin('AND', left, parseUnary());
+            left = bin('AND', left, parseUnary(d));
         }
         return left;
     };
-    const parseUnary = () => {
+    const parseUnary = d => {
         if (peek()?.type === 'NOT') {
+            if (d >= MAX_DEPTH) throw tooDeep();
             i++;
-            const operand = parseUnary();
+            const operand = parseUnary(d + 1);
             // Dangling NOT ("? -") must not become NOT(null) = matches-everything.
             return operand ? { type: 'NOT', operand } : null;
         }
-        return parsePrimary();
+        return parsePrimary(d);
     };
-    const parsePrimary = () => {
+    const parsePrimary = d => {
         // A binary operator in prefix position is Lucene's per-term marker (`+fire`): skipped, not a missing left operand.
         while (peek() && (peek().type === 'AND' || peek().type === 'OR' || peek().type === 'XOR')) i++;
         const t = tokens[i++];
         if (!t) return null;
         if (t.type === 'LPAREN') {
-            const node = parseOr();
+            if (d >= MAX_DEPTH) throw tooDeep();
+            const node = parseOr(d + 1);
             let w, near;
             if (peek()?.type === 'RPAREN') { ({ weight: w, near } = tokens[i]); i++; }
             // `groupWeight`, never `weight`: a TERM already multiplies its own into wsum, and `(fire::2)::3` is both.
@@ -148,7 +156,7 @@ export function parse(tokens) {
         }
         return t.type === 'TERM' || t.type === 'REGEX' ? t : null; // stray RPAREN — drop
     };
-    return parseOr();
+    return parseOr(0);
 }
 
 /** Whether any term is reachable without passing through an odd number of NOTs — evaluate() gives NOT no score. */
@@ -196,7 +204,17 @@ export function validateSmartKey(raw) {
         return out;   // everything below reads the terms; no point compounding the report
     }
 
-    if (!hasPositiveTerm(parse(tokens))) {
+    let ast = null;
+    try {
+        ast = parse(tokens);
+    } catch {
+        out.push({
+            severity: 'error', code: 'too-deep',
+            message: `The key nests deeper than ${MAX_DEPTH} groups or negations, which is past what a keyword needs. Flatten some of the “(” levels — or split it into two keys.`,
+        });
+        return out;   // a key refused at parse needs no second opinion
+    }
+    if (!hasPositiveTerm(ast)) {
         out.push({
             severity: 'error', code: 'negation-only',
             message: 'Every term is negated, so this matches whenever they are absent — which is almost always. Add a term that must be present.',
@@ -621,7 +639,12 @@ export function registerKeys(rawKeys, scope = defaultScope) {
         const raw = String(key ?? '').trim();
         if (!raw || isRegexKey(raw)) continue;
         if (raw.startsWith('?')) {
-            ensureAst(scope, raw, () => parse(tokenize(raw)));
+            // Fed raw stashes too, not only usableKeys' output: a key the grammar refuses is skipped here, and countKey answers 0 for it.
+            try {
+                ensureAst(scope, raw, () => parse(tokenize(raw)));
+            } catch {
+                // Refused at parse — validateSmartKey is the author's answer.
+            }
         } else {
             for (const v of keyVariants(raw)) internLiteral(scope, fold(v));
         }

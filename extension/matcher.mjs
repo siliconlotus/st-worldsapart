@@ -435,9 +435,15 @@ export function countKey(key, text, caseSensitive, wholeWords, scope, gateAst = 
     }
 
     if (raw.startsWith('?')) {
-        const { matched, scoreBoost } = evaluateSmartKey(raw, text, scope);
+        // Audit and Lab callers hand over keys usableKeys never filtered: a key the grammar refuses counts 0, and never aborts the scan matching it.
+        let sk;
+        try {
+            sk = evaluateSmartKey(raw, text, scope);
+        } catch {
+            return 0;
+        }
         // A negation-only SmartKey matches with zero weight; floor only that case, so a sub-1 :weight still down-weights.
-        return matched ? (scoreBoost > 0 ? scoreBoost : 1) : 0;
+        return sk.matched ? (sk.scoreBoost > 0 ? sk.scoreBoost : 1) : 0;
     }
 
     if (isRegexKey(raw)) return countRegexKey(raw, text);
@@ -641,7 +647,14 @@ const gateNodeFor = (gate, caseSensitive, wholeWords) => {
     const sec = (Array.isArray(gate?.keys) ? gate.keys : []).map(k => String(k ?? '').trim()).filter(Boolean);
     if (!sec.length) return () => null;
     const logic = Number(gate?.logic ?? WI_LOGIC.AND_ANY);
-    return key => synthesizeSecondary(key, sec, logic, { caseSensitive, wholeWords });
+    return key => {
+        // A gate list a caller did not run through secondaryKeys can hold a key the grammar refuses: it gates nothing rather than aborting.
+        try {
+            return synthesizeSecondary(key, sec, logic, { caseSensitive, wholeWords });
+        } catch {
+            return null;
+        }
+    };
 };
 
 /** The leaves of the key's AST, or one synthetic TERM branch for a plain key with no gate. */

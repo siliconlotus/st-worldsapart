@@ -80,7 +80,9 @@ resolves toward the literal: `*` is text, `~` is text except as `~N` on a group,
   `AND`, then `OR`/`XOR`. A binary operator with nothing on one side keeps the side that exists; a
   dangling `NOT` and a stray `)` are dropped; a malformed tail parses to nothing and matches nothing.
 - **Groups.** `(...)` group; a weight after the close, `(copper pipe)::3`, multiplies every unit inside
-  and composes with term weights and nested groups.
+  and composes with term weights and nested groups. Groups and negations nest at most 100 deep; past
+  that the key is refused (`too-deep` in `validateSmartKey`), which keeps parse and evaluate far from
+  the stack limit — a refused key counts 0, and never aborts the scan matching it.
 - **A regex is a term.** `/pattern/flags` at token start, negatable and weightable, closed at the
   leftmost `/` outside a character class whose body compiles and whose flag run ends at a token
   boundary; `\/` is a literal slash. A term reads exactly as the same string reads as a whole key
