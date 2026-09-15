@@ -1,4 +1,4 @@
-// version.mjs — staging's build counter and the version predicates the pre-push gate reads.
+// version.mjs — staging's build counter and the version predicates the pre-push gate and the bump script read.
 
 // Base is SemVer major.minor.patch with an optional prerelease; `+build.N` is the only build metadata WA writes.
 const PARTS = /^(\d+\.\d+\.\d+(?:-[0-9A-Za-z][0-9A-Za-z.-]*)?)(?:\+build\.(\d+))?$/;
@@ -17,4 +17,10 @@ export const isReleaseVersion = v => /^\d+\.\d+\.\d+$/.test(String(v ?? ''));
 export const hasBuildCounter = v => {
     const m = PARTS.exec(String(v ?? ''));
     return Boolean(m && m[2]);
+};
+
+/** A valid WA version with no counter — a release cut parked on staging. */
+export const isCounterless = v => {
+    const m = PARTS.exec(String(v ?? ''));
+    return Boolean(m && !m[2]);
 };
