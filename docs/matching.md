@@ -55,7 +55,10 @@ settings as parameters.
 
 If WA is enabled it owns activation; there is no half-owned mode. A matcher failure is reported once
 per distinct message per session (`reportFailure`) and WA keeps ownership: no per-turn fallback to
-core, whose match semantics would then flicker between two rule sets.
+core, whose match semantics would then flicker between two rule sets. A failure of the ranking itself
+— a throw inside `onScanDone` — is louder and decides less: it is reported on every turn it happens,
+the toast stays until dismissed, and the scan ships only what never needed a decision (constants,
+`@@activate`, armed stickies — `delivery.dropUndecided`). An undecided selection never ships.
 
 ## Keys
 

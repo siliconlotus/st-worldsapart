@@ -701,15 +701,16 @@ async function keywordActivations(chat) {
 const reportedFailures = new Set();
 
 /**
- * Toasts a generation-time failure once per distinct message per session, with the top stack frame.
+ * Toasts a generation-time failure with the top stack frame — once per distinct message per session, or on every
+ * occurrence when `dedupe` is false, and stuck until dismissed when `sticky` is.
  * @param {string} consequence What the user will observe this turn
  * @param {'error'|'warning'} [severity]
  */
-function reportFailure(stage, consequence, error, severity = 'error') {
+function reportFailure(stage, consequence, error, severity = 'error', { dedupe = true, sticky = false } = {}) {
     console.error(`Worlds Apart: ${stage} — ${consequence}`, error);
     const cause = String(error?.message ?? error);
-    const key = `${stage}${cause}`;
-    if (reportedFailures.has(key)) return;
+    const key = `${stage}␟${cause}`;
+    if (dedupe && reportedFailures.has(key)) return;
     reportedFailures.add(key);
     const frame = String(error?.stack ?? '').split('\n')[1]?.trim().replace(/^at\s+/, '');
     // ST sets toastr.options.escapeHtml = true globally, which collapses `\n`; opt out per toast and escape by hand.
@@ -718,7 +719,7 @@ function reportFailure(stage, consequence, error, severity = 'error') {
             escapeHtml(cause) + (frame ? `<br>&nbsp;&nbsp;at ${escapeHtml(frame)}` : ''),
             t`See the browser console for the full trace.`].join('<br><br>'),
         `Worlds Apart: ${stage}`,
-        { timeOut: 20000, extendedTimeOut: 15000, escapeHtml: false, closeButton: true },
+        { timeOut: sticky ? 0 : 20000, extendedTimeOut: sticky ? 0 : 15000, escapeHtml: false, closeButton: true, tapToDismiss: !sticky },
     );
 }
 
@@ -1157,6 +1158,20 @@ async function onScanDone(args) {
         return;
     }
 
+    // Past the gates the scan is WA's — the takeover has stashed core's keys and stood core's budget down — so a throw
+    // must not pass silently: nothing undecided ships, and the failure is loud on every turn it happens.
+    try {
+        await rankOwnedScan(activated, args, skip);
+    } catch (error) {
+        delivery.dropUndecided(activated, entry => Boolean(args?.timedEffects?.isEffectActive('sticky', entry)));
+        reportFailure(t`activation error`,
+            t`Only constant and sticky entries were included. Try again.`,
+            error, 'error', { dedupe: false, sticky: true });
+    }
+}
+
+/** The owned half of a scan: the recursion feed, then scoring (stage 3), the relevance cut (4) and the budget (5). Throws are the caller's. */
+async function rankOwnedScan(activated, args, skip) {
     // Before the size-0 return: a pass that activated nothing can still be followed by a min-activations widening.
     if (runState.waOwnsScan && Array.isArray(runState.waCandidates)) {
         await feedScanLoop(args);

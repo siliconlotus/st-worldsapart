@@ -1,5 +1,5 @@
 // Checks the nested entry caps: vector ⊆ dynamic ⊆ all.
-import { applyBudget } from '../extension/delivery.mjs';
+import { applyBudget, dropUndecided } from '../extension/delivery.mjs';
 import { eq } from '../eval/lib/metrics.mjs';
 
 const mk = (key, tokens, opts = {}) => ({ key, tokens, entry: { ...opts } });
@@ -253,4 +253,20 @@ eq(walkOrder({ sticky: stick, constant: cons, results: [] }).map(x => x.key).joi
 
     const legacy = await run({ walk, isDynamic: i => dynSet.has(i), isVector: i => Boolean(i.entry.vectorized), maxVectorEntries: 3 });
     eq(legacy.survivors.size, 7, 'isCapped defaults to isDynamic, so a caller with no promoted block is unchanged');
+}
+
+// --- a ranking failure ships only the rows that never needed a decision
+{
+    const sticky = {};
+    const activated = new Map([
+        ['c', { constant: true }],
+        ['a', { decorators: ['@@activate'] }],
+        ['s', sticky],
+        ['d', {}],
+        ['n', null],
+    ]);
+    const kept = dropUndecided(activated, e => e === sticky);
+    eq(kept, 3, 'dropUndecided keeps constants, @@activate and armed stickies');
+    eq([...activated.keys()].join(','), 'c,a,s', 'dropUndecided deletes the undecided rows, unreadable ones included');
+    eq(dropUndecided(new Map()), 0, 'an empty activation map has nothing to keep');
 }
