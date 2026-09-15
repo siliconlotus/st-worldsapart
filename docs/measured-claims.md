@@ -12,7 +12,8 @@ moves between the two files without changing its number, so `grep <ID>` always f
 lives in, or at a heading — `extension/keyword-audit.mjs buildKeyPruneScan`, `docs/matching.md Stage 3 — Scoring
 (onScanDone)` — so it survives an edit and `grep` finds it at any version. Several are separated by `,`
 in code and by `§` in prose; a claim that cites a file and no place in it names the file alone.
-`test/claims-check.mjs` asserts every cited path and symbol still exists.
+`test/claims-check.mjs` asserts every cited path and symbol still exists; a citation marked
+`(gitignored)` is exempt — it resolves for the author and not for a reader.
 
 **Nothing here names a book, a chat, an entry, a character or a line**, whether the author's or a
 contributor's. A finding drawn from contributed bundles is quoted in aggregate — "over 250 bundles" —
