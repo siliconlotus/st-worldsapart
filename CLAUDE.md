@@ -38,7 +38,8 @@ proposed first. The test is structural, not a judgement about how controversial 
 ## What is in test/ and eval/
 
 `test/` is the regression suite and nothing else; `eval/` is the research harness, and nothing in it
-ships or runs in CI.
+ships or runs in CI. `.github/workflows/checks.yml` runs `test/` on every pull request and on pushes to
+`staging` and `release`; it prints a failing check's whole output, since a throw carries no `FAIL` line.
 
 - `test/*-check.mjs` — self-checking, run with no arguments. The suite is run by exit code:
   `for f in test/*-check.mjs; do node "$f" >/dev/null 2>&1 || echo "FAIL $f"; done`. `eq()` sets
