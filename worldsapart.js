@@ -2093,13 +2093,24 @@ function renderDeliveryPanel(layout) {
 let initialized = false;
 
 export async function init() {
-    // Handed the pipeline's entry points once, here, so the dependency runs one way.
-    setCaptureHost({ chatBook, coreSelection, dryRun, effectiveTokenBudget, paramSnapshot, scopedPriority, vectorRequestBody });
     // Both `hooks.activate` and the jQuery bootstrap below can reach here.
     if (initialized) {
         return;
     }
     initialized = true;
+    // A failed init stays half-registered for the rest of the session — surfaced here, never retried: a retry would
+    // double-register everything that succeeded before the throw.
+    try {
+        await initBody();
+    } catch (error) {
+        console.error('Worlds Apart: init failed — the extension is partially active', error);
+        toastr.error(t`Worlds Apart failed to initialize — see the browser console.`, 'Worlds Apart');
+    }
+}
+
+async function initBody() {
+    // Handed the pipeline's entry points once, here, so the dependency runs one way.
+    setCaptureHost({ chatBook, coreSelection, dryRun, effectiveTokenBudget, paramSnapshot, scopedPriority, vectorRequestBody });
 
     ensureSettings(extension_settings);
     // Migrations of stored values from earlier settings shapes.

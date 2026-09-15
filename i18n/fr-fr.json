@@ -683,6 +683,7 @@
  "Word boundary": "Frontière de mot",
  "Worlds Apart": "Worlds Apart",
  "Worlds Apart (overrides core)": "Worlds Apart (remplace le cœur)",
+ "Worlds Apart failed to initialize — see the browser console.": "Worlds Apart n’a pas pu s’initialiser — consultez la console du navigateur.",
  "Worlds Apart is disabled — turn it on to run a dry run.": "Worlds Apart est désactivé — activez-le pour lancer un essai à blanc.",
  "Worlds Apart — Lorebook Studio: manage all lorebooks and entries": "Worlds Apart — Studio des lorebooks : gérer tous les lorebooks et leurs entrées",
  "Worlds Apart — delivered this turn": "Worlds Apart — inséré à ce tour",
