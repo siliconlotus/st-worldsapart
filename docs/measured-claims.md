@@ -1,9 +1,9 @@
 # Measured claims
 
-Findings the docs and code cite by ID. Each is reproducible without WorldsApart's author's lorebooks:
+Findings the docs and code cite by ID. Each should be reproducible without any one author's lorebooks:
 a synthetic benchmark, a fact about a model or about SillyTavern, or a result that depends only on
-sizes rather than on which book. Claims that rest on particular books or chats are not here and are not
-published; the docs cite those by ID too, and the ID is all a reader gets.
+sizes rather than on which book. Claims that are *about* particular books or chats are not here and are
+not published; the docs cite those by ID too, and the ID is all a reader gets.
 
 **Identifiers are append-only and shared with the private register.** An ID is never reused, and a claim
 moves between the two files without changing its number, so `grep <ID>` always finds one entry.
@@ -21,8 +21,7 @@ and which bundles is not recorded.
 **What counts.** A claim backed by a named measurement. Excluded: configuration values and thresholds
 unless the threshold was derived from a measurement, spec facts stated without one, and pure arithmetic.
 
-**`[one corpus]`** marks a finding from one person's books: the shape it names, without counts. Counts
-go in when other people's books can supply them; a finding that hinges on the counts is not published.
+**The corpus is one person's books:** shapes for what lorebooks look like, numbers for what WA does.
 
 **Rarity may argue against adopting a feature; never against guarding an edge case or keeping what an
 existing form means.** Those are settled on consistency, least surprise and correctness, and the register
@@ -432,7 +431,7 @@ does not carry "rare in one corpus" as a reason.
  lowercase); distributional function-word test: "marches" df 48.6% / 3.0 repeats was blocking every
  n-gram, "aldric" escaped at 6.42 repeats. — `extension/keyword-suggest.mjs buildKeySuggest`.
 
-- **S4** — [one corpus] The nobiliary particles the gazetteer carries: de/la/los/el/van/del/du/da/der/le.
+- **S4** — The nobiliary particles the gazetteer carries: de/la/los/el/van/del/du/da/der/le.
  No other particle has turned up. — `extension/keyword-suggest.mjs buildKeySuggest`.
 
 - **S6** — Cohesion: splitting a trigram down the middle muddied the bands to 0/50/55/68% where the
@@ -458,7 +457,7 @@ does not carry "rare in one corpus" as a reason.
  overlap average 0.61, orthographic neighbours with no shared meaning 0.68 — no separating
  threshold). — `docs/keyword-suggestions.md`.
 
-- **S19** — [one corpus] Genre shapes the suggester has to survive: acronyms are near-universal;
+- **S19** — Genre shapes the suggester has to survive: acronyms are near-universal;
  bracket tags, apostrophe names, accented text and nobiliary particles are common; hyphenated species
  compounds, shouted markdown headers, elisions, roman numerals and LitRPG stat blocks are minority
  shapes. Nearly every suggester bug came from one of these. — `test/genre-cases.mjs`.
