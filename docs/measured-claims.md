@@ -8,6 +8,10 @@ published; the docs cite those by ID too, and the ID is all a reader gets.
 **Identifiers are append-only and shared with the private register.** An ID is never reused, and a claim
 moves between the two files without changing its number, so `grep <ID>` always finds one entry.
 
+**Nothing here names a book, a chat, an entry, a character or a line**, whether the author's or a
+contributor's. A finding drawn from contributed bundles is quoted in aggregate — "over 250 bundles" —
+and which bundles is not recorded.
+
 **What counts.** A claim backed by a named measurement. Excluded: configuration values and thresholds
 unless the threshold was derived from a measurement, spec facts stated without one, and pure arithmetic.
 
