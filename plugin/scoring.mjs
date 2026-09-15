@@ -11,8 +11,9 @@ export function scoreCollection(collectionId, loaded, queryVector, { centered = 
 export function poolEntries(results) {
     const best = new Map();
     for (const r of results) {
-        // metadata.index is the owning entry's uid (syncWorld); US-separated; a chunk with no owner pools as its own entry. Pooled here, not on the client, so topK counts entries (R6).
-        const key = `${r.collectionId}${r.metadata?.index ?? `#${r.metadata?.hash}`}`;
+        // metadata.index is the owning entry's uid (syncWorld); US-separated (see CLAUDE.md) — bare concatenation pools
+        // `wa_a`+12 and `wa_a1`+2 onto one key. Pooled here, not on the client, so topK counts entries (R6).
+        const key = `${r.collectionId}${r.metadata?.index ?? `#${r.metadata?.hash ?? ''}`}`;
         const previous = best.get(key);
         if (!previous || r.score > previous.score) best.set(key, { ...r });
     }
@@ -24,12 +25,15 @@ export const admitCeiling = pooledServerSide => (pooledServerSide === true ? 100
 
 export function selectTopK(results, topK) {
     const byVector = [...results].sort((a, b) => b.score - a.score).slice(0, topK);
-    const grouped = {}, emitted = new Set();
+    // Null-prototype: collectionId is the caller's, and `grouped.__proto__ = …` on a plain object is silently dropped from the reply.
+    const grouped = Object.create(null), emitted = new Set();
     for (const r of byVector) {
-        const key = `${r.collectionId}:${r.metadata.hash}`;
+        const hash = r.metadata?.hash;
+        if (hash === undefined || hash === null) continue;   // a chunk without a hash cannot be resolved client-side
+        const key = `${r.collectionId}:${hash}`;
         if (emitted.has(key)) continue; emitted.add(key);
         grouped[r.collectionId] ??= { hashes: [], metadata: [] };
-        grouped[r.collectionId].hashes.push(Number(r.metadata.hash));
+        grouped[r.collectionId].hashes.push(Number(hash));
         grouped[r.collectionId].metadata.push({ ...r.metadata, score: r.score });
     }
     return grouped;
