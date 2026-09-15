@@ -26,6 +26,11 @@ hinges on. Options against a behaviour that stands go in a GitHub issue, never i
 **Terms are stable, or they are announced as new.** Use the doc's vocabulary exactly, and prefer the
 standard technical term to a coinage.
 
+**A measured claim cites its register entry by ID; anything else is an assertion and says so.**
+`docs/measured-claims.md` holds the claims reproducible without a particular corpus. Claims resting on
+particular books or chats share its ID space but are not published, so a cited ID that is not in that
+file resolves for the author and not for a reader.
+
 ## What is in test/ and eval/
 
 `test/` is the regression suite and nothing else; `eval/` is the research harness, and nothing in it
