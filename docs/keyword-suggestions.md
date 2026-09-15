@@ -29,7 +29,8 @@ recall; a key denoting many sibling entries is outranked, not disqualified.
 ## The lexical arm — `buildKeySuggest`
 
 One ranker for the suggest popup and the Studio: each entry's own terms, scored by tf x idf over the book
-plus `bgDocs`, the open chat's messages pooled into the idf denominator (P2). The language table is read
+plus `bgDocs`, the open chat's messages pooled into the idf denominator — one
+Aho-Corasick pass, 254ms for 497 keys over 5473 messages, and independent of the key count. The language table is read
 once per build.
 
 **Tokens** (`nameEvidence().wordSeq`): letter runs with internal apostrophes and hyphens; a sentence
@@ -41,7 +42,8 @@ word absent from the table; `I` is excluded.
 **Candidates** are grams of one to `maxN` content words. A function word blocks a gram: the fixed list,
 or a token in more than 30% of entries at fewer than six occurrences per entry that is not a name. A
 linker may sit inside a gram; a name particle (`de`, `van`, `al` …) may also lead, an English linker
-(`of`, `the`) may not, and nothing trails (S4). Linkers neither spend `maxN` nor earn the length bonus.
+(`of`, `the`) may not, and nothing trails. Ten particles occur across 38 books: `de la los el van
+del du da der le`. Linkers neither spend `maxN` nor earn the length bonus.
 
 **Gates**, in the order tested; a candidate must clear all of them:
 
@@ -83,7 +85,8 @@ sentence-initial; a tie goes to the quieter form, a shouted form defers to the b
 diagnostic's switch: every term passes the frequency gate at full weight.
 
 Warm-up: every admitted term's substring df over the book and the background documents is counted in
-one automaton pass per document, not one scan per term (S10).
+one automaton pass per document, not one scan per term: term-by-term df was 97% of build runtime on
+a 327-entry book.
 
 ## The LLM arm
 
@@ -113,7 +116,8 @@ at the top of each build, so a switch takes effect on the next.
 wordfreq gating the vocabulary and supplying the POS sets from the dominant tag at 1,000 or more tagged
 occurrences; any other language is wordfreq alone, with no POS sets, so the verb and adjective filters
 do nothing there. The corpus is fiction prose because the prior's job is to say what is ordinary in the
-register the chat is written in; genre-common words are ordinary by design (S24). The table begins at
+register the chat is written in; genre-common words are ordinary by design: against wordfreq, genre and
+narrative vocabulary rises 0.3–0.7 in Zipf (sword 4.4 → 4.8). The table begins at
 z 3.0, so absence from it is the rare line, and the phrase ceiling is exclusive at 5.5.
 
 ## The audit — `buildKeyPruneScan`
@@ -122,7 +126,7 @@ One pass over the book: each entry's content is segmented as the match window se
 segment goes through the automaton once, literal keys are counted only in the segments a variant of
 them was found in, and `?` and regex keys in every segment. Each key is counted under its entries' own
 flag combinations, and a whole-word entry's key under the substring combination too. df counts entries,
-not segments (K5). A key edited since the pass is judged on demand through a private scope.
+not segments — literal keys are slice-invariant, and eight segments against one join measured 1.01×. A key edited since the pass is judged on demand through a private scope.
 
 A chat scan, when one was run, supplies per key the share of units holding it (message, paragraph or
 scan window, as the match window defines the unit), the share holding it as typed, and two kinds of
