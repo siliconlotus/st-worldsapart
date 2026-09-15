@@ -51,7 +51,7 @@ published in aggregate only: "measured over 250 bundles" yes; a book title, chat
 character name or quoted line, never — in the docs, the commit log or the issue tracker.
 
 **Do not attach a bundle to an issue.** Issues are public, and attaching one publishes the chat it came
-from. <!-- TODO: name the private channel here before soliciting bundles. -->
+from. Send it privately instead; a call for grades will say where.
 
 If that trade is not one you want to make, do not send one. There is no way to strip the content and
 leave the bundle useful — the content is what is being graded.
