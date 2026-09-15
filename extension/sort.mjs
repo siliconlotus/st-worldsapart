@@ -42,8 +42,9 @@ const titleKey = e => (e.comment ?? '').trim();
 export const SORT_FNS = {
     'priority':   sortWith((a, b) => sortPrio(a) - sortPrio(b)),
     'custom':     sortWith((a, b) => (a.displayIndex ?? 0) - (b.displayIndex ?? 0)),
-    'title-asc':  sortWith((a, b) => titleKey(a).localeCompare(titleKey(b))),
-    'title-desc': sortWith((a, b) => titleKey(b).localeCompare(titleKey(a))),
+    // 'en', never the user's locale: the title order is the same on every install, and matches the matcher's locale-independent fold.
+    'title-asc':  sortWith((a, b) => titleKey(a).localeCompare(titleKey(b), 'en')),
+    'title-desc': sortWith((a, b) => titleKey(b).localeCompare(titleKey(a), 'en')),
     'tokens-asc': sortWith((a, b) => String(a.content ?? '').length - String(b.content ?? '').length),
     'tokens-desc':sortWith((a, b) => String(b.content ?? '').length - String(a.content ?? '').length),
     'depth-asc':  sortWith(numAsc('depth')),

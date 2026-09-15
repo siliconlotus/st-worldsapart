@@ -1,6 +1,7 @@
 // bindings.mjs — which chats and character cards name a lorebook that no longer exists. A binding is
 // `chat_metadata.world_info` in line 0 of a chat .jsonl or `data.extensions.world` on a card; ST-free.
-export const normalizeWorldName = s => String(s ?? '').toLowerCase().replace(/[_\-\s]+/g, ' ').trim();
+// NFC before the fold: a book name from an NFD source (a macOS zip) must match its NFC-written binding exactly, not fall to edit distance.
+export const normalizeWorldName = s => String(s ?? '').normalize('NFC').toLowerCase().replace(/[_\-\s]+/g, ' ').trim();
 
 export function editDistance(a, b) {
     if (a === b) return 0;
