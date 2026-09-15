@@ -1,13 +1,12 @@
-// st-install.mjs — locates the SillyTavern install this checkout sits in, and resolves paths inside it. node:* only,
-// so the deploy script and the fixtures can import it without pulling the harness in.
+// st-install.mjs — locates the SillyTavern install this checkout sits in, and resolves paths inside it. node:* only.
 import { existsSync, readFileSync } from 'node:fs';
 import { dirname, resolve as resolvePath } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 /**
- * `{ root, dataRoot, resolve }` for the install, or null when none is reachable. Walks up for `config.yaml` rather
- * than counting directories, so a checkout at any depth — or a git worktree — finds it; `WA_ST_ROOT` overrides.
- * `resolve` reads `dataRoot:` out of config.yaml, so a `data/…` path follows a relocated data directory.
+ * `{ root, dataRoot, resolve }` for the install, or null when none is reachable. Walks up for `config.yaml`, so a
+ * checkout at any depth — or a git worktree — finds it; `WA_ST_ROOT` overrides. `resolve` reads `dataRoot:` out of
+ * config.yaml, so a `data/…` path follows a relocated data directory.
  */
 export function stInstall() {
     let root = process.env.WA_ST_ROOT;

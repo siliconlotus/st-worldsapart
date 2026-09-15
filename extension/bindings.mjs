@@ -71,9 +71,8 @@ export function findOrphanBindings(index, worldNames) {
 
 /**
  * The books ST has active for one chat: global, the character's own and its charLore extras, the chat's, the persona's.
- * Mirrors getGlobalLore/getCharacterLore/getChatLore/getPersonaLore, which are private, because the exported
- * getSortedEntries emits WORLDINFO_ENTRIES_LOADED (upstream-st.md #18). The Set drops the duplicate core also skips.
- * In a group this unions the enabled members, where core takes one member per generation.
+ * Never through getSortedEntries, which emits WORLDINFO_ENTRIES_LOADED (upstream-st.md #18). In a group this unions
+ * the enabled members, where core takes one per generation.
  * @param {object} p ST's globals, injected
  * @param {(avatar: string) => string[]} p.extraBooksOf A character's additional lorebooks, keyed by avatar
  * @param {string[]} p.worldNames Books not in it are dropped — a stale binding names one that no longer exists
@@ -100,7 +99,7 @@ export function attachedBooks({ globalBooks = [], characters = [], characterId =
 
 /**
  * Which chats in `index` bind to `book`, and how. A book binds four ways: chat (chat_metadata.world_info), character
- * (data.extensions.world), the character's additional lorebooks (extraBooks), global. The same four attachedBooks reads.
+ * (data.extensions.world), the character's additional lorebooks (extraBooks), global.
  * `why` is an English constant the caller translates where it draws it.
  * @param index findOrphanBindings' index shape
  * @param {boolean} opt.all Keep the unbound chats too, each marked 'not bound'
