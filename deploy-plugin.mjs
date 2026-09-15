@@ -26,8 +26,11 @@ fs.mkdirSync(DEST, { recursive: true });
 for (const [from, to] of PLUGIN_FILES) {
     const src = path.join(SRC, 'plugin', from);
     const dst = path.join(DEST, to);
+    // Copy-then-swap: a failure mid-copy leaves the previously deployed copy intact, not half a plugin.
+    const tmp = `${dst}.deploying`;
+    fs.copyFileSync(src, tmp);
     fs.rmSync(dst, { force: true });
-    fs.copyFileSync(src, dst);
+    fs.renameSync(tmp, dst);
     console.log(`copied  ${path.relative(SRC, src)}  ->  plugins/worlds-apart/${to}`);
 }
 
@@ -38,7 +41,16 @@ console.log('wrote    package.json');
 for (const name of fs.readdirSync(DEST)) {
     if (KEEP.has(name)) continue;
     const stale = path.join(DEST, name);
-    if (!fs.statSync(stale).isFile()) {
+    let staleStat;
+    try {
+        staleStat = fs.statSync(stale);
+    } catch {
+        // A dangling symlink has no stat; removing it is the cleanup this sweep exists for.
+        fs.rmSync(stale, { force: true });
+        console.log(`removed  plugins/worlds-apart/${name}  (broken link)`);
+        continue;
+    }
+    if (!staleStat.isFile()) {
         console.log(`SKIP     ${name}/ is a directory — left alone, remove it yourself if it is stale`);
         continue;
     }
@@ -50,8 +62,15 @@ const configPath = path.join(ST.root, 'config.yaml');
 try {
     const cfg = fs.readFileSync(configPath, 'utf8');
     if (/^enableServerPlugins:\s*false\b/m.test(cfg)) {
-        fs.writeFileSync(configPath, cfg.replace(/^(enableServerPlugins:\s*)false\b/m, '$1true'));
-        console.log('enabled  enableServerPlugins: true in config.yaml (was false)');
+        // One backup, the first time a deploy touches the file; and write-then-rename, because a crash mid-write
+        // must never take config.yaml — the whole install's — down with it.
+        const backup = `${configPath}.wa-backup`;
+        if (!fs.existsSync(backup)) fs.copyFileSync(configPath, backup);
+        const tmp = `${configPath}.deploying`;
+        fs.writeFileSync(tmp, cfg.replace(/^(enableServerPlugins:\s*)false\b/m, '$1true'));
+        fs.rmSync(configPath, { force: true });
+        fs.renameSync(tmp, configPath);
+        console.log('enabled  enableServerPlugins: true in config.yaml (was false; the original is at config.yaml.wa-backup)');
     } else if (/^enableServerPlugins:\s*true\b/m.test(cfg)) {
         console.log('ok       enableServerPlugins already true in config.yaml');
     } else {
