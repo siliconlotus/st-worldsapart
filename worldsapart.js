@@ -1754,7 +1754,7 @@ const SETTINGS_HTML = `
         </div>
         <div class="inline-drawer-content">
             <div id="wa_plugin_alert"></div>
-            <div class="flex-container alignItemsCenter">
+            <div class="flex-container" style="align-items: baseline;">
                 <label class="checkbox_label" for="wa_enabled">
                     <input id="wa_enabled" type="checkbox" class="wa-switch"><span data-i18n="Enabled">Enabled</span>
                 </label>
