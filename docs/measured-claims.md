@@ -27,7 +27,10 @@ they are not stated. A number goes back when there are other people's books to t
 that hinges on the counts themselves is not published at all.
 
 **A census never licenses a design choice.** Where a decision needs an argument it is made on
-correctness, and the register does not carry "rare in one corpus" as a reason.
+consistency, least surprise and correctness; the register does not carry "rare in one corpus" as a
+reason. A census of WA's own syntax is circular as well as weak — the only lorebooks that can contain it
+are written by the people who already have it, so the count measures their adoption and not what a user
+would want. Whether a key form is rare says nothing about whether it must keep working.
 
 ## R — Stage 1: retrieval, embedding space, query
 
