@@ -1750,7 +1750,6 @@ const SETTINGS_HTML = `
     <div class="inline-drawer">
         <div class="inline-drawer-toggle inline-drawer-header">
             <b data-i18n="Worlds Apart">Worlds Apart</b>
-            <small id="wa_version" style="opacity:0.55;margin-left:6px;font-weight:400;"></small>
             <div class="inline-drawer-icon fa-solid fa-circle-chevron-down down"></div>
         </div>
         <div class="inline-drawer-content">
@@ -1758,6 +1757,7 @@ const SETTINGS_HTML = `
             <label class="checkbox_label" for="wa_enabled">
                 <input id="wa_enabled" type="checkbox" class="wa-switch"><span data-i18n="Enabled">Enabled</span>
             </label>
+            <small id="wa_version" style="display:block;opacity:0.55;margin:2px 0 6px;"></small>
             <label><span data-i18n="Prompt insertion order">Prompt insertion order</span> <span class="fa-solid fa-circle-question note-link-span" title="The order selected entries take in the prompt. A base sort, with optional tier grouping. This setting is saved. The Studio's sort views are not." data-i18n="[title]The order selected entries take in the prompt. A base sort, with optional tier grouping. This setting is saved. The Studio's sort views are not."></span></label>
             <div id="wa_presentation_order_mount" style="margin-top:4px;"></div>
 
