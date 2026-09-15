@@ -176,10 +176,6 @@ unless the threshold was derived from a measurement, spec facts stated without o
   Regression was measured no worse than RRF+nDCG and chosen for explainability.
   — `docs/matching.md:1260,:1165,:968`.
 
-- **F2** — With no relevance cut, F2@layout is EXACTLY invariant to layout: 5 arms × 4 parameter
-  families × 3 scenes, every per-scene delta 0.0000; level F2 ~0.25 (precision 0.064–0.104, recall
-  1.000). Rank decides overflow, never membership. — `docs/matching.md:924`.
-
 - **F3** — The asymmetric bar: hard ≥3 vs ≥2 on one scene reads P 0.542 vs 0.708, F1 0.703 vs 0.829
   with arm ordering barely moving; over 73 scenes the symmetric bar ranks shallow cuts on top and
   inverts at F4, the asymmetric bar keeps depth winning at every beta. — `docs/matching.md:951,:953`.
@@ -342,18 +338,6 @@ unless the threshold was derived from a measurement, spec facts stated without o
   macro-mean per cell, no sign test; the claim is that no gap is visible, not that one is excluded.
   — `docs/matching.md:1009`.
 
-- **F54** — Per-tier standardisation is DEGENERATE on a small tier, by arithmetic rather than by
-  measurement. The sd of two points is half their gap, so a tier of two gives every z exactly +/-1 and
-  `E[credit]` can take only 2^4 = 16 values whatever the raw signals are: under qwen3-embedding-8b the
-  best is 0.1725 and only 3 of the 16 clear a 0.10 cutoff; two partner rows differing wildly and
-  differing barely produce byte-identical output. A tier of ONE has sd 0, takes the `sd || 1` guard, and
-  collapses to the intercept — 0.0435/0.0363/0.0458/0.0407/0.0430/0.0406/0.0400 against that fit's own
-  cutoff 0.07/0.11/0.07/0.08/0.08/0.10/0.09, so it is cut under every one of the seven shipped models.
-  Reproduced through the shipped `scoreRelevance` on a live capture: a 26-row scan (2 memory, 24
-  reference) returned 0.04627 for a memory row ranking 1st of 26 on `text` and on `properNouns` and 3rd
-  on `cosine`, placing it 24th of 26. Corpus-independent: it is a property of n, not of the fit.
-  — `extension/relevance.mjs:284`.
-
 - **F55** — Pooled standardisation sits above per-scene on the WHOLE-SYSTEM cost curve, at matched
   token spend, at every point read. Both tiers, delivered set, `eval/cost-curve.mjs`, 105 bundles, both
   artefacts refit on the same corpus. Cutoff 0.04-0.30, scene -> pooled F2: 0.5055->0.5071,
@@ -485,9 +469,6 @@ unless the threshold was derived from a measurement, spec facts stated without o
 - **S4** — Particles occurring over 38 books: only de/la/los/el/van/del/du/da/der/le.
   — `extension/keyword-suggest.mjs:299`.
 
-- **S5** — No finer unigram ramp is honest: a word's frequency does not encode whether it is a good
-  key, so good unigrams and junk overlap broadly in Zipf. — `extension/keyword-suggest.mjs:437`.
-
 - **S6** — Cohesion: splitting a trigram down the middle muddied the bands to 0/50/55/68% where the
   bigram pair reads 8/65/100/100%; the legal-part rule matters — 13/84 and 31/102 of dropped grams on
   two books were being counted against an illegal part. — `extension/keyword-suggest.mjs:545,:563`.
@@ -496,9 +477,6 @@ unless the threshold was derived from a measurement, spec facts stated without o
   tetragram out-fires the whole 96% of the time, 13% when cohesive (one book and its 5598-message
   chat); a unit never swallows a bare word, and ~a third of swallowed unigrams sat in that band.
   — `extension/keyword-suggest.mjs:577,:602`; `test/keyword-extract-check.mjs:364,:504`.
-
-- **S8** — dfCeil at 0.15 was silently cutting recurring cast: a character in ~25% of a book’s entries.
-  — `extension/keyword-suggest.mjs:709`.
 
 - **S9** — The cap: uncapped over 39 books / 3405 entries an entry yields median 17 / mean 27
   candidates, near-linear ~7 per 1000 chars; cap 8 discarded ~70% of gate survivors (not junk — on a

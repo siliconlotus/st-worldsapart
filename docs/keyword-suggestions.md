@@ -49,7 +49,9 @@ del du da der le` (S4). Linkers neither spend `maxN` nor earn the length bonus.
 
 - Admission: frequency >= 2 in the entry, or every word independently name-like (a name, a linker in a
   legal position, or rare and not a lowercase `-ing` form).
-- Book share: document frequency over the book at most `dfCeil` (S8).
+- Book share: document frequency over the book at most `dfCeil`, which sits above the share a
+  recurring cast occupies — a book about a story names its people in most of its entries, and those
+  are keys worth having.
 - Literal occurrence: the joined gram occurs as a substring somewhere, since folding bridges punctuation.
 - Short: a unigram of three characters or fewer is cut unless it is an acronym (`excludeShort`).
 - Head: the last word is not a saturated entity (in > 85% of entries), a verb head by the book's own
@@ -62,7 +64,8 @@ del du da der le` (S4). Linkers neither spend `maxN` nor earn the length bonus.
   (`mr`, `dr` …), and — with `excludeDates` — a year, a numeric date or a month with a digit.
 - Frequency: names read as z 0; a unigram in the table (z >= 3.0) is cut; a phrase rides its rarest
   word on a ramp, full weight at z <= 2.5 and gone at z >= 3.8, and is cut outright if any non-linker,
-  non-name word sits above z 5.5; a lowercase `-ing` word reads as 3.8 (S5). The ceiling is exclusive on
+  non-name word sits above z 5.5; a lowercase `-ing` word reads as 3.8. The ramp is coarse because
+frequency does not encode key quality, so no finer cut separates a good unigram from a junk one. The ceiling is exclusive on
   the table's 0.1 grid.
 - Successor: a phrase seen twice or more with exactly one possible next token is the front of a longer
   name and is dropped.
