@@ -3,8 +3,8 @@
 import { mkdtempSync, writeFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { loadScene, makeCandidateSet, sceneParams } from '../eval/scene.mjs';
-import { eq } from '../eval/metrics.mjs';
+import { loadScene, makeCandidateSet, sceneParams } from '../eval/lib/scene.mjs';
+import { eq } from '../eval/lib/metrics.mjs';
 
 const DIR = mkdtempSync(join(tmpdir(), 'wa-recurse-'));
 const INDEX = join(DIR, 'index.json');

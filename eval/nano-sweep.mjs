@@ -3,8 +3,8 @@
 // Appends one JSONL line per response as it lands and resumes from what is on disk; the queue is entry-outermost, so a partial run covers every arm.
 import { readFileSync, appendFileSync, existsSync } from 'node:fs';
 import { buildKeySuggest, parseKeyList, STUDIO_SUGGEST_OPTS } from '../extension/keyword-suggest.mjs';
-import { mean, fmt3 as fmt } from './metrics.mjs';
-import { booksOrExit, WORLDS } from './corpus.mjs';
+import { mean, fmt3 as fmt } from './lib/metrics.mjs';
+import { booksOrExit, WORLDS } from './lib/corpus.mjs';
 import { fileURLToPath } from 'node:url';
 
 const HERE = fileURLToPath(new URL('.', import.meta.url));

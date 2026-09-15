@@ -22,7 +22,7 @@ export const fmt3 = x => (Number.isFinite(x) ? x.toFixed(3) : '—');
 export const gradeCredit = g => (g >= 3 ? 1 : g >= 2 ? 0.5 : 0);
 
 // Re-exported from grading.mjs, beside the schema it reads; a second copy of the rule must never appear here.
-export { gradeValue } from '../extension/grading.mjs';
+export { gradeValue } from '../../extension/grading.mjs';
 
 /** F-beta; beta > 1 weights recall (the harness passes RECALL_WEIGHT). */
 export const fbeta = (precision, recall, beta = 2) => {

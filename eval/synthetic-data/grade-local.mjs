@@ -9,7 +9,7 @@ import { archiveContract, contractBody, contractHash } from './contract.mjs';
 import { createHash } from 'node:crypto';
 import { dirname, resolve as resolvePath } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { arg } from '../metrics.mjs';
+import { arg } from '../lib/metrics.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const ROOT = resolvePath(HERE, '..', '..');

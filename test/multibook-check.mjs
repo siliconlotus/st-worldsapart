@@ -2,8 +2,8 @@
 import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, dirname } from 'node:path';
-import { getStringHash, loadScene, makeCandidateSet, makeGradeOf, sceneParams, scoreScene } from '../eval/scene.mjs';
-import { eq } from '../eval/metrics.mjs';
+import { getStringHash, loadScene, makeCandidateSet, makeGradeOf, sceneParams, scoreScene } from '../eval/lib/scene.mjs';
+import { eq } from '../eval/lib/metrics.mjs';
 
 const DIR = mkdtempSync(join(tmpdir(), 'wa-multibook-'));
 const VEC = {

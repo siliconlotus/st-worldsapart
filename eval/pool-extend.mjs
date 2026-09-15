@@ -5,9 +5,9 @@
 import { readFileSync, writeFileSync, mkdirSync } from 'node:fs';
 import { dirname, basename } from 'node:path';
 import { entryKey } from '../extension/content-lexical.mjs';
-import { scoreScene, loadScene, indexPath, openSample, sceneParams, embed, sceneLabel } from './scene.mjs';
-import { ensureIndex, resolveModel } from './reindex.mjs';
-import { arg } from './metrics.mjs';
+import { scoreScene, loadScene, indexPath, openSample, sceneParams, embed, sceneLabel } from './lib/scene.mjs';
+import { ensureIndex, resolveModel } from './lib/reindex.mjs';
+import { arg } from './lib/metrics.mjs';
 
 const argv = process.argv.slice(2);
 const samples = argv.filter(a => a.endsWith('.json') && !a.startsWith('--'));

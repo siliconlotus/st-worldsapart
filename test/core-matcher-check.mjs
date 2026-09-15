@@ -2,7 +2,7 @@
 // An assertion citing core as the authority goes here; one about what a matched expression is WORTH goes in matcher-check.mjs.
 import { countKey, hasPromoteDecorator, keywordScore, secondaryKeys, setBoundaryMode, splitKeys, wholeWordAdvice, withPromote, WI_LOGIC } from '../extension/matcher.mjs';
 import { synthesizeSecondary } from '../extension/smartkeys.mjs';
-import { eq } from '../eval/metrics.mjs';
+import { eq } from '../eval/lib/metrics.mjs';
 
 const { AND_ANY, NOT_ALL, NOT_ANY, AND_ALL } = WI_LOGIC;
 const CURLY = String.fromCharCode(0x2019);

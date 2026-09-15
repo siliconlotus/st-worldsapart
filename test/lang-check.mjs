@@ -1,5 +1,5 @@
 // Self-check for extension/lang.mjs: a pack becomes the table, a stand-down empties it, and the switch touches the store and the network only when it must.
-import { eq } from '../eval/metrics.mjs';
+import { eq } from '../eval/lib/metrics.mjs';
 import { table, usePack, standDown, parsePacked, setLanguage, refreshIndex, BUNDLED, toBase64 } from '../extension/lang.mjs';
 
 const pack = {

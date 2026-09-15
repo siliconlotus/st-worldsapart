@@ -3,11 +3,11 @@
 //   node .../param-screen.mjs <sample.json> [sample2.json ...] [--arms K1=3,filter=off] [--k 10] [--list]
 // Pool first (/wa-super-grade): an arm that surfaces unjudged entries scores them 0 and looks worse than it is.
 import { readFileSync } from 'node:fs';
-import { indexPath, loadScene, openSample, sceneParams, scoreScene, embed, sceneLabel, lineagesOf, fittedModels } from './scene.mjs';
+import { indexPath, loadScene, openSample, sceneParams, scoreScene, embed, sceneLabel, lineagesOf, fittedModels } from './lib/scene.mjs';
 import { modelKey } from '../extension/relevance.mjs';
-import { jaccard, signTest, spearman, gradeValue, arg } from './metrics.mjs';
+import { jaccard, signTest, spearman, gradeValue, arg } from './lib/metrics.mjs';
 import { isDurable, rowKey } from '../extension/grading.mjs';
-import { ensureIndex, resolveModel } from './reindex.mjs';
+import { ensureIndex, resolveModel } from './lib/reindex.mjs';
 
 const argv = process.argv.slice(2);
 const samples = argv.filter(a => a.endsWith('.json') && !a.startsWith('--'));

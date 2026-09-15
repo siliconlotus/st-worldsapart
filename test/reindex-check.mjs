@@ -1,8 +1,8 @@
 // Self-check for reindex.mjs, the offline collection builder. buildItems must mirror syncWorld; the oracle at the bottom
 // rebuilds a graded sample's embedded books at its own settings and matches the (hash, uid) multiset ST wrote.
-import { buildItems, chunkConfig, cachePath } from '../eval/reindex.mjs';
-import { getStringHash, stInstall, evalDataDir } from '../eval/scene.mjs';
-import { eq } from '../eval/metrics.mjs';
+import { buildItems, chunkConfig, cachePath } from '../eval/lib/reindex.mjs';
+import { getStringHash, stInstall, evalDataDir } from '../eval/lib/scene.mjs';
+import { eq } from '../eval/lib/metrics.mjs';
 import { readFileSync, readdirSync, existsSync } from 'node:fs';
 
 const CFG = { chunkMode: 'paragraph', chunkSize: 800, minChunkSize: 0 };

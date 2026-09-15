@@ -2,7 +2,7 @@
 // Self-checking; run with no arguments.
 
 import { addVariant, deleteKey, hasKey, keyHolders, kwNorm, renameKeyOn, replaceKey } from '../extension/keyedit.mjs';
-import { eq } from '../eval/metrics.mjs';
+import { eq } from '../eval/lib/metrics.mjs';
 
 const book = () => [{ key: ['Cat', 'dog'] }, { key: ['cat'] }, { key: ['bird'] }, { key: [] }, {}];
 

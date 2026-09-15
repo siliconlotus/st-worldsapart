@@ -1,7 +1,7 @@
 // Self-check for grading.mjs, the /wa-grade sample assembler: what a sample CONTAINS — book fidelity, the settings
 // mapping, the durable tier, the multi-arm bundle and its round trip.
 import { buildSample, bundleSamples, captureParams, hashBooks, keyByUid, stRelative, isDurable, mergeGrades, openBundle, passKey, rowKey, sampleFile, sceneDiff, searchedBook, setGrades, splitGraded, unionArms } from '../extension/grading.mjs';
-import { eq, gradeValue } from '../eval/metrics.mjs';
+import { eq, gradeValue } from '../eval/lib/metrics.mjs';
 import * as query from '../extension/query.mjs';
 
 const book = {

@@ -1,5 +1,5 @@
 // version-check.mjs — the staging counter and the two version predicates the pre-push gate reads.
-import { nextBuildVersion, isReleaseVersion, hasBuildCounter } from '../eval/version.mjs';
+import { nextBuildVersion, isReleaseVersion, hasBuildCounter } from '../eval/lib/version.mjs';
 
 let failed = 0;
 const eq = (got, want, msg) => {

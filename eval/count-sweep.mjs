@@ -4,8 +4,8 @@ import { readFileSync, writeFileSync, existsSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 import { buildKeySuggest, parseKeyList, STUDIO_SUGGEST_OPTS } from '../extension/keyword-suggest.mjs';
 import { countKey } from '../extension/matcher.mjs';
-import { mean } from './metrics.mjs';
-import { booksOrExit, WORLDS } from './corpus.mjs';
+import { mean } from './lib/metrics.mjs';
+import { booksOrExit, WORLDS } from './lib/corpus.mjs';
 import { fileURLToPath } from 'node:url';
 
 const HERE = fileURLToPath(new URL('.', import.meta.url));

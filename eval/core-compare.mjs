@@ -4,10 +4,10 @@
 //   node .../core-compare.mjs <sample.json> [...] [--tier memory|reference|all] [--budget 25083,37624] [--core-top-k 5] [--core-order order|newest|oldest] [--core-depth 2] [--core-uids 1,2,3] [--tokenizer gpt-3.5-turbo]
 // The defaults are a stock install (max_entries 5, depth 2, order untouched); a tuned install scores measurably higher (R14), so say which is being quoted.
 import fs from 'node:fs';
-import { haystackFor, indexPath, isMemory, loadScene, makeCandidateSet, makeGradeOf, openSample, sceneParams, makeLayoutOrder, sceneLabel } from './scene.mjs';
-import { gradeCredit, fbeta, RECALL_WEIGHT, arg } from './metrics.mjs';
-import { offlineTokenCounter } from './tokens.mjs';
-import { ensureIndex, resolveModel } from './reindex.mjs';
+import { haystackFor, indexPath, isMemory, loadScene, makeCandidateSet, makeGradeOf, openSample, sceneParams, makeLayoutOrder, sceneLabel } from './lib/scene.mjs';
+import { gradeCredit, fbeta, RECALL_WEIGHT, arg } from './lib/metrics.mjs';
+import { offlineTokenCounter } from './lib/tokens.mjs';
+import { ensureIndex, resolveModel } from './lib/reindex.mjs';
 
 const argv = process.argv.slice(2);
 const VALUED = new Set(['--tier', '--budget', '--core-top-k', '--core-order', '--core-depth', '--core-uids', '--tokenizer']);

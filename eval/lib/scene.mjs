@@ -4,16 +4,16 @@ import fs, { readFileSync, existsSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 import { dirname, resolve as resolvePath } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { scoreCollection, poolEntries, selectTopK, admitCeiling } from '../plugin/scoring.mjs';
-import { corpusMean, centeredCosineScores } from '../plugin/vector.mjs';
-import * as entity from '../extension/entity.mjs';
-import * as matcher from '../extension/matcher.mjs';
-import { hasPromoteDecorator } from '../extension/matcher.mjs';
-import { isDurable, openBundle } from '../extension/grading.mjs';
-import * as selection from '../extension/selection.mjs';
-import * as delivery from '../extension/delivery.mjs';
-import { buildContentIndex, scoreContent, entryKey } from '../extension/content-lexical.mjs';
-import { defaultSettings } from '../extension/state.mjs';
+import { scoreCollection, poolEntries, selectTopK, admitCeiling } from '../../plugin/scoring.mjs';
+import { corpusMean, centeredCosineScores } from '../../plugin/vector.mjs';
+import * as entity from '../../extension/entity.mjs';
+import * as matcher from '../../extension/matcher.mjs';
+import { hasPromoteDecorator } from '../../extension/matcher.mjs';
+import { isDurable, openBundle } from '../../extension/grading.mjs';
+import * as selection from '../../extension/selection.mjs';
+import * as delivery from '../../extension/delivery.mjs';
+import { buildContentIndex, scoreContent, entryKey } from '../../extension/content-lexical.mjs';
+import { defaultSettings } from '../../extension/state.mjs';
 // Cycle with reindex.mjs (getStringHash); safe only while neither side references the other at module scope.
 import { cachePath, chunkConfig, embedTexts, pathSafe, resolveModel } from './reindex.mjs';
 import { gradeCredit, fbeta, RECALL_WEIGHT, gradeValue, topComponents, projectOut, componentScales } from './metrics.mjs';
@@ -157,7 +157,7 @@ export function stInstall() {
 }
 
 export const evalDataDir = () => {
-    const local = fileURLToPath(new URL('./eval-data/', import.meta.url));
+    const local = fileURLToPath(new URL('../eval-data/', import.meta.url));
     const st = stInstall();
     return existsSync(local) || !st ? local : `${st.root}/public/scripts/extensions/third-party/WorldsApart/eval/eval-data/`;
 };
@@ -182,7 +182,7 @@ export const indexPath = (S, { vectors = 'data/default-user/vectors/ollama', mod
 
 const qCache = new Map();
 /** The cache file for one model label. `pathSafe` only, as cachePath treats the model half of a collection path. */
-export const queryCachePath = label => fileURLToPath(new URL(`./eval-data/query-cache__${pathSafe(label)}.jsonl`, import.meta.url));
+export const queryCachePath = label => fileURLToPath(new URL(`../eval-data/query-cache__${pathSafe(label)}.jsonl`, import.meta.url));
 const qCachePath = queryCachePath;
 const qCacheLoad = (label) => {
     if (qCache.has(label)) return qCache.get(label);
@@ -430,7 +430,7 @@ export function makeGradeOf(grades, { outOfScope, primary }) {
 }
 
 /** The three populations as predicates over a raw entry; they cross-cut. `isMemory` is imported AND re-exported: a bare `export ... from` would not bind it here. */
-import { isMemory, buildNameDf, properNames, properShared, properDensity, scoreRelevance, modelKey, postDates, UNFITTED_FALLBACK } from '../extension/relevance.mjs';
+import { isMemory, buildNameDf, properNames, properShared, properDensity, scoreRelevance, modelKey, postDates, UNFITTED_FALLBACK } from '../../extension/relevance.mjs';
 export { isMemory };
 export const isReference = e => !isMemory(e);
 export const isDurableEntry = e => Boolean(e?.constant);
@@ -590,7 +590,7 @@ const MODEL_CACHE = new Map();
 const modelFiles = (dir = null) => {
     const key = dir ?? '';
     if (!MODEL_CACHE.has(key)) {
-        const base = dir ? resolvePath(process.cwd(), dir) : dirname(fileURLToPath(new URL('../extension/x', import.meta.url)));
+        const base = dir ? resolvePath(process.cwd(), dir) : dirname(fileURLToPath(new URL('../../extension/x', import.meta.url)));
         const out = {};
         for (const tier of ['memory', 'reference']) {
             try { out[tier] = JSON.parse(fs.readFileSync(resolvePath(base, `relevance-model-${tier}.json`), 'utf8')); }

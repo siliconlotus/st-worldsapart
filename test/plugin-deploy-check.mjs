@@ -6,7 +6,7 @@ import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { PLUGIN_FILES } from '../plugin/fingerprint.mjs';
 import { countChatHits, setBoundaryMode } from '../extension/matcher.mjs';
-import { eq } from '../eval/metrics.mjs';
+import { eq } from '../eval/lib/metrics.mjs';
 
 const root = new URL('../plugin/', import.meta.url);
 const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'wa-deploy-'));

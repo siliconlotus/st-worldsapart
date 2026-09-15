@@ -1,7 +1,7 @@
 // Self-check for resolveModel and the label it mints: the label must resolve back to the same model, endpoint and prefixes.
-import { PREFIXES, cachePath, pathSafe, resolveModel } from '../eval/reindex.mjs';
+import { PREFIXES, cachePath, pathSafe, resolveModel } from '../eval/lib/reindex.mjs';
 import { PREFIXES as SHIPPED, queryPrefix } from '../extension/relevance.mjs';
-import { eq } from '../eval/metrics.mjs';
+import { eq } from '../eval/lib/metrics.mjs';
 
 const round = spec => resolveModel(resolveModel(spec).label);
 const idem = (spec, msg) => {

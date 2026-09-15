@@ -2,7 +2,7 @@
 // Usage (any cwd):
 //   node eval/pair-f2.mjs <baseline.json> <arm.json> [--at-recall 0.75]
 import fs from 'node:fs';
-import { signTest } from './metrics.mjs';
+import { signTest } from './lib/metrics.mjs';
 
 const argv = process.argv.slice(2);
 const arg = k => { const i = argv.indexOf(k); return i >= 0 ? (argv[i + 1] ?? null) : null; };

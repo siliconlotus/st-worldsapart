@@ -4,7 +4,7 @@
 // Read the >= 3 band first — every selection criterion is defined on it — and the agreement numbers against the contract-vs-itself reference printed at the end (G3).
 import { readFileSync, readdirSync, existsSync } from 'node:fs';
 import { resolve as resolvePath } from 'node:path';
-import { qwk, mean, arg } from './metrics.mjs';
+import { qwk, mean, arg } from './lib/metrics.mjs';
 
 const argv = process.argv.slice(2);
 const dirs = argv.filter(a => !a.startsWith('--') && argv[argv.indexOf(a) - 1] !== '--labels');

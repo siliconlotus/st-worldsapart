@@ -1,6 +1,6 @@
 // gazetteerSource selects WHICH FIELDS the gazetteer reads (scene.mjs); field selection is asserted, tokenization is not re-derived (R22).
-import { loadScene, sceneParams } from '../eval/scene.mjs';
-import { eq } from '../eval/metrics.mjs';
+import { loadScene, sceneParams } from '../eval/lib/scene.mjs';
+import { eq } from '../eval/lib/metrics.mjs';
 
 const entry = (uid, extra) => ({ world: 'B', uid, comment: `titleword${uid}`, content: `bodyword${uid}`, key: [`keyword${uid}`], ...extra });
 const S = {

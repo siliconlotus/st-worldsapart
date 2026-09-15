@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { bundleSamples, openBundle, raterParts } from '../extension/grading.mjs';
-import { gradeValue } from '../eval/metrics.mjs';
+import { gradeValue } from '../eval/lib/metrics.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const EVAL = resolve(HERE, '..', 'eval');

@@ -1,6 +1,6 @@
 // Stage-2 activation verdicts (matcher.mjs activationAdds): candidacy, depth resolution, scanDepth 0, segmentation, the recursion rematch window.
 import { activationAdds, makeWindowFor, scanSegments, withExtraTexts } from '../extension/matcher.mjs';
-import { eq } from '../eval/metrics.mjs';
+import { eq } from '../eval/lib/metrics.mjs';
 
 const OPTS = { messageDepth: 4, fallbackDepth: 2, caseSensitiveDefault: false, wholeWordsDefault: false };
 const win = text => () => (Array.isArray(text) ? text : [text]);

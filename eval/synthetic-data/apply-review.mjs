@@ -7,7 +7,7 @@ const HEAD_BYTES = 4096;   // enough to hold everything ahead of the bulk; captu
 import { basename, dirname, resolve as resolvePath } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { openBundle, passKey, setGrades } from '../../extension/grading.mjs';
-import { arg } from '../metrics.mjs';
+import { arg } from '../lib/metrics.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 

@@ -2,9 +2,9 @@
 // An oracle mismatch is the DATA drifting (P3), so it prints rather than fails; with no eval-data the oracle skips.
 import { readFileSync, readdirSync, existsSync } from 'node:fs';
 import { chunkEntry, splitRecursive } from '../extension/chunking.mjs';
-import { eq } from '../eval/metrics.mjs';
-import { evalDataDir, openSample, indexPath, sceneLabel } from '../eval/scene.mjs';
-import { chunkConfig } from '../eval/reindex.mjs';
+import { eq } from '../eval/lib/metrics.mjs';
+import { evalDataDir, openSample, indexPath, sceneLabel } from '../eval/lib/scene.mjs';
+import { chunkConfig } from '../eval/lib/reindex.mjs';
 
 const MODEL = process.env.WA_EMBED_MODEL ?? 'bge-m3';
 

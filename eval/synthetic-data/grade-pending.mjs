@@ -9,7 +9,7 @@ import { archiveContract, contractBody } from './contract.mjs';
 import { dirname, resolve as resolvePath } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { openBundle, passKey, raterKey, raterParts, setGrades } from '../../extension/grading.mjs';
-import { arg } from '../metrics.mjs';
+import { arg } from '../lib/metrics.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const EVAL = resolvePath(HERE, '..');

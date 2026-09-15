@@ -1,6 +1,6 @@
 // sort-check — the canonical grading-table order (sort.mjs gradeOrder), what /wa-grade and /wa-super-grade show first.
 import { gradeOrder } from '../extension/sort.mjs';
-import { eq } from '../eval/metrics.mjs';
+import { eq } from '../eval/lib/metrics.mjs';
 
 // One row per class, in the order onScanDone hands them over; do not reorder this fixture.
 const rows = [

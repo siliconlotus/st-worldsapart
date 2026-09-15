@@ -10,16 +10,16 @@ import { readFileSync, writeFileSync, mkdirSync, existsSync } from 'node:fs';
 import { basename, dirname, resolve as resolvePath } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { randomUUID } from 'node:crypto';
-import { haystackFor, loadScene, makeCandidateSet, makeLayoutOrder, sceneParams, indexPath, embed, stInstall, wiTitle, bookFingerprint, whyFor } from './scene.mjs';
-import { ensureIndex } from './reindex.mjs';
-import { arg } from './metrics.mjs';
+import { haystackFor, loadScene, makeCandidateSet, makeLayoutOrder, sceneParams, indexPath, embed, stInstall, wiTitle, bookFingerprint, whyFor } from './lib/scene.mjs';
+import { ensureIndex } from './lib/reindex.mjs';
+import { arg } from './lib/metrics.mjs';
 
-import { offlineTokenCounter } from './tokens.mjs';
+import { offlineTokenCounter } from './lib/tokens.mjs';
 import * as query from '../extension/query.mjs';
 import * as entity from '../extension/entity.mjs';
 import * as matcher from '../extension/matcher.mjs';
 import { bundleSamples, openBundle, stRelative } from '../extension/grading.mjs';
-import { gitVersion } from './gitversion.mjs';
+import { gitVersion } from './lib/gitversion.mjs';
 
 /** The pooling arms in harness vocabulary; mirrors worldsapart.js POOL_ARMS, which imports ST and cannot be loaded here. */
 const POOL_ARMS = {

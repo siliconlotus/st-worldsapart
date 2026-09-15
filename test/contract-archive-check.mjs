@@ -1,5 +1,5 @@
 // A rubric hash must resolve to the instructions it names (synthetic-data/contract.mjs), independent of git.
-import { eq } from '../eval/metrics.mjs';
+import { eq } from '../eval/lib/metrics.mjs';
 import { mkdtempSync, writeFileSync, readFileSync, existsSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';

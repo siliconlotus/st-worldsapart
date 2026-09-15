@@ -1,5 +1,6 @@
 // corpus-check.mjs — the book roster: the slug a filename derives, and that a missing roster refuses rather than guesses.
-import { evalBooks, toBooks, slugOf } from '../eval/corpus.mjs';
+import { evalBooks, toBooks, slugOf, ROSTER as DEFAULT_ROSTER, WORLDS } from '../eval/lib/corpus.mjs';
+import { resolve } from 'node:path';
 import { writeFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -40,5 +41,10 @@ throws(() => evalBooks(['node', 'x'], ROSTER), 'an object roster is refused: it 
 writeFileSync(ROSTER, '[]');
 throws(() => evalBooks(['node', 'x'], ROSTER), 'an empty roster is not a roster');
 rmSync(ROSTER, { force: true });
+
+// The defaults are module-relative, so moving corpus.mjs silently repoints both. Nothing else exercises them.
+const REPO = resolve(new URL('..', import.meta.url).pathname);
+eq(resolve(DEFAULT_ROSTER), resolve(REPO, 'eval/eval-data/books.json'), 'the roster is eval-data/books.json, wherever this module lives');
+eq(resolve(WORLDS), resolve(REPO, '../../../../../data/default-user/worlds'), "WORLDS is ST's lorebook directory, wherever this module lives");
 
 if (!failed) console.log('corpus-check: ok');

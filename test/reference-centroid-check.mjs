@@ -2,8 +2,8 @@
 import { mkdtempSync, writeFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { loadScene, makeCandidateSet, sceneParams } from '../eval/scene.mjs';
-import { eq } from '../eval/metrics.mjs';
+import { loadScene, makeCandidateSet, sceneParams } from '../eval/lib/scene.mjs';
+import { eq } from '../eval/lib/metrics.mjs';
 
 const DIR = mkdtempSync(join(tmpdir(), 'wa-refcent-'));
 // 1, 2 memory; 3, 4 reference. Reference items share a component (+z) memory items do not.

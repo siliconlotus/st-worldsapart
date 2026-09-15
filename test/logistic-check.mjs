@@ -1,6 +1,6 @@
 // Self-check for logistic.mjs, against cases whose answer is known independently of the fit.
-import { logisticFit, auc, inverse, cumulativeFit, prCurve, reliability, sigmoid } from '../eval/logistic.mjs';
-import { eq, eqNear } from '../eval/metrics.mjs';
+import { logisticFit, auc, inverse, cumulativeFit, prCurve, reliability, sigmoid } from '../eval/lib/logistic.mjs';
+import { eq, eqNear } from '../eval/lib/metrics.mjs';
 
 // --- inverse ---------------------------------------------------------------------------------------
 const I = inverse([[4, 7], [2, 6]]);

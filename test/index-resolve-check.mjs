@@ -1,6 +1,6 @@
 // index-resolve-check.mjs — where a scene looks for its vector collection, and what a missing one means: the CWD is not an input (H2), and a book with nothing to index legitimately has none.
 import { chdir, cwd } from 'node:process';
-import { indexPath, loadScene, sceneParams, stInstall } from '../eval/scene.mjs';
+import { indexPath, loadScene, sceneParams, stInstall } from '../eval/lib/scene.mjs';
 import { dirname, isAbsolute } from 'node:path';
 
 let bad = 0;

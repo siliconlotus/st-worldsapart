@@ -1,6 +1,6 @@
 // Checks the nested entry caps: vector ⊆ dynamic ⊆ all.
 import { applyBudget } from '../extension/delivery.mjs';
-import { eq } from '../eval/metrics.mjs';
+import { eq } from '../eval/lib/metrics.mjs';
 
 const mk = (key, tokens, opts = {}) => ({ key, tokens, entry: { ...opts } });
 

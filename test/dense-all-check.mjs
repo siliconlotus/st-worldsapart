@@ -2,8 +2,8 @@
 import { mkdtempSync, writeFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { loadScene, makeCandidateSet, sceneParams } from '../eval/scene.mjs';
-import { eq } from '../eval/metrics.mjs';
+import { loadScene, makeCandidateSet, sceneParams } from '../eval/lib/scene.mjs';
+import { eq } from '../eval/lib/metrics.mjs';
 
 const DIR = mkdtempSync(join(tmpdir(), 'wa-dense-'));
 const vec = { 1: [1, 0, 0], 2: [0.6, 0.8, 0], 3: [0, 0, 1], 5: [0.9, 0.1, 0.2] };

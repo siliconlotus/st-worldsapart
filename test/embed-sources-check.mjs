@@ -1,7 +1,7 @@
 // plugin/server.js embed() copies ST's module-private getVector; this reads ST's SOURCES array and asserts the switch still covers every entry. Skips without an ST install.
 import { readFileSync, existsSync } from 'node:fs';
-import { stInstall } from '../eval/scene.mjs';
-import { eq } from '../eval/metrics.mjs';
+import { stInstall } from '../eval/lib/scene.mjs';
+import { eq } from '../eval/lib/metrics.mjs';
 import { fileURLToPath } from 'node:url';
 
 const st = stInstall();

@@ -1,6 +1,6 @@
 // Orphaned bindings (bindings.mjs): chats and character cards naming a lorebook that no longer exists.
 import { findOrphanBindings, nearestWorld, normalizeWorldName, editDistance } from '../extension/bindings.mjs';
-import { eq } from '../eval/metrics.mjs';
+import { eq } from '../eval/lib/metrics.mjs';
 
 const chat = (file, world) => ({ file_name: file, chat_metadata: world ? { world_info: world } : {} });
 

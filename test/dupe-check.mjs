@@ -1,6 +1,6 @@
 // buildKeyPruneScan's near-duplicate flag, on synthetic shapes: a scene summarized twice, an arc containing a scene (must not flag), two arcs with one text (must flag).
 import { buildKeyPruneScan, KEY_DUPE_MIN } from '../extension/keyword-audit.mjs';
-import { eq } from '../eval/metrics.mjs';
+import { eq } from '../eval/lib/metrics.mjs';
 
 const OPTS = { scanKeyword: true, scanVectorized: true, scanConstant: true, includeInactive: true,
     pruneUnattested: false, pruneCommon: false, pruneShort: false, pruneShared: false, pruneFragment: false,

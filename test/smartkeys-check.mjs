@@ -3,7 +3,7 @@
 import { countChatHits, countKey, keywordScore, repeatCurveOf, setBoundaryMode, isRegexKey } from '../extension/matcher.mjs';
 import { tokenize, parse, evaluate, buildAutomaton, scanAutomaton, validateSmartKey, fold, resetSmartKeys } from '../extension/smartkeys.mjs';
 import { buildKeyPruneScan, pathProbes } from '../extension/keyword-audit.mjs';
-import { eq } from '../eval/metrics.mjs';
+import { eq } from '../eval/lib/metrics.mjs';
 
 const matches = (key, text) => countKey(key, text, false, false) > 0;
 

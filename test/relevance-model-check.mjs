@@ -1,7 +1,7 @@
 // relevance-model-check — the stage-4 relevance prediction's pure half (relevance.mjs, selection.mjs relevanceCut).
 import { properNames, buildNameDf, properShared, properDensity, scoreRelevance, postDates, modelKey } from '../extension/relevance.mjs';
 import { relevanceCut } from '../extension/selection.mjs';
-import { eq } from '../eval/metrics.mjs';
+import { eq } from '../eval/lib/metrics.mjs';
 import fs from 'node:fs';
 
 // ---- properNames -------------------------------------------------------------------------------
@@ -147,7 +147,7 @@ eq(postDates({}, 100), false, 'an entry with no range is available, which is wha
 eq(postDates({ STMB_start: 150 }, NaN), false, 'with no current position nothing is post-dated, so the filter is off rather than total');
 
 // ---- fitsNamed ---------------------------------------------------------------------------------
-const { fitsNamed, modelsFor } = await import('../eval/scene.mjs');
+const { fitsNamed, modelsFor } = await import('../eval/lib/scene.mjs');
 const { UNFITTED_FALLBACK } = await import('../extension/relevance.mjs');
 eq(fitsNamed('noCosine').memory.features.includes('cosine'), false, 'the noCosine fit carries no cosine feature');
 eq(fitsNamed('bge-m3').memory.features.includes('cosine'), true, '...where a model fit does');

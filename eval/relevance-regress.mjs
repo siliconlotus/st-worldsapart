@@ -4,16 +4,16 @@
 //        --tier all|memory|reference [--cut 4] [--ordinal] [--loso] [--lobo] [--calibration] [--cutoff] [--at 0.10] [--degree 2] [--interactions] --features cosine,text,properNouns,density [--drop-keys flagged.json] [--emit-rows rows.json] [--emit-model relevance-model-<tier>.json] [--proper-nouns count|idf|idf-len|jaccard|gaz] [--proper-nouns-extract regex|entity|bare|span|book|named] [--density-extract entity|book]
 //   --tier and --features are required. With properNouns in --features, --proper-nouns and --proper-nouns-extract are
 //   required. A --sweep read with --cutoff requires --at: arms compare at one set cutoff.
-import { haystackFor, indexPath, isMemory, loadScene, openSample, sceneParams, makeCandidateSet, makeGradeOf, embed, sceneLabel } from './scene.mjs';
-import { ensureIndex, resolveModel } from './reindex.mjs';
+import { haystackFor, indexPath, isMemory, loadScene, openSample, sceneParams, makeCandidateSet, makeGradeOf, embed, sceneLabel } from './lib/scene.mjs';
+import { ensureIndex, resolveModel } from './lib/reindex.mjs';
 import fs from 'node:fs';
-import { gradeValue, gradeCredit, fbeta, RECALL_WEIGHT, signTest, arg } from './metrics.mjs';
+import { gradeValue, gradeCredit, fbeta, RECALL_WEIGHT, signTest, arg } from './lib/metrics.mjs';
 import { PACK } from '../extension/wa-pack-en.js';
 import { table, usePack } from '../extension/lang.mjs';
 // table().common, not a second split: lang.mjs owns how a pack's word list is read.
 usePack(PACK);
 const COMMON_WORDS = table().common;
-import { logisticFit, auc, cumulativeFit, prCurve, reliability, sigmoid } from './logistic.mjs';
+import { logisticFit, auc, cumulativeFit, prCurve, reliability, sigmoid } from './lib/logistic.mjs';
 import * as entity from '../extension/entity.mjs';
 import { properNames, properDensity, modelKey, properNounsOf, NAME_PARTICLES } from '../extension/relevance.mjs';
 import { nameEvidence } from '../extension/keyword-suggest.mjs';

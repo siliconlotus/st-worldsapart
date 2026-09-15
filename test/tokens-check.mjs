@@ -3,7 +3,7 @@ import { readFileSync, readdirSync, existsSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { armNames, openBundle } from '../extension/grading.mjs';
-import { TOKENIZER_OFFSET, deriveOffsets, offlineTokenCounter } from '../eval/tokens.mjs';
+import { TOKENIZER_OFFSET, deriveOffsets, offlineTokenCounter } from '../eval/lib/tokens.mjs';
 
 const DATA = resolve(dirname(fileURLToPath(import.meta.url)), 'eval-data');
 let fails = 0;

@@ -2,7 +2,7 @@
 import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { dirname, resolve } from 'node:path';
-import { hasBuildCounter, isReleaseVersion } from '../eval/version.mjs';
+import { hasBuildCounter, isReleaseVersion } from '../eval/lib/version.mjs';
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const HOOK = resolve(ROOT, 'hooks/pre-push');

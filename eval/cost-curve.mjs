@@ -2,9 +2,9 @@
 // Usage (from SillyTavern root):
 //   node .../cost-curve.mjs <sample.json> [...] --fits scene=<dir>,book=<dir> [--cutoffs 0.05,0.10,…]
 // Both fits must be fitted on this corpus: a model fitted elsewhere reads two corpora as a standardisation effect.
-import { indexPath, loadScene, openSample, sceneParams, scoreScene, embed, sceneLabel } from './scene.mjs';
-import { resolveModel } from './reindex.mjs';
-import { mean, arg as sharedArg } from './metrics.mjs';
+import { indexPath, loadScene, openSample, sceneParams, scoreScene, embed, sceneLabel } from './lib/scene.mjs';
+import { resolveModel } from './lib/reindex.mjs';
+import { mean, arg as sharedArg } from './lib/metrics.mjs';
 
 
 const argv = process.argv.slice(2);

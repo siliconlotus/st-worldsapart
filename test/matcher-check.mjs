@@ -2,7 +2,7 @@
 // A claim that cites core as the authority belongs in core-matcher-check.mjs.
 import { countKey, dropTags, keyExcerpts, segment, keyHits, keySpans, mergeSpans, splitKeys, textSegments, keywordScore as rankKeywordScore, markExcerptText, repeatCurveOf, secondaryKeys, usableKeys, usedMatchSources, withMatchSources, WI_LOGIC } from '../extension/matcher.mjs';
 import { validateSmartKey } from '../extension/smartkeys.mjs';
-import { eq } from '../eval/metrics.mjs';
+import { eq } from '../eval/lib/metrics.mjs';
 
 // keywordScore with the production defaults injected; k1 is 2 here, and passing a cfg to this wrapper does nothing.
 const keywordScore = (e, t, k) => rankKeywordScore(e, t, k, { k1: 2, caseSensitiveDefault: false, wholeWordsDefault: false });

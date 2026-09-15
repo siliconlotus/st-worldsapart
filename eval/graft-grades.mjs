@@ -5,7 +5,7 @@ import { readFileSync, writeFileSync, existsSync } from 'node:fs';
 import { basename, resolve as resolvePath } from 'node:path';
 import { armNames, openBundle, rowKey, sceneDiff, setGrades } from '../extension/grading.mjs';
 import * as matcher from '../extension/matcher.mjs';
-import { gradeValue, arg } from './metrics.mjs';
+import { gradeValue, arg } from './lib/metrics.mjs';
 
 /** Unit Separator — joins title to content so neither can spell the other's boundary. */
 const US = String.fromCharCode(31);

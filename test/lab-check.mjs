@@ -2,7 +2,7 @@
 
 import { entryFlags, entryGate, labScan, runBook, runSpans } from '../extension/lab.mjs';
 import { WI_LOGIC } from '../extension/matcher.mjs';
-import { eq } from '../eval/metrics.mjs';
+import { eq } from '../eval/lib/metrics.mjs';
 
 
 const text = 'His breath is fast.\n\nHe looks slowly.\n\nHis breath hitches before slowly leveling out.';

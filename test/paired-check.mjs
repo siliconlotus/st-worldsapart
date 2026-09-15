@@ -1,6 +1,6 @@
 // Self-check for the paired estimator (metrics.mjs signTest), the set metrics, and scene.mjs's offline helpers.
-import { eq, eqNear, signTest, gradeCredit, fbeta, RECALL_WEIGHT, jaccard, spearman, qwk, topComponents, projectOut } from '../eval/metrics.mjs';
-import { sceneParams, ndcg, dcg, nrm, wiTitle, makeGradeOf, makeKeywordScore, scoreScene, tierRecall, bookFingerprint } from '../eval/scene.mjs';
+import { eq, eqNear, signTest, gradeCredit, fbeta, RECALL_WEIGHT, jaccard, spearman, qwk, topComponents, projectOut } from '../eval/lib/metrics.mjs';
+import { sceneParams, ndcg, dcg, nrm, wiTitle, makeGradeOf, makeKeywordScore, scoreScene, tierRecall, bookFingerprint } from '../eval/lib/scene.mjs';
 import { rowKey } from '../extension/grading.mjs';
 
 // --- exact two-sided sign-test p-values, against hand-computed binomials
@@ -182,7 +182,7 @@ eq(Number.isNaN(qwk([])), true, 'no rows -> NaN, not a fake 1');
 eq(Number.isNaN(qwk([[2, 2], [2, 2]])), true, 'one cell only -> NaN: no expected disagreement to correct against');
 
 // --- dropUnavailable: a row whose entry post-dates the scene could not be in the book when it was live
-const { dropUnavailable } = await import('../eval/scene.mjs');
+const { dropUnavailable } = await import('../eval/lib/scene.mjs');
 const mkSample = (msg, extra = {}) => ({
     generatedFrom: msg === null ? {} : { msg },
     books: { W: { 1: { uid: 1, STMB_start: 10, STMB_end: 20 }, 2: { uid: 2, STMB_start: 300, STMB_end: 400 }, 3: { uid: 3 } } },
@@ -216,7 +216,7 @@ eq(twice.entries.length, 2, '...and the grade list is stable across a second pas
 
 // --- haystackFor: composes a per-entry window from scan messages, injects and opted-in sources
 {
-    const { haystackFor, sceneParams } = await import('../eval/scene.mjs');
+    const { haystackFor, sceneParams } = await import('../eval/lib/scene.mjs');
     const S = {
         scanChat: [{ name: 'A', mes: 'first' }, { name: 'B', mes: 'second' }],
         depth: 2,
@@ -271,7 +271,7 @@ eq(JSON.stringify([...topComponents(pts, 2, MU)[0]]), JSON.stringify([...topComp
 
 // --- the query embedding cache: keyed by (label, exact text), tolerant of a torn append
 {
-    const { embed, queryCachePath: path } = await import('../eval/scene.mjs');
+    const { embed, queryCachePath: path } = await import('../eval/lib/scene.mjs');
     const { appendFileSync, writeFileSync, existsSync, unlinkSync } = await import('node:fs');
     const A = 'wa-check-model-a', B = 'wa-check-model-b';
     for (const l of [A, B]) if (existsSync(path(l))) unlinkSync(path(l));
@@ -286,7 +286,7 @@ eq(JSON.stringify([...topComponents(pts, 2, MU)[0]]), JSON.stringify([...topComp
     const hit = await embed(text, { ...fake, label: A });
     eq(JSON.stringify(hit), '[1,2,3]', 'a cached query is returned without an embed call');
     appendFileSync(path(A), '{"h":"deadbeef","v":[9,9');
-    const { embed: embed2 } = await import(`../eval/scene.mjs?bust=${Date.now()}`);
+    const { embed: embed2 } = await import(`../eval/lib/scene.mjs?bust=${Date.now()}`);
     const stillHit = await embed2(text, { ...fake, label: A });
     eq(JSON.stringify(stillHit), '[1,2,3]', '...and a torn final line does not take the cache down with it');
     let threw = false;
@@ -297,7 +297,7 @@ eq(JSON.stringify([...topComponents(pts, 2, MU)[0]]), JSON.stringify([...topComp
 }
 
 // --- etaSquared (global-basis.mjs): the sharedness statistic, which is not variance order
-const { etaSquared } = await import('../eval/global-basis.mjs');
+const { etaSquared } = await import('../eval/lib/global-basis.mjs');
 {
     const MEAN = [0, 0];
 // x: both groups straddle 0 identically (shared); y: group A at +1, group B at -1 (separating)
@@ -312,7 +312,7 @@ const { etaSquared } = await import('../eval/global-basis.mjs');
 }
 
 // --- lineagesOf: two versions of one book are one book
-const { lineagesOf } = await import('../eval/scene.mjs');
+const { lineagesOf } = await import('../eval/lib/scene.mjs');
 const bk = (...bodies) => Object.fromEntries(bodies.map((c, i) => [i, { uid: i, content: c }]));
 const L = lineagesOf({
     Big: bk('alpha', 'beta', 'gamma', 'delta'),

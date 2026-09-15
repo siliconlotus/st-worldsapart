@@ -5,7 +5,7 @@ import { buildKeyPruneScan, substringProbes, orthoAlternates } from '../extensio
 import { ORTHO_FAMILIES } from '../extension/smartkeys.mjs';
 import { keywordScore, scanSegments, countKey, countChatHits, activationAdds, makeWindowFor, withExtraTexts } from '../extension/matcher.mjs';
 import { buildKeyPruneScan as _pruneScan } from '../extension/keyword-audit.mjs';
-import { eq } from '../eval/metrics.mjs';
+import { eq } from '../eval/lib/metrics.mjs';
 
 const here = new URL('./fixtures/', import.meta.url);
 const data = JSON.parse(fs.readFileSync(new URL('sentinel-book.json', here), 'utf8'));

@@ -1,5 +1,5 @@
 // Checks for apply-review.mjs's merge rule (mergeReview) and section resolution (resolveSections).
-import { eq, gradeValue } from '../eval/metrics.mjs';
+import { eq, gradeValue } from '../eval/lib/metrics.mjs';
 const { mergeReview, resolveSections } = await import('../eval/synthetic-data/apply-review.mjs');
 const { mkdtempSync, writeFileSync, rmSync } = await import('node:fs');
 const { tmpdir } = await import('node:os');

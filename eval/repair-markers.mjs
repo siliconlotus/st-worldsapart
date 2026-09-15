@@ -3,7 +3,7 @@
 //   node eval/repair-markers.mjs <bundle.json | world.json ...> [--write]   (dry by default; a repaired world needs its collection re-synced, a repaired bundle re-deriving)
 import { readFileSync, writeFileSync } from 'node:fs';
 import { basename } from 'node:path';
-import { cachePath, chunkConfig } from './reindex.mjs';
+import { cachePath, chunkConfig } from './lib/reindex.mjs';
 import { openBundle } from '../extension/grading.mjs';
 
 const argv = process.argv.slice(2);

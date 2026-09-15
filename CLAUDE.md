@@ -50,10 +50,12 @@ ships or runs in CI. `.github/workflows/checks.yml` runs `test/` on every pull r
   fixture opens in the Studio. Symlinks rather than copies, so editing the fixture changes what the UI
   shows; every other check calls the classifier one layer below what the UI uses.
   `test/genre-cases.mjs` is test data on the same footing.
-- `eval/scene.mjs`, `metrics.mjs`, `corpus.mjs` — libraries, no CLI. `scene.mjs` loads and scores one
-  graded scene; `metrics.mjs` holds the shared statistics; `corpus.mjs` resolves which lorebooks a run
-  reads. Every tool goes through them: a second copy of the gazetteer or the scorers must never appear
-  (R22), and no tool names a book.
+- `eval/lib/` — libraries, no CLI and no argv. `scene.mjs` loads and scores one graded scene;
+  `metrics.mjs` holds the shared statistics; `corpus.mjs` resolves which lorebooks a run reads;
+  `reindex.mjs` builds a collection and `global-basis.mjs` the shared basis. Every tool goes through
+  them: a second copy of the gazetteer or the scorers must never appear (R22), and no tool names a book.
+  **A library's paths are module-relative, so moving one silently repoints them** — `corpus-check.mjs`
+  pins `ROSTER` and `WORLDS` for that reason.
 - `eval/synthetic-data/` — generates graded data and measures nothing. `grade-pending.mjs` turns a row
   list (`{bundle, book, uid}`) into judge jobs and merges the answers back, reading `eval-data` and
   writing `grade-jobs`. The rubric is `.claude/agents/scene-relevance.md`, where Claude Code discovers
@@ -62,9 +64,10 @@ ships or runs in CI. `.github/workflows/checks.yml` runs `test/` on every pull r
   benchmark and analysis tools that take a vector index and/or lorebook path. Run bare they print a
   usage line and exit non-zero; that is not a test failure.
 
-**A module that is both a library and a CLI splits into the two.** `corpus.mjs` is the shape: `evalBooks()`
-computes and throws, `booksOrExit()` parses argv and exits. `reindex.mjs` and `global-basis.mjs` have not
-been split yet.
+**A module is a library or a CLI, never both.** The library goes in `lib/` and takes no argv; the CLI keeps
+the name a person types (`node eval/reindex.mjs …`) and is a thin wrapper over it. Within one module the
+same split holds: `corpus.mjs` has `evalBooks()`, which computes and throws, and `booksOrExit()`, which
+parses argv and exits.
 
 ## A harness that spends anything appends; it never collects and writes at the end
 

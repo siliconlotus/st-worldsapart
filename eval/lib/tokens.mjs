@@ -2,7 +2,7 @@
 // offset measured off captures (G12). An unlisted tokenizer THROWS; count it against a running SillyTavern.
 import { createRequire } from 'node:module';
 import { stInstall } from './scene.mjs';
-import { armNames, openBundle } from '../extension/grading.mjs';
+import { armNames, openBundle } from '../../extension/grading.mjs';
 
 /** Offsets are MEASURED, not chosen; tokens-check.mjs re-derives them. */
 export const TOKENIZER_OFFSET = {
