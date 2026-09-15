@@ -6,7 +6,7 @@
 //
 //   {
 //     "name": "scene1",
-//     "query": "Sommers ABO: …",          // the retrieval query, verbatim — see FREEZE below
+//     "query": "Harbor: …",          // the retrieval query, verbatim — see FREEZE below
 //     "queryChat": [{name, mes}, ...],    // the messages it was joined from, for the depth sweep
 //     "scanChat": [{name, mes}, ...],     // the messages the keyword scan window is cut from
 //     "chat":  "data/default-user/chats/<char>/<chat>.jsonl",   // provenance / re-freezing only

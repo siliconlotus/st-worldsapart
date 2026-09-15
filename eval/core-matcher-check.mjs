@@ -291,9 +291,9 @@ eq(countKey('three-inch', 'three inch', false, false), 1, 'DIVERGENCE: a key exp
 eq(countKey('three inch', 'three-inch', false, false), 0, 'one way only: a spaces-only key interns no hyphenated form');
 eq(countKey('wait-no', 'wait\u2014no', false, false), 0, 'the expansion is not the fold: an em-dash stays two hyphens and no variant reaches it');
 eq(countKey('Bose\u2013Einstein', 'the Bose Einstein condensate', false, false), 1, 'an en-dash key expands as the hyphen it folds to');
-eq(countKey('Jos\u00e9', `Jose\u0301 Sommers`, false, false), 1, 'decomposed text matches a precomposed key');
-eq(countKey(`Jose\u0301`, 'Jos\u00e9 Sommers', false, false), 1, 'precomposed text matches a decomposed key');
-eq(countKey(`Jose\u0301`, `Jose\u0301 Sommers`, false, false), 1, 'decomposed both sides still matches');
+eq(countKey('Jos\u00e9', `Jose\u0301 Navarro`, false, false), 1, 'decomposed text matches a precomposed key');
+eq(countKey(`Jose\u0301`, 'Jos\u00e9 Navarro', false, false), 1, 'precomposed text matches a decomposed key');
+eq(countKey(`Jose\u0301`, `Jose\u0301 Navarro`, false, false), 1, 'decomposed both sides still matches');
 eq(countKey("Cap'n", `Cap'n and Cap${CURLY}n and Capʼn`, false, false), 3, 'mixed forms all counted');
 console.log('ok   apostrophe normalisation: straight/curly interchangeable, orthographic variants folded, meaning-bearing characters untouched');
 

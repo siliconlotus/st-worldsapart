@@ -106,12 +106,12 @@ eq(makeGradeOf([{ title: 'Villa', grade: 5, uid: 1 }, { title: 'Other', grade: 3
     'a grade set missing uids resolves every row by title');
 
 const twoBooks = makeGradeOf(
-    [{ title: 'Alpha Biology', grade: 4, uid: 1, book: 'omegaverse' }, { title: 'Sommers Pack Rules', grade: 0, uid: 1, book: 'B' }],
+    [{ title: 'Alpha Biology', grade: 4, uid: 1, book: 'folklore' }, { title: 'Harbor Pack Rules', grade: 0, uid: 1, book: 'B' }],
     inScope,
 );
-eq(twoBooks({ uid: 1, book: 'omegaverse', title: 'Alpha Biology' }), 4, 'a second book\'s row resolves against its own grade');
-eq(twoBooks({ uid: 1, book: 'B', title: 'Sommers Pack Rules' }), 0, '...and the primary\'s uid 1 keeps its own');
-eq(twoBooks({ uid: 1, entry: { world: 'omegaverse' }, title: 'x' }), 4, 'a scored row carries its book on entry.world');
+eq(twoBooks({ uid: 1, book: 'folklore', title: 'Alpha Biology' }), 4, 'a second book\'s row resolves against its own grade');
+eq(twoBooks({ uid: 1, book: 'B', title: 'Harbor Pack Rules' }), 0, '...and the primary\'s uid 1 keeps its own');
+eq(twoBooks({ uid: 1, entry: { world: 'folklore' }, title: 'x' }), 4, 'a scored row carries its book on entry.world');
 eq(twoBooks({ uid: 1, title: 'x' }), 0, 'a row naming no book is the primary\'s, as every reader here assumes');
 
 // --- makeKeywordScore

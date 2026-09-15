@@ -4,21 +4,21 @@ import { eq } from './metrics.mjs';
 
 const chat = (file, world) => ({ file_name: file, chat_metadata: world ? { world_info: world } : {} });
 
-eq(normalizeWorldName('LTM_Isekai_-_Time_Whore'), 'ltm isekai time whore', 'underscores and dashes collapse');
+eq(normalizeWorldName('LTM_Isekai_-_Night_Market'), 'ltm isekai night market', 'underscores and dashes collapse');
 eq(normalizeWorldName('  A  B  '), 'a b', 'runs of whitespace collapse, ends trim');
 
 {
-    const worlds = ['LTM_Isekai_-_Time_Whore_updated', 'Foxbridge', 'albion_lorebook_v2'];
-    eq(nearestWorld('LTM Isekai - Time Whore', worlds), 'LTM_Isekai_-_Time_Whore_updated', 'a dropped qualifier is recognised');
-    eq(nearestWorld('Foxbridge', worlds), null, 'a name that still exists is not its own suggestion');
-    eq(nearestWorld('LTM_-__Daddy_Next_Door__ABO_-_keywords_revised', ['LTM_-__Daddy_Next_Door__ABO__keywords_revised']),
-        'LTM_-__Daddy_Next_Door__ABO__keywords_revised', 'a rename that only moved a separator is recognised');
-    eq(nearestWorld('Sommers_Pack', worlds), null, 'an unrelated name gets no guess, rather than a near one');
+    const worlds = ['LTM_Isekai_-_Night_Market_updated', 'Ravenmoor', 'atlas_lorebook_v2'];
+    eq(nearestWorld('LTM Isekai - Night Market', worlds), 'LTM_Isekai_-_Night_Market_updated', 'a dropped qualifier is recognised');
+    eq(nearestWorld('Ravenmoor', worlds), null, 'a name that still exists is not its own suggestion');
+    eq(nearestWorld('LTM_-__House_Next_Door__Notes_-_keywords_revised', ['LTM_-__House_Next_Door__Notes__keywords_revised']),
+        'LTM_-__House_Next_Door__Notes__keywords_revised', 'a rename that only moved a separator is recognised');
+    eq(nearestWorld('Harbor_Pack', worlds), null, 'an unrelated name gets no guess, rather than a near one');
     eq(nearestWorld('Alastor', ['Alastor v2']), 'Alastor v2', 'a true prefix is suggested');
-    eq(nearestWorld('Sommers_Pack__v22', ['Sommers_Pack__v23', 'Foxbridge']), 'Sommers_Pack__v23', 'a version bump is recognised');
+    eq(nearestWorld('Harbor_Pack__v22', ['Harbor_Pack__v23', 'Ravenmoor']), 'Harbor_Pack__v23', 'a version bump is recognised');
     eq(nearestWorld('Alastor v1', ['Alastor v2']), 'Alastor v2', '...including one digit apart');
-    eq(nearestWorld('Gladiator', ['Foxbridge', 'albion_lorebook_v2', 'Mystara']), null, 'nothing close gets no guess');
-    eq(nearestWorld('Foxbridge', ['Sommers_Pack__v22']), null, 'and an unrelated long name is not within tolerance');
+    eq(nearestWorld('Gladiator', ['Ravenmoor', 'atlas_lorebook_v2', 'Mystara']), null, 'nothing close gets no guess');
+    eq(nearestWorld('Ravenmoor', ['Harbor_Pack__v22']), null, 'and an unrelated long name is not within tolerance');
 }
 
 {
