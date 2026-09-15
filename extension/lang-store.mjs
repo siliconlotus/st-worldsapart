@@ -3,7 +3,7 @@
 import { getRequestHeaders } from '../../../../../script.js';
 import { toBase64 } from './lang.mjs';
 
-export const PACKS_BASE = 'https://raw.githubusercontent.com/siliconlotus/st-worldsapart-lang/main/';
+const PACKS_BASE = 'https://raw.githubusercontent.com/siliconlotus/st-worldsapart-lang/main/';
 const filePath = lang => `user/files/wa-pack-${lang}.json`;
 
 /** lang.mjs's store contract over /api/files: existence through /verify so a miss is silent, not a 404; a failed write is forgotten, not thrown. */

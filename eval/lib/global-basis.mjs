@@ -12,7 +12,7 @@ import { isMemory } from '../../extension/relevance.mjs';
 import { fileURLToPath } from 'node:url';
 
 /** Where a book's basis lives, keyed by the book being scored; the hash is of the full name because two books can differ only past character 40. */
-export const basisPath = (book, model, within = false) => {
+const basisPath = (book, model, within = false) => {
     if (!model) throw new Error('basisPath needs the model label — a basis is per model');
     return fileURLToPath(new URL(`../eval-data/basis/${String(book).replace(/[^\w.-]+/g, '-').slice(0, 40)}__${model}${within ? '__within' : ''}__${getStringHash(String(book))}.json`, import.meta.url));
 };
@@ -44,7 +44,7 @@ const memoryChunks = (S, model) => {
 };
 
 /** Each group centred on its own mean, pooled — the within-class scatter, as one flat list. */
-export const groupResiduals = (groups) => groups.flatMap((g) => {
+const groupResiduals = (groups) => groups.flatMap((g) => {
     const m = corpusMean(g);
     return g.map(it => ({ vector: Float64Array.from({ length: m.length }, (_, i) => it.vector[i] - m[i]) }));
 });

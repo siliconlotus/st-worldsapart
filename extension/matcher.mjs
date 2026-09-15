@@ -257,7 +257,7 @@ export function textSegments(text, matchWindow) {
 }
 
 /** Entry match-flag -> scan-sources field, as core's buffer does. */
-export const MATCH_SOURCE_FIELDS = {
+const MATCH_SOURCE_FIELDS = {
     matchPersonaDescription: 'personaDescription',
     matchCharacterDescription: 'characterDescription',
     matchCharacterPersonality: 'characterPersonality',
@@ -350,7 +350,7 @@ export const foldedHay = (text, caseSensitive) => {
 /** The chat cut into the unit a conjunction is matched within — each message, each paragraph of each message, or blocks
  *  of `depth` messages joined as the live scan joins them, cut from the newest end so the last block is full. Through
  *  scanSegments, so a message reads `Name: text` exactly when the live scan would; a bare string is a nameless message. */
-export function chatUnits(messages, { matchWindow = 'message', depth = 0, includeNames = false } = {}) {
+function chatUnits(messages, { matchWindow = 'message', depth = 0, includeNames = false } = {}) {
     const chat = [...messages].map(m => (typeof m === 'string' ? { mes: m } : m));
     if (matchWindow !== 'scan') return scanSegments(chat, { depth: chat.length, includeNames, matchWindow });
     const n = Math.max(1, Number(depth) || chat.length);
@@ -410,7 +410,7 @@ export function countChatHits(keys, messages, { matchWindow = 'message', depth =
 /** The whole-word pattern for a needle, compiled once: a batch verifies every reported hit under this, and the runtime
  *  scorer every entry with the flag, and compiling per call was the cost. Bounded; the boundary mode is part of the key. */
 const wholeWordRe = new Map();
-export function wholeWordRegex(needle) {
+function wholeWordRegex(needle) {
     const id = `${boundaryBefore()}${needle}`;
     let re = wholeWordRe.get(id);
     if (!re) {

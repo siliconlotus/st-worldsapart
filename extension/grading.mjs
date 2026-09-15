@@ -213,7 +213,7 @@ const SCENE_FIELDS = ['chat', 'scanChat', 'injects', 'sources'];   // a sample's
 /** Numeric signal values, which live under `scores` and a fitted model indexes by name; ranks and the fused score stay flat, being arm-relative. */
 const SIGNAL_FIELDS = ['cosine', 'text', 'keys', 'properNouns', 'length'];
 
-export const SCHEMA_VERSION = 3;
+const SCHEMA_VERSION = 3;
 
 /** A scene's id, `<chat basename>-msg-<end>`, every run outside `[A-Za-z0-9_]` collapsed to `-`. */
 const sceneId = (chat, end) => {

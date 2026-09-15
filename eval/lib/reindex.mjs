@@ -57,7 +57,7 @@ export function cachePath(S, cfg, model, book = S.primaryBook, all = false, arch
 }
 
 /** Server stems for OpenAI-compatible /v1/embeddings, in the spec so two arms can sit on different servers; LM Studio cannot serve an MLX embedder (embedOnce checks who answered). */
-export const SERVERS = { 'lms:': 'http://localhost:1234', 'omlx:': 'http://localhost:8008' };
+const SERVERS = { 'lms:': 'http://localhost:1234', 'omlx:': 'http://localhost:8008' };
 
 /** st: is SillyTavern's own embedder in-process (transformers.js, quantized ONNX from data/_cache), the only way to measure a stock install. */
 const SERVICES = { ...SERVERS, 'st:': '' };

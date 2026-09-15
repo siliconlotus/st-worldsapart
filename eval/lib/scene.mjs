@@ -162,7 +162,7 @@ export const evalDataDir = () => {
     return existsSync(local) || !st ? local : `${st.root}/public/scripts/extensions/third-party/WorldsApart/eval/eval-data/`;
 };
 
-export const embedModelOf = S => {
+const embedModelOf = S => {
     if (!S?.embedModel) throw new Error('sample records no embedModel — the harness reads the model off the bundle');
     return S.embedModel;
 };
@@ -432,7 +432,7 @@ export function makeGradeOf(grades, { outOfScope, primary }) {
 /** The three populations as predicates over a raw entry; they cross-cut. `isMemory` is imported AND re-exported: a bare `export ... from` would not bind it here. */
 import { isMemory, buildNameDf, properNames, properShared, properDensity, scoreRelevance, modelKey, postDates, UNFITTED_FALLBACK } from '../../extension/relevance.mjs';
 export { isMemory };
-export const isReference = e => !isMemory(e);
+const isReference = e => !isMemory(e);
 export const isDurableEntry = e => Boolean(e?.constant);
 
 /** Recall split by tier over one selection's kept set (identity, not uid); `population` arrives with durable already excluded. */
@@ -455,7 +455,7 @@ const mentions = (name, content) => {
 };
 
 /** The query under the transform ONE BOOK'S collection took; applied per book at every call site, or the sides are compared in different spaces. */
-export const pcQuery = (loaded, qvec) => (loaded?.pc
+const pcQuery = (loaded, qvec) => (loaded?.pc
     ? loaded.pc.stages.reduce((v, st) => projectOut(v, st.mean, st.comps, st.weights ?? null), qvec)
     : qvec);
 

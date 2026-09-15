@@ -11,7 +11,7 @@ export const WORLDS = `${HERE}../../../../../../../data/default-user/worlds`;
 /** The roster a developer writes once; gitignored with the rest of eval-data. */
 export const ROSTER = `${HERE}../eval-data/books.json`;
 
-export const BOOKS_USAGE = `no books. Pass --books A.json,B.json, or write eval/eval-data/books.json:
+const BOOKS_USAGE = `no books. Pass --books A.json,B.json, or write eval/eval-data/books.json:
   ["A.json", { "file": "B.json", "provenance": "manually curated", "slug": "b" }]
 Books are read from data/default-user/worlds and are yours, not the repo's.
 Only hand-written or curated books can stand as a reference for keyword agreement.`;

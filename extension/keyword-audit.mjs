@@ -12,10 +12,10 @@ export const KEY_MIN_SHARED_ENTRIES = 10;
 export const KEY_MIN_LENGTH = 4;
 
 /** Share of the book LISTING a key at which the flag turns severe: how many entries one match activates. */
-export const KEY_BOOK_SHARED = 0.75;
+const KEY_BOOK_SHARED = 0.75;
 
 /** The flag itself fires at this fraction of `KEY_BOOK_SHARED`, so `book shared` has a moderate band below its severe one. */
-export const KEY_BOOK_SHARED_FLAG = 0.75;
+const KEY_BOOK_SHARED_FLAG = 0.75;
 
 /** Rare-vocabulary Jaccard at which two entries are reported near-duplicates. Advisory only: it colours (K14). */
 export const KEY_DUPE_MIN = 0.35;
@@ -33,7 +33,7 @@ export function looksLikeFragment(key) {
 
 /** A capitalised frame with a name-particle interior; a single capitalised word qualifies, and a titular leading `the`
  *  does not break the frame (`the Spire` is a name). `\p{Lu}`, not `[A-Z]`. */
-export function looksProper(key) {
+function looksProper(key) {
     const raw = String(key ?? '').trim();
     const tokens = raw.replace(/^the\s+/i, '').split(/\s+/).filter(Boolean);
     if (!tokens.length) return false;
@@ -83,10 +83,10 @@ const isCommonWord = (list) => (v) => !/\s/.test(v) && list.has(v.toLowerCase())
 /** Share of messages a key must match to be `chat common`, and to turn `common word` red. */
 export const KEY_CHAT_COMMON = 0.20;
 /** Share of messages at which `chat common` is severe rather than moderate: more messages than not. An assertion. */
-export const KEY_CHAT_SEVERE = 0.50;
+const KEY_CHAT_SEVERE = 0.50;
 /** Share of the book's entries whose content a key must appear in to be `book common` — the no-chat fallback for
  *  `chat common`. An assertion; 0.45 rather than a half so a book of few entries does not sit on the line. */
-export const KEY_BOOK_COMMON = 0.45;
+const KEY_BOOK_COMMON = 0.45;
 
 /**
  * The prune classifier for one loaded lorebook, shared by the Studio audit and eval/keyword-audit.mjs. Live closures:
