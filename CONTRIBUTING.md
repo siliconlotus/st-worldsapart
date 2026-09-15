@@ -3,7 +3,27 @@
 ## Where it goes
 
 Branch from `staging` and open the PR against `staging`; it will be squash-merged, so one readable
-commit per change. `release` carries tagged releases only — nothing is merged into it directly.
+commit per change. `release` is updated only by a merge from `staging` when a release is cut, and
+carries tagged releases only.
+
+## Cutting a release
+
+Feature branches squash-merge into `staging`, and CI bumps the build counter on every staging push.
+When `staging` is stable it is merged into `release` as the next release, and the cut is by hand:
+commit the version increment to `staging` — `manifest.json` set to the plain `X.Y.Z`, the number
+chosen, not derived — then merge the PR from `staging` into `release` and tag the release tip with
+the bare version:
+
+```bash
+git tag -a 1.0.0 -m 1.0.0
+git push origin 1.0.0
+```
+
+CI holds a counterless version as committed, so the release PR carries it plain however long the cut
+sits; the next squash-merge into `staging` restarts the counter from the new number as
+`X.Y.Z+build.1`. The pre-push hook refuses a direct `release` push whose version is not plain, or
+whose tip is not the commit the tag names. It runs only where `git config core.hooksPath hooks` has
+been run, and a merge button bypasses it — the tag is made by hand.
 
 ## Before you open it
 
