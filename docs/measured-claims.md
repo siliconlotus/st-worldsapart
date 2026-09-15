@@ -21,10 +21,8 @@ and which bundles is not recorded.
 **What counts.** A claim backed by a named measurement. Excluded: configuration values and thresholds
 unless the threshold was derived from a measurement, spec facts stated without one, and pure arithmetic.
 
-**`[one corpus]`** marks a finding drawn from one person's books, kept for the shape it names rather
-than the counts it once carried — those counts are that corpus's taste, not a property of lorebooks, so
-they are not stated. A number goes back when there are other people's books to take it from. A finding
-that hinges on the counts themselves is not published at all.
+**`[one corpus]`** marks a finding from one person's books: the shape it names, without counts. Counts
+go in when other people's books can supply them; a finding that hinges on the counts is not published.
 
 **Rarity may argue against adopting a feature; never against guarding an edge case or keeping what an
 existing form means.** Those are settled on consistency, least surprise and correctness, and the register

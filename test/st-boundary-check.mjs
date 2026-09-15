@@ -39,18 +39,15 @@ for (const file of files) {
 const found = escapes.map(([f]) => f).sort();
 const DECLARED = [...ST_HALF, ...ST_SERVER].sort();
 eq(found.join('\n'), DECLARED.join('\n'),
-    'exactly the declared ST-coupled files import SillyTavern; a pure module that gains an ST import stops being '
-    + 'node-importable, and fails at import time naming an unrelated ST file rather than the boundary');
+    'exactly the declared ST-coupled files import SillyTavern');
 
 // The pure modules are the point: an eval or check importing one must not drag ST in behind it.
 const pure = files.map(f => relative(ROOT, f)).filter(f => !DECLARED.includes(f));
 eq(pure.some(f => found.includes(f)), false, 'no module outside the ST half reaches past the repo root');
 eq(pure.length > 20, true, 'and the sweep is reading the tree, not an empty list');
 
-// Importing an ST-coupled module is as fatal as importing ST: it drags the same modules in behind it, so the
-// importer stops being node-importable too. The escape sweep above cannot see that — it reads each file alone.
+// An ST-coupled import is as fatal as importing ST, and the sweep above cannot see it: that reads each file alone.
 const inbound = [...edges].filter(([f]) => !DECLARED.includes(f))
     .flatMap(([f, targets]) => targets.filter(t => DECLARED.includes(t)).map(t => `${f} -> ${t}`));
-eq(inbound.join('\n'), '', 'no pure module imports the ST half; such an import is transitively ST-coupled and the '
-    + 'escape sweep, which reads one file at a time, would pass it');
+eq(inbound.join('\n'), '', 'no pure module imports the ST half');
 eq([...edges.values()].flat().length > 40, true, 'and the edge map is populated, not silently empty');
