@@ -293,7 +293,9 @@ per entry. The entity filter supplies the query terms: a token survives if it is
 in the query or in the gazetteer of every authored key, secondary and title, capitalised ones weighted
 `properNounBoost` (3), and terms in more than `stopwordDocFreq` (25%) of chunks are dropped. The
 gazetteer reads the authored keys through the takeover's stash, as a local view. These settings are
-internal and reset each init.
+internal and reset each init. The per-book index is rebuilt only when `indexFingerprint` moves — a
+sum of per-entry FNV hashes over world, uid and content, so a same-length edit rebuilds it and a
+reorder does not.
 
 **Keys.** Each row's keys — live, or the stash — are scored by `keywordScore` over its window with the
 recursion buffer appended, minus the entry's own content, and not at all for an `excludeRecursion`

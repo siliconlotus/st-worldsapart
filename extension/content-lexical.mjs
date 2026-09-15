@@ -37,11 +37,23 @@ export function scoreContent(index, queryText, { k1 = DEFAULT_K1, b = DEFAULT_B,
     return out;
 }
 
+/** FNV-1a, 32-bit. `bookIndexes` fingerprints per scan, so the hash must be a cheap sum and never a cryptographic one. */
+const fnv1a = s => {
+    let h = 0x811c9dc5;
+    for (let i = 0; i < s.length; i++) {
+        h ^= s.charCodeAt(i);
+        h = Math.imul(h, 0x01000193) >>> 0;
+    }
+    return h;
+};
+
 export const indexFingerprint = (entries, { chunkMode, chunkSize, minChunkSize }) => {
-    let n = 0, chars = 0;
+    let n = 0, chars = 0, hash = 0;
     for (const e of entries ?? []) {
         if (e.disable || typeof e.content !== 'string' || !e.content.trim()) continue;
         n++; chars += e.content.length;
+        // Sum, not XOR, with the uid folded in: a delete-and-grow edit and a book rename both move it, a reorder does not.
+        hash = (hash + fnv1a(`${e.world}␟${e.uid}␟${e.content}`)) >>> 0;
     }
-    return `${n}:${chars}:${chunkMode}:${chunkSize}:${minChunkSize}`;
+    return `${n}:${chars}:${hash.toString(16)}:${chunkMode}:${chunkSize}:${minChunkSize}`;
 };

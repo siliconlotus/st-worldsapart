@@ -48,6 +48,12 @@ ok(indexFingerprint(book, CFG) === base, 'fingerprint is stable for unchanged in
 ok(indexFingerprint([...book, e(9, 'a new entry')], CFG) !== base, 'adding an entry moves it');
 ok(indexFingerprint(book, { ...CFG, chunkSize: 400 }) !== base, 'changing chunk settings moves it');
 ok(indexFingerprint(book.map((x, i) => (i === 0 ? { ...x, content: `${x.content} extra` } : x)), CFG) !== base, 'editing content moves it');
+ok(indexFingerprint(book.map((x, i) => (i === 0 ? { ...x, content: x.content.replace('hums', 'murm') } : x)), CFG) !== base,
+    'a SAME-LENGTH edit moves it — count and total chars alone were blind to it');
+ok(indexFingerprint(book.filter(x => x.uid !== 1).concat(e(9, book[0].content.replace('hums', 'murm'))), CFG) !== base,
+    'deleting one entry and growing another back to the same total moves it');
+ok(indexFingerprint([...book].reverse(), CFG) === base, 'a reorder does not rebuild the index');
+ok(indexFingerprint(book.map(x => ({ ...x, world: 'C' })), CFG) !== base, 'the same contents under another book move it');
 
 ok(scoreContent(buildContentIndex([], CFG), 'anything').size === 0, 'an empty book scores nothing rather than throwing');
 ok(scoreContent(idx, '').size === 0, 'an empty query scores nothing');
