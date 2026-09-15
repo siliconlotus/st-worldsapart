@@ -8,7 +8,7 @@
     "author": "siliconlotus",
     "version": "1.0.0-alpha.1+build.1",
     "auto_update": true,
-    "homePage": "",
+    "homePage": "https://github.com/siliconlotus/st-worldsapart",
     "hooks": {
         "activate": "init"
     },
