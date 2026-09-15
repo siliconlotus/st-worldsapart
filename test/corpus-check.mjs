@@ -1,6 +1,7 @@
 // corpus-check.mjs — the book roster: the slug a filename derives, and that a missing roster refuses rather than guesses.
 import { evalBooks, toBooks, slugOf, ROSTER as DEFAULT_ROSTER, WORLDS } from '../eval/lib/corpus.mjs';
 import { resolve } from 'node:path';
+import { stInstall } from '../eval/lib/st-install.mjs';
 import { writeFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -42,9 +43,14 @@ writeFileSync(ROSTER, '[]');
 throws(() => evalBooks(['node', 'x'], ROSTER), 'an empty roster is not a roster');
 rmSync(ROSTER, { force: true });
 
-// The defaults are module-relative, so moving corpus.mjs silently repoints both. Nothing else exercises them.
+// ROSTER is module-relative, so moving corpus.mjs silently repoints it. Nothing else exercises it.
 const REPO = resolve(new URL('..', import.meta.url).pathname);
 eq(resolve(DEFAULT_ROSTER), resolve(REPO, 'eval/eval-data/books.json'), 'the roster is eval-data/books.json, wherever this module lives');
-eq(resolve(WORLDS), resolve(REPO, '../../../../../data/default-user/worlds'), "WORLDS is ST's lorebook directory, wherever this module lives");
+
+// WORLDS goes through stInstall, so it is pinned to the install's own answer rather than to a count of directories:
+// re-deriving it here would restate the assumption instead of checking it.
+const ST = stInstall();
+eq(WORLDS, ST.resolve('data/default-user/worlds'), "WORLDS is ST's lorebook directory as the install reports it");
+eq(WORLDS.startsWith(ST.dataRoot), true, 'and it sits under dataRoot, so a relocated data directory moves it');
 
 if (!failed) console.log('corpus-check: ok');

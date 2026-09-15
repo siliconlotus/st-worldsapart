@@ -25,7 +25,14 @@ import { pluginFingerprint, PLUGIN_FILES } from './fingerprint.mjs';
 
 // Deployed location: <root>/plugins/worlds-apart/index.js.
 const PLUGIN_DIR = path.dirname(fileURLToPath(import.meta.url));
-const ST_ROOT = path.resolve(PLUGIN_DIR, '..', '..');
+// Walked, not counted: the same rule as eval/lib/st-install.mjs, which this cannot import — only PLUGIN_FILES deploys.
+// Falls back to two up, the deployed depth, when no config.yaml is reachable.
+const ST_ROOT = (() => {
+    for (let d = PLUGIN_DIR; ; d = path.dirname(d)) {
+        if (fs.existsSync(path.join(d, 'config.yaml'))) return d;
+        if (path.dirname(d) === d) return path.resolve(PLUGIN_DIR, '..', '..');
+    }
+})();
 // The deployed copy's own fingerprint; the extension compares it with the same hash over its source files.
 const readDeployed = f => { try { return fs.readFileSync(path.join(PLUGIN_DIR, f), 'utf8'); } catch { return ''; } };
 const FINGERPRINT = pluginFingerprint(...PLUGIN_FILES.map(([, deployed]) => readDeployed(deployed)));

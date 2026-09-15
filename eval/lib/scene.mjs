@@ -4,6 +4,9 @@ import fs, { readFileSync, existsSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 import { dirname, resolve as resolvePath } from 'node:path';
 import { fileURLToPath } from 'node:url';
+// Re-exported: every existing importer reads it from here.
+export { stInstall } from './st-install.mjs';
+import { stInstall } from './st-install.mjs';
 import { scoreCollection, poolEntries, selectTopK, admitCeiling } from '../../plugin/scoring.mjs';
 import { corpusMean, centeredCosineScores } from '../../plugin/vector.mjs';
 import * as entity from '../../extension/entity.mjs';
@@ -142,19 +145,6 @@ export const nrm = s => (String(s ?? '').toLowerCase().match(/[a-z0-9]+/g) ?? []
 export const dcg = (v, k) => v.slice(0, k).reduce((s, x, i) => s + x / Math.log2(i + 2), 0);
 export const ndcg = (vec, k) => { const ideal = [...vec].sort((a, b) => b - a); return dcg(ideal, k) ? dcg(vec, k) / dcg(ideal, k) : 0; };
 
-export function stInstall() {
-    let root = process.env.WA_ST_ROOT;
-    if (!root) {
-        for (let d = dirname(fileURLToPath(import.meta.url)); ; d = dirname(d)) {
-            if (existsSync(`${d}/config.yaml`)) { root = d; break; }
-            if (dirname(d) === d) return null;
-        }
-    }
-    const m = existsSync(`${root}/config.yaml`) && readFileSync(`${root}/config.yaml`, 'utf8').match(/^dataRoot:\s*['"]?(.+?)['"]?\s*$/m);
-    const dataRoot = resolvePath(root, m ? m[1] : './data');
-    const resolve = p => p.startsWith('/') ? p : p.startsWith('data/') ? dataRoot + p.slice('data'.length) : `${root}/${p}`;
-    return { root, dataRoot, resolve };
-}
 
 export const evalDataDir = () => {
     const local = fileURLToPath(new URL('../eval-data/', import.meta.url));

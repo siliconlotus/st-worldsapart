@@ -4,9 +4,12 @@ import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 import fs from 'node:fs';
 import { PLUGIN_FILES, pluginFingerprint } from './plugin/fingerprint.mjs';
+import { stInstall } from './eval/lib/st-install.mjs';
 
 const SRC = path.dirname(fileURLToPath(import.meta.url));
-const DEST = path.resolve(SRC, '../../../../../plugins/worlds-apart');
+const ST = stInstall();
+if (!ST) { console.error('no SillyTavern install above this checkout (no config.yaml found) — set WA_ST_ROOT'); process.exit(2); }
+const DEST = path.join(ST.root, 'plugins/worlds-apart');
 
 const PACKAGE_JSON = JSON.stringify({
     name: 'worlds-apart-plugin',
@@ -43,7 +46,7 @@ for (const name of fs.readdirSync(DEST)) {
     console.log(`removed  plugins/worlds-apart/${name}  (not in the manifest)`);
 }
 
-const configPath = path.resolve(DEST, '../../config.yaml');
+const configPath = path.join(ST.root, 'config.yaml');
 try {
     const cfg = fs.readFileSync(configPath, 'utf8');
     if (/^enableServerPlugins:\s*false\b/m.test(cfg)) {

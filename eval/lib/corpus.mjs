@@ -2,11 +2,13 @@
 // `--books A.json,B.json`, or eval-data/books.json, or the run refuses.
 import { readFileSync, existsSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
+import { stInstall } from './st-install.mjs';
 
 const HERE = fileURLToPath(new URL('.', import.meta.url));
 
-/** ST's lorebook directory, which every sweep reads its books out of. */
-export const WORLDS = `${HERE}../../../../../../../data/default-user/worlds`;
+/** ST's lorebook directory, which every sweep reads its books out of. Through stInstall, so it follows a relocated
+ *  `dataRoot:` and does not count directories up from this module. */
+export const WORLDS = stInstall()?.resolve('data/default-user/worlds') ?? '';
 
 /** The roster a developer writes once; gitignored with the rest of eval-data. */
 export const ROSTER = `${HERE}../eval-data/books.json`;

@@ -23,11 +23,14 @@
 // audit. Defaults to the first character folder that already has chats.
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
+import { stInstall } from '../../eval/lib/st-install.mjs';
 import fs from 'node:fs';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
-const ST = path.resolve(HERE, '../../../../../../../');          // .../SillyTavern
-const USER = path.join(ST, 'data', 'default-user');
+const ST = stInstall();
+if (!ST) { console.error('no SillyTavern install above this checkout (no config.yaml found) — set WA_ST_ROOT'); process.exit(2); }
+// Through resolve, not join: a relocated `dataRoot:` moves the user directory out of the install root.
+const USER = ST.resolve('data/default-user');
 const WORLDS = path.join(USER, 'worlds');
 const CHATS = path.join(USER, 'chats');
 
