@@ -18,7 +18,8 @@ otherwise. To follow **staging** instead — fixes and features before they are 
 report a bug you want fixed quickly — pick `staging` in the branch box when installing, or switch later
 with the branch control on WA's entry in the extensions list.
 
-Updates stay on the channel you chose. WA checks for them once a day and tells you when one is waiting.
+Updates stay on the channel you chose. SillyTavern checks at startup and tells you when one is waiting; it installs
+updates by itself only when SillyTavern's own version changes.
 
 **Staging users:** when an update changes anything under `plugin/`, re-run the deploy command below and
 restart SillyTavern. WA tells you when this is needed — the settings panel shows **⚠ Server plugin out of
@@ -27,7 +28,7 @@ date** and a notification that does not dismiss itself.
 ## Languages
 
 The interface follows SillyTavern's own language setting; French ships in `i18n/fr-fr.json`, and a new locale
-is one JSON file declared in `manifest.json`, drafted from `node eval/i18n-check.mjs --dump`. The **Language**
+is one JSON file declared in `manifest.json`, drafted from `node test/i18n-check.mjs --dump`. The **Language**
 setting under *Audit & suggestions* is a different thing: it picks the word-frequency pack the keyword
 suggester and audit read (see *Data sources and licences*), so a French speaker can run an English UI over a
 French lorebook, or the reverse.

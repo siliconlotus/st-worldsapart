@@ -78,7 +78,7 @@ leave the bundle useful — the content is what is being graded.
 
 ## What is not the product
 
-`eval/` is a research harness: measurement, grading, fitting. Nothing in it ships, and nothing in it
-runs in CI. Most changes never touch it.
+`eval/` is a research harness: measurement, grading, fitting. Only its `lib/` is load-bearing outside the harness —
+the test suite imports it, and so does `deploy-plugin.mjs`. Most changes never touch it.
 
 `CLAUDE.md` is the long form of everything above, written for coding agents but accurate for people.

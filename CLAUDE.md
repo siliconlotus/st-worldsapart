@@ -33,9 +33,10 @@ file resolves for the author and not for a reader.
 
 ## What is in test/ and eval/
 
-`test/` is the regression suite and nothing else; `eval/` is the research harness, and nothing in it
-ships or runs in CI. `.github/workflows/checks.yml` runs `test/` on every pull request and on pushes to
-`staging` and `release`; it prints a failing check's whole output, since a throw carries no `FAIL` line.
+`test/` is the regression suite and nothing else; `eval/` is the research harness, and only its `lib/` is load-bearing
+outside the harness — the suite imports it, and so does the shipped `deploy-plugin.mjs`. `.github/workflows/checks.yml`
+runs `test/` on every pull request and on pushes to `staging` and `release`; it prints a failing check's whole output,
+since a throw carries no `FAIL` line.
 
 - `test/*-check.mjs` — self-checking, run with no arguments. The suite is run by exit code:
   `for f in test/*-check.mjs; do node "$f" >/dev/null 2>&1 || echo "FAIL $f"; done`. `eq()` sets
@@ -114,7 +115,7 @@ moments: the runtime reads the armed effect and hoists it past the cut, while th
 capture row's `block`, which a dry run never sets to sticky, so a sticky entry is durable at runtime
 once armed and is graded like any other activation.
 
-`eval/scene.mjs` models stages 1 and 3; the keyword loop in `makeCandidateSet` is stage 2 and may only
+`eval/lib/scene.mjs` models stages 1 and 3; the keyword loop in `makeCandidateSet` is stage 2 and may only
 admit what core could have activated — not disabled entries, not a `delayUntilRecursion` one on the
 initial pass, not an `excludeRecursion` one on a later one. It runs to a fixpoint when the scene records
 `recursive`; a scene that does not record it is read as recursion off.
@@ -193,4 +194,4 @@ Directories are left alone.
 **The matcher deploys into the plugin, so editing `matcher.mjs`, `smartkeys.mjs` or `automaton.mjs`
 needs a redeploy too.** The manifest names them with `../extension/` paths and copies them FLAT beside
 `index.js`: they may import each other only by bare `./name`, and nothing else in `extension/`.
-`eval/plugin-deploy-check.mjs` is what fails when that breaks — the server would otherwise fail at load.
+`test/plugin-deploy-check.mjs` is what fails when that breaks — the server would otherwise fail at load.
