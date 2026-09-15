@@ -12,7 +12,7 @@ export function stRelative(path) {
     return m ? path.slice(m.index + 1).replace(/\\/g, '/') : path;
 }
 
-/** A book's entries keyed by uid, verbatim and whole: a trimmed book moves stage 3's BM25 through the gazetteer (R22). */
+/** A book's entries keyed by uid, verbatim and whole: a trimmed book moves stage 3's BM25 through the gazetteer. */
 export function keyByUid(entries) {
     const out = {};
     for (const entry of (Array.isArray(entries) ? entries : Object.values(entries ?? {}))) out[entry.uid] = entry;
@@ -231,7 +231,7 @@ export const raterParts = r => (r?.kind === 'human'
     ? { id: r.id }
     : (([modelId, rubric]) => ({ modelId, rubric, isDigest: /^[0-9a-f]{64}$/.test(modelId) }))(String(r?.id ?? '').split(US)));
 
-/** A pass's identity, what a writer deduplicates on: the rater and the day. Settings are not identity (H1); `params` must not join it. */
+/** A pass's identity, what a writer deduplicates on: the rater and the day. Settings are not identity; `params` must not join it. */
 export const passKey = v => [v?.id ?? '', v?.gradedAt ?? ''].join(US);
 
 const RATER_DESC = ['modelName', 'family', 'quant', 'modelParams'];

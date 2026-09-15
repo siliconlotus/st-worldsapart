@@ -1,4 +1,4 @@
-// gazetteerSource selects WHICH FIELDS the gazetteer reads (scene.mjs); field selection is asserted, tokenization is not re-derived (R22).
+// gazetteerSource selects WHICH FIELDS the gazetteer reads (scene.mjs); field selection is asserted, tokenization is not re-derived.
 import { loadScene, sceneParams } from '../eval/lib/scene.mjs';
 import { eq } from '../eval/lib/metrics.mjs';
 

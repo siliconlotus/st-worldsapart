@@ -1,4 +1,4 @@
-// How should buildKeyPrompt ask for a count? Five wordings substituted over the shipped phrase, every entry at one fixed seed, so a difference between variants is the wording alone; local only, since hosted models honour neither seed nor temperature (H1).
+// How should buildKeyPrompt ask for a count? Five wordings substituted over the shipped phrase, every entry at one fixed seed, so a difference between variants is the wording alone; local only, since hosted models honour neither seed nor temperature.
 // Usage:  node count-sweep.mjs --model gemma3:4b [--seed 42] [--temp 1]
 import { readFileSync, writeFileSync, existsSync } from 'node:fs';
 import { createHash } from 'node:crypto';

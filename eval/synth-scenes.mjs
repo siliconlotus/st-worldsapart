@@ -260,7 +260,7 @@ for (const idx of picks) {
         // Per arm, not once: the gazetteer is baked at load time and an arm moves it.
         const scene = loadScene(S, { indexFile: indexPath(S, { model: MODEL }), indexOpts: { model: MODEL }, params: P });
         const haystack = haystackFor(S, P);
-        // Term weights as scoreScene derives them; null runs every arm with the entity filter off (R22).
+        // Term weights as scoreScene derives them; null runs every arm with the entity filter off.
         const tw = P.entityFilter ? entity.buildTermWeights(queryText, scene.gaz, P.boost) : null;
         const rows = makeCandidateSet({ ...scene, params: P })(
             P.K1, P.B, tw, qv, queryText, haystack,

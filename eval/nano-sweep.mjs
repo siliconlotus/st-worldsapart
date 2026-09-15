@@ -68,7 +68,7 @@ if (!has('score-only')) {
     const t0 = Date.now();
     const sleep = ms => new Promise(res => setTimeout(res, ms));
 
-    /** A 429 is back-pressure, not a failure: exponential backoff with jitter, up to 5 retries; anything else fails at once (H5). */
+    /** A 429 is back-pressure, not a failure: exponential backoff with jitter, up to 5 retries; anything else fails at once. */
     const fetchWithBackoff = async (task) => {
         for (let attempt = 0; ; attempt++) {
             const r = await fetch(`${BASE}/chat/completions`, {

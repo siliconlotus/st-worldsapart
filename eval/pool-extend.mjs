@@ -1,7 +1,7 @@
 // pool-extend.mjs — the entries an offline chunk arm would put in its top-k that nobody has graded, written as <name>-pending.json for /wa-super-grade's picker; re-run after grading and the list should be empty.
 // Usage (from SillyTavern root):
 //   node .../pool-extend.mjs <sample.json> [more.json ...] [--arms chunkSize=200,chunkSize=400] [--k 10] [--out-dir <dir>] [--dry]
-// Chunk arms only: live pooling cannot re-vectorize mid-capture, so a chunk cell is otherwise scored against a pool that never saw its population (H9). Indexes are cached by book + model + chunk settings.
+// Chunk arms only: live pooling cannot re-vectorize mid-capture, so a chunk cell is otherwise scored against a pool that never saw its population. Indexes are cached by book + model + chunk settings.
 import { readFileSync, writeFileSync, mkdirSync } from 'node:fs';
 import { dirname, basename } from 'node:path';
 import { entryKey } from '../extension/content-lexical.mjs';
@@ -29,7 +29,7 @@ const unknown = picked.filter(a => !CHUNK_ARMS[a]);
 if (unknown.length) { console.error(`unknown arm(s): ${unknown.join(', ')} — known: ${Object.keys(CHUNK_ARMS).join(', ')}`); process.exit(2); }
 
 const K = Number(arg(argv, '--k') ?? 10);
-// Falls back to the bundle's own model, never a hardcoded name (H3).
+// Falls back to the bundle's own model, never a hardcoded name.
 const MODEL = process.env.WA_EMBED_MODEL ?? openSample(samples[0], arg(argv, '--arm')).embedModel;
 if (!MODEL) { console.error(`${samples[0]} records no embedModel — set WA_EMBED_MODEL`); process.exit(2); }
 const EM = resolveModel(MODEL);

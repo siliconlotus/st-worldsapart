@@ -590,7 +590,7 @@ async function scoreEntriesUnsafe(searchText) {
                 return;
             }
 
-            // No invented score: ST's endpoint drops it, and a rank substitute feeds the fit a number in another unit (H12).
+            // No invented score: ST's endpoint drops it, and a rank substitute feeds the fit a number in another unit.
             const score = typeof item?.score === 'number' ? item.score : null;
             if (score === null) { rankOnly++; return; }
 
@@ -1411,7 +1411,7 @@ async function onScanDone(args) {
             dens: Number.isFinite(x.density) ? Number(x.density.toFixed(2)) : null,
             // Gated as cosine is: an entry with no chunks in the collection has no text score, and the scorer's 0 is a default.
             text: x.score !== undefined && Number.isFinite(x.textScore) ? Number(x.textScore.toFixed(2)) : null,
-            // Gated on eligibility, not the value: 0 is both a miss and no scorable keys (H12).
+            // Gated on eligibility, not the value: 0 is both a miss and no scorable keys.
             keys: x.keysEligible === false ? null : (Number.isFinite(x.keywordScore) ? Number(x.keywordScore.toFixed(2)) : null),
             tokens: tokens[i],
             cut: !kept.has(x),

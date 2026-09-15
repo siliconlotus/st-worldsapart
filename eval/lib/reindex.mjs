@@ -79,7 +79,7 @@ export const resolveModel = (spec) => {
 
 /** One embedding call, either transport; OpenAI's data array is sorted by index rather than trusted. */
 export const embedTexts = async (texts, opts) => {
-    // Retry transport failures only (undici throws TypeError); a server error would ask a wrong model three times (H4).
+    // Retry transport failures only (undici throws TypeError); a server error would ask a wrong model three times.
     for (let attempt = 0; ; attempt++) {
         try { return await embedOnce(texts, opts); }
         catch (e) {

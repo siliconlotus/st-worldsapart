@@ -1,5 +1,5 @@
 // scene.mjs — loads and scores ONE graded scene from a /wa-grade sample; the single copy of the gazetteer
-// and the scorers that graded-scene-grid.mjs and param-screen.mjs share. A second copy must never appear (R22).
+// and the scorers that graded-scene-grid.mjs and param-screen.mjs share. A second copy must never appear.
 import fs, { readFileSync, existsSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 import { dirname, resolve as resolvePath } from 'node:path';
@@ -171,7 +171,7 @@ export const indexPath = (S, { vectors = 'data/default-user/vectors/ollama', mod
     const own = book === S.primaryBook;
     if (index && own) return index;
     if (all) return cachePath(S, chunkConfig(S), model, book, true);
-    // Through stInstall, not the cwd: both local candidates carry ST's data/ prefix (H2).
+    // Through stInstall, not the cwd: both local candidates carry ST's data/ prefix.
     const st = stInstall();
     const local = p => (st ? st.resolve(p) : p);
     if (own && S.index && existsSync(local(S.index))) return local(S.index);
@@ -301,7 +301,7 @@ export function loadScene(S, { indexFile, indexOpts = {}, params: P }) {
         const extra = P.denseAllEntries ? live.filter(it => !ofVectorized(it)) : [];
         // Asked of the BOOK, not the file: a fully vectorized book legitimately has no extras.
         if (P.denseAllEntries && !extra.length && own.some(e => !e.vectorized && !e.disable && e.content)) throw new Error(`denseAllEntries is on but ${indexFile} holds no non-vectorized chunks for "${book}" — build that collection with: node eval/reindex.mjs <sample.json> --all --book ${JSON.stringify(book)}`);
-        // The same gate reindex.mjs buildItems applies; without it a missing collection scores keyword-and-BM25-only (H2).
+        // The same gate reindex.mjs buildItems applies; without it a missing collection scores keyword-and-BM25-only.
         if (!items.length && own.some(e => e.vectorized && !e.disable && e.content)) {
             throw new Error(`no vector collection for "${book}" at ${indexFile} — the book has vectorized entries, so scoring without one would silently drop cosine. Build it with: node eval/reindex.mjs <sample.json> --book ${JSON.stringify(book)}`);
         }

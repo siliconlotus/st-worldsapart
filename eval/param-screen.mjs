@@ -109,7 +109,7 @@ if (CUTOFF === null && (METRIC === 'fAtCut' || METRIC === 'nAtCut')) {
     process.exit(2);
 }
 const mOf = r => (WINDOWED[METRIC] ? WINDOWED[METRIC](r) : r[METRIC]);
-// Falls back to the bundle's own model, never a hardcoded name (H3).
+// Falls back to the bundle's own model, never a hardcoded name.
 const MODEL = process.env.WA_EMBED_MODEL ?? openSample(samples[0], arg(argv, '--arm')).embedModel;
 if (!MODEL) { console.error(`${samples[0]} records no embedModel — set WA_EMBED_MODEL`); process.exit(2); }
 const EM = resolveModel(MODEL);
