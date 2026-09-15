@@ -470,11 +470,8 @@ unless the threshold was derived from a measurement, spec facts stated without o
 - **S4** — Particles occurring over 38 books: only de/la/los/el/van/del/du/da/der/le.
   — `extension/keyword-suggest.mjs:299`.
 
-- **S5** — [RE-MEASURE against the shipped fiction pack] No finer unigram ramp is honest: good
-  unigrams and junk overlap broadly in Zipf. The illustrative pair originally cited (3.4 vs 3.1)
-  predates the fiction table — in the shipped pack the "good" example reads 3.0, below the junk
-  one, inverting the illustration. The overlap is far wider than any one pair, so the conclusion
-  stands. — `extension/keyword-suggest.mjs:437`.
+- **S5** — No finer unigram ramp is honest: a word's frequency does not encode whether it is a good
+  key, so good unigrams and junk overlap broadly in Zipf. — `extension/keyword-suggest.mjs:437`.
 
 - **S6** — Cohesion: splitting a trigram down the middle muddied the bands to 0/50/55/68% where the
   bigram pair reads 8/65/100/100%; the legal-part rule matters — 13/84 and 31/102 of dropped grams on
