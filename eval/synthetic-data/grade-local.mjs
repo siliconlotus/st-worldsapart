@@ -40,7 +40,7 @@ const rubricHash = contractHash(system);
 if (archiveContract(system, rubricHash).written) console.log(`contract ${rubricHash} archived`);
 
 /**
- * The rater, resolved from the backend rather than from what was typed; a field a backend cannot answer stays absent, never guessed (bundle-schema.md, *A rater is whoever passed a verdict*).
+ * The rater, resolved from the backend rather than from what was typed; a field a backend cannot answer stays absent, never guessed (eval/bundle-schema.md, *A rater is whoever passed a verdict*).
  */
 async function resolveModel() {
     const out = { modelName: MODEL };

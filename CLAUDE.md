@@ -8,32 +8,23 @@ changing it.
 A comment is one of three things: what this is, when the name does not say it; what it does, when the
 code does not show it; or a likely misstep in editing it — the `??` that must not become `||`, the order
 a fixture must keep, the field core reads. Decisions, rationale and provenance are not comments: they
-live in the design docs and `measured-claims.md`, and a misstep warning may cite a claim ID as the
-pointer, in one line. A module header is at most two lines, a docblock one sentence plus the params
+live in the docs, and a misstep warning may cite one in a line. A module header is at most two lines, a docblock one sentence plus the params
 whose shape is not obvious, an inline comment one line.
 
-## The design docs document how the code works and the decisions behind it
+## The docs document how the code works
 
-`matcher-design.md` owns the matcher and the pipeline: how a key is written and matched, and what each
-stage does. `keyword-suggest-design.md` owns the suggester and the audit. `st-worldinfo.md` is ST
-core's own scan; `bundle-schema.md` the graded bundle; `embedding-models.md` the model guidance;
+`docs/matching.md` owns the matcher and the pipeline: how a key is written and matched, and what each
+stage does. `docs/keyword-suggestions.md` owns the suggester and the audit. `eval/st-worldinfo.md` is ST
+core's own scan; `eval/bundle-schema.md` the graded bundle; `eval/embedding-models.md` the model guidance;
 `SMARTKEYS.md` the user's page, which must neither run ahead of the code nor lag it. Read the owning
 doc before changing what it covers, and update it rather than re-deriving it in conversation.
 
 A doc carries how the code works now and the architectural decisions behind it, and nothing else: not
 how it used to work, how it could work, how it does not work, speculation, or measurements nothing
-hinges on. An *Open* list holds at most options against a behaviour that stands.
+hinges on. Options against a behaviour that stands go in a GitHub issue, never in the doc.
 
 **Terms are stable, or they are announced as new.** Use the doc's vocabulary exactly, and prefer the
 standard technical term to a coinage.
-
-**A measurement stays only where a decision hinges on it**, cited by ID from
-`eval/eval-data/measured-claims.md`, the gitignored register that holds the numbers, the instrument and
-the n. Anything else is an assertion and says so. Unchallenged is not agreed.
-
-**Propose a new claim before writing it down.** Cuts and restatements of settled content can just be
-made; anything asserting what the doc does not already carry, with no measurement behind it, gets
-proposed first. The test is structural, not a judgement about how controversial it looks.
 
 ## What is in test/ and eval/
 
@@ -53,7 +44,7 @@ ships or runs in CI. `.github/workflows/checks.yml` runs `test/` on every pull r
 - `eval/lib/` — libraries, no CLI and no argv. `scene.mjs` loads and scores one graded scene;
   `metrics.mjs` holds the shared statistics; `corpus.mjs` resolves which lorebooks a run reads;
   `reindex.mjs` builds a collection and `global-basis.mjs` the shared basis. Every tool goes through
-  them: a second copy of the gazetteer or the scorers must never appear (R22), and no tool names a book.
+  them: a second copy of the gazetteer or the scorers must never appear, and no tool names a book.
   **A library's paths are module-relative, so moving one silently repoints them** — `corpus-check.mjs`
   pins `ROSTER` and `WORLDS` for that reason.
 - `eval/synthetic-data/` — generates graded data and measures nothing. `grade-pending.mjs` turns a row
@@ -78,7 +69,7 @@ cache so a re-run resumes rather than re-paying.
 first pass is one full replicate and a decision to abandon the rest can be made early.
 
 **Redirect the runner's output to a file and grep that; never filter the live stream.** `tail`
-re-buffers the log and `grep <pattern>` discards the line that explains the failure (H4).
+re-buffers the log and `grep <pattern>` discards the line that explains the failure.
 
 `pkill -f <script>` matches the wrapper shell too and kills queued jobs — kill by PID.
 
@@ -87,61 +78,11 @@ task list and outlives a deliberate stop; append-and-resume already makes a kill
 
 **Prompt work belongs on a local model with a fixed seed.** A seed pins output at any temperature, so a
 prompt change is the only thing that can move the result. Hosted reasoning models honour neither seed nor
-temperature (H1), so they can confirm a finding transfers but cannot be where it is found.
-
-## Graded scenes: pool first, then pair
-
-`n` is small and human grading is the scarce input. **Count the stories, not the files (C1)**: a story
-is neither a chat file nor a character card — a long run continues into a new file, and one card carries
-many stories. The closest key to a story is the lorebook, so group by that. Anything resting on corpus
-statistics has an effective n nearer the story count than the scene count (C1). So prefer
-`param-screen.mjs`, which contrasts one parameter at a time against each scene's own baseline and
-reports the sign test; at single-digit n the finding is the direction plus the mean delta, and
-"measured flat (ID), paired" is a legitimate outcome to write next to a default.
-
-A pool built from one configuration penalises every configuration far from it, so a defaults review
-scored against a single `/wa-grade` capture is not defensible. `/wa-super-grade` captures several
-population-changing arms, unions what they surfaced and grades the union once; later rounds grade only
-the delta. `judged@10` in `graded-scene-grid.mjs` is the stopping rule. It cannot always reach 10/10:
-offline re-derivation ranks keyword-only rows core's gates would have rejected — probability rolls,
-inclusion groups, delay and cooldown, character and tag filters, `@@dont_activate`,
-`delayUntilRecursion`, triggers. Matching is WA's and `scene.mjs` models it through the same
-`keywordScore` that runs at runtime.
-
-The bundle's own rules — one `grades` array per row, no verdict ever overwritten, the value in force
-read through `grading.mjs` `gradeValue` and never a stored scalar — are `bundle-schema.md`'s.
-
-**Grading is the expensive step, so extend a pool by delta and never re-pool.** Loaded grades are
-subtracted (`/wa-super-grade`), carried onto a fresh capture (`graft-grades.mjs`), or built into jobs
-only for what is pending (`grade-pending.mjs`). Where a shape change would do, migrate instead of
-re-grading.
-
-**A grade mean is only comparable at matched retrieval rank.** Grades fall steeply with pool depth, so a
-pass that graded deeper reads as a harsher rater (G2). Match the band or make no comparison; a scene's
-`entries` carry no rank, so join through the arm's `candidates`. Which rater graded a row correlates
-with rank band, so `graded-scene-grid.mjs` can report that as a parameter effect. Agreement is weakest
-at the head of the pool, where every selection criterion is defined, so a one-scene difference between
-arms is inside the noise (G3).
-
-## Chat-based measurement uses the standard corpus
-
-Anything measuring how keys behave against prose — match rate, over-matching, discourse recurrence — runs
-against the standard chat set in `eval/eval-data/README.md` (gitignored: the corpus is one person's
-chats), not whatever chat is open. Count usable messages, not raw lines: core and WA both drop
-`is_system`, and one chat in the set is mostly hidden (C3).
-
-Book-only measurements draw on the wider book population (C2). **Count lineages, not files** (C2): a
-book is versioned in place, and two versions of one book are not two books. Say which population a
-two-part finding rests on; the chat half cannot be widened by adding books.
-
-**A key existing in a book is not evidence that it is a good key**, and which books are curated is not
-derivable from the data. The per-book curation status is in `eval/eval-data/README.md`; ask rather than
-infer. In a curated book a removal is agreement with the flag and a retention is an override; curation
-says nothing about keys the flag never surfaced, so removals speak to precision, never to recall.
+temperature, so they can confirm a finding transfers but cannot be where it is found.
 
 ## Four stages, and the three orderings
 
-The stages are `matcher-design.md`'s: **1. Retrieval** (`retrieve`, cosine only, no admission test),
+The stages are `docs/matching.md`'s: **1. Retrieval** (`retrieve`, cosine only, no admission test),
 **2. Activation** (`selectAndActivate`, one force-activate; core's `activated` map is the result),
 **3. Scoring** (`onScanDone`: text, keys, `properNouns`, `density` and the cosine into the fitted
 per-tier model, whose `E[credit]` is the layout order), **4. Selection** (`relevanceCut`, the dynamic

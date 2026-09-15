@@ -484,7 +484,7 @@ export async function gradeScene(named) {
         snapshot: host.paramSnapshot(),
         candidates: rows,
         grades,
-        // The grading depth: what the grader was shown, not a relevance cutoff (bundle-schema.md).
+        // The grading depth: what the grader was shown, not a relevance cutoff (eval/bundle-schema.md).
         cutoff: {
             live,   // the configuration being assessed
             gradingOverride: { maxVectorEntries: wanted },   // how many rows the grader was shown

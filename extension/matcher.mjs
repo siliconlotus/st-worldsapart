@@ -321,7 +321,7 @@ export function withExtraTexts(windowFor, texts, matchWindow) {
 }
 
 /** Tags and HTML comments replaced by spaces, one per character, so a literal key cannot match inside one. Every offset is
- *  preserved. Regex keys bypass this and match the raw text (matcher-design.md, *Divergences from ST core*). */
+ *  preserved. Regex keys bypass this and match the raw text (docs/matching.md, *Divergences from ST core*). */
 export const maskMarkup = text => String(text).replace(/<!--[\s\S]*?-->|<\/?[A-Za-z][^>]*>/g, m => ' '.repeat(m.length));
 
 let maskMemoIn = null, maskMemoOut = null;

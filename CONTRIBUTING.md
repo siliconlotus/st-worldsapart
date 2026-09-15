@@ -21,11 +21,10 @@ judged by exit code — a failed assertion and a thrown error are the same signa
 
 **Comments say what is not obvious, never why.** A comment is one of three things: what this is, when
 the name does not say it; what it does, when the code does not show it; or a misstep likely in editing
-it. Decisions and rationale belong in the design docs, not beside the code.
+it. Decisions and rationale belong in the docs, not beside the code.
 
-**The design docs are the record.** `matcher-design.md` owns the matcher and the pipeline,
-`keyword-suggest-design.md` the suggester and the audit, `bundle-schema.md` the graded bundle,
-`SMARTKEYS.md` the key syntax. If a change alters what one of them describes, update it in the same PR.
+**The docs describe how it works now.** If a change alters what one of them describes, update it in the
+same PR. Design discussion belongs in an issue; a doc carries the outcome, not the deliberation.
 
 **Every string a user reads goes through SillyTavern's i18n.** Injected HTML carries `data-i18n`; code
 strings use the `t` tag, one whole sentence per template so a translator can reorder it.

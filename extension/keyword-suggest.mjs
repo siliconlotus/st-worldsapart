@@ -1,5 +1,5 @@
 // keyword-suggest.mjs — the key suggester: what to propose for an entry, from its own text (the TF-IDF ranker) and
-// from a model (the prompt, parser and post-filter). ST-free; keyword-suggest-design.md is the reference.
+// from a model (the prompt, parser and post-filter). ST-free; docs/keyword-suggestions.md is the reference.
 import { table } from './lang.mjs';
 import { buildAutomaton, scanAutomaton } from './smartkeys.mjs';
 import { FUNCTION_WORDS } from './keyword-audit.mjs';

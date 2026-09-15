@@ -1,5 +1,5 @@
 // smartkeys.mjs — boolean query engine for `?`-prefixed World Info keys. Entry point evaluateSmartKey(); countKey() routes `?` keys here.
-// The grammar is SMARTKEYS.md's; matcher-design.md holds what each operator is worth.
+// The grammar is SMARTKEYS.md's; docs/matching.md holds what each operator is worth.
 
 import { coreReadsAsRegex, countRegexKey, escapeRegex, foldedHay, isRegexKey, keyExcerpts, maskMarkup, REGEX_KEY_RE, boundaryAfter, boundaryBefore, wordChar } from './matcher.mjs';
 // Re-exported: matcher.mjs, keyword-tools.mjs and studio.mjs import these from here. One copy, or the browser and the server disagree.

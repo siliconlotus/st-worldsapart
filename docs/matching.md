@@ -1,7 +1,7 @@
 # Matcher and activation — reference
 
 How a key is written, how it is matched, and what WA does at each stage of a generation. The suggester
-and the audit are `keyword-suggest-design.md`; ST core's own scan is `st-worldinfo.md`; core defects
+and the audit are `keyword-suggestions.md`; ST core's own scan is `eval/st-worldinfo.md`; core defects
 are `upstream-st.md` in the SillyTavern root. The stage numbering is `CLAUDE.md`'s (*Four stages, and
 the three orderings*). A measured claim cites its register entry, `eval/eval-data/measured-claims.md`, by
 ID; anything else is an assertion.
@@ -357,7 +357,7 @@ its `upstream-st.md` number.
 - **The fold.** Core's `#transformString` only lowercases; WA folds orthography first, and expands a
   key's hyphen to a space. For the default substring path WA is a strict superset.
 - **NFC** on the regex path, where core runs raw.
-- **A regex is fold-exempt and the audit says so** (`regex orthography`, `keyword-suggest-design.md`)
+- **A regex is fold-exempt and the audit says so** (`regex orthography`, `keyword-suggestions.md`)
   rather than rewriting it: an ASCII quote in a pattern matches only itself where a plain key matches
   its family. The suggestion is the pair, never the whole family.
 - **Whole-word applies to multi-word keys.** Core splits the key on whitespace and uses `includes()`, so
@@ -407,24 +407,3 @@ Internal, no UI, reset to their defaults each init: `chunkSize` 1750 characters,
 `paragraph`, `minChunkSize` 120 (a change re-embeds every collection); `meanCentered` true;
 `entityFilter` true, `properNounBoost` 3, `stopwordDocFreq` 0.25; `bm25K1` 1.2, `bm25B` 0.75,
 `repeatCurve` `presence-log`, `repeatR` 1.
-
-## Open
-
-Each an option against a behaviour that stands:
-
-1. **A depth term in the score.** Depth is not a scoring signal: `waTriggerDepth` divides `keys`, which
-   no shipped fit reads, and `cosine` and `text` are scored against the query with no discount, so an
-   entry reached at any recursion depth competes on relevance like one matched in the chat. A fitted
-   depth column needs a recursion-using book with graded scenes; a post-hoc factor on `E[credit]` would
-   be the first term outside the fit, against `layoutOrder`'s prefix property. `maxRecursionSteps`
-   bounds how far recursion reaches.
-2. **Language packs beyond wordfreq.** Any language but English is wordfreq alone, with no POS sets, so
-   the verb and adjective filters are no-ops there and the English morphology rules stay on. Options:
-   the English morphology rules under another language, and tokenisation for languages without
-   whitespace.
-3. **Per-book signal spread as a book property.** A signal's within-scene SD varies by book (F45), and
-   standardisation divides by the scene's own SD, so a near-constant column has its few small
-   differences amplified against a slope fitted on other books. No use proposed.
-4. **Per-tier centring.** Reference is centred on the memory tier's centroid, which sits well off the
-   reference centroid (F44). Per-tier and cross centring are measured flat (F57); the
-   `referenceCentroid` arm in `eval/scene.mjs` is the instrument. Re-run when the corpus has more books.

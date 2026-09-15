@@ -393,7 +393,7 @@ export async function bundleSamples(arms, scene = {}, extra = {}) {
 
     if (indexed.raters.length) doc.raters = indexed.raters;
 
-    // Field order is the schema (bundle-schema.md): the bulk goes last, and the hashes stay ahead of the books.
+    // Field order is the schema (eval/bundle-schema.md): the bulk goes last, and the hashes stay ahead of the books.
     const books = first.books ?? {};
     doc.bookHashes = await hashBooks(books);
 

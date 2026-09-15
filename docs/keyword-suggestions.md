@@ -2,7 +2,7 @@
 
 Two modules. `keyword-suggest.mjs` proposes keys for an entry from its own text and from a model;
 `keyword-audit.mjs` judges the keys an entry has. Both are ST-free; `keyword-tools.mjs` and `studio.mjs`
-drive them. Matching itself is `matcher-design.md`. Vocabulary and claim discipline: `CLAUDE.md`; claim
+drive them. Matching itself is `matching.md`. Vocabulary and claim discipline: `CLAUDE.md`; claim
 IDs: `eval/eval-data/measured-claims.md`.
 
 ## What a key is for
